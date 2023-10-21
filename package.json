@@ -1,0 +1,17 @@
+{
+  "name": "ide",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/main.ts",
+  "scripts": {
+    "dev": "tsc && electron dist/main.js"
+  },
+  "author": "trolleur259",
+  "license": "ISC",
+  "dependencies": {
+    "typescript": "^5.2.2"
+  },
+  "devDependencies": {
+    "electron": "^27.0.2"
+  }
+}
