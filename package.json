@@ -1,10 +1,10 @@
 {
-  "name": "ide",
+  "name": "NCE (NDL Code Editor)",
   "version": "1.0.0",
   "description": "",
   "main": "src/main.ts",
   "scripts": {
-    "dev": "tsc && electron dist/main.js"
+    "dev": "tsc && run.bat && electron dist/main.js"
   },
   "author": "trolleur259",
   "license": "ISC",
