@@ -4,14 +4,14 @@
   "description": "",
   "main": "src/main.ts",
   "scripts": {
-    "dev": "tsc && run.bat && electron dist/main.js"
+    "win": "tsc && run.bat && electron dist/main.js",
+    "macos": "tsc && bash ./run.sh && electron dist/main.js"
   },
   "author": "trolleur259",
   "license": "ISC",
   "dependencies": {
+    "codemirror": "^6.0.1",
+    "electron": "^27.0.2",
     "typescript": "^5.2.2"
-  },
-  "devDependencies": {
-    "electron": "^27.0.2"
   }
 }

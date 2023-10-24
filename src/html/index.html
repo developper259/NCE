@@ -1,11 +1,23 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
-	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="../css/index.css">
+	<link rel="stylesheet" href="../css/Navigator.css">
 	<title>NCE</title>
 </head>
 <body>
-	<h1>NDL Code Editor !</h1>
+	<section class="main-section">
+		<div class="line-number"></div>
+		<div class="editor">
+			<textarea
+			 id="editor-area" 
+			 cols="50" 
+			 rows="10" 
+			 autofocus="true"></textarea>
+		</div>
+	</section>
+	<script src="../js/editor-design-fix.js"></script>
 </body>
 </html>

@@ -1,26 +1,26 @@
-import { BrowserWindow } from 'electron';
+import { BrowserWindow } from "electron";
 
 export class Window {
-	window: BrowserWindow | null;
-	width: number;
-	height: number;
+  window: BrowserWindow | null;
+  width: number;
+  height: number;
 
-	construct () {
-		this.window = null;
-		this.width = 800;
-		this.height = 600;
-	}
+  construct() {
+    this.window = null;
+    this.width = 800;
+    this.height = 600;
+  }
 
-	create () {
-		this.window = new BrowserWindow({
-			width: this.width,
-			height: this.height,
-			frame: false
-		});
-		this.window.loadFile('./html/index.html');
+  create() {
+    this.window = new BrowserWindow({
+      width: this.width,
+      height: this.height,
+      frame: false,
+    });
+    this.window.loadFile("./html/index.html");
 
-		this.window.on('closed', () => {
-			this.window = null;
-		});
-	}
+    this.window.on("closed", () => {
+      this.window = null;
+    });
+  }
 }
