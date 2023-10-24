@@ -3,21 +3,22 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<link rel="stylesheet" href="../css/index.css">
-	<link rel="stylesheet" href="../css/Navigator.css">
 	<title>NCE</title>
+	<link rel="stylesheet" href="../css/index.css">
+	<link rel="stylesheet" href="../css/line-number.css">
 </head>
 <body>
 	<section class="main-section">
-		<div class="line-number"></div>
-		<div class="editor">
-			<textarea
-			 id="editor-area" 
-			 cols="50" 
-			 rows="10" 
-			 autofocus="true"></textarea>
+		<div class="editor box">
+			<!--<div class="line-number box">
+				<span class="ln">1</span>
+			</div>!-->
+			<div class="editor-caret"></div>
+			<div class="editor-output editor-el">
+				<span class="editor-el" style="color: red;">echo</span>
+			</div>
 		</div>
 	</section>
-	<script src="../js/editor-design-fix.js"></script>
+	<script src="../js/editor.js"></script>
 </body>
 </html>

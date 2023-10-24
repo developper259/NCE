@@ -1,0 +1,25 @@
+const b = document;
+const editorOutput = document.querySelector(".editor-output");
+let selected = false;
+
+b.addEventListener("click", (e) => {
+  const t = e.target;
+  if (t.classList.contains("editor-el")) selected = true;
+  else selected = false;
+});
+
+b.addEventListener("keydown", function (e) {
+  const k = e.key;
+
+  if (selected) {
+    console.log(k);
+  }
+});
+
+//cursor-caret
+const caret = document.querySelector(".editor-caret");
+let caretInterval = setInterval(() => {
+  const c = caret.classList;
+  if (c.contains("caret-enable") || !selected) c.remove("caret-enable");
+  else c.add("caret-enable");
+}, 500);
