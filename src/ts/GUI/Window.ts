@@ -2,19 +2,17 @@ import { BrowserWindow } from "electron";
 
 export class Window {
   window: BrowserWindow | null;
-  width: number;
-  height: number;
 
-  construct() {
+  constructor() {
     this.window = null;
-    this.width = 800;
-    this.height = 600;
   }
 
   create() {
     this.window = new BrowserWindow({
-      width: this.width,
-      height: this.height,
+      width: 800,
+      height: 600,
+      minWidth: 800,
+      minHeight: 600,
     });
     this.window.loadFile("./html/index.html");
 
