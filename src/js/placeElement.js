@@ -1,6 +1,6 @@
 const baseX = 39;
 const baseY = 2;
-const posY = 20.5;
+const posY = 18;
 
 addInterval(() => {
   //line
