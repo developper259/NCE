@@ -1,8 +1,7 @@
-const d = document;
-const editorOutput = d.querySelector(".editor-output");
+const editorOutput = document.querySelector(".editor-output");
 
 addEvent = (event, f, obj) => {
-  if (obj == null || obj == undefined) obj = d;
+  if (obj == null || obj == undefined) obj = document;
   obj.addEventListener(event, f);
 };
 

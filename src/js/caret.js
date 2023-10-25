@@ -9,8 +9,8 @@ addInterval(() => {
 addEvent(
   "click",
   (event) => {
-    const x = event.clientX - editorOutput.getBoundingClientRect().left;
-    const y = event.clientY - editorOutput.getBoundingClientRect().top;
+    const x = event.clientX - editorOutput.getBoundingClientRect().left - 9;
+    const y = event.clientY - editorOutput.getBoundingClientRect().top - 9;
 
     caret.style.left = x + "px";
     caret.style.top = y + "px";
