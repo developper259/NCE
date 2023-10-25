@@ -34,8 +34,8 @@ caret.style.top = y + "px";
 });
 
 const lineNumbers = document.querySelector(".line-numbers");
-
+const output = editorOutput.querySelector(".output");
 lineInterval = setInterval(() => {
-  const lineCount = editorOutput.querySelectorAll("br").length + 1;
+  const lineCount = editorOutput.querySelectorAll(".line").length;
   lineNumbers.innerHTML = Array.from({ length: lineCount }, (_, index) => `<span class="line-el">${index + 1}</span>`).join("");
-}, 100);
+}, 200);

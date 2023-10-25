@@ -1,6 +1,5 @@
 body {
   margin: 0;
-  padding: 0;
   background-color: #181818;
 }
 
@@ -12,27 +11,27 @@ body {
   position: absolute;
   bottom: 0;
   width: 60%;
-  display: flex;
 }
 
 .editor-output {
-  padding-left: 5px;
   background-color: #202020;
   width: 100%; 
   height: 94vh;
-  white-space: nowrap;
   cursor: text;
   color: #b8b8b8;
 }
 
-.editor-el {
-  margin-top: 2px;
+.editor-output .output {
+  padding: 2.5px 0 0 2.5em;
+}
+.editor-output .output .line{
+  padding-bottom: 2.5px;
 }
 
 .line-numbers {
   float: left;
   width: 30px;
-  background-color: #202020;
+  background-color: transparent;
   color: #636a75;
   text-align: right;
   padding: 2px;
