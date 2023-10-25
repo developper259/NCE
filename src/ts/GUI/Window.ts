@@ -15,7 +15,6 @@ export class Window {
     this.window = new BrowserWindow({
       width: this.width,
       height: this.height,
-      frame: false,
     });
     this.window.loadFile("./html/index.html");
 
