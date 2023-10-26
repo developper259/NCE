@@ -1,6 +1,6 @@
 const baseX = 39;
 const baseY = 2;
-const posY = 21;
+const posY = 25;
 
 addInterval(() => {
   //line
@@ -34,7 +34,6 @@ addInterval(() => {
       const line = linesN[i];
 
       const y = baseY + posY * i;
-
       line.style.top = y + "px";
     }
   }

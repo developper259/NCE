@@ -1,7 +1,14 @@
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url("../assets/fonts/Jetbrains mono/webfonts/JetBrainsMono-Regular.woff2");
+}
+
 body {
   margin: 0;
   background-color: #181818;
   font-size: 20px;
+  font-family: 'JetBrains Mono', sans-serif;
+  letter-spacing: 0.001px;
 }
 
 .box {
@@ -33,19 +40,23 @@ body {
   height: 98.5%;
   background-color: transparent;
   color: #636a75;
-  border-right: 1px solid #2b2b2b;
 }
 
 .line-el {
   position: absolute;
   left: 35%;
+  user-select: none;
 }
 
 .caret-enable {
-  background-color: white;
-  width: 0.5px;
-  height: 14px; 
+  background-color: grey;
+  width: 2px;
+  height: 19px; 
   position: absolute;
   z-index: 2;
   margin-left: 10px;
+}
+
+.line-selected {
+  color: #ccc;
 }
