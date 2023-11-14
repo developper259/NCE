@@ -1,56 +1,55 @@
-const caret = document.querySelector(".editor-caret");
-//marge x et y
-const mX = 10;
-const mY = 7;
+class Caret {
+  constructor(e) {
+    this.mX = 10;
+    this.mY = 7;
+    this.mpY = 21;
+    this.mpX = 10;
+    this.cD = document.querySelector(".editor-caret");
+    this.editor = e;
+    //y
+    this.row = 1;
+    //x
+    this.column = 0;
 
-const mpY = 21;
-const mpX = 10;
+    this.onClick = (event) => {
+      const x =
+        event.clientX - this.editor.output.getBoundingClientRect().left - this.mX;
+      const y =
+        event.clientY - this.editor.output.getBoundingClientRect().top - this.mY;
 
-round = (nb) => {
-  console.log(nb);
-  var r = nb;
-  while(nb > 1) {
-    nb--;
+      this.row = round((y - baseY) / posY + 1);
+
+      this.setCursorPosition(this.row, this.column);
+
+      this.editor.lineControler.changeLine(this.row);
+
+      if (!this.cD.classList.contains("caret-enable"))
+        this.cD.classList.add("caret-enable");
+    };
+    this.caretFrame = () => {
+      if (this.cD.style.display == "block" || !this.editor.selected)
+      this.cD.style.display = "none";
+      else this.cD.style.display = "block";
+    };
+    this.setCursorPosition = (row, column) => {
+      const placeY = baseY + posY * row - this.mpY;
+      const placeX = baseX + column;
+
+      if (row > this.editor.lineControler.getIndex())
+        row = this.editor.lineControler.getIndex();
+
+      this.cD.style.left = placeX + "px";
+      this.cD.style.top = placeY + "px";
+    };
+
+    this.getCursorPosition = () => {
+      return [this.row, this.column];
+    };
+
+    this.setCursorPosition(this.row, this.column);
+
+    addInterval(this.caretFrame, 500);
+
+    addEvent("click", this.onClick, this.editor.output);
   }
-  r -= nb;
-  if (nb >= 0.65) nb = 1;
-  else nb = 0;
-
-  return r + nb;
 }
-
-
-
-addInterval(() => {
-  const c = caret.classList;
-  if (c.contains("caret-enable") || !selected) c.remove("caret-enable");
-  else c.add("caret-enable");
-}, 500);
-
-addEvent(
-  "click",
-  (event) => {
-    const x = event.clientX - editorOutput.getBoundingClientRect().left - mX;
-    const y = event.clientY - editorOutput.getBoundingClientRect().top - mY;
-
-    calcY = round(((y - baseY) / posY) + 1);
-
-    const linesN = document.querySelectorAll(".line-numbers .line-el");
-
-    if (calcY > linesN.length) calcY = linesN.length;
-
-    placeY = (baseY + posY * calcY) - mpY;
-
-    caret.style.left = x + "px";
-    caret.style.top = placeY + "px";
-
-    const currentLine = linesN[calcY - 1];
-    const oldLine = document.querySelector(".line-selected");
-
-    if (oldLine != null && oldLine != undefined) oldLine.classList.remove("line-selected");
-
-    if (!caret.classList.contains("caret-enable")) caret.classList.add("caret-enable");
-    currentLine.classList.add("line-selected");
-  },
-  editorOutput
-);

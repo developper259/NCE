@@ -1,34 +1,33 @@
 <!DOCTYPE html>
 <html lang="fr">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>NCE</title>
-	<link rel="stylesheet" href="../css/index.css">
-</head>
-<body>
-	<section class="main-section">
-		<div class="editor box">
-			<div class="line-numbers"></div>
-			<div class="editor-caret editor-select caret-enable"></div>
-			<div class="editor-output editor-select">
-				<div class="output">
-					<div class="line editor-select">
-						<span class="editor-el">echo</span>
-					</div>
-					<div class="line editor-select">
-						<span class="editor-el">deuxième texte pour le teste</span>
-					</div>
-					<div class="line editor-select">
-						<span class="editor-el">deuxième texte pour le teste</span>
-					</div>
-				</div>
-			</div>
-		</div>
-	</section>
-	<script src="../js/event.js"></script>
-	<script src="../js/caret.js"></script>
-	<script src="../js/placeElement.js"></script>
-	<script src="../js/editor.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCE</title>
+    <link rel="stylesheet" href="../css/index.css" />
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+  </head>
+  <body>
+    <section class="main-section">
+      <div class="editor box">
+        <div class="line-numbers"></div>
+        <div class="editor-caret editor-select"></div>
+        <div class="editor-output editor-select">
+          <div class="line editor-select">
+            <span class="editor-el">echo</span>
+          </div>
+          <div class="line editor-select">
+            <span class="editor-el">deuxième texte pour le teste</span>
+          </div>
+          <div class="line editor-select">
+            <span class="editor-el">deuxième texte pour le teste</span>
+          </div>
+        </div>
+      </div>
+    </section>
+    <script src="../js/controller/lineController.js"></script>
+    <script src="../js/event.js"></script>
+    <script src="../js/caret.js"></script>
+    <script src="../js/editor.js"></script>
+  </body>
 </html>
