@@ -1,4 +1,18 @@
-round = (nb) => {
+roundY = (nb) => {
+  var r = nb;
+  while (nb > 1) {
+    nb--;
+  }
+  r -= nb;
+  if (nb >= 0.65) nb = 1;
+  else nb = 0;
+
+  return r + nb;
+};
+
+roundX = (nb) => {
+  if (nb < 0) return -1;
+  if (nb < 1) return 0;
   var r = nb;
   while (nb > 1) {
     nb--;
@@ -34,5 +48,3 @@ class Editor {
 }
 
 var editor = new Editor();
-
-console.log(editor);
