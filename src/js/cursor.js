@@ -53,6 +53,59 @@ class Cursor {
       return [this.row, this.column];
     };
 
+    this.getBeforeLetter = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      return l[this.column];
+    }
+    this.getAfterLetter = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      return l[this.column];
+    }
+    this.getLine = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      return l;
+    }
+    this.getBeforeLine = () => {
+      const l = this.editor.lineController.lines[this.row - 2];
+      return l;
+    }
+    this.getAfterLine = () => {
+      const l = this.editor.lineController.lines[this.row];
+      return l;
+    }
+    this.getWord = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      const words = this.editor.writerController.splitWord(l);
+      let count = 0;
+
+      for (let word of words) {
+        count += word.length;
+        if (this.column - count <= 0) return word;
+      }
+    }
+    this.getBeforeWord = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      const words = this.editor.writerController.splitWord(l);
+      let count = 0;
+
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        count += word.length;
+        if (this.column - count <= 0) return words[i - 1];
+      }
+    }
+    this.getAfterWord = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      const words = this.editor.writerController.splitWord(l);
+      let count = 0;
+
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        count += word.length;
+        if (this.column - count <= 0) return words[i + 1];
+      }
+    }
+
     addInterval(this.caretFrame, 500);
 
     addEvent("click", this.onClick, this.editor.output);
