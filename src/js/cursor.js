@@ -1,4 +1,4 @@
-class Caret {
+class Cursor {
   constructor(e) {
     this.mX = 10;
     this.mY = 7;
@@ -21,8 +21,6 @@ class Caret {
 
       this.setCursorPosition(this.row, this.column);
 
-      this.editor.lineControler.changeLine(this.row);
-
       if (!this.cD.classList.contains("caret-enable"))
         this.cD.classList.add("caret-enable");
     };
@@ -35,11 +33,13 @@ class Caret {
       const placeY = baseY + posY * row - this.mpY;
       const placeX = baseX + column;
 
-      if (row > this.editor.lineControler.getIndex())
-        row = this.editor.lineControler.getIndex();
+      if (row > this.editor.lineController.getIndex())
+        row = this.editor.lineController.getIndex();
 
       this.cD.style.left = placeX + "px";
       this.cD.style.top = placeY + "px";
+
+      this.editor.lineController.setFocusLine(this.row);
     };
 
     this.getCursorPosition = () => {

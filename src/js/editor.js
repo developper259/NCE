@@ -13,8 +13,9 @@ round = (nb) => {
 class Editor {
   constructor() {
     this.output = document.querySelector(".editor-output");
-    this.lineControler = new lineControler(this);
-    this.caret = new Caret(this);
+    this.lineController = new lineController(this);
+    this.writerController = new WriterController(this);
+    this.cursor = new Cursor(this);
     this.selected = false;
 
     addEvent("click", this.onClick.bind(this), document);
@@ -25,10 +26,13 @@ class Editor {
     const c = t.classList;
     if (c.contains("editor-select") || c.contains("editor-el"))
       this.selected = true;
-    else this.selected = false;
+    else {
+      this.selected = false;
+      this.lineController.setFocusLine(0);
+    }
   }
 }
 
-let editor = new Editor();
+var editor = new Editor();
 
 console.log(editor);

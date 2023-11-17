@@ -2,10 +2,10 @@ const baseX = 39;
 const baseY = 2;
 const posY = 25;
 
-class lineControler {
+class lineController {
   constructor(e) {
-    this.lines = [];
-    this.lineNumbers = [];
+    this.lines = ['var hello="bonjour les copains!!"', "2", "3", "4"];
+    this.maxIndex = 0;
     this.index = 0;
     this.editor = e;
 
@@ -16,53 +16,66 @@ class lineControler {
       this.index = i;
     };
 
-    this.changeLine = (index) => {
+    this.setFocusLine = (index) => {
       const oldLine = document.querySelector(".line-selected");
 
       if (oldLine != null) oldLine.classList.remove("line-selected");
 
-      this.lineNumbers[index - 1].classList.add("line-selected");
+      const newLine = this.getLineNumberOBJ(index - 1);
+
+      if (newLine == null) return;
+
+      newLine.classList.add("line-selected");
       this.setIndex(index);
     };
 
-    this.addLine = () => {};
+    this.addLine = () => {
+      this.maxIndex += 1;
+    };
 
     this.replaceLines = () => {
+      let parser = new DOMParser();
       const lines = document.querySelectorAll(".editor-output .line");
 
-      if (lines.length != this.lines.length) this.lines = lines;
+      if (lines.length != this.lines.length) {
+        this.editor.output.innerHTML = "";
+        for (var i = 0; i < this.lines.length; i++) {
+          let doc = parser.parseFromString(
+            this.editor.writerController.toHTML(this.lines[i]),
+            "text/html"
+          );
+          let lineOBJ = doc
+            .createRange()
+            .createContextualFragment(doc.body.innerHTML).firstElementChild;
 
-      for (var i = 0; i < lines.length; i++) {
-        const line = lines[i];
+          this.editor.output.appendChild(lineOBJ);
 
-        const x = baseX;
-        const y = baseY + posY * i;
+          const x = baseX;
+          const y = baseY + posY * i;
 
-        line.style.position = "absolute";
-        line.style.top = y + "px";
-        line.style.left = x + "px";
+          lineOBJ.style.position = "absolute";
+          lineOBJ.style.top = y + "px";
+          lineOBJ.style.left = x + "px";
+        }
       }
-      if (lines.length == 0) {
-
+      if (this.lines.length == 0)
         this.editor.output.innerHTML = '<div class="line editor-select"></div>';
-      }
     };
 
     this.replaceNumberLines = () => {
       const lineN = document.querySelector(".line-numbers");
-      var linesN = lineN.querySelectorAll(".line-el");
+      let linesN = lineN.querySelectorAll(".line-el");
 
-      var count = this.lines.length;
+      if (this.maxIndex == 0) this.maxIndex = this.lines.length;
 
-      if (count == 0) count = 1;
-      if (count != linesN.length) {
+      if (this.maxIndex == 0) this.maxIndex = 1;
+      if (this.maxIndex != linesN.length) {
         lineN.innerHTML = Array.from(
-          { length: count },
+          { length: this.maxIndex },
           (_, index) => `<span class="line-el">${index + 1}</span>`
         ).join("");
 
         linesN = lineN.querySelectorAll(".line-el");
-        this.lineNumbers = linesN;
 
         for (var i = 0; i < linesN.length; i++) {
           const line = linesN[i];
@@ -71,6 +84,16 @@ class lineControler {
           line.style.top = y + "px";
         }
       }
+    };
+
+    this.getLineOBJ = (index) => {
+      const lines = document.querySelectorAll(".editor-output .line");
+      return lines[index];
+    };
+
+    this.getLineNumberOBJ = (index) => {
+      const lines = document.querySelectorAll(".line-el");
+      return lines[index];
     };
 
     addInterval(() => {
