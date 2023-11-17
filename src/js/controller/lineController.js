@@ -33,9 +33,16 @@ class lineController {
       this.maxIndex += 1;
     };
 
+    this.supLine = (index) => {
+      if(index > this.maxIndex) return;
+      this.maxIndex -= 1;
+    };
+
     this.replaceLines = () => {
       let parser = new DOMParser();
       const lines = document.querySelectorAll(".editor-output .line");
+
+      if (this.lines.length != this.maxIndex) this.maxIndex = this.lines.length;
 
       if (lines.length != this.lines.length) {
         this.editor.output.innerHTML = "";

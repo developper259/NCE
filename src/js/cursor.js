@@ -30,14 +30,17 @@ class Cursor {
       else this.cD.style.display = "block";
     };
     this.setCursorPosition = (row, column) => {
+
+      if (row > this.editor.lineController.maxIndex) row = this.editor.lineController.maxIndex;
+
       const placeY = baseY + posY * row - this.mpY;
       const placeX = baseX + column;
 
-      if (row > this.editor.lineController.getIndex())
-        row = this.editor.lineController.getIndex();
-
       this.cD.style.left = placeX + "px";
       this.cD.style.top = placeY + "px";
+
+      this.row = row;
+      this.column = column;
 
       this.editor.lineController.setFocusLine(this.row);
     };
