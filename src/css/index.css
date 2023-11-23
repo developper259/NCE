@@ -75,3 +75,7 @@ body {
 .selected {
   background-color: #264f78;
 }
+
+span {
+  white-space: pre;
+}
