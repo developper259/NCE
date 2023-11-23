@@ -14,12 +14,27 @@ class Cursor {
 
     this.onClick = (event) => {
       const x =
-        event.clientX - this.editor.output.getBoundingClientRect().left - this.mX;
+        event.clientX -
+        this.editor.output.getBoundingClientRect().left -
+        this.mX;
       const y =
-        event.clientY - this.editor.output.getBoundingClientRect().top - this.mY;
+        event.clientY -
+        this.editor.output.getBoundingClientRect().top -
+        this.mY;
 
-      this.row = roundY((y - baseY) / posY) + 1; 
-      this.column = roundX((x - baseX) / this.leterSize) + 1;
+      let row = roundY((y - baseY) / posY) + 1;
+      let column = roundX((x - baseX) / this.leterSize) + 1;
+
+
+      if (row <= 0) row = 1;
+      if (row > this.editor.lineController.maxIndex)
+        row = this.editor.lineController.maxIndex;
+      const l = this.editor.lineController.lines[row - 1].length;
+      if (column > l) column = l;
+
+      if (this.row != row || this.column != column) this.editor.output.dispatchEvent(new CustomEvent("cursormove", {detail: {row: row, column: column}}));
+      this.row = row;
+      this.column = column;
 
       this.setCursorPosition(this.row, this.column);
 
@@ -28,17 +43,18 @@ class Cursor {
     };
     this.caretFrame = () => {
       if (this.cD.style.display == "block" || !this.editor.selected)
-      this.cD.style.display = "none";
+        this.cD.style.display = "none";
       else this.cD.style.display = "block";
     };
     this.setCursorPosition = (row, column) => {
       if (row <= 0) row = 1;
-      if (row > this.editor.lineController.maxIndex) row = this.editor.lineController.maxIndex;
+      if (row > this.editor.lineController.maxIndex)
+        row = this.editor.lineController.maxIndex;
       const l = this.editor.lineController.lines[row - 1].length;
       if (column > l) column = l;
 
       const placeY = baseY + posY * row - this.mpY;
-      const placeX = baseX + ((column - 1) * this.leterSize) + 1;
+      const placeX = baseX + (column - 1) * this.leterSize + 1;
 
       this.cD.style.left = placeX + "px";
       this.cD.style.top = placeY + "px";
@@ -56,54 +72,65 @@ class Cursor {
     this.getBeforeLetter = () => {
       const l = this.editor.lineController.lines[this.row - 1];
       return l[this.column];
-    }
+    };
     this.getAfterLetter = () => {
       const l = this.editor.lineController.lines[this.row - 1];
-      return l[this.column];
-    }
+      return l[this.column + 1];
+    };
     this.getLine = () => {
       const l = this.editor.lineController.lines[this.row - 1];
       return l;
-    }
+    };
     this.getBeforeLine = () => {
       const l = this.editor.lineController.lines[this.row - 2];
       return l;
-    }
+    };
     this.getAfterLine = () => {
       const l = this.editor.lineController.lines[this.row];
       return l;
-    }
+    };
+    this.getIndexWord = () => {
+      const l = this.editor.lineController.lines[this.row - 1];
+      const words = this.editor.writerController.splitWord(l);
+      let count = 0;
+
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        count += word.length;
+        if (this.column - count <= 0) return i;
+      }
+    };
     this.getWord = () => {
       const l = this.editor.lineController.lines[this.row - 1];
       const words = this.editor.writerController.splitWord(l);
-      let count = 0;
 
-      for (let word of words) {
-        count += word.length;
-        if (this.column - count <= 0) return word;
-      }
-    }
+      return words[this.getIndexWord()];
+    };
     this.getBeforeWord = () => {
       const l = this.editor.lineController.lines[this.row - 1];
       const words = this.editor.writerController.splitWord(l);
-      let count = 0;
 
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        count += word.length;
-        if (this.column - count <= 0) return words[i - 1];
-      }
-    }
+      return words[this.getIndexWord() - 1];
+    };
     this.getAfterWord = () => {
       const l = this.editor.lineController.lines[this.row - 1];
       const words = this.editor.writerController.splitWord(l);
-      let count = 0;
 
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        count += word.length;
-        if (this.column - count <= 0) return words[i + 1];
-      }
+      return words[this.getIndexWord() + 1];
+    };
+
+    this.getWordOBJ = (row, column) => {
+      if (row == null || column == null) return;
+      const l = this.editor.output.querySelectorAll(".line")[row - 1];
+      const words = l.querySelectorAll(".line-word");
+      return words[column];
+    };
+
+    this.getLetterOBJ = (row, column) => {
+      if (row == null || column == null) return;
+      const l = this.editor.output.querySelectorAll(".line")[row - 1];
+      const letters = l.querySelectorAll(".line-letter");
+      return letters[column];
     }
 
     addInterval(this.caretFrame, 500);

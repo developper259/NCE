@@ -6,3 +6,5 @@ addEvent = (event, f, obj) => {
 addInterval = (f, time) => {
   return setInterval(f, time);
 };
+
+var onCursorMove = new CustomEvent("cursormove", {cancelable: true});

@@ -5,7 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCE</title>
     <link rel="stylesheet" href="../css/index.css" />
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+    <style>
+      #fps {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        font-size: 16px;
+        color: #ffffff;
+        padding: 5px;
+      }
+    </style>
   </head>
   <body>
     <section class="main-section">
@@ -15,10 +24,34 @@
         <div class="editor-output editor-select"></div>
       </div>
     </section>
+    <script src="../js/controller/selectController.js"></script>
     <script src="../js/controller/WriterController.js"></script>
     <script src="../js/controller/lineController.js"></script>
     <script src="../js/event.js"></script>
     <script src="../js/cursor.js"></script>
     <script src="../js/editor.js"></script>
+
+    <div id="fps"></div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        var fpsContainer = document.getElementById("fps");
+        var lastTime;
+        var fps = 0;
+
+        function updateFPS() {
+          var currentTime = performance.now();
+          var deltaTime = currentTime - (lastTime || currentTime);
+          lastTime = currentTime;
+
+          fps = Math.round(1000 / deltaTime);
+          requestAnimationFrame(updateFPS);
+        }
+        setInterval(() => {
+          fpsContainer.textContent = "FPS: " + fps;
+        }, 150);
+        updateFPS();
+      });
+    </script>
   </body>
 </html>

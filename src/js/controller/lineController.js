@@ -4,7 +4,7 @@ const posY = 25;
 
 class lineController {
   constructor(e) {
-    this.lines = ['var hello="bonjour les copains!!"', "2", "3", "4"];
+    this.lines = ['var hello="bonjour les copains!!"', "2*8", "3", "4"];
     this.maxIndex = 0;
     this.index = 0;
     this.editor = e;
@@ -34,7 +34,7 @@ class lineController {
     };
 
     this.supLine = (index) => {
-      if(index > this.maxIndex) return;
+      if (index > this.maxIndex) return;
       this.maxIndex -= 1;
     };
 

@@ -1,7 +1,7 @@
 class WriterController {
   constructor(e) {
     this.editor = e;
-    this.separator = [" ", "=", "\\+", "-", "/", "\\*"];
+    this.separator = [" ", "=", "+", "-", "/", "*"];
 
     this.splitWord = (txt) => {
       let oldChar = "";
@@ -28,23 +28,32 @@ class WriterController {
         oldChar = char;
       }
 
+      tableSplit = tableSplit.filter(function (chaine) {
+        return chaine.length !== 0;
+      });
+
       return tableSplit;
     };
 
     this.toHTML = (txt) => {
-      let result =
-        '<div class="line editor-select">' +
-        '<span class="editor-el">$value</span>' +
-        "</div>";
+      let result = '<div class="line editor-select">$value</div>';
 
       let resultWords = "";
 
       let words = this.splitWord(txt);
 
       for (let word of words) {
-        if (word == " ") resultWords += " ";
-        else {
-          if (word != "") resultWords += `<span class="line-word editor-select">${word}</span>`;
+        if (word != "") {
+          let wordHTML = "";
+
+          if (word.length > 1) {
+            for (let letter of word) {
+              wordHTML += `<span class="line-letter editor-select">${letter}</span>`;
+            }
+          }else wordHTML += word;
+          let classes = "line-word editor-select";
+          if (wordHTML.length == 1) classes += " line-letter";
+          resultWords += `<span class="${classes}">${wordHTML}</span>`;
         }
       }
 

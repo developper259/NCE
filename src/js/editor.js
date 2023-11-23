@@ -29,11 +29,11 @@ class Editor {
     this.output = document.querySelector(".editor-output");
     this.lineController = new lineController(this);
     this.writerController = new WriterController(this);
+    this.selectController = new SelectController(this);
     this.cursor = new Cursor(this);
     this.selected = false;
 
     addEvent("click", this.onClick.bind(this), document);
-
   }
   onClick(e) {
     const t = e.target;
@@ -47,4 +47,8 @@ class Editor {
   }
 }
 
-var editor = new Editor();
+var editor = null;
+
+window.addEventListener("load", (event) => {
+  editor = new Editor();
+});
