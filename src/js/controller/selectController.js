@@ -46,11 +46,12 @@ class SelectController {
     };
 
     this.mouseDown = () => {
-      if (this.clickCount != 1) return;
+      if (new Date().getTime() - this.lastClickTime > 300) this.unSelectAll();
       this.isMouseDown = true;
     };
     this.mouseUp = () => {
       this.isMouseDown = false;
+      this.mouseClick()
     };
 
     this.refreshContaisSelected = () => {
@@ -89,7 +90,6 @@ class SelectController {
       if (currentTime - this.lastClickTime < 300) {
         this.clickCount++;
       } else {
-        this.unSelectAll();
         this.clickCount = 1;
       }
       this.lastClickTime = currentTime;
@@ -114,6 +114,5 @@ class SelectController {
     addEvent("mouseup", this.mouseUp, document);
     addEvent("cursormove", this.cursorMove, this.editor.output);
     addEvent("mousemove", this.mouseMove, this.editor.output);
-    addEvent("click", this.mouseClick, this.editor.output);
   }
 }
