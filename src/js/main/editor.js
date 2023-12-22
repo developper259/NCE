@@ -31,6 +31,7 @@ class Editor {
     this.writerController = new WriterController(this);
     this.selectController = new SelectController(this);
     this.cursor = new Cursor(this);
+    this.bottomBar = new BottomBar(this);
     this.selected = false;
 
     addEvent("click", this.onClick.bind(this), document);

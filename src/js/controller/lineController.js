@@ -103,6 +103,20 @@ class lineController {
       return lines[index];
     };
 
+    this.getWordOBJ = (row, column) => {
+      if (row == null || column == null) return;
+      const l = this.editor.output.querySelectorAll(".line")[row - 1];
+      const words = l.querySelectorAll(".line-word");
+      return words[column];
+    };
+
+    this.getLetterOBJ = (row, column) => {
+      if (row == null || column == null) return;
+      const l = this.editor.output.querySelectorAll(".line")[row - 1];
+      const letters = l.querySelectorAll(".line-letter");
+      return letters[column];
+    }
+
     addInterval(() => {
       this.replaceLines();
       this.replaceNumberLines();

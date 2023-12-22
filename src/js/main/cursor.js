@@ -119,20 +119,6 @@ class Cursor {
       return words[this.getIndexWord() + 1];
     };
 
-    this.getWordOBJ = (row, column) => {
-      if (row == null || column == null) return;
-      const l = this.editor.output.querySelectorAll(".line")[row - 1];
-      const words = l.querySelectorAll(".line-word");
-      return words[column];
-    };
-
-    this.getLetterOBJ = (row, column) => {
-      if (row == null || column == null) return;
-      const l = this.editor.output.querySelectorAll(".line")[row - 1];
-      const letters = l.querySelectorAll(".line-letter");
-      return letters[column];
-    }
-
     addInterval(this.caretFrame, 500);
 
     addEvent("click", this.onClick, this.editor.output);

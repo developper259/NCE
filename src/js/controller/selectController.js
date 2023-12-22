@@ -20,6 +20,8 @@ class SelectController {
       for (let el of elements) {
         if (!el.classList.contains("selected")) el.classList.add("selected");
       }
+
+      this.refreshStartEndSelect();
       this.refreshContaisSelected();
     };
 
@@ -33,6 +35,9 @@ class SelectController {
         if (!wordOBJ.classList.contains("selected"))
           wordOBJ.classList.add("selected");
       }
+
+      this.refreshStartEndSelect();
+      this.refreshContaisSelected();
     };
 
     this.selectLine = (index) => {
@@ -65,15 +70,43 @@ class SelectController {
         }
       }
     };
+    this.refreshStartEndSelect = () => {
+      let lines = this.editor.output.querySelectorAll(".line");
+
+      for (var i = 0; i < lines.length; i++) {
+        let lineOBJ = lines[i].querySelectorAll(".selected");
+        let oldLineOBJ = lines[i - 1].querySelectorAll(".selected");
+        let nextLineOBJ = lines[i + 1].querySelectorAll(".selected");
+        let line = this.editor.lineController.lines[i];
+        let oldLine = this.editor.lineController.lines[i - 1];
+        let nextLine = this.editor.lineController.lines[i + 1];
+        for (var a = 0; a < lineOBJ.length; a++) {
+          let letter = lineOBJ[a];
+          if (letter.classList.contains("selected-start-bottom")) letter.classList.remove("selected-start-bottom");
+          if (letter.classList.contains("selected-start-top")) letter.classList.remove("selected-start-top");
+          if (letter.classList.contains("selected-end-bottom")) letter.classList.remove("selected-end-bottom");
+          if (letter.classList.contains("selected-end-top")) letter.classList.remove("selected-end-top");
+          
+          if (a === 0) {
+            if (nextLine == undefined || nextLine.length == 0) letter.classList.add("selected-start-bottom");
+            if (oldLine == undefined || oldLine.length == 0) letter.classList.add("selected-start-top");
+          }
+          if (a === lineOBJ.length - 1) {
+            if (nextLine == undefined || nextLine.length < line.length) letter.classList.add("selected-end-bottom");
+            if (oldLine == undefined || oldLine.length < line.length) letter.classList.add("selected-end-top");
+          }
+        }
+      }
+    };
     this.cursorMove = (event) => {
       if (this.isMouseDown) {
-        let cursor = this.editor.cursor;
-        let letter = cursor.getLetterOBJ(event.detail.row, event.detail.column);
+        let letter = this.editor.lineController.getLetterOBJ(event.detail.row, event.detail.column);
         if (letter == undefined || letter == null) return;
         if (letter.classList.contains("selected"))
           letter.classList.remove("selected");
         else letter.classList.add("selected");
 
+        this.refreshStartEndSelect();
         this.refreshContaisSelected();
       }
     };
@@ -98,7 +131,7 @@ class SelectController {
       this.calcClick();
 
       if (this.clickCount == 2) {
-        const word = this.editor.cursor.getWordOBJ(
+        const word = this.editor.lineController.getWordOBJ(
           this.editor.cursor.row,
           this.editor.cursor.getIndexWord()
         );
