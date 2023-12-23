@@ -8,7 +8,7 @@ class SelectController {
     this.clickCount = 0;
 
     this.unSelectAll = () => {
-      let elements = this.editor.output.querySelectorAll(".selected");
+      let elements = getElements(".selected");
       for (let el of elements) {
         el.classList.remove("selected");
       }
@@ -16,7 +16,7 @@ class SelectController {
     };
 
     this.selectAll = () => {
-      let elements = this.editor.output.querySelectorAll(".line-letter");
+      let elements = getElements(".line-letter");
       for (let el of elements) {
         if (!el.classList.contains("selected")) el.classList.add("selected");
       }
@@ -41,7 +41,7 @@ class SelectController {
     };
 
     this.selectLine = (index) => {
-      const lineOBJ = this.editor.output.querySelectorAll(".line")[index - 1];
+      const lineOBJ = getElements(".line")[index - 1];
 
       const words = lineOBJ.childNodes;
 
@@ -61,7 +61,7 @@ class SelectController {
 
     this.refreshContaisSelected = () => {
       this.containsSelected = "";
-      let elements = this.editor.output.querySelectorAll(".selected");
+      let elements = getElements(".selected");
 
       for (let el of elements) {
         const cl = el.classList;
@@ -71,7 +71,7 @@ class SelectController {
       }
     };
     this.refreshStartEndSelect = () => {
-      let lines = this.editor.output.querySelectorAll(".line");
+      let lines = getElements(".line");
 
       for (var i = 0; i < lines.length; i++) {
         let lineOBJ = lines[i].querySelectorAll(".selected");

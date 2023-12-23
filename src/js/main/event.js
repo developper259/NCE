@@ -8,3 +8,4 @@ addInterval = (f, time) => {
 };
 
 var onCursorMove = new CustomEvent("cursormove", {cancelable: true});
+var onCursorChange = new CustomEvent("cursorchange", {cancelable: true});

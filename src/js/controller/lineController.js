@@ -5,7 +5,7 @@ const posY = 25;
 class lineController {
   constructor(e) {
     this.lines = ['var   hello="bonjour les copains!!"', "2*8", "3", "4"];
-    this.maxIndex = 0;
+    this.maxIndex = this.lines.length;
     this.index = 0;
     this.editor = e;
 
@@ -105,14 +105,14 @@ class lineController {
 
     this.getWordOBJ = (row, column) => {
       if (row == null || column == null) return;
-      const l = this.editor.output.querySelectorAll(".line")[row - 1];
+      const l = getElements(".line")[row - 1];
       const words = l.querySelectorAll(".line-word");
       return words[column];
     };
 
     this.getLetterOBJ = (row, column) => {
       if (row == null || column == null) return;
-      const l = this.editor.output.querySelectorAll(".line")[row - 1];
+      const l = getElements(".line")[row - 1];
       const letters = l.querySelectorAll(".line-letter");
       return letters[column];
     }

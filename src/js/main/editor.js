@@ -24,6 +24,14 @@ roundX = (nb) => {
   return r + nb;
 };
 
+getElement = (str) => {
+  return document.querySelector(str);
+};
+
+getElements = (str) => {
+  return document.querySelectorAll(str);
+};
+
 class Editor {
   constructor() {
     this.output = document.querySelector(".editor-output");
@@ -33,6 +41,8 @@ class Editor {
     this.cursor = new Cursor(this);
     this.bottomBar = new BottomBar(this);
     this.selected = false;
+
+    this.cursor.setCursorPosition(1, 0);
 
     addEvent("click", this.onClick.bind(this), document);
   }

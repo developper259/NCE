@@ -47,10 +47,12 @@ class Cursor {
       else this.cD.style.display = "block";
     };
     this.setCursorPosition = (row, column) => {
+      console.log(row, column);
       if (row <= 0) row = 1;
       if (row > this.editor.lineController.maxIndex)
         row = this.editor.lineController.maxIndex;
-      const l = this.editor.lineController.lines[row - 1].length;
+      let l = this.editor.lineController.lines[row - 1];
+      if (l == undefined) l = 0; else l = l.length;
       if (column > l) column = l;
 
       const placeY = baseY + posY * row - this.mpY;
@@ -63,6 +65,7 @@ class Cursor {
       this.column = column;
 
       this.editor.lineController.setFocusLine(this.row);
+      this.editor.output.dispatchEvent(new CustomEvent("cursorchange", {detail: {row: row, column: column}}))
     };
 
     this.getCursorPosition = () => {
