@@ -1,0 +1,25 @@
+.command {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: absolute;
+  z-index: 4;
+  background-color: #202020;
+  border-radius: 5px;
+  box-shadow: 0px 0px 25px black;
+  width: 30%;
+  height: 45%;
+  left: 35%;
+  right: 35%;
+  top: 10px;
+}
+
+.command-body {
+  margin: 2px;
+  height: 100%;
+  width: 100%;
+}
+
+.command-search {
+  width: 100%;
+}

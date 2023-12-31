@@ -25,14 +25,18 @@ class Cursor {
       let row = roundY((y - baseY) / posY) + 1;
       let column = roundX((x - baseX) / this.leterSize) + 1;
 
-
       if (row <= 0) row = 1;
       if (row > this.editor.lineController.maxIndex)
         row = this.editor.lineController.maxIndex;
       const l = this.editor.lineController.lines[row - 1].length;
       if (column > l) column = l;
 
-      if (this.row != row || this.column != column) this.editor.output.dispatchEvent(new CustomEvent("cursormove", {detail: {row: row, column: column}}));
+      if (this.row != row || this.column != column)
+        this.editor.output.dispatchEvent(
+          new CustomEvent("cursormove", {
+            detail: { row: row, column: column },
+          })
+        );
       this.row = row;
       this.column = column;
 
@@ -52,7 +56,8 @@ class Cursor {
       if (row > this.editor.lineController.maxIndex)
         row = this.editor.lineController.maxIndex;
       let l = this.editor.lineController.lines[row - 1];
-      if (l == undefined) l = 0; else l = l.length;
+      if (l == undefined) l = 0;
+      else l = l.length;
       if (column > l) column = l;
 
       const placeY = baseY + posY * row - this.mpY;
@@ -65,7 +70,11 @@ class Cursor {
       this.column = column;
 
       this.editor.lineController.setFocusLine(this.row);
-      this.editor.output.dispatchEvent(new CustomEvent("cursorchange", {detail: {row: row, column: column}}))
+      this.editor.output.dispatchEvent(
+        new CustomEvent("cursorchange", {
+          detail: { row: row, column: column },
+        })
+      );
     };
 
     this.getCursorPosition = () => {

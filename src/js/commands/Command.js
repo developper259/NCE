@@ -1,12 +1,9 @@
 class Command {
-	constructor(e) {
-		this.editor = e;
+  constructor(e) {
+    this.editor = e;
 
-		this.open = () => {
-
-		};
-
-
-
-	}
+    this.open = () => {
+      
+    };
+  }
 }

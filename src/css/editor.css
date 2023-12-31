@@ -17,8 +17,9 @@ body {
 
 .editor {
   position: absolute;
-  bottom: 18px;
-  width: 60%;
+  bottom: 21px;
+  right: 0;
+  width: 80%;
   height: 90%;
   overflow: auto;
   background-color: #202020;
@@ -45,7 +46,7 @@ body {
   height: 96.9%;
   background-color: #202020;
   color: #636a75;
-  z-index: 3;  
+  z-index: 3;
 }
 
 .line-el {

@@ -4,8 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCE</title>
-    <link rel="stylesheet" href="../css/index.css" />
+    <link rel="stylesheet" href="../css/editor.css  " />
     <link rel="stylesheet" href="../css/bottomBar.css" />
+    <link rel="stylesheet" href="../css/command.css" />
     <style>
       #fps {
         position: fixed;
@@ -19,22 +20,36 @@
   </head>
   <body>
     <section class="main-section">
+      <div class="command box">
+        <div class="command-body">
+          <input type="search" class="command-search  " />
+          <ul class="command-body">
+            <div class="command-els-recently">
+              <li class="command-el">JavaScript</li>
+            </div>
+            <div class="command-els">
+              <li class="command-el">HTML</li>
+              <li class="command-el">CSS</li>
+              <li class="command-el">JavaScript</li>
+            </div>
+          </ul>
+        </div>
+      </div>
       <div class="editor box">
         <div class="line-numbers"></div>
         <div class="editor-caret editor-select"></div>
         <div class="editor-output editor-select"></div>
       </div>
-      <div class="bottomBar">
-        <section class="left">
-
-        </section>
-        <section class="middle">
-          
-        </section>
+      <div class="bottomBar box">
+        <section class="left"></section>
+        <section class="middle"></section>
         <section class="right">
-          <span class="scroller-open" id="code-type"></span>
-          <span class="bottomBar-cursorPos bottomBar-text"></span>
-          
+          <div class="bottomBar-el">
+            <span class="scroller-open" id="code-type"></span>
+          </div>
+          <div class="bottomBar-el">
+            <span class="bottomBar-cursorPos bottomBar-text"></span>
+          </div>
         </section>
       </div>
     </section>

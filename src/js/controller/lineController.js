@@ -115,7 +115,7 @@ class lineController {
       const l = getElements(".line")[row - 1];
       const letters = l.querySelectorAll(".line-letter");
       return letters[column];
-    }
+    };
 
     addInterval(() => {
       this.replaceLines();
