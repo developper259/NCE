@@ -1,0 +1,30 @@
+.bottomBar {
+	padding: 0;
+	margin: 0;
+	background-color: grey;
+	position: absolute;
+	bottom: 0;
+	height: 20px;
+	width: 100%;
+	z-index: 3;
+	user-select: none;
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+}
+.bottomBar section, .bottomBar .bottomBar-scroller {
+	display: flex;
+	flex-direction: row;
+	justify-content: space-between;
+	align-items: center;
+	margin: 0 20px;
+}
+.bottomBar span {
+	color: #404040;
+	font-size: 13px;
+	margin: 0 20px;
+}
+.bottomBar span:not(.bottomBar-text):hover {
+	color: #242424;
+}

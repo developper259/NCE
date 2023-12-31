@@ -17,9 +17,9 @@ body {
 
 .editor {
   position: absolute;
-  bottom: 0;
+  bottom: 18px;
   width: 60%;
-  height: 94%;
+  height: 90%;
   overflow: auto;
   background-color: #202020;
 }
@@ -42,7 +42,7 @@ body {
   float: left;
   position: relative;
   width: 30px;
-  height: 98.5%;
+  height: 96.9%;
   background-color: #202020;
   color: #636a75;
   z-index: 3;  
@@ -72,8 +72,29 @@ body {
 .line-selected {
   color: #ccc;
 }
+
 .selected {
   background-color: #264f78;
+}
+.selected-start-bottom {
+  border-bottom-left-radius: 3px;
+}
+.selected-start-top {
+  border-top-left-radius: 3px;
+}
+.selected-start-all {
+  border-top-left-radius: 3px;
+  border-bottom-left-radius: 3px;
+}
+.selected-end-bottom {
+  border-bottom-right-radius: 3px;
+}
+.selected-end-top {
+  border-top-right-radius: 3px;
+}
+.selected-end-all {
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
 }
 
 span {

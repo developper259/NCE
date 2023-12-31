@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCE</title>
     <link rel="stylesheet" href="../css/index.css" />
+    <link rel="stylesheet" href="../css/bottomBar.css" />
     <style>
       #fps {
         position: fixed;
@@ -23,13 +24,31 @@
         <div class="editor-caret editor-select"></div>
         <div class="editor-output editor-select"></div>
       </div>
+      <div class="bottomBar">
+        <section class="left">
+
+        </section>
+        <section class="middle">
+          
+        </section>
+        <section class="right">
+          <span class="scroller-open" id="code-type"></span>
+          <span class="bottomBar-cursorPos bottomBar-text"></span>
+          
+        </section>
+      </div>
     </section>
     <script src="../js/controller/selectController.js"></script>
     <script src="../js/controller/WriterController.js"></script>
     <script src="../js/controller/lineController.js"></script>
-    <script src="../js/event.js"></script>
-    <script src="../js/cursor.js"></script>
-    <script src="../js/editor.js"></script>
+
+    <script src="../js/add/bottomBar.js"></script>
+
+    <script src="../js/commands/Command.js"></script>
+
+    <script src="../js/main/event.js"></script>
+    <script src="../js/main/cursor.js"></script>
+    <script src="../js/main/editor.js"></script>
 
     <div id="fps"></div>
 
