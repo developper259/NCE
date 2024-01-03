@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NCE</title>
+    <link rel="stylesheet" href="../css/index.css" />
     <link rel="stylesheet" href="../css/editor.css  " />
     <link rel="stylesheet" href="../css/bottomBar.css" />
     <link rel="stylesheet" href="../css/command.css" />
@@ -15,6 +16,7 @@
         font-size: 16px;
         color: #ffffff;
         padding: 5px;
+        user-select: none;
       }
     </style>
   </head>
@@ -22,17 +24,39 @@
     <section class="main-section">
       <div class="command box">
         <div class="command-body">
-          <input type="search" class="command-search  " />
-          <ul class="command-body">
-            <div class="command-els-recently">
-              <li class="command-el">JavaScript</li>
+          <input
+            type="search"
+            class="command-search"
+            placeholder="Search files by name"
+          />
+          <div class="command-header">
+            <div class="command-els-recently box-bottom">
+              <div class="command-el">
+                <span class="command-el-title">JavaScript</span>
+                <div class="command-el-author">
+                  <span class="command-info-recently">recently used</span>
+                </div>
+              </div>
+              <div class="command-el">
+                <span class="command-el-title">CSS</span>
+                <div class="command-el-author"></div>
+              </div>
             </div>
             <div class="command-els">
-              <li class="command-el">HTML</li>
-              <li class="command-el">CSS</li>
-              <li class="command-el">JavaScript</li>
+              <div class="command-el">
+                <span class="command-el-title">HTML</span>
+                <div class="command-el-author"></div>
+              </div>
+              <div class="command-el">
+                <span class="command-el-title">CSS</span>
+                <div class="command-el-author"></div>
+              </div>
+              <div class="command-el">
+                <span class="command-el-title">JavaScript</span>
+                <div class="command-el-author"></div>
+              </div>
             </div>
-          </ul>
+          </div>
         </div>
       </div>
       <div class="editor box">
@@ -40,7 +64,7 @@
         <div class="editor-caret editor-select"></div>
         <div class="editor-output editor-select"></div>
       </div>
-      <div class="bottomBar box">
+      <div class="bottomBar box-top">
         <section class="left"></section>
         <section class="middle"></section>
         <section class="right">

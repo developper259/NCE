@@ -18,12 +18,10 @@
   flex-direction: row;
   justify-content: space-between;
   align-items: center;
-  margin: 0 20px;
 }
 .bottomBar-el {
   color: #b8b8b8;
   font-size: 13px;
-  margin: 0 20px;
   height: 21px;
   padding: 0 5px;
   display: flex;
@@ -31,4 +29,9 @@
 }
 .bottomBar-el:hover {
   background-color: #303030;
+  cursor: pointer;
+}
+
+.bottomBar-el, .bottomBar-scroller, .bottomBar section {
+  margin: 0 5px;
 }
