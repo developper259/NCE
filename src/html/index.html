@@ -23,38 +23,18 @@
   <body>
     <section class="main-section">
       <div class="command box">
-        <div class="command-body">
+        <div class="command-header">
           <input
             type="search"
             class="command-search"
             placeholder="Search files by name"
           />
-          <div class="command-header">
-            <div class="command-els-recently box-bottom">
-              <div class="command-el">
-                <span class="command-el-title">JavaScript</span>
-                <div class="command-el-author">
-                  <span class="command-info-recently">recently used</span>
-                </div>
-              </div>
-              <div class="command-el">
-                <span class="command-el-title">CSS</span>
-                <div class="command-el-author"></div>
-              </div>
+          <div class="command-body">
+            <div class="command-els-top box-bottom">
+              
             </div>
             <div class="command-els">
-              <div class="command-el">
-                <span class="command-el-title">HTML</span>
-                <div class="command-el-author"></div>
-              </div>
-              <div class="command-el">
-                <span class="command-el-title">CSS</span>
-                <div class="command-el-author"></div>
-              </div>
-              <div class="command-el">
-                <span class="command-el-title">JavaScript</span>
-                <div class="command-el-author"></div>
-              </div>
+              
             </div>
           </div>
         </div>
@@ -62,6 +42,7 @@
       <div class="editor box">
         <div class="line-numbers"></div>
         <div class="editor-caret editor-select"></div>
+        <div class="editor-select-output editor-select"></div>
         <div class="editor-output editor-select"></div>
       </div>
       <div class="bottomBar box-top">
@@ -84,6 +65,7 @@
     <script src="../js/add/bottomBar.js"></script>
 
     <script src="../js/commands/Command.js"></script>
+    <script src="../js/commands/Langague.js"></script>
 
     <script src="../js/main/event.js"></script>
     <script src="../js/main/cursor.js"></script>

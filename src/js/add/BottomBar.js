@@ -4,11 +4,9 @@ class BottomBar {
 
     this.line = 0;
     this.column = 0;
-
     this.scrollersValue = {
       "code-type": {
-        value: 0,
-        values: ["Plain-Text", "HTML", "CSS", "JavaScript"],
+        instance: this.editor.Clangague,
       },
     };
 
@@ -19,8 +17,10 @@ class BottomBar {
       this.cursorOBJ.innerText = `Line ${this.line}, Column ${this.column}`;
 
       for (let scroller of this.scrollers) {
-        let table = this.scrollersValue[scroller.id];
-        scroller.innerText = table.values[table.value];
+
+        let instance = this.scrollersValue[scroller.id].instance;
+        scroller.innerText = instance.values[instance.value];
+        scroller.addEventListener("click", instance.active);
       }
     };
 

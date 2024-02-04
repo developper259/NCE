@@ -58,7 +58,10 @@
 }
 
 .selected {
-  background-color: #264f78;
+  background-color: rgba(38, 79, 120);
+}
+.afk {
+  background-color: rgba(38, 79, 120, 0.5);
 }
 .selected-start-bottom {
   border-bottom-left-radius: 3px;

@@ -12,6 +12,19 @@ class Cursor {
     //x
     this.column = 1;
 
+    this.rowToY = (row) => {
+      return baseY + posY * row - this.mpY;
+    };
+    this.columnToX = (column) => {
+      return baseX + (column - 1) * this.leterSize + 1;
+    };
+    this.yToRow = (y) => {
+      return roundY((y - baseY) / posY) + 1;
+    };
+    this.xToColumn = (x) => {
+      return roundX((x - baseX) / this.leterSize) + 1;
+    };
+
     this.onClick = (event) => {
       const x =
         event.clientX -
@@ -22,8 +35,8 @@ class Cursor {
         this.editor.output.getBoundingClientRect().top -
         this.mY;
 
-      let row = roundY((y - baseY) / posY) + 1;
-      let column = roundX((x - baseX) / this.leterSize) + 1;
+      let row = this.yToRow(y);
+      let column = this.xToColumn(x);
 
       if (row <= 0) row = 1;
       if (row > this.editor.lineController.maxIndex)
@@ -51,7 +64,6 @@ class Cursor {
       else this.cD.style.display = "block";
     };
     this.setCursorPosition = (row, column) => {
-      console.log(row, column);
       if (row <= 0) row = 1;
       if (row > this.editor.lineController.maxIndex)
         row = this.editor.lineController.maxIndex;
@@ -60,8 +72,8 @@ class Cursor {
       else l = l.length;
       if (column > l) column = l;
 
-      const placeY = baseY + posY * row - this.mpY;
-      const placeX = baseX + (column - 1) * this.leterSize + 1;
+      const placeY = this.rowToY(row);
+      const placeX = this.columnToX(column);
 
       this.cD.style.left = placeX + "px";
       this.cD.style.top = placeY + "px";

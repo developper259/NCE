@@ -77,16 +77,8 @@ class WriterController {
 
       for (let word of words) {
         if (word != "") {
-          let wordHTML = "";
-
-          if (word.length > 1) {
-            for (let letter of word) {
-              wordHTML += `<span class="line-letter editor-select">${letter}</span>`;
-            }
-          } else wordHTML += word;
           let classes = "line-word editor-select";
-          if (wordHTML.length == 1) classes += " line-letter";
-          resultWords += `<span class="${classes}">${wordHTML}</span>`;
+          resultWords += `<span class="${classes}">${word}</span>`;
         }
       }
 
