@@ -27,8 +27,6 @@ class SelectController {
       div.style.width = width + "px";
       div.style.height = height + "px";
 
-      console.log(div);
-
       this.selectOutput.appendChild(div);
     };
 
@@ -54,12 +52,14 @@ class SelectController {
 
       this.createSelectEl(x, wordOBJ.innerText.length, y, "selected");
       this.refreshContaisSelected();
+      this.editor.cursor.setCursorPosition(y, x + wordOBJ.innerText.length - 1);
     };
 
 
     this.selectLine = (index) => {
       let lines = this.editor.lineController.lines;
       this.createSelectEl(1, lines[index].length, index, "selected");
+      this.editor.cursor.setCursorPosition(index + 1, lines[index].length);
     };
 
     this.mouseDown = () => {
@@ -69,7 +69,6 @@ class SelectController {
     };
     this.mouseUp = () => {
       this.isMouseDown = false;
-      this.mouseClick();
 
       if (this.containsSelected.length != 0) {
         this.endSelect = [this.editor.cursor.column, this.editor.cursor.row];
@@ -81,6 +80,7 @@ class SelectController {
     this.refreshContaisSelected = () => {
       this.containsSelected = "";
       
+
     };
     this.refreshStartEndSelect = () => {
       let a = 0;
@@ -131,6 +131,7 @@ class SelectController {
     };
     addEvent("mousedown", this.mouseDown, this.editor.output);
     addEvent("mouseup", this.mouseUp, document);
+    addEvent("click", this.mouseClick);
     addEvent("cursormove", this.cursorMove, this.editor.output);
     addEvent("mousemove", this.mouseMove, this.editor.output);
   }

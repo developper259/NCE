@@ -53,7 +53,7 @@ class Cursor {
       this.row = row;
       this.column = column;
 
-      this.setCursorPosition(this.row, this.column);
+      this.setCursorPosition(row, column);
 
       if (!this.cD.classList.contains("caret-enable"))
         this.cD.classList.add("caret-enable");
@@ -63,28 +63,28 @@ class Cursor {
         this.cD.style.display = "none";
       else this.cD.style.display = "block";
     };
-    this.setCursorPosition = (row, column) => {
-      if (row <= 0) row = 1;
-      if (row > this.editor.lineController.maxIndex)
-        row = this.editor.lineController.maxIndex;
-      let l = this.editor.lineController.lines[row - 1];
+    this.setCursorPosition = (y, x) => {
+      if (y <= 0) y = 1;
+      if (y > this.editor.lineController.maxIndex)
+        y = this.editor.lineController.maxIndex;
+      let l = this.editor.lineController.lines[y - 1];
       if (l == undefined) l = 0;
       else l = l.length;
-      if (column > l) column = l;
+      if (x > l) x = l;
 
-      const placeY = this.rowToY(row);
-      const placeX = this.columnToX(column);
+      const placeY = this.rowToY(y);
+      const placeX = this.columnToX(x);
 
       this.cD.style.left = placeX + "px";
       this.cD.style.top = placeY + "px";
 
-      this.row = row;
-      this.column = column;
+      this.row = y;
+      this.column = x;
 
       this.editor.lineController.setFocusLine(this.row);
       this.editor.output.dispatchEvent(
         new CustomEvent("cursorchange", {
-          detail: { row: row, column: column },
+          detail: { row: y, column: x },
         })
       );
     };

@@ -35,10 +35,10 @@ getElements = (str) => {
 class Editor {
   constructor() {
     this.output = document.querySelector(".editor-output");
+    this.cursor = new Cursor(this);
     this.lineController = new lineController(this);
     this.writerController = new WriterController(this);
     this.selectController = new SelectController(this);
-    this.cursor = new Cursor(this);
     this.command = new Command(this);
     this.Clangague = new Langague(this);
     this.bottomBar = new BottomBar(this);
