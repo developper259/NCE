@@ -51,11 +51,13 @@ class Editor {
   onClick(e) {
     const t = e.target;
     const c = t.classList;
-    if (c.contains("editor-select") || c.contains("editor-el"))
+    if (c.contains("editor-select") || c.contains("editor-el")) {
       this.selected = true;
-    else {
+      document.dispatchEvent(new CustomEvent("cursorenabled"));
+    } else {
       this.selected = false;
       this.lineController.setFocusLine(0);
+      document.dispatchEvent(new CustomEvent("cursordisabled"));
     }
   }
 }

@@ -57,33 +57,30 @@
   color: #ccc;
 }
 
+span {
+  white-space: pre;
+}
+
 .selected {
   background-color: rgba(38, 79, 120);
 }
-.afk {
-  background-color: rgba(38, 79, 120, 0.5);
-}
-.selected-start-bottom {
-  border-bottom-left-radius: 3px;
-}
-.selected-start-top {
+.selected-start {
   border-top-left-radius: 3px;
 }
 .selected-start-all {
   border-top-left-radius: 3px;
   border-bottom-left-radius: 3px;
 }
-.selected-end-bottom {
+.selected-end {
   border-bottom-right-radius: 3px;
-}
-.selected-end-top {
-  border-top-right-radius: 3px;
 }
 .selected-end-all {
-  border-top-right-radius: 3px;
   border-bottom-right-radius: 3px;
+  border-top-right-radius: 3px;
 }
-
-span {
-  white-space: pre;
+.selected-all {
+  border-radius: 3px;
+}
+.selected-afk {
+  background-color: rgba(38, 79, 120, 0.5);
 }

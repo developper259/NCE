@@ -12,11 +12,13 @@ class SelectController {
     //column start | column end
     this.createSelectEl = (columnS, columnE, row, classes, value) => {
       let div = document.createElement("div");
+      let difY = 4;
+      let difX = 2;
 
       let x = this.editor.cursor.columnToX(columnS);
-      let y = this.editor.cursor.rowToY(row + 1) - 2;
-      let width = columnE * this.editor.cursor.leterSize;
-      let height = 23;
+      let y = this.editor.cursor.rowToY(row + 1) - difY;
+      let width = columnE * this.editor.cursor.leterSize - difX;
+      let height = 21 + difY;
 
       div.className = classes;
       div.dataset.line = row;
@@ -54,7 +56,13 @@ class SelectController {
 
       y -= 1;
 
-      this.createSelectEl(x, wordOBJ.innerText.length, y, "selected", wordOBJ.innerText);
+      this.createSelectEl(
+        x,
+        wordOBJ.innerText.length,
+        y,
+        "selected",
+        wordOBJ.innerText
+      );
       this.editor.cursor.setCursorPosition(y, x + wordOBJ.innerText.length - 1);
     };
 
@@ -67,7 +75,13 @@ class SelectController {
     this.selectLine = (index) => {
       this.unSelectLine(index);
       let lines = this.editor.lineController.lines;
-      this.createSelectEl(1, lines[index].length, index, "selected", lines[index]);
+      this.createSelectEl(
+        1,
+        lines[index].length,
+        index,
+        "selected",
+        lines[index]
+      );
       let x = 0;
       if (index == lines.length - 1) x = lines[index].length;
       this.editor.cursor.setCursorPosition(index + 2, x);
@@ -119,8 +133,16 @@ class SelectController {
       }
     };
     this.refreshStartEndSelect = () => {
-      let a = 0;
-      let b = 0;
+      let els = getElements(".selected");
+
+      console.log(els, els.length);
+
+      for (let el of els) {
+        el.removeAttribute("class");
+        let classes = el.classList;
+        classes.add("selected");
+        if (els.length == 1) classes.add("selected-all");
+      }
     };
     this.cursorMove = (event) => {
       if (this.isMouseDown) {
@@ -132,6 +154,24 @@ class SelectController {
         let cursor = this.editor.cursor;
         cursor.cD.style.display = "block";
         cursor.onClick(event);
+      }
+    };
+    this.cursorDisabled = (event) => {
+      let els = getElements(".selected");
+
+      for (let el of els) {
+        let classes = el.classList;
+        classes.remove("selected");
+        classes.add("selected-afk");
+      }
+    };
+    this.cursorEnabled = (event) => {
+      let els = getElements(".selected");
+
+      for (let el of els) {
+        let classes = el.classList;
+        classes.remove("selected-afk");
+        classes.add("selected");
       }
     };
     this.calcClick = () => {
@@ -165,5 +205,7 @@ class SelectController {
     addEvent("click", this.mouseClick);
     addEvent("cursormove", this.cursorMove, this.editor.output);
     addEvent("mousemove", this.mouseMove, this.editor.output);
+    addEvent("cursordisabled", this.cursorDisabled, document);
+    addEvent("cursorenabled", this.cursorEnabled, document);
   }
 }

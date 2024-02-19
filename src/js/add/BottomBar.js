@@ -17,7 +17,6 @@ class BottomBar {
       this.cursorOBJ.innerText = `Line ${this.line}, Column ${this.column}`;
 
       for (let scroller of this.scrollers) {
-
         let instance = this.scrollersValue[scroller.id].instance;
         scroller.innerText = instance.values[instance.value];
         scroller.addEventListener("click", instance.active);

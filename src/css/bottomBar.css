@@ -32,6 +32,8 @@
   cursor: pointer;
 }
 
-.bottomBar-el, .bottomBar-scroller, .bottomBar section {
+.bottomBar-el,
+.bottomBar-scroller,
+.bottomBar section {
   margin: 0 5px;
 }
