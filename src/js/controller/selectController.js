@@ -10,8 +10,8 @@ class SelectController {
     this.selectOutput = getElement(".editor-select-output");
 
     //column start | column end
-    this.createSelectEl = (columnS, columnE, row, classes) => {
-      let div = document.createElement('div');
+    this.createSelectEl = (columnS, columnE, row, classes, value) => {
+      let div = document.createElement("div");
 
       let x = this.editor.cursor.columnToX(columnS);
       let y = this.editor.cursor.rowToY(row + 1) - 2;
@@ -19,15 +19,18 @@ class SelectController {
       let height = 23;
 
       div.className = classes;
-      div.id = row;
+      div.dataset.line = row;
+      div.dataset.value = value;
 
-      div.style.position = 'absolute';
-      div.style.left = x + 'px';
-      div.style.top = y + 'px';
+      div.style.position = "absolute";
+      div.style.left = x + "px";
+      div.style.top = y + "px";
       div.style.width = width + "px";
       div.style.height = height + "px";
 
       this.selectOutput.appendChild(div);
+      this.refreshContaisSelected();
+      this.refreshStartEndSelect();
     };
 
     this.unSelectAll = () => {
@@ -36,6 +39,7 @@ class SelectController {
     };
 
     this.selectAll = () => {
+      this.unSelectAll();
       for (let i = 0; i < this.editor.lineController.lines.length; i++) {
         this.selectLine(i);
       }
@@ -50,16 +54,23 @@ class SelectController {
 
       y -= 1;
 
-      this.createSelectEl(x, wordOBJ.innerText.length, y, "selected");
-      this.refreshContaisSelected();
+      this.createSelectEl(x, wordOBJ.innerText.length, y, "selected", wordOBJ.innerText);
       this.editor.cursor.setCursorPosition(y, x + wordOBJ.innerText.length - 1);
     };
 
-
+    this.unSelectLine = (index) => {
+      let els = getElements(".selected");
+      for (let el of els) {
+        if (el.dataset.line == index) el.remove();
+      }
+    };
     this.selectLine = (index) => {
+      this.unSelectLine(index);
       let lines = this.editor.lineController.lines;
-      this.createSelectEl(1, lines[index].length, index, "selected");
-      this.editor.cursor.setCursorPosition(index + 1, lines[index].length);
+      this.createSelectEl(1, lines[index].length, index, "selected", lines[index]);
+      let x = 0;
+      if (index == lines.length - 1) x = lines[index].length;
+      this.editor.cursor.setCursorPosition(index + 2, x);
     };
 
     this.mouseDown = () => {
@@ -77,23 +88,43 @@ class SelectController {
       }
     };
 
+    this.getTextSelectedLine = (index) => {
+      let els = [];
+
+      for (let el of getElements(".selected")) {
+        if (el.dataset.line == index) els.push(el);
+      }
+      els.sort((a, b) => {
+        let aLeft = parseInt(window.getComputedStyle(a).left, 10);
+        let bLeft = parseInt(window.getComputedStyle(b).left, 10);
+        return aLeft - bLeft;
+      });
+
+      let c = "";
+      for (let el of els) {
+        c += el.dataset.value;
+      }
+
+      return c;
+    };
+
     this.refreshContaisSelected = () => {
       this.containsSelected = "";
-      
 
+      for (let i in this.editor.lineController.lines) {
+        let t = this.getTextSelectedLine(i);
+        this.containsSelected += t;
+        if (i != this.editor.lineController.lines.length && t)
+          this.containsSelected += "\n";
+      }
     };
     this.refreshStartEndSelect = () => {
       let a = 0;
       let b = 0;
-      
     };
     this.cursorMove = (event) => {
       if (this.isMouseDown) {
-
         this.endSelect = [this.editor.cursor.column, this.editor.cursor.row];
-
-        this.refreshStartEndSelect();
-        this.refreshContaisSelected();
       }
     };
     this.mouseMove = (event) => {
