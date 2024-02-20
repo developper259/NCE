@@ -13,7 +13,7 @@ class SelectController {
     this.createSelectEl = (columnS, columnE, row, classes, value) => {
       let div = document.createElement("div");
       let difY = 4;
-      let difX = 2;
+      let difX = 1;
 
       let x = this.editor.cursor.columnToX(columnS);
       let y = this.editor.cursor.rowToY(row + 1) - difY;
@@ -63,7 +63,7 @@ class SelectController {
         "selected",
         wordOBJ.innerText
       );
-      this.editor.cursor.setCursorPosition(y, x + wordOBJ.innerText.length - 1);
+      this.editor.cursor.setCursorPosition(y + 1, x + wordOBJ.innerText.length - 1);
     };
 
     this.unSelectLine = (index) => {
@@ -134,14 +134,51 @@ class SelectController {
     };
     this.refreshStartEndSelect = () => {
       let els = getElements(".selected");
-
-      console.log(els, els.length);
+      let i = 0;
+      let lastEl;
+      let lastElW;
 
       for (let el of els) {
         el.removeAttribute("class");
         let classes = el.classList;
         classes.add("selected");
+
+        // 1 element selected
         if (els.length == 1) classes.add("selected-all");
+        // more element selected
+        else {
+          if (i != 0) lastElW = parseInt(window.getComputedStyle(lastEl).width);
+          let elW = parseInt(window.getComputedStyle(el).width);
+          if (i == 0) {
+            classes.add("selected-start");
+          }
+          if (i == els.length - 1) {
+            console.log(lastElW, elW);
+            if (lastElW < elW) classes.add("selected-end-all");
+            else classes.add("selected-end-bottom");
+          }
+          else {
+            let nextEl = els[i + 1];
+            let nextElW = parseInt(window.getComputedStyle(nextEl).width);
+            if ((!lastElW || lastElW < elW) && elW > nextElW) {
+              classes.add("selected-end-all")
+            }else{
+              if (!lastElW || lastElW < elW) {
+                classes.add("selected-end-top")
+              }else{
+                classes.add("selected-reverse-top");
+              }
+              if (elW > nextElW) {
+                classes.add("selected-end-bottom")
+              }else{
+                classes.add("selected-reverse-bottom");
+              }
+            }
+          }
+          
+        }
+        lastEl = el;
+        i++;
       }
     };
     this.cursorMove = (event) => {

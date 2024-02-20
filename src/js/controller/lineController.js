@@ -4,7 +4,7 @@ const posY = 25;
 
 class lineController {
   constructor(e) {
-    this.lines = ['var   hello="bonjour les copains!!"', "2*8", "3", "4444"];
+    this.lines = ['var   hello="bonjour les copains!!"', "2*8", "3vkiejoiejierhiurh", "4444"];
     this.maxIndex = this.lines.length;
     this.index = 0;
     this.editor = e;
