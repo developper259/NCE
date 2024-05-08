@@ -136,6 +136,7 @@ class SelectController {
       let els = getElements(".selected");
       let i = 0;
       let lastEl;
+      //width
       let lastElW;
 
       for (let el of els) {
@@ -153,7 +154,6 @@ class SelectController {
             classes.add("selected-start");
           }
           if (i == els.length - 1) {
-            console.log(lastElW, elW);
             if (lastElW < elW) classes.add("selected-end-all");
             else classes.add("selected-end-bottom");
           }
@@ -161,7 +161,7 @@ class SelectController {
             let nextEl = els[i + 1];
             let nextElW = parseInt(window.getComputedStyle(nextEl).width);
             if ((!lastElW || lastElW < elW) && elW > nextElW) {
-              classes.add("selected-end-all")
+              classes.add("selected-end")
             }else{
               if (!lastElW || lastElW < elW) {
                 classes.add("selected-end-top")
