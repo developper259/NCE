@@ -57,6 +57,16 @@ class Command {
       }
       return dic;
     };
+    this.mouseClick = (event) => {
+      let objSelectedC = event.srcElement.classList;
+      for (let c of objSelectedC) {
+        //on vérifi si une des classes contiens le mot command
+        let t = c.split("-");
+        if (!t.includes("command") && !t.includes("scroller") && !t.includes("bottomBar")) {
+          if (this.isActive) this.close();
+        }
+      }
+    };
     this.open = () => {
       this.instance.style.display = "flex";
       this.isActive = true;
@@ -71,5 +81,6 @@ class Command {
     };
 
     this.onSelect = (title) => {};
+    addEvent("click", this.mouseClick);
   }
 }
