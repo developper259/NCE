@@ -4,7 +4,13 @@ const posY = 25;
 
 class lineController {
   constructor(e) {
-    this.lines = ['var   hello="bonjour les copains!!"', "2*8", "3vkiejoiejierhiurh", "4444"];
+    this.lines = [
+      'var   hello="bonjour les copains!!"',
+      "2*8viurhviuruevoeubvebveuvbeurbveubv",
+      "3vkiejoiejierhi",
+      "3vkiejoiejierhiurh",
+      "4444",
+    ];
     this.maxIndex = this.lines.length;
     this.index = 0;
     this.editor = e;
@@ -49,7 +55,7 @@ class lineController {
         for (var i = 0; i < this.lines.length; i++) {
           let doc = parser.parseFromString(
             this.editor.writerController.toHTML(this.lines[i]),
-            "text/html"
+            "text/html",
           );
           let lineOBJ = doc
             .createRange()
@@ -79,16 +85,25 @@ class lineController {
       if (this.maxIndex != linesN.length) {
         lineN.innerHTML = Array.from(
           { length: this.maxIndex },
-          (_, index) => `<span class="line-el">${index + 1}</span>`
+          (_, index) => `<span class="line-el editor-el">${index + 1}</span>`,
         ).join("");
 
         linesN = lineN.querySelectorAll(".line-el");
 
-        for (var i = 0; i < linesN.length; i++) {
+        for (let i = 0; i < linesN.length; i++) {
           const line = linesN[i];
 
           const y = baseY + posY * i;
           line.style.top = y + "px";
+
+          line.addEventListener("click", (event) => {
+            let lineOBJ = editor.selectController.getSelectOBJLine(i);
+            editor.selectController.unSelectAll();
+
+            if (lineOBJ == undefined) editor.selectController.selectLine(i);
+            else editor.cursor.setCursorPosition(i + 1, 0);
+            console.log(i, lineOBJ);
+          });
         }
       }
     };

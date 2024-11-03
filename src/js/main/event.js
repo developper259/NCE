@@ -11,3 +11,4 @@ var onCursorMove = new CustomEvent("cursormove", { cancelable: true });
 var onCursorChange = new CustomEvent("cursorchange", { cancelable: true });
 var onCursorDisabled = new CustomEvent("cursordisabled", { cancelable: true });
 var onCursorEnabled = new CustomEvent("cursorenabled", { cancelable: true });
+var onSelect = new CustomEvent("onSelect", { cancelable: true });

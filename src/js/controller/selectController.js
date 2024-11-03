@@ -7,18 +7,18 @@ class SelectController {
     this.lastClick = 0;
     this.clickCount = 0;
 
+    this.clickTime = 500;
+
     this.selectOutput = getElement(".editor-select-output");
 
-    //column start | column end
-    this.createSelectEl = (columnS, columnE, row, classes, value) => {
+    this.createSelectEl = (column, length, row, classes, value) => {
       let div = document.createElement("div");
       let difY = 4;
-      let difX = 1;
 
-      let x = this.editor.cursor.columnToX(columnS);
+      let x = this.editor.cursor.columnToX(column);
       let y = this.editor.cursor.rowToY(row + 1) - difY;
-      let width = columnE * this.editor.cursor.leterSize - difX;
-      let height = 21 + difY;
+      let width = length * this.editor.cursor.leterSize;
+      let height = editor.cursor.mpY + difY;
 
       div.className = classes;
       div.dataset.line = row;
@@ -31,8 +31,47 @@ class SelectController {
       div.style.height = height + "px";
 
       this.selectOutput.appendChild(div);
-      this.refreshContaisSelected();
-      this.refreshStartEndSelect();
+    };
+
+    this.getNumberLineSelected = () => {
+      let n = 0;
+      for (var i = 0; i < editor.lineController.lines.length; i++) {
+        if (this.getSelectOBJLine(i)) n++;
+      }
+      return n;
+    };
+
+    this.getSelectOBJLine = (row) => {
+      let obj = getElement(".selected[data-line='" + row + "']");
+      if (obj == null) return undefined;
+      return obj;
+    };
+
+    this.refreshSelectLine = (row, length) => {
+      let obj = this.getSelectOBJLine(row);
+      if (!obj) return;
+
+      let width = length * this.editor.cursor.leterSize;
+      obj.style.width = width + "px ";
+    };
+
+    this.refreshSelectLineReverse = (row, length) => {
+      let obj = this.getSelectOBJLine(row);
+      if (!obj) return;
+
+      let width = length * this.editor.cursor.leterSize;
+      let lengthInit =
+        parseInt(window.getComputedStyle(obj).width, 10) /
+        this.editor.cursor.leterSize;
+      let column =
+        this.editor.cursor.xToColumn(
+          parseInt(window.getComputedStyle(obj).left, 10),
+        ) -
+        (length - lengthInit);
+      let x = this.editor.cursor.columnToX(column);
+
+      obj.style.left = x + "px";
+      obj.style.width = width + "px";
     };
 
     this.unSelectAll = () => {
@@ -61,9 +100,12 @@ class SelectController {
         wordOBJ.innerText.length,
         y,
         "selected",
-        wordOBJ.innerText
+        wordOBJ.innerText,
       );
-      this.editor.cursor.setCursorPosition(y + 1, x + wordOBJ.innerText.length - 1);
+      this.editor.cursor.setCursorPosition(
+        y + 1,
+        x + wordOBJ.innerText.length - 1,
+      );
     };
 
     this.unSelectLine = (index) => {
@@ -80,26 +122,11 @@ class SelectController {
         lines[index].length,
         index,
         "selected",
-        lines[index]
+        lines[index],
       );
       let x = 0;
       if (index == lines.length - 1) x = lines[index].length;
       this.editor.cursor.setCursorPosition(index + 2, x);
-    };
-
-    this.mouseDown = () => {
-      if (new Date().getTime() - this.lastClickTime > 300) this.unSelectAll();
-      this.startSelect = [this.editor.cursor.column, this.editor.cursor.row];
-      this.isMouseDown = true;
-    };
-    this.mouseUp = () => {
-      this.isMouseDown = false;
-
-      if (this.containsSelected.length != 0) {
-        this.endSelect = [this.editor.cursor.column, this.editor.cursor.row];
-        this.refreshStartEndSelect();
-        this.refreshContaisSelected();
-      }
     };
 
     this.getTextSelectedLine = (index) => {
@@ -124,20 +151,35 @@ class SelectController {
 
     this.refreshContaisSelected = () => {
       this.containsSelected = "";
+      let count = 0
 
       for (let i in this.editor.lineController.lines) {
         let t = this.getTextSelectedLine(i);
-        this.containsSelected += t;
-        if (i != this.editor.lineController.lines.length && t)
-          this.containsSelected += "\n";
+
+        if (t) {
+          this.containsSelected += t;
+          count++;
+          if (count != this.getNumberLineSelected())
+            this.containsSelected += "\n";
+        }
       }
     };
     this.refreshStartEndSelect = () => {
-      let els = getElements(".selected");
+      let els = [];
+
+      for (let i = 0; i < editor.lineController.lines.length; i++) {
+        let el = this.getSelectOBJLine(i);
+        if (el) els.push(el);
+      }
+
       let i = 0;
       let lastEl;
-      //width
       let lastElW;
+      let lastElX;
+
+      let nextEl;
+      let nextElW;
+      let nextElX;
 
       for (let el of els) {
         el.removeAttribute("class");
@@ -148,50 +190,43 @@ class SelectController {
         if (els.length == 1) classes.add("selected-all");
         // more element selected
         else {
-          if (i != 0) lastElW = parseInt(window.getComputedStyle(lastEl).width);
+          if (i != 0) {
+            lastElW = parseInt(window.getComputedStyle(lastEl).width);
+            lastElX = parseInt(window.getComputedStyle(lastEl).left, 10);
+          }
           let elW = parseInt(window.getComputedStyle(el).width);
+          let elX = parseInt(window.getComputedStyle(el).left, 10);
+          if (i != els.length - 1) {
+            nextEl = els[i+1];
+            nextElW = parseInt(window.getComputedStyle(nextEl).width);
+            nextElX = parseInt(window.getComputedStyle(nextEl).left, 10);
+          }
+
           if (i == 0) {
             classes.add("selected-start");
-          }
-          if (i == els.length - 1) {
-            if (lastElW < elW) classes.add("selected-end-all");
-            else classes.add("selected-end-bottom");
-          }
-          else {
-            let nextEl = els[i + 1];
-            let nextElW = parseInt(window.getComputedStyle(nextEl).width);
-            if ((!lastElW || lastElW < elW) && elW > nextElW) {
-              classes.add("selected-end")
-            }else{
-              if (!lastElW || lastElW < elW) {
-                classes.add("selected-end-top")
-              }else{
-                classes.add("selected-reverse-top");
-              }
-              if (elW > nextElW) {
-                classes.add("selected-end-bottom")
-              }else{
-                classes.add("selected-reverse-bottom");
-              }
+          }else{
+            if (lastElX > elX) {
+              classes.add("selected-top-left")
+            }
+
+            if (elX + elW > lastElW + lastElX) {
+              classes.add("selected-top-right");
+            }
+
+            if (elX + elW > nextElW + nextElX) {
+              classes.add("selected-bottom-right");
+            }
+
+
+            if (i == els.length - 1) {
+              classes.add("selected-bottom");
             }
           }
-          
         }
         lastEl = el;
         i++;
       }
-    };
-    this.cursorMove = (event) => {
-      if (this.isMouseDown) {
-        this.endSelect = [this.editor.cursor.column, this.editor.cursor.row];
-      }
-    };
-    this.mouseMove = (event) => {
-      if (this.isMouseDown) {
-        let cursor = this.editor.cursor;
-        cursor.cD.style.display = "block";
-        cursor.onClick(event);
-      }
+      this.refreshContaisSelected();
     };
     this.cursorDisabled = (event) => {
       let els = getElements(".selected");
@@ -214,7 +249,7 @@ class SelectController {
     this.calcClick = () => {
       var currentTime = new Date().getTime();
 
-      if (currentTime - this.lastClickTime < 300) {
+      if (currentTime - this.lastClickTime < this.clickTime) {
         this.clickCount++;
       } else {
         this.clickCount = 1;
@@ -224,25 +259,198 @@ class SelectController {
     this.mouseClick = (event) => {
       this.calcClick();
 
+      if (this.clickCount > 1 && this.clickCount < 5) {
+        this.unSelectAll();
+      }
+
       if (this.clickCount == 2) {
         const word = this.editor.lineController.getWordOBJ(
           this.editor.cursor.row,
-          this.editor.cursor.getIndexWord()
+          this.editor.cursor.getIndexWord(),
         );
-
+        
         this.selectWord(word);
       } else if (this.clickCount == 3) {
         this.selectLine(this.editor.cursor.row - 1);
+        editor.cursor.setCursorPosition(editor.cursor.row, 0)
       } else if (this.clickCount >= 4) {
         this.selectAll();
       }
     };
+    this.mouseDown = (event) => {
+      if (event.button == 2) {
+        //event right click
+        return;
+      }
+
+      if (new Date().getTime() - this.lastClickTime > this.clickTime)
+        this.unSelectAll();
+      else if (this.clickCount > 4) return;
+
+      editor.cursor.onClick(event);
+
+      this.startSelect = {
+        column: this.editor.cursor.column,
+        row: this.editor.cursor.row,
+      };
+      this.endSelect = {};
+      this.isMouseDown = true;
+
+      this.mouseClick(event);
+    };
+    this.mouseUp = () => {
+      this.isMouseDown = false;
+
+      this.endSelect = {
+        column: this.editor.cursor.column,
+        row: this.editor.cursor.row,
+      };
+    };
+    this.mouseMove = (event) => {
+      if (this.isMouseDown) {
+        let cursor = this.editor.cursor;
+        cursor.cD.style.display = "block";
+        cursor.onClick(event);
+
+        this.endSelect = {
+          column: this.editor.cursor.column,
+          row: this.editor.cursor.row,
+        };
+
+        if (this.startSelect.row == this.endSelect.row)
+          this.calculSelectSimpleLine();
+        else this.calculSelectMultiLine();
+
+        this.editor.output.dispatchEvent(
+          new CustomEvent("onSelect", {
+            detail: {
+              start: this.startSelect,
+              end: this.endSelect,
+              contains: this.containsSelected,
+            },
+          }),
+        );
+      }
+    };
+
+    this.calculSelectSimpleLine = () => {
+      let x = 0;
+      let length = 0;
+      let y = this.startSelect.row - 1;
+      let lineOBJ = this.getSelectOBJLine(y);
+      let mode = 0;
+
+      if (this.startSelect.column - this.endSelect.column == 0) {
+        if (lineOBJ != undefined) lineOBJ.remove();
+        return;
+      }
+
+      if (this.startSelect.column < this.endSelect.column) {
+        x = this.startSelect.column;
+        length = this.endSelect.column - this.startSelect.column;
+        mode = 1;
+      } else {
+        x = this.endSelect.column;
+        length = this.startSelect.column - this.endSelect.column;
+        let mode = 2;
+      }
+
+      if (this.getNumberLineSelected() > 1) this.unSelectAll();
+
+      if (lineOBJ == undefined) {
+        this.createSelectEl(
+          x + 1,
+          length,
+          y,
+          "selected",
+          this.containsSelected,
+        );
+      } else {
+        if (mode == 1) this.refreshSelectLine(y, length);
+        else this.refreshSelectLineReverse(y, length);
+      }
+    };
+
+    this.calculSelectMultiLine = () => {
+      let xStart;
+      let lengthStart;
+      let yStart;
+      let contentStart;
+
+      let xEnd;
+      let lengthEnd;
+      let yEnd;
+      let contentEnd;
+
+      if (this.startSelect.row < this.endSelect.row) {
+        xStart = this.startSelect.column;
+        yStart = this.startSelect.row - 1;
+        lengthStart = editor.lineController.lines[yStart].length - xStart;
+        contentStart = editor.lineController.lines[yStart].slice(xStart);
+
+        xEnd = 0;
+        lengthEnd = this.endSelect.column;
+        yEnd = this.endSelect.row - 1;
+        contentEnd = editor.lineController.lines[yEnd].slice(
+          0,
+          lengthEnd,
+        );
+      } else {
+        xStart = 0;
+        yStart = this.startSelect.row - 1;
+        lengthStart = this.startSelect.column;
+        contentStart = editor.lineController.lines[yStart].slice(0, lengthStart);
+
+        xEnd = this.endSelect.column;
+        yEnd = this.endSelect.row - 1;
+        lengthEnd = editor.lineController.lines[yEnd].length - xEnd;
+        contentEnd = editor.lineController.lines[yEnd].slice(xEnd);
+      }
+
+      let lineContentStart = this.getTextSelectedLine(yStart);
+      let lineContentEnd = this.getTextSelectedLine(yEnd);
+
+      let lineOBJStart = this.getSelectOBJLine(yStart);
+      let lineOBJEnd = this.getSelectOBJLine(yEnd);
+
+      if (lineContentStart != contentStart) {
+        if (lineOBJStart) lineOBJStart.remove();
+        this.createSelectEl(
+          xStart + 1,
+          lengthStart,
+          yStart,
+          "selected",
+          contentStart,
+        );
+      }
+
+      if (lineContentEnd != contentEnd) {
+        if (lineOBJEnd) lineOBJEnd.remove();
+        this.createSelectEl(xEnd + 1, lengthEnd, yEnd, "selected", contentEnd);
+      }
+
+      for (var i = 0; i < editor.lineController.lines.length; i++) {
+        if (i != yStart && i != yEnd) {
+          let lineOBJ = this.getSelectOBJLine(i);
+          let contentLine = this.getTextSelectedLine(i);
+          if ((yStart < i && i < yEnd) || (yStart > i && i > yEnd)) {
+            if (
+              lineOBJ == undefined ||
+              contentLine.length != editor.lineController.lines[i].length
+            )
+              this.selectLine(i);
+          } else {
+            if (lineOBJ) lineOBJ.remove();
+          }
+        }
+      }
+    };
+
     addEvent("mousedown", this.mouseDown, this.editor.output);
     addEvent("mouseup", this.mouseUp, document);
-    addEvent("click", this.mouseClick);
-    addEvent("cursormove", this.cursorMove, this.editor.output);
     addEvent("mousemove", this.mouseMove, this.editor.output);
     addEvent("cursordisabled", this.cursorDisabled, document);
     addEvent("cursorenabled", this.cursorEnabled, document);
+    addEvent("onSelect", this.refreshStartEndSelect, this.editor.output);
   }
 }

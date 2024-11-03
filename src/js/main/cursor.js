@@ -48,20 +48,12 @@ class Cursor {
         this.editor.output.dispatchEvent(
           new CustomEvent("cursormove", {
             detail: { row: row, column: column },
-          })
+          }),
         );
       this.row = row;
       this.column = column;
 
       this.setCursorPosition(this.row, this.column);
-
-      if (!this.cD.classList.contains("caret-enable"))
-        this.cD.classList.add("caret-enable");
-    };
-    this.caretFrame = () => {
-      if (this.cD.style.display == "block" || !this.editor.selected)
-        this.cD.style.display = "none";
-      else this.cD.style.display = "block";
     };
     this.setCursorPosition = (row, column) => {
       if (row <= 0) row = 1;
@@ -72,7 +64,7 @@ class Cursor {
       else l = l.length;
       if (column > l) column = l;
 
-      const placeY = this.rowToY(row);
+      const placeY = this.rowToY(row) - 4;
       const placeX = this.columnToX(column);
 
       this.cD.style.left = placeX + "px";
@@ -85,7 +77,7 @@ class Cursor {
       this.editor.output.dispatchEvent(
         new CustomEvent("cursorchange", {
           detail: { row: row, column: column },
-        })
+        }),
       );
     };
 
@@ -142,9 +134,5 @@ class Cursor {
 
       return words[this.getIndexWord() + 1];
     };
-
-    addInterval(this.caretFrame, 500);
-
-    addEvent("click", this.onClick, this.editor.output);
   }
 }

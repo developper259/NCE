@@ -27,11 +27,11 @@ class Command {
       }
 
       return `<div class="command-el">
-	                <span class="command-el-title">${dic.title}</span>
-	                <div class="command-el-author">
-	                	${author}
-	                </div>
-              	</div>`;
+                  <span class="command-el-title">${dic.title}</span>
+                  <div class="command-el-author">
+                    ${author}
+                  </div>
+                </div>`;
     };
     this.load = (dic) => {
       // {"top": [tree, tree], "all": [tree]}
@@ -62,7 +62,11 @@ class Command {
       for (let c of objSelectedC) {
         //on vérifi si une des classes contiens le mot command
         let t = c.split("-");
-        if (!t.includes("command") && !t.includes("scroller") && !t.includes("bottomBar")) {
+        if (
+          !t.includes("command") &&
+          !t.includes("scroller") &&
+          !t.includes("bottomBar")
+        ) {
           if (this.isActive) this.close();
         }
       }
