@@ -2,7 +2,7 @@ class SelectController {
   constructor(e) {
     this.editor = e;
     this.isMouseDown = false;
-    this.containsSelected = [];
+    this.containsSelected = "";
 
     this.lastClick = 0;
     this.clickCount = 0;
@@ -18,7 +18,7 @@ class SelectController {
       let x = this.editor.cursor.columnToX(column);
       let y = this.editor.cursor.rowToY(row + 1) - difY;
       let width = length * this.editor.cursor.leterSize;
-      let height = editor.cursor.mpY + difY;
+      let height = this.editor.cursor.mpY + difY;
 
       div.className = classes;
       div.dataset.line = row;
@@ -35,7 +35,7 @@ class SelectController {
 
     this.getNumberLineSelected = () => {
       let n = 0;
-      for (var i = 0; i < editor.lineController.lines.length; i++) {
+      for (var i = 0; i < this.editor.lineController.maxIndex; i++) {
         if (this.getSelectOBJLine(i)) n++;
       }
       return n;
@@ -53,6 +53,8 @@ class SelectController {
 
       let width = length * this.editor.cursor.leterSize;
       obj.style.width = width + "px ";
+      let column = this.editor.cursor.xToColumn(parseInt(window.getComputedStyle(obj).left, 10)) - 1;
+      obj.dataset.value = this.editor.lineController.lines[obj.dataset.line].slice(column, column + length);
     };
 
     this.refreshSelectLineReverse = (row, length) => {
@@ -81,9 +83,19 @@ class SelectController {
 
     this.selectAll = () => {
       this.unSelectAll();
-      for (let i = 0; i < this.editor.lineController.lines.length; i++) {
+      for (let i = 0; i < this.editor.lineController.maxIndex; i++) {
         this.selectLine(i);
       }
+
+      this.editor.output.dispatchEvent(
+        new CustomEvent("onSelect", {
+          detail: {
+            start: this.startSelect,
+            end: this.endSelect,
+            contains: this.containsSelected,
+          },
+        }),
+      );
     };
 
     this.selectWord = (wordOBJ) => {
@@ -106,6 +118,16 @@ class SelectController {
         y + 1,
         x + wordOBJ.innerText.length - 1,
       );
+
+      this.editor.output.dispatchEvent(
+        new CustomEvent("onSelect", {
+          detail: {
+            start: this.startSelect,
+            end: this.endSelect,
+            contains: this.containsSelected,
+          },
+        }),
+      );
     };
 
     this.unSelectLine = (index) => {
@@ -127,6 +149,16 @@ class SelectController {
       let x = 0;
       if (index == lines.length - 1) x = lines[index].length;
       this.editor.cursor.setCursorPosition(index + 2, x);
+
+      this.editor.output.dispatchEvent(
+        new CustomEvent("onSelect", {
+          detail: {
+            start: this.startSelect,
+            end: this.endSelect,
+            contains: this.containsSelected,
+          },
+        }),
+      );
     };
 
     this.getTextSelectedLine = (index) => {
@@ -167,7 +199,7 @@ class SelectController {
     this.refreshStartEndSelect = () => {
       let els = [];
 
-      for (let i = 0; i < editor.lineController.lines.length; i++) {
+      for (let i = 0; i < this.editor.lineController.maxIndex; i++) {
         let el = this.getSelectOBJLine(i);
         if (el) els.push(el);
       }
@@ -272,7 +304,7 @@ class SelectController {
         this.selectWord(word);
       } else if (this.clickCount == 3) {
         this.selectLine(this.editor.cursor.row - 1);
-        editor.cursor.setCursorPosition(editor.cursor.row, 0)
+        this.editor.cursor.setCursorPosition(this.editor.cursor.row, 0)
       } else if (this.clickCount >= 4) {
         this.selectAll();
       }
@@ -285,9 +317,9 @@ class SelectController {
 
       if (new Date().getTime() - this.lastClickTime > this.clickTime)
         this.unSelectAll();
-      else if (this.clickCount > 4) return;
+      else if (this.clickCount > 4) this.unSelectAll();
 
-      editor.cursor.onClick(event);
+      this.editor.cursor.onClick(event);
 
       this.startSelect = {
         column: this.editor.cursor.column,
@@ -308,13 +340,19 @@ class SelectController {
     };
     this.mouseMove = (event) => {
       if (this.isMouseDown) {
+        this.clickCount = 0;
         let cursor = this.editor.cursor;
         cursor.cD.style.display = "block";
         cursor.onClick(event);
 
+        let c = this.editor.cursor.column;
+        let r = this.editor.cursor.row;
+
+        if (this.endSelect.column == c && this.endSelect.row == r) return;
+
         this.endSelect = {
-          column: this.editor.cursor.column,
-          row: this.editor.cursor.row,
+          column: c,
+          row: r,
         };
 
         if (this.startSelect.row == this.endSelect.row)
@@ -385,13 +423,13 @@ class SelectController {
       if (this.startSelect.row < this.endSelect.row) {
         xStart = this.startSelect.column;
         yStart = this.startSelect.row - 1;
-        lengthStart = editor.lineController.lines[yStart].length - xStart;
-        contentStart = editor.lineController.lines[yStart].slice(xStart);
+        lengthStart = this.editor.lineController.lines[yStart].length - xStart;
+        contentStart = this.editor.lineController.lines[yStart].slice(xStart);
 
         xEnd = 0;
         lengthEnd = this.endSelect.column;
         yEnd = this.endSelect.row - 1;
-        contentEnd = editor.lineController.lines[yEnd].slice(
+        contentEnd = this.editor.lineController.lines[yEnd].slice(
           0,
           lengthEnd,
         );
@@ -399,12 +437,12 @@ class SelectController {
         xStart = 0;
         yStart = this.startSelect.row - 1;
         lengthStart = this.startSelect.column;
-        contentStart = editor.lineController.lines[yStart].slice(0, lengthStart);
+        contentStart = this.editor.lineController.lines[yStart].slice(0, lengthStart);
 
         xEnd = this.endSelect.column;
         yEnd = this.endSelect.row - 1;
-        lengthEnd = editor.lineController.lines[yEnd].length - xEnd;
-        contentEnd = editor.lineController.lines[yEnd].slice(xEnd);
+        lengthEnd = this.editor.lineController.lines[yEnd].length - xEnd;
+        contentEnd = this.editor.lineController.lines[yEnd].slice(xEnd);
       }
 
       let lineContentStart = this.getTextSelectedLine(yStart);
@@ -429,14 +467,14 @@ class SelectController {
         this.createSelectEl(xEnd + 1, lengthEnd, yEnd, "selected", contentEnd);
       }
 
-      for (var i = 0; i < editor.lineController.lines.length; i++) {
+      for (var i = 0; i < this.editor.lineController.maxIndex; i++) {
         if (i != yStart && i != yEnd) {
           let lineOBJ = this.getSelectOBJLine(i);
           let contentLine = this.getTextSelectedLine(i);
           if ((yStart < i && i < yEnd) || (yStart > i && i > yEnd)) {
             if (
               lineOBJ == undefined ||
-              contentLine.length != editor.lineController.lines[i].length
+              contentLine.length != this.editor.lineController.lines[i].length
             )
               this.selectLine(i);
           } else {

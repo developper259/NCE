@@ -79,6 +79,8 @@ class Cursor {
           detail: { row: row, column: column },
         }),
       );
+
+      this.editor.selected = true;
     };
 
     this.getCursorPosition = () => {

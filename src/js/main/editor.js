@@ -51,7 +51,7 @@ class Editor {
   onClick(e) {
     const t = e.target;
     const c = t.classList;
-    if (c.contains("editor-select") || c.contains("editor-el")) {
+    if (c.contains("editor-select") || c.contains("editor-el") || c.contains("editor")) {
       this.selected = true;
       document.dispatchEvent(new CustomEvent("cursorenabled"));
     } else {

@@ -35,22 +35,30 @@ class lineController {
       this.setIndex(index);
     };
 
-    this.addLine = () => {
-      this.maxIndex += 1;
+    this.addLine = (txt, index) => {
+      this.lines = [
+                    ...this.lines.slice(0, index),
+                    txt,
+                    ...this.lines.slice(index)
+                   ];
     };
+
+    this.changeLine = (txt, index) => {
+      this.lines[index] = txt;
+    }
 
     this.supLine = (index) => {
       if (index > this.maxIndex) return;
       this.maxIndex -= 1;
+      this.lines.splice(index, 1);
     };
 
-    this.replaceLines = () => {
+    this.refreshLine = () => {
       let parser = new DOMParser();
       const lines = document.querySelectorAll(".editor-output .line");
 
       if (this.lines.length != this.maxIndex) this.maxIndex = this.lines.length;
 
-      if (lines.length != this.lines.length) {
         this.editor.output.innerHTML = "";
         for (var i = 0; i < this.lines.length; i++) {
           let doc = parser.parseFromString(
@@ -70,7 +78,6 @@ class lineController {
           lineOBJ.style.top = y + "px";
           lineOBJ.style.left = x + "px";
         }
-      }
       if (this.lines.length == 0)
         this.editor.output.innerHTML = '<div class="line editor-select"></div>';
     };
@@ -97,12 +104,11 @@ class lineController {
           line.style.top = y + "px";
 
           line.addEventListener("click", (event) => {
-            let lineOBJ = editor.selectController.getSelectOBJLine(i);
-            editor.selectController.unSelectAll();
+            let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
+            this.editor.selectController.unSelectAll();
 
-            if (lineOBJ == undefined) editor.selectController.selectLine(i);
-            else editor.cursor.setCursorPosition(i + 1, 0);
-            console.log(i, lineOBJ);
+            if (lineOBJ == undefined) this.editor.selectController.selectLine(i);
+            else this.editor.cursor.setCursorPosition(i + 1, 0);
           });
         }
       }
@@ -133,7 +139,7 @@ class lineController {
     };
 
     addInterval(() => {
-      this.replaceLines();
+      this.refreshLine();
       this.replaceNumberLines();
     }, 100);
   }
