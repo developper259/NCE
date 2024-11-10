@@ -13,8 +13,12 @@ export class Window {
       height: 600,
       minWidth: 800,
       minHeight: 600,
+      webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: true,
+      }
     });
-    this.window.loadFile("./html/index.html");
+    this.window.loadFile("../src/html/index.html");
 
     this.window.on("closed", () => {
       this.window = null;

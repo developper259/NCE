@@ -24,6 +24,8 @@ class BottomBar {
     };
 
     this.refreshCursorOBJ = () => {
+      this.editor.selectController.refreshStartEndSelect();
+
       let r = "";
       let countLine = this.editor.selectController.getNumberLineSelected();
 

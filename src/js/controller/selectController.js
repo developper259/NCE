@@ -74,6 +74,8 @@ class SelectController {
 
       obj.style.left = x + "px";
       obj.style.width = width + "px";
+
+      obj.dataset.value = this.editor.lineController.lines[obj.dataset.line].slice(column - 1, column + length - 1);
     };
 
     this.unSelectAll = () => {
@@ -291,7 +293,7 @@ class SelectController {
     this.mouseClick = (event) => {
       this.calcClick();
 
-      if (this.clickCount > 1 && this.clickCount < 5) {
+      if (this.clickCount > 1 && this.clickCount < 5 || this.clickCount > 4) {
         this.unSelectAll();
       }
 
@@ -317,7 +319,6 @@ class SelectController {
 
       if (new Date().getTime() - this.lastClickTime > this.clickTime)
         this.unSelectAll();
-      else if (this.clickCount > 4) this.unSelectAll();
 
       this.editor.cursor.onClick(event);
 

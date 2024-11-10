@@ -41,16 +41,19 @@ class lineController {
                     txt,
                     ...this.lines.slice(index)
                    ];
+      this.refresh();
     };
 
     this.changeLine = (txt, index) => {
       this.lines[index] = txt;
+      this.refresh();
     }
 
     this.supLine = (index) => {
       if (index > this.maxIndex) return;
       this.maxIndex -= 1;
       this.lines.splice(index, 1);
+      this.refresh();
     };
 
     this.refreshLine = () => {
@@ -82,7 +85,7 @@ class lineController {
         this.editor.output.innerHTML = '<div class="line editor-select"></div>';
     };
 
-    this.replaceNumberLines = () => {
+    this.refreshNumberLines = () => {
       const lineN = document.querySelector(".line-numbers");
       let linesN = lineN.querySelectorAll(".line-el");
 
@@ -138,9 +141,11 @@ class lineController {
       return letters[column];
     };
 
-    addInterval(() => {
+    this.refresh = () => {
       this.refreshLine();
-      this.replaceNumberLines();
-    }, 100);
+      this.refreshNumberLines();
+    };
+
+    this.refresh();
   }
 }

@@ -4,9 +4,9 @@
   "description": "",
   "main": "src/main.ts",
   "scripts": {
-    "win": "tsc && run.bat && electron --trace-warnings dist/main.js",
-    "macos": "tsc && bash ./run.sh && electron --trace-warnings dist/main.js",
-    "fastmacos": "bash ./run.sh && electron --trace-warnings dist/main.js"
+    "win": "tsc && run.bat && electron dist/main.js",
+    "macos": "tsc && bash ./run.sh && electron dist/main.js",
+    "fast": "bash ./run.sh && electron --trace-warnings dist/main.js"
   },
   "author": "trolleur259",
   "license": "ISC",
