@@ -74,10 +74,12 @@ class Command {
     this.open = () => {
       this.instance.style.display = "flex";
       this.isActive = true;
+      this.editor.panel = this;
     };
     this.close = () => {
       this.instance.style.display = "none";
       this.isActive = false;
+      this.editor.panel = undefined;
     };
     this.active = () => {
       if (this.isActive) this.close();

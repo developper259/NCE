@@ -6,7 +6,7 @@ class Langague extends Command {
     this.values = ["HTML", "CSS", "JavaScript", "Java", "NDL", "Python"];
 
     this.trees = {
-      top: [{ title: "NDL", author: ["recently used"] }],
+      top: [{ title: "NDL", author: ["most used"] }],
       all: this.generateDicAll(this.values),
     };
 

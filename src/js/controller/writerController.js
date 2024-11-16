@@ -84,5 +84,39 @@ class WriterController {
 
       return result.replace("$value", resultWords);
     };
+
+    this.write = (txt) => {
+      let x = this.editor.cursor.column;
+      let y = this.editor.cursor.row - 1;
+      
+      let line = this.editor.lineController.lines[y];
+
+      txt = txt.replace('\t', ' '.repeat(CONFIG_GET('tab_width')));
+
+
+      if (!txt.includes("\n")) {
+        let newLine = line.slice(0, x) + txt + line.slice(x);
+        this.editor.lineController.changeLine(newLine, y);
+        this.editor.cursor.setCursorPosition(y + 1, x + txt.length);
+      }else{
+        let newLines = txt.split("\n");
+
+        for (let i = 0; i < newLines.length; i++) {
+          let newLine = newLines[i];
+          if (i == 0) {
+            newLine = line.slice(0, x) + newLine;
+            this.editor.lineController.changeLine(newLine, y);
+          }else if (i == newLines.length - 1) {
+            newLine = newLine + line.slice(x, line.length);
+            this.editor.lineController.addLine(newLine, y + i);
+          }else{
+            this.editor.lineController.addLine(newLine, y + i);
+          }
+        }
+        this.editor.cursor.setCursorPosition(y + newLines.length, 0);
+      }
+    };
   }
 }
+
+

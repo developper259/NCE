@@ -8,6 +8,9 @@ class BottomBar {
       "code-type": {
         instance: this.editor.Clangague,
       },
+      "config-space": {
+        instance: this.editor.Cconfig_space,
+      }
     };
 
     this.cursorOBJ = getElement(".bottomBar-cursorPos");
@@ -15,6 +18,7 @@ class BottomBar {
 
     this.refresh = () => {
       this.refreshCursorOBJ();
+      this.refreshConfigShow();
 
       for (let scroller of this.scrollers) {
         let instance = this.scrollersValue[scroller.id].instance;
@@ -38,6 +42,10 @@ class BottomBar {
       }
 
       this.cursorOBJ.innerText = r;
+    };
+
+    this.refreshConfigShow = () => {
+
     };
 
     this.cursorChange = (e) => {

@@ -38,11 +38,19 @@ class Editor {
     this.writerController = new WriterController(this);
     this.lineController = new lineController(this);
     this.selectController = new SelectController(this);
+    this.keyBindingController = new keyBindingController(this);
+
+    this.keyBinding = new KeyBinding(this);
     this.cursor = new Cursor(this);
+
     this.command = new Command(this);
     this.Clangague = new Langague(this);
+    this.Cconfig_space = new Config_space(this);
     this.bottomBar = new BottomBar(this);
+
+
     this.selected = false;
+    this.panel = undefined;
 
     this.cursor.setCursorPosition(1, 0);
 

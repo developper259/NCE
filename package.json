@@ -3,9 +3,10 @@
   "version": "1.0.0",
   "description": "",
   "main": "src/main.ts",
+  "type": "CommonJS",
   "scripts": {
     "win": "tsc && run.bat && electron dist/main.js",
-    "macos": "tsc && bash ./run.sh && electron dist/main.js",
+    "macos": "npx tsc && bash ./run.sh && electron dist/main.js",
     "fast": "bash ./run.sh && electron --trace-warnings dist/main.js"
   },
   "author": "trolleur259",

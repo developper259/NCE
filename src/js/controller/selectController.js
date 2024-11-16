@@ -141,9 +141,12 @@ class SelectController {
     this.selectLine = (index) => {
       this.unSelectLine(index);
       let lines = this.editor.lineController.lines;
+      let length = lines[index].length;
+      if (length == 0) length = 1;
+
       this.createSelectEl(
         1,
-        lines[index].length,
+        length,
         index,
         "selected",
         lines[index],
@@ -376,11 +379,10 @@ class SelectController {
       let x = 0;
       let length = 0;
       let y = this.startSelect.row - 1;
-      let lineOBJ = this.getSelectOBJLine(y);
       let mode = 0;
 
-      if (this.startSelect.column - this.endSelect.column == 0) {
-        if (lineOBJ != undefined) lineOBJ.remove();
+      if (this.startSelect.column === this.endSelect.column) {
+        this.unSelectAll();
         return;
       }
 
@@ -396,18 +398,18 @@ class SelectController {
 
       if (this.getNumberLineSelected() > 1) this.unSelectAll();
 
-      if (lineOBJ == undefined) {
+      if (this.getSelectOBJLine(y) == undefined) {
         this.createSelectEl(
           x + 1,
           length,
           y,
           "selected",
-          this.containsSelected,
+          '',
         );
-      } else {
-        if (mode == 1) this.refreshSelectLine(y, length);
-        else this.refreshSelectLineReverse(y, length);
       }
+      
+      if (mode == 1) this.refreshSelectLine(y, length);
+      else this.refreshSelectLineReverse(y, length);
     };
 
     this.calculSelectMultiLine = () => {

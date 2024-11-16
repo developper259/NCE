@@ -1,7 +1,7 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow } from 'electron';
 
 export class Window {
-  window: BrowserWindow | null;
+  window: InstanceType<typeof BrowserWindow> | null;
 
   constructor() {
     this.window = null;
@@ -14,10 +14,11 @@ export class Window {
       minWidth: 800,
       minHeight: 600,
       webPreferences: {
-          contextIsolation: true,
-          nodeIntegration: true,
+        contextIsolation: true,
+        nodeIntegration: true,
       }
     });
+
     this.window.loadFile("../src/html/index.html");
 
     this.window.on("closed", () => {

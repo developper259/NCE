@@ -1,16 +1,14 @@
 {
   "compilerOptions": {
-      "module": "ES6",
-      "esModuleInterop": true,
-      "target": "ES6",
-      "moduleResolution": "node",
-      "sourceMap": true,
-      "outDir": "./dist",
-      "emitDecoratorMetadata": true,
-      "experimentalDecorators": true
+    "lib": ["dom", "esnext"],
+    "module": "CommonJS",
+    "target": "ES6",
+    "moduleResolution": "node",
+    "types": ["node", "electron"],
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "sourceMap": true,
+    "strict": true
   },
-  "lib": [
-      "es2015"
-  ],
-  "include": ["src/ts/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

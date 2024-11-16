@@ -1,5 +1,5 @@
-import { app } from "electron";
-import { Window } from "./GUI/Window";
+import { app } from 'electron';
+import { Window } from './GUI/Window';
 
 export class App {
   window: Window;
