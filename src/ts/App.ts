@@ -3,16 +3,15 @@ import { Window } from './GUI/Window';
 
 export class App {
   window: Window;
+  name = "NCE";
 
   constructor() {
-    this.window = new Window();
+    this.window = new Window(this.name);
 
     app.on("ready", this.window.create);
 
     app.on("window-all-closed", () => {
-      if (process.platform !== "darwin") {
-        app.quit();
-      }
+      app.quit();
     });
 
     app.on("activate", () => {

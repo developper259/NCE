@@ -1,14 +1,23 @@
 addEvent = (event, f, obj) => {
-  if (obj == null || obj == undefined) obj = document;
-  obj.addEventListener(event, f);
+	if (obj == null || obj == undefined) obj = document;
+	obj.addEventListener(event, f);
 };
 
 addInterval = (f, time) => {
-  return setInterval(f, time);
+	return setInterval(f, time);
 };
 
-var onCursorMove = new CustomEvent("cursormove", { cancelable: true });
-var onCursorChange = new CustomEvent("cursorchange", { cancelable: true });
-var onCursorDisabled = new CustomEvent("cursordisabled", { cancelable: true });
-var onCursorEnabled = new CustomEvent("cursorenabled", { cancelable: true });
-var onSelect = new CustomEvent("onSelect", { cancelable: true });
+const events = ["cursormove", "cursorchange", "cursordisabled", "cursorenabled", "onSelect"];
+const output = document.querySelector(".editor-output");
+
+for (let e of events) {
+	addEvent(e, onEvent.bind(e), output);
+}
+
+function onEvent(e, name) {
+	output.dispatchEvent(
+		new CustomEvent("onEvent", {
+			detail: { event: name },
+		}),
+	);
+}

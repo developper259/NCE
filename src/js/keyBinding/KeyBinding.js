@@ -2,6 +2,8 @@ class KeyBinding {
 	constructor(e) {
 		this.editor = e;
 
+		this.historyX;
+
 		this.func = {
 			"save": this.control_save,
 			"open_file": this.control_open_file,
@@ -32,39 +34,48 @@ class KeyBinding {
 			"Insert": this.key_insert
 		};
 
-		this.exec = (key) => {
+		this.exec = (key, e) => {
+			let s = false;
+			let c = false;
+			let m = false;
+			let a = false;
+			
+			if (e != undefined) {
+				s = e.shiftKey; 
+				c = e.ctrlKey;
+				m = e.metaKey;
+				a = e.altKey;
+			}
 			if (this.func[key.action]) {
 				console.log(`Executing action: ${key.action} (${key.description})`);
-				this.func[key.action].call(this);
+				this.func[key.action].call(this, s, c, m, a);
 			}else if (this.func[key.key]) { 
 				console.log(`Executing action: ${key.key}`);
-				this.func[key.key].call(this);
-			}else {
-				console.log(`No action found for key: ${key ? key.key : 'undefined'}`);
+				this.func[key.key].call(this, s, c, m, a);
 			}
 		};
 	}
 
 	// Control functions
-	control_save() {}
-	control_open_file() {}
-	control_new_file() {}
-	control_close_file() {}
-	async control_copy() {
-		const selectedText = this.editor.selectController.containsSelected;
-		if (selectedText) {
-			try {
-				await navigator.clipboard.writeText(selectedText);
-				console.log("Texte copié dans le presse-papiers.");
-			} catch (err) {
-				console.error("Erreur lors de la copie : ", err);
-			}
-		} else {
-			console.log("Aucun texte sélectionné pour la copie.");
+	control_save(s, c, m, a) {}
+	control_open_file(s, c, m, a) {}
+	control_new_file(s, c, m, a) {}
+	control_close_file(s, c, m, a) {}
+	async control_copy(s, c, m, a) {
+		let txt = this.editor.selectController.containsSelected;
+		
+		if (!txt) {
+			txt = this.editor.lineController.lines[this.editor.cursor.row - 1];
+		}
+		try {
+			await navigator.clipboard.writeText(txt);
+			console.log("Texte copié dans le presse-papiers.");
+		} catch (err) {
+			console.error("Erreur lors de la copie : ", err);
 		}
 	}
 
-	async control_paste() {
+	async control_paste(s, c, m, a) {
 		try {
 			const text = await navigator.clipboard.readText();
 			this.editor.writerController.write(text);
@@ -73,42 +84,267 @@ class KeyBinding {
 		}
 	}
 
-	async control_cut() {
+	async control_cut(s, c, m, a) {
+		let txt = this.editor.selectController.containsSelected;
 		this.control_copy();
-		this.key_backspace();
+		if (txt) this.key_backspace();
+		else {
+			if (this.editor.lineController.maxIndex != this.editor.cursor.row)
+				this.editor.lineController.supLine(this.editor.cursor.row - 1);
+			else this.editor.lineController.changeLine('', this.editor.cursor.row - 1);
+			this.editor.cursor.setCursorPosition(this.editor.cursor.row, 0);
+		}
 	}
-	control_undo() {}
-	control_redo() {}
-	control_find() {}
-	control_replace() {}
-	control_open_command() {
-		
+	control_undo(s, c, m, a) {}
+	control_redo(s, c, m, a) {}
+	control_find(s, c, m, a) {}
+	control_replace(s, c, m, a) {}
+	control_open_command(s, c, m, a) {
+		if (this.editor.panel instanceof CMD) this.editor.panel.close();
+		else this.editor.Ccmd.open();
 	}
-	control_delete_line() {}
-	control_select_all() {
-		this.editor.selectController.selectAll();
+	control_delete_line(s, c, m, a) {}
+	control_select_all(s, c, m, a) {
+		this.editor.selectController.selectAll(true);
 	}
 
 	// Key functions
-	key_escape() {
+	key_escape(s, c, m, a) {
 		if (this.editor.panel == undefined) return;
 		else this.editor.panel.close();
 	}
-	key_tab() {
+	key_tab(s, c, m, a) {
 		this.editor.writerController.write("\t");
 	}
-	key_delete() {}
-	key_backspace() {
-		
+	key_delete(s, c, m, a) {
+
 	}
-	key_enter() {
+	key_backspace(s, c, m, a) {
+		if (m || a) return;
+		this.historyX = undefined;
+		let x = this.editor.cursor.column;
+		let y = this.editor.cursor.row;
+
+		let cursor;
+
+		if (!this.editor.selectController.containsSelected) {
+			let newLine = "";
+			const l = this.editor.lineController.lines[y - 1];
+			if (c) {
+				if (s) {
+					if (x == 0) {
+						y -= 1;
+						x = this.editor.lineController.getLineLength(y - 1);
+						newLine = this.editor.lineController.lines[y - 1] + l;
+						this.editor.lineController.supLine(y);
+					}else {
+						newLine = this.editor.lineController.sliceLine(y - 1, x);
+						x = 0;
+					}
+				}else{
+					cursor = this.editor.writerController.deleteWord(x, y);
+				}
+			}else{
+				cursor = this.editor.writerController.delete(x, y);	
+			}
+		}else{
+			cursor = this.editor.writerController.deleteSelection();
+		}
+
+		this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
+	}
+	key_enter(s, c, m, a) {
 		this.editor.writerController.write("\n");
 	}
-	key_arrow_up() {}
-	key_arrow_down() {}
-	key_arrow_left() {}
-	key_arrow_right() {}
-	key_home() {}
-	key_end() {}
-	key_insert() {}
+	key_arrow_up(s, c, m, a) {
+		let x = this.editor.cursor.column;
+		let y = this.editor.cursor.row;
+
+		if (s) {
+			if (this.editor.selectController.containsSelected.length == 0) {
+				this.editor.selectController.startSelect = {
+					column: x,
+					row: y,
+				};
+			}
+			this.editor.selectController.isMouseDown = true;
+		}else if (this.editor.selectController.containsSelected.length != 0) {
+			this.editor.selectController.unSelectAll();
+			return;
+		}
+
+
+		if (this.historyX == undefined) this.historyX = x;
+
+		if (y == 1) {
+			if (this.historyX != 0) this.historyX = 0;
+			else return;
+		}else y -= 1;
+
+		this.editor.cursor.setCursorPosition(y, this.historyX);
+		if (s){
+			this.editor.selectController.move();
+			this.editor.selectController.isMouseDown = false;
+		}
+	}
+	key_arrow_down(s, c, m, a) {
+		let x = this.editor.cursor.column;
+		let y = this.editor.cursor.row;
+
+		if (s) {
+			if (this.editor.selectController.containsSelected.length == 0) {
+				this.editor.selectController.startSelect = {
+					column: x,
+					row: y,
+				};
+			}
+			this.editor.selectController.isMouseDown = true;
+		}else if (this.editor.selectController.containsSelected.length != 0) {
+			this.editor.selectController.unSelectAll();
+			return;
+		}
+
+		if (this.historyX == undefined) this.historyX = x;
+
+		if (y == this.editor.lineController.maxIndex) {
+			if (this.historyX != this.editor.lineController.getLineLength(y - 1)) this.historyX = this.editor.lineController.getLineLength(y - 1);
+			else return;
+		} else y += 1
+
+		this.editor.cursor.setCursorPosition(y, this.historyX);
+
+		if (s){
+			this.editor.selectController.move();
+			this.editor.selectController.isMouseDown = false;
+		}
+	}
+	key_arrow_left(s, c, m, a) {
+		this.historyX = undefined;
+		let x = this.editor.cursor.column;
+		let y = this.editor.cursor.row;
+
+		if (s) {
+			if (this.editor.selectController.containsSelected.length == 0) {
+				this.editor.selectController.startSelect = {
+					column: x,
+					row: y,
+				};
+			}
+			this.editor.selectController.isMouseDown = true;
+		}else if (this.editor.selectController.containsSelected.length != 0) {
+			this.editor.selectController.unSelectAll();
+			return;
+		}
+		
+		if (y == 1 && x == 0) return;
+
+		if (a) {
+			const l = this.editor.lineController.lines[y - 1];
+			const words = this.editor.writerController.splitWordView(l);
+			let count = 0;
+
+			for (let i = 0; i < words.length; i++) {
+				const word = words[i];
+
+				if (x - (count + word.length) <= 0) {
+					x = count;
+					break;
+				}
+				count += word.length;
+			}
+		}else if (m) {
+			this.key_home(s, c, m, a);
+			return;
+		}else{
+			if (x == 0) {
+				y -= 1;
+				x = this.editor.lineController.getLineLength(y - 1);
+			}else {
+				if (this.editor.lineController.getLetter(y - 1, x - 1) == '\t') x -= CONFIG_GET('tab_width');
+				else x -= 1
+			}
+		}
+
+		this.editor.cursor.setCursorPosition(y, x);
+
+		if (s){
+			this.editor.selectController.move();
+			this.editor.selectController.isMouseDown = false;
+		}
+	}
+	key_arrow_right(s, c, m, a) {
+		this.historyX = undefined;
+		let x = this.editor.cursor.column;
+		let y = this.editor.cursor.row;
+
+		if (s) {
+			if (this.editor.selectController.containsSelected.length == 0) {
+				this.editor.selectController.startSelect = {
+					column: x,
+					row: y,
+				};
+			}
+			this.editor.selectController.isMouseDown = true;
+		}else if (this.editor.selectController.containsSelected.length != 0) {
+			this.editor.selectController.unSelectAll();
+			return;
+		}
+
+		if (y == this.editor.lineController.maxIndex && x == this.editor.lineController.getLineLength(y - 1)) return;
+
+		if (c || a) {
+			const l = this.editor.lineController.lines[y - 1];
+			const words = this.editor.writerController.splitWordView(l);
+			let count = 0;
+
+			for (let i = 0; i < words.length; i++) {
+				const word = words[i];
+				count += word.length;
+
+				if (x - count < 0) {
+					x = count;
+					break;
+				}
+			}
+		}else if (m) {
+			this.key_end(s, c, m, a);
+			return;
+		}else{
+			let length = this.editor.lineController.getLineLength(y - 1);
+
+			if (x == length) {
+				y += 1;
+				x = 0;
+			}else {
+				if (this.editor.lineController.getLetter(y - 1, x + 1) == '\t') x += CONFIG_GET('tab_width');
+				else x += 1
+			}
+		}
+
+		this.editor.cursor.setCursorPosition(y, x);
+
+		if (s) {
+			this.editor.selectController.move();
+			this.editor.selectController.isMouseDown = false;
+		}
+	}
+	key_home(s, c, m, a) {
+		let y = this.editor.cursor.row;
+		this.editor.cursor.setCursorPosition(y, 0);
+	}
+	key_end(s, c, m, a) {
+		let y = this.editor.cursor.row;
+		let x = this.editor.lineController.getLineLength(this.editor.cursor.row - 1);
+		this.editor.cursor.setCursorPosition(y, x);
+	}
+	key_insert(s, c, m, a) {
+		let wc = this.editor.writerController;
+		if (wc.insertMode) {
+			wc.insertMode = false;
+			this.editor.cursor.cD.classList.remove("insert-mode");
+		}else{
+			wc.insertMode = true;
+			this.editor.cursor.cD.classList.add("insert-mode");
+		}
+	}
 }

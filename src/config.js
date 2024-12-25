@@ -68,7 +68,7 @@ const USERCONFIG_KEYBINDING = [
     {
         "action": "open_command",
         "description": "Ouvrir le panel de commande",
-        "key": "Meta+P",
+        "key": "Meta+Shift+Y",
         "in_editor": false
     },
     {

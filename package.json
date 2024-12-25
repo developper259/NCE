@@ -6,8 +6,9 @@
   "type": "CommonJS",
   "scripts": {
     "win": "tsc && run.bat && electron dist/main.js",
-    "macos": "npx tsc && bash ./run.sh && electron dist/main.js",
-    "fast": "bash ./run.sh && electron --trace-warnings dist/main.js"
+    "macos": "npx tsc && bash ./run.sh && electron --no-sandbox dist/main.js",
+    "fast": "bash ./run.sh && electron --trace-warnings --no-sandbox dist/main.js",
+    "ubuntu": "sudo sysctl kernel.unprivileged_userns_clone=1"
   },
   "author": "trolleur259",
   "license": "ISC",
