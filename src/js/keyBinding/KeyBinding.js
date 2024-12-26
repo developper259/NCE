@@ -146,7 +146,10 @@ class KeyBinding {
 		if (this.editor.panel instanceof CMD) this.editor.panel.close();
 		else this.editor.Ccmd.open();
 	}
-	control_delete_line(s, c, m, a) {}
+	control_delete_line(s, c, m, a) {
+		this.editor.lineController.supLine(this.editor.cursor.row - 1);
+		this.editor.cursor.setCursorPosition(this.editor.cursor.row, this.editor.cursor.column);
+	}
 	control_select_all(s, c, m, a) {
 		this.editor.selectController.selectAll(true);
 	}

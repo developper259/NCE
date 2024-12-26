@@ -58,10 +58,10 @@ class Cursor {
 			this.setCursorPosition(this.row, this.column);
 		};
 		this.setCursorPosition = (row, column) => {
-			const line = this.editor.lineController.lines[row - 1];
 			if (row <= 0) row = 1;
 			if (row > this.editor.lineController.maxIndex)
 				row = this.editor.lineController.maxIndex;
+			const line = this.editor.lineController.lines[row - 1];
 			let l = 0;
 			if (line) l = this.editor.lineController.getLineLength(row - 1);
 			if (column > l) column = l;
