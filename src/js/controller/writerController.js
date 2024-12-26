@@ -1,7 +1,7 @@
 class WriterController {
 	constructor(e) {
 		this.editor = e;
-		this.insertMode;
+		this.insertMode = false;
 		this.separator = [
 			" ",
 			"!",
@@ -37,6 +37,13 @@ class WriterController {
 			"~",
 			"\t",
 		];
+
+		this.setInsertMode = (mode) => {
+			this.insertMode = mode;
+			if (mode) this.editor.cursor.cD.classList.add("insert-mode");
+			else if (this.editor.cursor.cD.classList.contains("insert-mode"))
+				this.editor.cursor.cD.classList.remove("insert-mode");
+		};
 
 		this.splitWord = (txt) => {
 			let oldChar = "";
@@ -111,6 +118,8 @@ class WriterController {
 
 		this.write = (txt) => {
 			this.editor.keyBinding.historyX = undefined;
+			this.editor.keyBinding.indexHistory = 1;
+
 			let x = this.editor.cursor.column;
 			let y = this.editor.cursor.row - 1;
 

@@ -4,6 +4,9 @@ class KeyBinding {
 
 		this.historyX;
 
+		this.history = [];
+		this.indexHistory = 1;
+
 		this.func = {
 			"save": this.control_save,
 			"open_file": this.control_open_file,
@@ -33,6 +36,20 @@ class KeyBinding {
 			"End": this.key_end,
 			"Insert": this.key_insert
 		};
+
+		setInterval(() => {
+			const currentLines = JSON.stringify(this.editor.lineController.lines);
+			const currentCursor = {row: this.editor.cursor.row, column: this.editor.cursor.column};
+			if (this.indexHistory < 1) this.indexHistory = 1;
+			if (this.indexHistory != 1) return;
+			if (this.history.length > 100) this.history.shift();
+
+			
+			if (this.history.length === 0 || this.history[this.history.length - 1].lines !== currentLines) {
+				this.history.push({lines: currentLines, cursor: null});
+			}
+			this.history[this.history.length - 1].cursor = currentCursor;
+		}, 1000);
 
 		this.exec = (key, e) => {
 			let s = false;
@@ -95,8 +112,34 @@ class KeyBinding {
 			this.editor.cursor.setCursorPosition(this.editor.cursor.row, 0);
 		}
 	}
-	control_undo(s, c, m, a) {}
-	control_redo(s, c, m, a) {}
+	control_undo(s, c, m, a) {
+		if (!this.history) return;
+
+		console.log(this.history, this.indexHistory);
+
+		if (!this.history[this.history.length - (this.indexHistory + 1)]) return;
+
+		this.indexHistory += 1;
+		this.editor.lineController.lines = JSON.parse(this.history[this.history.length - this.indexHistory].lines);
+		this.editor.cursor.setCursorPosition(this.history[this.history.length - this.indexHistory].cursor.row, this.history[this.history.length - this.indexHistory].cursor.column);
+		this.editor.lineController.refresh();
+
+		console.log(this.history, this.editor.lineController.lines);
+	}
+
+	control_redo(s, c, m, a) {
+		if (!this.history) return;
+
+		console.log(this.history, this.indexHistory);
+
+		if (!this.history[this.history.length - (this.indexHistory - 1)]) return;
+
+		this.indexHistory -= 1;
+		this.editor.lineController.lines = JSON.parse(this.history[this.history.length - this.indexHistory].lines);
+		this.editor.cursor.setCursorPosition(this.history[this.history.length - this.indexHistory].cursor.row, this.history[this.history.length - this.indexHistory].cursor.column);
+		this.editor.lineController.refresh();
+	}
+
 	control_find(s, c, m, a) {}
 	control_replace(s, c, m, a) {}
 	control_open_command(s, c, m, a) {
@@ -117,7 +160,40 @@ class KeyBinding {
 		this.editor.writerController.write("\t");
 	}
 	key_delete(s, c, m, a) {
+		if (m || a) return;
+		this.historyX = undefined;
+		let x = this.editor.cursor.column;
+		let y = this.editor.cursor.row;
 
+		let cursor;
+
+		if (!this.editor.selectController.containsSelected) {
+			let newLine = "";
+			const l = this.editor.lineController.lines[y - 1];
+			if (c) {
+				if (s) {
+					if (x == 0) {
+						y -= 1;
+						x = this.editor.lineController.getLineLength(y - 1);
+						newLine = l + this.editor.lineController.lines[y];
+						this.editor.lineController.supLine(y);
+					}else {
+						newLine = this.editor.lineController.sliceLine(y - 1, 0, x);
+						x = newLine.length;
+					}
+				}else{
+					cursor = this.editor.writerController.deleteWord(x, y);
+				}
+			}else{
+				x = x + 1;
+				if (this.editor.lineController.getLetter(y - 1, x + 1) == '\t') x += CONFIG_GET('tab_width') - 1;
+				cursor = this.editor.writerController.delete(x, y);	
+			}
+		}else{
+			cursor = this.editor.writerController.deleteSelection();
+		}
+
+		this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
 	}
 	key_backspace(s, c, m, a) {
 		if (m || a) return;
@@ -141,10 +217,15 @@ class KeyBinding {
 						newLine = this.editor.lineController.sliceLine(y - 1, x);
 						x = 0;
 					}
+					this.editor.lineController.changeLine(newLine, y - 1);
+					this.editor.cursor.setCursorPosition(y, x);
+					return;
 				}else{
+					if (x == 0 && y == 1) return;
 					cursor = this.editor.writerController.deleteWord(x, y);
 				}
 			}else{
+				if (x == 0 && y == 1) return;
 				cursor = this.editor.writerController.delete(x, y);	
 			}
 		}else{
@@ -207,7 +288,8 @@ class KeyBinding {
 		if (this.historyX == undefined) this.historyX = x;
 
 		if (y == this.editor.lineController.maxIndex) {
-			if (this.historyX != this.editor.lineController.getLineLength(y - 1)) this.historyX = this.editor.lineController.getLineLength(y - 1);
+			if (this.historyX != this.editor.lineController.getLineLength(y - 1)) 
+				this.historyX = this.editor.lineController.getLineLength(y - 1);
 			else return;
 		} else y += 1
 
@@ -339,12 +421,6 @@ class KeyBinding {
 	}
 	key_insert(s, c, m, a) {
 		let wc = this.editor.writerController;
-		if (wc.insertMode) {
-			wc.insertMode = false;
-			this.editor.cursor.cD.classList.remove("insert-mode");
-		}else{
-			wc.insertMode = true;
-			this.editor.cursor.cD.classList.add("insert-mode");
-		}
+		wc.setInsertMode(!wc.insertMode);
 	}
 }
