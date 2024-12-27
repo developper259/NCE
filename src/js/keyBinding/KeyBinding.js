@@ -75,7 +75,12 @@ class KeyBinding {
 
 	// Control functions
 	control_save(s, c, m, a) {}
-	control_open_file(s, c, m, a) {}
+	async control_open_file(s, c, m, a) {
+		console.log("Opening file...");
+		const file = await this.editor.fileController.selectFiles();
+		
+		this.editor.fileController.openFiles(file);
+	}
 	control_new_file(s, c, m, a) {}
 	control_close_file(s, c, m, a) {}
 	async control_copy(s, c, m, a) {

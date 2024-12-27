@@ -50,10 +50,14 @@ getOccurrence = (c, str) => {
 class Editor {
 	constructor() {
 		this.output = document.querySelector(".editor-output");
+
+		this.api = window.api;
+
 		this.writerController = new WriterController(this);
 		this.lineController = new lineController(this);
 		this.selectController = new SelectController(this);
 		this.keyBindingController = new keyBindingController(this);
+		this.fileController = new FileController(this);
 
 		this.keyBinding = new KeyBinding(this);
 		this.cursor = new Cursor(this);

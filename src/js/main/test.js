@@ -8,5 +8,7 @@ class Test {
 
 		//this.debug(this.e.lineController.sliceLine(1, 2));
 
+		//this.debug(this.e.fileController.selectFile());
+
 	}
 }
