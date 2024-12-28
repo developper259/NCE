@@ -42,7 +42,6 @@ class lineController {
 				}
 				if (c == '\t') i += CONFIG_GET('tab_width') - 1;
 			}
-			console.log(posA, posB, l, r)
 
 			return r;
 		};

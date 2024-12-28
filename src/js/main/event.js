@@ -1,6 +1,12 @@
 addEvent = (event, f, obj) => {
 	if (obj == null || obj == undefined) obj = document;
-	obj.addEventListener(event, f);
+	if (Array.isArray(obj)) {
+		for (let o of obj) {
+			o.addEventListener(event, f);
+			console.log(o, event, f);
+		}
+	}else
+		obj.addEventListener(event, f);
 };
 
 addInterval = (f, time) => {

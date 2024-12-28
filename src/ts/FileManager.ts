@@ -42,4 +42,15 @@ export class FileManager {
 
         return fileContents;
     }
+
+    async saveFile(content: string, path: string): Promise<void> {
+        console.log('Saving file...');
+        
+        try {
+            await fs.writeFile(path, content);
+            console.log('File saved successfully:', path);
+        } catch (error) {
+            console.error('Error saving file:', error);
+        }
+    }
 }

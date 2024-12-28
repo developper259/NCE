@@ -9,6 +9,7 @@ body {
   font-size: 20px;
   font-family: "JetBrains Mono", sans-serif;
   overflow: hidden;
+  user-select: none;
 }
 
 .box {
@@ -23,6 +24,6 @@ body {
 .box-left {
   border-left: 1px solid #2b2b2b;
 }
-.box-rigth {
+.box-right {
   border-right: 1px solid #2b2b2b;
 }

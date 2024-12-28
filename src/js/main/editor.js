@@ -28,6 +28,10 @@ getElement = (str) => {
 	return document.querySelector(str);
 };
 
+getElements = (str) => {
+	return nodeToArray(document.querySelectorAll(str));
+};
+
 nodeToArray = (node) => {
 	let r = [];
 
@@ -37,10 +41,6 @@ nodeToArray = (node) => {
 
 	return r;
 
-};
-
-getElements = (str) => {
-	return nodeToArray(document.querySelectorAll(str));
 };
 
 getOccurrence = (c, str) => {
@@ -57,7 +57,7 @@ class Editor {
 		this.lineController = new lineController(this);
 		this.selectController = new SelectController(this);
 		this.keyBindingController = new keyBindingController(this);
-		this.fileController = new FileController(this);
+		this.fileManager = new FileManager(this);
 
 		this.keyBinding = new KeyBinding(this);
 		this.cursor = new Cursor(this);

@@ -74,15 +74,24 @@ class KeyBinding {
 	}
 
 	// Control functions
-	control_save(s, c, m, a) {}
-	async control_open_file(s, c, m, a) {
-		console.log("Opening file...");
-		const file = await this.editor.fileController.selectFiles();
-		
-		this.editor.fileController.openFiles(file);
+	control_save(s, c, m, a) {
+		if (this.editor.fileManager.activeFile) this.editor.fileManager.activeFile.save();
 	}
-	control_new_file(s, c, m, a) {}
-	control_close_file(s, c, m, a) {}
+	async control_open_file(s, c, m, a) {
+		const file = await this.editor.fileManager.selectFiles();
+		
+		this.editor.fileManager.openFiles(file);
+	}
+	control_new_file(s, c, m, a) {
+		this.editor.fileManager.createEmptyFile();
+	}
+	control_close_file(s, c, m, a) {
+		if (s) {
+			this.editor.fileManager.closeFiles();
+		}else{
+			this.editor.fileManager.closeActiveFile();
+		}
+	}
 	async control_copy(s, c, m, a) {
 		let txt = this.editor.selectController.containsSelected;
 		
@@ -128,15 +137,11 @@ class KeyBinding {
 		this.editor.lineController.lines = JSON.parse(this.history[this.history.length - this.indexHistory].lines);
 		this.editor.cursor.setCursorPosition(this.history[this.history.length - this.indexHistory].cursor.row, this.history[this.history.length - this.indexHistory].cursor.column);
 		this.editor.lineController.refresh();
-
-		console.log(this.history, this.editor.lineController.lines);
 	}
 
 	control_redo(s, c, m, a) {
 		if (!this.history) return;
-
-		console.log(this.history, this.indexHistory);
-
+		
 		if (!this.history[this.history.length - (this.indexHistory - 1)]) return;
 
 		this.indexHistory -= 1;

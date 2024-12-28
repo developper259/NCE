@@ -3,7 +3,6 @@ class keyBindingController {
 		this.editor = e;
 
 		this.bindEditor = (key, e) => {
-			console.log(key, CONFIG_KEYBINDING_CONTAINSKEY(key))
 			if (CONFIG_KEYBINDING_CONTAINSKEY(key)) {
 				this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
 			}else{

@@ -54,12 +54,6 @@
   margin-left: 11px;
 }
 
-.line,
-.line-el,
-.editor-caret {
-  user-select: none;
-}
-
 .line-selected {
   color: #ccc;
 }
