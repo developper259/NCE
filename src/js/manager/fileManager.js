@@ -5,32 +5,51 @@ class FileManager {
     	this.folders = [];
 		this.activeFile = null;   //file on editor
 
+		this.openFile = (file) => {
+			if (!file) return;
+			this.openFiles([file]);
+		};
+
     	this.openFiles = async (files) => {
 			for (let file of files) {
-				this.files.push(file);
-				this.selectFile(file);
+				await file.loadContent();
+
+				if (this.activeFile && this.activeFile.isEmpty() && !file.isEmpty()) {
+					this.activeFile.replaceFile(file);
+					this.setFocusFile(this.activeFile);
+				} else {
+					this.files.push(file);
+					this.setFocusFile(file);
+				}
 			}
-			this.refresh();
+			this.editor.refreshAll();
     	};
 
 		this.closeFiles = () => {
 			this.files = [];
-			this.refresh();
+			this.editor.refreshAll();
 		};
 
 		this.closeFile = (id) => {
 			if (!id) return;
 			if (id == this.activeFile.id) {
-				if (id == 0) this.activeFile = this.files[this.files.length - 1];
-				else this.activeFile = this.files[id - 1];
+				if (this.files.length != 1) {
+					if (id == 0) this.setFocusFile(this.files[this.files.length - 1]);
+					else this.setFocusFile(this.files[id - 1]);
+				}
 			}
 			if (this.files.length != 1) 
 				this.files.splice(id, 1);
 			else {
 				this.files = [];
 				this.activeFile = null;
+
+				this.editor.writerController = null;
+				this.editor.lineController = null;
+				this.editor.selectController = null;
+				this.editor.cursor = null;
 			}
-			this.refresh();
+			this.editor.refreshAll();
 		};
 
 		this.closeActiveFile = () => {
@@ -39,17 +58,24 @@ class FileManager {
 			}
 		};
 
-		this.selectFile = (file) => {
+		this.setFocusFile = (file) => {
 			if (!file) return;
-			if (this.activeFile && this.activeFile.id == file.id) return;
 			this.activeFile = file;
-			this.refresh();
+
+			this.editor.writerController = this.activeFile.writerController;
+			this.editor.lineController = this.activeFile.lineController;
+			this.editor.selectController = this.activeFile.selectController;
+			this.editor.cursor = this.activeFile.cursor;
+
+			this.editor.cursor.setCursorPosition(this.editor.cursor.row, this.editor.cursor.column);
+
+			this.editor.refreshAll();
 		};
 
 		this.createEmptyFile = () => {
-			let name = 'new file';
+			let name = 'New file';
 			let node = new FileNode(this.editor, this.files.length, name, '');
-			this.openFiles([node]);
+			this.openFile(node);
 
 			return node;
 		};
@@ -100,6 +126,18 @@ class FileManager {
 
 			addEvent('click', this.onClick, getElements('.file-el'));
 			addEvent('click', this.onClickClose, getElements('.file-el-btn'));
+
+			if (this.files.length == 0) {
+				let editor = getElement('.editor-output');
+				let selectOutput = getElement('.editor-select-output');
+				let lineNumber = getElement('.line-numbers');
+				let cursor = getElement('.editor-caret');
+				
+				editor.innerHTML = '';
+				selectOutput.innerHTML = '';
+				lineNumber.innerHTML = '';
+				cursor.style.display = 'none';
+			}
 		};
 
 		this.onClick = (e) => {
@@ -109,7 +147,7 @@ class FileManager {
 				if (!id) return;
 			}
 			let file = this.files[id];
-			this.selectFile(file);
+			this.setFocusFile(file);
 		};
 
 		this.onClickClose = (e) => {

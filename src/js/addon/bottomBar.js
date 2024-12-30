@@ -15,6 +15,7 @@ class BottomBar {
 		this.scrollers = getElements(".scroller-open");
 
 		this.refresh = () => {
+			if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 			this.refreshCursorOBJ();
 
 			for (let scroller of this.scrollers) {

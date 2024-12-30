@@ -10,7 +10,7 @@ class Cursor {
 		//y
 		this.row = 1;
 		//x
-		this.column = 1;
+		this.column = 0;
 
 		this.rowToY = (row) => {
 			return baseY + posY * row - this.mpY;
@@ -47,11 +47,7 @@ class Cursor {
 			if (column > l) column = l;
 
 			if (this.row != row || this.column != column)
-				this.editor.output.dispatchEvent(
-					new CustomEvent("cursormove", {
-						detail: { row: row, column: column },
-					}),
-				);
+				CALLEVENT("cursormove", { row: row, column: column });
 			this.row = row;
 			this.column = column;
 
@@ -82,6 +78,7 @@ class Cursor {
 			const placeY = this.rowToY(row) - 4;
 			const placeX = this.columnToX(column);
 
+			this.cD.style.display = 'block';
 			this.cD.style.left = placeX + "px";
 			this.cD.style.top = placeY + "px";
 
@@ -89,11 +86,7 @@ class Cursor {
 			this.column = column;
 
 			this.editor.lineController.setFocusLine(this.row);
-			this.editor.output.dispatchEvent(
-				new CustomEvent("cursorchange", {
-					detail: { row: row, column: column },
-				}),
-			);
+			CALLEVENT("cursorchange", { row: row, column: column });
 
 			this.editor.selected = true;
 		};

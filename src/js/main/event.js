@@ -3,7 +3,6 @@ addEvent = (event, f, obj) => {
 	if (Array.isArray(obj)) {
 		for (let o of obj) {
 			o.addEventListener(event, f);
-			console.log(o, event, f);
 		}
 	}else
 		obj.addEventListener(event, f);
@@ -13,7 +12,7 @@ addInterval = (f, time) => {
 	return setInterval(f, time);
 };
 
-const events = ["cursormove", "cursorchange", "cursordisabled", "cursorenabled", "onSelect"];
+const events = ["cursormove", "cursorchange", "cursordisabled", "cursorenabled", "onSelect", "onChange"];
 const output = document.querySelector(".editor-output");
 
 for (let e of events) {
@@ -27,3 +26,11 @@ function onEvent(e, name) {
 		}),
 	);
 }
+
+CALLEVENT = (e, arg) =>{
+	output.dispatchEvent(
+		new CustomEvent(e, {
+			detail: arg,
+		}),
+	);
+};

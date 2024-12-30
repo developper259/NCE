@@ -164,6 +164,7 @@ class WriterController {
 				}
 				this.editor.cursor.setCursorPosition(y + newLines.length, x);
 			}
+			CALLEVENT('onChange');
 		};
 
 		this.delete = (x, y) => { // return {colum: ..., row: ...}
@@ -185,6 +186,7 @@ class WriterController {
 
 			this.editor.lineController.changeLine(newLine, cursor.row - 1);
 
+			CALLEVENT('onChange');
 			return cursor;
 		};
 
@@ -234,6 +236,7 @@ class WriterController {
 			}
 			this.editor.lineController.changeLine(newLine, cursor.row - 1);
 
+			CALLEVENT('onChange');
 			return cursor;
 		};
 
@@ -270,6 +273,8 @@ class WriterController {
 				i++;
 			}
 			this.editor.selectController.unSelectAll();
+			
+			CALLEVENT('onChange');
 			return cursor;
 		};
 	}

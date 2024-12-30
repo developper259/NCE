@@ -2,16 +2,9 @@ const baseX = 39;
 const baseY = 2;
 const posY = 25;
 
-class lineController {
+class LineController {
 	constructor(e) {
-		this.lines = [
-			'var   hello="bonjour les copains!!"',
-			"2*8viurhviuruevoeubvebveuvbeurbveubv",
-			"3vkiejoiejierhi",
-			"3vkiejoiejierhiurh",
-			"4444",
-			"	tab tab		double tab"
-		];
+		this.lines = [""];
 		this.maxIndex = this.lines.length;
 		this.index = 0;
 		this.editor = e;
@@ -21,6 +14,11 @@ class lineController {
 		};
 		this.setIndex = (i) => {
 			this.index = i;
+		};
+
+		this.loadContent = (content) => {
+			this.lines = content.split("\n");
+			this.maxIndex = this.lines.length;
 		};
 
 		this.getLineLength = (i) => {
@@ -99,7 +97,6 @@ class lineController {
 
 		this.refreshLine = () => {
 			let parser = new DOMParser();
-			const lines = document.querySelectorAll(".editor-output .line");
 
 			if (this.lines.length != this.maxIndex) this.maxIndex = this.lines.length;
 
@@ -130,9 +127,10 @@ class lineController {
 			const lineN = document.querySelector(".line-numbers");
 			let linesN = lineN.querySelectorAll(".line-el");
 
+			if (this.index == 0) this.index = this.editor.cursor.row;
 			if (this.maxIndex == 0) this.maxIndex = this.lines.length;
-
 			if (this.maxIndex == 0) this.maxIndex = 1;
+			
 			if (this.maxIndex != linesN.length) {
 				lineN.innerHTML = Array.from(
 					{ length: this.maxIndex },
@@ -156,6 +154,7 @@ class lineController {
 					});
 				}
 			}
+			this.setFocusLine(this.index);
 		};
 
 		this.getLineOBJ = (index) => {
@@ -186,7 +185,5 @@ class lineController {
 			this.refreshLine();
 			this.refreshNumberLines();
 		};
-
-		this.refresh();
 	}
 }

@@ -102,15 +102,11 @@ class SelectController {
 				this.selectLine(i, cursorChange);
 			}
 
-			this.editor.output.dispatchEvent(
-				new CustomEvent("onSelect", {
-					detail: {
-						start: this.startSelect,
-						end: this.endSelect,
-						contains: this.containsSelected,
-					},
-				}),
-			);
+			CALLEVENT("onSelect", {
+				start: this.startSelect,
+				end: this.endSelect,
+				contains: this.containsSelected,
+			});
 		};
 
 		this.selectWord = (wordOBJ, cursorChange) => {
@@ -134,15 +130,11 @@ class SelectController {
 				x + wordOBJ.innerText.length - 1,
 			);
 
-			this.editor.output.dispatchEvent(
-				new CustomEvent("onSelect", {
-					detail: {
-						start: this.startSelect,
-						end: this.endSelect,
-						contains: this.containsSelected,
-					},
-				}),
-			);
+			CALLEVENT("onSelect", {
+				start: this.startSelect,
+				end: this.endSelect,
+				contains: this.containsSelected,
+			});
 		};
 
 		this.unSelectLine = (index) => {
@@ -167,20 +159,15 @@ class SelectController {
 			let x = 0;
 			if (index == line.lines.length - 1) x = line.getLineLength(index - 1);
 			if (cursorChange) {
-				console.log(index, this.editor.lineController.maxIndex, this.editor.lineController.getLineLength(index))
 				if (index != this.editor.lineController.maxIndex - 1) this.editor.cursor.setCursorPosition(index + 2, x);
 				else this.editor.cursor.setCursorPosition(index + 1, this.editor.lineController.getLineLength(index));
 			}
 
-			this.editor.output.dispatchEvent(
-				new CustomEvent("onSelect", {
-					detail: {
+			CALLEVENT("onSelect", {
 						start: this.startSelect,
 						end: this.endSelect,
 						contains: this.containsSelected,
-					},
-				}),
-			);
+					});
 		};
 
 		this.getTextSelectedLine = (index) => {
@@ -377,15 +364,11 @@ class SelectController {
 				this.calculSelectSimpleLine();
 			else this.calculSelectMultiLine();
 
-			this.editor.output.dispatchEvent(
-				new CustomEvent("onSelect", {
-					detail: {
-						start: this.startSelect,
-						end: this.endSelect,
-						contains: this.containsSelected,
-					},
-				}),
-			);
+			CALLEVENT("onSelect", {
+				start: this.startSelect,
+				end: this.endSelect,
+				contains: this.containsSelected,
+			});
 		};
 
 		this.calculSelectSimpleLine = () => {

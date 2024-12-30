@@ -53,14 +53,14 @@ class Editor {
 
 		this.api = window.api;
 
-		this.writerController = new WriterController(this);
-		this.lineController = new lineController(this);
-		this.selectController = new SelectController(this);
+		this.writerController;
+		this.lineController;
+		this.selectController;
 		this.keyBindingController = new keyBindingController(this);
 		this.fileManager = new FileManager(this);
 
-		this.keyBinding = new KeyBinding(this);
-		this.cursor = new Cursor(this);
+        this.keyBinding = new KeyBinding(this);
+		this.cursor;
 
 		this.command = new Command(this);
 		this.Ccmd = new CMD(this);
@@ -74,20 +74,25 @@ class Editor {
 		this.selected = false;
 		this.panel = undefined;
 
-		this.cursor.setCursorPosition(1, 0);
-
 		addEvent("click", this.onClick.bind(this), document);
+
+		this.refreshAll = () => {
+			this.bottomBar.refresh();
+			if (this.lineController) this.lineController.refresh();
+			if (this.selectController) this.selectController.refreshStartEndSelect();
+			this.fileManager.refresh();
+		}
 	}
 	onClick(e) {
+		if (!this.lineController || !this.writerController || !this.selectController ||  !this.cursor) return;
 		const t = e.target;
 		const c = t.classList;
 		if (c.contains("editor-select") || c.contains("editor-el") || c.contains("editor")) {
 			this.selected = true;
-			this.output.dispatchEvent(new CustomEvent("cursorenabled"));
+			CALLEVENT("cursorenabled");
 		} else {
 			this.selected = false;
-			this.lineController.setFocusLine(0);
-			this.output.dispatchEvent(new CustomEvent("cursordisabled"));
+			CALLEVENT("cursordisabled");
 		}
 	}
 }
