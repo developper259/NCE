@@ -5,6 +5,8 @@ class FileManager {
     	this.folders = [];
 		this.activeFile = null;   //file on editor
 
+		this.emptyName = 'New file';
+
 		this.openFile = (file) => {
 			if (!file) return;
 			this.openFiles([file]);
@@ -31,13 +33,13 @@ class FileManager {
 		};
 
 		this.closeFile = (id) => {
-			if (!id) return;
 			if (id == this.activeFile.id) {
 				if (this.files.length != 1) {
 					if (id == 0) this.setFocusFile(this.files[this.files.length - 1]);
 					else this.setFocusFile(this.files[id - 1]);
 				}
 			}
+
 			if (this.files.length != 1) 
 				this.files.splice(id, 1);
 			else {
@@ -73,15 +75,25 @@ class FileManager {
 		};
 
 		this.createEmptyFile = () => {
-			let name = 'New file';
-			let node = new FileNode(this.editor, this.files.length, name, '');
+			let node = new FileNode(this.editor, this.files.length, this.emptyName, '');
 			this.openFile(node);
 
 			return node;
 		};
 
-    	this.selectFiles = async () => {
-     	   const files = await this.editor.api.selectFile();
+    	this.selectFile = async () => {
+     	   const file = await this.editor.api.selectFile();
+			if (file) {
+				let name = file.split('/').pop();
+				let node = new FileNode(this.editor, this.files.length, name, file);
+				return node;
+			}
+
+    	    return undefined;
+    	};
+
+		this.selectFiles = async () => {
+     	   const files = await this.editor.api.selectFiles();
 			let result = [];
 
 			if (files) {
@@ -95,10 +107,17 @@ class FileManager {
     	    return result;
     	};
 
-    	this.loadFile = (file) => {
+		this.selectNewFile = async () => {
+     	   	const file = await this.editor.api.selectNewFile(this.emptyName);
 
+			if (file) {
+				let name = file.split('/').pop();
+				let node = new FileNode(this.editor, this.files.length, name, file);
+				return node
+			}
+
+    	    return undefined;
     	};
-    
 
     	this.toHTMLFile = (file) => {
 			if (!file) return '';

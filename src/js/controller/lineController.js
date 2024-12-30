@@ -21,6 +21,10 @@ class LineController {
 			this.maxIndex = this.lines.length;
 		};
 
+		this.getContent = () => {
+			return this.lines.join("\n");
+		}
+
 		this.getLineLength = (i) => {
 			if (i < 0 || i >= this.lines.length || !this.lines[i]) return 0;
 			return this.lines[i].length + (getOccurrence('\t', this.lines[i]) * CONFIG_GET('tab_width')) - getOccurrence('\t', this.lines[i]);

@@ -21,7 +21,13 @@ const USERCONFIG_KEYBINDING = [
         "action": "close_file",
         "description": "Fermer le fichier actuel",
         "key": "Meta+W",
-        "in_editor": true
+        "in_editor": false
+    },
+    {
+        "action": "close_all_file",
+        "description": "Fermer tout les fichiers",
+        "key": "Meta+Shift+W",
+        "in_editor": false
     },
     {
         "action": "copy",

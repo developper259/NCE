@@ -1,13 +1,15 @@
-import { BrowserWindow, ipcMain } from 'electron';
-import { FileManager } from './FileManager';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
+
+import { FileManager } from './FileManager';
+import { AppMenu } from './Menu';
 
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
   fileManager: FileManager | undefined;
   name: string;
 
-  constructor(name: string) {
+  constructor(name: string ) {
     this.window = null;
     this.name = name;
   }
@@ -30,6 +32,8 @@ export class Window {
       },
     });
 
+    const menu = new AppMenu(this.window, this);
+
     this.window.loadFile("../src/html/index.html");
 
     this.window.on("closed", () => {
@@ -40,13 +44,28 @@ export class Window {
 
     if (!this.fileManager) console.log('FileManager is not defined');
 
+    ipcMain.handle('App:quit', async () => {
+      return app.quit();
+    });
+
     ipcMain.handle('FileManager:selectFile', async () => {
       return await this.fileManager?.selectFile();
     });
 
+    ipcMain.handle('FileManager:selectFiles', async () => {
+      return await this.fileManager?.selectFiles();
+    });
 
-    ipcMain.handle('FileManager:getFileContent', async (event, arg) => {
-      return await this.fileManager?.getFileContent(arg);
+    ipcMain.handle('FileManager:selectNewFile', async (event, name) => {
+      return await this.fileManager?.selectNewFile(name);
+    });
+
+    ipcMain.handle('FileManager:getFileContent', async (event, file) => {
+      return await this.fileManager?.getFileContent(file);
+    });
+
+    ipcMain.handle('FileManager:saveFile', async (event, path, content) => {
+      return await this.fileManager?.saveFile(path, content);
     });
   
   }

@@ -1,10 +1,10 @@
-import { dialog, OpenDialogOptions } from 'electron';
+import { dialog, OpenDialogOptions, SaveDialogOptions } from 'electron';
 const fs = require('fs').promises;
 
 export class FileManager {
     constructor() {}
 
-    async selectFile(): Promise<string[] | undefined> {
+    async selectFile(): Promise<string | undefined> {
         console.log('Selecting file...');
 
         const options: OpenDialogOptions = {
@@ -18,8 +18,46 @@ export class FileManager {
             return undefined;
         }
 
+        console.log('Selected file paths:', result.filePaths[0]);
+        return result.filePaths[0];
+    }
+
+    async selectFiles(): Promise<string[] | undefined> {
+        console.log('Selecting files...');
+
+        const options: OpenDialogOptions = {
+            properties: ['openFile', 'multiSelections'],
+        };
+
+        const result = await dialog.showOpenDialog(options);
+
+        if (result.canceled) {
+            console.log('User cancelled the files selection.');
+            return undefined;
+        }
+
         console.log('Selected file paths:', result.filePaths);
         return result.filePaths;
+    }
+
+    async selectNewFile(name: string): Promise<string | undefined> {
+        console.log('Saving file...');
+
+        const options: SaveDialogOptions = {
+            title: 'Save File',
+            defaultPath: name,
+            buttonLabel: 'Save',
+        };
+
+        const result = await dialog.showSaveDialog(options);
+
+        if (result.canceled) {
+            console.log('User cancelled the save file dialog.');
+            return undefined;
+        }
+
+        console.log('File path selected for saving:', result.filePath);
+        return result.filePath || undefined;
     }
 
     async getFileContent(file: string[]): Promise<{} | undefined> {
@@ -43,7 +81,7 @@ export class FileManager {
         return fileContents;
     }
 
-    async saveFile(content: string, path: string): Promise<void> {
+    async saveFile(path: string, content: string): Promise<void> {
         console.log('Saving file...');
         
         try {

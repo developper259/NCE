@@ -4,7 +4,6 @@ class FileNode {
         this.id = id;
         this.name = name;
         this.path = path;
-        this.content = '';
         this.isSaved = true;
 
 		this.historyX = undefined;
@@ -25,7 +24,6 @@ class FileNode {
         this.replaceFile = (file) => {
             this.name = file.name;
             this.path = file.path;
-            this.content = file.content;
             this.isSaved = file.isSaved;
 
             this.writerController = file.writerController;
@@ -50,11 +48,19 @@ class FileNode {
         };
 
         this.save = async () => {
+            if (!this.path) this.saveAs();
+            else {
+                await this.editor.api.saveFile(this.path, this.lineController.getContent());
+            }
             this.isSaved = true;
+            this.editor.refreshAll();
         };
 
-        this.saveAs = async (path) => {
-            this.path = path;
+        this.saveAs = async () => {
+            const file = await this.editor.fileManager.selectNewFile();
+            if (!file || file.isEmpty()) return;
+            this.path = file.path;
+            this.name = file.name;
             this.save();
         };
 

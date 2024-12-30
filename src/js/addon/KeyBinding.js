@@ -7,6 +7,7 @@ class KeyBinding {
 			"open_file": this.control_open_file,
 			"new_file": this.control_new_file,
 			"close_file": this.control_close_file,
+			"close_all_file": this.control_close_all_file,
 			"copy": this.control_copy,
 			"paste": this.control_paste,
 			"cut": this.control_cut,
@@ -72,7 +73,12 @@ class KeyBinding {
 	// Control functions
 	control_save(s, c, m, a) {
 		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
-		if (this.editor.fileManager.activeFile) this.editor.fileManager.activeFile.save();
+		if (!this.editor.fileManager.activeFile) return;
+		if (s) {
+			this.editor.fileManager.activeFile.saveAs();
+		}else{
+			this.editor.fileManager.activeFile.save();
+		}
 	}
 	async control_open_file(s, c, m, a) {
 		const file = await this.editor.fileManager.selectFiles();
@@ -83,11 +89,12 @@ class KeyBinding {
 		this.editor.fileManager.createEmptyFile();
 	}
 	control_close_file(s, c, m, a) {
-		if (s) {
-			this.editor.fileManager.closeFiles();
-		}else{
-			this.editor.fileManager.closeActiveFile();
-		}
+		if (this.editor.fileManager.files.length != 0) this.editor.fileManager.closeActiveFile();
+		else this.editor.api.quit();
+	}
+
+	control_close_all_file(s, c, m, a) {
+		this.editor.api.quit();
 	}
 	async control_copy(s, c, m, a) {
 		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
