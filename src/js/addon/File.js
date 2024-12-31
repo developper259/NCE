@@ -6,69 +6,100 @@ class FileNode {
         this.path = path;
         this.isSaved = true;
 
-		this.historyX = undefined;
+        // KeyBinding
+        this.historyX = undefined;
+        this.history = [];
+        this.indexHistory = 1;
 
-		this.history = [];
-		this.indexHistory = 1;
+        // Cursor
+        this.row = 1;
+        this.column = 0;
 
-		this.writerController = new WriterController(this.editor);
-		this.lineController = new LineController(this.editor);
-		this.selectController = new SelectController(this.editor);
-		this.cursor = new Cursor(this.editor);
+        // Line Controller
+        this.lines = [""];
+        this.maxIndex = this.lines.length;
+        this.index = 0;
 
-        this.isEmpty = () => {
-            if (this.path) return false;
-            return true;
-        };
+        // Select Controller
+        this.isMouseDown = false;
+        this.containsSelected = "";
 
-        this.replaceFile = (file) => {
-            this.name = file.name;
-            this.path = file.path;
-            this.isSaved = file.isSaved;
+        this.lastClick = 0;
+        this.clickCount = 0;
 
-            this.writerController = file.writerController;
-            this.lineController = file.lineController;
-            this.selectController = file.selectController;
-            this.cursor = file.cursor;
+        this.HstartSelect = undefined; // historique start select
+        this.startSelect = undefined;
+        this.endSelect = undefined;
 
-            this.historyX = file.historyX;
-            this.history = file.history;
-            this.indexHistory = file.indexHistory;
+        // Writer Controller
+        this.insertMode = false;
+
+        addEvent('onChange', this.onChange.bind(this));
+    }
+
+    isEmpty() {
+        if (this.path) return false;
+        return true;
+    }
+
+    replaceFile(file) {
+        this.name = file.name;
+        this.path = file.path;
+        this.isSaved = file.isSaved;
+
+        this.historyX = file.historyX;
+        this.history = file.history;
+        this.indexHistory = file.indexHistory;
+
+        this.row = file.row;
+        this.column = file.column;
+
+        this.lines = file.lines;
+        this.maxIndex = file.maxIndex;
+        this.index = file.index;
+
+        this.isMouseDown = file.isMouseDown;
+        this.containsSelected = file.containsSelected;
+
+        this.lastClick = file.lastClick;
+        this.clickCount = file.clickCount;
+
+        this.HstartSelect = file.HstartSelect;
+        this.startSelect = file.startSelect;
+        this.endSelect = file.endSelect;
+
+        this.insertMode = file.insertMode;
+    }
+
+    async loadContent() {
+        if (!this.path) {
+            this.editor.lineController.loadContent('');
+            return;
         }
+        let contents = await this.editor.api.getFileContent([this.path]);
 
-        this.loadContent = async () => {
-            if (!this.path) {
-                this.lineController.loadContent('');
-                return;
-            }
-            let contents = await this.editor.api.getFileContent([this.path]);
+        this.editor.lineController.loadContent(contents[this.path].toString());
+    }
 
-            this.content = contents[this.path].toString();
-            this.lineController.loadContent(this.content);
-        };
+    async save() {
+        if (!this.path) this.saveAs();
+        else {
+            await this.editor.api.saveFile(this.path, this.editor.lineController.getContent());
+        }
+        this.isSaved = true;
+        this.editor.refreshAll();
+    }
 
-        this.save = async () => {
-            if (!this.path) this.saveAs();
-            else {
-                await this.editor.api.saveFile(this.path, this.lineController.getContent());
-            }
-            this.isSaved = true;
-            this.editor.refreshAll();
-        };
+    async saveAs() {
+        const file = await this.editor.fileManager.selectNewFile();
+        if (!file || file.isEmpty()) return;
+        this.path = file.path;
+        this.name = file.name;
+        this.save();
+    }
 
-        this.saveAs = async () => {
-            const file = await this.editor.fileManager.selectNewFile();
-            if (!file || file.isEmpty()) return;
-            this.path = file.path;
-            this.name = file.name;
-            this.save();
-        };
-
-        this.onChange = () => {
-            console.log('change');
-            this.isSaved = false;
-        };
-        
-        addEvent('onChange', this.onChange);
+    onChange() {
+        console.log('change');
+        this.isSaved = false;
     }
 }

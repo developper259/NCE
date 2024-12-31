@@ -15,7 +15,16 @@ class BottomBar {
 		this.scrollers = getElements(".scroller-open");
 
 		this.refresh = () => {
-			if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
+			if (!this.editor.fileManager.activeFile) return;
+
+			let leftBottomBar = getElement('.bottomBar .left');
+			let middleBottomBar = getElement('.bottomBar .middle');
+			let rightBottomBar = getElement('.bottomBar .right');
+			
+			leftBottomBar.style.display = 'flex';
+			middleBottomBar.style.display = 'flex';
+			rightBottomBar.style.display = 'flex';
+
 			this.refreshCursorOBJ();
 
 			for (let scroller of this.scrollers) {
@@ -27,6 +36,7 @@ class BottomBar {
 		};
 
 		this.refreshCursorOBJ = () => {
+			if (!this.editor.fileManager.activeFile) return;
 			this.editor.selectController.refreshStartEndSelect();
 
 			let r = "";

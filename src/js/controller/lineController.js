@@ -3,191 +3,252 @@ const baseY = 2;
 const posY = 25;
 
 class LineController {
-	constructor(e) {
-		this.lines = [""];
-		this.maxIndex = this.lines.length;
-		this.index = 0;
-		this.editor = e;
+    constructor(editor) {
+        this.editor = editor;
+    }
 
-		this.getIndex = () => {
-			return this.index;
-		};
-		this.setIndex = (i) => {
-			this.index = i;
-		};
+    // Getters et Setters
+    get lines() {
+		if (!this.editor.fileManager.activeFile) return;
+        return this.editor.fileManager.activeFile?.lines;
+    }
 
-		this.loadContent = (content) => {
-			this.lines = content.split("\n");
-			this.maxIndex = this.lines.length;
-		};
+    set lines(value) {
+		if (!this.editor.fileManager.activeFile) return;
+        this.editor.fileManager.activeFile.lines = value;
+    }
 
-		this.getContent = () => {
-			return this.lines.join("\n");
-		}
+    get maxIndex() {
+		if (!this.editor.fileManager.activeFile) return;
+        return this.editor.fileManager.activeFile?.maxIndex;
+    }
 
-		this.getLineLength = (i) => {
-			if (i < 0 || i >= this.lines.length || !this.lines[i]) return 0;
-			return this.lines[i].length + (getOccurrence('\t', this.lines[i]) * CONFIG_GET('tab_width')) - getOccurrence('\t', this.lines[i]);
-		};
+    set maxIndex(value) {
+		if (!this.editor.fileManager.activeFile) return;
+        this.editor.fileManager.activeFile.maxIndex = value;
+    }
 
-		this.sliceLine = (index, posA, posB) =>  {
-			let r = "";
-			const l = this.lines[index];
+    get index() {
+		if (!this.editor.fileManager.activeFile) return;
+        return this.editor.fileManager.activeFile?.index;
+    }
 
-			if (posB == undefined) posB = this.getLineLength(index);
+    set index(value) {
+		if (!this.editor.fileManager.activeFile) return;
+        this.editor.fileManager.activeFile.index = value;
+    }
 
-			for (let i = 0; i < posB; i++) {
-				const c = this.getLetter(index, i);
+    // Méthodes
+    loadContent(content) {
+        console.log(this.editor.fileManager.activeFile);
+        this.lines = content.split("\n");
+        this.maxIndex = this.lines.length;
+    }
 
-				if (posA <= i && i < posB) {
-					r += c;
-				}
-				if (c == '\t') i += CONFIG_GET('tab_width') - 1;
-			}
+    getContent() {
+        return this.lines?.join("\n") || "";
+    }
 
-			return r;
-		};
+    getLineLength(i) {
+        if (i < 0 || i >= this.lines?.length || !this.lines[i]) return 0;
+        return this.lines[i].length + (getOccurrence('\t', this.lines[i]) * CONFIG_GET('tab_width')) - getOccurrence('\t', this.lines[i]);
+    }
+    getTextLength(text) {
+        return text.length + (getOccurrence('\t', text) * CONFIG_GET('tab_width')) - getOccurrence('\t', text);
+    }
 
-		this.getLetter = (y, index) => {
-			let line = this.lines[y];
-			let i = 0;
+    sliceLine(index, posA, posB) {
+        let r = "";
+        const l = this.lines[index];
 
-			for (let c of line) {
-				if (c == '\t') {
-					if (i <= index && index < (i + CONFIG_GET('tab_width'))) {
-						return c;
-					}else i += CONFIG_GET('tab_width');
-				}else{
-					if (i == index) return c;
-					else i++;
-				}
-			}
-			return undefined;
-		};
+        if (posB === undefined) posB = this.getLineLength(index);
 
-		this.setFocusLine = (index) => {
-			const oldLine = document.querySelector(".line-selected");
+        for (let i = 0; i < posB; i++) {
+            const c = this.getLetter(index, i);
 
-			if (oldLine != null) oldLine.classList.remove("line-selected");
+            if (posA <= i && i < posB) {
+                r += c;
+            }
+            if (c === '\t') i += CONFIG_GET('tab_width') - 1;
+        }
 
-			const newLine = this.getLineNumberOBJ(index - 1);
+        return r;
+    }
 
-			if (newLine == null) return;
+    sliceText(text, posA, posB) {
+        let r = "";
 
-			newLine.classList.add("line-selected");
-			this.setIndex(index);
-		};
+        if (posB === undefined) posB = this.getTextLength(text);
 
-		this.addLine = (txt, index) => {
-			this.lines = [
-										...this.lines.slice(0, index),
-										txt,
-										...this.lines.slice(index)
-									 ];
-			this.refresh();
-		};
+        for (let i = 0; i < text.length; i++) {
+            const c = this.getLetterText(text, i);
 
-		this.changeLine = (txt, index) => {
-			this.lines[index] = txt;
-			this.refresh();
-		}
+            if (posA <= i && i < posB) {
+                r += c;
+            }
+            if (c === '\t') i += CONFIG_GET('tab_width') - 1;
+        }
 
-		this.supLine = (index) => {
-			if (index > this.maxIndex) return;
-			this.maxIndex -= 1;
-			this.lines.splice(index, 1);
-			this.refresh();
-		};
+        return r;
+    }
 
-		this.refreshLine = () => {
-			let parser = new DOMParser();
+    getLetter(y, index) {
+        let line = this.lines[y];
+        let i = 0;
 
-			if (this.lines.length != this.maxIndex) this.maxIndex = this.lines.length;
+        for (let c of line) {
+            if (c === '\t') {
+                if (i <= index && index < (i + CONFIG_GET('tab_width'))) {
+                    return c;
+                } else i += CONFIG_GET('tab_width');
+            } else {
+                if (i === index) return c;
+                else i++;
+            }
+        }
+        return undefined;
+    }
 
-				this.editor.output.innerHTML = "";
-				for (var i = 0; i < this.maxIndex; i++) {
-					let doc = parser.parseFromString(
-						this.editor.writerController.toHTML(this.lines[i]),
-						"text/html",
-					);
-					let lineOBJ = doc
-						.createRange()
-						.createContextualFragment(doc.body.innerHTML).firstElementChild;
+    getLetterText(text, index) {
+        let i = 0;
 
-					this.editor.output.appendChild(lineOBJ);
+        for (let c of text) {
+            if (c === '\t') {
+                if (i <= index && index < (i + CONFIG_GET('tab_width'))) {
+                    return c;
+                } else i += CONFIG_GET('tab_width');
+            } else {
+                if (i === index) return c;
+                else i++;
+            }
+        }
+        return undefined;
+    }
 
-					const x = baseX;
-					const y = baseY + posY * i;
+    setFocusLine(index) {
+        const oldLine = document.querySelector(".line-selected");
 
-					lineOBJ.style.position = "absolute";
-					lineOBJ.style.top = y + "px";
-					lineOBJ.style.left = x + "px";
-				}
-			if (this.lines.length == 0)
-				this.editor.output.innerHTML = '<div class="line editor-select"></div>';
-		};
+        if (oldLine != null) oldLine.classList.remove("line-selected");
 
-		this.refreshNumberLines = () => {
-			const lineN = document.querySelector(".line-numbers");
-			let linesN = lineN.querySelectorAll(".line-el");
+        const newLine = this.getLineNumberOBJ(index - 1);
 
-			if (this.index == 0) this.index = this.editor.cursor.row;
-			if (this.maxIndex == 0) this.maxIndex = this.lines.length;
-			if (this.maxIndex == 0) this.maxIndex = 1;
-			
-			if (this.maxIndex != linesN.length) {
-				lineN.innerHTML = Array.from(
-					{ length: this.maxIndex },
-					(_, index) => `<span class="line-el editor-el">${index + 1}</span>`,
-				).join("");
+        if (newLine == null) return;
 
-				linesN = lineN.querySelectorAll(".line-el");
+        newLine.classList.add("line-selected");
+        this.index = index;
+    }
 
-				for (let i = 0; i < linesN.length; i++) {
-					const line = linesN[i];
+    addLine(txt, index) {
+        this.lines = [
+            ...this.lines.slice(0, index),
+            txt,
+            ...this.lines.slice(index)
+        ];
+        this.refresh();
+    }
 
-					const y = baseY + posY * i;
-					line.style.top = y + "px";
+    changeLine(txt, index) {
+        this.lines[index] = txt;
+        this.refresh();
+    }
 
-					line.addEventListener("click", (event) => {
-						let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
-						this.editor.selectController.unSelectAll();
+    supLine(index) {
+        if (index > this.maxIndex) return;
+        this.maxIndex -= 1;
+        this.lines.splice(index, 1);
+        this.refresh();
+    }
 
-						if (lineOBJ == undefined) this.editor.selectController.selectLine(i, true);
-						else this.editor.cursor.setCursorPosition(i + 1, 0);
-					});
-				}
-			}
-			this.setFocusLine(this.index);
-		};
+    refreshLine() {
+		if (!this.editor.fileManager.activeFile) return;
+        let parser = new DOMParser();
 
-		this.getLineOBJ = (index) => {
-			const lines = document.querySelectorAll(".editor-output .line");
-			return lines[index];
-		};
+        if (this.lines.length !== this.maxIndex) this.maxIndex = this.lines.length;
 
-		this.getLineNumberOBJ = (index) => {
-			const lines = document.querySelectorAll(".line-el");
-			return lines[index];
-		};
+        this.editor.output.innerHTML = "";
+        for (let i = 0; i < this.maxIndex; i++) {
+            let doc = parser.parseFromString(
+                this.editor.writerController.toHTML(this.lines[i]),
+                "text/html",
+            );
+            let lineOBJ = doc
+                .createRange()
+                .createContextualFragment(doc.body.innerHTML).firstElementChild;
 
-		this.getWordOBJ = (row, column) => {
-			if (row == null || column == null) return;
-			const l = getElements(".line")[row - 1];
-			const words = l.querySelectorAll(".line-word");
-			return words[column];
-		};
+            this.editor.output.appendChild(lineOBJ);
 
-		this.getLetterOBJ = (row, column) => {
-			if (row == null || column == null) return;
-			const l = getElements(".line")[row - 1];
-			const letters = l.querySelectorAll(".line-letter");
-			return letters[column];
-		};
+            const x = baseX;
+            const y = baseY + posY * i;
 
-		this.refresh = () => {
-			this.refreshLine();
-			this.refreshNumberLines();
-		};
-	}
+            lineOBJ.style.position = "absolute";
+            lineOBJ.style.top = y + "px";
+            lineOBJ.style.left = x + "px";
+        }
+        if (this.lines.length === 0)
+            this.editor.output.innerHTML = '<div class="line editor-select"></div>';
+    }
+
+    refreshNumberLines() {
+		if (!this.editor.fileManager.activeFile) return;
+        const lineN = document.querySelector(".line-numbers");
+        let linesN = lineN.querySelectorAll(".line-el");
+
+        if (this.index === 0) this.index = this.editor.cursor.row;
+        if (this.maxIndex === 0) this.maxIndex = this.lines.length;
+        if (this.maxIndex === 0) this.maxIndex = 1;
+
+        if (this.maxIndex !== linesN.length) {
+            lineN.innerHTML = Array.from(
+                { length: this.maxIndex },
+                (_, index) => `<span class="line-el editor-el">${index + 1}</span>`
+            ).join("");
+
+            linesN = lineN.querySelectorAll(".line-el");
+
+            for (let i = 0; i < linesN.length; i++) {
+                const line = linesN[i];
+
+                const y = baseY + posY * i;
+                line.style.top = y + "px";
+
+                line.addEventListener("click", () => {
+                    let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
+                    this.editor.selectController.unSelectAll();
+
+                    if (lineOBJ === undefined) this.editor.selectController.selectLine(i, true);
+                    else this.editor.cursor.setCursorPosition(i + 1, 0);
+                });
+            }
+        }
+        this.setFocusLine(this.index);
+    }
+
+    getLineOBJ(index) {
+        const lines = document.querySelectorAll(".editor-output .line");
+        return lines[index];
+    }
+
+    getLineNumberOBJ(index) {
+        const lines = document.querySelectorAll(".line-el");
+        return lines[index];
+    }
+
+    getWordOBJ(row, column) {
+        if (row == null || column == null) return;
+        const l = getElements(".line")[row - 1];
+        const words = l.querySelectorAll(".line-word");
+        return words[column];
+    }
+
+    getLetterOBJ(row, column) {
+        if (row == null || column == null) return;
+        const l = getElements(".line")[row - 1];
+        const letters = l.querySelectorAll(".line-letter");
+        return letters[column];
+    }
+
+    refresh() {
+        this.refreshLine();
+        this.refreshNumberLines();
+    }
 }

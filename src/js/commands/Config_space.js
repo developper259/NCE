@@ -10,18 +10,18 @@ class Config_space extends Command {
 			top: [{ title: this.values[this.value], author: ["currently used"] }],
 			all: this.generateDicAll(this.values),
 		};
+	}
 
-		this.onSelect = (title) => {
-			for (let i = 0; i < this.values.length; i++) {
-				if (this.values[i] === title) {
-					this.close();
-					this.value = i;
-					CONFIG_SET('tab_width', this.realValues[i]);
-				}
+	onSelect(title) {
+		for (let i = 0; i < this.values.length; i++) {
+			if (this.values[i] === title) {
+				this.close();
+				this.value = i;
+				CONFIG_SET('tab_width', this.realValues[i]);
 			}
-			this.trees.top[0].title = this.values[this.value];
-			this.editor.bottomBar.refresh();
-			this.editor.lineController.refresh();
-		};
+		}
+		this.trees.top[0].title = this.values[this.value];
+		this.editor.bottomBar.refresh();
+		this.editor.lineController.refresh();
 	}
 }

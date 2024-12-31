@@ -10,14 +10,17 @@ class Langague extends Command {
 			all: this.generateDicAll(this.values),
 		};
 
-		this.onSelect = (title) => {
-			for (let i = 0; i < this.values.length; i++) {
-				if (this.values[i] === title) {
-					this.close();
-					this.value = i;
-				}
-			}
-			this.editor.bottomBar.refresh();
-		};
+		this.onSelect = this.onSelect.bind(this);
 	}
+
+	onSelect(title) {
+		for (let i = 0; i < this.values.length; i++) {
+			if (this.values[i] === title) {
+				this.close();
+				this.value = i;
+			}
+		}
+		this.editor.bottomBar.refresh();
+	}
+
 }

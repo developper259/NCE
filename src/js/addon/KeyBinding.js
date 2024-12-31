@@ -34,7 +34,7 @@ class KeyBinding {
 		};
 
 		setInterval(() => {
-			if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
+			if (!this.editor.fileManager.activeFile) return;
 			const currentLines = JSON.stringify(this.editor.lineController.lines);
 			const currentCursor = {row: this.editor.cursor.row, column: this.editor.cursor.column};
 			if (this.editor.fileManager.activeFile.indexHistory < 1) this.editor.fileManager.activeFile.indexHistory = 1;
@@ -72,7 +72,6 @@ class KeyBinding {
 
 	// Control functions
 	control_save(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		if (!this.editor.fileManager.activeFile) return;
 		if (s) {
 			this.editor.fileManager.activeFile.saveAs();
@@ -97,7 +96,6 @@ class KeyBinding {
 		this.editor.api.quit();
 	}
 	async control_copy(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let txt = this.editor.selectController.containsSelected;
 		
 		if (!txt) {
@@ -112,9 +110,9 @@ class KeyBinding {
 	}
 
 	async control_paste(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		try {
 			const text = await navigator.clipboard.readText();
+			console.log(text);
 			this.editor.writerController.write(text);
 		} catch (err) {
 			console.error("Erreur lors du collage : ", err);
@@ -122,7 +120,6 @@ class KeyBinding {
 	}
 
 	async control_cut(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let txt = this.editor.selectController.containsSelected;
 		this.control_copy();
 		if (txt) this.key_backspace();
@@ -134,7 +131,6 @@ class KeyBinding {
 		}
 	}
 	control_undo(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		if (!this.editor.fileManager.activeFile.history) return;
 
 		console.log(this.editor.fileManager.activeFile.history, this.editor.fileManager.activeFile.indexHistory);
@@ -148,7 +144,6 @@ class KeyBinding {
 	}
 
 	control_redo(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		if (!this.editor.fileManager.activeFile.history) return;
 		
 		if (!this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - (this.editor.fileManager.activeFile.indexHistory - 1)]) return;
@@ -160,22 +155,18 @@ class KeyBinding {
 	}
 
 	control_find(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 	}
 	control_replace(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 	}
 	control_open_command(s, c, m, a) {
 		if (this.editor.panel instanceof CMD) this.editor.panel.close();
 		else this.editor.Ccmd.open();
 	}
 	control_delete_line(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		this.editor.lineController.supLine(this.editor.cursor.row - 1);
 		this.editor.cursor.setCursorPosition(this.editor.cursor.row, this.editor.cursor.column);
 	}
 	control_select_all(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		this.editor.selectController.selectAll(true);
 	}
 
@@ -185,11 +176,9 @@ class KeyBinding {
 		else this.editor.panel.close();
 	}
 	key_tab(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		this.editor.writerController.write("\t");
 	}
 	key_delete(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		if (m || a) return;
 		this.editor.fileManager.activeFile.historyX = undefined;
 		let x = this.editor.cursor.column;
@@ -226,7 +215,6 @@ class KeyBinding {
 		this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
 	}
 	key_backspace(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		if (m || a) return;
 		this.editor.fileManager.activeFile.historyX = undefined;
 		let x = this.editor.cursor.column;
@@ -266,11 +254,9 @@ class KeyBinding {
 		this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
 	}
 	key_enter(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		this.editor.writerController.write("\n");
 	}
 	key_arrow_up(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let x = this.editor.cursor.column;
 		let y = this.editor.cursor.row;
 
@@ -302,7 +288,6 @@ class KeyBinding {
 		}
 	}
 	key_arrow_down(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let x = this.editor.cursor.column;
 		let y = this.editor.cursor.row;
 
@@ -335,7 +320,6 @@ class KeyBinding {
 		}
 	}
 	key_arrow_left(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		this.editor.fileManager.activeFile.historyX = undefined;
 		let x = this.editor.cursor.column;
 		let y = this.editor.cursor.row;
@@ -390,7 +374,6 @@ class KeyBinding {
 		}
 	}
 	key_arrow_right(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		this.editor.fileManager.activeFile.historyX = undefined;
 		let x = this.editor.cursor.column;
 		let y = this.editor.cursor.row;
@@ -447,18 +430,15 @@ class KeyBinding {
 		}
 	}
 	key_home(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let y = this.editor.cursor.row;
 		this.editor.cursor.setCursorPosition(y, 0);
 	}
 	key_end(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let y = this.editor.cursor.row;
 		let x = this.editor.lineController.getLineLength(this.editor.cursor.row - 1);
 		this.editor.cursor.setCursorPosition(y, x);
 	}
 	key_insert(s, c, m, a) {
-		if (!this.editor.lineController || !this.editor.writerController || !this.editor.selectController || !this.editor.cursor) return;
 		let wc = this.editor.writerController;
 		wc.setInsertMode(!wc.insertMode);
 	}
