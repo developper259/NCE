@@ -145,11 +145,13 @@ class LineController {
             ...this.lines.slice(index)
         ];
         this.refresh();
+        CALLEVENT('onChange');
     }
 
     changeLine(txt, index) {
         this.lines[index] = txt;
         this.refresh();
+        CALLEVENT('onChange');
     }
 
     supLine(index) {
@@ -157,6 +159,7 @@ class LineController {
         this.maxIndex -= 1;
         this.lines.splice(index, 1);
         this.refresh();
+        CALLEVENT('onChange');
     }
 
     refreshLine() {

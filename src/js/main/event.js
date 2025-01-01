@@ -12,7 +12,7 @@ addInterval = (f, time) => {
 	return setInterval(f, time);
 };
 
-const events = ["cursormove", "cursorchange", "cursordisabled", "cursorenabled", "onSelect", "onChange"];
+const events = ["cursormove", "cursorchange", "cursordisabled", "cursorenabled", "onSelect", "onChange", "onWrite"];
 const output = document.querySelector(".editor-output");
 
 for (let e of events) {

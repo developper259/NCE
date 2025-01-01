@@ -48,26 +48,32 @@ class KeyBinding {
 			this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - 1].cursor = currentCursor;
 		}, 1000);
 
-		this.exec = (key, e) => {
-			let s = false;
-			let c = false;
-			let m = false;
-			let a = false;
-			
-			if (e != undefined) {
-				s = e.shiftKey; 
-				c = e.ctrlKey;
-				m = e.metaKey;
-				a = e.altKey;
-			}
-			if (this.func[key.action]) {
-				console.log(`Executing action: ${key.action} (${key.description})`);
-				this.func[key.action].call(this, s, c, m, a);
-			}else if (this.func[key.key]) { 
-				console.log(`Executing action: ${key.key}`);
-				this.func[key.key].call(this, s, c, m, a);
-			}
-		};
+		addEvent('onWrite', this.onWrite.bind(this), this.editor.output);
+	}
+
+	exec (key, e) {
+		let s = false;
+		let c = false;
+		let m = false;
+		let a = false;
+		
+		if (e != undefined) {
+			s = e.shiftKey; 
+			c = e.ctrlKey;
+			m = e.metaKey;
+			a = e.altKey;
+		}
+		if (this.func[key.action]) {
+			console.log(`Executing action: ${key.action} (${key.description})`);
+			this.func[key.action].call(this, s, c, m, a);
+		}else if (this.func[key.key]) { 
+			console.log(`Executing action: ${key.key}`);
+			this.func[key.key].call(this, s, c, m, a);
+		}
+	}
+
+	onWrite() {
+		this.editor.fileManager.activeFile.indexHistory = 1;
 	}
 
 	// Control functions
@@ -141,6 +147,7 @@ class KeyBinding {
 		this.editor.lineController.lines = JSON.parse(this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - this.editor.fileManager.activeFile.indexHistory].lines);
 		this.editor.cursor.setCursorPosition(this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - this.editor.fileManager.activeFile.indexHistory].cursor.row, this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - this.editor.fileManager.activeFile.indexHistory].cursor.column);
 		this.editor.lineController.refresh();
+        CALLEVENT('onChange');
 	}
 
 	control_redo(s, c, m, a) {
@@ -152,6 +159,7 @@ class KeyBinding {
 		this.editor.lineController.lines = JSON.parse(this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - this.editor.fileManager.activeFile.indexHistory].lines);
 		this.editor.cursor.setCursorPosition(this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - this.editor.fileManager.activeFile.indexHistory].cursor.row, this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - this.editor.fileManager.activeFile.indexHistory].cursor.column);
 		this.editor.lineController.refresh();
+        CALLEVENT('onChange');
 	}
 
 	control_find(s, c, m, a) {
@@ -163,6 +171,7 @@ class KeyBinding {
 		else this.editor.Ccmd.open();
 	}
 	control_delete_line(s, c, m, a) {
+		console.log(this.editor.cursor.row);
 		this.editor.lineController.supLine(this.editor.cursor.row - 1);
 		this.editor.cursor.setCursorPosition(this.editor.cursor.row, this.editor.cursor.column);
 	}

@@ -46,6 +46,15 @@
 	background-color: #2b2b2b;
 }
 
+.file-manager .file-el .file-unsaved {
+	background-color: white;
+	color: white;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	right: 12px;
+}
+
 .file-manager .files-ul .file-el:hover:not(.file-active) {
 	background-color: #212121;
 }

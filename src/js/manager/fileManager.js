@@ -25,6 +25,7 @@ class FileManager {
 				this.setFocusFile(file);
 			}
 			await this.activeFile.loadContent();
+			this.activeFile.setIsSaved(true);
 		}
 		this.editor.refreshAll();
 	}
@@ -116,9 +117,13 @@ class FileManager {
 		let arg = '';
 		if (this.activeFile && this.activeFile.id === file.id) arg = 'file-active';
 
+		let btn = '';
+		if (file.isSaved) btn = '<span class="file-el-btn material-symbols-outlined file-saved">close</span>';
+		else btn = '<div class="file-el-btn file-unsaved"></div>';
+
 		let html = `<li class="file-el ${arg}" id="${file.id}">
 						<span class="file-el-title">${file.name}</span>
-						<div class="file-el-btn material-symbols-outlined">close</div>
+						${btn}
 					</li>`;
 
 		return html;
@@ -172,5 +177,9 @@ class FileManager {
 		let id = e.target.parentElement.id;
 		if (!id) return;
 		this.closeFile(id);
+	}
+
+	getTab(id) {
+		return getElement(`.file-manager .file-el[id="${id}"]`);
 	}
 }

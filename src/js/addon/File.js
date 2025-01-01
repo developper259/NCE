@@ -34,7 +34,7 @@ class FileNode {
         // Writer Controller
         this.insertMode = false;
 
-        addEvent('onChange', this.onChange.bind(this));
+        addEvent('onChange', this.onChange.bind(this), this.editor.output);
     }
 
     isEmpty() {
@@ -86,7 +86,7 @@ class FileNode {
         else {
             await this.editor.api.saveFile(this.path, this.editor.lineController.getContent());
         }
-        this.isSaved = true;
+        this.setIsSaved(true);
         this.editor.refreshAll();
     }
 
@@ -98,8 +98,13 @@ class FileNode {
         this.save();
     }
 
+    setIsSaved(value) {
+        this.isSaved = value;
+
+        this.editor.refreshAll();
+    }
+
     onChange() {
-        console.log('change');
-        this.isSaved = false;
+        this.setIsSaved(false);
     }
 }

@@ -173,6 +173,7 @@ class WriterController {
 			this.editor.cursor.setCursorPosition(y + newLines.length, x);
 		}
 		CALLEVENT('onChange');
+		CALLEVENT('onWrite');
 	}
 
 	delete(x, y) {
@@ -195,6 +196,8 @@ class WriterController {
 		this.editor.lineController.changeLine(newLine, cursor.row - 1);
 
 		CALLEVENT('onChange');
+		CALLEVENT('onWrite');
+
 		return cursor;
 	}
 
@@ -245,6 +248,8 @@ class WriterController {
 		this.editor.lineController.changeLine(newLine, cursor.row - 1);
 
 		CALLEVENT('onChange');
+		CALLEVENT('onWrite');
+
 		return cursor;
 	}
 
@@ -283,6 +288,8 @@ class WriterController {
 		this.editor.selectController.unSelectAll();
 		
 		CALLEVENT('onChange');
+		CALLEVENT('onWrite');
+		
 		return cursor;
 	}
 }
