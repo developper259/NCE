@@ -2,10 +2,12 @@ class Command {
 	constructor(e) {
 		this.editor = e;
 		this.isActive = false;
+		this.searchTitle = "";
 		this.instance = getElement(".command");
 
 		this.top = getElement(".command-els-top");
 		this.all = getElement(".command-els");
+		this.searchBar = getElement(".command-search");
 
 		this.active = this.active.bind(this);
 		addEvent("click", this.mouseClick.bind(this));
@@ -46,6 +48,7 @@ class Command {
 		// {"top": [tree, tree], "all": [tree]}
 		this.top.innerHTML = "";
 		this.all.innerHTML = "";
+		this.searchBar.placeholder = this.searchTitle;
 		if (dic.top.length != 0) {
 			this.top.style.display = "flex";
 			for (let el of dic.top) {

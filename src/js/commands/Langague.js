@@ -5,6 +5,8 @@ class Langague extends Command {
 		this.value = 0;
 		this.values = ["HTML", "CSS", "JavaScript", "Java", "NDL", "Python"];
 
+		this.searchTitle = "Select Language";
+
 		this.trees = {
 			top: [{ title: "NDL", author: ["most used"] }],
 			all: this.generateDicAll(this.values),

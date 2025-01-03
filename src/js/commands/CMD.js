@@ -2,8 +2,10 @@ class CMD extends Command {
 	constructor(e) {
 		super(e);
 
-		this.values = ["save file", "open file", "close file"];
+		this.values = [">save file", ">open file", ">close file"];
 		this.actionValue = ["save", "open_file", "close_file"];
+
+		this.searchTitle = "Search File by name";
 
 		this.trees = {
 			top: [],

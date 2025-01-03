@@ -6,6 +6,8 @@ class Config_space extends Command {
 		this.values = ["Spaces: 1", "Spaces: 2", "Spaces: 3", "Spaces: 4", "Spaces: 5", "Spaces: 6", "Spaces: 7", "Spaces: 8"];
 		this.realValues = [1, 2, 3, 4, 5, 6, 7, 8];
 
+		this.searchTitle = "Select Tabs Size";
+
 		this.trees = {
 			top: [{ title: this.values[this.value], author: ["currently used"] }],
 			all: this.generateDicAll(this.values),
