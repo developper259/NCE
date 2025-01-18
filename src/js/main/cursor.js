@@ -3,12 +3,15 @@ class Cursor {
         this.editor = e;
         this._row = undefined;
         this._column = undefined;
-        this.mX = 10;
-        this.mY = 7;
-        this.mpY = 21;
-        this.mpX = 10;
-        this.leterSize = 12;
+        this.mX = 10;            // diff X axis
+        this.mY = 7;             // diff Y axis
+        this.mpY = 19;           // diff on calcul Y axis
+        this.mpX = 10;           // diff on calcul X axis
+        this.leterSize = 10.8;   // size of leter     (fs : 20 -> 12, fs : 18 -> 10.8)
         this.cD = document.querySelector(".editor-caret");
+
+        this.cD.style.height = this.editor.posY + "px";
+        this.cD.style.marginLeft = this.mpX + "px";
     }
 
     get row() {
@@ -32,19 +35,19 @@ class Cursor {
     }
 
     rowToY(row) {
-        return baseY + posY * row - this.mpY;
+        return this.editor.baseY + this.editor.posY * row - this.mpY;
     }
 
     columnToX(column) {
-        return baseX + (column - 1) * this.leterSize + 1;
+        return this.editor.baseX + (column - 1) * this.leterSize + 1;
     }
 
     yToRow(y) {
-        return roundY((y - baseY) / posY) + 1;
+        return roundY((y - this.editor.baseY) / this.editor.posY) + 1;
     }
 
     xToColumn(x) {
-        return roundX((x - baseX) / this.leterSize) + 1;
+        return roundX((x - this.editor.baseX) / this.leterSize) + 1;
     }
 
     onClick(event) {

@@ -1,7 +1,3 @@
-const baseX = 39;
-const baseY = 2;
-const posY = 25;
-
 class LineController {
     constructor(editor) {
         this.editor = editor;
@@ -40,7 +36,6 @@ class LineController {
 
     // Méthodes
     loadContent(content) {
-        console.log(this.editor.fileManager.activeFile);
         this.lines = content.split("\n");
         this.maxIndex = this.lines.length;
     }
@@ -180,8 +175,8 @@ class LineController {
 
             this.editor.output.appendChild(lineOBJ);
 
-            const x = baseX;
-            const y = baseY + posY * i;
+            const x = this.editor.baseX;
+            const y = this.editor.baseY + this.editor.posY * i;
 
             lineOBJ.style.position = "absolute";
             lineOBJ.style.top = y + "px";
@@ -211,7 +206,7 @@ class LineController {
             for (let i = 0; i < linesN.length; i++) {
                 const line = linesN[i];
 
-                const y = baseY + posY * i;
+                const y = this.editor.baseY + this.editor.posY * i;
                 line.style.top = y + "px";
 
                 line.addEventListener("click", () => {

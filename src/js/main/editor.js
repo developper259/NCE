@@ -53,6 +53,13 @@ class Editor {
 		this.selected = false;
 		this.panel = undefined;
 
+		const lineN = document.querySelector(".line-numbers");
+
+		this.baseX = parseInt(window.getComputedStyle(lineN).width) + 2;   // left margin (2 represents the difference left margin)
+		this.baseY = 2;    // top margin
+		this.posY = 23;    // size of a line
+
+
 		this.languages = [
             new PlainText(this),
             new Javascript(this),

@@ -287,7 +287,10 @@ class KeyBinding {
 
 		if (y == 1) {
 			if (this.editor.fileManager.activeFile.historyX != 0) this.editor.fileManager.activeFile.historyX = 0;
-			else return;
+			else {
+				this.editor.selectController.isMouseDown = false;
+				return;
+			}
 		}else y -= 1;
 
 		this.editor.cursor.setCursorPosition(y, this.editor.fileManager.activeFile.historyX);
@@ -318,7 +321,10 @@ class KeyBinding {
 		if (y == this.editor.lineController.maxIndex) {
 			if (this.editor.fileManager.activeFile.historyX != this.editor.lineController.getLineLength(y - 1)) 
 				this.editor.fileManager.activeFile.historyX = this.editor.lineController.getLineLength(y - 1);
-			else return;
+			else {
+				this.editor.selectController.isMouseDown = false;
+				return;
+			}
 		} else y += 1
 
 		this.editor.cursor.setCursorPosition(y, this.editor.fileManager.activeFile.historyX);

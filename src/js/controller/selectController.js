@@ -483,8 +483,10 @@ class SelectController {
 		let lineOBJStart = this.getSelectOBJLine(yStart);
 		let lineOBJEnd = this.getSelectOBJLine(yEnd);
 
-		if (lineContentStart != contentStart) {
+		if (lineContentStart != contentStart || contentStart.length == 0) {
 			if (lineOBJStart) lineOBJStart.remove();
+			if (lengthStart == 0) lengthStart = 1;
+
 			this.createSelectEl(xStart + 1, lengthStart, yStart, "selected", contentStart);
 		}
 
@@ -496,10 +498,13 @@ class SelectController {
 
 		for (var i = 0; i < this.editor.lineController.maxIndex; i++) {
 			if (i != yStart && i != yEnd) {
-				let lineOBJ = this.getSelectOBJLine(i);
-				let contentLine = this.getTextSelectedLine(i);
+				const lineOBJ = this.getSelectOBJLine(i);
+				const contentLine = this.getTextSelectedLine(i);
+				let width = 0;
+				if (lineOBJ) width = parseInt(window.getComputedStyle(lineOBJ).width);
+
 				if ((yStart < i && i < yEnd) || (yStart > i && i > yEnd)) {
-					if (lineOBJ == undefined || contentLine.length != this.editor.lineController.getLineLength(i)) this.selectLine(i, false);
+					if (lineOBJ == undefined || contentLine.length != this.editor.lineController.getLineLength(i) || width == 0) this.selectLine(i, false);
 				} else {
 					if (lineOBJ) lineOBJ.remove();
 				}

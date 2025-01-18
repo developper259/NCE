@@ -88,7 +88,6 @@ class Javascript extends LanguageController {
         let response = {value: false, params: {}};
 
         if (words.length > 1 && word == '/') {
-            console.log(oldWord);
             if (oldWord == '*') {
                 inFull = false;
                 response.value = true;
