@@ -24,8 +24,12 @@ class FileManager {
 				this.files.push(file);
 				this.setFocusFile(file);
 			}
-			await this.activeFile.loadContent();
+
 			this.activeFile.setIsSaved(true);
+			await this.activeFile.loadContent();
+
+			const l = this.editor.languageController.getLanaguage(this.activeFile);
+			this.setLanguage(l);
 		}
 		this.editor.refreshAll();
 	}
@@ -181,5 +185,12 @@ class FileManager {
 
 	getTab(id) {
 		return getElement(`.file-manager .file-el[id="${id}"]`);
+	}
+
+	setLanguage(language) {
+		if (this.activeFile) {
+			this.activeFile.language = language;
+			this.editor.refreshAll();
+		}
 	}
 }

@@ -28,7 +28,6 @@ class WriterController {
 			"[",
 			"]",
 			"^",
-			"_",
 			"`",
 			"{",
 			"|",
@@ -59,11 +58,11 @@ class WriterController {
 		let tableSplit = [];
 		for (let char of txt) {
 			if (this.separator.includes(char)) {
-				if (this.separator.includes(oldChar)) {
+				/*if (this.separator.includes(oldChar)) {
 					tableSplit[tableSplit.length - 1] += char;
-				} else {
+				} else {*/
 					tableSplit.push(char);
-				}
+				//}
 			} else {
 				if (!tableSplit.length || this.separator.includes(oldChar)) {
 					tableSplit.push(char);
@@ -85,12 +84,12 @@ class WriterController {
 		let tableSplit = [];
 		for (let char of txt) {
 			if (this.separator.includes(char)) {
-				let c = char.replace(/\t/g, '_'.repeat(CONFIG_GET('tab_width')));
-				if (this.separator.includes(oldChar)) {
+				let c = char.replace(/\t/g, ' '.repeat(CONFIG_GET('tab_width')));
+				/*if (this.separator.includes(oldChar)) {
 					tableSplit[tableSplit.length - 1] += c;
-				} else {
+				} else {*/
 					tableSplit.push(c);
-				}
+				//}
 			} else {
 				if (!tableSplit.length || this.separator.includes(oldChar)) {
 					tableSplit.push(char);
@@ -107,9 +106,7 @@ class WriterController {
 		return tableSplit;
 	}
 
-	toHTML(txt) {
-		let result = '<div class="line editor-select">$value</div>';
-
+	toHTML(txt, id='') {
 		let resultWords = "";
 
 		let words = this.splitWordView(txt);
@@ -121,7 +118,9 @@ class WriterController {
 			}
 		}
 
-		return result.replace("$value", resultWords);
+		let result = `<div class="line editor-select">${resultWords}</div>`;
+
+		return result;
 	}
 
 	write(txt) {
@@ -172,8 +171,19 @@ class WriterController {
 			}
 			this.editor.cursor.setCursorPosition(y + newLines.length, x);
 		}
-		CALLEVENT('onChange');
-		CALLEVENT('onWrite');
+
+		CALLEVENT('onChange', {
+			beforeRow: y,
+			beforeColumn: x,
+            afterRow: y,
+            afterColumn: x
+		});
+		CALLEVENT('onWrite', {
+			beforeRow: y,
+			beforeColumn: x,
+            afterRow: y,
+            afterColumn: x
+		});
 	}
 
 	delete(x, y) {
@@ -195,8 +205,18 @@ class WriterController {
 
 		this.editor.lineController.changeLine(newLine, cursor.row - 1);
 
-		CALLEVENT('onChange');
-		CALLEVENT('onWrite');
+		CALLEVENT('onChange', {
+			beforeRow: y,
+			beforeColumn: x,
+            afterRow: cursor.row,
+            afterColumn: cursor.column
+		});
+		CALLEVENT('onWrite', {
+			beforeRow: y,
+			beforeColumn: x,
+            afterRow: cursor.row,
+            afterColumn: cursor.column
+		});
 
 		return cursor;
 	}
@@ -247,8 +267,18 @@ class WriterController {
 		}
 		this.editor.lineController.changeLine(newLine, cursor.row - 1);
 
-		CALLEVENT('onChange');
-		CALLEVENT('onWrite');
+		CALLEVENT('onChange', {
+			beforeRow: y,
+			beforeColumn: x,
+            afterRow: cursor.row,
+            afterColumn: cursor.column
+		});
+		CALLEVENT('onWrite', {
+			beforeRow: y,
+			beforeColumn: x,
+            afterRow: cursor.row,
+            afterColumn: cursor.column
+		});
 
 		return cursor;
 	}
@@ -287,8 +317,18 @@ class WriterController {
 		}
 		this.editor.selectController.unSelectAll();
 		
-		CALLEVENT('onChange');
-		CALLEVENT('onWrite');
+		CALLEVENT('onChange', {
+			beforeRow: cursor.row,
+			beforeColumn: cursor.column,
+            afterRow: cursor.row,
+            afterColumn: cursor.column
+		});
+		CALLEVENT('onWrite', {
+			beforeRow: cursor.row,
+			beforeColumn: cursor.column,
+            afterRow: cursor.row,
+            afterColumn: cursor.column
+		});
 		
 		return cursor;
 	}

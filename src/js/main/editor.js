@@ -50,12 +50,22 @@ class Editor {
 	constructor() {
 		this.output = document.querySelector(".editor-output");
 
+		this.selected = false;
+		this.panel = undefined;
+
+		this.languages = [
+            new PlainText(this),
+            new Javascript(this),
+        ];
+
 		this.api = window.api;
 
 		this.writerController = new WriterController(this);
 		this.lineController = new LineController(this);
 		this.selectController = new SelectController(this);
 		this.keyBindingController = new keyBindingController(this);
+		this.languageController = new LanguageController(this);
+
 		this.fileManager = new FileManager(this);
 
 		this.keyBinding = new KeyBinding(this);
@@ -69,9 +79,6 @@ class Editor {
 
 		this.test = new Test(this);
 
-		this.selected = false;
-		this.panel = undefined;
-
 		addEvent("click", this.onClick.bind(this), document);
 	}
 
@@ -80,6 +87,7 @@ class Editor {
 		if (this.lineController) this.lineController.refresh();
 		if (this.selectController) this.selectController.refreshStartEndSelect();
 		this.fileManager.refresh();
+		if (this.fileManager.activeFile) this.fileManager.activeFile.language.refreshAll();
 	}
 
 	onClick(e) {
@@ -89,6 +97,7 @@ class Editor {
 			this.selected = true;
 			CALLEVENT("cursorenabled");
 		} else {
+			if (c.contains("command-el") || c.contains("command-el-title")) return;
 			this.selected = false;
 			CALLEVENT("cursordisabled");
 		}

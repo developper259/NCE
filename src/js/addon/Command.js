@@ -103,6 +103,7 @@ class Command {
 		this.instance.style.display = "none";
 		this.isActive = false;
 		this.editor.panel = undefined;
+		this.editor.selected = true;
 	}
 
 	active() {
@@ -111,4 +112,5 @@ class Command {
 	}
 
 	onSelect(title) {}
+	refresh() {}
 }

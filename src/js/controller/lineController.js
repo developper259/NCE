@@ -236,6 +236,13 @@ class LineController {
         return lines[index];
     }
 
+    getWordsOBJ(row) {
+        if (row == null) return;
+        const l = getElements(".line")[row - 1];
+        const words = l.querySelectorAll(".line-word");
+        return words;
+    }
+
     getWordOBJ(row, column) {
         if (row == null || column == null) return;
         const l = getElements(".line")[row - 1];

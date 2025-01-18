@@ -31,6 +31,11 @@ class BottomBar {
 		rightBottomBar.style.display = 'flex';
 
 		this.refreshCursorOBJ();
+		
+		for (let key in this.scrollersValue) {
+			let instance = this.scrollersValue[key].instance;
+			instance.refresh();
+		}
 
 		for (let scroller of this.scrollers) {
 			let instance = this.scrollersValue[scroller.id].instance;

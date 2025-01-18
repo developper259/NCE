@@ -34,6 +34,8 @@ class FileNode {
         // Writer Controller
         this.insertMode = false;
 
+        this.language = new PlainText(this.editor);
+
         addEvent('onChange', this.onChange.bind(this), this.editor.output);
     }
 
@@ -69,6 +71,8 @@ class FileNode {
         this.endSelect = file.endSelect;
 
         this.insertMode = file.insertMode;
+
+        this.language = file.language;
     }
 
     async loadContent() {
@@ -82,8 +86,10 @@ class FileNode {
     }
 
     async save() {
-        if (!this.path) this.saveAs();
-        else {
+        if (!this.path) {
+            await this.saveAs();
+            return;
+        }else {
             await this.editor.api.saveFile(this.path, this.editor.lineController.getContent());
         }
         this.setIsSaved(true);
