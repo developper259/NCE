@@ -1,6 +1,8 @@
 class LineController {
     constructor(editor) {
         this.editor = editor;
+        this.maxViewLine = 36;           // 34 + marge
+        this.maxCharactersPerLine = 130; // 102 + marge
     }
 
     // Getters et Setters
@@ -54,7 +56,6 @@ class LineController {
 
     sliceLine(index, posA, posB) {
         let r = "";
-        const l = this.lines[index];
 
         if (posB === undefined) posB = this.getLineLength(index);
 
@@ -91,6 +92,8 @@ class LineController {
         let line = this.lines[y];
         let i = 0;
 
+        if (!line || index >= line.length) return '';
+
         for (let c of line) {
             if (c === '\t') {
                 if (i <= index && index < (i + CONFIG_GET('tab_width'))) {
@@ -106,6 +109,7 @@ class LineController {
 
     getLetterText(text, index) {
         let i = 0;
+        if (!text || index >= text.length) return '';
 
         for (let c of text) {
             if (c === '\t') {
@@ -118,6 +122,41 @@ class LineController {
             }
         }
         return undefined;
+    }
+
+    getViewContent() {
+        let scrollY = 1;
+        let scrollX = 1;
+
+        const endY = this.maxViewLine * scrollY;
+        const endX = this.maxCharactersPerLine * scrollX;
+
+        const startY = endY - this.maxViewLine;
+        const startX = endX - this.maxCharactersPerLine;
+
+        let lines = [];
+
+        for (let i = startY; i <= endY; i++) {
+            let line = this.sliceLine(i, startX, endX);
+            lines.push(line);
+        }
+        return lines;
+    }
+
+    getViewNumberLines() {
+        let scrollY = 1;
+
+        const endY = this.maxViewLine * scrollY;
+        const startY = endY - this.maxViewLine;
+
+        let lines = []
+
+        for (let i = startY; i <= endY; i++) {
+            if (i > this.maxIndex - 1) break;
+            lines.push(i+1);
+        }
+
+        return lines;
     }
 
     setFocusLine(index) {
@@ -139,13 +178,17 @@ class LineController {
             txt,
             ...this.lines.slice(index)
         ];
+
         this.refresh();
+
         CALLEVENT('onChange');
     }
 
     changeLine(txt, index) {
         this.lines[index] = txt;
+
         this.refresh();
+
         CALLEVENT('onChange');
     }
 
@@ -153,25 +196,22 @@ class LineController {
         if (index > this.maxIndex) return;
         this.maxIndex -= 1;
         this.lines.splice(index, 1);
+
         this.refresh();
+
         CALLEVENT('onChange');
     }
 
     refreshLine() {
 		if (!this.editor.fileManager.activeFile) return;
-        let parser = new DOMParser();
 
         if (this.lines.length !== this.maxIndex) this.maxIndex = this.lines.length;
 
+        const lines = this.getViewContent();
+
         this.editor.output.innerHTML = "";
-        for (let i = 0; i < this.maxIndex; i++) {
-            let doc = parser.parseFromString(
-                this.editor.writerController.toHTML(this.lines[i]),
-                "text/html",
-            );
-            let lineOBJ = doc
-                .createRange()
-                .createContextualFragment(doc.body.innerHTML).firstElementChild;
+        for (let i = 0; i < lines.length; i++) {
+            let lineOBJ = this.createLineOBJ(lines[i]);
 
             this.editor.output.appendChild(lineOBJ);
 
@@ -196,10 +236,13 @@ class LineController {
         if (this.maxIndex === 0) this.maxIndex = 1;
 
         if (this.maxIndex !== linesN.length) {
-            lineN.innerHTML = Array.from(
-                { length: this.maxIndex },
-                (_, index) => `<span class="line-el editor-el">${index + 1}</span>`
-            ).join("");
+            let innerHTML = '';
+
+            const l = this.getViewNumberLines();
+
+            for (let i = 0; i < l.length; i++) innerHTML += `<span class="line-el editor-el">${l[i]}</span>`;
+            
+            lineN.innerHTML = innerHTML;
 
             linesN = lineN.querySelectorAll(".line-el");
 
@@ -221,19 +264,35 @@ class LineController {
         this.setFocusLine(this.index);
     }
 
+    createLineOBJ(line) {
+        let parser = new DOMParser();
+
+        let doc = parser.parseFromString(
+            this.editor.writerController.toHTML(line),
+            "text/html",
+        );
+
+        return doc
+            .createRange()
+            .createContextualFragment(doc.body.innerHTML).firstElementChild;
+    }
+
     getLineOBJ(index) {
         const lines = document.querySelectorAll(".editor-output .line");
+        if (!lines) return;
         return lines[index];
     }
 
     getLineNumberOBJ(index) {
         const lines = document.querySelectorAll(".line-el");
+        if (!lines) return;
         return lines[index];
     }
 
     getWordsOBJ(row) {
         if (row == null) return;
         const l = getElements(".line")[row - 1];
+        if (!l) return;
         const words = l.querySelectorAll(".line-word");
         return words;
     }
@@ -241,6 +300,7 @@ class LineController {
     getWordOBJ(row, column) {
         if (row == null || column == null) return;
         const l = getElements(".line")[row - 1];
+        if (!l) return;
         const words = l.querySelectorAll(".line-word");
         return words[column];
     }
@@ -248,6 +308,7 @@ class LineController {
     getLetterOBJ(row, column) {
         if (row == null || column == null) return;
         const l = getElements(".line")[row - 1];
+        if (!l) return;
         const letters = l.querySelectorAll(".line-letter");
         return letters[column];
     }

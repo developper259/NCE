@@ -84,12 +84,15 @@ class LanguageController {
         const ws = this.editor.lineController.getWordsOBJ(row);
         const wsStr = this.editor.writerController.splitWord(line);
 
+        if (!ws || !wsStr) return;
+
         for (let i = 0; i < wsStr.length; i++) {
-            if (wsStr[i] != ' ' && wsStr[i] != '\t' && wsStr[i].length > 0)  {
+            if (wsStr[i] && wsStr[i] != ' ' && wsStr[i] != '\t' && wsStr[i].length > 0)  {
                 words.push(ws[i]);
                 wordsStr.push(wsStr[i]);
             }
         }
+        if (!words || words.length == 0) return {};
 
         let params = p;
 
@@ -100,7 +103,7 @@ class LanguageController {
                 words[i].style.color = color;
                 params = type.params;
             }else{
-                words[i].style.color = this.colors.none;
+                if (words[i]) words[i].style.color = this.colors.none;
                 params = {};
             }
         }
@@ -112,7 +115,7 @@ class LanguageController {
         for (let i = 1; i <= this.editor.lineController.maxIndex; i++) {
             r = this.refreshLine(i, r);
             
-            r.inLine = false;
+            if (r) r.inLine = false;
         }
     }
 

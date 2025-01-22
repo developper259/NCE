@@ -31,7 +31,6 @@ class FileManager {
 			const l = this.editor.languageController.getLanaguage(this.activeFile);
 			this.setLanguage(l);
 		}
-		this.editor.refreshAll();
 	}
 
 	closeFiles() {

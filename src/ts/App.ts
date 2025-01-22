@@ -8,7 +8,15 @@ export class App {
   constructor() {
     this.window = new Window(this.name);
 
-    app.on("ready", this.window.create);
+    const gotTheLock = app.requestSingleInstanceLock();
+    if (!gotTheLock) {
+      app.quit();
+    } else {
+      this.setupAppEvents();
+    }
+  }
+  setupAppEvents() {
+    app.on("ready", () => this.window.create());
 
     app.on("window-all-closed", () => {
       app.quit();

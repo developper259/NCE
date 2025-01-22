@@ -139,8 +139,6 @@ class KeyBinding {
 	control_undo(s, c, m, a) {
 		if (!this.editor.fileManager.activeFile.history) return;
 
-		console.log(this.editor.fileManager.activeFile.history, this.editor.fileManager.activeFile.indexHistory);
-
 		if (!this.editor.fileManager.activeFile.history[this.editor.fileManager.activeFile.history.length - (this.editor.fileManager.activeFile.indexHistory + 1)]) return;
 
 		this.editor.fileManager.activeFile.indexHistory += 1;

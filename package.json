@@ -1,5 +1,6 @@
 {
   "name": "NCE (NDL Code Editor)",
+  "productName": "NCE",
   "version": "1.0.0",
   "description": "",
   "main": "src/main.ts",

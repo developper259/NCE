@@ -93,7 +93,7 @@ class FileNode {
             await this.editor.api.saveFile(this.path, this.editor.lineController.getContent());
         }
         this.setIsSaved(true);
-        this.editor.refreshAll();
+        this.editor.fileManager.refresh();
     }
 
     async saveAs() {
@@ -106,8 +106,6 @@ class FileNode {
 
     setIsSaved(value) {
         this.isSaved = value;
-
-        this.editor.refreshAll();
     }
 
     onChange() {

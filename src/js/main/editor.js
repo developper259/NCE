@@ -91,8 +91,8 @@ class Editor {
 
 	refreshAll() {
 		this.bottomBar.refresh();
-		if (this.lineController) this.lineController.refresh();
-		if (this.selectController) this.selectController.refreshStartEndSelect();
+		this.lineController.refresh();
+		this.selectController.refreshStartEndSelect();
 		this.fileManager.refresh();
 		if (this.fileManager.activeFile) this.fileManager.activeFile.language.refreshAll();
 	}
