@@ -12,6 +12,7 @@
   justify-content: space-between;
   background-color: #181818;
 }
+
 .bottomBar section,
 .bottomBar .bottomBar-scroller {
   display: flex;
@@ -19,6 +20,7 @@
   justify-content: space-between;
   align-items: center;
 }
+
 .bottomBar-el {
   color: #b8b8b8;
   font-size: 13px;
@@ -27,6 +29,7 @@
   display: flex;
   align-items: center;
 }
+
 .bottomBar-el:hover {
   background-color: #303030;
   cursor: pointer;

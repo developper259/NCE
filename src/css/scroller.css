@@ -1,0 +1,44 @@
+.page-scroller {
+    position: absolute;
+    display: flex;
+    background-color: transparent;
+    border: none;
+    z-index: 4;
+    overflow-x: hidden;
+    cursor: default;
+    user-select: none;
+    margin: 0;
+    padding: 0;
+}
+
+.page-scroller-body {
+    background-color: #202020;
+    border-left: 0.5px solid #161616;
+}
+
+.page-scroller-inactive {
+    display: none;
+}
+
+.page-scroller-vertical {
+    right: 0;
+    height: 100%;
+    width: 15px;
+}
+
+.page-scroller-horizontal {
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 15px;
+}
+
+.page-scroller-item {
+    height: 100%;
+    width: 100%;
+    background: rgba(101, 101, 101, 0.5);
+}
+
+.page-scroller-item:hover {
+    background: rgba(101, 101, 101, 0.7);
+}
