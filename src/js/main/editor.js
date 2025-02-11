@@ -89,8 +89,6 @@ class Editor {
     this.Cconfig_space = new Config_space(this);
     this.bottomBar = new BottomBar(this);
 
-    this.test = new Test(this);
-
     this.writerController.insertMode = true;
 
     addEvent("click", this.onClick.bind(this), document);

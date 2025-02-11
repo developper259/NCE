@@ -206,7 +206,7 @@ class LineController {
       if (!lines[i]) continue;
       if (lines[i].length > this.longuerLine)
         this.longuerLine = lines[i].length;
-      let lineOBJ = this.createLineOBJ(lines[i]);
+      let lineOBJ = this.createLineOBJ(lines[i], i + 1);
 
       this.editor.output.appendChild(lineOBJ);
 
@@ -261,15 +261,17 @@ class LineController {
     this.setFocusLine(this.index);
   }
 
-  createLineOBJ(line) {
+  createLineOBJ(line, row) {
     const html = this.editor.writerController.toHTML(line);
-    return createElement(html);
+    let element = createElement(html);
+    element.dataset.line = row;
+    return element;
   }
 
-  getLineOBJ(index) {
-    const lines = document.querySelectorAll(".editor-output .line");
-    if (!lines) return;
-    return lines[index];
+  getLineOBJ(row) {
+    const line = getElement(".editor-output .line[data-line='" + row + "']");
+    if (!line) return;
+    return line;
   }
 
   getLineNumberOBJ(index) {
@@ -279,8 +281,8 @@ class LineController {
   }
 
   getWordsOBJ(row) {
-    if (row == null) return;
-    const l = getElements(".line")[row - 1];
+    if (row == undefined) return;
+    const l = this.getLineOBJ(row);
     if (!l) return;
     const words = l.querySelectorAll(".line-word");
     return words;
@@ -288,18 +290,10 @@ class LineController {
 
   getWordOBJ(row, column) {
     if (row == null || column == null) return;
-    const l = getElements(".line")[row - 1];
+    const l = this.getLineOBJ(row);
     if (!l) return;
     const words = l.querySelectorAll(".line-word");
     return words[column];
-  }
-
-  getLetterOBJ(row, column) {
-    if (row == null || column == null) return;
-    const l = getElements(".line")[row - 1];
-    if (!l) return;
-    const letters = l.querySelectorAll(".line-letter");
-    return letters[column];
   }
 
   refresh() {

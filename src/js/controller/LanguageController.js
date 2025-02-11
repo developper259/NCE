@@ -78,14 +78,13 @@ class LanguageController {
 
   refreshLine(row, p) {
     const line = this.editor.lineController.lines[row - 1];
-    if (line == null) return;
+    if (line == undefined) return;
 
     const words = [];
     const wordsStr = [];
     const ws = this.editor.lineController.getWordsOBJ(row);
     const wsStr = this.editor.writerController.splitWord(line);
-
-    if (!ws || !wsStr) return;
+    if (!ws || !wsStr || wsStr.length == 0) return {};
 
     for (let i = 0; i < wsStr.length; i++) {
       if (

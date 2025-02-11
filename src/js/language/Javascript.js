@@ -50,6 +50,7 @@ class Javascript extends LanguageController {
         "extends",
         "super",
         "constructor",
+        "console",
       ],
       specialLetter: ["{", "}", "(", ")", "[", "]"],
       separator: [".", ",", ";", ":", "="],
@@ -67,13 +68,12 @@ class Javascript extends LanguageController {
     const oldWord = words[index - 1];
 
     if (maps.includes(oldWord)) response.value = true;
-    if ((index > 1 && oldWord === ".") || nextWord === ".")
-      response.value = true;
+    if (oldWord === "." || nextWord === ".") response.value = true;
     if (
       this.data.specialKeyword.includes(word) ||
       this.data.specialLetter.includes(word) ||
       this.data.keyword.includes(word) ||
-      nextWord != "("
+      nextWord == "("
     )
       response.value = false;
 
@@ -96,7 +96,7 @@ class Javascript extends LanguageController {
   }
   detectString(words, index, params) {
     const s = ['"', "'", "`"];
-    let oldS = params.oldS;
+    let oldS = params.oldS || null;
     let word = words[index];
     let oldWord = words[index - 1];
 

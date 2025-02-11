@@ -273,9 +273,13 @@ class SelectController {
 
   unSelectAll() {
     if (!this.editor.fileManager.activeFile) return;
-    if (this.containsSelected == "") return;
     this.containsSelected = "";
-    this.selectOutput.innerHTML = "";
+
+    let els = getElements(".selected");
+
+    for (let el of els) {
+      el.remove();
+    }
 
     CALLEVENT("onSelect", {
       start: undefined,
