@@ -49,50 +49,49 @@ class Cursor {
     return roundX(x / this.editor.letterSize) + 1;
   }
 
+  isNewPosition(column, row) {
+    return this.column !== column || this.row !== row;
+  }
+
   onClick(event) {
     if (!this.editor.fileManager.activeFile) return;
     this.editor.keyBinding.historyX = undefined;
-    const x =
-      event.clientX - this.editor.output.getBoundingClientRect().left - this.mX;
-    const y =
-      event.clientY - this.editor.output.getBoundingClientRect().top - this.mY;
 
-    const posReal = this.getPositionReverse(this.yToRow(y), this.xToColumn(x));
+    const rect = this.editor.output.getBoundingClientRect();
+    const localX = event.clientX - rect.left - this.mX;
+    const localY = event.clientY - rect.top - this.mY;
+
+    const targetRow = this.yToRow(localY);
+    const targetColumn = this.xToColumn(localX);
+    const posReal = this.getPositionReverse(targetRow, targetColumn);
     if (!posReal) return;
 
-    if (this.editor.lineController.lines[posReal.row - 1]) {
-      const c =
-        this.editor.lineController.lines[posReal.row - 1][posReal.column - 1];
-      if (c === "\t") {
-        const nbTab = getOccurrence(
-          "\t",
-          this.editor.lineController.lines[posReal.row - 1].slice(
-            0,
-            posReal.column
-          )
-        );
-        const calc =
-          ((this.xToColumn(x) -
-            (posReal.column + (nbTab * CONFIG_GET("tab_width") - nbTab))) /
-            CONFIG_GET("tab_width")) *
-          -1;
+    const line = this.editor.lineController.lines[posReal.row - 1];
+    if (line) {
+      const ch = line[posReal.column - 1];
+      if (ch === "\t") {
+        const tabWidth = CONFIG_GET("tab_width");
+        let nbTab = 0;
+        const limit = Math.min(posReal.column, line.length);
+        for (let i = 0; i < limit; i++) {
+          if (line.charCodeAt(i) === 9) nbTab++;  // 9 == charCode of tab
+        }
+        const adjustedCol = posReal.column + (nbTab * tabWidth - nbTab);
+        const calc = ((targetColumn - adjustedCol) / tabWidth) * -1;
         if (calc > 0.5) posReal.column -= 1;
       }
     }
+
     const pos = this.getPosition(posReal.row, posReal.column);
     if (!pos) return;
     const row = pos.row;
     const column = pos.column;
-
-    if (
-      this.row !== row ||
-      this.column !== column ||
-      this.column == 0 ||
-      this.row == 0
-    ) {
-      CALLEVENT("cursormove", { row, column });
+    if (this.isNewPosition(row, column)) {
+      //CALLEVENT("cursormove", { row, column });
       this.setCursorPosition(posReal.row, posReal.column);
     }
+
+    return pos;
   }
 
   setCursorPosition(row, column) {
@@ -103,12 +102,7 @@ class Cursor {
     row = pos.row;
     column = pos.column;
 
-    if (
-      this.row !== row ||
-      this.column !== column ||
-      this.column == 0 ||
-      this.row == 0
-    ) {
+    if (this.isNewPosition(row, column)) {
       const placeY = this.rowToY(row) - 4;
       const placeX = this.columnToX(column);
 
@@ -126,7 +120,7 @@ class Cursor {
     }
   }
 
-  getPosition(row, column) {
+  getPosition(row, column) {    // visible position of cursor == column
     if (!this.editor.fileManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.maxIndex) {
@@ -159,7 +153,7 @@ class Cursor {
     return { row: row, column: column };
   }
 
-  getPositionReverse(row, column) {
+  getPositionReverse(row, column) {    // real position of cursor == x
     if (!this.editor.fileManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.maxIndex) {

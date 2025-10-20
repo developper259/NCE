@@ -72,7 +72,7 @@ class Editor {
     this.api = window.api;
 
     this.fileManager = new FileManager(this);
-    this.scrollerManager = new ScrollerManager(this);
+    //this.scrollerManager = new ScrollerManager(this);
 
     this.writerController = new WriterController(this);
     this.lineController = new LineController(this);
@@ -91,11 +91,11 @@ class Editor {
 
     this.writerController.insertMode = true;
 
-    addEvent("click", this.onClick.bind(this), document);
+    addEvent("click", this.onClick.bind(this));
   }
 
   refreshAll() {
-    this.scrollerManager.refreshAll();
+    //this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
     this.lineController.refresh();
     this.selectController.refreshStartEndSelect();
@@ -130,6 +130,6 @@ class Editor {
 
 var editor = null;
 
-window.addEventListener("load", (event) => {
+document.addEventListener("DOMContentLoaded", (event) => {
   editor = new Editor();
-});
+}, window);

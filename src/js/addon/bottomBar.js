@@ -14,7 +14,22 @@ class BottomBar {
     this.cursorOBJ = getElement(".bottomBar-cursorPos");
     this.scrollers = getElements(".scroller-open");
 
+    this.initButton();
     addEvent("onEvent", this.refresh.bind(this), this.editor.output);
+  }
+
+  initButton() {
+    for (let key in this.scrollersValue) {
+      let instance = this.scrollersValue[key].instance;
+      instance.refresh();
+    }
+
+    for (let scroller of this.scrollers) {
+      let instance = this.scrollersValue[scroller.id].instance;
+      let title = scroller.childNodes[1];
+      title.innerText = instance.values[instance.value];
+      addEvent("click", instance.active, scroller);
+    }
   }
 
   refresh() {
@@ -29,23 +44,10 @@ class BottomBar {
     rightBottomBar.style.display = "flex";
 
     this.refreshCursorOBJ();
-
-    for (let key in this.scrollersValue) {
-      let instance = this.scrollersValue[key].instance;
-      instance.refresh();
-    }
-
-    for (let scroller of this.scrollers) {
-      let instance = this.scrollersValue[scroller.id].instance;
-      let title = scroller.childNodes[1];
-      title.innerText = instance.values[instance.value];
-      scroller.addEventListener("click", instance.active);
-    }
   }
 
   refreshCursorOBJ() {
     if (!this.editor.fileManager.activeFile) return;
-    this.editor.selectController.refreshStartEndSelect();
 
     let r = "";
     let countLine = this.editor.selectController.getNumberLineSelected();

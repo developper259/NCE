@@ -87,19 +87,23 @@ class SelectController {
 
   refreshContaisSelected() {
     if (!this.editor.fileManager.activeFile) return;
+
     this.containsSelected = "";
-    let count = 0;
+    let count = this.getNumberLineSelected();
+    if (!count) return;
 
-    for (let i in this.editor.lineController.lines) {
-      let t = this.getTextSelectedLine(i);
-      if (t != undefined) {
-        this.containsSelected += t;
-        count++;
+    const els = this.getSelectOBJ();
+    if (!els || !els.length) return;
 
-        if (count != this.getNumberLineSelected())
-          this.containsSelected += "\n";
-      }
+    const parts = [];
+    console.log(els);
+    for (let i = 0; i < els.length; i++) {
+      const v = els[i].dataset?.value;
+      if (v !== undefined) parts.push(v);
     }
+    this.containsSelected = parts.join("\n");
+
+    console.log(this.containsSelected);
   }
 
   refreshStartEndSelect() {
@@ -245,27 +249,38 @@ class SelectController {
 
   getNumberLineSelected() {
     if (!this.editor.fileManager.activeFile) return;
-    let n = 0;
-    for (var i = 0; i < this.editor.lineController.maxIndex; i++) {
-      if (this.getSelectOBJLine(i)) n++;
-    }
-    return n;
+    return this.selectOutput.children.length;
   }
 
   getSelectOBJLine(row) {
     if (!this.editor.fileManager.activeFile) return;
     if (row == undefined) return;
-    let obj = getElement(".selected[data-line='" + row + "']");
-    if (obj == null) return undefined;
-    return obj;
+    const children = this.selectOutput ? this.selectOutput.children : null;
+    if (!children || !children.length) return undefined;
+
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i];
+      if (!el.classList || !el.classList.contains("selected")) continue;
+      const line = parseInt(el.dataset.line, 10);
+      if (line === row) return el;
+    }
+    return undefined;
   }
 
   getSelectOBJ() {
     if (!this.editor.fileManager.activeFile) return;
-    let els = getElements(".selected");
+    const children = this.selectOutput ? this.selectOutput.children : null;
+    if (!children || !children.length) return [];
+
+    const els = [];
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i];
+      if (el.classList && el.classList.contains("selected")) els.push(el);
+    }
+
     els.sort((a, b) => {
-      let aLine = a.dataset.line;
-      let bLine = b.dataset.line;
+      const aLine = parseInt(a.dataset.line, 10);
+      const bLine = parseInt(b.dataset.line, 10);
       return aLine - bLine;
     });
     return els;
@@ -275,10 +290,14 @@ class SelectController {
     if (!this.editor.fileManager.activeFile) return;
     this.containsSelected = "";
 
-    let els = getElements(".selected");
+    if (this.selectOutput) {
+      this.selectOutput.innerHTML = "";
+    } else {
+      let els = this.getSelectOBJ();
 
-    for (let el of els) {
-      el.remove();
+      for (let el of els) {
+        el.remove();
+      }
     }
 
     CALLEVENT("onSelect", {
@@ -441,7 +460,7 @@ class SelectController {
     this.editor.keyBinding.historyX = undefined;
 
     if (new Date().getTime() - this.lastClickTime > this.clickTime)
-      this.unSelectAll();
+      if (this.containsSelected.length > 0) this.unSelectAll();
 
     this.editor.cursor.onClick(event);
     const pos = this.editor.cursor.getCursorPositionReverse();
@@ -491,7 +510,7 @@ class SelectController {
       column: c,
       row: r,
     };
-
+    
     if (this.startSelect.row == this.endSelect.row)
       this.calculSelectSimpleLine();
     else this.calculSelectMultiLine();
@@ -552,91 +571,76 @@ class SelectController {
   }
 
   calculSelectMultiLine() {
-    let xStart;
-    let lengthStart;
-    let yStart;
-    let contentStart;
+  if (!this.editor.fileManager.activeFile) return;
 
-    let xEnd;
-    let lengthEnd;
-    let yEnd;
-    let contentEnd;
+  const lc = this.editor.lineController;
+  const cur = this.editor.cursor;
 
-    if (this.startSelect.row < this.endSelect.row) {
-      xStart = this.startSelect.column;
-      yStart = this.startSelect.row - 1;
-      lengthStart = this.editor.lineController.lines[yStart].length - xStart;
-      contentStart = this.editor.lineController.lines[yStart].slice(xStart);
+  // Normalize selection to top/bottom
+  const startIsTop = this.startSelect.row <= this.endSelect.row;
+  const topRow = startIsTop ? this.startSelect.row : this.endSelect.row;
+  const bottomRow = startIsTop ? this.endSelect.row : this.startSelect.row;
+  const topColView = startIsTop ? this.startSelect.column : this.endSelect.column;
+  const bottomColView = startIsTop ? this.endSelect.column : this.startSelect.column;
 
-      xEnd = 0;
-      lengthEnd = this.endSelect.column;
-      yEnd = this.endSelect.row - 1;
-      contentEnd = this.editor.lineController.lines[yEnd].slice(
-        yEnd,
-        0,
-        lengthEnd
-      );
-    } else {
-      xStart = 0;
-      yStart = this.startSelect.row - 1;
-      lengthStart = this.startSelect.column;
-      contentStart = this.editor.lineController.lines[yStart].slice(
-        yStart,
-        0,
-        lengthStart
-      );
+  const yStart = topRow - 1;
+  const yEnd = bottomRow - 1;
 
-      xEnd = this.endSelect.column;
-      yEnd = this.endSelect.row - 1;
-      lengthEnd = this.editor.lineController.lines[yEnd].length - xEnd;
-      contentEnd = this.editor.lineController.lines[yEnd].slice(yEnd, xEnd);
-    }
+  // Convert view columns to raw indices for slicing (handles tabs)
+  const topRaw = cur.getPositionReverse(topRow, topColView)?.column ?? 0;
+  const bottomRaw = cur.getPositionReverse(bottomRow, bottomColView)?.column ?? 0;
 
-    let lineContentStart = this.getTextSelectedLine(yStart);
-    let lineContentEnd = this.getTextSelectedLine(yEnd);
+  const lineStart = lc.lines[yStart] ?? "";
+  const lineEnd = lc.lines[yEnd] ?? "";
 
-    let lineOBJStart = this.getSelectOBJLine(yStart);
-    let lineOBJEnd = this.getSelectOBJLine(yEnd);
+  // Compute view lengths for rendering
+  const startViewLen = Math.max(0, (lc.getViewLineLength ? lc.getViewLineLength(yStart) : lineStart.length) - topColView);
+  const endViewLen = Math.max(0, bottomColView);
 
-    if (lineContentStart != contentStart || contentStart.length == 0) {
-      if (lineOBJStart) lineOBJStart.remove();
-      if (lengthStart == 0) lengthStart = 1;
+  // Compute values to store in dataset (raw indices)
+  const contentStart = startViewLen > 0 ? lineStart.slice(topRaw) : "";
+  const contentEnd = endViewLen > 0 ? lineEnd.slice(0, bottomRaw) : "";
 
-      this.createSelectEl(
-        xStart + 1,
-        lengthStart,
-        yStart,
-        "selected",
-        contentStart
-      );
-    }
+  // Update start line selection
+  const lineOBJStart = this.getSelectOBJLine(yStart);
+  const lineContentStart = this.getTextSelectedLine(yStart);
+  if (startViewLen > 0) {
+    if (lineOBJStart) lineOBJStart.remove();
+    this.createSelectEl(topColView + 1, startViewLen, yStart, "selected", contentStart);
+  } else if (lineOBJStart) {
+    lineOBJStart.remove();
+  }
 
-    if (lineContentEnd != contentEnd || contentEnd.length == 0) {
-      if (lineOBJEnd) lineOBJEnd.remove();
+  // Update end line selection
+  const lineOBJEnd = this.getSelectOBJLine(yEnd);
+  const lineContentEnd = this.getTextSelectedLine(yEnd);
+  if (endViewLen > 0) {
+    if (lineOBJEnd) lineOBJEnd.remove();
+    this.createSelectEl(1, endViewLen, yEnd, "selected", contentEnd);
+  } else if (lineOBJEnd) {
+    lineOBJEnd.remove();
+  }
 
-      this.createSelectEl(xEnd + 1, lengthEnd, yEnd, "selected", contentEnd);
-    }
+  // Middle lines: select entire line
+  for (let i = 0; i < lc.maxIndex; i++) {
+    if (i === yStart || i === yEnd) continue;
 
-    for (var i = 0; i < this.editor.lineController.maxIndex; i++) {
-      if (i != yStart && i != yEnd) {
-        const lineOBJ = this.getSelectOBJLine(i);
-        const contentLine = this.getTextSelectedLine(i);
-        let width = 0;
-        if (lineOBJ) width = parseInt(window.getComputedStyle(lineOBJ).width);
+    const isBetween = (yStart < i && i < yEnd) || (yStart > i && i > yEnd);
+    const lineOBJ = this.getSelectOBJLine(i);
 
-        if ((yStart < i && i < yEnd) || (yStart > i && i > yEnd)) {
-          if (
-            lineOBJ == undefined ||
-            contentLine.length != this.editor.lineController.lines[i].length ||
-            width == 0
-          )
-            this.selectLine(i, false);
-        } else {
-          if (lineOBJ) lineOBJ.remove();
-        }
+    if (isBetween) {
+      const expectedLen = (lc.lines[i] || "").length;
+      const currentValue = this.getTextSelectedLine(i) || "";
+      const width = lineOBJ ? parseInt(window.getComputedStyle(lineOBJ).width, 10) : 0;
+
+      if (!lineOBJ || currentValue.length !== expectedLen || width === 0) {
+        this.selectLine(i, false);
       }
+    } else if (lineOBJ) {
+      lineOBJ.remove();
     }
   }
+}
 
   initEventListeners() {
     addEvent("mousedown", this.mouseDown.bind(this), this.editor.output);

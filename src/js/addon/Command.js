@@ -61,10 +61,10 @@ class Command {
       this.all.innerHTML += el;
     }
     for (let el of getElements(".command-el")) {
-      el.addEventListener("click", () => {
+      addEvent("click", () => {
         let title = el.childNodes[1].innerText;
         this.onSelect(title);
-      });
+      }, el);
     }
   }
 

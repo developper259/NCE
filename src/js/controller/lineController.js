@@ -10,8 +10,6 @@ class LineController {
       parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1; // - marge
     this.maxCharacters =
       parseInt(this.editor.output.clientHeight / this.editor.posY) - 2; // 102 - marge
-
-    //this.initScroller();
   }
 
   // Getters et Setters
@@ -55,49 +53,6 @@ class LineController {
     this.editor.fileManager.activeFile.longuerLine = value;
   }
 
-  initScroller() {
-    //vertical scroller
-    this.scrollerV = this.editor.scrollerManager.createScroller(
-      ".editor",
-      ".editor-output",
-      this.editor.scrollerManager.VERTICAL_TYPE,
-      true
-    );
-
-    this.scrollerV.calculProp = () => {
-      if (!this.editor.fileManager.activeFile) return 0;
-      if (this.lines.length <= this.maxLines) return 0;
-      let diff = this.lines.length - this.maxLines;
-      return this.scrollerV.calcul(diff);
-    };
-
-    this.scrollerV.calcIsActive = () => {
-      if (!this.editor.fileManager.activeFile) return false;
-      return true;
-    };
-
-    this.editor.scrollerManager.addScroller(this.scrollerV);
-
-    //horizontal scroller
-    this.scrollerH = this.editor.scrollerManager.createScroller(
-      ".editor",
-      ".editor-output",
-      this.editor.scrollerManager.HORIZONTAL_TYPE,
-      false
-    );
-
-    this.scrollerH.calculProp = () => {
-      if (!this.editor.fileManager.activeFile) return 0;
-      if (this.longuerLine <= this.maxCharacters) return 0;
-      let diff = parseInt((this.longuerLine - this.maxCharacters) / 2);
-      return this.scrollerH.calcul(diff);
-    };
-
-    this.scrollerH.calcIsActive = this.scrollerV.calcIsActive;
-
-    this.editor.scrollerManager.addScroller(this.scrollerH);
-  }
-
   loadContent(content) {
     this.lines = content.split("\n");
     this.maxIndex = this.lines.length;
@@ -116,39 +71,12 @@ class LineController {
     );
   }
   getViewContent() {
-    let scrollY = 1;
-    let scrollX = 1;
-
-    const endY = this.maxViewLine * scrollY;
-    const endX = this.maxCharactersPerLine * scrollX;
-
-    const startY = endY - this.maxViewLine;
-    const startX = endX - this.maxCharactersPerLine;
-
-    let lines = [];
-
-    for (let i = startY; i <= endY; i++) {
-      if (i > this.maxIndex) break;
-      if (this.lines[i] === undefined) continue;
-      let line = this.lines[i].slice(startX, endX);
-      lines.push(line);
-    }
-    return lines;
+    return this.lines || [];
   }
+
   getViewNumberLines() {
-    let scrollY = 1;
-
-    const endY = this.maxViewLine * scrollY;
-    const startY = endY - this.maxViewLine;
-
-    let lines = [];
-
-    for (let i = startY; i <= endY; i++) {
-      if (i > this.maxIndex - 1) break;
-      lines.push(i + 1);
-    }
-
-    return lines;
+    if (!this.lines) return [];
+    return Array.from({ length: this.lines.length }, (_, i) => i + 1);
   }
 
   setFocusLine(index) {
@@ -248,14 +176,14 @@ class LineController {
         const y = this.editor.baseY + this.editor.posY * i;
         line.style.top = y + "px";
 
-        line.addEventListener("click", () => {
+        addEvent("click", () => {
           let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
           this.editor.selectController.unSelectAll();
 
           if (lineOBJ === undefined)
             this.editor.selectController.selectLine(i, true);
           else this.editor.cursor.setCursorPosition(i + 1, 0);
-        });
+        }, line);
       }
     }
     this.setFocusLine(this.index);
