@@ -96,14 +96,11 @@ class SelectController {
     if (!els || !els.length) return;
 
     const parts = [];
-    console.log(els);
     for (let i = 0; i < els.length; i++) {
       const v = els[i].dataset?.value;
       if (v !== undefined) parts.push(v);
     }
     this.containsSelected = parts.join("\n");
-
-    console.log(this.containsSelected);
   }
 
   refreshStartEndSelect() {
@@ -399,11 +396,13 @@ class SelectController {
 
   cursorEnabled(event) {
     if (!this.editor.fileManager.activeFile) return;
-    let els = getElements(".selected-afk");
+    const els = this.getSelectOBJ();
+    if (!els || !els.length) return;
 
-    for (let el of els) {
-      let classes = el.classList;
-      classes.remove("selected-afk");
+    for (const el of els) {
+      if (el.classList && el.classList.contains("selected-afk")) {
+        el.classList.remove("selected-afk");
+      }
     }
   }
 
@@ -603,7 +602,6 @@ class SelectController {
 
   // Update start line selection
   const lineOBJStart = this.getSelectOBJLine(yStart);
-  const lineContentStart = this.getTextSelectedLine(yStart);
   if (startViewLen > 0) {
     if (lineOBJStart) lineOBJStart.remove();
     this.createSelectEl(topColView + 1, startViewLen, yStart, "selected", contentStart);
@@ -613,7 +611,6 @@ class SelectController {
 
   // Update end line selection
   const lineOBJEnd = this.getSelectOBJLine(yEnd);
-  const lineContentEnd = this.getTextSelectedLine(yEnd);
   if (endViewLen > 0) {
     if (lineOBJEnd) lineOBJEnd.remove();
     this.createSelectEl(1, endViewLen, yEnd, "selected", contentEnd);

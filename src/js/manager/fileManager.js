@@ -8,7 +8,6 @@ class FileManager {
     this.emptyName = "New file";
 
     this.refresh();
-    addEvent("onEvent", () => this.refresh(), this.editor.output);
   }
 
   openFile(file) {
@@ -142,8 +141,6 @@ class FileManager {
     for (let i = 0; i < this.files.length; i++) {
       let file = this.files[i];
 
-      file.refreshIsSelected();
-
       html += this.toHTMLFile(file);
     }
 
@@ -157,23 +154,27 @@ class FileManager {
     );
 
     if (this.files.length == 0) {
-      let editor = getElement(".editor-output");
-      let selectOutput = getElement(".editor-select-output");
-      let lineNumber = getElement(".line-numbers");
-      let cursor = getElement(".editor-caret");
-
-      let leftBottomBar = getElement(".bottomBar .left");
-      let middleBottomBar = getElement(".bottomBar .middle");
-      let rightBottomBar = getElement(".bottomBar .right");
-
-      editor.innerHTML = "";
-      selectOutput.innerHTML = "";
-      lineNumber.innerHTML = "";
-      cursor.style.display = "none";
-      leftBottomBar.style.display = "none";
-      middleBottomBar.style.display = "none";
-      rightBottomBar.style.display = "none";
+      this.clear();
     }
+  }
+
+  clear() {
+    let editor = getElement(".editor-output");
+    let selectOutput = getElement(".editor-select-output");
+    let lineNumber = getElement(".line-numbers");
+    let cursor = getElement(".editor-caret");
+
+    let leftBottomBar = getElement(".bottomBar .left");
+    let middleBottomBar = getElement(".bottomBar .middle");
+    let rightBottomBar = getElement(".bottomBar .right");
+
+    editor.innerHTML = "";
+    selectOutput.innerHTML = "";
+    lineNumber.innerHTML = "";
+    cursor.style.display = "none";
+    leftBottomBar.style.display = "none";
+    middleBottomBar.style.display = "none";
+    rightBottomBar.style.display = "none";
   }
 
   onClick(e) {

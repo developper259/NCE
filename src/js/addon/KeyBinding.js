@@ -114,7 +114,8 @@ class KeyBinding {
   }
 
   control_close_all_file(s, c, m, a) {
-    this.editor.api.quit();
+    //this.editor.api.quit();
+    this.editor.fileManager.closeFiles();
   }
   async control_copy(s, c, m, a) {
     let txt = this.editor.selectController.containsSelected;
@@ -124,7 +125,6 @@ class KeyBinding {
     }
     try {
       await navigator.clipboard.writeText(txt);
-      console.log("Texte copié dans le presse-papiers.");
     } catch (err) {
       console.error("Erreur lors de la copie : ", err);
     }
@@ -133,7 +133,6 @@ class KeyBinding {
   async control_paste(s, c, m, a) {
     try {
       const text = await navigator.clipboard.readText();
-      console.log(text);
       this.editor.writerController.write(text);
     } catch (err) {
       console.error("Erreur lors du collage : ", err);

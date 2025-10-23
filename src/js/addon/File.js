@@ -4,7 +4,9 @@ class FileNode {
     this.id = id;
     this.name = name;
     this.path = path;
+
     this.isSaved = true;
+    this.autoSave = false;
 
     // KeyBinding
     this.historyX = undefined;
@@ -17,7 +19,6 @@ class FileNode {
 
     // Line Controller
     this.lines = [""];
-    this.lastLines = [""];
     this.maxIndex = this.lines.length;
     this.index = 0;
     this.longuerLine = 0;
@@ -37,6 +38,7 @@ class FileNode {
     this.insertMode = false;
 
     this.language = new PlainText(this.editor);
+    addEvent("onChange", () => this.onChange(), this.editor.output);
   }
 
   isEmpty() {
@@ -110,12 +112,13 @@ class FileNode {
 
   setIsSaved(value) {
     this.isSaved = value;
-    if (value) this.lastLines = this.lines;
   }
 
-  refreshIsSelected() {
-    if (JSON.stringify(this.lines) != JSON.stringify(this.lastLines))
+  onChange() {
+    if (this.autoSave) this.save();
+    else {
       this.setIsSaved(false);
-    else this.setIsSaved(true);
+    }
+    this.editor.fileManager.refresh();
   }
 }
