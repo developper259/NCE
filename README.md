@@ -82,8 +82,12 @@ npm install
 npm run build
 
 # Lancer l'application
-npm start
-```
+
+# Sous macOS
+npm run macos
+
+# Sous Windows
+npm run win
 
 ## � Licence
 
