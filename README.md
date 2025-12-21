@@ -50,8 +50,11 @@ git clone https://github.com/developper259/NCE.git
 # Installer les dépendances
 npm install
 
-# Lancer en mode développement
-npm run fast
+# Sous macOS
+npm run macos
+
+# Sous Windows
+npm run win
 ```
 
 ## 🤝 Contribuer
@@ -94,3 +97,4 @@ npm run win
 Ce projet est sous licence [ISC](LICENSE).
 
 © 2025 Andrea Belvedere - Tous droits réservés
+```
