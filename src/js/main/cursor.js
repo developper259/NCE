@@ -49,6 +49,18 @@ class Cursor {
     return roundX(x / this.editor.letterSize) + 1;
   }
 
+  columnFromSelectObj(obj) {
+    return this.xToColumn(
+      parseInt(window.getComputedStyle(obj).left, 10) - this.editor.baseX
+    );
+  }
+
+  lengthFromSelectObj(obj) {
+    return (
+      parseInt(window.getComputedStyle(obj).width, 10) / this.editor.letterSize
+    );
+  }
+
   isNewPosition(column, row) {
     return this.column !== column || this.row !== row;
   }
@@ -63,7 +75,7 @@ class Cursor {
 
     const targetRow = this.yToRow(localY);
     const targetColumn = this.xToColumn(localX);
-    const posReal = this.getPositionReverse(targetRow, targetColumn);
+    const posReal = this.getReelPosition(targetRow, targetColumn);
     if (!posReal) return;
 
     const line = this.editor.lineController.lines[posReal.row - 1];
@@ -153,7 +165,7 @@ class Cursor {
     return { row: row, column: column };
   }
 
-  getPositionReverse(row, column) {    // real position of cursor == x
+  getReelPosition(row, column) {    // real position of cursor == x
     if (!this.editor.fileManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.maxIndex) {
@@ -161,7 +173,7 @@ class Cursor {
     }
 
     const line = this.editor.lineController.lines[row - 1];
-    if (line == undefined) return;
+    if (line == undefined) return { row: 1, column: 0 };
     let lineLength = this.editor.lineController.getViewLineLength(row - 1);
 
     if (column < 0) column = 0;
@@ -185,21 +197,21 @@ class Cursor {
     return { row: row, column: column };
   }
 
-  getCursorPositionReverse() {
-    return this.getPositionReverse(this.row, this.column);
+  getCursorReelPosition() {
+    return this.getReelPosition(this.row, this.column);
   }
   getCursorPosition() {
     return this.getPosition(this.row, this.column);
   }
 
   getBeforeLetter() {
-    const pos = this.getCursorPositionReverse();
+    const pos = this.getCursorReelPosition();
     const line = this.editor.lineController.lines[this.row - 1];
     return line[pos.column];
   }
 
   getAfterLetter() {
-    const pos = this.getCursorPositionReverse();
+    const pos = this.getCursorReelPosition();
     const line = this.editor.lineController.lines[this.row - 1];
     return line[pos.column + 1];
   }
@@ -220,7 +232,7 @@ class Cursor {
     const line = this.editor.lineController.lines[this.row - 1];
     if (!line) return;
     const words = this.editor.writerController.splitWord(line);
-    const pos = this.getCursorPositionReverse();
+    const pos = this.getCursorReelPosition();
     let count = 0;
 
     for (let i = 0; i < words.length; i++) {

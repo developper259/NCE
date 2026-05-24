@@ -99,17 +99,17 @@ class LineController {
       ...this.lines.slice(index),
     ];
 
-    this.refresh();
+    //this.refresh();
 
-    CALLEVENT("onChange");
+    //CALLEVENT("onChange");
   }
 
   changeLine(txt, index) {
     this.lines[index] = txt;
 
-    this.refresh();
+    //this.refresh();
 
-    CALLEVENT("onChange");
+    //CALLEVENT("onChange");
   }
 
   supLine(index) {
@@ -117,9 +117,9 @@ class LineController {
     this.maxIndex -= 1;
     this.lines.splice(index, 1);
 
-    this.refresh();
+    //this.refresh();
 
-    CALLEVENT("onChange");
+    //CALLEVENT("onChange");
   }
 
   refreshLine() {
@@ -164,7 +164,7 @@ class LineController {
       const l = this.getViewNumberLines();
 
       for (let i = 0; i < l.length; i++)
-        innerHTML += `<span class="line-el editor-el">${l[i]}</span>`;
+        innerHTML += `<span class="line-el editor-el ${i == this.index ? "line-selected" : ""}">${l[i]}</span>`;
 
       lineN.innerHTML = innerHTML;
 
@@ -186,7 +186,6 @@ class LineController {
         }, line);
       }
     }
-    this.setFocusLine(this.index);
   }
 
   createLineOBJ(line, row) {

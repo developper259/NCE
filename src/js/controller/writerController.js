@@ -128,7 +128,7 @@ class WriterController {
     this.editor.keyBinding.historyX = undefined;
     this.editor.keyBinding.indexHistory = 1;
 
-    const pos = this.editor.cursor.getCursorPositionReverse();
+    const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;
     let x = pos.column;
     let y = pos.row;
@@ -154,6 +154,8 @@ class WriterController {
       }
       x += txt.length;
       this.editor.lineController.changeLine(newLine, y - 1);
+
+      this.editor.lineController.refresh();
       this.editor.cursor.setCursorPosition(y, x);
     } else {
       let newLines = txt.split("\n");
@@ -173,6 +175,7 @@ class WriterController {
           this.editor.lineController.addLine(newLine, y + i - 1);
         }
       }
+      this.editor.lineController.refresh();
       this.editor.cursor.setCursorPosition(y + newLines.length - 1, x);
     }
 
@@ -191,6 +194,7 @@ class WriterController {
   }
 
   delete(x, y) {
+    if (this.editor.lineController.lines.length == 0) return;
     if (!this.editor.fileManager.activeFile) return;
     let newLine = "";
     const line = this.editor.lineController.lines[y - 1];
@@ -202,6 +206,7 @@ class WriterController {
       cursor.column = this.editor.lineController.lines[cursor.row - 1].length;
       newLine = this.editor.lineController.lines[cursor.row - 1] + line;
       this.editor.lineController.supLine(y - 1);
+      
     } else {
       let Nx = cursor.column - 1;
       newLine = line.slice(0, Nx) + line.slice(cursor.column);
@@ -209,6 +214,7 @@ class WriterController {
     }
 
     this.editor.lineController.changeLine(newLine, cursor.row - 1);
+    this.editor.lineController.refresh();
 
     CALLEVENT("onChange", {
       beforeRow: y,
@@ -227,6 +233,7 @@ class WriterController {
   }
 
   deleteWord(x, y) {
+    if (this.editor.lineController.lines.length == 0) return;
     if (!this.editor.fileManager.activeFile) return;
     let cursor = { column: x, row: y };
 
@@ -269,6 +276,7 @@ class WriterController {
       }
     }
     this.editor.lineController.changeLine(newLine, cursor.row - 1);
+    this.editor.lineController.refresh();
 
     CALLEVENT("onChange", {
       beforeRow: y,
@@ -287,6 +295,7 @@ class WriterController {
   }
 
   deleteSelection() {
+    if (this.editor.lineController.lines.length == 0) return;
     if (!this.editor.fileManager.activeFile) return;
     let objs = this.editor.selectController.getSelectOBJ();
     let cursor = this.editor.cursor.getCursorPosition();
@@ -304,16 +313,11 @@ class WriterController {
     for (let obj of objs) {
       let nbLine = parseInt(obj.dataset.line);
       let line = this.editor.lineController.lines[nbLine];
-      let column =
-        this.editor.cursor.xToColumn(
-          parseInt(window.getComputedStyle(obj).left, 10) - this.editor.baseX
-        ) - 1;
-      let width = Math.ceil(
-        parseInt(window.getComputedStyle(obj).width, 10) /
-          this.editor.letterSize
-      );
-
+      
+      let column = this.editor.cursor.columnFromSelectObj(obj) - 1;
+      let width = Math.ceil(this.editor.cursor.lengthFromSelectObj(obj));
       let newLine = line.slice(0, column) + line.slice(column + width);
+
       if (i != objs.length - 1) {
         if (newLine != "") rest = newLine + rest;
         this.editor.lineController.supLine(nbLine);
@@ -326,6 +330,7 @@ class WriterController {
       i++;
     }
     this.editor.selectController.unSelectAll();
+    this.editor.lineController.refresh();
 
     CALLEVENT("onChange", {
       beforeRow: cursor.row,

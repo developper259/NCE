@@ -175,13 +175,10 @@ class SelectController {
 
     let width = length * this.editor.letterSize;
     obj.style.width = width + "px ";
-    let column =
-      this.editor.cursor.xToColumn(
-        parseInt(window.getComputedStyle(obj).left, 10) - this.editor.baseX
-      ) - 1;
+    let column = this.editor.cursor.columnFromSelectObj(obj) - 1;
 
-    const vec1 = this.editor.cursor.getPositionReverse(row + 1, column);
-    const vec2 = this.editor.cursor.getPositionReverse(
+    const vec1 = this.editor.cursor.getReelPosition(row + 1, column);
+    const vec2 = this.editor.cursor.getReelPosition(
       row + 1,
       column + length
     );
@@ -198,20 +195,16 @@ class SelectController {
     if (!obj) return;
 
     let width = length * this.editor.letterSize;
-    let lengthInit =
-      parseInt(window.getComputedStyle(obj).width, 10) / this.editor.letterSize;
+    let lengthInit = this.editor.cursor.lengthFromSelectObj(obj);
     let column =
-      this.editor.cursor.xToColumn(
-        parseInt(window.getComputedStyle(obj).left, 10) - this.editor.baseX
-      ) -
-      (length - lengthInit);
+      this.editor.cursor.columnFromSelectObj(obj) - (length - lengthInit);
     let x = this.editor.cursor.columnToX(column);
 
     obj.style.left = x + "px";
     obj.style.width = width + "px";
 
-    const vec1 = this.editor.cursor.getPositionReverse(row + 1, column - 1);
-    const vec2 = this.editor.cursor.getPositionReverse(
+    const vec1 = this.editor.cursor.getReelPosition(row + 1, column - 1);
+    const vec2 = this.editor.cursor.getReelPosition(
       row + 1,
       column + length
     );
@@ -334,7 +327,7 @@ class SelectController {
       "selected",
       wordOBJ.innerText
     );
-    const pos = this.editor.cursor.getPositionReverse(
+    const pos = this.editor.cursor.getReelPosition(
       y,
       x + wordOBJ.innerText.length - 1
     );
@@ -462,7 +455,7 @@ class SelectController {
       if (this.containsSelected.length > 0) this.unSelectAll();
 
     this.editor.cursor.onClick(event);
-    const pos = this.editor.cursor.getCursorPositionReverse();
+    const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;
 
     this.startSelect = {
@@ -478,7 +471,7 @@ class SelectController {
   mouseUp() {
     if (!this.editor.fileManager.activeFile) return;
     this.isMouseDown = false;
-    const pos = this.editor.cursor.getCursorPositionReverse();
+    const pos = this.editor.cursor.getCursorReelPosition();
 
     this.endSelect = {
       column: pos.column,
@@ -498,7 +491,7 @@ class SelectController {
 
   move() {
     if (!this.editor.fileManager.activeFile) return;
-    const pos = this.editor.cursor.getCursorPositionReverse();
+    const pos = this.editor.cursor.getCursorReelPosition();
     let c = pos.column;
     let r = pos.row;
 
@@ -586,8 +579,8 @@ class SelectController {
   const yEnd = bottomRow - 1;
 
   // Convert view columns to raw indices for slicing (handles tabs)
-  const topRaw = cur.getPositionReverse(topRow, topColView)?.column ?? 0;
-  const bottomRaw = cur.getPositionReverse(bottomRow, bottomColView)?.column ?? 0;
+  const topRaw = cur.getReelPosition(topRow, topColView)?.column ?? 0;
+  const bottomRaw = cur.getReelPosition(bottomRow, bottomColView)?.column ?? 0;
 
   const lineStart = lc.lines[yStart] ?? "";
   const lineEnd = lc.lines[yEnd] ?? "";
