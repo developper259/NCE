@@ -1,5 +1,7 @@
-import { dialog, OpenDialogOptions, SaveDialogOptions } from 'electron';
+import { dialog, OpenDialogOptions, SaveDialogOptions, MessageBoxOptions, BrowserWindow } from 'electron';
 const fs = require('fs').promises;
+
+export type UnsavedCloseChoice = 'save' | 'dontSave' | 'cancel';
 
 export class FileManager {
     constructor() {}
@@ -90,5 +92,25 @@ export class FileManager {
         } catch (error) {
             console.error('Error saving file:', error);
         }
+    }
+
+    async confirmUnsavedChanges(
+        fileName: string,
+        parentWindow: BrowserWindow
+    ): Promise<UnsavedCloseChoice> {
+        const options: MessageBoxOptions = {
+            type: 'warning',
+            buttons: ['Save', "Don't Save", 'Cancel'],
+            defaultId: 0,
+            cancelId: 2,
+            message: `Do you want to save the changes you made to "${fileName}"?`,
+            detail: 'Your changes will be lost if you don\'t save them.',
+        };
+
+        const { response } = await dialog.showMessageBox(parentWindow, options);
+
+        if (response === 0) return 'save';
+        if (response === 1) return 'dontSave';
+        return 'cancel';
     }
 }

@@ -11,7 +11,7 @@
     "fast": "bash ./run.sh && electron --trace-warnings --no-sandbox dist/main.js",
     "ubuntu": "sudo sysctl kernel.unprivileged_userns_clone=1"
   },
-  "author": "trolleur259",
+  "author": "Andrea Belvedere",
   "license": "ISC",
   "dependencies": {
     "electron": "^27.0.2",

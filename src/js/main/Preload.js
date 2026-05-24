@@ -10,4 +10,6 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("FileManager:getFileContent", file),
   saveFile: (path, content) =>
     ipcRenderer.invoke("FileManager:saveFile", path, content),
+  confirmUnsavedChanges: (fileName) =>
+    ipcRenderer.invoke("FileManager:confirmUnsavedChanges", fileName),
 });

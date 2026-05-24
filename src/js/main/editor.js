@@ -87,6 +87,7 @@ class Editor {
     this.Ccmd = new CMD(this);
     this.Clangague = new Langague(this);
     this.Cconfig_space = new Config_space(this);
+    this.savePopupManager = new SavePopupManager(this, this.fileManager);
     this.bottomBar = new BottomBar(this);
 
     this.writerController.insertMode = true;

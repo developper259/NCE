@@ -67,6 +67,11 @@ export class Window {
     ipcMain.handle('FileManager:saveFile', async (event, path, content) => {
       return await this.fileManager?.saveFile(path, content);
     });
+
+    ipcMain.handle('FileManager:confirmUnsavedChanges', async (event, fileName: string) => {
+      if (!this.window) return 'cancel';
+      return await this.fileManager?.confirmUnsavedChanges(fileName, this.window);
+    });
   
   }
 }

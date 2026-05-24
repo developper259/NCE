@@ -4,7 +4,6 @@ class FileManager {
     this.files = []; //opened files
     this.folders = [];
     this.activeFile = null; //file on editor
-
     this.emptyName = "New file";
 
     this.refresh();
@@ -39,7 +38,20 @@ class FileManager {
     this.editor.refreshAll();
   }
 
-  closeFile(id) {
+  async closeFile(id) {
+    const file = this.files[id];
+    if (!file) return;
+
+    if (!file.isSaved) {
+      const choice = await this.editor.savePopupManager.confirmClose(id);
+      if (choice === "cancel") return;
+      if (choice === "save") {
+        if (this.activeFile?.id !== id) this.setFocusFile(file);
+        await file.save();
+        if (!file.isSaved) return;
+      }
+    }
+
     if (id == this.activeFile.id) {
       if (this.files.length != 1) {
         if (id == 0) this.setFocusFile(this.files[this.files.length - 1]);
