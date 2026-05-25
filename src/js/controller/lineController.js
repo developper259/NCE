@@ -113,7 +113,7 @@ class LineController {
   }
 
   supLine(index) {
-    if (index > this.maxIndex) return;
+    if (index > this.maxIndex || index < 0) return;
     this.maxIndex -= 1;
     this.lines.splice(index, 1);
 
@@ -124,6 +124,8 @@ class LineController {
 
   refreshLine() {
     if (!this.editor.fileManager.activeFile) return;
+
+    if (this.lines.length === 0) this.lines = [''];
 
     if (this.lines.length !== this.maxIndex) this.maxIndex = this.lines.length;
 
