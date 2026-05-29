@@ -38,7 +38,6 @@ class FileNode {
     this.insertMode = false;
 
     this.language = new PlainText(this.editor);
-    addEvent("onChange", () => this.onChange(), this.editor.output);
   }
 
   isEmpty() {

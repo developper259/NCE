@@ -21,8 +21,6 @@ class LanguageController {
       all: "#9CDCFE",
       none: "", // Aucune couleur définie
     };
-
-    addEvent("onChange", this.onChange.bind(this), this.editor.output);
   }
 
   detectVariables(words, index) {}
@@ -31,7 +29,7 @@ class LanguageController {
   detectComments(words, index) {}
   detectError(words, index) {}
 
-  onChange(event) {
+  onChange() {
     if (!this.editor.fileManager.activeFile) return;
     this.editor.fileManager.activeFile.language.refreshAll();
   }

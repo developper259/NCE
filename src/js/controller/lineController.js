@@ -1,15 +1,15 @@
 class LineController {
   constructor(editor) {
     this.editor = editor;
-    this.maxViewLine =
-      parseInt(this.editor.output.clientWidth / this.editor.letterSize) + 5; // + marge
     this.maxCharactersPerLine =
+      parseInt(this.editor.output.clientWidth / this.editor.letterSize) + 10; // + marge
+    this.maxViewLines =
       parseInt(this.editor.output.clientHeight / this.editor.posY) + 25; // + marge
 
-    this.maxLines =
-      parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1; // - marge
     this.maxCharacters =
-      parseInt(this.editor.output.clientHeight / this.editor.posY) - 2; // 102 - marge
+      parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1; // - marge
+    this.maxLines =
+      parseInt(this.editor.output.clientHeight / this.editor.posY);
   }
 
   // Getters et Setters
@@ -76,7 +76,7 @@ class LineController {
 
   getViewNumberLines() {
     if (!this.lines) return [];
-    return Array.from({ length: this.lines.length }, (_, i) => i + 1);
+    return Array.from({ length: Math.min(this.lines.length, this.maxViewLines) }, (_, i) => i + 1);
   }
 
   setFocusLine(index) {
@@ -98,28 +98,16 @@ class LineController {
       txt,
       ...this.lines.slice(index),
     ];
-
-    //this.refresh();
-
-    //CALLEVENT("onChange");
   }
 
   changeLine(txt, index) {
     this.lines[index] = txt;
-
-    //this.refresh();
-
-    //CALLEVENT("onChange");
   }
 
   supLine(index) {
     if (index > this.maxIndex || index < 0) return;
     this.maxIndex -= 1;
     this.lines.splice(index, 1);
-
-    //this.refresh();
-
-    //CALLEVENT("onChange");
   }
 
   refreshLine() {
@@ -132,10 +120,13 @@ class LineController {
     const lines = this.getViewContent();
 
     this.editor.output.innerHTML = "";
-    for (let i = 0; i < lines.length; i++) {
+    for (let i = 0; i < Math.min(lines.length, this.maxViewLines); i++) {
       if (!lines[i]) continue;
       if (lines[i].length > this.longuerLine)
         this.longuerLine = lines[i].length;
+
+      let line = lines[i]
+      if (line.length > this.maxCharacters) line = line.slice(0, this.maxCharacters);
       let lineOBJ = this.createLineOBJ(lines[i], i + 1);
 
       this.editor.output.appendChild(lineOBJ);

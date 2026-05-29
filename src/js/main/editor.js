@@ -5,8 +5,6 @@ class Editor {
     this.selected = false;
     this.panel = undefined;
 
-    const lineN = getElement(".line-numbers");
-
     this.baseX = 50; // left margin (2 represents the difference left margin)
     this.baseY = 2; // top margin
     this.posY = 23; // size of a line
@@ -25,6 +23,7 @@ class Editor {
     this.keyBindingController = new keyBindingController(this);
     this.languageController = new LanguageController(this);
 
+    this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
     this.cursor = new Cursor(this);
 
@@ -68,8 +67,8 @@ class Editor {
   setSelected(selected) {
     if (this.selected == selected) return;
 
-    if (selected) CALLEVENT("cursorenabled");
-    else CALLEVENT("cursordisabled");
+    if (selected) this.events.callEvent(Events.CURSOR_ENABLED);
+    else this.events.callEvent(Events.CURSOR_DISABLED);
     this.selected = selected;
   }
 }

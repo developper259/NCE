@@ -99,7 +99,7 @@ class Cursor {
     const row = pos.row;
     const column = pos.column;
     if (this.isNewPosition(row, column)) {
-      //CALLEVENT("cursormove", { row, column });
+      //this.editor.events.callEvent(Events.CURSOR_MOVE, { row, column });
       this.setCursorPosition(posReal.row, posReal.column);
     }
 
@@ -128,7 +128,7 @@ class Cursor {
       this.editor.lineController.setFocusLine(this.row);
 
       this.editor.setSelected(true);
-      CALLEVENT("cursorchange", { row, column });
+      this.editor.events.callEvent(Events.CURSOR_CHANGE, { row, column });
     }
   }
 

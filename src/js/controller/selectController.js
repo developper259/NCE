@@ -290,7 +290,7 @@ class SelectController {
       }
     }
 
-    CALLEVENT("onSelect", {
+    this.editor.events.callEvent(Events.ON_SELECT, {
       start: undefined,
       end: undefined,
       contains: "",
@@ -304,7 +304,7 @@ class SelectController {
       this.selectLine(i, cursorChange);
     }
 
-    CALLEVENT("onSelect", {
+    this.editor.events.callEvent(Events.ON_SELECT, {
       start: this.startSelect,
       end: this.endSelect,
       contains: this.containsSelected,
@@ -333,7 +333,7 @@ class SelectController {
     );
     if (cursorChange) this.editor.cursor.setCursorPosition(y + 1, pos.column);
 
-    CALLEVENT("onSelect", {
+    this.editor.events.callEvent(Events.ON_SELECT, {
       start: this.startSelect,
       end: this.endSelect,
       contains: this.containsSelected,
@@ -370,14 +370,14 @@ class SelectController {
       else this.editor.cursor.setCursorPosition(index + 1, length);
     }
 
-    CALLEVENT("onSelect", {
+    this.editor.events.callEvent(Events.ON_SELECT, {
       start: this.startSelect,
       end: this.endSelect,
       contains: this.containsSelected,
     });
   }
 
-  cursorDisabled(event) {
+  cursorDisabled() {
     if (!this.editor.fileManager.activeFile) return;
     let els = this.getSelectOBJ();
 
@@ -387,7 +387,7 @@ class SelectController {
     }
   }
 
-  cursorEnabled(event) {
+  cursorEnabled() {
     if (!this.editor.fileManager.activeFile) return;
     const els = this.getSelectOBJ();
     if (!els || !els.length) return;
@@ -507,7 +507,7 @@ class SelectController {
       this.calculSelectSimpleLine();
     else this.calculSelectMultiLine();
 
-    CALLEVENT("onSelect", {
+    this.editor.events.callEvent(Events.ON_SELECT, {
       start: this.startSelect,
       end: this.endSelect,
       contains: this.containsSelected,
@@ -636,12 +636,6 @@ class SelectController {
     addEvent("mousedown", this.mouseDown.bind(this), this.editor.output);
     addEvent("mouseup", this.mouseUp.bind(this), document);
     addEvent("mousemove", this.mouseMove.bind(this), this.editor.output);
-    addEvent("cursordisabled", this.cursorDisabled.bind(this), document);
-    addEvent("cursorenabled", this.cursorEnabled.bind(this), document);
-    addEvent(
-      "onSelect",
-      this.refreshStartEndSelect.bind(this),
-      this.editor.output
-    );
+    
   }
 }

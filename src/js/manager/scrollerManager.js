@@ -7,7 +7,7 @@ class ScrollerManager {
 
     this.scrollers = [];
 
-    addEvent("onEvent", this.onEvent.bind(this), this.editor.output);
+    //addEvent("onEvent", this.onEvent.bind(this), this.editor.output);
   }
 
   onEvent(event) {

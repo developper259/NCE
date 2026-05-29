@@ -61,8 +61,6 @@ class KeyBinding {
         this.editor.fileManager.activeFile.history.length - 1
       ].cursor = currentCursor;
     }, 1000);
-
-    addEvent("onWrite", this.onWrite.bind(this), this.editor.output);
   }
 
   exec(key, e) {
@@ -86,7 +84,7 @@ class KeyBinding {
     }
   }
 
-  onWrite() {
+  onChange() {
     this.editor.fileManager.activeFile.indexHistory = 1;
   }
 
@@ -188,7 +186,7 @@ class KeyBinding {
       ].cursor.column
     );
     this.editor.lineController.refresh();
-    CALLEVENT("onChange");
+    this.editor.events.callEvent(Events.ON_CHANGE);
   }
 
   control_redo(s, c, m, a) {
@@ -221,7 +219,7 @@ class KeyBinding {
       ].cursor.column
     );
     this.editor.lineController.refresh();
-    CALLEVENT("onChange");
+    this.editor.events.callEvent(Events.ON_CHANGE);
   }
 
   control_find(s, c, m, a) {}

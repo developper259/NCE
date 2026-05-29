@@ -15,7 +15,6 @@ class BottomBar {
     this.scrollers = getElements(".scroller-open");
 
     this.initButton();
-    addEvent("onEvent", this.refresh.bind(this), this.editor.output);
   }
 
   initButton() {

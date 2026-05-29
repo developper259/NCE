@@ -179,13 +179,13 @@ class WriterController {
       this.editor.cursor.setCursorPosition(y + newLines.length - 1, x);
     }
 
-    CALLEVENT("onChange", {
+    this.editor.events.callEvent(Events.ON_CHANGE, {
       beforeRow: y,
       beforeColumn: x,
       afterRow: y,
       afterColumn: x,
     });
-    CALLEVENT("onWrite", {
+    this.editor.events.callEvent(Events.ON_WRITE, {
       beforeRow: y,
       beforeColumn: x,
       afterRow: y,
@@ -216,13 +216,13 @@ class WriterController {
     this.editor.lineController.changeLine(newLine, cursor.row - 1);
     this.editor.lineController.refresh();
 
-    CALLEVENT("onChange", {
+    this.editor.events.callEvent(Events.ON_CHANGE, {
       beforeRow: y,
       beforeColumn: x,
       afterRow: cursor.row,
       afterColumn: cursor.column,
     });
-    CALLEVENT("onWrite", {
+    this.editor.events.callEvent(Events.ON_WRITE, {
       beforeRow: y,
       beforeColumn: x,
       afterRow: cursor.row,
@@ -278,13 +278,13 @@ class WriterController {
     this.editor.lineController.changeLine(newLine, cursor.row - 1);
     this.editor.lineController.refresh();
 
-    CALLEVENT("onChange", {
+    this.editor.events.callEvent(Events.ON_CHANGE, {
       beforeRow: y,
       beforeColumn: x,
       afterRow: cursor.row,
       afterColumn: cursor.column,
     });
-    CALLEVENT("onWrite", {
+    this.editor.events.callEvent(Events.ON_WRITE, {
       beforeRow: y,
       beforeColumn: x,
       afterRow: cursor.row,
@@ -331,14 +331,9 @@ class WriterController {
     }
     this.editor.selectController.unSelectAll();
     this.editor.lineController.refresh();
+    
 
-    CALLEVENT("onChange", {
-      beforeRow: cursor.row,
-      beforeColumn: cursor.column,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
-    });
-    CALLEVENT("onWrite", {
+    this.editor.events.callEvent(Events.ON_CHANGE, {
       beforeRow: cursor.row,
       beforeColumn: cursor.column,
       afterRow: cursor.row,
