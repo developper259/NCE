@@ -43,7 +43,7 @@ class LanguageController {
         return languages[i];
       }
     }
-    return new Javascript(this.editor);
+    return new PlainText(this.editor);
   }
 
   getType(words, index, params) {

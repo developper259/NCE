@@ -43,6 +43,7 @@ class BottomBar {
     rightBottomBar.style.display = "flex";
 
     this.refreshCursorOBJ();
+    this.refreshScrollers();
   }
 
   refreshCursorOBJ() {
@@ -61,5 +62,13 @@ class BottomBar {
     }
 
     this.cursorOBJ.innerText = r;
+  }
+
+  refreshScrollers() {
+    for (let scroller of this.scrollers) {
+      let instance = this.scrollersValue[scroller.id].instance;
+      let title = scroller.childNodes[1];
+      title.innerText = instance.values[instance.value];
+    }
   }
 }
