@@ -30,6 +30,8 @@ class Javascript extends LanguageController {
       specialKeyword: [
         "var",
         "let",
+        "of",
+        "in",
         "const",
         "function",
         "this",
@@ -43,7 +45,6 @@ class Javascript extends LanguageController {
         "typeof",
         "void",
         "delete",
-        "in",
         "typeof",
         "async",
         "class",
@@ -51,6 +52,7 @@ class Javascript extends LanguageController {
         "super",
         "constructor",
         "console",
+        "static"
       ],
       specialLetter: ["{", "}", "(", ")", "[", "]"],
       separator: [".", ",", ";", ":", "="],
@@ -61,7 +63,7 @@ class Javascript extends LanguageController {
   }
 
   detectVariable(words, index) {
-    const maps = ["const", "let", "var"];
+    const maps = ["const", "let", "var", "static"];
     let response = { value: false, params: {} };
     const word = words[index];
     const nextWord = words[index + 1];
@@ -69,6 +71,7 @@ class Javascript extends LanguageController {
 
     if (maps.includes(oldWord)) response.value = true;
     if (oldWord === "." || nextWord === ".") response.value = true;
+    if (nextWord == "=") response.value = true;
     if (
       this.data.specialKeyword.includes(word) ||
       this.data.specialLetter.includes(word) ||
