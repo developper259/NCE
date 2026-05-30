@@ -10,6 +10,8 @@ class LineController {
       parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1; // - marge
     this.maxLines =
       parseInt(this.editor.output.clientHeight / this.editor.posY);
+
+    this.lineN = document.querySelector(".line-numbers");
   }
 
   // Getters et Setters
@@ -75,8 +77,7 @@ class LineController {
   }
 
   getViewNumberLines() {
-    if (!this.lines) return [];
-    return Array.from({ length: Math.min(this.lines.length, this.maxViewLines) }, (_, i) => i + 1);
+    return Math.min(this.lines.length, this.maxViewLines);
   }
 
   setFocusLine(index) {
@@ -113,10 +114,6 @@ class LineController {
   refreshLine() {
     if (!this.editor.fileManager.activeFile) return;
 
-    if (this.lines.length === 0) this.lines = [''];
-
-    if (this.lines.length !== this.maxIndex) this.maxIndex = this.lines.length;
-
     const lines = this.getViewContent();
 
     this.editor.output.innerHTML = "";
@@ -141,44 +138,83 @@ class LineController {
     if (this.lines.length === 0)
       this.editor.output.innerHTML = '<div class="line editor-select"></div>';
   }
-
   refreshNumberLines() {
     if (!this.editor.fileManager.activeFile) return;
-    const lineN = document.querySelector(".line-numbers");
-    let linesN = lineN.querySelectorAll(".line-el");
 
-    if (this.index === 0) this.index = this.editor.cursor.row;
-    if (this.maxIndex === 0) this.maxIndex = this.lines.length;
-    if (this.maxIndex === 0) this.maxIndex = 1;
+    let children = this.lineN.children;
 
-    if (this.maxIndex !== linesN.length) {
-      let innerHTML = "";
+    if (children.length === 0) this.initNumberLines();
 
-      const l = this.getViewNumberLines();
+    if (children.length === this.getViewNumberLines()) return;
 
-      for (let i = 0; i < l.length; i++)
-        innerHTML += `<span class="line-el editor-el ${i == this.index ? "line-selected" : ""}">${l[i]}</span>`;
+    const diff = children.length - this.getViewNumberLines();
 
-      lineN.innerHTML = innerHTML;
-
-      linesN = lineN.querySelectorAll(".line-el");
-
-      for (let i = 0; i < linesN.length; i++) {
-        const line = linesN[i];
-
-        const y = this.editor.baseY + this.editor.posY * i;
-        line.style.top = y + "px";
-
-        addEvent("click", () => {
-          let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
-          this.editor.selectController.unSelectAll();
-
-          if (lineOBJ === undefined)
-            this.editor.selectController.selectLine(i, true);
-          else this.editor.cursor.setCursorPosition(i + 1, 0);
-        }, line);
+    if (diff > 0) {
+      for (let i = 0; i < diff; i++) {
+        this.lineN.lastElementChild.remove();
       }
+    }else{
+      const fragment = document.createDocumentFragment();
+      
+      for (let i = 0; i < (diff * -1); i++) {
+        const lNode = this.createLineNode(children.length + i);
+        fragment.appendChild(lNode);
+      }
+
+      this.lineN.appendChild(fragment);
     }
+  }
+
+  initNumberLines() {
+    if (!this.editor.fileManager.activeFile) return;
+    let linesN = this.lineN.querySelectorAll(".line-el");
+
+    const fragment = document.createDocumentFragment();
+    
+    this.lineN.innerHTML = ""; 
+    const l = this.getViewNumberLines();
+
+    for (let i = 0; i < l; i++) {
+      const lNode = this.createLineNode(i);
+      fragment.appendChild(lNode);
+    }
+
+    // Un seul accès au DOM réel
+    this.lineN.appendChild(fragment);
+
+    linesN = this.lineN.querySelectorAll(".line-el");
+
+    for (let i = 0; i < linesN.length; i++) {
+      const line = linesN[i];
+
+      addEvent("click", () => {
+        let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
+        this.editor.selectController.unSelectAll();
+
+        if (lineOBJ === undefined)
+          this.editor.selectController.selectLine(i, true);
+        else this.editor.cursor.setCursorPosition(i + 1, 0);
+      }, line);
+    }
+  }
+  
+  createLineNode(index) {
+    const span = document.createElement("span");
+    
+    // classes
+    span.classList.add("line-el", "editor-el");
+    if (index === this.index - 1) {
+      span.classList.add("line-selected");
+    }
+    
+    // style
+    const y = this.editor.baseY + this.editor.posY * index;
+    span.style.top = `${y}px`;
+    
+    // Contenu
+    span.textContent = index + 1;
+    
+    return span;
   }
 
   createLineOBJ(line, row) {
@@ -217,6 +253,11 @@ class LineController {
   }
 
   refresh() {
+    if (!this.editor.fileManager.activeFile) return;
+    if (this.lines.length === 0) this.lines = [''];
+    if (this.index !== this.editor.cursor.row) this.index = this.editor.cursor.row;
+    if (this.lines.length !== this.maxIndex) this.maxIndex = this.lines.length;
+
     this.refreshLine();
     this.refreshNumberLines();
   }
