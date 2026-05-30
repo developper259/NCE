@@ -35,8 +35,6 @@ class Editor {
     this.bottomBar = new BottomBar(this);
 
     this.writerController.insertMode = true;
-
-    addEvent("click", this.onClick.bind(this));
   }
 
   refreshAll() {

@@ -18,16 +18,12 @@ class BottomBar {
   }
 
   initButton() {
-    for (let key in this.scrollersValue) {
-      let instance = this.scrollersValue[key].instance;
-      instance.refresh();
-    }
-
     for (let scroller of this.scrollers) {
-      let instance = this.scrollersValue[scroller.id].instance;
+      const instance = this.scrollersValue[scroller.id].instance;
+      instance.refresh();
+
       let title = scroller.childNodes[1];
       title.innerText = instance.values[instance.value];
-      addEvent("click", instance.active, scroller);
     }
   }
 

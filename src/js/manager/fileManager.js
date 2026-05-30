@@ -9,6 +9,19 @@ class FileManager {
     this.refresh();
   }
 
+  getFileIndexByID(id) {
+    return this.files.findIndex(file => file.id == id);
+  }
+  getFileByID(id) {
+    return this.files.find(file => file.id == id);
+  }
+  removeFileByID(id) {
+    const index = this.getFileIndexByID(id);
+    if (index !== -1) {
+      this.files.splice(index, 1);
+    }
+  }
+
   openFile(file) {
     if (!file) return;
     this.openFiles([file]);
@@ -39,7 +52,7 @@ class FileManager {
   }
 
   async closeFile(id) {
-    const file = this.files[id];
+    const file = this.getFileByID(id);
     if (!file) return;
     
     if (!file.isSaved && (!file.isEmpty() && !file.hasPath())) {
@@ -54,12 +67,13 @@ class FileManager {
 
     if (id == this.activeFile.id) {
       if (this.files.length != 1) {
-        if (id == 0) this.setFocusFile(this.files[this.files.length - 1]);
-        else this.setFocusFile(this.files[id - 1]);
+        const index = this.getFileIndexByID(id);
+        if (index == 0) this.setFocusFile(this.files[index + 1]);
+        else this.setFocusFile(this.files[index - 1]);
       }
     }
 
-    if (this.files.length != 1) this.files.splice(id, 1);
+    if (this.files.length != 1) this.removeFileByID(id);
     else {
       this.closeFiles();
     }
@@ -158,13 +172,6 @@ class FileManager {
 
     ul.innerHTML = html;
 
-    addEvent("click", this.onClick.bind(this), getElements(".file-el"));
-    addEvent(
-      "click",
-      this.onClickClose.bind(this),
-      getElements(".file-el-btn")
-    );
-
     if (this.files.length == 0) {
       this.clear();
     }
@@ -190,12 +197,12 @@ class FileManager {
   }
 
   onClick(e) {
-    let id = e.target.id;
+    let id = parseInt(e.target.id);
     if (!id && e.target.classList.contains("file-el-title")) {
       id = e.target.parentElement.id;
       if (!id) return;
     }
-    let file = this.files[id];
+    let file = this.getFileByID(id);
     this.setFocusFile(file);
   }
 

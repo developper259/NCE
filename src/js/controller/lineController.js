@@ -155,7 +155,7 @@ class LineController {
       }
     }else{
       const fragment = document.createDocumentFragment();
-      
+
       for (let i = 0; i < (diff * -1); i++) {
         const lNode = this.createLineNode(children.length + i);
         fragment.appendChild(lNode);
@@ -181,21 +181,6 @@ class LineController {
 
     // Un seul accès au DOM réel
     this.lineN.appendChild(fragment);
-
-    linesN = this.lineN.querySelectorAll(".line-el");
-
-    for (let i = 0; i < linesN.length; i++) {
-      const line = linesN[i];
-
-      addEvent("click", () => {
-        let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
-        this.editor.selectController.unSelectAll();
-
-        if (lineOBJ === undefined)
-          this.editor.selectController.selectLine(i, true);
-        else this.editor.cursor.setCursorPosition(i + 1, 0);
-      }, line);
-    }
   }
   
   createLineNode(index) {
@@ -260,5 +245,20 @@ class LineController {
 
     this.refreshLine();
     this.refreshNumberLines();
+  }
+
+  onClickNumberLine(e) {
+    try {
+      const i = parseInt(e.target.textContent) - 1;
+      let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
+      this.editor.selectController.unSelectAll();
+  
+      if (lineOBJ === undefined)
+        this.editor.selectController.selectLine(i, true);
+      else this.editor.cursor.setCursorPosition(i + 1, 0);
+    } catch (error) {
+      console.error(error);
+      return
+    }
   }
 }

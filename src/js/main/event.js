@@ -22,6 +22,8 @@ class Events {
 
   constructor(editor) {
     this.editor = editor;
+
+    addEvent("click", this.onClick.bind(this));
   }
 
   callEvent(e, arg) {
@@ -48,13 +50,12 @@ class Events {
         this.onWrite(arg);
         break;
       default:
-        console.log(Events.ON_CHANGE);
         console.error("Event " + e + " not found !");
         return;
     }
     this.onEvent(arg);
   }
-
+  // Custom Event
   cursorMove(arg) {
 
   }
@@ -84,10 +85,53 @@ class Events {
     this.editor.keyBinding.onChange();
   }
   onWrite(arg) {
-  }
 
+  }
   onEvent(arg) {
     // ------- BottomBar.js ------
     this.editor.bottomBar.refresh();
+  }
+
+  // DOM Event
+  onClick(e) {
+    const el = e.target;
+    const cl = e.target.classList;
+
+    // ------- editor.js ------
+    this.editor.onClick(e);
+
+    // ------- Command.js ------
+    if (this.editor.panel) this.editor.panel.mouseClick(e);
+
+    if (cl.contains('command-el')) {
+      this.editor.command.onClickEl(e);
+      return;
+    }
+
+    // ------- LineController.js ------
+    if (cl.contains('line-el')) {
+      this.editor.lineController.onClickNumberLine(e);
+      return;
+    }
+    
+    // ------- LineController.js ------
+    if (cl.contains('file-el') || cl.contains('file-el-title')) {
+      this.editor.fileManager.onClick(e);
+      return;
+    }
+    if (cl.contains('file-el-btn')) {
+      this.editor.fileManager.onClickClose(e);
+      return;
+    }
+
+    // ------- BottomBar.js ------
+
+    if (cl.contains('scroller-open') || cl.contains('scroller-title')) {
+      let id = el.id;
+      if (!id) id = el.parentElement.id;
+      this.editor.bottomBar.scrollersValue[id].instance.active();
+      return;
+    }
+    
   }
 }

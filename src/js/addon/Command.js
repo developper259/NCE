@@ -10,7 +10,6 @@ class Command {
     this.searchBar = getElement(".command-search");
 
     this.active = this.active.bind(this);
-    addEvent("click", this.mouseClick.bind(this));
   }
 
   init(trees) {
@@ -60,12 +59,11 @@ class Command {
     for (let el of dic.all) {
       this.all.innerHTML += el;
     }
-    for (let el of getElements(".command-el")) {
-      addEvent("click", () => {
-        let title = el.childNodes[1].innerText;
-        this.onSelect(title);
-      }, el);
-    }
+  }
+
+  onClickEl(e) {
+    let title = e.target.childNodes[1].innerText;
+    this.onSelect(title);
   }
 
   generateDicAll(table) {
@@ -77,17 +75,13 @@ class Command {
   }
 
   mouseClick(event) {
-    let objSelectedC = event.srcElement.classList;
-    for (let c of objSelectedC) {
-      //on vérifi si une des classes contiens le mot command
-      let t = c.split("-");
-      if (
-        !t.includes("command") &&
-        !t.includes("scroller") &&
-        !t.includes("bottomBar")
-      ) {
-        if (this.isActive) this.close();
-      }
+    let objCl = event.target.classList;
+    const isIgnored = objCl.contains("command") || 
+                  objCl.contains("scroller") || 
+                  objCl.contains("bottomBar");
+
+    if (!isIgnored && this.isActive) {
+      this.close();
     }
   }
 
