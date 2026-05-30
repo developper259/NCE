@@ -147,7 +147,7 @@ class KeyBinding {
     this.control_copy();
     if (txt) this.key_backspace();
     else {
-      if (this.editor.lineController.maxIndex != this.editor.cursor.row)
+      if (this.editor.lineController.lines.length != this.editor.cursor.row)
         this.editor.lineController.supLine(this.editor.cursor.row - 1);
       else
         this.editor.lineController.changeLine("", this.editor.cursor.row - 1);
@@ -404,7 +404,7 @@ class KeyBinding {
       if (this.editor.fileManager.activeFile.historyX == undefined)
         this.editor.fileManager.activeFile.historyX = x;
 
-      if (y == this.editor.lineController.maxIndex) {
+      if (y == this.editor.lineController.lines.length) {
         if (
           this.editor.fileManager.activeFile.historyX !=
           this.editor.lineController.lines[y - 1].length
@@ -509,7 +509,7 @@ class KeyBinding {
       }
 
       if (
-        y == this.editor.lineController.maxIndex &&
+        y == this.editor.lineController.lines.length &&
         x == this.editor.lineController.lines[y - 1].length
       )
         return;

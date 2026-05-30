@@ -54,6 +54,7 @@ class WriterController {
   }
 
   splitWord(txt) {
+    if (txt === undefined) return;
     let oldChar = "";
     let tableSplit = [];
     for (let char of txt) {
@@ -80,6 +81,7 @@ class WriterController {
   }
 
   splitWordView(txt) {
+    if (txt === undefined) return;
     let oldChar = "";
     let tableSplit = [];
     for (let char of txt) {
@@ -106,21 +108,25 @@ class WriterController {
     return tableSplit;
   }
 
-  toHTML(txt, id = "") {
-    let resultWords = "";
-
-    let words = this.splitWordView(txt);
-
-    for (let word of words) {
-      if (word != "") {
-        let classes = "line-word editor-select";
-        resultWords += `<span class="${classes}">${word}</span>`;
+  textToOBJ(txt) {
+    if (txt === undefined) return;
+    const words = this.splitWord(txt);
+    const lineDiv = document.createElement("div");
+    lineDiv.className = "line editor-select";
+    
+    const fragment = document.createDocumentFragment();
+    
+    for (const word of words) {
+      if (word.length > 0) {
+        const span = document.createElement("span");
+        span.className = "line-word editor-select";
+        span.textContent = word;
+        fragment.appendChild(span);
       }
     }
-
-    let result = `<div class="line editor-select">${resultWords}</div>`;
-
-    return result;
+    
+    lineDiv.appendChild(fragment);
+    return lineDiv;
   }
 
   write(txt) {

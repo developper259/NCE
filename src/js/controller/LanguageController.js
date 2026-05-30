@@ -115,7 +115,7 @@ class LanguageController {
 
   refreshAll() {
     let r = { value: undefined, params: {} };
-    for (let i = 1; i <= this.editor.lineController.maxIndex; i++) {
+    for (let i = 1; i <= this.editor.lineController.lines.length; i++) {
       r = this.refreshLine(i, r);
 
       if (r) r.inLine = false;

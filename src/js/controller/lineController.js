@@ -4,7 +4,7 @@ class LineController {
     this.maxCharactersPerLine =
       parseInt(this.editor.output.clientWidth / this.editor.letterSize) + 10; // + marge
     this.maxViewLines =
-      parseInt(this.editor.output.clientHeight / this.editor.posY) + 25; // + marge
+      parseInt(this.editor.output.clientHeight / this.editor.posY) + 10; // + marge
 
     this.maxCharacters =
       parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1; // - marge
@@ -12,6 +12,8 @@ class LineController {
       parseInt(this.editor.output.clientHeight / this.editor.posY);
 
     this.lineN = document.querySelector(".line-numbers");
+
+    this.dirtyLines = new Set();
   }
 
   // Getters et Setters
@@ -23,16 +25,6 @@ class LineController {
   set lines(value) {
     if (!this.editor.fileManager.activeFile) return;
     this.editor.fileManager.activeFile.lines = value;
-  }
-
-  get maxIndex() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile?.maxIndex;
-  }
-
-  set maxIndex(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.maxIndex = value;
   }
 
   get index() {
@@ -57,7 +49,6 @@ class LineController {
 
   loadContent(content) {
     this.lines = content.split("\n");
-    this.maxIndex = this.lines.length;
   }
 
   getContent() {
@@ -72,11 +63,11 @@ class LineController {
       getOccurrence("\t", this.lines[i])
     );
   }
-  getViewContent() {
-    return this.lines || [];
-  }
 
   getViewNumberLines() {
+    return Math.min(this.lines.length, this.maxViewLines);
+  }
+  getViewLines() {
     return Math.min(this.lines.length, this.maxViewLines);
   }
 
@@ -94,56 +85,96 @@ class LineController {
   }
 
   addLine(txt, index) {
-    this.lines = [
-      ...this.lines.slice(0, index),
-      txt,
-      ...this.lines.slice(index),
-    ];
+    this.lines.splice(index, 0, txt);
+    this.markDirtyLineFrom(index);
   }
 
   changeLine(txt, index) {
-    this.lines[index] = txt;
+    if (index >= 0 && index < this.lines.length) {
+      this.lines[index] = txt;
+      this.markDirtyLine(index);
+    }
   }
 
   supLine(index) {
-    if (index > this.maxIndex || index < 0) return;
-    this.maxIndex -= 1;
-    this.lines.splice(index, 1);
+    if (index >= 0 && index < this.lines.length) {
+      this.markDirtyLineFrom(index);
+
+      this.lines.splice(index, 1);
+    }
   }
 
-  refreshLine() {
+  clear() {
+    this.lines = [''];
+    this.markDirtyLineFrom(0);
+  }
+
+  markDirtyLineFrom(index) {
+    for (let i = index; i < this.getViewLines(); i++) {
+      this.dirtyLines.add(i);
+    }
+  }
+
+  markDirtyLine(index) {
+    this.dirtyLines.add(index);
+  }
+
+  refreshOutput() {
+    if (this.dirtyLines.size === 0) return;
+
+    for (const index of this.dirtyLines) {
+      this.refreshLineOutput(index);
+    }
+    this.dirtyLines.clear();
+  }
+
+  refreshLineOutput(index) {
+    if (index >= this.maxViewLines) {
+      return;
+    }
+  
+    let lineOBJ = this.createLineOBJ(this.lines[index], index);
+    const child = this.editor.output.children[index];
+    if (!lineOBJ) {
+      child.replaceChildren();
+      return;
+    }
+    if (child.textContent !== lineOBJ.textContent) {
+      child.replaceWith(lineOBJ);
+    }
+  }
+
+  initLineOutput() {
     if (!this.editor.fileManager.activeFile) return;
 
-    const lines = this.getViewContent();
+    const fragment = document.createDocumentFragment();
 
-    this.editor.output.innerHTML = "";
-    for (let i = 0; i < Math.min(lines.length, this.maxViewLines); i++) {
-      if (!lines[i]) continue;
-      if (lines[i].length > this.longuerLine)
-        this.longuerLine = lines[i].length;
+    for (let i = 0; i < this.maxViewLines; i++) {
+      let lineOBJ;
+      if (!this.lines[i]) {
+        lineOBJ = this.createLineOBJ('', i);
+      }else{
+        let line = this.lines[i];
+        if (line.length > this.longuerLine)
+          this.longuerLine = line.length;
+  
+        if (line.length > this.maxCharactersPerLine) line = line.slice(0, this.maxCharactersPerLine);
+        lineOBJ = this.createLineOBJ(this.lines[i], i);
+      }
 
-      let line = lines[i]
-      if (line.length > this.maxCharacters) line = line.slice(0, this.maxCharacters);
-      let lineOBJ = this.createLineOBJ(lines[i], i + 1);
-
-      this.editor.output.appendChild(lineOBJ);
-
-      const x = 0;
-      const y = this.editor.baseY + this.editor.posY * i;
-
-      lineOBJ.style.position = "absolute";
-      lineOBJ.style.top = y + "px";
-      lineOBJ.style.left = x + "px";
+      fragment.appendChild(lineOBJ);
     }
-    if (this.lines.length === 0)
-      this.editor.output.innerHTML = '<div class="line editor-select"></div>';
+    if (this.lines.length === 0) {
+      let lineOBJ = this.createLineOBJ('', 1);
+      fragment.appendChild(lineOBJ);
+    }
+
+    this.editor.output.replaceChildren(fragment);
   }
   refreshNumberLines() {
     if (!this.editor.fileManager.activeFile) return;
 
     let children = this.lineN.children;
-
-    if (children.length === 0) this.initNumberLines();
 
     if (children.length === this.getViewNumberLines()) return;
 
@@ -157,7 +188,7 @@ class LineController {
       const fragment = document.createDocumentFragment();
 
       for (let i = 0; i < (diff * -1); i++) {
-        const lNode = this.createLineNode(children.length + i);
+        const lNode = this.createNumberLineOBJ(children.length + i);
         fragment.appendChild(lNode);
       }
 
@@ -167,23 +198,20 @@ class LineController {
 
   initNumberLines() {
     if (!this.editor.fileManager.activeFile) return;
-    let linesN = this.lineN.querySelectorAll(".line-el");
 
     const fragment = document.createDocumentFragment();
     
-    this.lineN.innerHTML = ""; 
     const l = this.getViewNumberLines();
 
     for (let i = 0; i < l; i++) {
-      const lNode = this.createLineNode(i);
+      const lNode = this.createNumberLineOBJ(i);
       fragment.appendChild(lNode);
     }
 
-    // Un seul accès au DOM réel
-    this.lineN.appendChild(fragment);
+    this.lineN.replaceChildren(fragment);
   }
   
-  createLineNode(index) {
+  createNumberLineOBJ(index) {
     const span = document.createElement("span");
     
     // classes
@@ -203,14 +231,23 @@ class LineController {
   }
 
   createLineOBJ(line, row) {
-    const html = this.editor.writerController.toHTML(line);
-    let element = createElement(html);
-    element.dataset.line = row;
-    return element;
+    const obj = this.editor.writerController.textToOBJ(line);
+
+    if (!obj) return;
+    
+    const x = 0;
+    const y = this.editor.baseY + this.editor.posY * row;
+
+    obj.style.position = "absolute";
+    obj.style.top = y + "px";
+    obj.style.left = x + "px";
+
+    obj.dataset.line = row;
+    return obj;
   }
 
   getLineOBJ(row) {
-    const line = getElement(".editor-output .line[data-line='" + row + "']");
+    const line = this.editor.output.children[row - 1];
     if (!line) return;
     return line;
   }
@@ -225,25 +262,23 @@ class LineController {
     if (row == undefined) return;
     const l = this.getLineOBJ(row);
     if (!l) return;
-    const words = l.querySelectorAll(".line-word");
-    return words;
+    return l.children;
   }
 
-  getWordOBJ(row, column) {
-    if (row == null || column == null) return;
+  getWordOBJ(row, index) {
+    if (row == null || index == null) return;
     const l = this.getLineOBJ(row);
     if (!l) return;
-    const words = l.querySelectorAll(".line-word");
-    return words[column];
+    const words = l.children;
+    return words[index];
   }
 
   refresh() {
     if (!this.editor.fileManager.activeFile) return;
     if (this.lines.length === 0) this.lines = [''];
     if (this.index !== this.editor.cursor.row) this.index = this.editor.cursor.row;
-    if (this.lines.length !== this.maxIndex) this.maxIndex = this.lines.length;
 
-    this.refreshLine();
+    this.refreshOutput();
     this.refreshNumberLines();
   }
 

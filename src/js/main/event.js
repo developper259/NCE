@@ -79,7 +79,7 @@ class Events {
     if (this.editor.fileManager.activeFile) this.editor.fileManager.activeFile.onChange();
 
     // ------- LanguageController.js ------
-    this.editor.languageController.onChange();
+    //this.editor.languageController.onChange();
 
     // ------- KeyBinding.js ------
     this.editor.keyBinding.onChange();

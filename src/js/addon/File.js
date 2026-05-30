@@ -19,7 +19,6 @@ class FileNode {
 
     // Line Controller
     this.lines = [""];
-    this.maxIndex = this.lines.length;
     this.index = 0;
     this.longuerLine = 0;
 
@@ -65,7 +64,6 @@ class FileNode {
     this.column = file.column;
 
     this.lines = file.lines;
-    this.maxIndex = file.maxIndex;
     this.index = file.index;
 
     this.isMouseDown = file.isMouseDown;

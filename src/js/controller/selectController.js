@@ -106,7 +106,7 @@ class SelectController {
   refreshStartEndSelect() {
     /*let els = [];
 
-		for (let i = 0; i < this.editor.lineController.maxIndex; i++) {
+		for (let i = 0; i < this.editor.lineController.lines.length; i++) {
 			let el = this.getSelectOBJLine(i);
 			if (el) els.push(el);
 		}
@@ -300,7 +300,7 @@ class SelectController {
   selectAll(cursorChange) {
     if (!this.editor.fileManager.activeFile) return;
     this.unSelectAll();
-    for (let i = 0; i < this.editor.lineController.maxIndex; i++) {
+    for (let i = 0; i < this.editor.lineController.lines.length; i++) {
       this.selectLine(i, cursorChange);
     }
 
@@ -365,7 +365,7 @@ class SelectController {
     let x = 0;
     if (index == line.lines.length - 1) x = length;
     if (cursorChange) {
-      if (index != this.editor.lineController.maxIndex - 1)
+      if (index != this.editor.lineController.lines.length - 1)
         this.editor.cursor.setCursorPosition(index + 2, x);
       else this.editor.cursor.setCursorPosition(index + 1, length);
     }
@@ -612,7 +612,7 @@ class SelectController {
   }
 
   // Middle lines: select entire line
-  for (let i = 0; i < lc.maxIndex; i++) {
+  for (let i = 0; i < lc.lines.length; i++) {
     if (i === yStart || i === yEnd) continue;
 
     const isBetween = (yStart < i && i < yEnd) || (yStart > i && i > yEnd);

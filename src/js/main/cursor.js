@@ -135,8 +135,8 @@ class Cursor {
   getPosition(row, column) {    // visible position of cursor == column
     if (!this.editor.fileManager.activeFile) return;
     if (row <= 0) row = 1;
-    if (row > this.editor.lineController.maxIndex) {
-      row = this.editor.lineController.maxIndex;
+    if (row > this.editor.lineController.lines.length) {
+      row = this.editor.lineController.lines.length;
     }
 
     const line = this.editor.lineController.lines[row - 1];
@@ -168,8 +168,8 @@ class Cursor {
   getReelPosition(row, column) {    // real position of cursor == x
     if (!this.editor.fileManager.activeFile) return;
     if (row <= 0) row = 1;
-    if (row > this.editor.lineController.maxIndex) {
-      row = this.editor.lineController.maxIndex;
+    if (row > this.editor.lineController.lines.length) {
+      row = this.editor.lineController.lines.length;
     }
 
     const line = this.editor.lineController.lines[row - 1];

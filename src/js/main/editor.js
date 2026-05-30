@@ -40,7 +40,8 @@ class Editor {
   refreshAll() {
     //this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
-    this.lineController.refresh();
+    this.lineController.initLineOutput();
+    this.lineController.initNumberLines();
     this.selectController.refreshStartEndSelect();
     this.fileManager.refresh();
     if (this.fileManager.activeFile)
