@@ -16,7 +16,7 @@ class FileManager {
 
   async openFiles(files) {
     for (let file of files) {
-      if (this.activeFile && this.activeFile.isEmpty() && !file.isEmpty()) {
+      if (this.activeFile && this.activeFile.hasPath() && !file.hasPath()) {
         this.activeFile.replaceFile(file);
         this.setFocusFile(this.activeFile);
       } else {
@@ -41,8 +41,8 @@ class FileManager {
   async closeFile(id) {
     const file = this.files[id];
     if (!file) return;
-
-    if (!file.isSaved) {
+    
+    if (!file.isSaved && (!file.isEmpty() && !file.hasPath())) {
       const choice = await this.editor.savePopupManager.confirmClose(id);
       if (choice === "cancel") return;
       if (choice === "save") {

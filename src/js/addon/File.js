@@ -41,6 +41,12 @@ class FileNode {
   }
 
   isEmpty() {
+    if (this.lines.length === 0) return true;
+    if (this.lines.length === 1 && this.lines[0].length === 0) return true; 
+    return false;
+  }
+
+  hasPath() {
     if (this.path) return false;
     return true;
   }
@@ -103,7 +109,7 @@ class FileNode {
 
   async saveAs() {
     const file = await this.editor.fileManager.selectNewFile();
-    if (!file || file.isEmpty()) return;
+    if (!file || file.hasPath()) return;
     this.path = file.path;
     this.name = file.name;
     this.save();
