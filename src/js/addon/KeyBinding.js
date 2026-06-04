@@ -185,6 +185,8 @@ class KeyBinding {
           this.editor.fileManager.activeFile.indexHistory
       ].cursor.column
     );
+    this.editor.selectController.unSelectAll();
+    this.editor.lineController.markDirtyAll();
     this.editor.lineController.refresh();
     this.editor.events.callEvent(Events.ON_CHANGE);
   }
@@ -218,6 +220,8 @@ class KeyBinding {
           this.editor.fileManager.activeFile.indexHistory
       ].cursor.column
     );
+    this.editor.selectController.unSelectAll();
+    this.editor.lineController.markDirtyAll();
     this.editor.lineController.refresh();
     this.editor.events.callEvent(Events.ON_CHANGE);
   }

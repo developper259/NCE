@@ -109,6 +109,10 @@ class LineController {
     this.markDirtyLineFrom(0);
   }
 
+  markDirtyAll() {
+    this.markDirtyLineFrom(0);
+  }
+
   markDirtyLineFrom(index) {
     for (let i = index; i < this.getViewLines(); i++) {
       this.dirtyLines.add(i);
