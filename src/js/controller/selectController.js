@@ -103,6 +103,20 @@ class SelectController {
     this.containsSelected = parts.join("\n");
   }
 
+  refreshSelectPositions() {
+    if (!this.editor.fileManager.activeFile) return;
+    const difY = 4;
+    const children = this.selectOutput?.children;
+    if (!children) return;
+
+    for (let i = 0; i < children.length; i++) {
+      const el = children[i];
+      const row = parseInt(el.dataset.line, 10);
+      if (isNaN(row)) continue;
+      el.style.top = `${this.editor.cursor.rowToY(row + 1) - difY}px`;
+    }
+  }
+
   refreshStartEndSelect() {
     /*let els = [];
 

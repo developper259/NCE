@@ -34,7 +34,11 @@ class Cursor {
   }
 
   rowToY(row) {
-    return this.editor.baseY + this.editor.posY * row - this.mpY;
+    const lc = this.editor.lineController;
+    const screenRow = row - 1 - lc.startIndex;
+    return (
+      this.editor.baseY + this.editor.posY * screenRow - this.mpY - lc.offsetY
+    );
   }
 
   columnToX(column) {
@@ -72,8 +76,9 @@ class Cursor {
     const rect = this.editor.output.getBoundingClientRect();
     const localX = event.clientX - rect.left - this.mX;
     const localY = event.clientY - rect.top - this.mY;
+    const scrollOffset = this.editor.lineController.getScrollOffsetY();
 
-    const targetRow = this.yToRow(localY);
+    const targetRow = this.yToRow(localY + scrollOffset);
     const targetColumn = this.xToColumn(localX);
     const posReal = this.getReelPosition(targetRow, targetColumn);
     if (!posReal) return;
@@ -115,13 +120,6 @@ class Cursor {
     column = pos.column;
 
     if (this.isNewPosition(row, column)) {
-      const placeY = this.rowToY(row) - 4;
-      const placeX = this.columnToX(column);
-
-      this.cD.style.display = "block";
-      this.cD.style.left = `${placeX}px`;
-      this.cD.style.top = `${placeY}px`;
-
       this.row = row;
       this.column = column;
 
@@ -130,6 +128,19 @@ class Cursor {
       this.editor.setSelected(true);
       this.editor.events.callEvent(Events.CURSOR_CHANGE, { row, column });
     }
+
+    this.updateCaretPosition();
+  }
+
+  updateCaretPosition() {
+    if (!this.editor.fileManager.activeFile) return;
+
+    const placeY = this.rowToY(this.row) - 4;
+    const placeX = this.columnToX(this.column);
+
+    this.cD.style.display = "block";
+    this.cD.style.left = `${placeX}px`;
+    this.cD.style.top = `${placeY}px`;
   }
 
   getPosition(row, column) {    // visible position of cursor == column

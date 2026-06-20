@@ -1,19 +1,137 @@
 class LineController {
   constructor(editor) {
     this.editor = editor;
-    this.maxCharactersPerLine =
-      parseInt(this.editor.output.clientWidth / this.editor.letterSize) + 10; // + marge
-    this.maxViewLines =
-      parseInt(this.editor.output.clientHeight / this.editor.posY) + 10; // + marge
-
-    this.maxCharacters =
-      parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1; // - marge
-    this.maxLines =
-      parseInt(this.editor.output.clientHeight / this.editor.posY);
 
     this.lineN = document.querySelector(".line-numbers");
 
     this.dirtyLines = new Set();
+    this.startIndex = 0;
+    this.offsetY = 0;
+
+    this.initScroller();
+  }
+
+  getScrollOffsetY() {
+    return this.startIndex * this.editor.posY + this.offsetY;
+  }
+
+  getMaxStartIndex() {
+    if (!this.lines || this.lines.length === 0) return 0;
+    return Math.max(0, this.lines.length - this.maxLines);
+  }
+
+  getLineTop(screenIndex) {
+    return this.editor.baseY + this.editor.posY * screenIndex - this.offsetY;
+  }
+
+  refreshLinePositions() {
+    for (let i = 0; i < this.editor.output.children.length; i++) {
+      this.editor.output.children[i].style.top = `${this.getLineTop(i)}px`;
+    }
+    for (let i = 0; i < this.lineN.children.length; i++) {
+      this.lineN.children[i].style.top = `${this.getLineTop(i)}px`;
+    }
+  }
+
+  applyScrollTransform() {
+    this.editor.output.style.transform = "";
+    this.lineN.style.transform = "";
+    this.refreshLinePositions();
+  }
+
+  resetScroll() {
+    this.startIndex = 0;
+    this.offsetY = 0;
+    if (this.scroller) this.scroller.scrollRatio = 0;
+    this.applyScrollTransform();
+  }
+
+  applyScrollFromRatio(scrollRatio) {
+    if (!this.lines || this.lines.length === 0) return;
+
+    if (!this.scroller.calcIsActive()) {
+      if (this.startIndex !== 0 || this.offsetY !== 0) {
+        this.resetScroll();
+        this.markDirtyAll();
+        this.refreshOutput();
+        this.refreshNumberLines();
+        this.editor.cursor.updateCaretPosition();
+        this.editor.selectController.refreshSelectPositions();
+      }
+      return;
+    }
+
+    const posY = this.editor.posY;
+    const totalHeight = this.lines.length * posY;
+    const viewportHeight = this.editor.output.clientHeight;
+    const maxScrollY = Math.max(0, totalHeight - viewportHeight);
+    const maxStartIndex = this.getMaxStartIndex();
+
+    scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
+    this.scroller.scrollRatio = scrollRatio;
+
+    const currentScrollY = scrollRatio * maxScrollY;
+    let newStartIndex = Math.min(
+      Math.floor(currentScrollY / posY),
+      maxStartIndex,
+    );
+    let newOffsetY = currentScrollY - newStartIndex * posY;
+
+    const maxOffsetY = Math.max(
+      0,
+      totalHeight - newStartIndex * posY - viewportHeight,
+    );
+    if (newOffsetY > maxOffsetY) newOffsetY = maxOffsetY;
+
+    const startIndexChanged = this.startIndex !== newStartIndex;
+    const offsetChanged = this.offsetY !== newOffsetY;
+
+    this.startIndex = newStartIndex;
+    this.offsetY = newOffsetY;
+    this.applyScrollTransform();
+
+    if (startIndexChanged) {
+      this.markDirtyAll();
+      this.refreshOutput();
+      this.refreshNumberLines();
+      this.editor.cursor.updateCaretPosition();
+      this.editor.selectController.refreshSelectPositions();
+    } else if (offsetChanged) {
+      this.editor.cursor.updateCaretPosition();
+      this.editor.selectController.refreshSelectPositions();
+    }
+  }
+
+  initScroller() {
+    this.scroller = this.editor.scrollerManager.createScroller(
+      this.editor.editorOBJ,
+      this.editor.scrollerManager.VERTICAL_TYPE,
+      false,
+    );
+    this.editor.scrollerManager.addScroller(this.scroller);
+    this.scroller.onRefresh = () => {
+      this.refresh();
+    };
+
+    this.scroller.nbItem = this.lines?.length || 0;
+    this.scroller.heightByItem = this.editor.posY;
+
+    this.scroller.calculProp = () => {
+      if (!this.lines || this.lines.length === 0) return 0;
+      const visibleLines = this.maxLines;
+      const totalLines = this.lines.length;
+      if (totalLines <= visibleLines) return 100;
+      return (visibleLines / totalLines) * 100;
+    };
+
+    this.scroller.calcIsActive = () => {
+      if (!this.lines || this.lines.length === 0) return false;
+      return this.lines.length > this.maxLines;
+    };
+
+    this.scroller.onScroll = (scrollRatio) => {
+      this.applyScrollFromRatio(scrollRatio);
+    };
   }
 
   // Getters et Setters
@@ -45,6 +163,26 @@ class LineController {
   set longuerLine(value) {
     if (!this.editor.fileManager.activeFile) return;
     this.editor.fileManager.activeFile.longuerLine = value;
+  }
+
+  get maxCharactersPerLine() {
+    return (
+      parseInt(this.editor.output.clientWidth / this.editor.letterSize) + 5
+    ); // + marge
+  }
+
+  get maxViewLines() {
+    return parseInt(this.editor.output.clientHeight / this.editor.posY) + 5; // + marge
+  }
+
+  get maxCharacters() {
+    return (
+      parseInt(this.editor.output.clientWidth / this.editor.letterSize) - 1
+    ); // - marge
+  }
+
+  get maxLines() {
+    return parseInt(this.editor.output.clientHeight / this.editor.posY);
   }
 
   loadContent(content) {
@@ -105,7 +243,7 @@ class LineController {
   }
 
   clear() {
-    this.lines = [''];
+    this.lines = [""];
     this.markDirtyLineFrom(0);
   }
 
@@ -113,8 +251,13 @@ class LineController {
     this.markDirtyLineFrom(0);
   }
 
-  markDirtyLineFrom(index) {
-    for (let i = index; i < this.getViewLines(); i++) {
+  markDirtyLineFrom(dataIndex) {
+    const start = Math.max(dataIndex, this.startIndex);
+    const end = Math.min(
+      this.lines.length,
+      this.startIndex + this.maxViewLines,
+    );
+    for (let i = start; i < end; i++) {
       this.dirtyLines.add(i);
     }
   }
@@ -126,23 +269,39 @@ class LineController {
   refreshOutput() {
     if (this.dirtyLines.size === 0) return;
 
-    for (const index of this.dirtyLines) {
-      this.refreshLineOutput(index);
-    }
+    this.dirtyLines.forEach((dataIndex) => {
+      const screenIndex = dataIndex - this.startIndex;
+      if (screenIndex >= 0 && screenIndex < this.maxViewLines) {
+        this.refreshLineOutput(screenIndex);
+      }
+    });
+
     this.dirtyLines.clear();
   }
 
-  refreshLineOutput(index) {
-    if (index >= this.maxViewLines) {
-      return;
-    }
-  
-    let lineOBJ = this.createLineOBJ(this.lines[index], index);
-    const child = this.editor.output.children[index];
-    if (!lineOBJ) {
+  refreshLineOutput(screenIndex) {
+    if (screenIndex >= this.maxViewLines) return;
+
+    const dataIndex = this.startIndex + screenIndex;
+    const child = this.editor.output.children[screenIndex];
+    if (!child) return;
+
+    if (dataIndex >= this.lines.length) {
       child.replaceChildren();
+      child.removeAttribute("data-line");
       return;
     }
+
+    let line = this.lines[dataIndex];
+    if (line.length > this.maxCharactersPerLine) {
+      line = line.slice(0, this.maxCharactersPerLine);
+    }
+
+    let lineOBJ = this.createLineOBJ(line, screenIndex);
+    if (!lineOBJ) return;
+
+    lineOBJ.dataset.line = dataIndex;
+
     if (child.textContent !== lineOBJ.textContent) {
       child.replaceWith(lineOBJ);
     }
@@ -151,86 +310,103 @@ class LineController {
   initLineOutput() {
     if (!this.editor.fileManager.activeFile) return;
 
+    this.resetScroll();
+
     const fragment = document.createDocumentFragment();
 
     for (let i = 0; i < this.maxViewLines; i++) {
+      const dataIndex = this.startIndex + i;
       let lineOBJ;
-      if (!this.lines[i]) {
-        lineOBJ = this.createLineOBJ('', i);
-      }else{
-        let line = this.lines[i];
-        if (line.length > this.longuerLine)
-          this.longuerLine = line.length;
-  
-        if (line.length > this.maxCharactersPerLine) line = line.slice(0, this.maxCharactersPerLine);
-        lineOBJ = this.createLineOBJ(this.lines[i], i);
+
+      if (dataIndex >= this.lines.length) {
+        lineOBJ = this.createLineOBJ("", i);
+      } else {
+        let line = this.lines[dataIndex];
+        if (line.length > this.longuerLine) this.longuerLine = line.length;
+        if (line.length > this.maxCharactersPerLine)
+          line = line.slice(0, this.maxCharactersPerLine);
+
+        lineOBJ = this.createLineOBJ(line, i);
       }
 
-      fragment.appendChild(lineOBJ);
-    }
-    if (this.lines.length === 0) {
-      let lineOBJ = this.createLineOBJ('', 1);
+      lineOBJ.dataset.line = dataIndex;
       fragment.appendChild(lineOBJ);
     }
 
     this.editor.output.replaceChildren(fragment);
+    this.scroller.nbItem = this.lines.length;
   }
+
   refreshNumberLines() {
     if (!this.editor.fileManager.activeFile) return;
 
     let children = this.lineN.children;
-
-    if (children.length === this.getViewNumberLines()) return;
-
-    const diff = children.length - this.getViewNumberLines();
+    const targetCount = this.getViewNumberLines();
+    const diff = children.length - targetCount;
 
     if (diff > 0) {
       for (let i = 0; i < diff; i++) {
         this.lineN.lastElementChild.remove();
       }
-    }else{
+    } else if (diff < 0) {
       const fragment = document.createDocumentFragment();
-
-      for (let i = 0; i < (diff * -1); i++) {
-        const lNode = this.createNumberLineOBJ(children.length + i);
+      const currentLength = children.length;
+      for (let i = 0; i < diff * -1; i++) {
+        const screenIndex = currentLength + i;
+        const lNode = this.createNumberLineOBJ(
+          screenIndex,
+          this.startIndex + screenIndex,
+        );
         fragment.appendChild(lNode);
       }
-
       this.lineN.appendChild(fragment);
     }
+
+    for (let i = 0; i < children.length; i++) {
+      const span = children[i];
+      const dataIndex = this.startIndex + i;
+
+      span.textContent = dataIndex + 1;
+      span.dataset.line = dataIndex;
+      span.style.top = `${this.getLineTop(i)}px`;
+
+      if (dataIndex === this.index - 1) {
+        span.classList.add("line-selected");
+      } else {
+        span.classList.remove("line-selected");
+      }
+    }
+
+    this.scroller.nbItem = this.lines.length;
   }
 
   initNumberLines() {
     if (!this.editor.fileManager.activeFile) return;
 
     const fragment = document.createDocumentFragment();
-    
     const l = this.getViewNumberLines();
 
     for (let i = 0; i < l; i++) {
-      const lNode = this.createNumberLineOBJ(i);
+      const lNode = this.createNumberLineOBJ(i, this.startIndex + i);
       fragment.appendChild(lNode);
     }
 
     this.lineN.replaceChildren(fragment);
   }
-  
-  createNumberLineOBJ(index) {
+
+  createNumberLineOBJ(screenIndex, dataIndex) {
     const span = document.createElement("span");
-    
-    // classes
+
     span.classList.add("line-el", "editor-el");
-    if (index === this.index - 1) {
+    if (dataIndex === this.index - 1) {
       span.classList.add("line-selected");
     }
-    
-    // style
-    const y = this.editor.baseY + this.editor.posY * index;
-    span.style.top = `${y}px`;
-    
-    // Contenu
-    span.textContent = index + 1;
-    
+
+    span.style.top = `${this.getLineTop(screenIndex)}px`;
+
+    span.textContent = dataIndex + 1;
+    span.dataset.line = dataIndex;
+
     return span;
   }
 
@@ -238,12 +414,11 @@ class LineController {
     const obj = this.editor.writerController.textToOBJ(line);
 
     if (!obj) return;
-    
+
     const x = 0;
-    const y = this.editor.baseY + this.editor.posY * row;
 
     obj.style.position = "absolute";
-    obj.style.top = y + "px";
+    obj.style.top = `${this.getLineTop(row)}px`;
     obj.style.left = x + "px";
 
     obj.dataset.line = row;
@@ -256,10 +431,12 @@ class LineController {
     return line;
   }
 
-  getLineNumberOBJ(index) {
-    const lines = document.querySelectorAll(".line-el");
-    if (!lines) return;
-    return lines[index];
+  getLineNumberOBJ(dataIndex) {
+    const screenIndex = dataIndex - this.startIndex;
+    if (screenIndex >= 0 && screenIndex < this.lineN.children.length) {
+      return this.lineN.children[screenIndex];
+    }
+    return null;
   }
 
   getWordsOBJ(row) {
@@ -279,25 +456,32 @@ class LineController {
 
   refresh() {
     if (!this.editor.fileManager.activeFile) return;
-    if (this.lines.length === 0) this.lines = [''];
-    if (this.index !== this.editor.cursor.row) this.index = this.editor.cursor.row;
+    if (this.lines.length === 0) this.lines = [""];
+    if (this.index !== this.editor.cursor.row)
+      this.index = this.editor.cursor.row;
 
     this.refreshOutput();
     this.refreshNumberLines();
+
+    this.scroller.nbItem = this.lines.length;
+    this.applyScrollFromRatio(this.scroller.scrollRatio);
+    this.scroller.refresh();
   }
 
   onClickNumberLine(e) {
     try {
-      const i = parseInt(e.target.textContent) - 1;
+      const i = parseInt(e.target.dataset.line);
+      if (isNaN(i)) return;
+
       let lineOBJ = this.editor.selectController.getSelectOBJLine(i);
       this.editor.selectController.unSelectAll();
-  
+
       if (lineOBJ === undefined)
         this.editor.selectController.selectLine(i, true);
       else this.editor.cursor.setCursorPosition(i + 1, 0);
     } catch (error) {
       console.error(error);
-      return
+      return;
     }
   }
 }
