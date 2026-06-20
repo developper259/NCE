@@ -15,7 +15,7 @@
   "license": "ISC",
   "dependencies": {
     "electron": "^42.4.1",
-    "material-symbols": "^0.27.2",
+    "@fontsource/material-symbols-outlined": "^5.2.45",
     "typescript": "^5.2.2"
   }
 }
