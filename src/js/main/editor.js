@@ -1,6 +1,7 @@
 class Editor {
   constructor() {
     this.output = getElement(".editor-output");
+    this.editorOBJ = getElement(".editor");
 
     this.selected = false;
     this.panel = undefined;
@@ -15,7 +16,7 @@ class Editor {
     this.api = window.api;
 
     this.fileManager = new FileManager(this);
-    //this.scrollerManager = new ScrollerManager(this);
+    this.scrollerManager = new ScrollerManager(this);
 
     this.writerController = new WriterController(this);
     this.lineController = new LineController(this);
@@ -38,7 +39,7 @@ class Editor {
   }
 
   refreshAll() {
-    //this.scrollerManager.refreshAll();
+    this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
     this.lineController.initLineOutput();
     this.lineController.initNumberLines();

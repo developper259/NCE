@@ -24,6 +24,7 @@ class Events {
     this.editor = editor;
 
     addEvent("click", this.onClick.bind(this));
+    addEvent("resize", this.onResize.bind(this), window);
   }
 
   callEvent(e, arg) {
@@ -133,5 +134,9 @@ class Events {
       return;
     }
     
+  }
+  onResize(e) {
+    this.editor.scrollerManager.refreshAll();
+    this.editor.lineController.refresh();
   }
 }

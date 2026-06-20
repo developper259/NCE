@@ -29,10 +29,9 @@ class ScrollerManager {
     this.refreshAll();
   }
 
-  createScroller(parent, target, type, isBody) {
+  createScroller(parent, type, isBody) {
     const s = new Scroller(this.editor);
-    s.parentOBJ = getElement(parent);
-    s.targetOBJ = getElement(target);
+    s.parentOBJ = parent;
     s.type = type;
     s.isBody = isBody;
     s.id = this.scrollers.length;

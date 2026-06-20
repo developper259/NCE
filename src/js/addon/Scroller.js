@@ -1,116 +1,148 @@
 class Scroller {
   constructor(e) {
     this.editor = e;
-
     this.id = 0;
-
-    this.scrollX = 1;
-    this.scrollY = 1;
-
-    this.maxScroll = 2;
-    this.maxScroll = 2;
-
+    this.scrollX = 0;
+    this.scrollY = 0;
     this.type = 0;
-    this.active = false;
+    this.active = true;
     this.isBody = true;
+    this.isRendering = false;
 
-    this.parentOBJ;
-    this.targetOBJ;
-    this.scrollerOBJ;
-    this.itemOBJ;
+    this.parentOBJ = null;
+    this.scrollerOBJ = null;
+    this.itemOBJ = null;
+
+    this.scrollRatio = 0;
+    this.strength = 0.2;
+    this.renderMargin = 5;
+
+    this.nbItem = 0;
+    this.heightByItem = 0;
 
     this.calculProp = () => 0;
     this.calcIsActive = () => false;
+    this.onRefresh = () => {};
+    this.onScroll = () => {};
   }
 
   calcul(diff) {
-    // reduit de a% diff fois(length / maxLines) obtient un pourcentage | a chaque fois a% augmente
-    // limite 3% : 0.99 pour eviter d'augmenter la taille du scroller
-    return Math.max(
-      Array.from({ length: diff }).reduce(
-        (r, _, i) => r * Math.min(0.98 + i * 0.0001, 0.99),
-        100
-      ),
-      3
-    );
+    return Math.max(100 * Math.pow(0.99, diff), 3);
   }
 
   init() {
     if (this.scrollerOBJ || this.itemOBJ) return;
-
-    let classes = this.isBody
-      ? "page-scroller-body"
-      : "" + !this.active
-      ? " page-scroller-inactive"
-      : "";
-    classes +=
-      this.type == this.editor.scrollerManager.VERTICAL_TYPE
-        ? " page-scroller-vertical"
-        : " page-scroller-horizontal";
-
-    const html = `<div class="page-scroller ${classes}" id="${this.id}">
-                        <div class="page-scroller-item"></div>
-                      </div>`;
-
-    this.parentOBJ.appendChild(createElement(html));
-
-    this.scrollerOBJ = this.parentOBJ.querySelector(".page-scroller");
-    if (this.scrollerOBJ)
-      this.itemOBJ = this.scrollerOBJ.querySelector(".page-scroller-item");
-
+  
+    this.scrollerOBJ = document.createElement("div");
+    this.itemOBJ = document.createElement("div");
+  
+    this.scrollerOBJ.classList.add("page-scroller", "box");
+    this.itemOBJ.classList.add("page-scroller-item");
+  
+    if (this.isBody) this.scrollerOBJ.classList.add("page-scroller-body");
+    if (!this.active) this.scrollerOBJ.classList.add("page-scroller-inactive");
+  
+    if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
+      this.scrollerOBJ.classList.add("page-scroller-vertical");
+    } else {
+      this.scrollerOBJ.classList.add("page-scroller-horizontal");
+    }
+  
+    this.scrollerOBJ.id = this.id;
+    this.scrollerOBJ.appendChild(this.itemOBJ);
+    this.parentOBJ.appendChild(this.scrollerOBJ);
+  
+    this.addScrollListeners();
     this.refresh();
   }
 
   refresh() {
-    if (!this.calcIsActive()) return;
+    if (!this.calcIsActive()) {
+      this.setActive(false);
+      return;
+    }
+    
+    this.setActive(true);
+    const proportion = this.calculProp();
+    
     if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
-      this.scrollerOBJ.style.height = this.targetOBJ.style.height;
-
-      const proportion = this.calculProp();
-      const size = (proportion / 100) * this.targetOBJ.clientHeight;
-
-      if (proportion == 0) {
-        this.setActive(false);
-        return;
-      } else {
-        this.setActive(true);
-      }
-
-      this.itemOBJ.style.height = `${size}px`;
+      const size = (proportion / 100) * this.parentOBJ.clientHeight;
+      this.itemOBJ.style.height = `${Math.max(size, 20)}px`;
+      this.itemOBJ.style.top = `${this.scrollRatio * (this.parentOBJ.clientHeight - this.itemOBJ.clientHeight)}px`;
     } else {
-      const authorScroller = this.editor.scrollerManager.getScrollerByParent(
-        this.parentOBJ
-      );
-      this.scrollerOBJ.style.width = this.targetOBJ.style.width;
-      this.scrollerOBJ.style.left = this.targetOBJ.style.left;
-
-      const proportion = this.calculProp();
-      const size = (proportion / 100) * this.targetOBJ.clientWidth;
-
-      if (proportion == 0) {
-        this.setActive(false);
-        return;
-      } else {
-        this.setActive(true);
-      }
-
-      this.itemOBJ.style.width = `${size}px`;
+      const size = (proportion / 100) * this.parentOBJ.clientWidth;
+      this.itemOBJ.style.width = `${Math.max(size, 20)}px`;
+      this.itemOBJ.style.left = `${this.scrollRatio * (this.parentOBJ.clientWidth - this.itemOBJ.clientWidth)}px`;
     }
   }
 
-  onScroll() {}
-
-  scroll(x, y) {}
-
-  setScroll(x, y) {
-    this.scrollX = x;
-    this.scrollY = y;
-
-    this.editor.refreshAll();
-  }
-
   setActive(mode) {
+    this.active = mode;
     if (mode) this.scrollerOBJ.classList.remove("page-scroller-inactive");
     else this.scrollerOBJ.classList.add("page-scroller-inactive");
+  }
+
+  addScrollListeners() {
+    this.isDragging = false;
+    this.itemOBJ.addEventListener('mousedown', (e) => { this.isDragging = true; e.preventDefault(); });
+    document.addEventListener('mousemove', this.handleMouseMove.bind(this));
+    document.addEventListener('mouseup', () => { this.isDragging = false; });
+    this.parentOBJ.addEventListener('wheel', this.handleWheel.bind(this), { passive: false });
+  }
+
+  handleMouseMove(e) {
+    if (!this.isDragging || !this.active) return;
+
+    const rect = this.scrollerOBJ.getBoundingClientRect();
+    if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
+      const maxScroll = this.scrollerOBJ.clientHeight - this.itemOBJ.clientHeight;
+      if (maxScroll <= 0) return;
+      
+      const newTop = Math.max(0, Math.min(e.clientY - rect.top - (this.itemOBJ.clientHeight / 2), maxScroll));
+      this.scrollRatio = newTop / maxScroll;
+    } else {
+      const maxScroll = this.scrollerOBJ.clientWidth - this.itemOBJ.clientWidth;
+      if (maxScroll <= 0) return;
+
+      const newLeft = Math.max(0, Math.min(e.clientX - rect.left - (this.itemOBJ.clientWidth / 2), maxScroll));
+      this.scrollRatio = newLeft / maxScroll;
+    }
+    
+    this.onScroll(this.scrollRatio);
+    this.refresh();
+  }
+
+  handleWheel(e) {
+    if (!this.active) return;
+    e.preventDefault();
+
+    const delta = (this.type === this.editor.scrollerManager.VERTICAL_TYPE) ? e.deltaY : e.deltaX;
+    const dimension = (this.type === this.editor.scrollerManager.VERTICAL_TYPE) ? this.scrollerOBJ.clientHeight : this.scrollerOBJ.clientWidth;
+    const itemSize = (this.type === this.editor.scrollerManager.VERTICAL_TYPE) ? this.itemOBJ.clientHeight : this.itemOBJ.clientWidth;
+    
+    const maxScroll = dimension - itemSize;
+    if (maxScroll <= 0) return;
+
+    // Mise à jour du ratio basé sur le déplacement
+    this.scrollRatio = Math.max(0, Math.min(this.scrollRatio + (delta * this.strength / dimension), 1));
+    
+    this.onScroll(this.scrollRatio);
+    this.refresh();
+  }
+
+  getIntervalItem() {
+    if (this.nbItem === undefined || this.nbItem === null || this.heightByItem === undefined || this.heightByItem === null || this.heightByItem === 0) {
+      return { start: 0, end: 0 };
+    }
+    
+    const visibleItems = Math.ceil(this.parentOBJ.clientHeight / this.heightByItem);
+    const maxScrollIndex = Math.max(0, this.nbItem - visibleItems);
+    let start = Math.floor(this.scrollRatio * maxScrollIndex) - this.renderMargin;
+    let end = Math.min(start + visibleItems, this.nbItem) + this.renderMargin;
+
+    if (start < 0) start = 0;
+    if (end > this.nbItem) end = this.nbItem;
+    
+    return { start, end };
   }
 }
