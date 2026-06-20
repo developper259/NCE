@@ -36,9 +36,7 @@ class Cursor {
   rowToY(row) {
     const lc = this.editor.lineController;
     const screenRow = row - 1 - lc.startIndex;
-    return (
-      this.editor.baseY + this.editor.posY * screenRow - this.mpY - lc.offsetY
-    );
+    return lc.getLineTop(screenRow) + 4;
   }
 
   columnToX(column) {
