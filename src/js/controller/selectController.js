@@ -108,12 +108,21 @@ class SelectController {
     const difY = 4;
     const children = this.selectOutput?.children;
     if (!children) return;
+    const cursor = this.editor.cursor;
 
     for (let i = 0; i < children.length; i++) {
       const el = children[i];
-      const row = parseInt(el.dataset.line, 10);
-      if (isNaN(row)) continue;
-      el.style.top = `${this.editor.cursor.rowToY(row + 1) - difY}px`;
+      const dataIndex = parseInt(el.dataset.line, 10);
+      if (isNaN(dataIndex)) continue;
+
+      const fileRow = dataIndex + 1;
+      if (!cursor.isRowVisible(fileRow)) {
+        el.style.display = "none";
+        continue;
+      }
+
+      el.style.display = "";
+      el.style.top = `${cursor.rowToY(fileRow) - difY}px`;
     }
   }
 

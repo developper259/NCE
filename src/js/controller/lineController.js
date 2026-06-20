@@ -25,11 +25,19 @@ class LineController {
   }
 
   refreshLinePositions() {
-    for (let i = 0; i < this.editor.output.children.length; i++) {
-      this.editor.output.children[i].style.top = `${this.getLineTop(i)}px`;
+    const outputLen = this.editor.output.children.length;
+    const lineLen = this.lineN.children.length;
+    const tops = new Array(Math.max(outputLen, lineLen));
+
+    for (let i = 0; i < tops.length; i++) {
+      tops[i] = `${this.getLineTop(i)}px`;
     }
-    for (let i = 0; i < this.lineN.children.length; i++) {
-      this.lineN.children[i].style.top = `${this.getLineTop(i)}px`;
+
+    for (let i = 0; i < outputLen; i++) {
+      this.editor.output.children[i].style.top = tops[i];
+    }
+    for (let i = 0; i < lineLen; i++) {
+      this.lineN.children[i].style.top = tops[i];
     }
   }
 
@@ -42,7 +50,7 @@ class LineController {
   resetScroll() {
     this.startIndex = 0;
     this.offsetY = 0;
-    if (this.scroller) this.scroller.scrollRatio = 0;
+    if (this.scroller) this.scroller.setScrollRatio(0);
     this.applyScrollTransform();
   }
 
@@ -68,7 +76,7 @@ class LineController {
     const maxStartIndex = this.getMaxStartIndex();
 
     scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
-    this.scroller.scrollRatio = scrollRatio;
+    this.scroller.setScrollRatio(scrollRatio);
 
     const currentScrollY = scrollRatio * maxScrollY;
     let newStartIndex = Math.min(
@@ -84,21 +92,17 @@ class LineController {
     if (newOffsetY > maxOffsetY) newOffsetY = maxOffsetY;
 
     const startIndexChanged = this.startIndex !== newStartIndex;
-    const offsetChanged = this.offsetY !== newOffsetY;
 
     this.startIndex = newStartIndex;
     this.offsetY = newOffsetY;
     this.applyScrollTransform();
+    this.editor.cursor.updateCaretPosition();
+    this.editor.selectController.refreshSelectPositions();
 
     if (startIndexChanged) {
       this.markDirtyAll();
       this.refreshOutput();
       this.refreshNumberLines();
-      this.editor.cursor.updateCaretPosition();
-      this.editor.selectController.refreshSelectPositions();
-    } else if (offsetChanged) {
-      this.editor.cursor.updateCaretPosition();
-      this.editor.selectController.refreshSelectPositions();
     }
   }
 

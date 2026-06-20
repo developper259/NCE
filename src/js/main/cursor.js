@@ -130,8 +130,24 @@ class Cursor {
     this.updateCaretPosition();
   }
 
+  isRowVisible(row) {
+    const lc = this.editor.lineController;
+    const screenRow = row - 1 - lc.startIndex;
+    if (screenRow < 0 || screenRow >= lc.maxViewLines) return false;
+
+    const top = lc.getLineTop(screenRow);
+    const bottom = top + this.editor.posY;
+    const viewport = this.editor.output.clientHeight;
+    return bottom > 0 && top < viewport;
+  }
+
   updateCaretPosition() {
     if (!this.editor.fileManager.activeFile) return;
+
+    if (!this.isRowVisible(this.row)) {
+      this.cD.style.display = "none";
+      return;
+    }
 
     const placeY = this.rowToY(this.row) - 4;
     const placeX = this.columnToX(this.column);
