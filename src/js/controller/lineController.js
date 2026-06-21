@@ -5,8 +5,6 @@ class LineController {
     this.lineN = document.querySelector(".line-numbers");
 
     this.dirtyLines = new Set();
-    this.startIndex = 0;
-    this.offsetY = 0;
 
     this.initScroller();
   }
@@ -52,6 +50,51 @@ class LineController {
     this.offsetY = 0;
     if (this.scroller) this.scroller.setScrollRatio(0);
     this.applyScrollTransform();
+  }
+
+  clampScrollState() {
+    if (!this.lines || this.lines.length === 0) {
+      this.startIndex = 0;
+      this.offsetY = 0;
+      return;
+    }
+
+    const posY = this.editor.posY;
+    const maxStart = this.getMaxStartIndex();
+    if (this.startIndex > maxStart) this.startIndex = maxStart;
+    if (this.startIndex < 0) this.startIndex = 0;
+
+    const viewportHeight = this.editor.output.clientHeight;
+    const totalHeight = this.lines.length * posY;
+    const maxOffsetY = Math.max(
+      0,
+      totalHeight - this.startIndex * posY - viewportHeight,
+    );
+    if (this.offsetY > maxOffsetY) this.offsetY = maxOffsetY;
+    if (this.offsetY < 0) this.offsetY = 0;
+  }
+
+  getScrollRatioFromState() {
+    if (!this.lines || this.lines.length === 0) return 0;
+
+    const posY = this.editor.posY;
+    const viewportHeight = this.editor.output.clientHeight;
+    const totalHeight = this.lines.length * posY;
+    const maxScrollY = Math.max(0, totalHeight - viewportHeight);
+    if (maxScrollY === 0) return 0;
+
+    return (this.startIndex * posY + this.offsetY) / maxScrollY;
+  }
+
+  restoreScroll() {
+    if (!this.editor.tabManager.activeFile) return;
+
+    this.clampScrollState();
+    this.scroller.setScrollRatio(this.getScrollRatioFromState());
+    this.applyScrollTransform();
+    this.scroller.refresh();
+    this.editor.cursor.updateCaretPosition();
+    this.editor.selectController.refreshSelectPositions();
   }
 
   applyScrollFromRatio(scrollRatio) {
@@ -189,6 +232,26 @@ class LineController {
     return parseInt(this.editor.output.clientHeight / this.editor.posY);
   }
 
+  get startIndex() {
+    if (!this.editor.tabManager.activeFile) return 0;
+    return this.editor.tabManager.activeFile.startIndex ?? 0;
+  }
+
+  set startIndex(value) {
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.startIndex = value;
+  }
+
+  get offsetY() {
+    if (!this.editor.tabManager.activeFile) return 0;
+    return this.editor.tabManager.activeFile.offsetY ?? 0;
+  }
+
+  set offsetY(value) {
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.offsetY = value;
+  }
+
   loadContent(content) {
     this.lines = content.split("\n");
   }
@@ -313,8 +376,6 @@ class LineController {
 
   initLineOutput() {
     if (!this.editor.tabManager.activeFile) return;
-
-    this.resetScroll();
 
     const fragment = document.createDocumentFragment();
 

@@ -43,6 +43,7 @@ class Editor {
     this.bottomBar.refresh();
     this.lineController.initLineOutput();
     this.lineController.initNumberLines();
+    this.lineController.restoreScroll();
     this.selectController.refreshStartEndSelect();
     this.tabManager.refresh();
     if (this.tabManager.activeFile)
