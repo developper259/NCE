@@ -40,7 +40,17 @@ export class Window {
       this.window = null;
     });
 
-    this.window.webContents.openDevTools();
+    this.window.webContents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown") return;
+      const isReload =
+        (input.meta || input.control) && input.key.toLowerCase() === "r";
+      if (!isReload) return;
+      event.preventDefault();
+      this.window?.webContents.reload();
+    });
+
+    //this.window.webContents.openDevTools();
+    
 
     if (!this.fileManager) console.log('FileManager is not defined');
 

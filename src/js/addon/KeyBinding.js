@@ -34,31 +34,31 @@ class KeyBinding {
     };
 
     setInterval(() => {
-      if (!this.editor.fileManager.activeFile) return;
+      if (!this.editor.tabManager.activeFile) return;
       const currentLines = JSON.stringify(this.editor.lineController.lines);
       const currentCursor = {
         row: this.editor.cursor.row,
         column: this.editor.cursor.column,
       };
-      if (this.editor.fileManager.activeFile.indexHistory < 1)
-        this.editor.fileManager.activeFile.indexHistory = 1;
-      if (this.editor.fileManager.activeFile.indexHistory != 1) return;
-      if (this.editor.fileManager.activeFile.history.length > 100)
-        this.editor.fileManager.activeFile.history.shift();
+      if (this.editor.tabManager.activeFile.indexHistory < 1)
+        this.editor.tabManager.activeFile.indexHistory = 1;
+      if (this.editor.tabManager.activeFile.indexHistory != 1) return;
+      if (this.editor.tabManager.activeFile.history.length > 100)
+        this.editor.tabManager.activeFile.history.shift();
 
       if (
-        this.editor.fileManager.activeFile.history.length === 0 ||
-        this.editor.fileManager.activeFile.history[
-          this.editor.fileManager.activeFile.history.length - 1
+        this.editor.tabManager.activeFile.history.length === 0 ||
+        this.editor.tabManager.activeFile.history[
+          this.editor.tabManager.activeFile.history.length - 1
         ].lines !== currentLines
       ) {
-        this.editor.fileManager.activeFile.history.push({
+        this.editor.tabManager.activeFile.history.push({
           lines: currentLines,
           cursor: null,
         });
       }
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length - 1
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length - 1
       ].cursor = currentCursor;
     }, 1000);
   }
@@ -85,38 +85,38 @@ class KeyBinding {
   }
 
   onChange() {
-    this.editor.fileManager.activeFile.indexHistory = 1;
+    this.editor.tabManager.activeFile.indexHistory = 1;
   }
 
   // Control functions
   control_save(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (s) {
-      this.editor.fileManager.activeFile.saveAs();
+      this.editor.tabManager.activeFile.saveAs();
     } else {
-      this.editor.fileManager.activeFile.save();
+      this.editor.tabManager.activeFile.save();
     }
   }
   async control_open_file(s, c, m, a) {
-    const file = await this.editor.fileManager.selectFiles();
+    const file = await this.editor.tabManager.selectFiles();
 
-    this.editor.fileManager.openFiles(file);
+    this.editor.tabManager.openFiles(file);
   }
   control_new_file(s, c, m, a) {
-    this.editor.fileManager.createEmptyFile();
+    this.editor.tabManager.createEmptyFile();
   }
   control_close_file(s, c, m, a) {
-    if (this.editor.fileManager.files.length != 0)
-      this.editor.fileManager.closeActiveFile();
+    if (this.editor.tabManager.files.length != 0)
+      this.editor.tabManager.closeActiveFile();
     else this.editor.api.quit();
   }
 
   control_close_all_file(s, c, m, a) {
     //this.editor.api.quit();
-    this.editor.fileManager.closeFiles();
+    this.editor.tabManager.closeFiles();
   }
   async control_copy(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     
     let txt = this.editor.selectController.containsSelected;
 
@@ -131,7 +131,7 @@ class KeyBinding {
   }
 
   async control_paste(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     try {
       const text = await navigator.clipboard.readText();
       this.editor.writerController.write(text);
@@ -141,7 +141,7 @@ class KeyBinding {
   }
 
   async control_cut(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     
     let txt = this.editor.selectController.containsSelected;
     this.control_copy();
@@ -157,32 +157,32 @@ class KeyBinding {
     }
   }
   control_undo(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
-    if (!this.editor.fileManager.activeFile.history) return;
+    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile.history) return;
 
     if (
-      !this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          (this.editor.fileManager.activeFile.indexHistory + 1)
+      !this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          (this.editor.tabManager.activeFile.indexHistory + 1)
       ]
     )
       return;
 
-    this.editor.fileManager.activeFile.indexHistory += 1;
+    this.editor.tabManager.activeFile.indexHistory += 1;
     this.editor.lineController.lines = JSON.parse(
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          this.editor.fileManager.activeFile.indexHistory
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          this.editor.tabManager.activeFile.indexHistory
       ].lines
     );
     this.editor.cursor.setCursorPosition(
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          this.editor.fileManager.activeFile.indexHistory
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          this.editor.tabManager.activeFile.indexHistory
       ].cursor.row,
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          this.editor.fileManager.activeFile.indexHistory
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          this.editor.tabManager.activeFile.indexHistory
       ].cursor.column
     );
     this.editor.selectController.unSelectAll();
@@ -192,32 +192,32 @@ class KeyBinding {
   }
 
   control_redo(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
-    if (!this.editor.fileManager.activeFile.history) return;
+    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile.history) return;
 
     if (
-      !this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          (this.editor.fileManager.activeFile.indexHistory - 1)
+      !this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          (this.editor.tabManager.activeFile.indexHistory - 1)
       ]
     )
       return;
 
-    this.editor.fileManager.activeFile.indexHistory -= 1;
+    this.editor.tabManager.activeFile.indexHistory -= 1;
     this.editor.lineController.lines = JSON.parse(
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          this.editor.fileManager.activeFile.indexHistory
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          this.editor.tabManager.activeFile.indexHistory
       ].lines
     );
     this.editor.cursor.setCursorPosition(
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          this.editor.fileManager.activeFile.indexHistory
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          this.editor.tabManager.activeFile.indexHistory
       ].cursor.row,
-      this.editor.fileManager.activeFile.history[
-        this.editor.fileManager.activeFile.history.length -
-          this.editor.fileManager.activeFile.indexHistory
+      this.editor.tabManager.activeFile.history[
+        this.editor.tabManager.activeFile.history.length -
+          this.editor.tabManager.activeFile.indexHistory
       ].cursor.column
     );
     this.editor.selectController.unSelectAll();
@@ -233,7 +233,7 @@ class KeyBinding {
     else this.editor.Ccmd.open();
   }
   control_delete_line(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
 
     this.editor.lineController.supLine(this.editor.cursor.row - 1);
@@ -244,7 +244,7 @@ class KeyBinding {
     );
   }
   control_select_all(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     
     this.editor.selectController.selectAll(true);
@@ -256,14 +256,14 @@ class KeyBinding {
     else this.editor.panel.close();
   }
   key_tab(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.editor.writerController.write("\t");
   }
   key_delete(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     if (m || a) return;
-    this.editor.fileManager.activeFile.historyX = undefined;
+    this.editor.tabManager.activeFile.historyX = undefined;
     const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;
     let x = pos.column;
@@ -292,11 +292,11 @@ class KeyBinding {
     this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
   }
   key_backspace(s, c, m, a) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     if (m || a) return;
 
-    this.editor.fileManager.activeFile.historyX = undefined;
+    this.editor.tabManager.activeFile.historyX = undefined;
     const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;
     let x = pos.column;
@@ -342,7 +342,7 @@ class KeyBinding {
     this.editor.writerController.write("\n");
   }
   key_arrow_up(s, c, m, a) {
-    if (this.editor.fileManager.activeFile) {
+    if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
       const pos = this.editor.cursor.getCursorReelPosition();
       if (!pos) return;
@@ -362,12 +362,12 @@ class KeyBinding {
         return;
       }
 
-      if (this.editor.fileManager.activeFile.historyX == undefined)
-        this.editor.fileManager.activeFile.historyX = x;
+      if (this.editor.tabManager.activeFile.historyX == undefined)
+        this.editor.tabManager.activeFile.historyX = x;
 
       if (y == 1) {
-        if (this.editor.fileManager.activeFile.historyX != 0)
-          this.editor.fileManager.activeFile.historyX = 0;
+        if (this.editor.tabManager.activeFile.historyX != 0)
+          this.editor.tabManager.activeFile.historyX = 0;
         else {
           this.editor.selectController.isMouseDown = false;
           return;
@@ -376,7 +376,7 @@ class KeyBinding {
 
       this.editor.cursor.setCursorPosition(
         y,
-        this.editor.fileManager.activeFile.historyX
+        this.editor.tabManager.activeFile.historyX
       );
       if (s) {
         this.editor.selectController.move();
@@ -385,7 +385,7 @@ class KeyBinding {
     }
   }
   key_arrow_down(s, c, m, a) {
-    if (this.editor.fileManager.activeFile) {
+    if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
       const pos = this.editor.cursor.getCursorReelPosition();
       if (!pos) return;
@@ -405,15 +405,15 @@ class KeyBinding {
         return;
       }
 
-      if (this.editor.fileManager.activeFile.historyX == undefined)
-        this.editor.fileManager.activeFile.historyX = x;
+      if (this.editor.tabManager.activeFile.historyX == undefined)
+        this.editor.tabManager.activeFile.historyX = x;
 
       if (y == this.editor.lineController.lines.length) {
         if (
-          this.editor.fileManager.activeFile.historyX !=
+          this.editor.tabManager.activeFile.historyX !=
           this.editor.lineController.lines[y - 1].length
         )
-          this.editor.fileManager.activeFile.historyX =
+          this.editor.tabManager.activeFile.historyX =
             this.editor.lineController.lines[y - 1].length;
         else {
           this.editor.selectController.isMouseDown = false;
@@ -423,7 +423,7 @@ class KeyBinding {
 
       this.editor.cursor.setCursorPosition(
         y,
-        this.editor.fileManager.activeFile.historyX
+        this.editor.tabManager.activeFile.historyX
       );
 
       if (s) {
@@ -433,9 +433,9 @@ class KeyBinding {
     }
   }
   key_arrow_left(s, c, m, a) {
-    if (this.editor.fileManager.activeFile) {
+    if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
-      this.editor.fileManager.activeFile.historyX = undefined;
+      this.editor.tabManager.activeFile.historyX = undefined;
       const pos = this.editor.cursor.getCursorReelPosition();
       if (!pos) return;
       let x = pos.column;
@@ -491,9 +491,9 @@ class KeyBinding {
     }
   }
   key_arrow_right(s, c, m, a) {
-    if (this.editor.fileManager.activeFile) {
+    if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
-      this.editor.fileManager.activeFile.historyX = undefined;
+      this.editor.tabManager.activeFile.historyX = undefined;
       const pos = this.editor.cursor.getCursorReelPosition();
       if (!pos) return;
       let x = pos.column;

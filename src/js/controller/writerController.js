@@ -38,14 +38,14 @@ class WriterController {
   }
 
   get insertMode() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile?.insertMode;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile?.insertMode;
   }
 
   set insertMode(mode) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
-    this.editor.fileManager.activeFile.insertMode = mode;
+    this.editor.tabManager.activeFile.insertMode = mode;
     if (mode) {
       this.editor.cursor.cD.classList.add("insert-mode");
     } else if (this.editor.cursor.cD.classList.contains("insert-mode")) {
@@ -130,7 +130,7 @@ class WriterController {
   }
 
   write(txt) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.editor.keyBinding.historyX = undefined;
     this.editor.keyBinding.indexHistory = 1;
 
@@ -201,7 +201,7 @@ class WriterController {
 
   delete(x, y) {
     if (this.editor.lineController.lines.length == 0) return;
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     let newLine = "";
     const line = this.editor.lineController.lines[y - 1];
     let cursor = { column: x, row: y };
@@ -240,7 +240,7 @@ class WriterController {
 
   deleteWord(x, y) {
     if (this.editor.lineController.lines.length == 0) return;
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     let cursor = { column: x, row: y };
 
     const line = this.editor.lineController.lines[y - 1];
@@ -302,7 +302,7 @@ class WriterController {
 
   deleteSelection() {
     if (this.editor.lineController.lines.length == 0) return;
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     let objs = this.editor.selectController.getSelectOBJ();
     let cursor = this.editor.cursor.getCursorPosition();
     if (!cursor) return;

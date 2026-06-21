@@ -28,7 +28,7 @@ class BottomBar {
   }
 
   refresh() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     let leftBottomBar = getElement(".bottomBar .left");
     let middleBottomBar = getElement(".bottomBar .middle");
@@ -43,7 +43,7 @@ class BottomBar {
   }
 
   refreshCursorOBJ() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     let r = "";
     let countLine = this.editor.selectController.getNumberLineSelected();

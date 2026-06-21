@@ -14,22 +14,22 @@ class Cursor {
   }
 
   get row() {
-    return this.editor.fileManager.activeFile?.row;
+    return this.editor.tabManager.activeFile?.row;
   }
 
   set row(value) {
-    if (this.editor.fileManager.activeFile) {
-      this.editor.fileManager.activeFile.row = value;
+    if (this.editor.tabManager.activeFile) {
+      this.editor.tabManager.activeFile.row = value;
     }
   }
 
   get column() {
-    return this.editor.fileManager.activeFile?.column;
+    return this.editor.tabManager.activeFile?.column;
   }
 
   set column(value) {
-    if (this.editor.fileManager.activeFile) {
-      this.editor.fileManager.activeFile.column = value;
+    if (this.editor.tabManager.activeFile) {
+      this.editor.tabManager.activeFile.column = value;
     }
   }
 
@@ -68,7 +68,7 @@ class Cursor {
   }
 
   onClick(event) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.editor.keyBinding.historyX = undefined;
 
     const rect = this.editor.output.getBoundingClientRect();
@@ -110,7 +110,7 @@ class Cursor {
   }
 
   setCursorPosition(row, column) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     const pos = this.getPosition(row, column);
     if (!pos) return;
@@ -142,7 +142,7 @@ class Cursor {
   }
 
   updateCaretPosition() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     if (!this.isRowVisible(this.row)) {
       this.cD.style.display = "none";
@@ -158,7 +158,7 @@ class Cursor {
   }
 
   getPosition(row, column) {    // visible position of cursor == column
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.lines.length) {
       row = this.editor.lineController.lines.length;
@@ -191,7 +191,7 @@ class Cursor {
   }
 
   getReelPosition(row, column) {    // real position of cursor == x
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.lines.length) {
       row = this.editor.lineController.lines.length;

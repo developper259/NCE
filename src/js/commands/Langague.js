@@ -24,15 +24,15 @@ class Langague extends Command {
       if (this.values[i] === title) {
         this.close();
         this.value = i;
-        this.editor.fileManager.setLanguage(this.editor.languages[i]);
+        this.editor.tabManager.setLanguage(this.editor.languages[i]);
       }
     }
     this.editor.bottomBar.refresh();
   }
 
   refresh() {
-    if (!this.editor.fileManager.activeFile) return;
-    const l = this.editor.fileManager.activeFile.language;
+    if (!this.editor.tabManager.activeFile) return;
+    const l = this.editor.tabManager.activeFile.language;
 
     for (let i = 0; i < this.values.length; i++) {
       if (this.values[i] === l.name) {

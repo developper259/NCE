@@ -7,73 +7,73 @@ class SelectController {
   }
 
   get isMouseDown() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.isMouseDown;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.isMouseDown;
   }
 
   set isMouseDown(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.isMouseDown = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.isMouseDown = value;
   }
 
   get containsSelected() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.containsSelected;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.containsSelected;
   }
 
   set containsSelected(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.containsSelected = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.containsSelected = value;
   }
 
   get lastClick() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.lastClick;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.lastClick;
   }
 
   set lastClick(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.lastClick = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.lastClick = value;
   }
 
   get clickCount() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.clickCount;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.clickCount;
   }
 
   set clickCount(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.clickCount = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.clickCount = value;
   }
 
   get HstartSelect() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.HstartSelect;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.HstartSelect;
   }
 
   set HstartSelect(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.HstartSelect = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.HstartSelect = value;
   }
 
   get startSelect() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.startSelect;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.startSelect;
   }
 
   set startSelect(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.startSelect = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.startSelect = value;
   }
 
   get endSelect() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile.endSelect;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile.endSelect;
   }
 
   set endSelect(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.endSelect = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.endSelect = value;
   }
 
   getTextSelectedLine(index) {
@@ -86,7 +86,7 @@ class SelectController {
   }
 
   refreshContaisSelected() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     this.containsSelected = "";
     let count = this.getNumberLineSelected();
@@ -104,7 +104,7 @@ class SelectController {
   }
 
   refreshSelectPositions() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     const difY = 4;
     const children = this.selectOutput?.children;
     if (!children) return;
@@ -191,7 +191,7 @@ class SelectController {
   }
 
   refreshSelectLine(row, length) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (row == undefined || length == undefined) return;
     let obj = this.getSelectOBJLine(row);
     if (!obj) return;
@@ -212,7 +212,7 @@ class SelectController {
   }
 
   refreshSelectLineReverse(row, length) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (row == undefined || length == undefined) return;
     let obj = this.getSelectOBJLine(row);
     if (!obj) return;
@@ -238,7 +238,7 @@ class SelectController {
   }
 
   createSelectEl(column, length, row, classes, value) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     let div = document.createElement("div");
     let difY = 4;
 
@@ -261,12 +261,12 @@ class SelectController {
   }
 
   getNumberLineSelected() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     return this.selectOutput.children.length;
   }
 
   getSelectOBJLine(row) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (row == undefined) return;
     const children = this.selectOutput ? this.selectOutput.children : null;
     if (!children || !children.length) return undefined;
@@ -281,7 +281,7 @@ class SelectController {
   }
 
   getSelectOBJ() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     const children = this.selectOutput ? this.selectOutput.children : null;
     if (!children || !children.length) return [];
 
@@ -300,7 +300,7 @@ class SelectController {
   }
 
   unSelectAll() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.containsSelected = "";
 
     if (this.selectOutput) {
@@ -321,7 +321,7 @@ class SelectController {
   }
 
   selectAll(cursorChange) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.unSelectAll();
     for (let i = 0; i < this.editor.lineController.lines.length; i++) {
       this.selectLine(i, cursorChange);
@@ -335,7 +335,7 @@ class SelectController {
   }
 
   selectWord(wordOBJ, cursorChange) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (wordOBJ == undefined) return;
     const rect = wordOBJ.getBoundingClientRect();
     const editorRect = this.editor.output.getBoundingClientRect();
@@ -364,7 +364,7 @@ class SelectController {
   }
 
   unSelectLine(index) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (index == undefined) return;
     let els = this.getSelectOBJ();
     for (let el of els) {
@@ -373,7 +373,7 @@ class SelectController {
   }
 
   selectLine(index, cursorChange) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (index == undefined) return;
     this.unSelectLine(index);
     let line = this.editor.lineController;
@@ -401,7 +401,7 @@ class SelectController {
   }
 
   cursorDisabled() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     let els = this.getSelectOBJ();
 
     for (let el of els) {
@@ -411,7 +411,7 @@ class SelectController {
   }
 
   cursorEnabled() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     const els = this.getSelectOBJ();
     if (!els || !els.length) return;
 
@@ -444,7 +444,7 @@ class SelectController {
   }
 
   mouseClick(event) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.calcClick();
 
     if ((this.clickCount > 1 && this.clickCount < 5) || this.clickCount > 4) {
@@ -466,7 +466,7 @@ class SelectController {
   }
 
   mouseDown(event) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (event.button == 2) {
       //event right click
       return;
@@ -492,7 +492,7 @@ class SelectController {
   }
 
   mouseUp() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     this.isMouseDown = false;
     const pos = this.editor.cursor.getCursorReelPosition();
 
@@ -503,7 +503,7 @@ class SelectController {
   }
 
   mouseMove(event) {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (this.isMouseDown) {
       this.clickCount = 0;
       this.editor.cursor.onClick(event);
@@ -513,7 +513,7 @@ class SelectController {
   }
 
   move() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     const pos = this.editor.cursor.getCursorReelPosition();
     let c = pos.column;
     let r = pos.row;
@@ -586,7 +586,7 @@ class SelectController {
   }
 
   calculSelectMultiLine() {
-  if (!this.editor.fileManager.activeFile) return;
+  if (!this.editor.tabManager.activeFile) return;
 
   const lc = this.editor.lineController;
   const cur = this.editor.cursor;

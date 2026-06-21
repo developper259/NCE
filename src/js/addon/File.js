@@ -102,11 +102,11 @@ class FileNode {
       );
     }
     this.setIsSaved(true);
-    this.editor.fileManager.refresh();
+    this.editor.tabManager.refresh();
   }
 
   async saveAs() {
-    const file = await this.editor.fileManager.selectNewFile();
+    const file = await this.editor.tabManager.selectNewFile();
     if (!file || file.hasPath()) return;
     this.path = file.path;
     this.name = file.name;
@@ -122,6 +122,6 @@ class FileNode {
     else {
       this.setIsSaved(false);
     }
-    this.editor.fileManager.refresh();
+    this.editor.tabManager.refresh();
   }
 }

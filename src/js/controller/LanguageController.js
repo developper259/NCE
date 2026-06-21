@@ -30,8 +30,8 @@ class LanguageController {
   detectError(words, index) {}
 
   onChange() {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.language.refreshAll();
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.language.refreshAll();
   }
 
   getLanaguage(file) {

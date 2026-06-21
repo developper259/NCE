@@ -326,7 +326,7 @@ export class AppMenu {
 
   reloadWindow() {
     console.log('Reload the current window');
-    this.window.reload();
+    this.window.webContents.reload();
   }
 
   toggleFullscreen() {

@@ -15,7 +15,7 @@ class Editor {
 
     this.api = window.api;
 
-    this.fileManager = new FileManager(this);
+    this.tabManager = new tabManager(this);
     this.scrollerManager = new ScrollerManager(this);
 
     this.writerController = new WriterController(this);
@@ -32,7 +32,7 @@ class Editor {
     this.Ccmd = new CMD(this);
     this.Clangague = new Langague(this);
     this.Cconfig_space = new Config_space(this);
-    this.savePopupManager = new SavePopupManager(this, this.fileManager);
+    this.savePopupManager = new SavePopupManager(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
 
     this.writerController.insertMode = true;
@@ -44,9 +44,9 @@ class Editor {
     this.lineController.initLineOutput();
     this.lineController.initNumberLines();
     this.selectController.refreshStartEndSelect();
-    this.fileManager.refresh();
-    if (this.fileManager.activeFile)
-      this.fileManager.activeFile.language.refreshAll();
+    this.tabManager.refresh();
+    if (this.tabManager.activeFile)
+      this.tabManager.activeFile.language.refreshAll();
   }
 
   onClick(e) {

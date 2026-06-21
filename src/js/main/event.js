@@ -77,7 +77,7 @@ class Events {
   }
   onChange(arg) {
     // ------- File.js ------
-    if (this.editor.fileManager.activeFile) this.editor.fileManager.activeFile.onChange();
+    if (this.editor.tabManager.activeFile) this.editor.tabManager.activeFile.onChange();
 
     // ------- LanguageController.js ------
     //this.editor.languageController.onChange();
@@ -117,11 +117,11 @@ class Events {
     
     // ------- LineController.js ------
     if (cl.contains('file-el') || cl.contains('file-el-title')) {
-      this.editor.fileManager.onClick(e);
+      this.editor.tabManager.onClick(e);
       return;
     }
     if (cl.contains('file-el-btn')) {
-      this.editor.fileManager.onClickClose(e);
+      this.editor.tabManager.onClickClose(e);
       return;
     }
 

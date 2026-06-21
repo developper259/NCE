@@ -1,4 +1,4 @@
-class FileManager {
+class tabManager {
   constructor(e) {
     this.editor = e;
     this.files = []; //opened files

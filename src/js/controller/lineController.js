@@ -140,33 +140,33 @@ class LineController {
 
   // Getters et Setters
   get lines() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile?.lines;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile?.lines;
   }
 
   set lines(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.lines = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.lines = value;
   }
 
   get index() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile?.index;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile?.index;
   }
 
   set index(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.index = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.index = value;
   }
 
   get longuerLine() {
-    if (!this.editor.fileManager.activeFile) return;
-    return this.editor.fileManager.activeFile?.longuerLine;
+    if (!this.editor.tabManager.activeFile) return;
+    return this.editor.tabManager.activeFile?.longuerLine;
   }
 
   set longuerLine(value) {
-    if (!this.editor.fileManager.activeFile) return;
-    this.editor.fileManager.activeFile.longuerLine = value;
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.longuerLine = value;
   }
 
   get maxCharactersPerLine() {
@@ -312,7 +312,7 @@ class LineController {
   }
 
   initLineOutput() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     this.resetScroll();
 
@@ -342,7 +342,7 @@ class LineController {
   }
 
   refreshNumberLines() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     let children = this.lineN.children;
     const targetCount = this.getViewNumberLines();
@@ -385,7 +385,7 @@ class LineController {
   }
 
   initNumberLines() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
 
     const fragment = document.createDocumentFragment();
     const l = this.getViewNumberLines();
@@ -459,7 +459,7 @@ class LineController {
   }
 
   refresh() {
-    if (!this.editor.fileManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) return;
     if (this.lines.length === 0) this.lines = [""];
     if (this.index !== this.editor.cursor.row)
       this.index = this.editor.cursor.row;

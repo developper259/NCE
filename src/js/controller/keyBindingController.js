@@ -9,7 +9,7 @@ class keyBindingController {
       this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
     } else {
       if (e.ctrlKey || e.metaKey) return;
-      if (this.editor.fileManager.activeFile && e.key.length == 1)
+      if (this.editor.tabManager.activeFile && e.key.length == 1)
         this.editor.writerController.write(e.key);
     }
   }
