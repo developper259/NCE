@@ -48,8 +48,8 @@ class FileNode {
   }
 
   hasPath() {
-    if (this.path) return false;
-    return true;
+    if (this.path) return true;
+    return false;
   }
 
   replaceFile(file) {

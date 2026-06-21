@@ -2,7 +2,6 @@ class tabManager {
   constructor(e) {
     this.editor = e;
     this.files = []; //opened files
-    this.folders = [];
     this.activeFile = null; //file on editor
     this.emptyName = "New file";
 
@@ -29,7 +28,7 @@ class tabManager {
 
   async openFiles(files) {
     for (let file of files) {
-      if (this.activeFile && this.activeFile.hasPath() && !file.hasPath()) {
+      if (this.activeFile && !this.activeFile.hasPath() && file.hasPath() && this.activeFile.isEmpty()) {
         this.activeFile.replaceFile(file);
         this.setFocusFile(this.activeFile);
       } else {
@@ -55,13 +54,15 @@ class tabManager {
     const file = this.getFileByID(id);
     if (!file) return;
     
-    if (!file.isSaved && (!file.isEmpty() && !file.hasPath())) {
+    if (!file.isSaved) {
+      if (!(file.isEmpty() && !file.hasPath())) {
       const choice = await this.editor.savePopupManager.confirmClose(id);
       if (choice === "cancel") return;
-      if (choice === "save") {
-        if (this.activeFile?.id !== id) this.setFocusFile(file);
-        await file.save();
-        if (!file.isSaved) return;
+        if (choice === "save") {
+          if (this.activeFile?.id !== id) this.setFocusFile(file);
+          await file.save();
+          if (!file.isSaved) return;
+        }
       }
     }
 
@@ -116,11 +117,13 @@ class tabManager {
   async selectFiles() {
     const files = await this.editor.api.selectFiles();
     let result = [];
+    let id = this.files.length;
 
     if (files) {
       for (let file of files) {
         let name = file.split("/").pop();
-        let node = new FileNode(this.editor, this.files.length, name, file);
+        let node = new FileNode(this.editor, id, name, file);
+        id++;
         result.push(node);
       }
     }
