@@ -15,6 +15,8 @@ class Editor {
 
     this.api = window.api;
 
+    this.emptyMenu = new EmptyMenu(this);
+
     this.tabManager = new tabManager(this);
     this.scrollerManager = new ScrollerManager(this);
 
@@ -39,6 +41,7 @@ class Editor {
   }
 
   refreshAll() {
+    this.emptyMenu.refresh();
     this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
     this.lineController.initLineOutput();
@@ -48,6 +51,54 @@ class Editor {
     this.tabManager.refresh();
     if (this.tabManager.activeFile)
       this.tabManager.activeFile.language.refreshAll();
+  }
+
+  reset() {
+    this.emptyMenu.refresh();
+
+    let selectOutput = getElement(".editor-select-output");
+    let lineNumber = getElement(".line-numbers");
+    let cursor = getElement(".editor-caret");
+
+    let leftBottomBar = getElement(".bottomBar .left");
+    let middleBottomBar = getElement(".bottomBar .middle");
+    let rightBottomBar = getElement(".bottomBar .right");
+
+    this.output.innerHTML = "";
+    selectOutput.innerHTML = "";
+    lineNumber.innerHTML = "";
+    cursor.style.display = "none";
+    leftBottomBar.style.display = "none";
+    middleBottomBar.style.display = "none";
+    rightBottomBar.style.display = "none";
+
+    if (!this.editorOBJ.classList.contains("editor-empty")) {
+      this.editorOBJ.classList.add("editor-empty");
+    }
+    if (this.selected) {
+      this.setSelected(false);
+    }
+
+    this.emptyMenu.show();
+  }
+
+  reactive() {
+    if (this.editorOBJ.classList.contains("editor-empty")) {
+      this.editorOBJ.classList.remove("editor-empty");
+    }
+    if (!this.selected) {
+      this.setSelected(true);
+    }
+
+    let leftBottomBar = getElement(".bottomBar .left");
+    let middleBottomBar = getElement(".bottomBar .middle");
+    let rightBottomBar = getElement(".bottomBar .right");
+
+    leftBottomBar.style.display = "flex";
+    middleBottomBar.style.display = "flex";
+    rightBottomBar.style.display = "flex";
+
+    this.emptyMenu.hide();
   }
 
   onClick(e) {

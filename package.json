@@ -6,16 +6,16 @@
   "main": "src/main.ts",
   "type": "CommonJS",
   "scripts": {
-    "win": "tsc && run.bat && electron dist/main.js",
-    "macos": "npx tsc && bash ./run.sh && electron --no-sandbox dist/main.js",
-    "fast": "bash ./run.sh && electron --trace-warnings --no-sandbox dist/main.js",
+    "win": "tsc && electron dist/main.js",
+    "macos": "npx tsc && electron --no-sandbox dist/main.js",
+    "fast": "electron --trace-warnings --no-sandbox dist/main.js",
     "ubuntu": "sudo sysctl kernel.unprivileged_userns_clone=1"
   },
   "author": "Andrea Belvedere",
   "license": "ISC",
   "dependencies": {
+    "@flaticon/flaticon-uicons": "^3.3.1",
     "electron": "^42.4.1",
-    "@fontsource/material-symbols-outlined": "^5.2.45",
     "typescript": "^5.2.2"
   }
 }

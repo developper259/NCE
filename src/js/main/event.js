@@ -115,12 +115,13 @@ class Events {
       return;
     }
     
-    // ------- LineController.js ------
+    // ------- tabManager.js ------
     if (cl.contains('file-el') || cl.contains('file-el-title')) {
       this.editor.tabManager.onClick(e);
       return;
     }
-    if (cl.contains('file-el-btn')) {
+    console.log(cl)
+    if (cl.contains('file-el-btn') || cl.contains('file-el-btn-img')) {
       this.editor.tabManager.onClickClose(e);
       return;
     }

@@ -25,7 +25,7 @@
 	padding: 0 40px;
 	cursor: pointer;
 	border-radius: 5px 5px 0 0;
-	color: #9e9e9e;
+	color: var(--text-secondary);
 }
 
 .file-manager .files-ul .file-el-title {
@@ -37,18 +37,31 @@
 .file-manager .file-el .file-el-btn {
 	position: absolute;
 	right: 5px;
-	font-size: 20px;
-	padding: 2px;
+	top: 50%;
+	transform: translateY(-50%);
+	padding: 5px;
 	border-radius: 5px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.file-manager .file-el .file-el-btn img {
+	width: 20px;
+	height: 20px;
 }
 
 .file-manager .file-el .file-el-btn:hover {
-	background-color: #2b2b2b;
+	background-color: var(--border-primary);
+}
+
+.file-manager .file-el .file-el-btn:active {
+	background-color: var(--bg-active);
 }
 
 .file-manager .file-el .file-unsaved {
-	background-color: white;
-	color: white;
+	background-color: var(--unsaved-indicator);
+	color: var(--text-white);
 	width: 7px;
 	height: 7px;
 	border-radius: 50%;
@@ -56,14 +69,14 @@
 }
 
 .file-manager .files-ul .file-el:hover:not(.file-active) {
-	background-color: #212121;
+	background-color: var(--bg-hover-alt);
 }
 
 .file-manager .files-ul .file-active {
-	background-color: #202020;
-	border-top: 1.5px solid blue;
-	color: white;
+	background-color: var(--bg-secondary);
+	border-top: 1.5px solid var(--border-active);
+	color: var(--text-white);
 	z-index: 2;
-	border-left: 1px solid #2b2b2b;
-	border-right: 1px solid #2b2b2b;
+	border-left: 1px solid var(--border-primary);
+	border-right: 1px solid var(--border-primary);
 }

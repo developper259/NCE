@@ -1,7 +1,7 @@
 .page-scroller {
     position: absolute;
     display: flex;
-    background-color: #181818;
+    background-color: var(--bg-primary);
     z-index: 4;
     overflow-x: hidden;
     cursor: default;
@@ -11,7 +11,7 @@
 }
 
 .page-scroller-body {
-    background-color: #202020;
+    background-color: var(--bg-secondary);
 }
 
 .page-scroller-inactive {
@@ -37,10 +37,10 @@
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(101, 101, 101, 0.5);
+    background: var(--scroller-bg);
     transition: background 0.2s;
 }
 
 .page-scroller-item:hover {
-    background: rgba(101, 101, 101, 0.7);
+    background: var(--scroller-bg-hover);
 }

@@ -4,14 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NDL Code Editor</title>
-    <link href="../../node_modules/@fontsource/material-symbols-outlined/latin-400.css" rel="stylesheet">
+    <link href="../../node_modules/@flaticon/flaticon-uicons/css/all/all.css" rel="stylesheet">
 
+    <link rel="stylesheet" href="../css/var.css" />
     <link rel="stylesheet" href="../css/index.css" />
     <link rel="stylesheet" href="../css/editor.css" />
     <link rel="stylesheet" href="../css/bottomBar.css" />
     <link rel="stylesheet" href="../css/command.css" />
     <link rel="stylesheet" href="../css/tabManager.css" />
     <link rel="stylesheet" href="../css/scroller.css" />
+    <link rel="stylesheet" href="../css/emptyMenu.css" />
     <style>
       #fps {
         position: fixed;
@@ -42,7 +44,8 @@
       <div class="file-manager box">
         <ul class="files-ul"></ul>
       </div>
-      <div class="editor box">
+      <div class="editor box editor-empty">
+        <div class="empty-menu"></div>
         <div class="line-numbers"></div>
         <div class="editor-caret editor-select"></div>
         <div class="editor-select-output editor-select"></div>
@@ -84,6 +87,7 @@
     <script src="../js/addon/File.js"></script>
     <script src="../js/addon/Command.js"></script>
     <script src="../js/addon/Scroller.js"></script>
+    <script src="../js/addon/emptyMenu.js"></script>
 
     <script src="../js/commands/CMD.js"></script>
     <script src="../js/commands/Langague.js"></script>

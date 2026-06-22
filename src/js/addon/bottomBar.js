@@ -30,14 +30,6 @@ class BottomBar {
   refresh() {
     if (!this.editor.tabManager.activeFile) return;
 
-    let leftBottomBar = getElement(".bottomBar .left");
-    let middleBottomBar = getElement(".bottomBar .middle");
-    let rightBottomBar = getElement(".bottomBar .right");
-
-    leftBottomBar.style.display = "flex";
-    middleBottomBar.style.display = "flex";
-    rightBottomBar.style.display = "flex";
-
     this.refreshCursorOBJ();
     this.refreshScrollers();
   }

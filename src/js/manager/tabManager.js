@@ -9,10 +9,10 @@ class tabManager {
   }
 
   getFileIndexByID(id) {
-    return this.files.findIndex(file => file.id == id);
+    return this.files.findIndex((file) => file.id == id);
   }
   getFileByID(id) {
-    return this.files.find(file => file.id == id);
+    return this.files.find((file) => file.id == id);
   }
   removeFileByID(id) {
     const index = this.getFileIndexByID(id);
@@ -28,7 +28,12 @@ class tabManager {
 
   async openFiles(files) {
     for (let file of files) {
-      if (this.activeFile && !this.activeFile.hasPath() && file.hasPath() && this.activeFile.isEmpty()) {
+      if (
+        this.activeFile &&
+        !this.activeFile.hasPath() &&
+        file.hasPath() &&
+        this.activeFile.isEmpty()
+      ) {
         this.activeFile.replaceFile(file);
         this.setFocusFile(this.activeFile);
       } else {
@@ -53,11 +58,11 @@ class tabManager {
   async closeFile(id) {
     const file = this.getFileByID(id);
     if (!file) return;
-    
+
     if (!file.isSaved) {
       if (!(file.isEmpty() && !file.hasPath())) {
-      const choice = await this.editor.savePopupManager.confirmClose(id);
-      if (choice === "cancel") return;
+        const choice = await this.editor.savePopupManager.confirmClose(id);
+        if (choice === "cancel") return;
         if (choice === "save") {
           if (this.activeFile?.id !== id) this.setFocusFile(file);
           await file.save();
@@ -151,7 +156,7 @@ class tabManager {
     let btn = "";
     if (file.isSaved)
       btn =
-        '<span class="file-el-btn material-symbols-outlined file-saved">close</span>';
+        '<span class="file-el-btn file-saved"><img src="../assets/icons/close.svg" alt="close" class="file-el-btn-img"></span>';
     else btn = '<div class="file-el-btn file-unsaved"></div>';
 
     let html = `<li class="file-el ${arg}" id="${file.id}">
@@ -176,27 +181,10 @@ class tabManager {
     ul.innerHTML = html;
 
     if (this.files.length == 0) {
-      this.clear();
+      this.editor.reset();
+    } else {
+      this.editor.reactive();
     }
-  }
-
-  clear() {
-    let editor = getElement(".editor-output");
-    let selectOutput = getElement(".editor-select-output");
-    let lineNumber = getElement(".line-numbers");
-    let cursor = getElement(".editor-caret");
-
-    let leftBottomBar = getElement(".bottomBar .left");
-    let middleBottomBar = getElement(".bottomBar .middle");
-    let rightBottomBar = getElement(".bottomBar .right");
-
-    editor.innerHTML = "";
-    selectOutput.innerHTML = "";
-    lineNumber.innerHTML = "";
-    cursor.style.display = "none";
-    leftBottomBar.style.display = "none";
-    middleBottomBar.style.display = "none";
-    rightBottomBar.style.display = "none";
   }
 
   onClick(e) {
@@ -211,7 +199,10 @@ class tabManager {
 
   onClickClose(e) {
     let id = e.target.parentElement.id;
-    if (!id) return;
+    if (!id && e.target.classList.contains("file-el-title")) {
+      id = e.target.parentElement.id;
+      if (!id) return;
+    }
     this.closeFile(id);
   }
 

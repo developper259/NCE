@@ -26,7 +26,7 @@ export class Window {
       fullscreen: true,
       webPreferences: {
         sandbox: false,
-        preload: path.join(__dirname, '../js/main/Preload.js'),
+        preload: path.join(__dirname, '../../src/js/main/Preload.js'),
         contextIsolation: true,
         nodeIntegration: true,
       },
