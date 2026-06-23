@@ -1,7 +1,10 @@
 class Editor {
   constructor() {
+    this.mainSection = getElement(".main-section");
     this.output = getElement(".editor-output");
     this.editorOBJ = getElement(".editor");
+
+    this.hideAll();
 
     this.selected = false;
     this.panel = undefined;
@@ -38,6 +41,9 @@ class Editor {
     this.bottomBar = new BottomBar(this);
 
     this.writerController.insertMode = true;
+
+    this.reset();
+    this.showAll();
   }
 
   refreshAll() {
@@ -53,24 +59,20 @@ class Editor {
       this.tabManager.activeFile.language.refreshAll();
   }
 
+  hideAll() {
+    this.mainSection.style.display = "none";
+  }
+
+  showAll() {
+    this.mainSection.style.display = "block";
+  }
+
   reset() {
-    this.emptyMenu.refresh();
+    if (this.emptyMenu) this.emptyMenu.refresh();
+    if (this.tabManager) this.tabManager.hide();
 
-    let selectOutput = getElement(".editor-select-output");
-    let lineNumber = getElement(".line-numbers");
-    let cursor = getElement(".editor-caret");
-
-    let leftBottomBar = getElement(".bottomBar .left");
-    let middleBottomBar = getElement(".bottomBar .middle");
-    let rightBottomBar = getElement(".bottomBar .right");
-
-    this.output.innerHTML = "";
-    selectOutput.innerHTML = "";
-    lineNumber.innerHTML = "";
-    cursor.style.display = "none";
-    leftBottomBar.style.display = "none";
-    middleBottomBar.style.display = "none";
-    rightBottomBar.style.display = "none";
+    if (this.lineController) this.lineController.hide();
+    if (this.bottomBar) this.bottomBar.hide();
 
     if (!this.editorOBJ.classList.contains("editor-empty")) {
       this.editorOBJ.classList.add("editor-empty");
@@ -79,7 +81,7 @@ class Editor {
       this.setSelected(false);
     }
 
-    this.emptyMenu.show();
+    if (this.emptyMenu) this.emptyMenu.show();
   }
 
   reactive() {
@@ -90,15 +92,12 @@ class Editor {
       this.setSelected(true);
     }
 
-    let leftBottomBar = getElement(".bottomBar .left");
-    let middleBottomBar = getElement(".bottomBar .middle");
-    let rightBottomBar = getElement(".bottomBar .right");
+    if (this.tabManager) this.tabManager.show();
 
-    leftBottomBar.style.display = "flex";
-    middleBottomBar.style.display = "flex";
-    rightBottomBar.style.display = "flex";
+    if (this.lineController) this.lineController.show();
+    if (this.bottomBar) this.bottomBar.show();
 
-    this.emptyMenu.hide();
+    if (this.emptyMenu) this.emptyMenu.hide();
   }
 
   onClick(e) {
@@ -127,6 +126,10 @@ class Editor {
 
 var editor = null;
 
-document.addEventListener("DOMContentLoaded", (event) => {
-  editor = new Editor();
-}, window);
+document.addEventListener(
+  "DOMContentLoaded",
+  (event) => {
+    editor = new Editor();
+  },
+  window,
+);

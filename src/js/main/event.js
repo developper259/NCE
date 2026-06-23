@@ -120,7 +120,6 @@ class Events {
       this.editor.tabManager.onClick(e);
       return;
     }
-    console.log(cl)
     if (cl.contains('file-el-btn') || cl.contains('file-el-btn-img')) {
       this.editor.tabManager.onClickClose(e);
       return;

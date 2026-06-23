@@ -5,6 +5,8 @@ class tabManager {
     this.activeFile = null; //file on editor
     this.emptyName = "New file";
 
+    this.tabsOBJ = getElement(".file-manager");
+
     this.refresh();
   }
 
@@ -214,6 +216,18 @@ class tabManager {
     if (this.activeFile) {
       this.activeFile.language = language;
       this.editor.refreshAll();
+    }
+  }
+
+  hide() {
+    if (this.tabsOBJ) {
+      this.tabsOBJ.classList.remove('box-bottom')
+    }
+  }
+  
+  show() {
+    if (this.tabsOBJ) {
+      this.tabsOBJ.classList.add('box-bottom');
     }
   }
 }

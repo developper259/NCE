@@ -59,4 +59,24 @@ class BottomBar {
       title.innerText = instance.values[instance.value];
     }
   }
+
+  hide() {
+    const leftBottomBar = getElement(".bottomBar .left");
+    const middleBottomBar = getElement(".bottomBar .middle");
+    const rightBottomBar = getElement(".bottomBar .right");
+
+    leftBottomBar.style.display = "none";
+    middleBottomBar.style.display = "none";
+    rightBottomBar.style.display = "none";
+  }
+
+  show() {
+    const leftBottomBar = getElement(".bottomBar .left");
+    const middleBottomBar = getElement(".bottomBar .middle");
+    const rightBottomBar = getElement(".bottomBar .right");
+
+    leftBottomBar.style.display = "flex";
+    middleBottomBar.style.display = "flex";
+    rightBottomBar.style.display = "flex";
+  }
 }

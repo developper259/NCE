@@ -3,7 +3,7 @@
 	right: 0;
 	width: 80%;
 	height: 40px;
-	bottom: calc(3px + 90%);
+	bottom: calc(2px + 90%);
 }
 
 .file-manager .files-ul {
@@ -24,8 +24,8 @@
 	align-items: center;
 	padding: 0 40px;
 	cursor: pointer;
-	border-radius: 5px 5px 0 0;
 	color: var(--text-secondary);
+	border-right: 1px solid var(--border-primary);
 }
 
 .file-manager .files-ul .file-el-title {
@@ -39,8 +39,8 @@
 	right: 5px;
 	top: 50%;
 	transform: translateY(-50%);
-	padding: 5px;
-	border-radius: 5px;
+	padding: 2px;
+	border-radius: 6px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -77,6 +77,4 @@
 	border-top: 1.5px solid var(--border-active);
 	color: var(--text-white);
 	z-index: 2;
-	border-left: 1px solid var(--border-primary);
-	border-right: 1px solid var(--border-primary);
 }

@@ -27,6 +27,7 @@
 
 .button-text {
   flex: 1;
+  margin-right: 32px;
 }
 
 .keybinding {

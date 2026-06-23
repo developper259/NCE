@@ -549,4 +549,20 @@ class LineController {
       return;
     }
   }
+
+  hide() {
+    this.lineN.innerHTML = "";
+    this.editor.output.innerHTML = "";
+    const cursor = getElement(".editor-caret");
+    cursor.style.display = "none";
+    const selectOutput = getElement(".editor-select-output");
+    selectOutput.innerHTML = "";
+  }
+
+  show() {
+    this.initLineOutput();
+    this.initNumberLines();
+    const cursor = getElement(".editor-caret");
+    cursor.style.display = "block";
+  }
 }
