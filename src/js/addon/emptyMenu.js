@@ -36,6 +36,12 @@ class EmptyMenu {
 
     emptyMenu.innerHTML = "";
 
+    const logo = document.createElement("img");
+    logo.src = "../assets/logo/NCE/dark-logo.png";
+    logo.className = "empty-menu-logo";
+    logo.alt = "NCE Logo";
+    emptyMenu.appendChild(logo);
+
     for (const action of this.actions) {
       const keybinding = CONFIG_KEYBINDING_GET_ACTION(action);
       if (!keybinding) continue;

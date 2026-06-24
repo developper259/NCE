@@ -7,6 +7,14 @@
   flex-direction: column;
   gap: 8px;
   z-index: 10;
+  align-items: stretch;
+}
+
+.empty-menu-logo {
+  width: 80px;
+  height: 80px;
+  margin-bottom: 16px;
+  align-self: center;
 }
 
 .empty-menu button {

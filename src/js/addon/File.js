@@ -19,7 +19,7 @@ class FileNode {
 
     // Line Controller
     this.lines = [""];
-    this.index = 0;
+    this.index = 1;
     this.longuerLine = 0;
     this.startIndex = 0;
     this.offsetY = 0;
