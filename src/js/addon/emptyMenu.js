@@ -37,7 +37,7 @@ class EmptyMenu {
     emptyMenu.innerHTML = "";
 
     const logo = document.createElement("img");
-    logo.src = "../assets/logo/NCE/dark-logo.png";
+    logo.src = "../../assets/logo/NCE/dark-logo.png";
     logo.className = "empty-menu-logo";
     logo.alt = "NCE Logo";
     emptyMenu.appendChild(logo);

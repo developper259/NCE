@@ -158,7 +158,7 @@ class tabManager {
     let btn = "";
     if (file.isSaved)
       btn =
-        '<span class="file-el-btn file-saved"><img src="../assets/icons/close.svg" alt="close" class="file-el-btn-img"></span>';
+        '<span class="file-el-btn file-saved"><img src="../../assets/icons/close.svg" alt="close" class="file-el-btn-img"></span>';
     else btn = '<div class="file-el-btn file-unsaved"></div>';
 
     let html = `<li class="file-el ${arg}" id="${file.id}">

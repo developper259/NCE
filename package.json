@@ -1,21 +1,62 @@
 {
-  "name": "NCE (NDL Code Editor)",
+  "name": "NCE",
   "productName": "NCE",
   "version": "1.0.0",
   "description": "",
-  "main": "src/main.ts",
-  "type": "CommonJS",
+  "main": "dist/main.js",
+  "type": "commonjs",
   "scripts": {
-    "win": "tsc && electron dist/main.js",
-    "macos": "npx tsc && electron --no-sandbox dist/main.js",
-    "fast": "electron --trace-warnings --no-sandbox dist/main.js",
-    "ubuntu": "sudo sysctl kernel.unprivileged_userns_clone=1"
+    "start": "tsc && electron dist/main.js",
+    "build": "electron-builder",
+    "dist": "electron-builder --dir"
   },
   "author": "Andrea Belvedere",
   "license": "ISC",
   "dependencies": {
     "@flaticon/flaticon-uicons": "^3.3.1",
-    "electron": "^42.4.1",
     "typescript": "^5.2.2"
+  },
+  "build": {
+    "appId": "fr.ndl.nce",
+    "productName": "NCE",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "assets/**/*",
+      "package.json",
+      "src/config.js",
+      {
+        "from": "src/js/",
+        "to": "js/",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "src/html/",
+        "to": "html/",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "src/css/",
+        "to": "css/",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/logo/NCE/dark-logo.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/logo/NCE/dark-logo.icns"
+    },
+    "linux": {
+      "icon": "assets/logo/NCE/dark-logo.png"
+    }
+  },
+  "devDependencies": {
+    "electron-builder": "^26.15.3",
+    "electron": "^42.4.1"
   }
 }

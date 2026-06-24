@@ -24,6 +24,7 @@ export class Window {
       minHeight: 600,
       title: this.name,
       fullscreen: true,
+      icon: path.join(__dirname, '../../assets/logo/NCE/dark-logo.png'),                    // build
       webPreferences: {
         sandbox: false,
         preload: path.join(__dirname, '../../src/js/main/Preload.js'),
@@ -34,7 +35,8 @@ export class Window {
 
     const menu = new AppMenu(this.window, this);
 
-    this.window.loadFile("../src/html/index.html");
+    //this.window.loadFile("../src/html/index.html");                      // dev
+    this.window.loadFile(path.join(__dirname, '../../src/html/index.html'));      // build
 
     this.window.on("closed", () => {
       this.window = null;
