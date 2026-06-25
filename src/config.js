@@ -12,6 +12,12 @@ const USERCONFIG_KEYBINDING = [
         "in_editor": false
     },
     {
+        "action": "find_file",
+        "description": "Rechercher un fichier",
+        "key": "Meta+Shift+f",
+        "in_editor": false
+    },
+    {
         "action": "new_file",
         "description": "Créer un nouveau fichier",
         "key": "Meta+N",

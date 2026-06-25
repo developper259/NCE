@@ -18,7 +18,7 @@ class Scroller {
     this._rafId = null;
     this._scrollEndTimer = null;
 
-    this.strength = 0.2;
+    this.strength = 0.5;
     this.renderMargin = 5;
 
     this.nbItem = 0;
@@ -73,8 +73,7 @@ class Scroller {
   readThumbMetrics() {
     if (!this.scrollerOBJ || !this.itemOBJ) return null;
 
-    const isVertical =
-      this.type === this.editor.scrollerManager.VERTICAL_TYPE;
+    const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
 
     if (isVertical) {
       return {
@@ -135,8 +134,7 @@ class Scroller {
     this.setActive(true);
 
     const proportion = this.calculProp();
-    const isVertical =
-      this.type === this.editor.scrollerManager.VERTICAL_TYPE;
+    const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
     const track = isVertical
       ? this.parentOBJ.clientHeight
       : this.parentOBJ.clientWidth;
@@ -174,8 +172,7 @@ class Scroller {
     if (!this.isDragging || !this.active) return;
 
     const rect = this.scrollerOBJ.getBoundingClientRect();
-    const isVertical =
-      this.type === this.editor.scrollerManager.VERTICAL_TYPE;
+    const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
 
     if (isVertical) {
       const maxScroll =
@@ -191,8 +188,7 @@ class Scroller {
       );
       this.targetScrollRatio = newTop / maxScroll;
     } else {
-      const maxScroll =
-        this.scrollerOBJ.clientWidth - this.itemOBJ.clientWidth;
+      const maxScroll = this.scrollerOBJ.clientWidth - this.itemOBJ.clientWidth;
       if (maxScroll <= 0) return;
 
       const newLeft = Math.max(
@@ -217,8 +213,7 @@ class Scroller {
     if (!this.active) return;
     e.preventDefault();
 
-    const isVertical =
-      this.type === this.editor.scrollerManager.VERTICAL_TYPE;
+    const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
     const delta = isVertical ? e.deltaY : e.deltaX;
     const dimension = isVertical
       ? this.scrollerOBJ.clientHeight
@@ -230,10 +225,22 @@ class Scroller {
     const maxScroll = dimension - itemSize;
     if (maxScroll <= 0) return;
 
+    // Dynamic strength based on file size
+    let dynamicStrength = this.strength;
+    if (this.nbItem > 0) {
+      if (this.nbItem < 50) {
+        dynamicStrength = 1.0;
+      } else if (this.nbItem > 500) {
+        dynamicStrength = 0.3;
+      } else {
+        dynamicStrength = 1.0 - ((this.nbItem - 50) / 450) * 0.7;
+      }
+    }
+
     this.targetScrollRatio = Math.max(
       0,
       Math.min(
-        this.targetScrollRatio + (delta * this.strength) / dimension,
+        this.targetScrollRatio + (delta * dynamicStrength) / dimension,
         1,
       ),
     );

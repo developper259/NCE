@@ -86,7 +86,6 @@ class Command {
   }
 
   open() {
-    if (this.editor.panel) this.editor.panel.close();
     this.init(this.trees);
     this.instance.style.display = "flex";
     this.isActive = true;
