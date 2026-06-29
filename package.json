@@ -6,7 +6,7 @@
   "main": "dist/main.js",
   "type": "commonjs",
   "scripts": {
-    "start": "tsc && electron dist/main.js",
+    "start": "tsc && electron --no-sandbox dist/main.js",
     "build": "electron-builder",
     "dist": "electron-builder --dir"
   },

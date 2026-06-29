@@ -1,8 +1,9 @@
 .editor {
   position: absolute;
   bottom: 20px;
+  left: 48px;
   right: 0;
-  width: 80%;
+  width: auto;
   height: calc(90% - 18px);
   overflow: hidden;
   background-color: var(--bg-secondary);
@@ -14,7 +15,7 @@
 
 .editor-output {
   position: absolute;
-  background-color: transparent;
+  background-color: var(--bg-secondary);
   left: 50px;
   width: calc(100% - 50px);
   height: 100%;
@@ -33,9 +34,9 @@
   position: relative;
   width: 50px;
   height: 100%;
-  background-color: transparent;
+  background-color: var(--bg-secondary);
   color: var(--text-tertiary);
-  z-index: 3;
+  z-index: 4;
   overflow: hidden;
 }
 
@@ -50,7 +51,7 @@
   background-color: var(--accent-caret);
   width: 2px;
   position: absolute;
-  z-index: 2;
+  z-index: 3;
 }
 
 .insert-mode {

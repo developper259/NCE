@@ -15,15 +15,17 @@
     <link rel="stylesheet" href="../css/tabManager.css" />
     <link rel="stylesheet" href="../css/scroller.css" />
     <link rel="stylesheet" href="../css/emptyMenu.css" />
+    <link rel="stylesheet" href="../css/sidebar.css" />
     <style>
       #fps {
         position: fixed;
         top: 10px;
-        left: 10px;
+        right: 10px;
         font-size: 16px;
         color: #ffffff;
         padding: 5px;
         user-select: none;
+        z-index: 1000;
       }
     </style>
   </head>
@@ -42,6 +44,10 @@
           </div>
         </div>
       </div>
+      <div class="sidebar-tab-selector box"></div>
+      <div class="sidebar-left box">
+        <div class="sidebar-menu"></div>
+      </div>
       <div class="file-manager box-left box-top box-bottom">
         <ul class="files-ul"></ul>
       </div>
@@ -51,6 +57,9 @@
         <div class="editor-caret editor-select"></div>
         <div class="editor-select-output editor-select"></div>
         <div class="editor-output editor-select"></div>
+      </div>
+      <div class="sidebar-right box">
+        <div class="sidebar-menu"></div>
       </div>
       <div class="bottomBar box-top">
         <section class="left"></section>
@@ -79,9 +88,13 @@
     <script src="../js/language/Javascript.js"></script>
     <script src="../js/language/PlainText.js"></script>
 
-    <script src="../js/manager/tabManager.js"></script>
+    <script src="../js/manager/TabManager.js"></script>
+    <script src="../js/manager/SidebarManager.js"></script>
     <script src="../js/manager/ScrollerManager.js"></script>
     <script src="../js/manager/SavePopupManager.js"></script>
+
+    <script src="../js/sidebar/Sidebar.js"></script>
+    <script src="../js/sidebar/FileExplorer.js"></script>
 
     <script src="../js/addon/BottomBar.js"></script>
     <script src="../js/addon/KeyBinding.js"></script>

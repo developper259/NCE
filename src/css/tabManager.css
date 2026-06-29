@@ -1,9 +1,11 @@
 .file-manager {
 	position: absolute;
+	left: 48px;
 	right: 0;
-	width: 80%;
+	width: auto;
 	height: 40px;
 	bottom: calc(2px + 90%);
+	box-sizing: border-box;
 }
 
 .file-manager .files-ul {
@@ -44,6 +46,7 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	z-index: 4;
 }
 
 .file-manager .file-el .file-el-btn img {

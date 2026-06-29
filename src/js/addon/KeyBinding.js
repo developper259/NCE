@@ -18,6 +18,7 @@ class KeyBinding {
       open_command: this.control_open_command,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,
+      toggle_file_explorer: this.control_toggle_file_explorer,
 
       Escape: this.key_escape,
       Tab: this.key_tab,
@@ -117,7 +118,7 @@ class KeyBinding {
   }
   async control_copy(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-    
+
     let txt = this.editor.selectController.containsSelected;
 
     if (!txt) {
@@ -142,7 +143,7 @@ class KeyBinding {
 
   async control_cut(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-    
+
     let txt = this.editor.selectController.containsSelected;
     this.control_copy();
     if (txt) this.key_backspace();
@@ -173,7 +174,7 @@ class KeyBinding {
       this.editor.tabManager.activeFile.history[
         this.editor.tabManager.activeFile.history.length -
           this.editor.tabManager.activeFile.indexHistory
-      ].lines
+      ].lines,
     );
     this.editor.cursor.setCursorPosition(
       this.editor.tabManager.activeFile.history[
@@ -183,7 +184,7 @@ class KeyBinding {
       this.editor.tabManager.activeFile.history[
         this.editor.tabManager.activeFile.history.length -
           this.editor.tabManager.activeFile.indexHistory
-      ].cursor.column
+      ].cursor.column,
     );
     this.editor.selectController.unSelectAll();
     this.editor.lineController.markDirtyAll();
@@ -208,7 +209,7 @@ class KeyBinding {
       this.editor.tabManager.activeFile.history[
         this.editor.tabManager.activeFile.history.length -
           this.editor.tabManager.activeFile.indexHistory
-      ].lines
+      ].lines,
     );
     this.editor.cursor.setCursorPosition(
       this.editor.tabManager.activeFile.history[
@@ -218,7 +219,7 @@ class KeyBinding {
       this.editor.tabManager.activeFile.history[
         this.editor.tabManager.activeFile.history.length -
           this.editor.tabManager.activeFile.indexHistory
-      ].cursor.column
+      ].cursor.column,
     );
     this.editor.selectController.unSelectAll();
     this.editor.lineController.markDirtyAll();
@@ -240,14 +241,26 @@ class KeyBinding {
     this.editor.lineController.refresh();
     this.editor.cursor.setCursorPosition(
       this.editor.cursor.row,
-      this.editor.cursor.column
+      this.editor.cursor.column,
     );
   }
   control_select_all(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
-    
+
     this.editor.selectController.selectAll(true);
+  }
+
+  control_toggle_file_explorer(s, c, m, a) {
+    if (this.editor.sidebarManager) {
+      this.editor.sidebarManager.toggleMenu("file-explorer");
+    }
+  }
+
+  control_toggle_search(s, c, m, a) {
+    if (this.editor.sidebarManager) {
+      this.editor.sidebarManager.toggleMenu("search");
+    }
   }
 
   // Key functions
@@ -337,7 +350,7 @@ class KeyBinding {
 
     this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
   }
-  
+
   key_enter(s, c, m, a) {
     this.editor.writerController.write("\n");
   }
@@ -376,7 +389,7 @@ class KeyBinding {
 
       this.editor.cursor.setCursorPosition(
         y,
-        this.editor.tabManager.activeFile.historyX
+        this.editor.tabManager.activeFile.historyX,
       );
       if (s) {
         this.editor.selectController.move();
@@ -423,7 +436,7 @@ class KeyBinding {
 
       this.editor.cursor.setCursorPosition(
         y,
-        this.editor.tabManager.activeFile.historyX
+        this.editor.tabManager.activeFile.historyX,
       );
 
       if (s) {
