@@ -1,20 +1,19 @@
-import { dialog, OpenDialogOptions, SaveDialogOptions, MessageBoxOptions, BrowserWindow } from 'electron';
+import { dialog, BrowserWindow } from 'electron';
 const fs = require('fs').promises;
 
 export type UnsavedCloseChoice = 'save' | 'dontSave' | 'cancel';
 
 export class FileManager {
-    constructor() {}
+    window: InstanceType<typeof BrowserWindow>;
+
+    constructor(window: BrowserWindow) {
+        this.window = window;
+    }
 
     async selectFile(): Promise<string | undefined> {
-        console.log('Selecting file...');
-
-        const options: OpenDialogOptions = {
+        const result = await dialog.showOpenDialog(this.window, {
             properties: ['openFile'],
-        };
-
-        const result = await dialog.showOpenDialog(options);
-
+        });
         if (result.canceled) {
             console.log('User cancelled the file selection.');
             return undefined;
@@ -25,13 +24,9 @@ export class FileManager {
     }
 
     async selectFiles(): Promise<string[] | undefined> {
-        console.log('Selecting files...');
-
-        const options: OpenDialogOptions = {
+        const result = await dialog.showOpenDialog(this.window, {
             properties: ['openFile', 'multiSelections'],
-        };
-
-        const result = await dialog.showOpenDialog(options);
+        });
 
         if (result.canceled) {
             console.log('User cancelled the files selection.');
@@ -43,15 +38,11 @@ export class FileManager {
     }
 
     async selectNewFile(name: string): Promise<string | undefined> {
-        console.log('Saving file...');
-
-        const options: SaveDialogOptions = {
+        const result = await dialog.showSaveDialog(this.window, {
             title: 'Save File',
             defaultPath: name,
             buttonLabel: 'Save',
-        };
-
-        const result = await dialog.showSaveDialog(options);
+        });
 
         if (result.canceled) {
             console.log('User cancelled the save file dialog.');
@@ -63,8 +54,6 @@ export class FileManager {
     }
 
     async getFileContent(file: string[]): Promise<{} | undefined> {
-        console.log('Getting file content...');
-
         if (!file) {
             console.log('No file selected.');
             return Promise.resolve(undefined);
@@ -84,8 +73,6 @@ export class FileManager {
     }
 
     async saveFile(path: string, content: string): Promise<void> {
-        console.log('Saving file...');
-        
         try {
             await fs.writeFile(path, content);
             console.log('File saved successfully:', path);
@@ -95,19 +82,15 @@ export class FileManager {
     }
 
     async confirmUnsavedChanges(
-        fileName: string,
-        parentWindow: BrowserWindow
-    ): Promise<UnsavedCloseChoice> {
-        const options: MessageBoxOptions = {
+        fileName: string): Promise<UnsavedCloseChoice> {
+        const { response } = await dialog.showMessageBox(this.window, {
             type: 'warning',
             buttons: ['Save', "Don't Save", 'Cancel'],
             defaultId: 0,
             cancelId: 2,
             message: `Do you want to save the changes you made to "${fileName}"?`,
             detail: 'Your changes will be lost if you don\'t save them.',
-        };
-
-        const { response } = await dialog.showMessageBox(parentWindow, options);
+        });
 
         if (response === 0) return 'save';
         if (response === 1) return 'dontSave';

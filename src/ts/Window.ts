@@ -15,8 +15,6 @@ export class Window {
   }
 
   create() {
-    this.fileManager = new FileManager();
-
     this.window = new BrowserWindow({
       width: 800,
       height: 600,
@@ -32,6 +30,8 @@ export class Window {
         nodeIntegration: true,
       },
     });
+
+    this.fileManager = new FileManager(this.window);
 
     const menu = new AppMenu(this.window, this);
 
@@ -82,7 +82,7 @@ export class Window {
 
     ipcMain.handle('FileManager:confirmUnsavedChanges', async (event, fileName: string) => {
       if (!this.window) return 'cancel';
-      return await this.fileManager?.confirmUnsavedChanges(fileName, this.window);
+      return await this.fileManager?.confirmUnsavedChanges(fileName);
     });
   
   }
