@@ -1,7 +1,7 @@
 class EmptyMenu {
   constructor(e) {
     this.editor = e;
-    this.actions = ["new_file", "open_file", "find_file", "open_command"];
+    this.actions = ["new_file", "open_file", "open_folder", "find_file"];
 
     this.emptyMenuOBJ = document.querySelector(".empty-menu");
 

@@ -24,7 +24,8 @@ class Editor {
     this.scrollerManager = new ScrollerManager(this);
     this.sidebarManager = new SidebarManager();
 
-    this.sidebarManager.registerMenu(new FileExplorer());
+    this.fileExplorer = new FileExplorer(this);
+    this.sidebarManager.registerMenu(this.fileExplorer);
 
     this.writerController = new WriterController(this);
     this.lineController = new LineController(this);
@@ -47,6 +48,8 @@ class Editor {
 
     this.reset();
     this.showAll();
+
+    this.sidebarManager.openMenu('file-explorer');
   }
 
   refreshAll() {

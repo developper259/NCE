@@ -84,6 +84,14 @@ export class Window {
       if (!this.window) return 'cancel';
       return await this.fileManager?.confirmUnsavedChanges(fileName);
     });
-  
+
+    ipcMain.handle('FileManager:getFolderContent', async (event, dirPath: string) => {
+      return await this.fileManager?.getFolderContent(dirPath);
+    });
+
+    ipcMain.handle('FileManager:selectFolder', async () => {
+      return await this.fileManager?.selectFolder();
+    });
+
   }
 }

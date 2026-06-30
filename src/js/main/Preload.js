@@ -12,4 +12,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("FileManager:saveFile", path, content),
   confirmUnsavedChanges: (fileName) =>
     ipcRenderer.invoke("FileManager:confirmUnsavedChanges", fileName),
+  getFolderContent: (dirPath) =>
+    ipcRenderer.invoke("FileManager:getFolderContent", dirPath),
+  selectFolder: () => ipcRenderer.invoke("FileManager:selectFolder"),
 });

@@ -1,7 +1,14 @@
 import { dialog, BrowserWindow } from 'electron';
 const fs = require('fs').promises;
+const path = require('path');
 
 export type UnsavedCloseChoice = 'save' | 'dontSave' | 'cancel';
+
+export interface FileItem {
+  name: string;
+  path: string;
+  type: 'file' | 'folder';
+}
 
 export class FileManager {
     window: InstanceType<typeof BrowserWindow>;
@@ -95,5 +102,47 @@ export class FileManager {
         if (response === 0) return 'save';
         if (response === 1) return 'dontSave';
         return 'cancel';
+    }
+
+    async getFolderContent(dirPath: string): Promise<FileItem[]> {
+        if (!dirPath) return [];
+        try {
+            const entries = await fs.readdir(dirPath);
+
+            const items = await Promise.all(
+                entries.map(async (entry: string): Promise<FileItem> => {
+                    const fullPath = path.join(dirPath, entry);
+                    const stats = await fs.stat(fullPath);
+                    return {
+                        name: entry,
+                        path: fullPath,
+                        type: stats.isDirectory() ? 'folder' : 'file'
+                    };
+                })
+            );
+
+            return items.sort((a, b) => {
+                if (a.type === b.type) {
+                    return a.name.localeCompare(b.name);
+                }
+                return a.type === 'folder' ? -1 : 1;
+            });
+
+        } catch (error) {
+            console.error("Erreur lors de la lecture du dossier :", error);
+            return [];
+        }
+    }
+
+    async selectFolder(): Promise<string | undefined> {
+        const { canceled, filePaths } = await dialog.showOpenDialog(this.window, {
+            properties: ['openDirectory']
+        });
+
+        if (canceled || filePaths.length === 0) {
+            return undefined;
+        }
+
+        return filePaths[0];
     }
 }

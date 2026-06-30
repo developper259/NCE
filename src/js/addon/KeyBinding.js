@@ -5,6 +5,7 @@ class KeyBinding {
     this.func = {
       save: this.control_save,
       open_file: this.control_open_file,
+      open_folder: this.control_open_folder,
       new_file: this.control_new_file,
       close_file: this.control_close_file,
       close_all_file: this.control_close_all_file,
@@ -103,6 +104,12 @@ class KeyBinding {
 
     this.editor.tabManager.openFiles(file);
   }
+  
+  async control_open_folder(s, c, m, a) {
+    await this.editor.fileExplorer.selectFolder();
+    this.editor.sidebarManager.openMenu('file-explorer');
+  }
+  
   control_new_file(s, c, m, a) {
     this.editor.tabManager.createEmptyFile();
   }

@@ -1,0 +1,151 @@
+.file-explorer-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  color: #cccccc;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  user-select: none;
+}
+
+.sidebar-menu-header {
+  padding: 10px 20px 5px 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #bbbbbb;
+}
+
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-top: 4px;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  cursor: pointer;
+  padding-right: 8px;
+  font-size: 13px;
+  padding-left: calc(var(--depth) * 8px + 4px);
+  margin: 0;
+}
+
+.file-item:hover {
+  background-color: #2a2d2e;
+  border-radius: 0;
+}
+
+.file-item.active-file {
+  background-color: #37373d;
+  color: #ffffff;
+  border-radius: 0;
+}
+
+.folder-arrow {
+  width: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 2px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: #cccccc;
+}
+
+.folder-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.file-icon {
+  margin-right: 4px;
+  font-size: 14px;
+  width: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #c79a56;
+  flex-shrink: 0;
+}
+
+.file-spacer {
+  width: 22px; 
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.file-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-main-title {
+  padding: 10px 20px 5px 20px;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: uppercase;
+  color: #cccccc;
+}
+
+.sidebar-menu-header {
+  padding: 5px 20px 10px 20px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #858585;
+  letter-spacing: 0.5px;
+}
+
+.sidebar-project-header {
+  display: flex;
+  align-items: center;
+  padding: 5px 20px 10px 5px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #858585;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sidebar-project-header:hover {
+  color: #cccccc;
+}
+
+.empty-state-message {
+  padding: 0 20px;
+  margin-top: 5px;
+  color: #cccccc;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.open-folder-btn {
+  display: block;
+  width: 100%;
+  margin-top: 15px;
+  padding: 6px 12px;
+  background-color: #007acc;
+  color: #ffffff;
+  border: none;
+  border-radius: 2px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+}
+
+.open-folder-btn:hover {
+  background-color: #0098ff;
+}
+
+.open-folder-btn:active {
+  background-color: #005a9e;
+}

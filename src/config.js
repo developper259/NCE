@@ -12,6 +12,12 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "open_folder",
+    description: "Ouvrir un dossier",
+    key: "Meta+Shift+O",
+    in_editor: false,
+  },
+  {
     action: "find_file",
     description: "Rechercher un fichier",
     key: "Meta+Shift+f",

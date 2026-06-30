@@ -1,10 +1,11 @@
 class Sidebar {
-  constructor(id, title, icon) {
+  constructor(id, title, icon, editor) {
     this.id = id;
     this.title = title;
     this.icon = icon;
     this.isOpen = false;
     this.element = null;
+    this.editor = editor;
   }
 
   open() {
@@ -26,12 +27,19 @@ class Sidebar {
   }
 
   render() {
-    return '';
+    return document.createElement("div");
   }
 
   refresh() {
     if (this.element && this.isOpen) {
-      this.element.innerHTML = this.render();
+      this.element.innerHTML = '';
+      const content = this.render();
+
+      if (content instanceof Node) {
+        this.element.appendChild(content);
+      } else {
+        this.element.innerHTML = content;
+      }
     }
   }
 
