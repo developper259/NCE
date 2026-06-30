@@ -1,13 +1,20 @@
 class tabManager {
   constructor(e) {
     this.editor = e;
-    this.files = []; //opened files
+    this.files = [];        //opened files
     this.activeFile = null; //file on editor
     this.emptyName = "New file";
 
     this.tabsOBJ = getElement(".file-manager");
 
+    this.idCounter = 0;
+
     this.refresh();
+  }
+
+  getNextID() {
+    this.idCounter++;
+    return this.idCounter;
   }
 
   getFileIndexByID(id) {
@@ -105,8 +112,14 @@ class tabManager {
     this.editor.refreshAll();
   }
 
+  openFileWithPath(path) {
+    let name = path.split("/").pop();
+    let node = new FileNode(this.editor, this.getNextID(), name, path);
+    this.openFile(node);
+  }
+
   createEmptyFile() {
-    let node = new FileNode(this.editor, this.files.length, this.emptyName, "");
+    let node = new FileNode(this.editor, this.getNextID(), this.emptyName, "");
     this.openFile(node);
 
     return node;
@@ -116,7 +129,7 @@ class tabManager {
     const file = await this.editor.api.selectFile();
     if (file) {
       let name = file.split("/").pop();
-      let node = new FileNode(this.editor, this.files.length, name, file);
+      let node = new FileNode(this.editor, this.getNextID(), name, file);
       return node;
     }
 
@@ -126,13 +139,11 @@ class tabManager {
   async selectFiles() {
     const files = await this.editor.api.selectFiles();
     let result = [];
-    let id = this.files.length;
 
     if (files) {
       for (let file of files) {
         let name = file.split("/").pop();
-        let node = new FileNode(this.editor, id, name, file);
-        id++;
+        let node = new FileNode(this.editor, this.getNextID(), name, file);
         result.push(node);
       }
     }
@@ -145,7 +156,7 @@ class tabManager {
 
     if (file) {
       let name = file.split("/").pop();
-      let node = new FileNode(this.editor, this.files.length, name, file);
+      let node = new FileNode(this.editor, this.getNextID(), name, file);
       return node;
     }
 
@@ -202,9 +213,10 @@ class tabManager {
   }
 
   onClickClose(e) {
-    let id = e.target.parentElement.id;
-    if (!id && e.target.classList.contains("file-el-title")) {
-      id = e.target.parentElement.id;
+    const parent = e.target.parentElement
+    let id = parent.id;
+    if (!id && e.target.classList.contains("file-el-btn-img")) {
+      id = parent.parentElement.id;
       if (!id) return;
     }
     this.closeFile(id);
