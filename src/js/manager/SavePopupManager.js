@@ -5,7 +5,7 @@ class SavePopupManager {
   }
 
   async confirmClose(fileId) {
-    const file = this.tabManager.files[fileId];
+    const file = this.tabManager.getFileByID(fileId);
     if (!file) return "cancel";
     return await this.editor.api.confirmUnsavedChanges(file.name);
   }

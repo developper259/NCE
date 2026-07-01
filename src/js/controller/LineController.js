@@ -443,6 +443,7 @@ class LineController {
     }
 
     this.scroller.nbItem = this.lines.length;
+    this.updateLineNumberWidth();
   }
 
   initNumberLines() {
@@ -457,6 +458,7 @@ class LineController {
     }
 
     this.lineN.replaceChildren(fragment);
+    this.updateLineNumberWidth();
   }
 
   createNumberLineOBJ(screenIndex, dataIndex) {
@@ -473,6 +475,24 @@ class LineController {
     span.dataset.line = dataIndex;
 
     return span;
+  }
+
+  calculateLineNumberWidth() {
+    if (!this.lines || this.lines.length === 0) return 50;
+
+    const maxLineNumber = this.lines.length;
+    const maxDigits = maxLineNumber.toString().length;
+
+    // Approximation: chaque caractère fait environ 0.6em (font-size actuel)
+    const estimatedWidth = Math.max(50, maxDigits * 10 + 15);
+
+    return estimatedWidth;
+  }
+
+  updateLineNumberWidth() {
+    const width = this.calculateLineNumberWidth();
+    this.lineN.style.width = `${width}px`;
+    this.editor.updateBaseX();
   }
 
   createLineOBJ(line, row) {

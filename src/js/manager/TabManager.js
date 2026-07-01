@@ -1,7 +1,7 @@
 class tabManager {
   constructor(e) {
     this.editor = e;
-    this.files = [];        //opened files
+    this.files = []; //opened files
     this.activeFile = null; //file on editor
     this.emptyName = "New file";
 
@@ -20,7 +20,7 @@ class tabManager {
   getFileIndexByID(id) {
     return this.files.findIndex((file) => file.id == id);
   }
-  
+
   getFileByID(id) {
     return this.files.find((file) => file.id == id);
   }
@@ -213,7 +213,7 @@ class tabManager {
   }
 
   onClickClose(e) {
-    const parent = e.target.parentElement
+    const parent = e.target.parentElement;
     let id = parent.id;
     if (!id && e.target.classList.contains("file-el-btn-img")) {
       id = parent.parentElement.id;
@@ -235,13 +235,13 @@ class tabManager {
 
   hide() {
     if (this.tabsOBJ) {
-      this.tabsOBJ.classList.remove('box-bottom')
+      this.tabsOBJ.classList.remove("box-bottom");
     }
   }
-  
+
   show() {
     if (this.tabsOBJ) {
-      this.tabsOBJ.classList.add('box-bottom');
+      this.tabsOBJ.classList.add("box-bottom");
     }
   }
 }

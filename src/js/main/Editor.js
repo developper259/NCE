@@ -10,6 +10,7 @@ class Editor {
     this.panel = undefined;
 
     this.baseX = 50; // left margin (2 represents the difference left margin)
+    this.updateBaseX();
     this.baseY = 2; // top margin
     this.posY = 23; // size of a line
     this.letterSize = 10.8; // size of leter     (fs : 20 -> 12, fs : 18 -> 10.8)
@@ -49,7 +50,7 @@ class Editor {
     this.reset();
     this.showAll();
 
-    this.sidebarManager.openMenu('file-explorer');
+    this.sidebarManager.openMenu("file-explorer");
   }
 
   refreshAll() {
@@ -127,6 +128,15 @@ class Editor {
     if (selected) this.events.callEvent(Events.CURSOR_ENABLED);
     else this.events.callEvent(Events.CURSOR_DISABLED);
     this.selected = selected;
+  }
+
+  updateBaseX() {
+    const lineNumbers = document.querySelector(".line-numbers");
+    if (lineNumbers) {
+      this.baseX = lineNumbers.offsetWidth;
+      this.output.style.left = `${this.baseX}px`;
+      this.output.style.width = `calc(100% - ${this.baseX}px)`;
+    }
   }
 }
 
