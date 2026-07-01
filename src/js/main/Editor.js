@@ -49,8 +49,6 @@ class Editor {
 
     this.reset();
     this.showAll();
-
-    this.sidebarManager.openMenu("file-explorer");
   }
 
   refreshAll() {

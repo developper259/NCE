@@ -25,6 +25,10 @@ class tabManager {
     return this.files.find((file) => file.id == id);
   }
 
+  getFileByPath(path) {
+    return this.files.find((file) => file.path == path);
+  }
+
   removeFileByID(id) {
     const index = this.getFileIndexByID(id);
     if (index !== -1) {
@@ -39,6 +43,11 @@ class tabManager {
 
   async openFiles(files) {
     for (let file of files) {
+      const f = this.getFileByPath(file.path);
+      if (f) {
+        continue;
+      }
+
       if (
         this.activeFile &&
         !this.activeFile.hasPath() &&
@@ -46,18 +55,22 @@ class tabManager {
         this.activeFile.isEmpty()
       ) {
         this.activeFile.replaceFile(file);
-        this.setFocusFile(this.activeFile);
       } else {
         this.files.push(file);
-        this.setFocusFile(file);
       }
-
-      this.activeFile.setIsSaved(true);
-      await this.activeFile.loadContent();
-
-      const l = this.editor.languageController.getLanaguage(this.activeFile);
-      this.setLanguage(l);
     }
+
+    let f = this.getFileByPath(files.pop().path);
+
+    if (!f) f = this.files.pop();
+
+    this.setFocusFile(f);
+
+    this.activeFile.setIsSaved(true);
+    await this.activeFile.loadContent();
+
+    const l = this.editor.languageController.getLanaguage(this.activeFile);
+    this.setLanguage(l);
   }
 
   closeFiles() {
@@ -106,6 +119,8 @@ class tabManager {
   setFocusFile(file) {
     if (!file) return;
     this.activeFile = file;
+
+    this.editor.fileExplorer.setActiveFile(file.path);
 
     this.editor.cursor.setCursorPosition(file.row, file.column);
 
