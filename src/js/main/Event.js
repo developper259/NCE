@@ -65,15 +65,13 @@ class Events {
   }
   cursorDisabled(arg) {
     // ------- SelectController.js ------
-    this.editor.selectController.cursorDisabled();
-    this.editor.selectController.cursorEnabled();
+    this.editor.selectController.refreshSelectionDOM();
   }
   cursorEnabled(arg) {
-
+    // ------- SelectController.js ------
+    this.editor.selectController.refreshSelectionDOM();
   }
   onSelect(arg) {
-    // ------- SelectController.js ------
-    this.editor.selectController.refreshStartEndSelect();
   }
   onChange(arg) {
     // ------- File.js ------

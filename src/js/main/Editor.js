@@ -58,7 +58,6 @@ class Editor {
     this.lineController.initLineOutput();
     this.lineController.initNumberLines();
     this.lineController.restoreScroll();
-    this.selectController.refreshStartEndSelect();
     this.tabManager.refresh();
     if (this.tabManager.activeFile)
       this.tabManager.activeFile.language.refreshAll();
@@ -123,9 +122,9 @@ class Editor {
   setSelected(selected) {
     if (this.selected == selected) return;
 
+    this.selected = selected;
     if (selected) this.events.callEvent(Events.CURSOR_ENABLED);
     else this.events.callEvent(Events.CURSOR_DISABLED);
-    this.selected = selected;
   }
 
   updateBaseX() {

@@ -27,6 +27,7 @@ class FileNode {
     // Select Controller
     this.isMouseDown = false;
     this.containsSelected = "";
+    this._selectedLines = new Map();
 
     this.lastClick = 0;
     this.clickCount = 0;
