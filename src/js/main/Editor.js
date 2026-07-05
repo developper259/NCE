@@ -4,8 +4,6 @@ class Editor {
     this.output = getElement(".editor-output");
     this.editorOBJ = getElement(".editor");
 
-    this.hideAll();
-
     this.selected = false;
     this.panel = undefined;
 
@@ -48,7 +46,6 @@ class Editor {
     this.writerController.insertMode = true;
 
     this.reset();
-    this.showAll();
   }
 
   refreshAll() {
@@ -127,13 +124,17 @@ class Editor {
     else this.events.callEvent(Events.CURSOR_DISABLED);
   }
 
-  updateBaseX() {
-    const lineNumbers = document.querySelector(".line-numbers");
-    if (lineNumbers) {
-      this.baseX = lineNumbers.offsetWidth;
-      this.output.style.left = `${this.baseX}px`;
-      this.output.style.width = `calc(100% - ${this.baseX}px)`;
+  updateBaseX(forcedWidth) {
+    if (forcedWidth !== undefined) {
+      this.baseX = forcedWidth + 10;
+    } else {
+      const lineNumbers = document.querySelector(".line-numbers");
+      if (!lineNumbers) return;
+      this.baseX = lineNumbers.offsetWidth + 10;
     }
+
+    this.output.style.left = `${this.baseX}px`;
+    this.output.style.width = `calc(100% - ${this.baseX}px)`;
   }
 }
 

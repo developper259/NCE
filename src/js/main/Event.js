@@ -134,7 +134,8 @@ class Events {
     
   }
   onResize(e) {
+    this.editor.lineController.resize();
+
     this.editor.scrollerManager.refreshAll();
-    this.editor.lineController.refresh();
   }
 }

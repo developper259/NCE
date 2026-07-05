@@ -137,7 +137,7 @@ class Cursor {
 
     const top = lc.getLineTop(screenRow);
     const bottom = top + this.editor.posY;
-    const viewport = this.editor.output.clientHeight;
+    const viewport = lc.outputHeight;
     return bottom > 0 && top < viewport;
   }
 
