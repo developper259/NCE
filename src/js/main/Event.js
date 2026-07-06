@@ -12,13 +12,13 @@ addInterval = (f, time) => {
 };
 
 class Events {
-  static CURSOR_MOVE = 'cursormove';
-  static CURSOR_CHANGE = 'cursorChange';
-  static CURSOR_DISABLED = 'cursorDisabled';
-  static CURSOR_ENABLED = 'cursorEnabled';
-  static ON_SELECT = 'onSelect';
-  static ON_CHANGE = 'onChange';
-  static ON_WRITE = 'onWrite';
+  static CURSOR_MOVE = "cursormove";
+  static CURSOR_CHANGE = "cursorChange";
+  static CURSOR_DISABLED = "cursorDisabled";
+  static CURSOR_ENABLED = "cursorEnabled";
+  static ON_SELECT = "onSelect";
+  static ON_CHANGE = "onChange";
+  static ON_WRITE = "onWrite";
 
   constructor(editor) {
     this.editor = editor;
@@ -57,12 +57,8 @@ class Events {
     this.onEvent(arg);
   }
   // Custom Event
-  cursorMove(arg) {
-
-  }
-  cursorChange(arg) {
-
-  }
+  cursorMove(arg) {}
+  cursorChange(arg) {}
   cursorDisabled(arg) {
     // ------- SelectController.js ------
     this.editor.selectController.refreshSelectionDOM();
@@ -71,21 +67,16 @@ class Events {
     // ------- SelectController.js ------
     this.editor.selectController.refreshSelectionDOM();
   }
-  onSelect(arg) {
-  }
+  onSelect(arg) {}
   onChange(arg) {
     // ------- File.js ------
-    if (this.editor.tabManager.activeFile) this.editor.tabManager.activeFile.onChange();
-
-    // ------- LanguageController.js ------
-    //this.editor.languageController.onChange();
+    if (this.editor.tabManager.activeFile)
+      this.editor.tabManager.activeFile.onChange();
 
     // ------- KeyBinding.js ------
     this.editor.keyBinding.onChange();
   }
-  onWrite(arg) {
-
-  }
+  onWrite(arg) {}
   onEvent(arg) {
     // ------- BottomBar.js ------
     this.editor.bottomBar.refresh();
@@ -102,36 +93,35 @@ class Events {
     // ------- Command.js ------
     if (this.editor.panel) this.editor.panel.mouseClick(e);
 
-    if (cl.contains('command-el')) {
+    if (cl.contains("command-el")) {
       this.editor.command.onClickEl(e);
       return;
     }
 
     // ------- LineController.js ------
-    if (cl.contains('line-el')) {
+    if (cl.contains("line-el")) {
       this.editor.lineController.onClickNumberLine(e);
       return;
     }
-    
+
     // ------- tabManager.js ------
-    if (cl.contains('file-el') || cl.contains('file-el-title')) {
+    if (cl.contains("file-el") || cl.contains("file-el-title")) {
       this.editor.tabManager.onClick(e);
       return;
     }
-    if (cl.contains('file-el-btn') || cl.contains('file-el-btn-img')) {
+    if (cl.contains("file-el-btn") || cl.contains("file-el-btn-img")) {
       this.editor.tabManager.onClickClose(e);
       return;
     }
 
     // ------- BottomBar.js ------
 
-    if (cl.contains('scroller-open') || cl.contains('scroller-title')) {
+    if (cl.contains("scroller-open") || cl.contains("scroller-title")) {
       let id = el.id;
       if (!id) id = el.parentElement.id;
       this.editor.bottomBar.scrollersValue[id].instance.active();
       return;
     }
-    
   }
   onResize(e) {
     this.editor.lineController.resize();

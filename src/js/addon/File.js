@@ -38,8 +38,6 @@ class FileNode {
 
     // Writer Controller
     this.insertMode = false;
-
-    this.language = new PlainText(this.editor);
   }
 
   isEmpty() {
@@ -82,8 +80,6 @@ class FileNode {
     this.endSelect = file.endSelect;
 
     this.insertMode = file.insertMode;
-
-    this.language = file.language;
   }
 
   async loadContent() {

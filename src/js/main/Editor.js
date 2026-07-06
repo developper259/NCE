@@ -13,8 +13,6 @@ class Editor {
     this.posY = 23; // size of a line
     this.letterSize = 10.8; // size of leter     (fs : 20 -> 12, fs : 18 -> 10.8)
 
-    this.languages = [new PlainText(this), new Javascript(this)];
-
     this.api = window.api;
 
     this.emptyMenu = new EmptyMenu(this);
@@ -32,7 +30,6 @@ class Editor {
     this.lineController = new LineController(this);
     this.selectController = new SelectController(this);
     this.keyBindingController = new keyBindingController(this);
-    this.languageController = new LanguageController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
@@ -40,7 +37,6 @@ class Editor {
 
     this.command = new Command(this);
     this.Ccmd = new CMD(this);
-    this.Clangague = new Langague(this);
     this.Cconfig_space = new Config_space(this);
     this.savePopupManager = new SavePopupManager(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
@@ -58,8 +54,6 @@ class Editor {
     this.lineController.initNumberLines();
     this.lineController.restoreScroll();
     this.tabManager.refresh();
-    //if (this.tabManager.activeFile)
-      //this.tabManager.activeFile.language.refreshAll();
   }
 
   hideAll() {

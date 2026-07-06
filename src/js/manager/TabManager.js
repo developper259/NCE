@@ -68,9 +68,6 @@ class tabManager {
 
     this.activeFile.setIsSaved(true);
     await this.activeFile.loadContent();
-
-    const l = this.editor.languageController.getLanaguage(this.activeFile);
-    this.setLanguage(l);
   }
 
   closeFiles() {
@@ -239,13 +236,6 @@ class tabManager {
 
   getTab(id) {
     return getElement(`.file-manager .file-el[id="${id}"]`);
-  }
-
-  setLanguage(language) {
-    if (this.activeFile) {
-      this.activeFile.language = language;
-      this.editor.refreshAll();
-    }
   }
 
   hide() {

@@ -3,9 +3,6 @@ class BottomBar {
     this.editor = e;
 
     this.scrollersValue = {
-      "code-type": {
-        instance: this.editor.Clangague,
-      },
       "config-space": {
         instance: this.editor.Cconfig_space,
       },
