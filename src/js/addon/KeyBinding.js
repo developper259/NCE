@@ -35,7 +35,7 @@ class KeyBinding {
       Insert: this.key_insert,
     };
 
-    setInterval(() => {
+    /*setInterval(() => {
       if (!this.editor.tabManager.activeFile) return;
       const currentLines = JSON.stringify(this.editor.lineController.lines);
       const currentCursor = {
@@ -62,7 +62,7 @@ class KeyBinding {
       this.editor.tabManager.activeFile.history[
         this.editor.tabManager.activeFile.history.length - 1
       ].cursor = currentCursor;
-    }, 1000);
+    }, 1000);*/
   }
 
   exec(key, e) {

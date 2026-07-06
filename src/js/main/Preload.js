@@ -15,4 +15,13 @@ contextBridge.exposeInMainWorld("api", {
   getFolderContent: (dirPath) =>
     ipcRenderer.invoke("FileManager:getFolderContent", dirPath),
   selectFolder: () => ipcRenderer.invoke("FileManager:selectFolder"),
+  initializeFile: (filePath) =>
+    ipcRenderer.invoke("FileManager:initializeFile", filePath),
+  getFileChunk: (filePath, startLine, lineCount) =>
+    ipcRenderer.invoke(
+      "FileManager:getFileChunk",
+      filePath,
+      startLine,
+      lineCount,
+    ),
 });

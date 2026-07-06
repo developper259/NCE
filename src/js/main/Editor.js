@@ -22,6 +22,8 @@ class Editor {
     this.tabManager = new tabManager(this);
     this.scrollerManager = new ScrollerManager(this);
     this.sidebarManager = new SidebarManager();
+    this.threadManager = new ThreadManager();
+    this.fileLoader = new FileLoader(this);
 
     this.fileExplorer = new FileExplorer(this);
     this.sidebarManager.registerMenu(this.fileExplorer);
@@ -56,8 +58,8 @@ class Editor {
     this.lineController.initNumberLines();
     this.lineController.restoreScroll();
     this.tabManager.refresh();
-    if (this.tabManager.activeFile)
-      this.tabManager.activeFile.language.refreshAll();
+    //if (this.tabManager.activeFile)
+      //this.tabManager.activeFile.language.refreshAll();
   }
 
   hideAll() {

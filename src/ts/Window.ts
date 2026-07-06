@@ -93,5 +93,13 @@ export class Window {
       return await this.fileManager?.selectFolder();
     });
 
+    ipcMain.handle('FileManager:initializeFile', async (event, filePath: string) => {
+      return await this.fileManager?.initializeFile(filePath);
+    });
+
+    ipcMain.handle('FileManager:getFileChunk', async (event, filePath: string, startLine: number, lineCount: number) => {
+      return await this.fileManager?.getFileChunk(filePath, startLine, lineCount);
+    });
+
   }
 }

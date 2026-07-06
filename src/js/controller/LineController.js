@@ -8,6 +8,7 @@ class LineController {
     this.outputHeight = this.editor.output.clientHeight;
 
     this.dirtyLines = new Set();
+    this.totalLines = 0;
 
     this.initScroller();
   }
@@ -17,8 +18,8 @@ class LineController {
   }
 
   getMaxStartIndex() {
-    if (!this.lines || this.lines.length === 0) return 0;
-    return Math.max(0, this.lines.length - this.maxLines);
+    if (this.totalLines === 0) return 0;
+    return Math.max(0, this.totalLines - this.maxLines);
   }
 
   getLineTop(screenIndex) {
@@ -257,8 +258,21 @@ class LineController {
     this.refresh();
   }
 
-  loadContent(content) {
+  loadContent(content, totalLines) {
     this.lines = content.split("\n");
+    this.totalLines = totalLines || this.lines.length;
+  }
+
+  setTotalLines(totalLines) {
+    this.totalLines = totalLines;
+  }
+
+  appendLines(newLines) {
+    if (!this.lines) {
+      this.lines = newLines;
+    } else {
+      this.lines = this.lines.concat(newLines);
+    }
   }
 
   getContent() {

@@ -44,7 +44,7 @@ class FileNode {
 
   isEmpty() {
     if (this.lines.length === 0) return true;
-    if (this.lines.length === 1 && this.lines[0].length === 0) return true; 
+    if (this.lines.length === 1 && this.lines[0].length === 0) return true;
     return false;
   }
 
@@ -91,9 +91,18 @@ class FileNode {
       this.editor.lineController.loadContent("");
       return;
     }
-    let contents = await this.editor.api.getFileContent([this.path]);
 
-    this.editor.lineController.loadContent(contents[this.path].toString());
+    const { initialLines, totalLines } = await this.editor.fileLoader.loadFile(
+      this.path,
+    );
+
+    this.editor.lineController.loadContent(initialLines.join("\n"), totalLines);
+
+    this.editor.fileLoader.loadRemainingLines(
+      this.path,
+      initialLines.length,
+      totalLines,
+    );
   }
 
   async save() {
@@ -103,7 +112,7 @@ class FileNode {
     } else {
       await this.editor.api.saveFile(
         this.path,
-        this.editor.lineController.getContent()
+        this.editor.lineController.getContent(),
       );
     }
     this.setIsSaved(true);

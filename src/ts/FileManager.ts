@@ -12,6 +12,7 @@ export interface FileItem {
 
 export class FileManager {
     window: InstanceType<typeof BrowserWindow>;
+    private fileCache: Map<string, string[]> = new Map();
 
     constructor(window: BrowserWindow) {
         this.window = window;
@@ -144,5 +145,59 @@ export class FileManager {
         }
 
         return filePaths[0];
+    }
+
+    async initializeFile(filePath: string): Promise<{ success: boolean; totalLines: number }> {
+        try {
+            const content = await fs.readFile(filePath, 'utf-8');
+            const lines = content.split('\n');
+            this.fileCache.set(filePath, lines);
+            
+            return {
+                success: true,
+                totalLines: lines.length
+            };
+        } catch (error) {
+            console.error('Error initializing file:', error);
+            return {
+                success: false,
+                totalLines: 0
+            };
+        }
+    }
+
+    async getFileChunk(filePath: string, startLine: number, lineCount: number): Promise<{ success: boolean; lines: string[] }> {
+        try {
+            const cachedLines = this.fileCache.get(filePath);
+            
+            if (!cachedLines) {
+                return {
+                    success: false,
+                    lines: []
+                };
+            }
+            
+            const endLine = Math.min(startLine + lineCount, cachedLines.length);
+            const lines = cachedLines.slice(startLine, endLine);
+            
+            return {
+                success: true,
+                lines
+            };
+        } catch (error) {
+            console.error('Error getting file chunk:', error);
+            return {
+                success: false,
+                lines: []
+            };
+        }
+    }
+
+    clearFileCache(filePath?: string) {
+        if (filePath) {
+            this.fileCache.delete(filePath);
+        } else {
+            this.fileCache.clear();
+        }
     }
 }
