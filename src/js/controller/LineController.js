@@ -273,6 +273,7 @@ class LineController {
     } else {
       this.lines = this.lines.concat(newLines);
     }
+    this.setTotalLines(this.lines.length);
   }
 
   getContent() {
@@ -331,10 +332,12 @@ class LineController {
   }
 
   markDirtyAll() {
+    this.setTotalLines(this.lines.length);
     this.markDirtyLineFrom(0);
   }
 
   markDirtyLineFrom(dataIndex) {
+    this.setTotalLines(this.lines.length);
     const start = Math.max(dataIndex, this.startIndex);
     const end = Math.min(
       this.lines.length,
@@ -346,6 +349,7 @@ class LineController {
   }
 
   markDirtyLine(index) {
+    this.setTotalLines(this.lines.length);
     this.dirtyLines.add(index);
   }
 
