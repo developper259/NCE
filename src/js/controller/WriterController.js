@@ -113,9 +113,9 @@ class WriterController {
     const words = this.splitWord(txt);
     const lineDiv = document.createElement("div");
     lineDiv.className = "line editor-select";
-    
+
     const fragment = document.createDocumentFragment();
-    
+
     for (const word of words) {
       if (word.length > 0) {
         const span = document.createElement("span");
@@ -124,7 +124,7 @@ class WriterController {
         fragment.appendChild(span);
       }
     }
-    
+
     lineDiv.appendChild(fragment);
     return lineDiv;
   }
@@ -158,11 +158,22 @@ class WriterController {
       else if (txt.length == 1 && this.insertMode) {
         newLine = line.substring(0, x) + txt + line.substring(x + 1);
       }
-      x += txt.length;
+      const newX = x + txt.length;
       this.editor.lineController.changeLine(newLine, y - 1);
 
       this.editor.lineController.refresh();
-      this.editor.cursor.setCursorPosition(y, x);
+      this.editor.cursor.setCursorPosition(y, newX);
+
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "insert",
+        text: txt,
+        beforeRow: y,
+        beforeColumn: x,
+        afterRow: y,
+        afterColumn: newX,
+      });
+
+      return;
     } else {
       let newLines = txt.split("\n");
 
@@ -182,21 +193,21 @@ class WriterController {
         }
       }
       this.editor.lineController.refresh();
-      this.editor.cursor.setCursorPosition(y + newLines.length - 1, x);
-    }
+      const lastLineLength = newLines[newLines.length - 1].length;
+      this.editor.cursor.setCursorPosition(
+        y + newLines.length - 1,
+        lastLineLength,
+      );
 
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      beforeRow: y,
-      beforeColumn: x,
-      afterRow: y,
-      afterColumn: x,
-    });
-    this.editor.events.callEvent(Events.ON_WRITE, {
-      beforeRow: y,
-      beforeColumn: x,
-      afterRow: y,
-      afterColumn: x,
-    });
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "insert",
+        text: txt,
+        beforeRow: y,
+        beforeColumn: x,
+        afterRow: y + newLines.length - 1,
+        afterColumn: lastLineLength,
+      });
+    }
   }
 
   delete(x, y) {
@@ -212,7 +223,6 @@ class WriterController {
       cursor.column = this.editor.lineController.lines[cursor.row - 1].length;
       newLine = this.editor.lineController.lines[cursor.row - 1] + line;
       this.editor.lineController.supLine(y - 1);
-      
     } else {
       let Nx = cursor.column - 1;
       newLine = line.slice(0, Nx) + line.slice(cursor.column);
@@ -223,16 +233,12 @@ class WriterController {
     this.editor.lineController.refresh();
 
     this.editor.events.callEvent(Events.ON_CHANGE, {
-      beforeRow: y,
-      beforeColumn: x,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
-    });
-    this.editor.events.callEvent(Events.ON_WRITE, {
-      beforeRow: y,
-      beforeColumn: x,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
+      action: "delete",
+      text: line[x - 1] || "",
+      beforeRow: cursor.row,
+      beforeColumn: cursor.column,
+      afterRow: y,
+      afterColumn: x,
     });
 
     return cursor;
@@ -285,16 +291,12 @@ class WriterController {
     this.editor.lineController.refresh();
 
     this.editor.events.callEvent(Events.ON_CHANGE, {
-      beforeRow: y,
-      beforeColumn: x,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
-    });
-    this.editor.events.callEvent(Events.ON_WRITE, {
-      beforeRow: y,
-      beforeColumn: x,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
+      action: "delete",
+      text: lastWord || "",
+      beforeRow: cursor.row,
+      beforeColumn: cursor.column,
+      afterRow: y,
+      afterColumn: x,
     });
 
     return cursor;
@@ -319,7 +321,7 @@ class WriterController {
     for (let obj of objs) {
       let nbLine = parseInt(obj.dataset.line);
       let line = this.editor.lineController.lines[nbLine];
-      
+
       let column = this.editor.cursor.columnFromSelectObj(obj) - 1;
       let width = Math.ceil(this.editor.cursor.lengthFromSelectObj(obj));
       let newLine = line.slice(0, column) + line.slice(column + width);
@@ -337,9 +339,10 @@ class WriterController {
     }
     this.editor.selectController.unSelectAll();
     this.editor.lineController.refresh();
-    
 
     this.editor.events.callEvent(Events.ON_CHANGE, {
+      action: "delete",
+      text: rest,
       beforeRow: cursor.row,
       beforeColumn: cursor.column,
       afterRow: cursor.row,
@@ -347,5 +350,126 @@ class WriterController {
     });
 
     return cursor;
+  }
+
+  deleteRange(startRow, startColumn, endRow, endColumn) {
+    if (this.editor.lineController.lines.length == 0) return;
+    if (!this.editor.tabManager.activeFile) return;
+
+    if (startRow > endRow || (startRow === endRow && startColumn > endColumn)) {
+      [startRow, startColumn, endRow, endColumn] = [
+        endRow,
+        endColumn,
+        startRow,
+        startColumn,
+      ];
+    }
+
+    const lines = this.editor.lineController.lines;
+
+    // Calculate deleted text BEFORE modifying lines
+    const deletedText =
+      startRow === endRow
+        ? lines[startRow - 1].slice(startColumn, endColumn)
+        : lines.slice(startRow - 1, endRow).join("\n");
+
+    if (startRow === endRow) {
+      const line = lines[startRow - 1];
+      const newLine = line.slice(0, startColumn) + line.slice(endColumn);
+      this.editor.lineController.changeLine(newLine, startRow - 1);
+    } else {
+      const firstLine = lines[startRow - 1];
+      const lastLine = lines[endRow - 1];
+
+      const newFirstLine = firstLine.slice(0, startColumn);
+      const newLastLine = lastLine.slice(endColumn);
+      const combinedLine = newFirstLine + newLastLine;
+
+      this.editor.lineController.changeLine(combinedLine, startRow - 1);
+
+      for (let i = endRow - 1; i > startRow; i--) {
+        this.editor.lineController.supLine(i);
+      }
+    }
+
+    this.editor.lineController.refresh();
+
+    if (!this.editor.historyController.isHistory) {
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "delete",
+        text: deletedText,
+        beforeRow: startRow,
+        beforeColumn: startColumn,
+        afterRow: startRow,
+        afterColumn: startColumn,
+      });
+    }
+
+    return { row: startRow, column: startColumn };
+  }
+
+  insertTextAt(text, row, column) {
+    if (this.editor.lineController.lines.length == 0) return;
+    if (!this.editor.tabManager.activeFile) return;
+
+    const lines = this.editor.lineController.lines;
+    const lineIndex = row - 1;
+
+    if (!text.includes("\n")) {
+      const line = lines[lineIndex];
+      const newLine = line.slice(0, column) + text + line.slice(column);
+      this.editor.lineController.changeLine(newLine, lineIndex);
+
+      this.editor.lineController.refresh();
+
+      if (!this.editor.historyController.isHistory) {
+        this.editor.events.callEvent(Events.ON_CHANGE, {
+          action: "insert",
+          text: text,
+          beforeRow: row,
+          beforeColumn: column,
+          afterRow: row,
+          afterColumn: column + text.length,
+        });
+      }
+
+      return { row, column: column + text.length };
+    } else {
+      const newLines = text.split("\n");
+      const currentLine = lines[lineIndex];
+
+      const firstPart = currentLine.slice(0, column) + newLines[0];
+      this.editor.lineController.changeLine(firstPart, lineIndex);
+
+      for (let i = 1; i < newLines.length - 1; i++) {
+        this.editor.lineController.addLine(newLines[i], lineIndex + i - 1);
+      }
+
+      const lastPart =
+        newLines[newLines.length - 1] + currentLine.slice(column);
+      this.editor.lineController.addLine(
+        lastPart,
+        lineIndex + newLines.length - 2,
+      );
+
+      this.editor.lineController.refresh();
+
+      const newRow = row + newLines.length - 1;
+      const newColumn =
+        newLines[newLines.length - 1].length + currentLine.slice(column).length;
+
+      if (!this.editor.historyController.isHistory) {
+        this.editor.events.callEvent(Events.ON_CHANGE, {
+          action: "insert",
+          text: text,
+          beforeRow: row,
+          beforeColumn: column,
+          afterRow: newRow,
+          afterColumn: newColumn,
+        });
+      }
+
+      return { row: newRow, column: newColumn };
+    }
   }
 }

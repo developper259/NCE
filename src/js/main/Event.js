@@ -18,7 +18,6 @@ class Events {
   static CURSOR_ENABLED = "cursorEnabled";
   static ON_SELECT = "onSelect";
   static ON_CHANGE = "onChange";
-  static ON_WRITE = "onWrite";
 
   constructor(editor) {
     this.editor = editor;
@@ -47,9 +46,6 @@ class Events {
       case Events.ON_CHANGE:
         this.onChange(arg);
         break;
-      case Events.ON_WRITE:
-        this.onWrite(arg);
-        break;
       default:
         console.error("Event " + e + " not found !");
         return;
@@ -72,11 +68,7 @@ class Events {
     // ------- File.js ------
     if (this.editor.tabManager.activeFile)
       this.editor.tabManager.activeFile.onChange();
-
-    // ------- KeyBinding.js ------
-    this.editor.keyBinding.onChange();
   }
-  onWrite(arg) {}
   onEvent(arg) {
     // ------- BottomBar.js ------
     this.editor.bottomBar.refresh();
@@ -87,7 +79,7 @@ class Events {
     const el = e.target;
     const cl = e.target.classList;
 
-    // ------- editor.js ------
+    // ------- Editor.js ------
     this.editor.onClick(e);
 
     // ------- Command.js ------
@@ -104,7 +96,7 @@ class Events {
       return;
     }
 
-    // ------- tabManager.js ------
+    // ------- TabManager.js ------
     if (cl.contains("file-el") || cl.contains("file-el-title")) {
       this.editor.tabManager.onClick(e);
       return;

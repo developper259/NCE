@@ -34,35 +34,6 @@ class KeyBinding {
       End: this.key_end,
       Insert: this.key_insert,
     };
-
-    /*setInterval(() => {
-      if (!this.editor.tabManager.activeFile) return;
-      const currentLines = JSON.stringify(this.editor.lineController.lines);
-      const currentCursor = {
-        row: this.editor.cursor.row,
-        column: this.editor.cursor.column,
-      };
-      if (this.editor.tabManager.activeFile.indexHistory < 1)
-        this.editor.tabManager.activeFile.indexHistory = 1;
-      if (this.editor.tabManager.activeFile.indexHistory != 1) return;
-      if (this.editor.tabManager.activeFile.history.length > 100)
-        this.editor.tabManager.activeFile.history.shift();
-
-      if (
-        this.editor.tabManager.activeFile.history.length === 0 ||
-        this.editor.tabManager.activeFile.history[
-          this.editor.tabManager.activeFile.history.length - 1
-        ].lines !== currentLines
-      ) {
-        this.editor.tabManager.activeFile.history.push({
-          lines: currentLines,
-          cursor: null,
-        });
-      }
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length - 1
-      ].cursor = currentCursor;
-    }, 1000);*/
   }
 
   exec(key, e) {
@@ -86,10 +57,6 @@ class KeyBinding {
     }
   }
 
-  onChange() {
-    this.editor.tabManager.activeFile.indexHistory = 1;
-  }
-
   // Control functions
   control_save(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
@@ -104,12 +71,12 @@ class KeyBinding {
 
     this.editor.tabManager.openFiles(file);
   }
-  
+
   async control_open_folder(s, c, m, a) {
     await this.editor.fileExplorer.selectFolder();
-    this.editor.sidebarManager.openMenu('file-explorer');
+    this.editor.sidebarManager.openMenu("file-explorer");
   }
-  
+
   control_new_file(s, c, m, a) {
     this.editor.tabManager.createEmptyFile();
   }
@@ -166,72 +133,40 @@ class KeyBinding {
   }
   control_undo(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-    if (!this.editor.tabManager.activeFile.history) return;
 
-    if (
-      !this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          (this.editor.tabManager.activeFile.indexHistory + 1)
-      ]
-    )
-      return;
+    if (this.editor.historyController) {
+      //const result = this.editor.historyController.undo();
 
-    this.editor.tabManager.activeFile.indexHistory += 1;
-    this.editor.lineController.lines = JSON.parse(
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          this.editor.tabManager.activeFile.indexHistory
-      ].lines,
-    );
-    this.editor.cursor.setCursorPosition(
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          this.editor.tabManager.activeFile.indexHistory
-      ].cursor.row,
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          this.editor.tabManager.activeFile.indexHistory
-      ].cursor.column,
-    );
-    this.editor.selectController.unSelectAll();
-    this.editor.lineController.markDirtyAll();
-    this.editor.lineController.refresh();
-    this.editor.events.callEvent(Events.ON_CHANGE);
+      this.editor.selectController.unSelectAll();
+      this.editor.lineController.markDirtyAll();
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "undo",
+        text: result?.text || "",
+        beforeRow: result?.start?.row || 0,
+        beforeColumn: result?.start?.column || 0,
+        afterRow: result?.start?.row || 0,
+        afterColumn: result?.start?.column || 0,
+      });
+    }
   }
 
   control_redo(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-    if (!this.editor.tabManager.activeFile.history) return;
 
-    if (
-      !this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          (this.editor.tabManager.activeFile.indexHistory - 1)
-      ]
-    )
-      return;
+    if (this.editor.historyController) {
+      //const result = this.editor.historyController.redo();
 
-    this.editor.tabManager.activeFile.indexHistory -= 1;
-    this.editor.lineController.lines = JSON.parse(
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          this.editor.tabManager.activeFile.indexHistory
-      ].lines,
-    );
-    this.editor.cursor.setCursorPosition(
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          this.editor.tabManager.activeFile.indexHistory
-      ].cursor.row,
-      this.editor.tabManager.activeFile.history[
-        this.editor.tabManager.activeFile.history.length -
-          this.editor.tabManager.activeFile.indexHistory
-      ].cursor.column,
-    );
-    this.editor.selectController.unSelectAll();
-    this.editor.lineController.markDirtyAll();
-    this.editor.lineController.refresh();
-    this.editor.events.callEvent(Events.ON_CHANGE);
+      this.editor.selectController.unSelectAll();
+      this.editor.lineController.markDirtyAll();
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "redo",
+        text: result?.text || "",
+        beforeRow: result?.end?.row || 0,
+        beforeColumn: result?.end?.column || 0,
+        afterRow: result?.end?.row || 0,
+        afterColumn: result?.end?.column || 0,
+      });
+    }
   }
 
   control_find(s, c, m, a) {}
