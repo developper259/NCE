@@ -35,7 +35,6 @@ export class Window {
 
     const menu = new AppMenu(this.window, this);
 
-    //this.window.loadFile("../src/html/index.html");                      // dev
     this.window.loadFile(path.join(__dirname, '../../src/html/index.html'));      // build
 
     this.window.on("closed", () => {

@@ -5,6 +5,7 @@ class Editor {
     this.editorOBJ = getElement(".editor");
 
     this.selected = false;
+    this.isActive = false;
     this.panel = undefined;
 
     this.baseX = 50; // left margin (2 represents the difference left margin)
@@ -65,6 +66,7 @@ class Editor {
   }
 
   reset() {
+    this.isActive = false;
     if (this.emptyMenu) this.emptyMenu.refresh();
     if (this.tabManager) this.tabManager.hide();
 
@@ -82,6 +84,7 @@ class Editor {
   }
 
   reactive() {
+    this.isActive = true;
     if (this.editorOBJ.classList.contains("editor-empty")) {
       this.editorOBJ.classList.remove("editor-empty");
     }

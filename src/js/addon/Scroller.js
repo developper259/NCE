@@ -231,9 +231,9 @@ class Scroller {
       if (this.nbItem < 50) {
         dynamicStrength = 1.0;
       } else if (this.nbItem > 500) {
-        dynamicStrength = 0.3;
+        dynamicStrength = 0.1;
       } else {
-        dynamicStrength = 1.0 - ((this.nbItem - 50) / 450) * 0.7;
+        dynamicStrength = 1.0 - ((this.nbItem - 50) / 450) * 0.5;
       }
     }
 

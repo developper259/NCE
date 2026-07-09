@@ -42,6 +42,7 @@ class tabManager {
   }
 
   async openFiles(files) {
+    if (files.length === 0) return;
     for (let file of files) {
       const f = this.getFileByPath(file.path);
       if (f) {
@@ -59,7 +60,6 @@ class tabManager {
         this.files.push(file);
       }
     }
-
     let f = this.getFileByPath(files.pop().path);
 
     if (!f) f = this.files.pop();
@@ -68,6 +68,7 @@ class tabManager {
 
     this.activeFile.setIsSaved(true);
     await this.activeFile.loadContent();
+    this.editor.refreshAll();
   }
 
   closeFiles() {
@@ -210,7 +211,7 @@ class tabManager {
     if (this.files.length == 0) {
       this.editor.reset();
     } else {
-      this.editor.reactive();
+      if (!this.editor.isActive) this.editor.reactive();
     }
   }
 

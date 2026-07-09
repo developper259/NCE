@@ -59,11 +59,7 @@ class WriterController {
     let tableSplit = [];
     for (let char of txt) {
       if (this.separator.includes(char)) {
-        /*if (this.separator.includes(oldChar)) {
-					tableSplit[tableSplit.length - 1] += char;
-				} else {*/
         tableSplit.push(char);
-        //}
       } else {
         if (!tableSplit.length || this.separator.includes(oldChar)) {
           tableSplit.push(char);
@@ -87,11 +83,7 @@ class WriterController {
     for (let char of txt) {
       if (this.separator.includes(char)) {
         let c = char.replace(/\t/g, "_".repeat(CONFIG_GET("tab_width")));
-        /*if (this.separator.includes(oldChar)) {
-					tableSplit[tableSplit.length - 1] += c;
-				} else {*/
         tableSplit.push(c);
-        //}
       } else {
         if (!tableSplit.length || this.separator.includes(oldChar)) {
           tableSplit.push(char);
@@ -142,7 +134,7 @@ class WriterController {
     if (this.editor.selectController.containsSelected) {
       let cursor = this.deleteSelection();
       x = cursor.column;
-      y = cursor.row - 1;
+      y = cursor.row;
     }
 
     const line = this.editor.lineController.lines[y - 1];
@@ -303,51 +295,20 @@ class WriterController {
   }
 
   deleteSelection() {
-    if (this.editor.lineController.lines.length == 0) return;
+    if (this.editor.lineController.lines.length === 0) return;
     if (!this.editor.tabManager.activeFile) return;
-    let objs = this.editor.selectController.getSelectOBJ();
-    let cursor = this.editor.cursor.getCursorPosition();
-    if (!cursor) return;
 
-    objs.sort((a, b) => {
-      let aLine = a.dataset.line;
-      let bLine = b.dataset.line;
-      return bLine - aLine;
-    });
+    const range = this.editor.selectController.getLogicalSelection();
+    if (!range) return;
 
-    let rest = "";
-    let i = 0;
+    let cursor = this.deleteRange(
+      range.startRow,
+      range.startColumn,
+      range.endRow,
+      range.endColumn,
+    );
 
-    for (let obj of objs) {
-      let nbLine = parseInt(obj.dataset.line);
-      let line = this.editor.lineController.lines[nbLine];
-
-      let column = this.editor.cursor.columnFromSelectObj(obj) - 1;
-      let width = Math.ceil(this.editor.cursor.lengthFromSelectObj(obj));
-      let newLine = line.slice(0, column) + line.slice(column + width);
-
-      if (i != objs.length - 1) {
-        if (newLine != "") rest = newLine + rest;
-        this.editor.lineController.supLine(nbLine);
-      } else {
-        this.editor.lineController.changeLine(newLine + rest, nbLine);
-        cursor.row = nbLine + 1;
-        if (objs.length != 1) cursor.column = newLine.length;
-        else cursor.column = column;
-      }
-      i++;
-    }
     this.editor.selectController.unSelectAll();
-    this.editor.lineController.refresh();
-
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      action: "delete",
-      text: rest,
-      beforeRow: cursor.row,
-      beforeColumn: cursor.column,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
-    });
 
     return cursor;
   }
@@ -367,7 +328,6 @@ class WriterController {
 
     const lines = this.editor.lineController.lines;
 
-    // Calculate deleted text BEFORE modifying lines
     const deletedText =
       startRow === endRow
         ? lines[startRow - 1].slice(startColumn, endColumn)
@@ -387,23 +347,21 @@ class WriterController {
 
       this.editor.lineController.changeLine(combinedLine, startRow - 1);
 
-      for (let i = endRow - 1; i > startRow; i--) {
+      for (let i = endRow - 1; i >= startRow; i--) {
         this.editor.lineController.supLine(i);
       }
     }
 
     this.editor.lineController.refresh();
 
-    if (!this.editor.historyController.isHistory) {
-      this.editor.events.callEvent(Events.ON_CHANGE, {
-        action: "delete",
-        text: deletedText,
-        beforeRow: startRow,
-        beforeColumn: startColumn,
-        afterRow: startRow,
-        afterColumn: startColumn,
-      });
-    }
+    this.editor.events.callEvent(Events.ON_CHANGE, {
+      action: "delete",
+      text: deletedText,
+      beforeRow: startRow,
+      beforeColumn: startColumn,
+      afterRow: startRow,
+      afterColumn: startColumn,
+    });
 
     return { row: startRow, column: startColumn };
   }
@@ -422,17 +380,14 @@ class WriterController {
 
       this.editor.lineController.refresh();
 
-      if (!this.editor.historyController.isHistory) {
-        this.editor.events.callEvent(Events.ON_CHANGE, {
-          action: "insert",
-          text: text,
-          beforeRow: row,
-          beforeColumn: column,
-          afterRow: row,
-          afterColumn: column + text.length,
-        });
-      }
-
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "insert",
+        text: text,
+        beforeRow: row,
+        beforeColumn: column,
+        afterRow: row,
+        afterColumn: column + text.length,
+      });
       return { row, column: column + text.length };
     } else {
       const newLines = text.split("\n");
@@ -458,16 +413,14 @@ class WriterController {
       const newColumn =
         newLines[newLines.length - 1].length + currentLine.slice(column).length;
 
-      if (!this.editor.historyController.isHistory) {
-        this.editor.events.callEvent(Events.ON_CHANGE, {
-          action: "insert",
-          text: text,
-          beforeRow: row,
-          beforeColumn: column,
-          afterRow: newRow,
-          afterColumn: newColumn,
-        });
-      }
+      this.editor.events.callEvent(Events.ON_CHANGE, {
+        action: "insert",
+        text: text,
+        beforeRow: row,
+        beforeColumn: column,
+        afterRow: newRow,
+        afterColumn: newColumn,
+      });
 
       return { row: newRow, column: newColumn };
     }

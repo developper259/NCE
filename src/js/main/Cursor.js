@@ -40,7 +40,12 @@ class Cursor {
   }
 
   columnToX(column) {
-    return this.editor.baseX + (column - 1) * this.editor.letterSize + 1;
+    const offsetXChars = this.editor.lineController.offsetX || 0;
+    return (
+      this.editor.baseX +
+      (column - 1 - offsetXChars) * this.editor.letterSize +
+      1
+    );
   }
 
   yToRow(y) {
@@ -52,8 +57,11 @@ class Cursor {
   }
 
   columnFromSelectObj(obj) {
-    return this.xToColumn(
-      parseInt(window.getComputedStyle(obj).left, 10) - this.editor.baseX
+    const offsetXChars = this.editor.lineController.offsetX || 0;
+    return (
+      this.xToColumn(
+        parseInt(window.getComputedStyle(obj).left, 10) - this.editor.baseX,
+      ) + offsetXChars
     );
   }
 
@@ -74,10 +82,13 @@ class Cursor {
     const rect = this.editor.output.getBoundingClientRect();
     const localX = event.clientX - rect.left - this.mX;
     const localY = event.clientY - rect.top - this.mY;
-    const scrollOffset = this.editor.lineController.getScrollOffsetY();
 
-    const targetRow = this.yToRow(localY + scrollOffset);
-    const targetColumn = this.xToColumn(localX);
+    const scrollOffsetY = this.editor.lineController.getScrollOffsetY();
+    const scrollOffsetXChars = this.editor.lineController.offsetX || 0;
+
+    const targetRow = this.yToRow(localY + scrollOffsetY);
+    const targetColumn = this.xToColumn(localX) + scrollOffsetXChars;
+
     const posReal = this.getReelPosition(targetRow, targetColumn);
     if (!posReal) return;
 
@@ -89,7 +100,7 @@ class Cursor {
         let nbTab = 0;
         const limit = Math.min(posReal.column, line.length);
         for (let i = 0; i < limit; i++) {
-          if (line.charCodeAt(i) === 9) nbTab++;  // 9 == charCode of tab
+          if (line.charCodeAt(i) === 9) nbTab++; // 9 == charCode of tab
         }
         const adjustedCol = posReal.column + (nbTab * tabWidth - nbTab);
         const calc = ((targetColumn - adjustedCol) / tabWidth) * -1;
@@ -102,7 +113,6 @@ class Cursor {
     const row = pos.row;
     const column = pos.column;
     if (this.isNewPosition(row, column)) {
-      //this.editor.events.callEvent(Events.CURSOR_MOVE, { row, column });
       this.setCursorPosition(posReal.row, posReal.column);
     }
 
@@ -157,7 +167,8 @@ class Cursor {
     this.cD.style.top = `${placeY}px`;
   }
 
-  getPosition(row, column) {    // visible position of cursor == column
+  getPosition(row, column) {
+    // visible position of cursor == column
     if (!this.editor.tabManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.lines.length) {
@@ -190,7 +201,8 @@ class Cursor {
     return { row: row, column: column };
   }
 
-  getReelPosition(row, column) {    // real position of cursor == x
+  getReelPosition(row, column) {
+    // real position of cursor == x
     if (!this.editor.tabManager.activeFile) return;
     if (row <= 0) row = 1;
     if (row > this.editor.lineController.lines.length) {
@@ -225,6 +237,7 @@ class Cursor {
   getCursorReelPosition() {
     return this.getReelPosition(this.row, this.column);
   }
+
   getCursorPosition() {
     return this.getPosition(this.row, this.column);
   }

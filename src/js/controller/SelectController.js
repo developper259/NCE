@@ -81,6 +81,24 @@ class SelectController {
     this.editor.tabManager.activeFile.endSelect = value;
   }
 
+  getLogicalSelection() {
+    if (!this.selectedLines || this.selectedLines.size === 0) return null;
+
+    const rows = Array.from(this.selectedLines.keys()).sort((a, b) => a - b);
+    const firstRow = rows[0];
+    const lastRow = rows[rows.length - 1];
+
+    const startInfo = this.selectedLines.get(firstRow);
+    const endInfo = this.selectedLines.get(lastRow);
+
+    return {
+      startRow: firstRow + 1,
+      startColumn: startInfo.startCol - 1,
+      endRow: lastRow + 1,
+      endColumn: endInfo.startCol - 1 + endInfo.length,
+    };
+  }
+
   refreshSelectionDOM() {
     if (!this.editor.tabManager.activeFile || !this.selectOutput) return;
 
@@ -98,8 +116,13 @@ class SelectController {
     });
 
     const currentDOMNodes = this.selectOutput.children;
-    const totalLoopLength = Math.max(visibleSelections.length, currentDOMNodes.length);
-    const classNameTarget = !this.editor.selected ? "selected selected-afk" : "selected";
+    const totalLoopLength = Math.max(
+      visibleSelections.length,
+      currentDOMNodes.length,
+    );
+    const classNameTarget = !this.editor.selected
+      ? "selected selected-afk"
+      : "selected";
 
     for (let i = 0; i < totalLoopLength; i++) {
       if (i < visibleSelections.length) {
@@ -113,7 +136,10 @@ class SelectController {
 
         const rawLine = this.editor.lineController.lines[row] || "";
         const vec1 = cursor.getReelPosition(fileRow, info.startCol - 1);
-        const vec2 = cursor.getReelPosition(fileRow, info.startCol - 1 + info.length);
+        const vec2 = cursor.getReelPosition(
+          fileRow,
+          info.startCol - 1 + info.length,
+        );
         const value = rawLine.slice(vec1.column, vec2.column);
 
         let div = currentDOMNodes[i];
@@ -125,13 +151,12 @@ class SelectController {
 
         div.className = classNameTarget;
         div.dataset.line = row;
-        
+
         div.style.display = "";
         div.style.left = `${x}px`;
         div.style.top = `${y}px`;
         div.style.width = `${width}px`;
         div.style.height = `${height}px`;
-
       } else {
         if (currentDOMNodes[i]) {
           currentDOMNodes[i].style.display = "none";
@@ -151,14 +176,19 @@ class SelectController {
     if (this.selectedLines.size === 0) return;
 
     const parts = [];
-    const sortedRows = Array.from(this.selectedLines.keys()).sort((a, b) => a - b);
+    const sortedRows = Array.from(this.selectedLines.keys()).sort(
+      (a, b) => a - b,
+    );
     const cursor = this.editor.cursor;
 
     for (const row of sortedRows) {
       const info = this.selectedLines.get(row);
       const rawLine = this.editor.lineController.lines[row] || "";
       const vec1 = cursor.getReelPosition(row + 1, info.startCol - 1);
-      const vec2 = cursor.getReelPosition(row + 1, info.startCol - 1 + info.length);
+      const vec2 = cursor.getReelPosition(
+        row + 1,
+        info.startCol - 1 + info.length,
+      );
       parts.push(rawLine.slice(vec1.column, vec2.column));
     }
 
@@ -171,8 +201,14 @@ class SelectController {
     if (!info) return undefined;
 
     const rawLine = this.editor.lineController.lines[index] || "";
-    const vec1 = this.editor.cursor.getReelPosition(index + 1, info.startCol - 1);
-    const vec2 = this.editor.cursor.getReelPosition(index + 1, info.startCol - 1 + info.length);
+    const vec1 = this.editor.cursor.getReelPosition(
+      index + 1,
+      info.startCol - 1,
+    );
+    const vec2 = this.editor.cursor.getReelPosition(
+      index + 1,
+      info.startCol - 1 + info.length,
+    );
     return rawLine.slice(vec1.column, vec2.column);
   }
 
@@ -207,11 +243,14 @@ class SelectController {
 
   selectLine(index, cursorChange) {
     if (!this.editor.tabManager.activeFile || index === undefined) return;
-    
+
     const line = this.editor.lineController;
     if (!line.lines[index] && line.lines.length === 1) return;
-    
-    let length = this.editor.cursor.getPosition(index + 1, line.lines[index].length).column;
+
+    let length = this.editor.cursor.getPosition(
+      index + 1,
+      line.lines[index].length,
+    ).column;
     if (length === 0) length = 1;
 
     this.selectedLines.set(index, { startCol: 1, length: length });
@@ -239,7 +278,10 @@ class SelectController {
 
     const lc = this.editor.lineController;
     for (let i = 0; i < lc.lines.length; i++) {
-      let length = this.editor.cursor.getPosition(i + 1, lc.lines[i].length).column;
+      let length = this.editor.cursor.getPosition(
+        i + 1,
+        lc.lines[i].length,
+      ).column;
       if (length === 0) length = 1;
       this.selectedLines.set(i, { startCol: 1, length: length });
     }
@@ -260,12 +302,21 @@ class SelectController {
     const rect = wordOBJ.getBoundingClientRect();
     const editorRect = this.editor.output.getBoundingClientRect();
 
-    const x = this.editor.cursor.xToColumn(rect.left - editorRect.left);
+    const offsetXChars = this.editor.lineController.offsetX || 0;
+
+    const x =
+      this.editor.cursor.xToColumn(rect.left - editorRect.left) + offsetXChars;
     const y = this.editor.cursor.yToRow(rect.top - editorRect.top) - 1;
 
-    this.selectedLines.set(y, { startCol: x, length: wordOBJ.innerText.length });
-    
-    const pos = this.editor.cursor.getReelPosition(y, x + wordOBJ.innerText.length - 1);
+    this.selectedLines.set(y, {
+      startCol: x,
+      length: wordOBJ.innerText.length,
+    });
+
+    const pos = this.editor.cursor.getReelPosition(
+      y,
+      x + wordOBJ.innerText.length - 1,
+    );
     if (cursorChange) this.editor.cursor.setCursorPosition(y + 1, pos.column);
 
     this.refreshSelectionDOM();
@@ -302,22 +353,36 @@ class SelectController {
     const startIsTop = this.startSelect.row <= this.endSelect.row;
     const topRow = startIsTop ? this.startSelect.row : this.endSelect.row;
     const bottomRow = startIsTop ? this.endSelect.row : this.startSelect.row;
-    const topColView = startIsTop ? this.startSelect.column : this.endSelect.column;
-    const bottomColView = startIsTop ? this.endSelect.column : this.startSelect.column;
+    const topColView = startIsTop
+      ? this.startSelect.column
+      : this.endSelect.column;
+    const bottomColView = startIsTop
+      ? this.endSelect.column
+      : this.startSelect.column;
 
     const yStart = topRow - 1;
     const yEnd = bottomRow - 1;
 
     const lineStart = lc.lines[yStart] ?? "";
-    const startViewLen = Math.max(0, (lc.getViewLineLength ? lc.getViewLineLength(yStart) : lineStart.length) - topColView);
+    const startViewLen = Math.max(
+      0,
+      (lc.getViewLineLength ? lc.getViewLineLength(yStart) : lineStart.length) -
+        topColView,
+    );
     if (startViewLen > 0) {
-      this.selectedLines.set(yStart, { startCol: topColView + 1, length: startViewLen });
+      this.selectedLines.set(yStart, {
+        startCol: topColView + 1,
+        length: startViewLen,
+      });
     }
 
     for (let i = yStart + 1; i < yEnd; i++) {
       const lineLen = (lc.lines[i] ?? "").length;
       const viewLen = lc.getViewLineLength ? lc.getViewLineLength(i) : lineLen;
-      this.selectedLines.set(i, { startCol: 1, length: viewLen === 0 ? 1 : viewLen });
+      this.selectedLines.set(i, {
+        startCol: 1,
+        length: viewLen === 0 ? 1 : viewLen,
+      });
     }
 
     const endViewLen = Math.max(0, bottomColView);
@@ -359,7 +424,7 @@ class SelectController {
     if (this.clickCount === 2) {
       const word = this.editor.lineController.getWordOBJ(
         this.editor.cursor.row,
-        this.editor.cursor.getIndexWord()
+        this.editor.cursor.getIndexWord(),
       );
       if (!word) return;
       this.selectWord(word, true);
@@ -376,7 +441,8 @@ class SelectController {
     this.editor.keyBinding.historyX = undefined;
 
     if (new Date().getTime() - this.lastClickTime > this.clickTime) {
-      if (this.containsSelected.length > 0 && this.editor.selected) this.unSelectAll();
+      if (this.containsSelected.length > 0 && this.editor.selected)
+        this.unSelectAll();
     }
 
     this.editor.cursor.onClick(event);
@@ -414,15 +480,18 @@ class SelectController {
     let c = pos.column;
     let r = pos.row;
 
-    if (this.endSelect && this.endSelect.column === c && this.endSelect.row === r)
+    if (
+      this.endSelect &&
+      this.endSelect.column === c &&
+      this.endSelect.row === r
+    )
       return;
 
     this.endSelect = { column: c, row: r };
-    
+
     if (this.startSelect.row === this.endSelect.row)
       this.calculSelectSimpleLine();
-    else 
-      this.calculSelectMultiLine();
+    else this.calculSelectMultiLine();
 
     this.editor.events.callEvent(Events.ON_SELECT, {
       start: this.startSelect,
@@ -433,8 +502,11 @@ class SelectController {
 
   getSelectOBJ() {
     if (!this.selectOutput) return [];
-    return Array.from(this.selectOutput.children).filter(el => 
-      el.classList && el.classList.contains("selected") && el.style.display !== "none"
+    return Array.from(this.selectOutput.children).filter(
+      (el) =>
+        el.classList &&
+        el.classList.contains("selected") &&
+        el.style.display !== "none",
     );
   }
 

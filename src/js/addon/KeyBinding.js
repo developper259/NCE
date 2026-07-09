@@ -413,7 +413,7 @@ class KeyBinding {
 
       if (a) {
         const l = this.editor.lineController.lines[y - 1];
-        const words = this.editor.writerController.splitWordView(l);
+        const words = this.editor.writerController.splitWord(l);
         let count = 0;
 
         for (let i = 0; i < words.length; i++) {
@@ -475,7 +475,7 @@ class KeyBinding {
 
       if (c || a) {
         const l = this.editor.lineController.lines[y - 1];
-        const words = this.editor.writerController.splitWordView(l);
+        const words = this.editor.writerController.splitWord(l);
         let count = 0;
 
         for (let i = 0; i < words.length; i++) {

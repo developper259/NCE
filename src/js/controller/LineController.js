@@ -9,6 +9,7 @@ class LineController {
 
     this.dirtyLines = new Set();
     this.totalLines = 0;
+    this.marginChars = 10;
 
     this.initScroller();
   }
@@ -154,6 +155,7 @@ class LineController {
   }
 
   initScroller() {
+    // Vertical scroller
     this.scroller = this.editor.scrollerManager.createScroller(
       this.editor.editorOBJ,
       this.editor.scrollerManager.VERTICAL_TYPE,
@@ -183,6 +185,81 @@ class LineController {
     this.scroller.onScroll = (scrollRatio) => {
       this.applyScrollFromRatio(scrollRatio);
     };
+
+    // Horizontal scroller
+    this.hScroller = this.editor.scrollerManager.createScroller(
+      this.editor.editorOBJ,
+      this.editor.scrollerManager.HORIZONTAL_TYPE,
+      false,
+    );
+    this.editor.scrollerManager.addScroller(this.hScroller);
+    this.hScroller.onRefresh = () => {
+      this.refresh();
+    };
+
+    this.hScroller.nbItem = 1000;
+    this.hScroller.heightByItem = 1;
+
+    this.hScroller.calculProp = () => {
+      if (!this.lines || this.lines.length === 0) return 0;
+      
+      const maxLineLength = this.maxLineLength + this.marginChars;
+      const visibleWidthPixels = this.editor.editorOBJ.clientWidth - this.editor.baseX;
+      const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+
+      if (maxLineLength <= visibleWidthChars) return 100;
+      return (visibleWidthChars / maxLineLength) * 100;
+    };
+
+    this.hScroller.calcIsActive = () => {
+      if (!this.lines || this.lines.length === 0) return false;
+      
+      const maxLineLength = this.maxLineLength + this.marginChars;
+      const visibleWidthPixels = this.editor.editorOBJ.clientWidth - this.editor.baseX;
+      const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+
+      return maxLineLength > visibleWidthChars;
+    };
+
+    this.hScroller.onScroll = (scrollRatio) => {
+      this.applyHorizontalScrollFromRatio(scrollRatio);
+    };
+  }
+
+  applyHorizontalScrollFromRatio(scrollRatio) {
+    if (!this.lines || this.lines.length === 0) return;
+
+    if (!this.hScroller.calcIsActive()) {
+      if (this.offsetX !== 0) {
+        this.offsetX = 0;
+        this.markDirtyAll();
+        this.refreshOutput();
+        this.editor.cursor.updateCaretPosition();
+        this.editor.selectController.refreshSelectPositions();
+      }
+      return;
+    }
+
+    // Utilisation de this.marginChars
+    const maxLineLength = this.maxLineLength + this.marginChars;
+    const visibleWidthPixels = this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+    
+    const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
+
+    scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
+    this.hScroller.setScrollRatio(scrollRatio);
+
+    const currentScrollX = scrollRatio * maxScrollX;
+    const newOffsetX = Math.round(currentScrollX);
+
+    if (this.offsetX !== newOffsetX) {
+      this.offsetX = newOffsetX;
+      this.markDirtyAll();
+      this.refreshOutput();
+      this.editor.cursor.updateCaretPosition();
+      this.editor.selectController.refreshSelectPositions();
+    }
   }
 
   // Getters et Setters
@@ -206,14 +283,14 @@ class LineController {
     this.editor.tabManager.activeFile.index = value;
   }
 
-  get longuerLine() {
+  get maxLineLength() {
     if (!this.editor.tabManager.activeFile) return;
-    return this.editor.tabManager.activeFile?.longuerLine;
+    return this.editor.tabManager.activeFile?.maxLineLength;
   }
 
-  set longuerLine(value) {
+  set maxLineLength(value) {
     if (!this.editor.tabManager.activeFile) return;
-    this.editor.tabManager.activeFile.longuerLine = value;
+    this.editor.tabManager.activeFile.maxLineLength = value;
   }
 
   get maxCharactersPerLine() {
@@ -252,6 +329,16 @@ class LineController {
     this.editor.tabManager.activeFile.offsetY = value;
   }
 
+  get offsetX() {
+    if (!this.editor.tabManager.activeFile) return 0;
+    return this.editor.tabManager.activeFile.offsetX ?? 0;
+  }
+
+  set offsetX(value) {
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.offsetX = value;
+  }
+
   resize() {
     this.outputWidth = this.editor.output.clientWidth;
     this.outputHeight = this.editor.output.clientHeight;
@@ -274,6 +361,9 @@ class LineController {
       this.lines = this.lines.concat(newLines);
     }
     this.setTotalLines(this.lines.length);
+    if (this.hScroller) {
+      this.hScroller.nbItem = this.maxLineLength;
+    }
   }
 
   getContent() {
@@ -321,7 +411,6 @@ class LineController {
   supLine(index) {
     if (index >= 0 && index < this.lines.length) {
       this.markDirtyLineFrom(index);
-
       this.lines.splice(index, 1);
     }
   }
@@ -380,6 +469,30 @@ class LineController {
     }
 
     let line = this.lines[dataIndex];
+
+    if (this.offsetX > 0) {
+      const tabWidth = CONFIG_GET("tab_width");
+      let visualPos = 0;
+      let charIndex = 0;
+
+      while (charIndex < line.length && visualPos < this.offsetX) {
+        if (line[charIndex] === "\t") {
+          visualPos += tabWidth;
+        } else {
+          visualPos += 1;
+        }
+        charIndex++;
+      }
+      
+      if (visualPos < this.offsetX) {
+        line = "";
+      } else {
+        line = line.slice(charIndex);
+      }
+    }
+
+    if (line.length > this.maxLineLength) this.maxLineLength = line.length;
+
     if (line.length > this.maxCharactersPerLine) {
       line = line.slice(0, this.maxCharactersPerLine);
     }
@@ -406,9 +519,36 @@ class LineController {
         lineOBJ = this.createLineOBJ("", i);
       } else {
         let line = this.lines[dataIndex];
-        if (line.length > this.longuerLine) this.longuerLine = line.length;
-        if (line.length > this.maxCharactersPerLine)
+        
+        if (line.length > this.maxLineLength) this.maxLineLength = line.length;
+
+        // Prise en compte du décalage horizontal (scroll X)
+        if (this.offsetX > 0) {
+          const tabWidth = CONFIG_GET("tab_width");
+          let visualPos = 0;
+          let charIndex = 0;
+
+          // Trouver le bon index de départ en fonction des pixels visuels/tabulations
+          while (charIndex < line.length && visualPos < this.offsetX) {
+            if (line[charIndex] === "\t") {
+              visualPos += tabWidth;
+            } else {
+              visualPos += 1;
+            }
+            charIndex++;
+          }
+
+          if (visualPos < this.offsetX) {
+            line = "";
+          } else {
+            line = line.slice(charIndex);
+          }
+        }
+
+        // On coupe ce qui dépasse de l'écran à droite
+        if (line.length > this.maxCharactersPerLine) {
           line = line.slice(0, this.maxCharactersPerLine);
+        }
 
         lineOBJ = this.createLineOBJ(line, i);
       }
@@ -502,9 +642,7 @@ class LineController {
     const maxLineNumber = this.lines.length;
     const maxDigits = maxLineNumber.toString().length;
 
-    // Approximation: chaque caractère fait environ 0.6em (font-size actuel)
     const estimatedWidth = Math.max(50, maxDigits * 10 + 15);
-
     return estimatedWidth;
   }
 
@@ -570,6 +708,10 @@ class LineController {
     this.scroller.nbItem = this.lines.length;
     this.applyScrollFromRatio(this.scroller.scrollRatio);
     this.scroller.refresh();
+
+    this.hScroller.nbItem = this.maxLineLength;
+    this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
+    this.hScroller.refresh();
   }
 
   onClickNumberLine(e) {
@@ -604,10 +746,10 @@ class LineController {
   }
 
   show() {
-    this.lineN.style.display = "block";
-    this.editor.output.style.display = "block";
     this.initLineOutput();
     this.initNumberLines();
+    this.lineN.style.display = "block";
+    this.editor.output.style.display = "block";
     const cursor = getElement(".editor-caret");
     cursor.style.display = "block";
   }
