@@ -84,7 +84,7 @@ class FileNode {
 
   async loadContent() {
     if (!this.path) {
-      this.editor.lineController.loadContent("");
+      this.editor.lineController.loadContent(this.lines.join("\n"));
       return;
     }
 

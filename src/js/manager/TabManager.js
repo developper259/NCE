@@ -43,32 +43,40 @@ class tabManager {
 
   async openFiles(files) {
     if (files.length === 0) return;
+    let lastAddedFile = null;
+
     for (let file of files) {
-      const f = this.getFileByPath(file.path);
-      if (f) {
-        continue;
+      if (file.path) {
+        const f = this.getFileByPath(file.path);
+        if (f) {
+          continue;
+        }
       }
 
       if (
+        file.hasPath() &&
         this.activeFile &&
         !this.activeFile.hasPath() &&
-        file.hasPath() &&
         this.activeFile.isEmpty()
       ) {
         this.activeFile.replaceFile(file);
+        lastAddedFile = this.activeFile;
       } else {
         this.files.push(file);
+        lastAddedFile = file;
       }
     }
-    let f = this.getFileByPath(files.pop().path);
 
-    if (!f) f = this.files.pop();
+    if (lastAddedFile) {
+      this.setFocusFile(lastAddedFile);
 
-    this.setFocusFile(f);
-
-    this.activeFile.setIsSaved(true);
-    await this.activeFile.loadContent();
-    this.editor.refreshAll();
+      this.activeFile.setIsSaved(true);
+      if (this.activeFile.hasPath()) {
+        await this.activeFile.loadContent();
+      }
+      this.editor.lineController.restoreScroll();
+      this.editor.refreshAll();
+    }
   }
 
   closeFiles() {
