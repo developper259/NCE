@@ -20,9 +20,11 @@ class FileNode {
     // Line Controller
     this.lines = [""];
     this.index = 1;
+    this.totalLines = 0;
     this.maxLineLength = 0;
     this.startIndex = 0;
     this.offsetY = 0;
+    this.offsetX = 0;
 
     // Select Controller
     this.isMouseDown = false;
@@ -66,8 +68,11 @@ class FileNode {
 
     this.lines = file.lines;
     this.index = file.index;
+    this.totalLines = file.totalLines;
+    this.maxLineLength = file.maxLineLength;
     this.startIndex = file.startIndex;
     this.offsetY = file.offsetY;
+    this.offsetX = file.offsetX;
 
     this.isMouseDown = file.isMouseDown;
     this.containsSelected = file.containsSelected;

@@ -8,7 +8,6 @@ class LineController {
     this.outputHeight = this.editor.output.clientHeight;
 
     this.dirtyLines = new Set();
-    this.totalLines = 0;
     this.marginChars = 10;
 
     this.initScroller();
@@ -91,13 +90,55 @@ class LineController {
     return (this.startIndex * posY + this.offsetY) / maxScrollY;
   }
 
+  getHorizontalScrollRatioFromState() {
+    if (!this.lines || this.lines.length === 0) return 0;
+
+    const maxLineLength = this.maxLineLength + this.marginChars;
+    const visibleWidthPixels =
+      this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+    const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
+    if (maxScrollX === 0) return 0;
+
+    return this.offsetX / maxScrollX;
+  }
+
   restoreScroll() {
     if (!this.editor.tabManager.activeFile) return;
 
+    this.scroller.nbItem = this.lines.length;
+    this.hScroller.nbItem = this.maxLineLength;
+
     this.clampScrollState();
+
+    this.scroller.refresh();
+    this.hScroller.refresh();
+
+    if (this.scroller.calcIsActive()) {
+      this.scroller.setActive(true);
+    }
+    if (this.hScroller.calcIsActive()) {
+      this.hScroller.setActive(true);
+    }
+
     this.scroller.setScrollRatio(this.getScrollRatioFromState());
     this.applyScrollTransform();
+
+    const vMetrics = this.scroller.readThumbMetrics();
+    if (vMetrics) this.scroller.writeThumbPosition(vMetrics);
     this.scroller.refresh();
+
+    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
+    this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
+
+    const hMetrics = this.hScroller.readThumbMetrics();
+    if (hMetrics) this.hScroller.writeThumbPosition(hMetrics);
+    this.hScroller.refresh();
+
+    this.markDirtyAll();
+    this.refreshOutput();
+    this.refreshNumberLines();
+
     this.editor.cursor.updateCaretPosition();
     this.editor.selectController.refreshSelectPositions();
   }
@@ -202,9 +243,10 @@ class LineController {
 
     this.hScroller.calculProp = () => {
       if (!this.lines || this.lines.length === 0) return 0;
-      
+
       const maxLineLength = this.maxLineLength + this.marginChars;
-      const visibleWidthPixels = this.editor.editorOBJ.clientWidth - this.editor.baseX;
+      const visibleWidthPixels =
+        this.editor.editorOBJ.clientWidth - this.editor.baseX;
       const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
 
       if (maxLineLength <= visibleWidthChars) return 100;
@@ -213,9 +255,10 @@ class LineController {
 
     this.hScroller.calcIsActive = () => {
       if (!this.lines || this.lines.length === 0) return false;
-      
+
       const maxLineLength = this.maxLineLength + this.marginChars;
-      const visibleWidthPixels = this.editor.editorOBJ.clientWidth - this.editor.baseX;
+      const visibleWidthPixels =
+        this.editor.editorOBJ.clientWidth - this.editor.baseX;
       const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
 
       return maxLineLength > visibleWidthChars;
@@ -240,11 +283,11 @@ class LineController {
       return;
     }
 
-    // Utilisation de this.marginChars
     const maxLineLength = this.maxLineLength + this.marginChars;
-    const visibleWidthPixels = this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    const visibleWidthPixels =
+      this.editor.editorOBJ.clientWidth - this.editor.baseX;
     const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
-    
+
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
 
     scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
@@ -309,6 +352,16 @@ class LineController {
     return parseInt(this.outputHeight / this.editor.posY);
   }
 
+  get totalLines() {
+    if (!this.editor.tabManager.activeFile) return 0;
+    return this.editor.tabManager.activeFile.totalLines ?? 0;
+  }
+
+  set totalLines(value) {
+    if (!this.editor.tabManager.activeFile) return;
+    this.editor.tabManager.activeFile.totalLines = value;
+  }
+
   get startIndex() {
     if (!this.editor.tabManager.activeFile) return 0;
     return this.editor.tabManager.activeFile.startIndex ?? 0;
@@ -348,6 +401,13 @@ class LineController {
   loadContent(content, totalLines) {
     this.lines = content.split("\n");
     this.totalLines = totalLines || this.lines.length;
+
+    if (this.scroller) {
+      this.scroller.nbItem = this.lines.length;
+    }
+    if (this.hScroller) {
+      this.hScroller.nbItem = this.maxLineLength;
+    }
   }
 
   setTotalLines(totalLines) {
@@ -483,7 +543,7 @@ class LineController {
         }
         charIndex++;
       }
-      
+
       if (visualPos < this.offsetX) {
         line = "";
       } else {
@@ -519,16 +579,14 @@ class LineController {
         lineOBJ = this.createLineOBJ("", i);
       } else {
         let line = this.lines[dataIndex];
-        
+
         if (line.length > this.maxLineLength) this.maxLineLength = line.length;
 
-        // Prise en compte du décalage horizontal (scroll X)
         if (this.offsetX > 0) {
           const tabWidth = CONFIG_GET("tab_width");
           let visualPos = 0;
           let charIndex = 0;
 
-          // Trouver le bon index de départ en fonction des pixels visuels/tabulations
           while (charIndex < line.length && visualPos < this.offsetX) {
             if (line[charIndex] === "\t") {
               visualPos += tabWidth;
@@ -545,7 +603,6 @@ class LineController {
           }
         }
 
-        // On coupe ce qui dépasse de l'écran à droite
         if (line.length > this.maxCharactersPerLine) {
           line = line.slice(0, this.maxCharactersPerLine);
         }
@@ -706,12 +763,24 @@ class LineController {
     this.refreshNumberLines();
 
     this.scroller.nbItem = this.lines.length;
+
+    this.scroller.setScrollRatio(this.getScrollRatioFromState());
     this.applyScrollFromRatio(this.scroller.scrollRatio);
     this.scroller.refresh();
+    
+    if (this.scroller.calcIsActive()) {
+      this.scroller.setActive(true);
+    }
 
     this.hScroller.nbItem = this.maxLineLength;
+    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
     this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
     this.hScroller.refresh();
+    if (this.hScroller.calcIsActive()) {
+      this.hScroller.setActive(true);
+    }
+
+    this.editor.cursor.updateCaretPosition();
   }
 
   onClickNumberLine(e) {
