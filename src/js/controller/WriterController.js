@@ -126,6 +126,8 @@ class WriterController {
     this.editor.keyBinding.historyX = undefined;
     this.editor.keyBinding.indexHistory = 1;
 
+    const lc = this.editor.lineController;
+
     const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;
     let x = pos.column;
@@ -137,7 +139,7 @@ class WriterController {
       y = cursor.row;
     }
 
-    const line = this.editor.lineController.lines[y - 1];
+    const line = lc.lines[y - 1];
 
     if (!txt.includes("\n")) {
       if (txt == undefined) newLine = "";
@@ -151,9 +153,9 @@ class WriterController {
         newLine = line.substring(0, x) + txt + line.substring(x + 1);
       }
       const newX = x + txt.length;
-      this.editor.lineController.changeLine(newLine, y - 1);
+      lc.changeLine(newLine, y - 1);
 
-      this.editor.lineController.refresh();
+      lc.refresh();
       this.editor.cursor.setCursorPosition(y, newX);
 
       this.editor.events.callEvent(Events.ON_CHANGE, {
@@ -175,21 +177,28 @@ class WriterController {
 
         if (i == 0) {
           newLine = line.slice(0, x) + newLine;
-          this.editor.lineController.changeLine(newLine, y - 1);
+          lc.changeLine(newLine, y - 1);
         } else if (i == newLines.length - 1) {
           newLine = newLine + line.slice(x, line.length);
-          this.editor.lineController.addLine(newLine, y + i - 1);
+          lc.addLine(newLine, y + i - 1);
           x = 0;
         } else {
-          this.editor.lineController.addLine(newLine, y + i - 1);
+          lc.addLine(newLine, y + i - 1);
         }
       }
-      this.editor.lineController.refresh();
+      lc.refresh();
       const lastLineLength = newLines[newLines.length - 1].length;
       this.editor.cursor.setCursorPosition(
         y + newLines.length - 1,
         lastLineLength,
       );
+    
+      const screenRow = y - lc.startIndex;
+      
+      if (screenRow >= lc.maxLines - lc.marginLines) {
+        const targetRow = lc.startIndex + newLines.length;
+        lc.scrollTo(targetRow);
+      }
 
       this.editor.events.callEvent(Events.ON_CHANGE, {
         action: "insert",

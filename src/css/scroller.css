@@ -33,7 +33,7 @@
 }
 
 .page-scroller-vertical:not(.page-scroller-inactive) ~ .page-scroller-horizontal {
-    width: calc(100% - 15px);
+    width: calc(100% - 16px);
 }
 
 .page-scroller-item {

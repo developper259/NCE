@@ -105,16 +105,16 @@ class Scroller {
     this.scrollerOBJ = document.createElement("div");
     this.itemOBJ = document.createElement("div");
 
-    this.scrollerOBJ.classList.add("page-scroller", "box");
+    this.scrollerOBJ.classList.add("page-scroller");
     this.itemOBJ.classList.add("page-scroller-item");
 
     if (this.isBody) this.scrollerOBJ.classList.add("page-scroller-body");
     if (!this.active) this.scrollerOBJ.classList.add("page-scroller-inactive");
 
     if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
-      this.scrollerOBJ.classList.add("page-scroller-vertical");
+      this.scrollerOBJ.classList.add("page-scroller-vertical", "box-left");
     } else {
-      this.scrollerOBJ.classList.add("page-scroller-horizontal");
+      this.scrollerOBJ.classList.add("page-scroller-horizontal", "box-top");
     }
 
     this.scrollerOBJ.id = this.id;

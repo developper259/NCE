@@ -250,7 +250,7 @@ class KeyBinding {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     if (m || a) return;
-
+    
     this.editor.tabManager.activeFile.historyX = undefined;
     const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;
@@ -258,24 +258,25 @@ class KeyBinding {
     let y = pos.row;
 
     let cursor;
+    const lc = this.editor.lineController;
 
     if (!this.editor.selectController.containsSelected) {
       let newLine = "";
-      const l = this.editor.lineController.lines[y - 1];
+      const l = lc.lines[y - 1];
       if (c) {
         if (s) {
           if (x == 0) {
             y -= 1;
-            x = this.editor.lineController.lines[y - 1].length;
-            newLine = this.editor.lineController.lines[y - 1] + l;
-            this.editor.lineController.supLine(y);
+            x = lc.lines[y - 1].length;
+            newLine = lc.lines[y - 1] + l;
+            lc.supLine(y);
           } else {
-            newLine = this.editor.lineController.lines[y - 1].slice(x);
+            newLine = lc.lines[y - 1].slice(x);
             x = 0;
           }
-          this.editor.lineController.changeLine(newLine, y - 1);
+          lc.changeLine(newLine, y - 1);
 
-          this.editor.lineController.refresh();
+          lc.refresh();
           this.editor.cursor.setCursorPosition(y, x);
           return;
         } else {
@@ -290,6 +291,12 @@ class KeyBinding {
       cursor = this.editor.writerController.deleteSelection();
     }
 
+    const screenRow = y - lc.startIndex;
+
+    if (screenRow <= lc.marginLines) {
+      const targetRow = Math.max(0, lc.startIndex - 1);
+      lc.scrollTo(targetRow);
+    }
     this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
   }
 
@@ -333,6 +340,14 @@ class KeyBinding {
         y,
         this.editor.tabManager.activeFile.historyX,
       );
+
+      const lc = this.editor.lineController;
+      const screenRow = y - lc.startIndex;
+      if (screenRow <= lc.marginLines) {
+        const targetRow = Math.max(0, lc.startIndex - 1);
+        lc.scrollTo(targetRow);
+      }
+
       if (s) {
         this.editor.selectController.move();
         this.editor.selectController.isMouseDown = false;
@@ -381,6 +396,13 @@ class KeyBinding {
         this.editor.tabManager.activeFile.historyX,
       );
 
+      const lc = this.editor.lineController;
+      const screenRow = y - lc.startIndex;
+      if (screenRow >= lc.maxLines - lc.marginLines) {
+        const targetRow = lc.startIndex + 1;
+        lc.scrollTo(targetRow);
+      }
+
       if (s) {
         this.editor.selectController.move();
         this.editor.selectController.isMouseDown = false;
@@ -388,8 +410,9 @@ class KeyBinding {
     }
   }
   key_arrow_left(s, c, m, a) {
+    const lc = this.editor.lineController;
     if (this.editor.tabManager.activeFile) {
-      if (this.editor.lineController.lines.length == 0) return;
+      if (lc.length == 0) return;
       this.editor.tabManager.activeFile.historyX = undefined;
       const pos = this.editor.cursor.getCursorReelPosition();
       if (!pos) return;
@@ -412,7 +435,7 @@ class KeyBinding {
       if (y == 1 && x == 0) return;
 
       if (a) {
-        const l = this.editor.lineController.lines[y - 1];
+        const l = lc.lines[y - 1];
         const words = this.editor.writerController.splitWord(l);
         let count = 0;
 
@@ -431,13 +454,19 @@ class KeyBinding {
       } else {
         if (x == 0) {
           y -= 1;
-          x = this.editor.lineController.lines[y - 1].length;
+          x = lc.lines[y - 1].length;
         } else {
           x -= 1;
         }
       }
 
       this.editor.cursor.setCursorPosition(y, x);
+
+      const screenCol = x - lc.offsetX;
+      if (screenCol < lc.marginChars) {
+        const targetCol = lc.offsetX - 1;
+        lc.scrollTo(undefined, targetCol);
+      }
 
       if (s) {
         this.editor.selectController.move();
@@ -446,8 +475,9 @@ class KeyBinding {
     }
   }
   key_arrow_right(s, c, m, a) {
+    const lc = this.editor.lineController;
     if (this.editor.tabManager.activeFile) {
-      if (this.editor.lineController.lines.length == 0) return;
+      if (lc.lines.length == 0) return;
       this.editor.tabManager.activeFile.historyX = undefined;
       const pos = this.editor.cursor.getCursorReelPosition();
       if (!pos) return;
@@ -467,11 +497,7 @@ class KeyBinding {
         return;
       }
 
-      if (
-        y == this.editor.lineController.lines.length &&
-        x == this.editor.lineController.lines[y - 1].length
-      )
-        return;
+      if (y == lc.lines.length && x == lc.lines[y - 1].length) return;
 
       if (c || a) {
         const l = this.editor.lineController.lines[y - 1];
@@ -502,6 +528,12 @@ class KeyBinding {
       }
 
       this.editor.cursor.setCursorPosition(y, x);
+
+      const screenCol = x - lc.offsetX;
+      if (screenCol >= lc.maxCharacters - lc.marginChars) {
+        const targetCol = lc.offsetX + 1;
+        lc.scrollTo(undefined, targetCol);
+      }
 
       if (s) {
         this.editor.selectController.move();
