@@ -11,7 +11,8 @@ class LineController {
     this.marginChars = 10;
     this.marginLines = 3;
 
-    this.initScroller();
+    this.outputScroller = new OutputScroller(editor);
+    this.outputScroller.setLineController(this);
   }
 
   getScrollOffsetY() {
@@ -45,327 +46,35 @@ class LineController {
   }
 
   applyScrollTransform() {
-    this.editor.output.style.transform = "";
-    this.lineN.style.transform = "";
-    this.refreshLinePositions();
+    this.outputScroller.applyScrollTransform();
   }
 
   resetScroll() {
-    this.startIndex = 0;
-    this.offsetY = 0;
-    if (this.scroller) this.scroller.setScrollRatio(0);
-    this.applyScrollTransform();
+    this.outputScroller.resetScroll();
   }
 
   clampScrollState() {
-    if (!this.lines || this.lines.length === 0) {
-      this.startIndex = 0;
-      this.offsetY = 0;
-      return;
-    }
-
-    const posY = this.editor.posY;
-    const maxStart = this.getMaxStartIndex();
-    if (this.startIndex > maxStart) this.startIndex = maxStart;
-    if (this.startIndex < 0) this.startIndex = 0;
-
-    const viewportHeight = this.outputHeight;
-    const totalHeight = this.lines.length * posY;
-    const maxOffsetY = Math.max(
-      0,
-      totalHeight - this.startIndex * posY - viewportHeight,
-    );
-    if (this.offsetY > maxOffsetY) this.offsetY = maxOffsetY;
-    if (this.offsetY < 0) this.offsetY = 0;
+    this.outputScroller.clampScrollState();
   }
 
   getScrollRatioFromState() {
-    if (!this.lines || this.lines.length === 0) return 0;
-
-    const posY = this.editor.posY;
-    const viewportHeight = this.outputHeight;
-    const totalHeight = this.lines.length * posY;
-    const maxScrollY = Math.max(0, totalHeight - viewportHeight);
-    if (maxScrollY === 0) return 0;
-
-    return (this.startIndex * posY + this.offsetY) / maxScrollY;
-  }
-
-  getHorizontalScrollRatioFromState() {
-    if (!this.lines || this.lines.length === 0) return 0;
-
-    const maxLineLength = this.maxLineLength + this.marginChars;
-    const visibleWidthPixels = this.outputWidth - this.editor.baseX;
-    const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
-    const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
-    if (maxScrollX === 0) return 0;
-
-    return this.offsetX / maxScrollX;
+    return this.outputScroller.getVerticalScrollRatioFromState();
   }
 
   restoreScroll() {
-    if (!this.editor.tabManager.activeFile) return;
-
-    this.scroller.nbItem = this.lines.length;
-    this.hScroller.nbItem = this.maxLineLength;
-
-    this.clampScrollState();
-
-    this.scroller.refresh();
-    this.hScroller.refresh();
-
-    if (this.scroller.calcIsActive()) {
-      this.scroller.setActive(true);
-    }
-    if (this.hScroller.calcIsActive()) {
-      this.hScroller.setActive(true);
-    }
-
-    this.scroller.setScrollRatio(this.getScrollRatioFromState());
-    this.applyScrollTransform();
-
-    const vMetrics = this.scroller.readThumbMetrics();
-    if (vMetrics) this.scroller.writeThumbPosition(vMetrics);
-    this.scroller.refresh();
-
-    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
-    this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
-
-    const hMetrics = this.hScroller.readThumbMetrics();
-    if (hMetrics) this.hScroller.writeThumbPosition(hMetrics);
-    this.hScroller.refresh();
-
-    this.markDirtyAll();
-    this.refreshOutput();
-    this.refreshNumberLines();
-
-    this.editor.cursor.updateCaretPosition();
-    this.editor.selectController.refreshSelectPositions();
+    this.outputScroller.restoreScroll();
   }
 
   applyScrollFromRatio(scrollRatio) {
-    if (!this.lines || this.lines.length === 0) return;
-
-    if (!this.scroller.calcIsActive()) {
-      if (this.startIndex !== 0 || this.offsetY !== 0) {
-        this.resetScroll();
-        this.markDirtyAll();
-        this.refreshOutput();
-        this.refreshNumberLines();
-        this.editor.cursor.updateCaretPosition();
-        this.editor.selectController.refreshSelectPositions();
-      }
-      return;
-    }
-
-    const posY = this.editor.posY;
-    const totalHeight = this.lines.length * posY;
-    const viewportHeight = this.outputHeight;
-    const maxScrollY = Math.max(0, totalHeight - viewportHeight);
-    const maxStartIndex = this.getMaxStartIndex();
-
-    scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
-    this.scroller.setScrollRatio(scrollRatio);
-
-    const currentScrollY = scrollRatio * maxScrollY;
-    let newStartIndex = Math.min(
-      Math.floor(currentScrollY / posY),
-      maxStartIndex,
-    );
-    let newOffsetY = currentScrollY - newStartIndex * posY;
-
-    const maxOffsetY = Math.max(
-      0,
-      totalHeight - newStartIndex * posY - viewportHeight,
-    );
-    if (newOffsetY > maxOffsetY) newOffsetY = maxOffsetY;
-
-    const startIndexChanged = this.startIndex !== newStartIndex;
-
-    this.startIndex = newStartIndex;
-    this.offsetY = newOffsetY;
-    this.applyScrollTransform();
-    this.editor.cursor.updateCaretPosition();
-    this.editor.selectController.refreshSelectPositions();
-
-    if (startIndexChanged) {
-      this.markDirtyAll();
-      this.refreshOutput();
-      this.refreshNumberLines();
-    }
-  }
-
-  initScroller() {
-    // Vertical scroller
-    this.scroller = this.editor.scrollerManager.createScroller(
-      this.editor.editorOBJ,
-      this.editor.scrollerManager.VERTICAL_TYPE,
-      false,
-    );
-    this.editor.scrollerManager.addScroller(this.scroller);
-    this.scroller.onRefresh = () => {
-      this.refresh();
-    };
-
-    this.scroller.nbItem = this.lines?.length || 0;
-    this.scroller.heightByItem = this.editor.posY;
-
-    this.scroller.calculProp = () => {
-      if (!this.lines || this.lines.length === 0) return 0;
-      const visibleLines = this.maxLines;
-      const totalLines = this.lines.length;
-      if (totalLines <= visibleLines) return 100;
-      return (visibleLines / totalLines) * 100;
-    };
-
-    this.scroller.calcIsActive = () => {
-      if (!this.lines || this.lines.length === 0) return false;
-      return this.lines.length > this.maxLines;
-    };
-
-    this.scroller.onScroll = (scrollRatio) => {
-      this.applyScrollFromRatio(scrollRatio);
-    };
-
-    // Horizontal scroller
-    this.hScroller = this.editor.scrollerManager.createScroller(
-      this.editor.editorOBJ,
-      this.editor.scrollerManager.HORIZONTAL_TYPE,
-      false,
-    );
-    this.editor.scrollerManager.addScroller(this.hScroller);
-    this.hScroller.onRefresh = () => {
-      this.refresh();
-    };
-
-    this.hScroller.nbItem = 1000;
-    this.hScroller.heightByItem = 1;
-
-    this.hScroller.calculProp = () => {
-      if (!this.lines || this.lines.length === 0) return 0;
-
-      const maxLineLength = this.maxLineLength + this.marginChars;
-      const visibleWidthPixels = this.outputWidth - this.editor.baseX;
-      const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
-
-      if (maxLineLength <= visibleWidthChars) return 100;
-      return (visibleWidthChars / maxLineLength) * 100;
-    };
-
-    this.hScroller.calcIsActive = () => {
-      if (!this.lines || this.lines.length === 0) return false;
-
-      const maxLineLength = this.maxLineLength + this.marginChars;
-      const visibleWidthPixels = this.outputWidth - this.editor.baseX;
-      const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
-
-      return maxLineLength > visibleWidthChars;
-    };
-
-    this.hScroller.onScroll = (scrollRatio) => {
-      this.applyHorizontalScrollFromRatio(scrollRatio);
-    };
+    this.outputScroller.applyVerticalScrollFromRatio(scrollRatio);
   }
 
   applyHorizontalScrollFromRatio(scrollRatio) {
-    if (!this.lines || this.lines.length === 0) return;
-
-    if (!this.hScroller.calcIsActive()) {
-      if (this.offsetX !== 0) {
-        this.offsetX = 0;
-        this.markDirtyAll();
-        this.refreshOutput();
-        this.editor.cursor.updateCaretPosition();
-        this.editor.selectController.refreshSelectPositions();
-      }
-      return;
-    }
-
-    const maxLineLength = this.maxLineLength + this.marginChars;
-    const visibleWidthPixels = this.outputWidth - this.editor.baseX;
-    const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
-
-    const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
-
-    scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
-    this.hScroller.setScrollRatio(scrollRatio);
-
-    const currentScrollX = scrollRatio * maxScrollX;
-    const newOffsetX = Math.round(currentScrollX);
-
-    if (this.offsetX !== newOffsetX) {
-      this.offsetX = newOffsetX;
-      this.markDirtyAll();
-      this.refreshOutput();
-      this.editor.cursor.updateCaretPosition();
-      this.editor.selectController.refreshSelectPositions();
-    }
+    this.outputScroller.applyHorizontalScrollFromRatio(scrollRatio);
   }
 
   scrollTo(row, column) {
-    if (!this.lines || this.lines.length === 0) return;
-
-    let verticalChanged = false;
-    let horizontalChanged = false;
-
-    if (row !== undefined && row !== null && !isNaN(row)) {
-      row = Math.max(0, Math.min(row, this.lines.length - 1));
-      const maxStartIndex = this.getMaxStartIndex();
-
-      this.startIndex = Math.min(row, maxStartIndex);
-      this.offsetY = 0;
-      verticalChanged = true;
-    }
-
-    if (column !== undefined && column !== null && !isNaN(column)) {
-      const activeRow =
-        row !== undefined && row !== null && !isNaN(row)
-          ? row
-          : this.editor.cursor?.row || 0;
-
-      const safeRow = Math.max(0, Math.min(activeRow, this.lines.length - 1));
-      const line = this.lines[safeRow] || "";
-      column = Math.max(0, Math.min(column, line.length));
-
-      const tabWidth = CONFIG_GET("tab_width");
-      let visualPos = 0;
-      for (let i = 0; i < column; i++) {
-        visualPos += line[i] === "\t" ? tabWidth : 1;
-      }
-
-      const cachedWidth = this.outputWidth;
-      const visibleWidthPixels = cachedWidth - this.editor.baseX;
-      const visibleWidthChars = Math.floor(
-        visibleWidthPixels / this.editor.letterSize,
-      );
-
-      const maxLineLength = this.maxLineLength + this.marginChars;
-      const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
-
-      this.offsetX = Math.min(visualPos, maxScrollX);
-      horizontalChanged = true;
-    }
-
-    if (verticalChanged) {
-      this.scroller.setScrollRatio(this.getScrollRatioFromState());
-      this.applyScrollTransform();
-    }
-
-    if (horizontalChanged) {
-      this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
-      this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
-    }
-
-    if (verticalChanged || horizontalChanged) {
-      this.markDirtyAll();
-      this.refreshOutput();
-      this.refreshNumberLines();
-
-      this.scroller.refresh();
-      this.hScroller.refresh();
-      this.editor.cursor.updateCaretPosition();
-      this.editor.selectController.refreshSelectPositions();
-    }
+    this.outputScroller.scrollTo(row, column);
   }
 
   // Getters et Setters
@@ -460,8 +169,8 @@ class LineController {
   resizeWidth() {
     this.outputWidth = this.editor.output.clientWidth;
     this.markDirtyAll();
-    this.scroller.refresh();
-    this.hScroller.refresh();
+    this.outputScroller.vScroller.refresh();
+    this.outputScroller.hScroller.refresh();
   }
 
   resize() {
@@ -475,11 +184,8 @@ class LineController {
     this.lines = content.split("\n");
     this.totalLines = totalLines || this.lines.length;
 
-    if (this.scroller) {
-      this.scroller.nbItem = this.lines.length;
-    }
-    if (this.hScroller) {
-      this.hScroller.nbItem = this.maxLineLength;
+    if (this.outputScroller) {
+      this.outputScroller.updateNbItem();
     }
   }
 
@@ -494,8 +200,8 @@ class LineController {
       this.lines = this.lines.concat(newLines);
     }
     this.setTotalLines(this.lines.length);
-    if (this.hScroller) {
-      this.hScroller.nbItem = this.maxLineLength;
+    if (this.outputScroller) {
+      this.outputScroller.updateNbItem();
     }
   }
 
@@ -691,7 +397,7 @@ class LineController {
     }
 
     this.editor.output.replaceChildren(fragment);
-    this.scroller.nbItem = this.lines.length;
+    this.outputScroller.vScroller.nbItem = this.lines.length;
   }
 
   refreshNumberLines() {
@@ -734,7 +440,7 @@ class LineController {
       }
     }
 
-    this.scroller.nbItem = this.lines.length;
+    this.outputScroller.vScroller.nbItem = this.lines.length;
     this.updateLineNumberWidth();
   }
 
@@ -838,23 +544,7 @@ class LineController {
     this.refreshOutput();
     this.refreshNumberLines();
 
-    this.scroller.nbItem = this.lines.length;
-
-    this.scroller.setScrollRatio(this.getScrollRatioFromState());
-    this.applyScrollFromRatio(this.scroller.scrollRatio);
-    this.scroller.refresh();
-
-    if (this.scroller.calcIsActive()) {
-      this.scroller.setActive(true);
-    }
-
-    this.hScroller.nbItem = this.maxLineLength;
-    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
-    this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
-    this.hScroller.refresh();
-    if (this.hScroller.calcIsActive()) {
-      this.hScroller.setActive(true);
-    }
+    this.outputScroller.refresh();
 
     this.editor.cursor.updateCaretPosition();
   }
