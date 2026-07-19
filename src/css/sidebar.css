@@ -2,8 +2,8 @@
   position: absolute;
   left: 0;
   bottom: 20px;
-  height: calc(90% + 20px);
-  width: 48px;
+  height: var(--sidebar-height);
+  width: var(sidebar-selector-width);
   background-color: var(--bg-primary);
   display: flex;
   flex-direction: column;
@@ -45,7 +45,7 @@
 .sidebar-right {
   position: absolute;
   bottom: 20px;
-  height: calc(90% + 20px);
+  height: var(--sidebar-height);
   width: 250px;
   background-color: var(--bg-primary);
   display: flex;
@@ -66,15 +66,6 @@
 .sidebar-left.open,
 .sidebar-right.open {
   transform: translateX(0);
-}
-
-.main-section.sidebar-left-open .file-manager {
-  left: 298px;
-}
-
-.main-section.sidebar-left-open .editor {
-  left: 298px;
-  width: calc(100% - 298px);
 }
 
 .sidebar-menu {
@@ -201,4 +192,19 @@
   text-align: center;
   color: var(--text-tertiary);
   font-size: 13px;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  bottom: calc(var(--bottombar-height) + 1px);
+  width: 4px;
+  height: var(--sidebar-height);
+  background-color: transparent;
+  cursor: col-resize;
+  z-index: 25;
+  transition: background-color 0.2s;
+}
+
+.sidebar-resizer:hover {
+  background-color: var(--border-accent);
 }

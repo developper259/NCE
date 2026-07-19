@@ -3,7 +3,7 @@
   margin: 0;
   position: absolute;
   bottom: 0;
-  height: 20px;
+  height: var(--bottombar-height);
   width: 100%;
   z-index: 5;
   user-select: none;

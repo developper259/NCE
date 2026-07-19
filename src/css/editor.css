@@ -1,10 +1,10 @@
 .editor {
   position: absolute;
-  bottom: 20px;
-  left: 48px;
+  bottom: var(--bottombar-height);
+  left: var(--sidebar-selector-width);
   right: 0;
   width: auto;
-  height: calc(90% - 18px);
+  height: var(--output-height);
   overflow: hidden;
   background-color: var(--bg-secondary);
 }

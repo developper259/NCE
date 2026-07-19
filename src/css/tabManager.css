@@ -1,9 +1,9 @@
 .file-manager {
 	position: absolute;
-	left: 48px;
+	left: var(--sidebar-selector-width);
 	right: 0;
 	width: auto;
-	height: 40px;
+	height: var(--file-manager-height);
 	bottom: calc(2px + 90%);
 	box-sizing: border-box;
 }

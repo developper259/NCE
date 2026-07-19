@@ -3,6 +3,7 @@ class Editor {
     this.mainSection = getElement(".main-section");
     this.output = getElement(".editor-output");
     this.editorOBJ = getElement(".editor");
+    this.fileManagerOBJ = getElement(".file-manager");
 
     this.selected = false;
     this.isActive = false;
@@ -20,7 +21,7 @@ class Editor {
 
     this.tabManager = new tabManager(this);
     this.scrollerManager = new ScrollerManager(this);
-    this.sidebarManager = new SidebarManager();
+    this.sidebarManager = new SidebarManager(this);
     this.threadManager = new ThreadManager();
     this.fileLoader = new FileLoader(this);
 
@@ -41,6 +42,7 @@ class Editor {
     this.Cconfig_space = new Config_space(this);
     this.savePopupManager = new SavePopupManager(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
+    this.sidebarResizer = new SidebarResizer(this);
 
     this.writerController.insertMode = true;
 

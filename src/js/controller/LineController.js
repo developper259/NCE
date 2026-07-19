@@ -95,8 +95,7 @@ class LineController {
     if (!this.lines || this.lines.length === 0) return 0;
 
     const maxLineLength = this.maxLineLength + this.marginChars;
-    const visibleWidthPixels =
-      this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    const visibleWidthPixels = this.outputWidth - this.editor.baseX;
     const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
     if (maxScrollX === 0) return 0;
@@ -246,8 +245,7 @@ class LineController {
       if (!this.lines || this.lines.length === 0) return 0;
 
       const maxLineLength = this.maxLineLength + this.marginChars;
-      const visibleWidthPixels =
-        this.editor.editorOBJ.clientWidth - this.editor.baseX;
+      const visibleWidthPixels = this.outputWidth - this.editor.baseX;
       const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
 
       if (maxLineLength <= visibleWidthChars) return 100;
@@ -258,8 +256,7 @@ class LineController {
       if (!this.lines || this.lines.length === 0) return false;
 
       const maxLineLength = this.maxLineLength + this.marginChars;
-      const visibleWidthPixels =
-        this.editor.editorOBJ.clientWidth - this.editor.baseX;
+      const visibleWidthPixels = this.outputWidth - this.editor.baseX;
       const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
 
       return maxLineLength > visibleWidthChars;
@@ -285,8 +282,7 @@ class LineController {
     }
 
     const maxLineLength = this.maxLineLength + this.marginChars;
-    const visibleWidthPixels =
-      this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    const visibleWidthPixels = this.outputWidth - this.editor.baseX;
     const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
 
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
@@ -337,8 +333,7 @@ class LineController {
         visualPos += line[i] === "\t" ? tabWidth : 1;
       }
 
-      const cachedWidth =
-        this.editor.cachedClientWidth || this.editor.editorOBJ.clientWidth;
+      const cachedWidth = this.outputWidth;
       const visibleWidthPixels = cachedWidth - this.editor.baseX;
       const visibleWidthChars = Math.floor(
         visibleWidthPixels / this.editor.letterSize,
@@ -462,6 +457,13 @@ class LineController {
     this.editor.tabManager.activeFile.offsetX = value;
   }
 
+  resizeWidth() {
+    this.outputWidth = this.editor.output.clientWidth;
+    this.markDirtyAll();
+    this.scroller.refresh();
+    this.hScroller.refresh();
+  }
+
   resize() {
     this.outputWidth = this.editor.output.clientWidth;
     this.outputHeight = this.editor.output.clientHeight;
@@ -552,11 +554,13 @@ class LineController {
   }
 
   markDirtyAll() {
+    if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
     this.markDirtyLineFrom(0);
   }
 
   markDirtyLineFrom(dataIndex) {
+    if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
     const start = Math.max(dataIndex, this.startIndex);
     const end = Math.min(
@@ -569,6 +573,7 @@ class LineController {
   }
 
   markDirtyLine(index) {
+    if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
     this.dirtyLines.add(index);
   }
