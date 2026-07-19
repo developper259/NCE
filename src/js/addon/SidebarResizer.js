@@ -109,7 +109,7 @@ class SidebarResizer {
       }
       if (editor) {
         editor.style.left = totalWidth + "px";
-        editor.style.width = "calc(100% - " + totalWidth + "px)";
+        editor.style.width = "";
       }
     }
     this.editor.sidebarManager.width = width;

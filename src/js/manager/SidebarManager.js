@@ -128,7 +128,7 @@ class SidebarManager {
 
       this.editor.fileManagerOBJ.style.left = (this.width + this.selectorWidth) + "px";
       this.editor.editorOBJ.style.left = (this.width + this.selectorWidth) + "px";
-      this.editor.editorOBJ.style.width = "calc(100% - " + (this.width + this.selectorWidth) + "px)";
+      this.editor.editorOBJ.style.width = "";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.add("open");
     }
@@ -137,7 +137,9 @@ class SidebarManager {
       this.editor.sidebarResizer.updateResizerVisibility();
     }
 
-    this.editor.lineController.resizeWidth();
+    requestAnimationFrame(() => {
+      this.editor.lineController.resizeWidth();
+    });
   }
 
   closeSidebar(position) {
@@ -149,7 +151,7 @@ class SidebarManager {
 
       this.editor.fileManagerOBJ.style.left = this.selectorWidth + "px";
       this.editor.editorOBJ.style.left = this.selectorWidth + "px";
-      this.editor.editorOBJ.style.width = "calc(100% - " + this.selectorWidth + "px)";
+      this.editor.editorOBJ.style.width = "";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.remove("open");
     }
@@ -157,8 +159,10 @@ class SidebarManager {
     if (this.editor.sidebarResizer) {
       this.editor.sidebarResizer.updateResizerVisibility();
     }
-    
-    this.editor.lineController.resizeWidth();
+
+    requestAnimationFrame(() => {
+      this.editor.lineController.resizeWidth();
+    });
   }
 
   renderMenuContent(menu) {

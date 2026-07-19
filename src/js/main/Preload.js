@@ -24,4 +24,14 @@ contextBridge.exposeInMainWorld("api", {
       startLine,
       lineCount,
     ),
+  saveEditorState: (stateString) =>
+    ipcRenderer.invoke("FileManager:saveState", stateString),
+
+  loadEditorState: () => ipcRenderer.invoke("FileManager:loadState"),
+
+  onSaveRequest: (callback) =>
+    ipcRenderer.on("Request:saveState", () => callback()),
+
+  onLoadState: (callback) =>
+    ipcRenderer.on("Request:loadState", (_event, state) => callback(state)),
 });

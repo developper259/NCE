@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 
 import { FileManager } from './FileManager';
@@ -8,13 +8,16 @@ export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
   fileManager: FileManager | undefined;
   name: string;
+  forceQuit: boolean;
 
   constructor(name: string ) {
     this.window = null;
     this.name = name;
+    this.forceQuit = false;
   }
 
   create() {
+    this.forceQuit = false;
     this.window = new BrowserWindow({
       width: 800,
       height: 600,
@@ -37,6 +40,19 @@ export class Window {
 
     this.window.loadFile(path.join(__dirname, '../../src/html/index.html'));      // build
 
+    this.window.webContents.on("did-finish-load", async () => {
+      const state = await this.fileManager?.loadState();
+      if (state) {
+        this.window?.webContents.send("Request:loadState", state);
+      }
+    });
+
+    this.window.on("close", (event) => {
+      if (this.forceQuit) return;
+      event.preventDefault();
+      this.window?.webContents.send("Request:saveState");
+    });
+
     this.window.on("closed", () => {
       this.window = null;
     });
@@ -56,7 +72,7 @@ export class Window {
     if (!this.fileManager) console.log('FileManager is not defined');
 
     ipcMain.handle('App:quit', async () => {
-      return app.quit();
+      this.window?.close();
     });
 
     ipcMain.handle('FileManager:selectFile', async () => {
@@ -98,6 +114,17 @@ export class Window {
 
     ipcMain.handle('FileManager:getFileChunk', async (event, filePath: string, startLine: number, lineCount: number) => {
       return await this.fileManager?.getFileChunk(filePath, startLine, lineCount);
+    });
+
+    ipcMain.handle('FileManager:saveState', async (event, stateString: string) => {
+      const saved = await this.fileManager?.saveState(stateString);
+      this.forceQuit = true;
+      this.window?.close();
+      return saved;
+    });
+
+    ipcMain.handle('FileManager:loadState', async () => {
+      return await this.fileManager?.loadState() ?? null;
     });
 
   }

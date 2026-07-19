@@ -24,6 +24,7 @@ class Editor {
     this.sidebarManager = new SidebarManager(this);
     this.threadManager = new ThreadManager();
     this.fileLoader = new FileLoader(this);
+    this.statesManager = new StatesManager(this);
 
     this.fileExplorer = new FileExplorer(this);
     this.sidebarManager.registerMenu(this.fileExplorer);
@@ -47,6 +48,9 @@ class Editor {
     this.writerController.insertMode = true;
 
     this.reset();
+
+    this.initQuitEvent();
+    this.initLoadState();
   }
 
   refreshAll() {
@@ -136,6 +140,30 @@ class Editor {
 
     this.output.style.left = `${this.baseX}px`;
     this.output.style.width = `calc(100% - ${this.baseX}px)`;
+  }
+
+  initQuitEvent() {
+    this.api.onSaveRequest(() => {
+      try {
+        const currentState = this.statesManager.getState();
+        this.api.saveEditorState(JSON.stringify(currentState));
+      } catch (error) {
+        console.error("Failed to serialize editor state:", error);
+        this.api.saveEditorState("{}");
+      }
+    });
+  }
+
+  initLoadState() {
+    let loaded = false;
+    const apply = (state) => {
+      if (!state || loaded) return;
+      loaded = true;
+      this.statesManager.loadStates(state);
+    };
+
+    this.api.onLoadState(apply);
+    this.api.loadEditorState().then(apply);
   }
 }
 

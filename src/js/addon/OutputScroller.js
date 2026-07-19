@@ -66,9 +66,8 @@ class OutputScroller {
 
       const maxLineLength =
         this.lineController.maxLineLength + this.marginChars;
-      const visibleWidthPixels =
-        this.lineController.outputWidth - this.editor.baseX;
-      const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+      const visibleWidthChars =
+        this.lineController.outputWidth / this.editor.letterSize;
 
       if (maxLineLength <= visibleWidthChars) return 100;
       return (visibleWidthChars / maxLineLength) * 100;
@@ -80,9 +79,8 @@ class OutputScroller {
 
       const maxLineLength =
         this.lineController.maxLineLength + this.marginChars;
-      const visibleWidthPixels =
-        this.lineController.outputWidth - this.editor.baseX;
-      const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+      const visibleWidthChars =
+        this.lineController.outputWidth / this.editor.letterSize;
 
       return maxLineLength > visibleWidthChars;
     };
@@ -97,9 +95,8 @@ class OutputScroller {
       return 0;
 
     const maxLineLength = this.lineController.maxLineLength + this.marginChars;
-    const visibleWidthPixels =
-      this.lineController.outputWidth - this.editor.baseX;
-    const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+    const visibleWidthChars =
+      this.lineController.outputWidth / this.editor.letterSize;
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
     if (maxScrollX === 0) return 0;
 
@@ -122,9 +119,8 @@ class OutputScroller {
     }
 
     const maxLineLength = this.lineController.maxLineLength + this.marginChars;
-    const visibleWidthPixels =
-      this.lineController.outputWidth - this.editor.baseX;
-    const visibleWidthChars = visibleWidthPixels / this.editor.letterSize;
+    const visibleWidthChars =
+      this.lineController.outputWidth / this.editor.letterSize;
 
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
 
@@ -320,7 +316,10 @@ class OutputScroller {
   }
 
   updateNbItem() {
-    this.vScroller.nbItem = this.lineController.lines.length;
+    if (!this.lineController.lines || this.lineController.lines.length === 0)
+      return;
+
+    this.vScroller.nbItem = this.lineController.totalLines || this.lineController.lines.length;
     this.hScroller.nbItem = this.lineController.maxLineLength;
   }
 
@@ -359,10 +358,8 @@ class OutputScroller {
         visualPos += line[i] === "\t" ? tabWidth : 1;
       }
 
-      const cachedWidth = this.lineController.outputWidth;
-      const visibleWidthPixels = cachedWidth - this.editor.baseX;
       const visibleWidthChars = Math.floor(
-        visibleWidthPixels / this.editor.letterSize,
+        this.lineController.outputWidth / this.editor.letterSize,
       );
 
       const maxLineLength =

@@ -3,7 +3,7 @@
   left: 0;
   bottom: 20px;
   height: var(--sidebar-height);
-  width: var(sidebar-selector-width);
+  width: var(--sidebar-selector-width);
   background-color: var(--bg-primary);
   display: flex;
   flex-direction: column;

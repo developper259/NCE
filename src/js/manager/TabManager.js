@@ -71,9 +71,6 @@ class tabManager {
       this.setFocusFile(lastAddedFile);
 
       this.activeFile.setIsSaved(true);
-      if (this.activeFile.hasPath()) {
-        await this.activeFile.loadContent();
-      }
       this.editor.lineController.restoreScroll();
       this.editor.refreshAll();
     }
@@ -122,11 +119,15 @@ class tabManager {
     }
   }
 
-  setFocusFile(file) {
+  async setFocusFile(file) {
     if (!file) return;
     this.activeFile = file;
 
     this.editor.fileExplorer.setActiveFile(file.path);
+
+    if (!file.isLoaded) {
+      await file.loadContent();
+    }
 
     this.editor.cursor.setCursorPosition(file.row, file.column);
 
@@ -141,6 +142,7 @@ class tabManager {
 
   createEmptyFile() {
     let node = new FileNode(this.editor, this.getNextID(), this.emptyName, "");
+    node.isLoaded = true;
     this.openFile(node);
 
     return node;

@@ -25,6 +25,7 @@ class FileNode {
     this.startIndex = 0;
     this.offsetY = 0;
     this.offsetX = 0;
+    this.isLoaded = false;
 
     // Select Controller
     this.isMouseDown = false;
@@ -90,6 +91,7 @@ class FileNode {
   async loadContent() {
     if (!this.path) {
       this.editor.lineController.loadContent(this.lines.join("\n"));
+      this.isLoaded = true;
       return;
     }
 
@@ -104,6 +106,8 @@ class FileNode {
       initialLines.length,
       totalLines,
     );
+
+    this.isLoaded = true;
   }
 
   async save() {

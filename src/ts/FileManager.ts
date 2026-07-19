@@ -1,4 +1,4 @@
-import { dialog, BrowserWindow } from 'electron';
+import { app, dialog, BrowserWindow } from 'electron';
 const fs = require('fs').promises;
 const path = require('path');
 
@@ -198,6 +198,37 @@ export class FileManager {
             this.fileCache.delete(filePath);
         } else {
             this.fileCache.clear();
+        }
+    }
+
+    async saveState(stateString: string): Promise<boolean> {
+        try {
+            const filePath = path.join(app.getPath('userData'), 'state.json');
+            console.log(filePath);
+            await fs.writeFile(filePath, stateString, 'utf-8');
+            return true;
+        } catch (error) {
+            console.error('Error saving editor state:', error);
+            return false;
+        }
+    }
+
+    async loadState(): Promise<object | null> {
+        try {
+            const filePath = path.join(app.getPath('userData'), 'state.json');
+            const content = await fs.readFile(filePath, 'utf-8');
+            const trimmed = content.trim();
+            if (!trimmed || trimmed === '{}') return null;
+
+            const state = JSON.parse(trimmed);
+            if (!state || typeof state !== 'object' || Object.keys(state).length === 0) {
+                return null;
+            }
+            return state;
+        } catch (error: any) {
+            if (error?.code === 'ENOENT') return null;
+            console.error('Error loading editor state:', error);
+            return null;
         }
     }
 }

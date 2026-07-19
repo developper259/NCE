@@ -4,8 +4,8 @@ class LineController {
 
     this.lineN = document.querySelector(".line-numbers");
 
-    this.outputWidth = this.editor.output.clientWidth;
-    this.outputHeight = this.editor.output.clientHeight;
+    this.outputWidth = 0;
+    this.outputHeight = 0;
 
     this.dirtyLines = new Set();
     this.marginChars = 10;
@@ -13,6 +13,10 @@ class LineController {
 
     this.outputScroller = new OutputScroller(editor);
     this.outputScroller.setLineController(this);
+
+    this.outputWidth = this.measureOutputWidth();
+    this.outputHeight =
+      this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
   }
 
   getScrollOffsetY() {
@@ -119,7 +123,7 @@ class LineController {
   }
 
   get maxCharacters() {
-    return parseInt(this.outputWidth / this.editor.letterSize) - 1; // - marge
+    return Math.max(0, parseInt(this.outputWidth / this.editor.letterSize) - 1);
   }
 
   get maxLines() {
@@ -166,16 +170,25 @@ class LineController {
     this.editor.tabManager.activeFile.offsetX = value;
   }
 
+  measureOutputWidth() {
+    const fromEditor =
+      this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    if (fromEditor > 0) return fromEditor;
+    return Math.max(0, this.editor.output.clientWidth);
+  }
+
   resizeWidth() {
-    this.outputWidth = this.editor.output.clientWidth;
+    const width = this.measureOutputWidth();
+    if (width > 0) this.outputWidth = width;
     this.markDirtyAll();
-    this.outputScroller.vScroller.refresh();
-    this.outputScroller.hScroller.refresh();
+    this.refresh();
   }
 
   resize() {
-    this.outputWidth = this.editor.output.clientWidth;
-    this.outputHeight = this.editor.output.clientHeight;
+    const width = this.measureOutputWidth();
+    if (width > 0) this.outputWidth = width;
+    this.outputHeight =
+      this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
     this.markDirtyAll();
     this.refresh();
   }
@@ -581,10 +594,16 @@ class LineController {
   }
 
   show() {
-    this.initLineOutput();
-    this.initNumberLines();
     this.lineN.style.display = "block";
     this.editor.output.style.display = "block";
+
+    const width = this.measureOutputWidth();
+    if (width > 0) this.outputWidth = width;
+    this.outputHeight =
+      this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
+
+    this.initLineOutput();
+    this.initNumberLines();
     const cursor = getElement(".editor-caret");
     cursor.style.display = "block";
   }
