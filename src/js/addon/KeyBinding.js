@@ -61,7 +61,8 @@ class KeyBinding {
   control_save(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (s) {
-      this.editor.tabManager.activeFile.saveAs();
+      this.editor.tabManager.activeFile.selectFileToSave();
+      this.editor.tabManager.activeFile.save();
     } else {
       this.editor.tabManager.activeFile.save();
     }
@@ -250,7 +251,7 @@ class KeyBinding {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     if (m || a) return;
-    
+
     this.editor.tabManager.activeFile.historyX = undefined;
     const pos = this.editor.cursor.getCursorReelPosition();
     if (!pos) return;

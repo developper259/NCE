@@ -144,13 +144,7 @@ class Editor {
 
   initQuitEvent() {
     this.api.onSaveRequest(() => {
-      try {
-        const currentState = this.statesManager.getState();
-        this.api.saveEditorState(JSON.stringify(currentState));
-      } catch (error) {
-        console.error("Failed to serialize editor state:", error);
-        this.api.saveEditorState("{}");
-      }
+      this.statesManager.save();
     });
   }
 

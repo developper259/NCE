@@ -18,6 +18,11 @@ class Events {
   static CURSOR_ENABLED = "cursorEnabled";
   static ON_SELECT = "onSelect";
   static ON_CHANGE = "onChange";
+  static ON_SAVE = "onSave";
+  static ON_OPEN_FILE = "onOpen";
+  static ON_CLOSE_FILE = "onClose";
+  static ON_OPEN_PROJECT = "onOpenProject";
+  static ON_CLOSE_PROJECT = "onCloseProject";
 
   constructor(editor) {
     this.editor = editor;
@@ -46,6 +51,21 @@ class Events {
       case Events.ON_CHANGE:
         this.onChange(arg);
         break;
+      case Events.ON_SAVE:
+        this.onSave(arg);
+        break;
+      case Events.ON_OPEN_FILE:
+        this.onOpenFile(arg);
+        break;
+      case Events.ON_CLOSE_FILE:
+        this.onCloseFile(arg);
+        break;
+      case Events.ON_OPEN_PROJECT:
+        this.onOpenProject(arg);
+        break;
+      case Events.ON_CLOSE_PROJECT:
+        this.onCloseProject(arg);
+        break;
       default:
         console.error("Event " + e + " not found !");
         return;
@@ -72,6 +92,21 @@ class Events {
   onEvent(arg) {
     // ------- BottomBar.js ------
     this.editor.bottomBar.refresh();
+  }
+  onSave(arg) {
+    this.editor.statesManager.save();
+  }
+  onOpenFile(arg) {
+    this.editor.statesManager.save();
+  }
+  onCloseFile(arg) {
+    this.editor.statesManager.save();
+  }
+  onOpenProject(arg) {
+    this.editor.statesManager.save();
+  }
+  onCloseProject(arg) {
+    this.editor.statesManager.save();
   }
 
   // DOM Event

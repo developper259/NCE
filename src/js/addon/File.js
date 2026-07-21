@@ -112,24 +112,23 @@ class FileNode {
 
   async save() {
     if (!this.path) {
-      await this.saveAs();
-      return;
-    } else {
-      await this.editor.api.saveFile(
-        this.path,
-        this.editor.lineController.getContent(),
-      );
+      await this.selectFileToSave();
     }
+
+    await this.editor.api.saveFile(
+      this.path,
+      this.editor.lineController.getContent(),
+    );
+
     this.setIsSaved(true);
     this.editor.tabManager.refresh();
   }
 
-  async saveAs() {
+  async selectFileToSave() {
     const file = await this.editor.tabManager.selectNewFile();
     if (!file || file.hasPath()) return;
     this.path = file.path;
     this.name = file.name;
-    this.save();
   }
 
   setIsSaved(value) {

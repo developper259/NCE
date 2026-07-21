@@ -3,6 +3,16 @@ class StatesManager {
     this.editor = editor;
   }
 
+  save() {
+    try {
+      const currentState = this.getState();
+      this.editor.api.saveEditorState(JSON.stringify(currentState));
+    } catch (error) {
+      console.error("Failed to serialize editor state:", error);
+      this.editor.api.saveEditorState("{}");
+    }
+  }
+
   getState() {
     return {
       tabManager: this.getTabManagerState(),

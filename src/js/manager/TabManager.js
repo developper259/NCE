@@ -74,6 +74,11 @@ class tabManager {
       this.editor.lineController.restoreScroll();
       this.editor.refreshAll();
     }
+
+    this.editor.events.callEvent(Events.ON_OPEN_FILE, {
+      files: files,
+      activeFile: lastAddedFile,
+    });
   }
 
   closeFiles() {
@@ -110,6 +115,10 @@ class tabManager {
     else {
       this.closeFiles();
     }
+    this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+      file: file,
+      activeFile: this.activeFile,
+    });
     this.editor.refreshAll();
   }
 
