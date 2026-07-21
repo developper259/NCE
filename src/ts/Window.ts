@@ -1,12 +1,14 @@
 import { BrowserWindow, ipcMain } from "electron";
 import path from "path";
 
-import { FileManager } from "./FileManager";
-import { AppMenu } from "./Menu";
+import { FileManager } from "./addon/FileManager";
+import { Watcher } from "./addon/Watcher";
+import { AppMenu } from "./addon/Menu";
 
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
   fileManager: FileManager | undefined;
+  watcher: Watcher | undefined;
   name: string;
   forceQuit: boolean;
 
@@ -35,6 +37,7 @@ export class Window {
     });
 
     this.fileManager = new FileManager(this.window);
+    this.watcher = new Watcher(this.window);
 
     const menu = new AppMenu(this.window, this);
 
@@ -145,6 +148,14 @@ export class Window {
 
     ipcMain.handle("FileManager:loadState", async () => {
       return (await this.fileManager?.loadState()) ?? null;
+    });
+
+    ipcMain.handle("Watcher:startWatching", async (event, projectPath: string) => {
+      this.watcher?.startWatching(projectPath);
+    });
+
+    ipcMain.handle("Watcher:stopWatching", async () => {
+      this.watcher?.stopWatching();
     });
   }
 }

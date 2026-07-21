@@ -177,6 +177,13 @@ class SidebarManager {
     }
   }
 
+  refreshAll() {
+    this.renderTabSelector();
+
+    if (this.activeMenu)
+      this.renderMenuContent(this.activeMenu);
+  }
+
   handleKeybinding(keybinding) {
     for (const menuConfig of USERCONFIG_SIDEBAR_MENUS) {
       if (menuConfig.keybinding === keybinding) {

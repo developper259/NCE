@@ -55,12 +55,14 @@ class Editor {
 
   refreshAll() {
     this.emptyMenu.refresh();
-    this.bottomBar.refresh();
     this.tabManager.refresh();
+    this.cursor.updateCaretPosition();
     this.lineController.initLineOutput();
     this.lineController.initNumberLines();
     this.lineController.restoreScroll();
     this.scrollerManager.refreshAll();
+    this.bottomBar.refresh();
+    this.sidebarManager.refreshAll();
   }
 
   hideAll() {

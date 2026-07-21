@@ -1,5 +1,5 @@
 import { Menu, MenuItem, BrowserWindow } from 'electron';
-import { Window } from './Window';
+import { Window } from '../Window';
 
 export class AppMenu {
   menu: InstanceType<typeof Menu>;

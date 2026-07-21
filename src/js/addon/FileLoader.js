@@ -16,6 +16,9 @@ class FileLoader {
 
     const initResponse = await this.editor.api.initializeFile(filePath);
     if (!initResponse || !initResponse.success) {
+      if (initResponse && initResponse.errorCode === "ENOENT") {
+        throw new Error("ENOENT");
+      }
       throw new Error("Failed to initialize file");
     }
 
@@ -25,7 +28,11 @@ class FileLoader {
       this.isFullyLoaded = true;
     }
 
-    const chunkResponse = await this.editor.api.getFileChunk(filePath, 0, this.initialChunkSize);
+    const chunkResponse = await this.editor.api.getFileChunk(
+      filePath,
+      0,
+      this.initialChunkSize,
+    );
     if (!chunkResponse || !chunkResponse.success) {
       throw new Error("Failed to load initial chunk");
     }
@@ -38,7 +45,7 @@ class FileLoader {
 
   loadRemainingLines(filePath, currentLineCount, totalLines) {
     if (this.isFullyLoaded || currentLineCount >= totalLines) {
-      this.isFullyLoaded = true; 
+      this.isFullyLoaded = true;
       return;
     }
 
@@ -56,18 +63,35 @@ class FileLoader {
         return;
       }
 
-      const endLine = Math.min(startLine + this.backgroundChunkSize, totalLines);
+      const endLine = Math.min(
+        startLine + this.backgroundChunkSize,
+        totalLines,
+      );
 
       const loadWithIdleCallback = () => {
         if (this.isFullyLoaded || !this.isLoading) return;
         if ("requestIdleCallback" in window) {
           requestIdleCallback(
-            () => this.performChunkLoad(filePath, startLine, endLine, totalLines, loadChunk),
+            () =>
+              this.performChunkLoad(
+                filePath,
+                startLine,
+                endLine,
+                totalLines,
+                loadChunk,
+              ),
             { timeout: 100 },
           );
         } else {
           this.timer = setTimeout(
-            () => this.performChunkLoad(filePath, startLine, endLine, totalLines, loadChunk),
+            () =>
+              this.performChunkLoad(
+                filePath,
+                startLine,
+                endLine,
+                totalLines,
+                loadChunk,
+              ),
             1,
           );
         }
@@ -79,19 +103,34 @@ class FileLoader {
     loadChunk(currentLineCount);
   }
 
-  async performChunkLoad(filePath, startLine, endLine, totalLines, nextCallback) {
+  async performChunkLoad(
+    filePath,
+    startLine,
+    endLine,
+    totalLines,
+    nextCallback,
+  ) {
     if (this.currentFilePath !== filePath) {
       this.isLoading = false;
       return;
     }
 
     try {
-      const response = await this.editor.api.getFileChunk(filePath, startLine, endLine - startLine);
+      const response = await this.editor.api.getFileChunk(
+        filePath,
+        startLine,
+        endLine - startLine,
+      );
 
-      if (response && response.success && response.lines && response.lines.length > 0) {
+      if (
+        response &&
+        response.success &&
+        response.lines &&
+        response.lines.length > 0
+      ) {
         this.editor.lineController.appendLines(response.lines);
         this.editor.scrollerManager.refreshAll();
-        
+
         nextCallback(endLine);
       } else {
         this.isLoading = false;

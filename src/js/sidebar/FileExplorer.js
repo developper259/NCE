@@ -9,6 +9,51 @@ class FileExplorer extends Sidebar {
     this.projectName = "";
 
     this.projectExpanded = true;
+
+    this.setupFileSystemWatcher();
+  }
+
+  setupFileSystemWatcher() {
+    window.api.onFileSystemChange((data) => {
+      this.handleFileSystemChange(data);
+    });
+  }
+
+  handleFileSystemChange(data) {
+    const { event, filePath, dirPath } = data;
+
+    if (!this.rootPath) return;
+
+    if (dirPath === this.rootPath) {
+      this.loadFiles().then(() => {
+        this.refresh();
+      });
+      return;
+    }
+
+    this.refreshFolderIfLoaded(dirPath);
+  }
+
+  refreshFolderIfLoaded(dirPath) {
+    const refreshRecursive = (files) => {
+      for (const file of files) {
+        if (file.type === "folder" && file.path === dirPath) {
+          if (file.expanded) {
+            this.loadFolderContent(dirPath).then((newChildren) => {
+              file.children = newChildren;
+              this.refresh();
+            });
+            return true;
+          }
+        }
+        if (file.children && refreshRecursive(file.children)) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    refreshRecursive(this.files);
   }
 
   async loadFiles() {
@@ -39,6 +84,8 @@ class FileExplorer extends Sidebar {
     this.rootPath = projectPath;
     this.projectName = segments.pop() || "Project";
 
+    await window.api.startWatching(projectPath);
+
     await this.loadFiles();
     this.refresh();
 
@@ -65,25 +112,27 @@ class FileExplorer extends Sidebar {
   }
 
   render() {
+    if (this.activeFilePath) {
+      if (!this.editor.tabManager.getFileByPath(this.activeFilePath)) {
+        this.activeFilePath = null;
+      }
+    }
+
     const container = document.createElement("div");
     container.className = "file-explorer-container";
 
-    // 1. Titre global
     const mainTitle = document.createElement("div");
     mainTitle.className = "sidebar-main-title";
     mainTitle.textContent = "EXPLORER";
     container.appendChild(mainTitle);
 
-    // 2. Header du projet (toujours visible pour pouvoir le rouvrir)
     const projectHeader = document.createElement("div");
     projectHeader.className = "sidebar-project-header";
 
-    // Flèche de collapse (toujours présente pour cliquer)
     const arrow = document.createElement("i");
     arrow.className = `folder-arrow fi fi-rr-angle-small-right ${this.projectExpanded ? "expanded" : ""}`;
     projectHeader.appendChild(arrow);
 
-    // Texte dynamique : nom du projet ou "NO FOLDER OPENED"
     const titleSpan = document.createElement("span");
     titleSpan.textContent = this.projectName
       ? this.projectName.toUpperCase()
@@ -97,13 +146,11 @@ class FileExplorer extends Sidebar {
 
     container.appendChild(projectHeader);
 
-    // 3. Conteneur du contenu (seulement si projectExpanded est vrai)
     if (this.projectExpanded) {
       const treeContainer = document.createElement("div");
       treeContainer.className = "file-tree";
 
       if (this.files.length === 0) {
-        // --- ÉTAT VIDE ---
         const emptyState = document.createElement("div");
         emptyState.className = "empty-state-message";
         emptyState.textContent = "You have not yet opened a folder.";
@@ -116,7 +163,6 @@ class FileExplorer extends Sidebar {
         emptyState.appendChild(openBtn);
         treeContainer.appendChild(emptyState);
       } else {
-        // --- ÉTAT REMPLI ---
         this.renderFiles(this.files, 0, treeContainer);
       }
       container.appendChild(treeContainer);

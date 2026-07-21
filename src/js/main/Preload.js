@@ -29,9 +29,17 @@ contextBridge.exposeInMainWorld("api", {
 
   loadEditorState: () => ipcRenderer.invoke("FileManager:loadState"),
 
+  startWatching: (projectPath) =>
+    ipcRenderer.invoke("Watcher:startWatching", projectPath),
+
+  stopWatching: () => ipcRenderer.invoke("Watcher:stopWatching"),
+
   onSaveRequest: (callback) =>
     ipcRenderer.on("Request:saveState", () => callback()),
 
   onLoadState: (callback) =>
     ipcRenderer.on("Request:loadState", (_event, state) => callback(state)),
+
+  onFileSystemChange: (callback) =>
+    ipcRenderer.on("file-system-change", (_event, data) => callback(data)),
 });

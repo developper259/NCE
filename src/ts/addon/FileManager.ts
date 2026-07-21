@@ -156,7 +156,7 @@ export class FileManager {
 
   async initializeFile(
     filePath: string,
-  ): Promise<{ success: boolean; totalLines: number }> {
+  ): Promise<{ success: boolean; totalLines: number; errorCode?: string }> {
     try {
       const content = await fs.readFile(filePath, "utf-8");
       const lines = content.split("\n");
@@ -166,11 +166,12 @@ export class FileManager {
         success: true,
         totalLines: lines.length,
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error initializing file:", error);
       return {
         success: false,
         totalLines: 0,
+        errorCode: error?.code || "UNKNOWN",
       };
     }
   }

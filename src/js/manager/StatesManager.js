@@ -211,9 +211,11 @@ class StatesManager {
       fileExplorer.files = this.deserializeFiles(explorerState.files);
     }
 
-    if (typeof fileExplorer.refresh === "function") {
-      fileExplorer.refresh();
+    if (fileExplorer.rootPath) {
+      window.api.startWatching(fileExplorer.rootPath);
     }
+
+    fileExplorer.refresh();
   }
 
   deserializeFiles(filesData) {

@@ -95,27 +95,41 @@ class FileNode {
       return;
     }
 
-    const { initialLines, totalLines } = await this.editor.fileLoader.loadFile(
-      this.path,
-    );
+    try {
+      const { initialLines, totalLines } =
+        await this.editor.fileLoader.loadFile(this.path);
 
-    this.editor.lineController.loadContent(initialLines.join("\n"), totalLines);
+      this.editor.lineController.loadContent(
+        initialLines.join("\n"),
+        totalLines,
+      );
 
-    this.editor.fileLoader.loadRemainingLines(
-      this.path,
-      initialLines.length,
-      totalLines,
-    );
+      this.editor.fileLoader.loadRemainingLines(
+        this.path,
+        initialLines.length,
+        totalLines,
+      );
 
-    this.isLoaded = true;
+      this.isLoaded = true;
+    } catch (error) {
+      if (error.message === "ENOENT") {
+        console.log(`File not found: ${this.path}, marking as unsaved`);
+        this.setIsSaved(false);
+        this.editor.lineController.loadContent(this.lines.join("\n"));
+        this.isLoaded = true;
+      } else {
+        throw error;
+      }
+    }
   }
 
   async save() {
     if (!this.path) {
-      await this.selectFileToSave();
+      let r = await this.selectFileToSave();
+      if (!r) return;
     }
 
-    await this.editor.api.saveFile(
+    let r = await this.editor.api.saveFile(
       this.path,
       this.editor.lineController.getContent(),
     );
@@ -126,9 +140,10 @@ class FileNode {
 
   async selectFileToSave() {
     const file = await this.editor.tabManager.selectNewFile();
-    if (!file || file.hasPath()) return;
+    if (!file) return false;
     this.path = file.path;
     this.name = file.name;
+    return true;
   }
 
   setIsSaved(value) {

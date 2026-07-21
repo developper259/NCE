@@ -84,6 +84,7 @@ class tabManager {
   closeFiles() {
     this.files = [];
     this.activeFile = undefined;
+    this.editor.fileExplorer.activeFilePath = null;
     this.editor.refreshAll();
   }
 
@@ -104,14 +105,14 @@ class tabManager {
     }
 
     if (id == this.activeFile.id) {
-      if (this.files.length != 1) {
+      if (this.files.length > 1) {
         const index = this.getFileIndexByID(id);
         if (index == 0) this.setFocusFile(this.files[index + 1]);
         else this.setFocusFile(this.files[index - 1]);
       }
     }
 
-    if (this.files.length != 1) this.removeFileByID(id);
+    if (this.files.length > 1) this.removeFileByID(id);
     else {
       this.closeFiles();
     }

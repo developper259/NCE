@@ -152,7 +152,12 @@ class Cursor {
   }
 
   updateCaretPosition() {
-    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeFile) {
+      if (this.cD) {
+        this.cD.style.display = "none";
+      }
+      return;
+    }
 
     if (!this.isRowVisible(this.row)) {
       this.cD.style.display = "none";
