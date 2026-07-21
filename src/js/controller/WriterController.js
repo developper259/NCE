@@ -47,9 +47,9 @@ class WriterController {
 
     this.editor.tabManager.activeFile.insertMode = mode;
     if (mode) {
-      this.editor.cursor.cD.classList.add("insert-mode");
-    } else if (this.editor.cursor.cD.classList.contains("insert-mode")) {
-      this.editor.cursor.cD.classList.remove("insert-mode");
+      this.editor.cD.classList.add("insert-mode");
+    } else if (this.editor.cD.classList.contains("insert-mode")) {
+      this.editor.cD.classList.remove("insert-mode");
     }
   }
 
@@ -192,9 +192,9 @@ class WriterController {
         y + newLines.length - 1,
         lastLineLength,
       );
-    
+
       const screenRow = y - lc.startIndex;
-      
+
       if (screenRow >= lc.maxLines - lc.marginLines) {
         const targetRow = lc.startIndex + newLines.length;
         lc.scrollTo(targetRow);

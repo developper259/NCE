@@ -7,10 +7,9 @@ class Cursor {
     this.mY = 7; // diff Y axis
     this.mpY = 19; // diff on calcul Y axis
     this.mpX = 10; // diff on calcul X axis
-    this.cD = document.querySelector(".editor-caret");
 
-    this.cD.style.height = this.editor.posY + "px";
-    this.cD.style.marginLeft = this.mpX + "px";
+    this.editor.cD.style.height = this.editor.posY + "px";
+    this.editor.cD.style.marginLeft = this.mpX + "px";
   }
 
   get row() {
@@ -153,23 +152,23 @@ class Cursor {
 
   updateCaretPosition() {
     if (!this.editor.tabManager.activeFile) {
-      if (this.cD) {
-        this.cD.style.display = "none";
+      if (this.editor.cD) {
+        this.editor.cD.style.display = "none";
       }
       return;
     }
 
     if (!this.isRowVisible(this.row)) {
-      this.cD.style.display = "none";
+      this.editor.cD.style.display = "none";
       return;
     }
 
     const placeY = this.rowToY(this.row) - 4;
     const placeX = this.columnToX(this.column);
 
-    this.cD.style.display = "block";
-    this.cD.style.left = `${placeX}px`;
-    this.cD.style.top = `${placeY}px`;
+    this.editor.cD.style.display = "block";
+    this.editor.cD.style.left = `${placeX}px`;
+    this.editor.cD.style.top = `${placeY}px`;
   }
 
   getPosition(row, column) {
@@ -249,57 +248,91 @@ class Cursor {
 
   getBeforeLetter() {
     const pos = this.getCursorReelPosition();
-    const line = this.editor.lineController.lines[this.row - 1];
-    return line[pos.column];
+    if (!pos) return undefined;
+
+    const line = this.getLine();
+    if (!line || pos.column <= 0) return undefined;
+
+    return line[pos.column - 1];
   }
 
   getAfterLetter() {
     const pos = this.getCursorReelPosition();
-    const line = this.editor.lineController.lines[this.row - 1];
-    return line[pos.column + 1];
+    if (!pos) return undefined;
+
+    const line = this.getLine();
+    if (!line || pos.column >= line.length) return undefined;
+
+    return line[pos.column];
   }
 
   getLine() {
-    return this.editor.lineController.lines[this.row - 1];
+    if (!this.editor.lineController?.lines) return "";
+    return this.editor.lineController.lines[this.row - 1] || "";
   }
 
   getBeforeLine() {
+    if (!this.editor.lineController?.lines) return undefined;
     return this.editor.lineController.lines[this.row - 2];
   }
 
   getAfterLine() {
+    if (!this.editor.lineController?.lines) return undefined;
     return this.editor.lineController.lines[this.row];
   }
 
   getIndexWord() {
-    const line = this.editor.lineController.lines[this.row - 1];
-    if (!line) return;
+    const line = this.getLine();
+    if (!line) return -1;
+
     const words = this.editor.writerController.splitWord(line);
+    if (!words || words.length === 0) return -1;
+
     const pos = this.getCursorReelPosition();
+    if (!pos) return -1;
+
     let count = 0;
 
     for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-      count += word.length;
-      if (pos.column - count <= 0) return i;
+      count += words[i].length;
+
+      if (pos.column <= count) {
+        return i;
+      }
     }
+
+    return words.length - 1;
   }
 
   getWord() {
-    const line = this.editor.lineController.lines[this.row - 1];
+    const line = this.getLine();
+    if (!line) return undefined;
+
     const words = this.editor.writerController.splitWord(line);
-    return words[this.getIndexWord()];
+    const index = this.getIndexWord();
+
+    return index !== -1 ? words[index] : undefined;
   }
 
   getBeforeWord() {
-    const line = this.editor.lineController.lines[this.row - 1];
+    const line = this.getLine();
+    if (!line) return undefined;
+
     const words = this.editor.writerController.splitWord(line);
-    return words[this.getIndexWord() - 1];
+    const index = this.getIndexWord();
+
+    return index > 0 ? words[index - 1] : undefined;
   }
 
   getAfterWord() {
-    const line = this.editor.lineController.lines[this.row - 1];
+    const line = this.getLine();
+    if (!line) return undefined;
+
     const words = this.editor.writerController.splitWord(line);
-    return words[this.getIndexWord() + 1];
+    const index = this.getIndexWord();
+
+    return index !== -1 && index < words.length - 1
+      ? words[index + 1]
+      : undefined;
   }
 }

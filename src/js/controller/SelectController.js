@@ -272,7 +272,7 @@ class SelectController {
     });
   }
 
-  selectAll() {
+  selectAll(cursorChange) {
     if (!this.editor.tabManager.activeFile) return;
     this.selectedLines.clear();
 
@@ -284,9 +284,21 @@ class SelectController {
       ).column;
       if (length === 0) length = 1;
       this.selectedLines.set(i, { startCol: 1, length: length });
+
+      this.editor.events.callEvent(Events.ON_SELECT, {
+        start: this.startSelect,
+        end: this.endSelect,
+        contains: this.containsSelected,
+      });
     }
 
     this.refreshSelectionDOM();
+
+    if (cursorChange) {
+      const lastLine = this.editor.lineController.lines.length - 1;
+      const lastLineLength = this.editor.lineController.lines[lastLine].length;
+      this.editor.cursor.setCursorPosition(lastLine + 1, lastLineLength + 1);
+    }
 
     this.editor.events.callEvent(Events.ON_SELECT, {
       start: this.startSelect,
@@ -295,37 +307,55 @@ class SelectController {
     });
   }
 
-  selectWord(wordOBJ, cursorChange) {
-    if (!this.editor.tabManager.activeFile || wordOBJ === undefined) return;
+  selectWord(cursorChange) {
+    if (!this.editor.tabManager.activeFile) return;
     this.selectedLines.clear();
 
-    const rect = wordOBJ.getBoundingClientRect();
-    const editorRect = this.editor.output.getBoundingClientRect();
+    const rowIndex = this.startSelect.row - 1;
+    const colIndex = this.startSelect.column;
 
-    const offsetXChars = this.editor.lineController.offsetX || 0;
+    const lineText = this.editor.lineController.lines[rowIndex] || "";
+    if (!lineText) return;
 
-    const x =
-      this.editor.cursor.xToColumn(rect.left - editorRect.left) + offsetXChars;
-    const y = this.editor.cursor.yToRow(rect.top - editorRect.top) - 1;
+    const words = this.editor.writerController.splitWord(lineText);
+    if (!words || words.length === 0) return;
 
-    this.selectedLines.set(y, {
-      startCol: x,
-      length: wordOBJ.innerText.length,
-    });
+    let startCol = 0;
+    let currentLength = 0;
+    let targetWordIndex = words.length - 1;
 
-    const pos = this.editor.cursor.getReelPosition(
-      y,
-      x + wordOBJ.innerText.length - 1,
-    );
-    if (cursorChange) this.editor.cursor.setCursorPosition(y + 1, pos.column);
+    for (let i = 0; i < words.length; i++) {
+      const wordLen = words[i].length;
+      currentLength += wordLen;
 
-    this.refreshSelectionDOM();
+      if (colIndex < currentLength) {
+        targetWordIndex = i;
+        break;
+      }
 
-    this.editor.events.callEvent(Events.ON_SELECT, {
-      start: this.startSelect,
-      end: this.endSelect,
-      contains: this.containsSelected,
-    });
+      startCol += wordLen;
+    }
+
+    const length = words[targetWordIndex].length;
+
+    if (length > 0) {
+      this.selectedLines.set(rowIndex, {
+        startCol: startCol + 1,
+        length: length,
+      });
+
+      if (cursorChange) {
+        this.editor.cursor.setCursorPosition(rowIndex + 1, startCol + length);
+      }
+
+      this.refreshSelectionDOM();
+
+      this.editor.events.callEvent(Events.ON_SELECT, {
+        start: this.startSelect,
+        end: this.endSelect,
+        contains: this.containsSelected,
+      });
+    }
   }
 
   calculSelectSimpleLine() {
@@ -417,17 +447,13 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
     this.calcClick();
 
+    console.log(this.clickCount);
+
     if (this.clickCount > 1) {
       this.unSelectAll();
     }
-
     if (this.clickCount === 2) {
-      const word = this.editor.lineController.getWordOBJ(
-        this.editor.cursor.row,
-        this.editor.cursor.getIndexWord(),
-      );
-      if (!word) return;
-      this.selectWord(word, true);
+      this.selectWord(true);
     } else if (this.clickCount === 3) {
       this.selectLine(this.editor.cursor.row - 1, true);
     } else if (this.clickCount >= 4) {
@@ -511,7 +537,10 @@ class SelectController {
   }
 
   initEventListeners() {
-    addEvent("mousedown", this.mouseDown.bind(this), this.editor.output);
+    addEvent("mousedown", this.mouseDown.bind(this), [
+      this.editor.output,
+      this.editor.cD,
+    ]);
     addEvent("mouseup", this.mouseUp.bind(this), document);
     addEvent("mousemove", this.mouseMove.bind(this), this.editor.output);
   }

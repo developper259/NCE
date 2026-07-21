@@ -4,6 +4,7 @@ class Editor {
     this.output = getElement(".editor-output");
     this.editorOBJ = getElement(".editor");
     this.fileManagerOBJ = getElement(".file-manager");
+    this.cD = getElement(".editor-caret");
 
     this.selected = false;
     this.isActive = false;
