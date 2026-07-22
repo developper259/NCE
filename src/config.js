@@ -170,7 +170,7 @@ const USERCONFIG_KEYBINDING = [
 ];
 
 USERCONFIG_CONFIG = {
-  tab_width: 4,
+  tab_width: 2,
 };
 
 USERCONFIG_SIDEBAR_MENUS = [

@@ -213,7 +213,8 @@ class KeyBinding {
   }
   key_tab(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-    this.editor.writerController.write("\t");
+
+    this.editor.writerController.write(" ".repeat(CONFIG_GET("tab_width")));
   }
   key_delete(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;

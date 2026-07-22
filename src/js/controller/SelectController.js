@@ -129,9 +129,12 @@ class SelectController {
         const { row, info } = visibleSelections[i];
         const fileRow = row + 1;
 
-        const x = cursor.columnToX(info.startCol);
+        const visualStartPos = cursor.getPosition(fileRow, info.startCol);
+        const visualEndPos = cursor.getPosition(fileRow, info.startCol + info.length);
+
+        const x = cursor.columnToX(visualStartPos.column);
+        const width = (visualEndPos.column - visualStartPos.column) * this.editor.letterSize;
         const y = cursor.rowToY(fileRow) - difY;
-        const width = info.length * this.editor.letterSize;
         const height = cursor.mpY + difY;
 
         const rawLine = this.editor.lineController.lines[row] || "";
@@ -446,8 +449,6 @@ class SelectController {
   mouseClick() {
     if (!this.editor.tabManager.activeFile) return;
     this.calcClick();
-
-    console.log(this.clickCount);
 
     if (this.clickCount > 1) {
       this.unSelectAll();

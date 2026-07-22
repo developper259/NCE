@@ -82,7 +82,7 @@ class WriterController {
     let tableSplit = [];
     for (let char of txt) {
       if (this.separator.includes(char)) {
-        let c = char.replace(/\t/g, "_".repeat(CONFIG_GET("tab_width")));
+        let c = char.replace(/\t/g, " ".repeat(CONFIG_GET("tab_width")));
         tableSplit.push(c);
       } else {
         if (!tableSplit.length || this.separator.includes(oldChar)) {
@@ -93,16 +93,15 @@ class WriterController {
       }
       oldChar = char;
     }
-    tableSplit = tableSplit.filter(function (chaine) {
-      return chaine.length !== 0;
-    });
+    tableSplit = tableSplit.filter((chaine) => chaine.length !== 0);
 
     return tableSplit;
   }
 
   textToOBJ(txt) {
     if (txt === undefined) return;
-    const words = this.splitWord(txt);
+
+    const words = this.splitWordView(txt);
     const lineDiv = document.createElement("div");
     lineDiv.className = "line editor-select";
 
