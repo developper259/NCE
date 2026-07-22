@@ -133,17 +133,9 @@ class SelectController {
         const visualEndPos = cursor.getPosition(fileRow, info.startCol + info.length);
 
         const x = cursor.columnToX(visualStartPos.column);
-        const width = (visualEndPos.column - visualStartPos.column) * this.editor.letterSize;
+        const width = ((visualEndPos.column + 1) - visualStartPos.column) * this.editor.letterSize;
         const y = cursor.rowToY(fileRow) - difY;
         const height = cursor.mpY + difY;
-
-        const rawLine = this.editor.lineController.lines[row] || "";
-        const vec1 = cursor.getReelPosition(fileRow, info.startCol - 1);
-        const vec2 = cursor.getReelPosition(
-          fileRow,
-          info.startCol - 1 + info.length,
-        );
-        const value = rawLine.slice(vec1.column, vec2.column);
 
         let div = currentDOMNodes[i];
         if (!div) {
