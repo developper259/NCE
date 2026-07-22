@@ -591,6 +591,8 @@ class LineController {
 
     const selectOutput = getElement(".editor-select-output");
     selectOutput.innerHTML = "";
+
+    this.outputScroller.hide();
   }
 
   show() {
@@ -606,5 +608,7 @@ class LineController {
     this.initNumberLines();
     const cursor = getElement(".editor-caret");
     cursor.style.display = "block";
+
+    this.outputScroller.show();
   }
 }

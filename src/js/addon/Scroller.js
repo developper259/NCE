@@ -35,6 +35,14 @@ class Scroller {
     this._onWheel = this.handleWheel.bind(this);
   }
 
+  hide() {
+    this.scrollerOBJ.style.display = "none";
+  }
+
+  show() {
+    this.scrollerOBJ.style.display = "block";
+  }
+
   calcul(diff) {
     return Math.max(100 * Math.pow(0.99, diff), 3);
   }

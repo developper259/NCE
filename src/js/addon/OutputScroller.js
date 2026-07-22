@@ -12,6 +12,16 @@ class OutputScroller {
     this.init();
   }
 
+  hide() {
+    this.vScroller.hide();
+    this.hScroller.hide();
+  }
+
+  show() {
+    this.vScroller.show();
+    this.hScroller.show();
+  }
+
   init() {
     // Vertical scroller
     this.vScroller = this.editor.scrollerManager.createScroller(

@@ -82,10 +82,15 @@ class tabManager {
   }
 
   closeFiles() {
-    this.files = [];
-    this.activeFile = undefined;
-    this.editor.fileExplorer.activeFilePath = null;
-    this.editor.refreshAll();
+    requestAnimationFrame(() => {
+      this.files = [];
+      this.activeFile = undefined;
+      this.editor.fileExplorer.activeFilePath = null;
+
+      this.editor.events.callEvent(Events.ON_CLOSE_FILE);
+
+      this.refresh();
+    });
   }
 
   async closeFile(id) {
@@ -115,11 +120,14 @@ class tabManager {
     if (this.files.length > 1) this.removeFileByID(id);
     else {
       this.closeFiles();
+      return;
     }
+
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
       file: file,
       activeFile: this.activeFile,
     });
+
     this.editor.refreshAll();
   }
 
