@@ -13,6 +13,13 @@ class Scroller {
     this.scrollerOBJ = null;
     this.itemOBJ = null;
 
+    this.scrollerOBJHeight = 0;
+    this.scrollerOBJWidth = 0;
+    this.itemOBJHeight = 0;
+    this.itemOBJWidth = 0;
+    this.parentOBJHeight = 0;
+    this.parentOBJWidth = 0;
+
     this.scrollRatio = 0;
     this.targetScrollRatio = 0;
     this._rafId = null;
@@ -80,6 +87,15 @@ class Scroller {
     this.onScroll(this.scrollRatio);
   }
 
+  refreshMetrics() {
+    this.scrollerOBJHeight = this.scrollerOBJ.clientHeight;
+    this.scrollerOBJWidth = this.scrollerOBJ.clientWidth;
+    this.itemOBJHeight = this.itemOBJ.clientHeight;
+    this.itemOBJWidth = this.itemOBJ.clientWidth;
+    this.parentOBJHeight = this.parentOBJ.clientHeight;
+    this.parentOBJWidth = this.parentOBJ.clientWidth;
+  }
+
   readThumbMetrics() {
     if (!this.scrollerOBJ || !this.itemOBJ) return null;
 
@@ -88,13 +104,13 @@ class Scroller {
     if (isVertical) {
       return {
         isVertical: true,
-        maxScroll: this.scrollerOBJ.clientHeight - this.itemOBJ.clientHeight,
+        maxScroll: this.scrollerOBJHeight - this.itemOBJHeight,
       };
     }
 
     return {
       isVertical: false,
-      maxScroll: this.scrollerOBJ.clientWidth - this.itemOBJ.clientWidth,
+      maxScroll: this.scrollerOBJWidth - this.itemOBJWidth,
     };
   }
 
@@ -132,6 +148,7 @@ class Scroller {
     this.parentOBJ.appendChild(this.scrollerOBJ);
 
     this.addScrollListeners();
+    this.refreshMetrics();
     this.refresh();
   }
 
@@ -146,8 +163,8 @@ class Scroller {
     const proportion = this.calculProp();
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
     const track = isVertical
-      ? this.parentOBJ.clientHeight
-      : this.parentOBJ.clientWidth;
+      ? this.parentOBJHeight
+      : this.parentOBJWidth;
     const size = Math.max((proportion / 100) * track, 20);
 
     if (isVertical) {
@@ -186,25 +203,25 @@ class Scroller {
 
     if (isVertical) {
       const maxScroll =
-        this.scrollerOBJ.clientHeight - this.itemOBJ.clientHeight;
+        this.scrollerOBJHeight - this.itemOBJHeight;
       if (maxScroll <= 0) return;
 
       const newTop = Math.max(
         0,
         Math.min(
-          e.clientY - rect.top - this.itemOBJ.clientHeight / 2,
+          e.clientY - rect.top - this.itemOBJHeight / 2,
           maxScroll,
         ),
       );
       this.targetScrollRatio = newTop / maxScroll;
     } else {
-      const maxScroll = this.scrollerOBJ.clientWidth - this.itemOBJ.clientWidth;
+      const maxScroll = this.scrollerOBJWidth - this.itemOBJWidth;
       if (maxScroll <= 0) return;
 
       const newLeft = Math.max(
         0,
         Math.min(
-          e.clientX - rect.left - this.itemOBJ.clientWidth / 2,
+          e.clientX - rect.left - this.itemOBJWidth / 2,
           maxScroll,
         ),
       );
@@ -226,11 +243,11 @@ class Scroller {
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
     const delta = isVertical ? e.deltaY : e.deltaX;
     const dimension = isVertical
-      ? this.scrollerOBJ.clientHeight
-      : this.scrollerOBJ.clientWidth;
+      ? this.scrollerOBJHeight
+      : this.scrollerOBJWidth;
     const itemSize = isVertical
-      ? this.itemOBJ.clientHeight
-      : this.itemOBJ.clientWidth;
+      ? this.itemOBJHeight
+      : this.itemOBJWidth;
 
     const maxScroll = dimension - itemSize;
     if (maxScroll <= 0) return;
@@ -269,7 +286,7 @@ class Scroller {
     }
 
     const visibleItems = Math.ceil(
-      this.parentOBJ.clientHeight / this.heightByItem,
+      this.parentOBJHeight / this.heightByItem,
     );
     const maxScrollIndex = Math.max(0, this.nbItem - visibleItems);
     let start =

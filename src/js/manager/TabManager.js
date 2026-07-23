@@ -71,8 +71,6 @@ class tabManager {
       this.setFocusFile(lastAddedFile);
 
       this.activeFile.setIsSaved(true);
-      this.editor.lineController.restoreScroll();
-      this.editor.refreshAll();
     }
 
     if (!this.editor.isOnInit) {
@@ -96,7 +94,7 @@ class tabManager {
         });
       }
 
-      this.refresh();
+      this.editor.refreshAll();
     });
   }
 
@@ -136,7 +134,6 @@ class tabManager {
         activeFile: this.activeFile,
       });
     }
-
     this.editor.refreshAll();
   }
 

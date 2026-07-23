@@ -7,15 +7,11 @@ class ScrollerManager {
 
     this.scrollers = [];
 
-    //addEvent("onEvent", this.onEvent.bind(this), this.editor.output);
-  }
-
-  onEvent(event) {
-    this.refreshAll();
   }
 
   refreshAll() {
     for (let scroller of this.scrollers) {
+      scroller.refreshMetrics();
       scroller.refresh();
     }
   }

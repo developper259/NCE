@@ -151,8 +151,10 @@ class Events {
     }
   }
   onResize(e) {
-    this.editor.lineController.resize();
+    requestAnimationFrame(() => {
+      this.editor.lineController.resize();
 
-    this.editor.scrollerManager.refreshAll();
+      this.editor.scrollerManager.refreshAll();
+    });
   }
 }
