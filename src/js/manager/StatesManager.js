@@ -105,12 +105,12 @@ class StatesManager {
   async loadStates(state) {
     if (!state) return;
 
-    if (state.fileExplorer) {
-      this.loadFileExplorerState(state.fileExplorer);
-    }
-
     if (state.sidebar) {
       this.loadSidebarState(state.sidebar);
+    }
+
+    if (state.fileExplorer) {
+      this.loadFileExplorerState(state.fileExplorer);
     }
 
     if (state.tabManager) {
@@ -124,7 +124,7 @@ class StatesManager {
     const tabManager = this.editor.tabManager;
     if (!tabManager) return;
 
-    tabManager.closeFiles();
+    tabManager.closeFiles(false);
 
     let activeFileToFocus = null;
 
@@ -214,8 +214,6 @@ class StatesManager {
     if (fileExplorer.rootPath) {
       window.api.startWatching(fileExplorer.rootPath);
     }
-
-    fileExplorer.refresh();
   }
 
   deserializeFiles(filesData) {

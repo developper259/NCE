@@ -32,11 +32,10 @@ class Sidebar {
 
   refresh() {
     if (this.element && this.isOpen) {
-      this.element.innerHTML = '';
       const content = this.render();
 
       if (content instanceof Node) {
-        this.element.appendChild(content);
+        this.element.replaceChildren(content);
       } else {
         this.element.innerHTML = content;
       }

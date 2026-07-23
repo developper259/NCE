@@ -3,12 +3,14 @@ class Editor {
     this.mainSection = getElement(".main-section");
     this.output = getElement(".editor-output");
     this.editorOBJ = getElement(".editor");
+    this.emptyMenuOBJ = getElement(".empty-menu");
     this.fileManagerOBJ = getElement(".file-manager");
     this.cD = getElement(".editor-caret");
 
     this.selected = false;
     this.isActive = false;
     this.panel = undefined;
+    this.isOnInit = true;
 
     this.baseX = 50; // left margin (2 represents the difference left margin)
     this.updateBaseX();
@@ -48,10 +50,10 @@ class Editor {
 
     this.writerController.insertMode = true;
 
-    this.reset();
-
     this.initQuitEvent();
     this.initLoadState();
+    
+    this.isOnInit = false;
   }
 
   refreshAll() {
@@ -154,7 +156,10 @@ class Editor {
   initLoadState() {
     let loaded = false;
     const apply = (state) => {
-      if (!state || loaded) return;
+      if (!state || loaded) {
+        this.reset();
+        return;
+      }
       loaded = true;
       this.statesManager.loadStates(state);
     };

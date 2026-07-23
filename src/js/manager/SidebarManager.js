@@ -39,7 +39,8 @@ class SidebarManager {
   renderTabSelector() {
     if (!this.tabSelector) return;
 
-    this.tabSelector.innerHTML = "";
+    const fragment = document.createDocumentFragment();
+
     for (const menuConfig of USERCONFIG_SIDEBAR_MENUS) {
       const menu = this.menus.get(menuConfig.id);
       const iconDiv = document.createElement("div");
@@ -54,8 +55,9 @@ class SidebarManager {
       icon.className = menuConfig.icon;
       iconDiv.appendChild(icon);
 
-      this.tabSelector.appendChild(iconDiv);
+      fragment.appendChild(iconDiv);
     }
+    this.tabSelector.replaceChildren(fragment);
   }
 
   setupEventListeners() {
@@ -171,9 +173,13 @@ class SidebarManager {
         ? this.leftMenuContainer
         : this.rightMenuContainer;
     if (container) {
-      container.innerHTML = "";
       const content = menu.render();
-      container.appendChild(content);
+
+      if (content instanceof Node) {
+        container.replaceChildren(content);
+      } else {
+        container.innerHTML = content;
+      }
     }
   }
 

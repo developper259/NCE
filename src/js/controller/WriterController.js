@@ -123,7 +123,6 @@ class WriterController {
   write(txt) {
     if (!this.editor.tabManager.activeFile) return;
     this.editor.keyBinding.historyX = undefined;
-    this.editor.keyBinding.indexHistory = 1;
 
     const lc = this.editor.lineController;
 

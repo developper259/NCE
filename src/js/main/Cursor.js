@@ -133,7 +133,10 @@ class Cursor {
       this.editor.lineController.setFocusLine(this.row);
 
       this.editor.setSelected(true);
-      this.editor.events.callEvent(Events.CURSOR_CHANGE, { row, column });
+      
+      if (!this.editor.isOnInit) {
+        this.editor.events.callEvent(Events.CURSOR_CHANGE, { row, column });
+      }
     }
 
     this.updateCaretPosition();

@@ -171,8 +171,7 @@ class LineController {
   }
 
   measureOutputWidth() {
-    const fromEditor =
-      this.editor.editorOBJ.clientWidth - this.editor.baseX;
+    const fromEditor = this.editor.editorOBJ.clientWidth - this.editor.baseX;
     if (fromEditor > 0) return fromEditor;
     return Math.max(0, this.editor.output.clientWidth);
   }
@@ -580,8 +579,8 @@ class LineController {
   }
 
   hide() {
-    this.lineN.innerHTML = "";
-    this.editor.output.innerHTML = "";
+    this.lineN.replaceChildren();
+    this.editor.output.replaceChildren();
 
     this.lineN.style.display = "none";
     this.editor.output.style.display = "none";
@@ -590,7 +589,7 @@ class LineController {
     cursor.style.display = "none";
 
     const selectOutput = getElement(".editor-select-output");
-    selectOutput.innerHTML = "";
+    selectOutput.replaceChildren();
 
     this.outputScroller.hide();
   }

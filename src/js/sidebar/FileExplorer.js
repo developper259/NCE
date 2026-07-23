@@ -89,10 +89,13 @@ class FileExplorer extends Sidebar {
     await this.loadFiles();
     this.refresh();
 
-    this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
-      rootPath: this.rootPath,
-      projectName: this.projectName,
-    });
+
+    if (!this.editor.isOnInit) {
+      this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
+        rootPath: this.rootPath,
+        projectName: this.projectName,
+      });
+    }
   }
 
   async loadFolderContent(folderPath) {

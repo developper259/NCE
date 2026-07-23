@@ -12,6 +12,8 @@ class keyBindingController {
       if (this.editor.tabManager.activeFile && e.key.length == 1)
         this.editor.writerController.write(e.key);
     }
+    e.preventDefault();
+    e.stopPropagation();
   }
 
   bind(key, e) {
@@ -20,7 +22,10 @@ class keyBindingController {
       if (item.in_editor == false) {
         this.editor.keyBinding.exec(item, e);
       }
-    }
+
+      e.preventDefault();
+      e.stopPropagation();
+    }    
   }
 
   onKey(e) {

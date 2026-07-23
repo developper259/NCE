@@ -36,11 +36,13 @@ class Scroller {
   }
 
   hide() {
-    this.scrollerOBJ.style.display = "none";
+    if (!this.scrollerOBJ.classList.contains("page-scroller-inactive"))
+      this.scrollerOBJ.classList.add("page-scroller-inactive");
   }
 
   show() {
-    this.scrollerOBJ.style.display = "block";
+    if (this.scrollerOBJ.classList.contains("page-scroller-inactive"))
+      this.scrollerOBJ.classList.remove("page-scroller-inactive");
   }
 
   calcul(diff) {

@@ -10,8 +10,6 @@ class FileNode {
 
     // KeyBinding
     this.historyX = undefined;
-    this.history = [];
-    this.indexHistory = 1;
 
     // Cursor
     this.row = 0;
@@ -60,9 +58,6 @@ class FileNode {
     this.isSaved = file.isSaved;
 
     this.historyX = file.historyX;
-    this.history = file.history;
-    this.indexHistory = file.indexHistory;
-    this.lastIndexHistory = file.lastIndexHistory;
 
     this.row = file.row;
     this.column = file.column;
@@ -74,9 +69,11 @@ class FileNode {
     this.startIndex = file.startIndex;
     this.offsetY = file.offsetY;
     this.offsetX = file.offsetX;
+    this.isLoaded = false;
 
     this.isMouseDown = file.isMouseDown;
     this.containsSelected = file.containsSelected;
+    this._selectedLines = file._selectedLines;
 
     this.lastClick = file.lastClick;
     this.clickCount = file.clickCount;

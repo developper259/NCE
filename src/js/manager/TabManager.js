@@ -75,19 +75,26 @@ class tabManager {
       this.editor.refreshAll();
     }
 
-    this.editor.events.callEvent(Events.ON_OPEN_FILE, {
-      files: files,
-      activeFile: lastAddedFile,
-    });
+    if (!this.editor.isOnInit) {
+      this.editor.events.callEvent(Events.ON_OPEN_FILE, {
+        files: files,
+        activeFile: lastAddedFile,
+      });
+    }
   }
 
-  closeFiles() {
+  closeFiles(isCallEvent) {
     requestAnimationFrame(() => {
       this.files = [];
       this.activeFile = undefined;
       this.editor.fileExplorer.activeFilePath = null;
 
-      this.editor.events.callEvent(Events.ON_CLOSE_FILE);
+      if (!this.editor.isOnInit && isCallEvent) {
+        this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+          file: null,
+          activeFile: undefined,
+        });
+      }
 
       this.refresh();
     });
@@ -123,10 +130,12 @@ class tabManager {
       return;
     }
 
-    this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
-      file: file,
-      activeFile: this.activeFile,
-    });
+    if (!this.editor.isOnInit) {
+      this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+        file: file,
+        activeFile: this.activeFile,
+      });
+    }
 
     this.editor.refreshAll();
   }
@@ -204,39 +213,58 @@ class tabManager {
     return undefined;
   }
 
-  toHTMLFile(file) {
-    if (!file) return "";
-    let arg = "";
-    if (this.activeFile && this.activeFile.id === file.id) arg = "file-active";
+  createFileOBJ(file) {
+    if (!file) return null;
 
-    let btn = "";
-    if (file.isSaved)
-      btn =
-        '<span class="file-el-btn file-saved"><img src="../../assets/icons/close.svg" alt="close" class="file-el-btn-img"></span>';
-    else btn = '<div class="file-el-btn file-unsaved"></div>';
+    const li = document.createElement("li");
+    li.className = "file-el";
+    if (this.activeFile && this.activeFile.id === file.id) {
+      li.classList.add("file-active");
+    }
+    li.id = file.id;
 
-    let html = `<li class="file-el ${arg}" id="${file.id}">
-						<span class="file-el-title">${file.name}</span>
-						${btn}
-					</li>`;
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "file-el-title";
+    titleSpan.textContent = file.name;
+    li.appendChild(titleSpan);
 
-    return html;
+    if (file.isSaved) {
+      const btnSpan = document.createElement("span");
+      btnSpan.className = "file-el-btn file-saved";
+
+      const img = document.createElement("img");
+      img.src = "../../assets/icons/close.svg";
+      img.alt = "close";
+      img.className = "file-el-btn-img";
+
+      btnSpan.appendChild(img);
+      li.appendChild(btnSpan);
+    } else {
+      const btnDiv = document.createElement("div");
+      btnDiv.className = "file-el-btn file-unsaved";
+      li.appendChild(btnDiv);
+    }
+
+    return li;
   }
 
   refresh() {
-    let ul = getElement(".file-manager .files-ul");
+    const ul = getElement(".file-manager .files-ul");
+    if (!ul) return;
 
-    let html = "";
+    const fragment = document.createDocumentFragment();
 
     for (let i = 0; i < this.files.length; i++) {
-      let file = this.files[i];
-
-      html += this.toHTMLFile(file);
+      const file = this.files[i];
+      const fileEl = this.createFileOBJ(file);
+      if (fileEl) {
+        fragment.appendChild(fileEl);
+      }
     }
 
-    ul.innerHTML = html;
+    ul.replaceChildren(fragment);
 
-    if (this.files.length == 0) {
+    if (this.files.length === 0) {
       this.editor.reset();
     } else {
       if (!this.editor.isActive) this.editor.reactive();
