@@ -10,6 +10,7 @@ class ScrollerManager {
   }
 
   refreshAll() {
+    if (this.editor.isOnInit) return;
     for (let scroller of this.scrollers) {
       scroller.refreshMetrics();
       scroller.refresh();

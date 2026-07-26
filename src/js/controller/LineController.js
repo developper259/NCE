@@ -13,10 +13,6 @@ class LineController {
 
     this.outputScroller = new OutputScroller(editor);
     this.outputScroller.setLineController(this);
-
-    this.outputWidth = this.measureOutputWidth();
-    this.outputHeight =
-      this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
   }
 
   getScrollOffsetY() {
@@ -174,6 +170,11 @@ class LineController {
     const fromEditor = this.editor.editorOBJ.clientWidth - this.editor.baseX;
     if (fromEditor > 0) return fromEditor;
     return Math.max(0, this.editor.output.clientWidth);
+  }
+
+  isSized() {
+    if (this.outputHeight !== 0 && this.outputWidth !== 0) return true;
+    return false;
   }
 
   resizeWidth() {
@@ -597,11 +598,6 @@ class LineController {
   show() {
     this.lineN.style.display = "block";
     this.editor.output.style.display = "block";
-
-    const width = this.measureOutputWidth();
-    if (width > 0) this.outputWidth = width;
-    this.outputHeight =
-      this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
 
     this.initLineOutput();
     this.initNumberLines();

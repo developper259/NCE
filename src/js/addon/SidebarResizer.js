@@ -19,12 +19,10 @@ class SidebarResizer {
   }
 
   createResizers() {
-    // Create left sidebar resizer
     this.leftResizer = document.createElement("div");
     this.leftResizer.className = "sidebar-resizer sidebar-resizer-left";
     document.querySelector(".main-section").appendChild(this.leftResizer);
 
-    // Create right sidebar resizer
     this.rightResizer = document.createElement("div");
     this.rightResizer.className = "sidebar-resizer sidebar-resizer-right";
     document.querySelector(".main-section").appendChild(this.rightResizer);
@@ -120,11 +118,9 @@ class SidebarResizer {
     const leftSidebar = document.querySelector(".sidebar-left");
     const rightSidebar = document.querySelector(".sidebar-right");
 
-    // Position left resizer on the right edge of left sidebar
     const leftSidebarWidth = leftSidebar.offsetWidth;
     this.leftResizer.style.left = 48 + leftSidebarWidth + "px";
 
-    // Position right resizer on the left edge of right sidebar
     const rightSidebarWidth = rightSidebar.offsetWidth;
     this.rightResizer.style.right = rightSidebarWidth + "px";
   }
@@ -133,12 +129,10 @@ class SidebarResizer {
     const leftSidebar = document.querySelector(".sidebar-left");
     const rightSidebar = document.querySelector(".sidebar-right");
 
-    // Hide left resizer if left sidebar is not open
     this.leftResizer.style.display = leftSidebar.classList.contains("open")
       ? "block"
       : "none";
 
-    // Hide right resizer if right sidebar is not open
     this.rightResizer.style.display = rightSidebar.classList.contains("open")
       ? "block"
       : "none";

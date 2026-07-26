@@ -82,35 +82,26 @@ class StatesManager {
     const fileExplorer = this.editor.fileExplorer;
     if (!fileExplorer) return null;
 
+    const expandedSet = fileExplorer.getExpandedPaths(fileExplorer.files);
+
     return {
       rootPath: fileExplorer.rootPath,
       projectName: fileExplorer.projectName,
       activeFilePath: fileExplorer.activeFilePath,
       projectExpanded: fileExplorer.projectExpanded,
-      files: this.serializeFiles(fileExplorer.files),
+      expandedPaths: Array.from(expandedSet),
     };
-  }
-
-  serializeFiles(files) {
-    if (!files) return [];
-    return files.map((file) => ({
-      name: file.name,
-      type: file.type,
-      path: file.path,
-      expanded: file.expanded,
-      children: file.children ? this.serializeFiles(file.children) : undefined,
-    }));
   }
 
   async loadStates(state) {
     if (!state) return;
 
-    if (state.sidebar) {
-      this.loadSidebarState(state.sidebar);
+    if (state.fileExplorer) {
+      await this.loadFileExplorerState(state.fileExplorer);
     }
 
-    if (state.fileExplorer) {
-      this.loadFileExplorerState(state.fileExplorer);
+    if (state.sidebar) {
+      this.loadSidebarState(state.sidebar);
     }
 
     if (state.tabManager) {
@@ -123,8 +114,6 @@ class StatesManager {
   async loadTabManagerState(tabState) {
     const tabManager = this.editor.tabManager;
     if (!tabManager) return;
-
-    tabManager.closeFiles(false);
 
     let activeFileToFocus = null;
 
@@ -162,12 +151,6 @@ class StatesManager {
 
       tabManager.files.push(file);
 
-      if (fileData.selectedLines && Array.isArray(fileData.selectedLines)) {
-        file._selectedLines = new Map(fileData.selectedLines);
-      } else {
-        file._selectedLines = new Map();
-      }
-
       if (tabState.activeFile && file.id === tabState.activeFile.id) {
         activeFileToFocus = file;
       }
@@ -198,34 +181,23 @@ class StatesManager {
     }
   }
 
-  loadFileExplorerState(explorerState) {
+  async loadFileExplorerState(explorerState) {
     const fileExplorer = this.editor.fileExplorer;
-    if (!fileExplorer) return;
+    if (!fileExplorer || !explorerState.rootPath) return;
 
     fileExplorer.rootPath = explorerState.rootPath;
     fileExplorer.projectName = explorerState.projectName;
     fileExplorer.activeFilePath = explorerState.activeFilePath;
     fileExplorer.projectExpanded = explorerState.projectExpanded;
 
-    if (explorerState.files) {
-      fileExplorer.files = this.deserializeFiles(explorerState.files);
-    }
+    await fileExplorer.loadFiles();
 
-    if (fileExplorer.rootPath) {
-      window.api.startWatching(fileExplorer.rootPath);
+    if (explorerState.expandedPaths && explorerState.expandedPaths.length > 0) {
+      const expandedSet = new Set(explorerState.expandedPaths);
+      await fileExplorer.restoreExpandedFolders(
+        fileExplorer.files,
+        expandedSet,
+      );
     }
-  }
-
-  deserializeFiles(filesData) {
-    if (!filesData) return [];
-    return filesData.map((file) => ({
-      name: file.name,
-      type: file.type,
-      path: file.path,
-      expanded: file.expanded,
-      children: file.children
-        ? this.deserializeFiles(file.children)
-        : undefined,
-    }));
   }
 }

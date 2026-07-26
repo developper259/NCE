@@ -9,6 +9,7 @@ class FileExplorer extends Sidebar {
     this.projectName = "";
 
     this.projectExpanded = true;
+    this.isLoaded = false;
 
     this.setupFileSystemWatcher();
   }
@@ -56,17 +57,22 @@ class FileExplorer extends Sidebar {
     refreshRecursive(this.files);
   }
 
-  async loadFiles() {
+  async loadFiles(expandedPaths = new Set()) {
     if (!this.rootPath) return;
     try {
-      const items = await window.api.getFolderContent(this.rootPath);
-      this.files = items.map((item) => ({
-        name: item.name,
-        type: item.type,
-        path: item.path,
-        expanded: false,
-        children: item.type === "folder" ? [] : undefined,
-      }));
+      if (expandedPaths.size === 0) {
+        const items = await window.api.getFolderContent(this.rootPath);
+        this.files = items.map((item) => ({
+          name: item.name,
+          type: item.type,
+          path: item.path,
+          expanded: false,
+          children: item.type === "folder" ? [] : undefined,
+        }));
+      }else{
+        await this.restoreExpandedFolders(this.files, expandedPaths);
+      }
+      this.isLoaded = true;
     } catch (error) {
       console.error("Error loading files:", error);
       this.files = [];
@@ -88,7 +94,6 @@ class FileExplorer extends Sidebar {
 
     await this.loadFiles();
     this.refresh();
-
 
     if (!this.editor.isOnInit) {
       this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
@@ -233,13 +238,15 @@ class FileExplorer extends Sidebar {
   }
 
   async onOpen() {
-    await this.loadFiles();
+    const expandedSet = this.getExpandedPaths(this.files);
+    await this.loadFiles(expandedSet);
     this.refresh();
   }
 
   async selectFolder() {
     const folderPath = await window.api.selectFolder();
     if (folderPath) {
+      this.isLoaded = false;
       this.loadProject(folderPath);
     }
   }
@@ -284,6 +291,32 @@ class FileExplorer extends Sidebar {
     if (newTreeContainer) {
       newTreeContainer.scrollTop = scrollTop;
     }
+  }
+
+  async restoreExpandedFolders(files, expandedSet) {
+    if (!expandedSet || !files || expandedSet.length === 0) return;
+    for (const file of files) {
+      if (file.type === "folder" && expandedSet.has(file.path)) {
+        file.expanded = true;
+        file.children = await this.loadFolderContent(file.path);
+        if (file.children && file.children.length > 0) {
+          await this.restoreExpandedFolders(file.children, expandedSet);
+        }
+      }
+    }
+  }
+
+  getExpandedPaths(files, pathsSet = new Set()) {
+    if (!files) return pathsSet;
+    for (const file of files) {
+      if (file.type === "folder" && file.expanded) {
+        pathsSet.add(file.path);
+        if (file.children) {
+          this.getExpandedPaths(file.children, pathsSet);
+        }
+      }
+    }
+    return pathsSet;
   }
 
   getFileIcon(filename) {

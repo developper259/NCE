@@ -2,8 +2,6 @@ class EmptyMenu {
   constructor(e) {
     this.editor = e;
     this.actions = ["new_file", "open_file", "open_folder", "find_file"];
-
-    this.refresh();
   }
 
   parseKeyToElements(keyString) {
@@ -25,11 +23,11 @@ class EmptyMenu {
 
       if (iconClass) {
         const i = document.createElement("i");
-        i.className = iconClass;
+        i.className = iconClass + " editor-el";
         elements.push(i);
       } else {
         const span = document.createElement("span");
-        span.className = "key-text";
+        span.className = "key-text editor-el";
         span.textContent = trimmed;
         elements.push(span);
       }
@@ -54,13 +52,15 @@ class EmptyMenu {
       if (!keybinding) continue;
 
       const button = document.createElement("button");
+      button.classList.add('editor-el');
       button.onclick = () => this.editor.keyBinding.exec(keybinding);
 
       const buttonText = document.createElement("span");
-      buttonText.className = "button-text";
+      buttonText.className = "button-text editor-el";
       buttonText.textContent = keybinding.description;
 
       const keybindingDiv = document.createElement("div");
+      keybindingDiv.classList.add('editor-el');
       keybindingDiv.className = "keybinding";
 
       const keyElements = this.parseKeyToElements(keybinding.key);

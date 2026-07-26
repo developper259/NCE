@@ -43,13 +43,6 @@ export class Window {
 
     this.window.loadFile(path.join(__dirname, "../../src/html/index.html")); // build
 
-    this.window.webContents.on("did-finish-load", async () => {
-      const state = await this.fileManager?.loadState();
-      if (state) {
-        this.window?.webContents.send("Request:loadState", state);
-      }
-    });
-
     this.window.on("close", (event) => {
       if (this.forceQuit) return;
       event.preventDefault();

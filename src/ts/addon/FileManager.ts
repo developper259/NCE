@@ -219,7 +219,7 @@ export class FileManager {
     try {
       const filePath = path.join(app.getPath("userData"), "state.json");
       await fs.writeFile(filePath, stateString, "utf-8");
-      console.log("Editor state saved !");
+
       return true;
     } catch (error) {
       console.error("Error saving editor state:", error);
@@ -242,7 +242,7 @@ export class FileManager {
       ) {
         return null;
       }
-      console.log("Editor state loaded !");
+      
       return state;
     } catch (error: any) {
       if (error?.code === "ENOENT") return null;

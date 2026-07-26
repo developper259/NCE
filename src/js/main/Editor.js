@@ -1,5 +1,7 @@
 class Editor {
   constructor() {
+    this.isOnInit = true;
+
     this.mainSection = getElement(".main-section");
     this.output = getElement(".editor-output");
     this.editorOBJ = getElement(".editor");
@@ -10,10 +12,9 @@ class Editor {
     this.selected = false;
     this.isActive = false;
     this.panel = undefined;
-    this.isOnInit = true;
 
     this.baseX = 50; // left margin (2 represents the difference left margin)
-    this.updateBaseX();
+    //this.updateBaseX();
     this.baseY = 2; // top margin
     this.posY = 23; // size of a line
     this.letterSize = 10.8; // size of leter     (fs : 20 -> 12, fs : 18 -> 10.8)
@@ -52,7 +53,7 @@ class Editor {
 
     this.initQuitEvent();
     this.initLoadState();
-    
+
     this.isOnInit = false;
   }
 
@@ -105,7 +106,10 @@ class Editor {
 
     if (this.tabManager) this.tabManager.show();
 
-    if (this.lineController) this.lineController.show();
+    if (this.lineController) {
+      if (!this.lineController.isSized()) this.lineController.resize();
+      this.lineController.show();
+    }
     if (this.bottomBar) this.bottomBar.show();
 
     if (this.emptyMenu) this.emptyMenu.hide();
@@ -114,6 +118,7 @@ class Editor {
   onClick(e) {
     const t = e.target;
     const c = t.classList;
+    
     if (
       c.contains("editor-select") ||
       c.contains("editor-el") ||

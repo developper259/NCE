@@ -148,7 +148,6 @@ class Scroller {
     this.parentOBJ.appendChild(this.scrollerOBJ);
 
     this.addScrollListeners();
-    this.refreshMetrics();
     this.refresh();
   }
 

@@ -10,6 +10,7 @@ class tabManager {
     this.idCounter = 0;
 
     this.refresh();
+
   }
 
   getNextID() {
@@ -41,7 +42,7 @@ class tabManager {
     this.openFiles([file]);
   }
 
-  async openFiles(files) {
+  async openFiles(files, isCallEvent=true, isRefreshAll=true, isSetFocusFile=true) {
     if (files.length === 0) return;
     let lastAddedFile = null;
 
@@ -68,21 +69,23 @@ class tabManager {
     }
 
     if (lastAddedFile) {
-      this.setFocusFile(lastAddedFile);
+      if (isSetFocusFile) this.setFocusFile(lastAddedFile, isRefreshAll);
 
       this.activeFile.setIsSaved(true);
     }
 
-    if (!this.editor.isOnInit) {
+    if (!this.editor.isOnInit && isCallEvent) {
       this.editor.events.callEvent(Events.ON_OPEN_FILE, {
         files: files,
         activeFile: lastAddedFile,
       });
     }
+    if (!isSetFocusFile) this.editor.refreshAll();
   }
 
-  closeFiles(isCallEvent) {
+  closeFiles(isCallEvent = true, isRefreshAll = true) {
     requestAnimationFrame(() => {
+      console.log(this.files)
       this.files = [];
       this.activeFile = undefined;
       this.editor.fileExplorer.activeFilePath = null;
@@ -94,11 +97,11 @@ class tabManager {
         });
       }
 
-      this.editor.refreshAll();
+      if (!this.editor.isOnInit && isRefreshAll) this.editor.refreshAll();
     });
   }
 
-  async closeFile(id) {
+  async closeFile(id, isRefreshAll = true) {
     const file = this.getFileByID(id);
     if (!file) return;
 
@@ -134,7 +137,7 @@ class tabManager {
         activeFile: this.activeFile,
       });
     }
-    this.editor.refreshAll();
+    if (!this.editor.isOnInit && isRefreshAll) this.editor.refreshAll();
   }
 
   closeActiveFile() {
@@ -143,7 +146,7 @@ class tabManager {
     }
   }
 
-  async setFocusFile(file) {
+  async setFocusFile(file, isRefreshAll = true) {
     if (!file) return;
     this.activeFile = file;
 
@@ -155,7 +158,7 @@ class tabManager {
 
     this.editor.cursor.setCursorPosition(file.row, file.column);
 
-    this.editor.refreshAll();
+    if (!this.editor.isOnInit && isRefreshAll) this.editor.refreshAll();
   }
 
   openFileWithPath(path) {
@@ -262,7 +265,7 @@ class tabManager {
     ul.replaceChildren(fragment);
 
     if (this.files.length === 0) {
-      this.editor.reset();
+      if (!this.editor.isOnInit) this.editor.reset();
     } else {
       if (!this.editor.isActive) this.editor.reactive();
     }

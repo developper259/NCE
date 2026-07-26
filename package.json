@@ -14,8 +14,10 @@
   "license": "ISC",
   "dependencies": {
     "@flaticon/flaticon-uicons": "^3.3.1",
+    "@types/ws": "^8.18.1",
     "chokidar": "^5.0.0",
-    "typescript": "^5.2.2"
+    "typescript": "^5.2.2",
+    "ws": "^8.21.1"
   },
   "build": {
     "appId": "fr.ndl.nce",
