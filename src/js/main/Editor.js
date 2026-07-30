@@ -1,5 +1,5 @@
 class Editor {
-  constructor() {
+   constructor() {
     this.isOnInit = true;
 
     this.mainSection = getElement(".main-section");
@@ -13,8 +13,7 @@ class Editor {
     this.isActive = false;
     this.panel = undefined;
 
-    this.baseX = 50; // left margin (2 represents the difference left margin)
-    //this.updateBaseX();
+    this.baseX = 50; // left margin
     this.baseY = 2; // top margin
     this.posY = 23; // size of a line
     this.letterSize = 10.8; // size of leter     (fs : 20 -> 12, fs : 18 -> 10.8)
@@ -29,6 +28,7 @@ class Editor {
     this.threadManager = new ThreadManager();
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
+    this.threadManager = new ThreadManager();
 
     this.fileExplorer = new FileExplorer(this);
     this.sidebarManager.registerMenu(this.fileExplorer);
@@ -37,6 +37,7 @@ class Editor {
     this.lineController = new LineController(this);
     this.selectController = new SelectController(this);
     this.keyBindingController = new keyBindingController(this);
+    this.highlightController = new HighlightController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
@@ -67,6 +68,7 @@ class Editor {
     this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
     this.sidebarManager.refreshAll();
+    this.highlightController.refresh();
   }
 
   hideAll() {

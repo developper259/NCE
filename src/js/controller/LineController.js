@@ -2,7 +2,7 @@ class LineController {
   constructor(editor) {
     this.editor = editor;
 
-    this.lineN = document.querySelector(".line-numbers");
+    this.lineN = getElement(".line-numbers");
 
     this.outputWidth = 0;
     this.outputHeight = 0;
@@ -250,35 +250,36 @@ class LineController {
 
   addLine(txt, index) {
     this.lines.splice(index, 0, txt);
-    this.markDirtyLineFrom(index);
+    this.markDirtyFrom(index);
   }
 
   changeLine(txt, index) {
     if (index >= 0 && index < this.lines.length) {
       this.lines[index] = txt;
-      this.markDirtyLine(index);
+      this.markDirty(index);
     }
   }
 
   supLine(index) {
     if (index >= 0 && index < this.lines.length) {
-      this.markDirtyLineFrom(index);
+      this.markDirtyFrom(index);
       this.lines.splice(index, 1);
     }
   }
 
   clear() {
     this.lines = [""];
-    this.markDirtyLineFrom(0);
+    this.markDirtyAll();
   }
 
   markDirtyAll() {
     if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
-    this.markDirtyLineFrom(0);
+    this.markDirtyFrom(0, false);
+    this.editor.highlightController.markDirtyAll(true);
   }
 
-  markDirtyLineFrom(dataIndex) {
+  markDirtyFrom(dataIndex, isHighlight=true) {
     if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
     const start = Math.max(dataIndex, this.startIndex);
@@ -289,12 +290,16 @@ class LineController {
     for (let i = start; i < end; i++) {
       this.dirtyLines.add(i);
     }
+
+    if (isHighlight) this.editor.highlightController.markDirtyFrom(dataIndex);
   }
 
-  markDirtyLine(index) {
+  markDirty(index) {
     if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
     this.dirtyLines.add(index);
+
+    this.editor.highlightController.markDirty(index);
   }
 
   refreshOutput() {
@@ -308,6 +313,7 @@ class LineController {
     });
 
     this.dirtyLines.clear();
+    this.editor.highlightController.refresh();
   }
 
   refreshLineOutput(screenIndex) {
@@ -359,6 +365,8 @@ class LineController {
       lineOBJ.dataset.line = dataIndex;
       child.replaceWith(lineOBJ);
     }
+
+    this.editor.highlightController.initLineNode();
   }
 
   initLineOutput() {
@@ -411,6 +419,8 @@ class LineController {
 
     this.editor.output.replaceChildren(fragment);
     this.outputScroller.vScroller.nbItem = this.lines.length;
+
+    this.editor.highlightController.initLineNode();
   }
 
   refreshNumberLines() {
@@ -505,18 +515,22 @@ class LineController {
   }
 
   createLineOBJ(line, row) {
-    const obj = this.editor.writerController.textToOBJ(line);
+    const obj = this.editor.writerController.textToOBJ(line, row);
 
     if (!obj) return;
 
+    const lineOBJ = obj.line;
+
     const x = 0;
 
-    obj.style.position = "absolute";
-    obj.style.top = `${this.getLineTop(row)}px`;
-    obj.style.left = x + "px";
+    lineOBJ.style.position = "absolute";
+    lineOBJ.style.top = `${this.getLineTop(row)}px`;
+    lineOBJ.style.left = x + "px";
 
-    obj.dataset.line = row;
-    return obj;
+    lineOBJ.dataset.line = row;
+    lineOBJ.dataset.isHighlight = obj.isHighlight;
+
+    return lineOBJ;
   }
 
   getLineOBJ(row) {
@@ -560,6 +574,8 @@ class LineController {
     this.outputScroller.refresh();
 
     this.editor.cursor.updateCaretPosition();
+
+    this.editor.highlightController.refresh();
   }
 
   onClickNumberLine(e) {
@@ -601,9 +617,12 @@ class LineController {
 
     this.initLineOutput();
     this.initNumberLines();
+
     const cursor = getElement(".editor-caret");
     cursor.style.display = "block";
 
     this.outputScroller.show();
+
+    this.editor.highlightController.refresh();
   }
 }

@@ -8,9 +8,6 @@ class ThreadManager {
 
   createWorker(workerPath, name) {
     if (this.workers.size >= this.maxWorkers) {
-      console.warn(
-        `Max workers (${this.maxWorkers}) reached. Reusing existing workers.`,
-      );
       return this.getAvailableWorker();
     }
 
@@ -27,7 +24,6 @@ class ThreadManager {
       task: null,
     });
 
-    console.log(`Worker ${workerId} (${name}) created`);
     return workerId;
   }
 
@@ -42,38 +38,47 @@ class ThreadManager {
 
   executeTask(workerPath, taskName, data, transferables = []) {
     return new Promise((resolve, reject) => {
-      let workerId = this.getAvailableWorker();
+      const run = () => {
+        let workerId = this.getAvailableWorker();
 
-      if (!workerId) {
-        workerId = this.createWorker(workerPath, taskName);
-      }
+        if (!workerId) {
+          workerId = this.createWorker(workerPath, taskName);
+        }
 
-      const taskId = `${taskName}-${Date.now()}-${Math.random()}`;
+        if (!workerId) {
+          setTimeout(run, 10);
+          return;
+        }
 
-      this.taskQueue.set(taskId, {
-        resolve,
-        reject,
-        workerId,
-        taskName,
-      });
+        const taskId = `${taskName}-${Date.now()}-${Math.random()}`;
 
-      const workerData = this.workers.get(workerId);
-      workerData.busy = true;
-      workerData.task = taskId;
+        this.taskQueue.set(taskId, {
+          resolve,
+          reject,
+          workerId,
+          taskName,
+        });
 
-      try {
-        workerData.worker.postMessage(
-          {
-            taskId,
-            taskName,
-            data,
-          },
-          transferables,
-        );
-      } catch (error) {
-        this.cleanupTask(taskId);
-        reject(error);
-      }
+        const workerData = this.workers.get(workerId);
+        workerData.busy = true;
+        workerData.task = taskId;
+
+        try {
+          workerData.worker.postMessage(
+            {
+              taskId,
+              taskName,
+              data: JSON.parse(JSON.stringify(data)),
+            },
+            transferables,
+          );
+        } catch (error) {
+          this.cleanupTask(taskId);
+          reject(error);
+        }
+      };
+
+      run();
     });
   }
 

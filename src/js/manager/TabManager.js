@@ -85,7 +85,6 @@ class tabManager {
 
   closeFiles(isCallEvent = true, isRefreshAll = true) {
     requestAnimationFrame(() => {
-      console.log(this.files)
       this.files = [];
       this.activeFile = undefined;
       this.editor.fileExplorer.activeFilePath = null;

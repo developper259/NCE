@@ -98,7 +98,7 @@ class WriterController {
     return tableSplit;
   }
 
-  textToOBJ(txt) {
+  textToOBJ(txt, screenIndex) {
     if (txt === undefined) return;
 
     const words = this.splitWordView(txt);
@@ -107,17 +107,50 @@ class WriterController {
 
     const fragment = document.createDocumentFragment();
 
+    const row = screenIndex + this.editor.lineController.startIndex;
+    const tokens = this.editor.highlightController.cachedLines[row];
+
+    let i = 0;
+    let a = 0;
+    let maxA = 0;
+    let isHighlight = false;
+
     for (const word of words) {
       if (word.length > 0) {
+        let c = "";
+        let token = null;
+        if (tokens) {
+          token = tokens[i];
+          if (token && word && word !== " ") {
+            c = token.type;
+            isHighlight = true;
+          }
+        }
+
         const span = document.createElement("span");
-        span.className = "line-word editor-select";
+        span.className = `line-word editor-select ${c}`;
         span.textContent = word;
         fragment.appendChild(span);
+
+        if (tokens && word && word !== " ") {
+          if (token && token.value) {
+            maxA = this.editor.writerController.splitWord(token.value).length;
+          }
+          a++;
+
+          if (a === maxA) {
+            i++;
+            maxA = 0;
+            a = 0;
+          }
+        }
       }
     }
 
+    if (fragment.childNodes.length === 0) isHighlight = true;
+
     lineDiv.appendChild(fragment);
-    return lineDiv;
+    return { line: lineDiv, isHighlight: isHighlight};
   }
 
   write(txt) {

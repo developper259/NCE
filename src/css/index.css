@@ -3,6 +3,10 @@
   src: url("../../assets/fonts/Jetbrains mono/webfonts/JetBrainsMono-Regular.woff2");
 }
 
+body, pre, code, .editor {
+  font-feature-settings: "liga" 0, "calt" 0;
+}
+
 body {
   margin: 0;
   background-color: var(--bg-primary);

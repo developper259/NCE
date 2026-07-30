@@ -1,0 +1,64 @@
+.nsh-highlighter {
+  color: #000000;
+}
+
+.nsh-keyword {
+  color: #0000ff;
+}
+
+.nsh-control {
+  color: #af00db;
+}
+
+.nsh-string {
+  color: #a31515;
+}
+
+.nsh-number {
+  color: #098658;
+}
+
+.nsh-comment {
+  color: #008000;
+  font-style: italic;
+}
+
+.nsh-function {
+  color: #795e26;
+}
+
+.nsh-variable {
+  color: #001080;
+}
+
+.nsh-property {
+  color: #001080;
+}
+
+.nsh-type {
+  color: #267f99;
+}
+
+.nsh-builtin {
+  color: #0070c1;
+}
+
+.nsh-operator {
+  color: #000000;
+}
+
+.nsh-bracket {
+  color: #000000;
+}
+
+.nsh-regex {
+  color: #811f3f;
+}
+
+.nsh-tag {
+  color: #800000;
+}
+
+.nsh-attribute {
+  color: #ff0000;
+}

@@ -4,11 +4,13 @@ import path from "path";
 import { FileManager } from "./addon/FileManager";
 import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
+import { NSH } from './NSH'
 
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
   fileManager: FileManager | undefined;
   watcher: Watcher | undefined;
+  nsh: NSH | undefined;
   name: string;
   forceQuit: boolean;
 
@@ -38,6 +40,7 @@ export class Window {
 
     this.fileManager = new FileManager(this.window);
     this.watcher = new Watcher(this.window);
+    this.nsh = new NSH(this);
 
     const menu = new AppMenu(this.window, this);
 

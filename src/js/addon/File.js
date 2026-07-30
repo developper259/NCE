@@ -39,8 +39,17 @@ class FileNode {
 
     // Writer Controller
     this.insertMode = false;
+
+    // HighlightController
+    this.cachedLines = new Set();
+    this.language = "plaintext";
+
+    this.initLanguage();
   }
 
+  async initLanguage() {
+    this.language = await this.editor.highlightController.detectLanguage(this.name);
+  }
   isEmpty() {
     if (this.lines.length === 0) return true;
     if (this.lines.length === 1 && this.lines[0].length === 0) return true;
@@ -83,6 +92,9 @@ class FileNode {
     this.endSelect = file.endSelect;
 
     this.insertMode = file.insertMode;
+
+    this.cachedLines = file.cachedLines;
+    this.language = file.language;
   }
 
   async loadContent() {
