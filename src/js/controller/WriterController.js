@@ -108,7 +108,7 @@ class WriterController {
     const fragment = document.createDocumentFragment();
 
     const row = screenIndex + this.editor.lineController.startIndex;
-    const tokens = this.editor.highlightController.cachedLines[row];
+    const tokens = this.editor.highlightController.cachedLines.get(row);
 
     let i = 0;
     let a = 0;

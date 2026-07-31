@@ -166,6 +166,12 @@ class LineController {
     this.editor.tabManager.activeFile.offsetX = value;
   }
 
+  getLineLength(row) {
+    if (row >= this.lines.length || !this.lines[row]) return;
+    const l = this.lines[row].replace([' ', '\t'], '');
+    return l.length;
+  }
+
   measureOutputWidth() {
     const fromEditor = this.editor.editorOBJ.clientWidth - this.editor.baseX;
     if (fromEditor > 0) return fromEditor;
@@ -420,8 +426,9 @@ class LineController {
       fragment.appendChild(lineOBJ);
 
       this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
-      if (lineOBJ.dataset.isHighlight === 'false') this.editor.highlightController.markDirty(dataIndex);
+      //if (lineOBJ.dataset.isHighlight === 'false') this.editor.highlightController.markDirty(dataIndex);
     }
+    this.editor.highlightController.markDirtyAll(true);
 
     this.editor.output.replaceChildren(fragment);
     this.outputScroller.vScroller.nbItem = this.lines.length;

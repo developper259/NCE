@@ -1,8 +1,9 @@
 let ws = null;
 const pendingRequests = new Map();
 let connectionPromise = null;
+const port = 1212;
 
-function connectWebSocket(port = 8080) {
+function connectWebSocket() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
     return connectionPromise;
   }
@@ -45,8 +46,8 @@ function connectWebSocket(port = 8080) {
 }
 
 // Fonction utilitaire interne pour mutualiser l'envoi de requêtes au serveur
-async function sendToServer(payload, port = 8080) {
-  await connectWebSocket(port);
+async function sendToServer(payload) {
+  await connectWebSocket();
 
   const requestId = Date.now().toString() + Math.random().toString(36).substring(2, 9);
 
@@ -62,8 +63,6 @@ async function sendToServer(payload, port = 8080) {
   });
 }
 
-connectWebSocket(8080);
-
 self.onmessage = async (event) => {
   const { taskId, taskName, data } = event.data;
 
@@ -71,8 +70,7 @@ self.onmessage = async (event) => {
     let result;
 
     switch (taskName) {
-      case 'highlight':
-      case 'parse': {
+      case 'highlight': {
         const { code, language, responseType, options } = data;
         
         result = await sendToServer({

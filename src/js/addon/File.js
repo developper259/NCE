@@ -41,7 +41,7 @@ class FileNode {
     this.insertMode = false;
 
     // HighlightController
-    this.cachedLines = new Set();
+    this.cachedLines = new Map();
     this.language = undefined;
   }
 

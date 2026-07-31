@@ -9,6 +9,9 @@ class HighlightController {
     this.dirtyLines = new Set();
     this.isProcessingDirty = false;
 
+    this.maxLength = 1000;
+    this.marginHighlight = 100;
+
     this.classValue = [
       "nsh-keyword",
       "nsh-string",
@@ -127,21 +130,35 @@ class HighlightController {
   }
 
   markDirty(lineNumber) {
+    if (
+      lineNumber > this.editor.lineController.lines.length ||
+      this.dirtyLines.has(lineNumber)
+    )
+      return;
     this.dirtyLines.add(lineNumber);
   }
 
-  markDirtyAll(onlyUnHighlight=false) {
+  markDirtyAll(onlyUnHighlight = false) {
     if (
       !this.editor.lineController.lines ||
       this.editor.lineController.lines.length === 0
     )
       return;
     if (onlyUnHighlight) {
+      let l = 0;
       for (const node of this.lineNodes.values()) {
-        if (!node.dataset.isHighlight || node.dataset.isHighlight === 'false') 
-          this.markDirty(parseInt(node.dataset.line, 10));
+        l = parseInt(node.dataset.line, 10);
+        if (!node.dataset.isHighlight || node.dataset.isHighlight === "false")
+          this.markDirty(l);
       }
-    }else {
+      for (let i = 1; i < this.marginHighlight + 1; i++) {
+        if (
+          !this.cachedLines.has(l + i) &&
+          this.editor.lineController.getLineLength(l + 1) > 0
+        )
+          this.markDirty(l + i);
+      }
+    } else {
       this.markDirtyFrom(0);
     }
   }
@@ -154,24 +171,37 @@ class HighlightController {
       return;
 
     const start = Math.max(dataIndex, this.editor.lineController.startIndex);
-    const end = Math.min(
+    let end = Math.min(
       this.editor.lineController.lines.length,
       this.editor.lineController.startIndex +
         this.editor.lineController.maxViewLines,
     );
+
+    end = Math.min(
+      this.editor.lineController.lines.length,
+      end + this.marginHighlight,
+    );
+
     for (let i = start; i < end; i++) {
-      this.dirtyLines.add(i);
+      if (
+        !this.cachedLines.has(l + i) &&
+        this.editor.lineController.getLineLength(l + 1) > 0
+      )
+        this.dirtyLines.add(i);
     }
   }
 
   async refresh() {
+    console.log(this.dirtyLines);
     if (this.isProcessingDirty || this.dirtyLines.size === 0) return;
 
     const language = this.editor.tabManager.activeFile?.language || "plaintext";
-    
+
     if (language === "plaintext") {
       return;
     }
+
+    if (!this.cachedLines) this.cachedLines = new Map();
 
     this.isProcessingDirty = true;
 
@@ -190,6 +220,8 @@ class HighlightController {
           return null;
         }
 
+        if (lineText.length >= this.maxLength) return null;
+
         const result = await this.editor.threadManager.executeTask(
           this.workerPath,
           "highlight",
@@ -207,17 +239,13 @@ class HighlightController {
           },
         );
 
-        return { lineNumber, tokens: result?.tokens };
+        if (result && result.tokens) {
+          this.applyHighlightToLine(lineNumber, result.tokens);
+          this.cachedLines.set(lineNumber, result.tokens);
+        }
       });
 
-      const results = await Promise.all(promises);
-      if (!this.cachedLines) this.cachedLines = new Set();
-      for (const res of results) {
-        if (res && res.tokens) {
-          this.applyHighlightToLine(res.lineNumber, res.tokens);
-          this.cachedLines[res.lineNumber] = res.tokens;
-        }
-      }
+     await Promise.all(promises);
     } catch (error) {
       console.error("Erreur lors du refresh :", error);
     } finally {

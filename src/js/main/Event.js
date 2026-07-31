@@ -115,6 +115,8 @@ class Events {
   }
   onLoaded(arg) {
     this.editor.isOnInit = false;
+
+    if (this.editor.tabManager.files.length === 0) this.editor.reset();
   }
 
   // DOM Event
