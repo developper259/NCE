@@ -22,9 +22,9 @@
 	display: flex;
 	position: relative;
 	height: 100%;
-	width: 100px;
+	width: auto;
+	padding-right: 5px;
 	align-items: center;
-	padding: 0 40px;
 	cursor: pointer;
 	color: var(--text-secondary);
 	border-right: 1px solid var(--border-primary);
@@ -32,15 +32,11 @@
 
 .file-manager .files-ul .file-el-title {
 	font-size: 14px;
-	position: absolute;
-	left: 10px;
+	margin-left: 10px;
 }
 
 .file-manager .file-el .file-el-btn {
-	position: absolute;
-	right: 5px;
-	top: 50%;
-	transform: translateY(-50%);
+	margin-left: 15px;
 	padding: 2px;
 	border-radius: 6px;
 	display: flex;
@@ -50,8 +46,8 @@
 }
 
 .file-manager .file-el .file-el-btn img {
-	width: 20px;
-	height: 20px;
+	width: 16px;
+	height: 16px;
 }
 
 .file-manager .file-el .file-el-btn:hover {

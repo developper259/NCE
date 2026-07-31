@@ -54,7 +54,7 @@ class tabManager {
         }
       }
 
-      if (!file.language) file.loadLanguage();
+      if (!file.language) await file.loadLanguage();
 
       if (
         file.hasPath() &&
@@ -143,6 +143,9 @@ class tabManager {
   async setFocusFile(file) {
     if (!file) return;
     this.activeFile = file;
+
+    this.editor.lineController.dirtyLines.clear();
+    this.editor.highlightController.dirtyLines.clear();
 
     this.editor.fileExplorer.setActiveFile(file.path);
 
