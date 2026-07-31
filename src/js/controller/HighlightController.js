@@ -108,19 +108,22 @@ class HighlightController {
     }
   }
 
-  initLineNode() {
+  refreshLineNode() {
     this.editor.output.childNodes.forEach((node) => {
       const lineNumber = parseInt(node.dataset.line, 10);
-      this.lineNodes.set(lineNumber, node);
+      const screenRow = lineNumber - this.editor.lineController.startIndex;
+      this.lineNodes.set(screenRow, node);
     });
   }
 
   setLineNode(lineNumber, node) {
-    this.lineNodes.set(lineNumber, node);
+    const screenRow = lineNumber - this.editor.lineController.startIndex;
+    this.lineNodes.set(screenRow, node);
   }
 
   getLineNode(lineNumber) {
-    return this.lineNodes.get(lineNumber);
+    const screenRow = lineNumber - this.editor.lineController.startIndex;
+    return this.lineNodes.get(screenRow);
   }
 
   markDirty(lineNumber) {
@@ -165,9 +168,8 @@ class HighlightController {
     if (this.isProcessingDirty || this.dirtyLines.size === 0) return;
 
     const language = this.editor.tabManager.activeFile?.language || "plaintext";
-
+    
     if (language === "plaintext") {
-      this.dirtyLines.clear();
       return;
     }
 
@@ -176,10 +178,8 @@ class HighlightController {
     try {
       const linesToProcess = [...this.dirtyLines];
       this.dirtyLines.clear();
-
       const promises = linesToProcess.map(async (lineNumber) => {
         const lineText = this.editor.lineController.lines[lineNumber];
-
         if (
           !language ||
           language === "plaintext" ||
@@ -211,10 +211,11 @@ class HighlightController {
       });
 
       const results = await Promise.all(promises);
-
+      if (!this.cachedLines) this.cachedLines = new Set();
       for (const res of results) {
         if (res && res.tokens) {
           this.applyHighlightToLine(res.lineNumber, res.tokens);
+          this.cachedLines[res.lineNumber] = res.tokens;
         }
       }
     } catch (error) {
@@ -266,8 +267,6 @@ class HighlightController {
     }
 
     this.dirtyLines.delete(lineNumber);
-    if (!this.cachedLines) this.cachedLines = [];
-    this.cachedLines[lineNumber] = tokens;
 
     lineNode.dataset.isHighlight = true;
   }

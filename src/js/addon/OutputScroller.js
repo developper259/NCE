@@ -54,6 +54,7 @@ class OutputScroller {
 
     this.vScroller.onScroll = (scrollRatio) => {
       this.applyVerticalScrollFromRatio(scrollRatio);
+      this.lineController.refresh(true);
     };
 
     // Horizontal scroller
@@ -97,6 +98,7 @@ class OutputScroller {
 
     this.hScroller.onScroll = (scrollRatio) => {
       this.applyHorizontalScrollFromRatio(scrollRatio);
+      this.lineController.refresh(true);
     };
   }
 
@@ -142,10 +144,6 @@ class OutputScroller {
 
     if (this.lineController.offsetX !== newOffsetX) {
       this.lineController.offsetX = newOffsetX;
-      this.lineController.markDirtyAll();
-      this.lineController.refreshOutput();
-      this.editor.cursor.updateCaretPosition();
-      this.editor.selectController.refreshSelectPositions();
     }
   }
 
@@ -211,14 +209,6 @@ class OutputScroller {
     this.lineController.startIndex = newStartIndex;
     this.lineController.offsetY = newOffsetY;
     this.applyScrollTransform();
-    this.editor.cursor.updateCaretPosition();
-    this.editor.selectController.refreshSelectPositions();
-
-    if (startIndexChanged) {
-      this.lineController.markDirtyAll();
-      this.lineController.refreshOutput();
-      this.lineController.refreshNumberLines();
-    }
   }
 
   applyScrollTransform() {
@@ -297,13 +287,6 @@ class OutputScroller {
     const hMetrics = this.hScroller.readThumbMetrics();
     if (hMetrics) this.hScroller.writeThumbPosition(hMetrics);
     this.hScroller.refresh();
-
-    this.lineController.markDirtyAll();
-    this.lineController.refreshOutput();
-    this.lineController.refreshNumberLines();
-
-    this.editor.cursor.updateCaretPosition();
-    this.editor.selectController.refreshSelectPositions();
   }
 
   refresh() {

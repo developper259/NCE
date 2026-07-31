@@ -42,13 +42,13 @@ class FileNode {
 
     // HighlightController
     this.cachedLines = new Set();
-    this.language = "plaintext";
-
-    this.initLanguage();
+    this.language = undefined;
   }
 
-  async initLanguage() {
-    this.language = await this.editor.highlightController.detectLanguage(this.name);
+  async loadLanguage() {
+    this.language = await this.editor.highlightController.detectLanguage(
+      this.name,
+    );
   }
   isEmpty() {
     if (this.lines.length === 0) return true;

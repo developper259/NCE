@@ -69,7 +69,7 @@ class FileExplorer extends Sidebar {
           expanded: false,
           children: item.type === "folder" ? [] : undefined,
         }));
-      }else{
+      } else {
         await this.restoreExpandedFolders(this.files, expandedPaths);
       }
       this.isLoaded = true;
@@ -95,12 +95,10 @@ class FileExplorer extends Sidebar {
     await this.loadFiles();
     this.refresh();
 
-    if (!this.editor.isOnInit) {
-      this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
-        rootPath: this.rootPath,
-        projectName: this.projectName,
-      });
-    }
+    this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
+      rootPath: this.rootPath,
+      projectName: this.projectName,
+    });
   }
 
   async loadFolderContent(folderPath) {

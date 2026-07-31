@@ -10,7 +10,6 @@ class tabManager {
     this.idCounter = 0;
 
     this.refresh();
-
   }
 
   getNextID() {
@@ -42,7 +41,7 @@ class tabManager {
     this.openFiles([file]);
   }
 
-  async openFiles(files, isCallEvent=true, isRefreshAll=true, isSetFocusFile=true) {
+  async openFiles(files, isSetFocusFile = true) {
     if (files.length === 0) return;
     let lastAddedFile = null;
 
@@ -50,9 +49,12 @@ class tabManager {
       if (file.path) {
         const f = this.getFileByPath(file.path);
         if (f) {
+          lastAddedFile = f;
           continue;
         }
       }
+
+      if (!file.language) file.loadLanguage();
 
       if (
         file.hasPath() &&
@@ -67,40 +69,35 @@ class tabManager {
         lastAddedFile = file;
       }
     }
-
     if (lastAddedFile) {
-      if (isSetFocusFile) this.setFocusFile(lastAddedFile, isRefreshAll);
+      if (isSetFocusFile) this.setFocusFile(lastAddedFile);
 
       this.activeFile.setIsSaved(true);
     }
 
-    if (!this.editor.isOnInit && isCallEvent) {
-      this.editor.events.callEvent(Events.ON_OPEN_FILE, {
-        files: files,
-        activeFile: lastAddedFile,
-      });
-    }
+    this.editor.events.callEvent(Events.ON_OPEN_FILE, {
+      files: files,
+      activeFile: lastAddedFile,
+    });
     if (!isSetFocusFile) this.editor.refreshAll();
   }
 
-  closeFiles(isCallEvent = true, isRefreshAll = true) {
+  closeFiles() {
     requestAnimationFrame(() => {
       this.files = [];
       this.activeFile = undefined;
       this.editor.fileExplorer.activeFilePath = null;
 
-      if (!this.editor.isOnInit && isCallEvent) {
-        this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
-          file: null,
-          activeFile: undefined,
-        });
-      }
+      this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+        file: null,
+        activeFile: undefined,
+      });
 
-      if (!this.editor.isOnInit && isRefreshAll) this.editor.refreshAll();
+      if (!this.editor.isOnInit) this.editor.refreshAll();
     });
   }
 
-  async closeFile(id, isRefreshAll = true) {
+  async closeFile(id) {
     const file = this.getFileByID(id);
     if (!file) return;
 
@@ -130,13 +127,11 @@ class tabManager {
       return;
     }
 
-    if (!this.editor.isOnInit) {
-      this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
-        file: file,
-        activeFile: this.activeFile,
-      });
-    }
-    if (!this.editor.isOnInit && isRefreshAll) this.editor.refreshAll();
+    this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+      file: file,
+      activeFile: this.activeFile,
+    });
+    if (!this.editor.isOnInit) this.editor.refreshAll();
   }
 
   closeActiveFile() {
@@ -145,7 +140,7 @@ class tabManager {
     }
   }
 
-  async setFocusFile(file, isRefreshAll = true) {
+  async setFocusFile(file) {
     if (!file) return;
     this.activeFile = file;
 
@@ -157,7 +152,7 @@ class tabManager {
 
     this.editor.cursor.setCursorPosition(file.row, file.column);
 
-    if (!this.editor.isOnInit && isRefreshAll) this.editor.refreshAll();
+    if (!this.editor.isOnInit) this.editor.refreshAll();
   }
 
   openFileWithPath(path) {

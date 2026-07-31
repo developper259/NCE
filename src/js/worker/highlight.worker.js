@@ -11,7 +11,7 @@ function connectWebSocket(port = 8080) {
     ws = new WebSocket(`ws://localhost:${port}`);
 
     ws.onopen = () => {
-      console.log("🟢 Worker : Connecté au serveur WebSocket NSH (Permanent)");
+      console.log("Worker : Connecté au serveur WebSocket NSH (Permanent)");
       resolve();
     };
 

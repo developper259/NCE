@@ -1,6 +1,7 @@
 class Editor {
    constructor() {
     this.isOnInit = true;
+    this.isOnRefresh = false;
 
     this.mainSection = getElement(".main-section");
     this.output = getElement(".editor-output");
@@ -54,21 +55,21 @@ class Editor {
 
     this.initQuitEvent();
     this.initLoadState();
-
-    this.isOnInit = false;
   }
 
   refreshAll() {
+    this.isOnRefresh = true;
+
     this.emptyMenu.refresh();
     this.tabManager.refresh();
     this.cursor.updateCaretPosition();
-    this.lineController.initLineOutput();
-    this.lineController.initNumberLines();
+    this.lineController.refresh(true);
     this.lineController.restoreScroll();
     this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
     this.sidebarManager.refreshAll();
-    this.highlightController.refresh();
+    
+    this.isOnRefresh = false;
   }
 
   hideAll() {
@@ -162,13 +163,19 @@ class Editor {
 
   initLoadState() {
     let loaded = false;
-    const apply = (state) => {
+    const apply = async (state) => {
       if (!state || loaded) {
+        if (this.isOnInit) this.events.callEvent(Events.ON_LOADED, {
+          isStateLoaded: false
+        });
         this.reset();
         return;
       }
       loaded = true;
-      this.statesManager.loadStates(state);
+      await this.statesManager.loadStates(state);
+      if (this.isOnInit) this.events.callEvent(Events.ON_LOADED, {
+        isStateLoaded: true
+      });
     };
 
     this.api.onLoadState(apply);

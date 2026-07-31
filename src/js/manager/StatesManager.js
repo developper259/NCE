@@ -107,8 +107,6 @@ class StatesManager {
     if (state.tabManager) {
       await this.loadTabManagerState(state.tabManager);
     }
-
-    this.editor.refreshAll();
   }
 
   async loadTabManagerState(tabState) {
@@ -149,6 +147,8 @@ class StatesManager {
         file._selectedLines = new Map();
       }
 
+      await file.loadLanguage();
+
       tabManager.files.push(file);
 
       if (tabState.activeFile && file.id === tabState.activeFile.id) {
@@ -157,7 +157,7 @@ class StatesManager {
     }
 
     if (activeFileToFocus) {
-      tabManager.setFocusFile(activeFileToFocus);
+      tabManager.setFocusFile(activeFileToFocus, false);
 
       if (
         this.editor.selectController &&

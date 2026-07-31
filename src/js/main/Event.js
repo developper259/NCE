@@ -23,6 +23,7 @@ class Events {
   static ON_CLOSE_FILE = "onClose";
   static ON_OPEN_PROJECT = "onOpenProject";
   static ON_CLOSE_PROJECT = "onCloseProject";
+  static ON_LOADED = "onLoaded"; 
 
   constructor(editor) {
     this.editor = editor;
@@ -32,6 +33,7 @@ class Events {
   }
 
   callEvent(e, arg) {
+    if (this.editor.isOnInit && e !== Events.ON_LOADED) return;
     switch (e) {
       case Events.CURSOR_MOVE:
         this.cursorMove(arg);
@@ -65,6 +67,9 @@ class Events {
         break;
       case Events.ON_CLOSE_PROJECT:
         this.onCloseProject(arg);
+        break;
+      case Events.ON_LOADED:
+        this.onLoaded(arg);
         break;
       default:
         console.error("Event " + e + " not found !");
@@ -107,6 +112,9 @@ class Events {
   }
   onCloseProject(arg) {
     this.editor.statesManager.save();
+  }
+  onLoaded(arg) {
+    this.editor.isOnInit = false;
   }
 
   // DOM Event

@@ -189,8 +189,11 @@ class LineController {
     if (width > 0) this.outputWidth = width;
     this.outputHeight =
       this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
-    this.markDirtyAll();
-    this.refresh();
+    
+    if (!this.editor.isOnRefresh) {
+      this.markDirtyAll();
+      this.refresh();
+    }
   }
 
   loadContent(content, totalLines) {
@@ -313,7 +316,6 @@ class LineController {
     });
 
     this.dirtyLines.clear();
-    this.editor.highlightController.refresh();
   }
 
   refreshLineOutput(screenIndex) {
@@ -364,9 +366,10 @@ class LineController {
 
       lineOBJ.dataset.line = dataIndex;
       child.replaceWith(lineOBJ);
-    }
 
-    this.editor.highlightController.initLineNode();
+      this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
+      if (lineOBJ.dataset.isHighlight === 'false') this.editor.highlightController.markDirty(dataIndex);
+    }
   }
 
   initLineOutput() {
@@ -415,12 +418,13 @@ class LineController {
 
       lineOBJ.dataset.line = dataIndex;
       fragment.appendChild(lineOBJ);
+
+      this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
+      if (lineOBJ.dataset.isHighlight === 'false') this.editor.highlightController.markDirty(dataIndex);
     }
 
     this.editor.output.replaceChildren(fragment);
     this.outputScroller.vScroller.nbItem = this.lines.length;
-
-    this.editor.highlightController.initLineNode();
   }
 
   refreshNumberLines() {
@@ -562,19 +566,18 @@ class LineController {
     return words[index];
   }
 
-  refresh() {
+  refresh(forcedInit=false) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.lines.length === 0) this.lines = [""];
     if (this.index !== this.editor.cursor.row)
       this.index = this.editor.cursor.row;
 
-    this.refreshOutput();
+    if (forcedInit) this.initLineOutput();
+    else this.refreshOutput();
     this.refreshNumberLines();
 
-    this.outputScroller.refresh();
-
     this.editor.cursor.updateCaretPosition();
-
+    
     this.editor.highlightController.refresh();
   }
 
@@ -615,14 +618,15 @@ class LineController {
     this.lineN.style.display = "block";
     this.editor.output.style.display = "block";
 
-    this.initLineOutput();
-    this.initNumberLines();
-
     const cursor = getElement(".editor-caret");
     cursor.style.display = "block";
 
     this.outputScroller.show();
 
-    this.editor.highlightController.refresh();
+    if (!this.editor.isOnRefresh) {
+      this.initLineOutput();
+      this.initNumberLines();
+      this.editor.highlightController.refresh();
+    }
   }
 }
