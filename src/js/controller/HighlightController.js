@@ -111,6 +111,63 @@ class HighlightController {
     }
   }
 
+  getStartTokenDetails(tokens, offsetX) {
+    if (!tokens || tokens.length === 0) {
+      return { i: 0, a: 0, maxA: 0 };
+    }
+
+    let i = 0;
+    for (const token of tokens) {
+      if (
+        offsetX === token.column - 1 ||
+        (tokens.length - 1 > i && offsetX < tokens[i + 1].column - 1)
+      ) {
+        break;
+      }
+      i++;
+    }
+
+    if (i >= tokens.length) {
+      i = tokens.length - 1;
+    }
+
+    const getValidWords = (tokenValue) => {
+      return this.editor.writerController
+        .splitWord(tokenValue || "")
+        .filter((w) => w && w !== " ");
+    };
+
+    const rawWords = this.editor.writerController.splitWord(
+      tokens[i].value || "",
+    );
+    let maxA = getValidWords(tokens[i].value).length;
+
+    let b = tokens[i].column - 1;
+    let a = 0;
+
+    for (const el of rawWords) {
+      const isSpace = !el || el === " ";
+
+      if (offsetX < b + el.length) {
+        break;
+      }
+
+      b += el.length;
+
+      if (!isSpace) {
+        a++;
+      }
+    }
+
+    if (a >= maxA && i < tokens.length - 1) {
+      i++;
+      a = 0;
+      maxA = getValidWords(tokens[i].value).length;
+    }
+
+    return { i, a, maxA };
+  }
+
   refreshLineNode() {
     this.editor.output.childNodes.forEach((node) => {
       const lineNumber = parseInt(node.dataset.line, 10);
@@ -192,11 +249,9 @@ class HighlightController {
   }
 
   async refresh() {
-    console.log(this.dirtyLines);
     if (this.isProcessingDirty || this.dirtyLines.size === 0) return;
 
     const language = this.editor.tabManager.activeFile?.language || "plaintext";
-
     if (language === "plaintext") {
       return;
     }
@@ -245,7 +300,7 @@ class HighlightController {
         }
       });
 
-     await Promise.all(promises);
+      await Promise.all(promises);
     } catch (error) {
       console.error("Erreur lors du refresh :", error);
     } finally {
@@ -267,9 +322,10 @@ class HighlightController {
 
     if (!tokens || tokens.length === 0) return;
 
-    let i = 0;
-    let a = 0;
-    let maxA = 0;
+    let { i, a, maxA } = this.getStartTokenDetails(
+      tokens,
+      this.editor.lineController.offsetX,
+    );
     for (const node of wordNodes) {
       const token = tokens[i];
 

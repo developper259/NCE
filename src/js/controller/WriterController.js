@@ -110,9 +110,10 @@ class WriterController {
     const row = screenIndex + this.editor.lineController.startIndex;
     const tokens = this.editor.highlightController.cachedLines.get(row);
 
-    let i = 0;
-    let a = 0;
-    let maxA = 0;
+    let { i, a, maxA } = this.editor.highlightController.getStartTokenDetails(
+      tokens,
+      this.editor.lineController.offsetX,
+    );
     let isHighlight = false;
 
     for (const word of words) {
@@ -150,7 +151,7 @@ class WriterController {
     if (fragment.childNodes.length === 0) isHighlight = true;
 
     lineDiv.appendChild(fragment);
-    return { line: lineDiv, isHighlight: isHighlight};
+    return { line: lineDiv, isHighlight: isHighlight };
   }
 
   write(txt) {

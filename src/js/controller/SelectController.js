@@ -336,7 +336,7 @@ class SelectController {
     if (length > 0) {
       this.selectedLines.set(rowIndex, {
         startCol: startCol + 1,
-        length: length,
+        length: length - 1,
       });
 
       if (cursorChange) {
@@ -496,7 +496,7 @@ class SelectController {
   move() {
     if (!this.editor.tabManager.activeFile) return;
     const pos = this.editor.cursor.getCursorReelPosition();
-    let c = pos.column;
+    let c = pos.column - 1;
     let r = pos.row;
 
     if (
