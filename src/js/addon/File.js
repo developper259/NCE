@@ -16,7 +16,7 @@ class FileNode {
     this.column = 0;
 
     // Line Controller
-    this.lines = [""];
+    this.lines = [new LineNode("")];
     this.index = 1;
     this.totalLines = 0;
     this.maxLineLength = 0;
@@ -41,7 +41,6 @@ class FileNode {
     this.insertMode = false;
 
     // HighlightController
-    this.cachedLines = new Map();
     this.language = undefined;
   }
 
@@ -52,7 +51,8 @@ class FileNode {
   }
   isEmpty() {
     if (this.lines.length === 0) return true;
-    if (this.lines.length === 1 && this.lines[0].length === 0) return true;
+    if (this.lines.length === 1 && this.lines[0].getText().length === 0)
+      return true;
     return false;
   }
 
@@ -93,13 +93,13 @@ class FileNode {
 
     this.insertMode = file.insertMode;
 
-    this.cachedLines = file.cachedLines;
     this.language = file.language;
   }
 
   async loadContent() {
     if (!this.path) {
-      this.editor.lineController.loadContent(this.lines.join("\n"));
+      const content = this.lines.map((line) => line.getText()).join("\n");
+      this.editor.lineController.loadContent(content);
       this.isLoaded = true;
       return;
     }
@@ -124,7 +124,8 @@ class FileNode {
       if (error.message === "ENOENT") {
         console.log(`File not found: ${this.path}, marking as unsaved`);
         this.setIsSaved(false);
-        this.editor.lineController.loadContent(this.lines.join("\n"));
+        const content = this.lines.map((line) => line.getText()).join("\n");
+        this.editor.lineController.loadContent(content);
         this.isLoaded = true;
       } else {
         throw error;

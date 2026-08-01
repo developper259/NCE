@@ -312,7 +312,8 @@ class OutputScroller {
     if (!this.lineController.lines || this.lineController.lines.length === 0)
       return;
 
-    this.vScroller.nbItem = this.lineController.totalLines || this.lineController.lines.length;
+    this.vScroller.nbItem =
+      this.lineController.totalLines || this.lineController.lines.length;
     this.hScroller.nbItem = this.lineController.maxLineLength;
   }
 
@@ -342,7 +343,8 @@ class OutputScroller {
         0,
         Math.min(activeRow, this.lineController.lines.length - 1),
       );
-      const line = this.lineController.lines[safeRow] || "";
+      const lineNode = this.lineController.lines[safeRow];
+      const line = lineNode ? lineNode.getText() : "";
       column = Math.max(0, Math.min(column, line.length));
 
       const tabWidth = CONFIG_GET("tab_width");

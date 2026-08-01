@@ -91,8 +91,9 @@ class Cursor {
     const posReal = this.getReelPosition(targetRow, targetColumn);
     if (!posReal) return;
 
-    const line = this.editor.lineController.lines[posReal.row - 1];
-    if (line) {
+    const lineNode = this.editor.lineController.lines[posReal.row - 1];
+    if (lineNode) {
+      const line = lineNode.getText();
       const ch = line[posReal.column - 1];
       if (ch === "\t") {
         const tabWidth = CONFIG_GET("tab_width");
@@ -133,7 +134,7 @@ class Cursor {
       this.editor.lineController.setFocusLine(this.row);
 
       this.editor.setSelected(true);
-      
+
       if (!this.editor.isOnInit) {
         this.editor.events.callEvent(Events.CURSOR_CHANGE, { row, column });
       }
@@ -182,8 +183,9 @@ class Cursor {
       row = this.editor.lineController.lines.length;
     }
 
-    const line = this.editor.lineController.lines[row - 1];
-    if (line == undefined) return;
+    const lineNode = this.editor.lineController.lines[row - 1];
+    if (lineNode == undefined) return;
+    const line = lineNode.getText();
     let lineLength = this.editor.lineController.getViewLineLength(row - 1);
 
     if (column < 0) column = 0;
@@ -216,8 +218,9 @@ class Cursor {
       row = this.editor.lineController.lines.length;
     }
 
-    const line = this.editor.lineController.lines[row - 1];
-    if (line == undefined) return { row: 1, column: 0 };
+    const lineNode = this.editor.lineController.lines[row - 1];
+    if (lineNode == undefined) return { row: 1, column: 0 };
+    const line = lineNode.getText();
     let lineLength = this.editor.lineController.getViewLineLength(row - 1);
 
     if (column < 0) column = 0;
@@ -271,17 +274,20 @@ class Cursor {
 
   getLine() {
     if (!this.editor.lineController?.lines) return "";
-    return this.editor.lineController.lines[this.row - 1] || "";
+    const lineNode = this.editor.lineController.lines[this.row - 1];
+    return lineNode ? lineNode.getText() : "";
   }
 
   getBeforeLine() {
     if (!this.editor.lineController?.lines) return undefined;
-    return this.editor.lineController.lines[this.row - 2];
+    const lineNode = this.editor.lineController.lines[this.row - 2];
+    return lineNode ? lineNode.getText() : undefined;
   }
 
   getAfterLine() {
     if (!this.editor.lineController?.lines) return undefined;
-    return this.editor.lineController.lines[this.row];
+    const lineNode = this.editor.lineController.lines[this.row];
+    return lineNode ? lineNode.getText() : undefined;
   }
 
   getIndexWord() {

@@ -130,10 +130,15 @@ class SelectController {
         const fileRow = row + 1;
 
         const visualStartPos = cursor.getPosition(fileRow, info.startCol);
-        const visualEndPos = cursor.getPosition(fileRow, info.startCol + info.length);
+        const visualEndPos = cursor.getPosition(
+          fileRow,
+          info.startCol + info.length,
+        );
 
         const x = cursor.columnToX(visualStartPos.column);
-        const width = ((visualEndPos.column + 1) - visualStartPos.column) * this.editor.letterSize;
+        const width =
+          (visualEndPos.column + 1 - visualStartPos.column) *
+          this.editor.letterSize;
         const y = cursor.rowToY(fileRow) - difY;
         const height = cursor.mpY + difY;
 
@@ -178,7 +183,8 @@ class SelectController {
 
     for (const row of sortedRows) {
       const info = this.selectedLines.get(row);
-      const rawLine = this.editor.lineController.lines[row] || "";
+      const lineNode = this.editor.lineController.lines[row];
+      const rawLine = lineNode ? lineNode.getText() : "";
       const vec1 = cursor.getReelPosition(row + 1, info.startCol - 1);
       const vec2 = cursor.getReelPosition(
         row + 1,
@@ -195,7 +201,8 @@ class SelectController {
     const info = this.selectedLines.get(index);
     if (!info) return undefined;
 
-    const rawLine = this.editor.lineController.lines[index] || "";
+    const lineNode = this.editor.lineController.lines[index];
+    const rawLine = lineNode ? lineNode.getText() : "";
     const vec1 = this.editor.cursor.getReelPosition(
       index + 1,
       info.startCol - 1,
@@ -240,12 +247,11 @@ class SelectController {
     if (!this.editor.tabManager.activeFile || index === undefined) return;
 
     const line = this.editor.lineController;
-    if (!line.lines[index] && line.lines.length === 1) return;
+    const lineNode = line.lines[index];
+    if (!lineNode && line.lines.length === 1) return;
 
-    let length = this.editor.cursor.getPosition(
-      index + 1,
-      line.lines[index].length,
-    ).column;
+    const lineLength = lineNode ? lineNode.getText().length : 0;
+    let length = this.editor.cursor.getPosition(index + 1, lineLength).column;
     if (length === 0) length = 1;
 
     this.selectedLines.set(index, { startCol: 1, length: length });
@@ -273,10 +279,9 @@ class SelectController {
 
     const lc = this.editor.lineController;
     for (let i = 0; i < lc.lines.length; i++) {
-      let length = this.editor.cursor.getPosition(
-        i + 1,
-        lc.lines[i].length,
-      ).column;
+      const lineNode = lc.lines[i];
+      const lineLength = lineNode ? lineNode.getText().length : 0;
+      let length = this.editor.cursor.getPosition(i + 1, lineLength).column;
       if (length === 0) length = 1;
       this.selectedLines.set(i, { startCol: 1, length: length });
 
@@ -291,7 +296,8 @@ class SelectController {
 
     if (cursorChange) {
       const lastLine = this.editor.lineController.lines.length - 1;
-      const lastLineLength = this.editor.lineController.lines[lastLine].length;
+      const lastLineNode = this.editor.lineController.lines[lastLine];
+      const lastLineLength = lastLineNode ? lastLineNode.getText().length : 0;
       this.editor.cursor.setCursorPosition(lastLine + 1, lastLineLength + 1);
     }
 
@@ -309,7 +315,8 @@ class SelectController {
     const rowIndex = this.startSelect.row - 1;
     const colIndex = this.startSelect.column;
 
-    const lineText = this.editor.lineController.lines[rowIndex] || "";
+    const lineNode = this.editor.lineController.lines[rowIndex];
+    const lineText = lineNode ? lineNode.getText() : "";
     if (!lineText) return;
 
     const words = this.editor.writerController.splitWord(lineText);
@@ -388,7 +395,8 @@ class SelectController {
     const yStart = topRow - 1;
     const yEnd = bottomRow - 1;
 
-    const lineStart = lc.lines[yStart] ?? "";
+    const lineStartNode = lc.lines[yStart];
+    const lineStart = lineStartNode ? lineStartNode.getText() : "";
     const startViewLen = Math.max(
       0,
       (lc.getViewLineLength ? lc.getViewLineLength(yStart) : lineStart.length) -
@@ -402,7 +410,8 @@ class SelectController {
     }
 
     for (let i = yStart + 1; i < yEnd; i++) {
-      const lineLen = (lc.lines[i] ?? "").length;
+      const lineNode = lc.lines[i];
+      const lineLen = lineNode ? lineNode.getText().length : 0;
       const viewLen = lc.getViewLineLength ? lc.getViewLineLength(i) : lineLen;
       this.selectedLines.set(i, {
         startCol: 1,

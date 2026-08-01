@@ -26,16 +26,6 @@ class HighlightController {
     this.supportedLanguage = null;
   }
 
-  get cachedLines() {
-    if (!this.editor.tabManager.activeFile) return;
-    return this.editor.tabManager.activeFile?.cachedLines;
-  }
-
-  set cachedLines(value) {
-    if (!this.editor.tabManager.activeFile) return;
-    this.editor.tabManager.activeFile.cachedLines = value;
-  }
-
   getId() {
     return Date.now().toString() + Math.random().toString(36).substring(2, 9);
   }
@@ -111,6 +101,12 @@ class HighlightController {
     }
   }
 
+  splitValidWord(tokenValue) {
+    return this.editor.writerController
+      .splitWord(tokenValue || "")
+      .filter((w) => w && w !== " ");
+  }
+
   getStartTokenDetails(tokens, offsetX) {
     if (!tokens || tokens.length === 0) {
       return { i: 0, a: 0, maxA: 0 };
@@ -131,21 +127,13 @@ class HighlightController {
       i = tokens.length - 1;
     }
 
-    const getValidWords = (tokenValue) => {
-      return this.editor.writerController
-        .splitWord(tokenValue || "")
-        .filter((w) => w && w !== " ");
-    };
-
-    const rawWords = this.editor.writerController.splitWord(
-      tokens[i].value || "",
-    );
-    let maxA = getValidWords(tokens[i].value).length;
+    const validWords = this.splitValidWord(tokens[i].value || "");
+    let maxA = validWords.length;
 
     let b = tokens[i].column - 1;
     let a = 0;
 
-    for (const el of rawWords) {
+    for (const el of validWords) {
       const isSpace = !el || el === " ";
 
       if (offsetX < b + el.length) {
@@ -162,7 +150,7 @@ class HighlightController {
     if (a >= maxA && i < tokens.length - 1) {
       i++;
       a = 0;
-      maxA = getValidWords(tokens[i].value).length;
+      maxA = validWords.length;
     }
 
     return { i, a, maxA };
@@ -205,13 +193,15 @@ class HighlightController {
       let l = 0;
       for (const node of this.lineNodes.values()) {
         l = parseInt(node.dataset.line, 10);
-        if (!node.dataset.isHighlight || node.dataset.isHighlight === "false")
-          this.markDirty(l);
+        const lineNode = this.editor.lineController.lines[l];
+        if (!lineNode || !lineNode.isHighlight) this.markDirty(l);
       }
       for (let i = 1; i < this.marginHighlight + 1; i++) {
+        const lineNode = this.editor.lineController.lines[l + i];
         if (
-          !this.cachedLines.has(l + i) &&
-          this.editor.lineController.getLineLength(l + 1) > 0
+          !lineNode ||
+          (!lineNode.getTokens() &&
+            this.editor.lineController.getLineLength(l + 1) > 0)
         )
           this.markDirty(l + i);
       }
@@ -239,12 +229,14 @@ class HighlightController {
       end + this.marginHighlight,
     );
 
-    for (let i = start; i < end; i++) {
+    for (let i = 0; i < this.marginHighlight; i++) {
+      const lineNode = this.editor.lineController.lines[end + i];
       if (
-        !this.cachedLines.has(l + i) &&
-        this.editor.lineController.getLineLength(l + 1) > 0
+        !lineNode ||
+        (!lineNode.getTokens() &&
+          this.editor.lineController.getLineLength(end + i + 1) > 0)
       )
-        this.dirtyLines.add(i);
+        this.dirtyLines.add(end + i);
     }
   }
 
@@ -256,15 +248,14 @@ class HighlightController {
       return;
     }
 
-    if (!this.cachedLines) this.cachedLines = new Map();
-
     this.isProcessingDirty = true;
 
     try {
       const linesToProcess = [...this.dirtyLines];
       this.dirtyLines.clear();
       const promises = linesToProcess.map(async (lineNumber) => {
-        const lineText = this.editor.lineController.lines[lineNumber];
+        const lineNode = this.editor.lineController.lines[lineNumber];
+        const lineText = lineNode ? lineNode.getText() : "";
         if (
           !language ||
           language === "plaintext" ||
@@ -295,8 +286,9 @@ class HighlightController {
         );
 
         if (result && result.tokens) {
+          lineNode.setTokens(result.tokens);
+          lineNode.setHighlighted(true);
           this.applyHighlightToLine(lineNumber, result.tokens);
-          this.cachedLines.set(lineNumber, result.tokens);
         }
       });
 
@@ -339,7 +331,7 @@ class HighlightController {
       }
 
       if (token) {
-        maxA = this.editor.writerController.splitWord(token.value).length;
+        maxA = this.splitValidWord(token.value).length;
       }
       a++;
 
@@ -351,7 +343,5 @@ class HighlightController {
     }
 
     this.dirtyLines.delete(lineNumber);
-
-    lineNode.dataset.isHighlight = true;
   }
 }

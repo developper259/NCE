@@ -168,7 +168,7 @@ class LineController {
 
   getLineLength(row) {
     if (row >= this.lines.length || !this.lines[row]) return;
-    const l = this.lines[row].replace([' ', '\t'], '');
+    const l = this.lines[row].getText().replace(/ |\t/g, "");
     return l.length;
   }
 
@@ -195,7 +195,7 @@ class LineController {
     if (width > 0) this.outputWidth = width;
     this.outputHeight =
       this.editor.output.clientHeight || this.editor.editorOBJ.clientHeight;
-    
+
     if (!this.editor.isOnRefresh) {
       this.markDirtyAll();
       this.refresh();
@@ -203,7 +203,8 @@ class LineController {
   }
 
   loadContent(content, totalLines) {
-    this.lines = content.split("\n");
+    const textLines = content.split("\n");
+    this.lines = textLines.map((text) => new LineNode(text));
     this.totalLines = totalLines || this.lines.length;
 
     if (this.outputScroller) {
@@ -217,9 +218,10 @@ class LineController {
 
   appendLines(newLines) {
     if (!this.lines) {
-      this.lines = newLines;
+      this.lines = newLines.map((text) => new LineNode(text));
     } else {
-      this.lines = this.lines.concat(newLines);
+      const lineNodes = newLines.map((text) => new LineNode(text));
+      this.lines = this.lines.concat(lineNodes);
     }
     this.setTotalLines(this.lines.length);
     if (this.outputScroller) {
@@ -228,15 +230,16 @@ class LineController {
   }
 
   getContent() {
-    return this.lines?.join("\n") || "";
+    return this.lines?.map((line) => line.getText()).join("\n") || "";
   }
 
   getViewLineLength(i) {
     if (i < 0 || i >= this.lines?.length || !this.lines[i]) return 0;
+    const text = this.lines[i].getText();
     return (
-      this.lines[i].length +
-      getOccurrence("\t", this.lines[i]) * CONFIG_GET("tab_width") -
-      getOccurrence("\t", this.lines[i])
+      text.length +
+      getOccurrence("\t", text) * CONFIG_GET("tab_width") -
+      getOccurrence("\t", text)
     );
   }
 
@@ -258,13 +261,13 @@ class LineController {
   }
 
   addLine(txt, index) {
-    this.lines.splice(index, 0, txt);
+    this.lines.splice(index, 0, new LineNode(txt));
     this.markDirtyFrom(index);
   }
 
   changeLine(txt, index) {
     if (index >= 0 && index < this.lines.length) {
-      this.lines[index] = txt;
+      this.lines[index].setText(txt);
       this.markDirty(index);
     }
   }
@@ -277,8 +280,8 @@ class LineController {
   }
 
   clear() {
-    this.lines = [""];
-    this.markDirtyAll();
+    this.lines = [new LineNode("")];
+    this.markDirtyFrom(0);
   }
 
   markDirtyAll() {
@@ -288,7 +291,7 @@ class LineController {
     this.editor.highlightController.markDirtyAll(true);
   }
 
-  markDirtyFrom(dataIndex, isHighlight=true) {
+  markDirtyFrom(dataIndex, isHighlight = true) {
     if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
     const start = Math.max(dataIndex, this.startIndex);
@@ -297,7 +300,7 @@ class LineController {
       this.startIndex + this.maxViewLines,
     );
     for (let i = start; i < end; i++) {
-      this.dirtyLines.add(i);
+      this.dirtyLines.add(this.lines[i]);
     }
 
     if (isHighlight) this.editor.highlightController.markDirtyFrom(dataIndex);
@@ -306,7 +309,7 @@ class LineController {
   markDirty(index) {
     if (!this.lines || this.lines.length === 0) return;
     this.setTotalLines(this.lines.length);
-    this.dirtyLines.add(index);
+    this.dirtyLines.add(this.lines[index]);
 
     this.editor.highlightController.markDirty(index);
   }
@@ -314,7 +317,8 @@ class LineController {
   refreshOutput() {
     if (this.dirtyLines.size === 0) return;
 
-    this.dirtyLines.forEach((dataIndex) => {
+    this.dirtyLines.forEach((lineNode) => {
+      const dataIndex = this.lines.indexOf(lineNode);
       const screenIndex = dataIndex - this.startIndex;
       if (screenIndex >= 0 && screenIndex < this.maxViewLines) {
         this.refreshLineOutput(screenIndex);
@@ -337,7 +341,8 @@ class LineController {
       return;
     }
 
-    let line = this.lines[dataIndex];
+    let lineNode = this.lines[dataIndex];
+    let line = lineNode.getText();
 
     if (this.offsetX > 0) {
       const tabWidth = CONFIG_GET("tab_width");
@@ -374,7 +379,8 @@ class LineController {
       child.replaceWith(lineOBJ);
 
       this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
-      if (lineOBJ.dataset.isHighlight === 'false') this.editor.highlightController.markDirty(dataIndex);
+      if (!lineNode.isHighlight)
+        this.editor.highlightController.markDirty(dataIndex);
     }
   }
 
@@ -390,7 +396,8 @@ class LineController {
       if (dataIndex >= this.lines.length) {
         lineOBJ = this.createLineOBJ("", i);
       } else {
-        let line = this.lines[dataIndex];
+        let lineNode = this.lines[dataIndex];
+        let line = lineNode.getText();
 
         if (line.length > this.maxLineLength) this.maxLineLength = line.length;
 
@@ -526,11 +533,9 @@ class LineController {
   }
 
   createLineOBJ(line, row) {
-    const obj = this.editor.writerController.textToOBJ(line, row);
+    const lineOBJ = this.editor.writerController.textToOBJ(line, row);
 
-    if (!obj) return;
-
-    const lineOBJ = obj.line;
+    if (!lineOBJ) return;
 
     const x = 0;
 
@@ -539,7 +544,6 @@ class LineController {
     lineOBJ.style.left = x + "px";
 
     lineOBJ.dataset.line = row;
-    lineOBJ.dataset.isHighlight = obj.isHighlight;
 
     return lineOBJ;
   }
@@ -573,9 +577,9 @@ class LineController {
     return words[index];
   }
 
-  refresh(forcedInit=false) {
+  refresh(forcedInit = false) {
     if (!this.editor.tabManager.activeFile) return;
-    if (this.lines.length === 0) this.lines = [""];
+    if (this.lines.length === 0) this.lines = [new LineNode("")];
     if (this.index !== this.editor.cursor.row)
       this.index = this.editor.cursor.row;
 
@@ -584,7 +588,7 @@ class LineController {
     this.refreshNumberLines();
 
     this.editor.cursor.updateCaretPosition();
-    
+
     this.editor.highlightController.refresh();
   }
 

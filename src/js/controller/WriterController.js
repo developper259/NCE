@@ -108,13 +108,13 @@ class WriterController {
     const fragment = document.createDocumentFragment();
 
     const row = screenIndex + this.editor.lineController.startIndex;
-    const tokens = this.editor.highlightController.cachedLines.get(row);
+    const lineNode = this.editor.lineController.lines[row];
+    const tokens = lineNode ? lineNode.getTokens() : null;
 
     let { i, a, maxA } = this.editor.highlightController.getStartTokenDetails(
       tokens,
       this.editor.lineController.offsetX,
     );
-    let isHighlight = false;
 
     for (const word of words) {
       if (word.length > 0) {
@@ -124,7 +124,6 @@ class WriterController {
           token = tokens[i];
           if (token && word && word !== " ") {
             c = token.type;
-            isHighlight = true;
           }
         }
 
@@ -135,7 +134,9 @@ class WriterController {
 
         if (tokens && word && word !== " ") {
           if (token && token.value) {
-            maxA = this.editor.writerController.splitWord(token.value).length;
+            maxA = this.editor.highlightController.splitValidWord(
+              token.value,
+            ).length;
           }
           a++;
 
@@ -148,10 +149,8 @@ class WriterController {
       }
     }
 
-    if (fragment.childNodes.length === 0) isHighlight = true;
-
     lineDiv.appendChild(fragment);
-    return { line: lineDiv, isHighlight: isHighlight };
+    return lineDiv;
   }
 
   write(txt) {
@@ -171,7 +170,8 @@ class WriterController {
       y = cursor.row;
     }
 
-    const line = lc.lines[y - 1];
+    const lineNode = lc.lines[y - 1];
+    const line = lineNode.getText();
 
     if (!txt.includes("\n")) {
       if (txt == undefined) newLine = "";
@@ -247,14 +247,17 @@ class WriterController {
     if (this.editor.lineController.lines.length == 0) return;
     if (!this.editor.tabManager.activeFile) return;
     let newLine = "";
-    const line = this.editor.lineController.lines[y - 1];
+    const lineNode = this.editor.lineController.lines[y - 1];
+    const line = lineNode.getText();
     let cursor = { column: x, row: y };
 
     if (cursor.column == 0) {
       if (cursor.row == 1) return;
       cursor.row -= 1;
-      cursor.column = this.editor.lineController.lines[cursor.row - 1].length;
-      newLine = this.editor.lineController.lines[cursor.row - 1] + line;
+      cursor.column =
+        this.editor.lineController.lines[cursor.row - 1].getText().length;
+      newLine =
+        this.editor.lineController.lines[cursor.row - 1].getText() + line;
       this.editor.lineController.supLine(y - 1);
     } else {
       let Nx = cursor.column - 1;
@@ -282,14 +285,17 @@ class WriterController {
     if (!this.editor.tabManager.activeFile) return;
     let cursor = { column: x, row: y };
 
-    const line = this.editor.lineController.lines[y - 1];
+    const lineNode = this.editor.lineController.lines[y - 1];
+    const line = lineNode.getText();
     let newLine = "";
 
     if (cursor.column == 0) {
       if (cursor.row == 1) return;
       cursor.row -= 1;
-      cursor.column = this.editor.lineController.lines[cursor.row - 1].length;
-      newLine = this.editor.lineController.lines[cursor.row - 1] + line;
+      cursor.column =
+        this.editor.lineController.lines[cursor.row - 1].getText().length;
+      newLine =
+        this.editor.lineController.lines[cursor.row - 1].getText() + line;
       this.editor.lineController.supLine(y);
     } else {
       const words = this.splitWord(line);
@@ -371,16 +377,22 @@ class WriterController {
 
     const deletedText =
       startRow === endRow
-        ? lines[startRow - 1].slice(startColumn, endColumn)
-        : lines.slice(startRow - 1, endRow).join("\n");
+        ? lines[startRow - 1].getText().slice(startColumn, endColumn)
+        : lines
+            .slice(startRow - 1, endRow)
+            .map((ln) => ln.getText())
+            .join("\n");
 
     if (startRow === endRow) {
-      const line = lines[startRow - 1];
+      const lineNode = lines[startRow - 1];
+      const line = lineNode.getText();
       const newLine = line.slice(0, startColumn) + line.slice(endColumn);
       this.editor.lineController.changeLine(newLine, startRow - 1);
     } else {
-      const firstLine = lines[startRow - 1];
-      const lastLine = lines[endRow - 1];
+      const firstLineNode = lines[startRow - 1];
+      const lastLineNode = lines[endRow - 1];
+      const firstLine = firstLineNode.getText();
+      const lastLine = lastLineNode.getText();
 
       const newFirstLine = firstLine.slice(0, startColumn);
       const newLastLine = lastLine.slice(endColumn);
@@ -415,7 +427,8 @@ class WriterController {
     const lineIndex = row - 1;
 
     if (!text.includes("\n")) {
-      const line = lines[lineIndex];
+      const lineNode = lines[lineIndex];
+      const line = lineNode.getText();
       const newLine = line.slice(0, column) + text + line.slice(column);
       this.editor.lineController.changeLine(newLine, lineIndex);
 
@@ -432,7 +445,8 @@ class WriterController {
       return { row, column: column + text.length };
     } else {
       const newLines = text.split("\n");
-      const currentLine = lines[lineIndex];
+      const currentLineNode = lines[lineIndex];
+      const currentLine = currentLineNode.getText();
 
       const firstPart = currentLine.slice(0, column) + newLines[0];
       this.editor.lineController.changeLine(firstPart, lineIndex);

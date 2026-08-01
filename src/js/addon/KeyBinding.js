@@ -97,7 +97,9 @@ class KeyBinding {
     let txt = this.editor.selectController.containsSelected;
 
     if (!txt) {
-      txt = this.editor.lineController.lines[this.editor.cursor.row - 1];
+      const lineNode =
+        this.editor.lineController.lines[this.editor.cursor.row - 1];
+      txt = lineNode ? lineNode.getText() : "";
     }
     try {
       await navigator.clipboard.writeText(txt);
@@ -230,11 +232,14 @@ class KeyBinding {
 
     if (!this.editor.selectController.containsSelected) {
       let newLine = "";
-      const l = this.editor.lineController.lines[y - 1];
-      if (x == 0 && this.editor.lineController.lines[y - 1].length == 0) {
+      const lineNode = this.editor.lineController.lines[y - 1];
+      const l = lineNode ? lineNode.getText() : "";
+      if (x == 0 && l.length == 0) {
         y -= 1;
-        x = this.editor.lineController.lines[y].length;
-        newLine = l + this.editor.lineController.lines[y];
+        const prevLineNode = this.editor.lineController.lines[y];
+        x = prevLineNode ? prevLineNode.getText().length : 0;
+        const prevLine = prevLineNode ? prevLineNode.getText() : "";
+        newLine = l + prevLine;
         this.editor.lineController.supLine(y);
         cursor = pos;
       } else {
@@ -264,16 +269,19 @@ class KeyBinding {
 
     if (!this.editor.selectController.containsSelected) {
       let newLine = "";
-      const l = lc.lines[y - 1];
+      const lineNode = lc.lines[y - 1];
+      const l = lineNode ? lineNode.getText() : "";
       if (c) {
         if (s) {
           if (x == 0) {
             y -= 1;
-            x = lc.lines[y - 1].length;
-            newLine = lc.lines[y - 1] + l;
+            const prevLineNode = lc.lines[y - 1];
+            x = prevLineNode ? prevLineNode.getText().length : 0;
+            const prevLine = prevLineNode ? prevLineNode.getText() : "";
+            newLine = prevLine + l;
             lc.supLine(y);
           } else {
-            newLine = lc.lines[y - 1].slice(x);
+            newLine = l.slice(x);
             x = 0;
           }
           lc.changeLine(newLine, y - 1);
@@ -381,12 +389,10 @@ class KeyBinding {
         this.editor.tabManager.activeFile.historyX = x;
 
       if (y == this.editor.lineController.lines.length) {
-        if (
-          this.editor.tabManager.activeFile.historyX !=
-          this.editor.lineController.lines[y - 1].length
-        )
-          this.editor.tabManager.activeFile.historyX =
-            this.editor.lineController.lines[y - 1].length;
+        const lineNode = this.editor.lineController.lines[y - 1];
+        const lineLength = lineNode ? lineNode.getText().length : 0;
+        if (this.editor.tabManager.activeFile.historyX != lineLength)
+          this.editor.tabManager.activeFile.historyX = lineLength;
         else {
           this.editor.selectController.isMouseDown = false;
           return;
@@ -437,7 +443,8 @@ class KeyBinding {
       if (y == 1 && x == 0) return;
 
       if (a) {
-        const l = lc.lines[y - 1];
+        const lineNode = lc.lines[y - 1];
+        const l = lineNode ? lineNode.getText() : "";
         const words = this.editor.writerController.splitWord(l);
         let count = 0;
 
@@ -456,7 +463,8 @@ class KeyBinding {
       } else {
         if (x == 0) {
           y -= 1;
-          x = lc.lines[y - 1].length;
+          const prevLineNode = lc.lines[y - 1];
+          x = prevLineNode ? prevLineNode.getText().length : 0;
         } else {
           x -= 1;
         }
@@ -499,10 +507,15 @@ class KeyBinding {
         return;
       }
 
-      if (y == lc.lines.length && x == lc.lines[y - 1].length) return;
+      if (y == lc.lines.length) {
+        const lineNode = lc.lines[y - 1];
+        const lineLength = lineNode ? lineNode.getText().length : 0;
+        if (x == lineLength) return;
+      }
 
       if (c || a) {
-        const l = this.editor.lineController.lines[y - 1];
+        const lineNode = this.editor.lineController.lines[y - 1];
+        const l = lineNode ? lineNode.getText() : "";
         const words = this.editor.writerController.splitWord(l);
         let count = 0;
 
@@ -515,11 +528,11 @@ class KeyBinding {
             break;
           }
         }
-      } else if (m) {
         this.key_end(s, c, m, a);
         return;
       } else {
-        let length = this.editor.lineController.lines[y - 1].length;
+        const lineNode = this.editor.lineController.lines[y - 1];
+        let length = lineNode ? lineNode.getText().length : 0;
 
         if (x == length) {
           y += 1;
@@ -551,7 +564,9 @@ class KeyBinding {
   key_end(s, c, m, a) {
     if (this.editor.lineController.lines.length == 0) return;
     let y = this.editor.cursor.row;
-    let x = this.editor.lineController.lines[this.editor.cursor.row - 1].length;
+    const lineNode =
+      this.editor.lineController.lines[this.editor.cursor.row - 1];
+    let x = lineNode ? lineNode.getText().length : 0;
     this.editor.cursor.setCursorPosition(y, x);
   }
   key_insert(s, c, m, a) {
