@@ -118,7 +118,7 @@ class SelectController {
     const currentDOMNodes = this.selectOutput.children;
     const totalLoopLength = Math.max(
       visibleSelections.length,
-      currentDOMNodes.length,
+      currentDOMNodes.length
     );
     const classNameTarget = !this.editor.selected
       ? "selected selected-afk"
@@ -132,13 +132,15 @@ class SelectController {
         const visualStartPos = cursor.getPosition(fileRow, info.startCol);
         const visualEndPos = cursor.getPosition(
           fileRow,
-          info.startCol + info.length,
+          info.startCol + info.length - 1
         );
 
         const x = cursor.columnToX(visualStartPos.column);
+        
         const width =
           (visualEndPos.column + 1 - visualStartPos.column) *
           this.editor.letterSize;
+          
         const y = cursor.rowToY(fileRow) - difY;
         const height = cursor.mpY + difY;
 
@@ -369,8 +371,25 @@ class SelectController {
       return;
     }
 
-    const startCol = Math.min(this.startSelect.column, this.endSelect.column);
-    const endCol = Math.max(this.startSelect.column, this.endSelect.column);
+    const startColView = Math.min(
+      this.startSelect.column,
+      this.endSelect.column
+    );
+    const endColView = Math.max(
+      this.startSelect.column,
+      this.endSelect.column
+    );
+
+    const startReel = this.editor.cursor.getReelPosition(y + 1, startColView);
+    const endReel = this.editor.cursor.getReelPosition(y + 1, endColView);
+
+    if (!startReel || !endReel) {
+      this.refreshSelectionDOM();
+      return;
+    }
+
+    const startCol = startReel.column;
+    const endCol = endReel.column;
     const length = endCol - startCol;
 
     this.selectedLines.set(y, { startCol: startCol + 1, length: length });
@@ -397,31 +416,42 @@ class SelectController {
 
     const lineStartNode = lc.lines[yStart];
     const lineStart = lineStartNode ? lineStartNode.getText() : "";
-    const startViewLen = Math.max(
-      0,
-      (lc.getViewLineLength ? lc.getViewLineLength(yStart) : lineStart.length) -
-        topColView,
-    );
-    if (startViewLen > 0) {
+
+    const topReel = this.editor.cursor.getReelPosition(topRow, topColView);
+    if (!topReel) {
+      this.refreshSelectionDOM();
+      return;
+    }
+
+    const startLineLen = lineStart.length;
+    const startReelLen = Math.max(0, startLineLen - topReel.column);
+    if (startReelLen > 0) {
       this.selectedLines.set(yStart, {
-        startCol: topColView + 1,
-        length: startViewLen,
+        startCol: topReel.column + 1,
+        length: startReelLen,
       });
     }
 
     for (let i = yStart + 1; i < yEnd; i++) {
       const lineNode = lc.lines[i];
       const lineLen = lineNode ? lineNode.getText().length : 0;
-      const viewLen = lc.getViewLineLength ? lc.getViewLineLength(i) : lineLen;
       this.selectedLines.set(i, {
         startCol: 1,
-        length: viewLen === 0 ? 1 : viewLen,
+        length: lineLen === 0 ? 1 : lineLen,
       });
     }
 
-    const endViewLen = Math.max(0, bottomColView);
-    if (endViewLen > 0) {
-      this.selectedLines.set(yEnd, { startCol: 1, length: endViewLen });
+    const bottomReel = this.editor.cursor.getReelPosition(bottomRow, bottomColView);
+    if (!bottomReel) {
+      this.refreshSelectionDOM();
+      return;
+    }
+
+    if (bottomReel.column >= 0) {
+      this.selectedLines.set(yEnd, {
+        startCol: 1,
+        length: bottomReel.column,
+      });
     }
 
     this.refreshSelectionDOM();
@@ -505,7 +535,7 @@ class SelectController {
   move() {
     if (!this.editor.tabManager.activeFile) return;
     const pos = this.editor.cursor.getCursorReelPosition();
-    let c = pos.column - 1;
+    let c = pos.column;
     let r = pos.row;
 
     if (
