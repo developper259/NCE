@@ -407,7 +407,6 @@ class LineController {
 
     this.editor.highlightController.markDirtyAll(true);
     this.editor.output.replaceChildren(fragment);
-    this.outputScroller.vScroller.nbItem = this.lines.length;
   }
 
   refreshNumberLines() {
@@ -450,7 +449,6 @@ class LineController {
       }
     }
 
-    this.outputScroller.vScroller.nbItem = this.lines.length;
     this.updateLineNumberWidth();
   }
 
@@ -546,6 +544,8 @@ class LineController {
     else this.refreshOutput();
 
     this.refreshNumberLines();
+    
+    this.outputScroller.updateNbItem();
 
     this.editor.cursor.updateCaretPosition();
     this.editor.selectController.refreshSelectionDOM();

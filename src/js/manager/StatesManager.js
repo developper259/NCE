@@ -157,7 +157,7 @@ class StatesManager {
     }
 
     if (activeFileToFocus) {
-      tabManager.setFocusFile(activeFileToFocus, false);
+      tabManager.setFocusFile(activeFileToFocus);
 
       if (
         this.editor.selectController &&

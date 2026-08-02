@@ -117,6 +117,7 @@ class Events {
     this.editor.isOnInit = false;
 
     if (this.editor.tabManager.files.length === 0) this.editor.reset();
+    this.editor.refreshAll();
   }
 
   // DOM Event

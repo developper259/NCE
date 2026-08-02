@@ -68,7 +68,6 @@ class OutputScroller {
       this.lineController.refresh();
     };
 
-    this.hScroller.nbItem = 1000;
     this.hScroller.heightByItem = 1;
 
     this.hScroller.calculProp = () => {
@@ -263,9 +262,6 @@ class OutputScroller {
 
     this.clampScrollState();
 
-    this.vScroller.refresh();
-    this.hScroller.refresh();
-
     if (this.vScroller.calcIsActive()) {
       this.vScroller.setActive(true);
     }
@@ -278,7 +274,6 @@ class OutputScroller {
 
     const vMetrics = this.vScroller.readThumbMetrics();
     if (vMetrics) this.vScroller.writeThumbPosition(vMetrics);
-    this.vScroller.refresh();
 
     this.hScroller.nbItem = this.lineController.maxLineLength;
     this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
@@ -286,7 +281,7 @@ class OutputScroller {
 
     const hMetrics = this.hScroller.readThumbMetrics();
     if (hMetrics) this.hScroller.writeThumbPosition(hMetrics);
-    this.hScroller.refresh();
+    this.refresh();
   }
 
   refresh() {
@@ -314,7 +309,7 @@ class OutputScroller {
 
     this.vScroller.nbItem =
       this.lineController.totalLines || this.lineController.lines.length;
-    this.hScroller.nbItem = this.lineController.maxLineLength;
+    this.hScroller.nbItem = this.lineController.maxLineLength + 2;
   }
 
   scrollTo(row, column) {
