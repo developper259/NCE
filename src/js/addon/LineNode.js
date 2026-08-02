@@ -1,9 +1,10 @@
 class LineNode {
   constructor(text = "") {
     this.text = text;
-    this.tokens = null; // Cache for syntax highlighting tokens
-    this.isDirty = false; // Flag for marking line as needing re-render
-    this.isHighlight = false; // Flag for whether line has been highlighted
+    this.tokens = null;
+    this.isDirty = false;
+    this.isHighlight = false; 
+    this.state = null;
   }
 
   setText(text) {
@@ -41,6 +42,14 @@ class LineNode {
     this.isHighlight = value;
   }
 
+  setState(state) {
+    this.state = state;
+  }
+
+  getState() {
+    return this.state;
+  }
+
   getLength() {
     return this.text.length;
   }
@@ -54,6 +63,7 @@ class LineNode {
     newNode.tokens = this.tokens;
     newNode.isDirty = this.isDirty;
     newNode.isHighlight = this.isHighlight;
+    newNode.state = this.state;
     return newNode;
   }
 
@@ -62,6 +72,7 @@ class LineNode {
       text: this.text,
       tokens: this.tokens,
       isHighlight: this.isHighlight,
+      state: this.state,
     };
   }
 
@@ -69,6 +80,7 @@ class LineNode {
     const node = new LineNode(data.text || "");
     node.tokens = data.tokens || null;
     node.isHighlight = data.isHighlight || false;
+    node.state = data.state || null;
     return node;
   }
 }

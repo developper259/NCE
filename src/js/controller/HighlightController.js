@@ -206,7 +206,39 @@ class HighlightController {
           this.markDirty(l + i);
       }
     } else {
+      for (const lineNode of this.editor.lineController.lines) {
+        lineNode.setState(null);
+      }
       this.markDirtyFrom(0);
+    }
+  }
+
+  getInitialState(lineNumber) {
+    const prevLineNode = this.editor.lineController.lines[lineNumber - 1];
+    return (prevLineNode && prevLineNode.getState()) || ["root"];
+  }
+
+  statesEqual(a, b) {
+    if (a === b) return true;
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  propagateState(lineNumber, finalState) {
+    const lineNode = this.editor.lineController.lines[lineNumber];
+    if (!lineNode) return;
+
+    const previousState = lineNode.getState();
+    lineNode.setState(finalState);
+
+    const nextLineExists =
+      lineNumber + 1 <= this.editor.lineController.lines.length;
+
+    if (nextLineExists && !this.statesEqual(previousState, finalState)) {
+      this.markDirty(lineNumber + 1);
     }
   }
 
@@ -251,48 +283,66 @@ class HighlightController {
     this.isProcessingDirty = true;
 
     try {
-      const linesToProcess = [...this.dirtyLines];
+      const linesToProcess = [...this.dirtyLines].sort((a, b) => a - b);
       this.dirtyLines.clear();
-      const promises = linesToProcess.map(async (lineNumber) => {
+
+      for (const lineNumber of linesToProcess) {
         const lineNode = this.editor.lineController.lines[lineNumber];
         const lineText = lineNode ? lineNode.getText() : "";
-        if (
-          !language ||
-          language === "plaintext" ||
-          lineText === undefined ||
-          lineText === null ||
-          lineText.trim() === ""
-        ) {
-          return null;
+        const initialState = this.getInitialState(lineNumber);
+
+        if (lineText === undefined || lineText === null) {
+          continue;
         }
 
-        if (lineText.length >= this.maxLength) return null;
+        if (lineText.trim() === "") {
+          this.propagateState(lineNumber, initialState);
+          continue;
+        }
 
-        const result = await this.editor.threadManager.executeTask(
-          this.workerPath,
-          "highlight",
-          {
-            requestType: "highlight",
-            code: lineText,
-            language: language,
-            responseType: "tokens",
-            options: {
-              theme: "dark",
-              lineNumbers: false,
+        if (lineText.length >= this.maxLength) {
+          this.propagateState(lineNumber, lineNode.getState() || initialState);
+          continue;
+        }
+
+        try {
+          const result = await this.editor.threadManager.executeTask(
+            this.workerPath,
+            "highlightLine",
+            {
+              requestType: "highlightLine",
+              code: lineText,
               language: language,
-              includeClasses: true,
+              initialState: initialState,
+              lineIndex: lineNumber,
+              responseType: "tokens",
+              options: {
+                theme: "dark",
+                lineNumbers: false,
+                language: language,
+                includeClasses: true,
+              },
             },
-          },
-        );
+          );
 
-        if (result && result.tokens) {
-          lineNode.setTokens(result.tokens);
-          lineNode.setHighlighted(true);
-          this.applyHighlightToLine(lineNumber, result.tokens);
+          if (result && result.tokens) {
+            lineNode.setTokens(result.tokens);
+            lineNode.setHighlighted(true);
+            this.applyHighlightToLine(lineNumber, result.tokens);
+          }
+
+          this.propagateState(
+            lineNumber,
+            (result && result.finalState) || initialState,
+          );
+        } catch (error) {
+          console.error(
+            `Erreur lors du highlight de la ligne ${lineNumber} :`,
+            error,
+          );
+          this.propagateState(lineNumber, initialState);
         }
-      });
-
-      await Promise.all(promises);
+      }
     } catch (error) {
       console.error("Erreur lors du refresh :", error);
     } finally {

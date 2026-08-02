@@ -4,7 +4,10 @@ let connectionPromise = null;
 const port = 1212;
 
 function connectWebSocket() {
-  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+  if (
+    ws &&
+    (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)
+  ) {
     return connectionPromise;
   }
 
@@ -36,7 +39,9 @@ function connectWebSocket() {
     };
 
     ws.onclose = () => {
-      console.warn("⚠️ Worker : Connexion perdue. Reconnexion automatique dans 2s...");
+      console.warn(
+        "⚠️ Worker : Connexion perdue. Reconnexion automatique dans 2s...",
+      );
       ws = null;
       setTimeout(() => connectWebSocket(port), 2000);
     };
@@ -45,11 +50,11 @@ function connectWebSocket() {
   return connectionPromise;
 }
 
-// Fonction utilitaire interne pour mutualiser l'envoi de requêtes au serveur
 async function sendToServer(payload) {
   await connectWebSocket();
 
-  const requestId = Date.now().toString() + Math.random().toString(36).substring(2, 9);
+  const requestId =
+    Date.now().toString() + Math.random().toString(36).substring(2, 9);
 
   return new Promise((resolve, reject) => {
     pendingRequests.set(requestId, { resolve, reject });
@@ -58,7 +63,7 @@ async function sendToServer(payload) {
       JSON.stringify({
         id: requestId,
         ...payload,
-      })
+      }),
     );
   });
 }
@@ -70,21 +75,44 @@ self.onmessage = async (event) => {
     let result;
 
     switch (taskName) {
-      case 'highlight': {
+      case "highlight": {
         const { code, language, responseType, options } = data;
-        
+
         result = await sendToServer({
           requestType: "highlight",
           code,
           language,
-          responseType: responseType || 'tokens',
+          responseType: responseType || "tokens",
           options,
         });
 
         break;
       }
 
-      case 'supportedLanguages': {
+      case "highlightLine": {
+        const {
+          code,
+          language,
+          initialState,
+          lineIndex,
+          responseType,
+          options,
+        } = data;
+
+        result = await sendToServer({
+          requestType: "highlightLine",
+          code,
+          language,
+          initialState,
+          lineIndex,
+          responseType: responseType || "tokens",
+          options,
+        });
+
+        break;
+      }
+
+      case "supportedLanguages": {
         result = await sendToServer({
           requestType: "supportedLanguages",
         });
@@ -92,14 +120,14 @@ self.onmessage = async (event) => {
         break;
       }
 
-      case 'detectLanguage': {
+      case "detectLanguage": {
         const { fileName } = data;
 
         result = await sendToServer({
           requestType: "detectLanguage",
-          fileName
+          fileName,
         });
-        
+
         break;
       }
 
@@ -108,11 +136,10 @@ self.onmessage = async (event) => {
     }
 
     self.postMessage({ taskId, result });
-
   } catch (error) {
     self.postMessage({
       taskId,
-      error: error.message || 'Erreur inconnue dans le worker',
+      error: error.message || "Erreur inconnue dans le worker",
     });
   }
 };
