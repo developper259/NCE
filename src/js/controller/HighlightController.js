@@ -104,7 +104,7 @@ class HighlightController {
   splitValidWord(tokenValue) {
     return this.editor.writerController
       .splitWord(tokenValue || "")
-      .filter((w) => w && w !== " ");
+      .filter((w) => w && w !== " " && w !== "\t");
   }
 
   getStartTokenDetails(tokens, offsetX) {
@@ -134,7 +134,7 @@ class HighlightController {
     let a = 0;
 
     for (const el of validWords) {
-      const isSpace = !el || el === " ";
+      const isSpace = !el || el === " " || el === "\t";
 
       if (offsetX < b + el.length) {
         break;
@@ -320,8 +320,12 @@ class HighlightController {
     );
     for (const node of wordNodes) {
       const token = tokens[i];
-
-      if (!node.textContent || node.textContent === " ") continue;
+      if (
+        !node.textContent ||
+        node.textContent.replaceAll(" ", "").length === 0 ||
+        node.textContent === "\t"
+      )
+        continue;
 
       if (token) {
         if (token.type) {

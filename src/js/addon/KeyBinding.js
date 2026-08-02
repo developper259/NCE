@@ -57,7 +57,8 @@ class KeyBinding {
     }
   }
 
-  // Control functions
+  // --- Control functions ---
+
   control_save(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (s) {
@@ -67,9 +68,9 @@ class KeyBinding {
       this.editor.tabManager.activeFile.save();
     }
   }
+
   async control_open_file(s, c, m, a) {
     const file = await this.editor.tabManager.selectFiles();
-
     this.editor.tabManager.openFiles(file);
   }
 
@@ -81,6 +82,7 @@ class KeyBinding {
   control_new_file(s, c, m, a) {
     this.editor.tabManager.createEmptyFile();
   }
+
   control_close_file(s, c, m, a) {
     if (this.editor.tabManager.files.length != 0)
       this.editor.tabManager.closeActiveFile();
@@ -88,9 +90,9 @@ class KeyBinding {
   }
 
   control_close_all_file(s, c, m, a) {
-    //this.editor.api.quit();
     this.editor.tabManager.closeFiles();
   }
+
   async control_copy(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
 
@@ -121,10 +123,12 @@ class KeyBinding {
   async control_cut(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
 
-    let txt = this.editor.selectController.containsSelected;
-    this.control_copy();
-    if (txt) this.key_backspace();
-    else {
+    let hasSelection = this.editor.selectController.containsSelected;
+    await this.control_copy();
+
+    if (hasSelection) {
+      this.key_backspace();
+    } else {
       if (this.editor.lineController.lines.length != this.editor.cursor.row)
         this.editor.lineController.supLine(this.editor.cursor.row - 1);
       else
@@ -134,21 +138,20 @@ class KeyBinding {
       this.editor.cursor.setCursorPosition(this.editor.cursor.row, 0);
     }
   }
+
   control_undo(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
 
     if (this.editor.historyController) {
-      //const result = this.editor.historyController.undo();
-
       this.editor.selectController.unSelectAll();
       this.editor.lineController.markDirtyAll();
       this.editor.events.callEvent(Events.ON_CHANGE, {
         action: "undo",
-        text: result?.text || "",
-        beforeRow: result?.start?.row || 0,
-        beforeColumn: result?.start?.column || 0,
-        afterRow: result?.start?.row || 0,
-        afterColumn: result?.start?.column || 0,
+        text: "",
+        beforeRow: 0,
+        beforeColumn: 0,
+        afterRow: 0,
+        afterColumn: 0,
       });
     }
   }
@@ -157,27 +160,27 @@ class KeyBinding {
     if (!this.editor.tabManager.activeFile) return;
 
     if (this.editor.historyController) {
-      //const result = this.editor.historyController.redo();
-
       this.editor.selectController.unSelectAll();
       this.editor.lineController.markDirtyAll();
       this.editor.events.callEvent(Events.ON_CHANGE, {
         action: "redo",
-        text: result?.text || "",
-        beforeRow: result?.end?.row || 0,
-        beforeColumn: result?.end?.column || 0,
-        afterRow: result?.end?.row || 0,
-        afterColumn: result?.end?.column || 0,
+        text: "",
+        beforeRow: 0,
+        beforeColumn: 0,
+        afterRow: 0,
+        afterColumn: 0,
       });
     }
   }
 
   control_find(s, c, m, a) {}
   control_replace(s, c, m, a) {}
+
   control_open_command(s, c, m, a) {
     if (this.editor.panel instanceof CMD) this.editor.panel.close();
     else this.editor.Ccmd.open();
   }
+
   control_delete_line(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
@@ -189,6 +192,7 @@ class KeyBinding {
       this.editor.cursor.column,
     );
   }
+
   control_select_all(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
@@ -208,130 +212,125 @@ class KeyBinding {
     }
   }
 
-  // Key functions
+  // --- Key functions ---
+
   key_escape(s, c, m, a) {
     if (this.editor.panel == undefined) return;
     else this.editor.panel.close();
   }
+
   key_tab(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-
     this.editor.writerController.write(" ".repeat(CONFIG_GET("tab_width")));
   }
+
   key_delete(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     if (m || a) return;
+
     this.editor.tabManager.activeFile.historyX = undefined;
-    const pos = this.editor.cursor.getCursorReelPosition();
-    if (!pos) return;
-    let x = pos.column;
-    let y = pos.row;
+    const lc = this.editor.lineController;
+    let x = this.editor.cursor.column;
+    let y = this.editor.cursor.row;
 
     let cursor;
 
-    if (!this.editor.selectController.containsSelected) {
-      let newLine = "";
-      const lineNode = this.editor.lineController.lines[y - 1];
-      const l = lineNode ? lineNode.getText() : "";
-      if (x == 0 && l.length == 0) {
-        y -= 1;
-        const prevLineNode = this.editor.lineController.lines[y];
-        x = prevLineNode ? prevLineNode.getText().length : 0;
-        const prevLine = prevLineNode ? prevLineNode.getText() : "";
-        newLine = l + prevLine;
-        this.editor.lineController.supLine(y);
-        cursor = pos;
-      } else {
-        x = x + 1;
-        cursor = this.editor.writerController.delete(x, y);
-      }
-    } else {
+    if (this.editor.selectController.containsSelected) {
       cursor = this.editor.writerController.deleteSelection();
+    } else {
+      const lineNode = lc.lines[y - 1];
+      const l = lineNode ? lineNode.getText() : "";
+
+      let start, end;
+      if (x < l.length) {
+        start = { row: y, column: x };
+        end = { row: y, column: x + 1 };
+      } else if (y < lc.lines.length) {
+        start = { row: y, column: x };
+        end = { row: y + 1, column: 0 };
+      } else {
+        return;
+      }
+
+      cursor = this.editor.writerController.deleteRange(start, end);
     }
 
-    this.editor.lineController.refresh();
-    this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
+    if (cursor) {
+      lc.refresh();
+      this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
+    }
   }
+
   key_backspace(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
     if (m || a) return;
 
     this.editor.tabManager.activeFile.historyX = undefined;
-    const pos = this.editor.cursor.getCursorReelPosition();
-    if (!pos) return;
-    let x = pos.column;
-    let y = pos.row;
+    const lc = this.editor.lineController;
+    let x = this.editor.cursor.column;
+    let y = this.editor.cursor.row;
 
     let cursor;
-    const lc = this.editor.lineController;
 
-    if (!this.editor.selectController.containsSelected) {
-      let newLine = "";
-      const lineNode = lc.lines[y - 1];
-      const l = lineNode ? lineNode.getText() : "";
+    if (this.editor.selectController.containsSelected) {
+      cursor = this.editor.writerController.deleteSelection();
+    } else {
       if (c) {
-        if (s) {
-          if (x == 0) {
-            y -= 1;
-            const prevLineNode = lc.lines[y - 1];
-            x = prevLineNode ? prevLineNode.getText().length : 0;
-            const prevLine = prevLineNode ? prevLineNode.getText() : "";
-            newLine = prevLine + l;
-            lc.supLine(y);
-          } else {
-            newLine = l.slice(x);
-            x = 0;
-          }
-          lc.changeLine(newLine, y - 1);
-
-          lc.refresh();
-          this.editor.cursor.setCursorPosition(y, x);
-          return;
-        } else {
-          if (x == 0 && y == 1) return;
-          cursor = this.editor.writerController.deleteWord(x, y);
-        }
+        if (x == 0 && y == 1) return;
+        cursor = this.editor.writerController.deleteWord
+          ? this.editor.writerController.deleteWord(x, y)
+          : null;
       } else {
         if (x == 0 && y == 1) return;
-        cursor = this.editor.writerController.delete(x, y);
+
+        let start, end;
+        if (x > 0) {
+          start = { row: y, column: x - 1 };
+          end = { row: y, column: x };
+        } else {
+          const prevLineNode = lc.lines[y - 2];
+          const prevLen = prevLineNode ? prevLineNode.getText().length : 0;
+          start = { row: y - 1, column: prevLen };
+          end = { row: y, column: 0 };
+        }
+
+        cursor = this.editor.writerController.deleteRange(start, end);
       }
-    } else {
-      cursor = this.editor.writerController.deleteSelection();
     }
 
-    const screenRow = y - lc.startIndex;
-
-    if (screenRow <= lc.marginLines) {
-      const targetRow = Math.max(0, lc.startIndex - 1);
-      lc.scrollTo(targetRow);
+    if (cursor) {
+      lc.refresh();
+      const screenRow = cursor.row - lc.startIndex;
+      if (screenRow <= lc.marginLines) {
+        const targetRow = Math.max(0, lc.startIndex - 1);
+        lc.scrollTo(targetRow);
+      }
+      this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
     }
-    this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
   }
 
   key_enter(s, c, m, a) {
     this.editor.writerController.write("\n");
   }
+
   key_arrow_up(s, c, m, a) {
     if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
-      const pos = this.editor.cursor.getCursorReelPosition();
-      if (!pos) return;
-      let x = pos.column;
-      let y = pos.row;
+      let x = this.editor.cursor.column;
+      let y = this.editor.cursor.row;
 
       if (s) {
-        if (this.editor.selectController.containsSelected.length == 0) {
+        if (!this.editor.selectController.containsSelected) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected.length != 0) {
+      } else if (this.editor.selectController.containsSelected) {
         this.editor.selectController.unSelectAll();
-        return;
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
@@ -364,25 +363,23 @@ class KeyBinding {
       }
     }
   }
+
   key_arrow_down(s, c, m, a) {
     if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
-      const pos = this.editor.cursor.getCursorReelPosition();
-      if (!pos) return;
-      let x = pos.column;
-      let y = pos.row;
+      let x = this.editor.cursor.column;
+      let y = this.editor.cursor.row;
 
       if (s) {
-        if (this.editor.selectController.containsSelected.length == 0) {
+        if (!this.editor.selectController.containsSelected) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected.length != 0) {
+      } else if (this.editor.selectController.containsSelected) {
         this.editor.selectController.unSelectAll();
-        return;
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
@@ -417,27 +414,25 @@ class KeyBinding {
       }
     }
   }
+
   key_arrow_left(s, c, m, a) {
     const lc = this.editor.lineController;
     if (this.editor.tabManager.activeFile) {
-      if (lc.length == 0) return;
+      if (lc.lines.length == 0) return;
       this.editor.tabManager.activeFile.historyX = undefined;
-      const pos = this.editor.cursor.getCursorReelPosition();
-      if (!pos) return;
-      let x = pos.column;
-      let y = pos.row;
+      let x = this.editor.cursor.column;
+      let y = this.editor.cursor.row;
 
       if (s) {
-        if (this.editor.selectController.containsSelected.length == 0) {
+        if (!this.editor.selectController.containsSelected) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected.length != 0) {
+      } else if (this.editor.selectController.containsSelected) {
         this.editor.selectController.unSelectAll();
-        return;
       }
 
       if (y == 1 && x == 0) return;
@@ -450,7 +445,6 @@ class KeyBinding {
 
         for (let i = 0; i < words.length; i++) {
           const word = words[i];
-
           if (x - (count + word.length) <= 0) {
             x = count;
             break;
@@ -474,7 +468,7 @@ class KeyBinding {
 
       const screenCol = x - lc.offsetX;
       if (screenCol < lc.marginChars) {
-        const targetCol = lc.offsetX - 1;
+        const targetCol = Math.max(0, lc.offsetX - 1);
         lc.scrollTo(undefined, targetCol);
       }
 
@@ -484,37 +478,33 @@ class KeyBinding {
       }
     }
   }
+
   key_arrow_right(s, c, m, a) {
     const lc = this.editor.lineController;
     if (this.editor.tabManager.activeFile) {
       if (lc.lines.length == 0) return;
       this.editor.tabManager.activeFile.historyX = undefined;
-      const pos = this.editor.cursor.getCursorReelPosition();
-      if (!pos) return;
-      let x = pos.column;
-      let y = pos.row;
+      let x = this.editor.cursor.column;
+      let y = this.editor.cursor.row;
 
       if (s) {
-        if (this.editor.selectController.containsSelected.length == 0) {
+        if (!this.editor.selectController.containsSelected) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected.length != 0) {
+      } else if (this.editor.selectController.containsSelected) {
         this.editor.selectController.unSelectAll();
-        return;
       }
 
-      if (y == lc.lines.length) {
-        const lineNode = lc.lines[y - 1];
-        const lineLength = lineNode ? lineNode.getText().length : 0;
-        if (x == lineLength) return;
-      }
+      const lineNode = lc.lines[y - 1];
+      const lineLength = lineNode ? lineNode.getText().length : 0;
+
+      if (y == lc.lines.length && x == lineLength) return;
 
       if (c || a) {
-        const lineNode = this.editor.lineController.lines[y - 1];
         const l = lineNode ? lineNode.getText() : "";
         const words = this.editor.writerController.splitWord(l);
         let count = 0;
@@ -522,19 +512,17 @@ class KeyBinding {
         for (let i = 0; i < words.length; i++) {
           const word = words[i];
           count += word.length;
-
           if (x - count < 0) {
             x = count;
             break;
           }
         }
-        this.key_end(s, c, m, a);
-        return;
+        if (x === lineLength && y < lc.lines.length) {
+          y += 1;
+          x = 0;
+        }
       } else {
-        const lineNode = this.editor.lineController.lines[y - 1];
-        let length = lineNode ? lineNode.getText().length : 0;
-
-        if (x == length) {
+        if (x == lineLength) {
           y += 1;
           x = 0;
         } else {
@@ -556,11 +544,13 @@ class KeyBinding {
       }
     }
   }
+
   key_home(s, c, m, a) {
     if (this.editor.lineController.lines.length == 0) return;
     let y = this.editor.cursor.row;
     this.editor.cursor.setCursorPosition(y, 0);
   }
+
   key_end(s, c, m, a) {
     if (this.editor.lineController.lines.length == 0) return;
     let y = this.editor.cursor.row;
@@ -569,6 +559,7 @@ class KeyBinding {
     let x = lineNode ? lineNode.getText().length : 0;
     this.editor.cursor.setCursorPosition(y, x);
   }
+
   key_insert(s, c, m, a) {
     let wc = this.editor.writerController;
     wc.insertMode = !wc.insertMode;
