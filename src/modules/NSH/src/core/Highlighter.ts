@@ -1,5 +1,5 @@
 import { Token } from '../types/token';
-import { HighlightOptions, HighlightResult } from '../types/highlighter';
+import { HighlightOptions, HighlightResult, LineHighlightResult } from '../types/highlighter';
 import { Tokenizer } from './Tokenizer';
 import { LanguageDefinition } from '../types/language';
 import { languages } from '../languages/Languages'
@@ -34,16 +34,62 @@ export class Highlighter {
   }
 
   public highlight(code: string): HighlightResult {
-    let tokens = this.tokenizer.tokenize(code);
-    const html = this.generateHTML(code, tokens);
+    const { tokens: rawTokens, finalStateStack } = this.tokenizer.tokenizeWithState(code);
+    const html = this.generateHTML(code, rawTokens);
 
-    if (this.options.includeClasses) {
-      tokens = this.replaceByClasses(tokens);
-    }
+    const tokens = this.options.includeClasses
+      ? this.replaceByClasses(rawTokens)
+      : rawTokens;
 
     return {
       html,
-      tokens
+      tokens,
+      finalState: finalStateStack,
+    };
+  }
+
+  public highlightLine(
+    line: string,
+    initialStateStack: string[] = ['root'],
+    lineIndex: number = 0,
+  ): LineHighlightResult {
+    const { tokens: rawTokens, finalStateStack } = this.tokenizer.tokenizeLine(
+      line,
+      initialStateStack,
+      lineIndex,
+    );
+
+    const html = this.generateLineHTML(line, rawTokens, lineIndex + 1);
+
+    const tokens = this.options.includeClasses
+      ? this.replaceByClasses(rawTokens)
+      : rawTokens;
+
+    return {
+      html,
+      tokens,
+      finalState: finalStateStack,
+    };
+  }
+
+  public getTokenLine(
+    line: string,
+    initialStateStack: string[] = ['root'],
+    lineIndex: number = 0,
+  ): { tokens: Token[]; finalState: string[] } {
+    const { tokens, finalStateStack } = this.tokenizer.tokenizeLine(line, initialStateStack, lineIndex);
+    return { tokens, finalState: finalStateStack };
+  }
+
+  public getHTMLLine(
+    line: string,
+    initialStateStack: string[] = ['root'],
+    lineIndex: number = 0,
+  ): { html: string; finalState: string[] } {
+    const { tokens, finalStateStack } = this.tokenizer.tokenizeLine(line, initialStateStack, lineIndex);
+    return {
+      html: this.generateLineHTML(line, tokens, lineIndex + 1),
+      finalState: finalStateStack,
     };
   }
 
@@ -77,6 +123,52 @@ export class Highlighter {
 
   private generateHTML(code: string, tokens: Token[]): string {
     const lines = code.split('\n');
+    const linesMap = this.groupTokensByLine(tokens);
+
+    let html = '<div class="nsh-highlighter">';
+
+    for (let i = 0; i < lines.length; i++) {
+      const lineNumber = i + 1;
+      const lineTokens = linesMap.get(lineNumber) || [];
+      html += this.generateLineHTML(lines[i], lineTokens, lineNumber);
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  private generateLineHTML(line: string, lineTokens: Token[], lineNumber: number): string {
+    let html = '<div class="nsh-line">';
+
+    if (this.options.lineNumbers) {
+      html += `<span class="nsh-line-number">${lineNumber}</span>`;
+    }
+
+    let position = 0;
+    const sortedTokens = [...lineTokens].sort((a, b) => a.column - b.column);
+
+    for (const token of sortedTokens) {
+      if (token.column > position + 1) {
+        const plainText = line.substring(position, token.column - 1);
+        html += this.escapeHtml(plainText);
+        position = token.column - 1;
+      }
+
+      const className = this.getCssClass(token.type);
+      html += `<span class="${className}">${this.escapeHtml(token.value)}</span>`;
+      position = token.column - 1 + token.value.length;
+    }
+
+    if (position < line.length) {
+      const plainText = line.substring(position);
+      html += this.escapeHtml(plainText);
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  private groupTokensByLine(tokens: Token[]): Map<number, Token[]> {
     const linesMap = new Map<number, Token[]>();
 
     for (const token of tokens) {
@@ -86,44 +178,7 @@ export class Highlighter {
       linesMap.get(token.line)!.push(token);
     }
 
-    let html = '<div class="nsh-highlighter">';
-
-    for (let i = 0; i < lines.length; i++) {
-      const lineNumber = i + 1;
-      const line = lines[i];
-      const lineTokens = linesMap.get(lineNumber) || [];
-
-      html += '<div class="nsh-line">';
-
-      if (this.options.lineNumbers) {
-        html += `<span class="nsh-line-number">${lineNumber}</span>`;
-      }
-
-      let position = 0;
-      let sortedTokens = [...lineTokens].sort((a, b) => a.column - b.column);
-
-      for (const token of sortedTokens) {
-        if (token.column > position + 1) {
-          const plainText = line.substring(position, token.column - 1);
-          html += this.escapeHtml(plainText);
-          position = token.column - 1;
-        }
-
-        const className = this.getCssClass(token.type);
-        html += `<span class="${className}">${this.escapeHtml(token.value)}</span>`;
-        position = token.column - 1 + token.value.length;
-      }
-
-      if (position < line.length) {
-        const plainText = line.substring(position);
-        html += this.escapeHtml(plainText);
-      }
-
-      html += '</div>';
-    }
-
-    html += '</div>';
-    return html;
+    return linesMap;
   }
 
   private getCssClass(tokenType: string): string {

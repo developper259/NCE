@@ -59,10 +59,20 @@ export class NSHServer {
 
       if (request.requestType === "highlight") {
         this.handleHighlight(ws, request);
-      }else if (request.requestType === "supportedLanguages") {
+      } else if (request.requestType === "highlightLine") {
+        this.handleHighlightLine(ws, request);
+      } else if (request.requestType === "supportedLanguages") {
         this.handleSupportedLanguage(ws, request);
-      }else if (request.requestType === "detectLanguage") {
+      } else if (request.requestType === "detectLanguage") {
         this.handleDetectLanguage(ws, request);
+      } else {
+        ws.send(
+          JSON.stringify({
+            id: request.id,
+            success: false,
+            error: `requestType inconnu : ${request.requestType}`,
+          }),
+        );
       }
     } catch (e) {
       ws.send(
@@ -74,13 +84,13 @@ export class NSHServer {
 
   private handleHighlight(ws: WebSocket, request: HighlightRequest): void {
     try {
-      if (!request.language || !request.code) {
+      if (!request.language || request.code === undefined || request.code === null) {
         console.log(request);
         throw new Error('Request not valid : language or code missing !');
       }
 
       const language: string = request.language || "";
-      const code: string = request.code || "";
+      const code: string = request.code;
 
       const languageDef = languages[language.toLowerCase()];
 
@@ -112,6 +122,7 @@ export class NSHServer {
         const result = highlighter.highlight(code);
         response.html = result.html;
         response.tokens = result.tokens;
+        response.finalState = result.finalState;
       }
 
       ws.send(JSON.stringify(response));
@@ -120,6 +131,63 @@ export class NSHServer {
         id: request.id,
         success: false,
         error: error.message || "Erreur inconnue lors du highlight",
+      };
+      ws.send(JSON.stringify(errorResponse));
+    }
+  }
+
+  private handleHighlightLine(ws: WebSocket, request: HighlightRequest): void {
+    try {
+      if (!request.language || request.code === undefined || request.code === null) {
+        throw new Error('Request not valid : language or code missing !');
+      }
+
+      const language: string = request.language;
+      const line: string = request.code;
+
+      const languageDef = languages[language.toLowerCase()];
+
+      if (!languageDef) {
+        throw new Error(`Langage non supporté : ${language}`);
+      }
+
+      const highlighter = new Highlighter(languageDef, request.options);
+
+      const initialState =
+        request.initialState && request.initialState.length > 0
+          ? request.initialState
+          : ["root"];
+      const lineIndex = request.lineIndex ?? 0;
+
+      const responseType = request.responseType || "html";
+      const response: HighlightResponse = {
+        id: request.id,
+        success: true,
+      };
+
+      if (responseType === "html") {
+        const result = highlighter.getHTMLLine(line, initialState, lineIndex);
+        response.html = result.html;
+        response.finalState = result.finalState;
+      } else if (responseType === "tokens") {
+        const result = highlighter.getTokenLine(line, initialState, lineIndex);
+        response.tokens = request.options?.includeClasses
+          ? highlighter.replaceByClasses(result.tokens)
+          : result.tokens;
+        response.finalState = result.finalState;
+      } else {
+        const result = highlighter.highlightLine(line, initialState, lineIndex);
+        response.html = result.html;
+        response.tokens = result.tokens;
+        response.finalState = result.finalState;
+      }
+
+      ws.send(JSON.stringify(response));
+    } catch (error: any) {
+      const errorResponse: HighlightResponse = {
+        id: request.id,
+        success: false,
+        error: error.message || "Erreur inconnue lors du highlight de ligne",
       };
       ws.send(JSON.stringify(errorResponse));
     }

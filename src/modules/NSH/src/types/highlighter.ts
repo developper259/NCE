@@ -10,4 +10,11 @@ export interface HighlightOptions {
 export interface HighlightResult {
   html: string;
   tokens: Token[];
+  finalState: string[];
+}
+
+export interface LineHighlightResult {
+  html: string;
+  tokens: Token[];
+  finalState: string[];
 }

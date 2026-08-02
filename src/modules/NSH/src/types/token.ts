@@ -9,4 +9,6 @@ export interface TokenType {
   name: string;
   pattern: RegExp;
   className?: string;
+  push?: string;
+  pop?: boolean;
 }

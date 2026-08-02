@@ -3,7 +3,7 @@ import { TokenType } from './token';
 export interface LanguageDefinition {
   name: string;
   extensions: string[];
-  tokenTypes: TokenType[];
+  tokenTypes?: TokenType[];
   comments?: {
     singleLine?: string;
     multiLine?: {
@@ -16,4 +16,5 @@ export interface LanguageDefinition {
     escapeChar?: string;
   };
   getTokenTypes(): TokenType[];
+  getStates(): Record<string, TokenType[]>;
 }
