@@ -144,8 +144,11 @@ class FileNode {
       this.editor.lineController.getContent(),
     );
 
-    this.setIsSaved(true);
-    this.editor.tabManager.refresh();
+    if (r) {
+      await this.loadLanguage();
+      this.setIsSaved(true);
+      this.editor.tabManager.refresh();
+    }
   }
 
   async selectFileToSave() {

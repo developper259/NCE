@@ -77,7 +77,7 @@ class Cursor {
   normalizePosition(row, column) {
     const lc = this.editor.lineController;
 
-    if (row > lc.lines.length - 1) row = lc.lines.length - 1;
+    if (row > lc.lines.length - 1) row = lc.lines.length;
     if (row <= 0) row = 1;
 
     const line = lc.lines[row - 1] ? lc.lines[row - 1].getText() : "";

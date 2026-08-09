@@ -245,7 +245,9 @@ class LineController {
   }
 
   getViewNumberLines() {
-    return Math.min(this.lines.length, this.maxViewLines);
+    if (!this.lines) return 0;
+    const visibleLines = this.lines.length - this.startIndex;
+    return Math.max(0, Math.min(visibleLines, this.maxViewLines));
   }
 
   setFocusLine(index) {
@@ -362,9 +364,14 @@ class LineController {
     }
 
     let lineNode = this.lines[dataIndex];
-    let line = this.getSlicedLine(lineNode.getText());
+    let fullText = lineNode.getText();
 
-    if (line.length > this.maxLineLength) this.maxLineLength = line.length;
+    const currentLineLength = this.getViewLineLength(dataIndex);
+    if (currentLineLength > this.maxLineLength) {
+      this.maxLineLength = currentLineLength;
+    }
+
+    let line = this.getSlicedLine(fullText);
 
     if (child.textContent !== line) {
       let lineOBJ = this.createLineOBJ(line, screenIndex);
@@ -392,17 +399,21 @@ class LineController {
         lineOBJ = this.createLineOBJ("", i);
       } else {
         const lineNode = this.lines[dataIndex];
-        const line = this.getSlicedLine(lineNode.getText());
+        const fullText = lineNode.getText();
 
-        if (line.length > this.maxLineLength) this.maxLineLength = line.length;
+        const currentLineLength = this.getViewLineLength(dataIndex);
+        if (currentLineLength > this.maxLineLength) {
+          this.maxLineLength = currentLineLength;
+        }
 
+        const line = this.getSlicedLine(fullText);
         lineOBJ = this.createLineOBJ(line, i);
+        lineOBJ.dataset.line = dataIndex;
+
+        this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
       }
 
-      lineOBJ.dataset.line = dataIndex;
       fragment.appendChild(lineOBJ);
-
-      this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
     }
 
     this.editor.highlightController.markDirtyAll(true);
@@ -504,7 +515,6 @@ class LineController {
     lineOBJ.style.position = "absolute";
     lineOBJ.style.top = `${this.getLineTop(row)}px`;
     lineOBJ.style.left = "0px";
-    lineOBJ.dataset.line = row;
 
     return lineOBJ;
   }
@@ -544,7 +554,7 @@ class LineController {
     else this.refreshOutput();
 
     this.refreshNumberLines();
-    
+
     this.outputScroller.updateNbItem();
 
     this.editor.cursor.updateCaretPosition();

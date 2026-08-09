@@ -180,8 +180,10 @@ class Scroller {
 
     if (isVertical) {
       this.itemOBJ.style.height = `${size}px`;
+      this.itemOBJHeight = size;
     } else {
       this.itemOBJ.style.width = `${size}px`;
+      this.itemOBJWidth = size;
     }
 
     const metrics = this.readThumbMetrics();

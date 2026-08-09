@@ -5,6 +5,8 @@ class OutputScroller {
     this.vScroller = null;
     this.hScroller = null;
     this.marginChars = 10;
+
+    this.marginLines = 3;
   }
 
   setLineController(lineController) {
@@ -22,6 +24,11 @@ class OutputScroller {
     this.hScroller.show();
   }
 
+  getTotalScrollLines() {
+    if (!this.lineController || !this.lineController.lines) return 0;
+    return this.lineController.lines.length + this.marginLines;
+  }
+
   init() {
     // Vertical scroller
     this.vScroller = this.editor.scrollerManager.createScroller(
@@ -34,14 +41,14 @@ class OutputScroller {
       this.lineController.refresh();
     };
 
-    this.vScroller.nbItem = this.lineController.lines?.length || 0;
+    this.vScroller.nbItem = this.getTotalScrollLines();
     this.vScroller.heightByItem = this.editor.posY;
 
     this.vScroller.calculProp = () => {
       if (!this.lineController.lines || this.lineController.lines.length === 0)
         return 0;
       const visibleLines = this.lineController.maxLines;
-      const totalLines = this.lineController.lines.length;
+      const totalLines = this.getTotalScrollLines();
       if (totalLines <= visibleLines) return 100;
       return (visibleLines / totalLines) * 100;
     };
@@ -49,7 +56,7 @@ class OutputScroller {
     this.vScroller.calcIsActive = () => {
       if (!this.lineController.lines || this.lineController.lines.length === 0)
         return false;
-      return this.lineController.lines.length > this.lineController.maxLines;
+      return this.getTotalScrollLines() > this.lineController.maxLines;
     };
 
     this.vScroller.onScroll = (scrollRatio) => {
@@ -152,7 +159,7 @@ class OutputScroller {
 
     const posY = this.editor.posY;
     const viewportHeight = this.lineController.outputHeight;
-    const totalHeight = this.lineController.lines.length * posY;
+    const totalHeight = this.getTotalScrollLines() * posY;
     const maxScrollY = Math.max(0, totalHeight - viewportHeight);
     if (maxScrollY === 0) return 0;
 
@@ -182,7 +189,7 @@ class OutputScroller {
     }
 
     const posY = this.editor.posY;
-    const totalHeight = this.lineController.lines.length * posY;
+    const totalHeight = this.getTotalScrollLines() * posY;
     const viewportHeight = this.lineController.outputHeight;
     const maxScrollY = Math.max(0, totalHeight - viewportHeight);
     const maxStartIndex = this.getMaxStartIndex();
@@ -237,7 +244,7 @@ class OutputScroller {
     if (this.lineController.startIndex < 0) this.lineController.startIndex = 0;
 
     const viewportHeight = this.lineController.outputHeight;
-    const totalHeight = this.lineController.lines.length * posY;
+    const totalHeight = this.getTotalScrollLines() * posY;
     const maxOffsetY = Math.max(
       0,
       totalHeight - this.lineController.startIndex * posY - viewportHeight,
@@ -248,17 +255,18 @@ class OutputScroller {
   }
 
   getMaxStartIndex() {
-    if (this.lineController.totalLines === 0) return 0;
+    if (!this.lineController.lines || this.lineController.lines.length === 0)
+      return 0;
     return Math.max(
       0,
-      this.lineController.totalLines - this.lineController.maxLines,
+      this.getTotalScrollLines() - this.lineController.maxLines,
     );
   }
 
   restoreScroll() {
     if (!this.editor.tabManager.activeFile) return;
 
-    this.vScroller.nbItem = this.lineController.lines.length;
+    this.vScroller.nbItem = this.getTotalScrollLines();
 
     this.clampScrollState();
 
@@ -285,7 +293,7 @@ class OutputScroller {
   }
 
   refresh() {
-    this.vScroller.nbItem = this.lineController.lines.length;
+    this.vScroller.nbItem = this.getTotalScrollLines();
     this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
     this.applyVerticalScrollFromRatio(this.vScroller.scrollRatio);
     this.vScroller.refresh();
@@ -307,8 +315,7 @@ class OutputScroller {
     if (!this.lineController.lines || this.lineController.lines.length === 0)
       return;
 
-    this.vScroller.nbItem =
-      this.lineController.totalLines || this.lineController.lines.length;
+    this.vScroller.nbItem = this.getTotalScrollLines();
     this.hScroller.nbItem = this.lineController.maxLineLength + 2;
   }
 
