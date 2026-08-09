@@ -250,9 +250,6 @@ class FileExplorer extends Sidebar {
   }
 
   async toggleFolder(folderPath) {
-    const treeContainer = this.element?.querySelector(".file-tree");
-    const scrollTop = treeContainer ? treeContainer.scrollTop : 0;
-
     const toggle = async (files) => {
       for (const file of files) {
         if (file.path === folderPath && file.type === "folder") {
@@ -270,25 +267,11 @@ class FileExplorer extends Sidebar {
     };
     await toggle(this.files);
     this.refresh();
-
-    const newTreeContainer = this.element?.querySelector(".file-tree");
-    if (newTreeContainer) {
-      newTreeContainer.scrollTop = scrollTop;
-    }
   }
 
   async openFile(filePath) {
-    const treeContainer = this.element?.querySelector(".file-tree");
-    const scrollTop = treeContainer ? treeContainer.scrollTop : 0;
-
     this.editor.tabManager.openFileWithPath(filePath);
-
     this.setActiveFile(filePath);
-
-    const newTreeContainer = this.element?.querySelector(".file-tree");
-    if (newTreeContainer) {
-      newTreeContainer.scrollTop = scrollTop;
-    }
   }
 
   async restoreExpandedFolders(files, expandedSet) {

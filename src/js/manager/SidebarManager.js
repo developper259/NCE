@@ -12,6 +12,9 @@ class SidebarManager {
     this.width = 250;
     this.selectorWidth = 48;
 
+    this.leftScroller = null;
+    this.rightScroller = null;
+
     this.init();
   }
 
@@ -24,6 +27,19 @@ class SidebarManager {
 
     this.renderTabSelector();
     this.setupEventListeners();
+
+    this.leftScroller = new SidebarScroller(
+      this.editor,
+      this.leftSidebar,
+      this.leftMenuContainer,
+    );
+    this.rightScroller = new SidebarScroller(
+      this.editor,
+      this.rightSidebar,
+      this.rightMenuContainer,
+    );
+    this.leftScroller.init();
+    this.rightScroller.init();
   }
 
   registerMenu(menu) {
@@ -128,8 +144,9 @@ class SidebarManager {
         .querySelector(".main-section")
         .classList.add("sidebar-left-open");
 
-      this.editor.fileManagerOBJ.style.left = (this.width + this.selectorWidth) + "px";
-      this.editor.editorOBJ.style.left = (this.width + this.selectorWidth) + "px";
+      this.editor.fileManagerOBJ.style.left =
+        this.width + this.selectorWidth + "px";
+      this.editor.editorOBJ.style.left = this.width + this.selectorWidth + "px";
       this.editor.editorOBJ.style.width = "";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.add("open");
@@ -141,6 +158,8 @@ class SidebarManager {
 
     requestAnimationFrame(() => {
       this.editor.lineController.resizeWidth();
+      if (this.leftScroller) this.leftScroller.refresh();
+      if (this.rightScroller) this.rightScroller.refresh();
     });
   }
 
@@ -164,6 +183,8 @@ class SidebarManager {
 
     requestAnimationFrame(() => {
       this.editor.lineController.resizeWidth();
+      if (this.leftScroller) this.leftScroller.refresh();
+      if (this.rightScroller) this.rightScroller.refresh();
     });
   }
 
@@ -186,8 +207,7 @@ class SidebarManager {
   refreshAll() {
     this.renderTabSelector();
 
-    if (this.activeMenu)
-      this.renderMenuContent(this.activeMenu);
+    if (this.activeMenu) this.renderMenuContent(this.activeMenu);
   }
 
   handleKeybinding(keybinding) {
