@@ -107,55 +107,6 @@ class HighlightController {
       .filter((w) => w && w !== " " && w !== "\t");
   }
 
-  getStartTokenDetails(tokens, offsetX) {
-    if (!tokens || tokens.length === 0) {
-      return { i: 0, a: 0, maxA: 0 };
-    }
-
-    let i = 0;
-    for (const token of tokens) {
-      if (
-        offsetX === token.column - 1 ||
-        (tokens.length - 1 > i && offsetX < tokens[i + 1].column - 1)
-      ) {
-        break;
-      }
-      i++;
-    }
-
-    if (i >= tokens.length) {
-      i = tokens.length - 1;
-    }
-
-    const validWords = this.splitValidWord(tokens[i].value || "");
-    let maxA = validWords.length;
-
-    let b = tokens[i].column - 1;
-    let a = 0;
-
-    for (const el of validWords) {
-      const isSpace = !el || el === " " || el === "\t";
-
-      if (offsetX < b + el.length) {
-        break;
-      }
-
-      b += el.length;
-
-      if (!isSpace) {
-        a++;
-      }
-    }
-
-    if (a >= maxA && i < tokens.length - 1) {
-      i++;
-      a = 0;
-      maxA = validWords.length;
-    }
-
-    return { i, a, maxA };
-  }
-
   refreshLineNode() {
     this.editor.output.childNodes.forEach((node) => {
       const lineNumber = parseInt(node.dataset.line, 10);
@@ -362,38 +313,46 @@ class HighlightController {
 
     if (!wordNodes || wordNodes.length === 0) return;
 
-    if (!tokens || tokens.length === 0) return;
+    tokens = tokens || [];
 
-    let { i, a, maxA } = this.getStartTokenDetails(
-      tokens,
-      this.editor.lineController.offsetX,
-    );
+    let position = this.editor.lineController.offsetX || 0;
+    let i = 0;
+
+    while (
+      i < tokens.length &&
+      tokens[i].column - 1 + tokens[i].value.length <= position
+    ) {
+      i++;
+    }
+
     for (const node of wordNodes) {
-      const token = tokens[i];
-      if (
-        !node.textContent ||
-        node.textContent.replaceAll(" ", "").length === 0 ||
-        node.textContent === "\t"
-      )
+      const text = node.textContent || "";
+      const length = text.length;
+
+      if (!text || text.replaceAll(" ", "").length === 0 || text === "\t") {
+        position += length;
         continue;
-
-      if (token) {
-        if (token.type) {
-          node.classList.remove(...this.classValue);
-          node.classList.add(token.type);
-        }
       }
 
-      if (token) {
-        maxA = this.splitValidWord(token.value).length;
-      }
-      a++;
-
-      if (a === maxA) {
+      while (
+        i < tokens.length &&
+        tokens[i].column - 1 + tokens[i].value.length <= position
+      ) {
         i++;
-        maxA = 0;
-        a = 0;
       }
+
+      const token = tokens[i];
+      const tokenStart = token ? token.column - 1 : -1;
+      const tokenEnd = token ? tokenStart + token.value.length : -1;
+      const belongsToToken =
+        !!token && position >= tokenStart && position < tokenEnd;
+
+      node.classList.remove(...this.classValue);
+      if (belongsToToken && token.type) {
+        node.classList.add(token.type);
+      }
+
+      position += length;
     }
 
     this.dirtyLines.delete(lineNumber);

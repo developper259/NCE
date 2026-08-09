@@ -103,23 +103,38 @@ class WriterController {
 
     const row = screenIndex + this.editor.lineController.startIndex;
     const lineNode = this.editor.lineController.lines[row];
-    const tokens = lineNode ? lineNode.getTokens() : null;
+    const tokens = lineNode ? lineNode.getTokens() || [] : [];
 
-    let { i, a, maxA } = this.editor.highlightController.getStartTokenDetails(
-      tokens,
-      this.editor.lineController.offsetX,
-    );
+    let position = this.editor.lineController.offsetX || 0;
+    let i = 0;
+
+    while (
+      i < tokens.length &&
+      tokens[i].column - 1 + tokens[i].value.length <= position
+    ) {
+      i++;
+    }
 
     for (const word of words) {
       if (word.length > 0) {
         let c = "";
-        let token = null;
-
         const isContentWord = word.trim().length !== 0 && word !== "\t";
 
-        if (tokens) {
-          token = tokens[i];
-          if (token && isContentWord) {
+        if (isContentWord) {
+          while (
+            i < tokens.length &&
+            tokens[i].column - 1 + tokens[i].value.length <= position
+          ) {
+            i++;
+          }
+
+          const token = tokens[i];
+          const tokenStart = token ? token.column - 1 : -1;
+          const tokenEnd = token ? tokenStart + token.value.length : -1;
+          const belongsToToken =
+            !!token && position >= tokenStart && position < tokenEnd;
+
+          if (belongsToToken) {
             c = token.type;
           }
         }
@@ -129,20 +144,7 @@ class WriterController {
         span.textContent = word;
         fragment.appendChild(span);
 
-        if (tokens && isContentWord) {
-          if (token && token.value) {
-            maxA = this.editor.highlightController.splitValidWord(
-              token.value,
-            ).length;
-          }
-          a++;
-
-          if (a === maxA) {
-            i++;
-            maxA = 0;
-            a = 0;
-          }
-        }
+        position += word.length;
       }
     }
 
