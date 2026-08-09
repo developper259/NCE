@@ -1,8 +1,12 @@
-import { Token } from '../types/token';
-import { HighlightOptions, HighlightResult, LineHighlightResult } from '../types/highlighter';
-import { Tokenizer } from './Tokenizer';
-import { LanguageDefinition } from '../types/language';
-import { languages } from '../languages/Languages'
+import { Token } from "../types/token";
+import {
+  HighlightOptions,
+  HighlightResult,
+  LineHighlightResult,
+} from "../types/highlighter";
+import { Tokenizer } from "./Tokenizer";
+import { LanguageDefinition } from "../types/language";
+import { languages } from "../languages/Languages";
 
 export class Highlighter {
   private tokenizer: Tokenizer;
@@ -11,7 +15,7 @@ export class Highlighter {
 
   constructor(language: LanguageDefinition, options?: HighlightOptions) {
     this.tokenizer = new Tokenizer(language);
-    this.themeName = options?.theme || 'dark';
+    this.themeName = options?.theme || "dark";
     this.options = options || {};
   }
 
@@ -20,12 +24,17 @@ export class Highlighter {
   }
 
   public static detectLanguage(extension: string): string | undefined {
-    const ext = extension.startsWith('.') ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
+    const ext = extension.startsWith(".")
+      ? extension.toLowerCase()
+      : `.${extension.toLowerCase()}`;
 
     for (const langKey in languages) {
       const lang = languages[langKey];
-      
-      if (lang.extensions && lang.extensions.map(e => e.toLowerCase()).includes(ext)) {
+
+      if (
+        lang.extensions &&
+        lang.extensions.map((e) => e.toLowerCase()).includes(ext)
+      ) {
         return lang.name;
       }
     }
@@ -34,7 +43,8 @@ export class Highlighter {
   }
 
   public highlight(code: string): HighlightResult {
-    const { tokens: rawTokens, finalStateStack } = this.tokenizer.tokenizeWithState(code);
+    const { tokens: rawTokens, finalStateStack } =
+      this.tokenizer.tokenizeWithState(code);
     const html = this.generateHTML(code, rawTokens);
 
     const tokens = this.options.includeClasses
@@ -50,7 +60,7 @@ export class Highlighter {
 
   public highlightLine(
     line: string,
-    initialStateStack: string[] = ['root'],
+    initialStateStack: string[] = ["root"],
     lineIndex: number = 0,
   ): LineHighlightResult {
     const { tokens: rawTokens, finalStateStack } = this.tokenizer.tokenizeLine(
@@ -74,19 +84,28 @@ export class Highlighter {
 
   public getTokenLine(
     line: string,
-    initialStateStack: string[] = ['root'],
+    initialStateStack: string[] = ["root"],
     lineIndex: number = 0,
   ): { tokens: Token[]; finalState: string[] } {
-    const { tokens, finalStateStack } = this.tokenizer.tokenizeLine(line, initialStateStack, lineIndex);
+    const { tokens, finalStateStack } = this.tokenizer.tokenizeLine(
+      line,
+      initialStateStack,
+      lineIndex,
+    );
+
     return { tokens, finalState: finalStateStack };
   }
 
   public getHTMLLine(
     line: string,
-    initialStateStack: string[] = ['root'],
+    initialStateStack: string[] = ["root"],
     lineIndex: number = 0,
   ): { html: string; finalState: string[] } {
-    const { tokens, finalStateStack } = this.tokenizer.tokenizeLine(line, initialStateStack, lineIndex);
+    const { tokens, finalStateStack } = this.tokenizer.tokenizeLine(
+      line,
+      initialStateStack,
+      lineIndex,
+    );
     return {
       html: this.generateLineHTML(line, tokens, lineIndex + 1),
       finalState: finalStateStack,
@@ -122,7 +141,7 @@ export class Highlighter {
   }
 
   private generateHTML(code: string, tokens: Token[]): string {
-    const lines = code.split('\n');
+    const lines = code.split("\n");
     const linesMap = this.groupTokensByLine(tokens);
 
     let html = '<div class="nsh-highlighter">';
@@ -133,11 +152,15 @@ export class Highlighter {
       html += this.generateLineHTML(lines[i], lineTokens, lineNumber);
     }
 
-    html += '</div>';
+    html += "</div>";
     return html;
   }
 
-  private generateLineHTML(line: string, lineTokens: Token[], lineNumber: number): string {
+  private generateLineHTML(
+    line: string,
+    lineTokens: Token[],
+    lineNumber: number,
+  ): string {
     let html = '<div class="nsh-line">';
 
     if (this.options.lineNumbers) {
@@ -164,7 +187,7 @@ export class Highlighter {
       html += this.escapeHtml(plainText);
     }
 
-    html += '</div>';
+    html += "</div>";
     return html;
   }
 
@@ -184,83 +207,105 @@ export class Highlighter {
   private getCssClass(tokenType: string): string {
     const classMap: { [key: string]: string } = {
       // Types de base
-      keyword: 'nsh-keyword',
-      string: 'nsh-string',
-      number: 'nsh-number',
-      comment: 'nsh-comment',
-      function: 'nsh-function',
-      variable: 'nsh-variable',
-      operator: 'nsh-operator',
-      bracket: 'nsh-bracket',
-      
+      keyword: "nsh-keyword",
+      string: "nsh-string",
+      number: "nsh-number",
+      comment: "nsh-comment",
+      function: "nsh-function",
+      variable: "nsh-variable",
+      operator: "nsh-operator",
+      bracket: "nsh-bracket",
+
       // JavaScript/TypeScript spécifiques
-      builtin: 'nsh-function',
-      'template-expression': 'nsh-variable',
-      regex: 'nsh-string',
-      'arrow-function': 'nsh-operator',
-      spread: 'nsh-operator',
-      type: 'nsh-keyword',
-      jsdoc: 'nsh-comment',
-      'type-annotation': 'nsh-keyword',
-      generic: 'nsh-keyword',
-      'non-null': 'nsh-operator',
-      'optional-chaining': 'nsh-operator',
-      'jsx-tag': 'nsh-keyword',
-      
+      builtin: "nsh-function",
+      "template-expression": "nsh-variable",
+      regex: "nsh-string",
+      "arrow-function": "nsh-operator",
+      spread: "nsh-operator",
+      type: "nsh-keyword",
+      jsdoc: "nsh-comment",
+      "type-annotation": "nsh-keyword",
+      generic: "nsh-keyword",
+      "non-null": "nsh-operator",
+      "optional-chaining": "nsh-operator",
+      "jsx-tag": "nsh-keyword",
+
       // Python spécifiques
-      decorator: 'nsh-function',
-      'fstring-expression': 'nsh-variable',
-      docstring: 'nsh-comment',
-      'type-hint': 'nsh-keyword',
-      comparison: 'nsh-operator',
-      assignment: 'nsh-operator',
-      identity: 'nsh-operator',
-      membership: 'nsh-operator',
-      boolean: 'nsh-operator',
-      walrus: 'nsh-operator',
-      'special-variable': 'nsh-variable',
-      
+      decorator: "nsh-function",
+      "fstring-expression": "nsh-variable",
+      docstring: "nsh-comment",
+      "type-hint": "nsh-keyword",
+      comparison: "nsh-operator",
+      assignment: "nsh-operator",
+      identity: "nsh-operator",
+      membership: "nsh-operator",
+      boolean: "nsh-operator",
+      walrus: "nsh-operator",
+      "special-variable": "nsh-variable",
+
       // HTML spécifiques
-      tag: 'nsh-keyword',
-      doctype: 'nsh-keyword',
-      'tag-open': 'nsh-keyword',
-      'tag-close': 'nsh-keyword',
-      'tag-selfclose': 'nsh-keyword',
-      'tag-bracket': 'nsh-keyword',
-      attribute: 'nsh-variable',
-      'attribute-value': 'nsh-string',
-      cdata: 'nsh-string',
-      'processing-instruction': 'nsh-comment',
-      'script-content': 'nsh-string',
-      'style-content': 'nsh-string',
-      entity: 'nsh-number',
-      
+      tag: "nsh-keyword",
+      doctype: "nsh-keyword",
+      "tag-open": "nsh-keyword",
+      "tag-close": "nsh-keyword",
+      "tag-selfclose": "nsh-keyword",
+      "tag-bracket": "nsh-keyword",
+      attribute: "nsh-variable",
+      "attribute-value": "nsh-string",
+      cdata: "nsh-string",
+      "processing-instruction": "nsh-comment",
+      "script-content": "nsh-string",
+      "style-content": "nsh-string",
+      entity: "nsh-number",
+      "script-start": "nsh-keyword",
+      "script-end": "nsh-keyword",
+      "style-start": "nsh-keyword",
+      "style-end": "nsh-keyword",
+
       // CSS spécifiques
-      selector: 'nsh-function',
-      'selector-id': 'nsh-function',
-      'selector-class': 'nsh-function',
-      'selector-attribute': 'nsh-variable',
-      'pseudo-class': 'nsh-keyword',
-      'pseudo-element': 'nsh-keyword',
-      property: 'nsh-keyword',
-      value: 'nsh-string',
-      color: 'nsh-number',
-      'var-function': 'nsh-variable',
-      'at-rule': 'nsh-keyword',
-      important: 'nsh-keyword',
-      combinator: 'nsh-operator'
+      selector: "nsh-function",
+      "selector-tag": "nsh-function",
+      "selector-id": "nsh-function",
+      "selector-class": "nsh-function",
+      "selector-attribute": "nsh-variable",
+      "pseudo-class": "nsh-keyword",
+      "pseudo-element": "nsh-keyword",
+      property: "nsh-keyword",
+      value: "nsh-string",
+      "value-identifier": "nsh-string",
+      color: "nsh-number",
+      "hex-color": "nsh-number",
+      "var-function": "nsh-variable",
+      "at-rule": "nsh-keyword",
+      important: "nsh-keyword",
+      combinator: "nsh-operator",
+
+      // YAML spécifiques
+      "yaml-key": "nsh-variable",
+      "yaml-value": "nsh-string",
+
+      // JSON spécifiques
+      "json-key": "nsh-variable",
+
+      // PHP spécifiques
+      "php-open": "nsh-keyword",
+      "php-close": "nsh-keyword",
+      "object-operator": "nsh-operator",
+      "scope-resolution": "nsh-operator",
+      "namespace-separator": "nsh-operator",
+      "class-name": "nsh-variable",
     };
 
-    return classMap[tokenType] || 'nsh-variable';
+    return classMap[tokenType] || '';
   }
 
   private escapeHtml(text: string): string {
     const htmlEscapes: { [key: string]: string } = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#39;'
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
     };
 
     return text.replace(/[&<>"']/g, (char) => htmlEscapes[char]);

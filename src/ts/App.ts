@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import { Window } from './Window';
-import { NSHServer } from '../modules/NSH/src/core/Socket'
+import { NSHServer } from '../modules/NSH/core/Socket'
 
 export class App {
   window: Window;
@@ -21,7 +21,7 @@ export class App {
   }
   setupAppEvents() {
     app.on("ready", () => {
-      //this.nsh.start();
+      this.nsh.start();
       
       this.window.create();
     });

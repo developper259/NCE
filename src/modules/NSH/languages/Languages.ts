@@ -6,6 +6,7 @@ import { HTML } from './HTML';
 import { CSS } from './CSS';
 import { Json } from './JSON';
 import { Yaml } from './YAML';
+import { PHP } from './PHP';
 
 export const languages: Record<string, LanguageDefinition> = {
   javascript: new JavaScript(),
@@ -14,5 +15,6 @@ export const languages: Record<string, LanguageDefinition> = {
   html: new HTML(),
   css: new CSS(),
   json: new Json(),
-  yaml: new Yaml()
+  yaml: new Yaml(),
+  php: new PHP()
 };
