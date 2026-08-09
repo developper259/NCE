@@ -1,51 +1,49 @@
 .page-scroller {
-    position: absolute;
-    display: flex;
-    background-color: var(--bg-primary);
-    z-index: 4;
-    overflow-x: hidden;
-    cursor: default;
-    user-select: none;
-    margin: 0;
-    padding: 0;
-}
-
-.page-scroller-body {
-    background-color: var(--bg-secondary);
-}
-
-.page-scroller-inactive {
-    display: none;
+  position: absolute;
+  background-color: transparent !important;
+  z-index: 4;
+  overflow-x: hidden;
+  cursor: default;
+  user-select: none;
+  margin: 0;
+  padding: 0;
 }
 
 .page-scroller-vertical {
-    right: 0;
-    top: 0;
-    height: 100%;
-    width: var(--scroller-size);
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 100%;
 }
 
 .page-scroller-horizontal {
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    height: var(--scroller-size);
-}
-
-.page-scroller-vertical:not(.page-scroller-inactive) ~ .page-scroller-horizontal {
-    width: calc(100% - var(--scroller-size) - 1px);
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 10px;
 }
 
 .page-scroller-item {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: var(--scroller-bg);
-    transition: background 0.2s;
+  position: absolute;
+  background-color: rgba(180, 180, 180, 0.4) !important;
 }
 
-.page-scroller-item:hover {
-    background: var(--scroller-bg-hover);
+.page-scroller-item:hover,
+.page-scroller-item:active {
+  background-color: rgba(180, 180, 180, 0.6) !important;
+}
+
+.page-scroller-vertical .page-scroller-item {
+  width: 100%;
+  left: 0;
+}
+
+.page-scroller-horizontal .page-scroller-item {
+  height: 100%;
+  top: 0;
+}
+
+.page-scroller-inactive {
+  opacity: 0 !important;
+  pointer-events: none;
 }

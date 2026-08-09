@@ -31,6 +31,8 @@ class Scroller {
     this.nbItem = 0;
     this.heightByItem = 0;
 
+    this.isHovered = false;
+
     this.calculProp = () => 0;
     this.calcIsActive = () => false;
     this.onRefresh = () => {};
@@ -134,13 +136,16 @@ class Scroller {
     this.scrollerOBJ.classList.add("page-scroller");
     this.itemOBJ.classList.add("page-scroller-item");
 
+    this.scrollerOBJ.style.transition = "opacity 0.2s ease-in-out";
+    this.scrollerOBJ.style.opacity = "0";
+
     if (this.isBody) this.scrollerOBJ.classList.add("page-scroller-body");
     if (!this.active) this.scrollerOBJ.classList.add("page-scroller-inactive");
 
     if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
-      this.scrollerOBJ.classList.add("page-scroller-vertical", "box-left");
+      this.scrollerOBJ.classList.add("page-scroller-vertical");
     } else {
-      this.scrollerOBJ.classList.add("page-scroller-horizontal", "box-top");
+      this.scrollerOBJ.classList.add("page-scroller-horizontal");
     }
 
     this.scrollerOBJ.id = this.id;
@@ -149,6 +154,15 @@ class Scroller {
 
     this.addScrollListeners();
     this.refresh();
+  }
+
+  updateVisibility() {
+    if (!this.scrollerOBJ) return;
+    if (this.active && (this.isHovered || this.isDragging)) {
+      this.scrollerOBJ.style.opacity = "1";
+    } else {
+      this.scrollerOBJ.style.opacity = "0";
+    }
   }
 
   refresh() {
@@ -161,9 +175,7 @@ class Scroller {
 
     const proportion = this.calculProp();
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
-    const track = isVertical
-      ? this.parentOBJHeight
-      : this.parentOBJWidth;
+    const track = isVertical ? this.parentOBJHeight : this.parentOBJWidth;
     const size = Math.max((proportion / 100) * track, 20);
 
     if (isVertical) {
@@ -181,14 +193,28 @@ class Scroller {
     if (!this.scrollerOBJ) return;
     if (mode) this.scrollerOBJ.classList.remove("page-scroller-inactive");
     else this.scrollerOBJ.classList.add("page-scroller-inactive");
+
+    this.updateVisibility();
   }
 
   addScrollListeners() {
     this.isDragging = false;
     this.itemOBJ.addEventListener("mousedown", (e) => {
       this.isDragging = true;
+      this.updateVisibility();
       e.preventDefault();
     });
+
+    this.parentOBJ.addEventListener("mouseenter", () => {
+      this.isHovered = true;
+      this.updateVisibility();
+    });
+
+    this.parentOBJ.addEventListener("mouseleave", () => {
+      this.isHovered = false;
+      this.updateVisibility();
+    });
+
     document.addEventListener("mousemove", this._onMouseMove);
     document.addEventListener("mouseup", this._onMouseUp);
     this.parentOBJ.addEventListener("wheel", this._onWheel, { passive: false });
@@ -201,16 +227,12 @@ class Scroller {
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
 
     if (isVertical) {
-      const maxScroll =
-        this.scrollerOBJHeight - this.itemOBJHeight;
+      const maxScroll = this.scrollerOBJHeight - this.itemOBJHeight;
       if (maxScroll <= 0) return;
 
       const newTop = Math.max(
         0,
-        Math.min(
-          e.clientY - rect.top - this.itemOBJHeight / 2,
-          maxScroll,
-        ),
+        Math.min(e.clientY - rect.top - this.itemOBJHeight / 2, maxScroll),
       );
       this.targetScrollRatio = newTop / maxScroll;
     } else {
@@ -219,10 +241,7 @@ class Scroller {
 
       const newLeft = Math.max(
         0,
-        Math.min(
-          e.clientX - rect.left - this.itemOBJWidth / 2,
-          maxScroll,
-        ),
+        Math.min(e.clientX - rect.left - this.itemOBJWidth / 2, maxScroll),
       );
       this.targetScrollRatio = newLeft / maxScroll;
     }
@@ -233,6 +252,7 @@ class Scroller {
   handleMouseUp() {
     if (this.isDragging) this.onScrollEnd();
     this.isDragging = false;
+    this.updateVisibility();
   }
 
   handleWheel(e) {
@@ -244,14 +264,11 @@ class Scroller {
     const dimension = isVertical
       ? this.scrollerOBJHeight
       : this.scrollerOBJWidth;
-    const itemSize = isVertical
-      ? this.itemOBJHeight
-      : this.itemOBJWidth;
+    const itemSize = isVertical ? this.itemOBJHeight : this.itemOBJWidth;
 
     const maxScroll = dimension - itemSize;
     if (maxScroll <= 0) return;
 
-    // Dynamic strength based on file size
     let dynamicStrength = this.strength;
     if (this.nbItem > 0) {
       if (this.nbItem < 50) {
@@ -284,9 +301,7 @@ class Scroller {
       return { start: 0, end: 0 };
     }
 
-    const visibleItems = Math.ceil(
-      this.parentOBJHeight / this.heightByItem,
-    );
+    const visibleItems = Math.ceil(this.parentOBJHeight / this.heightByItem);
     const maxScrollIndex = Math.max(0, this.nbItem - visibleItems);
     let start =
       Math.floor(this.scrollRatio * maxScrollIndex) - this.renderMargin;
