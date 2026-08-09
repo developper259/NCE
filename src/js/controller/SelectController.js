@@ -91,7 +91,6 @@ class SelectController {
     const startInfo = this.selectedLines.get(firstRow);
     const endInfo = this.selectedLines.get(lastRow);
 
-    // Retourne des coordonnées réelles
     const realStart = this.editor.cursor.getPosition(
       firstRow + 1,
       startInfo.startCol - 1,
@@ -189,7 +188,6 @@ class SelectController {
       const lineNode = this.editor.lineController.lines[row];
       const rawLine = lineNode ? lineNode.getText() : "";
 
-      // Conversion Visuel -> Réel
       const realStart = cursor.getPosition(row + 1, info.startCol - 1).column;
       const realEnd = cursor.getPosition(
         row + 1,
@@ -210,7 +208,6 @@ class SelectController {
     const lineNode = this.editor.lineController.lines[index];
     const rawLine = lineNode ? lineNode.getText() : "";
 
-    // Conversion Visuel -> Réel
     const realStart = this.editor.cursor.getPosition(
       index + 1,
       info.startCol - 1,
@@ -351,7 +348,6 @@ class SelectController {
 
     const lengthReal = words[targetWordIndex].length;
 
-    // Calcul visuel délégué au Curseur
     const viewStart = this.editor.cursor.getViewPosition(
       rowIndex + 1,
       startReal,
@@ -400,7 +396,6 @@ class SelectController {
     const startReal = Math.min(this.startSelect.column, this.endSelect.column);
     const endReal = Math.max(this.startSelect.column, this.endSelect.column);
 
-    // Calcul visuel délégué au Curseur
     const viewStart = this.editor.cursor.getViewPosition(
       y + 1,
       startReal,
@@ -434,7 +429,6 @@ class SelectController {
     const yStart = topRow - 1;
     const yEnd = bottomRow - 1;
 
-    // Calcul pour la Ligne du Haut
     const topRealLen = lc.lines[yStart] ? lc.lines[yStart].getText().length : 0;
     const topVisualStart = this.editor.cursor.getViewPosition(
       topRow,
@@ -453,7 +447,6 @@ class SelectController {
       });
     }
 
-    // Calcul pour les Lignes du Milieu
     for (let i = yStart + 1; i < yEnd; i++) {
       const realLen = lc.lines[i] ? lc.lines[i].getText().length : 0;
       const lineLenVis = this.editor.cursor.getViewPosition(
@@ -466,7 +459,6 @@ class SelectController {
       });
     }
 
-    // Calcul pour la Ligne du Bas
     const bottomVisualLen = this.editor.cursor.getViewPosition(
       bottomRow,
       bottomRealCol,

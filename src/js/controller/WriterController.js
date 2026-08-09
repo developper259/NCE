@@ -401,6 +401,14 @@ class WriterController {
       }
     }
 
+    this.editor.events.callEvent(Events.ON_CHANGE, {
+      action: "delete",
+      beforeRow: start.row,
+      beforeColumn: start.column,
+      afterRow: end.row,
+      afterColumn: end.column,
+    });
+
     return { row: newRow, column: newCol };
   }
 

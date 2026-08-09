@@ -52,7 +52,7 @@ class Cursor {
   }
 
   xToColumn(x) {
-    return roundX(x / this.editor.letterSize) + 1; // Renvoie la colonne Visuelle
+    return roundX(x / this.editor.letterSize) + 1;
   }
 
   columnFromSelectObj(obj) {
@@ -74,6 +74,19 @@ class Cursor {
     return this.column !== realColumn || this.row !== row;
   }
 
+  normalizePosition(row, column) {
+    const lc = this.editor.lineController;
+
+    if (row > lc.lines.length - 1) row = lc.lines.length - 1;
+    if (row <= 0) row = 1;
+
+    const line = lc.lines[row - 1] ? lc.lines[row - 1].getText() : "";
+    if (column < 0) column = 0;
+    if (column > line.length) column = line.length;
+
+    return { row: row, column: column };
+  }
+
   onClick(event) {
     if (!this.editor.tabManager.activeFile) return;
     this.editor.keyBinding.historyX = undefined;
@@ -88,7 +101,6 @@ class Cursor {
     const targetRow = this.yToRow(localY + scrollOffsetY);
     const targetViewColumn = this.xToColumn(localX) + scrollOffsetXChars;
 
-    // 🎯 Conversion instantanée: Visuel -> Réel
     const posReal = this.getPosition(targetRow, targetViewColumn);
     if (!posReal) return;
 
@@ -99,12 +111,14 @@ class Cursor {
     return posReal;
   }
 
-  setCursorPosition(row, realColumn) {
+  setCursorPosition(r, c) {
     if (!this.editor.tabManager.activeFile) return;
 
-    if (this.isNewPosition(row, realColumn)) {
+    const { row, column } = this.normalizePosition(r, c);
+
+    if (this.isNewPosition(row, column)) {
       this.row = row;
-      this.column = realColumn;
+      this.column = column;
 
       this.editor.lineController.setFocusLine(this.row);
       this.editor.setSelected(true);
@@ -144,7 +158,6 @@ class Cursor {
       return;
     }
 
-    // 🎯 On récupère la position visuelle pour positionner le curseur à l'écran
     const viewPos = this.getViewPosition(this.row, this.column);
 
     const placeY = this.rowToY(this.row) - 4;
@@ -155,7 +168,6 @@ class Cursor {
     this.editor.cD.style.top = `${placeY}px`;
   }
 
-  // 🎯 Transformer position RÉELLE (dans la ligne) -> VISUELLE
   getViewPosition(row, realColumn) {
     if (!this.editor.tabManager.activeFile) return { row: 1, column: 0 };
 
@@ -168,7 +180,6 @@ class Cursor {
     const line = lineNode.getText();
     const safeRealCol = Math.max(0, Math.min(realColumn, line.length));
 
-    // Utilisation de votre logique testée et validée
     const lBefore = line.slice(0, safeRealCol);
     const tabsCount = getOccurrence("\t", lBefore);
     const viewColumn =
@@ -177,7 +188,6 @@ class Cursor {
     return { row: row, column: viewColumn };
   }
 
-  // 🎯 Transformer position VISUELLE -> RÉELLE (dans la ligne)
   getPosition(row, viewColumn) {
     if (!this.editor.tabManager.activeFile) return { row: 1, column: 0 };
 
@@ -195,13 +205,11 @@ class Cursor {
     let currentViewCol = 0;
     let realCol = 0;
 
-    // Itération simple et efficace pour retrouver l'index réel
     for (let i = 0; i < line.length; i++) {
       if (currentViewCol >= viewColumn) break;
 
       const charWidth = line[i] === "\t" ? tabWidth : 1;
 
-      // Gestion du clic au milieu d'une tabulation (arrondi)
       if (currentViewCol + charWidth > viewColumn) {
         const midPoint = currentViewCol + charWidth / 2;
         if (viewColumn >= midPoint) {
@@ -217,7 +225,6 @@ class Cursor {
     return { row: row, column: realCol };
   }
 
-  // 🎯 Les accesseurs standards renvoient désormais toujours la position RÉELLE
   getCursorPosition() {
     return { row: this.row, column: this.column };
   }
