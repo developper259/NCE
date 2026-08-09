@@ -5,11 +5,13 @@ import { FileManager } from "./addon/FileManager";
 import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
 import { NSH } from './NSH'
+import { ContextMenu } from "./addon/ContextMenu";
 
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
   fileManager: FileManager | undefined;
   watcher: Watcher | undefined;
+  contextMenu: ContextMenu | undefined;
   nsh: NSH | undefined;
   name: string;
   forceQuit: boolean;
@@ -40,6 +42,7 @@ export class Window {
 
     this.fileManager = new FileManager(this.window);
     this.watcher = new Watcher(this.window);
+    this.contextMenu = new ContextMenu(this.window);
     this.nsh = new NSH(this);
 
     const menu = new AppMenu(this.window, this);
@@ -147,11 +150,17 @@ export class Window {
     });
 
     ipcMain.handle("Watcher:startWatching", async (event, projectPath: string) => {
-      this.watcher?.startWatching(projectPath);
+      return this.watcher?.startWatching(projectPath);
     });
 
     ipcMain.handle("Watcher:stopWatching", async () => {
-      this.watcher?.stopWatching();
+      return this.watcher?.stopWatching();
     });
+
+    ipcMain.handle(
+      "ContextMenu:show", async (event, actions: Array<{ name: string; keys?: string }>) => {
+        return this.contextMenu?.openContext(actions);
+      }
+    );
   }
 }

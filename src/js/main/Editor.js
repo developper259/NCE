@@ -30,6 +30,7 @@ class Editor {
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
     this.threadManager = new ThreadManager();
+    this.contextMenuManager = new ContextMenuManager();
 
     this.fileExplorer = new FileExplorer(this);
     this.sidebarManager.registerMenu(this.fileExplorer);
