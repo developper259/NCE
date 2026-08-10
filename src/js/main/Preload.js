@@ -32,6 +32,25 @@ contextBridge.exposeInMainWorld("api", {
   stopWatching: () => ipcRenderer.invoke("Watcher:stopWatching"),
   openContextMenu: (actions) => ipcRenderer.invoke("ContextMenu:show", actions),
 
+  renameEntry: (oldPath, newPath) =>
+    ipcRenderer.invoke("FileManager:rename", oldPath, newPath),
+  deleteEntry: (targetPath) =>
+    ipcRenderer.invoke("FileManager:delete", targetPath),
+  createFile: (dirPath, fileName) =>
+    ipcRenderer.invoke("FileManager:createFile", dirPath, fileName),
+  createFolder: (dirPath, folderName) =>
+    ipcRenderer.invoke("FileManager:createFolder", dirPath, folderName),
+  copyEntry: (sourcePath, destPath) =>
+    ipcRenderer.invoke("FileManager:copy", sourcePath, destPath),
+  moveEntry: (sourcePath, destPath) =>
+    ipcRenderer.invoke("FileManager:move", sourcePath, destPath),
+  duplicateEntry: (targetPath) =>
+    ipcRenderer.invoke("FileManager:duplicate", targetPath),
+  revealInExplorer: (targetPath) =>
+    ipcRenderer.invoke("FileManager:revealInExplorer", targetPath),
+  pathExists: (targetPath) =>
+    ipcRenderer.invoke("FileManager:pathExists", targetPath),
+
   onSaveRequest: (callback) =>
     ipcRenderer.on("Request:saveState", () => callback()),
   onLoadState: (callback) =>

@@ -12,6 +12,15 @@ export class ContextMenu {
     this.window = window;
   }
 
+  handleIPC() {
+    ipcMain.handle(
+      "ContextMenu:show",
+      async (event, actions: Array<{ name: string; keys?: string }>) => {
+        return this.openContext(actions);
+      },
+    );
+  }
+
   async openContext(
     actions: Array<{ name: string; type?: string; keys?: string }>,
   ) {

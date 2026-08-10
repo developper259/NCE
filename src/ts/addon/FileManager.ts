@@ -1,5 +1,7 @@
-import { app, dialog, BrowserWindow } from "electron";
+import { app, dialog, shell, BrowserWindow, ipcMain } from "electron";
+import { Window } from "../Window";
 const fs = require("fs").promises;
+const fsSync = require("fs");
 const path = require("path");
 
 export type UnsavedCloseChoice = "save" | "dontSave" | "cancel";
@@ -10,16 +12,155 @@ export interface FileItem {
   type: "file" | "folder";
 }
 
+export interface FileOperationResult {
+  success: boolean;
+  path?: string;
+  error?: string;
+}
+
 export class FileManager {
-  window: InstanceType<typeof BrowserWindow>;
+  window: Window;
   private fileCache: Map<string, string[]> = new Map();
 
-  constructor(window: BrowserWindow) {
+  constructor(window: Window) {
     this.window = window;
   }
 
+  handleIPC() {
+    ipcMain.handle("FileManager:selectFile", async () => {
+      return await this.selectFile();
+    });
+
+    ipcMain.handle("FileManager:selectFiles", async () => {
+      return await this.selectFiles();
+    });
+
+    ipcMain.handle("FileManager:selectNewFile", async (event, name) => {
+      return await this.selectNewFile(name);
+    });
+
+    ipcMain.handle("FileManager:getFileContent", async (event, file) => {
+      return await this.getFileContent(file);
+    });
+
+    ipcMain.handle("FileManager:saveFile", async (event, path, content) => {
+      return await this.saveFile(path, content);
+    });
+
+    ipcMain.handle(
+      "FileManager:confirmUnsavedChanges",
+      async (event, fileName: string) => {
+        if (!this.window.window) return "cancel";
+        return await this.confirmUnsavedChanges(fileName);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:getFolderContent",
+      async (event, dirPath: string) => {
+        return await this.getFolderContent(dirPath);
+      },
+    );
+
+    ipcMain.handle("FileManager:selectFolder", async () => {
+      return await this.selectFolder();
+    });
+
+    ipcMain.handle(
+      "FileManager:initializeFile",
+      async (event, filePath: string) => {
+        return await this.initializeFile(filePath);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:getFileChunk",
+      async (event, filePath: string, startLine: number, lineCount: number) => {
+        return await this.getFileChunk(filePath, startLine, lineCount);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:saveState",
+      async (event, stateString: string) => {
+        const saved = await this.saveState(stateString);
+        if (this.window.forceQuit) {
+          this.window.window?.close();
+        }
+        return saved;
+      },
+    );
+
+    ipcMain.handle("FileManager:loadState", async () => {
+      return (await this.loadState()) ?? null;
+    });
+
+    ipcMain.handle(
+      "FileManager:rename",
+      async (event, oldPath: string, newPath: string) => {
+        return await this.renameEntry(oldPath, newPath);
+      },
+    );
+
+    ipcMain.handle("FileManager:delete", async (event, targetPath: string) => {
+      return await this.deleteEntry(targetPath);
+    });
+
+    ipcMain.handle(
+      "FileManager:createFile",
+      async (event, dirPath: string, fileName: string) => {
+        return await this.createFile(dirPath, fileName);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:createFolder",
+      async (event, dirPath: string, folderName: string) => {
+        return await this.createFolder(dirPath, folderName);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:copy",
+      async (event, sourcePath: string, destPath: string) => {
+        return await this.copyEntry(sourcePath, destPath);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:move",
+      async (event, sourcePath: string, destPath: string) => {
+        return await this.moveEntry(sourcePath, destPath);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:duplicate",
+      async (event, targetPath: string) => {
+        return await this.duplicateEntry(targetPath);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:revealInExplorer",
+      async (event, targetPath: string) => {
+        shell.showItemInFolder(targetPath);
+        return { success: true };
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:pathExists",
+      async (event, targetPath: string) => {
+        return fsSync.existsSync(targetPath);
+      },
+    );
+  }
+
   async selectFile(): Promise<string | undefined> {
-    const result = await dialog.showOpenDialog(this.window, {
+    if (!this.window.window) return undefined;
+
+    const result = await dialog.showOpenDialog(this.window.window, {
       properties: ["openFile"],
     });
     if (result.canceled) {
@@ -32,7 +173,9 @@ export class FileManager {
   }
 
   async selectFiles(): Promise<string[] | undefined> {
-    const result = await dialog.showOpenDialog(this.window, {
+    if (!this.window.window) return undefined;
+
+    const result = await dialog.showOpenDialog(this.window.window, {
       properties: ["openFile", "multiSelections"],
     });
 
@@ -46,7 +189,9 @@ export class FileManager {
   }
 
   async selectNewFile(name: string): Promise<string | undefined> {
-    const result = await dialog.showSaveDialog(this.window, {
+    if (!this.window.window) return undefined;
+
+    const result = await dialog.showSaveDialog(this.window.window, {
       title: "Save File",
       defaultPath: name,
       buttonLabel: "Save",
@@ -99,7 +244,9 @@ export class FileManager {
   }
 
   async confirmUnsavedChanges(fileName: string): Promise<UnsavedCloseChoice> {
-    const { response } = await dialog.showMessageBox(this.window, {
+    if (!this.window.window) return "cancel";
+
+    const { response } = await dialog.showMessageBox(this.window.window, {
       type: "warning",
       buttons: ["Save", "Don't Save", "Cancel"],
       defaultId: 0,
@@ -143,15 +290,154 @@ export class FileManager {
   }
 
   async selectFolder(): Promise<string | undefined> {
-    const { canceled, filePaths } = await dialog.showOpenDialog(this.window, {
-      properties: ["openDirectory"],
-    });
+    if (!this.window.window) return undefined;
+
+    const { canceled, filePaths } = await dialog.showOpenDialog(
+      this.window.window,
+      {
+        properties: ["openDirectory"],
+      },
+    );
 
     if (canceled || filePaths.length === 0) {
       return undefined;
     }
 
     return filePaths[0];
+  }
+
+  async renameEntry(
+    oldPath: string,
+    newPath: string,
+  ): Promise<FileOperationResult> {
+    try {
+      if (fsSync.existsSync(newPath)) {
+        return {
+          success: false,
+          error: "Un fichier ou dossier portant ce nom existe déjà.",
+        };
+      }
+      await fs.rename(oldPath, newPath);
+      this.clearFileCache(oldPath);
+      return { success: true, path: newPath };
+    } catch (error: any) {
+      console.error("Error renaming entry:", error);
+      return { success: false, error: error?.message || "Rename failed." };
+    }
+  }
+
+  async deleteEntry(targetPath: string): Promise<FileOperationResult> {
+    try {
+      await fs.rm(targetPath, { recursive: true, force: true });
+      this.clearFileCache(targetPath);
+      return { success: true };
+    } catch (error: any) {
+      console.error("Error deleting entry:", error);
+      return { success: false, error: error?.message || "Delete failed." };
+    }
+  }
+
+  async createFile(
+    dirPath: string,
+    fileName: string,
+  ): Promise<FileOperationResult> {
+    const fullPath = path.join(dirPath, fileName);
+    try {
+      if (fsSync.existsSync(fullPath)) {
+        return { success: false, error: "Ce fichier existe déjà." };
+      }
+      await fs.mkdir(dirPath, { recursive: true });
+      await fs.writeFile(fullPath, "");
+      return { success: true, path: fullPath };
+    } catch (error: any) {
+      console.error("Error creating file:", error);
+      return { success: false, error: error?.message || "Create file failed." };
+    }
+  }
+
+  async createFolder(
+    dirPath: string,
+    folderName: string,
+  ): Promise<FileOperationResult> {
+    const fullPath = path.join(dirPath, folderName);
+    try {
+      if (fsSync.existsSync(fullPath)) {
+        return { success: false, error: "Ce dossier existe déjà." };
+      }
+      await fs.mkdir(fullPath, { recursive: true });
+      return { success: true, path: fullPath };
+    } catch (error: any) {
+      console.error("Error creating folder:", error);
+      return {
+        success: false,
+        error: error?.message || "Create folder failed.",
+      };
+    }
+  }
+
+  async copyEntry(
+    sourcePath: string,
+    destPath: string,
+  ): Promise<FileOperationResult> {
+    try {
+      await fs.cp(sourcePath, destPath, {
+        recursive: true,
+        errorOnExist: true,
+      });
+      return { success: true, path: destPath };
+    } catch (error: any) {
+      console.error("Error copying entry:", error);
+      return { success: false, error: error?.message || "Copy failed." };
+    }
+  }
+
+  async moveEntry(
+    sourcePath: string,
+    destPath: string,
+  ): Promise<FileOperationResult> {
+    try {
+      await fs.rename(sourcePath, destPath);
+      this.clearFileCache(sourcePath);
+      return { success: true, path: destPath };
+    } catch (error: any) {
+      if (error?.code === "EXDEV") {
+        try {
+          await fs.cp(sourcePath, destPath, { recursive: true });
+          await fs.rm(sourcePath, { recursive: true, force: true });
+          this.clearFileCache(sourcePath);
+          return { success: true, path: destPath };
+        } catch (fallbackError: any) {
+          console.error("Error moving entry (fallback):", fallbackError);
+          return {
+            success: false,
+            error: fallbackError?.message || "Move failed.",
+          };
+        }
+      }
+      console.error("Error moving entry:", error);
+      return { success: false, error: error?.message || "Move failed." };
+    }
+  }
+
+  async duplicateEntry(targetPath: string): Promise<FileOperationResult> {
+    try {
+      const dir = path.dirname(targetPath);
+      const ext = path.extname(targetPath);
+      const base = path.basename(targetPath, ext);
+
+      let candidate = path.join(dir, `${base} copy${ext}`);
+      let counter = 2;
+      while (fsSync.existsSync(candidate)) {
+        candidate = path.join(dir, `${base} copy ${counter}${ext}`);
+        counter += 1;
+      }
+
+      await fs.cp(targetPath, candidate, { recursive: true });
+      return { success: true, path: candidate };
+    } catch (error: any) {
+      console.error("Error duplicating entry:", error);
+      return { success: false, error: error?.message || "Duplicate failed." };
+    }
   }
 
   async initializeFile(
@@ -242,7 +528,7 @@ export class FileManager {
       ) {
         return null;
       }
-      
+
       return state;
     } catch (error: any) {
       if (error?.code === "ENOENT") return null;

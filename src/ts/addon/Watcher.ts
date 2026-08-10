@@ -1,4 +1,4 @@
-import { BrowserWindow } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 const chokidar = require("chokidar");
 
 export class Watcher {
@@ -8,6 +8,19 @@ export class Watcher {
 
   constructor(window: BrowserWindow) {
     this.window = window;
+  }
+
+  handleIPC() {
+    ipcMain.handle(
+      "Watcher:startWatching",
+      async (event, projectPath: string) => {
+        return this.startWatching(projectPath);
+      },
+    );
+
+    ipcMain.handle("Watcher:stopWatching", async () => {
+      return this.stopWatching();
+    });
   }
 
   startWatching(projectPath: string) {

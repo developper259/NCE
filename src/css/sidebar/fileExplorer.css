@@ -18,8 +18,11 @@
 }
 
 .file-tree {
+  flex: 1;
+  min-height: 0;
   overflow: visible;
   padding-top: 4px;
+  width: 100%;
 }
 
 .file-item {
@@ -146,4 +149,21 @@
 
 .open-folder-btn:active {
   background-color: #005a9e;
+}
+
+.file-item.editing {
+  padding-left: calc(var(--depth) * 14px + 4px);
+}
+
+.file-item .file-name-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--input-bg, #1e1e1e);
+  color: var(--text-color, #ddd);
+  border: 1px solid var(--accent-color, #007acc);
+  border-radius: 2px;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 1px 4px;
+  outline: none;
 }
