@@ -346,7 +346,7 @@ export class FileManager {
       if (fsSync.existsSync(fullPath)) {
         return { success: false, error: "Ce fichier existe déjà." };
       }
-      await fs.mkdir(dirPath, { recursive: true });
+      await fs.mkdir(path.dirname(fullPath), { recursive: true });
       await fs.writeFile(fullPath, "");
       return { success: true, path: fullPath };
     } catch (error: any) {

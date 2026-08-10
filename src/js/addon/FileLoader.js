@@ -1,18 +1,23 @@
 class FileLoader {
   constructor(editor) {
     this.editor = editor;
-    this.loadingChunks = new Map();
+    this.loadingStates = new Map();
     this.initialChunkSize = 1000;
     this.backgroundChunkSize = 1000;
-    this.isLoading = false;
-    this.isFullyLoaded = false;
-    this.currentFilePath = null;
-    this.timer = undefined;
+  }
+
+  getState(filePath) {
+    let state = this.loadingStates.get(filePath);
+    if (!state) {
+      state = { isLoading: false, isFullyLoaded: false, timer: undefined };
+      this.loadingStates.set(filePath, state);
+    }
+    return state;
   }
 
   async loadFile(filePath) {
-    this.currentFilePath = filePath;
-    this.isFullyLoaded = false;
+    const state = this.getState(filePath);
+    state.isFullyLoaded = false;
 
     const initResponse = await this.editor.api.initializeFile(filePath);
     if (!initResponse || !initResponse.success) {
@@ -25,7 +30,7 @@ class FileLoader {
     const totalLines = initResponse.totalLines;
 
     if (totalLines <= this.initialChunkSize) {
-      this.isFullyLoaded = true;
+      state.isFullyLoaded = true;
     }
 
     const chunkResponse = await this.editor.api.getFileChunk(
@@ -43,23 +48,26 @@ class FileLoader {
     };
   }
 
-  loadRemainingLines(filePath, currentLineCount, totalLines) {
-    if (this.isFullyLoaded || currentLineCount >= totalLines) {
-      this.isFullyLoaded = true;
+  loadRemainingLines(file, currentLineCount, totalLines) {
+    const filePath = file.path;
+    const state = this.getState(filePath);
+
+    if (state.isFullyLoaded || currentLineCount >= totalLines) {
+      state.isFullyLoaded = true;
       return;
     }
 
-    if (this.isLoading) {
+    if (state.isLoading) {
       return;
     }
 
-    this.isLoading = true;
+    state.isLoading = true;
 
     const loadChunk = (startLine) => {
       if (startLine >= totalLines) {
-        this.isLoading = false;
-        this.isFullyLoaded = true;
-        if (this.timer) this.timer.close();
+        state.isLoading = false;
+        state.isFullyLoaded = true;
+        if (state.timer) state.timer.close();
         return;
       }
 
@@ -69,11 +77,12 @@ class FileLoader {
       );
 
       const loadWithIdleCallback = () => {
-        if (this.isFullyLoaded || !this.isLoading) return;
+        if (state.isFullyLoaded || !state.isLoading) return;
         if ("requestIdleCallback" in window) {
-          requestIdleCallback(
+          const handle = requestIdleCallback(
             () =>
               this.performChunkLoad(
+                file,
                 filePath,
                 startLine,
                 endLine,
@@ -82,10 +91,12 @@ class FileLoader {
               ),
             { timeout: 100 },
           );
+          state.timer = { close: () => cancelIdleCallback(handle) };
         } else {
-          this.timer = setTimeout(
+          const handle = setTimeout(
             () =>
               this.performChunkLoad(
+                file,
                 filePath,
                 startLine,
                 endLine,
@@ -94,6 +105,7 @@ class FileLoader {
               ),
             1,
           );
+          state.timer = { close: () => clearTimeout(handle) };
         }
       };
 
@@ -104,14 +116,16 @@ class FileLoader {
   }
 
   async performChunkLoad(
+    file,
     filePath,
     startLine,
     endLine,
     totalLines,
     nextCallback,
   ) {
-    if (this.currentFilePath !== filePath) {
-      this.isLoading = false;
+    const state = this.getState(filePath);
+
+    if (!state.isLoading) {
       return;
     }
 
@@ -128,26 +142,43 @@ class FileLoader {
         response.lines &&
         response.lines.length > 0
       ) {
-        this.editor.lineController.appendLines(response.lines);
-        this.editor.scrollerManager.refreshAll();
+        if (file === this.editor.tabManager.activeFile) {
+          this.editor.lineController.appendLines(response.lines);
+          this.editor.scrollerManager.refreshAll();
+        } else {
+          const newLineNodes = response.lines.map((text) => new LineNode(text));
+          file.lines = file.lines.concat(newLineNodes);
+          file.totalLines = file.lines.length;
+        }
 
         nextCallback(endLine);
       } else {
-        this.isLoading = false;
-        this.isFullyLoaded = true;
-        if (this.timer) this.timer.close();
+        state.isLoading = false;
+        state.isFullyLoaded = true;
+        if (state.timer) state.timer.close();
       }
     } catch (error) {
       console.error("Error loading chunk:", error);
-      this.isLoading = false;
-      if (this.timer) this.timer.close();
+      state.isLoading = false;
+      if (state.timer) state.timer.close();
     }
   }
 
-  cancelLoading() {
-    this.isLoading = false;
-    this.isFullyLoaded = false;
-    this.loadingChunks.clear();
-    this.currentFilePath = null;
+  cancelLoading(filePath) {
+    if (filePath) {
+      const state = this.loadingStates.get(filePath);
+      if (state) {
+        state.isLoading = false;
+        if (state.timer) state.timer.close();
+        this.loadingStates.delete(filePath);
+      }
+      return;
+    }
+
+    for (const state of this.loadingStates.values()) {
+      state.isLoading = false;
+      if (state.timer) state.timer.close();
+    }
+    this.loadingStates.clear();
   }
 }

@@ -158,6 +158,34 @@ class tabManager {
     if (!this.editor.isOnInit) this.editor.refreshAll();
   }
 
+  async reloadFileFromDisk(path) {
+    if (!path) return;
+
+    const file = this.getFileByPath(path);
+    if (!file) return;
+
+    if (!file.isSaved) {
+      return;
+    }
+
+    try {
+      if (file === this.activeFile) {
+        this.editor.fileLoader.cancelLoading(file.path);
+        file.isLoaded = false;
+
+        await file.loadContent();
+
+        this.editor.lineController.markDirtyAll();
+        this.editor.lineController.refresh(true);
+        this.editor.scrollerManager.refreshAll();
+      } else {
+        file.isLoaded = false;
+      }
+    } catch (error) {
+      console.error("Error reloading file from disk:", error);
+    }
+  }
+
   openFileWithPath(path) {
     let name = path.split("/").pop();
     let node = new FileNode(this.editor, this.getNextID(), name, path);

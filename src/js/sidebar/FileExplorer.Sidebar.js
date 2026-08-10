@@ -43,23 +43,33 @@ class FileExplorer extends Sidebar {
 
   setupFileSystemWatcher() {
     window.api.onFileSystemChange((data) => {
-      this.handleFileSystemChange(data);
+      this.handleFileSystemChanges(data);
     });
   }
 
-  handleFileSystemChange(data) {
-    const { event, filePath, dirPath } = data;
+  handleFileSystemChanges(changes) {
+    if (!this.rootPath || !Array.isArray(changes) || changes.length === 0) {
+      return;
+    }
 
-    if (!this.rootPath) return;
+    for (const change of changes) {
+      if (change.event === "change") {
+        this.editor.tabManager.reloadFileFromDisk(change.filePath);
+      }
+    }
 
-    if (dirPath === this.rootPath) {
-      this.loadFiles().then(() => {
+    const dirPaths = new Set(changes.map((change) => change.dirPath));
+
+    if (dirPaths.has(this.rootPath)) {
+      this.loadFiles(this.getExpandedPaths(this.files)).then(() => {
         this.refresh();
       });
       return;
     }
 
-    this.refreshFolderIfLoaded(dirPath);
+    for (const dirPath of dirPaths) {
+      this.refreshFolderIfLoaded(dirPath);
+    }
   }
 
   refreshFolderIfLoaded(dirPath) {
@@ -87,18 +97,20 @@ class FileExplorer extends Sidebar {
   async loadFiles(expandedPaths = new Set()) {
     if (!this.rootPath) return;
     try {
-      if (expandedPaths.size === 0) {
-        const items = await window.api.getFolderContent(this.rootPath);
-        this.files = items.map((item) => ({
-          name: item.name,
-          type: item.type,
-          path: item.path,
-          expanded: false,
-          children: item.type === "folder" ? [] : undefined,
-        }));
-      } else {
-        await this.restoreExpandedFolders(this.files, expandedPaths);
+      const items = await window.api.getFolderContent(this.rootPath);
+      const newFiles = items.map((item) => ({
+        name: item.name,
+        type: item.type,
+        path: item.path,
+        expanded: false,
+        children: item.type === "folder" ? [] : undefined,
+      }));
+
+      if (expandedPaths.size > 0) {
+        await this.restoreExpandedFolders(newFiles, expandedPaths);
       }
+
+      this.files = newFiles;
       this.isLoaded = true;
     } catch (error) {
       console.error("Error loading files:", error);
@@ -117,7 +129,7 @@ class FileExplorer extends Sidebar {
     this.rootPath = projectPath;
     this.projectName = segments.pop() || "Project";
 
-    window.api.startWatching(projectPath);
+    await window.api.startWatching(projectPath);
 
     await this.loadFiles();
     this.refresh();
@@ -147,7 +159,7 @@ class FileExplorer extends Sidebar {
   async closeProject() {
     if (!this.rootPath) return;
 
-    window.api.stopWatching();
+    await window.api.stopWatching();
 
     const previousRootPath = this.rootPath;
     const previousProjectName = this.projectName;
@@ -497,6 +509,20 @@ class FileExplorer extends Sidebar {
     this.refresh();
   }
 
+  async expandPathSegments(basePath, segments) {
+    let currentPath = basePath;
+
+    for (const segment of segments) {
+      currentPath = `${currentPath}/${segment}`;
+      const folder = this.findFileByPath(this.files, currentPath);
+      if (!folder) break;
+      folder.expanded = true;
+      folder.children = await this.loadFolderContent(currentPath);
+    }
+
+    this.refresh();
+  }
+
   async startCreateEntry(parentPath, entryType) {
     let childrenArray;
 
@@ -559,6 +585,13 @@ class FileExplorer extends Sidebar {
         }
 
         await this.refreshFolder(parentPath);
+
+        const segments = name.split("/").filter(Boolean);
+        const foldersToExpand =
+          target.type === "folder" ? segments : segments.slice(0, -1);
+        if (foldersToExpand.length > 0) {
+          await this.expandPathSegments(parentPath, foldersToExpand);
+        }
 
         if (target.type === "file") {
           this.openFile(result.path);

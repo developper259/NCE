@@ -1,10 +1,30 @@
 import { BrowserWindow, ipcMain } from "electron";
 const chokidar = require("chokidar");
+const path = require("path");
+
+const DEFAULT_IGNORED = [
+  /(^|[\/\\])\../,
+  /[\/\\]node_modules[\/\\]/,
+  /[\/\\]dist[\/\\]/,
+  /[\/\\]build[\/\\]/,
+  /[\/\\]out[\/\\]/,
+  /[\/\\]\.next[\/\\]/,
+  /[\/\\]coverage[\/\\]/,
+];
+
+interface FileChange {
+  event: string;
+  filePath: string;
+  dirPath: string;
+}
 
 export class Watcher {
   private window: InstanceType<typeof BrowserWindow>;
   private watcher: any = null;
   private watchedPath: string = "";
+
+  private pendingEvents: Map<string, FileChange> = new Map();
+  private flushTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor(window: BrowserWindow) {
     this.window = window;
@@ -23,37 +43,59 @@ export class Watcher {
     });
   }
 
-  startWatching(projectPath: string) {
-    if (this.watcher) {
-      this.stopWatching();
-    }
+  async startWatching(projectPath: string): Promise<void> {
+    await this.stopWatching();
 
     this.watchedPath = projectPath;
 
     this.watcher = chokidar.watch(projectPath, {
-      ignored: /(^|[\/\\])\../,
+      ignored: DEFAULT_IGNORED,
       persistent: true,
+      ignoreInitial: true,
+      awaitWriteFinish: {
+        stabilityThreshold: 300,
+        pollInterval: 100,
+      },
     });
 
     this.watcher.on("all", (event: string, filePath: string) => {
-      const path = require("path");
       const dirPath = path.dirname(filePath);
-      this.window.webContents.send("file-system-change", {
-        event,
-        filePath,
-        dirPath,
-      });
+      this.queueEvent(event, filePath, dirPath);
     });
 
-    console.log("Started watching:", projectPath);
+    this.watcher.on("error", (err: unknown) => {
+      console.error("[Watcher] error:", err);
+    });
   }
 
-  stopWatching() {
+  private queueEvent(event: string, filePath: string, dirPath: string) {
+    this.pendingEvents.set(filePath, { event, filePath, dirPath });
+
+    if (this.flushTimeout) clearTimeout(this.flushTimeout);
+    this.flushTimeout = setTimeout(() => this.flushEvents(), 150);
+  }
+
+  private flushEvents() {
+    this.flushTimeout = null;
+    if (this.pendingEvents.size === 0) return;
+
+    const changes = Array.from(this.pendingEvents.values());
+    this.pendingEvents.clear();
+
+    this.window.webContents.send("file-system-change", changes);
+  }
+
+  async stopWatching(): Promise<void> {
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
+    this.pendingEvents.clear();
+
     if (this.watcher) {
-      this.watcher.close();
+      await this.watcher.close();
       this.watcher = null;
       this.watchedPath = "";
-      console.log("Stopped watching");
     }
   }
 

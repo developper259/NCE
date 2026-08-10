@@ -114,7 +114,7 @@ class FileNode {
       );
 
       this.editor.fileLoader.loadRemainingLines(
-        this.path,
+        this,
         initialLines.length,
         totalLines,
       );

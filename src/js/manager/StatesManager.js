@@ -190,6 +190,8 @@ class StatesManager {
     fileExplorer.activeFilePath = explorerState.activeFilePath;
     fileExplorer.projectExpanded = explorerState.projectExpanded;
 
+    await window.api.startWatching(fileExplorer.rootPath);
+
     await fileExplorer.loadFiles();
 
     if (explorerState.expandedPaths && explorerState.expandedPaths.length > 0) {
