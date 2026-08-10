@@ -32,6 +32,7 @@ class Scroller {
     this.heightByItem = 0;
 
     this.isHovered = false;
+    this.dragOffset = 0;
 
     this.calculProp = () => 0;
     this.calcIsActive = () => false;
@@ -203,6 +204,14 @@ class Scroller {
     this.isDragging = false;
     this.itemOBJ.addEventListener("mousedown", (e) => {
       this.isDragging = true;
+
+      const itemRect = this.itemOBJ.getBoundingClientRect();
+      const isVertical =
+        this.type === this.editor.scrollerManager.VERTICAL_TYPE;
+      this.dragOffset = isVertical
+        ? e.clientY - itemRect.top
+        : e.clientX - itemRect.left;
+
       this.updateVisibility();
       e.preventDefault();
     });
@@ -234,7 +243,7 @@ class Scroller {
 
       const newTop = Math.max(
         0,
-        Math.min(e.clientY - rect.top - this.itemOBJHeight / 2, maxScroll),
+        Math.min(e.clientY - rect.top - this.dragOffset, maxScroll),
       );
       this.targetScrollRatio = newTop / maxScroll;
     } else {
@@ -243,7 +252,7 @@ class Scroller {
 
       const newLeft = Math.max(
         0,
-        Math.min(e.clientX - rect.left - this.itemOBJWidth / 2, maxScroll),
+        Math.min(e.clientX - rect.left - this.dragOffset, maxScroll),
       );
       this.targetScrollRatio = newLeft / maxScroll;
     }
