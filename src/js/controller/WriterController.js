@@ -157,8 +157,8 @@ class WriterController {
     this.editor.keyBinding.historyX = undefined;
 
     const lc = this.editor.lineController;
-    let row = this.editor.cursor.row;
-    let column = this.editor.cursor.column;
+    let row = this.editor.cursorController.row;
+    let column = this.editor.cursorController.column;
 
     if (this.editor.selectController.containsSelected) {
       const newPos = this.deleteSelection();
@@ -184,7 +184,7 @@ class WriterController {
       lc.changeLine(newLine, row - 1);
       lc.refresh();
 
-      this.editor.cursor.setCursorPosition(row, newColumn);
+      this.editor.cursorController.setCursorPosition(row, newColumn);
 
       this.editor.events.callEvent(Events.ON_CHANGE, {
         action: "insert",
@@ -220,7 +220,7 @@ class WriterController {
     const lastLineLength = newLines[newLines.length - 1].length;
     const endRow = row + newLines.length - 1;
 
-    this.editor.cursor.setCursorPosition(endRow, lastLineLength);
+    this.editor.cursorController.setCursorPosition(endRow, lastLineLength);
 
     const screenRow = row - lc.startIndex;
     if (screenRow >= lc.maxLines - lc.marginLines) {
@@ -349,7 +349,7 @@ class WriterController {
 
   deleteSelection() {
     const selectCtrl = this.editor.selectController;
-    const cursor = this.editor.cursor;
+    const cursor = this.editor.cursorController;
 
     if (!selectCtrl || !selectCtrl.containsSelected) return null;
 

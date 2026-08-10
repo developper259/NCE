@@ -1,4 +1,4 @@
-class Cursor {
+class CursorController {
   constructor(e) {
     this.editor = e;
     this._row = 0;

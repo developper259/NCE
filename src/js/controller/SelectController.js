@@ -91,11 +91,11 @@ class SelectController {
     const startInfo = this.selectedLines.get(firstRow);
     const endInfo = this.selectedLines.get(lastRow);
 
-    const realStart = this.editor.cursor.getPosition(
+    const realStart = this.editor.cursorController.getPosition(
       firstRow + 1,
       startInfo.startCol - 1,
     ).column;
-    const realEnd = this.editor.cursor.getPosition(
+    const realEnd = this.editor.cursorController.getPosition(
       lastRow + 1,
       endInfo.startCol - 1 + endInfo.length,
     ).column;
@@ -111,7 +111,7 @@ class SelectController {
   refreshSelectionDOM() {
     if (!this.editor.tabManager.activeFile || !this.selectOutput) return;
 
-    const cursor = this.editor.cursor;
+    const cursor = this.editor.cursorController;
     const difY = 4;
 
     this.refreshContaisSelected();
@@ -181,7 +181,7 @@ class SelectController {
     const sortedRows = Array.from(this.selectedLines.keys()).sort(
       (a, b) => a - b,
     );
-    const cursor = this.editor.cursor;
+    const cursor = this.editor.cursorController;
 
     for (const row of sortedRows) {
       const info = this.selectedLines.get(row);
@@ -208,11 +208,11 @@ class SelectController {
     const lineNode = this.editor.lineController.lines[index];
     const rawLine = lineNode ? lineNode.getText() : "";
 
-    const realStart = this.editor.cursor.getPosition(
+    const realStart = this.editor.cursorController.getPosition(
       index + 1,
       info.startCol - 1,
     ).column;
-    const realEnd = this.editor.cursor.getPosition(
+    const realEnd = this.editor.cursorController.getPosition(
       index + 1,
       info.startCol - 1 + info.length,
     ).column;
@@ -257,7 +257,7 @@ class SelectController {
     if (!lineNode && line.lines.length === 1) return;
 
     const lineLengthReal = lineNode ? lineNode.getText().length : 0;
-    const viewLen = this.editor.cursor.getViewPosition(
+    const viewLen = this.editor.cursorController.getViewPosition(
       index + 1,
       lineLengthReal,
     ).column;
@@ -270,8 +270,12 @@ class SelectController {
 
     if (cursorChange) {
       if (index !== this.editor.lineController.lines.length - 1)
-        this.editor.cursor.setCursorPosition(index + 2, 0);
-      else this.editor.cursor.setCursorPosition(index + 1, lineLengthReal);
+        this.editor.cursorController.setCursorPosition(index + 2, 0);
+      else
+        this.editor.cursorController.setCursorPosition(
+          index + 1,
+          lineLengthReal,
+        );
     }
 
     this.refreshSelectionDOM();
@@ -291,7 +295,10 @@ class SelectController {
     for (let i = 0; i < lc.lines.length; i++) {
       const lineNode = lc.lines[i];
       const realLen = lineNode ? lineNode.getText().length : 0;
-      const viewLen = this.editor.cursor.getViewPosition(i + 1, realLen).column;
+      const viewLen = this.editor.cursorController.getViewPosition(
+        i + 1,
+        realLen,
+      ).column;
       let length = viewLen === 0 ? 1 : viewLen;
 
       this.selectedLines.set(i, { startCol: 1, length: length });
@@ -307,7 +314,10 @@ class SelectController {
     this.refreshSelectionDOM();
 
     if (cursorChange) {
-      this.editor.cursor.setCursorPosition(lastLine + 1, lastLineLengthReal);
+      this.editor.cursorController.setCursorPosition(
+        lastLine + 1,
+        lastLineLengthReal,
+      );
     }
 
     this.editor.events.callEvent(Events.ON_SELECT, {
@@ -321,8 +331,8 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
     this.selectedLines.clear();
 
-    const rowIndex = this.editor.cursor.row - 1;
-    const colIndex = this.editor.cursor.column;
+    const rowIndex = this.editor.cursorController.row - 1;
+    const colIndex = this.editor.cursorController.column;
 
     const lineNode = this.editor.lineController.lines[rowIndex];
     const lineText = lineNode ? lineNode.getText() : "";
@@ -348,11 +358,11 @@ class SelectController {
 
     const lengthReal = words[targetWordIndex].length;
 
-    const viewStart = this.editor.cursor.getViewPosition(
+    const viewStart = this.editor.cursorController.getViewPosition(
       rowIndex + 1,
       startReal,
     ).column;
-    const viewEnd = this.editor.cursor.getViewPosition(
+    const viewEnd = this.editor.cursorController.getViewPosition(
       rowIndex + 1,
       startReal + lengthReal,
     ).column;
@@ -368,7 +378,7 @@ class SelectController {
       this.endSelect = { row: rowIndex + 1, column: startReal + lengthReal };
 
       if (cursorChange) {
-        this.editor.cursor.setCursorPosition(
+        this.editor.cursorController.setCursorPosition(
           rowIndex + 1,
           startReal + lengthReal,
         );
@@ -396,11 +406,14 @@ class SelectController {
     const startReal = Math.min(this.startSelect.column, this.endSelect.column);
     const endReal = Math.max(this.startSelect.column, this.endSelect.column);
 
-    const viewStart = this.editor.cursor.getViewPosition(
+    const viewStart = this.editor.cursorController.getViewPosition(
       y + 1,
       startReal,
     ).column;
-    const viewEnd = this.editor.cursor.getViewPosition(y + 1, endReal).column;
+    const viewEnd = this.editor.cursorController.getViewPosition(
+      y + 1,
+      endReal,
+    ).column;
 
     this.selectedLines.set(y, {
       startCol: viewStart + 1,
@@ -430,11 +443,11 @@ class SelectController {
     const yEnd = bottomRow - 1;
 
     const topRealLen = lc.lines[yStart] ? lc.lines[yStart].getText().length : 0;
-    const topVisualStart = this.editor.cursor.getViewPosition(
+    const topVisualStart = this.editor.cursorController.getViewPosition(
       topRow,
       topRealCol,
     ).column;
-    const topVisualEnd = this.editor.cursor.getViewPosition(
+    const topVisualEnd = this.editor.cursorController.getViewPosition(
       topRow,
       topRealLen,
     ).column;
@@ -449,7 +462,7 @@ class SelectController {
 
     for (let i = yStart + 1; i < yEnd; i++) {
       const realLen = lc.lines[i] ? lc.lines[i].getText().length : 0;
-      const lineLenVis = this.editor.cursor.getViewPosition(
+      const lineLenVis = this.editor.cursorController.getViewPosition(
         i + 1,
         realLen,
       ).column;
@@ -459,7 +472,7 @@ class SelectController {
       });
     }
 
-    const bottomVisualLen = this.editor.cursor.getViewPosition(
+    const bottomVisualLen = this.editor.cursorController.getViewPosition(
       bottomRow,
       bottomRealCol,
     ).column;
@@ -503,7 +516,7 @@ class SelectController {
     if (this.clickCount === 2) {
       this.selectWord(true);
     } else if (this.clickCount === 3) {
-      this.selectLine(this.editor.cursor.row - 1, true);
+      this.selectLine(this.editor.cursorController.row - 1, true);
     } else if (this.clickCount >= 4) {
       this.selectAll(true);
     }
@@ -519,9 +532,9 @@ class SelectController {
         this.unSelectAll();
     }
 
-    this.editor.cursor.onClick(event);
-    const c = this.editor.cursor.column;
-    const r = this.editor.cursor.row;
+    this.editor.cursorController.onClick(event);
+    const c = this.editor.cursorController.column;
+    const r = this.editor.cursorController.row;
 
     this.startSelect = { column: c, row: r };
     this.endSelect = { column: c, row: r };
@@ -534,8 +547,8 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
     this.isMouseDown = false;
     this.endSelect = {
-      column: this.editor.cursor.column,
-      row: this.editor.cursor.row,
+      column: this.editor.cursorController.column,
+      row: this.editor.cursorController.row,
     };
   }
 
@@ -543,15 +556,15 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
     if (this.isMouseDown) {
       this.clickCount = 0;
-      this.editor.cursor.onClick(event);
+      this.editor.cursorController.onClick(event);
       this.move();
     }
   }
 
   move() {
     if (!this.editor.tabManager.activeFile) return;
-    let c = this.editor.cursor.column;
-    let r = this.editor.cursor.row;
+    let c = this.editor.cursorController.column;
+    let r = this.editor.cursorController.row;
 
     if (
       this.endSelect &&

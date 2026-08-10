@@ -38,7 +38,7 @@ class BottomBar {
     let countLine = this.editor.selectController.getNumberLineSelected();
 
     if (!countLine) {
-      r = `Line ${this.editor.cursor.row}, Column ${this.editor.cursor.column}`;
+      r = `Line ${this.editor.cursorController.row}, Column ${this.editor.cursorController.column}`;
     } else {
       if (countLine > 1) r += countLine + " lines, ";
       r +=

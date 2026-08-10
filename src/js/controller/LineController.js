@@ -547,8 +547,8 @@ class LineController {
   refresh(forcedInit = false) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.lines.length === 0) this.lines = [new LineNode("")];
-    if (this.index !== this.editor.cursor.row)
-      this.index = this.editor.cursor.row;
+    if (this.index !== this.editor.cursorController.row)
+      this.index = this.editor.cursorController.row;
 
     if (forcedInit) this.initLineOutput();
     else this.refreshOutput();
@@ -557,7 +557,7 @@ class LineController {
 
     this.outputScroller.updateNbItem();
 
-    this.editor.cursor.updateCaretPosition();
+    this.editor.cursorController.updateCaretPosition();
     this.editor.selectController.refreshSelectionDOM();
     this.editor.highlightController.refresh();
   }
@@ -573,7 +573,7 @@ class LineController {
       if (!isLineSelected) {
         this.editor.selectController.selectLine(i, true);
       } else {
-        this.editor.cursor.setCursorPosition(i + 1, 0);
+        this.editor.cursorController.setCursorPosition(i + 1, 0);
       }
     } catch (error) {
       console.error(error);

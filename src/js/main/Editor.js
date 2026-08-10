@@ -1,5 +1,5 @@
 class Editor {
-   constructor() {
+  constructor() {
     this.isOnInit = true;
     this.isOnRefresh = false;
 
@@ -43,7 +43,7 @@ class Editor {
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
-    this.cursor = new Cursor(this);
+    this.cursorController = new CursorController(this);
 
     this.command = new Command(this);
     this.Ccmd = new CMD(this);
@@ -63,13 +63,13 @@ class Editor {
 
     this.emptyMenu.refresh();
     this.tabManager.refresh();
-    this.cursor.updateCaretPosition();
+    this.cursorController.updateCaretPosition();
     this.lineController.refresh(true);
     this.lineController.restoreScroll();
     this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
     this.sidebarManager.refreshAll();
-    
+
     this.isOnRefresh = false;
   }
 
@@ -122,7 +122,7 @@ class Editor {
   onClick(e) {
     const t = e.target;
     const c = t.classList;
-    
+
     if (
       c.contains("editor-select") ||
       c.contains("editor-el") ||
@@ -166,17 +166,19 @@ class Editor {
     let loaded = false;
     const apply = async (state) => {
       if (!state || loaded) {
-        if (this.isOnInit) this.events.callEvent(Events.ON_LOADED, {
-          isStateLoaded: false
-        });
+        if (this.isOnInit)
+          this.events.callEvent(Events.ON_LOADED, {
+            isStateLoaded: false,
+          });
         this.reset();
         return;
       }
       loaded = true;
       await this.statesManager.loadStates(state);
-      if (this.isOnInit) this.events.callEvent(Events.ON_LOADED, {
-        isStateLoaded: true
-      });
+      if (this.isOnInit)
+        this.events.callEvent(Events.ON_LOADED, {
+          isStateLoaded: true,
+        });
     };
 
     this.api.onLoadState(apply);

@@ -153,7 +153,7 @@ class tabManager {
       await file.loadContent();
     }
 
-    this.editor.cursor.setCursorPosition(file.row, file.column);
+    this.editor.cursorController.setCursorPosition(file.row, file.column);
 
     if (!this.editor.isOnInit) this.editor.refreshAll();
   }

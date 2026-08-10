@@ -130,7 +130,7 @@ class OutputScroller {
         this.lineController.offsetX = 0;
         this.lineController.markDirtyAll();
         this.lineController.refreshOutput();
-        this.editor.cursor.updateCaretPosition();
+        this.editor.cursorController.updateCaretPosition();
         this.editor.selectController.refreshSelectPositions();
       }
       return;
@@ -182,7 +182,7 @@ class OutputScroller {
         this.lineController.markDirtyAll();
         this.lineController.refreshOutput();
         this.lineController.refreshNumberLines();
-        this.editor.cursor.updateCaretPosition();
+        this.editor.cursorController.updateCaretPosition();
         this.editor.selectController.refreshSelectPositions();
       }
       return;
@@ -339,7 +339,7 @@ class OutputScroller {
       const activeRow =
         row !== undefined && row !== null && !isNaN(row)
           ? row
-          : this.editor.cursor?.row || 0;
+          : this.editor.cursorController?.row || 0;
 
       const safeRow = Math.max(
         0,
@@ -384,7 +384,7 @@ class OutputScroller {
 
       this.vScroller.refresh();
       this.hScroller.refresh();
-      this.editor.cursor.updateCaretPosition();
+      this.editor.cursorController.updateCaretPosition();
       this.editor.selectController.refreshSelectPositions();
     }
   }

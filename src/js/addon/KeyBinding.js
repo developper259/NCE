@@ -100,7 +100,7 @@ class KeyBinding {
 
     if (!txt) {
       const lineNode =
-        this.editor.lineController.lines[this.editor.cursor.row - 1];
+        this.editor.lineController.lines[this.editor.cursorController.row - 1];
       txt = lineNode ? lineNode.getText() : "";
     }
     try {
@@ -129,13 +129,24 @@ class KeyBinding {
     if (hasSelection) {
       this.key_backspace();
     } else {
-      if (this.editor.lineController.lines.length != this.editor.cursor.row)
-        this.editor.lineController.supLine(this.editor.cursor.row - 1);
+      if (
+        this.editor.lineController.lines.length !=
+        this.editor.cursorController.row
+      )
+        this.editor.lineController.supLine(
+          this.editor.cursorController.row - 1,
+        );
       else
-        this.editor.lineController.changeLine("", this.editor.cursor.row - 1);
+        this.editor.lineController.changeLine(
+          "",
+          this.editor.cursorController.row - 1,
+        );
 
       this.editor.lineController.refresh();
-      this.editor.cursor.setCursorPosition(this.editor.cursor.row, 0);
+      this.editor.cursorController.setCursorPosition(
+        this.editor.cursorController.row,
+        0,
+      );
     }
   }
 
@@ -185,11 +196,11 @@ class KeyBinding {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
 
-    this.editor.lineController.supLine(this.editor.cursor.row - 1);
+    this.editor.lineController.supLine(this.editor.cursorController.row - 1);
     this.editor.lineController.refresh();
-    this.editor.cursor.setCursorPosition(
-      this.editor.cursor.row,
-      this.editor.cursor.column,
+    this.editor.cursorController.setCursorPosition(
+      this.editor.cursorController.row,
+      this.editor.cursorController.column,
     );
   }
 
@@ -231,8 +242,8 @@ class KeyBinding {
 
     this.editor.tabManager.activeFile.historyX = undefined;
     const lc = this.editor.lineController;
-    let x = this.editor.cursor.column;
-    let y = this.editor.cursor.row;
+    let x = this.editor.cursorController.column;
+    let y = this.editor.cursorController.row;
 
     let cursor;
 
@@ -258,7 +269,7 @@ class KeyBinding {
 
     if (cursor) {
       lc.refresh();
-      this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
+      this.editor.cursorController.setCursorPosition(cursor.row, cursor.column);
     }
   }
 
@@ -269,8 +280,8 @@ class KeyBinding {
 
     this.editor.tabManager.activeFile.historyX = undefined;
     const lc = this.editor.lineController;
-    let x = this.editor.cursor.column;
-    let y = this.editor.cursor.row;
+    let x = this.editor.cursorController.column;
+    let y = this.editor.cursorController.row;
 
     let cursor;
 
@@ -307,7 +318,7 @@ class KeyBinding {
         const targetRow = Math.max(0, lc.startIndex - 1);
         lc.scrollTo(targetRow);
       }
-      this.editor.cursor.setCursorPosition(cursor.row, cursor.column);
+      this.editor.cursorController.setCursorPosition(cursor.row, cursor.column);
     }
   }
 
@@ -318,8 +329,8 @@ class KeyBinding {
   key_arrow_up(s, c, m, a) {
     if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
-      let x = this.editor.cursor.column;
-      let y = this.editor.cursor.row;
+      let x = this.editor.cursorController.column;
+      let y = this.editor.cursorController.row;
 
       if (s) {
         if (!this.editor.selectController.containsSelected) {
@@ -345,7 +356,7 @@ class KeyBinding {
         }
       } else y -= 1;
 
-      this.editor.cursor.setCursorPosition(
+      this.editor.cursorController.setCursorPosition(
         y,
         this.editor.tabManager.activeFile.historyX,
       );
@@ -367,8 +378,8 @@ class KeyBinding {
   key_arrow_down(s, c, m, a) {
     if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
-      let x = this.editor.cursor.column;
-      let y = this.editor.cursor.row;
+      let x = this.editor.cursorController.column;
+      let y = this.editor.cursorController.row;
 
       if (s) {
         if (!this.editor.selectController.containsSelected) {
@@ -396,7 +407,7 @@ class KeyBinding {
         }
       } else y += 1;
 
-      this.editor.cursor.setCursorPosition(
+      this.editor.cursorController.setCursorPosition(
         y,
         this.editor.tabManager.activeFile.historyX,
       );
@@ -420,8 +431,8 @@ class KeyBinding {
     if (this.editor.tabManager.activeFile) {
       if (lc.lines.length == 0) return;
       this.editor.tabManager.activeFile.historyX = undefined;
-      let x = this.editor.cursor.column;
-      let y = this.editor.cursor.row;
+      let x = this.editor.cursorController.column;
+      let y = this.editor.cursorController.row;
 
       if (s) {
         if (!this.editor.selectController.containsSelected) {
@@ -464,7 +475,7 @@ class KeyBinding {
         }
       }
 
-      this.editor.cursor.setCursorPosition(y, x);
+      this.editor.cursorController.setCursorPosition(y, x);
 
       const screenCol = x - lc.offsetX;
       if (screenCol < lc.marginChars) {
@@ -484,8 +495,8 @@ class KeyBinding {
     if (this.editor.tabManager.activeFile) {
       if (lc.lines.length == 0) return;
       this.editor.tabManager.activeFile.historyX = undefined;
-      let x = this.editor.cursor.column;
-      let y = this.editor.cursor.row;
+      let x = this.editor.cursorController.column;
+      let y = this.editor.cursorController.row;
 
       if (s) {
         if (!this.editor.selectController.containsSelected) {
@@ -530,7 +541,7 @@ class KeyBinding {
         }
       }
 
-      this.editor.cursor.setCursorPosition(y, x);
+      this.editor.cursorController.setCursorPosition(y, x);
 
       const screenCol = x - lc.offsetX;
       if (screenCol >= lc.maxCharacters - lc.marginChars) {
@@ -547,17 +558,17 @@ class KeyBinding {
 
   key_home(s, c, m, a) {
     if (this.editor.lineController.lines.length == 0) return;
-    let y = this.editor.cursor.row;
-    this.editor.cursor.setCursorPosition(y, 0);
+    let y = this.editor.cursorController.row;
+    this.editor.cursorController.setCursorPosition(y, 0);
   }
 
   key_end(s, c, m, a) {
     if (this.editor.lineController.lines.length == 0) return;
-    let y = this.editor.cursor.row;
+    let y = this.editor.cursorController.row;
     const lineNode =
-      this.editor.lineController.lines[this.editor.cursor.row - 1];
+      this.editor.lineController.lines[this.editor.cursorController.row - 1];
     let x = lineNode ? lineNode.getText().length : 0;
-    this.editor.cursor.setCursorPosition(y, x);
+    this.editor.cursorController.setCursorPosition(y, x);
   }
 
   key_insert(s, c, m, a) {
