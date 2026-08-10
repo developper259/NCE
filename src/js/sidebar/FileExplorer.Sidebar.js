@@ -55,6 +55,8 @@ class FileExplorer extends Sidebar {
     for (const change of changes) {
       if (change.event === "change") {
         this.editor.tabManager.reloadFileFromDisk(change.filePath);
+      } else if (change.event === "unlink" || change.event === "unlinkDir") {
+        this.editor.tabManager.markFileAsDeleted(change.filePath);
       }
     }
 
@@ -625,7 +627,7 @@ class FileExplorer extends Sidebar {
       if (this.activeFilePath === target.path) {
         this.activeFilePath = newPath;
       }
-      this.editor.tabManager.updateFilePath?.(target.path, newPath);
+      this.editor.tabManager.updateFilePath(target.path, newPath);
 
       target.name = name;
       target.path = newPath;
@@ -649,10 +651,7 @@ class FileExplorer extends Sidebar {
         return;
       }
 
-      if (this.activeFilePath === file.path) {
-        this.activeFilePath = null;
-      }
-      this.editor.tabManager.closeFileByPath?.(file.path);
+      this.editor.tabManager.markFileAsDeleted(file.path);
 
       const parentPath = file.path.substring(0, file.path.lastIndexOf("/"));
       await this.refreshFolder(parentPath);

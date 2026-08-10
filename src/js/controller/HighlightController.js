@@ -223,6 +223,15 @@ class HighlightController {
     }
   }
 
+  reset() {
+    for (const line of this.editor.lineController.lines) {
+      line.setTokens(null);
+    }
+    this.markDirtyAll(false);
+    this.refresh();
+    this.editor.lineController.refresh(true);
+  }
+
   async refresh() {
     if (this.isProcessingDirty || this.dirtyLines.size === 0) return;
 

@@ -36,6 +36,48 @@ class tabManager {
     }
   }
 
+  async updateFilePath(oldPath, newPath) {
+    if (!oldPath || !newPath) return;
+    let changed = false;
+
+    for (const file of this.files) {
+      if (!file.path) continue;
+
+      if (file.path === oldPath) {
+        file.path = newPath;
+        file.name = newPath.split("/").pop();
+        changed = true;
+
+        await file.loadLanguage();
+        this.editor.highlightController.reset();
+      } else if (file.path.startsWith(`${oldPath}/`)) {
+        file.path = newPath + file.path.slice(oldPath.length);
+        changed = true;
+
+        await file.loadLanguage();
+        this.editor.highlightController.reset();
+      }
+    }
+
+    if (changed) this.refresh();
+  }
+
+  markFileAsDeleted(path) {
+    if (!path) return;
+    let changed = false;
+
+    for (const file of this.files) {
+      if (!file.path) continue;
+
+      if (file.path === path || file.path.startsWith(`${path}/`)) {
+        file.setIsSaved(false);
+        changed = true;
+      }
+    }
+
+    if (changed) this.refresh();
+  }
+
   openFile(file) {
     if (!file) return;
     this.openFiles([file]);
