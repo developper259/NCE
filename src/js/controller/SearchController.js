@@ -96,6 +96,7 @@ class SearchController {
 
   onInput() {
     this.search(this.input.value);
+    this.goToResult(true, true);
   }
 
   onInputKey(e) {
