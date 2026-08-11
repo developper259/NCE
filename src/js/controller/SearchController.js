@@ -47,6 +47,18 @@ class SearchController {
     this.closeButton = this.searchBar.querySelector(".search-bar-close");
   }
 
+  focusInput() {
+    if (!this.input || !this.isOpen) return;
+
+    this.input.focus({
+      preventScroll: true,
+    });
+
+    this.input.select();
+
+    this.editor.cursorController.disable();
+  }
+
   open() {
     if (!this.editor.tabManager.activeFile) return;
 
@@ -54,11 +66,7 @@ class SearchController {
 
     this.searchBar.classList.add("search-bar-visible");
 
-    this.input.focus({
-      preventScroll: true,
-    });
-
-    this.input.select();
+    this.focusInput();
 
     this.search(this.input.value);
   }
@@ -79,7 +87,7 @@ class SearchController {
 
   toggle() {
     if (this.isOpen) {
-      this.close();
+      this.focusInput();
       return;
     }
 

@@ -6,7 +6,6 @@
 
   z-index: 10;
 
-  display: flex;
   align-items: center;
 
   height: 36px;
@@ -20,8 +19,7 @@
 
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
 
-  opacity: 0;
-  visibility: hidden;
+  display: none;
 
   transform: translateY(-5px);
 
@@ -32,8 +30,7 @@
 }
 
 .search-bar-visible {
-  opacity: 1;
-  visibility: visible;
+  display: flex;
 
   transform: translateY(0);
 }
@@ -163,7 +160,6 @@
   pointer-events: none;
 }
 
-
 .search-match-active {
   border-radius: 2px;
 
@@ -176,7 +172,6 @@
 .search-bar-visible .search-bar-input {
   caret-color: var(--accent-caret);
 }
-
 
 @media (max-width: 600px) {
   .search-bar {

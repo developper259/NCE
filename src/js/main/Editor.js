@@ -38,13 +38,13 @@ class Editor {
     this.writerController = new WriterController(this);
     this.lineController = new LineController(this);
     this.selectController = new SelectController(this);
+    this.cursorController = new CursorController(this);
     this.keyBindingController = new keyBindingController(this);
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
-    this.cursorController = new CursorController(this);
 
     this.command = new Command(this);
     this.Ccmd = new CMD(this);
