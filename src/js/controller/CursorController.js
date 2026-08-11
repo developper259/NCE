@@ -32,6 +32,18 @@ class CursorController {
     }
   }
 
+  enable() {
+    if (this.editor.cD) {
+      this.editor.cD.style.display = "block";
+    }
+  }
+
+  disable() {
+    if (this.editor.cD) {
+      this.editor.cD.style.display = "none";
+    }
+  }
+
   rowToY(row) {
     const lc = this.editor.lineController;
     const screenRow = row - 1 - lc.startIndex;
@@ -147,14 +159,12 @@ class CursorController {
 
   updateCaretPosition() {
     if (!this.editor.tabManager.activeFile) {
-      if (this.editor.cD) {
-        this.editor.cD.style.display = "none";
-      }
+      this.disable();
       return;
     }
 
     if (!this.isRowVisible(this.row)) {
-      this.editor.cD.style.display = "none";
+      this.disable()
       return;
     }
 
@@ -163,7 +173,7 @@ class CursorController {
     const placeY = this.rowToY(this.row) - 4;
     const placeX = this.columnToX(viewPos.column);
 
-    this.editor.cD.style.display = "block";
+    this.enable();
     this.editor.cD.style.left = `${placeX}px`;
     this.editor.cD.style.top = `${placeY}px`;
   }

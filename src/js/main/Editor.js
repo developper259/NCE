@@ -132,6 +132,7 @@ class Editor {
     } else {
       if (c.contains("command-el") || c.contains("command-el-title")) return;
       this.setSelected(false);
+      this.cursorController.disable();
     }
   }
 

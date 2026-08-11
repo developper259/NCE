@@ -25,11 +25,22 @@ class keyBindingController {
 
       e.preventDefault();
       e.stopPropagation();
-    }    
+    }
   }
 
   onKey(e) {
+    const target = e.target;
+    const isInput =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target.isContentEditable;
+
+    if (isInput) {
+      return;
+    }
+
     let key = "";
+
     if (e.key.length == 1) {
       if (e.ctrlKey) key += "Ctrl+";
       if (e.metaKey) key += "Meta+";
