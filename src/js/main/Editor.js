@@ -40,6 +40,7 @@ class Editor {
     this.selectController = new SelectController(this);
     this.keyBindingController = new keyBindingController(this);
     this.highlightController = new HighlightController(this);
+    this.searchController = new SearchController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);

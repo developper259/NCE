@@ -559,6 +559,7 @@ class LineController {
 
     this.editor.cursorController.updateCaretPosition();
     this.editor.selectController.refreshSelectionDOM();
+    this.editor.searchController.refreshSelectionDOM();
     this.editor.highlightController.refresh();
   }
 
@@ -590,7 +591,7 @@ class LineController {
     const cursor = getElement(".editor-caret");
     if (cursor) cursor.style.display = "none";
 
-    const selectOutput = getElement(".editor-select-output");
+    const selectOutput = getElement(".editor-select-highlight");
     if (selectOutput) selectOutput.replaceChildren();
 
     this.outputScroller.hide();

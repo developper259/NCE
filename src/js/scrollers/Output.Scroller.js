@@ -386,6 +386,7 @@ class OutputScroller {
       this.hScroller.refresh();
       this.editor.cursorController.updateCaretPosition();
       this.editor.selectController.refreshSelectPositions();
+      this.editor.searchController.refreshSelectionDOM();
     }
   }
 }

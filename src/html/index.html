@@ -20,6 +20,7 @@
     <link rel="stylesheet" href="../css/emptyMenu.css" />
     <link rel="stylesheet" href="../css/sidebar.css" />
     <link rel="stylesheet" href="../css/sidebar/fileExplorer.css" />
+    <link rel="stylesheet" href="../css/SearchBar.css" />
 
     <link rel="stylesheet" href="../modules/NSH/themes/dark.css" />
 
@@ -60,10 +61,45 @@
       </div>
       <div class="editor box-left editor-empty">
         <div class="empty-menu"></div>
+        <div class="editor-search-bar">
+          <div class="search-bar-input-container">
+            <input
+              class="search-bar-input"
+              type="text"
+              placeholder="Rechercher"
+              autocomplete="off"
+              spellcheck="false"
+            />
+
+            <span class="search-bar-counter"></span>
+          </div>
+          <button
+            class="search-bar-button search-bar-previous"
+            type="button"
+            title="Occurrence précédente"
+          >
+            <i class="fi fi-rr-angle-small-up"></i>
+          </button>
+          <button
+            class="search-bar-button search-bar-next"
+            type="button"
+            title="Occurrence suivante"
+          >
+            <i class="fi fi-rr-angle-small-down"></i>
+          </button>
+          <button
+            class="search-bar-button search-bar-close"
+            type="button"
+            title="Fermer"
+          >
+            <i class="fi fi-rr-cross-small"></i>
+          </button>
+        </div>
         <div class="line-numbers"></div>
         <div class="editor-output editor-select"></div>
         <div class="editor-caret editor-select"></div>
-        <div class="editor-select-output editor-select"></div>
+        <div class="editor-select-highlight editor-select"></div>
+        <div class="editor-search-highlight editor-select"></div>
       </div>
       <div class="sidebar-right box">
         <div class="sidebar-menu"></div>
@@ -92,6 +128,7 @@
     <script src="../js/controller/KeyBindingController.js"></script>
     <script src="../js/controller/HighlightController.js"></script>
     <script src="../js/controller/CursorController.js"></script>
+    <script src="../js/controller/SearchController.js"></script>
 
     <script src="../js/manager/TabManager.js"></script>
     <script src="../js/manager/SidebarManager.js"></script>

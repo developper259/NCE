@@ -75,7 +75,7 @@ const USERCONFIG_KEYBINDING = [
     action: "find",
     description: "Rechercher dans le fichier",
     key: "Meta+F",
-    in_editor: true,
+    in_editor: false,
   },
   {
     action: "replace",

@@ -184,7 +184,11 @@ class KeyBinding {
     }
   }
 
-  control_find(s, c, m, a) {}
+  control_find(s, c, m, a) {
+    if (!this.editor.tabManager.activeFile) return;
+
+    this.editor.searchController.toggle();
+  }
   control_replace(s, c, m, a) {}
 
   control_open_command(s, c, m, a) {
@@ -226,8 +230,14 @@ class KeyBinding {
   // --- Key functions ---
 
   key_escape(s, c, m, a) {
+    if (this.editor.searchController.isOpen) {
+      this.editor.searchController.close();
+      return;
+    }
+
     if (this.editor.panel == undefined) return;
-    else this.editor.panel.close();
+
+    this.editor.panel.close();
   }
 
   key_tab(s, c, m, a) {

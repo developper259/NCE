@@ -2,7 +2,7 @@ class SelectController {
   constructor(e) {
     this.editor = e;
     this.clickTime = 500;
-    this.selectOutput = getElement(".editor-select-output");
+    this.selectOutput = getElement(".editor-select-highlight");
     this.initEventListeners();
   }
 
