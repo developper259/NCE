@@ -26,8 +26,8 @@
   --accent-caret: orange;
   
   /* Selection colors */
-  --selection-bg: rgba(38, 79, 120);
-  --selection-bg-afk: rgba(38, 79, 120, 0.3);
+  --selection-bg: rgba(255, 255, 255, 0.1);
+  --selection-bg-search: rgba(38, 79, 120, 0.5);
   
   /* Scroller colors */
   --scroller-bg: rgba(101, 101, 101, 0.5);

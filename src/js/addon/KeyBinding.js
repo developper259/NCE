@@ -235,9 +235,12 @@ class KeyBinding {
       return;
     }
 
-    if (this.editor.panel == undefined) return;
+    if (this.editor.panel !== undefined){
+      this.editor.panel.close();
+      return;
+    }
 
-    this.editor.panel.close();
+    this.editor.selectController.unSelectAll();
   }
 
   key_tab(s, c, m, a) {

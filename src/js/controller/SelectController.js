@@ -129,9 +129,6 @@ class SelectController {
       visibleSelections.length,
       currentDOMNodes.length,
     );
-    const classNameTarget = !this.editor.selected
-      ? "selected selected-afk"
-      : "selected";
 
     for (let i = 0; i < totalLoopLength; i++) {
       if (i < visibleSelections.length) {
@@ -151,7 +148,7 @@ class SelectController {
           this.selectOutput.appendChild(div);
         }
 
-        div.className = classNameTarget;
+        div.className = "selected";
         div.dataset.line = row;
 
         div.style.display = "";
@@ -528,7 +525,7 @@ class SelectController {
     this.editor.keyBinding.historyX = undefined;
 
     if (new Date().getTime() - this.lastClickTime > this.clickTime) {
-      if (this.containsSelected.length > 0 && this.editor.selected)
+      if (this.containsSelected.length > 0)
         this.unSelectAll();
     }
 

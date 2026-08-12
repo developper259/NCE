@@ -126,7 +126,3 @@ span {
 .selected-all {
   border-radius: 4px;
 }
-
-.selected-afk {
-  background-color: var(--selection-bg-afk);
-}

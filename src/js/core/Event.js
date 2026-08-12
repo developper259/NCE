@@ -23,7 +23,7 @@ class Events {
   static ON_CLOSE_FILE = "onClose";
   static ON_OPEN_PROJECT = "onOpenProject";
   static ON_CLOSE_PROJECT = "onCloseProject";
-  static ON_LOADED = "onLoaded"; 
+  static ON_LOADED = "onLoaded";
 
   constructor(editor) {
     this.editor = editor;
@@ -80,14 +80,8 @@ class Events {
   // Custom Event
   cursorMove(arg) {}
   cursorChange(arg) {}
-  cursorDisabled(arg) {
-    // ------- SelectController.js ------
-    this.editor.selectController.refreshSelectionDOM();
-  }
-  cursorEnabled(arg) {
-    // ------- SelectController.js ------
-    this.editor.selectController.refreshSelectionDOM();
-  }
+  cursorDisabled(arg) {}
+  cursorEnabled(arg) {}
   onSelect(arg) {}
   onChange(arg) {
     // ------- File.js ------
