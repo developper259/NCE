@@ -85,6 +85,7 @@ class SelectController {
     if (!this.selectedLines || this.selectedLines.size === 0) return null;
 
     const rows = Array.from(this.selectedLines.keys()).sort((a, b) => a - b);
+
     const firstRow = rows[0];
     const lastRow = rows[rows.length - 1];
 
@@ -95,6 +96,7 @@ class SelectController {
       firstRow + 1,
       startInfo.startCol - 1,
     ).column;
+
     const realEnd = this.editor.cursorController.getPosition(
       lastRow + 1,
       endInfo.startCol - 1 + endInfo.length,
@@ -113,18 +115,25 @@ class SelectController {
 
     const cursor = this.editor.cursorController;
     const difY = 4;
+    const radius = "4px";
 
     this.refreshContaisSelected();
 
     const visibleSelections = [];
+
     this.selectedLines.forEach((info, row) => {
       const fileRow = row + 1;
+
       if (cursor.isRowVisible(fileRow)) {
-        visibleSelections.push({ row, info });
+        visibleSelections.push({
+          row,
+          info,
+        });
       }
     });
 
     const currentDOMNodes = this.selectOutput.children;
+
     const totalLoopLength = Math.max(
       visibleSelections.length,
       currentDOMNodes.length,
@@ -142,9 +151,11 @@ class SelectController {
         const height = cursor.mpY + difY;
 
         let div = currentDOMNodes[i];
+
         if (!div) {
           div = document.createElement("div");
           div.style.position = "absolute";
+
           this.selectOutput.appendChild(div);
         }
 
@@ -156,6 +167,62 @@ class SelectController {
         div.style.top = `${y}px`;
         div.style.width = `${width}px`;
         div.style.height = `${height}px`;
+
+        const currentLeft = info.startCol;
+        const currentRight = info.startCol + info.length;
+
+        const previousInfo = this.selectedLines.get(row - 1);
+
+        const nextInfo = this.selectedLines.get(row + 1);
+
+        div.style.borderTopLeftRadius = "0";
+        div.style.borderTopRightRadius = "0";
+        div.style.borderBottomLeftRadius = "0";
+        div.style.borderBottomRightRadius = "0";
+
+        let topLeftConnected = false;
+        let topRightConnected = false;
+
+        if (previousInfo) {
+          const previousLeft = previousInfo.startCol;
+          const previousRight = previousInfo.startCol + previousInfo.length;
+
+          topLeftConnected =
+            previousLeft <= currentLeft && previousRight > currentLeft;
+
+          topRightConnected =
+            previousLeft < currentRight && previousRight >= currentRight;
+        }
+
+        if (!topLeftConnected) {
+          div.style.borderTopLeftRadius = radius;
+        }
+
+        if (!topRightConnected) {
+          div.style.borderTopRightRadius = radius;
+        }
+
+        let bottomLeftConnected = false;
+        let bottomRightConnected = false;
+
+        if (nextInfo) {
+          const nextLeft = nextInfo.startCol;
+          const nextRight = nextInfo.startCol + nextInfo.length;
+
+          bottomLeftConnected =
+            nextLeft <= currentLeft && nextRight > currentLeft;
+
+          bottomRightConnected =
+            nextLeft < currentRight && nextRight >= currentRight;
+        }
+
+        if (!bottomLeftConnected) {
+          div.style.borderBottomLeftRadius = radius;
+        }
+
+        if (!bottomRightConnected) {
+          div.style.borderBottomRightRadius = radius;
+        }
       } else {
         if (currentDOMNodes[i]) {
           currentDOMNodes[i].style.display = "none";
@@ -172,20 +239,26 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
 
     this.containsSelected = "";
+
     if (this.selectedLines.size === 0) return;
 
     const parts = [];
+
     const sortedRows = Array.from(this.selectedLines.keys()).sort(
       (a, b) => a - b,
     );
+
     const cursor = this.editor.cursorController;
 
     for (const row of sortedRows) {
       const info = this.selectedLines.get(row);
+
       const lineNode = this.editor.lineController.lines[row];
+
       const rawLine = lineNode ? lineNode.getText() : "";
 
       const realStart = cursor.getPosition(row + 1, info.startCol - 1).column;
+
       const realEnd = cursor.getPosition(
         row + 1,
         info.startCol - 1 + info.length,
@@ -199,16 +272,20 @@ class SelectController {
 
   getTextSelectedLine(index) {
     if (index === undefined) return undefined;
+
     const info = this.selectedLines.get(index);
+
     if (!info) return undefined;
 
     const lineNode = this.editor.lineController.lines[index];
+
     const rawLine = lineNode ? lineNode.getText() : "";
 
     const realStart = this.editor.cursorController.getPosition(
       index + 1,
       info.startCol - 1,
     ).column;
+
     const realEnd = this.editor.cursorController.getPosition(
       index + 1,
       info.startCol - 1 + info.length,
@@ -223,11 +300,13 @@ class SelectController {
 
   unSelectAll() {
     if (!this.editor.tabManager.activeFile) return;
+
     this.containsSelected = "";
     this.selectedLines.clear();
 
     if (this.selectOutput) {
       const currentDOMNodes = this.selectOutput.children;
+
       for (let i = 0; i < currentDOMNodes.length; i++) {
         currentDOMNodes[i].style.display = "none";
       }
@@ -242,7 +321,9 @@ class SelectController {
 
   unSelectLine(index) {
     if (!this.editor.tabManager.activeFile || index === undefined) return;
+
     this.selectedLines.delete(index);
+
     this.refreshSelectionDOM();
   }
 
@@ -250,29 +331,44 @@ class SelectController {
     if (!this.editor.tabManager.activeFile || index === undefined) return;
 
     const line = this.editor.lineController;
+
     const lineNode = line.lines[index];
+
     if (!lineNode && line.lines.length === 1) return;
 
     const lineLengthReal = lineNode ? lineNode.getText().length : 0;
+
     const viewLen = this.editor.cursorController.getViewPosition(
       index + 1,
       lineLengthReal,
     ).column;
+
     let length = viewLen === 0 ? 1 : viewLen;
 
-    this.selectedLines.set(index, { startCol: 1, length: length });
+    this.selectedLines.set(index, {
+      startCol: 1,
+      length: length,
+    });
 
-    this.startSelect = { row: index + 1, column: 0 };
-    this.endSelect = { row: index + 1, column: lineLengthReal };
+    this.startSelect = {
+      row: index + 1,
+      column: 0,
+    };
+
+    this.endSelect = {
+      row: index + 1,
+      column: lineLengthReal,
+    };
 
     if (cursorChange) {
-      if (index !== this.editor.lineController.lines.length - 1)
+      if (index !== this.editor.lineController.lines.length - 1) {
         this.editor.cursorController.setCursorPosition(index + 2, 0);
-      else
+      } else {
         this.editor.cursorController.setCursorPosition(
           index + 1,
           lineLengthReal,
         );
+      }
     }
 
     this.refreshSelectionDOM();
@@ -286,27 +382,44 @@ class SelectController {
 
   selectAll(cursorChange) {
     if (!this.editor.tabManager.activeFile) return;
+
     this.selectedLines.clear();
 
     const lc = this.editor.lineController;
+
     for (let i = 0; i < lc.lines.length; i++) {
       const lineNode = lc.lines[i];
+
       const realLen = lineNode ? lineNode.getText().length : 0;
+
       const viewLen = this.editor.cursorController.getViewPosition(
         i + 1,
         realLen,
       ).column;
+
       let length = viewLen === 0 ? 1 : viewLen;
 
-      this.selectedLines.set(i, { startCol: 1, length: length });
+      this.selectedLines.set(i, {
+        startCol: 1,
+        length: length,
+      });
     }
 
     const lastLine = lc.lines.length - 1;
+
     const lastLineNode = lc.lines[lastLine];
+
     const lastLineLengthReal = lastLineNode ? lastLineNode.getText().length : 0;
 
-    this.startSelect = { row: 1, column: 0 };
-    this.endSelect = { row: lastLine + 1, column: lastLineLengthReal };
+    this.startSelect = {
+      row: 1,
+      column: 0,
+    };
+
+    this.endSelect = {
+      row: lastLine + 1,
+      column: lastLineLengthReal,
+    };
 
     this.refreshSelectionDOM();
 
@@ -326,30 +439,38 @@ class SelectController {
 
   selectWord(cursorChange) {
     if (!this.editor.tabManager.activeFile) return;
+
     this.selectedLines.clear();
 
     const rowIndex = this.editor.cursorController.row - 1;
+
     const colIndex = this.editor.cursorController.column;
 
     const lineNode = this.editor.lineController.lines[rowIndex];
+
     const lineText = lineNode ? lineNode.getText() : "";
+
     if (!lineText) return;
 
     const words = this.editor.writerController.splitWord(lineText);
+
     if (!words || words.length === 0) return;
 
     let startReal = 0;
     let currentLength = 0;
+
     let targetWordIndex = words.length - 1;
 
     for (let i = 0; i < words.length; i++) {
       const wordLen = words[i].length;
+
       currentLength += wordLen;
 
       if (colIndex < currentLength) {
         targetWordIndex = i;
         break;
       }
+
       startReal += wordLen;
     }
 
@@ -359,10 +480,12 @@ class SelectController {
       rowIndex + 1,
       startReal,
     ).column;
+
     const viewEnd = this.editor.cursorController.getViewPosition(
       rowIndex + 1,
       startReal + lengthReal,
     ).column;
+
     const lengthVisual = viewEnd - viewStart;
 
     if (lengthReal > 0) {
@@ -371,8 +494,15 @@ class SelectController {
         length: lengthVisual,
       });
 
-      this.startSelect = { row: rowIndex + 1, column: startReal };
-      this.endSelect = { row: rowIndex + 1, column: startReal + lengthReal };
+      this.startSelect = {
+        row: rowIndex + 1,
+        column: startReal,
+      };
+
+      this.endSelect = {
+        row: rowIndex + 1,
+        column: startReal + lengthReal,
+      };
 
       if (cursorChange) {
         this.editor.cursorController.setCursorPosition(
@@ -393,6 +523,7 @@ class SelectController {
 
   calculSelectSimpleLine() {
     this.selectedLines.clear();
+
     const y = this.startSelect.row - 1;
 
     if (this.startSelect.column === this.endSelect.column) {
@@ -401,12 +532,14 @@ class SelectController {
     }
 
     const startReal = Math.min(this.startSelect.column, this.endSelect.column);
+
     const endReal = Math.max(this.startSelect.column, this.endSelect.column);
 
     const viewStart = this.editor.cursorController.getViewPosition(
       y + 1,
       startReal,
     ).column;
+
     const viewEnd = this.editor.cursorController.getViewPosition(
       y + 1,
       endReal,
@@ -422,32 +555,41 @@ class SelectController {
 
   calculSelectMultiLine() {
     if (!this.editor.tabManager.activeFile) return;
+
     this.selectedLines.clear();
 
     const lc = this.editor.lineController;
+
     const startIsTop = this.startSelect.row <= this.endSelect.row;
+
     const topRow = startIsTop ? this.startSelect.row : this.endSelect.row;
+
     const bottomRow = startIsTop ? this.endSelect.row : this.startSelect.row;
 
     const topRealCol = startIsTop
       ? this.startSelect.column
       : this.endSelect.column;
+
     const bottomRealCol = startIsTop
       ? this.endSelect.column
       : this.startSelect.column;
 
     const yStart = topRow - 1;
+
     const yEnd = bottomRow - 1;
 
     const topRealLen = lc.lines[yStart] ? lc.lines[yStart].getText().length : 0;
+
     const topVisualStart = this.editor.cursorController.getViewPosition(
       topRow,
       topRealCol,
     ).column;
+
     const topVisualEnd = this.editor.cursorController.getViewPosition(
       topRow,
       topRealLen,
     ).column;
+
     const startLineLen = topVisualEnd - topVisualStart;
 
     if (startLineLen > 0) {
@@ -459,10 +601,12 @@ class SelectController {
 
     for (let i = yStart + 1; i < yEnd; i++) {
       const realLen = lc.lines[i] ? lc.lines[i].getText().length : 0;
+
       const lineLenVis = this.editor.cursorController.getViewPosition(
         i + 1,
         realLen,
       ).column;
+
       this.selectedLines.set(i, {
         startCol: 1,
         length: lineLenVis === 0 ? 1 : lineLenVis,
@@ -473,6 +617,7 @@ class SelectController {
       bottomRow,
       bottomRealCol,
     ).column;
+
     if (bottomVisualLen >= 0) {
       this.selectedLines.set(yEnd, {
         startCol: 1,
@@ -485,31 +630,40 @@ class SelectController {
 
   calcClick() {
     const currentTime = new Date().getTime();
-    if (this.HstartSelect === undefined) this.HstartSelect = this.startSelect;
-    else if (
+
+    if (this.HstartSelect === undefined) {
+      this.HstartSelect = this.startSelect;
+    } else if (
       this.startSelect.column !== this.HstartSelect.column ||
       this.startSelect.row !== this.HstartSelect.row
     ) {
       this.HstartSelect = this.startSelect;
+
       this.lastClickTime = currentTime;
+
       this.clickCount = 1;
+
       return;
     }
+
     if (currentTime - this.lastClickTime < this.clickTime) {
       this.clickCount++;
     } else {
       this.clickCount = 1;
     }
+
     this.lastClickTime = currentTime;
   }
 
   mouseClick() {
     if (!this.editor.tabManager.activeFile) return;
+
     this.calcClick();
 
     if (this.clickCount > 1) {
       this.unSelectAll();
     }
+
     if (this.clickCount === 2) {
       this.selectWord(true);
     } else if (this.clickCount === 3) {
@@ -525,12 +679,15 @@ class SelectController {
     this.editor.keyBinding.historyX = undefined;
 
     if (new Date().getTime() - this.lastClickTime > this.clickTime) {
-      if (this.containsSelected.length > 0)
+      if (this.containsSelected.length > 0) {
         this.unSelectAll();
+      }
     }
 
     this.editor.cursorController.onClick(event);
+
     const c = this.editor.cursorController.column;
+
     const r = this.editor.cursorController.row;
 
     this.startSelect = { column: c, row: r };
@@ -542,33 +699,42 @@ class SelectController {
 
   mouseUp() {
     if (!this.editor.tabManager.activeFile) return;
+
     this.isMouseDown = false;
+
     this.endSelect = {
       column: this.editor.cursorController.column,
+
       row: this.editor.cursorController.row,
     };
   }
 
   mouseMove(event) {
     if (!this.editor.tabManager.activeFile) return;
+
     if (this.isMouseDown) {
       this.clickCount = 0;
+
       this.editor.cursorController.onClick(event);
+
       this.move();
     }
   }
 
   move() {
     if (!this.editor.tabManager.activeFile) return;
+
     let c = this.editor.cursorController.column;
+
     let r = this.editor.cursorController.row;
 
     if (
       this.endSelect &&
       this.endSelect.column === c &&
       this.endSelect.row === r
-    )
+    ) {
       return;
+    }
 
     this.endSelect = { column: c, row: r };
 
@@ -585,6 +751,7 @@ class SelectController {
 
   getSelectOBJ() {
     if (!this.selectOutput) return [];
+
     return Array.from(this.selectOutput.children).filter(
       (el) =>
         el.classList &&
@@ -598,7 +765,9 @@ class SelectController {
       this.editor.output,
       this.editor.cD,
     ]);
+
     addEvent("mouseup", this.mouseUp.bind(this), document);
+
     addEvent("mousemove", this.mouseMove.bind(this), this.editor.output);
   }
 }
