@@ -18,12 +18,6 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
-    action: "find_file",
-    description: "Rechercher un fichier",
-    key: "Meta+Shift+f",
-    in_editor: false,
-  },
-  {
     action: "new_file",
     description: "Créer un nouveau fichier",
     key: "Meta+N",
@@ -108,6 +102,12 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "toggle_search",
+    description: "Ouvrir/Fermer la recherche avancée",
+    key: "Meta+Shift+F",
+    in_editor: false,
+  },
+  {
     key: "Escape",
     action: "escape",
     in_editor: false,
@@ -178,6 +178,12 @@ USERCONFIG_SIDEBAR_MENUS = [
     id: "file-explorer",
     title: "File Explorer",
     icon: "fi fi-rr-folder",
+    position: "left",
+  },
+  {
+    id: "search",
+    title: "Search",
+    icon: "fi fi-rr-search",
     position: "left",
   },
 ];

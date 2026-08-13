@@ -1,0 +1,199 @@
+.search-sidebar-container {
+  padding: 0 10px 12px;
+  color: var(--text-secondary);
+}
+
+.search-sidebar-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Nouveau conteneur pour superposer les boutons sur l'input */
+.search-sidebar-input-wrapper {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.search-sidebar-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  /* On ajoute un padding-right de 85px pour ne pas écrire sous les boutons */
+  padding: 5px 85px 5px 8px; 
+
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+
+  outline: none;
+
+  background: var(--bg-secondary, var(--bg-primary));
+  color: var(--text-primary, var(--text-white));
+
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.search-sidebar-filter {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 5px 8px;
+
+  border: 1px solid var(--border-primary);
+  border-radius: 3px;
+
+  outline: none;
+
+  background: var(--bg-secondary, var(--bg-primary));
+  color: var(--text-primary, var(--text-white));
+
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.search-sidebar-input:focus,
+.search-sidebar-filter:focus {
+  border-color: var(--border-active);
+}
+
+/* Positionnement absolu des boutons à l'intérieur de l'input */
+.search-sidebar-options {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.search-sidebar-option {
+  width: 26px; /* Légèrement réduit pour bien tenir dans l'input */
+  height: 24px;
+
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid transparent;
+  border-radius: 3px;
+
+  background: transparent;
+
+  color: var(--text-tertiary);
+
+  cursor: pointer;
+
+  font-family: inherit;
+  font-size: 11px;
+}
+
+.search-sidebar-option:hover {
+  background: var(--bg-hover-alt);
+  color: var(--text-white);
+}
+
+.search-sidebar-option.sidebar-option-active {
+  background: var(--bg-hover-alt);
+  color: var(--text-white);
+}
+
+.search-sidebar-summary {
+  padding: 10px 2px 6px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.search-sidebar-results {
+  overflow-x: hidden;
+}
+
+.search-sidebar-file-group {
+  margin-bottom: 7px;
+}
+
+.search-sidebar-file-header {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 4px;
+  cursor: default;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.search-sidebar-file-icon {
+  width: 17px;
+  margin-right: 5px;
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+.search-sidebar-file-name {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary, var(--text-white));
+}
+
+.search-sidebar-file-count {
+  margin-left: 6px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.search-sidebar-match {
+  display: flex;
+  min-width: 0;
+  padding: 3px 4px 3px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.search-sidebar-match:hover {
+  background: var(--bg-hover-alt);
+  color: var(--text-white);
+}
+
+.search-sidebar-line-number {
+  width: 32px;
+  flex: 0 0 32px;
+  padding-right: 5px;
+  color: var(--text-tertiary);
+  text-align: right;
+  user-select: none;
+}
+
+.search-sidebar-line-content {
+  min-width: 0;
+  overflow: hidden;
+  flex: 1;
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+
+.search-sidebar-line-content mark {
+  border-radius: 2px;
+  background: var(--selection-bg);
+  color: var(--text-white);
+}
+
+.search-sidebar-placeholder {
+  padding: 20px 8px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}

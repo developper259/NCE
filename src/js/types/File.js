@@ -137,6 +137,7 @@ class FileNode {
     if (!this.path) {
       let r = await this.selectFileToSave();
       if (!r) return;
+      await this.loadLanguage();
     }
 
     let r = await this.editor.api.saveFile(
@@ -145,7 +146,6 @@ class FileNode {
     );
 
     if (r) {
-      await this.loadLanguage();
       this.setIsSaved(true);
       this.editor.tabManager.refresh();
     }

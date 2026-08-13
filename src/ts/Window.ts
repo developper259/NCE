@@ -4,8 +4,9 @@ import path from "path";
 import { FileManager } from "./addon/FileManager";
 import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
-import { NSH } from './NSH'
+import { NSH } from "./NSH";
 import { ContextMenu } from "./addon/ContextMenu";
+import { WorkspaceSearch } from "./addon/WorkspaceSearch";
 
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
@@ -13,6 +14,7 @@ export class Window {
   watcher: Watcher | undefined;
   contextMenu: ContextMenu | undefined;
   nsh: NSH | undefined;
+  workspaceSearch: WorkspaceSearch | undefined;
   name: string;
   forceQuit: boolean;
 
@@ -24,6 +26,7 @@ export class Window {
 
   create() {
     this.forceQuit = false;
+
     this.window = new BrowserWindow({
       width: 800,
       height: 600,
@@ -32,27 +35,40 @@ export class Window {
       title: this.name,
       fullscreen: true,
       icon: path.join(__dirname, "../../assets/logo/NCE/dark-logo.png"),
+
       webPreferences: {
         sandbox: false,
+
         preload: path.join(__dirname, "../../src/js/main/Preload.js"),
+
         contextIsolation: true,
         nodeIntegration: true,
       },
     });
 
     this.fileManager = new FileManager(this);
+
     this.watcher = new Watcher(this.window);
+
     this.contextMenu = new ContextMenu(this.window);
+
     this.nsh = new NSH(this);
+
+    this.workspaceSearch = new WorkspaceSearch(this);
 
     const menu = new AppMenu(this.window, this);
 
     this.window.loadFile(path.join(__dirname, "../../src/html/index.html"));
 
     this.window.on("close", (event) => {
-      if (this.forceQuit) return;
+      if (this.forceQuit) {
+        return;
+      }
+
       event.preventDefault();
+
       this.forceQuit = true;
+
       this.window?.webContents.send("Request:saveState");
     });
 
@@ -61,17 +77,27 @@ export class Window {
     });
 
     this.window.webContents.on("before-input-event", (event, input) => {
-      if (input.type !== "keyDown") return;
+      if (input.type !== "keyDown") {
+        return;
+      }
+
       const isReload =
         (input.meta || input.control) && input.key.toLowerCase() === "r";
-      if (!isReload) return;
+
+      if (!isReload) {
+        return;
+      }
+
       event.preventDefault();
+
       this.window?.webContents.reload();
     });
 
-    //this.window.webContents.openDevTools();
+    // this.window.webContents.openDevTools();
 
-    if (!this.fileManager) console.log("FileManager is not defined");
+    if (!this.fileManager) {
+      console.log("FileManager is not defined");
+    }
 
     ipcMain.handle("App:quit", async () => {
       this.window?.close();
@@ -82,5 +108,7 @@ export class Window {
     this.watcher.handleIPC();
 
     this.contextMenu.handleIPC();
+
+    this.workspaceSearch.handleIPC();
   }
 }

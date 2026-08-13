@@ -19,7 +19,9 @@ class KeyBinding {
       open_command: this.control_open_command,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,
+
       toggle_file_explorer: this.control_toggle_file_explorer,
+      toggle_search: this.control_toggle_search,
 
       Escape: this.key_escape,
       Tab: this.key_tab,
