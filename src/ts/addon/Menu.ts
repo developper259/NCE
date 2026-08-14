@@ -1,5 +1,6 @@
-import { Menu, MenuItem, BrowserWindow } from 'electron';
-import { Window } from '../Window';
+import { Menu, MenuItem, BrowserWindow, dialog } from "electron";
+
+import { Window } from "../Window";
 
 export class AppMenu {
   menu: InstanceType<typeof Menu>;
@@ -7,352 +8,784 @@ export class AppMenu {
   WinAPP: Window;
 
   constructor(window: BrowserWindow, WinAPP: Window) {
-    this.menu = new Menu();
     this.window = window;
     this.WinAPP = WinAPP;
 
+    this.menu = new Menu();
+
     this.init();
+
     Menu.setApplicationMenu(this.menu);
   }
 
   init() {
-    // NCE Menu
-    this.menu.append(new MenuItem({
-        label: 'NCE',
-        submenu: [
-            {
-            label: 'About NCE',
-            click: () => this.showAbout(),
-            },
-            {
-            label: 'Check Update',
-            click: () => this.checkUpdate(),
-            },
-            { type: 'separator' },
-            {
-            label: 'NCE Settings',
-            click: () => this.settings(),
-            },
-            {
-            label: 'NDL Settings',
-            click: () => this.NDLSettings(),
-            },
-            { type: 'separator' },
-            {
-            label: 'Exit',
-            accelerator: process.platform === 'darwin' ? 'Cmd+Q' : 'Alt+F4',
-            click: () => this.exitApp(),
-            },
-        ],
-    }));
+    /*
+     * =======================================================
+     * NCE
+     * =======================================================
+     */
 
-    // File Menu
     this.menu.append(
       new MenuItem({
-        label: 'File',
+        label: "NCE",
+
         submenu: [
           {
-            label: 'New File',
-            click: () => this.newFile(),
+            label: "About NCE",
+            click: () => this.showAbout(),
           },
-          { type: 'separator' },
+
           {
-            label: 'Open File',
-            click: () => this.openFile(),
+            label: "Check for Updates",
+            click: () => this.checkUpdate(),
           },
+
           {
-            label: 'Open Folder',
-            click: () => this.openFolder(),
+            type: "separator",
           },
-          { type: 'separator' },
+
           {
-            label: 'Save',
-            click: () => this.saveFile(),
+            label: "NCE Settings",
+            click: () => this.settings(),
           },
+
           {
-            label: 'Save As...',
-            click: () => this.saveFileAs(),
+            label: "NDL Settings",
+            click: () => this.NDLSettings(),
           },
-          { type: 'separator' },
+
           {
-            label: 'Close File',
-            click: () => this.closeFile(),
+            type: "separator",
           },
+
           {
-            label: 'Close All Files',
-            click: () => this.closeAllFiles(),
+            label: "Quit NCE",
+
+            accelerator: process.platform === "darwin" ? "Cmd+Q" : "Alt+F4",
+
+            click: () => this.exitApp(),
           },
         ],
-      })
+      }),
     );
 
-    // Edit Menu
+    /*
+     * =======================================================
+     * FILE
+     * =======================================================
+     */
+
     this.menu.append(
       new MenuItem({
-        label: 'Edit',
+        label: "File",
+
         submenu: [
           {
-            label: 'Undo',
-            click: () => this.undo(),
+            label: "New File",
+
+            accelerator: "CommandOrControl+N",
+
+            click: () => this.newFile(),
           },
+
           {
-            label: 'Redo',
-            click: () => this.redo(),
+            type: "separator",
           },
-          { type: 'separator' },
+
           {
-            label: 'Cut',
-            click: () => this.cut(),
+            label: "Open File...",
+
+            accelerator: "CommandOrControl+O",
+
+            click: () => this.openFile(),
           },
+
           {
-            label: 'Copy',
-            click: () => this.copy(),
+            label: "Open Folder...",
+
+            accelerator: "CommandOrControl+Shift+O",
+
+            click: () => this.openFolder(),
           },
+
           {
-            label: 'Paste',
-            click: () => this.paste(),
+            type: "separator",
           },
-          { type: 'separator' },
+
           {
-            label: 'Find',
+            label: "Save",
+
+            accelerator: "CommandOrControl+S",
+
+            click: () => this.saveFile(),
+          },
+
+          {
+            label: "Save As...",
+
+            accelerator: "CommandOrControl+Shift+S",
+
+            click: () => this.saveFileAs(),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Close File",
+
+            accelerator: "CommandOrControl+W",
+
+            click: () => this.closeFile(),
+          },
+
+          {
+            label: "Close All Files",
+
+            accelerator: "CommandOrControl+Shift+W",
+
+            click: () => this.closeAllFiles(),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Quit NCE",
+
+            accelerator: process.platform === "darwin" ? "Cmd+Q" : "Alt+F4",
+
+            click: () => this.exitApp(),
+          },
+        ],
+      }),
+    );
+
+    /*
+     * =======================================================
+     * EDIT
+     * =======================================================
+     */
+
+    this.menu.append(
+      new MenuItem({
+        label: "Edit",
+
+        submenu: [
+          {
+            label: "Undo",
+
+            accelerator: "CommandOrControl+Z",
+
+            click: () => this.editAction("undo"),
+          },
+
+          {
+            label: "Redo",
+
+            accelerator: "CommandOrControl+Shift+Z",
+
+            click: () => this.editAction("redo"),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Cut",
+
+            accelerator: "CommandOrControl+X",
+
+            click: () => this.editAction("cut"),
+          },
+
+          {
+            label: "Copy",
+
+            accelerator: "CommandOrControl+C",
+
+            click: () => this.editAction("copy"),
+          },
+
+          {
+            label: "Paste",
+
+            accelerator: "CommandOrControl+V",
+
+            click: () => this.editAction("paste"),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Find",
+
+            accelerator: "CommandOrControl+F",
+
             click: () => this.find(),
           },
+
           {
-            label: 'Replace',
+            label: "Replace",
+
+            accelerator: "CommandOrControl+H",
+
             click: () => this.replace(),
           },
-          { type: 'separator' },
+
           {
-            label: 'Select All',
-            click: () => this.selectAll(),
+            type: "separator",
           },
+
           {
-            label: 'Unselect All',
+            label: "Select All",
+
+            accelerator: "CommandOrControl+A",
+
+            click: () => this.editAction("selectAll"),
+          },
+
+          {
+            label: "Unselect All",
+
             click: () => this.unSelectAll(),
           },
-          { type: 'separator' },
+
           {
-            label: 'New Line',
+            type: "separator",
+          },
+
+          {
+            label: "New Line",
+
             click: () => this.newLine(),
           },
+
           {
-            label: 'Delete Line',
+            label: "Delete Line",
+
             click: () => this.deleteLine(),
           },
         ],
-      })
+      }),
     );
 
-    // View Menu
+    /*
+     * =======================================================
+     * VIEW
+     * =======================================================
+     */
+
     this.menu.append(
       new MenuItem({
-        label: 'View',
+        label: "View",
+
         submenu: [
           {
-            label: 'Reload',
-            accelerator: 'CmdOrCtrl+R',
+            label: "Reload Window",
+
+            accelerator: "CommandOrControl+R",
+
             click: () => this.reloadWindow(),
           },
+
           {
-            label: 'Toggle Fullscreen',
-            accelerator: process.platform === 'darwin' ? 'Ctrl+Cmd+F' : 'F11',
+            type: "separator",
+          },
+
+          {
+            label: "File Explorer",
+
+            accelerator: "CommandOrControl+Shift+E",
+
+            click: () => this.toggleFileExplorer(),
+          },
+
+          {
+            label: "Search",
+
+            accelerator: "CommandOrControl+Shift+F",
+
+            click: () => this.toggleSearch(),
+          },
+
+          {
+            label: "Command Palette",
+
+            accelerator: "CommandOrControl+Shift+P",
+
+            click: () => this.openCommandPalette(),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Toggle Fullscreen",
+
+            accelerator: process.platform === "darwin" ? "Ctrl+Cmd+F" : "F11",
+
             click: () => this.toggleFullscreen(),
           },
+
           {
-            label: 'Toggle Developer Tools',
-            accelerator: process.platform === 'darwin' ? 'Alt+Cmd+I' : 'Ctrl+Shift+I',
+            label: "Toggle Developer Tools",
+
+            accelerator:
+              process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
+
             click: () => this.openDevTools(),
           },
         ],
-      })
+      }),
     );
 
-    // Help Menu
+    /*
+     * =======================================================
+     * HELP
+     * =======================================================
+     */
+
     this.menu.append(
       new MenuItem({
-        label: 'Help',
+        label: "Help",
+
         submenu: [
           {
-            label: 'Documentation',
+            label: "Documentation",
+
             click: () => this.openDocumentation(),
           },
+
+          {
+            label: "Check for Updates",
+
+            click: () => this.checkUpdate(),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "About NCE",
+
+            click: () => this.showAbout(),
+          },
         ],
-      })
+      }),
     );
   }
 
-  checkUpdate() {
-    console.log('Check Update');
+  async editAction(action: string) {
+    const script = `
+      (() => {
+        const element =
+          document.activeElement;
+
+        const isInput =
+          element instanceof HTMLInputElement;
+
+        const isTextarea =
+          element instanceof HTMLTextAreaElement;
+
+        const isSelect =
+          element instanceof HTMLSelectElement;
+
+        const isEditable =
+          element instanceof HTMLElement &&
+          element.isContentEditable;
+
+        const nativeInput =
+          isInput ||
+          isTextarea ||
+          isSelect ||
+          isEditable;
+
+        if (!nativeInput) {
+          return false;
+        }
+
+        switch (${JSON.stringify(action)}) {
+
+          case "selectAll":
+            if (
+              isInput ||
+              isTextarea
+            ) {
+              element.select();
+            } else if (isEditable) {
+              const selection =
+                window.getSelection();
+
+              const range =
+                document.createRange();
+
+              range.selectNodeContents(
+                element,
+              );
+
+              selection.removeAllRanges();
+
+              selection.addRange(
+                range,
+              );
+            }
+
+            return true;
+
+          case "copy":
+            return document.execCommand(
+              "copy",
+            );
+
+          case "cut":
+            return document.execCommand(
+              "cut",
+            );
+
+          case "undo":
+            return document.execCommand(
+              "undo",
+            );
+
+          case "redo":
+            return document.execCommand(
+              "redo",
+            );
+
+          default:
+            return false;
+        }
+      })();
+    `;
+
+    try {
+      const handled = await this.window.webContents.executeJavaScript(script);
+
+      if (handled) {
+        return;
+      }
+    } catch (error) {
+      console.error("Native edit action error:", error);
+    }
+
+    switch (action) {
+      case "undo":
+        this.undo();
+        break;
+
+      case "redo":
+        this.redo();
+        break;
+
+      case "cut":
+        this.cut();
+        break;
+
+      case "copy":
+        this.copy();
+        break;
+
+      case "paste":
+        await this.paste();
+        break;
+
+      case "selectAll":
+        this.selectAll();
+        break;
+    }
   }
 
-  settings() {
-    console.log('Open Settings');
-  }
-
-  NDLSettings() {
-    console.log('Open NDL Settings');
-  }
+  // =========================================================
+  // FILE
+  // =========================================================
 
   newFile() {
-    console.log('Create a new file');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_new_file(); }"
-    );
+    this.executeEditor("control_new_file");
   }
 
   openFile() {
-    console.log('Open an existing file');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_open_file(); }"
-    );
+    this.executeEditor("control_open_file");
   }
 
   openFolder() {
-    console.log('Open a folder');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_open_folder(); }"
-    );
+    this.executeEditor("control_open_folder");
   }
 
   saveFile() {
-    console.log('Save the current file');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_save(); }"
-    );
+    this.executeEditor("control_save");
   }
 
   saveFileAs() {
-    console.log('Save the current file as...');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_save(true); }"
-    );
+    this.executeEditor("control_save", "true");
   }
 
   closeFile() {
-    console.log('Close the current file');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_close_file(); }"
-    );
+    this.executeEditor("control_close_file");
   }
 
   closeAllFiles() {
-    console.log('Close all files');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_close_all_file(); }"
-    );
+    this.executeEditor("control_close_all_file");
   }
 
-  exitApp() {
-    console.log('Exit the application');
-    this.window.close();
-  }
+  // =========================================================
+  // EDIT
+  // =========================================================
 
   undo() {
-    console.log('Undo the last action');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_undo(); }"
-    );
+    this.executeEditor("control_undo");
   }
 
   redo() {
-    console.log('Redo the last undone action');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_redo(); }"
-    );
+    this.executeEditor("control_redo");
   }
 
   cut() {
-    console.log('Cut the selected text');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_cut(); }"
-    );
+    this.executeEditor("control_cut");
   }
 
   copy() {
-    console.log('Copy the selected text');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_copy(); }"
-    );
+    this.executeEditor("control_copy");
   }
 
-  paste() {
-    console.log('Paste from clipboard');
-    this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_paste(); }"
-    );
+  async paste() {
+    const script = `
+      (async () => {
+        const element =
+          document.activeElement;
+
+        const isInput =
+          element instanceof HTMLInputElement;
+
+        const isTextarea =
+          element instanceof HTMLTextAreaElement;
+
+        const isEditable =
+          element instanceof HTMLElement &&
+          element.isContentEditable;
+
+        if (
+          !isInput &&
+          !isTextarea &&
+          !isEditable
+        ) {
+          return false;
+        }
+
+        try {
+          const text =
+            await navigator.clipboard.readText();
+
+          if (
+            isInput ||
+            isTextarea
+          ) {
+            const start =
+              element.selectionStart ?? 0;
+
+            const end =
+              element.selectionEnd ?? 0;
+
+            const value =
+              element.value ?? "";
+
+            element.value =
+              value.slice(0, start) +
+              text +
+              value.slice(end);
+
+            const cursor =
+              start + text.length;
+
+            element.selectionStart =
+              cursor;
+
+            element.selectionEnd =
+              cursor;
+
+            element.dispatchEvent(
+              new Event("input", {
+                bubbles: true,
+              }),
+            );
+
+            return true;
+          }
+
+          if (isEditable) {
+            return document.execCommand(
+              "insertText",
+              false,
+              text,
+            );
+          }
+        } catch (error) {
+          console.error(
+            "Native paste error:",
+            error,
+          );
+        }
+
+        return false;
+      })();
+    `;
+
+    try {
+      const handled = await this.window.webContents.executeJavaScript(script);
+
+      if (handled) {
+        return;
+      }
+    } catch (error) {
+      console.error("Paste error:", error);
+    }
+
+    this.executeEditor("control_paste");
   }
 
   find() {
-    console.log('Find text');
-    this.window.webContents.executeJavaScript(
-      "if (editor.keyBinding) { editor.keyBinding.control_find(); }"
-    );
+    this.executeEditor("control_find");
   }
 
   replace() {
-    console.log('Replace text');
-    this.window.webContents.executeJavaScript(
-      "if (editor.keyBinding) { editor.keyBinding.control_replace(); }"
-    );
-  }
-
-  unSelectAll() {
-    console.log('Unselect all content');
-    this.window.webContents.executeJavaScript(
-        "if (editor.selectController) { editor.selectController.unSelectAll(); }"
-    );
+    this.executeEditor("control_replace");
   }
 
   selectAll() {
-    console.log('Select all content');
+    this.executeEditor("control_select_all");
+  }
+
+  unSelectAll() {
     this.window.webContents.executeJavaScript(
-        "if (editor.keyBinding) { editor.keyBinding.control_select_all(); }"
+      `
+        if (
+          editor &&
+          editor.selectController
+        ) {
+          editor.selectController.unSelectAll();
+        }
+      `,
     );
   }
 
   newLine() {
-    console.log('Insert a new line');
-    this.window.webContents.executeJavaScript(
-      "if (editor.keyBinding) { editor.keyBinding.key_enter(); }"
-    );
+    this.executeEditor("key_enter");
   }
 
   deleteLine() {
-    console.log('Delete the current line');
-    this.window.webContents.executeJavaScript(
-      "if (editor.keyBinding) { editor.keyBinding.control_delete_line(); }"
-    );
+    this.executeEditor("control_delete_line");
+  }
+
+  // =========================================================
+  // VIEW
+  // =========================================================
+
+  toggleFileExplorer() {
+    this.executeEditor("control_toggle_file_explorer");
+  }
+
+  toggleSearch() {
+    this.executeEditor("control_toggle_search");
+  }
+
+  openCommandPalette() {
+    this.executeEditor("control_open_command");
   }
 
   reloadWindow() {
-    console.log('Reload the current window');
     this.window.webContents.reload();
   }
 
   toggleFullscreen() {
-    const isFullscreen = this.window.isFullScreen();
-    this.window.setFullScreen(!isFullscreen);
-    console.log(isFullscreen ? 'Exit fullscreen mode' : 'Enter fullscreen mode');
+    const fullscreen = this.window.isFullScreen();
+
+    this.window.setFullScreen(!fullscreen);
   }
 
   openDevTools() {
-    console.log('Open developer tools');
-    this.window.webContents.openDevTools();
+    if (this.window.webContents.isDevToolsOpened()) {
+      this.window.webContents.closeDevTools();
+    } else {
+      this.window.webContents.openDevTools();
+    }
+  }
+
+  // =========================================================
+  // APPLICATION
+  // =========================================================
+
+  exitApp() {
+    this.window.close();
+  }
+
+  settings() {
+    console.log("Open NCE Settings");
+  }
+
+  NDLSettings() {
+    console.log("Open NDL Settings");
+  }
+
+  checkUpdate() {
+    console.log("Check for updates");
   }
 
   openDocumentation() {
-    console.log('Open documentation');
+    console.log("Open documentation");
   }
 
+  // =========================================================
+  // ABOUT
+  // =========================================================
 
+  async showAbout() {
+    await dialog.showMessageBox(this.window, {
+      type: "info",
 
-  showAbout() {
-    console.log('Show About dialog');
+      title: "About NCE",
 
-    require('electron').dialog.showMessageBox(this.window, {
-      type: 'info',
-      title: 'About NCE',
-      message: 'NCE Code Editor\nVersion 1.0.0',
+      message: "NCE Code Editor",
+
+      detail:
+        "A lightweight and powerful code editor.\n\n" +
+        `Version ${this.WinAPP.app.version}`,
+
+      buttons: ["OK"],
+
+      defaultId: 0,
     });
+  }
+
+  // =========================================================
+  // UTILITIES
+  // =========================================================
+
+  executeEditor(method: string, ...args: string[]) {
+    const serializedArgs = args.length > 0 ? `, ${args.join(", ")}` : "";
+
+    const script = `
+      (() => {
+        if (
+          typeof editor === "undefined" ||
+          !editor ||
+          !editor.keyBinding
+        ) {
+          return;
+        }
+
+        editor.keyBinding.${method}(
+          ${serializedArgs}
+        );
+      })();
+    `;
+
+    this.window.webContents.executeJavaScript(script);
   }
 }

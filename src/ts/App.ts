@@ -8,8 +8,11 @@ export class App {
   name = "NCE";
   port = 1212;
 
+  version = "BETA 0.0.1";   // NCE Version
+  fversion = "BETA 0.0.1";  // NCE Front Version
+
   constructor() {
-    this.window = new Window(this.name);
+    this.window = new Window(this);
     this.nsh = new NSHServer(this.port);
 
     const gotTheLock = app.requestSingleInstanceLock();

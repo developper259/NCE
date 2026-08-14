@@ -126,9 +126,13 @@ class tabManager {
 
   closeFiles() {
     requestAnimationFrame(() => {
+      delete this.files;
       this.files = [];
+      
       this.activeFile = undefined;
       this.editor.fileExplorer.activeFilePath = null;
+      
+      this.editor.searchController.close();
 
       this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
         file: null,

@@ -376,12 +376,13 @@ class FileExplorer extends Sidebar {
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
+        e.stopPropagation();
         settle(true);
       } else if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
         settle(false);
       }
-      e.stopPropagation();
     });
     input.addEventListener("click", (e) => e.stopPropagation());
     input.addEventListener("blur", () => settle(true));

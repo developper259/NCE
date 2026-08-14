@@ -7,6 +7,7 @@ import { AppMenu } from "./addon/Menu";
 import { NSH } from "./NSH";
 import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
+import { App } from "./App";
 
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
@@ -15,12 +16,12 @@ export class Window {
   contextMenu: ContextMenu | undefined;
   nsh: NSH | undefined;
   workspaceSearch: WorkspaceSearch | undefined;
-  name: string;
+  app: App;
   forceQuit: boolean;
 
-  constructor(name: string) {
+  constructor(app: App) {
     this.window = null;
-    this.name = name;
+    this.app = app;
     this.forceQuit = false;
   }
 
@@ -32,7 +33,7 @@ export class Window {
       height: 600,
       minWidth: 800,
       minHeight: 600,
-      title: this.name,
+      title: this.app.name,
       fullscreen: true,
       icon: path.join(__dirname, "../../assets/logo/NCE/dark-logo.png"),
 

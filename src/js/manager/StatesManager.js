@@ -116,6 +116,7 @@ class StatesManager {
     let activeFileToFocus = null;
 
     for (const fileData of tabState.files) {
+      if (!fileData) continue;
       let file = new FileNode(
         this.editor,
         fileData.id,
