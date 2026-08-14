@@ -24,7 +24,10 @@ export class Watcher {
   private watchedPath: string = "";
 
   private pendingEvents: Map<string, FileChange> = new Map();
+
   private flushTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  private ignoredChanges: Set<string> = new Set();
 
   constructor(window: BrowserWindow) {
     this.window = window;
@@ -52,6 +55,7 @@ export class Watcher {
       ignored: DEFAULT_IGNORED,
       persistent: true,
       ignoreInitial: true,
+
       awaitWriteFinish: {
         stabilityThreshold: 300,
         pollInterval: 100,
@@ -59,7 +63,16 @@ export class Watcher {
     });
 
     this.watcher.on("all", (event: string, filePath: string) => {
+      const normalizedPath = path.normalize(filePath);
+
+      if (event === "change" && this.ignoredChanges.has(normalizedPath)) {
+        this.ignoredChanges.delete(normalizedPath);
+
+        return;
+      }
+
       const dirPath = path.dirname(filePath);
+
       this.queueEvent(event, filePath, dirPath);
     });
 
@@ -68,18 +81,35 @@ export class Watcher {
     });
   }
 
-  private queueEvent(event: string, filePath: string, dirPath: string) {
-    this.pendingEvents.set(filePath, { event, filePath, dirPath });
+  ignoreNextChange(filePath: string): void {
+    if (!filePath) return;
 
-    if (this.flushTimeout) clearTimeout(this.flushTimeout);
+    this.ignoredChanges.add(path.normalize(filePath));
+  }
+
+  private queueEvent(event: string, filePath: string, dirPath: string) {
+    this.pendingEvents.set(filePath, {
+      event,
+      filePath,
+      dirPath,
+    });
+
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+    }
+
     this.flushTimeout = setTimeout(() => this.flushEvents(), 150);
   }
 
   private flushEvents() {
     this.flushTimeout = null;
-    if (this.pendingEvents.size === 0) return;
+
+    if (this.pendingEvents.size === 0) {
+      return;
+    }
 
     const changes = Array.from(this.pendingEvents.values());
+
     this.pendingEvents.clear();
 
     this.window.webContents.send("file-system-change", changes);
@@ -88,12 +118,17 @@ export class Watcher {
   async stopWatching(): Promise<void> {
     if (this.flushTimeout) {
       clearTimeout(this.flushTimeout);
+
       this.flushTimeout = null;
     }
+
     this.pendingEvents.clear();
+
+    this.ignoredChanges.clear();
 
     if (this.watcher) {
       await this.watcher.close();
+
       this.watcher = null;
       this.watchedPath = "";
     }

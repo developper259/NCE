@@ -232,14 +232,21 @@ export class FileManager {
     try {
       const dir = path.dirname(filePath);
 
-      await fs.mkdir(dir, { recursive: true });
+      await fs.mkdir(dir, {
+        recursive: true,
+      });
+
+      this.window.watcher?.ignoreNextChange(filePath);
 
       await fs.writeFile(filePath, content);
+
       console.log("File saved successfully:", filePath);
+
       return filePath;
     } catch (error) {
       console.error("Error saving file:", error);
     }
+
     return undefined;
   }
 
