@@ -275,8 +275,8 @@ class LineController {
 
   supLine(index) {
     if (index >= 0 && index < this.lines.length) {
-      this.markDirtyFrom(index);
       this.lines.splice(index, 1);
+      this.markDirtyFrom(index);
     }
   }
 
@@ -341,11 +341,32 @@ class LineController {
 
     this.dirtyLines.forEach((lineNode) => {
       const dataIndex = this.lines.indexOf(lineNode);
+
+      if (dataIndex < 0) return;
+
       const screenIndex = dataIndex - this.startIndex;
+
       if (screenIndex >= 0 && screenIndex < this.maxViewLines) {
         this.refreshLineOutput(screenIndex);
       }
     });
+
+    const firstEmptyIndex = Math.max(0, this.lines.length - this.startIndex);
+
+    const outputLength = this.editor.output.children.length;
+
+    for (
+      let screenIndex = firstEmptyIndex;
+      screenIndex < outputLength;
+      screenIndex++
+    ) {
+      const child = this.editor.output.children[screenIndex];
+
+      if (!child) continue;
+
+      child.replaceChildren();
+      child.removeAttribute("data-line");
+    }
 
     this.dirtyLines.clear();
   }
