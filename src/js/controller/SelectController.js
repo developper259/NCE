@@ -575,7 +575,6 @@ class SelectController {
       : this.startSelect.column;
 
     const yStart = topRow - 1;
-
     const yEnd = bottomRow - 1;
 
     const topRealLen = lc.lines[yStart] ? lc.lines[yStart].getText().length : 0;
@@ -590,14 +589,12 @@ class SelectController {
       topRealLen,
     ).column;
 
-    const startLineLen = topVisualEnd - topVisualStart;
+    const startLineLen = Math.max(0, topVisualEnd - topVisualStart);
 
-    if (startLineLen > 0) {
-      this.selectedLines.set(yStart, {
-        startCol: topVisualStart + 1,
-        length: startLineLen,
-      });
-    }
+    this.selectedLines.set(yStart, {
+      startCol: topVisualStart + 1,
+      length: startLineLen,
+    });
 
     for (let i = yStart + 1; i < yEnd; i++) {
       const realLen = lc.lines[i] ? lc.lines[i].getText().length : 0;
@@ -618,12 +615,11 @@ class SelectController {
       bottomRealCol,
     ).column;
 
-    if (bottomVisualLen >= 0) {
-      this.selectedLines.set(yEnd, {
-        startCol: 1,
-        length: bottomVisualLen,
-      });
-    }
+    this.selectedLines.set(yEnd, {
+      startCol: 1,
+
+      length: Math.max(0, bottomVisualLen),
+    });
 
     this.refreshSelectionDOM();
   }
