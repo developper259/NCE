@@ -196,7 +196,7 @@ class LineController {
 
     if (!this.editor.isOnRefresh) {
       this.markDirtyAll();
-      this.refresh();
+      this.refresh(true);
     }
   }
 
