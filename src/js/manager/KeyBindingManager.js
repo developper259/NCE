@@ -1,4 +1,4 @@
-class keyBindingController {
+class KeyBindingManager {
   constructor(e) {
     this.editor = e;
 

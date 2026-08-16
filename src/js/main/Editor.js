@@ -24,6 +24,7 @@ class Editor {
     this.emptyMenu = new EmptyMenu(this);
 
     this.tabManager = new tabManager(this);
+    this.keyBindingManager = new KeyBindingManager(this);
     this.scrollerManager = new ScrollerManager(this);
     this.sidebarManager = new SidebarManager(this);
     this.threadManager = new ThreadManager();
@@ -41,7 +42,6 @@ class Editor {
     this.lineController = new LineController(this);
     this.selectController = new SelectController(this);
     this.cursorController = new CursorController(this);
-    this.keyBindingController = new keyBindingController(this);
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
 
