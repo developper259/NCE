@@ -157,9 +157,17 @@ class Events {
   }
   onResize(e) {
     requestAnimationFrame(() => {
-      this.editor.lineController.resize();
+      if (this.editor.domManager) {
+        this.editor.domManager.resize();
+      }
 
-      this.editor.scrollerManager.refreshAll();
+      if (this.editor.lineController) {
+        this.editor.lineController.resize();
+      }
+
+      if (this.editor.scrollerManager) {
+        this.editor.scrollerManager.refreshAll();
+      }
     });
   }
 }

@@ -21,11 +21,11 @@ class SidebarResizer {
   createResizers() {
     this.leftResizer = document.createElement("div");
     this.leftResizer.className = "sidebar-resizer sidebar-resizer-left";
-    document.querySelector(".main-section").appendChild(this.leftResizer);
+    this.editor.domManager.getElement(".main-section").appendChild(this.leftResizer);
 
     this.rightResizer = document.createElement("div");
     this.rightResizer.className = "sidebar-resizer sidebar-resizer-right";
-    document.querySelector(".main-section").appendChild(this.rightResizer);
+    this.editor.domManager.getElement(".main-section").appendChild(this.rightResizer);
   }
 
   attachEventListeners() {
@@ -48,10 +48,12 @@ class SidebarResizer {
 
     const sidebar =
       side === "left"
-        ? document.querySelector(".sidebar-left")
-        : document.querySelector(".sidebar-right");
+        ? this.editor.domManager.getElement(".sidebar-left")
+        : this.editor.domManager.getElement(".sidebar-right");
 
-    this.startWidth = sidebar.offsetWidth;
+    this.startWidth = sidebar
+      ? sidebar.offsetWidth
+      : this.editor.domManager.getSidebarWidth(side);
 
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
@@ -89,10 +91,18 @@ class SidebarResizer {
   applyWidth(width, side) {
     const sidebar =
       side === "left"
-        ? document.querySelector(".sidebar-left")
-        : document.querySelector(".sidebar-right");
+        ? this.editor.domManager.getElement(".sidebar-left")
+        : this.editor.domManager.getElement(".sidebar-right");
 
-    sidebar.style.width = width + "px";
+    if (sidebar) {
+      sidebar.style.width = width + "px";
+    }
+
+    if (this.editor.domManager) {
+      this.editor.domManager.measureElements();
+      this.editor.domManager.calculate();
+      this.editor.domManager.apply();
+    }
 
     this.updateResizerPositions();
     this.updateResizerVisibility();
@@ -115,19 +125,23 @@ class SidebarResizer {
   }
 
   updateResizerPositions() {
-    const leftSidebar = document.querySelector(".sidebar-left");
-    const rightSidebar = document.querySelector(".sidebar-right");
+    const leftSidebar = this.editor.domManager.getElement(".sidebar-left");
+    const rightSidebar = this.editor.domManager.getElement(".sidebar-right");
 
-    const leftSidebarWidth = leftSidebar.offsetWidth;
+    const leftSidebarWidth = leftSidebar
+      ? leftSidebar.offsetWidth
+      : this.editor.domManager.getSidebarWidth("left");
     this.leftResizer.style.left = 48 + leftSidebarWidth + "px";
 
-    const rightSidebarWidth = rightSidebar.offsetWidth;
+    const rightSidebarWidth = rightSidebar
+      ? rightSidebar.offsetWidth
+      : this.editor.domManager.getSidebarWidth("right");
     this.rightResizer.style.right = rightSidebarWidth + "px";
   }
 
   updateResizerVisibility() {
-    const leftSidebar = document.querySelector(".sidebar-left");
-    const rightSidebar = document.querySelector(".sidebar-right");
+    const leftSidebar = this.editor.domManager.getElement(".sidebar-left");
+    const rightSidebar = this.editor.domManager.getElement(".sidebar-right");
 
     this.leftResizer.style.display = leftSidebar.classList.contains("open")
       ? "block"

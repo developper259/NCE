@@ -1,100 +1,65 @@
-# NCE (NDL Code Editor)
+# NCE - Webview
 
-[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/yourusername/NCE-Webview/pulls)
+Éditeur de code webview dédié au développement NDL, avec un moteur d’édition, un système de surbrillance, un gestionnaire de fichiers, un explorateur de projet.
 
-## 📋 À propos
+## Présentation
 
-**NCE (NDL Code Editor)** est l'environnement de développement officiel conçu spécifiquement pour le langage de programmation NDL. Plus qu'un simple éditeur, NCE est un écosystème complet optimisé pour la productivité des développeurs NDL.
+Ce projet contient la partie interface applicative d’un éditeur de code embarqué dans une webview Electron. Il fournit :
 
-### Pour le langage NDL
+- un éditeur de texte multi-lignes
+- une gestion de l’indentation, du curseur, de la sélection et du rendu syntaxique
+- un explorateur de fichiers et une recherche dans l’espace de travail
+- des scrollers personnalisés pour la vue texte et les sidebars
+- une intégration avec les modules de syntaxe et de thème
 
-- **Support natif** : Prise en charge complète de la syntaxe NDL
-- **Outils intégrés** : Compilation, débogage et exécution optimisés
-- **Bibliothèques standards** : Accès rapide à la documentation et aux APIs NDL
-- **Workflow optimisé** : Fonctionnalités conçues pour le cycle de développement NDL
+## Structure du projet
 
-## 🚀 Fonctionnalités principales
+- `src/js/` : logique applicative JavaScript de l’éditeur
+- `src/css/` : styles et thèmes de l’interface
+- `src/html/` : structure HTML de la webview
+- `src/modules/NSH/` : moteur de coloration / tokenisation / parsing
+- `src/ts/` : couche TypeScript d’intégration côté app
+- `assets/` : icônes, logos et ressources visuelles
 
-### 🔧 Moteur d'édition NDL
+## Démarrage
 
-- Coloration syntaxique avancée pour NDL
-- Auto-complétion intelligente
-- Navigation dans le code (définitions, références)
-- Refactoring de code
+Prérequis :
 
-### 🛠 Outils de développement
+- Node.js
+- npm
 
-- Compilateur intégré
-- Gestionnaire de paquets NDL
-- Terminal intégré
-
-### 🎨 Interface utilisateur
-
-- Éditeur personnalisable
-- Thèmes clair/sombre
-- Disposition modulaire
-- Raccourcis clavier configurables
-
-## 🛠 Installation
-
-### Prérequis
-
-- Node.js 16+
-- NPM ou Yarn
+Installation :
 
 ```bash
-# Cloner le dépôt
-git clone https://github.com/developper259/NCE.git
-
-# Installer les dépendances
 npm install
-
-# Sous macOS
-npm run macos
-
-# Sous Windows
-npm run win
 ```
 
-## 🤝 Contribuer
-
-Les contributions sont les bienvenues ! Voici comment participer :
-
-1. Forkez le projet
-2. Créez une branche pour votre fonctionnalité
-3. Soumettez une Pull Request
-
-## 📄 Licence
-
-Ce projet est sous licence ISC. Voir le fichier [LICENSE](LICENSE) pour plus de détails.
-
-© 2025 Andrea Belvedere
-
-### Installation
+Lancement de l’application :
 
 ```bash
-# Cloner le dépôt
-git clone [URL_DU_DEPOT]
-cd NCE-Webview
+npm start
+```
 
-# Installer les dépendances
-npm install
+## Build
 
-# Compiler le projet
+Pour générer un paquet applicatif :
+
+```bash
 npm run build
-
-# Lancer l'application
-
-# Sous macOS
-npm run macos
-
-# Sous Windows
-npm run win
-
-## � Licence
-
-Ce projet est sous licence [ISC](LICENSE).
-
-© 2025 Andrea Belvedere - Tous droits réservés
 ```
+
+Ou une version non installée pour test local :
+
+```bash
+npm run dist
+```
+
+## Notes
+
+- Le projet est conçu pour fonctionner dans un environnement Electron.
+- La webview charge l’éditeur et les modules UI depuis les fichiers sous `src/`.
+- La coloration syntaxique est gérée dans `src/modules/NSH/`.
+
+## Licence
+
+ISC

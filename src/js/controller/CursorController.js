@@ -103,7 +103,7 @@ class CursorController {
     if (!this.editor.tabManager.activeFile) return;
     this.editor.keyBinding.historyX = undefined;
 
-    const rect = this.editor.output.getBoundingClientRect();
+    const rect = this.editor.domManager.getOutputRect();
     const localX = event.clientX - rect.left - this.mX;
     const localY = event.clientY - rect.top - this.mY;
 

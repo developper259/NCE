@@ -34,17 +34,17 @@ class SearchController {
   }
 
   initSearchBar() {
-    this.searchBar = getElement(".editor-search-bar");
+    this.searchBar = this.editor.domManager.getElement(".editor-search-bar");
 
-    this.input = this.searchBar.querySelector(".search-bar-input");
+    this.input = this.editor.domManager.getElement(".search-bar-input", this.searchBar);
 
-    this.counter = this.searchBar.querySelector(".search-bar-counter");
+    this.counter = this.editor.domManager.getElement(".search-bar-counter", this.searchBar);
 
-    this.previousButton = this.searchBar.querySelector(".search-bar-previous");
+    this.previousButton = this.editor.domManager.getElement(".search-bar-previous", this.searchBar);
 
-    this.nextButton = this.searchBar.querySelector(".search-bar-next");
+    this.nextButton = this.editor.domManager.getElement(".search-bar-next", this.searchBar);
 
-    this.closeButton = this.searchBar.querySelector(".search-bar-close");
+    this.closeButton = this.editor.domManager.getElement(".search-bar-close", this.searchBar);
   }
 
   focusInput() {

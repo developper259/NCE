@@ -14,9 +14,19 @@ class SidebarScroller {
 
   updateMetrics() {
     if (!this.menuOBJ) return;
-    this.scrollTop = this.menuOBJ.scrollTop;
-    this.clientHeight = this.menuOBJ.clientHeight;
-    this.scrollHeight = this.menuOBJ.scrollHeight;
+
+    const domManager = this.editor && this.editor.domManager;
+    if (!domManager) {
+      this.scrollTop = this.menuOBJ.scrollTop || 0;
+      this.clientHeight = this.menuOBJ.clientHeight || 0;
+      this.scrollHeight = this.menuOBJ.scrollHeight || 0;
+      return;
+    }
+
+    const metrics = domManager.getElementMetrics(this.menuOBJ);
+    this.scrollTop = metrics.scrollTop;
+    this.clientHeight = metrics.clientHeight;
+    this.scrollHeight = metrics.scrollHeight;
   }
 
   init() {

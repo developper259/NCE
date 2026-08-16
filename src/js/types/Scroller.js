@@ -91,12 +91,16 @@ class Scroller {
   }
 
   refreshMetrics() {
-    this.scrollerOBJHeight = this.scrollerOBJ.clientHeight;
-    this.scrollerOBJWidth = this.scrollerOBJ.clientWidth;
-    this.itemOBJHeight = this.itemOBJ.clientHeight;
-    this.itemOBJWidth = this.itemOBJ.clientWidth;
-    this.parentOBJHeight = this.parentOBJ.clientHeight;
-    this.parentOBJWidth = this.parentOBJ.clientWidth;
+    const scrollerMetrics = this.editor.domManager.getElementMetrics(this.scrollerOBJ);
+    const itemMetrics = this.editor.domManager.getElementMetrics(this.itemOBJ);
+    const parentMetrics = this.editor.domManager.getElementMetrics(this.parentOBJ);
+
+    this.scrollerOBJHeight = scrollerMetrics.clientHeight;
+    this.scrollerOBJWidth = scrollerMetrics.clientWidth;
+    this.itemOBJHeight = itemMetrics.clientHeight;
+    this.itemOBJWidth = itemMetrics.clientWidth;
+    this.parentOBJHeight = parentMetrics.clientHeight;
+    this.parentOBJWidth = parentMetrics.clientWidth;
   }
 
   readThumbMetrics() {
@@ -205,7 +209,7 @@ class Scroller {
     this.itemOBJ.addEventListener("mousedown", (e) => {
       this.isDragging = true;
 
-      const itemRect = this.itemOBJ.getBoundingClientRect();
+      const itemRect = this.editor.domManager.getElementMetrics(this.itemOBJ);
       const isVertical =
         this.type === this.editor.scrollerManager.VERTICAL_TYPE;
       this.dragOffset = isVertical
@@ -234,7 +238,7 @@ class Scroller {
   handleMouseMove(e) {
     if (!this.isDragging || !this.active) return;
 
-    const rect = this.scrollerOBJ.getBoundingClientRect();
+    const rect = this.editor.domManager.getElementMetrics(this.scrollerOBJ);
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
 
     if (isVertical) {

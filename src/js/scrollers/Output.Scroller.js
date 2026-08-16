@@ -26,7 +26,18 @@ class OutputScroller {
 
   getTotalScrollLines() {
     if (!this.lineController || !this.lineController.lines) return 0;
-    return this.lineController.lines.length + this.marginLines;
+    return this.lineController.lines.length;
+  }
+
+  getEffectiveTotalLines() {
+    const totalLines = this.getTotalScrollLines();
+    const maxLines = this.lineController.maxLines;
+
+    if (totalLines <= maxLines) {
+      return totalLines;
+    }
+
+    return totalLines + this.marginLines;
   }
 
   init() {
@@ -48,7 +59,7 @@ class OutputScroller {
       if (!this.lineController.lines || this.lineController.lines.length === 0)
         return 0;
       const visibleLines = this.lineController.maxLines;
-      const totalLines = this.getTotalScrollLines();
+      const totalLines = this.getEffectiveTotalLines();
       if (totalLines <= visibleLines) return 100;
       return (visibleLines / totalLines) * 100;
     };
@@ -158,15 +169,13 @@ class OutputScroller {
       return 0;
 
     const posY = this.editor.posY;
-    const viewportHeight = this.lineController.outputHeight;
-    const totalHeight = this.getTotalScrollLines() * posY;
-    const maxScrollY = Math.max(0, totalHeight - viewportHeight);
-    if (maxScrollY === 0) return 0;
+    const maxStartIndex = this.getMaxStartIndex();
+    if (maxStartIndex === 0) return 0;
 
-    return (
-      (this.lineController.startIndex * posY + this.lineController.offsetY) /
-      maxScrollY
-    );
+    const currentPosition =
+      this.lineController.startIndex + this.lineController.offsetY / posY;
+
+    return currentPosition / maxStartIndex;
   }
 
   applyVerticalScrollFromRatio(scrollRatio) {
@@ -189,26 +198,14 @@ class OutputScroller {
     }
 
     const posY = this.editor.posY;
-    const totalHeight = this.getTotalScrollLines() * posY;
-    const viewportHeight = this.lineController.outputHeight;
-    const maxScrollY = Math.max(0, totalHeight - viewportHeight);
     const maxStartIndex = this.getMaxStartIndex();
 
     scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
     this.vScroller.setScrollRatio(scrollRatio);
 
-    const currentScrollY = scrollRatio * maxScrollY;
-    let newStartIndex = Math.min(
-      Math.floor(currentScrollY / posY),
-      maxStartIndex,
-    );
-    let newOffsetY = currentScrollY - newStartIndex * posY;
-
-    const maxOffsetY = Math.max(
-      0,
-      totalHeight - newStartIndex * posY - viewportHeight,
-    );
-    if (newOffsetY > maxOffsetY) newOffsetY = maxOffsetY;
+    const scrollPosition = scrollRatio * maxStartIndex;
+    let newStartIndex = Math.min(Math.floor(scrollPosition), maxStartIndex);
+    let newOffsetY = (scrollPosition - newStartIndex) * posY;
 
     const startIndexChanged = this.lineController.startIndex !== newStartIndex;
 
@@ -243,11 +240,9 @@ class OutputScroller {
       this.lineController.startIndex = maxStart;
     if (this.lineController.startIndex < 0) this.lineController.startIndex = 0;
 
-    const viewportHeight = this.lineController.outputHeight;
-    const totalHeight = this.getTotalScrollLines() * posY;
     const maxOffsetY = Math.max(
       0,
-      totalHeight - this.lineController.startIndex * posY - viewportHeight,
+      (maxStart - this.lineController.startIndex) * posY,
     );
     if (this.lineController.offsetY > maxOffsetY)
       this.lineController.offsetY = maxOffsetY;
@@ -257,10 +252,14 @@ class OutputScroller {
   getMaxStartIndex() {
     if (!this.lineController.lines || this.lineController.lines.length === 0)
       return 0;
-    return Math.max(
-      0,
-      this.getTotalScrollLines() - this.lineController.maxLines,
-    );
+
+    const overflow = this.lineController.totalLines - this.lineController.maxLines;
+
+    if (overflow <= 0) {
+      return 0;
+    }
+
+    return overflow + this.marginLines;
   }
 
   restoreScroll() {

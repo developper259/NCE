@@ -25,10 +25,18 @@ roundX = (nb) => {
 };
 
 getElement = (str) => {
+  if (window.__domManager && typeof window.__domManager.getElement === "function") {
+    return window.__domManager.getElement(str);
+  }
+
   return document.querySelector(str);
 };
 
 getElements = (str) => {
+  if (window.__domManager && typeof window.__domManager.getElements === "function") {
+    return window.__domManager.getElements(str);
+  }
+
   return nodeToArray(document.querySelectorAll(str));
 };
 

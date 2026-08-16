@@ -19,11 +19,11 @@ class SidebarManager {
   }
 
   init() {
-    this.tabSelector = getElement(".sidebar-tab-selector");
-    this.leftSidebar = getElement(".sidebar-left");
-    this.rightSidebar = getElement(".sidebar-right");
-    this.leftMenuContainer = getElement(".sidebar-left .sidebar-menu");
-    this.rightMenuContainer = getElement(".sidebar-right .sidebar-menu");
+    this.tabSelector = this.editor.domManager.getElement(".sidebar-tab-selector");
+    this.leftSidebar = this.editor.domManager.getElement(".sidebar-left");
+    this.rightSidebar = this.editor.domManager.getElement(".sidebar-right");
+    this.leftMenuContainer = this.editor.domManager.getElement(".sidebar-left .sidebar-menu");
+    this.rightMenuContainer = this.editor.domManager.getElement(".sidebar-right .sidebar-menu");
 
     this.renderTabSelector();
     this.setupEventListeners();
@@ -140,8 +140,8 @@ class SidebarManager {
   openSidebar(position) {
     if (position === "left" && this.leftSidebar) {
       this.leftSidebar.classList.add("open");
-      document
-        .querySelector(".main-section")
+      this.editor.domManager
+        .getElement(".main-section")
         .classList.add("sidebar-left-open");
 
       this.editor.fileManagerOBJ.style.left =
@@ -166,8 +166,8 @@ class SidebarManager {
   closeSidebar(position) {
     if (position === "left" && this.leftSidebar) {
       this.leftSidebar.classList.remove("open");
-      document
-        .querySelector(".main-section")
+      this.editor.domManager
+        .getElement(".main-section")
         .classList.remove("sidebar-left-open");
 
       this.editor.fileManagerOBJ.style.left = this.selectorWidth + "px";

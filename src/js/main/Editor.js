@@ -3,12 +3,14 @@ class Editor {
     this.isOnInit = true;
     this.isOnRefresh = false;
 
-    this.mainSection = getElement(".main-section");
-    this.output = getElement(".editor-output");
-    this.editorOBJ = getElement(".editor");
-    this.emptyMenuOBJ = getElement(".empty-menu");
-    this.fileManagerOBJ = getElement(".file-manager");
-    this.cD = getElement(".editor-caret");
+    this.domManager = new DOMManager(this);
+
+    this.mainSection = this.domManager.getElement(".main-section");
+    this.output = this.domManager.getElement(".editor-output");
+    this.editorOBJ = this.domManager.getElement(".editor");
+    this.emptyMenuOBJ = this.domManager.getElement(".empty-menu");
+    this.fileManagerOBJ = this.domManager.getElement(".file-manager");
+    this.cD = this.domManager.getElement(".editor-caret");
 
     this.selected = false;
     this.isActive = false;
@@ -35,6 +37,7 @@ class Editor {
 
     this.fileExplorer = new FileExplorer(this);
     this.searchSidebar = new SearchSidebar(this);
+
     this.sidebarManager.registerMenu(this.fileExplorer);
     this.sidebarManager.registerMenu(this.searchSidebar);
 
@@ -56,6 +59,11 @@ class Editor {
     this.sidebarResizer = new SidebarResizer(this);
 
     this.writerController.insertMode = true;
+
+    this.domManager.init();
+    if (this.lineController) {
+      this.lineController.syncDimensions();
+    }
 
     this.initQuitEvent();
     this.initLoadState();
@@ -150,10 +158,14 @@ class Editor {
   updateBaseX(forcedWidth) {
     if (forcedWidth !== undefined) {
       this.baseX = forcedWidth + 10;
+
+      if (this.domManager) {
+        this.domManager.setLineNumberWidth(forcedWidth);
+      }
     } else {
-      const lineNumbers = document.querySelector(".line-numbers");
-      if (!lineNumbers) return;
-      this.baseX = lineNumbers.offsetWidth + 10;
+      if (this.domManager) {
+        this.baseX = this.domManager.getOutputX();
+      }
     }
 
     this.output.style.left = `${this.baseX}px`;
