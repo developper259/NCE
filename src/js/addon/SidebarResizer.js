@@ -140,15 +140,18 @@ class SidebarResizer {
     const leftSidebar = this.editor.domManager.getElement(".sidebar-left");
     const rightSidebar = this.editor.domManager.getElement(".sidebar-right");
 
+    const sideBarSelectorWidth = this.editor.domManager.sidebarResizer.width;
+
     const leftSidebarWidth = leftSidebar
       ? leftSidebar.offsetWidth
       : this.editor.domManager.getSidebarWidth("left");
-    this.leftResizer.style.left = 48 + leftSidebarWidth + "px";
+
+    this.leftResizer.style.left = sideBarSelectorWidth + leftSidebarWidth - 3 + "px";
 
     const rightSidebarWidth = rightSidebar
       ? rightSidebar.offsetWidth
       : this.editor.domManager.getSidebarWidth("right");
-    this.rightResizer.style.right = rightSidebarWidth + "px";
+    this.rightResizer.style.right = rightSidebarWidth - 3 + "px";
   }
 
   updateResizerVisibility() {

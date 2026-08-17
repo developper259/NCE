@@ -95,6 +95,7 @@ const USERCONFIG_KEYBINDING = [
     key: "Meta+A",
     in_editor: true,
   },
+
   {
     action: "toggle_file_explorer",
     description: "Ouvrir/Fermer l'explorateur de fichiers",
@@ -107,6 +108,13 @@ const USERCONFIG_KEYBINDING = [
     key: "Meta+Shift+F",
     in_editor: false,
   },
+  {
+    action: "toggle_agent",
+    description: "Ouvrir/Fermer l'agent",
+    key: "Meta+L",
+    in_editor: false,
+  },
+
   {
     key: "Escape",
     action: "escape",

@@ -4,7 +4,6 @@
   bottom: 20px;
   height: var(--sidebar-height);
   width: var(--sidebar-selector-width);
-  box-sizing: border-box;
   background-color: var(--bg-primary);
   display: flex;
   flex-direction: column;
@@ -188,7 +187,7 @@
 
 .sidebar-resizer {
   position: absolute;
-  bottom: calc(var(--bottombar-height) + 1px);
+  bottom: var(--bottombar-height);
   width: 4px;
   height: var(--sidebar-height);
   background-color: transparent;

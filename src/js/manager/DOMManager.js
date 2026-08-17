@@ -82,6 +82,7 @@ class DOMManager {
       left: { width: 0 },
       right: { width: 0 },
     };
+    this.sidebarResizer = { width: 48 };
   }
 
   // =========================================================
