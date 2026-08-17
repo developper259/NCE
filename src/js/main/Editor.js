@@ -37,9 +37,11 @@ class Editor {
 
     this.fileExplorer = new FileExplorer(this);
     this.searchSidebar = new SearchSidebar(this);
+    this.agentSidebar = new AgentSidebar(this);
 
     this.sidebarManager.registerMenu(this.fileExplorer);
     this.sidebarManager.registerMenu(this.searchSidebar);
+    this.sidebarManager.registerMenu(this.agentSidebar);
 
     this.writerController = new WriterController(this);
     this.lineController = new LineController(this);

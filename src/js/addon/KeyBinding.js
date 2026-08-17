@@ -22,6 +22,7 @@ class KeyBinding {
 
       toggle_file_explorer: this.control_toggle_file_explorer,
       toggle_search: this.control_toggle_search,
+      toggle_agent: this.control_toggle_agent,
 
       Escape: this.key_escape,
       Tab: this.key_tab,
@@ -96,6 +97,7 @@ class KeyBinding {
   }
 
   async control_copy(s, c, m, a) {
+    if (!document.hasFocus()) return;
     if (!this.editor.tabManager.activeFile) return;
 
     let txt = this.editor.selectController.containsSelected;
@@ -113,6 +115,7 @@ class KeyBinding {
   }
 
   async control_paste(s, c, m, a) {
+    if (!document.hasFocus()) return;
     if (!this.editor.tabManager.activeFile) return;
     try {
       const text = await navigator.clipboard.readText();
@@ -123,6 +126,7 @@ class KeyBinding {
   }
 
   async control_cut(s, c, m, a) {
+    if (!document.hasFocus()) return;
     if (!this.editor.tabManager.activeFile) return;
 
     let hasSelection = this.editor.selectController.containsSelected;
@@ -226,6 +230,12 @@ class KeyBinding {
   control_toggle_search(s, c, m, a) {
     if (this.editor.sidebarManager) {
       this.editor.sidebarManager.toggleMenu("search");
+    }
+  }
+
+  control_toggle_agent(s, c, m, a) {
+    if (this.editor.sidebarManager) {
+      this.editor.sidebarManager.toggleMenu("agent");
     }
   }
 

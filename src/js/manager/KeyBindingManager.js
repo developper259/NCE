@@ -59,7 +59,7 @@ class KeyBindingManager {
   }
 
   onKey(e) {
-    if (this.isNativeInputTarget(e.target)) {
+    if (this.isNativeInputTarget(e.target) || !document.hasFocus()) {
       e.stopPropagation();
 
       return;
