@@ -91,9 +91,13 @@ class Scroller {
   }
 
   refreshMetrics() {
-    const scrollerMetrics = this.editor.domManager.getElementMetrics(this.scrollerOBJ);
+    const scrollerMetrics = this.editor.domManager.getElementMetrics(
+      this.scrollerOBJ,
+    );
     const itemMetrics = this.editor.domManager.getElementMetrics(this.itemOBJ);
-    const parentMetrics = this.editor.domManager.getElementMetrics(this.parentOBJ);
+    const parentMetrics = this.editor.domManager.getElementMetrics(
+      this.parentOBJ,
+    );
 
     this.scrollerOBJHeight = scrollerMetrics.clientHeight;
     this.scrollerOBJWidth = scrollerMetrics.clientWidth;
@@ -209,6 +213,11 @@ class Scroller {
     this.itemOBJ.addEventListener("mousedown", (e) => {
       this.isDragging = true;
 
+      if (this.editor && this.editor.sidebarResizer) {
+        this.editor.sidebarResizer.leftResizer.style.display = "none";
+        this.editor.sidebarResizer.rightResizer.style.display = "none";
+      }
+
       const itemRect = this.editor.domManager.getElementMetrics(this.itemOBJ);
       const isVertical =
         this.type === this.editor.scrollerManager.VERTICAL_TYPE;
@@ -267,6 +276,11 @@ class Scroller {
   handleMouseUp() {
     if (this.isDragging) this.onScrollEnd();
     this.isDragging = false;
+
+    if (this.editor && this.editor.sidebarResizer) {
+      this.editor.sidebarResizer.updateResizerVisibility();
+    }
+
     this.updateVisibility();
   }
 
