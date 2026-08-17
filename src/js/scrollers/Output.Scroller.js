@@ -40,6 +40,22 @@ class OutputScroller {
     return totalLines + this.marginLines;
   }
 
+  getVisibleHorizontalWidth() {
+    const editorWidth = this.editor.editorOBJ
+      ? this.editor.editorOBJ.getBoundingClientRect().width
+      : this.lineController.outputWidth || 0;
+    const rightSidebar = this.editor.sidebarManager?.rightSidebar;
+    const rightSidebarWidth =
+      rightSidebar && rightSidebar.classList.contains("open")
+        ? rightSidebar.offsetWidth || 0
+        : 0;
+    const outputWidth = this.editor.output
+      ? this.editor.output.getBoundingClientRect().width
+      : this.lineController.outputWidth || 0;
+
+    return Math.max(0, Math.min(outputWidth, editorWidth - rightSidebarWidth));
+  }
+
   init() {
     // Vertical scroller
     this.vScroller = this.editor.scrollerManager.createScroller(
@@ -95,7 +111,7 @@ class OutputScroller {
       const maxLineLength =
         this.lineController.maxLineLength + this.marginChars;
       const visibleWidthChars =
-        this.lineController.outputWidth / this.editor.letterSize;
+        this.getVisibleHorizontalWidth() / this.editor.letterSize;
 
       if (maxLineLength <= visibleWidthChars) return 100;
       return (visibleWidthChars / maxLineLength) * 100;
@@ -108,7 +124,7 @@ class OutputScroller {
       const maxLineLength =
         this.lineController.maxLineLength + this.marginChars;
       const visibleWidthChars =
-        this.lineController.outputWidth / this.editor.letterSize;
+        this.getVisibleHorizontalWidth() / this.editor.letterSize;
 
       return maxLineLength > visibleWidthChars;
     };
@@ -125,7 +141,7 @@ class OutputScroller {
 
     const maxLineLength = this.lineController.maxLineLength + this.marginChars;
     const visibleWidthChars =
-      this.lineController.outputWidth / this.editor.letterSize;
+      this.getVisibleHorizontalWidth() / this.editor.letterSize;
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
     if (maxScrollX === 0) return 0;
 
@@ -149,7 +165,7 @@ class OutputScroller {
 
     const maxLineLength = this.lineController.maxLineLength + this.marginChars;
     const visibleWidthChars =
-      this.lineController.outputWidth / this.editor.letterSize;
+      this.getVisibleHorizontalWidth() / this.editor.letterSize;
 
     const maxScrollX = Math.max(0, maxLineLength - visibleWidthChars);
 
@@ -253,7 +269,8 @@ class OutputScroller {
     if (!this.lineController.lines || this.lineController.lines.length === 0)
       return 0;
 
-    const overflow = this.lineController.totalLines - this.lineController.maxLines;
+    const overflow =
+      this.lineController.totalLines - this.lineController.maxLines;
 
     if (overflow <= 0) {
       return 0;
@@ -355,7 +372,7 @@ class OutputScroller {
       }
 
       const visibleWidthChars = Math.floor(
-        this.lineController.outputWidth / this.editor.letterSize,
+        this.getVisibleHorizontalWidth() / this.editor.letterSize,
       );
 
       const maxLineLength =

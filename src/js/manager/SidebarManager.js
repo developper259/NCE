@@ -3,6 +3,8 @@ class SidebarManager {
     this.editor = editor;
     this.menus = new Map();
     this.activeMenu = null;
+    this.leftActiveMenu = null;
+    this.rightActiveMenu = null;
     this.leftSidebar = null;
     this.rightSidebar = null;
     this.tabSelector = null;
@@ -94,22 +96,51 @@ class SidebarManager {
     }
   }
 
+  getActiveMenuForPosition(position) {
+    if (position === "left") return this.leftActiveMenu;
+    if (position === "right") return this.rightActiveMenu;
+    return this.activeMenu;
+  }
+
+  setActiveMenuForPosition(position, menu) {
+    if (position === "left") {
+      this.leftActiveMenu = menu;
+    } else if (position === "right") {
+      this.rightActiveMenu = menu;
+    }
+
+    this.activeMenu = menu;
+  }
+
+  clearActiveMenuForPosition(position) {
+    if (position === "left") {
+      this.leftActiveMenu = null;
+    } else if (position === "right") {
+      this.rightActiveMenu = null;
+    }
+
+    if (!this.leftActiveMenu && !this.rightActiveMenu) {
+      this.activeMenu = null;
+    }
+  }
+
   toggleMenu(menuId) {
     const menu = this.menus.get(menuId);
     if (!menu) return;
 
-    if (this.activeMenu && this.activeMenu.id !== menuId) {
-      this.activeMenu.close();
+    const currentActive = this.getActiveMenuForPosition(menu.position);
+    if (currentActive && currentActive.id !== menuId) {
+      currentActive.close();
     }
 
     menu.toggle();
 
     if (menu.isOpen) {
-      this.activeMenu = menu;
+      this.setActiveMenuForPosition(menu.position, menu);
       this.openSidebar(menu.position);
       this.renderMenuContent(menu);
     } else {
-      this.activeMenu = null;
+      this.clearActiveMenuForPosition(menu.position);
       this.closeSidebar(menu.position);
     }
 
@@ -120,12 +151,13 @@ class SidebarManager {
     const menu = this.menus.get(menuId);
     if (!menu) return;
 
-    if (this.activeMenu && this.activeMenu.id !== menuId) {
-      this.activeMenu.close();
+    const currentActive = this.getActiveMenuForPosition(menu.position);
+    if (currentActive && currentActive.id !== menuId) {
+      currentActive.close();
     }
 
     menu.open();
-    this.activeMenu = menu;
+    this.setActiveMenuForPosition(menu.position, menu);
     this.openSidebar(menu.position);
     this.renderMenuContent(menu);
     this.renderTabSelector();
@@ -136,11 +168,37 @@ class SidebarManager {
     if (!menu) return;
 
     menu.close();
-    if (this.activeMenu && this.activeMenu.id === menuId) {
-      this.activeMenu = null;
-      this.closeSidebar(menu.position);
+    if (this.getActiveMenuForPosition(menu.position)?.id === menuId) {
+      this.clearActiveMenuForPosition(menu.position);
     }
+    this.closeSidebar(menu.position);
     this.renderTabSelector();
+  }
+
+  getOpenSidebarWidth(position) {
+    const sidebar = position === "left" ? this.leftSidebar : this.rightSidebar;
+
+    if (!sidebar || !sidebar.classList.contains("open")) {
+      return 0;
+    }
+
+    return sidebar.offsetWidth || this.width;
+  }
+
+  syncEditorLayout() {
+    const leftWidth = this.getOpenSidebarWidth("left");
+    const rightWidth = this.getOpenSidebarWidth("right");
+    const leftOffset = this.selectorWidth + leftWidth;
+
+    if (this.editor.fileManagerOBJ) {
+      this.editor.fileManagerOBJ.style.left = `${leftOffset}px`;
+    }
+
+    if (this.editor.editorOBJ) {
+      this.editor.editorOBJ.style.left = `${leftOffset}px`;
+      this.editor.editorOBJ.style.right = `${rightWidth}px`;
+      this.editor.editorOBJ.style.width = "";
+    }
   }
 
   openSidebar(position) {
@@ -149,17 +207,11 @@ class SidebarManager {
       this.editor.domManager
         .getElement(".main-section")
         .classList.add("sidebar-left-open");
-
-      this.editor.fileManagerOBJ.style.left =
-        this.width + this.selectorWidth + "px";
-      this.editor.editorOBJ.style.left = this.width + this.selectorWidth + "px";
-      this.editor.editorOBJ.style.width = "";
-      this.editor.editorOBJ.style.right = "0px";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.add("open");
-      this.editor.editorOBJ.style.right = this.width + "px";
-      this.editor.editorOBJ.style.width = "";
     }
+
+    this.syncEditorLayout();
 
     if (this.editor.sidebarResizer) {
       this.editor.sidebarResizer.updateResizerVisibility();
@@ -178,16 +230,11 @@ class SidebarManager {
       this.editor.domManager
         .getElement(".main-section")
         .classList.remove("sidebar-left-open");
-
-      this.editor.fileManagerOBJ.style.left = this.selectorWidth + "px";
-      this.editor.editorOBJ.style.left = this.selectorWidth + "px";
-      this.editor.editorOBJ.style.width = "";
-      this.editor.editorOBJ.style.right = "0px";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.remove("open");
-      this.editor.editorOBJ.style.right = "0px";
-      this.editor.editorOBJ.style.width = "";
     }
+
+    this.syncEditorLayout();
 
     if (this.editor.sidebarResizer) {
       this.editor.sidebarResizer.updateResizerVisibility();

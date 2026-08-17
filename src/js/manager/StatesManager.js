@@ -67,6 +67,22 @@ class StatesManager {
     return {
       leftOpen,
       rightOpen,
+      leftActiveMenu: sidebarManager.leftActiveMenu
+        ? {
+            id: sidebarManager.leftActiveMenu.id,
+            title: sidebarManager.leftActiveMenu.title,
+            position: sidebarManager.leftActiveMenu.position,
+            isOpen: sidebarManager.leftActiveMenu.isOpen,
+          }
+        : null,
+      rightActiveMenu: sidebarManager.rightActiveMenu
+        ? {
+            id: sidebarManager.rightActiveMenu.id,
+            title: sidebarManager.rightActiveMenu.title,
+            position: sidebarManager.rightActiveMenu.position,
+            isOpen: sidebarManager.rightActiveMenu.isOpen,
+          }
+        : null,
       activeMenu: sidebarManager.activeMenu
         ? {
             id: sidebarManager.activeMenu.id,
@@ -174,10 +190,18 @@ class StatesManager {
     const sidebarManager = this.editor.sidebarManager;
     if (!sidebarManager) return;
 
-    if (sidebarState.activeMenu) {
-      sidebarManager.openMenu(sidebarState.activeMenu.id);
+    const leftMenu = sidebarState.leftActiveMenu || sidebarState.activeMenu;
+    const rightMenu = sidebarState.rightActiveMenu;
+
+    if (leftMenu && leftMenu.position === "left") {
+      sidebarManager.openMenu(leftMenu.id);
     } else {
       sidebarManager.closeSidebar("left");
+    }
+
+    if (rightMenu && rightMenu.position === "right") {
+      sidebarManager.openMenu(rightMenu.id);
+    } else {
       sidebarManager.closeSidebar("right");
     }
   }
