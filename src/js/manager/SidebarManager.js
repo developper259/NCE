@@ -199,6 +199,16 @@ class SidebarManager {
       this.editor.editorOBJ.style.right = `${rightWidth}px`;
       this.editor.editorOBJ.style.width = "";
     }
+
+    if (this.editor.domManager) {
+      this.editor.domManager.measureElements();
+      this.editor.domManager.calculate();
+      this.editor.domManager.apply();
+    }
+
+    if (this.editor.cursorController) {
+      this.editor.cursorController.updateCaretPosition();
+    }
   }
 
   openSidebar(position) {

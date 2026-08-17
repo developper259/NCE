@@ -64,7 +64,7 @@ class CursorController {
   }
 
   xToColumn(x) {
-    return roundX(x / this.editor.letterSize) + 1;
+    return roundX(x / this.editor.letterSize);
   }
 
   columnFromSelectObj(obj) {
@@ -164,7 +164,7 @@ class CursorController {
     }
 
     if (!this.isRowVisible(this.row)) {
-      this.disable()
+      this.disable();
       return;
     }
 
