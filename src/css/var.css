@@ -40,10 +40,10 @@
   --scroller-size: 15px;
 
   --output-height: calc(90% - 18px);
-  --sidebar-height: calc(90% + 20px);
+  --sidebar-height: calc(var(--output-height) + var(--file-manager-height));
   --bottombar-height: 20px;
   --file-manager-height: 40px;
   
 
-  --sidebar-selector-width: 48px;
+  --sidebar-selector-width: 49px;
 }

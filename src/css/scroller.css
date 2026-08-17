@@ -14,6 +14,7 @@
   right: 0;
   width: 10px;
   height: 100%;
+  box-sizing: border-box;
 }
 
 .page-scroller-horizontal {
@@ -36,6 +37,7 @@
 .page-scroller-vertical .page-scroller-item {
   width: 100%;
   left: 0;
+  right: 0;
 }
 
 .page-scroller-horizontal .page-scroller-item {

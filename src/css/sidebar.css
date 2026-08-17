@@ -4,6 +4,7 @@
   bottom: 20px;
   height: var(--sidebar-height);
   width: var(--sidebar-selector-width);
+  box-sizing: border-box;
   background-color: var(--bg-primary);
   display: flex;
   flex-direction: column;
