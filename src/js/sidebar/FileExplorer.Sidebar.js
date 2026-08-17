@@ -1,7 +1,6 @@
 class FileExplorer extends Sidebar {
   constructor(editor) {
-    super("file-explorer", "File Explorer", "fi fi-rr-folder", editor);
-    this.position = "left";
+    super("file-explorer", "File Explorer", "fi fi-rr-folder", "left" ,editor);
 
     this.activeFilePath = null;
     this.files = [];

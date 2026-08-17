@@ -21,11 +21,15 @@ class SidebarResizer {
   createResizers() {
     this.leftResizer = document.createElement("div");
     this.leftResizer.className = "sidebar-resizer sidebar-resizer-left";
-    this.editor.domManager.getElement(".main-section").appendChild(this.leftResizer);
+    this.editor.domManager
+      .getElement(".main-section")
+      .appendChild(this.leftResizer);
 
     this.rightResizer = document.createElement("div");
     this.rightResizer.className = "sidebar-resizer sidebar-resizer-right";
-    this.editor.domManager.getElement(".main-section").appendChild(this.rightResizer);
+    this.editor.domManager
+      .getElement(".main-section")
+      .appendChild(this.rightResizer);
   }
 
   attachEventListeners() {
@@ -107,9 +111,10 @@ class SidebarResizer {
     this.updateResizerPositions();
     this.updateResizerVisibility();
 
+    const fileManager = this.editor.fileManagerOBJ;
+    const editor = this.editor.editorOBJ;
+
     if (side === "left") {
-      const fileManager = this.editor.fileManagerOBJ;
-      const editor = this.editor.editorOBJ;
       const totalWidth = this.editor.sidebarManager.selectorWidth + width;
 
       if (fileManager) {
@@ -117,9 +122,16 @@ class SidebarResizer {
       }
       if (editor) {
         editor.style.left = totalWidth + "px";
+        editor.style.right = "0px";
+        editor.style.width = "";
+      }
+    } else if (side === "right") {
+      if (editor) {
+        editor.style.right = width + "px";
         editor.style.width = "";
       }
     }
+
     this.editor.sidebarManager.width = width;
     this.editor.lineController.resizeWidth();
   }

@@ -19,11 +19,17 @@ class SidebarManager {
   }
 
   init() {
-    this.tabSelector = this.editor.domManager.getElement(".sidebar-tab-selector");
+    this.tabSelector = this.editor.domManager.getElement(
+      ".sidebar-tab-selector",
+    );
     this.leftSidebar = this.editor.domManager.getElement(".sidebar-left");
     this.rightSidebar = this.editor.domManager.getElement(".sidebar-right");
-    this.leftMenuContainer = this.editor.domManager.getElement(".sidebar-left .sidebar-menu");
-    this.rightMenuContainer = this.editor.domManager.getElement(".sidebar-right .sidebar-menu");
+    this.leftMenuContainer = this.editor.domManager.getElement(
+      ".sidebar-left .sidebar-menu",
+    );
+    this.rightMenuContainer = this.editor.domManager.getElement(
+      ".sidebar-right .sidebar-menu",
+    );
 
     this.renderTabSelector();
     this.setupEventListeners();
@@ -148,8 +154,11 @@ class SidebarManager {
         this.width + this.selectorWidth + "px";
       this.editor.editorOBJ.style.left = this.width + this.selectorWidth + "px";
       this.editor.editorOBJ.style.width = "";
+      this.editor.editorOBJ.style.right = "0px";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.add("open");
+      this.editor.editorOBJ.style.right = this.width + "px";
+      this.editor.editorOBJ.style.width = "";
     }
 
     if (this.editor.sidebarResizer) {
@@ -173,8 +182,11 @@ class SidebarManager {
       this.editor.fileManagerOBJ.style.left = this.selectorWidth + "px";
       this.editor.editorOBJ.style.left = this.selectorWidth + "px";
       this.editor.editorOBJ.style.width = "";
+      this.editor.editorOBJ.style.right = "0px";
     } else if (position === "right" && this.rightSidebar) {
       this.rightSidebar.classList.remove("open");
+      this.editor.editorOBJ.style.right = "0px";
+      this.editor.editorOBJ.style.width = "";
     }
 
     if (this.editor.sidebarResizer) {

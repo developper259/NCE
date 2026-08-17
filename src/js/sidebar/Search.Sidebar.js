@@ -1,6 +1,6 @@
 class SearchSidebar extends Sidebar {
   constructor(editor) {
-    super("search", "Search", "fi fi-rr-search", editor);
+    super("search", "Search", "fi fi-rr-search", "left", editor);
 
     this.container = null;
     this.input = null;
@@ -11,8 +11,6 @@ class SearchSidebar extends Sidebar {
     this.caseButton = null;
     this.wordButton = null;
     this.regexButton = null;
-
-    this.position = "left";
 
     this.query = "";
     this.include = "";

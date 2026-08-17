@@ -5,6 +5,7 @@
   right: 0;
   width: auto;
   height: var(--output-height);
+  box-sizing: border-box;
   overflow: hidden;
   background-color: var(--bg-secondary);
 }

@@ -1,8 +1,9 @@
 class Sidebar {
-  constructor(id, title, icon, editor) {
+  constructor(id="", title="", icon="", position="left", editor) {
     this.id = id;
     this.title = title;
     this.icon = icon;
+    this.position = position;
     this.isOpen = false;
     this.element = null;
     this.editor = editor;
