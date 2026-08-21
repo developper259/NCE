@@ -57,7 +57,6 @@ class SidebarManager {
         ? this.leftMenuContainer
         : this.rightMenuContainer,
     );
-    this.renderTabSelector();
   }
 
   renderTabSelector() {

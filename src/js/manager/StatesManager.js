@@ -35,7 +35,6 @@ class StatesManager {
         id: file.id,
         name: file.name,
         path: file.path,
-        isSaved: file.isSaved,
 
         row: file.row,
         column: file.column,
@@ -143,8 +142,6 @@ class StatesManager {
       if (fileData.id >= tabManager.idCounter) {
         tabManager.idCounter = fileData.id;
       }
-
-      file.isSaved = fileData.isSaved;
 
       file.row = fileData.row;
       file.column = fileData.column;

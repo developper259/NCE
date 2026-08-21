@@ -69,6 +69,12 @@ class SearchController {
     this.focusInput();
 
     this.search(this.input.value);
+
+
+    if (this.results.length > 0) {
+      this.goToResult(false, true);
+    }
+
   }
 
   close() {
@@ -96,28 +102,32 @@ class SearchController {
 
   onInput() {
     this.search(this.input.value);
+
+    this.currentIndex = 0;
     this.goToResult(true, true);
   }
 
   onInputKey(e) {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      e.stopPropagation();
+    if (e.target instanceof HTMLInputElement) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+  
+        if (e.shiftKey) {
+          this.previous();
+        } else {
+          this.next();
+        }
 
-      if (e.shiftKey) {
-        this.previous();
-      } else {
-        this.next();
+        return;
       }
 
-      return;
-    }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
 
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-
-      this.close();
+        this.close();
+      }
     }
   }
 
@@ -182,12 +192,6 @@ class SearchController {
       }
     }
 
-    if (this.results.length > 0) {
-      this.currentIndex = 0;
-
-      this.goToResult(false, true);
-    }
-
     this.refreshSelectionDOM();
 
     this.updateCounter();
@@ -196,18 +200,26 @@ class SearchController {
   next() {
     if (this.results.length === 0) return;
 
+    this.editor.isButtonChangePosition = true;
+
     this.currentIndex = (this.currentIndex + 1) % this.results.length;
 
     this.goToResult(true, true);
+
+    this.editor.focusOutput();
   }
 
   previous() {
     if (this.results.length === 0) return;
 
+    this.editor.isButtonChangePosition = true;
+
     this.currentIndex =
       (this.currentIndex - 1 + this.results.length) % this.results.length;
 
     this.goToResult(true, false);
+
+    this.editor.focusOutput();
   }
 
   goToResult(allowScroll = true, isNext = false) {
@@ -226,8 +238,6 @@ class SearchController {
 
     if (isNext && part === 1) part = 2;
     else if (!isNext && part === 3) part = 2;
-
-    console.log(part, isNext, middle, screenRow, maxLines);
 
     if (allowScroll && (!this.isResultVisible(result) || part !== 2)) {
       this.scrollToResult(result);

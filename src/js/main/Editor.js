@@ -2,6 +2,7 @@ class Editor {
   constructor() {
     this.isOnInit = true;
     this.isOnRefresh = false;
+    this.isButtonChangePosition = false;
 
     this.domManager = new DOMManager(this);
 
@@ -132,6 +133,16 @@ class Editor {
     if (this.emptyMenu) this.emptyMenu.hide();
   }
 
+  focusOutput() {
+
+    this.output.focus({
+      preventScroll: true,
+    });
+
+    this.setSelected(true);
+    this.cursorController.enable();
+  }
+
   onClick(e) {
     const t = e.target;
     const c = t.classList;
@@ -145,7 +156,11 @@ class Editor {
     } else {
       if (c.contains("command-el") || c.contains("command-el-title")) return;
       this.setSelected(false);
-      this.cursorController.disable();
+      if (!this.isButtonChangePosition) {
+        this.cursorController.disable();
+      }else{
+        this.isButtonChangePosition = false;
+      }
     }
   }
 

@@ -128,6 +128,8 @@ class CursorController {
 
     const { row, column } = this.normalizePosition(r, c);
 
+    this.editor.focusOutput();
+
     if (this.isNewPosition(row, column)) {
       this.row = row;
       this.column = column;

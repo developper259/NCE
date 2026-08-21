@@ -84,6 +84,8 @@ class Events {
   cursorEnabled(arg) {}
   onSelect(arg) {}
   onChange(arg) {
+    // ------- SearchController.js ------
+    this.editor.searchController.refresh();
     // ------- File.js ------
     if (this.editor.tabManager.activeFile)
       this.editor.tabManager.activeFile.onChange();
