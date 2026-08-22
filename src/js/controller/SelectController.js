@@ -2,7 +2,6 @@ class SelectController {
   constructor(e) {
     this.editor = e;
     this.clickTime = 500;
-    this.selectOutput = getElement(".editor-select-highlight");
     this.initEventListeners();
   }
 
@@ -111,7 +110,7 @@ class SelectController {
   }
 
   refreshSelectionDOM() {
-    if (!this.editor.tabManager.activeFile || !this.selectOutput) return;
+    if (!this.editor.tabManager.activeFile || !this.editor.selectOutput) return;
 
     const cursor = this.editor.cursorController;
     const difY = 4;
@@ -132,7 +131,7 @@ class SelectController {
       }
     });
 
-    const currentDOMNodes = this.selectOutput.children;
+    const currentDOMNodes = this.editor.selectOutput.children;
 
     const totalLoopLength = Math.max(
       visibleSelections.length,
@@ -156,7 +155,7 @@ class SelectController {
           div = document.createElement("div");
           div.style.position = "absolute";
 
-          this.selectOutput.appendChild(div);
+          this.editor.selectOutput.appendChild(div);
         }
 
         div.className = "selected";
@@ -304,8 +303,8 @@ class SelectController {
     this.containsSelected = "";
     this.selectedLines.clear();
 
-    if (this.selectOutput) {
-      const currentDOMNodes = this.selectOutput.children;
+    if (this.editor.selectOutput) {
+      const currentDOMNodes = this.editor.selectOutput.children;
 
       for (let i = 0; i < currentDOMNodes.length; i++) {
         currentDOMNodes[i].style.display = "none";
@@ -746,9 +745,9 @@ class SelectController {
   }
 
   getSelectOBJ() {
-    if (!this.selectOutput) return [];
+    if (!this.editor.selectOutput) return [];
 
-    return Array.from(this.selectOutput.children).filter(
+    return Array.from(this.editor.selectOutput.children).filter(
       (el) =>
         el.classList &&
         el.classList.contains("selected") &&

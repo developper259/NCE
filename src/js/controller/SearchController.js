@@ -10,8 +10,6 @@ class SearchController {
     this.nextButton = null;
     this.closeButton = null;
 
-    this.searchSelection = getElement(".editor-search-highlight");
-
     this.results = [];
     this.currentIndex = -1;
 
@@ -273,18 +271,18 @@ class SearchController {
 
     this.currentIndex = -1;
 
-    if (this.searchSelection) {
-      this.searchSelection.replaceChildren();
+    if (this.editor.searchOutput) {
+      this.editor.searchOutput.replaceChildren();
     }
 
     this.updateCounter();
   }
 
   refreshSelectionDOM() {
-    if (!this.searchSelection) return;
+    if (!this.editor.searchOutput) return;
 
     if (!this.isOpen || this.results.length === 0) {
-      this.searchSelection.replaceChildren();
+      this.editor.searchOutput.replaceChildren();
       return;
     }
 
@@ -294,7 +292,7 @@ class SearchController {
       cursor.isRowVisible(result.row),
     );
 
-    const currentDOMNodes = this.searchSelection.children;
+    const currentDOMNodes = this.editor.searchOutput.children;
 
     const totalLength = Math.max(visibleResults.length, currentDOMNodes.length);
 
@@ -334,7 +332,7 @@ class SearchController {
 
         div.style.position = "absolute";
 
-        this.searchSelection.appendChild(div);
+        this.editor.searchOutput.appendChild(div);
       }
 
       const resultIndex = this.results.indexOf(result);

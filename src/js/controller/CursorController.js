@@ -172,7 +172,7 @@ class CursorController {
 
     const viewPos = this.getViewPosition(this.row, this.column);
 
-    const placeY = this.rowToY(this.row) - 4;
+    const placeY = this.rowToY(this.row) - 4 - this.editor.lineController.offsetY;
     const placeX = this.columnToX(viewPos.column);
 
     this.enable();

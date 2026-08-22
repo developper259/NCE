@@ -2,8 +2,6 @@ class LineController {
   constructor(editor) {
     this.editor = editor;
 
-    this.lineN = getElement(".line-numbers");
-
     this.outputWidth = 0;
     this.outputHeight = 0;
 
@@ -211,12 +209,20 @@ class LineController {
 
       return lineHeight * screenIndex;
   }
-
-  applyOutputTransform() {
+  getOutputTransform() {
     const x = -this.offsetX * this.editor.domManager.getLetterWidth();
     const y = -this.offsetY;
 
-    this.editor.output.style.transform = `translate(${x}px, ${y}px)`;
+    return `translate(${x}px, ${y}px)`;
+  }
+
+  applyOutputTransform() {
+    const transform = this.getOutputTransform();
+
+    this.editor.output.style.transform = transform;
+    this.editor.lineNumberOutput.style.transform = transform;
+    this.editor.selectOutput.style.transform = transform;
+    this.editor.searchOutput.style.transform = transform;
   }
 
   isSized() {
@@ -611,7 +617,7 @@ class LineController {
       return;
     }
 
-    let children = this.lineN.children;
+    let children = this.editor.lineNumberOutput.children;
 
     const targetCount = this.getViewNumberLines();
 
@@ -619,7 +625,7 @@ class LineController {
 
     if (diff > 0) {
       for (let i = 0; i < diff; i++) {
-        this.lineN.lastElementChild.remove();
+        this.editor.lineNumberOutput.lastElementChild.remove();
       }
     } else if (diff < 0) {
       const fragment = document.createDocumentFragment();
@@ -637,7 +643,7 @@ class LineController {
         fragment.appendChild(lNode);
       }
 
-      this.lineN.appendChild(fragment);
+      this.editor.lineNumberOutput.appendChild(fragment);
     }
 
     for (let i = 0; i < children.length; i++) {
@@ -676,7 +682,7 @@ class LineController {
       fragment.appendChild(lNode);
     }
 
-    this.lineN.replaceChildren(fragment);
+    this.editor.lineNumberOutput.replaceChildren(fragment);
 
     this.updateLineNumberWidth();
   }
@@ -714,7 +720,7 @@ class LineController {
   updateLineNumberWidth() {
     const width = this.calculateLineNumberWidth();
 
-    this.lineN.style.width = `${width}px`;
+    this.editor.lineNumberOutput.style.width = `${width}px`;
 
     this.editor.updateBaseX(width);
   }
@@ -768,8 +774,8 @@ class LineController {
   getLineNumberOBJ(dataIndex) {
     const screenIndex = dataIndex - this.startIndex;
 
-    if (screenIndex >= 0 && screenIndex < this.lineN.children.length) {
-      return this.lineN.children[screenIndex];
+    if (screenIndex >= 0 && screenIndex < this.editor.lineNumberOutput.children.length) {
+      return this.editor.lineNumberOutput.children[screenIndex];
     }
 
     return null;
@@ -854,11 +860,11 @@ class LineController {
   }
 
   hide() {
-    this.lineN.replaceChildren();
+    this.editor.lineNumberOutput.replaceChildren();
 
     this.editor.output.replaceChildren();
 
-    this.lineN.style.display = "none";
+    this.editor.lineNumberOutput.style.display = "none";
 
     this.editor.output.style.display = "none";
 
@@ -878,7 +884,7 @@ class LineController {
   }
 
   show() {
-    this.lineN.style.display = "block";
+    this.editor.lineNumberOutput.style.display = "block";
 
     this.editor.output.style.display = "block";
 

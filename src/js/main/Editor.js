@@ -7,11 +7,15 @@ class Editor {
     this.domManager = new DOMManager(this);
 
     this.mainSection = this.domManager.getElement(".main-section");
-    this.output = this.domManager.getElement(".editor-output");
     this.editorOBJ = this.domManager.getElement(".editor");
     this.emptyMenuOBJ = this.domManager.getElement(".empty-menu");
     this.fileManagerOBJ = this.domManager.getElement(".file-manager");
     this.cD = this.domManager.getElement(".editor-caret");
+
+    this.output = this.domManager.getElement(".editor-output");
+    this.lineNumberOutput = this.domManager.getElement(".line-numbers");
+    this.selectOutput = this.domManager.getElement(".editor-select-highlight");
+    this.searchOutput = this.domManager.getElement(".editor-search-highlight");
 
     this.selected = false;
     this.isActive = false;
