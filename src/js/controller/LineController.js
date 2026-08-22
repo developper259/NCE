@@ -209,7 +209,7 @@ class LineController {
           ? this.editor.domManager.getLineHeight()
           : this.editor.posY;
 
-      return baseY + lineHeight * screenIndex;
+      return lineHeight * screenIndex;
   }
 
   applyOutputTransform() {
@@ -445,26 +445,29 @@ class LineController {
   }
 
   getSlicedLine(line) {
+    let startChar = 0;
+
     if (this.offsetX > 0) {
       const tabWidth = CONFIG_GET("tab_width");
 
       let visualPos = 0;
-      let charIndex = 0;
 
-      while (charIndex < line.length && visualPos < this.offsetX) {
-        visualPos += line[charIndex] === "\t" ? tabWidth : 1;
-
-        charIndex++;
+      while (startChar < line.length && visualPos < this.offsetX) {
+        visualPos += line[startChar] === "\t" ? tabWidth : 1;
+        startChar++;
       }
 
-      line = visualPos < this.offsetX ? "" : line.slice(charIndex);
+      line = line.slice(startChar);
     }
 
     if (line.length > this.maxCharactersPerLine) {
       line = line.slice(0, this.maxCharactersPerLine);
     }
 
-    return line;
+    return {
+      text: line,
+      startChar,
+    };
   }
 
   refreshOutput() {
@@ -574,7 +577,7 @@ class LineController {
       let lineOBJ;
 
       if (dataIndex >= this.lines.length) {
-        lineOBJ = this.createLineOBJ("", i);
+        lineOBJ = this.createLineOBJ(null, i);
       } else {
         const lineNode = this.lines[dataIndex];
 
@@ -716,17 +719,43 @@ class LineController {
     this.editor.updateBaseX(width);
   }
 
-  createLineOBJ(line, row) {
-    const lineOBJ = this.editor.writerController.textToOBJ(line, row);
+  getVisibleTokens(tokens, slicedLine) {
+      if (!tokens || !slicedLine) return null;
+      const startChar = slicedLine.startChar;
 
-    if (!lineOBJ) {
-      return;
-    }
+      const endChar = startChar + slicedLine.text.length;
+
+      const visible = [];
+
+      for (const token of tokens) {
+        const tokenStart = token.column - 1; 
+        const tokenEnd = tokenStart + token.value.length;
+
+        if (tokenEnd <= startChar || tokenStart >= endChar) continue;
+
+        const from = Math.max(startChar, tokenStart);
+        const to = Math.min(endChar, tokenEnd);
+
+        visible.push({
+          ...token,
+          value: token.value.slice(from - tokenStart, to - tokenStart),
+          column: from + 1,
+        });
+      }
+
+      return visible;
+  }
+
+  createLineOBJ(slicedLine, screenIndex) {
+    const dataIndex = this.startIndex + screenIndex;
+
+    const tokens = this.lines[dataIndex]?.getTokens();
+    const visibleTokens = this.getVisibleTokens(tokens, slicedLine);
+
+    const lineOBJ = this.editor.writerController.textToOBJ(slicedLine?.text, visibleTokens);
 
     lineOBJ.style.position = "absolute";
-
-    lineOBJ.style.top = `${this.getLineTop(row)}px`;
-
+    lineOBJ.style.top = `${this.getLineTop(screenIndex)}px`;
     lineOBJ.style.left = "0px";
 
     return lineOBJ;

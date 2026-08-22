@@ -29,7 +29,9 @@
 }
 
 .line {
+  white-space: pre;
   z-index: 3;
+  overflow: hidden;
 }
 
 .editor-select {
@@ -81,10 +83,6 @@
 
 .line-selected {
   color: var(--text-selected);
-}
-
-span {
-  white-space: pre;
 }
 
 .selected {

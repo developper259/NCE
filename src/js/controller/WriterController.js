@@ -92,60 +92,51 @@ class WriterController {
     return tableSplit.filter((chaine) => chaine.length !== 0);
   }
 
-  textToOBJ(txt, screenIndex) {
-    if (txt === undefined) return;
+  tokenToDOM(txt, tokens) {
+    const fragment = document.createDocumentFragment();
 
-    const words = this.splitWordView(txt);
+    if (!txt) return fragment;
+
+    let index = 0;
+
+    for (const token of tokens) {
+      const tokenStart = token.column - 1;
+
+      if (tokenStart > index) {
+        fragment.appendChild(
+          document.createTextNode(txt.slice(index, tokenStart))
+        );
+      }
+
+      const span = document.createElement("span");
+      span.className = `token editor-select ${token.type}`;
+      span.textContent = token.value;
+
+      fragment.appendChild(span);
+
+      index = tokenStart + token.value.length;
+    }
+
+    if (index < txt.length) {
+      fragment.appendChild(document.createTextNode(txt.slice(index)));
+    }
+
+    return fragment;
+  }
+
+  textToOBJ(txt, tokens = null) {
     const lineDiv = document.createElement("div");
     lineDiv.className = "line editor-select";
 
-    const fragment = document.createDocumentFragment();
+    let fragment;
 
-    const row = screenIndex + this.editor.lineController.startIndex;
-    const lineNode = this.editor.lineController.lines[row];
-    const tokens = lineNode ? lineNode.getTokens() || [] : [];
+    if (tokens && tokens.length !== 0) {
+      fragment = this.tokenToDOM(txt, tokens);
+    } else {
+      const value = document.createTextNode(txt ?? "");
 
-    let position = this.editor.lineController.offsetX || 0;
-    let i = 0;
-
-    while (
-      i < tokens.length &&
-      tokens[i].column - 1 + tokens[i].value.length <= position
-    ) {
-      i++;
-    }
-
-    for (const word of words) {
-      if (word.length > 0) {
-        let c = "";
-        const isContentWord = word.trim().length !== 0 && word !== "\t";
-
-        if (isContentWord) {
-          while (
-            i < tokens.length &&
-            tokens[i].column - 1 + tokens[i].value.length <= position
-          ) {
-            i++;
-          }
-
-          const token = tokens[i];
-          const tokenStart = token ? token.column - 1 : -1;
-          const tokenEnd = token ? tokenStart + token.value.length : -1;
-          const belongsToToken =
-            !!token && position >= tokenStart && position < tokenEnd;
-
-          if (belongsToToken) {
-            c = token.type;
-          }
-        }
-
-        const span = document.createElement("span");
-        span.className = `line-word editor-select ${c}`;
-        span.textContent = word;
-        fragment.appendChild(span);
-
-        position += word.length;
-      }
+      fragment = document.createDocumentFragment();
+      fragment.appendChild(value);
     }
 
     lineDiv.appendChild(fragment);

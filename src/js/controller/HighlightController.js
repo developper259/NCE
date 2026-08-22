@@ -288,7 +288,9 @@ class HighlightController {
           if (result && result.tokens) {
             lineNode.setTokens(result.tokens);
             lineNode.setHighlighted(true);
+
             this.applyHighlightToLine(lineNumber, result.tokens);
+            this.dirtyLines.delete(lineNumber);
           }
 
           this.propagateState(
@@ -318,52 +320,13 @@ class HighlightController {
 
     if (!lineNode) return;
 
-    const wordNodes = lineNode.children;
+    const text = this.editor.lineController.lines[lineNumber]?.getText();
 
-    if (!wordNodes || wordNodes.length === 0) return;
+    if (!text) return;
 
-    tokens = tokens || [];
+    const fragment = this.editor.writerController.textToOBJ(text, tokens);
 
-    let position = this.editor.lineController.offsetX || 0;
-    let i = 0;
-
-    while (
-      i < tokens.length &&
-      tokens[i].column - 1 + tokens[i].value.length <= position
-    ) {
-      i++;
-    }
-
-    for (const node of wordNodes) {
-      const text = node.textContent || "";
-      const length = text.length;
-
-      if (!text || text.replaceAll(" ", "").length === 0 || text === "\t") {
-        position += length;
-        continue;
-      }
-
-      while (
-        i < tokens.length &&
-        tokens[i].column - 1 + tokens[i].value.length <= position
-      ) {
-        i++;
-      }
-
-      const token = tokens[i];
-      const tokenStart = token ? token.column - 1 : -1;
-      const tokenEnd = token ? tokenStart + token.value.length : -1;
-      const belongsToToken =
-        !!token && position >= tokenStart && position < tokenEnd;
-
-      node.classList.remove(...this.classValue);
-      if (belongsToToken && token.type) {
-        node.classList.add(token.type);
-      }
-
-      position += length;
-    }
-
-    this.dirtyLines.delete(lineNumber);
+    lineNode.replaceChildren(fragment);
+    return true;
   }
 }
