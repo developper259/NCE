@@ -231,9 +231,8 @@ class OutputScroller {
   }
 
   applyScrollTransform() {
-    this.editor.output.style.transform = "";
     this.lineController.lineN.style.transform = "";
-    this.lineController.refreshLinePositions();
+    this.lineController.applyOutputTransform();
   }
 
   resetScroll() {

@@ -201,37 +201,26 @@ class LineController {
   }
 
   getLineTop(screenIndex) {
-    const baseY = this.editor.domManager
-      ? this.editor.domManager.getOutputY()
-      : this.editor.baseY;
+      const baseY = this.editor.domManager
+          ? this.editor.domManager.getOutputY()
+          : this.editor.baseY;
 
-    const lineHeight = this.editor.domManager
-      ? this.editor.domManager.getLineHeight()
-      : this.editor.posY;
+      const lineHeight = this.editor.domManager
+          ? this.editor.domManager.getLineHeight()
+          : this.editor.posY;
 
-    return baseY + lineHeight * screenIndex - this.offsetY;
+      return baseY + lineHeight * screenIndex;
+  }
+
+  applyOutputTransform() {
+    const x = -this.offsetX * this.editor.domManager.getLetterWidth();
+    const y = -this.offsetY;
+
+    this.editor.output.style.transform = `translate(${x}px, ${y}px)`;
   }
 
   isSized() {
     return this.outputHeight !== 0 && this.outputWidth !== 0;
-  }
-
-  refreshLinePositions() {
-    const outputLen = this.editor.output.children.length;
-    const lineLen = this.lineN.children.length;
-    const tops = new Array(Math.max(outputLen, lineLen));
-
-    for (let i = 0; i < tops.length; i++) {
-      tops[i] = `${this.getLineTop(i)}px`;
-    }
-
-    for (let i = 0; i < outputLen; i++) {
-      this.editor.output.children[i].style.top = tops[i];
-    }
-
-    for (let i = 0; i < lineLen; i++) {
-      this.lineN.children[i].style.top = tops[i];
-    }
   }
 
   applyScrollTransform() {
