@@ -18,7 +18,17 @@ class StatesManager {
       tabManager: this.getTabManagerState(),
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(),
+      agent: this.getAgentState(),
     };
+  }
+
+  getAgentState() {
+    const agentSidebar = this.editor.agentSidebar;
+    if (!agentSidebar || typeof agentSidebar.getConfigState !== "function") {
+      return null;
+    }
+
+    return agentSidebar.getConfigState();
   }
 
   getTabManagerState() {
@@ -117,6 +127,10 @@ class StatesManager {
 
     if (state.sidebar) {
       this.loadSidebarState(state.sidebar);
+    }
+
+    if (state.agent) {
+      this.editor.agentSidebar?.loadConfigState?.(state.agent);
     }
 
     if (state.tabManager) {

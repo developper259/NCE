@@ -10,6 +10,8 @@ class AgentSidebar extends Sidebar {
     this.sendButton = null;
 
     this.pendingConfirmation = null;
+    this.apiKeys = new Map();
+    this.apiKeyPanel = null;
 
     this.agent = new Agent(editor);
     this.agent.setCallbacks({
@@ -79,7 +81,7 @@ class AgentSidebar extends Sidebar {
 
     this.agent.setProvider({
       baseURL: resolvedConfig.provider.baseURL,
-      apiKey: resolvedConfig.provider.apiKey,
+      apiKey: this.apiKeys.get(resolvedConfig.provider.id) || null,
     });
     this.agent.setModel(this.currentModel);
 
@@ -88,6 +90,50 @@ class AgentSidebar extends Sidebar {
     this._sessionCounter = 0;
 
     this.createSession();
+  }
+
+  getConfigState() {
+    return {
+      currentAgentId: this.currentAgentId,
+      currentProviderId: this.currentProviderId,
+      currentModel: this.currentModel,
+      apiKeys: Object.fromEntries(this.apiKeys),
+    };
+  }
+
+  loadConfigState(state) {
+    if (!state || typeof state !== "object") return;
+
+    if (typeof state.currentAgentId === "string") {
+      this.currentAgentId = state.currentAgentId;
+    }
+    if (typeof state.currentProviderId === "string") {
+      this.currentProviderId = state.currentProviderId;
+    }
+    if (typeof state.currentModel === "string") {
+      this.currentModel = state.currentModel;
+    }
+
+    if (state.apiKeys && typeof state.apiKeys === "object") {
+      for (const [providerId, apiKey] of Object.entries(state.apiKeys)) {
+        if (
+          typeof providerId === "string" &&
+          typeof apiKey === "string" &&
+          apiKey.trim()
+        ) {
+          this.apiKeys.set(providerId, apiKey);
+        }
+      }
+    }
+
+    const provider = AgentAI.getProvider(this.currentProviderId);
+    if (!provider) return;
+
+    this.agent.setProvider({
+      baseURL: provider.baseURL,
+      apiKey: this.apiKeys.get(provider.id) || null,
+    });
+    this.agent.setModel(this.currentModel || provider.defaultModel);
   }
 
   render() {
@@ -384,9 +430,11 @@ class AgentSidebar extends Sidebar {
 
           this.agent.setProvider({
             baseURL: m.baseURL,
-            apiKey: m.apiKey,
+            apiKey: this.apiKeys.get(m.providerId) || null,
           });
           this.agent.setModel(m.id);
+
+          this.editor.statesManager?.save();
 
           triggerBtn.querySelector(".trigger-label").textContent = m.name;
           renderModelsList();
@@ -976,6 +1024,80 @@ class AgentSidebar extends Sidebar {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
+  requestApiKey(provider) {
+    if (!this.container) return Promise.resolve("");
+
+    if (this.apiKeyPanel) {
+      this.apiKeyPanel.input.focus();
+      return this.apiKeyPanel.promise;
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "agent-sidebar-api-key-overlay";
+
+    const panel = document.createElement("form");
+    panel.className = "agent-sidebar-api-key-panel";
+
+    const title = document.createElement("h3");
+    title.textContent = `${provider.name} API key`;
+    panel.appendChild(title);
+
+    const description = document.createElement("p");
+    description.textContent = "Enter your API key to use this model.";
+    panel.appendChild(description);
+
+    const input = document.createElement("input");
+    input.type = "password";
+    input.required = true;
+    input.autocomplete = "off";
+    input.placeholder = "API key";
+    input.className = "agent-sidebar-api-key-input";
+    panel.appendChild(input);
+
+    const actions = document.createElement("div");
+    actions.className = "agent-sidebar-api-key-actions";
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.textContent = "Cancel";
+    cancelButton.className = "agent-sidebar-api-key-cancel";
+
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "submit";
+    confirmButton.textContent = "Use key";
+    confirmButton.className = "agent-sidebar-api-key-confirm";
+
+    actions.append(cancelButton, confirmButton);
+    panel.appendChild(actions);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    let resolveRequest;
+    const promise = new Promise((resolve) => {
+      resolveRequest = resolve;
+    });
+    const close = (value) => {
+      if (!this.apiKeyPanel) return;
+      this.apiKeyPanel = null;
+      overlay.remove();
+      resolveRequest(value);
+    };
+
+    this.apiKeyPanel = { input, promise };
+    panel.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const value = input.value.trim();
+      if (value) close(value);
+    });
+    cancelButton.addEventListener("click", () => close(""));
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) close("");
+    });
+
+    input.focus();
+    return promise;
+  }
+
   generateSessionId() {
     this._sessionCounter += 1;
     return `session-${Date.now()}-${this._sessionCounter}`;
@@ -1118,6 +1240,18 @@ class AgentSidebar extends Sidebar {
   async sendMessage(content, sessionId = this.activeSessionId) {
     const session = this.getSession(sessionId);
     if (!session) return;
+
+    const provider = AgentAI.getProvider(this.currentProviderId);
+    if (provider?.requiresApiKey && !this.apiKeys.get(provider.id)) {
+      const apiKey = await this.requestApiKey(provider);
+      if (!apiKey) return;
+      this.apiKeys.set(provider.id, apiKey);
+      this.agent.setProvider({
+        baseURL: provider.baseURL,
+        apiKey,
+      });
+      this.editor.statesManager?.save();
+    }
 
     const messageHistory = session.messages
       .filter((m) => m && (m.role === "user" || m.role === "agent"))
