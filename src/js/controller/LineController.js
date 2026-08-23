@@ -297,9 +297,20 @@ class LineController {
     this.lines = textLines.map((text) => new LineNode(text));
 
     this.totalLines = totalLines || this.lines.length;
+    this.maxLineLength = 0;
+
+    for (let i = 0; i < this.lines.length; i++) {
+      const currentLineLength = this.getViewLineLength(i);
+      if (currentLineLength > this.maxLineLength) {
+        this.maxLineLength = currentLineLength;
+      }
+    }
+
+    this.updateLineNumberWidth();
 
     if (this.outputScroller) {
       this.outputScroller.updateNbItem();
+      this.outputScroller.refresh();
     }
   }
 
@@ -825,8 +836,10 @@ class LineController {
     }
 
     this.refreshNumberLines();
+    this.updateLineNumberWidth();
 
     this.outputScroller.updateNbItem();
+    this.outputScroller.refresh();
 
     this.editor.cursorController.updateCaretPosition();
 

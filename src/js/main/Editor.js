@@ -57,6 +57,7 @@ class Editor {
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
+    this.agent = new Agent(this);
 
     this.command = new Command(this);
     this.Ccmd = new CMD(this);

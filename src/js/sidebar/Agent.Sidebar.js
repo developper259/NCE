@@ -9,9 +9,82 @@ class AgentSidebar extends Sidebar {
     this.inputElement = null;
     this.sendButton = null;
 
+    this.pendingConfirmation = null;
+
+    this.agent = new Agent(editor);
+    this.agent.setCallbacks({
+      onToolStart: (toolName, args) => {
+        this.appendToolReasoning(toolName, args);
+      },
+      onToolAskConfirmation: (toolName, args, accept, reject) => {
+        this.pendingConfirmation = { toolName, args, accept, reject };
+        this.refresh();
+      },
+      onToolEnd: (toolName, result) => {
+        const payload = result?.result ?? result;
+
+        if (
+          toolName !== "modify_active_file" ||
+          !payload ||
+          payload.success !== true
+        ) {
+          return;
+        }
+
+        const session = this.getActiveSession();
+        if (!session) return;
+
+        const filePath = typeof payload.path === "string" ? payload.path : "";
+        if (!filePath) return;
+
+        const beforeText =
+          typeof payload.beforeText === "string" ? payload.beforeText : "";
+        const afterText =
+          typeof payload.afterText === "string" ? payload.afterText : "";
+        const beforeLines = beforeText ? beforeText.split("\n") : [];
+        const afterLines = afterText ? afterText.split("\n") : [];
+
+        const diffStats = this.getLineDiffStats(beforeLines, afterLines);
+
+        const change = {
+          path: filePath,
+          name: filePath.split("/").pop() || "fichier",
+          status: "modified",
+          additions: diffStats.additions,
+          deletions: diffStats.deletions,
+        };
+
+        const existingIndex = session.changes.findIndex(
+          (entry) => entry.path === filePath,
+        );
+        if (existingIndex >= 0) {
+          session.changes[existingIndex] = {
+            ...session.changes[existingIndex],
+            ...change,
+          };
+        } else {
+          session.changes.push(change);
+        }
+
+        session.changesExpanded = true;
+        this.refresh();
+      },
+    });
+
+    this.currentAgentId = AgentAI.defaultAgent || "coder";
+    const resolvedConfig = AgentAI.resolve(this.currentAgentId);
+
+    this.currentProviderId = resolvedConfig.provider.id;
+    this.currentModel = resolvedConfig.model;
+
+    this.agent.setProvider({
+      baseURL: resolvedConfig.provider.baseURL,
+      apiKey: resolvedConfig.provider.apiKey,
+    });
+    this.agent.setModel(this.currentModel);
+
     this.sessions = [];
     this.activeSessionId = null;
-
     this._sessionCounter = 0;
 
     this.createSession();
@@ -56,9 +129,16 @@ class AgentSidebar extends Sidebar {
     const header = document.createElement("div");
     header.className = "sidebar-main-title agent-sidebar-header";
 
+    const titleWrap = document.createElement("div");
+    titleWrap.style.display = "flex";
+    titleWrap.style.alignItems = "center";
+    titleWrap.style.gap = "8px";
+
     const title = document.createElement("span");
     title.textContent = "AGENT";
-    header.appendChild(title);
+    titleWrap.appendChild(title);
+
+    header.appendChild(titleWrap);
 
     return header;
   }
@@ -129,6 +209,54 @@ class AgentSidebar extends Sidebar {
     return tab;
   }
 
+  describeToolAction(toolName, args = {}) {
+    const q = typeof args?.query === "string" ? args.query.trim() : "";
+    const path = typeof args?.path === "string" ? args.path.trim() : "";
+    const startLine = Number.isInteger(args?.startLine) ? args.startLine : null;
+    const endLine = Number.isInteger(args?.endLine) ? args.endLine : null;
+    const fileName = path ? path.split("/").pop() || path : "file";
+
+    switch (toolName) {
+      case "search_active_file":
+        return q ? `search in file "${q}"` : 'search in file ""';
+      case "search_project_files":
+        return q ? `search in workspace "${q}"` : 'search in workspace ""';
+      case "read_active_file":
+        return startLine && endLine
+          ? `read file "${fileName}" line ${startLine} to ${endLine}`
+          : `read file "${fileName}" line 1`;
+      case "read_file":
+        return path
+          ? `read file "${fileName}" line 1`
+          : 'read file "file" line 1';
+      case "list_project_files":
+        return path ? `list files in "${path}"` : "list files in project";
+      case "modify_active_file":
+        return "modify active file";
+      case "get_editor_context":
+        return "get editor context";
+      case "read_selection":
+        return "read selection";
+      default:
+        return `${toolName}`;
+    }
+  }
+
+  appendToolReasoning(toolName, args = {}) {
+    const session = this.getActiveSession();
+    if (!session) return;
+
+    const summary = this.describeToolAction(toolName, args);
+    session.messages.push({
+      role: "agent",
+      reasoning: summary,
+      timestamp: this.formatTime(),
+    });
+
+    this.refresh();
+    this.scrollMessagesToBottom();
+  }
+
   renderInputArea() {
     const inputArea = document.createElement("div");
     inputArea.className = "agent-sidebar-input-area";
@@ -138,7 +266,7 @@ class AgentSidebar extends Sidebar {
 
     const textarea = document.createElement("textarea");
     textarea.className = "agent-sidebar-input";
-    textarea.placeholder = "Ask the agent…";
+    textarea.placeholder = "Describe what you want to build...";
     textarea.rows = 1;
     textarea.value = this.getActiveSession()?.draft || "";
     this.inputElement = textarea;
@@ -161,13 +289,157 @@ class AgentSidebar extends Sidebar {
 
     inputWrapper.appendChild(textarea);
 
+    const toolbar = document.createElement("div");
+    toolbar.className = "agent-sidebar-input-toolbar";
+
+    const modelDropdownContainer = document.createElement("div");
+    modelDropdownContainer.className = "agent-sidebar-model-dropdown-container";
+
+    const triggerBtn = document.createElement("button");
+    triggerBtn.type = "button";
+    triggerBtn.className = "agent-sidebar-model-trigger";
+
+    const availableModels = [];
+    Object.values(AgentAI.providers).forEach((provider) => {
+      Object.values(provider.models).forEach((model) => {
+        availableModels.push({
+          id: model.id,
+          name: model.name,
+          providerId: provider.id,
+          providerName: provider.name,
+          baseURL: provider.baseURL,
+          apiKey: provider.apiKey,
+        });
+      });
+    });
+
+    const currentModelObj =
+      availableModels.find((m) => m.id === this.currentModel) ||
+      availableModels[0];
+    const currentDisplayName = currentModelObj
+      ? currentModelObj.name
+      : this.currentModel;
+
+    triggerBtn.innerHTML = `
+      <i class="fi fi-rr-robot"></i> 
+      <span class="trigger-label">${currentDisplayName}</span>
+      <i class="fi fi-rr-menu-dots trigger-dots"></i>
+    `;
+
+    const dropdownMenu = document.createElement("div");
+    dropdownMenu.className = "agent-sidebar-model-menu hidden";
+
+    const searchBox = document.createElement("input");
+    searchBox.type = "text";
+    searchBox.className = "agent-sidebar-model-search";
+    searchBox.placeholder = "Search models";
+    dropdownMenu.appendChild(searchBox);
+
+    const listContainer = document.createElement("div");
+    listContainer.className = "agent-sidebar-model-list";
+    dropdownMenu.appendChild(listContainer);
+
+    const renderModelsList = (filterText = "") => {
+      listContainer.innerHTML = "";
+      const filtered = availableModels.filter(
+        (m) =>
+          m.name.toLowerCase().includes(filterText.toLowerCase()) ||
+          m.id.toLowerCase().includes(filterText.toLowerCase()) ||
+          m.providerName.toLowerCase().includes(filterText.toLowerCase()),
+      );
+
+      filtered.forEach((m) => {
+        const item = document.createElement("div");
+        item.className = "agent-sidebar-model-item";
+        const isActive =
+          m.id === this.currentModel && m.providerId === this.currentProviderId;
+        if (isActive) item.classList.add("active");
+
+        const checkIcon = document.createElement("i");
+        checkIcon.className = "fi fi-rr-check";
+        checkIcon.style.opacity = isActive ? "1" : "0";
+
+        const textWrap = document.createElement("div");
+        textWrap.style.display = "flex";
+        textWrap.style.flexDirection = "column";
+        textWrap.style.gap = "2px";
+
+        const titleSpan = document.createElement("span");
+        titleSpan.textContent = m.name;
+
+        const subSpan = document.createElement("span");
+        subSpan.style.fontSize = "9px";
+        subSpan.style.opacity = "0.6";
+        subSpan.textContent = m.providerName;
+
+        textWrap.appendChild(titleSpan);
+        textWrap.appendChild(subSpan);
+
+        item.appendChild(checkIcon);
+        item.appendChild(textWrap);
+
+        item.addEventListener("click", () => {
+          this.currentModel = m.id;
+          this.currentProviderId = m.providerId;
+
+          this.agent.setProvider({
+            baseURL: m.baseURL,
+            apiKey: m.apiKey,
+          });
+          this.agent.setModel(m.id);
+
+          triggerBtn.querySelector(".trigger-label").textContent = m.name;
+          renderModelsList();
+          dropdownMenu.classList.add("hidden");
+        });
+
+        listContainer.appendChild(item);
+      });
+
+      const separator = document.createElement("div");
+      separator.className = "agent-sidebar-model-separator";
+      listContainer.appendChild(separator);
+
+      const manageItem = document.createElement("div");
+      manageItem.className = "agent-sidebar-model-manage";
+      manageItem.textContent = "Manage Models...";
+      listContainer.appendChild(manageItem);
+    };
+
+    renderModelsList();
+
+    searchBox.addEventListener("input", (e) => {
+      renderModelsList(e.target.value);
+    });
+
+    triggerBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      dropdownMenu.classList.toggle("hidden");
+      if (!dropdownMenu.classList.contains("hidden")) {
+        searchBox.value = "";
+        renderModelsList();
+        searchBox.focus();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!modelDropdownContainer.contains(e.target)) {
+        dropdownMenu.classList.add("hidden");
+      }
+    });
+
+    modelDropdownContainer.appendChild(triggerBtn);
+    modelDropdownContainer.appendChild(dropdownMenu);
+
+    toolbar.appendChild(modelDropdownContainer);
+
     const sendButton = document.createElement("button");
     sendButton.type = "button";
     sendButton.className = "agent-sidebar-send";
     sendButton.title = "Send";
 
     const sendIcon = document.createElement("i");
-    sendIcon.className = "fi fi-rr-paper-plane";
+    sendIcon.className = "fi fi-rr-arrow-up";
     sendButton.appendChild(sendIcon);
 
     sendButton.addEventListener("click", () => {
@@ -175,8 +447,9 @@ class AgentSidebar extends Sidebar {
     });
 
     this.sendButton = sendButton;
-    inputWrapper.appendChild(sendButton);
+    toolbar.appendChild(sendButton);
 
+    inputWrapper.appendChild(toolbar);
     inputArea.appendChild(inputWrapper);
 
     const hint = document.createElement("div");
@@ -236,16 +509,93 @@ class AgentSidebar extends Sidebar {
     return empty;
   }
 
+  normalizeReasoningValue(value) {
+    if (!value) return "";
+
+    if (typeof value === "string") return value.trim();
+    if (Array.isArray(value)) {
+      return value
+        .map((entry) => this.normalizeReasoningValue(entry))
+        .filter(Boolean)
+        .join("\n");
+    }
+    if (typeof value === "object") {
+      for (const key of [
+        "text",
+        "content",
+        "value",
+        "reasoning",
+        "reasoning_content",
+      ]) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
+          const extracted = this.normalizeReasoningValue(value[key]);
+          if (extracted) return extracted;
+        }
+      }
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return "";
+      }
+    }
+    return String(value).trim();
+  }
+
   createMessageElement(message, options = {}) {
     const row = document.createElement("div");
-    row.className = `agent-sidebar-message agent-sidebar-message-${message.role}`;
+    const role = message?.role || "agent";
+    row.className = `agent-sidebar-message agent-sidebar-message-${role}`;
     if (options.queued) {
       row.classList.add("agent-sidebar-message-queued");
     }
 
     const bubble = document.createElement("div");
     bubble.className = "agent-sidebar-bubble";
-    bubble.textContent = message.content;
+
+    const reasoning = this.normalizeReasoningValue(
+      message?.reasoning ??
+        message?.reasoning_content ??
+        message?.reasoningText,
+    );
+
+    if (reasoning) {
+      const reasoningToggle = document.createElement("button");
+      reasoningToggle.type = "button";
+      reasoningToggle.className = "agent-sidebar-reasoning-toggle";
+      reasoningToggle.setAttribute("aria-expanded", "false");
+
+      const reasoningIcon = document.createElement("i");
+      reasoningIcon.className = "fi fi-rr-angle-small-right";
+      reasoningToggle.appendChild(reasoningIcon);
+
+      const reasoningLabel = document.createElement("span");
+      reasoningLabel.textContent = "Reasoning";
+      reasoningToggle.appendChild(reasoningLabel);
+
+      const reasoningEl = document.createElement("div");
+      reasoningEl.className = "agent-sidebar-reasoning";
+      reasoningEl.textContent = reasoning;
+      reasoningEl.hidden = true;
+
+      reasoningToggle.addEventListener("click", () => {
+        const expanded =
+          reasoningToggle.getAttribute("aria-expanded") === "true";
+        reasoningToggle.setAttribute("aria-expanded", String(!expanded));
+        reasoningEl.hidden = expanded;
+      });
+
+      bubble.appendChild(reasoningToggle);
+      bubble.appendChild(reasoningEl);
+    }
+
+    const contentValue =
+      typeof message?.content === "string" ? message.content : "";
+    if (contentValue) {
+      const contentEl = document.createElement("div");
+      contentEl.className = "agent-sidebar-content";
+      contentEl.textContent = contentValue;
+      bubble.appendChild(contentEl);
+    }
 
     bubble.style.userSelect = "text";
     bubble.style.WebkitUserSelect = "text";
@@ -461,24 +811,70 @@ class AgentSidebar extends Sidebar {
   }
 
   openChange(change) {
-    this.editor.tabManager.openFileWithPath(change.path);
+    if (
+      this.editor &&
+      this.editor.tabManager &&
+      typeof this.editor.tabManager.openFileWithPath === "function"
+    ) {
+      this.editor.tabManager.openFileWithPath(change.path);
+    } else {
+      console.warn(
+        "tabManager.openFileWithPath n'est pas disponible pour ouvrir :",
+        change.path,
+      );
+    }
   }
 
-  addSimulatedChange(sessionId, path, status, additions, deletions) {
-    const session = this.getSession(sessionId);
-    if (!session) return;
+  getLineDiffStats(beforeLines = [], afterLines = []) {
+    const source = Array.isArray(beforeLines) ? beforeLines : [];
+    const target = Array.isArray(afterLines) ? afterLines : [];
 
-    const name = path.split("/").pop();
+    const rows = source.length + 1;
+    const cols = target.length + 1;
+    const dp = Array.from({ length: rows }, () => Array(cols).fill(0));
 
-    session.changes.push({
-      path,
-      name,
-      status,
-      additions,
-      deletions,
-    });
+    for (let i = source.length - 1; i >= 0; i -= 1) {
+      for (let j = target.length - 1; j >= 0; j -= 1) {
+        if (source[i] === target[j]) {
+          dp[i][j] = dp[i + 1][j + 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+      }
+    }
 
-    this.refresh();
+    let i = 0;
+    let j = 0;
+    let additions = 0;
+    let deletions = 0;
+
+    while (i < source.length && j < target.length) {
+      if (source[i] === target[j]) {
+        i += 1;
+        j += 1;
+        continue;
+      }
+
+      if (dp[i + 1][j] >= dp[i][j + 1]) {
+        deletions += 1;
+        i += 1;
+      } else {
+        additions += 1;
+        j += 1;
+      }
+    }
+
+    while (i < source.length) {
+      deletions += 1;
+      i += 1;
+    }
+
+    while (j < target.length) {
+      additions += 1;
+      j += 1;
+    }
+
+    return { additions, deletions };
   }
 
   updateView() {
@@ -507,10 +903,10 @@ class AgentSidebar extends Sidebar {
           icon.className = "fi fi-rr-square";
           this.sendButton.title = "Stop";
         } else if (isGenerating && draft !== "") {
-          icon.className = "fi fi-rr-paper-plane";
+          icon.className = "fi fi-rr-arrow-up";
           this.sendButton.title = "Add to queue";
         } else {
-          icon.className = "fi fi-rr-paper-plane";
+          icon.className = "fi fi-rr-arrow-up";
           this.sendButton.title = "Send";
         }
       }
@@ -611,6 +1007,7 @@ class AgentSidebar extends Sidebar {
       messages: [],
       draft: "",
       isGenerating: false,
+      abortController: null,
       pendingTimeout: null,
       queue: [],
       changes: [],
@@ -649,6 +1046,10 @@ class AgentSidebar extends Sidebar {
     if (index === -1) return;
 
     const session = this.sessions[index];
+
+    if (session.abortController) {
+      session.abortController.abort();
+    }
     if (session.pendingTimeout) {
       clearTimeout(session.pendingTimeout);
     }
@@ -682,21 +1083,27 @@ class AgentSidebar extends Sidebar {
     const session = this.getSession(sessionId);
     if (!session) return;
 
+    this.agent.stop();
+
+    if (session.abortController) {
+      session.abortController.abort();
+      session.abortController = null;
+    }
+
     if (session.pendingTimeout) {
       clearTimeout(session.pendingTimeout);
       session.pendingTimeout = null;
-
-      session.messages.push({
-        role: "agent",
-        content: "Génération interrompue.",
-        timestamp: this.formatTime(),
-      });
     }
 
     session.isGenerating = false;
 
-    this.processQueue(session.id);
+    session.messages.push({
+      role: "agent",
+      content: "Génération interrompue.",
+      timestamp: this.formatTime(),
+    });
 
+    this.processQueue(session.id);
     this.refresh();
   }
 
@@ -708,9 +1115,20 @@ class AgentSidebar extends Sidebar {
     this.refresh();
   }
 
-  sendMessage(content, sessionId = this.activeSessionId) {
+  async sendMessage(content, sessionId = this.activeSessionId) {
     const session = this.getSession(sessionId);
     if (!session) return;
+
+    const messageHistory = session.messages
+      .filter((m) => m && (m.role === "user" || m.role === "agent"))
+      .filter((m) => {
+        const text = typeof m.content === "string" ? m.content : "";
+        return !text.startsWith("❌") && !text.startsWith("🚫");
+      })
+      .map((m) => ({
+        role: m.role === "agent" ? "assistant" : "user",
+        content: typeof m.content === "string" ? m.content : "",
+      }));
 
     session.messages.push({
       role: "user",
@@ -728,24 +1146,52 @@ class AgentSidebar extends Sidebar {
     this.refresh();
     this.focusInput();
 
-    const fakeDelay = 1500 + Math.random() * 1500;
-
-    session.pendingTimeout = setTimeout(() => {
-      session.pendingTimeout = null;
-      session.isGenerating = false;
-
-      session.messages.push({
-        role: "agent",
-        content: this.generateFakeResponse(content),
-        timestamp: this.formatTime(),
+    try {
+      const result = await this.agent.execute(content, {
+        history: messageHistory,
       });
 
-      this.processQueue(session.id);
-    }, fakeDelay);
-  }
+      const agentReply =
+        typeof result === "string"
+          ? result
+          : typeof result?.response === "string"
+            ? result.response
+            : "";
+      const agentReasoning =
+        typeof result === "object" && result
+          ? this.normalizeReasoningValue(
+              result.reasoning ??
+                result.reasoning_content ??
+                result.reasoningText,
+            )
+          : "";
 
-  generateFakeResponse(content) {
-    return `Réponse simulée à : "${content}"`;
+      if (session.isGenerating) {
+        session.messages.push({
+          role: "agent",
+          content: agentReply,
+          reasoning: agentReasoning || undefined,
+          timestamp: this.formatTime(),
+        });
+      }
+    } catch (error) {
+      if (error.name === "AbortError") {
+        console.log("Requête Agent annulée par l'utilisateur.");
+      } else {
+        console.error("Erreur avec Agent:", error);
+        session.messages.push({
+          role: "agent",
+          content: `Erreur de connexion à l'Agent: ${error.message}`,
+          timestamp: this.formatTime(),
+        });
+      }
+    } finally {
+      session.isGenerating = false;
+
+      this.processQueue(session.id);
+      this.refresh();
+      this.scrollMessagesToBottom();
+    }
   }
 
   queueMessage(sessionId, content) {
