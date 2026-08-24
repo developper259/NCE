@@ -40,6 +40,12 @@ contextBridge.exposeInMainWorld("api", {
 
   loadEditorState: () => ipcRenderer.invoke("FileManager:loadState"),
 
+  getAgentApiKey: (providerId) =>
+    ipcRenderer.invoke("FileManager:getAgentApiKey", providerId),
+
+  setAgentApiKey: (providerId, apiKey) =>
+    ipcRenderer.invoke("FileManager:setAgentApiKey", providerId, apiKey),
+
   startWatching: (projectPath) =>
     ipcRenderer.invoke("Watcher:startWatching", projectPath),
 

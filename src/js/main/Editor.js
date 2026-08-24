@@ -39,6 +39,7 @@ class Editor {
     this.statesManager = new StatesManager(this);
     this.threadManager = new ThreadManager();
     this.contextMenuManager = new ContextMenuManager();
+    this.agent = new Agent(this);
 
     this.fileExplorer = new FileExplorer(this);
     this.searchSidebar = new SearchSidebar(this);
@@ -57,8 +58,6 @@ class Editor {
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
-    this.agent = new Agent(this);
-
     this.command = new Command(this);
     this.Ccmd = new CMD(this);
     this.Cconfig_space = new Config_space(this);
@@ -139,7 +138,6 @@ class Editor {
   }
 
   focusOutput() {
-
     this.output.focus({
       preventScroll: true,
     });
@@ -163,7 +161,7 @@ class Editor {
       this.setSelected(false);
       if (!this.isButtonChangePosition) {
         this.cursorController.disable();
-      }else{
+      } else {
         this.isButtonChangePosition = false;
       }
     }

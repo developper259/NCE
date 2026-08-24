@@ -1,4 +1,4 @@
-import { app, dialog, shell, BrowserWindow, ipcMain } from "electron";
+import { app, dialog, shell, BrowserWindow, ipcMain, safeStorage } from "electron";
 import { Window } from "../Window";
 const fs = require("fs").promises;
 const fsSync = require("fs");
@@ -94,6 +94,17 @@ export class FileManager {
     ipcMain.handle("FileManager:loadState", async () => {
       return (await this.loadState()) ?? null;
     });
+
+    ipcMain.handle(
+      "FileManager:getAgentApiKey",
+      async (_event, providerId: string) => this.getAgentApiKey(providerId),
+    );
+
+    ipcMain.handle(
+      "FileManager:setAgentApiKey",
+      async (_event, providerId: string, apiKey: string) =>
+        this.setAgentApiKey(providerId, apiKey),
+    );
 
     ipcMain.handle(
       "FileManager:rename",
@@ -536,11 +547,62 @@ export class FileManager {
         return null;
       }
 
+      const legacyKeys = (state as any).agent?.apiKeys;
+      if (legacyKeys && typeof legacyKeys === "object") {
+        for (const [providerId, apiKey] of Object.entries(legacyKeys)) {
+          if (typeof apiKey === "string" && apiKey.trim()) {
+            await this.setAgentApiKey(providerId, apiKey);
+          }
+        }
+        delete (state as any).agent.apiKeys;
+        await fs.writeFile(filePath, JSON.stringify(state), "utf-8");
+      }
+
       return state;
     } catch (error: any) {
       if (error?.code === "ENOENT") return null;
       console.error("Error loading editor state:", error);
       return null;
     }
+  }
+
+  private getSecretsPath(): string {
+    return path.join(app.getPath("userData"), "agent-secrets.json");
+  }
+
+  private async readAgentSecrets(): Promise<Record<string, string>> {
+    if (!safeStorage.isEncryptionAvailable()) return {};
+    try {
+      const parsed = JSON.parse(
+        await fs.readFile(this.getSecretsPath(), "utf-8"),
+      );
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private async getAgentApiKey(providerId: string): Promise<string> {
+    if (typeof providerId !== "string" || !safeStorage.isEncryptionAvailable())
+      return "";
+    const secrets = await this.readAgentSecrets();
+    try {
+      return safeStorage.decryptString(Buffer.from(secrets[providerId], "base64"));
+    } catch {
+      return "";
+    }
+  }
+
+  private async setAgentApiKey(providerId: string, apiKey: string): Promise<boolean> {
+    if (!providerId || !safeStorage.isEncryptionAvailable()) return false;
+    const secrets = await this.readAgentSecrets();
+    if (apiKey) {
+      secrets[providerId] = safeStorage.encryptString(apiKey).toString("base64");
+    } else {
+      delete secrets[providerId];
+    }
+    await fs.mkdir(path.dirname(this.getSecretsPath()), { recursive: true });
+    await fs.writeFile(this.getSecretsPath(), JSON.stringify(secrets), "utf-8");
+    return true;
   }
 }

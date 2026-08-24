@@ -1,3 +1,69 @@
+const AgentPath = {
+  sep: "/",
+  normalize(value) {
+    if (typeof value !== "string") return "";
+    let normalized = value.replace(/\\/g, "/");
+    const driveMatch = normalized.match(/^([A-Za-z]:)/);
+    const drive = driveMatch ? driveMatch[1].toUpperCase() : "";
+    if (drive) normalized = normalized.slice(2);
+    const absolute = normalized.startsWith("/");
+    const segments = normalized.split("/").filter(Boolean);
+    const stack = [];
+
+    for (const segment of segments) {
+      if (segment === ".") continue;
+      if (segment === "..") {
+        if (stack.length) {
+          stack.pop();
+        } else if (!absolute && !drive) {
+          stack.push("..");
+        }
+        continue;
+      }
+      stack.push(segment);
+    }
+
+    const joined = stack.join("/");
+    const prefix = absolute ? "/" : "";
+    return `${prefix}${drive ? `${drive}/` : ""}${joined}`.replace(/\/+/g, "/");
+  },
+  isAbsolute(value) {
+    if (typeof value !== "string") return false;
+    const normalized = value.replace(/\\/g, "/");
+    return normalized.startsWith("/") || /^[A-Za-z]:\//.test(normalized);
+  },
+  resolve(...segments) {
+    const safeSegments = segments.filter(
+      (segment) => typeof segment === "string" && segment.length > 0,
+    );
+    if (!safeSegments.length) return "/";
+    const joined = safeSegments
+      .map((segment) => segment.replace(/\\/g, "/"))
+      .join("/");
+    return this.normalize(joined);
+  },
+  relative(from, to) {
+    const base = this.normalize(from);
+    const target = this.normalize(to);
+    const baseParts = base.split("/").filter(Boolean);
+    const targetParts = target.split("/").filter(Boolean);
+    let index = 0;
+
+    while (
+      index < baseParts.length &&
+      index < targetParts.length &&
+      baseParts[index] === targetParts[index]
+    ) {
+      index += 1;
+    }
+
+    const up = Array(Math.max(0, baseParts.length - index)).fill("..");
+    const down = targetParts.slice(index);
+    const relative = [...up, ...down].join("/");
+    return relative;
+  },
+};
+
 class Agent {
   constructor(editor) {
     this.editor = editor;
@@ -9,10 +75,14 @@ class Agent {
     this.callbacks = {};
     this.contextProvider = null;
     this.abortController = null;
+    this.currentSessionId = null;
     this.isRunning = false;
     this.stopRequested = false;
     this.runId = 0;
     this.maxIterations = 20;
+    this.temperature = undefined;
+    this.maxTokens = undefined;
+    this.permissions = "code";
     this.messages = [];
     this.fileSnapshots = new Map();
     this.systemPrompt = "";
@@ -42,6 +112,21 @@ class Agent {
     this.systemPrompt = prompt.trim();
     return this;
   }
+  setConfig(config = {}) {
+    if (Number.isFinite(config.maxIterations)) {
+      this.maxIterations = Math.max(1, Math.floor(config.maxIterations));
+    }
+    if (Number.isFinite(config.temperature)) {
+      this.temperature = Math.max(0, Math.min(2, config.temperature));
+    }
+    if (Number.isFinite(config.maxTokens)) {
+      this.maxTokens = Math.max(1, Math.floor(config.maxTokens));
+    }
+    if (config.permissions === "read" || config.permissions === "code") {
+      this.permissions = config.permissions;
+    }
+    return this;
+  }
   setContextProvider(provider) {
     if (provider !== null && typeof provider !== "function")
       throw new TypeError("contextProvider doit être une fonction.");
@@ -52,7 +137,6 @@ class Agent {
     for (const name of [
       "onToken",
       "onToolStart",
-      "onToolAskConfirmation",
       "onToolEnd",
       "onError",
       "onFinish",
@@ -78,7 +162,10 @@ class Agent {
       description: definition.description || "",
       parameters: definition.parameters || { type: "object", properties: {} },
       execute: definition.execute,
-      requiresConfirmation: definition.requiresConfirmation === true,
+      readOnly:
+        definition.readOnly === true ||
+        (typeof AgentAI !== "undefined" &&
+          AgentAI.readOnlyTools?.includes(name)),
       enabled: definition.enabled !== false,
     };
     this.tools.set(name, tool);
@@ -101,24 +188,27 @@ class Agent {
     this.abortController = new AbortController();
     const runId = ++this.runId;
     const controller = this.abortController;
+    const runContext = { sessionId: options.sessionId || null, runId };
+    this.currentSessionId = runContext.sessionId;
     try {
-      const context = await this.getContext();
+      const editorContext = await this.getContext();
       this.messages = [
-        { role: "system", content: this.buildSystemMessage(context) },
+        { role: "system", content: this.buildSystemMessage(editorContext) },
       ];
       this.appendHistory(options.history);
       this.messages.push({ role: "user", content: userMessage });
       const result = await this.runLoop(runId, controller);
-      this.callbacks.onFinish?.(result);
+      this.callbacks.onFinish?.(result, runContext);
       return result;
     } catch (error) {
       if (!this.isAbortError(error) && runId === this.runId)
-        this.callbacks.onError?.(error);
+        this.callbacks.onError?.(error, runContext);
       throw error;
     } finally {
       if (runId === this.runId) {
         this.isRunning = false;
         this.abortController = null;
+        this.currentSessionId = null;
       }
     }
   }
@@ -140,7 +230,12 @@ class Agent {
       const parsed = this.parseResponse(modelResponse);
       response += parsed.text;
       reasoning += parsed.reasoning;
-      if (parsed.text) this.callbacks.onToken?.(parsed.text);
+      if (parsed.text) {
+        this.callbacks.onToken?.(parsed.text, {
+          sessionId: this.currentSessionId,
+          runId,
+        });
+      }
       if (!parsed.toolCalls.length)
         return { response, reasoning, iterations: iteration };
       this.messages.push(parsed.assistantMessage);
@@ -169,6 +264,9 @@ class Agent {
       tool_choice: "auto",
       stream: false,
     };
+    if (Number.isFinite(this.temperature))
+      payload.temperature = this.temperature;
+    if (Number.isFinite(this.maxTokens)) payload.max_tokens = this.maxTokens;
     const provider = this.sanitizeProviderForIPC();
     if (typeof this.api?.aiChat === "function")
       return this.api.aiChat({ provider, payload });
@@ -241,6 +339,7 @@ class Agent {
   getOpenAITools() {
     return [...this.tools.values()]
       .filter((tool) => tool.enabled)
+      .filter((tool) => this.permissions === "code" || tool.readOnly)
       .map((tool) => ({
         type: "function",
         function: {
@@ -257,10 +356,25 @@ class Agent {
     if (!tool)
       return {
         success: false,
-        error: `Outil inconnu : ${name || "(sans nom)"}`,
+        error: {
+          code: "TOOL_NOT_FOUND",
+          message: `Outil inconnu : ${name || "(sans nom)"}`,
+        },
       };
     if (!tool.enabled)
-      return { success: false, error: `Outil désactivé : ${name}` };
+      return {
+        success: false,
+        error: { code: "TOOL_DISABLED", message: `Outil désactivé : ${name}` },
+      };
+    if (this.permissions === "read" && !tool.readOnly) {
+      return {
+        success: false,
+        error: {
+          code: "TOOL_NOT_ALLOWED",
+          message: `L'outil ${name} n'est pas autorisé dans ce mode.`,
+        },
+      };
+    }
     let args = {};
     try {
       const raw = call.function.arguments;
@@ -271,74 +385,165 @@ class Agent {
             : {}
           : raw || {};
     } catch {
-      return { success: false, error: "Arguments JSON invalides." };
+      return {
+        success: false,
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "Arguments JSON invalides.",
+        },
+      };
     }
     if (!args || typeof args !== "object" || Array.isArray(args))
-      return { success: false, error: "Les arguments doivent être un objet." };
-    const validation = this.validateTool(tool, args);
-    if (!validation.valid) return { success: false, error: validation.error };
-    this.callbacks.onToolStart?.(name, args);
-    if (
-      tool.requiresConfirmation &&
-      !(await this.askConfirmation(name, args))
-    ) {
-      const result = {
+      return {
         success: false,
-        cancelled: true,
-        error: "Action refusée par l'utilisateur.",
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "Les arguments doivent être un objet.",
+        },
       };
-      this.callbacks.onToolEnd?.(name, result);
-      return result;
+
+    const normalizedArgs = { ...args };
+    for (const [key, rule] of Object.entries(
+      tool.parameters?.properties || {},
+    )) {
+      if (!(key in normalizedArgs)) continue;
+      const value = normalizedArgs[key];
+      if (
+        rule.type === "integer" &&
+        typeof value === "string" &&
+        /^-?\d+$/.test(value.trim())
+      ) {
+        normalizedArgs[key] = Number.parseInt(value, 10);
+      }
+      if (
+        rule.type === "number" &&
+        typeof value === "string" &&
+        value.trim() !== ""
+      ) {
+        const asNumber = Number(value);
+        if (Number.isFinite(asNumber)) normalizedArgs[key] = asNumber;
+      }
     }
+
+    const validation = this.validateTool(tool, normalizedArgs);
+    if (!validation.valid) return { success: false, error: validation.error };
+    const callbackContext = {
+      sessionId: this.currentSessionId,
+      runId: this.runId,
+    };
+    this.callbacks.onToolStart?.(name, normalizedArgs, callbackContext);
     try {
       const result = this.limitResult(
-        await tool.execute(args, {
+        await tool.execute(normalizedArgs, {
           editor: this.editor,
           agent: this,
           signal: this.abortController?.signal,
         }),
       );
-      this.callbacks.onToolEnd?.(name, result);
+      this.callbacks.onToolEnd?.(name, result, callbackContext);
       return { success: true, result };
     } catch (error) {
-      const result = { success: false, error: error?.message || String(error) };
-      this.callbacks.onToolEnd?.(name, result);
+      const result = {
+        success: false,
+        error: {
+          code: this.isAbortError(error) ? "USER_ABORTED" : "INTERNAL_ERROR",
+          message: error?.message || String(error),
+        },
+      };
+      this.callbacks.onToolEnd?.(name, result, callbackContext);
       return result;
     }
   }
   validateTool(tool, args) {
-    for (const key of tool.parameters?.required || [])
-      if (args[key] === undefined || args[key] === null)
+    const schema = tool.parameters || {};
+    if (schema.type && schema.type !== "object") {
+      return { valid: false, error: "Schéma d'arguments invalide." };
+    }
+    for (const key of schema.required || []) {
+      if (args[key] === undefined || args[key] === null) {
         return {
           valid: false,
-          error: `Argument obligatoire manquant : ${key}`,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Argument obligatoire manquant : ${key}`,
+          },
         };
+      }
+    }
+    for (const [key, rule] of Object.entries(schema.properties || {})) {
+      if (args[key] === undefined) continue;
+      const value = args[key];
+      const coercedNumber =
+        rule.type === "integer" || rule.type === "number"
+          ? Number(value)
+          : null;
+      const typeValid =
+        !rule.type ||
+        (rule.type === "string" && typeof value === "string") ||
+        (rule.type === "integer" &&
+          (Number.isInteger(value) ||
+            (typeof value === "string" && /^-?\d+$/.test(value.trim())))) ||
+        (rule.type === "number" &&
+          ((typeof value === "number" && Number.isFinite(value)) ||
+            (typeof value === "string" &&
+              value.trim() !== "" &&
+              Number.isFinite(coercedNumber)))) ||
+        (rule.type === "boolean" && typeof value === "boolean") ||
+        (rule.type === "object" &&
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value));
+      if (!typeValid)
+        return {
+          valid: false,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Argument invalide : ${key}`,
+          },
+        };
+      if (rule.enum && !rule.enum.includes(value))
+        return {
+          valid: false,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Valeur interdite : ${key}`,
+          },
+        };
+      if (rule.minimum !== undefined && value < rule.minimum)
+        return {
+          valid: false,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Valeur trop petite : ${key}`,
+          },
+        };
+      if (rule.maximum !== undefined && value > rule.maximum)
+        return {
+          valid: false,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Valeur trop grande : ${key}`,
+          },
+        };
+      if (rule.minLength !== undefined && value.length < rule.minLength)
+        return {
+          valid: false,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Texte trop court : ${key}`,
+          },
+        };
+      if (rule.maxLength !== undefined && value.length > rule.maxLength)
+        return {
+          valid: false,
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: `Texte trop long : ${key}`,
+          },
+        };
+    }
     return { valid: true };
   }
-  askConfirmation(name, args) {
-    const callback = this.callbacks.onToolAskConfirmation;
-    if (!callback) return Promise.resolve(false);
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      const finish = (value) => {
-        if (!settled) {
-          settled = true;
-          resolve(Boolean(value));
-        }
-      };
-      try {
-        callback(
-          name,
-          args,
-          () => finish(true),
-          (error) => (error ? reject(error) : finish(false)),
-        );
-      } catch (error) {
-        reject(error);
-      }
-    });
-  }
-
   async getContext() {
     let custom = {};
     if (this.contextProvider)
@@ -409,16 +614,24 @@ class Agent {
       : `${text.slice(0, Math.max(0, max - 32))}\n\n[... contenu tronqué par NCE ...]`;
   }
   limitResult(result) {
-    const text = typeof result === "string" ? result : JSON.stringify(result);
-    if (text.length <= 3000) return result;
-    return result && typeof result === "object"
-      ? {
-          success: result.success !== false,
-          truncated: true,
-          path: result.path,
-          error: result.error,
-        }
-      : this.truncate(text, 3000);
+    const maxContent = 4000;
+    if (typeof result === "string") return this.truncate(result, maxContent);
+    if (!result || typeof result !== "object") return result;
+    const limited = { ...result };
+    for (const key of ["content", "beforeText", "afterText"]) {
+      if (
+        typeof limited[key] === "string" &&
+        limited[key].length > maxContent
+      ) {
+        limited[key] = this.truncate(limited[key], maxContent);
+        limited.truncated = true;
+      }
+    }
+    if (Array.isArray(limited.results) && limited.results.length > 100) {
+      limited.results = limited.results.slice(0, 100);
+      limited.truncated = true;
+    }
+    return limited;
   }
   abortError() {
     return new DOMException(
@@ -489,14 +702,17 @@ class Agent {
       description: "Rechercher dans le fichier actif.",
       parameters: {
         type: "object",
-        properties: { query: { type: "string" } },
+        properties: {
+          query: { type: "string", minLength: 1, maxLength: 500 },
+          offset: { type: "integer", minimum: 0, maximum: 100000 },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
         required: ["query"],
       },
       execute: (args) => this.searchActiveFile(args),
     });
     this.registerTool("modify_active_file", {
       description: "Modifier une plage du fichier actif.",
-      requiresConfirmation: true,
       parameters: {
         type: "object",
         properties: {
@@ -597,26 +813,32 @@ class Agent {
   }
   async readFile(filePath) {
     const root = this.editor?.fileExplorer?.rootPath;
-    if (
-      !root ||
-      typeof filePath !== "string" ||
-      filePath.includes("..") ||
-      filePath.startsWith("/")
-    )
-      return { success: false, error: "Chemin invalide ou hors du projet." };
-    const absolute = `${root.replace(/\/+$/, "")}/${filePath.replace(/^\.\//, "")}`;
+    const absolute = this.resolveWorkspacePath(filePath, root);
+    if (!absolute)
+      return {
+        success: false,
+        error: { code: "INVALID_PATH", message: "Chemin hors du workspace." },
+      };
     const result = await this.api?.getFileContent?.([absolute]);
     const content = result?.[absolute];
     return typeof content === "string"
-      ? { success: true, path: filePath, content: this.truncate(content, 4000) }
+      ? {
+          success: true,
+          path: filePath,
+          totalLines: content.split(/\r?\n/).length,
+          content: this.truncate(content, 4000),
+        }
       : { success: false, error: `Impossible de lire le fichier: ${filePath}` };
   }
   async listProjectFiles(path = "") {
     const root = this.editor?.fileExplorer?.rootPath;
     if (!root) return { success: false, error: "Pas de projet ouvert." };
-    const target = path
-      ? `${root.replace(/\/+$/, "")}/${path.replace(/^\.\//, "")}`
-      : root;
+    const target = path ? this.resolveWorkspacePath(path, root) : root;
+    if (!target)
+      return {
+        success: false,
+        error: { code: "INVALID_PATH", message: "Chemin hors du workspace." },
+      };
     const files = await this.api?.getFolderContent?.(target);
     return Array.isArray(files)
       ? {
@@ -635,7 +857,26 @@ class Agent {
     const root = this.editor?.fileExplorer?.rootPath;
     if (!root || !args.query)
       return { success: false, error: "Projet ou requête indisponible." };
-    return this.editor.api.searchInFiles(root, args.query, args);
+    return this.editor.api.searchInFiles(root, args.query, {
+      ...args,
+      offset: args.offset,
+      limit: args.limit,
+    });
+  }
+  resolveWorkspacePath(filePath, rootPath) {
+    if (typeof filePath !== "string" || typeof rootPath !== "string")
+      return null;
+
+    const root = AgentPath.normalize(rootPath);
+    const candidate = AgentPath.isAbsolute(filePath)
+      ? AgentPath.normalize(filePath)
+      : AgentPath.normalize(`${root}/${filePath}`);
+    const relative = AgentPath.relative(root, candidate);
+
+    if (!relative || relative === ".") return candidate;
+    if (relative.startsWith("..") || AgentPath.isAbsolute(relative))
+      return null;
+    return candidate;
   }
   async modifyActiveFile(args) {
     const file = this.editor?.tabManager?.activeFile;

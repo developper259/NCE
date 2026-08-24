@@ -9,20 +9,15 @@ class AgentSidebar extends Sidebar {
     this.inputElement = null;
     this.sendButton = null;
 
-    this.pendingConfirmation = null;
     this.apiKeys = new Map();
     this.apiKeyPanel = null;
 
-    this.agent = new Agent(editor);
+    this.agent = editor.agent;
     this.agent.setCallbacks({
-      onToolStart: (toolName, args) => {
-        this.appendToolReasoning(toolName, args);
+      onToolStart: (toolName, args, context) => {
+        this.appendToolReasoning(toolName, args, context?.sessionId);
       },
-      onToolAskConfirmation: (toolName, args, accept, reject) => {
-        this.pendingConfirmation = { toolName, args, accept, reject };
-        this.refresh();
-      },
-      onToolEnd: (toolName, result) => {
+      onToolEnd: (toolName, result, context) => {
         const payload = result?.result ?? result;
 
         if (
@@ -33,7 +28,7 @@ class AgentSidebar extends Sidebar {
           return;
         }
 
-        const session = this.getActiveSession();
+        const session = this.getSession(context?.sessionId);
         if (!session) return;
 
         const filePath = typeof payload.path === "string" ? payload.path : "";
@@ -85,6 +80,7 @@ class AgentSidebar extends Sidebar {
     });
     this.agent.setModel(this.currentModel);
     this.agent.setSystemPrompt(resolvedConfig.systemPrompt);
+    this.agent.setConfig(resolvedConfig);
 
     this.sessions = [];
     this.activeSessionId = null;
@@ -98,11 +94,10 @@ class AgentSidebar extends Sidebar {
       currentAgentId: this.currentAgentId,
       currentProviderId: this.currentProviderId,
       currentModel: this.currentModel,
-      apiKeys: Object.fromEntries(this.apiKeys),
     };
   }
 
-  loadConfigState(state) {
+  async loadConfigState(state) {
     if (!state || typeof state !== "object") return;
 
     if (typeof state.currentAgentId === "string") {
@@ -127,6 +122,13 @@ class AgentSidebar extends Sidebar {
       }
     }
 
+    if (this.editor.api.getAgentApiKey) {
+      for (const provider of AgentAI.getProviders()) {
+        const apiKey = await this.editor.api.getAgentApiKey(provider.id);
+        if (apiKey) this.apiKeys.set(provider.id, apiKey);
+      }
+    }
+
     const provider = AgentAI.getProvider(this.currentProviderId);
     if (!provider) return;
 
@@ -136,6 +138,7 @@ class AgentSidebar extends Sidebar {
     });
     this.agent.setModel(this.currentModel || provider.defaultModel);
     const mode = AgentAI.getAgent(this.currentAgentId);
+    this.agent.setConfig({ ...mode, maxIterations: AgentAI.maxIterations });
     if (mode?.systemPrompt) {
       this.agent.setSystemPrompt(mode.systemPrompt);
     }
@@ -293,8 +296,8 @@ class AgentSidebar extends Sidebar {
     }
   }
 
-  appendToolReasoning(toolName, args = {}) {
-    const session = this.getActiveSession();
+  appendToolReasoning(toolName, args = {}, sessionId = null) {
+    const session = this.getSession(sessionId) || this.getActiveSession();
     if (!session) return;
 
     const summary = this.describeToolAction(toolName, args);
@@ -412,6 +415,7 @@ class AgentSidebar extends Sidebar {
           this.currentAgentId = mode.id;
           this.agent.setModel(this.currentModel);
           this.agent.setSystemPrompt(resolved.systemPrompt);
+          this.agent.setConfig(resolved);
           modeTrigger.querySelector(".trigger-label").textContent = mode.name;
           renderModes();
           modeMenu.classList.add("hidden");
@@ -1242,6 +1246,7 @@ class AgentSidebar extends Sidebar {
       messages: [],
       draft: "",
       isGenerating: false,
+      runId: null,
       abortController: null,
       pendingTimeout: null,
       queue: [],
@@ -1318,6 +1323,14 @@ class AgentSidebar extends Sidebar {
     const session = this.getSession(sessionId);
     if (!session) return;
 
+    if (
+      !session.runId ||
+      this.agent.currentSessionId !== session.id ||
+      this.agent.runId !== session.runId
+    ) {
+      return;
+    }
+
     this.agent.stop();
 
     if (session.abortController) {
@@ -1363,7 +1376,7 @@ class AgentSidebar extends Sidebar {
         baseURL: provider.baseURL,
         apiKey,
       });
-      this.editor.statesManager?.save();
+      await this.editor.api.setAgentApiKey?.(provider.id, apiKey);
     }
 
     const messageHistory = session.messages
@@ -1394,9 +1407,12 @@ class AgentSidebar extends Sidebar {
     this.focusInput();
 
     try {
-      const result = await this.agent.execute(content, {
+      const execution = this.agent.execute(content, {
         history: messageHistory,
+        sessionId: session.id,
       });
+      session.runId = this.agent.runId;
+      const result = await execution;
 
       const agentReply =
         typeof result === "string"
@@ -1433,6 +1449,7 @@ class AgentSidebar extends Sidebar {
         });
       }
     } finally {
+      session.runId = null;
       session.isGenerating = false;
 
       this.processQueue(session.id);

@@ -104,7 +104,7 @@ class WriterController {
 
       if (tokenStart > index) {
         fragment.appendChild(
-          document.createTextNode(txt.slice(index, tokenStart))
+          document.createTextNode(txt.slice(index, tokenStart)),
         );
       }
 
@@ -403,6 +403,70 @@ class WriterController {
     });
 
     return { row: newRow, column: newCol };
+  }
+
+  replaceRange(text, startLine, startColumn, endLine, endColumn) {
+    const file = this.editor.tabManager.activeFile;
+    const lineController = this.editor.lineController;
+
+    if (!file || !lineController || typeof text !== "string") return null;
+
+    const lines = lineController.lines.map((line) => line.getText());
+    if (lines.length === 0) return null;
+
+    const startRow = Math.min(
+      Math.max(1, Number(startLine) || 1),
+      lines.length,
+    );
+    const endRow = Math.min(
+      Math.max(startRow, Number(endLine) || startRow),
+      lines.length,
+    );
+    const startText = lines[startRow - 1] || "";
+    const endText = lines[endRow - 1] || "";
+    const startCol = Math.min(
+      Math.max(0, Number(startColumn) || 0),
+      startText.length,
+    );
+    const endCol = Math.min(
+      Math.max(0, Number(endColumn) || 0),
+      endText.length,
+    );
+
+    const replacement = text.split("\n");
+    const prefix = startText.slice(0, startCol);
+    const suffix = endText.slice(endCol);
+    const replacementLines = replacement.slice();
+    replacementLines[0] = prefix + replacementLines[0];
+    replacementLines[replacementLines.length - 1] += suffix;
+
+    lines.splice(startRow - 1, endRow - startRow + 1, ...replacementLines);
+    file.lines = lines.map((line) => new LineNode(line));
+    file.totalLines = file.lines.length;
+    file.maxLineLength = 0;
+    file.startIndex = 0;
+    file.offsetY = 0;
+    file.offsetX = 0;
+
+    const lastLine = replacementLines.length - 1;
+    const cursorRow = startRow + lastLine;
+    const cursorColumn = replacementLines[lastLine].length - suffix.length;
+
+    file.row = cursorRow;
+    file.column = cursorColumn;
+    lineController.markDirtyAll();
+    lineController.refresh(true);
+    this.editor.selectController?.unSelectAll();
+    this.editor.events.callEvent(Events.ON_CHANGE, {
+      action: "replace",
+      text,
+      beforeRow: startRow,
+      beforeColumn: startCol,
+      afterRow: cursorRow,
+      afterColumn: cursorColumn,
+    });
+
+    return { row: cursorRow, column: cursorColumn };
   }
 
   insertTextAt(text, row, column) {

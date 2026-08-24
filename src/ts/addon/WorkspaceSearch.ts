@@ -9,6 +9,8 @@ interface SearchOptions {
   caseSensitive?: boolean;
   useRegex?: boolean;
   wholeWord?: boolean;
+  offset?: number;
+  limit?: number;
 }
 
 interface SearchResult {
@@ -26,6 +28,9 @@ interface SearchResponse {
   results: SearchResult[];
   totalMatches: number;
   filesSearched: number;
+  offset: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 export class WorkspaceSearch {
@@ -73,6 +78,9 @@ export class WorkspaceSearch {
       results: [],
       totalMatches: 0,
       filesSearched: 0,
+      offset: 0,
+      limit: 50,
+      hasMore: false,
     };
 
     if (!rootPath || !query) {
@@ -101,11 +109,14 @@ export class WorkspaceSearch {
     const excludePatterns = this.splitPatterns(options.exclude);
 
     const results: SearchResult[] = [];
+    const offset = Math.max(0, Math.floor(options.offset || 0));
+    const limit = Math.min(100, Math.max(1, Math.floor(options.limit || 50)));
+    let totalMatches = 0;
 
     let filesSearched = 0;
 
     const walk = async (directory: string): Promise<void> => {
-      if (results.length >= this.maxResults) {
+      if (totalMatches >= this.maxResults) {
         return;
       }
 
@@ -122,7 +133,7 @@ export class WorkspaceSearch {
       entries.sort((a, b) => a.name.localeCompare(b.name));
 
       for (const entry of entries) {
-        if (results.length >= this.maxResults) {
+        if (totalMatches >= this.maxResults) {
           return;
         }
 
@@ -181,7 +192,7 @@ export class WorkspaceSearch {
           const lines = content.split(/\r?\n/);
 
           for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            if (results.length >= this.maxResults) {
+            if (totalMatches >= this.maxResults) {
               return;
             }
 
@@ -190,9 +201,8 @@ export class WorkspaceSearch {
             const matches = matcher(line);
 
             for (const match of matches) {
-              if (results.length >= this.maxResults) {
-                return;
-              }
+              totalMatches++;
+              if (totalMatches <= offset || results.length >= limit) continue;
 
               const preview = this.createPreview(
                 line,
@@ -229,8 +239,11 @@ export class WorkspaceSearch {
 
     return {
       results,
-      totalMatches: results.length,
+      totalMatches,
       filesSearched,
+      offset,
+      limit,
+      hasMore: offset + results.length < totalMatches,
     };
   }
 
