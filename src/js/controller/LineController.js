@@ -199,21 +199,20 @@ class LineController {
   }
 
   getLineTop(screenIndex) {
-      const baseY = this.editor.domManager
-          ? this.editor.domManager.getOutputY()
-          : this.editor.baseY;
+    const baseY = this.editor.domManager
+      ? this.editor.domManager.getOutputY()
+      : this.editor.baseY;
 
-      const lineHeight = this.editor.domManager
-          ? this.editor.domManager.getLineHeight()
-          : this.editor.posY;
+    const lineHeight = this.editor.domManager
+      ? this.editor.domManager.getLineHeight()
+      : this.editor.posY;
 
-      return lineHeight * screenIndex;
+    return lineHeight * screenIndex;
   }
   getOutputTransform() {
-    const x = -this.offsetX * this.editor.domManager.getLetterWidth();
     const y = -this.offsetY;
 
-    return `translate(${x}px, ${y}px)`;
+    return `translate(0px, ${y}px)`;
   }
 
   applyOutputTransform() {
@@ -737,30 +736,30 @@ class LineController {
   }
 
   getVisibleTokens(tokens, slicedLine) {
-      if (!tokens || !slicedLine) return null;
-      const startChar = slicedLine.startChar;
+    if (!tokens || !slicedLine) return null;
+    const startChar = slicedLine.startChar;
 
-      const endChar = startChar + slicedLine.text.length;
+    const endChar = startChar + slicedLine.text.length;
 
-      const visible = [];
+    const visible = [];
 
-      for (const token of tokens) {
-        const tokenStart = token.column - 1; 
-        const tokenEnd = tokenStart + token.value.length;
+    for (const token of tokens) {
+      const tokenStart = token.column - 1;
+      const tokenEnd = tokenStart + token.value.length;
 
-        if (tokenEnd <= startChar || tokenStart >= endChar) continue;
+      if (tokenEnd <= startChar || tokenStart >= endChar) continue;
 
-        const from = Math.max(startChar, tokenStart);
-        const to = Math.min(endChar, tokenEnd);
+      const from = Math.max(startChar, tokenStart);
+      const to = Math.min(endChar, tokenEnd);
 
-        visible.push({
-          ...token,
-          value: token.value.slice(from - tokenStart, to - tokenStart),
-          column: from + 1,
-        });
-      }
+      visible.push({
+        ...token,
+        value: token.value.slice(from - tokenStart, to - tokenStart),
+        column: from - startChar + 1,
+      });
+    }
 
-      return visible;
+    return visible;
   }
 
   createLineOBJ(slicedLine, screenIndex) {
@@ -769,7 +768,10 @@ class LineController {
     const tokens = this.lines[dataIndex]?.getTokens();
     const visibleTokens = this.getVisibleTokens(tokens, slicedLine);
 
-    const lineOBJ = this.editor.writerController.textToOBJ(slicedLine?.text, visibleTokens);
+    const lineOBJ = this.editor.writerController.textToOBJ(
+      slicedLine?.text,
+      visibleTokens,
+    );
 
     lineOBJ.style.position = "absolute";
     lineOBJ.style.top = `${this.getLineTop(screenIndex)}px`;
@@ -785,7 +787,10 @@ class LineController {
   getLineNumberOBJ(dataIndex) {
     const screenIndex = dataIndex - this.startIndex;
 
-    if (screenIndex >= 0 && screenIndex < this.editor.lineNumberOutput.children.length) {
+    if (
+      screenIndex >= 0 &&
+      screenIndex < this.editor.lineNumberOutput.children.length
+    ) {
       return this.editor.lineNumberOutput.children[screenIndex];
     }
 
@@ -840,6 +845,7 @@ class LineController {
 
     this.outputScroller.updateNbItem();
     this.outputScroller.refresh();
+    this.applyScrollTransform();
 
     this.editor.cursorController.updateCaretPosition();
 

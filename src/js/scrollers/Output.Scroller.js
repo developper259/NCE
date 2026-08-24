@@ -41,19 +41,12 @@ class OutputScroller {
   }
 
   getVisibleHorizontalWidth() {
-    const editorWidth = this.editor.editorOBJ
-      ? this.editor.editorOBJ.getBoundingClientRect().width
-      : this.lineController.outputWidth || 0;
-    const rightSidebar = this.editor.sidebarManager?.rightSidebar;
-    const rightSidebarWidth =
-      rightSidebar && rightSidebar.classList.contains("open")
-        ? rightSidebar.offsetWidth || 0
-        : 0;
     const outputWidth = this.editor.output
-      ? this.editor.output.getBoundingClientRect().width
+      ? this.editor.output.clientWidth ||
+        this.editor.output.getBoundingClientRect().width
       : this.lineController.outputWidth || 0;
 
-    return Math.max(0, Math.min(outputWidth, editorWidth - rightSidebarWidth));
+    return Math.max(0, outputWidth);
   }
 
   init() {
@@ -97,6 +90,7 @@ class OutputScroller {
       this.editor.scrollerManager.HORIZONTAL_TYPE,
       false,
     );
+    this.hScroller.wheelTarget = this.editor.output;
     this.editor.scrollerManager.addScroller(this.hScroller);
     this.hScroller.onRefresh = () => {
       this.lineController.refresh();
@@ -155,6 +149,7 @@ class OutputScroller {
     if (!this.hScroller.calcIsActive()) {
       if (this.lineController.offsetX !== 0) {
         this.lineController.offsetX = 0;
+        this.applyScrollTransform();
         this.lineController.markDirtyAll();
         this.lineController.refreshOutput();
         this.editor.cursorController.updateCaretPosition();
@@ -177,6 +172,7 @@ class OutputScroller {
 
     if (this.lineController.offsetX !== newOffsetX) {
       this.lineController.offsetX = newOffsetX;
+      this.applyScrollTransform();
     }
   }
 
@@ -308,6 +304,9 @@ class OutputScroller {
   }
 
   refresh() {
+    if (this.vScroller) this.vScroller.refreshMetrics();
+    if (this.hScroller) this.hScroller.refreshMetrics();
+
     this.vScroller.nbItem = this.getTotalScrollLines();
     this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
     this.applyVerticalScrollFromRatio(this.vScroller.scrollRatio);

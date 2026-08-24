@@ -10,6 +10,7 @@ class Scroller {
     this.isRendering = false;
 
     this.parentOBJ = null;
+    this.wheelTarget = null;
     this.scrollerOBJ = null;
     this.itemOBJ = null;
 
@@ -241,7 +242,8 @@ class Scroller {
 
     document.addEventListener("mousemove", this._onMouseMove);
     document.addEventListener("mouseup", this._onMouseUp);
-    this.parentOBJ.addEventListener("wheel", this._onWheel, { passive: false });
+    const wheelTarget = this.wheelTarget || this.parentOBJ;
+    wheelTarget.addEventListener("wheel", this._onWheel, { passive: false });
   }
 
   handleMouseMove(e) {
@@ -286,10 +288,25 @@ class Scroller {
 
   handleWheel(e) {
     if (!this.active) return;
-    e.preventDefault();
 
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
-    const delta = isVertical ? e.deltaY : e.deltaX;
+    if (isVertical && !e.shiftKey && Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+      return;
+    }
+
+    if (
+      !isVertical &&
+      !e.shiftKey &&
+      Math.abs(e.deltaX) <= Math.abs(e.deltaY)
+    ) {
+      return;
+    }
+
+    const delta = isVertical ? e.deltaY : e.shiftKey ? e.deltaY : e.deltaX;
+    if (!isVertical && delta === 0) return;
+
+    e.preventDefault();
+    if (!isVertical && delta !== 0) e.stopPropagation();
     const dimension = isVertical
       ? this.scrollerOBJHeight
       : this.scrollerOBJWidth;

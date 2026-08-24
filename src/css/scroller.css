@@ -19,8 +19,8 @@
 
 .page-scroller-horizontal {
   bottom: 0;
-  left: 0;
-  width: 100%;
+  left: var(--nce-output-x, 50px);
+  width: calc(100% - var(--nce-output-x, 50px));
   height: 10px;
 }
 

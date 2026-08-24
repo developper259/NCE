@@ -23,9 +23,6 @@
   color: var(--text-primary);
   overflow: hidden;
   white-space: nowrap;
-  transition:
-    left 0.1s ease,
-    width 0.1s ease;
 }
 
 .line {
