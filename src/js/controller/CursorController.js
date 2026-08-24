@@ -104,7 +104,7 @@ class CursorController {
     this.editor.keyBinding.historyX = undefined;
 
     const rect = this.editor.domManager.getOutputRect();
-    const localX = event.clientX - rect.left - this.mX;
+    const localX = event.clientX - rect.left;
     const localY = event.clientY - rect.top - this.mY;
 
     const scrollOffsetY = this.editor.lineController.getScrollOffsetY();
@@ -172,7 +172,8 @@ class CursorController {
 
     const viewPos = this.getViewPosition(this.row, this.column);
 
-    const placeY = this.rowToY(this.row) - 4 - this.editor.lineController.offsetY;
+    const placeY =
+      this.rowToY(this.row) - 4 - this.editor.lineController.offsetY;
     const placeX = this.columnToX(viewPos.column);
 
     this.enable();

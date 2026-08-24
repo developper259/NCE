@@ -102,15 +102,6 @@ class SidebarResizer {
       sidebar.style.width = width + "px";
     }
 
-    if (this.editor.domManager) {
-      this.editor.domManager.measureElements();
-      this.editor.domManager.calculate();
-      this.editor.domManager.apply();
-    }
-
-    this.updateResizerPositions();
-    this.updateResizerVisibility();
-
     const fileManager = this.editor.fileManagerOBJ;
     const editor = this.editor.editorOBJ;
 
@@ -132,6 +123,15 @@ class SidebarResizer {
       }
     }
 
+    if (this.editor.domManager) {
+      this.editor.domManager.measureElements();
+      this.editor.domManager.calculate();
+      this.editor.domManager.apply();
+    }
+
+    this.updateResizerPositions();
+    this.updateResizerVisibility();
+
     this.editor.sidebarManager.width = width;
     this.editor.lineController.resizeWidth();
   }
@@ -146,7 +146,8 @@ class SidebarResizer {
       ? leftSidebar.offsetWidth
       : this.editor.domManager.getSidebarWidth("left");
 
-    this.leftResizer.style.left = sideBarSelectorWidth + leftSidebarWidth - 3 + "px";
+    this.leftResizer.style.left =
+      sideBarSelectorWidth + leftSidebarWidth - 3 + "px";
 
     const rightSidebarWidth = rightSidebar
       ? rightSidebar.offsetWidth

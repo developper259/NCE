@@ -253,6 +253,25 @@ class DOMManager {
   }
 
   getOutputRect() {
+    const editor = this.editor?.editorOBJ || this.getElement(".editor");
+    if (editor) {
+      const editorRect = editor.getBoundingClientRect();
+      const left = editorRect.left + this.output.x;
+      const top = editorRect.top;
+      const width = Math.max(0, editorRect.width - this.output.x);
+      const height = editorRect.height;
+
+      this.outputRect = {
+        ...this.outputRect,
+        left,
+        top,
+        width,
+        height,
+        right: left + width,
+        bottom: top + height,
+      };
+    }
+
     return { ...this.outputRect };
   }
 

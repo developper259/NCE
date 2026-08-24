@@ -34,15 +34,30 @@ class SearchController {
   initSearchBar() {
     this.searchBar = this.editor.domManager.getElement(".editor-search-bar");
 
-    this.input = this.editor.domManager.getElement(".search-bar-input", this.searchBar);
+    this.input = this.editor.domManager.getElement(
+      ".search-bar-input",
+      this.searchBar,
+    );
 
-    this.counter = this.editor.domManager.getElement(".search-bar-counter", this.searchBar);
+    this.counter = this.editor.domManager.getElement(
+      ".search-bar-counter",
+      this.searchBar,
+    );
 
-    this.previousButton = this.editor.domManager.getElement(".search-bar-previous", this.searchBar);
+    this.previousButton = this.editor.domManager.getElement(
+      ".search-bar-previous",
+      this.searchBar,
+    );
 
-    this.nextButton = this.editor.domManager.getElement(".search-bar-next", this.searchBar);
+    this.nextButton = this.editor.domManager.getElement(
+      ".search-bar-next",
+      this.searchBar,
+    );
 
-    this.closeButton = this.editor.domManager.getElement(".search-bar-close", this.searchBar);
+    this.closeButton = this.editor.domManager.getElement(
+      ".search-bar-close",
+      this.searchBar,
+    );
   }
 
   focusInput() {
@@ -68,11 +83,9 @@ class SearchController {
 
     this.search(this.input.value);
 
-
     if (this.results.length > 0) {
       this.goToResult(false, true);
     }
-
   }
 
   close() {
@@ -110,7 +123,7 @@ class SearchController {
       if (e.key === "Enter") {
         e.preventDefault();
         e.stopPropagation();
-  
+
         if (e.shiftKey) {
           this.previous();
         } else {
@@ -118,13 +131,6 @@ class SearchController {
         }
 
         return;
-      }
-
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-
-        this.close();
       }
     }
   }
