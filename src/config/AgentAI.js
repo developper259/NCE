@@ -1,5 +1,6 @@
 const AgentAI = {
   defaultAgent: "coder",
+  defaultProvider: "groq",
   maxIterations: 10,
   providers: {
     ollama: {
@@ -82,11 +83,9 @@ const AgentAI = {
   agents: {
     coder: {
       id: "coder",
-      name: "NCE Coder",
+      name: "Code",
       description:
         "Agent principal pour comprendre, modifier et corriger du code.",
-      provider: "groq",
-      model: "openai/gpt-oss-120b",
       temperature: 0.2,
       maxTokens: 4096,
       systemPrompt: `Tu es l'agent de programmation intégré à NCE.
@@ -101,54 +100,45 @@ RÈGLES :
 - Utilise les outils disponibles lorsque tu as besoin d'informations précises.
 - Ne suppose jamais le contenu d'un fichier que tu n'as pas consulté.
 - Avant une modification, vérifie que tu comprends suffisamment le contexte.
-- Ne modifie jamais un fichier simplement pour "essayer".
+- Ne modifie jamais un fichier simplement pour essayer.
 - Les modifications doivent passer par les outils prévus par NCE.
 - Respecte les confirmations utilisateur.
-- Ne contourne jamais une confirmation.
 - Si une opération échoue, indique clairement l'erreur.
-- Évite de répéter des informations déjà présentes dans le contexte.
 - Lorsque la tâche est terminée, réponds avec un résumé court.
 
 Tu es un agent intégré à un éditeur de code, pas un simple chatbot.`.trim(),
     },
-    reviewer: {
-      id: "reviewer",
-      name: "Code Reviewer",
+    ask: {
+      id: "ask",
+      name: "Ask",
+      description: "Répond aux questions et aide à comprendre le projet.",
+      temperature: 0.2,
+      maxTokens: 4096,
+      systemPrompt: `Tu es le mode Ask de NCE.
+
+Réponds aux questions de l'utilisateur avec clarté et précision.
+Utilise les outils lorsque des informations du projet sont nécessaires.
+Ne modifie jamais les fichiers dans ce mode.
+Ne prétends jamais avoir vérifié une information que tu n'as pas lue.`.trim(),
+    },
+    plan: {
+      id: "plan",
+      name: "Plan",
       description:
-        "Analyse le code et détecte les problèmes sans le modifier automatiquement.",
-      provider: "groq",
-      model: "openai/gpt-oss-120b",
+        "Prépare une stratégie de modification sans changer le code.",
       temperature: 0.1,
       maxTokens: 4096,
-      systemPrompt: `Tu es un reviewer de code intégré à NCE.
+      systemPrompt: `Tu es le mode Plan de NCE.
 
-Ton rôle est d'analyser le code fourni par l'utilisateur.
-
-Recherche notamment :
-- bugs ;
-- erreurs logiques ;
-- problèmes de sécurité ;
-- problèmes de performance ;
-- code inutile ;
-- problèmes d'architecture ;
-- problèmes de lisibilité ;
-- mauvaises pratiques.
-
-Ne modifie jamais le code automatiquement.
-
-Lorsque tu trouves un problème :
-1. explique où il se trouve ;
-2. explique pourquoi c'est un problème ;
-3. propose une correction concise.
-
-Ne prétends jamais avoir analysé un fichier que tu n'as pas réellement lu.`.trim(),
+Analyse la demande et le projet avant de répondre.
+Utilise les outils de lecture et de recherche pour établir les faits.
+Présente un plan d'implémentation ordonné, précis et vérifiable.
+Ne modifie jamais les fichiers dans ce mode.`.trim(),
     },
     explain: {
       id: "explain",
-      name: "Code Explain",
+      name: "Explain",
       description: "Explique le code sélectionné ou le contexte actuel.",
-      provider: "groq",
-      model: "openai/gpt-oss-120b",
       temperature: 0.2,
       maxTokens: 3000,
       systemPrompt: `Tu es un assistant spécialisé dans l'explication du code.
@@ -179,9 +169,9 @@ Si une information manque, utilise les outils disponibles avant de demander à l
     if (!agent) {
       throw new Error(`Agent AI inconnu : ${agentId || this.defaultAgent}`);
     }
-    const provider = this.getProvider(agent.provider);
+    const provider = this.getProvider(this.defaultProvider);
     if (!provider) {
-      throw new Error(`Provider AI inconnu : ${agent.provider}`);
+      throw new Error(`Provider AI inconnu : ${this.defaultProvider}`);
     }
     return {
       agent,

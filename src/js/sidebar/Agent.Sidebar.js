@@ -84,6 +84,7 @@ class AgentSidebar extends Sidebar {
       apiKey: this.apiKeys.get(resolvedConfig.provider.id) || null,
     });
     this.agent.setModel(this.currentModel);
+    this.agent.setSystemPrompt(resolvedConfig.systemPrompt);
 
     this.sessions = [];
     this.activeSessionId = null;
@@ -134,6 +135,10 @@ class AgentSidebar extends Sidebar {
       apiKey: this.apiKeys.get(provider.id) || null,
     });
     this.agent.setModel(this.currentModel || provider.defaultModel);
+    const mode = AgentAI.getAgent(this.currentAgentId);
+    if (mode?.systemPrompt) {
+      this.agent.setSystemPrompt(mode.systemPrompt);
+    }
   }
 
   render() {
@@ -338,12 +343,109 @@ class AgentSidebar extends Sidebar {
     const toolbar = document.createElement("div");
     toolbar.className = "agent-sidebar-input-toolbar";
 
+    const positionSelectorMenu = (menu, container) => {
+      const containerRect = container.getBoundingClientRect();
+      menu.style.position = "fixed";
+      menu.style.left = `${containerRect.left}px`;
+      menu.style.right = "auto";
+      menu.style.bottom = `${window.innerHeight - containerRect.top + 4}px`;
+
+      requestAnimationFrame(() => {
+        const menuRect = menu.getBoundingClientRect();
+        const edgePadding = 8;
+        let left = containerRect.left;
+
+        if (menuRect.right > window.innerWidth - edgePadding) {
+          left = window.innerWidth - menuRect.width - edgePadding;
+        }
+
+        menu.style.left = `${Math.max(edgePadding, left)}px`;
+      });
+    };
+
+    const modeDropdownContainer = document.createElement("div");
+    modeDropdownContainer.className =
+      "agent-sidebar-model-dropdown-container agent-sidebar-mode-selector";
+
+    const modeTrigger = document.createElement("button");
+    modeTrigger.type = "button";
+    modeTrigger.className =
+      "agent-sidebar-model-trigger agent-sidebar-mode-trigger";
+    modeTrigger.title = "Change mode";
+    modeTrigger.setAttribute("aria-label", "Change mode");
+    const currentAgent = AgentAI.getAgent(this.currentAgentId);
+    modeTrigger.innerHTML = `
+      <i class="fi fi-rr-settings-sliders"></i>
+      <span class="trigger-label">${currentAgent?.name || "Mode"}</span>
+    `;
+
+    const modeMenu = document.createElement("div");
+    modeMenu.className =
+      "agent-sidebar-model-menu agent-sidebar-mode-menu hidden";
+    const modeList = document.createElement("div");
+    modeList.className = "agent-sidebar-model-list";
+    modeMenu.appendChild(modeList);
+    document.body.appendChild(modeMenu);
+
+    const renderModes = () => {
+      modeList.innerHTML = "";
+      for (const mode of AgentAI.getAgents()) {
+        const item = document.createElement("div");
+        item.className = "agent-sidebar-model-item";
+        if (mode.id === this.currentAgentId) item.classList.add("active");
+
+        const icon = document.createElement("i");
+        icon.className = "fi fi-rr-check";
+        icon.style.opacity = mode.id === this.currentAgentId ? "1" : "0";
+
+        const textWrap = document.createElement("div");
+        textWrap.style.display = "flex";
+        textWrap.style.flexDirection = "column";
+
+        const name = document.createElement("span");
+        name.textContent = mode.name;
+        textWrap.appendChild(name);
+        item.append(icon, textWrap);
+
+        item.addEventListener("click", () => {
+          const resolved = AgentAI.resolve(mode.id);
+          this.currentAgentId = mode.id;
+          this.agent.setModel(this.currentModel);
+          this.agent.setSystemPrompt(resolved.systemPrompt);
+          modeTrigger.querySelector(".trigger-label").textContent = mode.name;
+          renderModes();
+          modeMenu.classList.add("hidden");
+          this.editor.statesManager?.save();
+        });
+        modeList.appendChild(item);
+      }
+    };
+
+    renderModes();
+    modeTrigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      dropdownMenu?.classList.add("hidden");
+      modeMenu.classList.toggle("hidden");
+      if (!modeMenu.classList.contains("hidden")) {
+        positionSelectorMenu(modeMenu, modeDropdownContainer);
+      }
+    });
+    modeDropdownContainer.addEventListener("click", (event) =>
+      event.stopPropagation(),
+    );
+    modeDropdownContainer.appendChild(modeTrigger);
+    toolbar.appendChild(modeDropdownContainer);
+
     const modelDropdownContainer = document.createElement("div");
-    modelDropdownContainer.className = "agent-sidebar-model-dropdown-container";
+    modelDropdownContainer.className =
+      "agent-sidebar-model-dropdown-container agent-sidebar-model-selector";
 
     const triggerBtn = document.createElement("button");
     triggerBtn.type = "button";
-    triggerBtn.className = "agent-sidebar-model-trigger";
+    triggerBtn.className =
+      "agent-sidebar-model-trigger agent-sidebar-model-trigger-button";
+    triggerBtn.title = "Change model";
+    triggerBtn.setAttribute("aria-label", "Change model");
 
     const availableModels = [];
     Object.values(AgentAI.providers).forEach((provider) => {
@@ -369,7 +471,6 @@ class AgentSidebar extends Sidebar {
     triggerBtn.innerHTML = `
       <i class="fi fi-rr-robot"></i> 
       <span class="trigger-label">${currentDisplayName}</span>
-      <i class="fi fi-rr-menu-dots trigger-dots"></i>
     `;
 
     const dropdownMenu = document.createElement("div");
@@ -384,6 +485,7 @@ class AgentSidebar extends Sidebar {
     const listContainer = document.createElement("div");
     listContainer.className = "agent-sidebar-model-list";
     dropdownMenu.appendChild(listContainer);
+    document.body.appendChild(dropdownMenu);
 
     const renderModelsList = (filterText = "") => {
       listContainer.innerHTML = "";
@@ -433,6 +535,10 @@ class AgentSidebar extends Sidebar {
             apiKey: this.apiKeys.get(m.providerId) || null,
           });
           this.agent.setModel(m.id);
+          const selectedAgent = AgentAI.getAgent(this.currentAgentId);
+          if (selectedAgent?.systemPrompt) {
+            this.agent.setSystemPrompt(selectedAgent.systemPrompt);
+          }
 
           this.editor.statesManager?.save();
 
@@ -462,8 +568,10 @@ class AgentSidebar extends Sidebar {
 
     triggerBtn.addEventListener("click", (e) => {
       e.stopPropagation();
+      modeMenu.classList.add("hidden");
       dropdownMenu.classList.toggle("hidden");
       if (!dropdownMenu.classList.contains("hidden")) {
+        positionSelectorMenu(dropdownMenu, modelDropdownContainer);
         searchBox.value = "";
         renderModelsList();
         searchBox.focus();
@@ -471,13 +579,18 @@ class AgentSidebar extends Sidebar {
     });
 
     document.addEventListener("click", (e) => {
-      if (!modelDropdownContainer.contains(e.target)) {
+      if (
+        !modelDropdownContainer.contains(e.target) &&
+        !modeDropdownContainer.contains(e.target) &&
+        !dropdownMenu.contains(e.target) &&
+        !modeMenu.contains(e.target)
+      ) {
         dropdownMenu.classList.add("hidden");
+        modeMenu.classList.add("hidden");
       }
     });
 
     modelDropdownContainer.appendChild(triggerBtn);
-    modelDropdownContainer.appendChild(dropdownMenu);
 
     toolbar.appendChild(modelDropdownContainer);
 

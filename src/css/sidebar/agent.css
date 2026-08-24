@@ -1,5 +1,6 @@
 .agent-sidebar-container {
   position: relative;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -562,9 +563,9 @@
 /* La barre d'outils du bas (sous le texte) */
 .agent-sidebar-input-toolbar {
   display: flex;
-  justify-content: space-between;
+  gap: 6px;
   align-items: center;
-  padding: 4px 8px 8px 8px;
+  padding: 4px 6px 6px;
 }
 
 /* --- Menu personnalisé du modèle --- */
@@ -572,51 +573,121 @@
   position: relative;
 }
 
+.agent-sidebar-mode-selector,
+.agent-sidebar-model-selector {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 /* Le bouton "Auto" / "Qwen" */
 .agent-sidebar-model-trigger {
+  min-width: 0;
+  max-width: 190px;
   display: flex;
   align-items: center;
   gap: 6px;
-  
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid transparent;
-  border-radius: 4px;
-  padding: 4px 8px;
-  
+
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  padding: 4px 7px;
+
   color: var(--text-secondary);
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
-  
-  transition: background 0.2s, color 0.2s;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.agent-sidebar-mode-trigger {
+  max-width: 125px;
+}
+
+.agent-sidebar-model-trigger-button {
+  width: auto;
 }
 
 .agent-sidebar-model-trigger:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text-white);
+  background: var(--bg-hover-alt, rgba(255, 255, 255, 0.09));
+  border-color: var(--border-active, var(--accent-color, #007acc));
+  color: var(--text-primary, var(--text-white));
+}
+
+.agent-sidebar-model-trigger:focus-visible {
+  outline: 2px solid var(--accent-color, #007acc);
+  outline-offset: 1px;
+}
+
+.agent-sidebar-model-trigger > i:first-child {
+  flex: 0 0 auto;
+  color: var(--text-tertiary, #a0a0a0);
+  font-size: 12px;
+}
+
+.agent-sidebar-model-trigger .trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container (max-width: 275px) {
+  .agent-sidebar-input-toolbar {
+    gap: 4px;
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .agent-sidebar-mode-selector,
+  .agent-sidebar-model-selector {
+    flex: 0 0 auto;
+  }
+
+  .agent-sidebar-model-trigger {
+    width: 26px;
+    height: 26px;
+    justify-content: center;
+    padding: 0;
+    border-color: transparent;
+  }
+
+  .agent-sidebar-model-trigger .trigger-label,
+  .agent-sidebar-model-trigger .trigger-dots {
+    display: none;
+  }
+
+  .agent-sidebar-model-trigger > i:first-child {
+    color: var(--text-secondary, #c4c4c4);
+    font-size: 13px;
+  }
 }
 
 .trigger-dots {
+  flex: 0 0 auto;
+  margin-left: auto;
   font-size: 9px;
   opacity: 0.7;
 }
 
 /* La liste déroulante au-dessus du bouton */
 .agent-sidebar-model-menu {
-  position: absolute;
-  bottom: calc(100% + 8px);
+  bottom: calc(100% + 4px);
   left: 0;
-  width: 220px;
-  
+  width: 210px;
+  max-width: calc(100vw - 16px);
   background: var(--bg-primary, #1e1e1e);
   border: 1px solid var(--border-primary, #333);
-  border-radius: 8px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
-  
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3);
+
   z-index: 100;
   display: flex;
   flex-direction: column;
-  padding: 6px;
+  padding: 3px;
+}
+
+.agent-sidebar-mode-menu {
+  width: 220px;
 }
 
 .agent-sidebar-model-menu.hidden {
@@ -630,11 +701,11 @@
   background: var(--bg-primary, #1e1e1e);
   border: 1px solid var(--border-primary, #333);
   color: var(--text-primary, #fff);
-  padding: 6px 8px;
+  padding: 5px 7px;
   border-radius: 4px;
   font-size: 11px;
   outline: none;
-  margin-bottom: 6px;
+  margin-bottom: 3px;
   font-family: inherit;
   transition: border-color 0.2s;
 }
@@ -650,7 +721,7 @@
 .agent-sidebar-model-list {
   display: flex;
   flex-direction: column;
-  max-height: 180px;
+  max-height: 150px;
   overflow-y: auto;
   gap: 2px;
 }
@@ -668,12 +739,13 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 5px 7px;
   border-radius: 4px;
   cursor: pointer;
   font-size: 11px;
   color: var(--text-secondary, #aaa);
-  border: 1px solid transparent; /* Prépare l'espace pour la bordure bleue au clic */
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .agent-sidebar-model-item:hover {
@@ -684,13 +756,17 @@
 /* Modèle sélectionné */
 .agent-sidebar-model-item.active {
   border-color: var(--accent-color, #007acc);
-  background: rgba(0, 122, 204, 0.1); /* Bleu très transparent */
+  background: color-mix(in srgb, var(--accent-color, #007acc) 12%, transparent);
   color: var(--text-primary, #fff);
 }
 
 .agent-sidebar-model-item i {
   font-size: 10px;
-  color: var(--accent-color, #007acc);
+  color: var(--text-tertiary, #a0a0a0);
+}
+
+.agent-sidebar-model-item.active i {
+  color: var(--text-primary, #f0f0f0);
 }
 
 /* Ligne séparatrice et "Manage models" */
@@ -716,6 +792,7 @@
   width: 24px;
   height: 24px;
   flex: 0 0 auto;
+  margin-left: auto;
 
   display: flex;
   align-items: center;

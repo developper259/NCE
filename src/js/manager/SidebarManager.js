@@ -11,7 +11,7 @@ class SidebarManager {
     this.leftMenuContainer = null;
     this.rightMenuContainer = null;
 
-    this.width = 250;
+    this.width = 350;
     this.selectorWidth = 48;
 
     this.leftScroller = null;

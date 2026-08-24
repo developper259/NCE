@@ -15,7 +15,7 @@ class Agent {
     this.maxIterations = 20;
     this.messages = [];
     this.fileSnapshots = new Map();
-    this.systemPrompt = this.createDefaultSystemPrompt();
+    this.systemPrompt = "";
     this.registerEditorTools();
   }
 
@@ -33,6 +33,13 @@ class Agent {
     if (typeof model !== "string" || !model.trim())
       throw new TypeError("Le modèle doit être une chaîne non vide.");
     this.model = model.trim();
+    return this;
+  }
+  setSystemPrompt(prompt) {
+    if (typeof prompt !== "string" || !prompt.trim()) {
+      throw new TypeError("Le system prompt doit être une chaîne non vide.");
+    }
+    this.systemPrompt = prompt.trim();
     return this;
   }
   setContextProvider(provider) {
@@ -394,9 +401,6 @@ class Agent {
           role: message.role,
           content: message.content.slice(0, 4000),
         });
-  }
-  createDefaultSystemPrompt() {
-    return "Tu es l'agent IA intégré à NCE, un éditeur de code.\nUtilise les outils pour obtenir des faits avant de répondre ou de modifier.\nNe suppose jamais le contenu d'un fichier non lu.\nToute modification doit passer par l'outil prévu et respecter la confirmation utilisateur.\nSi une opération échoue, indique l'erreur. Quand la tâche est terminée, réponds brièvement.";
   }
   truncate(value, max) {
     const text = value === null || value === undefined ? "" : String(value);

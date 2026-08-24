@@ -242,12 +242,20 @@ class KeyBinding {
   // --- Key functions ---
 
   key_escape(s, c, m, a) {
+    const openAgentSelectors = document.querySelectorAll(
+      ".agent-sidebar-model-menu:not(.hidden)",
+    );
+    if (openAgentSelectors.length > 0) {
+      openAgentSelectors.forEach((menu) => menu.classList.add("hidden"));
+      return;
+    }
+
     if (this.editor.searchController.isOpen) {
       this.editor.searchController.close();
       return;
     }
 
-    if (this.editor.panel !== undefined){
+    if (this.editor.panel !== undefined) {
       this.editor.panel.close();
       return;
     }
