@@ -152,8 +152,16 @@ class LineController {
     const lineHeight = this.editor.domManager
       ? this.editor.domManager.getLineHeight()
       : this.editor.posY;
+    const horizontalScroller = this.outputScroller?.hScroller;
+    const horizontalHeight = horizontalScroller?.calcIsActive()
+      ? horizontalScroller.scrollerOBJ?.offsetHeight || 10
+      : 0;
+    const availableHeight = Math.max(
+      lineHeight,
+      this.outputHeight - horizontalHeight + lineHeight,
+    );
 
-    return Math.max(1, parseInt(this.outputHeight / lineHeight));
+    return Math.max(1, parseInt(availableHeight / lineHeight));
   }
 
   get renderedLineCount() {
@@ -172,8 +180,16 @@ class LineController {
     const lineHeight = this.editor.domManager
       ? this.editor.domManager.getLineHeight()
       : this.editor.posY;
+    const horizontalScroller = this.outputScroller?.hScroller;
+    const horizontalHeight = horizontalScroller?.calcIsActive()
+      ? horizontalScroller.scrollerOBJ?.offsetHeight || 10
+      : 0;
+    const availableHeight = Math.max(
+      lineHeight,
+      this.outputHeight - horizontalHeight + lineHeight,
+    );
 
-    return parseInt(this.outputHeight / lineHeight);
+    return parseInt(availableHeight / lineHeight);
   }
 
   getScrollOffsetY() {
@@ -195,7 +211,7 @@ class LineController {
       return 0;
     }
 
-    return overflow + this.marginLines;
+    return overflow;
   }
 
   getLineTop(screenIndex) {

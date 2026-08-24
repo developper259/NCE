@@ -271,7 +271,7 @@ class OutputScroller {
       return 0;
     }
 
-    return overflow + this.marginLines;
+    return overflow;
   }
 
   restoreScroll() {

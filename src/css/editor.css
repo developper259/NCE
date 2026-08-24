@@ -6,7 +6,8 @@
   width: auto;
   height: var(--output-height);
   box-sizing: border-box;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: visible;
   background-color: var(--bg-secondary);
 }
 
@@ -19,7 +20,7 @@
   background-color: var(--bg-secondary);
   left: 50px;
   width: calc(100% - 50px);
-  height: 100%;
+  height: calc(100% + var(--nce-line-height, 23px));
   color: var(--text-primary);
   overflow: hidden;
   white-space: nowrap;
