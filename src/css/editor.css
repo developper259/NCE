@@ -11,6 +11,17 @@
   background-color: var(--bg-secondary);
 }
 
+.editor,
+.editor * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.editor::-webkit-scrollbar,
+.editor *::-webkit-scrollbar {
+  display: none;
+}
+
 .editor-empty {
   background-color: var(--bg-primary);
 }
