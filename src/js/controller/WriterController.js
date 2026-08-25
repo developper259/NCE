@@ -77,7 +77,7 @@ class WriterController {
 
     for (let char of txt) {
       if (this.separator.includes(char)) {
-        let c = char.replace(/\t/g, " ".repeat(CONFIG_GET("tab_width")));
+        let c = expandTabsForDisplay(char);
         tableSplit.push(c);
       } else {
         if (!tableSplit.length || this.separator.includes(oldChar)) {
@@ -104,13 +104,15 @@ class WriterController {
 
       if (tokenStart > index) {
         fragment.appendChild(
-          document.createTextNode(txt.slice(index, tokenStart)),
+          document.createTextNode(
+            expandTabsForDisplay(txt.slice(index, tokenStart)),
+          ),
         );
       }
 
       const span = document.createElement("span");
       span.className = `token editor-select ${token.type}`;
-      span.textContent = token.value;
+      span.textContent = expandTabsForDisplay(token.value);
 
       fragment.appendChild(span);
 
@@ -118,7 +120,9 @@ class WriterController {
     }
 
     if (index < txt.length) {
-      fragment.appendChild(document.createTextNode(txt.slice(index)));
+      fragment.appendChild(
+        document.createTextNode(expandTabsForDisplay(txt.slice(index))),
+      );
     }
 
     return fragment;
@@ -137,13 +141,13 @@ class WriterController {
         span.className = segment.type
           ? `diff-segment diff-${segment.type}`
           : "diff-segment";
-        span.textContent = segment.text ?? "";
+        span.textContent = expandTabsForDisplay(segment.text ?? "");
         fragment.appendChild(span);
       }
     } else if (tokens && tokens.length !== 0) {
       fragment = this.tokenToDOM(txt, tokens);
     } else {
-      const value = document.createTextNode(txt ?? "");
+      const value = document.createTextNode(expandTabsForDisplay(txt ?? ""));
 
       fragment = document.createDocumentFragment();
       fragment.appendChild(value);

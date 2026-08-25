@@ -54,6 +54,66 @@ getOccurrence = (c, str) => {
   return str.split(c).length - 1;
 };
 
+normalizeTabWidth = (tabWidth) => {
+  const width = Number(tabWidth);
+  return Number.isFinite(width) && width > 0 ? Math.floor(width) : 1;
+};
+
+expandTabsForDisplay = (text, tabWidth = CONFIG_GET("tab_width")) => {
+  const value = typeof text === "string" ? text : "";
+  return value.replace(/\t/g, " ".repeat(normalizeTabWidth(tabWidth)));
+};
+
+realColumnToViewColumn = (
+  text,
+  realColumn,
+  tabWidth = CONFIG_GET("tab_width"),
+) => {
+  const value = typeof text === "string" ? text : "";
+  const safeColumn = Math.max(0, Math.min(Number(realColumn) || 0, value.length));
+  const before = value.slice(0, safeColumn);
+  const tabs = getOccurrence("\t", before);
+
+  return before.length + tabs * (normalizeTabWidth(tabWidth) - 1);
+};
+
+viewColumnToRealColumn = (
+  text,
+  viewColumn,
+  tabWidth = CONFIG_GET("tab_width"),
+) => {
+  const value = typeof text === "string" ? text : "";
+  const target = Number(viewColumn) || 0;
+  const width = normalizeTabWidth(tabWidth);
+
+  if (target <= 0) return 0;
+
+  let currentViewColumn = 0;
+  let realColumn = 0;
+
+  for (const character of value) {
+    if (currentViewColumn >= target) break;
+
+    const characterWidth = character === "\t" ? width : 1;
+    if (currentViewColumn + characterWidth > target) {
+      if (target >= currentViewColumn + characterWidth / 2) {
+        realColumn++;
+      }
+      break;
+    }
+
+    currentViewColumn += characterWidth;
+    realColumn++;
+  }
+
+  return realColumn;
+};
+
+getVisualTextLength = (text, tabWidth = CONFIG_GET("tab_width")) => {
+  const value = typeof text === "string" ? text : "";
+  return realColumnToViewColumn(value, value.length, tabWidth);
+};
+
 createElement = (html) => {
   const parser = new DOMParser();
   let doc = parser.parseFromString(html, "text/html");

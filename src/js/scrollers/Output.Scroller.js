@@ -351,11 +351,7 @@ class OutputScroller {
       const line = lineNode ? lineNode.getText() : "";
       column = Math.max(0, Math.min(column, line.length));
 
-      const tabWidth = CONFIG_GET("tab_width");
-      let visualPos = 0;
-      for (let i = 0; i < column; i++) {
-        visualPos += line[i] === "\t" ? tabWidth : 1;
-      }
+      const visualPos = realColumnToViewColumn(line, column);
 
       const visibleWidthChars = Math.floor(
         this.getVisibleHorizontalWidth() / this.editor.letterSize,

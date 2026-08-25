@@ -198,10 +198,7 @@ class CursorController {
     const line = lineNode.getText();
     const safeRealCol = Math.max(0, Math.min(realColumn, line.length));
 
-    const lBefore = line.slice(0, safeRealCol);
-    const tabsCount = getOccurrence("\t", lBefore);
-    const viewColumn =
-      lBefore.length + tabsCount * CONFIG_GET("tab_width") - tabsCount;
+    const viewColumn = realColumnToViewColumn(line, safeRealCol);
 
     return { row: row, column: viewColumn };
   }
@@ -216,31 +213,10 @@ class CursorController {
     if (!lineNode) return { row, column: 0 };
 
     const line = lineNode.getText();
-    const tabWidth = CONFIG_GET("tab_width");
-
-    if (viewColumn <= 0) return { row: row, column: 0 };
-
-    let currentViewCol = 0;
-    let realCol = 0;
-
-    for (let i = 0; i < line.length; i++) {
-      if (currentViewCol >= viewColumn) break;
-
-      const charWidth = line[i] === "\t" ? tabWidth : 1;
-
-      if (currentViewCol + charWidth > viewColumn) {
-        const midPoint = currentViewCol + charWidth / 2;
-        if (viewColumn >= midPoint) {
-          realCol++;
-        }
-        break;
-      }
-
-      currentViewCol += charWidth;
-      realCol++;
-    }
-
-    return { row: row, column: realCol };
+    return {
+      row: row,
+      column: viewColumnToRealColumn(line, viewColumn),
+    };
   }
 
   getCursorPosition() {

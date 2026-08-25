@@ -33,6 +33,6 @@ class Config_space extends Command {
     }
     this.trees.top[0].title = this.values[this.value];
     this.editor.bottomBar.refresh();
-    this.editor.lineController.refresh();
+    this.editor.lineController.refreshTabWidth();
   }
 }

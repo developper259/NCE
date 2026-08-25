@@ -405,13 +405,21 @@ class LineController {
   }
 
   getViewTextLength(text) {
-    const value = typeof text === "string" ? text : "";
+    return getVisualTextLength(text);
+  }
 
-    return (
-      value.length +
-      getOccurrence("\t", value) * CONFIG_GET("tab_width") -
-      getOccurrence("\t", value)
-    );
+  refreshTabWidth() {
+    this.maxLineLength = 0;
+
+    for (let i = 0; i < this.lines.length; i++) {
+      this.maxLineLength = Math.max(
+        this.maxLineLength,
+        this.getViewLineLength(i),
+      );
+    }
+
+    this.markDirtyAll();
+    this.refresh(true);
   }
 
   getViewNumberLines() {
@@ -543,7 +551,7 @@ class LineController {
   getSlicedLine(line) {
     let startChar = 0;
     let visualStart = 0;
-    const tabWidth = CONFIG_GET("tab_width");
+    const tabWidth = normalizeTabWidth(CONFIG_GET("tab_width"));
 
     if (this.offsetX > 0) {
       while (startChar < line.length && visualStart < this.offsetX) {
@@ -565,6 +573,7 @@ class LineController {
     return {
       text: line.slice(startChar, endChar),
       startChar,
+      leftPaddingColumns: Math.max(0, visualStart - this.offsetX),
     };
   }
 
@@ -648,7 +657,7 @@ class LineController {
 
     let line = this.getSlicedLine(fullText);
 
-    if (child.textContent !== line.text) {
+    if (child.dataset.sourceText !== line.text) {
       let lineOBJ = this.createLineOBJ(line, screenIndex);
 
       if (!lineOBJ) {
@@ -899,13 +908,16 @@ class LineController {
       diffSegments,
     );
 
+    lineOBJ.dataset.sourceText = displayText;
+
     if (diffState) {
       lineOBJ.classList.add(`line-${diffState}`);
     }
 
     lineOBJ.style.position = "absolute";
     lineOBJ.style.top = `${this.getLineTop(screenIndex)}px`;
-    lineOBJ.style.left = "0px";
+    const leftPaddingColumns = slicedLine?.leftPaddingColumns || 0;
+    lineOBJ.style.left = `${leftPaddingColumns * this.editor.letterSize}px`;
 
     return lineOBJ;
   }
