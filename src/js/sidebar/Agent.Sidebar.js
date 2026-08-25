@@ -49,6 +49,10 @@ class AgentSidebar extends Sidebar {
           status: "modified",
           additions: diffStats.additions,
           deletions: diffStats.deletions,
+          beforeText,
+          afterText,
+          cursorBefore: payload.cursorBefore || null,
+          absolutePath: this.editor.tabManager.activeFile?.path || "",
         };
 
         const existingIndex = session.changes.findIndex(
@@ -947,11 +951,115 @@ class AgentSidebar extends Sidebar {
 
     li.appendChild(statsSpan);
 
+    const actions = document.createElement("div");
+    actions.className = "agent-sidebar-change-actions";
+
+    actions.appendChild(
+      this.createChangeActionButton(
+        "Keep",
+        "fi fi-rr-check",
+        "Keep changes",
+        () => this.keepChange(change),
+      ),
+    );
+    actions.appendChild(
+      this.createChangeActionButton(
+        "Undo",
+        "fi fi-rr-undo",
+        "Undo changes",
+        () => this.undoChange(change),
+      ),
+    );
+    li.appendChild(actions);
+
     li.addEventListener("click", () => {
       this.openChange(change);
     });
 
     return li;
+  }
+
+  createChangeActionButton(label, iconClass, title, handler) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "agent-sidebar-change-action";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+
+    const icon = document.createElement("i");
+    icon.className = iconClass;
+    button.appendChild(icon);
+
+    const text = document.createElement("span");
+    text.textContent = label;
+    button.appendChild(text);
+
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      handler();
+    });
+    return button;
+  }
+
+  getChangeFile(change) {
+    const tabManager = this.editor?.tabManager;
+    if (!tabManager) return null;
+    if (change.absolutePath && typeof tabManager.getFileByPath === "function") {
+      const exact = tabManager.getFileByPath(change.absolutePath);
+      if (exact) return exact;
+    }
+    const activeFile = tabManager.activeFile;
+    if (
+      activeFile &&
+      (activeFile.path === change.path ||
+        activeFile.path?.replace(/\\/g, "/").endsWith(`/${change.path}`))
+    ) {
+      return activeFile;
+    }
+    return null;
+  }
+
+  removeChange(change) {
+    const session = this.getActiveSession();
+    if (!session) return;
+    session.changes = session.changes.filter((entry) => entry !== change);
+    this.refresh();
+  }
+
+  async keepChange(change) {
+    const file = this.getChangeFile(change);
+    if (!file) return;
+    if (this.editor.tabManager.activeFile !== file) {
+      await this.editor.tabManager.setFocusFile(file);
+    }
+    this.agent.markFileDiffHighlights("", "", file);
+    if (this.editor.lineController?.refresh) {
+      this.editor.lineController.refresh(true);
+    }
+    this.removeChange(change);
+  }
+
+  async undoChange(change) {
+    const file = this.getChangeFile(change);
+    if (!file || typeof change.beforeText !== "string") return;
+
+    if (this.editor.tabManager.activeFile !== file) {
+      await this.editor.tabManager.setFocusFile(file);
+    }
+    this.editor.lineController.loadContent(change.beforeText);
+    this.editor.lineController.markDirtyAll?.();
+    this.editor.lineController.refresh(true);
+    if (
+      change.cursorBefore &&
+      this.editor.cursorController?.setCursorPosition
+    ) {
+      this.editor.cursorController.setCursorPosition(
+        change.cursorBefore.row,
+        change.cursorBefore.column,
+      );
+    }
+    file.setIsSaved(false);
+    this.removeChange(change);
   }
 
   getSessionChangeStats(session) {

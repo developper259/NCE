@@ -88,7 +88,9 @@ class LineNode {
     node.isHighlight = data.isHighlight || false;
     node.state = data.state || null;
     node.diffState = data.diffState || null;
-    node.diffSegments = Array.isArray(data.diffSegments) ? data.diffSegments : [];
+    node.diffSegments = Array.isArray(data.diffSegments)
+      ? data.diffSegments
+      : [];
     return node;
   }
 }

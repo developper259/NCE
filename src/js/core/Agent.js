@@ -90,6 +90,7 @@ class Agent {
     this.permissions = "code";
     this.messages = [];
     this.fileSnapshots = new Map();
+    this.executedToolCalls = new Map();
     this.systemPrompt = "";
     this.registerEditorTools();
   }
@@ -230,6 +231,7 @@ class Agent {
       model: this.model,
     });
     this.runConfig = runConfig;
+    this.executedToolCalls = new Map();
     try {
       const editorContext = await this.getContext();
       this.messages = [
@@ -378,7 +380,10 @@ class Agent {
               role: "user",
               content: `Le dernier patch a produit une erreur de syntaxe dans le script. Détail de l'erreur : ${validation.error}. Corrige le fichier et réécris uniquement la partie nécessaire pour rendre le code valide.`,
             });
-            const repairResponse = await this.requestModel(controller, runConfig);
+            const repairResponse = await this.requestModel(
+              controller,
+              runConfig,
+            );
             const repaired = this.parseResponse(repairResponse);
             if (repaired.text) {
               finalResponse = repaired.text;
@@ -573,6 +578,10 @@ class Agent {
 
   async executeToolCall(call) {
     const name = call?.function?.name;
+    const toolCallId = typeof call?.id === "string" ? call.id : "";
+    if (toolCallId && this.executedToolCalls.has(toolCallId)) {
+      return this.executedToolCalls.get(toolCallId);
+    }
     const tool = this.getTool(name);
     if (!tool)
       return {
@@ -652,6 +661,7 @@ class Agent {
     const callbackContext = {
       sessionId: this.currentSessionId,
       runId: this.runId,
+      toolCallId: toolCallId || null,
     };
     this.callbacks.onToolStart?.(name, normalizedArgs, callbackContext);
     try {
@@ -663,7 +673,9 @@ class Agent {
         }),
       );
       this.callbacks.onToolEnd?.(name, result, callbackContext);
-      return { success: true, result };
+      const toolResult = { success: true, result };
+      if (toolCallId) this.executedToolCalls.set(toolCallId, toolResult);
+      return toolResult;
     } catch (error) {
       const result = {
         success: false,
@@ -673,6 +685,7 @@ class Agent {
         },
       };
       this.callbacks.onToolEnd?.(name, result, callbackContext);
+      if (toolCallId) this.executedToolCalls.set(toolCallId, result);
       return result;
     }
   }
@@ -876,6 +889,72 @@ class Agent {
       .reduce((total, line) => total + line.length + 1, 0);
     return offset + Math.min(column, (source[lineIndex] || "").length);
   }
+  getStrictRange(text, args = {}) {
+    const lines = String(text).split("\n");
+    const values = [
+      args.startLine,
+      args.startColumn,
+      args.endLine,
+      args.endColumn,
+    ];
+    if (!values.every((value) => Number.isInteger(value))) {
+      return {
+        valid: false,
+        error: {
+          code: "INVALID_RANGE",
+          message: "Les coordonnées doivent être des entiers.",
+        },
+      };
+    }
+    const { startLine, startColumn, endLine, endColumn } = args;
+    if (
+      startLine < 1 ||
+      endLine < startLine ||
+      startLine > lines.length ||
+      endLine > lines.length ||
+      startColumn < 0 ||
+      endColumn < 0
+    ) {
+      return {
+        valid: false,
+        error: {
+          code: "INVALID_RANGE",
+          message: "La plage ne correspond pas aux lignes du fichier.",
+        },
+      };
+    }
+    if (
+      startColumn > lines[startLine - 1].length ||
+      endColumn > lines[endLine - 1].length ||
+      (startLine === endLine && endColumn < startColumn)
+    ) {
+      return {
+        valid: false,
+        error: {
+          code: "INVALID_RANGE",
+          message: "Une colonne dépasse la longueur de sa ligne.",
+        },
+      };
+    }
+    const lineStart = lines
+      .slice(0, startLine - 1)
+      .reduce((total, line) => total + line.length + 1, 0);
+    const endStart = lines
+      .slice(0, endLine - 1)
+      .reduce((total, line) => total + line.length + 1, 0);
+    const startIndex = lineStart + startColumn;
+    const endIndex = endStart + endColumn;
+    return {
+      valid: true,
+      startIndex,
+      endIndex,
+      actualText: text.slice(startIndex, endIndex),
+      startLine,
+      startColumn,
+      endLine,
+      endColumn,
+    };
+  }
   toProjectRelativePath(filePath, rootPath) {
     if (typeof filePath !== "string") return "";
     const path = filePath.replace(/\\/g, "/");
@@ -948,13 +1027,15 @@ IMPORTANT :
 - Les colonnes sont numérotées à partir de 0.
 - column 0 correspond au premier caractère de la ligne.
 - Une colonne égale à la longueur de la ligne correspond à la fin de la ligne.
-- La plage [startLine:startColumn, endLine:endColumn] est remplacée par text.
+ - La plage [startLine:startColumn, endLine:endColumn] est remplacée par text.
 - start et end sont inclusifs/exclusifs comme une plage JavaScript : le caractère à endColumn n'est PAS remplacé.
 - Pour remplacer toute une ligne, utilise startColumn=0 et endColumn=longueur exacte de la ligne.
 - Pour INSÉRER du texte sans supprimer de texte, start et end doivent être exactement identiques.
 - Pour supprimer du texte, utilise text="".
 - Ne devine jamais les coordonnées : lis d'abord le contenu actuel avec read_active_file.
 - Après une lecture, utilise exactement les numéros de lignes et colonnes correspondant au contenu lu.
+- expectedText doit contenir exactement le texte actuellement présent dans la plage.
+- Si expectedText ne correspond pas, le remplacement sera refusé.
 `,
       parameters: {
         type: "object",
@@ -984,14 +1065,40 @@ IMPORTANT :
               "Colonne 0-based et exclusive. Une valeur égale à la longueur de la ligne signifie la fin de la ligne.",
           },
 
+          expectedText: {
+            type: "string",
+            description:
+              "Contenu exact attendu dans la plage avant le remplacement.",
+          },
+
           text: {
             type: "string",
             description: "Texte qui remplacera exactement la plage spécifiée.",
           },
         },
-        required: ["startLine", "startColumn", "endLine", "endColumn", "text"],
+        required: [
+          "startLine",
+          "startColumn",
+          "endLine",
+          "endColumn",
+          "expectedText",
+          "text",
+        ],
       },
       execute: (args) => this.modifyActiveFile(args),
+    });
+    this.registerTool("replace_text", {
+      description:
+        "Remplacer une seule occurrence exacte dans le fichier actif. Préférer cet outil pour les modifications simples.",
+      parameters: {
+        type: "object",
+        properties: {
+          oldText: { type: "string", description: "Texte exact à remplacer." },
+          newText: { type: "string", description: "Nouveau texte." },
+        },
+        required: ["oldText", "newText"],
+      },
+      execute: (args) => this.replaceText(args),
     });
     this.registerTool("read_file", {
       description: "Lire un fichier du projet.",
@@ -1025,6 +1132,21 @@ IMPORTANT :
     return typeof text === "string" && text
       ? { success: true, content: this.truncate(text, 2000) }
       : { success: false, error: "Aucune sélection active." };
+  }
+  async replaceText(args = {}) {
+    if (typeof args.oldText !== "string" || typeof args.newText !== "string") {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "oldText et newText doivent être des chaînes.",
+        },
+      };
+    }
+    return this.modifyActiveFile({
+      oldText: args.oldText,
+      newText: args.newText,
+    });
   }
   async readActiveFile(args = {}) {
     const controller = this.editor?.lineController;
@@ -1196,7 +1318,12 @@ IMPORTANT :
       }
       const fileName = file?.path || "script.js";
       const language = (file?.language || "javascript").toLowerCase();
-      if (language !== "javascript" && language !== "js" && language !== "typescript" && language !== "ts") {
+      if (
+        language !== "javascript" &&
+        language !== "js" &&
+        language !== "typescript" &&
+        language !== "ts"
+      ) {
         return { valid: true, error: null };
       }
       const script = new Function(`"use strict";\n${source}`);
@@ -1218,7 +1345,10 @@ IMPORTANT :
       pass += 1;
       const result = await this.modifyActiveFile(currentArgs);
       if (!result?.success) {
-        return { success: false, error: result?.error || { code: "EDIT_FAILED" } };
+        return {
+          success: false,
+          error: result?.error || { code: "EDIT_FAILED" },
+        };
       }
 
       const validation = this.validateActiveFileSyntax();
@@ -1242,7 +1372,10 @@ IMPORTANT :
         newText: snippet,
       };
 
-      if (typeof currentArgs.newText === "string" && currentArgs.newText.includes(errorMessage)) {
+      if (
+        typeof currentArgs.newText === "string" &&
+        currentArgs.newText.includes(errorMessage)
+      ) {
         break;
       }
 
@@ -1264,7 +1397,9 @@ IMPORTANT :
       };
     }
 
-    return lastResult || { success: false, error: { code: "NO_REPAIR_ATTEMPT" } };
+    return (
+      lastResult || { success: false, error: { code: "NO_REPAIR_ATTEMPT" } }
+    );
   }
   async modifyActiveFile(args = {}) {
     const file = this.editor?.tabManager?.activeFile;
@@ -1277,14 +1412,19 @@ IMPORTANT :
       typeof lineController.getContent === "function"
         ? lineController.getContent()
         : "";
+    const cursorBefore = this.editor?.cursorController
+      ? {
+          row: this.editor.cursorController.row ?? 1,
+          column: this.editor.cursorController.column ?? 0,
+        }
+      : null;
     const replacementText =
       typeof args.newText === "string"
         ? args.newText
         : typeof args.text === "string"
           ? args.text
           : "";
-    const hasTextMatch =
-      typeof args.oldText === "string" && args.oldText.length > 0;
+    const hasTextMatch = typeof args.oldText === "string";
     const hasCoordinateFallback =
       Number.isInteger(args.startLine) &&
       Number.isInteger(args.startColumn) &&
@@ -1294,21 +1434,35 @@ IMPORTANT :
     let resolvedRange = null;
 
     if (hasTextMatch) {
+      if (args.oldText.length === 0) {
+        resolvedRange = {
+          startLine: 1,
+          startColumn: 0,
+          endLine: 1,
+          endColumn: 0,
+          startIndex: 0,
+          endIndex: 0,
+          text: replacementText,
+        };
+      }
       const matches = [];
       let cursor = 0;
-      while (cursor <= beforeText.length - args.oldText.length) {
+      while (
+        args.oldText.length > 0 &&
+        cursor <= beforeText.length - args.oldText.length
+      ) {
         const index = beforeText.indexOf(args.oldText, cursor);
         if (index === -1) break;
         matches.push(index);
         cursor = index + args.oldText.length;
       }
 
-      if (matches.length === 0) {
+      if (args.oldText.length > 0 && matches.length === 0) {
         if (!hasCoordinateFallback) {
           return {
             success: false,
             error: {
-              code: "NO_MATCH",
+              code: "CONTENT_NOT_FOUND",
               message: "Aucune occurrence exacte trouvée pour oldText.",
             },
           };
@@ -1340,40 +1494,23 @@ IMPORTANT :
     }
 
     if (!resolvedRange && hasCoordinateFallback) {
-      const lines = beforeText.split("\n");
-      const startIndex = this.lineColumnToIndex(
-        lines,
-        args.startLine,
-        args.startColumn,
-      );
-      const endIndex = this.lineColumnToIndex(
-        lines,
-        args.endLine,
-        args.endColumn,
-      );
+      const strictRange = this.getStrictRange(beforeText, args);
+      if (!strictRange.valid) return { success: false, error: strictRange.error };
       if (
-        startIndex < 0 ||
-        endIndex < startIndex ||
-        endIndex > beforeText.length
+        typeof args.expectedText !== "string" ||
+        strictRange.actualText !== args.expectedText
       ) {
         return {
           success: false,
           error: {
-            code: "INVALID_RANGE",
-            message:
-              "Les coordonnées de remplacement ne correspondent pas au fichier actuel.",
+            code: "CONTENT_MISMATCH",
+            message: "Le contenu réel de la plage ne correspond pas à expectedText.",
+            expectedText: args.expectedText ?? "",
+            actualText: strictRange.actualText,
           },
         };
       }
-      resolvedRange = {
-        startLine: Number(args.startLine),
-        startColumn: Number(args.startColumn),
-        endLine: Number(args.endLine),
-        endColumn: Number(args.endColumn),
-        startIndex,
-        endIndex,
-        text: replacementText,
-      };
+      resolvedRange = { ...strictRange, text: replacementText };
     }
 
     if (
@@ -1386,6 +1523,25 @@ IMPORTANT :
           code: "INVALID_REPLACEMENT",
           message:
             "Aucun remplacement valide n'a été fourni. Passez oldText/newText ou une plage de coordonnées valide.",
+        },
+      };
+    }
+
+    if (
+      typeof args.expectedText === "string" &&
+      beforeText.slice(resolvedRange.startIndex, resolvedRange.endIndex) !==
+        args.expectedText
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "CONTENT_MISMATCH",
+          message: "Le contenu réel de la plage ne correspond pas à expectedText.",
+          expectedText: args.expectedText,
+          actualText: beforeText.slice(
+            resolvedRange.startIndex,
+            resolvedRange.endIndex,
+          ),
         },
       };
     }
@@ -1426,7 +1582,7 @@ IMPORTANT :
       return {
         success: false,
         error: {
-          code: "VERIFY_FAILED",
+          code: "MODIFICATION_VERIFICATION_FAILED",
           message:
             "Le remplacement n'a pas été vérifié dans le fichier. La modification a été annulée.",
         },
@@ -1453,6 +1609,7 @@ IMPORTANT :
       },
       beforeText,
       afterText,
+      cursorBefore,
       match: hasTextMatch ? "exact" : "coordinates",
     };
   }
