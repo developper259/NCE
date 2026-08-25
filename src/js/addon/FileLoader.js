@@ -115,6 +115,16 @@ class FileLoader {
     loadChunk(currentLineCount);
   }
 
+  async waitForFileLoaded(file) {
+    if (!file?.path) return;
+
+    while (true) {
+      const state = this.loadingStates.get(file.path);
+      if (!state || !state.isLoading || state.isFullyLoaded) return;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
   async performChunkLoad(
     file,
     filePath,

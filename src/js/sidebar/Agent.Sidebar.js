@@ -21,7 +21,7 @@ class AgentSidebar extends Sidebar {
         const payload = result?.result ?? result;
 
         if (
-          toolName !== "modify_active_file" ||
+          (toolName !== "modify_active_file" && toolName !== "modify_file") ||
           !payload ||
           payload.success !== true
         ) {
@@ -32,7 +32,11 @@ class AgentSidebar extends Sidebar {
         if (!session) return;
 
         const filePath = typeof payload.path === "string" ? payload.path : "";
-        if (!filePath) return;
+        const absolutePath =
+          typeof payload.absolutePath === "string"
+            ? payload.absolutePath
+            : this.editor?.tabManager?.activeFile?.path || "";
+        if (!filePath && !absolutePath) return;
 
         const beforeText =
           typeof payload.beforeText === "string" ? payload.beforeText : "";
@@ -44,15 +48,15 @@ class AgentSidebar extends Sidebar {
         const diffStats = this.getLineDiffStats(beforeLines, afterLines);
 
         const change = {
-          path: filePath,
-          name: filePath.split("/").pop() || "fichier",
+          path: filePath || absolutePath,
+          name: (filePath || absolutePath).split("/").pop() || "fichier",
           status: "modified",
           additions: diffStats.additions,
           deletions: diffStats.deletions,
           beforeText,
           afterText,
           cursorBefore: payload.cursorBefore || null,
-          absolutePath: this.editor.tabManager.activeFile?.path || "",
+          absolutePath,
         };
 
         const existingIndex = session.changes.findIndex(

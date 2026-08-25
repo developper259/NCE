@@ -78,9 +78,9 @@ class tabManager {
     if (changed) this.refresh();
   }
 
-  openFile(file) {
+  async openFile(file) {
     if (!file) return;
-    this.openFiles([file]);
+    return this.openFiles([file]);
   }
 
   async openFiles(files, isSetFocusFile = true) {
@@ -112,7 +112,7 @@ class tabManager {
       }
     }
     if (lastAddedFile) {
-      if (isSetFocusFile) this.setFocusFile(lastAddedFile);
+      if (isSetFocusFile) await this.setFocusFile(lastAddedFile);
 
       this.activeFile.setIsSaved(true);
     }
@@ -128,10 +128,10 @@ class tabManager {
     requestAnimationFrame(() => {
       delete this.files;
       this.files = [];
-      
+
       this.activeFile = undefined;
       this.editor.fileExplorer.activeFilePath = null;
-      
+
       this.editor.searchController.close();
 
       this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
@@ -232,10 +232,10 @@ class tabManager {
     }
   }
 
-  openFileWithPath(path) {
+  async openFileWithPath(path) {
     let name = path.split("/").pop();
     let node = new FileNode(this.editor, this.getNextID(), name, path);
-    this.openFile(node);
+    return this.openFile(node);
   }
 
   createEmptyFile() {

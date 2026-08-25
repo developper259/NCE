@@ -168,9 +168,14 @@ class FileNode {
     this.isSaved = value;
   }
 
+  shouldPersistChanges() {
+    return this.autoSave === true && Boolean(this.path);
+  }
+
   onChange() {
-    if (this.autoSave) this.save();
-    else {
+    if (this.shouldPersistChanges()) {
+      this.save();
+    } else {
       this.setIsSaved(false);
     }
     this.editor.tabManager.refresh();

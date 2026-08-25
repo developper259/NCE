@@ -90,6 +90,7 @@ class Agent {
     this.permissions = "code";
     this.messages = [];
     this.fileSnapshots = new Map();
+    this.readFileContexts = new Map();
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
     this.systemPrompt = "";
@@ -118,6 +119,46 @@ class Agent {
     }
     this.systemPrompt = prompt.trim();
     return this;
+  }
+  debugTool(name, args, result, details = {}) {
+    const preview = (value) => {
+      if (typeof value !== "string") return value;
+      return value.length > 240
+        ? `${value.slice(0, 240)}...[truncated]`
+        : value;
+    };
+    console.info("[NCE Agent tool]", {
+      name,
+      mode:
+        name === "modify_file"
+          ? "workspace-text"
+          : args?.oldText !== undefined
+            ? "text"
+            : "coordinates",
+      request: {
+        path: args?.path,
+        oldText: preview(args?.oldText),
+        newText: preview(args?.newText ?? args?.text),
+        expectedText: preview(args?.expectedText),
+        range:
+          args?.startLine !== undefined ||
+          args?.startColumn !== undefined ||
+          args?.endLine !== undefined ||
+          args?.endColumn !== undefined
+            ? {
+                startLine: args?.startLine ?? null,
+                startColumn: args?.startColumn ?? null,
+                endLine: args?.endLine ?? null,
+                endColumn: args?.endColumn ?? null,
+              }
+            : null,
+      },
+      result:
+        result?.success === false
+          ? { success: false, error: result.error }
+          : { success: true },
+      details,
+    });
   }
   setConfig(config = {}) {
     if (Number.isFinite(config.maxIterations)) {
@@ -234,6 +275,7 @@ class Agent {
     this.runConfig = runConfig;
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
+    this.readFileContexts = new Map();
     try {
       const editorContext = await this.getContext();
       this.messages = [
@@ -331,6 +373,7 @@ class Agent {
     let finalReasoning = "";
     let postEditRepairAttempts = 0;
     let modificationFailures = 0;
+    let failedModifications = [];
     for (
       let iteration = 1;
       iteration <= (runConfig?.maxIterations ?? this.maxIterations);
@@ -349,13 +392,31 @@ class Agent {
         });
       }
       if (!parsed.toolCalls.length)
-        return {
-          response: finalResponse,
-          reasoning: finalReasoning,
-          iterations: iteration,
-        };
+        return failedModifications.length > 0
+          ? {
+              response: `Certaines modifications n'ont pas été appliquées : ${failedModifications.join("; ")}. Les fichiers concernés doivent être relus avant une nouvelle tentative.`,
+              reasoning: finalReasoning,
+              error: { code: "PARTIAL_MODIFICATION_FAILURE" },
+              iterations: iteration,
+            }
+          : {
+              response: finalResponse,
+              reasoning: finalReasoning,
+              iterations: iteration,
+            };
       this.messages.push(parsed.assistantMessage);
-      for (const call of parsed.toolCalls) {
+      const orderedToolCalls = [...parsed.toolCalls].sort((left, right) => {
+        const readTools = new Set([
+          "read_file",
+          "read_active_file",
+          "get_editor_context",
+        ]);
+        return (
+          Number(!readTools.has(left?.function?.name)) -
+          Number(!readTools.has(right?.function?.name))
+        );
+      });
+      for (const call of orderedToolCalls) {
         if (this.stopRequested || runId !== this.runId) throw this.abortError();
         const toolResult = await this.executeToolCall(call);
         this.messages.push({
@@ -367,7 +428,8 @@ class Agent {
         const toolPayload = toolResult?.result ?? toolResult;
         const modificationTool =
           call?.function?.name === "modify_active_file" ||
-          call?.function?.name === "replace_text";
+          call?.function?.name === "replace_text" ||
+          call?.function?.name === "modify_file";
         const retryableErrorCodes = new Set([
           "CONTENT_MISMATCH",
           "INVALID_RANGE",
@@ -376,12 +438,15 @@ class Agent {
           "MODIFICATION_VERIFICATION_FAILED",
           "SUSPECTED_DUPLICATION",
         ]);
-        if (
-          modificationTool &&
-          toolResult?.success === false &&
-          retryableErrorCodes.has(toolPayload?.error?.code)
-        ) {
-          modificationFailures += 1;
+        if (modificationTool && toolResult?.success === false) {
+          if (retryableErrorCodes.has(toolPayload?.error?.code)) {
+            modificationFailures += 1;
+          }
+          const failureMessage =
+            toolPayload?.error?.message || "échec de modification";
+          failedModifications.push(
+            `${call?.function?.name || "outil de modification"}: ${failureMessage}`,
+          );
           if (modificationFailures >= 2) {
             return {
               response:
@@ -393,6 +458,7 @@ class Agent {
           }
         } else if (modificationTool && toolResult?.success) {
           modificationFailures = 0;
+          failedModifications.pop();
         }
 
         const toolName = call?.function?.name;
@@ -597,9 +663,17 @@ class Agent {
   }
   getOpenAITools() {
     const permissions = this.runConfig?.permissions ?? this.permissions;
+    const hasActiveFile = Boolean(this.editor?.tabManager?.activeFile);
+    const activeFileTools = new Set([
+      "read_active_file",
+      "search_active_file",
+      "modify_active_file",
+      "replace_text",
+    ]);
     return [...this.tools.values()]
       .filter((tool) => tool.enabled)
       .filter((tool) => permissions === "code" || tool.readOnly)
+      .filter((tool) => hasActiveFile || !activeFileTools.has(tool.name))
       .map((tool) => ({
         type: "function",
         function: {
@@ -615,6 +689,24 @@ class Agent {
     const toolCallId = typeof call?.id === "string" ? call.id : "";
     if (toolCallId && this.executedToolCalls.has(toolCallId)) {
       return this.executedToolCalls.get(toolCallId);
+    }
+    const activeFileTools = new Set([
+      "read_active_file",
+      "search_active_file",
+      "modify_active_file",
+      "replace_text",
+    ]);
+    if (activeFileTools.has(name) && !this.editor?.tabManager?.activeFile) {
+      const result = {
+        success: false,
+        error: {
+          code: "NO_ACTIVE_FILE",
+          message:
+            "Aucun fichier n'est ouvert. Utilisez les outils workspace avec un chemin de fichier.",
+        },
+      };
+      this.debugTool(name, {}, result);
+      return result;
     }
     const tool = this.getTool(name);
     if (!tool)
@@ -691,7 +783,11 @@ class Agent {
     }
 
     const validation = this.validateTool(tool, normalizedArgs);
-    if (!validation.valid) return { success: false, error: validation.error };
+    if (!validation.valid) {
+      const result = { success: false, error: validation.error };
+      this.debugTool(name, normalizedArgs, result);
+      return result;
+    }
     const callbackContext = {
       sessionId: this.currentSessionId,
       runId: this.runId,
@@ -708,6 +804,10 @@ class Agent {
       );
       const toolResult =
         result && result.success === false ? result : { success: true, result };
+      this.debugTool(name, normalizedArgs, toolResult, {
+        activePath: this.editor?.tabManager?.activeFile?.path || null,
+        activeTabId: this.editor?.tabManager?.activeFile?.id || null,
+      });
       this.callbacks.onToolEnd?.(name, toolResult, callbackContext);
       if (toolCallId) this.executedToolCalls.set(toolCallId, toolResult);
       return toolResult;
@@ -719,6 +819,10 @@ class Agent {
           message: error?.message || String(error),
         },
       };
+      this.debugTool(name, normalizedArgs, result, {
+        activePath: this.editor?.tabManager?.activeFile?.path || null,
+        activeTabId: this.editor?.tabManager?.activeFile?.id || null,
+      });
       this.callbacks.onToolEnd?.(name, result, callbackContext);
       if (toolCallId) this.executedToolCalls.set(toolCallId, result);
       return result;
@@ -912,6 +1016,16 @@ class Agent {
   isAbortError(error) {
     return error?.name === "AbortError" || this.stopRequested;
   }
+  async waitForEditorReady(timeout = 3000) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeout) {
+      const writer = this.editor?.writerController;
+      const lineController = this.editor?.lineController;
+      if (writer?.replaceRange && lineController?.getContent) return true;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    return false;
+  }
   lineColumnToIndex(lines, lineNumber, columnNumber) {
     const source = Array.isArray(lines) ? lines : [];
     if (
@@ -997,6 +1111,27 @@ class Agent {
       endColumn,
     };
   }
+  adjustRangeForMissingIndentation(text, args, range) {
+    if (!range || args.startColumn !== 0 || args.startLine !== args.endLine) {
+      return range;
+    }
+    const line = String(text).split("\n")[args.startLine - 1] || "";
+    const indentation = line.match(/^[ \t]*/)?.[0] || "";
+    if (!indentation || typeof args.expectedText !== "string") return range;
+    const content = line.slice(
+      indentation.length,
+      indentation.length + args.expectedText.length,
+    );
+    if (args.expectedText !== content) return range;
+    return {
+      ...range,
+      startColumn: indentation.length,
+      startIndex: range.startIndex + indentation.length,
+      endColumn: range.endColumn + indentation.length,
+      endIndex: range.endIndex + indentation.length,
+      actualText: args.expectedText,
+    };
+  }
   toProjectRelativePath(filePath, rootPath) {
     if (typeof filePath !== "string") return "";
     const path = filePath.replace(/\\/g, "/");
@@ -1060,6 +1195,42 @@ class Agent {
       },
       execute: (args) => this.searchActiveFile(args),
     });
+    this.registerTool("modify_file", {
+      description: `
+Modifier un fichier du workspace, même s'il n'est pas actif.
+
+Règles de sécurité :
+- Le chemin peut être relatif au projet ou absolu.
+- Le fichier doit rester dans le workspace ouvert.
+- Utilise cet outil uniquement pour un fichier différent du fichier actif. Pour le fichier actif, utilise modify_active_file avec une plage réelle.
+- oldText doit correspondre à une seule occurrence exacte; sinon la modification est refusée.
+- Après modification, la commande retourne le chemin relatif et les contenus avant/après.
+`,
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            description:
+              "Chemin du fichier à modifier, relatif au workspace ou absolu.",
+          },
+          oldText: {
+            type: "string",
+            description: "Texte exact à remplacer dans le fichier cible.",
+          },
+          newText: {
+            type: "string",
+            description: "Nouveau texte exact à enregistrer.",
+          },
+          text: {
+            type: "string",
+            description: "Alias de newText pour compatibilité.",
+          },
+        },
+        required: ["path", "oldText", "newText"],
+      },
+      execute: (args) => this.modifyFile(args),
+    });
     this.registerTool("modify_active_file", {
       description: `
 Modifier précisément une plage du fichier actif.
@@ -1077,8 +1248,10 @@ IMPORTANT :
 - Ne devine jamais les coordonnées : lis d'abord le contenu actuel avec read_active_file.
 - Après une lecture, utilise exactement les numéros de lignes et colonnes correspondant au contenu lu.
 - expectedText doit contenir exactement le texte actuellement présent dans la plage.
+- expectedText doit normalement inclure les espaces et tabulations au début de ligne ; si startColumn=0 et qu'il les omet, ils sont conservés automatiquement.
 - Si expectedText ne correspond pas, le remplacement sera refusé.
 - Pour une modification normale, fournis oldText et newText : les coordonnées seront calculées automatiquement.
+- N'envoie jamais une plage partielle ou des valeurs undefined : utilise soit oldText/newText, soit les quatre coordonnées startLine, startColumn, endLine et endColumn.
 `,
       parameters: {
         type: "object",
@@ -1169,6 +1342,16 @@ IMPORTANT :
       execute: (args) => this.searchProjectFiles(args),
     });
   }
+  shouldPersistAgentEdit(filePath) {
+    const file =
+      typeof filePath === "string"
+        ? this.editor?.tabManager?.getFileByPath?.(filePath)
+        : null;
+    if (file && typeof file.autoSave === "boolean") {
+      return file.autoSave === true;
+    }
+    return false;
+  }
   async readSelection() {
     const controller = this.editor?.selectController;
     const text = controller?.getSelectedText
@@ -1193,6 +1376,271 @@ IMPORTANT :
       newText: args.newText,
     });
   }
+  async modifyFile(args = {}) {
+    const relativePath = typeof args.path === "string" ? args.path.trim() : "";
+    if (!relativePath) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "Le chemin du fichier est obligatoire.",
+        },
+      };
+    }
+
+    const root = this.editor?.fileExplorer?.rootPath;
+    const absolutePath = this.resolveWorkspacePath(relativePath, root);
+    if (!absolutePath) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_PATH",
+          message: "Chemin hors du workspace.",
+        },
+      };
+    }
+
+    const activePath = this.editor?.tabManager?.activeFile?.path;
+    if (
+      activePath &&
+      AgentPath.normalize(activePath) === AgentPath.normalize(absolutePath)
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "USE_ACTIVE_FILE_TOOL",
+          message:
+            "Le fichier demandé est déjà actif. Utilisez modify_active_file avec une plage startLine/startColumn/endLine/endColumn, ou oldText/newText.",
+        },
+      };
+    }
+
+    if (!this.readFileContexts.has(absolutePath)) {
+      return {
+        success: false,
+        error: {
+          code: "READ_FILE_FIRST",
+          message:
+            "Lisez d'abord ce fichier avec read_file dans la demande actuelle avant d'utiliser modify_file.",
+          path: relativePath,
+        },
+      };
+    }
+
+    const oldText = typeof args.oldText === "string" ? args.oldText : "";
+    const newText =
+      typeof args.newText === "string"
+        ? args.newText
+        : typeof args.text === "string"
+          ? args.text
+          : "";
+
+    if (typeof oldText !== "string" || typeof newText !== "string") {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "oldText et newText doivent être des chaînes.",
+        },
+      };
+    }
+
+    const requestKey = JSON.stringify({
+      path: absolutePath,
+      oldText,
+      newText,
+    });
+    if (this.executedModificationRequests.has(requestKey)) {
+      return {
+        success: false,
+        error: {
+          code: "DUPLICATE_MODIFICATION",
+          message: "Cette modification de fichier a déjà été exécutée.",
+        },
+      };
+    }
+
+    const tabManager = this.editor?.tabManager;
+    const alreadyOpen = tabManager?.getFileByPath?.(absolutePath);
+    if (alreadyOpen) {
+      await this.editor?.fileLoader?.waitForFileLoaded?.(alreadyOpen);
+    }
+
+    const persistToDisk = this.shouldPersistAgentEdit(absolutePath);
+    const currentText = alreadyOpen
+      ? alreadyOpen.lines.map((line) => line.getText()).join("\n")
+      : (await this.api?.getFileContent?.([absolutePath]))?.[absolutePath];
+    if (typeof currentText !== "string") {
+      return {
+        success: false,
+        error: {
+          code: "READ_FAILED",
+          message: `Impossible de lire le fichier : ${relativePath}`,
+        },
+      };
+    }
+
+    if (oldText.length === 0 && newText === "") {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "Le remplacement ne peut pas être vide si oldText est vide.",
+        },
+      };
+    }
+
+    if (oldText.length === 0) {
+      const updatedText = `${newText}${currentText}`;
+      const result = {
+        success: true,
+        operation: "replace",
+        path: this.toProjectRelativePath(absolutePath, root),
+        absolutePath,
+        beforeText: currentText,
+        afterText: updatedText,
+        match: "insert-start",
+      };
+      this.executedModificationRequests.set(requestKey, result);
+
+      if (tabManager && !alreadyOpen) {
+        await tabManager.openFileWithPath(absolutePath);
+      }
+      const openFile = tabManager?.getFileByPath?.(absolutePath);
+      if (!openFile) {
+        this.executedModificationRequests.delete(requestKey);
+        return {
+          success: false,
+          error: {
+            code: "TARGET_FILE_NOT_OPEN",
+            message: `Le fichier cible n'a pas pu être ouvert : ${relativePath}`,
+          },
+        };
+      }
+      if (
+        AgentPath.normalize(openFile.path) !== AgentPath.normalize(absolutePath)
+      ) {
+        this.executedModificationRequests.delete(requestKey);
+        return {
+          success: false,
+          error: {
+            code: "TARGET_PATH_MISMATCH",
+            message: `Le tab ouvert ne correspond pas au fichier cible : ${relativePath}`,
+          },
+        };
+      }
+      if (openFile) {
+        openFile.isLoaded = false;
+        await tabManager.setFocusFile(openFile);
+        this.editor.lineController?.loadContent?.(updatedText);
+        if (openFile) {
+          openFile.lines = updatedText
+            .split(/\r?\n/)
+            .map((line) => new LineNode(line));
+          openFile.totalLines = openFile.lines.length;
+          openFile.maxLineLength = 0;
+        }
+        this.markFileDiffHighlights(currentText, updatedText, openFile);
+        if (this.editor.lineController?.refresh) {
+          this.editor.lineController.refresh(true);
+        }
+        openFile.setIsSaved(false);
+        if (persistToDisk && typeof this.api?.saveFile === "function") {
+          this.api.saveFile(absolutePath, updatedText);
+        }
+      }
+      this.readFileContexts.delete(absolutePath);
+      return result;
+    }
+
+    const firstIndex = currentText.indexOf(oldText);
+    if (firstIndex === -1) {
+      return {
+        success: false,
+        error: {
+          code: "NO_MATCH",
+          message:
+            "Aucune occurrence exacte trouvée pour oldText dans ce fichier.",
+        },
+      };
+    }
+
+    if (currentText.indexOf(oldText, firstIndex + oldText.length) !== -1) {
+      return {
+        success: false,
+        error: {
+          code: "AMBIGUOUS_MATCH",
+          message:
+            "oldText est présent plusieurs fois dans ce fichier. Le remplacement est refusé.",
+        },
+      };
+    }
+
+    const updatedText =
+      currentText.slice(0, firstIndex) +
+      newText +
+      currentText.slice(firstIndex + oldText.length);
+
+    const result = {
+      success: true,
+      operation: "replace",
+      path: this.toProjectRelativePath(absolutePath, root),
+      absolutePath,
+      beforeText: currentText,
+      afterText: updatedText,
+      match: "exact",
+    };
+    this.executedModificationRequests.set(requestKey, result);
+
+    if (tabManager && !alreadyOpen) {
+      await tabManager.openFileWithPath(absolutePath);
+    }
+    const openFile = tabManager?.getFileByPath?.(absolutePath);
+    if (!openFile) {
+      this.executedModificationRequests.delete(requestKey);
+      return {
+        success: false,
+        error: {
+          code: "TARGET_FILE_NOT_OPEN",
+          message: `Le fichier cible n'a pas pu être ouvert : ${relativePath}`,
+        },
+      };
+    }
+    if (
+      AgentPath.normalize(openFile.path) !== AgentPath.normalize(absolutePath)
+    ) {
+      this.executedModificationRequests.delete(requestKey);
+      return {
+        success: false,
+        error: {
+          code: "TARGET_PATH_MISMATCH",
+          message: `Le tab ouvert ne correspond pas au fichier cible : ${relativePath}`,
+        },
+      };
+    }
+    if (openFile) {
+      openFile.isLoaded = false;
+      await tabManager.setFocusFile(openFile);
+      this.editor.lineController?.loadContent?.(updatedText);
+      if (openFile) {
+        openFile.lines = updatedText
+          .split(/\r?\n/)
+          .map((line) => new LineNode(line));
+        openFile.totalLines = openFile.lines.length;
+        openFile.maxLineLength = 0;
+      }
+      this.markFileDiffHighlights(currentText, updatedText, openFile);
+      if (this.editor.lineController?.refresh) {
+        this.editor.lineController.refresh(true);
+      }
+      openFile.setIsSaved(false);
+      if (persistToDisk && typeof this.api?.saveFile === "function") {
+        this.api.saveFile(absolutePath, updatedText);
+      }
+    }
+    this.readFileContexts.delete(absolutePath);
+    return result;
+  }
   restoreActiveFileSnapshot(content) {
     const lineController = this.editor?.lineController;
     if (typeof lineController?.loadContent !== "function") return false;
@@ -1206,6 +1654,7 @@ IMPORTANT :
     const file = this.editor?.tabManager?.activeFile;
     if (!file || !controller)
       return { success: false, error: "Aucun fichier actif." };
+    await this.editor?.fileLoader?.waitForFileLoaded?.(file);
     const lines = controller.getContent().split("\n");
     const startLine =
       Number.isInteger(args.startLine) && args.startLine > 0
@@ -1261,8 +1710,19 @@ IMPORTANT :
         success: false,
         error: { code: "INVALID_PATH", message: "Chemin hors du workspace." },
       };
-    const result = await this.api?.getFileContent?.([absolute]);
-    const content = result?.[absolute];
+    const openFile = this.editor?.tabManager?.getFileByPath?.(absolute);
+    if (openFile) {
+      await this.editor?.fileLoader?.waitForFileLoaded?.(openFile);
+    }
+    const content = openFile
+      ? openFile.lines.map((line) => line.getText()).join("\n")
+      : (await this.api?.getFileContent?.([absolute]))?.[absolute];
+    if (typeof content === "string") {
+      this.readFileContexts.set(absolute, {
+        content,
+        truncated: content.length > 4000,
+      });
+    }
     return typeof content === "string"
       ? {
           success: true,
@@ -1323,10 +1783,19 @@ IMPORTANT :
   markFileDiffHighlights(beforeText, afterText, file) {
     if (!file || !Array.isArray(file.lines)) return;
 
-    file.diffSnapshot = beforeText;
+    const originalText =
+      file.diffSnapshot === null ? beforeText : file.diffSnapshot;
+    if (originalText === afterText) {
+      file.diffSnapshot = null;
+      file.diffActive = false;
+      file.diffRows = [];
+      return;
+    }
+
+    file.diffSnapshot = originalText;
     file.diffActive = true;
     file.diffRows = [];
-    const beforeLines = beforeText.split(/\r?\n/);
+    const beforeLines = originalText.split(/\r?\n/);
     const afterLines = afterText.split(/\r?\n/);
     const rows = beforeLines.length + 1;
     const cols = afterLines.length + 1;
@@ -1498,11 +1967,22 @@ IMPORTANT :
     );
   }
   async modifyActiveFile(args = {}) {
+    const editorReady = await this.waitForEditorReady();
     const file = this.editor?.tabManager?.activeFile;
     const writer = this.editor?.writerController;
     const lineController = this.editor?.lineController;
-    if (!file || !writer?.replaceRange || !lineController)
-      throw new Error("WriterController indisponible.");
+    if (!editorReady || !file || !writer?.replaceRange || !lineController) {
+      return {
+        success: false,
+        error: {
+          code: "EDITOR_NOT_READY",
+          message:
+            "L'éditeur n'est pas prêt pour une modification. Réessayez lorsque le fichier actif est chargé.",
+        },
+      };
+    }
+
+    await this.editor?.fileLoader?.waitForFileLoaded?.(file);
 
     const beforeText =
       typeof lineController.getContent === "function"
@@ -1562,6 +2042,23 @@ IMPORTANT :
       Number.isInteger(args.startColumn) &&
       Number.isInteger(args.endLine) &&
       Number.isInteger(args.endColumn);
+    const hasAnyCoordinate = [
+      args.startLine,
+      args.startColumn,
+      args.endLine,
+      args.endColumn,
+    ].some((value) => value !== undefined);
+
+    if (hasAnyCoordinate && !hasCoordinateFallback && !hasTextMatch) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_RANGE",
+          message:
+            "La plage est incomplète. Fournissez startLine, startColumn, endLine et endColumn, ou utilisez oldText/newText.",
+        },
+      };
+    }
 
     let resolvedRange = null;
 
@@ -1629,9 +2126,13 @@ IMPORTANT :
       const strictRange = this.getStrictRange(beforeText, args);
       if (!strictRange.valid)
         return { success: false, error: strictRange.error };
+      const adjustedRange =
+        typeof args.expectedText === "string"
+          ? this.adjustRangeForMissingIndentation(beforeText, args, strictRange)
+          : strictRange;
       if (
         typeof args.expectedText !== "string" ||
-        strictRange.actualText !== args.expectedText
+        adjustedRange.actualText !== args.expectedText
       ) {
         return {
           success: false,
@@ -1640,11 +2141,11 @@ IMPORTANT :
             message:
               "Le contenu réel de la plage ne correspond pas à expectedText.",
             expectedText: args.expectedText ?? "",
-            actualText: strictRange.actualText,
+            actualText: adjustedRange.actualText,
           },
         };
       }
-      resolvedRange = { ...strictRange, text: replacementText };
+      resolvedRange = { ...adjustedRange, text: replacementText };
     }
 
     if (
