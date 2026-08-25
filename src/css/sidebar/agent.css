@@ -225,7 +225,17 @@
   gap: 10px;
 
   padding: 4px 10px 10px;
-  user-select: auto;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.agent-sidebar-messages,
+.agent-sidebar-message,
+.agent-sidebar-bubble,
+.agent-sidebar-content,
+.agent-sidebar-reasoning {
+  user-select: text !important;
+  -webkit-user-select: text !important;
 }
 
 .agent-sidebar-empty-state {
@@ -324,6 +334,63 @@
   word-break: break-word;
 }
 
+.agent-sidebar-copy-button {
+  align-self: center;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  user-select: none;
+}
+
+.agent-sidebar-message-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  margin-top: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.agent-sidebar-message:hover > .agent-sidebar-message-meta,
+.agent-sidebar-message:focus-within > .agent-sidebar-message-meta {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.agent-sidebar-copy-button i {
+  display: inline-block;
+}
+
+.agent-sidebar-copy-button-copied i {
+  color: #4caf50 !important;
+  animation: agent-sidebar-copy-confirm 180ms ease-out;
+}
+
+.agent-sidebar-copy-button-copied {
+  color: #4caf50 !important;
+}
+
+.agent-sidebar-copy-button:hover {
+  color: var(--text-primary, var(--text-white));
+}
+
+@keyframes agent-sidebar-copy-confirm {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .agent-sidebar-message-user .agent-sidebar-bubble {
   background: var(--accent-color, #007acc);
   color: var(--text-white);
@@ -338,7 +405,7 @@
 }
 
 .agent-sidebar-timestamp {
-  margin-top: 3px;
+  margin-top: 0;
   padding: 0 2px;
   font-size: 10px;
   color: var(--text-tertiary);

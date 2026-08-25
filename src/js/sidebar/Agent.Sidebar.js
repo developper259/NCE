@@ -759,11 +759,48 @@ class AgentSidebar extends Sidebar {
 
     const contentValue =
       typeof message?.content === "string" ? message.content : "";
+    let messageMeta = null;
     if (contentValue) {
       const contentEl = document.createElement("div");
       contentEl.className = "agent-sidebar-content";
       contentEl.textContent = contentValue;
       bubble.appendChild(contentEl);
+
+      const copyButton = document.createElement("button");
+      copyButton.type = "button";
+      copyButton.className = "agent-sidebar-copy-button";
+      copyButton.title = "Copy message";
+      copyButton.setAttribute("aria-label", "Copy message");
+      const copyIcon = document.createElement("i");
+      copyIcon.className = "fi fi-rr-copy";
+      copyButton.appendChild(copyIcon);
+      copyButton.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        try {
+          await navigator.clipboard.writeText(contentValue);
+          copyButton.title = "Copied";
+        } catch {
+          const selection = window.getSelection();
+          const range = document.createRange();
+          range.selectNodeContents(contentEl);
+          selection.removeAllRanges();
+          selection.addRange(range);
+          document.execCommand("copy");
+          selection.removeAllRanges();
+        }
+        copyButton.title = "Copied";
+        copyButton.classList.add("agent-sidebar-copy-button-copied");
+        copyIcon.className = "fi fi-rr-check";
+        clearTimeout(copyButton._resetCopyIcon);
+        copyButton._resetCopyIcon = setTimeout(() => {
+          copyIcon.className = "fi fi-rr-copy";
+          copyButton.title = "Copy message";
+          copyButton.classList.remove("agent-sidebar-copy-button-copied");
+        }, 2000);
+      });
+      messageMeta = document.createElement("div");
+      messageMeta.className = "agent-sidebar-message-meta";
+      messageMeta.appendChild(copyButton);
     }
 
     bubble.style.userSelect = "text";
@@ -771,6 +808,9 @@ class AgentSidebar extends Sidebar {
     bubble.style.cursor = "text";
 
     row.appendChild(bubble);
+    if (messageMeta) {
+      row.appendChild(messageMeta);
+    }
 
     if (options.queued) {
       const status = document.createElement("div");
@@ -802,7 +842,11 @@ class AgentSidebar extends Sidebar {
       const time = document.createElement("div");
       time.className = "agent-sidebar-timestamp";
       time.textContent = message.timestamp;
-      row.appendChild(time);
+      if (messageMeta) {
+        messageMeta.appendChild(time);
+      } else {
+        row.appendChild(time);
+      }
     }
 
     return row;

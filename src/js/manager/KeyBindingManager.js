@@ -32,6 +32,13 @@ class KeyBindingManager {
     return false;
   }
 
+  isAgentMessageTarget(target) {
+    return (
+      target instanceof Element &&
+      Boolean(target.closest(".agent-sidebar-messages"))
+    );
+  }
+
   bindEditor(key, e) {
     if (CONFIG_KEYBINDING_CONTAINSKEY(key)) {
       this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
@@ -59,6 +66,12 @@ class KeyBindingManager {
   }
 
   onKey(e) {
+    if (this.isAgentMessageTarget(e.target)) {
+      const isModifier = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (isModifier && (key === "c" || key === "a")) return;
+    }
+
     if (
       (this.isNativeInputTarget(e.target) && e.key !== "Escape") ||
       !document.hasFocus()
