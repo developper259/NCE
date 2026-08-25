@@ -39,19 +39,25 @@ class tabManager {
   async updateFilePath(oldPath, newPath) {
     if (!oldPath || !newPath) return;
     let changed = false;
+    const normalizePath = (value) =>
+      String(value || "")
+        .replace(/\\/g, "/")
+        .replace(/\/+$/g, "");
+    const normalizedOldPath = normalizePath(oldPath);
 
     for (const file of this.files) {
       if (!file.path) continue;
+      const normalizedFilePath = normalizePath(file.path);
 
-      if (file.path === oldPath) {
+      if (normalizedFilePath === normalizedOldPath) {
         file.path = newPath;
         file.name = newPath.split("/").pop();
         changed = true;
 
         await file.loadLanguage();
         this.editor.highlightController.reset();
-      } else if (file.path.startsWith(`${oldPath}/`)) {
-        file.path = newPath + file.path.slice(oldPath.length);
+      } else if (normalizedFilePath.startsWith(`${normalizedOldPath}/`)) {
+        file.path = newPath + normalizedFilePath.slice(normalizedOldPath.length);
         changed = true;
 
         await file.loadLanguage();

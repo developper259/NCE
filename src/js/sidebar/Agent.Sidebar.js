@@ -69,6 +69,14 @@ class AgentSidebar extends Sidebar {
     const payload = result?.result ?? result;
 
     if (
+      (toolName === "create_file" || toolName === "rename_file") &&
+      payload?.success === true
+    ) {
+      this.recordFileOperationChange(toolName, payload, context);
+      return;
+    }
+
+    if (
       (toolName !== "modify_active_file" && toolName !== "modify_file") ||
       !payload ||
       payload.success !== true
@@ -111,8 +119,9 @@ class AgentSidebar extends Sidebar {
 
     const existingIndex = session.changes.findIndex(
       (entry) =>
-        entry.path === filePath ||
-        (absolutePath && entry.absolutePath === absolutePath),
+        entry.status !== "renamed" &&
+        (entry.path === filePath ||
+          (absolutePath && entry.absolutePath === absolutePath)),
     );
     if (existingIndex >= 0) {
       const existingChange = session.changes[existingIndex];
@@ -127,6 +136,10 @@ class AgentSidebar extends Sidebar {
       session.changes[existingIndex] = {
         ...existingChange,
         ...change,
+        status:
+          existingChange.status === "created"
+            ? "created"
+            : change.status,
         beforeText: originalBeforeText,
         additions: cumulativeStats.additions,
         deletions: cumulativeStats.deletions,
@@ -135,6 +148,65 @@ class AgentSidebar extends Sidebar {
       session.changes.push(change);
     }
 
+    session.changesExpanded = true;
+    if (session.id === this.activeSessionId && this.changesElement) {
+      this.renderChangesPanel(this.changesElement);
+    }
+  }
+
+  recordFileOperationChange(toolName, payload, context = {}) {
+    const session = this.getSession(context.sessionId);
+    if (!session) return;
+
+    let change = null;
+    if (toolName === "create_file") {
+      const path = typeof payload.path === "string" ? payload.path : "";
+      if (!path) return;
+      change = {
+        operation: "create",
+        status: payload.overwritten ? "modified" : "created",
+        path,
+        name: path.replace(/\\/g, "/").split("/").pop() || path,
+        absolutePath: payload.absolutePath || "",
+        snapshotKey: payload.snapshotKey || null,
+        created: payload.created === true,
+        overwritten: payload.overwritten === true,
+      };
+    } else if (toolName === "rename_file") {
+      const oldPath =
+        typeof payload.oldPath === "string" ? payload.oldPath : "";
+      const newPath =
+        typeof payload.newPath === "string" ? payload.newPath : "";
+      if (!oldPath || !newPath) return;
+      const oldName = oldPath.replace(/\\/g, "/").split("/").pop();
+      const newName = newPath.replace(/\\/g, "/").split("/").pop();
+      change = {
+        operation: "rename",
+        status: "renamed",
+        path: newPath,
+        name: `${oldName} → ${newName}`,
+        oldPath,
+        newPath,
+        oldAbsolutePath: payload.oldAbsolutePath || "",
+        newAbsolutePath: payload.newAbsolutePath || "",
+        absolutePath: payload.newAbsolutePath || "",
+      };
+      for (const existing of session.changes) {
+        if (existing.status === "renamed") continue;
+        if (
+          existing.path === oldPath ||
+          (payload.oldAbsolutePath &&
+            existing.absolutePath === payload.oldAbsolutePath)
+        ) {
+          existing.path = newPath;
+          existing.absolutePath = payload.newAbsolutePath || newPath;
+          existing.name = newName || existing.name;
+        }
+      }
+    }
+    if (!change) return;
+
+    session.changes.push(change);
     session.changesExpanded = true;
     if (session.id === this.activeSessionId && this.changesElement) {
       this.renderChangesPanel(this.changesElement);
@@ -559,6 +631,8 @@ class AgentSidebar extends Sidebar {
   }
 
   getActivityType(toolName = "") {
+    if (toolName === "create_file") return "create";
+    if (toolName === "rename_file") return "rename";
     if (toolName.includes("search")) return "search";
     if (toolName.includes("read")) return "read";
     if (toolName.includes("modify") || toolName.includes("replace")) {
@@ -670,6 +744,23 @@ class AgentSidebar extends Sidebar {
       case "list_project_files":
         title = `${running ? "Listing" : "Listed"} project files${running ? "…" : ""}`;
         break;
+      case "create_file":
+        title = `${running ? "Creating" : "Created"} ${fileName}${running ? "…" : ""}`;
+        break;
+      case "rename_file": {
+        const oldPath =
+          typeof payload?.oldPath === "string"
+            ? payload.oldPath
+            : item.args?.path || "";
+        const newPath =
+          typeof payload?.newPath === "string"
+            ? payload.newPath
+            : item.args?.newPath || "";
+        const oldName = oldPath.replace(/\\/g, "/").split("/").pop();
+        const newName = newPath.replace(/\\/g, "/").split("/").pop();
+        title = `${running ? "Renaming" : "Renamed"} ${oldName || "file"} → ${newName || "file"}${running ? "…" : ""}`;
+        break;
+      }
       case "modify_file":
         title = `${running ? "Modifying" : "Modified"} ${fileName}${running ? "…" : ""}`;
         break;
@@ -718,6 +809,8 @@ class AgentSidebar extends Sidebar {
         read_active_file: `read ${fileName}`,
         read_selection: "read selection",
         list_project_files: "list project files",
+        create_file: `create ${fileName}`,
+        rename_file: `rename ${this.getActivityFileName(item)}`,
         modify_file: `modify ${fileName}`,
         modify_active_file: "modify active file",
         replace_text: `replace text in ${fileName}`,
@@ -1112,6 +1205,8 @@ class AgentSidebar extends Sidebar {
       edit: "✎",
       context: "◇",
       list: "≡",
+      create: "＋",
+      rename: "↪",
       verify: "✓",
       other: "•",
     }[item.type];
@@ -1531,7 +1626,7 @@ class AgentSidebar extends Sidebar {
     const label = document.createElement("span");
     label.className = "agent-sidebar-changes-label";
     const count = session.changes.length;
-    label.textContent = `${count} ${count > 1 ? "fichiers modifiés" : "fichier modifié"}`;
+    label.textContent = `${count} ${count > 1 ? "changements" : "changement"}`;
     header.appendChild(label);
 
     const stats = this.getSessionChangeStats(session);
@@ -1575,6 +1670,8 @@ class AgentSidebar extends Sidebar {
 
   getStatusLetter(status) {
     switch (status) {
+      case "created":
+        return "C";
       case "added":
         return "A";
       case "deleted":
@@ -1700,6 +1797,13 @@ class AgentSidebar extends Sidebar {
   }
 
   async keepChange(change) {
+    if (change.operation === "create" || change.operation === "rename") {
+      if (change.snapshotKey) {
+        this.agent?.fileSnapshots?.delete(change.snapshotKey);
+      }
+      this.removeChange(change);
+      return;
+    }
     const file = this.getChangeFile(change);
     if (!file) return;
     if (this.editor.tabManager.activeFile !== file) {
@@ -1721,6 +1825,65 @@ class AgentSidebar extends Sidebar {
   }
 
   async undoChange(change) {
+    if (change.operation === "create") {
+      const absolutePath = change.absolutePath || change.path;
+      if (change.overwritten && change.snapshotKey) {
+        const previous = this.agent?.fileSnapshots?.get(change.snapshotKey);
+        if (typeof previous !== "string") return;
+        const saved = await this.editor?.api?.saveFile?.(
+          absolutePath,
+          previous,
+        );
+        if (!saved) return;
+        this.agent.fileSnapshots.delete(change.snapshotKey);
+        await this.editor?.tabManager?.reloadFileFromDisk?.(absolutePath);
+      } else {
+        const result = await this.editor?.api?.deleteEntry?.(absolutePath);
+        if (!result?.success) return;
+        this.editor?.tabManager?.markFileAsDeleted?.(absolutePath);
+      }
+      await this.refreshChangeFolders([absolutePath]);
+      this.removeChange(change);
+      return;
+    }
+
+    if (change.operation === "rename") {
+      const oldAbsolutePath = change.oldAbsolutePath || change.oldPath;
+      const newAbsolutePath = change.newAbsolutePath || change.newPath;
+      const result = await this.editor?.api?.renameEntry?.(
+        newAbsolutePath,
+        oldAbsolutePath,
+      );
+      if (!result?.success) return;
+      await this.editor?.tabManager?.updateFilePath?.(
+        newAbsolutePath,
+        oldAbsolutePath,
+      );
+      const normalizePath = (value) =>
+        String(value || "").replace(/\\/g, "/").replace(/\/+$/g, "");
+      if (
+        normalizePath(this.editor?.fileExplorer?.activeFilePath) ===
+        normalizePath(newAbsolutePath)
+      ) {
+        this.editor.fileExplorer.activeFilePath = oldAbsolutePath;
+      }
+      const session = this.getActiveSession();
+      for (const existing of session?.changes || []) {
+        if (existing === change || existing.status === "renamed") continue;
+        if (
+          existing.path === change.newPath ||
+          existing.absolutePath === newAbsolutePath
+        ) {
+          existing.path = change.oldPath;
+          existing.absolutePath = oldAbsolutePath;
+          existing.name = change.oldPath.replace(/\\/g, "/").split("/").pop();
+        }
+      }
+      await this.refreshChangeFolders([oldAbsolutePath, newAbsolutePath]);
+      this.removeChange(change);
+      return;
+    }
+
     const file = this.getChangeFile(change);
     if (!file || typeof change.beforeText !== "string") return;
 
@@ -1741,6 +1904,23 @@ class AgentSidebar extends Sidebar {
     }
     file.setIsSaved(false);
     this.removeChange(change);
+  }
+
+  async refreshChangeFolders(paths = []) {
+    const refreshFolder = this.editor?.fileExplorer?.refreshFolder;
+    if (typeof refreshFolder !== "function") return;
+    const parents = new Set(
+      paths
+        .filter((path) => typeof path === "string" && path)
+        .map((path) => {
+          const normalized = path.replace(/\\/g, "/");
+          const index = normalized.lastIndexOf("/");
+          return index > 0 ? normalized.slice(0, index) : normalized;
+        }),
+    );
+    for (const parent of parents) {
+      await refreshFolder.call(this.editor.fileExplorer, parent);
+    }
   }
 
   getSessionChangeStats(session) {
@@ -1770,7 +1950,9 @@ class AgentSidebar extends Sidebar {
       this.editor.tabManager &&
       typeof this.editor.tabManager.openFileWithPath === "function"
     ) {
-      this.editor.tabManager.openFileWithPath(change.path);
+      this.editor.tabManager.openFileWithPath(
+        change.absolutePath || change.path,
+      );
     } else {
       console.warn(
         "tabManager.openFileWithPath n'est pas disponible pour ouvrir :",
@@ -2080,6 +2262,12 @@ class AgentSidebar extends Sidebar {
     if (index === -1) return;
 
     const session = this.sessions[index];
+
+    for (const change of session.changes || []) {
+      if (change.snapshotKey) {
+        this.agent?.fileSnapshots?.delete(change.snapshotKey);
+      }
+    }
 
     for (const message of session.messages) {
       if (message?.role !== "activity") continue;

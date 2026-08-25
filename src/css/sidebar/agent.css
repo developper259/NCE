@@ -830,6 +830,7 @@
 }
 
 .agent-sidebar-change-status-added { color: #4CAF50; }
+.agent-sidebar-change-status-created { color: #4CAF50; }
 .agent-sidebar-change-status-modified { color: #2196F3; }
 .agent-sidebar-change-status-deleted { color: #F44336; }
 .agent-sidebar-change-status-renamed { color: #9C27B0; }

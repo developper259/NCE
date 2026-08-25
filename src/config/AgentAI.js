@@ -2,7 +2,7 @@ const AgentAI = {
   defaultAgent: "coder",
   defaultProvider: "groq",
 
-  maxIterations: 10,
+  maxIterations: 30,
 
   readOnlyTools: [
     "get_editor_context",
@@ -137,7 +137,6 @@ const AgentAI = {
 
       temperature: 0.2,
       maxTokens: 4096,
-      maxIterations: 10,
 
       permissions: "code",
 
@@ -251,6 +250,8 @@ Tu es responsable de modifier réellement les fichiers lorsque l'utilisateur dem
 Ne fournis pas simplement un patch dans ta réponse si un tool de modification est disponible.
 Avant toute modification, lis le code concerné et ne devine jamais son contenu actuel.
 Pour toute modification, utilise modify_file avec path, oldText et newText. N'utilise pas les anciens tools de compatibilité modify_active_file ou replace_text.
+Pour créer un fichier qui n'existe pas, utilise create_file; n'utilise pas modify_file sur un fichier absent.
+Pour renommer ou déplacer un fichier, utilise rename_file. Après le renommage, recherche l'ancien nom et l'ancien chemin puis mets à jour uniquement les imports et usages pertinents avant de terminer.
 Copie oldText mot pour mot depuis le résultat read_file le plus récent. Utilise le plus petit fragment qui reste unique et conserve exactement les tabulations, espaces et ponctuations.
 N'inclus jamais le marqueur [... contenu tronqué par NCE ...] dans oldText.
 Si plusieurs modifications dépendantes concernent le même fichier, applique-les séquentiellement et relis le fichier entre deux modifications susceptibles de toucher la même zone.
@@ -391,7 +392,6 @@ Ne fournis pas simplement les modifications à appliquer manuellement.
 
       temperature: 0.2,
       maxTokens: 4096,
-      maxIterations: 10,
 
       permissions: "read",
 
@@ -458,7 +458,6 @@ Sois précis et concis.
 
       temperature: 0.1,
       maxTokens: 4096,
-      maxIterations: 10,
 
       permissions: "read",
 
@@ -523,7 +522,6 @@ Présente un plan concret basé sur les informations réellement obtenues avec l
 
       temperature: 0.2,
       maxTokens: 3000,
-      maxIterations: 10,
 
       permissions: "read",
 
@@ -614,7 +612,7 @@ Ne prétends jamais avoir vérifié une information que tu n'as pas obtenue avec
 
       maxTokens: agent.maxTokens,
 
-      maxIterations: agent.maxIterations || this.maxIterations,
+      maxIterations: this.maxIterations,
 
       permissions: agent.permissions || "read",
 

@@ -66,6 +66,20 @@ const AgentPath = {
     const relative = [...up, ...down].join("/");
     return relative;
   },
+  dirname(value) {
+    const normalized = this.normalize(value);
+    const index = normalized.lastIndexOf("/");
+    if (index < 0) return "";
+    if (index === 0) return "/";
+    if (index === 2 && /^[A-Za-z]:\//.test(normalized)) {
+      return `${normalized.slice(0, 2)}/`;
+    }
+    return normalized.slice(0, index);
+  },
+  basename(value) {
+    const normalized = this.normalize(value);
+    return normalized.slice(normalized.lastIndexOf("/") + 1);
+  },
 };
 
 class Agent {
@@ -1280,6 +1294,57 @@ class Agent {
       },
       execute: (args) => this.searchActiveFile(args),
     });
+    this.registerTool("create_file", {
+      description:
+        "Crée un nouveau fichier dans le workspace. Utilise ce tool uniquement si le fichier n'existe pas déjà. Ne l'utilise pas pour modifier un fichier existant : utilise modify_file.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: 4000,
+            description: "Chemin du nouveau fichier relatif au workspace.",
+          },
+          content: {
+            type: "string",
+            maxLength: 500000,
+            description: "Contenu initial du fichier. Vide par défaut.",
+          },
+          overwrite: {
+            type: "boolean",
+            description:
+              "Écrase explicitement un fichier existant. false par défaut; préfère modify_file pour un fichier existant.",
+          },
+        },
+        required: ["path"],
+      },
+      execute: (args) => this.createWorkspaceFile(args),
+    });
+    this.registerTool("rename_file", {
+      description:
+        "Renomme ou déplace un fichier existant dans le workspace. Si le fichier est importé ailleurs, recherche ses références et mets à jour les chemins concernés.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: 4000,
+            description: "Chemin actuel du fichier dans le workspace.",
+          },
+          newPath: {
+            type: "string",
+            minLength: 1,
+            maxLength: 4000,
+            description:
+              "Nouveau chemin du fichier dans le workspace. Le dossier parent doit exister.",
+          },
+        },
+        required: ["path", "newPath"],
+      },
+      execute: (args) => this.renameWorkspaceFile(args),
+    });
     this.registerTool("modify_file", {
       description: `
 Modifier un fichier du workspace, même s'il n'est pas actif.
@@ -1440,6 +1505,266 @@ IMPORTANT :
       return file.autoSave === true;
     }
     return false;
+  }
+  getWorkspaceFileTarget(filePath) {
+    const input = typeof filePath === "string" ? filePath.trim() : "";
+    const root = this.editor?.fileExplorer?.rootPath;
+    if (
+      !input ||
+      /[\\/]$/.test(input) ||
+      input.includes("\0") ||
+      typeof root !== "string" ||
+      !root.trim()
+    ) {
+      return {
+        valid: false,
+        error: {
+          code: "INVALID_PATH",
+          message: "Un chemin de fichier et un workspace ouvert sont requis.",
+          path: input,
+        },
+      };
+    }
+    const absolutePath = this.resolveWorkspacePath(input, root);
+    if (!absolutePath) {
+      return {
+        valid: false,
+        error: {
+          code: "OUTSIDE_WORKSPACE",
+          message: "Le chemin doit rester dans le workspace ouvert.",
+          path: input,
+        },
+      };
+    }
+    if (
+      AgentPath.normalize(absolutePath) === AgentPath.normalize(root) ||
+      !AgentPath.basename(absolutePath)
+    ) {
+      return {
+        valid: false,
+        error: {
+          code: "INVALID_PATH",
+          message: "Le chemin doit désigner un fichier.",
+          path: input,
+        },
+      };
+    }
+    return {
+      valid: true,
+      input,
+      root: AgentPath.normalize(root),
+      absolutePath,
+      relativePath: this.toProjectRelativePath(absolutePath, root),
+      parentPath: AgentPath.dirname(absolutePath),
+      fileName: AgentPath.basename(absolutePath),
+    };
+  }
+  getFileOperationError(result, fallbackCode, fallbackMessage, path) {
+    const code =
+      typeof result?.code === "string" ? result.code : fallbackCode;
+    return {
+      code,
+      message:
+        typeof result?.error === "string" && result.error
+          ? result.error
+          : fallbackMessage,
+      path,
+    };
+  }
+  async refreshWorkspaceFolders(paths = []) {
+    const explorer = this.editor?.fileExplorer;
+    if (typeof explorer?.refreshFolder !== "function") return;
+    const uniquePaths = [...new Set(paths.filter(Boolean))];
+    for (const folderPath of uniquePaths) {
+      await explorer.refreshFolder(folderPath);
+    }
+  }
+  async createWorkspaceFile(args = {}) {
+    const target = this.getWorkspaceFileTarget(args.path);
+    if (!target.valid) return { success: false, error: target.error };
+
+    const content = typeof args.content === "string" ? args.content : "";
+    const overwrite = args.overwrite === true;
+    const exists = await this.api?.pathExists?.(target.absolutePath);
+    if (exists && !overwrite) {
+      return {
+        success: false,
+        error: {
+          code: "FILE_ALREADY_EXISTS",
+          message:
+            "Le fichier existe déjà. Utilisez modify_file pour le modifier.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    const openFile = this.editor?.tabManager?.getFileByPath?.(
+      target.absolutePath,
+    );
+    if (exists && overwrite && openFile && !openFile.isSaved) {
+      return {
+        success: false,
+        error: {
+          code: "PERMISSION_DENIED",
+          message:
+            "Le fichier ouvert contient des modifications non sauvegardées et ne peut pas être écrasé.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    let snapshotKey = null;
+    if (exists && overwrite) {
+      const previous = (await this.api?.getFileContent?.([
+        target.absolutePath,
+      ]))?.[target.absolutePath];
+      if (typeof previous !== "string") {
+        return {
+          success: false,
+          error: {
+            code: "CREATE_FAILED",
+            message: "Le contenu existant n'a pas pu être sauvegardé.",
+            path: target.relativePath,
+          },
+        };
+      }
+      snapshotKey = `create:${target.absolutePath}:${Date.now()}:${Math.random()}`;
+      this.fileSnapshots.set(snapshotKey, previous);
+    }
+
+    const operation = await this.api?.createFile?.(
+      target.parentPath,
+      target.fileName,
+      content,
+      overwrite,
+    );
+    if (!operation?.success) {
+      if (snapshotKey) this.fileSnapshots.delete(snapshotKey);
+      return {
+        success: false,
+        error: this.getFileOperationError(
+          operation,
+          "CREATE_FAILED",
+          "La création du fichier a échoué.",
+          target.relativePath,
+        ),
+      };
+    }
+
+    if (openFile && overwrite) {
+      openFile.isLoaded = false;
+      await this.editor?.tabManager?.reloadFileFromDisk?.(target.absolutePath);
+    }
+    await this.refreshWorkspaceFolders([target.parentPath]);
+    return {
+      success: true,
+      operation: "create",
+      path: target.relativePath,
+      absolutePath: target.absolutePath,
+      created: !exists,
+      overwritten: Boolean(exists && overwrite),
+      snapshotKey,
+    };
+  }
+  async renameWorkspaceFile(args = {}) {
+    const source = this.getWorkspaceFileTarget(args.path);
+    if (!source.valid) return { success: false, error: source.error };
+    const destination = this.getWorkspaceFileTarget(args.newPath);
+    if (!destination.valid) {
+      return { success: false, error: destination.error };
+    }
+    if (
+      AgentPath.normalize(source.absolutePath) ===
+      AgentPath.normalize(destination.absolutePath)
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_PATH",
+          message: "Le nouveau chemin doit être différent du chemin actuel.",
+          path: destination.relativePath,
+        },
+      };
+    }
+    if (!(await this.api?.pathExists?.(source.absolutePath))) {
+      return {
+        success: false,
+        error: {
+          code: "FILE_NOT_FOUND",
+          message: "Le fichier source n'existe pas.",
+          path: source.relativePath,
+        },
+      };
+    }
+    if (await this.api?.pathExists?.(destination.absolutePath)) {
+      return {
+        success: false,
+        error: {
+          code: "DESTINATION_EXISTS",
+          message: "La destination existe déjà.",
+          path: destination.relativePath,
+        },
+      };
+    }
+    if (!(await this.api?.pathExists?.(destination.parentPath))) {
+      return {
+        success: false,
+        error: {
+          code: "PARENT_NOT_FOUND",
+          message: "Le dossier de destination n'existe pas.",
+          path: destination.relativePath,
+        },
+      };
+    }
+
+    const operation = await this.api?.renameEntry?.(
+      source.absolutePath,
+      destination.absolutePath,
+    );
+    if (!operation?.success) {
+      return {
+        success: false,
+        error: this.getFileOperationError(
+          operation,
+          "RENAME_FAILED",
+          "Le renommage du fichier a échoué.",
+          source.relativePath,
+        ),
+      };
+    }
+
+    const tabManager = this.editor?.tabManager;
+    await tabManager?.updateFilePath?.(
+      source.absolutePath,
+      destination.absolutePath,
+    );
+    const explorer = this.editor?.fileExplorer;
+    if (
+      AgentPath.normalize(explorer?.activeFilePath || "") ===
+      AgentPath.normalize(source.absolutePath)
+    ) {
+      explorer.activeFilePath = destination.absolutePath;
+    }
+    if (this.readFileContexts.has(source.absolutePath)) {
+      this.readFileContexts.set(
+        destination.absolutePath,
+        this.readFileContexts.get(source.absolutePath),
+      );
+      this.readFileContexts.delete(source.absolutePath);
+    }
+    await this.refreshWorkspaceFolders([
+      source.parentPath,
+      destination.parentPath,
+    ]);
+    return {
+      success: true,
+      operation: "rename",
+      oldPath: source.relativePath,
+      newPath: destination.relativePath,
+      oldAbsolutePath: source.absolutePath,
+      newAbsolutePath: destination.absolutePath,
+      renamed: true,
+    };
   }
   async readSelection() {
     const controller = this.editor?.selectController;

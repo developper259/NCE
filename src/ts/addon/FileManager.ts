@@ -15,6 +15,7 @@ export interface FileItem {
 export interface FileOperationResult {
   success: boolean;
   path?: string;
+  code?: string;
   error?: string;
 }
 
@@ -119,8 +120,14 @@ export class FileManager {
 
     ipcMain.handle(
       "FileManager:createFile",
-      async (event, dirPath: string, fileName: string) => {
-        return await this.createFile(dirPath, fileName);
+      async (
+        event,
+        dirPath: string,
+        fileName: string,
+        content: string = "",
+        overwrite: boolean = false,
+      ) => {
+        return await this.createFile(dirPath, fileName, content, overwrite);
       },
     );
 
@@ -330,10 +337,33 @@ export class FileManager {
     newPath: string,
   ): Promise<FileOperationResult> {
     try {
+      if (!fsSync.existsSync(oldPath)) {
+        return {
+          success: false,
+          code: "FILE_NOT_FOUND",
+          error: "Le fichier source n'existe pas.",
+        };
+      }
       if (fsSync.existsSync(newPath)) {
         return {
           success: false,
+          code: "DESTINATION_EXISTS",
           error: "Un fichier ou dossier portant ce nom existe déjà.",
+        };
+      }
+      const sourceStats = await fs.stat(oldPath);
+      if (!sourceStats.isFile()) {
+        return {
+          success: false,
+          code: "NOT_A_FILE",
+          error: "La source n'est pas un fichier.",
+        };
+      }
+      if (!fsSync.existsSync(path.dirname(newPath))) {
+        return {
+          success: false,
+          code: "PARENT_NOT_FOUND",
+          error: "Le dossier de destination n'existe pas.",
         };
       }
       await fs.rename(oldPath, newPath);
@@ -341,7 +371,14 @@ export class FileManager {
       return { success: true, path: newPath };
     } catch (error: any) {
       console.error("Error renaming entry:", error);
-      return { success: false, error: error?.message || "Rename failed." };
+      return {
+        success: false,
+        code:
+          error?.code === "EACCES" || error?.code === "EPERM"
+            ? "PERMISSION_DENIED"
+            : "RENAME_FAILED",
+        error: error?.message || "Rename failed.",
+      };
     }
   }
 
@@ -359,18 +396,38 @@ export class FileManager {
   async createFile(
     dirPath: string,
     fileName: string,
+    content: string = "",
+    overwrite: boolean = false,
   ): Promise<FileOperationResult> {
     const fullPath = path.join(dirPath, fileName);
     try {
-      if (fsSync.existsSync(fullPath)) {
-        return { success: false, error: "Ce fichier existe déjà." };
+      if (fsSync.existsSync(fullPath) && !overwrite) {
+        return {
+          success: false,
+          code: "FILE_ALREADY_EXISTS",
+          error: "Ce fichier existe déjà.",
+        };
       }
       await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.writeFile(fullPath, "");
+      await fs.writeFile(
+        fullPath,
+        content,
+        overwrite ? undefined : { flag: "wx" },
+      );
+      this.clearFileCache(fullPath);
       return { success: true, path: fullPath };
     } catch (error: any) {
       console.error("Error creating file:", error);
-      return { success: false, error: error?.message || "Create file failed." };
+      return {
+        success: false,
+        code:
+          error?.code === "EEXIST"
+            ? "FILE_ALREADY_EXISTS"
+            : error?.code === "EACCES" || error?.code === "EPERM"
+              ? "PERMISSION_DENIED"
+              : "CREATE_FAILED",
+        error: error?.message || "Create file failed.",
+      };
     }
   }
 

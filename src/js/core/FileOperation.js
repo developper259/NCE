@@ -7,8 +7,8 @@ class FileOperations {
     return window.api.deleteEntry(targetPath);
   }
 
-  async createFile(dirPath, fileName) {
-    return window.api.createFile(dirPath, fileName);
+  async createFile(dirPath, fileName, content = "", overwrite = false) {
+    return window.api.createFile(dirPath, fileName, content, overwrite);
   }
 
   async createFolder(dirPath, folderName) {
