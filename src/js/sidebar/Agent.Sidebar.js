@@ -8,12 +8,20 @@ class AgentSidebar extends Sidebar {
     this.changesElement = null;
     this.inputElement = null;
     this.sendButton = null;
+    this.markdownRenderer = new MarkdownRenderer({
+      throttleMs: 50,
+      getHighlightController: () => this.editor.highlightController,
+    });
+    this.messageElements = new WeakMap();
 
     this.apiKeys = new Map();
     this.apiKeyPanel = null;
 
     this.agent = editor.agent;
     this.agent.setCallbacks({
+      onToken: (markdown, context) => {
+        this.handleAgentToken(markdown, context);
+      },
       onToolStart: (toolName, args, context) => {
         this.appendToolReasoning(toolName, args, context?.sessionId);
       },
@@ -353,7 +361,11 @@ class AgentSidebar extends Sidebar {
         session.draft = textarea.value;
       }
       this.autoResizeInput();
-      this.updateView();
+      this.updateView({
+        renderTabs: false,
+        renderMessages: false,
+        renderChanges: false,
+      });
     });
 
     textarea.addEventListener("keydown", (event) => {
@@ -648,7 +660,10 @@ class AgentSidebar extends Sidebar {
   }
 
   renderMessages(container) {
-    container.innerHTML = "";
+    container
+      .querySelectorAll(".agent-sidebar-markdown")
+      .forEach((element) => this.markdownRenderer.destroy(element));
+    container.replaceChildren();
 
     const session = this.getActiveSession();
 
@@ -661,7 +676,7 @@ class AgentSidebar extends Sidebar {
       container.appendChild(this.createMessageElement(message));
     }
 
-    if (session.isGenerating) {
+    if (session.isGenerating && !session.streamingMessage) {
       container.appendChild(this.createTypingIndicator());
     }
 
@@ -781,8 +796,16 @@ class AgentSidebar extends Sidebar {
     if (contentValue) {
       const contentEl = document.createElement("div");
       contentEl.className = "agent-sidebar-content";
-      contentEl.textContent = contentValue;
+      if (role === "agent") {
+        contentEl.classList.add("agent-sidebar-markdown");
+        this.markdownRenderer.render(contentValue, contentEl, {
+          highlightImmediately: message?.streaming !== true,
+        });
+      } else {
+        contentEl.textContent = contentValue;
+      }
       bubble.appendChild(contentEl);
+      this.messageElements.set(message, { row, content: contentEl });
 
       const copyButton = document.createElement("button");
       copyButton.type = "button";
@@ -794,17 +817,13 @@ class AgentSidebar extends Sidebar {
       copyButton.appendChild(copyIcon);
       copyButton.addEventListener("click", async (event) => {
         event.stopPropagation();
+        const markdown =
+          typeof message?.content === "string" ? message.content : "";
         try {
-          await navigator.clipboard.writeText(contentValue);
+          await navigator.clipboard.writeText(markdown);
           copyButton.title = "Copied";
         } catch {
-          const selection = window.getSelection();
-          const range = document.createRange();
-          range.selectNodeContents(contentEl);
-          selection.removeAllRanges();
-          selection.addRange(range);
-          document.execCommand("copy");
-          selection.removeAllRanges();
+          this.copyTextFallback(markdown);
         }
         copyButton.title = "Copied";
         copyButton.classList.add("agent-sidebar-copy-button-copied");
@@ -868,6 +887,72 @@ class AgentSidebar extends Sidebar {
     }
 
     return row;
+  }
+
+  copyTextFallback(value) {
+    const textarea = document.createElement("textarea");
+    textarea.value = typeof value === "string" ? value : "";
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.left = "-9999px";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+
+  shouldAutoScrollMessages() {
+    if (!this.messagesElement) return false;
+    const distanceFromBottom =
+      this.messagesElement.scrollHeight -
+      this.messagesElement.scrollTop -
+      this.messagesElement.clientHeight;
+    return distanceFromBottom < 48;
+  }
+
+  handleAgentToken(markdown, context = {}) {
+    if (typeof markdown !== "string") return;
+
+    const session = this.getSession(context.sessionId);
+    if (!session || !session.isGenerating) return;
+
+    let message = session.streamingMessage;
+    if (!message) {
+      message = {
+        role: "agent",
+        content: markdown,
+        timestamp: this.formatTime(),
+        streaming: true,
+      };
+      session.streamingMessage = message;
+      session.messages.push(message);
+
+      if (session.id === this.activeSessionId && this.messagesElement) {
+        this.renderMessages(this.messagesElement);
+        this.scrollMessagesToBottom();
+      }
+      return;
+    }
+
+    message.content = markdown;
+    const element = this.messageElements.get(message)?.content;
+    if (
+      session.id !== this.activeSessionId ||
+      !element ||
+      !element.isConnected
+    ) {
+      return;
+    }
+
+    const shouldScroll = this.shouldAutoScrollMessages();
+    this.markdownRenderer.update(markdown, element, {
+      onRendered: () => {
+        if (shouldScroll && session.id === this.activeSessionId) {
+          this.scrollMessagesToBottom();
+        }
+      },
+    });
   }
 
   createTypingIndicator() {
@@ -1220,17 +1305,21 @@ class AgentSidebar extends Sidebar {
     return { additions, deletions };
   }
 
-  updateView() {
-    if (this.tabsElement) {
+  updateView(options = {}) {
+    const renderTabs = options.renderTabs !== false;
+    const renderMessages = options.renderMessages !== false;
+    const renderChanges = options.renderChanges !== false;
+
+    if (renderTabs && this.tabsElement) {
       this.renderTabs(this.tabsElement);
     }
 
-    if (this.messagesElement) {
+    if (renderMessages && this.messagesElement) {
       this.renderMessages(this.messagesElement);
       this.scrollMessagesToBottom();
     }
 
-    if (this.changesElement) {
+    if (renderChanges && this.changesElement) {
       this.renderChangesPanel(this.changesElement);
     }
 
@@ -1427,6 +1516,7 @@ class AgentSidebar extends Sidebar {
       runId: null,
       abortController: null,
       pendingTimeout: null,
+      streamingMessage: null,
       queue: [],
       changes: [],
       changesExpanded: true,
@@ -1523,6 +1613,11 @@ class AgentSidebar extends Sidebar {
 
     session.isGenerating = false;
 
+    if (session.streamingMessage) {
+      session.streamingMessage.streaming = false;
+      session.streamingMessage = null;
+    }
+
     session.messages.push({
       role: "agent",
       content: "Génération interrompue.",
@@ -1608,18 +1703,28 @@ class AgentSidebar extends Sidebar {
           : "";
 
       if (session.isGenerating) {
-        session.messages.push({
-          role: "agent",
-          content: agentReply,
-          reasoning: agentReasoning || undefined,
-          timestamp: this.formatTime(),
-        });
+        if (session.streamingMessage) {
+          if (agentReply) session.streamingMessage.content = agentReply;
+          session.streamingMessage.reasoning = agentReasoning || undefined;
+          session.streamingMessage.timestamp = this.formatTime();
+          session.streamingMessage.streaming = false;
+        } else {
+          session.messages.push({
+            role: "agent",
+            content: agentReply,
+            reasoning: agentReasoning || undefined,
+            timestamp: this.formatTime(),
+          });
+        }
       }
     } catch (error) {
       if (error.name === "AbortError") {
         console.log("Requête Agent annulée par l'utilisateur.");
       } else {
         console.error("Erreur avec Agent:", error);
+        if (session.streamingMessage) {
+          session.streamingMessage.streaming = false;
+        }
         session.messages.push({
           role: "agent",
           content: `Erreur de connexion à l'Agent: ${error.message}`,
@@ -1629,6 +1734,7 @@ class AgentSidebar extends Sidebar {
     } finally {
       session.runId = null;
       session.isGenerating = false;
+      session.streamingMessage = null;
 
       this.processQueue(session.id);
       this.refresh();
