@@ -780,14 +780,21 @@ class LineController {
 
   createLineOBJ(slicedLine, screenIndex) {
     const dataIndex = this.startIndex + screenIndex;
-
-    const tokens = this.lines[dataIndex]?.getTokens();
+    const lineNode = this.lines[dataIndex];
+    const diffSegments = lineNode?.diffSegments || null;
+    const diffState = lineNode?.diffState || null;
+    const tokens = lineNode?.getTokens();
     const visibleTokens = this.getVisibleTokens(tokens, slicedLine);
 
     const lineOBJ = this.editor.writerController.textToOBJ(
       slicedLine?.text,
       visibleTokens,
+      diffSegments,
     );
+
+    if (diffState) {
+      lineOBJ.classList.add(`line-${diffState}`);
+    }
 
     lineOBJ.style.position = "absolute";
     lineOBJ.style.top = `${this.getLineTop(screenIndex)}px`;

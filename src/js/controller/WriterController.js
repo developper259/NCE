@@ -124,13 +124,23 @@ class WriterController {
     return fragment;
   }
 
-  textToOBJ(txt, tokens = null) {
+  textToOBJ(txt, tokens = null, diffSegments = null) {
     const lineDiv = document.createElement("div");
     lineDiv.className = "line editor-select";
 
     let fragment;
 
-    if (tokens && tokens.length !== 0) {
+    if (Array.isArray(diffSegments) && diffSegments.length > 0) {
+      fragment = document.createDocumentFragment();
+      for (const segment of diffSegments) {
+        const span = document.createElement("span");
+        span.className = segment.type
+          ? `diff-segment diff-${segment.type}`
+          : "diff-segment";
+        span.textContent = segment.text ?? "";
+        fragment.appendChild(span);
+      }
+    } else if (tokens && tokens.length !== 0) {
       fragment = this.tokenToDOM(txt, tokens);
     } else {
       const value = document.createTextNode(txt ?? "");

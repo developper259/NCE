@@ -325,6 +325,7 @@ class Agent {
   async runLoop(runId, controller, runConfig = this.runConfig) {
     let finalResponse = "";
     let finalReasoning = "";
+    let postEditRepairAttempts = 0;
     for (
       let iteration = 1;
       iteration <= (runConfig?.maxIterations ?? this.maxIterations);
@@ -357,6 +358,67 @@ class Agent {
           tool_call_id: call.id,
           content: JSON.stringify(toolResult),
         });
+
+        const toolName = call?.function?.name;
+        if (toolName === "modify_active_file" && toolResult?.success) {
+          const validation = this.validateActiveFileSyntax();
+          if (!validation.valid) {
+            if (postEditRepairAttempts >= 3) {
+              throw new Error(
+                `La validation du fichier échoue après correction automatique : ${validation.error}`,
+              );
+            }
+            postEditRepairAttempts += 1;
+            this.messages.push({
+              role: "system",
+              content:
+                "VALIDATION POST-MODIFICATION : le fichier modifié contient une erreur de syntaxe. Lis le code actuel, corrige immédiatement la cause de l'erreur et réapplique une modification valide avant de répondre.",
+            });
+            this.messages.push({
+              role: "user",
+              content: `Le dernier patch a produit une erreur de syntaxe dans le script. Détail de l'erreur : ${validation.error}. Corrige le fichier et réécris uniquement la partie nécessaire pour rendre le code valide.`,
+            });
+            const repairResponse = await this.requestModel(controller, runConfig);
+            const repaired = this.parseResponse(repairResponse);
+            if (repaired.text) {
+              finalResponse = repaired.text;
+              finalReasoning = repaired.reasoning || finalReasoning;
+              this.callbacks.onToken?.(repaired.text, {
+                sessionId: this.currentSessionId,
+                runId,
+              });
+            }
+            this.messages.push(repaired.assistantMessage);
+            if (!repaired.toolCalls.length) {
+              const recheck = this.validateActiveFileSyntax();
+              if (recheck.valid) {
+                return {
+                  response: finalResponse,
+                  reasoning: finalReasoning,
+                  iterations: iteration,
+                };
+              }
+            }
+            for (const repairCall of repaired.toolCalls) {
+              const repairToolResult = await this.executeToolCall(repairCall);
+              this.messages.push({
+                role: "tool",
+                tool_call_id: repairCall.id,
+                content: JSON.stringify(repairToolResult),
+              });
+              if (repairCall?.function?.name === "modify_active_file") {
+                const repairedValidation = this.validateActiveFileSyntax();
+                if (repairedValidation.valid) {
+                  return {
+                    response: finalResponse,
+                    reasoning: finalReasoning,
+                    iterations: iteration,
+                  };
+                }
+              }
+            }
+          }
+        }
       }
     }
     throw new Error(
@@ -1083,6 +1145,127 @@ IMPORTANT :
       return null;
     return candidate;
   }
+  markFileDiffHighlights(beforeText, afterText, file) {
+    if (!file || !Array.isArray(file.lines)) return;
+
+    for (const line of file.lines) {
+      if (line && typeof line === "object") {
+        line.diffState = null;
+        line.diffSegments = [];
+      }
+    }
+
+    if (!beforeText || !afterText || beforeText === afterText) return;
+
+    const beforeLines = beforeText.split(/\r?\n/);
+    const afterLines = afterText.split(/\r?\n/);
+    const maxLength = Math.max(beforeLines.length, afterLines.length);
+
+    for (let index = 0; index < maxLength; index += 1) {
+      const beforeLine = beforeLines[index];
+      const afterLine = afterLines[index];
+      const targetLine = file.lines[index];
+      if (!targetLine) continue;
+
+      if (beforeLine === undefined && afterLine !== undefined) {
+        targetLine.diffState = "added";
+        targetLine.diffSegments = [{ type: "added", text: afterLine }];
+      } else if (afterLine === undefined && beforeLine !== undefined) {
+        targetLine.diffState = "removed";
+        targetLine.diffSegments = [{ type: "removed", text: beforeLine }];
+      } else if (beforeLine !== afterLine) {
+        targetLine.diffState = "modified";
+        targetLine.diffSegments = [
+          { type: "removed", text: beforeLine },
+          { type: "added", text: afterLine },
+        ];
+      }
+    }
+  }
+  validateActiveFileSyntax() {
+    try {
+      const editor = this.editor;
+      const lineController = editor?.lineController;
+      const file = editor?.tabManager?.activeFile;
+      const source =
+        typeof lineController?.getContent === "function"
+          ? lineController.getContent()
+          : "";
+      if (!source.trim()) {
+        return { valid: true, error: null };
+      }
+      const fileName = file?.path || "script.js";
+      const language = (file?.language || "javascript").toLowerCase();
+      if (language !== "javascript" && language !== "js" && language !== "typescript" && language !== "ts") {
+        return { valid: true, error: null };
+      }
+      const script = new Function(`"use strict";\n${source}`);
+      script();
+      return { valid: true, error: null, fileName };
+    } catch (error) {
+      return {
+        valid: false,
+        error: error?.message || String(error),
+      };
+    }
+  }
+  async repairBrokenFileAfterEdit(args = {}, maxPasses = 3) {
+    let currentArgs = args;
+    let pass = 0;
+    let lastResult = null;
+
+    while (pass < maxPasses) {
+      pass += 1;
+      const result = await this.modifyActiveFile(currentArgs);
+      if (!result?.success) {
+        return { success: false, error: result?.error || { code: "EDIT_FAILED" } };
+      }
+
+      const validation = this.validateActiveFileSyntax();
+      if (validation.valid) {
+        lastResult = {
+          success: true,
+          result,
+          validation,
+          passes: pass,
+        };
+        break;
+      }
+
+      const errorMessage = validation.error;
+      const fileContent = this.editor?.lineController?.getContent?.() || "";
+      const snippet = (fileContent || "").slice(0, 4000);
+
+      currentArgs = {
+        ...currentArgs,
+        oldText: snippet,
+        newText: snippet,
+      };
+
+      if (typeof currentArgs.newText === "string" && currentArgs.newText.includes(errorMessage)) {
+        break;
+      }
+
+      if (pass >= maxPasses) {
+        return {
+          success: false,
+          error: {
+            code: "SYNTAX_REPAIR_LIMIT_REACHED",
+            message: errorMessage,
+          },
+        };
+      }
+
+      lastResult = {
+        success: false,
+        result,
+        validation,
+        passes: pass,
+      };
+    }
+
+    return lastResult || { success: false, error: { code: "NO_REPAIR_ATTEMPT" } };
+  }
   async modifyActiveFile(args = {}) {
     const file = this.editor?.tabManager?.activeFile;
     const writer = this.editor?.writerController;
@@ -1250,6 +1433,10 @@ IMPORTANT :
       };
     }
 
+    this.markFileDiffHighlights(beforeText, afterText, file);
+    if (typeof lineController.refresh === "function") {
+      lineController.refresh(true);
+    }
     file.setIsSaved(false);
     return {
       success: true,

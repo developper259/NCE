@@ -3,8 +3,10 @@ class LineNode {
     this.text = text;
     this.tokens = null;
     this.isDirty = false;
-    this.isHighlight = false; 
+    this.isHighlight = false;
     this.state = null;
+    this.diffState = null;
+    this.diffSegments = [];
   }
 
   setText(text) {
@@ -64,6 +66,8 @@ class LineNode {
     newNode.isDirty = this.isDirty;
     newNode.isHighlight = this.isHighlight;
     newNode.state = this.state;
+    newNode.diffState = this.diffState;
+    newNode.diffSegments = [...(this.diffSegments || [])];
     return newNode;
   }
 
@@ -73,6 +77,8 @@ class LineNode {
       tokens: this.tokens,
       isHighlight: this.isHighlight,
       state: this.state,
+      diffState: this.diffState,
+      diffSegments: this.diffSegments,
     };
   }
 
@@ -81,6 +87,8 @@ class LineNode {
     node.tokens = data.tokens || null;
     node.isHighlight = data.isHighlight || false;
     node.state = data.state || null;
+    node.diffState = data.diffState || null;
+    node.diffSegments = Array.isArray(data.diffSegments) ? data.diffSegments : [];
     return node;
   }
 }

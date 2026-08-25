@@ -134,3 +134,34 @@
 .selected-all {
   border-radius: 4px;
 }
+
+.line-added {
+  background: rgba(34, 197, 94, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.18);
+}
+
+.line-removed {
+  background: rgba(239, 68, 68, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.18);
+}
+
+.line-modified {
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15);
+}
+
+.diff-segment {
+  display: inline;
+  border-radius: 3px;
+}
+
+.diff-added {
+  background: rgba(34, 197, 94, 0.22);
+  color: #a7f3d0;
+}
+
+.diff-removed {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  text-decoration: line-through;
+}
