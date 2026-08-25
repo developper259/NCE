@@ -346,7 +346,7 @@ class KeyBinding {
 
     if (cursor) {
       lc.refresh();
-      const screenRow = cursor.row - lc.startIndex;
+      const screenRow = lc.getDisplayIndexForCursor(cursor.row) - lc.startIndex;
       if (screenRow <= lc.marginLines) {
         const targetRow = Math.max(0, lc.startIndex - 1);
         lc.scrollTo(targetRow);
@@ -395,7 +395,7 @@ class KeyBinding {
       );
 
       const lc = this.editor.lineController;
-      const screenRow = y - lc.startIndex;
+      const screenRow = lc.getDisplayIndexForCursor(y) - lc.startIndex;
       if (screenRow <= lc.marginLines) {
         const targetRow = Math.max(0, lc.startIndex - 1);
         lc.scrollTo(targetRow);
@@ -446,7 +446,7 @@ class KeyBinding {
       );
 
       const lc = this.editor.lineController;
-      const screenRow = y - lc.startIndex;
+      const screenRow = lc.getDisplayIndexForCursor(y) - lc.startIndex;
       if (screenRow >= lc.maxLines - lc.marginLines) {
         const targetRow = lc.startIndex + 1;
         lc.scrollTo(targetRow);

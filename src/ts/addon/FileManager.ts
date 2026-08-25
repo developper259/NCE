@@ -250,6 +250,7 @@ export class FileManager {
       this.window.watcher?.ignoreNextChange(filePath);
 
       await fs.writeFile(filePath, content);
+      this.clearFileCache(filePath);
 
       console.log("File saved successfully:", filePath);
 
@@ -463,7 +464,10 @@ export class FileManager {
   ): Promise<{ success: boolean; totalLines: number; errorCode?: string }> {
     try {
       const content = await fs.readFile(filePath, "utf-8");
-      const lines = content.split("\n");
+      const lines = content.split(/\r?\n/);
+      if (lines.length > 0 && lines[lines.length - 1] === "") {
+        lines.pop();
+      }
       this.fileCache.set(filePath, lines);
 
       return {

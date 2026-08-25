@@ -60,12 +60,26 @@ class AgentSidebar extends Sidebar {
         };
 
         const existingIndex = session.changes.findIndex(
-          (entry) => entry.path === filePath,
+          (entry) =>
+            entry.path === filePath ||
+            (absolutePath && entry.absolutePath === absolutePath),
         );
         if (existingIndex >= 0) {
+          const existingChange = session.changes[existingIndex];
+          const originalBeforeText =
+            typeof existingChange.beforeText === "string"
+              ? existingChange.beforeText
+              : beforeText;
+          const cumulativeStats = this.getLineDiffStats(
+            originalBeforeText ? originalBeforeText.split("\n") : [],
+            afterText ? afterText.split("\n") : [],
+          );
           session.changes[existingIndex] = {
-            ...session.changes[existingIndex],
+            ...existingChange,
             ...change,
+            beforeText: originalBeforeText,
+            additions: cumulativeStats.additions,
+            deletions: cumulativeStats.deletions,
           };
         } else {
           session.changes.push(change);
@@ -1080,7 +1094,15 @@ class AgentSidebar extends Sidebar {
     if (this.editor.tabManager.activeFile !== file) {
       await this.editor.tabManager.setFocusFile(file);
     }
-    this.agent.markFileDiffHighlights("", "", file);
+    file.diffSnapshot = null;
+    file.diffActive = false;
+    file.diffRows = null;
+    for (const line of file.lines || []) {
+      if (line && typeof line === "object") {
+        line.diffState = null;
+        line.diffSegments = [];
+      }
+    }
     if (this.editor.lineController?.refresh) {
       this.editor.lineController.refresh(true);
     }

@@ -44,9 +44,10 @@ class LineController {
   }
 
   getDisplayIndexForDocument(documentIndex) {
-    return this.getDisplayRows().findIndex(
+    const displayIndex = this.getDisplayRows().findIndex(
       (row) => row.documentIndex === documentIndex,
     );
+    return displayIndex >= 0 ? displayIndex : documentIndex;
   }
 
   getDisplayIndexForCursor(documentRow) {
@@ -400,12 +401,16 @@ class LineController {
       return 0;
     }
 
-    const text = this.lines[i].getText();
+    return this.getViewTextLength(this.lines[i].getText());
+  }
+
+  getViewTextLength(text) {
+    const value = typeof text === "string" ? text : "";
 
     return (
-      text.length +
-      getOccurrence("\t", text) * CONFIG_GET("tab_width") -
-      getOccurrence("\t", text)
+      value.length +
+      getOccurrence("\t", value) * CONFIG_GET("tab_width") -
+      getOccurrence("\t", value)
     );
   }
 
@@ -537,26 +542,28 @@ class LineController {
 
   getSlicedLine(line) {
     let startChar = 0;
+    let visualStart = 0;
+    const tabWidth = CONFIG_GET("tab_width");
 
     if (this.offsetX > 0) {
-      const tabWidth = CONFIG_GET("tab_width");
-
-      let visualPos = 0;
-
-      while (startChar < line.length && visualPos < this.offsetX) {
-        visualPos += line[startChar] === "\t" ? tabWidth : 1;
+      while (startChar < line.length && visualStart < this.offsetX) {
+        visualStart += line[startChar] === "\t" ? tabWidth : 1;
         startChar++;
       }
-
-      line = line.slice(startChar);
     }
 
-    if (line.length > this.maxCharactersPerLine) {
-      line = line.slice(0, this.maxCharactersPerLine);
+    const maxWidth = this.maxCharactersPerLine;
+    let visibleWidth = 0;
+    let endChar = startChar;
+    while (endChar < line.length) {
+      const charWidth = line[endChar] === "\t" ? tabWidth : 1;
+      if (visibleWidth + charWidth > maxWidth) break;
+      visibleWidth += charWidth;
+      endChar++;
     }
 
     return {
-      text: line,
+      text: line.slice(startChar, endChar),
       startChar,
     };
   }
@@ -633,7 +640,7 @@ class LineController {
     const lineNode = documentIndex === null ? null : this.lines[documentIndex];
     const fullText = displayRow.text;
 
-    const currentLineLength = fullText.length;
+    const currentLineLength = this.getViewTextLength(fullText);
 
     if (currentLineLength > this.maxLineLength) {
       this.maxLineLength = currentLineLength;
@@ -641,7 +648,7 @@ class LineController {
 
     let line = this.getSlicedLine(fullText);
 
-    if (child.textContent !== line) {
+    if (child.textContent !== line.text) {
       let lineOBJ = this.createLineOBJ(line, screenIndex);
 
       if (!lineOBJ) {
@@ -683,7 +690,7 @@ class LineController {
       } else {
         const documentIndex = displayRow.documentIndex;
         const fullText = displayRow.text;
-        const currentLineLength = fullText.length;
+        const currentLineLength = this.getViewTextLength(fullText);
 
         if (currentLineLength > this.maxLineLength) {
           this.maxLineLength = currentLineLength;

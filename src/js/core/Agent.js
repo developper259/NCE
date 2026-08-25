@@ -359,13 +359,7 @@ class Agent {
   }
 
   resolveToolChoice(message) {
-    const config = this.runConfig || this.createRunConfig();
-    const providerId = config.providerId || this.provider?.id;
-    const provider = providerId ? AgentAI?.getProvider?.(providerId) : null;
-    const supportsToolChoice = !!provider && !!provider.supportsToolChoice;
-    const modificationIntent = this.detectModificationIntent(message);
-    if (!modificationIntent) return "auto";
-    return supportsToolChoice ? "required" : "auto";
+    return "auto";
   }
 
   async runLoop(runId, controller, runConfig = this.runConfig) {
@@ -664,16 +658,22 @@ class Agent {
   getOpenAITools() {
     const permissions = this.runConfig?.permissions ?? this.permissions;
     const hasActiveFile = Boolean(this.editor?.tabManager?.activeFile);
-    const activeFileTools = new Set([
-      "read_active_file",
-      "search_active_file",
+    const hiddenCompatibilityWriteTools = new Set([
       "modify_active_file",
       "replace_text",
+    ]);
+    const activeFileReadTools = new Set([
+      "read_active_file",
+      "search_active_file",
     ]);
     return [...this.tools.values()]
       .filter((tool) => tool.enabled)
       .filter((tool) => permissions === "code" || tool.readOnly)
-      .filter((tool) => hasActiveFile || !activeFileTools.has(tool.name))
+      .filter(
+        (tool) =>
+          !hiddenCompatibilityWriteTools.has(tool.name) &&
+          (hasActiveFile || !activeFileReadTools.has(tool.name)),
+      )
       .map((tool) => ({
         type: "function",
         function: {
@@ -1202,8 +1202,9 @@ Modifier un fichier du workspace, même s'il n'est pas actif.
 Règles de sécurité :
 - Le chemin peut être relatif au projet ou absolu.
 - Le fichier doit rester dans le workspace ouvert.
-- Utilise cet outil uniquement pour un fichier différent du fichier actif. Pour le fichier actif, utilise modify_active_file avec une plage réelle.
+- Utilise cet outil pour toute modification, y compris celle du fichier actif.
 - oldText doit correspondre à une seule occurrence exacte; sinon la modification est refusée.
+- N'envoie pas de coordonnées : NCE calcule les positions automatiquement.
 - Après modification, la commande retourne le chemin relatif et les contenus avant/après.
 `,
       parameters: {
@@ -1400,33 +1401,6 @@ IMPORTANT :
       };
     }
 
-    const activePath = this.editor?.tabManager?.activeFile?.path;
-    if (
-      activePath &&
-      AgentPath.normalize(activePath) === AgentPath.normalize(absolutePath)
-    ) {
-      return {
-        success: false,
-        error: {
-          code: "USE_ACTIVE_FILE_TOOL",
-          message:
-            "Le fichier demandé est déjà actif. Utilisez modify_active_file avec une plage startLine/startColumn/endLine/endColumn, ou oldText/newText.",
-        },
-      };
-    }
-
-    if (!this.readFileContexts.has(absolutePath)) {
-      return {
-        success: false,
-        error: {
-          code: "READ_FILE_FIRST",
-          message:
-            "Lisez d'abord ce fichier avec read_file dans la demande actuelle avant d'utiliser modify_file.",
-          path: relativePath,
-        },
-      };
-    }
-
     const oldText = typeof args.oldText === "string" ? args.oldText : "";
     const newText =
       typeof args.newText === "string"
@@ -1501,7 +1475,6 @@ IMPORTANT :
         afterText: updatedText,
         match: "insert-start",
       };
-      this.executedModificationRequests.set(requestKey, result);
 
       if (tabManager && !alreadyOpen) {
         await tabManager.openFileWithPath(absolutePath);
@@ -1546,9 +1519,20 @@ IMPORTANT :
         }
         openFile.setIsSaved(false);
         if (persistToDisk && typeof this.api?.saveFile === "function") {
-          this.api.saveFile(absolutePath, updatedText);
+          const savedPath = await this.api.saveFile(absolutePath, updatedText);
+          if (savedPath !== absolutePath) {
+            return {
+              success: false,
+              error: {
+                code: "SAVE_FAILED",
+                message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+                path: relativePath,
+              },
+            };
+          }
         }
       }
+      this.executedModificationRequests.set(requestKey, result);
       this.readFileContexts.delete(absolutePath);
       return result;
     }
@@ -1572,6 +1556,7 @@ IMPORTANT :
           code: "AMBIGUOUS_MATCH",
           message:
             "oldText est présent plusieurs fois dans ce fichier. Le remplacement est refusé.",
+          occurrences: currentText.split(oldText).length - 1,
         },
       };
     }
@@ -1590,7 +1575,6 @@ IMPORTANT :
       afterText: updatedText,
       match: "exact",
     };
-    this.executedModificationRequests.set(requestKey, result);
 
     if (tabManager && !alreadyOpen) {
       await tabManager.openFileWithPath(absolutePath);
@@ -1635,9 +1619,20 @@ IMPORTANT :
       }
       openFile.setIsSaved(false);
       if (persistToDisk && typeof this.api?.saveFile === "function") {
-        this.api.saveFile(absolutePath, updatedText);
+        const savedPath = await this.api.saveFile(absolutePath, updatedText);
+        if (savedPath !== absolutePath) {
+          return {
+            success: false,
+            error: {
+              code: "SAVE_FAILED",
+              message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+              path: relativePath,
+            },
+          };
+        }
       }
     }
+    this.executedModificationRequests.set(requestKey, result);
     this.readFileContexts.delete(absolutePath);
     return result;
   }
@@ -1786,6 +1781,12 @@ IMPORTANT :
     const originalText =
       file.diffSnapshot === null ? beforeText : file.diffSnapshot;
     if (originalText === afterText) {
+      for (const line of file.lines) {
+        if (line && typeof line === "object") {
+          line.diffState = null;
+          line.diffSegments = [];
+        }
+      }
       file.diffSnapshot = null;
       file.diffActive = false;
       file.diffRows = [];
@@ -2103,6 +2104,7 @@ IMPORTANT :
             code: "AMBIGUOUS_MATCH",
             message:
               "oldText est présent plusieurs fois. Le remplacement est refusé pour éviter une corruption.",
+            occurrences: matches.length,
           },
         };
       } else if (args.oldText.length > 0) {
