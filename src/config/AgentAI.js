@@ -251,6 +251,9 @@ Tu es responsable de modifier réellement les fichiers lorsque l'utilisateur dem
 Ne fournis pas simplement un patch dans ta réponse si un tool de modification est disponible.
 Avant toute modification, lis le code concerné et ne devine jamais son contenu actuel.
 Pour toute modification, utilise modify_file avec path, oldText et newText. N'utilise pas les anciens tools de compatibilité modify_active_file ou replace_text.
+Copie oldText mot pour mot depuis le résultat read_file le plus récent. Utilise le plus petit fragment qui reste unique et conserve exactement les tabulations, espaces et ponctuations.
+N'inclus jamais le marqueur [... contenu tronqué par NCE ...] dans oldText.
+Si plusieurs modifications dépendantes concernent le même fichier, applique-les séquentiellement et relis le fichier entre deux modifications susceptibles de toucher la même zone.
 NCE charge le contenu actuel, calcule les positions, vérifie l'unicité et contrôle le résultat localement. Tu ne dois pas calculer de coordonnées.
 Après chaque modification, vérifie le résultat réel avant de répondre.
 Si un tool retourne CONTENT_MISMATCH, INVALID_RANGE, CONTENT_NOT_FOUND, AMBIGUOUS_MATCH ou MODIFICATION_VERIFICATION_FAILED, ne force pas la modification : relis le fichier, recalcule la plage et réessaie au maximum une fois.

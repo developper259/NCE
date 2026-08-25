@@ -8,11 +8,17 @@ class AgentSidebar extends Sidebar {
     this.changesElement = null;
     this.inputElement = null;
     this.sendButton = null;
+    this.typingIndicatorElement = null;
     this.markdownRenderer = new MarkdownRenderer({
       throttleMs: 50,
       getHighlightController: () => this.editor.highlightController,
     });
     this.messageElements = new WeakMap();
+    this.activityElements = new WeakMap();
+    this.activityItems = new Map();
+    this.activityItemElements = new Map();
+    this.pendingActivityItems = new Map();
+    this._activityItemCounter = 0;
 
     this.apiKeys = new Map();
     this.apiKeyPanel = null;
@@ -23,78 +29,16 @@ class AgentSidebar extends Sidebar {
         this.handleAgentToken(markdown, context);
       },
       onToolStart: (toolName, args, context) => {
-        this.appendToolReasoning(toolName, args, context?.sessionId);
+        this.handleToolStart(toolName, args, context);
       },
       onToolEnd: (toolName, result, context) => {
-        const payload = result?.result ?? result;
-
-        if (
-          (toolName !== "modify_active_file" && toolName !== "modify_file") ||
-          !payload ||
-          payload.success !== true
-        ) {
-          return;
-        }
-
-        const session = this.getSession(context?.sessionId);
-        if (!session) return;
-
-        const filePath = typeof payload.path === "string" ? payload.path : "";
-        const absolutePath =
-          typeof payload.absolutePath === "string"
-            ? payload.absolutePath
-            : this.editor?.tabManager?.activeFile?.path || "";
-        if (!filePath && !absolutePath) return;
-
-        const beforeText =
-          typeof payload.beforeText === "string" ? payload.beforeText : "";
-        const afterText =
-          typeof payload.afterText === "string" ? payload.afterText : "";
-        const beforeLines = beforeText ? beforeText.split("\n") : [];
-        const afterLines = afterText ? afterText.split("\n") : [];
-
-        const diffStats = this.getLineDiffStats(beforeLines, afterLines);
-
-        const change = {
-          path: filePath || absolutePath,
-          name: (filePath || absolutePath).split("/").pop() || "fichier",
-          status: "modified",
-          additions: diffStats.additions,
-          deletions: diffStats.deletions,
-          beforeText,
-          afterText,
-          cursorBefore: payload.cursorBefore || null,
-          absolutePath,
-        };
-
-        const existingIndex = session.changes.findIndex(
-          (entry) =>
-            entry.path === filePath ||
-            (absolutePath && entry.absolutePath === absolutePath),
-        );
-        if (existingIndex >= 0) {
-          const existingChange = session.changes[existingIndex];
-          const originalBeforeText =
-            typeof existingChange.beforeText === "string"
-              ? existingChange.beforeText
-              : beforeText;
-          const cumulativeStats = this.getLineDiffStats(
-            originalBeforeText ? originalBeforeText.split("\n") : [],
-            afterText ? afterText.split("\n") : [],
-          );
-          session.changes[existingIndex] = {
-            ...existingChange,
-            ...change,
-            beforeText: originalBeforeText,
-            additions: cumulativeStats.additions,
-            deletions: cumulativeStats.deletions,
-          };
-        } else {
-          session.changes.push(change);
-        }
-
-        session.changesExpanded = true;
-        this.refresh();
+        this.handleToolEnd(toolName, result, context);
+      },
+      onFinish: (_result, context) => {
+        this.finishActivityGroup(context);
+      },
+      onError: (_error, context) => {
+        this.finishActivityGroup(context, "error");
       },
     });
 
@@ -117,6 +61,84 @@ class AgentSidebar extends Sidebar {
     this._sessionCounter = 0;
 
     this.createSession();
+  }
+
+  handleToolEnd(toolName, result, context = {}) {
+    const activityItem = this.completeActivityItem(toolName, result, context);
+
+    const payload = result?.result ?? result;
+
+    if (
+      (toolName !== "modify_active_file" && toolName !== "modify_file") ||
+      !payload ||
+      payload.success !== true
+    ) {
+      return;
+    }
+
+    const session = this.getSession(context?.sessionId);
+    if (!session) return;
+
+    const filePath = typeof payload.path === "string" ? payload.path : "";
+    const absolutePath =
+      typeof payload.absolutePath === "string"
+        ? payload.absolutePath
+        : this.editor?.tabManager?.activeFile?.path || "";
+    if (!filePath && !absolutePath) return;
+
+    const beforeText =
+      typeof payload.beforeText === "string" ? payload.beforeText : "";
+    const afterText =
+      typeof payload.afterText === "string" ? payload.afterText : "";
+    const beforeLines = beforeText ? beforeText.split("\n") : [];
+    const afterLines = afterText ? afterText.split("\n") : [];
+
+    const diffStats =
+      activityItem?.lastDiffStats ||
+      this.getLineDiffStats(beforeLines, afterLines);
+
+    const change = {
+      path: filePath || absolutePath,
+      name: (filePath || absolutePath).split("/").pop() || "fichier",
+      status: "modified",
+      additions: diffStats.additions,
+      deletions: diffStats.deletions,
+      beforeText,
+      afterText,
+      cursorBefore: payload.cursorBefore || null,
+      absolutePath,
+    };
+
+    const existingIndex = session.changes.findIndex(
+      (entry) =>
+        entry.path === filePath ||
+        (absolutePath && entry.absolutePath === absolutePath),
+    );
+    if (existingIndex >= 0) {
+      const existingChange = session.changes[existingIndex];
+      const originalBeforeText =
+        typeof existingChange.beforeText === "string"
+          ? existingChange.beforeText
+          : beforeText;
+      const cumulativeStats = this.getLineDiffStats(
+        originalBeforeText ? originalBeforeText.split("\n") : [],
+        afterText ? afterText.split("\n") : [],
+      );
+      session.changes[existingIndex] = {
+        ...existingChange,
+        ...change,
+        beforeText: originalBeforeText,
+        additions: cumulativeStats.additions,
+        deletions: cumulativeStats.deletions,
+      };
+    } else {
+      session.changes.push(change);
+    }
+
+    session.changesExpanded = true;
+    if (session.id === this.activeSessionId && this.changesElement) {
+      this.renderChangesPanel(this.changesElement);
+    }
   }
 
   getConfigState() {
@@ -293,52 +315,419 @@ class AgentSidebar extends Sidebar {
     return tab;
   }
 
-  describeToolAction(toolName, args = {}) {
-    const q = typeof args?.query === "string" ? args.query.trim() : "";
-    const path = typeof args?.path === "string" ? args.path.trim() : "";
-    const startLine = Number.isInteger(args?.startLine) ? args.startLine : null;
-    const endLine = Number.isInteger(args?.endLine) ? args.endLine : null;
-    const fileName = path ? path.split("/").pop() || path : "file";
+  getActivityGroup(session, runId, create = false) {
+    if (!session || !Number.isInteger(runId)) return null;
+    let group = session.messages.find(
+      (message) => message?.role === "activity" && message.runId === runId,
+    );
+    if (group || !create) return group || null;
 
-    switch (toolName) {
-      case "search_active_file":
-        return q ? `search in file "${q}"` : 'search in file ""';
-      case "search_project_files":
-        return q ? `search in workspace "${q}"` : 'search in workspace ""';
-      case "read_active_file":
-        return startLine && endLine
-          ? `read file "${fileName}" line ${startLine} to ${endLine}`
-          : `read file "${fileName}" line 1`;
-      case "read_file":
-        return path
-          ? `read file "${fileName}" line 1`
-          : 'read file "file" line 1';
-      case "list_project_files":
-        return path ? `list files in "${path}"` : "list files in project";
-      case "modify_active_file":
-        return "modify active file";
-      case "get_editor_context":
-        return "get editor context";
-      case "read_selection":
-        return "read selection";
-      default:
-        return `${toolName}`;
+    group = {
+      role: "activity",
+      runId,
+      sessionId: session.id,
+      startedAt: Date.now(),
+      finishedAt: null,
+      status: "running",
+      collapsed: false,
+      hasErrors: false,
+      items: [],
+    };
+
+    const streamingIndex = session.streamingMessage
+      ? session.messages.indexOf(session.streamingMessage)
+      : -1;
+    if (streamingIndex >= 0) {
+      session.messages.splice(streamingIndex, 0, group);
+    } else {
+      session.messages.push(group);
     }
+    return group;
   }
 
-  appendToolReasoning(toolName, args = {}, sessionId = null) {
-    const session = this.getSession(sessionId) || this.getActiveSession();
-    if (!session) return;
+  getActivityPendingKey(context = {}, toolName = "") {
+    return `${context.sessionId || ""}:${context.runId || ""}:${toolName}`;
+  }
 
-    const summary = this.describeToolAction(toolName, args);
-    session.messages.push({
-      role: "agent",
-      reasoning: summary,
-      timestamp: this.formatTime(),
+  getActivityItemId(context = {}) {
+    if (context.toolCallId) {
+      return `${context.sessionId}:${context.runId}:${context.toolCallId}`;
+    }
+    this._activityItemCounter += 1;
+    return `${context.sessionId}:${context.runId}:activity-${this._activityItemCounter}`;
+  }
+
+  handleToolStart(toolName, args = {}, context = {}) {
+    const session = this.getSession(context.sessionId);
+    const group = this.getActivityGroup(session, context.runId, true);
+    if (!session || !group) return;
+
+    const itemId = this.getActivityItemId(context);
+    const activePath = this.editor?.tabManager?.activeFile?.path;
+    const type = this.getActivityType(toolName);
+    const previousItem = group.items[group.items.length - 1] || null;
+    let item =
+      type === "edit" && previousItem?.aggregate === "modifications"
+        ? previousItem
+        : null;
+    const isNewItem = !item;
+
+    if (!item) {
+      item = {
+        id: itemId,
+        toolCallId: context.toolCallId || null,
+        toolName,
+        type,
+        title: "",
+        detail: "",
+        status: "running",
+        startedAt: Date.now(),
+        finishedAt: null,
+        args: { ...args },
+      };
+      if (activePath) item.activePath = activePath;
+      if (type === "edit") {
+        item.aggregate = "modifications";
+        item.modificationCount = 0;
+        item.completedModifications = 0;
+        item.failedModifications = 0;
+        item.files = [];
+        item.diffStats = { additions: 0, deletions: 0 };
+        item.errors = [];
+      }
+      group.items.push(item);
+    }
+
+    if (item.aggregate === "modifications") {
+      item.modificationCount += 1;
+      item.status = "running";
+      item.finishedAt = null;
+      const fileName = this.getActivityFileName(
+        { args, activePath },
+        {},
+      );
+      if (!item.files.includes(fileName)) item.files.push(fileName);
+      Object.assign(item, this.describeModificationAggregate(item));
+    } else {
+      Object.assign(item, this.describeActivityItem(item));
+    }
+    this.activityItems.set(itemId, {
+      group,
+      item,
+      toolName,
+      args: { ...args },
+      activePath,
     });
 
-    this.refresh();
+    if (!context.toolCallId) {
+      const pendingKey = this.getActivityPendingKey(context, toolName);
+      const pending = this.pendingActivityItems.get(pendingKey) || [];
+      pending.push(itemId);
+      this.pendingActivityItems.set(pendingKey, pending);
+    }
+
+    if (session.id !== this.activeSessionId || !this.messagesElement) return;
+    this.removeEmptyState();
+    if (this.typingIndicatorElement?.isConnected) {
+      this.typingIndicatorElement.remove();
+      this.typingIndicatorElement = null;
+    }
+
+    let groupRefs = this.activityElements.get(group);
+    if (!groupRefs?.row?.isConnected) {
+      const groupElement = this.createActivityElement(group);
+      const streamingRow = session.streamingMessage
+        ? this.messageElements.get(session.streamingMessage)?.row
+        : null;
+      this.messagesElement.insertBefore(groupElement, streamingRow || null);
+      groupRefs = this.activityElements.get(group);
+    } else if (isNewItem) {
+      groupRefs.list.appendChild(this.createActivityItemElement(item));
+      this.updateActivityHeader(group);
+    } else {
+      this.updateActivityItemElement(item);
+    }
+
     this.scrollMessagesToBottom();
+  }
+
+  completeActivityItem(toolName, result, context = {}) {
+    const session = this.getSession(context.sessionId);
+    const group = this.getActivityGroup(session, context.runId);
+    if (!group) return null;
+
+    let itemId = context.toolCallId
+      ? `${context.sessionId}:${context.runId}:${context.toolCallId}`
+      : null;
+    if (!itemId) {
+      const pendingKey = this.getActivityPendingKey(context, toolName);
+      const pending = this.pendingActivityItems.get(pendingKey) || [];
+      itemId = pending.shift() || null;
+      if (pending.length) this.pendingActivityItems.set(pendingKey, pending);
+      else this.pendingActivityItems.delete(pendingKey);
+    }
+
+    const itemRecord = this.activityItems.get(itemId);
+    const item = itemRecord?.group === group ? itemRecord.item : null;
+    if (!item) return null;
+
+    const payload = result?.result ?? result;
+    const failed = result?.success === false || payload?.success === false;
+    if (item.aggregate === "modifications") {
+      item.completedModifications += 1;
+      if (failed) {
+        item.failedModifications += 1;
+        item.errors.push(this.getActivityError(result));
+      }
+      const beforeText = payload?.beforeText;
+      const afterText = payload?.afterText;
+      if (typeof beforeText === "string" && typeof afterText === "string") {
+        item.lastDiffStats = this.getLineDiffStats(
+          beforeText ? beforeText.split("\n") : [],
+          afterText ? afterText.split("\n") : [],
+        );
+        item.diffStats.additions += item.lastDiffStats.additions;
+        item.diffStats.deletions += item.lastDiffStats.deletions;
+      } else {
+        item.lastDiffStats = null;
+      }
+      const allCompleted =
+        item.completedModifications >= item.modificationCount;
+      item.status = !allCompleted
+        ? "running"
+        : item.failedModifications
+          ? "error"
+          : "success";
+      item.finishedAt = allCompleted ? Date.now() : null;
+      Object.assign(item, this.describeModificationAggregate(item));
+    } else {
+      item.status = failed ? "error" : "success";
+      item.finishedAt = Date.now();
+      Object.assign(item, this.describeActivityItem(item, result));
+    }
+    if (failed) group.hasErrors = true;
+
+    this.activityItems.delete(itemId);
+    this.updateActivityItemElement(item);
+    this.updateActivityHeader(group);
+    return item;
+  }
+
+  finishActivityGroup(context = {}, status = "success") {
+    const session = this.getSession(context.sessionId);
+    const group = this.getActivityGroup(session, context.runId);
+    if (!group || group.status !== "running") return;
+
+    for (const item of group.items) {
+      if (item.status !== "running") continue;
+      item.status = status === "error" ? "error" : "success";
+      item.finishedAt = Date.now();
+      Object.assign(
+        item,
+        item.aggregate === "modifications"
+          ? this.describeModificationAggregate(item)
+          : this.describeActivityItem(item),
+      );
+      this.updateActivityItemElement(item);
+    }
+    group.finishedAt = Date.now();
+    group.status = status === "error" || group.hasErrors ? "error" : "success";
+    const pendingPrefix = `${context.sessionId}:${context.runId}:`;
+    for (const key of this.pendingActivityItems.keys()) {
+      if (key.startsWith(pendingPrefix)) this.pendingActivityItems.delete(key);
+    }
+    this.updateActivityHeader(group);
+  }
+
+  setActivityGroupCollapsed(group, collapsed) {
+    if (!group) return;
+    group.collapsed = !!collapsed;
+    const refs = this.activityElements.get(group);
+    if (!refs?.row?.isConnected) return;
+    refs.activity.classList.toggle(
+      "agent-activity-collapsed",
+      group.collapsed,
+    );
+    refs.header.setAttribute("aria-expanded", String(!group.collapsed));
+    refs.list.hidden = group.collapsed;
+  }
+
+  collapseActivityGroup(context = {}) {
+    const session = this.getSession(context.sessionId);
+    const group = this.getActivityGroup(session, context.runId);
+    this.setActivityGroupCollapsed(group, true);
+  }
+
+  getActivityType(toolName = "") {
+    if (toolName.includes("search")) return "search";
+    if (toolName.includes("read")) return "read";
+    if (toolName.includes("modify") || toolName.includes("replace")) {
+      return "edit";
+    }
+    if (toolName.includes("context") || toolName === "get_cursor") {
+      return "context";
+    }
+    if (toolName.includes("list")) return "list";
+    if (/verify|check|test|build/.test(toolName)) return "verify";
+    return "other";
+  }
+
+  describeModificationAggregate(item) {
+    const running = item.status === "running";
+    const files = Array.isArray(item.files) ? item.files : [];
+    const target =
+      files.length === 1
+        ? files[0]
+        : `${files.length} ${files.length === 1 ? "file" : "files"}`;
+    const title = `${running ? "Modifying" : "Modified"} ${target || "files"}${running ? "…" : ""}`;
+    const details = [];
+    if (item.modificationCount > 1) {
+      details.push(`${item.modificationCount} modifications`);
+    }
+    const additions = item.diffStats?.additions || 0;
+    const deletions = item.diffStats?.deletions || 0;
+    if (additions || deletions) details.push(`+${additions} −${deletions}`);
+    if (item.failedModifications) {
+      details.push(`${item.failedModifications} failed`);
+      const lastError = item.errors?.[item.errors.length - 1];
+      if (lastError) details.push(lastError);
+    }
+    return { title, detail: details.join(" · ") };
+  }
+
+  getActivityFileName(item, payload = {}) {
+    const path =
+      (typeof payload?.path === "string" && payload.path) ||
+      (typeof item.args?.path === "string" && item.args.path) ||
+      item.activePath ||
+      "";
+    return path.replace(/\\/g, "/").split("/").pop() || "file";
+  }
+
+  getActivityResultCount(payload = {}) {
+    for (const value of [
+      payload.totalMatches,
+      payload.total,
+      payload.count,
+      payload.resultCount,
+    ]) {
+      if (Number.isFinite(value)) return Math.max(0, value);
+    }
+    for (const value of [payload.results, payload.matches, payload.files]) {
+      if (Array.isArray(value)) return value.length;
+    }
+    return null;
+  }
+
+  formatActivityCount(count, singular, plural = `${singular}s`) {
+    if (count === 0) return `No ${plural}`;
+    return `${count} ${count === 1 ? singular : plural}`;
+  }
+
+  getActivityError(result) {
+    const error = result?.error ?? result?.result?.error;
+    if (typeof error === "string") return error;
+    if (typeof error?.message === "string") return error.message;
+    return "The tool could not complete this action";
+  }
+
+  describeActivityItem(item, result = null) {
+    const running = item.status === "running";
+    const failed = item.status === "error";
+    const payload = result?.result ?? result ?? {};
+    const query =
+      typeof item.args?.query === "string" ? item.args.query.trim() : "";
+    const fileName = this.getActivityFileName(item, payload);
+    const rangeStart = Number.isInteger(payload?.startLine)
+      ? payload.startLine
+      : Number.isInteger(item.args?.startLine)
+        ? item.args.startLine
+        : null;
+    const rangeEnd = Number.isInteger(payload?.endLine)
+      ? payload.endLine
+      : Number.isInteger(item.args?.endLine)
+        ? item.args.endLine
+        : null;
+    let title = "";
+    let detail = "";
+
+    switch (item.toolName) {
+      case "search_project_files":
+        title = `${running ? "Searching" : "Searched"} workspace${query ? ` for "${query}"` : ""}${running ? "…" : ""}`;
+        break;
+      case "search_active_file":
+        title = `${running ? "Searching" : "Searched"} active file${query ? ` for "${query}"` : ""}${running ? "…" : ""}`;
+        break;
+      case "read_file":
+      case "read_active_file":
+        title = `${running ? "Reading" : "Read"} ${fileName}${running ? "…" : ""}`;
+        if (rangeStart && rangeEnd) detail = `lines ${rangeStart}–${rangeEnd}`;
+        else if (rangeStart) detail = `line ${rangeStart}`;
+        break;
+      case "read_selection":
+        title = `${running ? "Reading" : "Read"} selection${running ? "…" : ""}`;
+        break;
+      case "list_project_files":
+        title = `${running ? "Listing" : "Listed"} project files${running ? "…" : ""}`;
+        break;
+      case "modify_file":
+        title = `${running ? "Modifying" : "Modified"} ${fileName}${running ? "…" : ""}`;
+        break;
+      case "modify_active_file":
+        title = `${running ? "Modifying" : "Modified"} active file${running ? "…" : ""}`;
+        break;
+      case "replace_text":
+        title = `${running ? "Replacing" : "Replaced"} text in ${fileName}${running ? "…" : ""}`;
+        break;
+      case "get_editor_context":
+        title = `${running ? "Inspecting" : "Inspected"} editor context${running ? "…" : ""}`;
+        break;
+      case "get_cursor":
+        title = `${running ? "Inspecting" : "Inspected"} cursor position${running ? "…" : ""}`;
+        break;
+      default: {
+        const readableName = item.toolName.replace(/_/g, " ");
+        title = `${running ? "Running" : "Ran"} ${readableName}${running ? "…" : ""}`;
+      }
+    }
+
+    if (!running && !failed && item.type === "search") {
+      const count = this.getActivityResultCount(payload);
+      if (count !== null) detail = this.formatActivityCount(count, "result");
+    } else if (!running && !failed && item.type === "list") {
+      const count = this.getActivityResultCount(payload);
+      if (count !== null) detail = this.formatActivityCount(count, "file");
+    } else if (!running && !failed && item.type === "edit") {
+      const beforeText = payload?.beforeText;
+      const afterText = payload?.afterText;
+      if (typeof beforeText === "string" && typeof afterText === "string") {
+        const stats = this.getLineDiffStats(
+          beforeText ? beforeText.split("\n") : [],
+          afterText ? afterText.split("\n") : [],
+        );
+        item.diffStats = stats;
+        detail = `+${stats.additions} −${stats.deletions}`;
+      }
+    }
+
+    if (failed) {
+      const failedAction = {
+        search_project_files: `search workspace${query ? ` for "${query}"` : ""}`,
+        search_active_file: `search active file${query ? ` for "${query}"` : ""}`,
+        read_file: `read ${fileName}`,
+        read_active_file: `read ${fileName}`,
+        read_selection: "read selection",
+        list_project_files: "list project files",
+        modify_file: `modify ${fileName}`,
+        modify_active_file: "modify active file",
+        replace_text: `replace text in ${fileName}`,
+        get_editor_context: "inspect editor context",
+        get_cursor: "inspect cursor position",
+      }[item.toolName];
+      title = `Failed to ${failedAction || item.toolName.replace(/_/g, " ")}`;
+      detail = this.getActivityError(result);
+    }
+    return { title, detail };
   }
 
   renderInputArea() {
@@ -664,6 +1053,7 @@ class AgentSidebar extends Sidebar {
       .querySelectorAll(".agent-sidebar-markdown")
       .forEach((element) => this.markdownRenderer.destroy(element));
     container.replaceChildren();
+    this.typingIndicatorElement = null;
 
     const session = this.getActiveSession();
 
@@ -673,10 +1063,22 @@ class AgentSidebar extends Sidebar {
     }
 
     for (const message of session.messages) {
-      container.appendChild(this.createMessageElement(message));
+      container.appendChild(
+        message?.role === "activity"
+          ? this.createActivityElement(message)
+          : this.createMessageElement(message),
+      );
     }
 
-    if (session.isGenerating && !session.streamingMessage) {
+    const hasRunningActivity = session.messages.some(
+      (message) =>
+        message?.role === "activity" && message.status === "running",
+    );
+    if (
+      session.isGenerating &&
+      !session.streamingMessage &&
+      !hasRunningActivity
+    ) {
       container.appendChild(this.createTypingIndicator());
     }
 
@@ -693,6 +1095,129 @@ class AgentSidebar extends Sidebar {
         );
       });
     }
+  }
+
+  removeEmptyState() {
+    this.messagesElement
+      ?.querySelector(":scope > .agent-sidebar-empty-state")
+      ?.remove();
+  }
+
+  getActivityIcon(item) {
+    if (item.status === "error") return "⚠";
+    if (item.status === "running") return "◌";
+    return {
+      search: "⌕",
+      read: "▣",
+      edit: "✎",
+      context: "◇",
+      list: "≡",
+      verify: "✓",
+      other: "•",
+    }[item.type];
+  }
+
+  getActivityHeaderLabel(group) {
+    const count = Array.isArray(group.items) ? group.items.length : 0;
+    const steps = `${count} ${count === 1 ? "step" : "steps"}`;
+    if (group.status === "running") {
+      return count ? `Working · ${steps}` : "Working";
+    }
+    if (group.status === "error" || group.hasErrors) {
+      return `Completed with errors · ${steps}`;
+    }
+    return `Worked on ${steps}`;
+  }
+
+  createActivityElement(group) {
+    const row = document.createElement("div");
+    row.className = "agent-sidebar-message agent-sidebar-activity-message";
+
+    const activity = document.createElement("div");
+    activity.className = "agent-activity";
+    activity.dataset.status = group.status;
+    activity.classList.toggle("agent-activity-collapsed", !!group.collapsed);
+
+    const header = document.createElement("button");
+    header.type = "button";
+    header.className = "agent-activity-header";
+    header.setAttribute("aria-expanded", String(!group.collapsed));
+
+    const chevron = document.createElement("span");
+    chevron.className = "agent-activity-chevron";
+    chevron.textContent = "›";
+    header.appendChild(chevron);
+
+    const title = document.createElement("span");
+    title.className = "agent-activity-title";
+    title.textContent = this.getActivityHeaderLabel(group);
+    header.appendChild(title);
+
+    const list = document.createElement("div");
+    list.className = "agent-activity-list";
+    list.hidden = !!group.collapsed;
+    const fragment = document.createDocumentFragment();
+    for (const item of group.items || []) {
+      fragment.appendChild(this.createActivityItemElement(item));
+    }
+    list.appendChild(fragment);
+
+    header.addEventListener("click", () => {
+      this.setActivityGroupCollapsed(group, !group.collapsed);
+    });
+
+    activity.append(header, list);
+    row.appendChild(activity);
+    this.activityElements.set(group, { row, activity, header, title, list });
+    return row;
+  }
+
+  createActivityItemElement(item) {
+    const element = document.createElement("div");
+    element.className = "agent-activity-item";
+    element.dataset.status = item.status;
+    element.dataset.type = item.type;
+
+    const icon = document.createElement("span");
+    icon.className = "agent-activity-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = this.getActivityIcon(item);
+
+    const content = document.createElement("div");
+    content.className = "agent-activity-content";
+
+    const title = document.createElement("div");
+    title.className = "agent-activity-item-title";
+    title.textContent = item.title;
+    content.appendChild(title);
+
+    const detail = document.createElement("div");
+    detail.className = "agent-activity-item-detail";
+    detail.textContent = item.detail || "";
+    detail.hidden = !item.detail;
+    content.appendChild(detail);
+
+    element.append(icon, content);
+    this.activityItemElements.set(item.id, { element, icon, title, detail });
+    return element;
+  }
+
+  updateActivityItemElement(item) {
+    const refs = this.activityItemElements.get(item.id);
+    if (!refs?.element?.isConnected) return;
+    refs.element.dataset.status = item.status;
+    refs.element.dataset.type = item.type;
+    refs.icon.textContent = this.getActivityIcon(item);
+    refs.title.textContent = item.title;
+    refs.detail.textContent = item.detail || "";
+    refs.detail.hidden = !item.detail;
+  }
+
+  updateActivityHeader(group) {
+    const refs = this.activityElements.get(group);
+    if (!refs?.row?.isConnected) return;
+    refs.title.textContent = this.getActivityHeaderLabel(group);
+    refs.activity.dataset.status = group.status;
   }
 
   createEmptyState() {
@@ -969,6 +1494,7 @@ class AgentSidebar extends Sidebar {
     }
 
     row.appendChild(bubble);
+    this.typingIndicatorElement = row;
     return row;
   }
 
@@ -1555,6 +2081,18 @@ class AgentSidebar extends Sidebar {
 
     const session = this.sessions[index];
 
+    for (const message of session.messages) {
+      if (message?.role !== "activity") continue;
+      for (const item of message.items || []) {
+        this.activityItems.delete(item.id);
+        this.activityItemElements.delete(item.id);
+      }
+    }
+    const pendingPrefix = `${sessionId}:`;
+    for (const key of this.pendingActivityItems.keys()) {
+      if (key.startsWith(pendingPrefix)) this.pendingActivityItems.delete(key);
+    }
+
     if (session.abortController) {
       session.abortController.abort();
     }
@@ -1732,6 +2270,15 @@ class AgentSidebar extends Sidebar {
         });
       }
     } finally {
+      const completedRunId = session.runId;
+      if (Number.isInteger(completedRunId)) {
+        const activityContext = {
+          sessionId: session.id,
+          runId: completedRunId,
+        };
+        this.finishActivityGroup(activityContext);
+        this.collapseActivityGroup(activityContext);
+      }
       session.runId = null;
       session.isGenerating = false;
       session.streamingMessage = null;

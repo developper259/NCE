@@ -987,6 +987,91 @@ class Agent {
       ? text
       : `${text.slice(0, Math.max(0, max - 32))}\n\n[... contenu tronqué par NCE ...]`;
   }
+  normalizeLineEndingsWithBoundaries(value) {
+    const source = typeof value === "string" ? value : "";
+    let normalized = "";
+    const boundaries = [0];
+
+    for (let index = 0; index < source.length; ) {
+      if (source[index] === "\r") {
+        index += source[index + 1] === "\n" ? 2 : 1;
+        normalized += "\n";
+      } else {
+        normalized += source[index];
+        index += 1;
+      }
+      boundaries.push(index);
+    }
+    return { normalized, boundaries };
+  }
+  findUniqueTextMatch(content, searchText) {
+    const source = typeof content === "string" ? content : "";
+    const search = typeof searchText === "string" ? searchText : "";
+    if (!search) return { status: "missing", occurrences: 0 };
+
+    const findMatches = (haystack, needle) => {
+      const matches = [];
+      let cursor = 0;
+      while (cursor <= haystack.length - needle.length) {
+        const index = haystack.indexOf(needle, cursor);
+        if (index === -1) break;
+        matches.push(index);
+        cursor = index + needle.length;
+      }
+      return matches;
+    };
+
+    const exactMatches = findMatches(source, search);
+    const hasCarriageReturns = source.includes("\r") || search.includes("\r");
+    if (exactMatches.length === 1 && !hasCarriageReturns) {
+      return {
+        status: "unique",
+        startIndex: exactMatches[0],
+        endIndex: exactMatches[0] + search.length,
+        match: "exact",
+      };
+    }
+    if (exactMatches.length > 1) {
+      return { status: "ambiguous", occurrences: exactMatches.length };
+    }
+
+    const normalizedSource = this.normalizeLineEndingsWithBoundaries(source);
+    const normalizedSearch = search.replace(/\r\n?|\n/g, "\n");
+    const normalizedMatches = findMatches(
+      normalizedSource.normalized,
+      normalizedSearch,
+    );
+    if (normalizedMatches.length > 1) {
+      return { status: "ambiguous", occurrences: normalizedMatches.length };
+    }
+    if (exactMatches.length === 1) {
+      return {
+        status: "unique",
+        startIndex: exactMatches[0],
+        endIndex: exactMatches[0] + search.length,
+        match: "exact",
+      };
+    }
+    if (normalizedMatches.length === 1) {
+      const start = normalizedMatches[0];
+      const end = start + normalizedSearch.length;
+      return {
+        status: "unique",
+        startIndex: normalizedSource.boundaries[start],
+        endIndex: normalizedSource.boundaries[end],
+        match: "normalized-line-endings",
+      };
+    }
+    return { status: "missing", occurrences: 0 };
+  }
+  adaptReplacementLineEndings(value, content) {
+    const replacement = typeof value === "string" ? value : "";
+    const source = typeof content === "string" ? content : "";
+    const crlfCount = (source.match(/\r\n/g) || []).length;
+    const lfCount = (source.match(/\n/g) || []).length - crlfCount;
+    if (crlfCount <= lfCount) return replacement.replace(/\r\n?|\n/g, "\n");
+    return replacement.replace(/\r\n?|\n/g, "\r\n");
+  }
   limitResult(result) {
     const maxContent = 4000;
     if (typeof result === "string") return this.truncate(result, maxContent);
@@ -1204,6 +1289,9 @@ Règles de sécurité :
 - Le fichier doit rester dans le workspace ouvert.
 - Utilise cet outil pour toute modification, y compris celle du fichier actif.
 - oldText doit correspondre à une seule occurrence exacte; sinon la modification est refusée.
+- Copie oldText depuis le dernier résultat read_file et choisis un fragment minimal mais unique.
+- Ne copie jamais le marqueur de troncature ajouté par NCE dans oldText.
+- Les différences CRLF/LF sont normalisées automatiquement, mais aucun autre écart de contenu n'est accepté.
 - N'envoie pas de coordonnées : NCE calcule les positions automatiquement.
 - Après modification, la commande retourne le chemin relatif et les contenus avant/après.
 `,
@@ -1453,8 +1541,12 @@ IMPORTANT :
         },
       };
     }
+    const replacementText = this.adaptReplacementLineEndings(
+      newText,
+      currentText,
+    );
 
-    if (oldText.length === 0 && newText === "") {
+    if (oldText.length === 0 && replacementText === "") {
       return {
         success: false,
         error: {
@@ -1465,7 +1557,7 @@ IMPORTANT :
     }
 
     if (oldText.length === 0) {
-      const updatedText = `${newText}${currentText}`;
+      const updatedText = `${replacementText}${currentText}`;
       const result = {
         success: true,
         operation: "replace",
@@ -1537,34 +1629,36 @@ IMPORTANT :
       return result;
     }
 
-    const firstIndex = currentText.indexOf(oldText);
-    if (firstIndex === -1) {
+    const textMatch = this.findUniqueTextMatch(currentText, oldText);
+    if (textMatch.status === "missing") {
       return {
         success: false,
         error: {
           code: "NO_MATCH",
           message:
-            "Aucune occurrence exacte trouvée pour oldText dans ce fichier.",
+            "Aucune occurrence trouvée pour oldText. Relisez le fichier et copiez un fragment minimal depuis le dernier résultat de read_file.",
+          path: this.toProjectRelativePath(absolutePath, root),
+          readRequired: true,
         },
       };
     }
 
-    if (currentText.indexOf(oldText, firstIndex + oldText.length) !== -1) {
+    if (textMatch.status === "ambiguous") {
       return {
         success: false,
         error: {
           code: "AMBIGUOUS_MATCH",
           message:
             "oldText est présent plusieurs fois dans ce fichier. Le remplacement est refusé.",
-          occurrences: currentText.split(oldText).length - 1,
+          occurrences: textMatch.occurrences,
         },
       };
     }
 
     const updatedText =
-      currentText.slice(0, firstIndex) +
-      newText +
-      currentText.slice(firstIndex + oldText.length);
+      currentText.slice(0, textMatch.startIndex) +
+      replacementText +
+      currentText.slice(textMatch.endIndex);
 
     const result = {
       success: true,
@@ -1573,7 +1667,7 @@ IMPORTANT :
       absolutePath,
       beforeText: currentText,
       afterText: updatedText,
-      match: "exact",
+      match: textMatch.match,
     };
 
     if (tabManager && !alreadyOpen) {
