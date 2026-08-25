@@ -2,12 +2,12 @@ const AgentPath = {
   sep: "/",
   normalize(value) {
     if (typeof value !== "string") return "";
-    let normalized = value.replace(/\\/g, "/");
+    let normalized = value.replace(/\\/g, "/").trim();
     const driveMatch = normalized.match(/^([A-Za-z]:)/);
     const drive = driveMatch ? driveMatch[1].toUpperCase() : "";
-    if (drive) normalized = normalized.slice(2);
-    const absolute = normalized.startsWith("/");
-    const segments = normalized.split("/").filter(Boolean);
+    const remainder = drive ? normalized.slice(2) : normalized;
+    const absoluteUnix = remainder.startsWith("/");
+    const segments = remainder.split("/").filter(Boolean);
     const stack = [];
 
     for (const segment of segments) {
@@ -15,7 +15,7 @@ const AgentPath = {
       if (segment === "..") {
         if (stack.length) {
           stack.pop();
-        } else if (!absolute && !drive) {
+        } else if (!absoluteUnix && !drive) {
           stack.push("..");
         }
         continue;
@@ -24,8 +24,12 @@ const AgentPath = {
     }
 
     const joined = stack.join("/");
-    const prefix = absolute ? "/" : "";
-    return `${prefix}${drive ? `${drive}/` : ""}${joined}`.replace(/\/+/g, "/");
+    if (drive) {
+      const withRoot = joined ? `/${joined}` : "";
+      return `${drive}${withRoot}`.replace(/\/+$/g, "") || drive;
+    }
+    if (absoluteUnix) return `/${joined}`.replace(/\/+$/g, "") || "/";
+    return joined;
   },
   isAbsolute(value) {
     if (typeof value !== "string") return false;
@@ -71,6 +75,7 @@ class Agent {
     this.window = window;
     this.provider = null;
     this.model = null;
+    this.runConfig = null;
     this.tools = new Map();
     this.callbacks = {};
     this.contextProvider = null;
@@ -178,6 +183,33 @@ class Agent {
     return this.tools.get(name);
   }
 
+  createRunConfig(overrides = {}) {
+    const provider = this.provider ? { ...this.provider } : null;
+    const providerId =
+      overrides.providerId ||
+      (provider && typeof provider.id === "string" ? provider.id : null) ||
+      this.runConfig?.providerId ||
+      "unknown";
+    const config = {
+      sessionId: overrides.sessionId ?? this.currentSessionId ?? null,
+      runId: overrides.runId ?? this.runId,
+      agentId: overrides.agentId ?? null,
+      providerId,
+      provider: provider ? { ...provider } : null,
+      model: overrides.model ?? this.model,
+      temperature: Number.isFinite(this.temperature)
+        ? this.temperature
+        : undefined,
+      maxTokens: Number.isFinite(this.maxTokens) ? this.maxTokens : undefined,
+      maxIterations: Number.isFinite(this.maxIterations)
+        ? this.maxIterations
+        : undefined,
+      permissions: this.permissions || "read",
+      systemPrompt: this.systemPrompt || "",
+    };
+    return config;
+  }
+
   async execute(userMessage, options = {}) {
     if (this.isRunning && !this.stopRequested)
       throw new Error("Un agent est déjà en cours d'exécution.");
@@ -190,14 +222,30 @@ class Agent {
     const controller = this.abortController;
     const runContext = { sessionId: options.sessionId || null, runId };
     this.currentSessionId = runContext.sessionId;
+    const runConfig = this.createRunConfig({
+      sessionId: runContext.sessionId,
+      runId,
+      agentId: options.agentId || null,
+      providerId: options.providerId || this.provider?.id || null,
+      model: this.model,
+    });
+    this.runConfig = runConfig;
     try {
       const editorContext = await this.getContext();
       this.messages = [
         { role: "system", content: this.buildSystemMessage(editorContext) },
       ];
+      const modificationHint = this.detectModificationIntent(userMessage);
+      if (modificationHint) {
+        this.messages.push({
+          role: "system",
+          content:
+            "PRIORITÉ: cette requête nécessite une modification du projet. Utilise un outil de modification si possible et réponds avec le résultat réel de la modification.",
+        });
+      }
       this.appendHistory(options.history);
       this.messages.push({ role: "user", content: userMessage });
-      const result = await this.runLoop(runId, controller);
+      const result = await this.runLoop(runId, controller, runConfig);
       this.callbacks.onFinish?.(result, runContext);
       return result;
     } catch (error) {
@@ -209,6 +257,7 @@ class Agent {
         this.isRunning = false;
         this.abortController = null;
         this.currentSessionId = null;
+        this.runConfig = null;
       }
     }
   }
@@ -220,73 +269,182 @@ class Agent {
     this.abortController?.abort();
   }
 
-  async runLoop(runId, controller) {
-    let response = "";
-    let reasoning = "";
-    for (let iteration = 1; iteration <= this.maxIterations; iteration += 1) {
+  detectModificationIntent(message) {
+    if (typeof message !== "string") return false;
+    const normalized = message.toLowerCase();
+    const actionWords = [
+      "corrige",
+      "modifie",
+      "change",
+      "ajoute",
+      "supprime",
+      "renomme",
+      "refactor",
+      "optimise",
+      "améliore",
+      "implémente",
+      "ajuster",
+      "fix",
+      "update",
+      "add",
+      "remove",
+      "rename",
+      "optimize",
+      "implement",
+      "refactor",
+      "rewrite",
+    ];
+    const contextWords = [
+      "fonction",
+      "fichier",
+      "classe",
+      "composant",
+      "bug",
+      "erreur",
+      "code",
+      "script",
+    ];
+    const hasAction = actionWords.some((word) => normalized.includes(word));
+    const hasContext = contextWords.some((word) => normalized.includes(word));
+    if (!hasAction) return false;
+    return (
+      hasContext || normalized.includes("cette") || normalized.includes("ce ")
+    );
+  }
+
+  resolveToolChoice(message) {
+    const config = this.runConfig || this.createRunConfig();
+    const providerId = config.providerId || this.provider?.id;
+    const provider = providerId ? AgentAI?.getProvider?.(providerId) : null;
+    const supportsToolChoice = !!provider && !!provider.supportsToolChoice;
+    const modificationIntent = this.detectModificationIntent(message);
+    if (!modificationIntent) return "auto";
+    return supportsToolChoice ? "required" : "auto";
+  }
+
+  async runLoop(runId, controller, runConfig = this.runConfig) {
+    let finalResponse = "";
+    let finalReasoning = "";
+    for (
+      let iteration = 1;
+      iteration <= (runConfig?.maxIterations ?? this.maxIterations);
+      iteration += 1
+    ) {
       if (this.stopRequested || runId !== this.runId) throw this.abortError();
-      const modelResponse = await this.requestModel(controller);
+      const modelResponse = await this.requestModel(controller, runConfig);
       if (this.stopRequested || runId !== this.runId) throw this.abortError();
       const parsed = this.parseResponse(modelResponse);
-      response += parsed.text;
-      reasoning += parsed.reasoning;
       if (parsed.text) {
+        finalResponse = parsed.text;
+        finalReasoning = parsed.reasoning || finalReasoning;
         this.callbacks.onToken?.(parsed.text, {
           sessionId: this.currentSessionId,
           runId,
         });
       }
       if (!parsed.toolCalls.length)
-        return { response, reasoning, iterations: iteration };
+        return {
+          response: finalResponse,
+          reasoning: finalReasoning,
+          iterations: iteration,
+        };
       this.messages.push(parsed.assistantMessage);
       for (const call of parsed.toolCalls) {
         if (this.stopRequested || runId !== this.runId) throw this.abortError();
+        const toolResult = await this.executeToolCall(call);
         this.messages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: JSON.stringify(await this.executeToolCall(call)),
+          content: JSON.stringify(toolResult),
         });
       }
     }
     throw new Error(
-      `Nombre maximal d'itérations atteint (${this.maxIterations}).`,
+      `Nombre maximal d'itérations atteint (${runConfig?.maxIterations ?? this.maxIterations}).`,
     );
   }
 
-  async requestModel(controller = this.abortController) {
-    if (!this.provider?.baseURL)
-      throw new Error("Aucun provider IA configuré.");
-    if (!this.model) throw new Error("Aucun modèle IA configuré.");
+  async requestModel(
+    controller = this.abortController,
+    runConfig = this.runConfig,
+  ) {
+    const config = runConfig || this.createRunConfig();
+    const provider = config.provider || this.provider;
+    if (!provider?.baseURL) throw new Error("Aucun provider IA configuré.");
+    if (!config.model) throw new Error("Aucun modèle IA configuré.");
     const payload = {
-      model: this.model,
+      model: config.model,
       messages: this.messages,
       tools: this.getOpenAITools(),
-      tool_choice: "auto",
+      tool_choice: this.resolveToolChoice(
+        this.messages[this.messages.length - 1]?.content || "",
+      ),
       stream: false,
     };
-    if (Number.isFinite(this.temperature))
-      payload.temperature = this.temperature;
-    if (Number.isFinite(this.maxTokens)) payload.max_tokens = this.maxTokens;
-    const provider = this.sanitizeProviderForIPC();
+    if (Number.isFinite(config.temperature))
+      payload.temperature = config.temperature;
+    if (Number.isFinite(config.maxTokens))
+      payload.max_tokens = config.maxTokens;
+    const sanitizedProvider = { ...provider };
+    delete sanitizedProvider.apiKey;
     if (typeof this.api?.aiChat === "function")
-      return this.api.aiChat({ provider, payload });
+      return this.api.aiChat({ provider: sanitizedProvider, payload });
     if (typeof this.api?.requestAI === "function")
-      return this.api.requestAI({ provider, payload });
+      return this.api.requestAI({ provider: sanitizedProvider, payload });
     const headers = { "Content-Type": "application/json" };
-    if (this.provider.apiKey)
-      headers.Authorization = `Bearer ${this.provider.apiKey}`;
-    const result = await fetch(
-      `${this.provider.baseURL.replace(/\/+$/, "")}/chat/completions`,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-        signal: controller?.signal,
-      },
-    );
-    if (!result.ok)
-      throw new Error(`Erreur API (${result.status}) : ${await result.text()}`);
-    return result.json();
+    if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
+    const url = `${provider.baseURL.replace(/\/+$/, "")}/chat/completions`;
+    const attempt = async (retryIndex) => {
+      const abortController = new AbortController();
+      const timeout = setTimeout(() => abortController.abort(), 60000);
+      try {
+        const result = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          signal: controller?.signal
+            ? AbortSignal.any([controller.signal, abortController.signal])
+            : abortController.signal,
+        });
+        if (
+          result.status === 429 ||
+          result.status === 500 ||
+          result.status === 502 ||
+          result.status === 503
+        ) {
+          if (retryIndex < 2) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, 250 * (retryIndex + 1)),
+            );
+            return attempt(retryIndex + 1);
+          }
+        }
+        if (!result.ok) {
+          const text = await result.text();
+          if (result.status === 401 || result.status === 400)
+            throw new Error(`Erreur API (${result.status}) : ${text}`);
+          throw new Error(`Erreur API (${result.status}) : ${text}`);
+        }
+        return result.json();
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          throw new DOMException(
+            "Le fournisseur a dépassé le délai autorisé.",
+            "TimeoutError",
+          );
+        }
+        if ((error?.message || "").includes("429") && retryIndex < 2) {
+          await new Promise((resolve) =>
+            setTimeout(resolve, 250 * (retryIndex + 1)),
+          );
+          return attempt(retryIndex + 1);
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    return attempt(0);
   }
   sanitizeProviderForIPC() {
     if (!this.provider) return null;
@@ -337,9 +495,10 @@ class Agent {
     }
   }
   getOpenAITools() {
+    const permissions = this.runConfig?.permissions ?? this.permissions;
     return [...this.tools.values()]
       .filter((tool) => tool.enabled)
-      .filter((tool) => this.permissions === "code" || tool.readOnly)
+      .filter((tool) => permissions === "code" || tool.readOnly)
       .map((tool) => ({
         type: "function",
         function: {
@@ -366,7 +525,8 @@ class Agent {
         success: false,
         error: { code: "TOOL_DISABLED", message: `Outil désactivé : ${name}` },
       };
-    if (this.permissions === "read" && !tool.readOnly) {
+    const permissions = this.runConfig?.permissions ?? this.permissions;
+    if (permissions === "read" && !tool.readOnly) {
       return {
         success: false,
         error: {
@@ -661,9 +821,15 @@ class Agent {
       typeof rootPath === "string"
         ? rootPath.replace(/\\/g, "/").replace(/\/+$/, "")
         : "";
-    return root && path.startsWith(`${root}/`)
-      ? path.slice(root.length + 1)
-      : path;
+    const normalizedPath = AgentPath.normalize(path);
+    const normalizedRoot = AgentPath.normalize(root);
+    const rootPrefix =
+      normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)
+        ? normalizedRoot
+        : null;
+    return rootPrefix
+      ? normalizedPath.slice(rootPrefix.length + 1)
+      : normalizedPath;
   }
 
   registerEditorTools() {
@@ -712,15 +878,54 @@ class Agent {
       execute: (args) => this.searchActiveFile(args),
     });
     this.registerTool("modify_active_file", {
-      description: "Modifier une plage du fichier actif.",
+      description: `
+Modifier précisément une plage du fichier actif.
+
+IMPORTANT :
+- Les lignes sont numérotées à partir de 1.
+- Les colonnes sont numérotées à partir de 0.
+- column 0 correspond au premier caractère de la ligne.
+- Une colonne égale à la longueur de la ligne correspond à la fin de la ligne.
+- La plage [startLine:startColumn, endLine:endColumn] est remplacée par text.
+- start et end sont inclusifs/exclusifs comme une plage JavaScript : le caractère à endColumn n'est PAS remplacé.
+- Pour remplacer toute une ligne, utilise startColumn=0 et endColumn=longueur exacte de la ligne.
+- Pour INSÉRER du texte sans supprimer de texte, start et end doivent être exactement identiques.
+- Pour supprimer du texte, utilise text="".
+- Ne devine jamais les coordonnées : lis d'abord le contenu actuel avec read_active_file.
+- Après une lecture, utilise exactement les numéros de lignes et colonnes correspondant au contenu lu.
+`,
       parameters: {
         type: "object",
         properties: {
-          startLine: { type: "integer" },
-          startColumn: { type: "integer" },
-          endLine: { type: "integer" },
-          endColumn: { type: "integer" },
-          text: { type: "string" },
+          startLine: {
+            type: "integer",
+            minimum: 1,
+            description: "Numéro de ligne 1-based.",
+          },
+
+          startColumn: {
+            type: "integer",
+            minimum: 0,
+            description: "Colonne 0-based. 0 = début de ligne.",
+          },
+
+          endLine: {
+            type: "integer",
+            minimum: 1,
+            description: "Numéro de ligne 1-based.",
+          },
+
+          endColumn: {
+            type: "integer",
+            minimum: 0,
+            description:
+              "Colonne 0-based et exclusive. Une valeur égale à la longueur de la ligne signifie la fin de la ligne.",
+          },
+
+          text: {
+            type: "string",
+            description: "Texte qui remplacera exactement la plage spécifiée.",
+          },
         },
         required: ["startLine", "startColumn", "endLine", "endColumn", "text"],
       },
@@ -878,32 +1083,173 @@ class Agent {
       return null;
     return candidate;
   }
-  async modifyActiveFile(args) {
+  async modifyActiveFile(args = {}) {
     const file = this.editor?.tabManager?.activeFile;
     const writer = this.editor?.writerController;
     const lineController = this.editor?.lineController;
     if (!file || !writer?.replaceRange || !lineController)
       throw new Error("WriterController indisponible.");
-    const beforeText = lineController.getContent();
-    const lines = beforeText.split("\n");
-    const startIndex = this.lineColumnToIndex(
-      lines,
-      args.startLine,
-      args.startColumn,
+
+    const beforeText =
+      typeof lineController.getContent === "function"
+        ? lineController.getContent()
+        : "";
+    const replacementText =
+      typeof args.newText === "string"
+        ? args.newText
+        : typeof args.text === "string"
+          ? args.text
+          : "";
+    const hasTextMatch =
+      typeof args.oldText === "string" && args.oldText.length > 0;
+    const hasCoordinateFallback =
+      Number.isInteger(args.startLine) &&
+      Number.isInteger(args.startColumn) &&
+      Number.isInteger(args.endLine) &&
+      Number.isInteger(args.endColumn);
+
+    let resolvedRange = null;
+
+    if (hasTextMatch) {
+      const matches = [];
+      let cursor = 0;
+      while (cursor <= beforeText.length - args.oldText.length) {
+        const index = beforeText.indexOf(args.oldText, cursor);
+        if (index === -1) break;
+        matches.push(index);
+        cursor = index + args.oldText.length;
+      }
+
+      if (matches.length === 0) {
+        if (!hasCoordinateFallback) {
+          return {
+            success: false,
+            error: {
+              code: "NO_MATCH",
+              message: "Aucune occurrence exacte trouvée pour oldText.",
+            },
+          };
+        }
+      } else if (matches.length > 1) {
+        return {
+          success: false,
+          error: {
+            code: "AMBIGUOUS_MATCH",
+            message:
+              "oldText est présent plusieurs fois. Le remplacement est refusé pour éviter une corruption.",
+          },
+        };
+      } else {
+        const startIndex = matches[0];
+        const endIndex = startIndex + args.oldText.length;
+        const startBefore = beforeText.slice(0, startIndex);
+        const endBefore = beforeText.slice(0, endIndex);
+        resolvedRange = {
+          startLine: startBefore.split("\n").length,
+          startColumn: startBefore.split("\n").pop().length,
+          endLine: endBefore.split("\n").length,
+          endColumn: endBefore.split("\n").pop().length,
+          startIndex,
+          endIndex,
+          text: replacementText,
+        };
+      }
+    }
+
+    if (!resolvedRange && hasCoordinateFallback) {
+      const lines = beforeText.split("\n");
+      const startIndex = this.lineColumnToIndex(
+        lines,
+        args.startLine,
+        args.startColumn,
+      );
+      const endIndex = this.lineColumnToIndex(
+        lines,
+        args.endLine,
+        args.endColumn,
+      );
+      if (
+        startIndex < 0 ||
+        endIndex < startIndex ||
+        endIndex > beforeText.length
+      ) {
+        return {
+          success: false,
+          error: {
+            code: "INVALID_RANGE",
+            message:
+              "Les coordonnées de remplacement ne correspondent pas au fichier actuel.",
+          },
+        };
+      }
+      resolvedRange = {
+        startLine: Number(args.startLine),
+        startColumn: Number(args.startColumn),
+        endLine: Number(args.endLine),
+        endColumn: Number(args.endColumn),
+        startIndex,
+        endIndex,
+        text: replacementText,
+      };
+    }
+
+    if (
+      !resolvedRange ||
+      !Object.prototype.hasOwnProperty.call(resolvedRange, "text")
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_REPLACEMENT",
+          message:
+            "Aucun remplacement valide n'a été fourni. Passez oldText/newText ou une plage de coordonnées valide.",
+        },
+      };
+    }
+
+    const afterText = `${beforeText.slice(0, resolvedRange.startIndex)}${resolvedRange.text}${beforeText.slice(resolvedRange.endIndex)}`;
+
+    const replaceResult = writer.replaceRange(
+      resolvedRange.text,
+      resolvedRange.startLine,
+      resolvedRange.startColumn,
+      resolvedRange.endLine,
+      resolvedRange.endColumn,
     );
-    const endIndex = this.lineColumnToIndex(
-      lines,
-      args.endLine,
-      args.endColumn,
-    );
-    const afterText = `${beforeText.slice(0, startIndex)}${args.text}${beforeText.slice(endIndex)}`;
-    writer.replaceRange(
-      args.text,
-      args.startLine,
-      args.startColumn,
-      args.endLine,
-      args.endColumn,
-    );
+
+    if (!replaceResult) {
+      return {
+        success: false,
+        error: {
+          code: "WRITE_FAILED",
+          message: "Le remplacement n'a pas été appliqué.",
+        },
+      };
+    }
+
+    const writtenText =
+      typeof lineController.getContent === "function"
+        ? lineController.getContent()
+        : "";
+
+    if (writtenText !== afterText) {
+      writer.replaceRange(
+        beforeText,
+        resolvedRange.startLine,
+        resolvedRange.startColumn,
+        resolvedRange.endLine,
+        resolvedRange.endColumn,
+      );
+      return {
+        success: false,
+        error: {
+          code: "VERIFY_FAILED",
+          message:
+            "Le remplacement n'a pas été vérifié dans le fichier. La modification a été annulée.",
+        },
+      };
+    }
+
     file.setIsSaved(false);
     return {
       success: true,
@@ -912,9 +1258,15 @@ class Agent {
         file.path,
         this.editor?.fileExplorer?.rootPath,
       ),
-      range: args,
+      range: {
+        startLine: resolvedRange.startLine,
+        startColumn: resolvedRange.startColumn,
+        endLine: resolvedRange.endLine,
+        endColumn: resolvedRange.endColumn,
+      },
       beforeText,
       afterText,
+      match: hasTextMatch ? "exact" : "coordinates",
     };
   }
 }

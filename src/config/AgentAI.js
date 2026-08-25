@@ -21,6 +21,8 @@ const AgentAI = {
       name: "Ollama",
       baseURL: "http://localhost:11434/v1",
       requiresApiKey: false,
+      supportsTools: true,
+      supportsToolChoice: true,
       defaultModel: "qwen3",
 
       models: {
@@ -36,6 +38,8 @@ const AgentAI = {
       name: "OpenAI",
       baseURL: "https://api.openai.com/v1",
       requiresApiKey: true,
+      supportsTools: true,
+      supportsToolChoice: true,
       defaultModel: "gpt-4o-mini",
 
       models: {
@@ -56,6 +60,8 @@ const AgentAI = {
       name: "Groq",
       baseURL: "https://api.groq.com/openai/v1",
       requiresApiKey: true,
+      supportsTools: true,
+      supportsToolChoice: true,
       defaultModel: "openai/gpt-oss-120b",
 
       models: {
@@ -81,6 +87,8 @@ const AgentAI = {
       name: "OpenRouter",
       baseURL: "https://openrouter.ai/api/v1",
       requiresApiKey: true,
+      supportsTools: true,
+      supportsToolChoice: true,
       defaultModel: "openai/gpt-4o-mini",
 
       models: {
@@ -101,6 +109,8 @@ const AgentAI = {
       name: "Mistral",
       baseURL: "https://api.mistral.ai/v1",
       requiresApiKey: true,
+      supportsTools: true,
+      supportsToolChoice: true,
       defaultModel: "mistral-small-latest",
 
       models: {
