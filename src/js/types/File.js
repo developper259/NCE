@@ -42,6 +42,11 @@ class FileNode {
 
     // HighlightController
     this.language = undefined;
+
+    // Diff State
+    this.diffSnapshot = null;
+    this.diffActive = false;
+    this.diffRows = null;
   }
 
   async loadLanguage() {
@@ -168,6 +173,24 @@ class FileNode {
     else {
       this.setIsSaved(false);
     }
+    this.editor.tabManager.refresh();
+  }
+
+  keepDiff() {
+    this.diffSnapshot = null;
+    this.diffActive = false;
+    this.diffRows = null;
+    this.setIsSaved(false);
+    this.editor.lineController.refresh(true);
+  }
+
+  undoDiff() {
+    if (!this.diffSnapshot) return;
+    const lineController = this.editor.lineController;
+    lineController.loadContent(this.diffSnapshot);
+    this.diffSnapshot = null;
+    this.diffActive = false;
+    this.diffRows = null;
     this.editor.tabManager.refresh();
   }
 }

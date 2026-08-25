@@ -25,8 +25,8 @@ class OutputScroller {
   }
 
   getTotalScrollLines() {
-    if (!this.lineController || !this.lineController.lines) return 0;
-    return this.lineController.lines.length;
+    if (!this.lineController) return 0;
+    return this.lineController.getDisplayLineCount();
   }
 
   getEffectiveTotalLines() {
@@ -65,8 +65,7 @@ class OutputScroller {
     this.vScroller.heightByItem = this.editor.posY;
 
     this.vScroller.calculProp = () => {
-      if (!this.lineController.lines || this.lineController.lines.length === 0)
-        return 0;
+      if (this.getTotalScrollLines() === 0) return 0;
       const visibleLines = this.lineController.maxLines;
       const totalLines = this.getEffectiveTotalLines();
       if (totalLines <= visibleLines) return 100;
@@ -74,8 +73,7 @@ class OutputScroller {
     };
 
     this.vScroller.calcIsActive = () => {
-      if (!this.lineController.lines || this.lineController.lines.length === 0)
-        return false;
+      if (this.getTotalScrollLines() === 0) return false;
       return this.getTotalScrollLines() > this.lineController.maxLines;
     };
 
@@ -99,8 +97,7 @@ class OutputScroller {
     this.hScroller.heightByItem = 1;
 
     this.hScroller.calculProp = () => {
-      if (!this.lineController.lines || this.lineController.lines.length === 0)
-        return 0;
+      if (this.getTotalScrollLines() === 0) return 0;
 
       const maxLineLength =
         this.lineController.maxLineLength + this.marginChars;
@@ -112,8 +109,7 @@ class OutputScroller {
     };
 
     this.hScroller.calcIsActive = () => {
-      if (!this.lineController.lines || this.lineController.lines.length === 0)
-        return false;
+      if (this.getTotalScrollLines() === 0) return false;
 
       const maxLineLength =
         this.lineController.maxLineLength + this.marginChars;
@@ -130,8 +126,7 @@ class OutputScroller {
   }
 
   getHorizontalScrollRatioFromState() {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return 0;
+    if (this.getTotalScrollLines() === 0) return 0;
 
     const maxLineLength = this.lineController.maxLineLength + this.marginChars;
     const visibleWidthChars =
@@ -143,8 +138,7 @@ class OutputScroller {
   }
 
   applyHorizontalScrollFromRatio(scrollRatio) {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return;
+    if (this.getTotalScrollLines() === 0) return;
 
     if (!this.hScroller.calcIsActive()) {
       if (this.lineController.offsetX !== 0) {
@@ -177,8 +171,7 @@ class OutputScroller {
   }
 
   getVerticalScrollRatioFromState() {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return 0;
+    if (this.getTotalScrollLines() === 0) return 0;
 
     const posY = this.editor.posY;
     const maxStartIndex = this.getMaxStartIndex();
@@ -191,8 +184,7 @@ class OutputScroller {
   }
 
   applyVerticalScrollFromRatio(scrollRatio) {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return;
+    if (this.getTotalScrollLines() === 0) return;
 
     if (!this.vScroller.calcIsActive()) {
       if (
@@ -239,7 +231,7 @@ class OutputScroller {
   }
 
   clampScrollState() {
-    if (!this.lineController.lines || this.lineController.lines.length === 0) {
+    if (this.getTotalScrollLines() === 0) {
       this.lineController.startIndex = 0;
       this.lineController.offsetY = 0;
       return;
@@ -261,11 +253,9 @@ class OutputScroller {
   }
 
   getMaxStartIndex() {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return 0;
+    if (this.getTotalScrollLines() === 0) return 0;
 
-    const overflow =
-      this.lineController.totalLines - this.lineController.maxLines;
+    const overflow = this.getTotalScrollLines() - this.lineController.maxLines;
 
     if (overflow <= 0) {
       return 0;
@@ -326,22 +316,20 @@ class OutputScroller {
   }
 
   updateNbItem() {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return;
+    if (this.getTotalScrollLines() === 0) return;
 
     this.vScroller.nbItem = this.getTotalScrollLines();
     this.hScroller.nbItem = this.lineController.maxLineLength + 2;
   }
 
   scrollTo(row, column) {
-    if (!this.lineController.lines || this.lineController.lines.length === 0)
-      return;
+    if (this.getTotalScrollLines() === 0) return;
 
     let verticalChanged = false;
     let horizontalChanged = false;
 
     if (row !== undefined && row !== null && !isNaN(row)) {
-      row = Math.max(0, Math.min(row, this.lineController.lines.length - 1));
+      row = Math.max(0, Math.min(row, this.getTotalScrollLines() - 1));
       const maxStartIndex = this.getMaxStartIndex();
 
       this.lineController.startIndex = Math.min(row, maxStartIndex);

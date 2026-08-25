@@ -451,6 +451,7 @@ class WriterController {
     replacementLines[replacementLines.length - 1] += suffix;
 
     lines.splice(startRow - 1, endRow - startRow + 1, ...replacementLines);
+
     file.lines = lines.map((line) => new LineNode(line));
     file.totalLines = file.lines.length;
     file.maxLineLength = 0;

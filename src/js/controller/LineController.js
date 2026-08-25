@@ -24,6 +24,39 @@ class LineController {
     return this.editor.tabManager.activeFile.lines || [];
   }
 
+  get diffRows() {
+    return this.editor.tabManager.activeFile?.diffRows || null;
+  }
+
+  getDisplayRows() {
+    if (Array.isArray(this.diffRows) && this.diffRows.length > 0) {
+      return this.diffRows;
+    }
+    return this.lines.map((line, documentIndex) => ({
+      type: "unchanged",
+      text: line.getText(),
+      documentIndex,
+    }));
+  }
+
+  getDisplayRow(displayIndex) {
+    return this.getDisplayRows()[displayIndex] || null;
+  }
+
+  getDisplayIndexForDocument(documentIndex) {
+    return this.getDisplayRows().findIndex(
+      (row) => row.documentIndex === documentIndex,
+    );
+  }
+
+  getDisplayIndexForCursor(documentRow) {
+    return this.getDisplayIndexForDocument(documentRow - 1);
+  }
+
+  getDisplayLineCount() {
+    return this.getDisplayRows().length;
+  }
+
   set lines(value) {
     if (!this.editor.tabManager.activeFile) {
       return;
@@ -205,7 +238,7 @@ class LineController {
       return 0;
     }
 
-    const overflow = this.totalLines - this.maxLines;
+    const overflow = this.getDisplayLineCount() - this.maxLines;
 
     if (overflow <= 0) {
       return 0;
@@ -310,6 +343,9 @@ class LineController {
     const textLines = content.split("\n");
 
     this.lines = textLines.map((text) => new LineNode(text));
+    if (this.editor.tabManager.activeFile) {
+      this.editor.tabManager.activeFile.diffRows = null;
+    }
 
     this.totalLines = totalLines || this.lines.length;
     this.maxLineLength = 0;
@@ -378,7 +414,7 @@ class LineController {
       return 0;
     }
 
-    const visibleLines = this.lines.length - this.startIndex;
+    const visibleLines = this.getDisplayLineCount() - this.startIndex;
 
     return Math.max(0, Math.min(visibleLines, this.renderedLineCount));
   }
@@ -399,6 +435,29 @@ class LineController {
     newLine.classList.add("line-selected");
 
     this.index = index;
+  }
+
+  clearDiffRows() {
+    if (this.editor.tabManager.activeFile) {
+      this.editor.tabManager.activeFile.diffRows = null;
+    }
+  }
+
+  recalculatePersistentDiff() {
+    const file = this.editor.tabManager.activeFile;
+    if (!file || !file.diffActive || !file.diffSnapshot) {
+      return;
+    }
+    const currentContent = this.getContent();
+    const agent = this.editor.agent || this.editor.api?.agent;
+    if (agent && typeof agent.markFileDiffHighlights === "function") {
+      agent.markFileDiffHighlights(file.diffSnapshot, currentContent, file);
+      this.markDirtyAll();
+      if (this.outputScroller) {
+        this.outputScroller.updateNbItem();
+      }
+      this.refresh(true);
+    }
   }
 
   addLine(txt, index) {
@@ -514,14 +573,18 @@ class LineController {
         return;
       }
 
-      const screenIndex = dataIndex - this.startIndex;
+      const displayIndex = this.getDisplayIndexForDocument(dataIndex);
+      const screenIndex = displayIndex - this.startIndex;
 
       if (screenIndex >= 0 && screenIndex < this.renderedLineCount) {
         this.refreshLineOutput(screenIndex);
       }
     });
 
-    const firstEmptyIndex = Math.max(0, this.lines.length - this.startIndex);
+    const firstEmptyIndex = Math.max(
+      0,
+      this.getDisplayLineCount() - this.startIndex,
+    );
 
     const outputLength = this.editor.output.children.length;
 
@@ -549,7 +612,8 @@ class LineController {
       return;
     }
 
-    const dataIndex = this.startIndex + screenIndex;
+    const displayIndex = this.startIndex + screenIndex;
+    const displayRow = this.getDisplayRow(displayIndex);
 
     const child = this.editor.output.children[screenIndex];
 
@@ -557,7 +621,7 @@ class LineController {
       return;
     }
 
-    if (dataIndex >= this.lines.length) {
+    if (!displayRow) {
       child.replaceChildren();
 
       child.removeAttribute("data-line");
@@ -565,11 +629,11 @@ class LineController {
       return;
     }
 
-    let lineNode = this.lines[dataIndex];
+    const documentIndex = displayRow.documentIndex;
+    const lineNode = documentIndex === null ? null : this.lines[documentIndex];
+    const fullText = displayRow.text;
 
-    let fullText = lineNode.getText();
-
-    const currentLineLength = this.getViewLineLength(dataIndex);
+    const currentLineLength = fullText.length;
 
     if (currentLineLength > this.maxLineLength) {
       this.maxLineLength = currentLineLength;
@@ -584,14 +648,19 @@ class LineController {
         return;
       }
 
-      lineOBJ.dataset.line = dataIndex;
+      lineOBJ.dataset.line = documentIndex === null ? "" : documentIndex;
+      lineOBJ.dataset.displayLine = displayIndex;
 
       child.replaceWith(lineOBJ);
 
-      this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
+      if (documentIndex !== null) {
+        this.editor.highlightController.setLineNode(documentIndex, lineOBJ);
+      }
 
-      if (!lineNode.isHighlight) {
-        this.editor.highlightController.markDirty(dataIndex);
+      if (lineNode && !lineNode.isHighlight) {
+        if (documentIndex !== null) {
+          this.editor.highlightController.markDirty(documentIndex);
+        }
       }
     }
   }
@@ -604,18 +673,17 @@ class LineController {
     const fragment = document.createDocumentFragment();
 
     for (let i = 0; i < this.renderedLineCount; i++) {
-      const dataIndex = this.startIndex + i;
+      const displayIndex = this.startIndex + i;
+      const displayRow = this.getDisplayRow(displayIndex);
 
       let lineOBJ;
 
-      if (dataIndex >= this.lines.length) {
+      if (!displayRow) {
         lineOBJ = this.createLineOBJ(null, i);
       } else {
-        const lineNode = this.lines[dataIndex];
-
-        const fullText = lineNode.getText();
-
-        const currentLineLength = this.getViewLineLength(dataIndex);
+        const documentIndex = displayRow.documentIndex;
+        const fullText = displayRow.text;
+        const currentLineLength = fullText.length;
 
         if (currentLineLength > this.maxLineLength) {
           this.maxLineLength = currentLineLength;
@@ -625,9 +693,12 @@ class LineController {
 
         lineOBJ = this.createLineOBJ(line, i);
 
-        lineOBJ.dataset.line = dataIndex;
+        lineOBJ.dataset.line = documentIndex === null ? "" : documentIndex;
+        lineOBJ.dataset.displayLine = displayIndex;
 
-        this.editor.highlightController.setLineNode(dataIndex, lineOBJ);
+        if (documentIndex !== null) {
+          this.editor.highlightController.setLineNode(documentIndex, lineOBJ);
+        }
       }
 
       fragment.appendChild(lineOBJ);
@@ -675,15 +746,25 @@ class LineController {
     for (let i = 0; i < children.length; i++) {
       const span = children[i];
 
-      const dataIndex = this.startIndex + i;
+      const displayIndex = this.startIndex + i;
+      const displayRow = this.getDisplayRow(displayIndex);
 
-      span.textContent = dataIndex + 1;
+      span.textContent =
+        displayRow?.documentIndex === null
+          ? ""
+          : displayRow
+            ? displayRow.documentIndex + 1
+            : "";
 
-      span.dataset.line = dataIndex;
+      span.dataset.line =
+        displayRow?.documentIndex === null
+          ? ""
+          : (displayRow?.documentIndex ?? "");
+      span.dataset.displayLine = displayIndex;
 
       span.style.top = `${this.getLineTop(i)}px`;
 
-      if (dataIndex === this.index - 1) {
+      if (displayRow?.documentIndex === this.index - 1) {
         span.classList.add("line-selected");
       } else {
         span.classList.remove("line-selected");
@@ -718,15 +799,26 @@ class LineController {
 
     span.classList.add("line-el", "editor-el");
 
-    if (dataIndex === this.index - 1) {
+    const displayRow = this.getDisplayRow(dataIndex);
+
+    if (displayRow?.documentIndex === this.index - 1) {
       span.classList.add("line-selected");
     }
 
     span.style.top = `${this.getLineTop(screenIndex)}px`;
 
-    span.textContent = dataIndex + 1;
+    span.textContent =
+      displayRow?.documentIndex === null
+        ? ""
+        : displayRow
+          ? displayRow.documentIndex + 1
+          : "";
 
-    span.dataset.line = dataIndex;
+    span.dataset.line =
+      displayRow?.documentIndex === null
+        ? ""
+        : (displayRow?.documentIndex ?? "");
+    span.dataset.displayLine = dataIndex;
 
     return span;
   }
@@ -779,15 +871,23 @@ class LineController {
   }
 
   createLineOBJ(slicedLine, screenIndex) {
-    const dataIndex = this.startIndex + screenIndex;
-    const lineNode = this.lines[dataIndex];
-    const diffSegments = lineNode?.diffSegments || null;
-    const diffState = lineNode?.diffState || null;
+    const displayIndex = this.startIndex + screenIndex;
+    const displayRow = this.getDisplayRow(displayIndex);
+    const lineNode =
+      displayRow?.documentIndex === null
+        ? null
+        : this.lines[displayRow?.documentIndex];
+    const displayText = slicedLine?.text ?? displayRow?.text ?? "";
+    const diffSegments =
+      displayRow?.type === "removed"
+        ? [{ type: "removed", text: displayText }]
+        : null;
+    const diffState = displayRow?.type || null;
     const tokens = lineNode?.getTokens();
     const visibleTokens = this.getVisibleTokens(tokens, slicedLine);
 
     const lineOBJ = this.editor.writerController.textToOBJ(
-      slicedLine?.text,
+      displayText,
       visibleTokens,
       diffSegments,
     );
@@ -808,7 +908,8 @@ class LineController {
   }
 
   getLineNumberOBJ(dataIndex) {
-    const screenIndex = dataIndex - this.startIndex;
+    const screenIndex =
+      this.getDisplayIndexForDocument(dataIndex) - this.startIndex;
 
     if (
       screenIndex >= 0 &&

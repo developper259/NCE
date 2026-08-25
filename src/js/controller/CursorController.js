@@ -46,7 +46,8 @@ class CursorController {
 
   rowToY(row) {
     const lc = this.editor.lineController;
-    const screenRow = row - 1 - lc.startIndex;
+    const displayIndex = lc.getDisplayIndexForCursor(row);
+    const screenRow = displayIndex - lc.startIndex;
     return lc.getLineTop(screenRow) + 4;
   }
 
@@ -110,7 +111,10 @@ class CursorController {
     const scrollOffsetY = this.editor.lineController.getScrollOffsetY();
     const scrollOffsetXChars = this.editor.lineController.offsetX || 0;
 
-    const targetRow = this.yToRow(localY + scrollOffsetY);
+    const displayIndex = this.yToRow(localY + scrollOffsetY) - 1;
+    const displayRow = this.editor.lineController.getDisplayRow(displayIndex);
+    if (!displayRow || displayRow.documentIndex === null) return;
+    const targetRow = displayRow.documentIndex + 1;
     const targetViewColumn = this.xToColumn(localX) + scrollOffsetXChars;
 
     const posReal = this.getPosition(targetRow, targetViewColumn);
@@ -150,7 +154,8 @@ class CursorController {
 
   isRowVisible(row) {
     const lc = this.editor.lineController;
-    const screenRow = row - 1 - lc.startIndex;
+    const displayIndex = lc.getDisplayIndexForCursor(row);
+    const screenRow = displayIndex - lc.startIndex;
     if (screenRow < 0 || screenRow >= lc.maxViewLines) return false;
 
     const top = lc.getLineTop(screenRow);

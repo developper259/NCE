@@ -163,7 +163,10 @@ class SearchSidebar extends Sidebar {
       this.renderResults(this.resultsElement);
     }
     if (this.caseButton) {
-      this.caseButton.classList.toggle("sidebar-option-active", this.caseSensitive);
+      this.caseButton.classList.toggle(
+        "sidebar-option-active",
+        this.caseSensitive,
+      );
     }
     if (this.wordButton) {
       this.wordButton.classList.toggle("sidebar-option-active", this.wholeWord);
@@ -418,7 +421,12 @@ class SearchSidebar extends Sidebar {
         }
       }
 
-      this.editor.lineController.scrollTo(Math.max(0, result.line - 1));
+      const documentIndex = Math.max(0, result.line - 1);
+      const displayIndex =
+        this.editor.lineController.getDisplayIndexForDocument(documentIndex);
+      this.editor.lineController.scrollTo(
+        displayIndex >= 0 ? displayIndex : documentIndex,
+      );
 
       this.editor.cursorController.setCursorPosition(
         result.line,

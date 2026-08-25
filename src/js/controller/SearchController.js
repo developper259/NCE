@@ -263,7 +263,10 @@ class SearchController {
 
   scrollToResult(result) {
     const lineController = this.editor.lineController;
-    const resultIndex = result.row - 1;
+    const documentIndex = result.row - 1;
+    const displayIndex =
+      lineController.getDisplayIndexForDocument(documentIndex);
+    const resultIndex = displayIndex >= 0 ? displayIndex : documentIndex;
 
     const visibleLines = Math.max(1, lineController.maxLines);
 

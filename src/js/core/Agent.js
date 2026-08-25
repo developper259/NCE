@@ -1323,6 +1323,74 @@ IMPORTANT :
   markFileDiffHighlights(beforeText, afterText, file) {
     if (!file || !Array.isArray(file.lines)) return;
 
+    file.diffSnapshot = beforeText;
+    file.diffActive = true;
+    file.diffRows = [];
+    const beforeLines = beforeText.split(/\r?\n/);
+    const afterLines = afterText.split(/\r?\n/);
+    const rows = beforeLines.length + 1;
+    const cols = afterLines.length + 1;
+    const lcs = Array.from({ length: rows }, () => Array(cols).fill(0));
+
+    for (
+      let beforeIndex = beforeLines.length - 1;
+      beforeIndex >= 0;
+      beforeIndex -= 1
+    ) {
+      for (
+        let afterIndex = afterLines.length - 1;
+        afterIndex >= 0;
+        afterIndex -= 1
+      ) {
+        lcs[beforeIndex][afterIndex] =
+          beforeLines[beforeIndex] === afterLines[afterIndex]
+            ? lcs[beforeIndex + 1][afterIndex + 1] + 1
+            : Math.max(
+                lcs[beforeIndex + 1][afterIndex],
+                lcs[beforeIndex][afterIndex + 1],
+              );
+      }
+    }
+
+    let beforeIndex = 0;
+    let documentIndex = 0;
+    let afterIndex = 0;
+    while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
+      if (
+        beforeIndex < beforeLines.length &&
+        afterIndex < afterLines.length &&
+        beforeLines[beforeIndex] === afterLines[afterIndex]
+      ) {
+        file.diffRows.push({
+          type: "unchanged",
+          text: afterLines[afterIndex],
+          documentIndex,
+        });
+        beforeIndex += 1;
+        afterIndex += 1;
+        documentIndex += 1;
+      } else if (
+        beforeIndex < beforeLines.length &&
+        (afterIndex >= afterLines.length ||
+          lcs[beforeIndex + 1][afterIndex] >= lcs[beforeIndex][afterIndex + 1])
+      ) {
+        file.diffRows.push({
+          type: "removed",
+          text: beforeLines[beforeIndex],
+          documentIndex: null,
+        });
+        beforeIndex += 1;
+      } else {
+        file.diffRows.push({
+          type: "added",
+          text: afterLines[afterIndex],
+          documentIndex,
+        });
+        afterIndex += 1;
+        documentIndex += 1;
+      }
+    }
+
     for (const line of file.lines) {
       if (line && typeof line === "object") {
         line.diffState = null;
@@ -1330,31 +1398,8 @@ IMPORTANT :
       }
     }
 
-    if (!beforeText || !afterText || beforeText === afterText) return;
-
-    const beforeLines = beforeText.split(/\r?\n/);
-    const afterLines = afterText.split(/\r?\n/);
-    const maxLength = Math.max(beforeLines.length, afterLines.length);
-
-    for (let index = 0; index < maxLength; index += 1) {
-      const beforeLine = beforeLines[index];
-      const afterLine = afterLines[index];
-      const targetLine = file.lines[index];
-      if (!targetLine) continue;
-
-      if (beforeLine === undefined && afterLine !== undefined) {
-        targetLine.diffState = "added";
-        targetLine.diffSegments = [{ type: "added", text: afterLine }];
-      } else if (afterLine === undefined && beforeLine !== undefined) {
-        targetLine.diffState = "removed";
-        targetLine.diffSegments = [{ type: "removed", text: beforeLine }];
-      } else if (beforeLine !== afterLine) {
-        targetLine.diffState = "modified";
-        targetLine.diffSegments = [
-          { type: "removed", text: beforeLine },
-          { type: "added", text: afterLine },
-        ];
-      }
+    if (beforeText === afterText) {
+      file.diffRows = [];
     }
   }
   validateActiveFileSyntax() {

@@ -84,6 +84,8 @@ class Events {
   cursorEnabled(arg) {}
   onSelect(arg) {}
   onChange(arg) {
+    // ------- LineController  ------
+    this.editor.lineController.recalculatePersistentDiff();
     // ------- SearchController.js ------
     this.editor.searchController.refresh();
     // ------- File.js ------
