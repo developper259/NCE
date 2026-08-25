@@ -91,6 +91,7 @@ class Agent {
     this.messages = [];
     this.fileSnapshots = new Map();
     this.executedToolCalls = new Map();
+    this.executedModificationRequests = new Map();
     this.systemPrompt = "";
     this.registerEditorTools();
   }
@@ -232,6 +233,7 @@ class Agent {
     });
     this.runConfig = runConfig;
     this.executedToolCalls = new Map();
+    this.executedModificationRequests = new Map();
     try {
       const editorContext = await this.getContext();
       this.messages = [
@@ -328,6 +330,7 @@ class Agent {
     let finalResponse = "";
     let finalReasoning = "";
     let postEditRepairAttempts = 0;
+    let modificationFailures = 0;
     for (
       let iteration = 1;
       iteration <= (runConfig?.maxIterations ?? this.maxIterations);
@@ -360,6 +363,37 @@ class Agent {
           tool_call_id: call.id,
           content: JSON.stringify(toolResult),
         });
+
+        const toolPayload = toolResult?.result ?? toolResult;
+        const modificationTool =
+          call?.function?.name === "modify_active_file" ||
+          call?.function?.name === "replace_text";
+        const retryableErrorCodes = new Set([
+          "CONTENT_MISMATCH",
+          "INVALID_RANGE",
+          "NO_MATCH",
+          "AMBIGUOUS_MATCH",
+          "MODIFICATION_VERIFICATION_FAILED",
+          "SUSPECTED_DUPLICATION",
+        ]);
+        if (
+          modificationTool &&
+          toolResult?.success === false &&
+          retryableErrorCodes.has(toolPayload?.error?.code)
+        ) {
+          modificationFailures += 1;
+          if (modificationFailures >= 2) {
+            return {
+              response:
+                "Modification arrêtée après deux échecs de validation. Relis le fichier et relance une demande avec un contexte actualisé.",
+              reasoning: finalReasoning,
+              error: toolPayload.error,
+              iterations: iteration,
+            };
+          }
+        } else if (modificationTool && toolResult?.success) {
+          modificationFailures = 0;
+        }
 
         const toolName = call?.function?.name;
         if (toolName === "modify_active_file" && toolResult?.success) {
@@ -672,8 +706,9 @@ class Agent {
           signal: this.abortController?.signal,
         }),
       );
-      this.callbacks.onToolEnd?.(name, result, callbackContext);
-      const toolResult = { success: true, result };
+      const toolResult =
+        result && result.success === false ? result : { success: true, result };
+      this.callbacks.onToolEnd?.(name, toolResult, callbackContext);
       if (toolCallId) this.executedToolCalls.set(toolCallId, toolResult);
       return toolResult;
     } catch (error) {
@@ -879,11 +914,18 @@ class Agent {
   }
   lineColumnToIndex(lines, lineNumber, columnNumber) {
     const source = Array.isArray(lines) ? lines : [];
-    const lineIndex = Math.min(
-      Math.max(0, Number(lineNumber || 1) - 1),
-      Math.max(0, source.length - 1),
-    );
-    const column = Math.max(0, Number(columnNumber) || 0);
+    if (
+      !Number.isInteger(lineNumber) ||
+      !Number.isInteger(columnNumber) ||
+      lineNumber < 1 ||
+      lineNumber > source.length ||
+      columnNumber < 0 ||
+      columnNumber > (source[lineNumber - 1] || "").length
+    ) {
+      return null;
+    }
+    const lineIndex = lineNumber - 1;
+    const column = columnNumber;
     const offset = source
       .slice(0, lineIndex)
       .reduce((total, line) => total + line.length + 1, 0);
@@ -1027,7 +1069,7 @@ IMPORTANT :
 - Les colonnes sont numérotées à partir de 0.
 - column 0 correspond au premier caractère de la ligne.
 - Une colonne égale à la longueur de la ligne correspond à la fin de la ligne.
- - La plage [startLine:startColumn, endLine:endColumn] est remplacée par text.
+- La plage [startLine:startColumn, endLine:endColumn] est remplacée par text.
 - start et end sont inclusifs/exclusifs comme une plage JavaScript : le caractère à endColumn n'est PAS remplacé.
 - Pour remplacer toute une ligne, utilise startColumn=0 et endColumn=longueur exacte de la ligne.
 - Pour INSÉRER du texte sans supprimer de texte, start et end doivent être exactement identiques.
@@ -1036,10 +1078,20 @@ IMPORTANT :
 - Après une lecture, utilise exactement les numéros de lignes et colonnes correspondant au contenu lu.
 - expectedText doit contenir exactement le texte actuellement présent dans la plage.
 - Si expectedText ne correspond pas, le remplacement sera refusé.
+- Pour une modification normale, fournis oldText et newText : les coordonnées seront calculées automatiquement.
 `,
       parameters: {
         type: "object",
         properties: {
+          oldText: {
+            type: "string",
+            description:
+              "Texte exact à remplacer. Une seule occurrence doit exister.",
+          },
+          newText: {
+            type: "string",
+            description: "Nouveau texte exact qui remplacera oldText.",
+          },
           startLine: {
             type: "integer",
             minimum: 1,
@@ -1073,17 +1125,10 @@ IMPORTANT :
 
           text: {
             type: "string",
-            description: "Texte qui remplacera exactement la plage spécifiée.",
+            description:
+              "Texte de remplacement, conservé pour compatibilité si newText n'est pas fourni.",
           },
         },
-        required: [
-          "startLine",
-          "startColumn",
-          "endLine",
-          "endColumn",
-          "expectedText",
-          "text",
-        ],
       },
       execute: (args) => this.modifyActiveFile(args),
     });
@@ -1147,6 +1192,14 @@ IMPORTANT :
       oldText: args.oldText,
       newText: args.newText,
     });
+  }
+  restoreActiveFileSnapshot(content) {
+    const lineController = this.editor?.lineController;
+    if (typeof lineController?.loadContent !== "function") return false;
+    lineController.loadContent(content);
+    lineController.markDirtyAll?.();
+    lineController.refresh?.(true);
+    return true;
   }
   async readActiveFile(args = {}) {
     const controller = this.editor?.lineController;
@@ -1316,18 +1369,16 @@ IMPORTANT :
       if (!source.trim()) {
         return { valid: true, error: null };
       }
-      const fileName = file?.path || "script.js";
-      const language = (file?.language || "javascript").toLowerCase();
-      if (
-        language !== "javascript" &&
-        language !== "js" &&
-        language !== "typescript" &&
-        language !== "ts"
-      ) {
+      const fileName = file?.path || file?.name || "";
+      const extension = fileName.split(".").pop()?.toLowerCase() || "";
+      const language = String(file?.language || "").toLowerCase();
+      const isJavaScript =
+        ["javascript", "js", "jsx", "mjs", "cjs"].includes(language) ||
+        ["js", "jsx", "mjs", "cjs"].includes(extension);
+      if (!isJavaScript) {
         return { valid: true, error: null };
       }
-      const script = new Function(`"use strict";\n${source}`);
-      script();
+      new Function(`"use strict";\n${source}`);
       return { valid: true, error: null, fileName };
     } catch (error) {
       return {
@@ -1424,6 +1475,42 @@ IMPORTANT :
         : typeof args.text === "string"
           ? args.text
           : "";
+    const requestKey = JSON.stringify({
+      oldText: typeof args.oldText === "string" ? args.oldText : null,
+      newText: replacementText,
+      startLine: args.startLine ?? null,
+      startColumn: args.startColumn ?? null,
+      endLine: args.endLine ?? null,
+      endColumn: args.endColumn ?? null,
+    });
+    if (this.executedModificationRequests.has(requestKey)) {
+      return {
+        success: false,
+        error: {
+          code: "DUPLICATE_MODIFICATION",
+          message: "Cette demande de modification a déjà été exécutée.",
+        },
+      };
+    }
+    const sourceText =
+      typeof args.oldText === "string"
+        ? args.oldText
+        : typeof args.expectedText === "string"
+          ? args.expectedText
+          : "";
+    if (
+      sourceText.length > 0 &&
+      replacementText.includes(`${sourceText}${sourceText}`)
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "SUSPECTED_DUPLICATION",
+          message:
+            "Le nouveau texte contient deux occurrences consécutives du texte remplacé. La modification est refusée.",
+        },
+      };
+    }
     const hasTextMatch = typeof args.oldText === "string";
     const hasCoordinateFallback =
       Number.isInteger(args.startLine) &&
@@ -1462,12 +1549,12 @@ IMPORTANT :
           return {
             success: false,
             error: {
-              code: "CONTENT_NOT_FOUND",
+              code: "NO_MATCH",
               message: "Aucune occurrence exacte trouvée pour oldText.",
             },
           };
         }
-      } else if (matches.length > 1) {
+      } else if (args.oldText.length > 0 && matches.length > 1) {
         return {
           success: false,
           error: {
@@ -1476,7 +1563,7 @@ IMPORTANT :
               "oldText est présent plusieurs fois. Le remplacement est refusé pour éviter une corruption.",
           },
         };
-      } else {
+      } else if (args.oldText.length > 0) {
         const startIndex = matches[0];
         const endIndex = startIndex + args.oldText.length;
         const startBefore = beforeText.slice(0, startIndex);
@@ -1495,7 +1582,8 @@ IMPORTANT :
 
     if (!resolvedRange && hasCoordinateFallback) {
       const strictRange = this.getStrictRange(beforeText, args);
-      if (!strictRange.valid) return { success: false, error: strictRange.error };
+      if (!strictRange.valid)
+        return { success: false, error: strictRange.error };
       if (
         typeof args.expectedText !== "string" ||
         strictRange.actualText !== args.expectedText
@@ -1504,7 +1592,8 @@ IMPORTANT :
           success: false,
           error: {
             code: "CONTENT_MISMATCH",
-            message: "Le contenu réel de la plage ne correspond pas à expectedText.",
+            message:
+              "Le contenu réel de la plage ne correspond pas à expectedText.",
             expectedText: args.expectedText ?? "",
             actualText: strictRange.actualText,
           },
@@ -1536,7 +1625,8 @@ IMPORTANT :
         success: false,
         error: {
           code: "CONTENT_MISMATCH",
-          message: "Le contenu réel de la plage ne correspond pas à expectedText.",
+          message:
+            "Le contenu réel de la plage ne correspond pas à expectedText.",
           expectedText: args.expectedText,
           actualText: beforeText.slice(
             resolvedRange.startIndex,
@@ -1548,15 +1638,29 @@ IMPORTANT :
 
     const afterText = `${beforeText.slice(0, resolvedRange.startIndex)}${resolvedRange.text}${beforeText.slice(resolvedRange.endIndex)}`;
 
-    const replaceResult = writer.replaceRange(
-      resolvedRange.text,
-      resolvedRange.startLine,
-      resolvedRange.startColumn,
-      resolvedRange.endLine,
-      resolvedRange.endColumn,
-    );
+    let replaceResult;
+    try {
+      replaceResult = writer.replaceRange(
+        resolvedRange.text,
+        resolvedRange.startLine,
+        resolvedRange.startColumn,
+        resolvedRange.endLine,
+        resolvedRange.endColumn,
+      );
+    } catch (error) {
+      this.restoreActiveFileSnapshot(beforeText);
+      return {
+        success: false,
+        error: {
+          code: "WRITE_FAILED",
+          message:
+            error?.message || "Le remplacement a provoqué une exception.",
+        },
+      };
+    }
 
     if (!replaceResult) {
+      this.restoreActiveFileSnapshot(beforeText);
       return {
         success: false,
         error: {
@@ -1570,21 +1674,18 @@ IMPORTANT :
       typeof lineController.getContent === "function"
         ? lineController.getContent()
         : "";
-
     if (writtenText !== afterText) {
-      writer.replaceRange(
-        beforeText,
-        resolvedRange.startLine,
-        resolvedRange.startColumn,
-        resolvedRange.endLine,
-        resolvedRange.endColumn,
-      );
+      if (typeof lineController.loadContent === "function") {
+        lineController.loadContent(beforeText);
+      }
       return {
         success: false,
         error: {
           code: "MODIFICATION_VERIFICATION_FAILED",
           message:
             "Le remplacement n'a pas été vérifié dans le fichier. La modification a été annulée.",
+          expectedText: afterText,
+          actualText: writtenText,
         },
       };
     }
@@ -1594,7 +1695,7 @@ IMPORTANT :
       lineController.refresh(true);
     }
     file.setIsSaved(false);
-    return {
+    const result = {
       success: true,
       operation: "replace",
       path: this.toProjectRelativePath(
@@ -1612,5 +1713,7 @@ IMPORTANT :
       cursorBefore,
       match: hasTextMatch ? "exact" : "coordinates",
     };
+    this.executedModificationRequests.set(requestKey, result);
+    return result;
   }
 }

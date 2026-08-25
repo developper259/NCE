@@ -493,11 +493,12 @@ export class FileManager {
       if (!cachedLines) {
         try {
           const content = await fs.readFile(filePath, "utf-8");
-          cachedLines = content.split(/\r?\n/);
-          if (cachedLines.length > 0 && cachedLines[cachedLines.length - 1] === "") {
-            cachedLines.pop();
+          const loadedLines: string[] = content.split(/\r?\n/);
+          if (loadedLines.length > 0 && loadedLines[loadedLines.length - 1] === "") {
+            loadedLines.pop();
           }
-          this.fileCache.set(filePath, cachedLines);
+          cachedLines = loadedLines;
+          this.fileCache.set(filePath, loadedLines);
         } catch (error) {
           console.error("Error loading file into cache for chunk request:", error);
           return {
@@ -505,6 +506,13 @@ export class FileManager {
             lines: [],
           };
         }
+      }
+
+      if (!cachedLines) {
+        return {
+          success: false,
+          lines: [],
+        };
       }
 
       const endLine = Math.min(safeStartLine + safeLineCount, cachedLines.length);
