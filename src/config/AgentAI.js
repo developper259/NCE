@@ -1,6 +1,6 @@
 const AgentAI = {
   defaultAgent: "coder",
-  defaultProvider: "groq",
+  defaultProvider: "openrouter",
 
   maxIterations: 100,
 
@@ -24,38 +24,12 @@ const AgentAI = {
       supportsTools: true,
       supportsToolChoice: true,
       defaultModel: "qwen3",
+      fallbackModels: [],
 
       models: {
         qwen3: {
           id: "qwen3",
           name: "Qwen 3",
-        },
-      },
-    },
-
-    groq: {
-      id: "groq",
-      name: "Groq",
-      baseURL: "https://api.groq.com/openai/v1",
-      requiresApiKey: true,
-      supportsTools: true,
-      supportsToolChoice: true,
-      defaultModel: "openai/gpt-oss-120b",
-
-      models: {
-        "openai/gpt-oss-120b": {
-          id: "openai/gpt-oss-120b",
-          name: "GPT OSS 120B",
-        },
-
-        "llama-3.3-70b-versatile": {
-          id: "llama-3.3-70b-versatile",
-          name: "Llama 3.3 70B",
-        },
-
-        "llama-3.1-8b-instant": {
-          id: "llama-3.1-8b-instant",
-          name: "Llama 3.1 8B",
         },
       },
     },
@@ -69,6 +43,11 @@ const AgentAI = {
       supportsToolChoice: true,
 
       defaultModel: "z-ai/glm-5.2:free",
+      fallbackModels: [
+        "qwen/qwen3-coder:free",
+        "openai/gpt-4o-mini",
+        { provider: "zenmux", model: "z-ai/glm-5.2-free" },
+      ],
 
       models: {
         "z-ai/glm-5.2:free": {
@@ -88,24 +67,20 @@ const AgentAI = {
       },
     },
 
-    mistral: {
-      id: "mistral",
-      name: "Mistral",
-      baseURL: "https://api.mistral.ai/v1",
+    zenmux: {
+      id: "zenmux",
+      name: "ZenMux",
+      baseURL: "https://zenmux.ai/api/v1",
       requiresApiKey: true,
       supportsTools: true,
       supportsToolChoice: true,
-      defaultModel: "mistral-small-latest",
+      defaultModel: "z-ai/glm-5.2-free",
+      fallbackModels: [],
 
       models: {
-        "mistral-small-latest": {
-          id: "mistral-small-latest",
-          name: "Mistral Small",
-        },
-
-        "mistral-large-latest": {
-          id: "mistral-large-latest",
-          name: "Mistral Large",
+        "z-ai/glm-5.2-free": {
+          id: "z-ai/glm-5.2-free",
+          name: "GLM 5.2 Free",
         },
       },
     },
@@ -175,6 +150,32 @@ const AgentAI = {
     return this.providers[id] || null;
   },
 
+  getFallbackChain(providerId, modelId) {
+    const provider = this.getProvider(providerId);
+    if (!provider) return [];
+    const modelConfig = provider.models?.[modelId] || null;
+    const configured = Array.isArray(modelConfig?.fallbackChain)
+      ? modelConfig.fallbackChain
+      : provider.fallbackModels;
+    if (!Array.isArray(configured)) return [];
+    return configured
+      .map((candidate) =>
+        typeof candidate === "string"
+          ? { provider: provider.id, model: candidate }
+          : {
+              provider: candidate?.provider || provider.id,
+              model: candidate?.model,
+            },
+      )
+      .filter(
+        (candidate) =>
+          typeof candidate.model === "string" &&
+          candidate.model &&
+          `${candidate.provider}:${candidate.model}` !==
+            `${provider.id}:${modelId}`,
+      );
+  },
+
   resolve(agentId = null, providerId = null, modelId = null) {
     const agent = this.getAgent(agentId);
 
@@ -191,6 +192,7 @@ const AgentAI = {
     }
 
     const model = modelId || agent.model || provider.defaultModel;
+    const modelConfig = provider.models?.[model] || {};
 
     const modelFamily = AgentPrompts.resolveModelFamily(model);
 
@@ -200,7 +202,22 @@ const AgentAI = {
 
       model,
 
+      modelConfig,
+
       modelFamily,
+
+      supportsTools:
+        modelConfig.supportsTools !== false && provider.supportsTools !== false,
+
+      supportsToolChoice:
+        modelConfig.supportsToolChoice !== false &&
+        provider.supportsToolChoice !== false,
+
+      contextWindow: Number.isFinite(modelConfig.contextWindow)
+        ? modelConfig.contextWindow
+        : null,
+
+      fallbackChain: this.getFallbackChain(provider.id, model),
 
       temperature: agent.temperature,
 

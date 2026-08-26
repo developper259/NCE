@@ -37,6 +37,9 @@ class AgentSidebar extends Sidebar {
       onToolEnd: (toolName, result, context, fullResult) => {
         this.handleToolEnd(toolName, result, context, fullResult);
       },
+      onModelStatus: (event, context) => {
+        this.handleModelStatus(event, context);
+      },
       onFinish: (_result, context) => {
         this.finishActivityGroup(context);
       },
@@ -51,8 +54,19 @@ class AgentSidebar extends Sidebar {
     this.currentProviderId = resolvedConfig.provider.id;
     this.currentModel = resolvedConfig.model;
 
+    this.agent.setModelConfigResolver((agentId, providerId, modelId) => {
+      const resolved = AgentAI.resolve(agentId, providerId, modelId);
+      return {
+        ...resolved,
+        provider: {
+          ...resolved.provider,
+          apiKey: this.apiKeys.get(resolved.provider.id) || null,
+        },
+      };
+    });
+
     this.agent.setProvider({
-      baseURL: resolvedConfig.provider.baseURL,
+      ...resolvedConfig.provider,
       apiKey: this.apiKeys.get(resolvedConfig.provider.id) || null,
     });
     this.agent.setModel(this.currentModel);
@@ -257,7 +271,7 @@ class AgentSidebar extends Sidebar {
     if (!provider) return;
 
     this.agent.setProvider({
-      baseURL: provider.baseURL,
+      ...provider,
       apiKey: this.apiKeys.get(provider.id) || null,
     });
     this.agent.setModel(this.currentModel || provider.defaultModel);
@@ -494,6 +508,7 @@ class AgentSidebar extends Sidebar {
     const group = this.getActivityGroup(session, context.runId, true);
     if (!session || !group) return;
     group.role = "activity";
+    group.status = "running";
     session.streamingMessage = null;
 
     const itemId = this.getActivityItemId(context);
@@ -577,6 +592,47 @@ class AgentSidebar extends Sidebar {
       this.updateActivityItemElement(item);
     }
 
+    if (shouldScroll) this.scrollMessagesToBottom();
+  }
+
+  handleModelStatus(event = {}, context = {}) {
+    const session = this.getSession(context.sessionId);
+    const group = this.getActivityGroup(session, context.runId, true);
+    if (!session || !group || !event.userMessage) return;
+    group.role = "activity";
+    group.status = "running";
+    session.streamingMessage = null;
+    const classification = event.classification || {};
+    const item = {
+      id: this.getActivityItemId(context),
+      toolName: "model_status",
+      type: "model",
+      modelEventKind: event.kind || "error",
+      title: event.userMessage,
+      detail:
+        event.kind === "retry"
+          ? `${classification.category || "Erreur temporaire"} · tentative ${event.attempt || 1}`
+          : event.kind === "fallback"
+            ? `${event.fromProvider || "provider"} → ${event.toProvider || "provider"}`
+            : classification.category || "Erreur modèle",
+      status: event.kind === "error" ? "error" : "success",
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+    };
+    group.items.push(item);
+    if (event.kind === "error") group.hasErrors = true;
+
+    if (session.id !== this.activeSessionId || !this.messagesElement) return;
+    const shouldScroll = this.shouldAutoScrollMessages();
+    this.removeEmptyState();
+    let groupRefs = this.activityElements.get(group);
+    if (!groupRefs?.row?.isConnected) {
+      this.messagesElement.appendChild(this.createActivityElement(group));
+      groupRefs = this.activityElements.get(group);
+    } else {
+      groupRefs.list.appendChild(this.createActivityItemElement(item));
+      this.updateActivityHeader(group);
+    }
     if (shouldScroll) this.scrollMessagesToBottom();
   }
 
@@ -1132,7 +1188,7 @@ class AgentSidebar extends Sidebar {
           this.currentProviderId = m.providerId;
 
           this.agent.setProvider({
-            baseURL: m.baseURL,
+            ...AgentAI.getProvider(m.providerId),
             apiKey: this.apiKeys.get(m.providerId) || null,
           });
           this.agent.setModel(m.id);
@@ -1286,6 +1342,9 @@ class AgentSidebar extends Sidebar {
   getActivityIcon(item) {
     if (item.status === "error") return "⚠";
     if (item.status === "running") return "◌";
+    if (item.type === "model") {
+      return item.modelEventKind === "retry" ? "↻" : "↪";
+    }
     return {
       search: "⌕",
       read: "▣",
@@ -1295,6 +1354,7 @@ class AgentSidebar extends Sidebar {
       create: "＋",
       rename: "↪",
       verify: "✓",
+      model: "↪",
       other: "•",
     }[item.type];
   }
@@ -2611,7 +2671,7 @@ class AgentSidebar extends Sidebar {
       if (!apiKey) return;
       this.apiKeys.set(provider.id, apiKey);
       this.agent.setProvider({
-        baseURL: provider.baseURL,
+        ...provider,
         apiKey,
       });
       await this.editor.api.setAgentApiKey?.(provider.id, apiKey);
@@ -2701,7 +2761,10 @@ class AgentSidebar extends Sidebar {
         }
         session.messages.push({
           role: "agent",
-          content: `Erreur de connexion à l'Agent: ${error.message}`,
+          content:
+            error?.userMessage ||
+            error?.message ||
+            "La requête vers le modèle a échoué.",
           timestamp: this.formatTime(),
         });
       }

@@ -110,6 +110,18 @@ class Agent {
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
     this.systemPrompt = "";
+    this.agentId = null;
+    this.modelFamily = null;
+    this.modelConfig = null;
+    this.contextWindow = null;
+    this.supportsTools = true;
+    this.supportsToolChoice = true;
+    this.modelConfigResolver = null;
+    this.fallbackChain = [];
+    this.maxProviderRetries = 2;
+    this.maxModelFallbacks = 3;
+    this.maxRetryDelayMs = 30000;
+    this.modelRequestState = null;
     this.registerEditorTools();
   }
 
@@ -134,6 +146,13 @@ class Agent {
       throw new TypeError("Le system prompt doit être une chaîne non vide.");
     }
     this.systemPrompt = prompt.trim();
+    return this;
+  }
+  setModelConfigResolver(resolver) {
+    if (resolver !== null && typeof resolver !== "function") {
+      throw new TypeError("modelConfigResolver doit être une fonction.");
+    }
+    this.modelConfigResolver = resolver;
     return this;
   }
   debugTool(name, args, result, details = {}) {
@@ -193,6 +212,40 @@ class Agent {
     if (config.permissions === "read" || config.permissions === "code") {
       this.permissions = config.permissions;
     }
+    if (typeof config.agent?.id === "string") this.agentId = config.agent.id;
+    if (typeof config.agentId === "string") this.agentId = config.agentId;
+    if (typeof config.modelFamily === "string" || config.modelFamily === null) {
+      this.modelFamily = config.modelFamily;
+    }
+    if (config.modelConfig && typeof config.modelConfig === "object") {
+      this.modelConfig = { ...config.modelConfig };
+    }
+    this.contextWindow = Number.isFinite(config.contextWindow)
+      ? config.contextWindow
+      : null;
+    if (typeof config.supportsTools === "boolean") {
+      this.supportsTools = config.supportsTools;
+    }
+    if (typeof config.supportsToolChoice === "boolean") {
+      this.supportsToolChoice = config.supportsToolChoice;
+    }
+    if (Array.isArray(config.fallbackChain)) {
+      this.fallbackChain = config.fallbackChain.map((candidate) => ({
+        ...candidate,
+      }));
+    }
+    if (Number.isFinite(config.maxProviderRetries)) {
+      this.maxProviderRetries = Math.max(
+        0,
+        Math.floor(config.maxProviderRetries),
+      );
+    }
+    if (Number.isFinite(config.maxModelFallbacks)) {
+      this.maxModelFallbacks = Math.max(
+        0,
+        Math.floor(config.maxModelFallbacks),
+      );
+    }
     return this;
   }
   setContextProvider(provider) {
@@ -207,6 +260,7 @@ class Agent {
       "onReasoning",
       "onToolStart",
       "onToolEnd",
+      "onModelStatus",
       "onError",
       "onFinish",
     ]) {
@@ -257,7 +311,7 @@ class Agent {
     const config = {
       sessionId: overrides.sessionId ?? this.currentSessionId ?? null,
       runId: overrides.runId ?? this.runId,
-      agentId: overrides.agentId ?? null,
+      agentId: overrides.agentId ?? this.agentId,
       providerId,
       provider: provider ? { ...provider } : null,
       model: overrides.model ?? this.model,
@@ -270,6 +324,16 @@ class Agent {
         : undefined,
       permissions: this.permissions || "read",
       systemPrompt: this.systemPrompt || "",
+      modelFamily: this.modelFamily,
+      modelConfig: this.modelConfig ? { ...this.modelConfig } : null,
+      contextWindow: this.contextWindow,
+      supportsTools: this.supportsTools && provider?.supportsTools !== false,
+      supportsToolChoice:
+        this.supportsToolChoice && provider?.supportsToolChoice !== false,
+      fallbackChain: this.fallbackChain.map((candidate) => ({ ...candidate })),
+      maxProviderRetries: this.maxProviderRetries,
+      maxModelFallbacks: this.maxModelFallbacks,
+      maxRetryDelayMs: this.maxRetryDelayMs,
     };
     return config;
   }
@@ -299,10 +363,18 @@ class Agent {
     this.readFileContexts = new Map();
     this.fileContextVersion = 0;
     this.readAfterFailurePaths = new Set();
+    this.modelRequestState = null;
     try {
       const editorContext = await this.getContext();
+      runConfig.editorContext = editorContext;
       this.messages = [
-        { role: "system", content: this.buildSystemMessage(editorContext) },
+        {
+          role: "system",
+          content: this.buildSystemMessage(
+            editorContext,
+            runConfig.systemPrompt,
+          ),
+        },
       ];
       const modificationHint = this.detectModificationIntent(userMessage);
       if (modificationHint) {
@@ -781,82 +853,616 @@ class Agent {
     runConfig = this.runConfig,
   ) {
     const config = runConfig || this.createRunConfig();
+    const state = this.getModelRequestState(config);
+    let retryCount = 0;
+
+    while (state.currentConfig) {
+      const activeConfig = state.currentConfig;
+      try {
+        const result = await this.requestSingleModel(controller, activeConfig);
+        this.applyActiveModelConfig(config, activeConfig);
+        return result;
+      } catch (error) {
+        if (this.isAbortError(error) && controller?.signal?.aborted) throw error;
+        const classified = this.classifyModelError(error, error?.response, {
+          provider: activeConfig.provider,
+          providerId: activeConfig.providerId,
+          model: activeConfig.model,
+          modelConfig: activeConfig.modelConfig,
+        });
+        state.failures.push(classified);
+        this.debugModelError(classified, {
+          retryCount,
+          fallbackCount: state.modelFallbackCount,
+        });
+
+        const retryDelay = this.getModelRetryDelay(classified, retryCount);
+        const mayRetry =
+          classified.retryable &&
+          retryCount < (config.maxProviderRetries ?? this.maxProviderRetries) &&
+          retryDelay <= (config.maxRetryDelayMs ?? this.maxRetryDelayMs);
+        if (mayRetry) {
+          retryCount += 1;
+          state.providerRetryCount += 1;
+          this.emitModelStatus(
+            {
+              kind: "retry",
+              classification: classified,
+              delayMs: retryDelay,
+              attempt: retryCount,
+              userMessage: `${classified.userMessage} Nouvelle tentative dans ${this.formatRetryDelay(retryDelay)}…`,
+            },
+            config,
+          );
+          await this.waitForModelRetry(retryDelay, controller);
+          continue;
+        }
+
+        if (
+          classified.category === "MODEL_NOT_FOUND" ||
+          classified.category === "NO_CAPACITY" ||
+          classified.category === "NO_TOKENS_AVAILABLE" ||
+          classified.category === "MODEL_UNAVAILABLE"
+        ) {
+          state.unhealthyModels.add(
+            `${activeConfig.providerId}:${activeConfig.model}`,
+          );
+        }
+
+        const fallback = classified.fallbackRecommended
+          ? this.takeNextFallback(state, classified, config)
+          : null;
+        if (fallback) {
+          const previous = activeConfig;
+          state.currentConfig = fallback;
+          state.modelFallbackCount += 1;
+          retryCount = 0;
+          this.applyActiveModelConfig(config, fallback);
+          this.emitModelStatus(
+            {
+              kind: "fallback",
+              classification: classified,
+              fromProvider: previous.providerId,
+              fromModel: previous.model,
+              toProvider: fallback.providerId,
+              toModel: fallback.model,
+              userMessage: `${this.getModelDisplayName(previous)} est indisponible. Basculement vers ${this.getModelDisplayName(fallback)}…`,
+            },
+            config,
+          );
+          continue;
+        }
+
+        throw this.createFinalModelError(classified, state);
+      }
+    }
+
+    throw this.createFinalModelError(
+      this.classifyModelError(new Error("Aucun modèle IA configuré."), null, {
+        provider: config.provider,
+        providerId: config.providerId,
+        model: config.model,
+        modelConfig: config.modelConfig,
+      }),
+      state,
+    );
+  }
+
+  async requestSingleModel(controller, config) {
     const provider = config.provider || this.provider;
-    if (!provider?.baseURL) throw new Error("Aucun provider IA configuré.");
-    if (!config.model) throw new Error("Aucun modèle IA configuré.");
+    if (!provider?.baseURL) {
+      throw Object.assign(new Error("Aucun provider IA configuré."), {
+        code: "PROVIDER_NOT_CONFIGURED",
+      });
+    }
+    if (!config.model) {
+      throw Object.assign(new Error("Aucun modèle IA configuré."), {
+        code: "MODEL_NOT_CONFIGURED",
+      });
+    }
     const payload = {
       model: config.model,
       messages: this.messages,
-      tools: this.getOpenAITools(),
-      tool_choice: this.resolveToolChoice(
-        this.messages[this.messages.length - 1]?.content || "",
-      ),
       stream: false,
     };
+    if (config.supportsTools !== false && provider.supportsTools !== false) {
+      payload.tools = this.getOpenAITools();
+      if (
+        config.supportsToolChoice !== false &&
+        provider.supportsToolChoice !== false
+      ) {
+        payload.tool_choice = this.resolveToolChoice(
+          this.messages[this.messages.length - 1]?.content || "",
+        );
+      }
+    }
     if (Number.isFinite(config.temperature))
       payload.temperature = config.temperature;
     if (Number.isFinite(config.maxTokens))
       payload.max_tokens = config.maxTokens;
     const sanitizedProvider = { ...provider };
     delete sanitizedProvider.apiKey;
-    if (typeof this.api?.aiChat === "function")
-      return this.api.aiChat({ provider: sanitizedProvider, payload });
-    if (typeof this.api?.requestAI === "function")
-      return this.api.requestAI({ provider: sanitizedProvider, payload });
+    if (typeof this.api?.aiChat === "function") {
+      const result = await this.api.aiChat({
+        provider: sanitizedProvider,
+        payload,
+      });
+      return this.unwrapModelTransportResult(result);
+    }
+    if (typeof this.api?.requestAI === "function") {
+      const result = await this.api.requestAI({
+        provider: sanitizedProvider,
+        payload,
+      });
+      return this.unwrapModelTransportResult(result);
+    }
     const headers = { "Content-Type": "application/json" };
     if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
     const url = `${provider.baseURL.replace(/\/+$/, "")}/chat/completions`;
-    const attempt = async (retryIndex) => {
-      const abortController = new AbortController();
-      const timeout = setTimeout(() => abortController.abort(), 60000);
-      try {
-        const result = await fetch(url, {
-          method: "POST",
-          headers,
-          body: JSON.stringify(payload),
-          signal: controller?.signal
-            ? AbortSignal.any([controller.signal, abortController.signal])
-            : abortController.signal,
-        });
-        if (
-          result.status === 429 ||
-          result.status === 500 ||
-          result.status === 502 ||
-          result.status === 503
-        ) {
-          if (retryIndex < 2) {
-            await new Promise((resolve) =>
-              setTimeout(resolve, 250 * (retryIndex + 1)),
-            );
-            return attempt(retryIndex + 1);
-          }
+    const timeoutController = new AbortController();
+    const timeout = setTimeout(() => timeoutController.abort(), 60000);
+    try {
+      const signal =
+        controller?.signal && typeof AbortSignal?.any === "function"
+          ? AbortSignal.any([controller.signal, timeoutController.signal])
+          : timeoutController.signal;
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let body = text;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = text;
         }
-        if (!result.ok) {
-          const text = await result.text();
-          if (result.status === 401 || result.status === 400)
-            throw new Error(`Erreur API (${result.status}) : ${text}`);
-          throw new Error(`Erreur API (${result.status}) : ${text}`);
-        }
-        return result.json();
-      } catch (error) {
-        if (error?.name === "AbortError") {
-          throw new DOMException(
-            "Le fournisseur a dépassé le délai autorisé.",
-            "TimeoutError",
-          );
-        }
-        if ((error?.message || "").includes("429") && retryIndex < 2) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, 250 * (retryIndex + 1)),
-          );
-          return attempt(retryIndex + 1);
-        }
-        throw error;
-      } finally {
-        clearTimeout(timeout);
+        const transportError = new Error(`Model request failed (${response.status})`);
+        transportError.status = response.status;
+        transportError.body = body;
+        transportError.response = response;
+        throw transportError;
       }
+      return response.json();
+    } catch (error) {
+      if (
+        error?.name === "AbortError" &&
+        !controller?.signal?.aborted &&
+        timeoutController.signal.aborted
+      ) {
+        throw Object.assign(new Error("Le provider ne répond pas."), {
+          name: "TimeoutError",
+          code: "ETIMEDOUT",
+        });
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  unwrapModelTransportResult(result) {
+    if (
+      result?.success === false ||
+      (result?.error && !result?.choices && !result?.message)
+    ) {
+      const payload = result?.error || result;
+      const error = new Error(
+        typeof payload === "string"
+          ? payload
+          : payload?.message || "Le provider a refusé la requête.",
+      );
+      error.status =
+        result?.status || result?.statusCode || payload?.status || payload?.code;
+      error.code = payload?.code || result?.code;
+      error.body = result;
+      error.response = result?.response || null;
+      throw error;
+    }
+    return result;
+  }
+  getModelRequestState(config) {
+    if (
+      this.modelRequestState &&
+      this.modelRequestState.runId === config.runId &&
+      this.modelRequestState.sessionId === config.sessionId
+    ) {
+      return this.modelRequestState;
+    }
+    const currentConfig = {
+      ...config,
+      provider: config.provider ? { ...config.provider } : null,
     };
-    return attempt(0);
+    const key = `${config.providerId}:${config.model}`;
+    this.modelRequestState = {
+      runId: config.runId,
+      sessionId: config.sessionId,
+      currentConfig,
+      fallbackQueue: Array.isArray(config.fallbackChain)
+        ? config.fallbackChain.map((candidate) => ({ ...candidate }))
+        : [],
+      fallbackIndex: 0,
+      triedCandidates: new Set([key]),
+      unhealthyModels: new Set(),
+      failures: [],
+      providerRetryCount: 0,
+      modelFallbackCount: 0,
+    };
+    return this.modelRequestState;
+  }
+  getHeaderValue(response, name) {
+    const headers = response?.headers;
+    if (!headers) return null;
+    if (typeof headers.get === "function") return headers.get(name);
+    const target = name.toLowerCase();
+    const key = Object.keys(headers).find(
+      (headerName) => headerName.toLowerCase() === target,
+    );
+    return key ? headers[key] : null;
+  }
+  parseRetryAfterMs(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const seconds = Number(value);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+    const date = Date.parse(String(value));
+    return Number.isFinite(date) ? Math.max(0, date - Date.now()) : null;
+  }
+  classifyModelError(error, response = null, request = {}) {
+    const body = error?.body ?? response?.body ?? error?.data ?? null;
+    const providerError = body?.error || body || {};
+    const metadata =
+      providerError?.metadata || body?.metadata || error?.metadata || {};
+    const possibleStatus = [
+      response?.status,
+      error?.status,
+      error?.statusCode,
+      providerError?.status,
+      typeof providerError?.code === "number" ? providerError.code : null,
+    ].find((value) => Number.isFinite(Number(value)));
+    const statusCode = possibleStatus === undefined
+      ? null
+      : Number(possibleStatus);
+    let serializedBody = "";
+    try {
+      serializedBody = typeof body === "string" ? body : JSON.stringify(body);
+    } catch {
+      serializedBody = "";
+    }
+    const technicalMessage = [error?.message, serializedBody]
+      .filter(Boolean)
+      .join(" | ")
+      .slice(0, 12000);
+    const text = technicalMessage.toLowerCase();
+    const code = String(
+      providerError?.code || error?.code || metadata?.provider_error_code || "",
+    );
+    const configuredProvider =
+      request.providerId || request.provider?.id || "unknown";
+    const upstreamProvider =
+      metadata?.provider_name || metadata?.upstream_provider || null;
+    const model = request.model || "unknown";
+    const modelName = request.modelConfig?.name || model;
+    const retryAfterMetadata = this.parseRetryAfterMs(
+      metadata?.retry_after_seconds,
+    );
+    const retryAfterHeader = this.parseRetryAfterMs(
+      this.getHeaderValue(response || error?.response, "Retry-After"),
+    );
+    const retryAfterMs = retryAfterMetadata ?? retryAfterHeader;
+    let category = "UNKNOWN";
+
+    if (/context.{0,30}(length|window)|too many tokens|maximum context|token limit/.test(text)) {
+      category = "CONTEXT_LENGTH_EXCEEDED";
+    } else if (/no tokens available|no available tokens/.test(text)) {
+      category = "NO_TOKENS_AVAILABLE";
+    } else if (/quota|billing|insufficient[_ ]credits|credit balance/.test(text)) {
+      category = "QUOTA_EXCEEDED";
+    } else if (statusCode === 401 || /invalid api key|unauthorized|authentication/.test(text)) {
+      category = "AUTH_ERROR";
+    } else if (statusCode === 403 || /forbidden|permission denied/.test(text)) {
+      category = "PERMISSION_ERROR";
+    } else if (
+      /model.{0,30}(not found|does not exist|deprecated|removed)|invalid model/.test(text) ||
+      statusCode === 404
+    ) {
+      category = "MODEL_NOT_FOUND";
+    } else if (/no capacity|no slots|shared pool|saturat|overload/.test(text)) {
+      category = statusCode === 429 ? "RATE_LIMIT" : "NO_CAPACITY";
+    } else if (
+      /model.{0,30}(unavailable|not available)|provider.{0,30}unavailable/.test(text)
+    ) {
+      category = "MODEL_UNAVAILABLE";
+    } else if (statusCode === 429 || /rate.?limit|too many requests/.test(text)) {
+      category = "RATE_LIMIT";
+    } else if (
+      statusCode === 408 ||
+      error?.name === "TimeoutError" ||
+      /timed? ?out|timeout|etimedout/.test(text)
+    ) {
+      category = "TIMEOUT";
+    } else if (
+      ["ECONNRESET", "ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN"].includes(
+        String(error?.code || "").toUpperCase(),
+      ) ||
+      /failed to fetch|network error|dns/.test(text)
+    ) {
+      category = "NETWORK_ERROR";
+    } else if (statusCode === 502 || statusCode === 504 || /upstream/.test(text)) {
+      category = "UPSTREAM_ERROR";
+    } else if (statusCode === 503) {
+      category = "MODEL_UNAVAILABLE";
+    } else if (statusCode !== null && statusCode >= 500) {
+      category = "SERVER_ERROR";
+    } else if ([400, 409, 422].includes(statusCode)) {
+      category = "INVALID_REQUEST";
+    }
+
+    const retryable = new Set([
+      "RATE_LIMIT",
+      "MODEL_UNAVAILABLE",
+      "NO_CAPACITY",
+      "NO_TOKENS_AVAILABLE",
+      "TIMEOUT",
+      "NETWORK_ERROR",
+      "UPSTREAM_ERROR",
+      "SERVER_ERROR",
+    ]).has(category);
+    const fallbackRecommended =
+      retryable ||
+      new Set([
+        "MODEL_NOT_FOUND",
+        "CONTEXT_LENGTH_EXCEEDED",
+        "AUTH_ERROR",
+        "PERMISSION_ERROR",
+        "QUOTA_EXCEEDED",
+      ]).has(category);
+    const providerName = request.provider?.name || configuredProvider;
+    const messages = {
+      RATE_LIMIT: `${modelName} est temporairement limité par ${providerName}.`,
+      MODEL_UNAVAILABLE: `${modelName} est temporairement indisponible.`,
+      MODEL_NOT_FOUND: `Le modèle ${modelName} n'existe plus ou n'est pas accessible.`,
+      NO_CAPACITY: `${modelName} n'a actuellement aucune capacité disponible.`,
+      NO_TOKENS_AVAILABLE: `${modelName} n'a actuellement aucun jeton disponible.`,
+      QUOTA_EXCEEDED: `Le quota du compte ${providerName} est dépassé.`,
+      AUTH_ERROR: `Clé API invalide ou absente pour ${providerName}.`,
+      PERMISSION_ERROR: `Le compte ${providerName} n'a pas accès à ${modelName}.`,
+      INVALID_REQUEST: `La requête envoyée à ${providerName} est invalide.`,
+      TIMEOUT: `${providerName} ne répond pas dans le délai autorisé.`,
+      NETWORK_ERROR: `La connexion à ${providerName} a échoué.`,
+      UPSTREAM_ERROR: `Un provider en amont de ${providerName} est indisponible.`,
+      SERVER_ERROR: `${providerName} rencontre une erreur temporaire.`,
+      CONTEXT_LENGTH_EXCEEDED: `La requête dépasse la taille de contexte de ${modelName}.`,
+      UNKNOWN: `La requête vers ${modelName} a échoué.`,
+    };
+    return {
+      category,
+      retryable,
+      retryAfterMs,
+      fallbackRecommended,
+      userMessage: messages[category],
+      technicalMessage: technicalMessage || "Unknown model error",
+      provider: configuredProvider,
+      configuredProvider,
+      upstreamProvider,
+      model,
+      statusCode,
+      code: code || category,
+    };
+  }
+  getModelRetryDelay(classified, retryCount) {
+    if (Number.isFinite(classified?.retryAfterMs)) {
+      return Math.max(0, classified.retryAfterMs);
+    }
+    return [2000, 5000][Math.min(retryCount, 1)];
+  }
+  formatRetryDelay(delayMs) {
+    const seconds = Math.max(0, delayMs) / 1000;
+    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
+  }
+  waitForModelRetry(delayMs, controller = this.abortController) {
+    if (!delayMs) return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        controller?.signal?.removeEventListener?.("abort", onAbort);
+        resolve();
+      }, delayMs);
+      const onAbort = () => {
+        clearTimeout(timeout);
+        reject(this.abortError());
+      };
+      if (controller?.signal?.aborted) {
+        onAbort();
+        return;
+      }
+      controller?.signal?.addEventListener?.("abort", onAbort, { once: true });
+    });
+  }
+  resolveFallbackConfig(candidate, baseConfig) {
+    const providerId = candidate?.provider || candidate?.providerId;
+    const model = candidate?.model;
+    if (!providerId || !model) return null;
+    let resolved = null;
+    if (typeof this.modelConfigResolver === "function") {
+      resolved = this.modelConfigResolver(
+        baseConfig.agentId || this.agentId,
+        providerId,
+        model,
+      );
+    } else if (typeof AgentAI !== "undefined") {
+      resolved = AgentAI.resolve(
+        baseConfig.agentId || this.agentId,
+        providerId,
+        model,
+      );
+    }
+    if (!resolved) return null;
+    const provider = { ...resolved.provider };
+    if (
+      !provider.apiKey &&
+      providerId === baseConfig.providerId &&
+      baseConfig.provider?.apiKey
+    ) {
+      provider.apiKey = baseConfig.provider.apiKey;
+    }
+    return {
+      ...baseConfig,
+      ...resolved,
+      agentId: baseConfig.agentId || resolved.agent?.id || this.agentId,
+      providerId,
+      provider,
+      model,
+      fallbackChain: baseConfig.fallbackChain,
+    };
+  }
+  isCompatibleFallback(candidate, classified, currentConfig) {
+    if (!candidate?.provider?.baseURL || !candidate?.model) return false;
+    if (
+      candidate.provider.requiresApiKey &&
+      !candidate.provider.apiKey
+    ) {
+      return false;
+    }
+    if (this.getOpenAITools().length && candidate.supportsTools === false) {
+      return false;
+    }
+    if (
+      ["AUTH_ERROR", "PERMISSION_ERROR", "QUOTA_EXCEEDED"].includes(
+        classified.category,
+      ) &&
+      candidate.providerId === currentConfig.providerId
+    ) {
+      return false;
+    }
+    if (classified.category === "CONTEXT_LENGTH_EXCEEDED") {
+      return (
+        Number.isFinite(candidate.contextWindow) &&
+        Number.isFinite(currentConfig.contextWindow) &&
+        candidate.contextWindow > currentConfig.contextWindow
+      );
+    }
+    return true;
+  }
+  takeNextFallback(state, classified, baseConfig) {
+    if (
+      state.modelFallbackCount >=
+      (baseConfig.maxModelFallbacks ?? this.maxModelFallbacks)
+    ) {
+      return null;
+    }
+    while (state.fallbackIndex < state.fallbackQueue.length) {
+      const candidate = state.fallbackQueue[state.fallbackIndex++];
+      const key = `${candidate.provider || candidate.providerId}:${candidate.model}`;
+      if (state.triedCandidates.has(key) || state.unhealthyModels.has(key)) {
+        continue;
+      }
+      state.triedCandidates.add(key);
+      let resolved = null;
+      try {
+        resolved = this.resolveFallbackConfig(candidate, baseConfig);
+      } catch (error) {
+        console.warn("[NCE Agent model] fallback configuration ignored", {
+          provider: candidate.provider || candidate.providerId,
+          model: candidate.model,
+          error: error?.message || String(error),
+        });
+        continue;
+      }
+      if (
+        !this.isCompatibleFallback(resolved, classified, state.currentConfig)
+      ) {
+        continue;
+      }
+      return resolved;
+    }
+    return null;
+  }
+  applyActiveModelConfig(runConfig, activeConfig) {
+    const previousPrompt = runConfig.systemPrompt;
+    for (const key of [
+      "providerId",
+      "provider",
+      "model",
+      "modelFamily",
+      "systemPrompt",
+      "supportsTools",
+      "supportsToolChoice",
+      "contextWindow",
+    ]) {
+      if (activeConfig[key] !== undefined) runConfig[key] = activeConfig[key];
+    }
+    if (
+      activeConfig.systemPrompt &&
+      activeConfig.systemPrompt !== previousPrompt &&
+      this.messages[0]?.role === "system"
+    ) {
+      this.messages[0] = {
+        ...this.messages[0],
+        content: this.buildSystemMessage(
+          runConfig.editorContext || {},
+          activeConfig.systemPrompt,
+        ),
+      };
+    }
+  }
+  getModelDisplayName(config) {
+    return config?.modelConfig?.name || config?.model || "Le modèle";
+  }
+  emitModelStatus(event, config) {
+    this.callbacks.onModelStatus?.(event, {
+      sessionId: config.sessionId ?? this.currentSessionId,
+      runId: config.runId ?? this.runId,
+    });
+  }
+  debugModelError(classified, counters = {}) {
+    console.warn("[NCE Agent model]", {
+      provider: classified.provider,
+      upstreamProvider: classified.upstreamProvider,
+      model: classified.model,
+      status: classified.statusCode,
+      code: classified.code,
+      classification: classified.category,
+      retryable: classified.retryable,
+      retryAfterMs: classified.retryAfterMs,
+      retryCount: counters.retryCount || 0,
+      fallbackCount: counters.fallbackCount || 0,
+      technicalMessage: classified.technicalMessage,
+    });
+  }
+  createFinalModelError(classified, state) {
+    const configurationCategory = new Set([
+      "AUTH_ERROR",
+      "PERMISSION_ERROR",
+      "QUOTA_EXCEEDED",
+      "INVALID_REQUEST",
+      "CONTEXT_LENGTH_EXCEEDED",
+    ]).has(classified.category);
+    const exhausted = state.modelFallbackCount > 0 && !configurationCategory;
+    const details = exhausted
+      ? {
+          ...classified,
+          category: "ALL_MODELS_UNAVAILABLE",
+          code: "ALL_MODELS_UNAVAILABLE",
+          retryable: false,
+          fallbackRecommended: false,
+          userMessage:
+            "Aucun modèle configuré n'est actuellement disponible. Réessaie plus tard ou sélectionne un autre provider.",
+        }
+      : classified;
+    const error = new Error(details.userMessage);
+    error.name = "AgentModelError";
+    error.isAgentModelError = true;
+    Object.assign(error, details, {
+      failures: state.failures.map((failure) => ({ ...failure })),
+      providerRetryCount: state.providerRetryCount,
+      modelFallbackCount: state.modelFallbackCount,
+    });
+    this.emitModelStatus(
+      { kind: "error", classification: details, userMessage: details.userMessage },
+      state.currentConfig || this.runConfig || {},
+    );
+    return error;
   }
   sanitizeProviderForIPC() {
     if (!this.provider) return null;
@@ -1225,8 +1831,8 @@ class Agent {
       selection,
     };
   }
-  buildSystemMessage(context) {
-    return `${this.systemPrompt}\n\nCONTEXTE ACTUEL DE L'ÉDITEUR :\n${JSON.stringify(context)}`;
+  buildSystemMessage(context, systemPrompt = this.systemPrompt) {
+    return `${systemPrompt}\n\nCONTEXTE ACTUEL DE L'ÉDITEUR :\n${JSON.stringify(context)}`;
   }
   appendHistory(history) {
     if (!Array.isArray(history)) return;
