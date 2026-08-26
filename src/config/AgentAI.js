@@ -42,14 +42,33 @@ const AgentAI = {
       supportsTools: true,
       supportsToolChoice: true,
 
-      defaultModel: "z-ai/glm-5.2:free",
+      defaultModel: "cohere/north-mini-code:free",
+
       fallbackModels: [
+        "poolside/laguna-s-2.1:free",
+        "nvidia/nemotron-3-ultra-550b-a55b:free",
+        "z-ai/glm-5.2:free",
         "qwen/qwen3-coder:free",
         "openai/gpt-4o-mini",
         { provider: "zenmux", model: "z-ai/glm-5.2-free" },
       ],
 
       models: {
+        "cohere/north-mini-code:free": {
+          id: "cohere/north-mini-code:free",
+          name: "North Mini Code Free",
+        },
+
+        "poolside/laguna-s-2.1:free": {
+          id: "poolside/laguna-s-2.1:free",
+          name: "Laguna S 2.1 Free",
+        },
+
+        "nvidia/nemotron-3-ultra-550b-a55b:free": {
+          id: "nvidia/nemotron-3-ultra-550b-a55b:free",
+          name: "Nemotron 3 Ultra Free",
+        },
+
         "z-ai/glm-5.2:free": {
           id: "z-ai/glm-5.2:free",
           name: "GLM 5.2 Free",
@@ -153,15 +172,22 @@ const AgentAI = {
   getFallbackChain(providerId, modelId) {
     const provider = this.getProvider(providerId);
     if (!provider) return [];
+
     const modelConfig = provider.models?.[modelId] || null;
+
     const configured = Array.isArray(modelConfig?.fallbackChain)
       ? modelConfig.fallbackChain
       : provider.fallbackModels;
+
     if (!Array.isArray(configured)) return [];
+
     return configured
       .map((candidate) =>
         typeof candidate === "string"
-          ? { provider: provider.id, model: candidate }
+          ? {
+              provider: provider.id,
+              model: candidate,
+            }
           : {
               provider: candidate?.provider || provider.id,
               model: candidate?.model,
@@ -192,6 +218,7 @@ const AgentAI = {
     }
 
     const model = modelId || agent.model || provider.defaultModel;
+
     const modelConfig = provider.models?.[model] || {};
 
     const modelFamily = AgentPrompts.resolveModelFamily(model);

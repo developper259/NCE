@@ -864,6 +864,7 @@ class Agent {
         return result;
       } catch (error) {
         if (this.isAbortError(error) && controller?.signal?.aborted) throw error;
+        if (error?.code === "MESSAGE_SERIALIZATION_FAILED") throw error;
         const classified = this.classifyModelError(error, error?.response, {
           provider: activeConfig.provider,
           providerId: activeConfig.providerId,
@@ -960,9 +961,10 @@ class Agent {
         code: "MODEL_NOT_CONFIGURED",
       });
     }
+    const providerMessages = this.normalizeMessagesForProvider(this.messages);
     const payload = {
       model: config.model,
-      messages: this.messages,
+      messages: providerMessages,
       stream: false,
     };
     if (config.supportsTools !== false && provider.supportsTools !== false) {
@@ -1042,6 +1044,168 @@ class Agent {
     } finally {
       clearTimeout(timeout);
     }
+  }
+  createMessageSerializationError(
+    messageIndex,
+    toolCallIndex,
+    field,
+    value,
+    reason,
+  ) {
+    const valueType =
+      value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    const error = new Error(
+      `Impossible de sérialiser le message ${messageIndex}${Number.isInteger(toolCallIndex) ? `, tool call ${toolCallIndex}` : ""} pour le provider.`,
+    );
+    error.name = "AgentMessageSerializationError";
+    error.code = "MESSAGE_SERIALIZATION_FAILED";
+    error.category = "MESSAGE_SERIALIZATION_FAILED";
+    error.retryable = false;
+    error.fallbackRecommended = false;
+    error.userMessage = error.message;
+    error.messageIndex = messageIndex;
+    error.toolCallIndex = Number.isInteger(toolCallIndex)
+      ? toolCallIndex
+      : null;
+    error.field = field;
+    error.valueType = valueType;
+    error.technicalMessage = `${field} contient une valeur de type ${valueType}${reason ? ` (${reason})` : ""}.`;
+    return error;
+  }
+  normalizeToolArgumentsForProvider(value, messageIndex, toolCallIndex) {
+    if (value === null || value === undefined) return "{}";
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new TypeError("le JSON doit représenter un objet");
+        }
+        return value;
+      } catch (error) {
+        throw this.createMessageSerializationError(
+          messageIndex,
+          toolCallIndex,
+          "function.arguments",
+          value,
+          error?.message || "JSON invalide",
+        );
+      }
+    }
+    if (typeof value !== "object" || Array.isArray(value)) {
+      throw this.createMessageSerializationError(
+        messageIndex,
+        toolCallIndex,
+        "function.arguments",
+        value,
+        "un objet JSON est requis",
+      );
+    }
+    try {
+      const serialized = JSON.stringify(value);
+      if (typeof serialized !== "string") throw new TypeError("résultat vide");
+      const parsed = JSON.parse(serialized);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new TypeError("le JSON doit représenter un objet");
+      }
+      return serialized;
+    } catch (error) {
+      throw this.createMessageSerializationError(
+        messageIndex,
+        toolCallIndex,
+        "function.arguments",
+        value,
+        error?.message || "JSON non sérialisable",
+      );
+    }
+  }
+  normalizeToolContentForProvider(value, messageIndex) {
+    if (typeof value === "string") return value;
+    if (value === null || value === undefined) return "";
+    try {
+      const serialized = JSON.stringify(value);
+      if (typeof serialized !== "string") throw new TypeError("résultat vide");
+      return serialized;
+    } catch (error) {
+      throw this.createMessageSerializationError(
+        messageIndex,
+        null,
+        "content",
+        value,
+        error?.message || "JSON non sérialisable",
+      );
+    }
+  }
+  normalizeMessagesForProvider(messages = []) {
+    if (!Array.isArray(messages)) {
+      throw this.createMessageSerializationError(
+        -1,
+        null,
+        "messages",
+        messages,
+        "un tableau est requis",
+      );
+    }
+    return messages.map((message, messageIndex) => {
+      if (!message || typeof message !== "object" || Array.isArray(message)) {
+        throw this.createMessageSerializationError(
+          messageIndex,
+          null,
+          "message",
+          message,
+          "un objet est requis",
+        );
+      }
+      const normalized = { ...message };
+      if (Object.prototype.hasOwnProperty.call(message, "tool_calls")) {
+        if (!Array.isArray(message.tool_calls)) {
+          throw this.createMessageSerializationError(
+            messageIndex,
+            null,
+            "tool_calls",
+            message.tool_calls,
+            "un tableau est requis",
+          );
+        }
+        normalized.tool_calls = message.tool_calls.map(
+          (toolCall, toolCallIndex) => {
+            if (
+              !toolCall ||
+              typeof toolCall !== "object" ||
+              Array.isArray(toolCall) ||
+              !toolCall.function ||
+              typeof toolCall.function !== "object" ||
+              Array.isArray(toolCall.function)
+            ) {
+              throw this.createMessageSerializationError(
+                messageIndex,
+                toolCallIndex,
+                "tool_calls.function",
+                toolCall?.function,
+                "un objet function est requis",
+              );
+            }
+            return {
+              ...toolCall,
+              function: {
+                ...toolCall.function,
+                arguments: this.normalizeToolArgumentsForProvider(
+                  toolCall.function.arguments,
+                  messageIndex,
+                  toolCallIndex,
+                ),
+              },
+            };
+          },
+        );
+      }
+      if (message.role === "tool") {
+        normalized.content = this.normalizeToolContentForProvider(
+          message.content,
+          messageIndex,
+        );
+      }
+      return normalized;
+    });
   }
   unwrapModelTransportResult(result) {
     if (
@@ -1836,15 +2000,54 @@ class Agent {
   }
   appendHistory(history) {
     if (!Array.isArray(history)) return;
-    for (const message of history.slice(-6))
-      if (
-        (message?.role === "user" || message?.role === "assistant") &&
-        typeof message.content === "string"
-      )
+    const recentHistory = history.slice(-80);
+    while (recentHistory[0]?.role === "tool") recentHistory.shift();
+    for (const message of recentHistory) {
+      if (message?.role === "user" && typeof message.content === "string") {
         this.messages.push({
-          role: message.role,
+          role: "user",
           content: message.content.slice(0, 4000),
         });
+        continue;
+      }
+      if (
+        message?.role === "assistant" &&
+        (typeof message.content === "string" ||
+          message.content === null ||
+          Array.isArray(message.tool_calls))
+      ) {
+        this.messages.push({
+          role: "assistant",
+          content:
+            typeof message.content === "string"
+              ? message.content.slice(0, 4000)
+              : message.content ?? null,
+          ...(message.reasoning ? { reasoning: message.reasoning } : {}),
+          ...(Array.isArray(message.tool_calls)
+            ? {
+                tool_calls: message.tool_calls.map((toolCall) => ({
+                  ...toolCall,
+                  function:
+                    toolCall?.function && typeof toolCall.function === "object"
+                      ? { ...toolCall.function }
+                      : toolCall?.function,
+                })),
+              }
+            : {}),
+        });
+        continue;
+      }
+      if (
+        message?.role === "tool" &&
+        typeof message.tool_call_id === "string"
+      ) {
+        this.messages.push({
+          role: "tool",
+          tool_call_id: message.tool_call_id,
+          content: message.content,
+        });
+      }
+    }
   }
   truncate(value, max) {
     const text = value === null || value === undefined ? "" : String(value);

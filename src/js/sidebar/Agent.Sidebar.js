@@ -440,7 +440,7 @@ class AgentSidebar extends Sidebar {
       finishedAt: null,
       hasErrors: false,
       items: type === "activity" ? [] : undefined,
-      collapsed: false,
+      collapsed: type === "reasoning",
     };
     session.segments.push(segment);
     session.messages.push(segment);
@@ -472,7 +472,7 @@ class AgentSidebar extends Sidebar {
           sessionId: session.id,
           content: reasoning,
           status: "complete",
-          collapsed: false,
+          collapsed: true,
         });
       }
       if (message?.role === "agent" && typeof message.content === "string") {
@@ -766,6 +766,34 @@ class AgentSidebar extends Sidebar {
     const session = this.getSession(context.sessionId);
     const group = this.getActivityGroup(session, context.runId);
     this.setActivityGroupCollapsed(group, true);
+  }
+
+  setReasoningSegmentCollapsed(segment, collapsed) {
+    if (!segment) return;
+    segment.collapsed = !!collapsed;
+    const refs = this.messageElements.get(segment);
+    if (!refs?.row?.isConnected) return;
+    refs.reasoningToggle?.setAttribute(
+      "aria-expanded",
+      String(!segment.collapsed),
+    );
+    if (refs.reasoning) refs.reasoning.hidden = segment.collapsed;
+  }
+
+  collapseRunDetails(session, runId) {
+    if (!session || !Number.isInteger(runId)) return;
+    const segments = new Set([
+      ...(Array.isArray(session.segments) ? session.segments : []),
+      ...(Array.isArray(session.messages) ? session.messages : []),
+    ]);
+    for (const segment of segments) {
+      if (segment?.runId !== runId) continue;
+      if (segment.type === "reasoning") {
+        this.setReasoningSegmentCollapsed(segment, true);
+      } else if (segment.type === "activity" || segment.role === "activity") {
+        this.setActivityGroupCollapsed(segment, true);
+      }
+    }
   }
 
   getActivityType(toolName = "") {
@@ -1682,7 +1710,11 @@ class AgentSidebar extends Sidebar {
     });
     bubble.append(toggle, content);
     row.appendChild(bubble);
-    this.messageElements.set(segment, { row, reasoning: content });
+    this.messageElements.set(segment, {
+      row,
+      reasoning: content,
+      reasoningToggle: toggle,
+    });
     return row;
   }
 
@@ -2624,6 +2656,7 @@ class AgentSidebar extends Sidebar {
       return;
     }
 
+    const stoppedRunId = session.runId;
     this.agent.stop();
 
     if (session.abortController) {
@@ -2643,13 +2676,14 @@ class AgentSidebar extends Sidebar {
       session.streamingMessage = null;
     }
 
+    this.collapseRunDetails(session, stoppedRunId);
+
     session.messages.push({
       role: "agent",
       content: "Génération interrompue.",
       timestamp: this.formatTime(),
     });
 
-    this.processQueue(session.id);
     this.refresh();
   }
 
@@ -2777,7 +2811,7 @@ class AgentSidebar extends Sidebar {
           runId: completedRunId,
         };
         this.finishActivityGroup(activityContext);
-        this.collapseActivityGroup(activityContext);
+        this.collapseRunDetails(session, completedRunId);
       }
       session.runId = null;
       session.isGenerating = false;
