@@ -824,6 +824,7 @@ class AgentSidebar extends Sidebar {
 
   getActivityType(toolName = "") {
     if (toolName === "create_file") return "create";
+    if (toolName === "write_file_chunk") return "edit";
     if (toolName === "rename_file") return "rename";
     if (toolName.includes("search")) return "search";
     if (toolName === "get_project_map") return "list";
@@ -943,6 +944,12 @@ class AgentSidebar extends Sidebar {
         break;
       case "create_file":
         title = `${running ? "Creating" : "Created"} ${fileName}${running ? "…" : ""}`;
+        break;
+      case "write_file_chunk":
+        title = `${running ? "Appending to" : "Appended to"} ${fileName}${running ? "…" : ""}`;
+        if (!running && Number.isInteger(payload?.appendedChars)) {
+          detail = `${payload.appendedChars} characters`;
+        }
         break;
       case "rename_file": {
         const oldPath =

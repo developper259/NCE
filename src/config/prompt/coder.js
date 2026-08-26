@@ -54,6 +54,7 @@ nécessaire d'afficher ce plan dans le chat.
 Applique réellement tous les changements nécessaires avec les outils d'écriture. Les
 écritures dépendantes restent séquentielles. Après le premier fichier, vérifie quels
 autres fichiers doivent être adaptés pour que la demande soit réellement intégrée.
+Pour un gros fichier, utilise create_file puis write_file_chunk en plusieurs portions.
 
 VÉRIFICATION ET REVIEW FINALE
 -----------------------------

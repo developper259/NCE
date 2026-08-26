@@ -5,6 +5,12 @@ const AgentAI = {
   maxIterations: 100,
   maxIncompleteContinuations: 3,
 
+  largeFileWriting: {
+    recommendedChunkCharacters: 10000,
+    maxChunkCharacters: 12000,
+    maxRecoveryAttempts: 2,
+  },
+
   contextCompaction: {
     enabled: true,
     recentIterations: 2,
@@ -248,6 +254,8 @@ const AgentAI = {
       maxIterations: this.maxIterations,
 
       maxIncompleteContinuations: this.maxIncompleteContinuations,
+
+      largeFileWriting: { ...this.largeFileWriting },
 
       contextCompaction: { ...this.contextCompaction },
 

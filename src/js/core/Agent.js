@@ -100,6 +100,11 @@ class Agent {
     this.runId = 0;
     this.maxIterations = 30;
     this.maxIncompleteContinuations = 3;
+    this.largeFileWriting = {
+      recommendedChunkCharacters: 10000,
+      maxChunkCharacters: 12000,
+      maxRecoveryAttempts: 2,
+    };
     this.temperature = undefined;
     this.maxTokens = undefined;
     this.permissions = "code";
@@ -194,6 +199,7 @@ class Agent {
         expectedText: preview(args?.expectedText),
         nearLine: args?.nearLine ?? null,
         revision: args?.revision ?? null,
+        expectedRevision: args?.expectedRevision ?? null,
         range:
           args?.startLine !== undefined ||
           args?.startColumn !== undefined ||
@@ -223,6 +229,31 @@ class Agent {
         0,
         Math.floor(config.maxIncompleteContinuations),
       );
+    }
+    if (
+      config.largeFileWriting &&
+      typeof config.largeFileWriting === "object"
+    ) {
+      const largeFileWriting = config.largeFileWriting;
+      if (Number.isFinite(largeFileWriting.recommendedChunkCharacters)) {
+        this.largeFileWriting.recommendedChunkCharacters = Math.max(
+          1000,
+          Math.floor(largeFileWriting.recommendedChunkCharacters),
+        );
+      }
+      if (Number.isFinite(largeFileWriting.maxChunkCharacters)) {
+        this.largeFileWriting.maxChunkCharacters = Math.max(
+          this.largeFileWriting.recommendedChunkCharacters,
+          Math.floor(largeFileWriting.maxChunkCharacters),
+        );
+      }
+      if (Number.isFinite(largeFileWriting.maxRecoveryAttempts)) {
+        this.largeFileWriting.maxRecoveryAttempts = Math.max(
+          0,
+          Math.floor(largeFileWriting.maxRecoveryAttempts),
+        );
+      }
+      this.updateLargeFileToolDefinitions();
     }
     if (Number.isFinite(config.temperature)) {
       this.temperature = Math.max(0, Math.min(2, config.temperature));
@@ -371,6 +402,7 @@ class Agent {
       )
         ? this.maxIncompleteContinuations
         : undefined,
+      largeFileWriting: { ...this.largeFileWriting },
       permissions: this.permissions || "read",
       systemPrompt: this.systemPrompt || "",
       modelFamily: this.modelFamily,
@@ -867,13 +899,18 @@ class Agent {
     let modelTurn = 0;
     let toolIterations = 0;
     let validationPending = false;
+    let largeWriteRecoveryAttempts = 0;
     const pendingValidationPaths = new Set();
     const maxIterations = runConfig?.maxIterations ?? this.maxIterations;
     const maxIncompleteContinuations =
       runConfig?.maxIncompleteContinuations ?? this.maxIncompleteContinuations;
+    const maxLargeWriteRecoveryAttempts =
+      runConfig?.largeFileWriting?.maxRecoveryAttempts ??
+      this.largeFileWriting.maxRecoveryAttempts;
     const writeTools = new Set([
       "modify_file",
       "create_file",
+      "write_file_chunk",
       "rename_file",
       "modify_active_file",
       "replace_text",
@@ -904,13 +941,44 @@ class Agent {
       const outputContext = this.createModelOutputContext(runId, "main");
       const modelResponse = await this.requestModel(controller, runConfig);
       this.assertRunActive(runId, controller);
-      const parsed = this.parseResponse(modelResponse, {
-        source: "provider_response",
-        iteration,
-        runId,
-        provider: runConfig?.providerId,
-        model: runConfig?.model,
-      });
+      let parsed;
+      try {
+        parsed = this.parseResponse(modelResponse, {
+          source: "provider_response",
+          iteration,
+          runId,
+          provider: runConfig?.providerId,
+          model: runConfig?.model,
+        });
+      } catch (error) {
+        if (!this.isRecoverableLargeWriteToolCallError(error, modelResponse)) {
+          throw error;
+        }
+        if (largeWriteRecoveryAttempts >= maxLargeWriteRecoveryAttempts) {
+          throw this.createLargeWriteRecoveryError(
+            error,
+            largeWriteRecoveryAttempts,
+            maxLargeWriteRecoveryAttempts,
+          );
+        }
+        largeWriteRecoveryAttempts += 1;
+        this.messages.push({
+          role: "system",
+          content: this.buildLargeWriteRecoveryInstruction(error.toolName),
+        });
+        console.warn("[NCE Agent large write recovery]", {
+          toolName: error.toolName,
+          attempt: largeWriteRecoveryAttempts,
+          maxAttempts: maxLargeWriteRecoveryAttempts,
+          finishReason: this.normalizeFinishReason(
+            modelResponse,
+            modelResponse?.choices?.[0]?.message || modelResponse?.message,
+            [],
+          ),
+          reason: error.reason,
+        });
+        continue;
+      }
       finalResponse = parsed.text || "";
       finalReasoning = parsed.reasoning || finalReasoning;
       let outcome = this.evaluateIterationOutcome({
@@ -1003,7 +1071,7 @@ class Agent {
           this.messages.push({
             role: "system",
             content:
-              "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise modify_file, create_file ou rename_file.",
+              "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise modify_file, create_file, write_file_chunk ou rename_file.",
           });
           continue;
         }
@@ -1598,6 +1666,9 @@ class Agent {
     error.field = "function.arguments";
     error.valueType =
       value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    error.argumentsLength = typeof value === "string" ? value.length : null;
+    error.argumentsLastCharacter =
+      typeof value === "string" ? value.trimEnd().slice(-1) : null;
     error.reason = reason || "format incompatible";
     error.source = context.source || "provider_response";
     error.runId = context.runId ?? this.runId;
@@ -1616,6 +1687,55 @@ class Agent {
       provider: context.provider || this.runConfig?.providerId || null,
       model: context.model || this.runConfig?.model || this.model || null,
     });
+    return error;
+  }
+
+  isRecoverableLargeWriteToolCallError(error, result = null) {
+    if (error?.code !== "TOOL_CALL_FINALIZATION_FAILED") return false;
+    if (!new Set(["create_file", "write_file_chunk"]).has(error.toolName)) {
+      return false;
+    }
+    const reason = String(error.reason || error.message || "");
+    const message = result?.choices?.[0]?.message || result?.message;
+    const finishReason = this.normalizeFinishReason(result, message, []);
+    const explicitlyTruncatedJson =
+      /unterminated string|unexpected end(?: of json)?|end of (?:json )?input|json[^\n]{0,30}(?:incomplete|truncated)|incomplete json/i.test(
+        reason,
+      );
+    const stopsBeforeObjectEnd =
+      error.valueType === "string" && error.argumentsLastCharacter !== "}";
+    const likelyTruncatedAtPosition =
+      stopsBeforeObjectEnd &&
+      /expected[^\n]{0,80}(?:property|delimiter|comma|position|end)/i.test(
+        reason,
+      );
+    const truncatedJson =
+      explicitlyTruncatedJson ||
+      likelyTruncatedAtPosition ||
+      (finishReason === "length" && stopsBeforeObjectEnd);
+    if (!truncatedJson) return false;
+    error.finishReason = finishReason;
+    return true;
+  }
+
+  buildLargeWriteRecoveryInstruction(toolName = "create_file") {
+    const recommended = this.largeFileWriting.recommendedChunkCharacters;
+    return `L'appel ${toolName} précédent était trop volumineux et son JSON a été tronqué. Ne réutilise pas cet appel incomplet. Recommence avec create_file pour une première portion, puis write_file_chunk pour chaque portion suivante, idéalement sous ${recommended} caractères. Utilise la revision retournée comme expectedRevision du chunk suivant et termine par read_file pour vérifier le fichier complet. Ne répète pas les lectures déjà effectuées.`;
+  }
+
+  createLargeWriteRecoveryError(cause, attempts, limit) {
+    const error = new Error(
+      `La création du gros fichier a été arrêtée après ${attempts} tentatives de récupération : le modèle continue à produire un appel ${cause?.toolName || "d'écriture"} tronqué.`,
+    );
+    error.name = "AgentLargeWriteRecoveryError";
+    error.code = "LARGE_WRITE_RECOVERY_EXHAUSTED";
+    error.category = "LARGE_WRITE_RECOVERY_EXHAUSTED";
+    error.toolName = cause?.toolName || null;
+    error.attempts = attempts;
+    error.maxRecoveryAttempts = limit;
+    error.cause = cause;
+    error.userMessage =
+      "Le modèle n'a pas réussi à découper la création du gros fichier en appels valides.";
     return error;
   }
 
@@ -2043,6 +2163,7 @@ class Agent {
       "modify_active_file",
       "replace_text",
       "create_file",
+      "write_file_chunk",
       "rename_file",
     ]).has(toolName);
     const isRead = new Set(["read_file", "read_active_file"]).has(toolName);
@@ -2071,6 +2192,9 @@ class Agent {
           "match",
           "nearLine",
           "revision",
+          "previousRevision",
+          "appendedChars",
+          "totalChars",
           "additions",
           "deletions",
           "range",
@@ -2183,6 +2307,7 @@ class Agent {
       "modify_active_file",
       "replace_text",
       "create_file",
+      "write_file_chunk",
       "rename_file",
     ]);
     const laterWrites = new Set();
@@ -4044,6 +4169,35 @@ class Agent {
       : normalizedPath;
   }
 
+  getCreateFileToolDescription() {
+    const recommended = this.largeFileWriting.recommendedChunkCharacters;
+    return `Crée un nouveau fichier dans le workspace. Pour un fichier petit ou moyen, fournis directement tout le contenu. Pour un fichier volumineux, n'envoie pas tout dans un seul appel : crée seulement la première portion, idéalement sous ${recommended} caractères, puis continue avec write_file_chunk. Utilise ce tool uniquement si le fichier n'existe pas déjà; utilise modify_file pour corriger ensuite un fichier existant.`;
+  }
+
+  getWriteFileChunkToolDescription() {
+    const recommended = this.largeFileWriting.recommendedChunkCharacters;
+    return `Ajoute une portion de contenu à la fin d'un fichier existant. Utilise ce tool après create_file pour construire progressivement un gros fichier sans générer un énorme tool call. Garde idéalement content sous ${recommended} caractères, passe la revision précédente dans expectedRevision, puis utilise la nouvelle revision pour le chunk suivant. Après le dernier chunk, relis le fichier pour vérifier qu'aucune portion ne manque ou n'est dupliquée. Pour une correction locale ultérieure, utilise modify_file.`;
+  }
+
+  updateLargeFileToolDefinitions() {
+    const maxChunkCharacters = this.largeFileWriting.maxChunkCharacters;
+    const createFile = this.getTool("create_file");
+    if (createFile) {
+      createFile.description = this.getCreateFileToolDescription();
+      if (createFile.parameters?.properties?.content) {
+        createFile.parameters.properties.content.maxLength = maxChunkCharacters;
+      }
+    }
+    const writeFileChunk = this.getTool("write_file_chunk");
+    if (writeFileChunk) {
+      writeFileChunk.description = this.getWriteFileChunkToolDescription();
+      if (writeFileChunk.parameters?.properties?.content) {
+        writeFileChunk.parameters.properties.content.maxLength =
+          maxChunkCharacters;
+      }
+    }
+  }
+
   registerEditorTools() {
     this.registerTool("get_editor_context", {
       description: "Obtenir le contexte minimal de l'éditeur.",
@@ -4090,8 +4244,7 @@ class Agent {
       execute: (args) => this.searchActiveFile(args),
     });
     this.registerTool("create_file", {
-      description:
-        "Crée un nouveau fichier dans le workspace. Utilise ce tool uniquement si le fichier n'existe pas déjà. Ne l'utilise pas pour modifier un fichier existant : utilise modify_file.",
+      description: this.getCreateFileToolDescription(),
       parameters: {
         type: "object",
         properties: {
@@ -4103,8 +4256,9 @@ class Agent {
           },
           content: {
             type: "string",
-            maxLength: 500000,
-            description: "Contenu initial du fichier. Vide par défaut.",
+            maxLength: this.largeFileWriting.maxChunkCharacters,
+            description:
+              "Contenu complet d'un petit/moyen fichier, ou première portion d'un gros fichier. Vide par défaut.",
           },
           overwrite: {
             type: "boolean",
@@ -4115,6 +4269,35 @@ class Agent {
         required: ["path"],
       },
       execute: (args) => this.createWorkspaceFile(args),
+    });
+    this.registerTool("write_file_chunk", {
+      description: this.getWriteFileChunkToolDescription(),
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: 4000,
+            description: "Chemin du fichier existant relatif au workspace.",
+          },
+          content: {
+            type: "string",
+            minLength: 1,
+            maxLength: this.largeFileWriting.maxChunkCharacters,
+            description:
+              "Nouvelle portion à ajouter exactement à la fin du fichier.",
+          },
+          expectedRevision: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Révision retournée par create_file ou par le write_file_chunk précédent.",
+          },
+        },
+        required: ["path", "content", "expectedRevision"],
+      },
+      execute: (args) => this.writeWorkspaceFileChunk(args),
     });
     this.registerTool("rename_file", {
       description:
@@ -4549,10 +4732,168 @@ IMPORTANT :
       overwritten: Boolean(exists && overwrite),
       openedInTabManager,
       snapshotKey,
+      revision: verificationContext.revision,
       verification: {
         verified: true,
         revision: verificationContext.revision,
         content: verificationContext.content,
+      },
+    };
+  }
+  async writeWorkspaceFileChunk(args = {}) {
+    const target = this.getWorkspaceFileTarget(args.path);
+    if (!target.valid) return { success: false, error: target.error };
+    if (!(await this.api?.pathExists?.(target.absolutePath))) {
+      return {
+        success: false,
+        error: {
+          code: "FILE_NOT_FOUND",
+          message:
+            "Le fichier n'existe pas. Utilisez create_file avant write_file_chunk.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    const content = typeof args.content === "string" ? args.content : "";
+    const expectedRevision =
+      typeof args.expectedRevision === "string"
+        ? args.expectedRevision.trim()
+        : "";
+    if (!content || !expectedRevision) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_ARGUMENT",
+          message: "content et expectedRevision sont obligatoires.",
+          path: target.relativePath,
+        },
+      };
+    }
+    if (content.length > this.largeFileWriting.maxChunkCharacters) {
+      return {
+        success: false,
+        error: {
+          code: "CHUNK_TOO_LARGE",
+          message: `La portion dépasse ${this.largeFileWriting.maxChunkCharacters} caractères. Découpez-la en portions plus petites.`,
+          path: target.relativePath,
+          maxChunkCharacters: this.largeFileWriting.maxChunkCharacters,
+          actualCharacters: content.length,
+        },
+      };
+    }
+    const openFile = this.editor?.tabManager?.getFileByPath?.(
+      target.absolutePath,
+    );
+    if (openFile && !openFile.isSaved) {
+      return {
+        success: false,
+        error: {
+          code: "PERMISSION_DENIED",
+          message:
+            "Le fichier contient des modifications non sauvegardées et ne peut pas recevoir un chunk.",
+          path: target.relativePath,
+        },
+      };
+    }
+    const currentContent = (
+      await this.api?.getFileContent?.([target.absolutePath])
+    )?.[target.absolutePath];
+    if (typeof currentContent !== "string") {
+      return {
+        success: false,
+        error: {
+          code: "READ_FAILED",
+          message: "Le contenu actuel du fichier n'a pas pu être lu.",
+          path: target.relativePath,
+        },
+      };
+    }
+    const currentRevision = this.getContentRevision(currentContent);
+    if (expectedRevision !== currentRevision) {
+      return {
+        success: false,
+        error: {
+          code: "REVISION_MISMATCH",
+          message:
+            "Le fichier a changé depuis le chunk précédent. Relisez-le avant de continuer.",
+          path: target.relativePath,
+          expectedRevision,
+          actualRevision: currentRevision,
+        },
+      };
+    }
+
+    const updatedContent = `${currentContent}${content}`;
+    const savedPath = await this.api?.saveFile?.(
+      target.absolutePath,
+      updatedContent,
+    );
+    if (
+      AgentPath.normalize(savedPath || "") !==
+      AgentPath.normalize(target.absolutePath)
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "APPEND_FAILED",
+          message: "La portion n'a pas pu être enregistrée.",
+          path: target.relativePath,
+        },
+      };
+    }
+    const verifiedContent = (
+      await this.api?.getFileContent?.([target.absolutePath])
+    )?.[target.absolutePath];
+    if (
+      typeof verifiedContent !== "string" ||
+      verifiedContent !== updatedContent
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "APPEND_VERIFICATION_FAILED",
+          message:
+            "Le contenu du fichier ne correspond pas au résultat attendu après l'ajout.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    if (openFile) {
+      openFile.isLoaded = false;
+      await this.editor?.tabManager?.reloadFileFromDisk?.(target.absolutePath);
+      const refreshedFile = this.editor?.tabManager?.getFileByPath?.(
+        target.absolutePath,
+      );
+      if (refreshedFile) {
+        this.markFileDiffHighlights(
+          currentContent,
+          verifiedContent,
+          refreshedFile,
+        );
+        this.editor?.lineController?.refresh?.(true);
+      }
+    }
+    const totalLines = verifiedContent.split(/\r?\n/).length;
+    const verificationContext = this.createFileReadContext(
+      target.absolutePath,
+      verifiedContent,
+      Math.max(1, totalLines - 199),
+      totalLines,
+      "post-chunk-verification",
+    );
+    return {
+      success: true,
+      operation: "append",
+      path: target.relativePath,
+      appendedChars: content.length,
+      totalChars: verifiedContent.length,
+      previousRevision: currentRevision,
+      revision: verificationContext.revision,
+      verification: {
+        verified: true,
+        revision: verificationContext.revision,
       },
     };
   }
