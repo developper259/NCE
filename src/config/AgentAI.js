@@ -33,28 +33,6 @@ const AgentAI = {
       },
     },
 
-    openai: {
-      id: "openai",
-      name: "OpenAI",
-      baseURL: "https://api.openai.com/v1",
-      requiresApiKey: true,
-      supportsTools: true,
-      supportsToolChoice: true,
-      defaultModel: "gpt-4o-mini",
-
-      models: {
-        "gpt-4o-mini": {
-          id: "gpt-4o-mini",
-          name: "GPT-4o mini",
-        },
-
-        "gpt-4o": {
-          id: "gpt-4o",
-          name: "GPT-4o",
-        },
-      },
-    },
-
     groq: {
       id: "groq",
       name: "Groq",
@@ -89,17 +67,23 @@ const AgentAI = {
       requiresApiKey: true,
       supportsTools: true,
       supportsToolChoice: true,
-      defaultModel: "openai/gpt-4o-mini",
+
+      defaultModel: "z-ai/glm-5.2:free",
 
       models: {
+        "z-ai/glm-5.2:free": {
+          id: "z-ai/glm-5.2:free",
+          name: "GLM 5.2 Free",
+        },
+
+        "qwen/qwen3-coder:free": {
+          id: "qwen/qwen3-coder:free",
+          name: "Qwen3 Coder 480B Free",
+        },
+
         "openai/gpt-4o-mini": {
           id: "openai/gpt-4o-mini",
           name: "GPT-4o mini",
-        },
-
-        "google/gemini-2.0-flash-001": {
-          id: "google/gemini-2.0-flash-001",
-          name: "Gemini 2 Flash",
         },
       },
     },
@@ -207,6 +191,7 @@ const AgentAI = {
     }
 
     const model = modelId || agent.model || provider.defaultModel;
+
     const modelFamily = AgentPrompts.resolveModelFamily(model);
 
     return {

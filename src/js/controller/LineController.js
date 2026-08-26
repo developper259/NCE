@@ -450,7 +450,7 @@ class LineController {
 
   recalculatePersistentDiff() {
     const file = this.editor.tabManager.activeFile;
-    if (!file || !file.diffActive || !file.diffSnapshot) {
+    if (!file || !file.diffActive || file.diffSnapshot === null) {
       return;
     }
     const currentContent = this.getContent();

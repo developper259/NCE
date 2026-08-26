@@ -190,7 +190,7 @@ class FileNode {
   }
 
   undoDiff() {
-    if (!this.diffSnapshot) return;
+    if (this.diffSnapshot === null) return;
     const lineController = this.editor.lineController;
     lineController.loadContent(this.diffSnapshot);
     this.diffSnapshot = null;

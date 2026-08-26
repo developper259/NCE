@@ -2116,6 +2116,22 @@ IMPORTANT :
       Math.min(200, verifiedContent.split(/\r?\n/).length),
       "post-create-verification",
     );
+    let openedInTabManager = false;
+    if (
+      !exists &&
+      typeof this.editor?.tabManager?.openFileWithPath === "function"
+    ) {
+      await this.editor.tabManager.openFileWithPath(target.absolutePath);
+      openedInTabManager = true;
+      const createdFile = this.editor.tabManager.getFileByPath?.(
+        target.absolutePath,
+      );
+      if (createdFile) {
+        this.markFileDiffHighlights("", verifiedContent, createdFile);
+        this.editor?.lineController?.markDirtyAll?.();
+        this.editor?.lineController?.refresh?.(true);
+      }
+    }
     return {
       success: true,
       operation: "create",
@@ -2123,6 +2139,7 @@ IMPORTANT :
       absolutePath: target.absolutePath,
       created: !exists,
       overwritten: Boolean(exists && overwrite),
+      openedInTabManager,
       snapshotKey,
       verification: {
         verified: true,
@@ -2873,8 +2890,9 @@ IMPORTANT :
     file.diffSnapshot = originalText;
     file.diffActive = true;
     file.diffRows = [];
-    const beforeLines = originalText.split(/\r?\n/);
-    const afterLines = afterText.split(/\r?\n/);
+    const beforeLines =
+      originalText === "" ? [] : originalText.split(/\r?\n/);
+    const afterLines = afterText === "" ? [] : afterText.split(/\r?\n/);
     const rows = beforeLines.length + 1;
     const cols = afterLines.length + 1;
     const lcs = Array.from({ length: rows }, () => Array(cols).fill(0));
