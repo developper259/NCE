@@ -786,11 +786,6 @@ class AgentSidebar extends Sidebar {
   setActivityGroupCollapsed(group, collapsed) {
     if (!group) return;
     group.collapsed = !!collapsed;
-    const refs = this.activityElements.get(group);
-    if (!refs?.row?.isConnected) return;
-    refs.activity.classList.toggle("agent-activity-collapsed", group.collapsed);
-    refs.header.setAttribute("aria-expanded", String(!group.collapsed));
-    refs.list.hidden = group.collapsed;
   }
 
   collapseActivityGroup(context = {}) {
@@ -1419,58 +1414,27 @@ class AgentSidebar extends Sidebar {
     }[item.type];
   }
 
-  getActivityHeaderLabel(group) {
-    const count = Array.isArray(group.items) ? group.items.length : 0;
-    const steps = `${count} ${count === 1 ? "step" : "steps"}`;
-    if (group.status === "running") {
-      return count ? `Working · ${steps}` : "Working";
-    }
-    if (group.status === "error" || group.hasErrors) {
-      return `Completed with errors · ${steps}`;
-    }
-    return `Worked on ${steps}`;
-  }
-
   createActivityElement(group) {
     const row = document.createElement("div");
-    row.className = "agent-sidebar-message agent-sidebar-activity-message";
+    row.className =
+      "agent-sidebar-message agent-sidebar-activity-message agent-sidebar-timeline-segment";
+    row.dataset.runId = String(group.runId);
 
     const activity = document.createElement("div");
     activity.className = "agent-activity";
     activity.dataset.status = group.status;
-    activity.classList.toggle("agent-activity-collapsed", !!group.collapsed);
-
-    const header = document.createElement("button");
-    header.type = "button";
-    header.className = "agent-activity-header";
-    header.setAttribute("aria-expanded", String(!group.collapsed));
-
-    const chevron = document.createElement("span");
-    chevron.className = "agent-activity-chevron";
-    chevron.textContent = "›";
-    header.appendChild(chevron);
-
-    const title = document.createElement("span");
-    title.className = "agent-activity-title";
-    title.textContent = this.getActivityHeaderLabel(group);
-    header.appendChild(title);
 
     const list = document.createElement("div");
     list.className = "agent-activity-list";
-    list.hidden = !!group.collapsed;
     const fragment = document.createDocumentFragment();
     for (const item of group.items || []) {
       fragment.appendChild(this.createActivityItemElement(item));
     }
     list.appendChild(fragment);
 
-    header.addEventListener("click", () => {
-      this.setActivityGroupCollapsed(group, !group.collapsed);
-    });
-
-    activity.append(header, list);
+    activity.appendChild(list);
     row.appendChild(activity);
-    this.activityElements.set(group, { row, activity, header, title, list });
+    this.activityElements.set(group, { row, activity, list });
     return row;
   }
 
@@ -1518,7 +1482,6 @@ class AgentSidebar extends Sidebar {
   updateActivityHeader(group) {
     const refs = this.activityElements.get(group);
     if (!refs?.row?.isConnected) return;
-    refs.title.textContent = this.getActivityHeaderLabel(group);
     refs.activity.dataset.status = group.status;
   }
 
@@ -1718,8 +1681,10 @@ class AgentSidebar extends Sidebar {
 
   createReasoningElement(segment) {
     const row = document.createElement("div");
-    row.className = "agent-sidebar-message agent-sidebar-message-reasoning";
+    row.className =
+      "agent-sidebar-message agent-sidebar-message-reasoning agent-sidebar-timeline-segment";
     row.dataset.segmentId = segment.id;
+    row.dataset.runId = String(segment.runId);
     const bubble = document.createElement("div");
     bubble.className = "agent-sidebar-bubble";
     const toggle = document.createElement("button");

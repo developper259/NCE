@@ -834,10 +834,7 @@ class Agent {
           missingWriteRetries = 0;
           successfulWrites.push({
             tool: call.function.name,
-            path:
-              toolPayload?.path ||
-              toolPayload?.oldPath ||
-              "fichier",
+            path: toolPayload?.path || toolPayload?.oldPath || "fichier",
             newPath: toolPayload?.newPath || "",
           });
         }
@@ -963,9 +960,8 @@ class Agent {
         });
       } else if (
         hasWriteCall &&
-        orderedToolCalls.filter((call) =>
-          writeTools.has(call?.function?.name),
-        ).length > executableToolCalls.length
+        orderedToolCalls.filter((call) => writeTools.has(call?.function?.name))
+          .length > executableToolCalls.length
       ) {
         this.messages.push({
           role: "system",
@@ -994,7 +990,8 @@ class Agent {
         this.applyActiveModelConfig(config, activeConfig);
         return result;
       } catch (error) {
-        if (this.isAbortError(error) && controller?.signal?.aborted) throw error;
+        if (this.isAbortError(error) && controller?.signal?.aborted)
+          throw error;
         if (error?.code === "MESSAGE_SERIALIZATION_FAILED") throw error;
         const classified = this.classifyModelError(error, error?.response, {
           provider: activeConfig.provider,
@@ -1045,9 +1042,7 @@ class Agent {
             retryCount = 0;
             continue;
           }
-          state.authenticationCancelledProviders.add(
-            activeConfig.providerId,
-          );
+          state.authenticationCancelledProviders.add(activeConfig.providerId);
         }
 
         const retryDelay = this.getModelRetryDelay(classified, retryCount);
@@ -1195,7 +1190,9 @@ class Agent {
         } catch {
           body = text;
         }
-        const transportError = new Error(`Model request failed (${response.status})`);
+        const transportError = new Error(
+          `Model request failed (${response.status})`,
+        );
         transportError.status = response.status;
         transportError.body = body;
         transportError.response = response;
@@ -1255,6 +1252,13 @@ class Agent {
         }
         return value;
       } catch (error) {
+        console.error("[NCE Agent serialization]", {
+          messageIndex: error.messageIndex,
+          toolCallIndex: error.toolCallIndex,
+          field: error.field,
+          valueType: error.valueType,
+          technicalMessage: error.technicalMessage,
+        });
         throw this.createMessageSerializationError(
           messageIndex,
           toolCallIndex,
@@ -1392,7 +1396,10 @@ class Agent {
           : payload?.message || "Le provider a refusé la requête.",
       );
       error.status =
-        result?.status || result?.statusCode || payload?.status || payload?.code;
+        result?.status ||
+        result?.statusCode ||
+        payload?.status ||
+        payload?.code;
       error.code = payload?.code || result?.code;
       error.body = result;
       error.response = result?.response || null;
@@ -1459,9 +1466,8 @@ class Agent {
       providerError?.status,
       typeof providerError?.code === "number" ? providerError.code : null,
     ].find((value) => Number.isFinite(Number(value)));
-    const statusCode = possibleStatus === undefined
-      ? null
-      : Number(possibleStatus);
+    const statusCode =
+      possibleStatus === undefined ? null : Number(possibleStatus);
     let serializedBody = "";
     try {
       serializedBody = typeof body === "string" ? body : JSON.stringify(body);
@@ -1491,28 +1497,44 @@ class Agent {
     const retryAfterMs = retryAfterMetadata ?? retryAfterHeader;
     let category = "UNKNOWN";
 
-    if (/context.{0,30}(length|window)|too many tokens|maximum context|token limit/.test(text)) {
+    if (
+      /context.{0,30}(length|window)|too many tokens|maximum context|token limit/.test(
+        text,
+      )
+    ) {
       category = "CONTEXT_LENGTH_EXCEEDED";
     } else if (/no tokens available|no available tokens/.test(text)) {
       category = "NO_TOKENS_AVAILABLE";
-    } else if (/quota|billing|insufficient[_ ]credits|credit balance/.test(text)) {
+    } else if (
+      /quota|billing|insufficient[_ ]credits|credit balance/.test(text)
+    ) {
       category = "QUOTA_EXCEEDED";
-    } else if (statusCode === 401 || /invalid api key|unauthorized|authentication/.test(text)) {
+    } else if (
+      statusCode === 401 ||
+      /invalid api key|unauthorized|authentication/.test(text)
+    ) {
       category = "AUTH_ERROR";
     } else if (statusCode === 403 || /forbidden|permission denied/.test(text)) {
       category = "PERMISSION_ERROR";
     } else if (
-      /model.{0,30}(not found|does not exist|deprecated|removed)|invalid model/.test(text) ||
+      /model.{0,30}(not found|does not exist|deprecated|removed)|invalid model/.test(
+        text,
+      ) ||
       statusCode === 404
     ) {
       category = "MODEL_NOT_FOUND";
     } else if (/no capacity|no slots|shared pool|saturat|overload/.test(text)) {
       category = statusCode === 429 ? "RATE_LIMIT" : "NO_CAPACITY";
     } else if (
-      /model.{0,30}(unavailable|not available)|provider.{0,30}unavailable/.test(text)
+      /model.{0,30}(unavailable|not available)|provider.{0,30}unavailable/.test(
+        text,
+      )
     ) {
       category = "MODEL_UNAVAILABLE";
-    } else if (statusCode === 429 || /rate.?limit|too many requests/.test(text)) {
+    } else if (
+      statusCode === 429 ||
+      /rate.?limit|too many requests/.test(text)
+    ) {
       category = "RATE_LIMIT";
     } else if (
       statusCode === 408 ||
@@ -1527,7 +1549,11 @@ class Agent {
       /failed to fetch|network error|dns/.test(text)
     ) {
       category = "NETWORK_ERROR";
-    } else if (statusCode === 502 || statusCode === 504 || /upstream/.test(text)) {
+    } else if (
+      statusCode === 502 ||
+      statusCode === 504 ||
+      /upstream/.test(text)
+    ) {
       category = "UPSTREAM_ERROR";
     } else if (statusCode === 503) {
       category = "MODEL_UNAVAILABLE";
@@ -1656,10 +1682,7 @@ class Agent {
   }
   isCompatibleFallback(candidate, classified, currentConfig) {
     if (!candidate?.provider?.baseURL || !candidate?.model) return false;
-    if (
-      candidate.provider.requiresApiKey &&
-      !candidate.provider.apiKey
-    ) {
+    if (candidate.provider.requiresApiKey && !candidate.provider.apiKey) {
       return false;
     }
     if (this.getOpenAITools().length && candidate.supportsTools === false) {
@@ -1797,7 +1820,11 @@ class Agent {
       modelFallbackCount: state.modelFallbackCount,
     });
     this.emitModelStatus(
-      { kind: "error", classification: details, userMessage: details.userMessage },
+      {
+        kind: "error",
+        classification: details,
+        userMessage: details.userMessage,
+      },
       state.currentConfig || this.runConfig || {},
     );
     return error;
@@ -2195,7 +2222,7 @@ class Agent {
           content:
             typeof message.content === "string"
               ? message.content.slice(0, 4000)
-              : message.content ?? null,
+              : (message.content ?? null),
           ...(message.reasoning ? { reasoning: message.reasoning } : {}),
           ...(Array.isArray(message.tool_calls)
             ? {
@@ -2245,9 +2272,7 @@ class Agent {
       lines.length,
       Math.max(safeStartLine, endLine || safeStartLine),
     );
-    const rangeContent = lines
-      .slice(safeStartLine - 1, safeEndLine)
-      .join("\n");
+    const rangeContent = lines.slice(safeStartLine - 1, safeEndLine).join("\n");
     const visibleContent = this.truncate(rangeContent, 4000);
     const context = {
       path: absolutePath,
@@ -2305,7 +2330,8 @@ class Agent {
         valid: false,
         error: {
           code: "FILE_CONTEXT_REQUIRED",
-          message: "Read the current file section containing oldText before modifying it.",
+          message:
+            "Read the current file section containing oldText before modifying it.",
         },
       };
     }
@@ -3079,15 +3105,16 @@ IMPORTANT :
       await this.editor?.tabManager?.reloadFileFromDisk?.(target.absolutePath);
     }
     await this.refreshWorkspaceFolders([target.parentPath]);
-    const verifiedContent = (await this.api?.getFileContent?.([
-      target.absolutePath,
-    ]))?.[target.absolutePath];
+    const verifiedContent = (
+      await this.api?.getFileContent?.([target.absolutePath])
+    )?.[target.absolutePath];
     if (typeof verifiedContent !== "string" || verifiedContent !== content) {
       return {
         success: false,
         error: {
           code: "CREATE_VERIFICATION_FAILED",
-          message: "Le contenu du fichier créé ne correspond pas au contenu demandé.",
+          message:
+            "Le contenu du fichier créé ne correspond pas au contenu demandé.",
           path: target.relativePath,
         },
       };
@@ -3236,9 +3263,9 @@ IMPORTANT :
         },
       };
     }
-    const renamedContent = (await this.api?.getFileContent?.([
-      destination.absolutePath,
-    ]))?.[destination.absolutePath];
+    const renamedContent = (
+      await this.api?.getFileContent?.([destination.absolutePath])
+    )?.[destination.absolutePath];
     let verification = { verified: true };
     if (typeof renamedContent === "string") {
       const verificationContext = this.createFileReadContext(
@@ -3873,8 +3900,7 @@ IMPORTANT :
     file.diffSnapshot = originalText;
     file.diffActive = true;
     file.diffRows = [];
-    const beforeLines =
-      originalText === "" ? [] : originalText.split(/\r?\n/);
+    const beforeLines = originalText === "" ? [] : originalText.split(/\r?\n/);
     const afterLines = afterText === "" ? [] : afterText.split(/\r?\n/);
     const rows = beforeLines.length + 1;
     const cols = afterLines.length + 1;
