@@ -123,6 +123,8 @@ class Agent {
     this.contextCompaction = {
       enabled: true,
       recentIterations: 2,
+      warmIterations: 6,
+      maxPreviouslyReadFiles: 100,
       softLimitRatio: 0.4,
       hardLimitRatio: 0.7,
       criticalLimitRatio: 0.85,
@@ -132,6 +134,8 @@ class Agent {
       debugDecisions: false,
     };
     this.lastContextMetrics = null;
+    this.cumulativeEstimatedPromptTokens = 0;
+    this.cumulativeActualPromptTokens = 0;
     this.supportsTools = true;
     this.supportsToolChoice = true;
     this.modelConfigResolver = null;
@@ -408,6 +412,9 @@ class Agent {
       modelFamily: this.modelFamily,
       modelConfig: this.modelConfig ? { ...this.modelConfig } : null,
       contextWindow: this.contextWindow,
+      maxOutputTokens: Number.isFinite(this.modelConfig?.maxOutputTokens)
+        ? this.modelConfig.maxOutputTokens
+        : null,
       contextCompaction: { ...this.contextCompaction },
       supportsTools: this.supportsTools && provider?.supportsTools !== false,
       supportsToolChoice:
@@ -448,6 +455,9 @@ class Agent {
     this.modelRequestState = null;
     this.modelRequestCounter = 0;
     this.modelOutputStates = new Map();
+    this.lastContextMetrics = null;
+    this.cumulativeEstimatedPromptTokens = 0;
+    this.cumulativeActualPromptTokens = 0;
     try {
       const editorContext = await this.getContext();
       runConfig.editorContext = editorContext;
@@ -1461,15 +1471,23 @@ class Agent {
         code: "MODEL_NOT_CONFIGURED",
       });
     }
-    const modelContext = this.buildModelContext(this.messages, config);
+    const providerTools =
+      config.supportsTools !== false && provider.supportsTools !== false
+        ? this.getOpenAITools()
+        : [];
+    const modelContext = this.buildModelContext(this.messages, {
+      ...config,
+      toolSchemas: providerTools,
+      trackCumulative: true,
+    });
     const providerMessages = this.normalizeMessagesForProvider(modelContext);
     const payload = {
       model: config.model,
       messages: providerMessages,
       stream: false,
     };
-    if (config.supportsTools !== false && provider.supportsTools !== false) {
-      payload.tools = this.getOpenAITools();
+    if (providerTools.length) {
+      payload.tools = providerTools;
       if (
         config.supportsToolChoice !== false &&
         provider.supportsToolChoice !== false
@@ -1490,14 +1508,14 @@ class Agent {
         provider: sanitizedProvider,
         payload,
       });
-      return this.unwrapModelTransportResult(result);
+      return this.recordModelPromptUsage(this.unwrapModelTransportResult(result));
     }
     if (typeof this.api?.requestAI === "function") {
       const result = await this.api.requestAI({
         provider: sanitizedProvider,
         payload,
       });
-      return this.unwrapModelTransportResult(result);
+      return this.recordModelPromptUsage(this.unwrapModelTransportResult(result));
     }
     const headers = { "Content-Type": "application/json" };
     if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
@@ -1531,7 +1549,7 @@ class Agent {
         transportError.response = response;
         throw transportError;
       }
-      return response.json();
+      return this.recordModelPromptUsage(await response.json());
     } catch (error) {
       if (
         error?.name === "AbortError" &&
@@ -1994,6 +2012,14 @@ class Agent {
         1,
         Math.floor(number(source.recentIterations, 2, 1)),
       ),
+      warmIterations: Math.max(
+        Math.floor(number(source.recentIterations, 2, 1)),
+        Math.floor(number(source.warmIterations, 6, 1)),
+      ),
+      maxPreviouslyReadFiles: Math.max(
+        1,
+        Math.floor(number(source.maxPreviouslyReadFiles, 100, 1)),
+      ),
       softLimitRatio,
       hardLimitRatio,
       criticalLimitRatio,
@@ -2246,19 +2272,171 @@ class Agent {
     return JSON.stringify(compact);
   }
 
+  getContextBudget(config, options) {
+    const contextWindow = Number.isFinite(config.contextWindow)
+      ? Math.max(1, Math.floor(config.contextWindow))
+      : null;
+    const outputReserve = Number.isFinite(config.maxTokens)
+      ? Math.max(0, Math.floor(config.maxTokens))
+      : 0;
+    const budgetKnown = contextWindow !== null;
+    return {
+      contextWindow,
+      outputReserve,
+      budgetKnown,
+      inputBudget: budgetKnown
+        ? Math.max(
+            1,
+            contextWindow - outputReserve - options.safetyMarginTokens,
+          )
+        : null,
+    };
+  }
+
+  getContextTokenBreakdown(messages = [], toolSchemas = [], charsPerToken = 4) {
+    const breakdown = {
+      systemPrompt: 0,
+      runtimeMessages: 0,
+      userMessages: 0,
+      assistantMessages: 0,
+      reasoning: 0,
+      toolCalls: 0,
+      readResults: 0,
+      searchResults: 0,
+      projectMaps: 0,
+      listings: 0,
+      writeResults: 0,
+      otherToolResults: 0,
+      toolSchemas: Array.isArray(toolSchemas) && toolSchemas.length
+        ? this.estimateTokens(toolSchemas, charsPerToken)
+        : 0,
+    };
+    const toolNames = new Map();
+    let sawPrimarySystem = false;
+    for (const message of messages) {
+      if (message?.role === "assistant" && Array.isArray(message.tool_calls)) {
+        for (const call of message.tool_calls) {
+          if (call?.id) toolNames.set(call.id, call?.function?.name || "");
+        }
+      }
+    }
+    const reads = new Set(["read_file", "read_active_file"]);
+    const searches = new Set(["search_project_files", "search_active_file"]);
+    const writes = new Set([
+      "modify_file", "modify_active_file", "replace_text", "create_file",
+      "write_file_chunk", "rename_file",
+    ]);
+    for (const message of messages) {
+      let tokens = this.estimateTokens(message, charsPerToken);
+      let reasoningTokens = 0;
+      if (
+        message?.role === "assistant" &&
+        Object.prototype.hasOwnProperty.call(message, "reasoning")
+      ) {
+        reasoningTokens = this.estimateTokens(
+          message.reasoning,
+          charsPerToken,
+        );
+        const withoutReasoning = { ...message };
+        delete withoutReasoning.reasoning;
+        tokens = this.estimateTokens(withoutReasoning, charsPerToken);
+      }
+      if (message?.role === "system") {
+        const key = sawPrimarySystem ? "runtimeMessages" : "systemPrompt";
+        breakdown[key] += tokens;
+        sawPrimarySystem = true;
+      } else if (message?.role === "user") {
+        breakdown.userMessages += tokens;
+      } else if (message?.role === "assistant") {
+        if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+          breakdown.toolCalls += tokens;
+        } else {
+          breakdown.assistantMessages += tokens;
+        }
+        breakdown.reasoning += reasoningTokens;
+      } else if (message?.role === "tool") {
+        const name = toolNames.get(message.tool_call_id) || "";
+        if (reads.has(name)) breakdown.readResults += tokens;
+        else if (searches.has(name)) breakdown.searchResults += tokens;
+        else if (name === "get_project_map") breakdown.projectMaps += tokens;
+        else if (name === "list_project_files") breakdown.listings += tokens;
+        else if (writes.has(name)) breakdown.writeResults += tokens;
+        else breakdown.otherToolResults += tokens;
+      }
+    }
+    return breakdown;
+  }
+
   buildModelContext(messages = this.messages, config = {}) {
     const options = this.getContextCompactionConfig(config);
+    const toolSchemas = Array.isArray(config.toolSchemas) ? config.toolSchemas : [];
+    const toolSchemaTokens = toolSchemas.length
+      ? this.estimateTokens(toolSchemas, options.charsPerToken)
+      : 0;
+    const { contextWindow, outputReserve, budgetKnown, inputBudget } =
+      this.getContextBudget(config, options);
+    const estimatedFullMessageTokens = this.estimateTokens(
+      messages,
+      options.charsPerToken,
+    );
+    const estimatedFullTokens = estimatedFullMessageTokens + toolSchemaTokens;
+    const initialUsageRatio = budgetKnown
+      ? estimatedFullTokens / inputBudget
+      : null;
+    const pressureLevel = !budgetKnown
+      ? "conservative"
+      : initialUsageRatio >= options.criticalLimitRatio
+        ? "critical"
+        : initialUsageRatio >= options.hardLimitRatio
+          ? "hard"
+          : initialUsageRatio >= options.softLimitRatio
+            ? "moderate"
+            : "light";
     if (!options.enabled) {
-      this.lastContextMetrics = {
+      const modelMessages = messages.map((message) => ({ ...message }));
+      const estimatedModelMessageTokens = this.estimateTokens(
+        modelMessages,
+        options.charsPerToken,
+      );
+      const tokenBreakdown = this.getContextTokenBreakdown(
+        modelMessages,
+        toolSchemas,
+        options.charsPerToken,
+      );
+      const metrics = {
         fullMessages: messages.length,
-        modelMessages: messages.length,
-        estimatedFullTokens: this.estimateTokens(messages, options.charsPerToken),
-        estimatedModelTokens: this.estimateTokens(messages, options.charsPerToken),
-        contextWindow: config.contextWindow ?? null,
-        inputBudget: null,
+        modelMessages: modelMessages.length,
+        estimatedFullMessageTokens,
+        estimatedModelMessageTokens,
+        estimatedFullTokens,
+        estimatedModelTokens: estimatedModelMessageTokens + toolSchemaTokens,
+        messageTokens: estimatedModelMessageTokens,
+        toolSchemaTokens,
+        totalEstimatedInputTokens:
+          estimatedModelMessageTokens + toolSchemaTokens,
+        systemPromptTokens: tokenBreakdown.systemPrompt,
+        tokenBreakdown,
+        contextWindow,
+        maxOutputTokens: config.maxOutputTokens ?? null,
+        outputReserve,
+        safetyMarginTokens: options.safetyMarginTokens,
+        inputBudget,
+        budgetKnown,
+        usageRatio: initialUsageRatio === null
+          ? null
+          : Number(initialUsageRatio.toFixed(3)),
+        level: pressureLevel,
         disabled: true,
       };
-      return messages.map((message) => ({ ...message }));
+      if (config.trackCumulative === true) {
+        this.cumulativeEstimatedPromptTokens += metrics.estimatedModelTokens;
+        metrics.cumulativeEstimatedPromptTokens =
+          this.cumulativeEstimatedPromptTokens;
+        metrics.cumulativeActualPromptTokens =
+          this.cumulativeActualPromptTokens;
+      }
+      this.lastContextMetrics = metrics;
+      return modelMessages;
     }
 
     const state = config.contextState;
@@ -2284,12 +2462,19 @@ class Agent {
       0,
       exchangeCount - options.recentIterations,
     );
+    const warmExchangeStart = Math.max(0, exchangeCount - options.warmIterations);
     const firstHotIndex =
       entries.find(
         (entry) =>
           entry.kind === "tool_exchange" &&
           entry.exchangeIndex >= hotExchangeStart,
       )?.start ?? messages.length;
+    const firstWarmIndex =
+      entries.find(
+        (entry) =>
+          entry.kind === "tool_exchange" &&
+          entry.exchangeIndex >= warmExchangeStart,
+      )?.start ?? firstHotIndex;
     const readTools = new Set(["read_file", "read_active_file"]);
     const searchTools = new Set([
       "search_project_files",
@@ -2335,11 +2520,31 @@ class Agent {
       removedObsoleteRuntimeMessages: 0,
       removedForBudget: 0,
       invalidToolExchanges: 0,
+      removedOldReads: 0,
+      removedOldSearches: 0,
+      removedOldProjectMaps: 0,
+      removedOldListings: 0,
+      summarizedReadFiles: 0,
+      omittedReadFiles: 0,
     };
+    const previouslyReadFiles = new Map();
+    const toolTypes = {};
+    for (const entry of entries) {
+      if (entry.kind !== "tool_exchange") continue;
+      for (const tool of entry.tools) {
+        const name = tool.name || "unknown";
+        toolTypes[name] = (toolTypes[name] || 0) + 1;
+      }
+    }
 
     for (let index = entries.length - 1; index >= 0; index -= 1) {
       const entry = entries[index];
       entry.recent = entry.start >= firstHotIndex;
+      entry.tier = entry.recent
+        ? "HOT"
+        : entry.start >= firstWarmIndex
+          ? "WARM"
+          : "COLD";
       entry.critical = false;
       entry.priority = 60;
       if (!entry.keep) {
@@ -2509,65 +2714,69 @@ class Agent {
         entry.reasons.push("unresolved_error");
       } else if (entry.tools.some((tool) => navigationTools.has(tool.name))) {
         entry.priority = 30;
-        entry.reasons.push(entry.recent ? "recent" : "navigation_result");
+        const names = new Set(entry.tools.map((tool) => tool.name));
+        if (entry.tier === "COLD") {
+          entry.keep = false;
+          entry.reasons.push("cold_navigation");
+          if (names.has("get_project_map")) counters.removedOldProjectMaps += 1;
+          if (names.has("list_project_files")) counters.removedOldListings += 1;
+          if (
+            !names.has("get_project_map") &&
+            !names.has("list_project_files")
+          ) counters.removedOldListings += 1;
+        } else {
+          entry.reasons.push(entry.recent ? "recent" : "navigation_result");
+        }
       } else if (entry.tools.some((tool) => searchTools.has(tool.name))) {
         entry.priority = 40;
-        entry.reasons.push(entry.recent ? "recent" : "search_result");
+        if (entry.tier === "COLD") {
+          entry.keep = false;
+          entry.reasons.push("cold_search");
+          counters.removedOldSearches += 1;
+        } else {
+          entry.reasons.push(entry.recent ? "recent" : "search_result");
+        }
       } else if (entry.tools.some((tool) => readTools.has(tool.name))) {
         entry.priority = 50;
-        entry.reasons.push(entry.recent ? "recent" : "current_file_read");
+        if (entry.tier === "COLD") {
+          entry.keep = false;
+          entry.reasons.push("cold_read_summarized");
+          counters.removedOldReads += 1;
+          for (const tool of entry.tools) {
+            if (readTools.has(tool.name) && tool.path) {
+              previouslyReadFiles.set(tool.path, {
+                path: tool.path,
+                ...(tool.revision ? { revision: tool.revision } : {}),
+              });
+            }
+          }
+        } else {
+          entry.reasons.push(entry.recent ? "recent" : "current_file_read");
+        }
       } else {
         entry.reasons.push(entry.recent ? "recent" : "tool_result");
       }
     }
 
-    const contextWindow = Number.isFinite(config.contextWindow)
-      ? Math.max(1, Math.floor(config.contextWindow))
-      : null;
-    const maxOutputTokens = Number.isFinite(config.maxTokens)
-      ? Math.max(0, Math.floor(config.maxTokens))
-      : 0;
-    const inputBudget = contextWindow
-      ? Math.max(
-          1,
-          contextWindow - maxOutputTokens - options.safetyMarginTokens,
-        )
-      : null;
-    const estimatedFullTokens = this.estimateTokens(
-      messages,
-      options.charsPerToken,
-    );
-    const usageRatio = inputBudget
-      ? estimatedFullTokens / inputBudget
-      : 0;
-    const level =
-      usageRatio >= options.criticalLimitRatio
-        ? "critical"
-        : usageRatio >= options.hardLimitRatio
-          ? "hard"
-          : usageRatio >= options.softLimitRatio
-            ? "moderate"
-            : "light";
-
     for (const entry of entries) {
       if (!entry.keep || entry.critical || entry.recent) continue;
       if (
-        level === "moderate" &&
+        pressureLevel === "moderate" &&
         entry.kind === "message" &&
         ["assistant", "system"].includes(entry.message?.role)
       ) {
         entry.keep = false;
         entry.reasons.push("adaptive_moderate");
       } else if (
-        ["hard", "critical"].includes(level) &&
+        ["hard", "critical"].includes(pressureLevel) &&
         ((entry.kind === "message" &&
           ["assistant", "system"].includes(entry.message?.role)) ||
           entry.priority <= 40)
       ) {
         entry.keep = false;
-        entry.reasons.push(`adaptive_${level}`);
+        entry.reasons.push(`adaptive_${pressureLevel}`);
       } else if (
-        ["hard", "critical"].includes(level) &&
+        ["hard", "critical"].includes(pressureLevel) &&
         entry.kind === "tool_exchange" &&
         entry.tools.some((tool) => readTools.has(tool.name))
       ) {
@@ -2581,13 +2790,19 @@ class Agent {
       if (!entry.keep) return [];
       if (entry.kind !== "tool_exchange") {
         const message = { ...entry.message };
-        if (Object.prototype.hasOwnProperty.call(message, "reasoning")) {
+        if (
+          Object.prototype.hasOwnProperty.call(message, "reasoning") &&
+          !(config.modelConfig?.requiresReasoningReplay && entry.tier === "HOT")
+        ) {
           delete message.reasoning;
         }
         return [message];
       }
       const assistant = { ...entry.assistant };
-      if (Object.prototype.hasOwnProperty.call(assistant, "reasoning")) {
+      if (
+        Object.prototype.hasOwnProperty.call(assistant, "reasoning") &&
+        !(config.modelConfig?.requiresReasoningReplay && entry.tier === "HOT")
+      ) {
         delete assistant.reasoning;
       }
       const toolById = new Map(
@@ -2609,15 +2824,29 @@ class Agent {
       });
       return [assistant, ...results];
     };
-    const render = (trackMetrics = false) =>
-      entries.flatMap((entry) => renderEntry(entry, trackMetrics));
+    const render = (trackMetrics = false) => {
+      const rendered = entries.flatMap((entry) => renderEntry(entry, trackMetrics));
+      if (previouslyReadFiles.size > 0) {
+        const allFiles = [...previouslyReadFiles.values()];
+        const files = allFiles.slice(0, options.maxPreviouslyReadFiles);
+        counters.summarizedReadFiles = files.length;
+        counters.omittedReadFiles = allFiles.length - files.length;
+        const summary = {
+          role: "system",
+          content: `[NCE PREVIOUSLY READ FILES]\n${JSON.stringify({ files, omittedCount: counters.omittedReadFiles })}`,
+        };
+        const insertionIndex = rendered[0]?.role === "system" ? 1 : 0;
+        rendered.splice(insertionIndex, 0, summary);
+      }
+      return rendered;
+    };
     let modelMessages = render();
     let estimatedModelTokens = this.estimateTokens(
       modelMessages,
       options.charsPerToken,
     );
 
-    if (inputBudget && estimatedModelTokens > inputBudget) {
+    if (inputBudget && estimatedModelTokens + toolSchemaTokens > inputBudget) {
       for (const entry of entries) {
         if (
           entry.keep &&
@@ -2637,7 +2866,7 @@ class Agent {
         options.charsPerToken,
       );
     }
-    if (inputBudget && estimatedModelTokens > inputBudget) {
+    if (inputBudget && estimatedModelTokens + toolSchemaTokens > inputBudget) {
       const candidates = entries
         .filter((entry) => entry.keep && !entry.critical)
         .sort(
@@ -2657,10 +2886,7 @@ class Agent {
             ),
           ]),
       );
-      let projectedTokens = [...entryTokenCosts.values()].reduce(
-        (total, tokens) => total + tokens,
-        0,
-      );
+      let projectedTokens = estimatedModelTokens + toolSchemaTokens;
       for (const entry of candidates) {
         if (projectedTokens <= inputBudget) break;
         entry.keep = false;
@@ -2670,15 +2896,30 @@ class Agent {
       }
     }
 
-    counters.removedReasoningMessages = messages.filter(
+    counters.compactedToolResults = 0;
+    modelMessages = render(true);
+    const preservedReasoning = modelMessages.filter(
       (message) =>
         message?.role === "assistant" &&
         Object.prototype.hasOwnProperty.call(message, "reasoning"),
     ).length;
-    counters.compactedToolResults = 0;
-    modelMessages = render(true);
-    estimatedModelTokens = this.estimateTokens(
+    counters.removedReasoningMessages = Math.max(
+      0,
+      messages.filter(
+        (message) =>
+          message?.role === "assistant" &&
+          Object.prototype.hasOwnProperty.call(message, "reasoning"),
+      ).length - preservedReasoning,
+    );
+    const estimatedModelMessageTokens = this.estimateTokens(
       modelMessages,
+      options.charsPerToken,
+    );
+    estimatedModelTokens = estimatedModelMessageTokens + toolSchemaTokens;
+    const usageRatio = budgetKnown ? estimatedModelTokens / inputBudget : null;
+    const tokenBreakdown = this.getContextTokenBreakdown(
+      modelMessages,
+      toolSchemas,
       options.charsPerToken,
     );
 
@@ -2686,25 +2927,46 @@ class Agent {
       fullMessages: messages.length,
       modelMessages: modelMessages.length,
       estimatedFullTokens,
+      estimatedFullMessageTokens,
       estimatedModelTokens,
+      estimatedModelMessageTokens,
+      messageTokens: estimatedModelMessageTokens,
+      toolSchemaTokens,
+      totalEstimatedInputTokens: estimatedModelTokens,
+      systemPromptTokens: tokenBreakdown.systemPrompt,
+      tokenBreakdown,
+      toolTypes,
       ...counters,
       contextWindow,
+      maxOutputTokens: config.maxOutputTokens ?? null,
+      outputReserve,
+      safetyMarginTokens: options.safetyMarginTokens,
       inputBudget,
-      usageRatio: Number(usageRatio.toFixed(3)),
-      level,
+      budgetKnown,
+      initialUsageRatio: initialUsageRatio === null
+        ? null
+        : Number(initialUsageRatio.toFixed(3)),
+      usageRatio: usageRatio === null ? null : Number(usageRatio.toFixed(3)),
+      level: pressureLevel,
+      budgetExceeded: budgetKnown && estimatedModelTokens > inputBudget,
+      cumulativeEstimatedPromptTokens: this.cumulativeEstimatedPromptTokens,
+      cumulativeActualPromptTokens: this.cumulativeActualPromptTokens,
     };
+    if (config.trackCumulative === true) {
+      this.cumulativeEstimatedPromptTokens += estimatedModelTokens;
+      metrics.cumulativeEstimatedPromptTokens =
+        this.cumulativeEstimatedPromptTokens;
+    }
     for (const entry of entries) {
       entry.classification = entry.critical
         ? "CRITICAL"
-        : entry.recent
-          ? "RECENT"
-          : entry.kind === "tool_exchange" ||
-              entry.message?.role === "user"
-            ? "IMPORTANT"
-            : "DROPPABLE";
+        : entry.tier || "COLD";
     }
     this.lastContextMetrics = metrics;
     if (options.logMetrics) console.info("[NCE Agent context]", metrics);
+    if (options.logMetrics) {
+      console.info("[NCE Agent context breakdown]", tokenBreakdown);
+    }
     if (options.debugDecisions) {
       console.debug(
         "[NCE Agent context decisions]",
@@ -2895,6 +3157,36 @@ class Agent {
       error.body = result;
       error.response = result?.response || null;
       throw error;
+    }
+    return result;
+  }
+  recordModelPromptUsage(result) {
+    const usage = result?.usage || result?.data?.usage || null;
+    const actualPromptTokens = Number(
+      usage?.prompt_tokens ?? usage?.input_tokens ?? usage?.promptTokens,
+    );
+    if (Number.isFinite(actualPromptTokens) && actualPromptTokens >= 0) {
+      this.cumulativeActualPromptTokens += actualPromptTokens;
+    }
+    if (this.lastContextMetrics) {
+      this.lastContextMetrics.actualPromptTokens = Number.isFinite(
+        actualPromptTokens,
+      )
+        ? actualPromptTokens
+        : null;
+      this.lastContextMetrics.cumulativeEstimatedPromptTokens =
+        this.cumulativeEstimatedPromptTokens;
+      this.lastContextMetrics.cumulativeActualPromptTokens =
+        this.cumulativeActualPromptTokens;
+      if (this.contextCompaction.logMetrics) {
+        console.info("[NCE Agent context usage]", {
+          estimatedPromptTokens: this.lastContextMetrics.estimatedModelTokens,
+          actualPromptTokens: this.lastContextMetrics.actualPromptTokens,
+          cumulativeEstimatedPromptTokens:
+            this.cumulativeEstimatedPromptTokens,
+          cumulativeActualPromptTokens: this.cumulativeActualPromptTokens,
+        });
+      }
     }
     return result;
   }
@@ -3241,6 +3533,9 @@ class Agent {
       "supportsTools",
       "supportsToolChoice",
       "contextWindow",
+      "maxOutputTokens",
+      "maxTokens",
+      "modelConfig",
     ]) {
       if (activeConfig[key] !== undefined) runConfig[key] = activeConfig[key];
     }
@@ -4201,10 +4496,12 @@ class Agent {
   registerEditorTools() {
     this.registerTool("get_editor_context", {
       description: "Obtenir le contexte minimal de l'éditeur.",
+      readOnly: true,
       execute: () => this.buildEditorContext(),
     });
     this.registerTool("get_cursor", {
       description: "Obtenir la position du curseur.",
+      readOnly: true,
       execute: () => ({
         available: Boolean(this.editor?.cursorController),
         position: this.editor?.cursorController
@@ -4217,10 +4514,12 @@ class Agent {
     });
     this.registerTool("read_selection", {
       description: "Lire la sélection actuelle.",
+      readOnly: true,
       execute: () => this.readSelection(),
     });
     this.registerTool("read_active_file", {
       description: "Lire une portion du fichier actif.",
+      readOnly: true,
       parameters: {
         type: "object",
         properties: {
@@ -4232,6 +4531,7 @@ class Agent {
     });
     this.registerTool("search_active_file", {
       description: "Rechercher dans le fichier actif.",
+      readOnly: true,
       parameters: {
         type: "object",
         properties: {
@@ -4464,6 +4764,7 @@ IMPORTANT :
     });
     this.registerTool("read_file", {
       description: "Lire un fichier du projet.",
+      readOnly: true,
       parameters: {
         type: "object",
         properties: {
@@ -4500,11 +4801,13 @@ IMPORTANT :
     });
     this.registerTool("list_project_files", {
       description: "Lister les fichiers du projet.",
+      readOnly: true,
       parameters: { type: "object", properties: { path: { type: "string" } } },
       execute: (args) => this.listProjectFiles(args.path),
     });
     this.registerTool("search_project_files", {
       description: "Rechercher dans le projet.",
+      readOnly: true,
       parameters: {
         type: "object",
         properties: { query: { type: "string" } },

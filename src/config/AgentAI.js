@@ -14,6 +14,8 @@ const AgentAI = {
   contextCompaction: {
     enabled: true,
     recentIterations: 2,
+    warmIterations: 6,
+    maxPreviouslyReadFiles: 100,
     softLimitRatio: 0.4,
     hardLimitRatio: 0.7,
     criticalLimitRatio: 0.85,
@@ -50,6 +52,7 @@ const AgentAI = {
         qwen3: {
           id: "qwen3",
           name: "Qwen 3",
+          contextWindow: 40960,
         },
       },
     },
@@ -76,31 +79,44 @@ const AgentAI = {
         "cohere/north-mini-code:free": {
           id: "cohere/north-mini-code:free",
           name: "North Mini Code Free",
+          contextWindow: 256000,
+          maxOutputTokens: 64000,
         },
 
         "poolside/laguna-s-2.1:free": {
           id: "poolside/laguna-s-2.1:free",
           name: "Laguna S 2.1 Free",
+          contextWindow: 1048576,
+          maxOutputTokens: 131072,
         },
 
         "nvidia/nemotron-3-ultra-550b-a55b:free": {
           id: "nvidia/nemotron-3-ultra-550b-a55b:free",
           name: "Nemotron 3 Ultra Free",
+          contextWindow: 512288,
+          maxOutputTokens: 16384,
         },
 
         "z-ai/glm-5.2:free": {
           id: "z-ai/glm-5.2:free",
           name: "GLM 5.2 Free",
+          contextWindow: 1048576,
+          maxOutputTokens: 131072,
         },
 
         "qwen/qwen3-coder:free": {
           id: "qwen/qwen3-coder:free",
           name: "Qwen3 Coder 480B Free",
+          contextWindow: 1048576,
         },
 
         "openai/gpt-4o-mini": {
           id: "openai/gpt-4o-mini",
           name: "GPT-4o mini",
+          contextWindow: 128000,
+          maxOutputTokens: 16384,
+          supportsTools: false,
+          supportsToolChoice: false,
         },
       },
     },
@@ -245,11 +261,17 @@ const AgentAI = {
         ? modelConfig.contextWindow
         : null,
 
+      maxOutputTokens: Number.isFinite(modelConfig.maxOutputTokens)
+        ? modelConfig.maxOutputTokens
+        : null,
+
       fallbackChain: this.getFallbackChain(provider.id, model),
 
       temperature: agent.temperature,
 
-      maxTokens: agent.maxTokens,
+      maxTokens: Number.isFinite(modelConfig.maxOutputTokens)
+        ? Math.min(agent.maxTokens, modelConfig.maxOutputTokens)
+        : agent.maxTokens,
 
       maxIterations: this.maxIterations,
 
