@@ -7,6 +7,7 @@ class AgentSidebar extends Sidebar {
     this.messagesElement = null;
     this.changesElement = null;
     this.inputElement = null;
+    this.inputWrapperElement = null;
     this.sendButton = null;
     this.typingIndicatorElement = null;
     this.markdownRenderer = new MarkdownRenderer({
@@ -39,6 +40,9 @@ class AgentSidebar extends Sidebar {
       },
       onModelStatus: (event, context) => {
         this.handleModelStatus(event, context);
+      },
+      onAuthenticationRequired: (classification, context) => {
+        return this.replaceInvalidApiKey(classification, context);
       },
       onFinish: (_result, context) => {
         this.finishActivityGroup(context);
@@ -81,6 +85,10 @@ class AgentSidebar extends Sidebar {
   }
 
   handleToolEnd(toolName, result, context = {}, fullResult = result) {
+    const session = this.getSession(context.sessionId);
+    if (!session || !session.isGenerating || session.runId !== context.runId) {
+      return;
+    }
     const activityItem = this.completeActivityItem(toolName, result, context);
 
     const payload = fullResult?.result ?? fullResult;
@@ -100,9 +108,6 @@ class AgentSidebar extends Sidebar {
     ) {
       return;
     }
-
-    const session = this.getSession(context?.sessionId);
-    if (!session) return;
 
     const filePath = typeof payload.path === "string" ? payload.path : "";
     const absolutePath =
@@ -422,18 +427,34 @@ class AgentSidebar extends Sidebar {
     return null;
   }
 
-  getRunSegment(session, runId, type, create = false) {
+  getRunSegment(session, runId, type, create = false, context = {}) {
     if (!session || !Number.isInteger(runId)) return null;
     if (!Array.isArray(session.segments)) session.segments = [];
     const current = session.currentSegment;
-    if (current?.runId === runId && current.type === type) return current;
+    const segmentKey = context.segmentId || context.requestId || null;
+    if (
+      current?.runId === runId &&
+      current.type === type &&
+      (!segmentKey || current.segmentKey === segmentKey)
+    ) {
+      return current;
+    }
     if (!create) return null;
-    if (current) current.status = "complete";
+    if (current) {
+      current.finishedAt = Date.now();
+      current.status =
+        current.type === "activity"
+          ? current.hasErrors
+            ? "error"
+            : "success"
+          : "complete";
+    }
     const segment = {
       id: `${session.id}:${runId}:segment-${session.segments.length}`,
       type,
       runId,
       sessionId: session.id,
+      segmentKey,
       content: type === "reasoning" || type === "assistant" ? "" : undefined,
       status: "streaming",
       startedAt: Date.now(),
@@ -505,8 +526,11 @@ class AgentSidebar extends Sidebar {
 
   handleToolStart(toolName, args = {}, context = {}) {
     const session = this.getSession(context.sessionId);
+    if (!session || !session.isGenerating || session.runId !== context.runId) {
+      return;
+    }
     const group = this.getActivityGroup(session, context.runId, true);
-    if (!session || !group) return;
+    if (!group) return;
     group.role = "activity";
     group.status = "running";
     session.streamingMessage = null;
@@ -597,8 +621,11 @@ class AgentSidebar extends Sidebar {
 
   handleModelStatus(event = {}, context = {}) {
     const session = this.getSession(context.sessionId);
+    if (!session || !session.isGenerating || session.runId !== context.runId) {
+      return;
+    }
     const group = this.getActivityGroup(session, context.runId, true);
-    if (!session || !group || !event.userMessage) return;
+    if (!group || !event.userMessage) return;
     group.role = "activity";
     group.status = "running";
     session.streamingMessage = null;
@@ -648,8 +675,12 @@ class AgentSidebar extends Sidebar {
       context.runId,
       "reasoning",
       true,
+      context,
     );
-    segment.content += reasoning;
+    segment.content =
+      context.contentMode === "snapshot"
+        ? reasoning
+        : `${segment.content || ""}${reasoning}`;
     segment.status = "streaming";
     if (session.id !== this.activeSessionId || !this.messagesElement) return;
 
@@ -995,6 +1026,7 @@ class AgentSidebar extends Sidebar {
 
     const inputWrapper = document.createElement("div");
     inputWrapper.className = "agent-sidebar-input-wrapper";
+    this.inputWrapperElement = inputWrapper;
 
     const textarea = document.createElement("textarea");
     textarea.className = "agent-sidebar-input";
@@ -1753,11 +1785,15 @@ class AgentSidebar extends Sidebar {
       context.runId,
       "assistant",
       true,
+      context,
     );
     const shouldScroll =
       session.id === this.activeSessionId && this.shouldAutoScrollMessages();
     message.role = "agent";
-    message.content = markdown;
+    message.content =
+      context.contentMode === "delta"
+        ? `${message.content || ""}${markdown}`
+        : markdown;
     message.timestamp ||= this.formatTime();
     message.streaming = true;
     session.streamingMessage = message;
@@ -1781,7 +1817,7 @@ class AgentSidebar extends Sidebar {
     }
 
     const shouldFollowScroll = this.shouldAutoScrollMessages();
-    this.markdownRenderer.update(markdown, element, {
+    this.markdownRenderer.update(message.content, element, {
       onRendered: () => {
         if (shouldFollowScroll && session.id === this.activeSessionId) {
           this.scrollMessagesToBottom();
@@ -2362,6 +2398,11 @@ class AgentSidebar extends Sidebar {
 
     const session = this.getActiveSession();
 
+    this.inputWrapperElement?.classList.toggle(
+      "agent-sidebar-input-running",
+      !!session?.isGenerating,
+    );
+
     if (this.sendButton) {
       const icon = this.sendButton.querySelector("i");
       const isGenerating = !!session?.isGenerating;
@@ -2445,7 +2486,7 @@ class AgentSidebar extends Sidebar {
     return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
 
-  requestApiKey(provider) {
+  requestApiKey(provider, options = {}) {
     if (!this.container) return Promise.resolve("");
 
     if (this.apiKeyPanel) {
@@ -2460,11 +2501,15 @@ class AgentSidebar extends Sidebar {
     panel.className = "agent-sidebar-api-key-panel";
 
     const title = document.createElement("h3");
-    title.textContent = `${provider.name} API key`;
+    title.textContent = options.invalid
+      ? `Replace ${provider.name} API key`
+      : `${provider.name} API key`;
     panel.appendChild(title);
 
     const description = document.createElement("p");
-    description.textContent = "Enter your API key to use this model.";
+    description.textContent = options.invalid
+      ? "The current API key is missing or invalid. Enter a new key to retry."
+      : "Enter your API key to use this model.";
     panel.appendChild(description);
 
     const input = document.createElement("input");
@@ -2500,11 +2545,13 @@ class AgentSidebar extends Sidebar {
     const close = (value) => {
       if (!this.apiKeyPanel) return;
       this.apiKeyPanel = null;
+      options.signal?.removeEventListener?.("abort", onAbort);
       overlay.remove();
       resolveRequest(value);
     };
+    const onAbort = () => close("");
 
-    this.apiKeyPanel = { input, promise };
+    this.apiKeyPanel = { input, promise, close };
     panel.addEventListener("submit", (event) => {
       event.preventDefault();
       const value = input.value.trim();
@@ -2514,9 +2561,51 @@ class AgentSidebar extends Sidebar {
     overlay.addEventListener("click", (event) => {
       if (event.target === overlay) close("");
     });
+    if (options.signal?.aborted) {
+      close("");
+      return promise;
+    }
+    options.signal?.addEventListener?.("abort", onAbort, { once: true });
 
     input.focus();
     return promise;
+  }
+
+  async replaceInvalidApiKey(classification = {}, context = {}) {
+    const providerId =
+      context.providerId ||
+      classification.configuredProvider ||
+      classification.provider ||
+      this.currentProviderId;
+    const provider = AgentAI.getProvider(providerId);
+    if (!provider?.requiresApiKey) return "";
+
+    this.apiKeys.delete(provider.id);
+    if (this.currentProviderId === provider.id) {
+      this.agent.setProvider({ ...provider, apiKey: null });
+    }
+    try {
+      await this.editor.api.setAgentApiKey?.(provider.id, "");
+    } catch (error) {
+      console.error("Impossible de supprimer la clé API invalide :", error);
+    }
+
+    const apiKey = await this.requestApiKey(provider, {
+      invalid: true,
+      signal: this.agent.abortController?.signal,
+    });
+    if (!apiKey) return "";
+
+    this.apiKeys.set(provider.id, apiKey);
+    if (this.currentProviderId === provider.id) {
+      this.agent.setProvider({ ...provider, apiKey });
+    }
+    try {
+      await this.editor.api.setAgentApiKey?.(provider.id, apiKey);
+    } catch (error) {
+      console.error("Impossible d'enregistrer la nouvelle clé API :", error);
+    }
+    return apiKey;
   }
 
   generateSessionId() {
@@ -2772,6 +2861,7 @@ class AgentSidebar extends Sidebar {
             session.runId,
             "assistant",
             true,
+            { segmentId: `${session.runId}:terminal-response` },
           );
           message.role = "agent";
           message.content = agentReply;
@@ -2793,14 +2883,22 @@ class AgentSidebar extends Sidebar {
         if (session.streamingMessage) {
           session.streamingMessage.streaming = false;
         }
-        session.messages.push({
-          role: "agent",
-          content:
-            error?.userMessage ||
-            error?.message ||
-            "La requête vers le modèle a échoué.",
-          timestamp: this.formatTime(),
-        });
+        const errorMessage = this.getRunSegment(
+          session,
+          session.runId,
+          "assistant",
+          true,
+          { segmentId: `${session.runId}:terminal-error` },
+        );
+        errorMessage.role = "agent";
+        errorMessage.content =
+          error?.userMessage ||
+          error?.message ||
+          "La requête vers le modèle a échoué.";
+        errorMessage.timestamp = this.formatTime();
+        errorMessage.streaming = false;
+        errorMessage.hasErrors = true;
+        errorMessage.status = "error";
       }
     } finally {
       const shouldScroll = this.shouldAutoScrollMessages();

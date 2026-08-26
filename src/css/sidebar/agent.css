@@ -921,21 +921,75 @@
 
 /* Le grand conteneur qui englobe tout (textarea + boutons du bas) */
 .agent-sidebar-input-wrapper {
+  --agent-input-border-radius: 8px;
+  --agent-running-accent: var(
+    --accent-color,
+    var(--accent-primary, #007acc)
+  );
+
   position: relative;
+  isolation: isolate;
   width: 100%;
   display: flex;
   flex-direction: column;
   
   border: 1px solid var(--border-primary, #444);
-  border-radius: 8px;
+  border-radius: var(--agent-input-border-radius);
   background: var(--bg-secondary, #252526);
   
   transition: border-color 0.2s ease;
 }
 
-/* Bordure bleue quand on clique dans la zone de texte */
-.agent-sidebar-input-wrapper:focus-within {
-  border-color: var(--accent-color, #007acc);
+@property --agent-running-border-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.agent-sidebar-input-wrapper.agent-sidebar-input-running::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  padding: 1px;
+  border-radius: calc(var(--agent-input-border-radius) + 1px);
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--agent-running-border-angle),
+    transparent 0deg,
+    transparent 235deg,
+    color-mix(in srgb, var(--agent-running-accent) 28%, transparent) 270deg,
+    var(--agent-running-accent) 305deg,
+    color-mix(in srgb, var(--agent-running-accent) 68%, white) 320deg,
+    transparent 350deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: agent-sidebar-running-border 2.7s linear infinite;
+}
+
+@keyframes agent-sidebar-running-border {
+  to {
+    --agent-running-border-angle: 360deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-sidebar-input-wrapper.agent-sidebar-input-running::before {
+    background: color-mix(
+      in srgb,
+      var(--agent-running-accent) 78%,
+      transparent
+    );
+    animation: none;
+  }
 }
 
 /* Textarea transparent à l'intérieur */

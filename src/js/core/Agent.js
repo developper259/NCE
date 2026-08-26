@@ -122,6 +122,8 @@ class Agent {
     this.maxModelFallbacks = 3;
     this.maxRetryDelayMs = 30000;
     this.modelRequestState = null;
+    this.modelRequestCounter = 0;
+    this.modelOutputStates = new Map();
     this.registerEditorTools();
   }
 
@@ -261,6 +263,7 @@ class Agent {
       "onToolStart",
       "onToolEnd",
       "onModelStatus",
+      "onAuthenticationRequired",
       "onError",
       "onFinish",
     ]) {
@@ -364,6 +367,8 @@ class Agent {
     this.fileContextVersion = 0;
     this.readAfterFailurePaths = new Set();
     this.modelRequestState = null;
+    this.modelRequestCounter = 0;
+    this.modelOutputStates = new Map();
     try {
       const editorContext = await this.getContext();
       runConfig.editorContext = editorContext;
@@ -551,6 +556,92 @@ class Agent {
       .join("\n")}\n\nVérifications post-écriture effectuées.`;
   }
 
+  assertRunActive(runId, controller = this.abortController) {
+    if (
+      this.stopRequested ||
+      runId !== this.runId ||
+      controller?.signal?.aborted
+    ) {
+      throw this.abortError();
+    }
+  }
+
+  createModelOutputContext(runId, phase = "main") {
+    this.modelRequestCounter += 1;
+    return {
+      sessionId: this.currentSessionId,
+      runId,
+      requestId: `${runId}:${phase}:${this.modelRequestCounter}`,
+    };
+  }
+
+  normalizeModelOutput(value, context = {}, mode = "snapshot") {
+    if (typeof value !== "string" || !value) {
+      return { delta: "", fullText: "", reset: false, revision: 0 };
+    }
+    const channel = context.channel || "text";
+    const requestId = context.requestId || "legacy";
+    const key = `${context.runId ?? ""}:${requestId}:${channel}`;
+    let state = this.modelOutputStates.get(key);
+    if (!state) {
+      state = { fullText: "", revision: 0 };
+      this.modelOutputStates.set(key, state);
+    }
+
+    let delta = value;
+    let reset = false;
+    if (mode === "delta") {
+      state.fullText += value;
+    } else if (mode === "snapshot") {
+      if (value === state.fullText) {
+        delta = "";
+      } else if (value.startsWith(state.fullText)) {
+        delta = value.slice(state.fullText.length);
+      } else if (state.fullText) {
+        state.revision += 1;
+        reset = true;
+      }
+      state.fullText = value;
+    } else {
+      if (value === state.fullText) {
+        delta = "";
+      } else if (value.startsWith(state.fullText)) {
+        delta = value.slice(state.fullText.length);
+        state.fullText = value;
+      } else {
+        state.fullText += value;
+      }
+    }
+
+    return {
+      delta,
+      fullText: state.fullText,
+      reset,
+      revision: state.revision,
+    };
+  }
+
+  emitModelOutput(channel, value, context, mode = "snapshot") {
+    if (typeof value !== "string" || !value) return;
+    this.assertRunActive(context.runId);
+    const normalized = this.normalizeModelOutput(
+      value,
+      { ...context, channel },
+      mode,
+    );
+    if (!normalized.delta && !normalized.reset) return;
+    const callback =
+      channel === "reasoning"
+        ? this.callbacks.onReasoning
+        : this.callbacks.onToken;
+    callback?.(normalized.delta, {
+      ...context,
+      contentMode: "delta",
+      resetSegment: normalized.reset,
+      segmentId: `${context.requestId}:${channel}:${normalized.revision}`,
+    });
+  }
+
   resolveToolChoice(message) {
     return "auto";
   }
@@ -582,28 +673,41 @@ class Agent {
       iteration <= (runConfig?.maxIterations ?? this.maxIterations);
       iteration += 1
     ) {
-      if (this.stopRequested || runId !== this.runId) throw this.abortError();
+      this.assertRunActive(runId, controller);
+      const outputContext = this.createModelOutputContext(runId, "main");
       const modelResponse = await this.requestModel(controller, runConfig);
-      if (this.stopRequested || runId !== this.runId) throw this.abortError();
+      this.assertRunActive(runId, controller);
       const parsed = this.parseResponse(modelResponse);
-      if (parsed.text) {
-        finalResponse = parsed.text;
-        finalReasoning = parsed.reasoning || finalReasoning;
-      }
+      finalResponse = parsed.text || "";
+      finalReasoning = parsed.reasoning || finalReasoning;
       if (parsed.reasoning) {
-        this.callbacks.onReasoning?.(parsed.reasoning, {
-          sessionId: this.currentSessionId,
-          runId,
-        });
+        this.emitModelOutput(
+          "reasoning",
+          parsed.reasoning,
+          outputContext,
+          "snapshot",
+        );
       }
-      if (parsed.text && !requiresModification) {
-        this.callbacks.onToken?.(parsed.text, {
-          sessionId: this.currentSessionId,
-          runId,
-        });
+      if (
+        parsed.text &&
+        (!requiresModification ||
+          (parsed.toolCalls.length > 0 && !finalSummaryRequested))
+      ) {
+        this.emitModelOutput(
+          "assistant",
+          parsed.text,
+          outputContext,
+          "snapshot",
+        );
       }
       if (!parsed.toolCalls.length) {
         if (requiresModification && successfulWriteCount === 0) {
+          this.emitModelOutput(
+            "assistant",
+            parsed.text,
+            outputContext,
+            "snapshot",
+          );
           if (missingWriteRetries < 2) {
             missingWriteRetries += 1;
             this.messages.push({
@@ -644,10 +748,12 @@ class Agent {
             finalResponse = this.buildSuccessfulWriteFallback(successfulWrites);
           }
           if (finalResponse) {
-            this.callbacks.onToken?.(finalResponse, {
-              sessionId: this.currentSessionId,
-              runId,
-            });
+            this.emitModelOutput(
+              "assistant",
+              finalResponse,
+              outputContext,
+              looksLikeDump && !allowsFullCodeResponse ? "delta" : "snapshot",
+            );
           }
         }
         return failedModifications.length > 0
@@ -665,10 +771,12 @@ class Agent {
       }
       if (finalSummaryRequested) {
         finalResponse = this.buildSuccessfulWriteFallback(successfulWrites);
-        this.callbacks.onToken?.(finalResponse, {
-          sessionId: this.currentSessionId,
-          runId,
-        });
+        this.emitModelOutput(
+          "assistant",
+          finalResponse,
+          outputContext,
+          "delta",
+        );
         return {
           response: finalResponse,
           reasoning: finalReasoning,
@@ -704,8 +812,12 @@ class Agent {
           : {}),
       });
       for (const call of executableToolCalls) {
-        if (this.stopRequested || runId !== this.runId) throw this.abortError();
-        const toolResult = await this.executeToolCall(call);
+        this.assertRunActive(runId, controller);
+        const toolResult = await this.executeToolCall(call, {
+          sessionId: this.currentSessionId,
+          runId,
+        });
+        this.assertRunActive(runId, controller);
         this.messages.push({
           role: "tool",
           tool_call_id: call.id,
@@ -779,18 +891,33 @@ class Agent {
               role: "user",
               content: `Le dernier patch a produit une erreur de syntaxe dans le script. Détail de l'erreur : ${validation.error}. Corrige le fichier et réécris uniquement la partie nécessaire pour rendre le code valide.`,
             });
+            const repairContext = this.createModelOutputContext(
+              runId,
+              "repair",
+            );
             const repairResponse = await this.requestModel(
               controller,
               runConfig,
             );
+            this.assertRunActive(runId, controller);
             const repaired = this.parseResponse(repairResponse);
+            if (repaired.reasoning) {
+              this.emitModelOutput(
+                "reasoning",
+                repaired.reasoning,
+                repairContext,
+                "snapshot",
+              );
+            }
             if (repaired.text) {
               finalResponse = repaired.text;
               finalReasoning = repaired.reasoning || finalReasoning;
-              this.callbacks.onToken?.(repaired.text, {
-                sessionId: this.currentSessionId,
-                runId,
-              });
+              this.emitModelOutput(
+                "assistant",
+                repaired.text,
+                repairContext,
+                "snapshot",
+              );
             }
             this.messages.push(repaired.assistantMessage);
             if (!repaired.toolCalls.length) {
@@ -804,7 +931,11 @@ class Agent {
               }
             }
             for (const repairCall of repaired.toolCalls) {
-              const repairToolResult = await this.executeToolCall(repairCall);
+              const repairToolResult = await this.executeToolCall(repairCall, {
+                sessionId: this.currentSessionId,
+                runId,
+              });
+              this.assertRunActive(runId, controller);
               this.messages.push({
                 role: "tool",
                 tool_call_id: repairCall.id,
@@ -876,6 +1007,48 @@ class Agent {
           retryCount,
           fallbackCount: state.modelFallbackCount,
         });
+
+        if (
+          classified.category === "AUTH_ERROR" &&
+          !state.authenticationCancelledProviders.has(
+            activeConfig.providerId,
+          ) &&
+          typeof this.callbacks.onAuthenticationRequired === "function"
+        ) {
+          let replacementKey = "";
+          try {
+            replacementKey = await this.callbacks.onAuthenticationRequired(
+              classified,
+              {
+                sessionId: config.sessionId ?? this.currentSessionId,
+                runId: config.runId ?? this.runId,
+                providerId: activeConfig.providerId,
+              },
+            );
+          } catch (authenticationError) {
+            console.error(
+              "[NCE Agent model] impossible de remplacer la clé API",
+              authenticationError,
+            );
+          }
+          this.assertRunActive(config.runId, controller);
+          if (typeof replacementKey === "string" && replacementKey.trim()) {
+            const apiKey = replacementKey.trim();
+            activeConfig.provider = {
+              ...activeConfig.provider,
+              apiKey,
+            };
+            if (config.providerId === activeConfig.providerId) {
+              config.provider = { ...config.provider, apiKey };
+            }
+            state.currentConfig = activeConfig;
+            retryCount = 0;
+            continue;
+          }
+          state.authenticationCancelledProviders.add(
+            activeConfig.providerId,
+          );
+        }
 
         const retryDelay = this.getModelRetryDelay(classified, retryCount);
         const mayRetry =
@@ -1253,6 +1426,7 @@ class Agent {
       failures: [],
       providerRetryCount: 0,
       modelFallbackCount: 0,
+      authenticationCancelledProviders: new Set(),
     };
     return this.modelRequestState;
   }
@@ -1705,7 +1879,7 @@ class Agent {
       }));
   }
 
-  async executeToolCall(call) {
+  async executeToolCall(call, executionContext = {}) {
     const name = call?.function?.name;
     const toolCallId = typeof call?.id === "string" ? call.id : "";
     if (toolCallId && this.executedToolCalls.has(toolCallId)) {
@@ -1810,8 +1984,8 @@ class Agent {
       return result;
     }
     const callbackContext = {
-      sessionId: this.currentSessionId,
-      runId: this.runId,
+      sessionId: executionContext.sessionId ?? this.currentSessionId,
+      runId: executionContext.runId ?? this.runId,
       toolCallId: toolCallId || null,
     };
     this.callbacks.onToolStart?.(name, normalizedArgs, callbackContext);

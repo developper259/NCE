@@ -50,7 +50,6 @@ const AgentAI = {
         "z-ai/glm-5.2:free",
         "qwen/qwen3-coder:free",
         "openai/gpt-4o-mini",
-        { provider: "zenmux", model: "z-ai/glm-5.2-free" },
       ],
 
       models: {
@@ -82,24 +81,6 @@ const AgentAI = {
         "openai/gpt-4o-mini": {
           id: "openai/gpt-4o-mini",
           name: "GPT-4o mini",
-        },
-      },
-    },
-
-    zenmux: {
-      id: "zenmux",
-      name: "ZenMux",
-      baseURL: "https://zenmux.ai/api/v1",
-      requiresApiKey: true,
-      supportsTools: true,
-      supportsToolChoice: true,
-      defaultModel: "z-ai/glm-5.2-free",
-      fallbackModels: [],
-
-      models: {
-        "z-ai/glm-5.2-free": {
-          id: "z-ai/glm-5.2-free",
-          name: "GLM 5.2 Free",
         },
       },
     },

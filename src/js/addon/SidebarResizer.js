@@ -5,7 +5,7 @@ class SidebarResizer {
     this.currentResizer = null;
     this.startX = 0;
     this.startWidth = 0;
-    this.minWidth = 150;
+    this.minWidth = 200;
     this.maxWidth = 500;
 
     this.init();
