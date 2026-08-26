@@ -98,13 +98,15 @@ class Agent {
     this.isRunning = false;
     this.stopRequested = false;
     this.runId = 0;
-    this.maxIterations = 20;
+    this.maxIterations = 30;
     this.temperature = undefined;
     this.maxTokens = undefined;
     this.permissions = "code";
     this.messages = [];
     this.fileSnapshots = new Map();
     this.readFileContexts = new Map();
+    this.fileContextVersion = 0;
+    this.readAfterFailurePaths = new Set();
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
     this.systemPrompt = "";
@@ -144,16 +146,20 @@ class Agent {
     console.info("[NCE Agent tool]", {
       name,
       mode:
-        name === "modify_file"
-          ? "workspace-text"
-          : args?.oldText !== undefined
-            ? "text"
-            : "coordinates",
+        name.startsWith("read") || name.startsWith("search")
+          ? "read"
+          : name === "modify_file"
+            ? "workspace-text"
+            : args?.oldText !== undefined
+              ? "text"
+              : "coordinates",
       request: {
         path: args?.path,
         oldText: preview(args?.oldText),
         newText: preview(args?.newText ?? args?.text),
         expectedText: preview(args?.expectedText),
+        nearLine: args?.nearLine ?? null,
+        revision: args?.revision ?? null,
         range:
           args?.startLine !== undefined ||
           args?.startColumn !== undefined ||
@@ -198,6 +204,7 @@ class Agent {
   setCallbacks(callbacks = {}) {
     for (const name of [
       "onToken",
+      "onReasoning",
       "onToolStart",
       "onToolEnd",
       "onError",
@@ -290,6 +297,8 @@ class Agent {
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
     this.readFileContexts = new Map();
+    this.fileContextVersion = 0;
+    this.readAfterFailurePaths = new Set();
     try {
       const editorContext = await this.getContext();
       this.messages = [
@@ -305,7 +314,12 @@ class Agent {
       }
       this.appendHistory(options.history);
       this.messages.push({ role: "user", content: userMessage });
-      const result = await this.runLoop(runId, controller, runConfig);
+      const result = await this.runLoop(runId, controller, runConfig, {
+        requiresModification:
+          runConfig.permissions === "code" &&
+          this.detectModificationIntent(userMessage),
+        allowsFullCodeResponse: this.requestsFullCodeResponse(userMessage),
+      });
       this.callbacks.onFinish?.(result, runContext);
       return result;
     } catch (error) {
@@ -337,6 +351,10 @@ class Agent {
       "modifie",
       "change",
       "ajoute",
+      "crée",
+      "cree",
+      "écris",
+      "ecris",
       "supprime",
       "renomme",
       "refactor",
@@ -347,6 +365,8 @@ class Agent {
       "fix",
       "update",
       "add",
+      "create",
+      "write",
       "remove",
       "rename",
       "optimize",
@@ -372,16 +392,119 @@ class Agent {
     );
   }
 
+  requestsFullCodeResponse(message) {
+    if (typeof message !== "string") return false;
+    const normalized = message.toLowerCase();
+    if (
+      /(?:ne|n')\s+(?:renvoie|recopie|affiche|montre|fournis|donne)[^.!?\n]{0,80}(?:code|fichier|patch|diff)/.test(
+        normalized,
+      )
+    ) {
+      return false;
+    }
+    return [
+      /montre(?:-moi| moi)? (?:le |la |les )?(?:code|fichier)/,
+      /(?:donne|fournis)(?:-moi| moi)? (?:le |la )?(?:fichier complet|code complet|patch|diff)/,
+      /affiche [^.!?\n]{0,30}(?:code|fichier|fonction)/,
+      /(?:show|display) (?:me )?(?:the )?(?:code|full file|complete file|patch|diff)/,
+      /(?:give|send) me (?:the )?(?:full file|complete file|code|patch|diff)/,
+    ].some((pattern) => pattern.test(normalized));
+  }
+
+  isLikelyFullFileDump(text) {
+    if (typeof text !== "string") return false;
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    const lines = trimmed.split(/\r?\n/);
+    const dumpIntroduction =
+      /(?:voici|ci-dessous).{0,40}(?:fichier complet|fichier mis à jour|version finale)|(?:updated|full|complete) file\s*:/i.test(
+        trimmed.slice(0, 500),
+      );
+    const fencedBlocks = [...trimmed.matchAll(/```[^\n]*\n([\s\S]*?)```/g)];
+    const largestFenceLines = fencedBlocks.reduce(
+      (largest, match) =>
+        Math.max(largest, String(match[1] || "").split(/\r?\n/).length),
+      0,
+    );
+    if (largestFenceLines >= 30) return true;
+    if (dumpIntroduction && (lines.length >= 20 || trimmed.length >= 1500)) {
+      return true;
+    }
+    if (lines.length < 40 && trimmed.length < 5000) return false;
+    let codeLikeLines = 0;
+    for (const line of lines) {
+      const value = line.trim();
+      if (!value) continue;
+      if (
+        /[;{}]$/.test(value) ||
+        /^(?:import|export|const|let|var|class|interface|type|function|async|def|public|private|protected|#include)\b/.test(
+          value,
+        ) ||
+        /^(?:<\/?[A-Za-z]|[.#][\w-]+\s*\{)/.test(value)
+      ) {
+        codeLikeLines += 1;
+      }
+    }
+    return (
+      (lines.length >= 60 && codeLikeLines >= 20) ||
+      (trimmed.length >= 12000 && lines.length >= 40)
+    );
+  }
+
+  buildSuccessfulWriteFallback(successfulWrites = []) {
+    const writes = successfulWrites.filter(Boolean);
+    if (!writes.length) {
+      return "Les modifications ont été appliquées et vérifiées.";
+    }
+    if (writes.length === 1) {
+      const write = writes[0];
+      if (write.tool === "create_file") {
+        return `Fichier créé et vérifié : ${write.path}.`;
+      }
+      if (write.tool === "rename_file") {
+        return `Fichier renommé et vérifié : ${write.path} → ${write.newPath}.`;
+      }
+      return `Modification appliquée et vérifiée dans ${write.path}.`;
+    }
+    const files = [];
+    for (const write of writes) {
+      const label =
+        write.tool === "rename_file"
+          ? `${write.path} → ${write.newPath}`
+          : write.path;
+      if (label && !files.includes(label)) files.push(label);
+    }
+    return `Modifications appliquées dans ${files.length} fichiers :\n${files
+      .map((filePath) => `- ${filePath}`)
+      .join("\n")}\n\nVérifications post-écriture effectuées.`;
+  }
+
   resolveToolChoice(message) {
     return "auto";
   }
 
-  async runLoop(runId, controller, runConfig = this.runConfig) {
+  async runLoop(runId, controller, runConfig = this.runConfig, runState = {}) {
     let finalResponse = "";
     let finalReasoning = "";
     let postEditRepairAttempts = 0;
     let modificationFailures = 0;
     let failedModifications = [];
+    const requiresModification = runState.requiresModification === true;
+    const allowsFullCodeResponse = runState.allowsFullCodeResponse === true;
+    let successfulWriteCount = 0;
+    const successfulWrites = [];
+    let missingWriteRetries = 0;
+    let finalSummaryRequested = false;
+    const writeTools = new Set(["modify_file", "create_file", "rename_file"]);
+    const readTools = new Set([
+      "read_file",
+      "read_active_file",
+      "search_active_file",
+      "search_project_files",
+      "get_editor_context",
+      "get_cursor",
+      "read_selection",
+    ]);
     for (
       let iteration = 1;
       iteration <= (runConfig?.maxIterations ?? this.maxIterations);
@@ -394,15 +517,70 @@ class Agent {
       if (parsed.text) {
         finalResponse = parsed.text;
         finalReasoning = parsed.reasoning || finalReasoning;
+      }
+      if (parsed.reasoning) {
+        this.callbacks.onReasoning?.(parsed.reasoning, {
+          sessionId: this.currentSessionId,
+          runId,
+        });
+      }
+      if (parsed.text && !requiresModification) {
         this.callbacks.onToken?.(parsed.text, {
           sessionId: this.currentSessionId,
           runId,
         });
       }
-      if (!parsed.toolCalls.length)
+      if (!parsed.toolCalls.length) {
+        if (requiresModification && successfulWriteCount === 0) {
+          if (missingWriteRetries < 2) {
+            missingWriteRetries += 1;
+            this.messages.push({
+              role: "system",
+              content:
+                "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise modify_file, create_file ou rename_file.",
+            });
+            continue;
+          }
+          return {
+            response:
+              "La modification n'a pas été effectuée : aucun outil d'écriture n'a réussi.",
+            reasoning: finalReasoning,
+            error: {
+              code: "WRITE_REQUIRED_NOT_PERFORMED",
+              message: "Aucun outil d'écriture n'a réussi pour cette demande.",
+            },
+            iterations: iteration,
+          };
+        }
+        if (requiresModification && successfulWriteCount > 0) {
+          const looksLikeDump = this.isLikelyFullFileDump(parsed.text);
+          if (
+            looksLikeDump &&
+            !allowsFullCodeResponse &&
+            !finalSummaryRequested
+          ) {
+            finalSummaryRequested = true;
+            finalResponse = "";
+            this.messages.push({
+              role: "system",
+              content:
+                "Les modifications ont déjà été appliquées avec succès. Ne renvoie pas le contenu complet des fichiers. Fournis uniquement un résumé concis des changements et des vérifications, sans appeler de tool.",
+            });
+            continue;
+          }
+          if (looksLikeDump && !allowsFullCodeResponse) {
+            finalResponse = this.buildSuccessfulWriteFallback(successfulWrites);
+          }
+          if (finalResponse) {
+            this.callbacks.onToken?.(finalResponse, {
+              sessionId: this.currentSessionId,
+              runId,
+            });
+          }
+        }
         return failedModifications.length > 0
           ? {
-              response: `Certaines modifications n'ont pas été appliquées : ${failedModifications.join("; ")}. Les fichiers concernés doivent être relus avant une nouvelle tentative.`,
+              response: `Certaines modifications n'ont pas été appliquées : ${failedModifications.join("; ")}.`,
               reasoning: finalReasoning,
               error: { code: "PARTIAL_MODIFICATION_FAILURE" },
               iterations: iteration,
@@ -412,19 +590,48 @@ class Agent {
               reasoning: finalReasoning,
               iterations: iteration,
             };
-      this.messages.push(parsed.assistantMessage);
+      }
+      if (finalSummaryRequested) {
+        finalResponse = this.buildSuccessfulWriteFallback(successfulWrites);
+        this.callbacks.onToken?.(finalResponse, {
+          sessionId: this.currentSessionId,
+          runId,
+        });
+        return {
+          response: finalResponse,
+          reasoning: finalReasoning,
+          iterations: iteration,
+        };
+      }
+      const hasReadCall = parsed.toolCalls.some((call) =>
+        readTools.has(call?.function?.name),
+      );
+      const hasWriteCall = parsed.toolCalls.some((call) =>
+        writeTools.has(call?.function?.name),
+      );
       const orderedToolCalls = [...parsed.toolCalls].sort((left, right) => {
-        const readTools = new Set([
-          "read_file",
-          "read_active_file",
-          "get_editor_context",
-        ]);
         return (
           Number(!readTools.has(left?.function?.name)) -
           Number(!readTools.has(right?.function?.name))
         );
       });
-      for (const call of orderedToolCalls) {
+      const executableToolCalls =
+        hasReadCall && hasWriteCall
+          ? orderedToolCalls.filter((call) =>
+              readTools.has(call?.function?.name),
+            )
+          : hasWriteCall
+            ? orderedToolCalls
+                .filter((call) => writeTools.has(call?.function?.name))
+                .slice(0, 1)
+            : orderedToolCalls;
+      this.messages.push({
+        ...parsed.assistantMessage,
+        ...(parsed.assistantMessage.tool_calls
+          ? { tool_calls: executableToolCalls }
+          : {}),
+      });
+      for (const call of executableToolCalls) {
         if (this.stopRequested || runId !== this.runId) throw this.abortError();
         const toolResult = await this.executeToolCall(call);
         this.messages.push({
@@ -438,6 +645,18 @@ class Agent {
           call?.function?.name === "modify_active_file" ||
           call?.function?.name === "replace_text" ||
           call?.function?.name === "modify_file";
+        if (writeTools.has(call?.function?.name) && toolResult?.success) {
+          successfulWriteCount += 1;
+          missingWriteRetries = 0;
+          successfulWrites.push({
+            tool: call.function.name,
+            path:
+              toolPayload?.path ||
+              toolPayload?.oldPath ||
+              "fichier",
+            newPath: toolPayload?.newPath || "",
+          });
+        }
         const retryableErrorCodes = new Set([
           "CONTENT_MISMATCH",
           "INVALID_RANGE",
@@ -532,6 +751,24 @@ class Agent {
             }
           }
         }
+      }
+      if (hasReadCall && hasWriteCall) {
+        this.messages.push({
+          role: "system",
+          content:
+            "Les lectures ont été exécutées. Décide des écritures au prochain tour avec leur résultat.",
+        });
+      } else if (
+        hasWriteCall &&
+        orderedToolCalls.filter((call) =>
+          writeTools.has(call?.function?.name),
+        ).length > executableToolCalls.length
+      ) {
+        this.messages.push({
+          role: "system",
+          content:
+            "Une seule écriture a été exécutée. Réévalue les écritures restantes au prochain tour à partir du résultat réel.",
+        });
       }
     }
     throw new Error(
@@ -809,20 +1046,28 @@ class Agent {
     };
     this.callbacks.onToolStart?.(name, normalizedArgs, callbackContext);
     try {
-      const result = this.limitResult(
-        await tool.execute(normalizedArgs, {
-          editor: this.editor,
-          agent: this,
-          signal: this.abortController?.signal,
-        }),
-      );
+      const rawResult = await tool.execute(normalizedArgs, {
+        editor: this.editor,
+        agent: this,
+        signal: this.abortController?.signal,
+      });
+      const result = this.limitResult(rawResult);
       const toolResult =
         result && result.success === false ? result : { success: true, result };
+      const callbackResult =
+        rawResult && rawResult.success === false
+          ? rawResult
+          : { success: true, result: rawResult };
       this.debugTool(name, normalizedArgs, toolResult, {
         activePath: this.editor?.tabManager?.activeFile?.path || null,
         activeTabId: this.editor?.tabManager?.activeFile?.id || null,
       });
-      this.callbacks.onToolEnd?.(name, toolResult, callbackContext);
+      this.callbacks.onToolEnd?.(
+        name,
+        toolResult,
+        callbackContext,
+        callbackResult,
+      );
       if (toolCallId) this.executedToolCalls.set(toolCallId, toolResult);
       return toolResult;
     } catch (error) {
@@ -1001,6 +1246,117 @@ class Agent {
       ? text
       : `${text.slice(0, Math.max(0, max - 32))}\n\n[... contenu tronqué par NCE ...]`;
   }
+  getContentRevision(value) {
+    const text = typeof value === "string" ? value : "";
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0).toString(16);
+  }
+  createFileReadContext(absolutePath, content, startLine, endLine, source) {
+    const lines = String(content).split(/\r?\n/);
+    const safeStartLine = Math.max(1, startLine || 1);
+    const safeEndLine = Math.min(
+      lines.length,
+      Math.max(safeStartLine, endLine || safeStartLine),
+    );
+    const rangeContent = lines
+      .slice(safeStartLine - 1, safeEndLine)
+      .join("\n");
+    const visibleContent = this.truncate(rangeContent, 4000);
+    const context = {
+      path: absolutePath,
+      startLine: safeStartLine,
+      endLine: safeEndLine,
+      content: visibleContent,
+      revision: this.getContentRevision(content),
+      timestamp: Date.now(),
+      version: ++this.fileContextVersion,
+      source,
+      truncated: visibleContent !== rangeContent,
+    };
+    this.readFileContexts.set(absolutePath, context);
+    return context;
+  }
+  validateFileReadContext(absolutePath, currentText, oldText) {
+    const context = this.readFileContexts.get(absolutePath);
+    if (!context) {
+      return {
+        valid: false,
+        error: {
+          code: "FILE_CONTEXT_REQUIRED",
+          message: "Read the current file before modifying it.",
+        },
+      };
+    }
+    const currentRevision = this.getContentRevision(currentText);
+    if (context.revision !== currentRevision) {
+      this.readFileContexts.delete(absolutePath);
+      return {
+        valid: false,
+        error: {
+          code: "STALE_CONTEXT",
+          message: "The file changed since it was read. Read it again.",
+          expectedRevision: context.revision,
+          actualRevision: currentRevision,
+        },
+      };
+    }
+    if (oldText.includes("[... contenu tronqué par NCE ...]")) {
+      return {
+        valid: false,
+        error: {
+          code: "INVALID_OLD_TEXT",
+          message: "oldText cannot contain NCE's truncation marker.",
+        },
+      };
+    }
+    const oldTextWasRead =
+      oldText.length > 0
+        ? context.content.includes(oldText.replace(/\r\n?/g, "\n"))
+        : context.startLine === 1;
+    if (!oldTextWasRead) {
+      return {
+        valid: false,
+        error: {
+          code: "FILE_CONTEXT_REQUIRED",
+          message: "Read the current file section containing oldText before modifying it.",
+        },
+      };
+    }
+    return { valid: true, context, currentRevision };
+  }
+  buildModificationVerification(
+    absolutePath,
+    content,
+    changedStartIndex,
+    replacementText,
+  ) {
+    const startLine = content.slice(0, changedStartIndex).split(/\r?\n/).length;
+    const replacementLines = replacementText.split(/\r?\n/).length;
+    const totalLines = content.split(/\r?\n/).length;
+    const verificationStartLine = Math.max(1, startLine - 10);
+    const verificationEndLine = Math.min(
+      totalLines,
+      startLine + Math.max(1, replacementLines) + 10,
+    );
+    const context = this.createFileReadContext(
+      absolutePath,
+      content,
+      verificationStartLine,
+      verificationEndLine,
+      "post-write-verification",
+    );
+    return {
+      verified: true,
+      startLine: context.startLine,
+      endLine: context.endLine,
+      revision: context.revision,
+      content: context.content,
+    };
+  }
   normalizeLineEndingsWithBoundaries(value) {
     const source = typeof value === "string" ? value : "";
     let normalized = "";
@@ -1018,7 +1374,7 @@ class Agent {
     }
     return { normalized, boundaries };
   }
-  findUniqueTextMatch(content, searchText) {
+  findUniqueTextMatch(content, searchText, nearLine) {
     const source = typeof content === "string" ? content : "";
     const search = typeof searchText === "string" ? searchText : "";
     if (!search) return { status: "missing", occurrences: 0 };
@@ -1046,7 +1402,7 @@ class Agent {
       };
     }
     if (exactMatches.length > 1) {
-      return { status: "ambiguous", occurrences: exactMatches.length };
+      return this.selectMatchNearLine(source, search, exactMatches, nearLine);
     }
 
     const normalizedSource = this.normalizeLineEndingsWithBoundaries(source);
@@ -1056,7 +1412,17 @@ class Agent {
       normalizedSearch,
     );
     if (normalizedMatches.length > 1) {
-      return { status: "ambiguous", occurrences: normalizedMatches.length };
+      return this.selectMatchNearLine(
+        source,
+        search,
+        normalizedMatches.map((index) => normalizedSource.boundaries[index]),
+        nearLine,
+        normalizedSearch.length,
+        normalizedMatches.map(
+          (index) =>
+            normalizedSource.boundaries[index + normalizedSearch.length],
+        ),
+      );
     }
     if (exactMatches.length === 1) {
       return {
@@ -1077,6 +1443,51 @@ class Agent {
       };
     }
     return { status: "missing", occurrences: 0 };
+  }
+  selectMatchNearLine(
+    source,
+    search,
+    matches,
+    nearLine,
+    matchLength,
+    endIndexes = [],
+  ) {
+    const occurrences = matches.map((startIndex) => ({
+      startIndex,
+      line: source.slice(0, startIndex).split(/\r?\n/).length,
+    }));
+    const validNearLine = Number.isInteger(nearLine) && nearLine > 0;
+    if (!validNearLine) {
+      return {
+        status: "ambiguous",
+        occurrences: occurrences.length,
+        nearestLines: occurrences.map((item) => item.line),
+      };
+    }
+    const ranked = occurrences
+      .map((item) => ({ ...item, distance: Math.abs(item.line - nearLine) }))
+      .sort((left, right) => left.distance - right.distance);
+    if (
+      ranked.length === 0 ||
+      (ranked[1] && ranked[0].distance === ranked[1].distance)
+    ) {
+      return {
+        status: "ambiguous",
+        occurrences: occurrences.length,
+        nearestLines: ranked.map((item) => item.line),
+      };
+    }
+    const selected = ranked[0];
+    const length = matchLength || search.length;
+    return {
+      status: "unique",
+      startIndex: selected.startIndex,
+      endIndex:
+        endIndexes[matches.indexOf(selected.startIndex)] ??
+        selected.startIndex + length,
+      match: "near-line",
+      nearLine: selected.line,
+    };
   }
   adaptReplacementLineEndings(value, content) {
     const replacement = typeof value === "string" ? value : "";
@@ -1355,6 +1766,7 @@ Règles de sécurité :
 - Utilise cet outil pour toute modification, y compris celle du fichier actif.
 - oldText doit correspondre à une seule occurrence exacte; sinon la modification est refusée.
 - Copie oldText depuis le dernier résultat read_file et choisis un fragment minimal mais unique.
+- Une lecture récente de la zone contenant oldText est obligatoire; sinon FILE_CONTEXT_REQUIRED est retourné.
 - Ne copie jamais le marqueur de troncature ajouté par NCE dans oldText.
 - Les différences CRLF/LF sont normalisées automatiquement, mais aucun autre écart de contenu n'est accepté.
 - N'envoie pas de coordonnées : NCE calcule les positions automatiquement.
@@ -1375,6 +1787,17 @@ Règles de sécurité :
           newText: {
             type: "string",
             description: "Nouveau texte exact à enregistrer.",
+          },
+          nearLine: {
+            type: "integer",
+            minimum: 1,
+            description:
+              "Numéro de ligne approximatif 1-based. Sert uniquement à choisir une occurrence en cas d'ambiguïté.",
+          },
+          revision: {
+            type: "string",
+            description:
+              "Révision retournée par read_file. Le write est refusé si le fichier a changé depuis cette lecture.",
           },
           text: {
             type: "string",
@@ -1476,10 +1899,14 @@ IMPORTANT :
       description: "Lire un fichier du projet.",
       parameters: {
         type: "object",
-        properties: { path: { type: "string" } },
+        properties: {
+          path: { type: "string" },
+          startLine: { type: "integer", minimum: 1 },
+          endLine: { type: "integer", minimum: 1 },
+        },
         required: ["path"],
       },
-      execute: (args) => this.readFile(args.path),
+      execute: (args) => this.readFile(args.path, args),
     });
     this.registerTool("list_project_files", {
       description: "Lister les fichiers du projet.",
@@ -1560,8 +1987,7 @@ IMPORTANT :
     };
   }
   getFileOperationError(result, fallbackCode, fallbackMessage, path) {
-    const code =
-      typeof result?.code === "string" ? result.code : fallbackCode;
+    const code = typeof result?.code === "string" ? result.code : fallbackCode;
     return {
       code,
       message:
@@ -1615,15 +2041,29 @@ IMPORTANT :
 
     let snapshotKey = null;
     if (exists && overwrite) {
-      const previous = (await this.api?.getFileContent?.([
-        target.absolutePath,
-      ]))?.[target.absolutePath];
+      const previous = (
+        await this.api?.getFileContent?.([target.absolutePath])
+      )?.[target.absolutePath];
       if (typeof previous !== "string") {
         return {
           success: false,
           error: {
             code: "CREATE_FAILED",
             message: "Le contenu existant n'a pas pu être sauvegardé.",
+            path: target.relativePath,
+          },
+        };
+      }
+      const readContextValidation = this.validateFileReadContext(
+        target.absolutePath,
+        previous,
+        "",
+      );
+      if (!readContextValidation.valid) {
+        return {
+          success: false,
+          error: {
+            ...readContextValidation.error,
             path: target.relativePath,
           },
         };
@@ -1656,6 +2096,26 @@ IMPORTANT :
       await this.editor?.tabManager?.reloadFileFromDisk?.(target.absolutePath);
     }
     await this.refreshWorkspaceFolders([target.parentPath]);
+    const verifiedContent = (await this.api?.getFileContent?.([
+      target.absolutePath,
+    ]))?.[target.absolutePath];
+    if (typeof verifiedContent !== "string" || verifiedContent !== content) {
+      return {
+        success: false,
+        error: {
+          code: "CREATE_VERIFICATION_FAILED",
+          message: "Le contenu du fichier créé ne correspond pas au contenu demandé.",
+          path: target.relativePath,
+        },
+      };
+    }
+    const verificationContext = this.createFileReadContext(
+      target.absolutePath,
+      verifiedContent,
+      1,
+      Math.min(200, verifiedContent.split(/\r?\n/).length),
+      "post-create-verification",
+    );
     return {
       success: true,
       operation: "create",
@@ -1664,6 +2124,11 @@ IMPORTANT :
       created: !exists,
       overwritten: Boolean(exists && overwrite),
       snapshotKey,
+      verification: {
+        verified: true,
+        revision: verificationContext.revision,
+        content: verificationContext.content,
+      },
     };
   }
   async renameWorkspaceFile(args = {}) {
@@ -1756,6 +2221,39 @@ IMPORTANT :
       source.parentPath,
       destination.parentPath,
     ]);
+    const sourceStillExists = await this.api?.pathExists?.(source.absolutePath);
+    const destinationExists = await this.api?.pathExists?.(
+      destination.absolutePath,
+    );
+    if (sourceStillExists || !destinationExists) {
+      return {
+        success: false,
+        error: {
+          code: "RENAME_VERIFICATION_FAILED",
+          message: "Le renommage n'a pas pu être vérifié dans le workspace.",
+          path: source.relativePath,
+          newPath: destination.relativePath,
+        },
+      };
+    }
+    const renamedContent = (await this.api?.getFileContent?.([
+      destination.absolutePath,
+    ]))?.[destination.absolutePath];
+    let verification = { verified: true };
+    if (typeof renamedContent === "string") {
+      const verificationContext = this.createFileReadContext(
+        destination.absolutePath,
+        renamedContent,
+        1,
+        Math.min(200, renamedContent.split(/\r?\n/).length),
+        "post-rename-verification",
+      );
+      verification = {
+        verified: true,
+        revision: verificationContext.revision,
+        content: verificationContext.content,
+      };
+    }
     return {
       success: true,
       operation: "rename",
@@ -1764,6 +2262,7 @@ IMPORTANT :
       oldAbsolutePath: source.absolutePath,
       newAbsolutePath: destination.absolutePath,
       renamed: true,
+      verification,
     };
   }
   async readSelection() {
@@ -1821,6 +2320,10 @@ IMPORTANT :
         : typeof args.text === "string"
           ? args.text
           : "";
+    const nearLine =
+      Number.isInteger(args.nearLine) && args.nearLine > 0
+        ? args.nearLine
+        : undefined;
 
     if (typeof oldText !== "string" || typeof newText !== "string") {
       return {
@@ -1836,6 +2339,8 @@ IMPORTANT :
       path: absolutePath,
       oldText,
       newText,
+      nearLine: nearLine ?? null,
+      revision: args.revision ?? null,
     });
     if (this.executedModificationRequests.has(requestKey)) {
       return {
@@ -1852,6 +2357,19 @@ IMPORTANT :
     if (alreadyOpen) {
       await this.editor?.fileLoader?.waitForFileLoaded?.(alreadyOpen);
     }
+    if (!alreadyOpen && typeof this.api?.pathExists === "function") {
+      const exists = await this.api.pathExists(absolutePath);
+      if (!exists) {
+        return {
+          success: false,
+          error: {
+            code: "FILE_NOT_FOUND",
+            message: `Le fichier n'existe pas : ${relativePath}`,
+            path: relativePath,
+          },
+        };
+      }
+    }
 
     const persistToDisk = this.shouldPersistAgentEdit(absolutePath);
     const currentText = alreadyOpen
@@ -1866,10 +2384,53 @@ IMPORTANT :
         },
       };
     }
+    const readContextValidation = this.validateFileReadContext(
+      absolutePath,
+      currentText,
+      oldText,
+    );
+    if (!readContextValidation.valid) {
+      return {
+        success: false,
+        error: {
+          ...readContextValidation.error,
+          path: this.toProjectRelativePath(absolutePath, root),
+        },
+      };
+    }
+    if (this.readAfterFailurePaths.has(absolutePath)) {
+      return {
+        success: false,
+        error: {
+          code: "READ_AFTER_NO_MATCH",
+          message:
+            "Relisez ce fichier avec read_file avant de réessayer après NO_MATCH.",
+          path: this.toProjectRelativePath(absolutePath, root),
+        },
+      };
+    }
+    const currentRevision = readContextValidation.currentRevision;
+    if (
+      typeof args.revision === "string" &&
+      args.revision !== currentRevision
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "STALE_CONTEXT",
+          message: "Le fichier a changé depuis sa dernière lecture.",
+          path: this.toProjectRelativePath(absolutePath, root),
+          expectedRevision: args.revision,
+          actualRevision: currentRevision,
+        },
+      };
+    }
     const replacementText = this.adaptReplacementLineEndings(
       newText,
       currentText,
     );
+    const editorUpdatedText = (updatedText) =>
+      updatedText.replace(/\r\n?/g, "\n");
 
     if (oldText.length === 0 && replacementText === "") {
       return {
@@ -1880,9 +2441,23 @@ IMPORTANT :
         },
       };
     }
+    if (
+      oldText.length > 0 &&
+      replacementText.includes(`${oldText}${oldText}`)
+    ) {
+      return {
+        success: false,
+        error: {
+          code: "SUSPECTED_DUPLICATION",
+          message:
+            "The replacement contains two consecutive copies of oldText.",
+        },
+      };
+    }
 
     if (oldText.length === 0) {
       const updatedText = `${replacementText}${currentText}`;
+      const normalizedUpdatedText = editorUpdatedText(updatedText);
       const result = {
         success: true,
         operation: "replace",
@@ -1891,6 +2466,8 @@ IMPORTANT :
         beforeText: currentText,
         afterText: updatedText,
         match: "insert-start",
+        nearLine: nearLine ?? null,
+        revision: this.getContentRevision(updatedText),
       };
 
       if (tabManager && !alreadyOpen) {
@@ -1922,13 +2499,30 @@ IMPORTANT :
       if (openFile) {
         openFile.isLoaded = false;
         await tabManager.setFocusFile(openFile);
-        this.editor.lineController?.loadContent?.(updatedText);
+        this.editor.lineController?.loadContent?.(normalizedUpdatedText);
         if (openFile) {
-          openFile.lines = updatedText
-            .split(/\r?\n/)
+          openFile.lines = normalizedUpdatedText
+            .split("\n")
             .map((line) => new LineNode(line));
           openFile.totalLines = openFile.lines.length;
           openFile.maxLineLength = 0;
+        }
+        const writtenText = openFile.lines
+          .map((line) => line.getText())
+          .join("\n");
+        if (writtenText !== normalizedUpdatedText) {
+          this.editor.lineController?.loadContent?.(
+            editorUpdatedText(currentText),
+          );
+          return {
+            success: false,
+            error: {
+              code: "VERIFICATION_FAILED",
+              message:
+                "Le contenu écrit ne correspond pas au remplacement demandé.",
+              path: relativePath,
+            },
+          };
         }
         this.markFileDiffHighlights(currentText, updatedText, openFile);
         if (this.editor.lineController?.refresh) {
@@ -1949,13 +2543,20 @@ IMPORTANT :
           }
         }
       }
+      result.revision = this.getContentRevision(normalizedUpdatedText);
+      result.verification = this.buildModificationVerification(
+        absolutePath,
+        normalizedUpdatedText,
+        0,
+        replacementText,
+      );
       this.executedModificationRequests.set(requestKey, result);
-      this.readFileContexts.delete(absolutePath);
       return result;
     }
 
-    const textMatch = this.findUniqueTextMatch(currentText, oldText);
+    const textMatch = this.findUniqueTextMatch(currentText, oldText, nearLine);
     if (textMatch.status === "missing") {
+      this.readAfterFailurePaths.add(absolutePath);
       return {
         success: false,
         error: {
@@ -1963,7 +2564,9 @@ IMPORTANT :
           message:
             "Aucune occurrence trouvée pour oldText. Relisez le fichier et copiez un fragment minimal depuis le dernier résultat de read_file.",
           path: this.toProjectRelativePath(absolutePath, root),
+          nearLine: nearLine ?? null,
           readRequired: true,
+          hint: "Relisez la zone autour de nearLine et utilisez un oldText exact.",
         },
       };
     }
@@ -1976,6 +2579,7 @@ IMPORTANT :
           message:
             "oldText est présent plusieurs fois dans ce fichier. Le remplacement est refusé.",
           occurrences: textMatch.occurrences,
+          nearestLines: textMatch.nearestLines || [],
         },
       };
     }
@@ -1984,6 +2588,7 @@ IMPORTANT :
       currentText.slice(0, textMatch.startIndex) +
       replacementText +
       currentText.slice(textMatch.endIndex);
+    const normalizedUpdatedText = editorUpdatedText(updatedText);
 
     const result = {
       success: true,
@@ -1993,6 +2598,8 @@ IMPORTANT :
       beforeText: currentText,
       afterText: updatedText,
       match: textMatch.match,
+      nearLine: nearLine ?? null,
+      revision: this.getContentRevision(updatedText),
     };
 
     if (tabManager && !alreadyOpen) {
@@ -2024,13 +2631,30 @@ IMPORTANT :
     if (openFile) {
       openFile.isLoaded = false;
       await tabManager.setFocusFile(openFile);
-      this.editor.lineController?.loadContent?.(updatedText);
+      this.editor.lineController?.loadContent?.(normalizedUpdatedText);
       if (openFile) {
-        openFile.lines = updatedText
-          .split(/\r?\n/)
+        openFile.lines = normalizedUpdatedText
+          .split("\n")
           .map((line) => new LineNode(line));
         openFile.totalLines = openFile.lines.length;
         openFile.maxLineLength = 0;
+      }
+      const writtenText = openFile.lines
+        .map((line) => line.getText())
+        .join("\n");
+      if (writtenText !== normalizedUpdatedText) {
+        this.editor.lineController?.loadContent?.(
+          editorUpdatedText(currentText),
+        );
+        return {
+          success: false,
+          error: {
+            code: "VERIFICATION_FAILED",
+            message:
+              "Le contenu écrit ne correspond pas au remplacement demandé.",
+            path: relativePath,
+          },
+        };
       }
       this.markFileDiffHighlights(currentText, updatedText, openFile);
       if (this.editor.lineController?.refresh) {
@@ -2051,8 +2675,14 @@ IMPORTANT :
         }
       }
     }
+    result.revision = this.getContentRevision(normalizedUpdatedText);
+    result.verification = this.buildModificationVerification(
+      absolutePath,
+      normalizedUpdatedText,
+      editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
+      replacementText.replace(/\r\n?/g, "\n"),
+    );
     this.executedModificationRequests.set(requestKey, result);
-    this.readFileContexts.delete(absolutePath);
     return result;
   }
   restoreActiveFileSnapshot(content) {
@@ -2079,6 +2709,15 @@ IMPORTANT :
       startLine + 199,
       lines.length,
     );
+    const content = lines.slice(startLine - 1, endLine).join("\n");
+    const fullContent = lines.join("\n");
+    const readContext = this.createFileReadContext(
+      AgentPath.normalize(file.path),
+      fullContent,
+      startLine,
+      endLine,
+      "read_active_file",
+    );
     return {
       success: true,
       path: this.toProjectRelativePath(
@@ -2089,10 +2728,8 @@ IMPORTANT :
       endLine,
       totalLines: lines.length,
       truncated: endLine < lines.length,
-      content: this.truncate(
-        lines.slice(startLine - 1, endLine).join("\n"),
-        4000,
-      ),
+      revision: readContext.revision,
+      content: readContext.content,
     };
   }
   async searchActiveFile(args = {}) {
@@ -2116,7 +2753,7 @@ IMPORTANT :
       })),
     };
   }
-  async readFile(filePath) {
+  async readFile(filePath, options = {}) {
     const root = this.editor?.fileExplorer?.rootPath;
     const absolute = this.resolveWorkspacePath(filePath, root);
     if (!absolute)
@@ -2132,19 +2769,40 @@ IMPORTANT :
       ? openFile.lines.map((line) => line.getText()).join("\n")
       : (await this.api?.getFileContent?.([absolute]))?.[absolute];
     if (typeof content === "string") {
-      this.readFileContexts.set(absolute, {
+      this.readAfterFailurePaths.delete(absolute);
+      const totalLines = content.split(/\r?\n/).length;
+      const startLine =
+        Number.isInteger(options.startLine) && options.startLine > 0
+          ? options.startLine
+          : 1;
+      const endLine = Math.min(
+        Number.isInteger(options.endLine) && options.endLine >= startLine
+          ? options.endLine
+          : startLine + 199,
+        totalLines,
+      );
+      const readContext = this.createFileReadContext(
+        absolute,
         content,
-        truncated: content.length > 4000,
-      });
+        startLine,
+        endLine,
+        "read_file",
+      );
+      return {
+        success: true,
+        path: filePath,
+        startLine,
+        endLine,
+        totalLines,
+        revision: readContext.revision,
+        truncated: endLine < totalLines || readContext.truncated,
+        content: readContext.content,
+      };
     }
-    return typeof content === "string"
-      ? {
-          success: true,
-          path: filePath,
-          totalLines: content.split(/\r?\n/).length,
-          content: this.truncate(content, 4000),
-        }
-      : { success: false, error: `Impossible de lire le fichier: ${filePath}` };
+    return {
+      success: false,
+      error: `Impossible de lire le fichier: ${filePath}`,
+    };
   }
   async listProjectFiles(path = "") {
     const root = this.editor?.fileExplorer?.rootPath;

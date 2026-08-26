@@ -28,11 +28,14 @@ class AgentSidebar extends Sidebar {
       onToken: (markdown, context) => {
         this.handleAgentToken(markdown, context);
       },
+      onReasoning: (reasoning, context) => {
+        this.handleAgentReasoning(reasoning, context);
+      },
       onToolStart: (toolName, args, context) => {
         this.handleToolStart(toolName, args, context);
       },
-      onToolEnd: (toolName, result, context) => {
-        this.handleToolEnd(toolName, result, context);
+      onToolEnd: (toolName, result, context, fullResult) => {
+        this.handleToolEnd(toolName, result, context, fullResult);
       },
       onFinish: (_result, context) => {
         this.finishActivityGroup(context);
@@ -63,10 +66,10 @@ class AgentSidebar extends Sidebar {
     this.createSession();
   }
 
-  handleToolEnd(toolName, result, context = {}) {
+  handleToolEnd(toolName, result, context = {}, fullResult = result) {
     const activityItem = this.completeActivityItem(toolName, result, context);
 
-    const payload = result?.result ?? result;
+    const payload = fullResult?.result ?? fullResult;
 
     if (
       (toolName === "create_file" || toolName === "rename_file") &&
@@ -136,10 +139,7 @@ class AgentSidebar extends Sidebar {
       session.changes[existingIndex] = {
         ...existingChange,
         ...change,
-        status:
-          existingChange.status === "created"
-            ? "created"
-            : change.status,
+        status: existingChange.status === "created" ? "created" : change.status,
         beforeText: originalBeforeText,
         additions: cumulativeStats.additions,
         deletions: cumulativeStats.deletions,
@@ -261,11 +261,13 @@ class AgentSidebar extends Sidebar {
       apiKey: this.apiKeys.get(provider.id) || null,
     });
     this.agent.setModel(this.currentModel || provider.defaultModel);
-    const mode = AgentAI.getAgent(this.currentAgentId);
-    this.agent.setConfig({ ...mode, maxIterations: AgentAI.maxIterations });
-    if (mode?.systemPrompt) {
-      this.agent.setSystemPrompt(mode.systemPrompt);
-    }
+    const resolved = AgentAI.resolve(
+      this.currentAgentId,
+      this.currentProviderId,
+      this.currentModel || provider.defaultModel,
+    );
+    this.agent.setConfig(resolved);
+    this.agent.setSystemPrompt(resolved.systemPrompt);
   }
 
   render() {
@@ -389,32 +391,90 @@ class AgentSidebar extends Sidebar {
 
   getActivityGroup(session, runId, create = false) {
     if (!session || !Number.isInteger(runId)) return null;
-    let group = session.messages.find(
-      (message) => message?.role === "activity" && message.runId === runId,
-    );
+    if (!Array.isArray(session.segments)) session.segments = [];
+    if (
+      session.currentSegment?.runId === runId &&
+      session.currentSegment?.type === "activity"
+    ) {
+      return session.currentSegment;
+    }
+    if (create) return this.getRunSegment(session, runId, "activity", true);
+    let group = [...session.messages]
+      .reverse()
+      .find(
+        (message) => message?.role === "activity" && message.runId === runId,
+      );
     if (group || !create) return group || null;
+    return null;
+  }
 
-    group = {
-      role: "activity",
+  getRunSegment(session, runId, type, create = false) {
+    if (!session || !Number.isInteger(runId)) return null;
+    if (!Array.isArray(session.segments)) session.segments = [];
+    const current = session.currentSegment;
+    if (current?.runId === runId && current.type === type) return current;
+    if (!create) return null;
+    if (current) current.status = "complete";
+    const segment = {
+      id: `${session.id}:${runId}:segment-${session.segments.length}`,
+      type,
       runId,
       sessionId: session.id,
+      content: type === "reasoning" || type === "assistant" ? "" : undefined,
+      status: "streaming",
       startedAt: Date.now(),
       finishedAt: null,
-      status: "running",
-      collapsed: false,
       hasErrors: false,
-      items: [],
+      items: type === "activity" ? [] : undefined,
+      collapsed: false,
     };
+    session.segments.push(segment);
+    session.messages.push(segment);
+    session.currentSegment = segment;
+    return segment;
+  }
 
-    const streamingIndex = session.streamingMessage
-      ? session.messages.indexOf(session.streamingMessage)
-      : -1;
-    if (streamingIndex >= 0) {
-      session.messages.splice(streamingIndex, 0, group);
-    } else {
-      session.messages.push(group);
+  ensureSessionSegments(session) {
+    if (!session) return [];
+    if (Array.isArray(session.segments) && session.segments.length) {
+      return session.segments;
     }
-    return group;
+    session.segments = [];
+    for (const message of session.messages || []) {
+      if (message?.role === "activity" || message?.type === "activity") {
+        session.segments.push(message);
+        continue;
+      }
+      const reasoning = this.normalizeReasoningValue(
+        message?.reasoning ??
+          message?.reasoning_content ??
+          message?.reasoningText,
+      );
+      if (reasoning) {
+        session.segments.push({
+          id: `${session.id}:legacy-reasoning-${session.segments.length}`,
+          type: "reasoning",
+          runId: message.runId ?? session.runId ?? 0,
+          sessionId: session.id,
+          content: reasoning,
+          status: "complete",
+          collapsed: false,
+        });
+      }
+      if (message?.role === "agent" && typeof message.content === "string") {
+        session.segments.push({
+          id: `${session.id}:legacy-assistant-${session.segments.length}`,
+          type: "assistant",
+          runId: message.runId ?? session.runId ?? 0,
+          sessionId: session.id,
+          role: "agent",
+          content: message.content,
+          status: "complete",
+          streaming: false,
+        });
+      }
+    }
+    return session.segments;
   }
 
   getActivityPendingKey(context = {}, toolName = "") {
@@ -433,6 +493,8 @@ class AgentSidebar extends Sidebar {
     const session = this.getSession(context.sessionId);
     const group = this.getActivityGroup(session, context.runId, true);
     if (!session || !group) return;
+    group.role = "activity";
+    session.streamingMessage = null;
 
     const itemId = this.getActivityItemId(context);
     const activePath = this.editor?.tabManager?.activeFile?.path;
@@ -474,10 +536,7 @@ class AgentSidebar extends Sidebar {
       item.modificationCount += 1;
       item.status = "running";
       item.finishedAt = null;
-      const fileName = this.getActivityFileName(
-        { args, activePath },
-        {},
-      );
+      const fileName = this.getActivityFileName({ args, activePath }, {});
       if (!item.files.includes(fileName)) item.files.push(fileName);
       Object.assign(item, this.describeModificationAggregate(item));
     } else {
@@ -499,6 +558,7 @@ class AgentSidebar extends Sidebar {
     }
 
     if (session.id !== this.activeSessionId || !this.messagesElement) return;
+    const shouldScroll = this.shouldAutoScrollMessages();
     this.removeEmptyState();
     if (this.typingIndicatorElement?.isConnected) {
       this.typingIndicatorElement.remove();
@@ -508,10 +568,7 @@ class AgentSidebar extends Sidebar {
     let groupRefs = this.activityElements.get(group);
     if (!groupRefs?.row?.isConnected) {
       const groupElement = this.createActivityElement(group);
-      const streamingRow = session.streamingMessage
-        ? this.messageElements.get(session.streamingMessage)?.row
-        : null;
-      this.messagesElement.insertBefore(groupElement, streamingRow || null);
+      this.messagesElement.appendChild(groupElement);
       groupRefs = this.activityElements.get(group);
     } else if (isNewItem) {
       groupRefs.list.appendChild(this.createActivityItemElement(item));
@@ -520,7 +577,35 @@ class AgentSidebar extends Sidebar {
       this.updateActivityItemElement(item);
     }
 
-    this.scrollMessagesToBottom();
+    if (shouldScroll) this.scrollMessagesToBottom();
+  }
+
+  handleAgentReasoning(reasoning, context = {}) {
+    if (typeof reasoning !== "string" || !reasoning) return;
+    const session = this.getSession(context.sessionId);
+    if (!session || !session.isGenerating || session.runId !== context.runId) {
+      return;
+    }
+    session.streamingMessage = null;
+    const segment = this.getRunSegment(
+      session,
+      context.runId,
+      "reasoning",
+      true,
+    );
+    segment.content += reasoning;
+    segment.status = "streaming";
+    if (session.id !== this.activeSessionId || !this.messagesElement) return;
+
+    const refs = this.messageElements.get(segment);
+    const shouldScroll = this.shouldAutoScrollMessages();
+    if (!refs?.row?.isConnected) {
+      this.removeEmptyState();
+      this.messagesElement.appendChild(this.createReasoningElement(segment));
+    } else {
+      refs.reasoning.textContent = segment.content;
+    }
+    if (shouldScroll) this.scrollMessagesToBottom();
   }
 
   completeActivityItem(toolName, result, context = {}) {
@@ -616,10 +701,7 @@ class AgentSidebar extends Sidebar {
     group.collapsed = !!collapsed;
     const refs = this.activityElements.get(group);
     if (!refs?.row?.isConnected) return;
-    refs.activity.classList.toggle(
-      "agent-activity-collapsed",
-      group.collapsed,
-    );
+    refs.activity.classList.toggle("agent-activity-collapsed", group.collapsed);
     refs.header.setAttribute("aria-expanded", String(!group.collapsed));
     refs.list.hidden = group.collapsed;
   }
@@ -890,13 +972,10 @@ class AgentSidebar extends Sidebar {
     modeTrigger.type = "button";
     modeTrigger.className =
       "agent-sidebar-model-trigger agent-sidebar-mode-trigger";
-    modeTrigger.title = "Change mode";
-    modeTrigger.setAttribute("aria-label", "Change mode");
     const currentAgent = AgentAI.getAgent(this.currentAgentId);
-    modeTrigger.innerHTML = `
-      <i class="fi fi-rr-settings-sliders"></i>
-      <span class="trigger-label">${currentAgent?.name || "Mode"}</span>
-    `;
+    modeTrigger.title = `Mode: ${currentAgent?.name || "Mode"}`;
+    modeTrigger.setAttribute("aria-label", modeTrigger.title);
+    modeTrigger.innerHTML = '<i class="fi fi-rr-settings-sliders"></i>';
 
     const modeMenu = document.createElement("div");
     modeMenu.className =
@@ -927,12 +1006,17 @@ class AgentSidebar extends Sidebar {
         item.append(icon, textWrap);
 
         item.addEventListener("click", () => {
-          const resolved = AgentAI.resolve(mode.id);
+          const resolved = AgentAI.resolve(
+            mode.id,
+            this.currentProviderId,
+            this.currentModel,
+          );
           this.currentAgentId = mode.id;
           this.agent.setModel(this.currentModel);
           this.agent.setSystemPrompt(resolved.systemPrompt);
           this.agent.setConfig(resolved);
-          modeTrigger.querySelector(".trigger-label").textContent = mode.name;
+          modeTrigger.title = `Mode: ${mode.name}`;
+          modeTrigger.setAttribute("aria-label", modeTrigger.title);
           renderModes();
           modeMenu.classList.add("hidden");
           this.editor.statesManager?.save();
@@ -964,8 +1048,6 @@ class AgentSidebar extends Sidebar {
     triggerBtn.type = "button";
     triggerBtn.className =
       "agent-sidebar-model-trigger agent-sidebar-model-trigger-button";
-    triggerBtn.title = "Change model";
-    triggerBtn.setAttribute("aria-label", "Change model");
 
     const availableModels = [];
     Object.values(AgentAI.providers).forEach((provider) => {
@@ -988,10 +1070,9 @@ class AgentSidebar extends Sidebar {
       ? currentModelObj.name
       : this.currentModel;
 
-    triggerBtn.innerHTML = `
-      <i class="fi fi-rr-robot"></i> 
-      <span class="trigger-label">${currentDisplayName}</span>
-    `;
+    triggerBtn.title = `Model: ${currentDisplayName}`;
+    triggerBtn.setAttribute("aria-label", triggerBtn.title);
+    triggerBtn.innerHTML = '<i class="fi fi-rr-robot"></i>';
 
     const dropdownMenu = document.createElement("div");
     dropdownMenu.className = "agent-sidebar-model-menu hidden";
@@ -1055,14 +1136,18 @@ class AgentSidebar extends Sidebar {
             apiKey: this.apiKeys.get(m.providerId) || null,
           });
           this.agent.setModel(m.id);
-          const selectedAgent = AgentAI.getAgent(this.currentAgentId);
-          if (selectedAgent?.systemPrompt) {
-            this.agent.setSystemPrompt(selectedAgent.systemPrompt);
-          }
+          const resolved = AgentAI.resolve(
+            this.currentAgentId,
+            m.providerId,
+            m.id,
+          );
+          this.agent.setConfig(resolved);
+          this.agent.setSystemPrompt(resolved.systemPrompt);
 
           this.editor.statesManager?.save();
 
-          triggerBtn.querySelector(".trigger-label").textContent = m.name;
+          triggerBtn.title = `Model: ${m.name}`;
+          triggerBtn.setAttribute("aria-label", triggerBtn.title);
           renderModelsList();
           dropdownMenu.classList.add("hidden");
         });
@@ -1154,18 +1239,20 @@ class AgentSidebar extends Sidebar {
       container.appendChild(this.createEmptyState());
       return;
     }
+    this.ensureSessionSegments(session);
 
     for (const message of session.messages) {
       container.appendChild(
-        message?.role === "activity"
-          ? this.createActivityElement(message)
-          : this.createMessageElement(message),
+        message?.type === "reasoning"
+          ? this.createReasoningElement(message)
+          : message?.role === "activity" || message?.type === "activity"
+            ? this.createActivityElement(message)
+            : this.createMessageElement(message),
       );
     }
 
     const hasRunningActivity = session.messages.some(
-      (message) =>
-        message?.role === "activity" && message.status === "running",
+      (message) => message?.role === "activity" && message.status === "running",
     );
     if (
       session.isGenerating &&
@@ -1509,6 +1596,36 @@ class AgentSidebar extends Sidebar {
     return row;
   }
 
+  createReasoningElement(segment) {
+    const row = document.createElement("div");
+    row.className = "agent-sidebar-message agent-sidebar-message-reasoning";
+    row.dataset.segmentId = segment.id;
+    const bubble = document.createElement("div");
+    bubble.className = "agent-sidebar-bubble";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "agent-sidebar-reasoning-toggle";
+    toggle.setAttribute("aria-expanded", String(!segment.collapsed));
+    const icon = document.createElement("i");
+    icon.className = "fi fi-rr-angle-small-right";
+    const label = document.createElement("span");
+    label.textContent = "Reasoning";
+    toggle.append(icon, label);
+    const content = document.createElement("div");
+    content.className = "agent-sidebar-reasoning";
+    content.textContent = segment.content;
+    content.hidden = !!segment.collapsed;
+    toggle.addEventListener("click", () => {
+      segment.collapsed = !segment.collapsed;
+      toggle.setAttribute("aria-expanded", String(!segment.collapsed));
+      content.hidden = segment.collapsed;
+    });
+    bubble.append(toggle, content);
+    row.appendChild(bubble);
+    this.messageElements.set(segment, { row, reasoning: content });
+    return row;
+  }
+
   copyTextFallback(value) {
     const textarea = document.createElement("textarea");
     textarea.value = typeof value === "string" ? value : "";
@@ -1535,28 +1652,34 @@ class AgentSidebar extends Sidebar {
     if (typeof markdown !== "string") return;
 
     const session = this.getSession(context.sessionId);
-    if (!session || !session.isGenerating) return;
+    if (!session || !session.isGenerating || session.runId !== context.runId) {
+      return;
+    }
 
-    let message = session.streamingMessage;
-    if (!message) {
-      message = {
-        role: "agent",
-        content: markdown,
-        timestamp: this.formatTime(),
-        streaming: true,
-      };
-      session.streamingMessage = message;
-      session.messages.push(message);
-
+    const message = this.getRunSegment(
+      session,
+      context.runId,
+      "assistant",
+      true,
+    );
+    const shouldScroll =
+      session.id === this.activeSessionId && this.shouldAutoScrollMessages();
+    message.role = "agent";
+    message.content = markdown;
+    message.timestamp ||= this.formatTime();
+    message.streaming = true;
+    session.streamingMessage = message;
+    const refs = this.messageElements.get(message);
+    if (!refs?.row?.isConnected) {
+      this.removeEmptyState();
       if (session.id === this.activeSessionId && this.messagesElement) {
-        this.renderMessages(this.messagesElement);
-        this.scrollMessagesToBottom();
+        this.messagesElement.appendChild(this.createMessageElement(message));
+        if (shouldScroll) this.scrollMessagesToBottom();
       }
       return;
     }
 
-    message.content = markdown;
-    const element = this.messageElements.get(message)?.content;
+    const element = refs.content;
     if (
       session.id !== this.activeSessionId ||
       !element ||
@@ -1565,10 +1688,10 @@ class AgentSidebar extends Sidebar {
       return;
     }
 
-    const shouldScroll = this.shouldAutoScrollMessages();
+    const shouldFollowScroll = this.shouldAutoScrollMessages();
     this.markdownRenderer.update(markdown, element, {
       onRendered: () => {
-        if (shouldScroll && session.id === this.activeSessionId) {
+        if (shouldFollowScroll && session.id === this.activeSessionId) {
           this.scrollMessagesToBottom();
         }
       },
@@ -1614,20 +1737,24 @@ class AgentSidebar extends Sidebar {
   }
 
   createChangesHeader(session) {
-    const header = document.createElement("button");
-    header.type = "button";
+    const header = document.createElement("div");
     header.className = "agent-sidebar-changes-header";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "agent-sidebar-changes-toggle";
+    toggle.setAttribute("aria-expanded", String(session.changesExpanded));
 
     const chevron = document.createElement("i");
     chevron.className =
       "fi fi-rr-angle-small-right agent-sidebar-changes-chevron";
-    header.appendChild(chevron);
+    toggle.appendChild(chevron);
 
     const label = document.createElement("span");
     label.className = "agent-sidebar-changes-label";
     const count = session.changes.length;
-    label.textContent = `${count} ${count > 1 ? "changements" : "changement"}`;
-    header.appendChild(label);
+    label.textContent = `${count} ${count > 1 ? "fichiers" : "fichier"}`;
+    toggle.appendChild(label);
 
     const stats = this.getSessionChangeStats(session);
 
@@ -1648,11 +1775,32 @@ class AgentSidebar extends Sidebar {
       statsWrap.appendChild(del);
     }
 
-    header.appendChild(statsWrap);
+    toggle.appendChild(statsWrap);
 
-    header.addEventListener("click", () => {
+    toggle.addEventListener("click", () => {
       this.toggleChangesPanel(session.id);
     });
+
+    const actions = document.createElement("div");
+    actions.className = "agent-sidebar-changes-header-actions";
+    actions.appendChild(
+      this.createChangeActionButton(
+        "Keep all",
+        "fi fi-rr-check-double",
+        "Keep all changes",
+        () => this.keepAllChanges(session),
+      ),
+    );
+    actions.appendChild(
+      this.createChangeActionButton(
+        "Undo all",
+        "fi fi-rr-undo",
+        "Undo all changes",
+        () => this.undoAllChanges(session),
+      ),
+    );
+
+    header.append(toggle, actions);
 
     return header;
   }
@@ -1705,19 +1853,15 @@ class AgentSidebar extends Sidebar {
     const statsSpan = document.createElement("span");
     statsSpan.className = "agent-sidebar-change-stats";
 
-    if (change.additions) {
-      const add = document.createElement("span");
-      add.className = "change-stat-add";
-      add.textContent = `+${change.additions}`;
-      statsSpan.appendChild(add);
-    }
+    const add = document.createElement("span");
+    add.className = "change-stat-add";
+    add.textContent = `+${change.additions | 0}`;
+    statsSpan.appendChild(add);
 
-    if (change.deletions) {
-      const del = document.createElement("span");
-      del.className = "change-stat-del";
-      del.textContent = `-${change.deletions}`;
-      statsSpan.appendChild(del);
-    }
+    const del = document.createElement("span");
+    del.className = "change-stat-del";
+    del.textContent = `-${change.deletions | 0}`;
+    statsSpan.appendChild(del);
 
     li.appendChild(statsSpan);
 
@@ -1729,7 +1873,7 @@ class AgentSidebar extends Sidebar {
         "Keep",
         "fi fi-rr-check",
         "Keep changes",
-        () => this.keepChange(change),
+        () => this.keepFileChanges(change),
       ),
     );
     actions.appendChild(
@@ -1737,7 +1881,7 @@ class AgentSidebar extends Sidebar {
         "Undo",
         "fi fi-rr-undo",
         "Undo changes",
-        () => this.undoChange(change),
+        () => this.undoFileChanges(change),
       ),
     );
     li.appendChild(actions);
@@ -1792,23 +1936,51 @@ class AgentSidebar extends Sidebar {
   removeChange(change) {
     const session = this.getActiveSession();
     if (!session) return;
-    session.changes = session.changes.filter((entry) => entry !== change);
-    this.refresh();
+    this.removeChanges(session, [change]);
   }
 
-  async keepChange(change) {
-    if (change.operation === "create" || change.operation === "rename") {
-      if (change.snapshotKey) {
-        this.agent?.fileSnapshots?.delete(change.snapshotKey);
+  removeChanges(session, changes, refresh = true) {
+    if (!session || !Array.isArray(changes) || changes.length === 0) return;
+    const removed = new Set(changes);
+    session.changes = session.changes.filter((entry) => !removed.has(entry));
+    if (refresh) this.refresh();
+  }
+
+  getChangePaths(change) {
+    return [
+      change?.path,
+      change?.absolutePath,
+      change?.oldPath,
+      change?.newPath,
+      change?.oldAbsolutePath,
+      change?.newAbsolutePath,
+    ]
+      .filter((value) => typeof value === "string" && value)
+      .map((value) => value.replace(/\\/g, "/").replace(/\/+$/g, ""));
+  }
+
+  getFileChanges(session, selectedChange) {
+    if (!session?.changes?.includes(selectedChange)) return [];
+    const related = new Set([selectedChange]);
+    const paths = new Set(this.getChangePaths(selectedChange));
+    let foundRelatedChange = true;
+    while (foundRelatedChange) {
+      foundRelatedChange = false;
+      for (const change of session.changes) {
+        if (related.has(change)) continue;
+        const changePaths = this.getChangePaths(change);
+        if (!changePaths.some((filePath) => paths.has(filePath))) continue;
+        related.add(change);
+        for (const filePath of changePaths) paths.add(filePath);
+        foundRelatedChange = true;
       }
-      this.removeChange(change);
-      return;
     }
+    return session.changes.filter((change) => related.has(change));
+  }
+
+  clearChangeDiff(change) {
     const file = this.getChangeFile(change);
     if (!file) return;
-    if (this.editor.tabManager.activeFile !== file) {
-      await this.editor.tabManager.setFocusFile(file);
-    }
     file.diffSnapshot = null;
     file.diffActive = false;
     file.diffRows = null;
@@ -1818,33 +1990,59 @@ class AgentSidebar extends Sidebar {
         line.diffSegments = [];
       }
     }
-    if (this.editor.lineController?.refresh) {
-      this.editor.lineController.refresh(true);
+    if (this.editor.tabManager?.activeFile === file) {
+      this.editor.lineController?.refresh?.(true);
     }
-    this.removeChange(change);
   }
 
-  async undoChange(change) {
+  async keepFileChanges(change, options = {}) {
+    const session = options.session || this.getActiveSession();
+    const fileChanges = this.getFileChanges(session, change);
+    if (!fileChanges.length) return false;
+    for (const fileChange of fileChanges) {
+      if (fileChange.snapshotKey) {
+        this.agent?.fileSnapshots?.delete(fileChange.snapshotKey);
+      }
+    }
+    this.clearChangeDiff(fileChanges[fileChanges.length - 1]);
+    this.removeChanges(session, fileChanges, options.refresh !== false);
+    return true;
+  }
+
+  async keepAllChanges(session = this.getActiveSession()) {
+    if (!session?.changes?.length) return;
+    const pendingChanges = [...session.changes];
+    for (const change of pendingChanges) {
+      if (!session.changes.includes(change)) continue;
+      await this.keepFileChanges(change, { session, refresh: false });
+    }
+    this.refresh();
+  }
+
+  async keepChange(change) {
+    return this.keepFileChanges(change);
+  }
+
+  async undoSingleChange(change) {
     if (change.operation === "create") {
       const absolutePath = change.absolutePath || change.path;
       if (change.overwritten && change.snapshotKey) {
         const previous = this.agent?.fileSnapshots?.get(change.snapshotKey);
-        if (typeof previous !== "string") return;
+        if (typeof previous !== "string") return false;
         const saved = await this.editor?.api?.saveFile?.(
           absolutePath,
           previous,
         );
-        if (!saved) return;
+        if (!saved) return false;
         this.agent.fileSnapshots.delete(change.snapshotKey);
         await this.editor?.tabManager?.reloadFileFromDisk?.(absolutePath);
       } else {
         const result = await this.editor?.api?.deleteEntry?.(absolutePath);
-        if (!result?.success) return;
+        if (!result?.success) return false;
         this.editor?.tabManager?.markFileAsDeleted?.(absolutePath);
       }
       await this.refreshChangeFolders([absolutePath]);
-      this.removeChange(change);
-      return;
+      return true;
     }
 
     if (change.operation === "rename") {
@@ -1854,13 +2052,15 @@ class AgentSidebar extends Sidebar {
         newAbsolutePath,
         oldAbsolutePath,
       );
-      if (!result?.success) return;
+      if (!result?.success) return false;
       await this.editor?.tabManager?.updateFilePath?.(
         newAbsolutePath,
         oldAbsolutePath,
       );
       const normalizePath = (value) =>
-        String(value || "").replace(/\\/g, "/").replace(/\/+$/g, "");
+        String(value || "")
+          .replace(/\\/g, "/")
+          .replace(/\/+$/g, "");
       if (
         normalizePath(this.editor?.fileExplorer?.activeFilePath) ===
         normalizePath(newAbsolutePath)
@@ -1880,12 +2080,11 @@ class AgentSidebar extends Sidebar {
         }
       }
       await this.refreshChangeFolders([oldAbsolutePath, newAbsolutePath]);
-      this.removeChange(change);
-      return;
+      return true;
     }
 
     const file = this.getChangeFile(change);
-    if (!file || typeof change.beforeText !== "string") return;
+    if (!file || typeof change.beforeText !== "string") return false;
 
     if (this.editor.tabManager.activeFile !== file) {
       await this.editor.tabManager.setFocusFile(file);
@@ -1903,7 +2102,42 @@ class AgentSidebar extends Sidebar {
       );
     }
     file.setIsSaved(false);
-    this.removeChange(change);
+    return true;
+  }
+
+  async undoFileChanges(change, options = {}) {
+    const session = options.session || this.getActiveSession();
+    const fileChanges = this.getFileChanges(session, change);
+    if (!fileChanges.length) return false;
+    for (const fileChange of [...fileChanges].reverse()) {
+      const undone = await this.undoSingleChange(fileChange);
+      if (!undone) {
+        if (options.refresh !== false) this.refresh();
+        return false;
+      }
+      this.removeChanges(session, [fileChange], false);
+    }
+    this.clearChangeDiff(fileChanges[0]);
+    if (options.refresh !== false) this.refresh();
+    return true;
+  }
+
+  async undoAllChanges(session = this.getActiveSession()) {
+    if (!session?.changes?.length) return;
+    const pendingChanges = [...session.changes].reverse();
+    for (const change of pendingChanges) {
+      if (!session.changes.includes(change)) continue;
+      const undone = await this.undoFileChanges(change, {
+        session,
+        refresh: false,
+      });
+      if (!undone) break;
+    }
+    this.refresh();
+  }
+
+  async undoChange(change) {
+    return this.undoFileChanges(change);
   }
 
   async refreshChangeFolders(paths = []) {
@@ -2023,8 +2257,11 @@ class AgentSidebar extends Sidebar {
     }
 
     if (renderMessages && this.messagesElement) {
+      const shouldScroll = this.shouldAutoScrollMessages();
+      const previousScrollTop = this.messagesElement.scrollTop;
       this.renderMessages(this.messagesElement);
-      this.scrollMessagesToBottom();
+      if (shouldScroll) this.scrollMessagesToBottom();
+      else this.messagesElement.scrollTop = previousScrollTop;
     }
 
     if (renderChanges && this.changesElement) {
@@ -2226,6 +2463,8 @@ class AgentSidebar extends Sidebar {
       pendingTimeout: null,
       streamingMessage: null,
       queue: [],
+      segments: [],
+      currentSegment: null,
       changes: [],
       changesExpanded: true,
     };
@@ -2431,16 +2670,25 @@ class AgentSidebar extends Sidebar {
       if (session.isGenerating) {
         if (session.streamingMessage) {
           if (agentReply) session.streamingMessage.content = agentReply;
-          session.streamingMessage.reasoning = agentReasoning || undefined;
           session.streamingMessage.timestamp = this.formatTime();
           session.streamingMessage.streaming = false;
-        } else {
-          session.messages.push({
-            role: "agent",
-            content: agentReply,
-            reasoning: agentReasoning || undefined,
-            timestamp: this.formatTime(),
-          });
+        } else if (agentReply) {
+          const message = this.getRunSegment(
+            session,
+            session.runId,
+            "assistant",
+            true,
+          );
+          message.role = "agent";
+          message.content = agentReply;
+          message.timestamp = this.formatTime();
+          message.streaming = false;
+          if (session.id === this.activeSessionId && this.messagesElement) {
+            this.removeEmptyState();
+            this.messagesElement.appendChild(
+              this.createMessageElement(message),
+            );
+          }
         }
       }
     } catch (error) {
@@ -2458,6 +2706,7 @@ class AgentSidebar extends Sidebar {
         });
       }
     } finally {
+      const shouldScroll = this.shouldAutoScrollMessages();
       const completedRunId = session.runId;
       if (Number.isInteger(completedRunId)) {
         const activityContext = {
@@ -2470,10 +2719,13 @@ class AgentSidebar extends Sidebar {
       session.runId = null;
       session.isGenerating = false;
       session.streamingMessage = null;
+      if (session.currentSegment) {
+        session.currentSegment.status = "complete";
+      }
 
       this.processQueue(session.id);
       this.refresh();
-      this.scrollMessagesToBottom();
+      if (shouldScroll) this.scrollMessagesToBottom();
     }
   }
 

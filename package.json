@@ -30,7 +30,13 @@
       "dist/**/*",
       "assets/**/*",
       "package.json",
-      "src/config.js",
+      {
+        "from": "src/config/",
+        "to": "config/",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "src/js/",
         "to": "js/",

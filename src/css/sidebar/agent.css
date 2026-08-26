@@ -762,19 +762,41 @@
 .agent-sidebar-changes-header {
   display: flex;
   align-items: center;
-  padding: 6px 10px;
   background: transparent;
   border: none;
   color: var(--text-tertiary);
-  cursor: pointer;
   width: 100%;
-  text-align: left;
   font-size: 11px;
 }
 
-.agent-sidebar-changes-header:hover {
+.agent-sidebar-changes-toggle {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+
+.agent-sidebar-changes-toggle:hover {
   background: var(--bg-hover-alt, rgba(255, 255, 255, 0.05));
   color: var(--text-primary, var(--text-white));
+}
+
+.agent-sidebar-changes-header-actions {
+  display: flex;
+  gap: 4px;
+  padding-right: 8px;
+}
+
+.agent-sidebar-changes-header-actions .agent-sidebar-change-action {
+  white-space: nowrap;
+  padding-inline: 4px;
 }
 
 .agent-sidebar-changes-chevron {
@@ -963,36 +985,36 @@
 
 /* Le bouton "Auto" / "Qwen" */
 .agent-sidebar-model-trigger {
-  min-width: 0;
-  max-width: 190px;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  flex: 0 0 26px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
 
   background: var(--bg-secondary, rgba(255, 255, 255, 0.05));
-  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
+  border: none;
   border-radius: 6px;
-  padding: 4px 7px;
+  padding: 0;
 
   color: var(--text-secondary);
   font-size: 11px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .agent-sidebar-mode-trigger {
-  max-width: 125px;
+  max-width: 26px;
 }
 
 .agent-sidebar-model-trigger-button {
-  width: auto;
+  width: 26px;
 }
 
 .agent-sidebar-model-trigger:hover {
-  background: var(--bg-hover-alt, rgba(255, 255, 255, 0.09));
-  border-color: var(--border-active, var(--accent-color, #007acc));
-  color: var(--text-primary, var(--text-white));
+  border: 1px solid var(--border-primary, rgba(255, 255, 255, 0.12));
 }
 
 .agent-sidebar-model-trigger:focus-visible {
@@ -1006,13 +1028,6 @@
   font-size: 12px;
 }
 
-.agent-sidebar-model-trigger .trigger-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @container (max-width: 275px) {
   .agent-sidebar-input-toolbar {
     gap: 4px;
@@ -1023,19 +1038,6 @@
   .agent-sidebar-mode-selector,
   .agent-sidebar-model-selector {
     flex: 0 0 auto;
-  }
-
-  .agent-sidebar-model-trigger {
-    width: 26px;
-    height: 26px;
-    justify-content: center;
-    padding: 0;
-    border-color: transparent;
-  }
-
-  .agent-sidebar-model-trigger .trigger-label,
-  .agent-sidebar-model-trigger .trigger-dots {
-    display: none;
   }
 
   .agent-sidebar-model-trigger > i:first-child {
