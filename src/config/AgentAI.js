@@ -3,6 +3,7 @@ const AgentAI = {
   defaultProvider: "openrouter",
 
   maxIterations: 100,
+  maxIncompleteContinuations: 3,
 
   readOnlyTools: [
     "get_editor_context",
@@ -95,7 +96,7 @@ const AgentAI = {
         "Agent principal pour comprendre, modifier et corriger directement le projet.",
 
       temperature: 0.2,
-      maxTokens: 4096,
+      maxTokens: 8192,
 
       permissions: "code",
     },
@@ -232,6 +233,8 @@ const AgentAI = {
       maxTokens: agent.maxTokens,
 
       maxIterations: this.maxIterations,
+
+      maxIncompleteContinuations: this.maxIncompleteContinuations,
 
       permissions: agent.permissions || "read",
 

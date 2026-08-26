@@ -99,6 +99,7 @@ class Agent {
     this.stopRequested = false;
     this.runId = 0;
     this.maxIterations = 30;
+    this.maxIncompleteContinuations = 3;
     this.temperature = undefined;
     this.maxTokens = undefined;
     this.permissions = "code";
@@ -205,6 +206,12 @@ class Agent {
     if (Number.isFinite(config.maxIterations)) {
       this.maxIterations = Math.max(1, Math.floor(config.maxIterations));
     }
+    if (Number.isFinite(config.maxIncompleteContinuations)) {
+      this.maxIncompleteContinuations = Math.max(
+        0,
+        Math.floor(config.maxIncompleteContinuations),
+      );
+    }
     if (Number.isFinite(config.temperature)) {
       this.temperature = Math.max(0, Math.min(2, config.temperature));
     }
@@ -283,10 +290,23 @@ class Agent {
       typeof definition.execute !== "function"
     )
       throw new TypeError(`Définition invalide pour l'outil "${name}".`);
+    const parameters = definition.parameters || {
+      type: "object",
+      properties: {},
+    };
+    if (
+      !this.isPlainObject(parameters) ||
+      parameters.type !== "object" ||
+      !this.isPlainObject(parameters.properties || {})
+    ) {
+      throw new TypeError(
+        `Le schema de l'outil "${name}" doit avoir une racine object JSON Schema.`,
+      );
+    }
     const tool = {
       name,
       description: definition.description || "",
-      parameters: definition.parameters || { type: "object", properties: {} },
+      parameters,
       execute: definition.execute,
       readOnly:
         definition.readOnly === true ||
@@ -324,6 +344,11 @@ class Agent {
       maxTokens: Number.isFinite(this.maxTokens) ? this.maxTokens : undefined,
       maxIterations: Number.isFinite(this.maxIterations)
         ? this.maxIterations
+        : undefined,
+      maxIncompleteContinuations: Number.isFinite(
+        this.maxIncompleteContinuations,
+      )
+        ? this.maxIncompleteContinuations
         : undefined,
       permissions: this.permissions || "read",
       systemPrompt: this.systemPrompt || "",
@@ -646,6 +671,164 @@ class Agent {
     return "auto";
   }
 
+  normalizeFinishReason(result, message = null, toolCalls = []) {
+    const choice = result?.choices?.[0];
+    const rawReason =
+      choice?.finish_reason ??
+      choice?.finishReason ??
+      choice?.stop_reason ??
+      choice?.stopReason ??
+      result?.finish_reason ??
+      result?.finishReason ??
+      result?.stop_reason ??
+      result?.stopReason ??
+      result?.incomplete_details?.reason ??
+      message?.finish_reason ??
+      message?.finishReason ??
+      message?.stop_reason ??
+      message?.stopReason ??
+      null;
+    const reason =
+      typeof rawReason === "string" ? rawReason.trim().toLowerCase() : "";
+    if (toolCalls.length > 0 || ["tool_calls", "function_call"].includes(reason)) {
+      return "tool_calls";
+    }
+    if (
+      [
+        "length",
+        "max_tokens",
+        "max_output_tokens",
+        "model_length",
+        "token_limit",
+      ].includes(reason)
+    ) {
+      return "length";
+    }
+    if (["stop", "end_turn", "stop_sequence", "eos", "eos_token", "end"].includes(reason)) {
+      return "stop";
+    }
+    if (["content_filter", "safety", "blocked"].includes(reason)) {
+      return "content_filter";
+    }
+    if (["error", "failed", "failure"].includes(reason)) return "error";
+    if (
+      ["incomplete", "cancelled", "canceled"].includes(reason) ||
+      String(result?.status || "").toLowerCase() === "incomplete"
+    ) {
+      return "incomplete";
+    }
+    return "unknown";
+  }
+
+  evaluateIterationOutcome({
+    finishReason = "unknown",
+    hasReasoning = false,
+    hasText = false,
+    toolCallCount = 0,
+    requiresModification = false,
+    modificationPerformed = false,
+    validationPending = false,
+  } = {}) {
+    if (toolCallCount > 0) {
+      return { action: "execute_tools", reason: "tool_calls_available" };
+    }
+    if (finishReason === "error" || finishReason === "content_filter") {
+      return { action: "fail", reason: `provider_${finishReason}` };
+    }
+    if (finishReason === "length" || finishReason === "incomplete") {
+      return { action: "continue", reason: `generation_${finishReason}` };
+    }
+    if (finishReason === "tool_calls") {
+      return { action: "continue", reason: "missing_finalized_tool_calls" };
+    }
+    if (hasReasoning && !hasText) {
+      return { action: "continue", reason: "reasoning_without_final_text" };
+    }
+    if (!hasText) {
+      return { action: "continue", reason: "empty_model_turn" };
+    }
+    if (requiresModification && !modificationPerformed) {
+      return { action: "continue", reason: "required_write_missing" };
+    }
+    if (validationPending) {
+      return { action: "continue", reason: "post_write_validation_pending" };
+    }
+    return { action: "finish", reason: "final_response_complete" };
+  }
+
+  debugIterationDecision(details = {}) {
+    console.debug("[NCE Agent iteration]", {
+      iteration: details.iteration,
+      modelTurn: details.modelTurn,
+      finishReason: details.finishReason,
+      hasReasoning: details.hasReasoning,
+      hasText: details.hasText,
+      toolCallCount: details.toolCallCount,
+      requiresModification: details.requiresModification,
+      modificationPerformed: details.modificationPerformed,
+      validationPending: details.validationPending,
+      incompleteContinuations: details.incompleteContinuations,
+      decision: String(details.decision || "").toUpperCase(),
+      decisionReason: details.decisionReason,
+    });
+  }
+
+  createIncompleteGenerationError(reason, count, limit) {
+    const error = new Error(
+      `La génération est restée incomplète après ${count} continuations (${reason}).`,
+    );
+    error.name = "AgentIncompleteGenerationError";
+    error.code = "GENERATION_INCOMPLETE";
+    error.category = "GENERATION_INCOMPLETE";
+    error.reason = reason;
+    error.continuations = count;
+    error.maxIncompleteContinuations = limit;
+    return error;
+  }
+
+  createIterationFailure(finishReason) {
+    const filtered = finishReason === "content_filter";
+    const error = new Error(
+      filtered
+        ? "La réponse du modèle a été bloquée par le filtre de contenu."
+        : "Le provider a terminé la génération avec une erreur.",
+    );
+    error.name = "AgentGenerationError";
+    error.code = filtered ? "GENERATION_CONTENT_FILTERED" : "GENERATION_FAILED";
+    error.category = error.code;
+    error.finishReason = finishReason;
+    return error;
+  }
+
+  createMaxIterationsError(iterations, limit) {
+    const error = new Error(`Nombre maximal d'itérations atteint (${limit}).`);
+    error.name = "AgentMaxIterationsError";
+    error.code = "MAX_ITERATIONS_REACHED";
+    error.category = "MAX_ITERATIONS_REACHED";
+    error.iterations = iterations;
+    error.maxIterations = limit;
+    return error;
+  }
+
+  appendIncompleteContinuation(parsed, decisionReason) {
+    if (parsed.text) {
+      this.messages.push({ role: "assistant", content: parsed.text });
+    }
+    this.messages.push({
+      role: "system",
+      content:
+        decisionReason === "reasoning_without_final_text"
+          ? "Continue l'exécution. Tu as produit un raisonnement intermédiaire sans action ni réponse finale. Ne répète pas les étapes déjà effectuées."
+          : decisionReason === "post_write_validation_pending"
+            ? "Continue l'exécution. Une modification a réussi mais sa validation reste incomplète. Relis le fichier concerné et vérifie le résultat réel avant de répondre."
+          : "Continue la tâche à partir de l'état actuel. La génération précédente s'est terminée avant sa finalisation. Ne répète pas les étapes déjà effectuées et utilise les tools nécessaires.",
+    });
+  }
+
+  toolResultConfirmsValidation(toolPayload) {
+    return toolPayload?.verification?.verified === true;
+  }
+
   async runLoop(runId, controller, runConfig = this.runConfig, runState = {}) {
     let finalResponse = "";
     let finalReasoning = "";
@@ -658,28 +841,81 @@ class Agent {
     const successfulWrites = [];
     let missingWriteRetries = 0;
     let finalSummaryRequested = false;
-    const writeTools = new Set(["modify_file", "create_file", "rename_file"]);
+    let incompleteContinuations = 0;
+    let modelTurn = 0;
+    let toolIterations = 0;
+    let validationPending = false;
+    const pendingValidationPaths = new Set();
+    const maxIterations = runConfig?.maxIterations ?? this.maxIterations;
+    const maxIncompleteContinuations =
+      runConfig?.maxIncompleteContinuations ?? this.maxIncompleteContinuations;
+    const writeTools = new Set([
+      "modify_file",
+      "create_file",
+      "rename_file",
+      "modify_active_file",
+      "replace_text",
+    ]);
     const readTools = new Set([
       "read_file",
       "read_active_file",
       "search_active_file",
       "search_project_files",
+      "list_project_files",
       "get_editor_context",
       "get_cursor",
       "read_selection",
     ]);
-    for (
-      let iteration = 1;
-      iteration <= (runConfig?.maxIterations ?? this.maxIterations);
-      iteration += 1
-    ) {
+    while (true) {
+      const iteration = toolIterations + 1;
+      modelTurn += 1;
       this.assertRunActive(runId, controller);
       const outputContext = this.createModelOutputContext(runId, "main");
       const modelResponse = await this.requestModel(controller, runConfig);
       this.assertRunActive(runId, controller);
-      const parsed = this.parseResponse(modelResponse);
+      const parsed = this.parseResponse(modelResponse, {
+        source: "provider_response",
+        iteration,
+        runId,
+        provider: runConfig?.providerId,
+        model: runConfig?.model,
+      });
       finalResponse = parsed.text || "";
       finalReasoning = parsed.reasoning || finalReasoning;
+      let outcome = this.evaluateIterationOutcome({
+        finishReason: parsed.finishReason,
+        hasReasoning: Boolean(parsed.reasoning),
+        hasText: Boolean(parsed.text.trim()),
+        toolCallCount: parsed.toolCalls.length,
+        requiresModification,
+        modificationPerformed: successfulWriteCount > 0,
+        validationPending,
+      });
+      if (
+        outcome.action === "execute_tools" &&
+        toolIterations >= maxIterations
+      ) {
+        outcome = { action: "fail", reason: "max_iterations_reached" };
+      } else if (
+        outcome.reason === "required_write_missing" &&
+        missingWriteRetries >= 2
+      ) {
+        outcome = { action: "fail", reason: "required_write_not_performed" };
+      }
+      this.debugIterationDecision({
+        iteration,
+        modelTurn,
+        finishReason: parsed.finishReason,
+        hasReasoning: Boolean(parsed.reasoning),
+        hasText: Boolean(parsed.text.trim()),
+        toolCallCount: parsed.toolCalls.length,
+        requiresModification,
+        modificationPerformed: successfulWriteCount > 0,
+        validationPending,
+        incompleteContinuations,
+        decision: outcome.action,
+        decisionReason: outcome.reason,
+      });
       if (parsed.reasoning) {
         this.emitModelOutput(
           "reasoning",
@@ -700,23 +936,17 @@ class Agent {
           "snapshot",
         );
       }
-      if (!parsed.toolCalls.length) {
-        if (requiresModification && successfulWriteCount === 0) {
+      if (outcome.action === "fail") {
+        if (outcome.reason === "max_iterations_reached") {
+          throw this.createMaxIterationsError(toolIterations, maxIterations);
+        }
+        if (outcome.reason === "required_write_not_performed") {
           this.emitModelOutput(
             "assistant",
             parsed.text,
             outputContext,
             "snapshot",
           );
-          if (missingWriteRetries < 2) {
-            missingWriteRetries += 1;
-            this.messages.push({
-              role: "system",
-              content:
-                "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise modify_file, create_file ou rename_file.",
-            });
-            continue;
-          }
           return {
             response:
               "La modification n'a pas été effectuée : aucun outil d'écriture n'a réussi.",
@@ -728,6 +958,37 @@ class Agent {
             iterations: iteration,
           };
         }
+        throw this.createIterationFailure(parsed.finishReason);
+      }
+      if (outcome.action === "continue") {
+        if (outcome.reason === "required_write_missing") {
+          this.emitModelOutput(
+            "assistant",
+            parsed.text,
+            outputContext,
+            "snapshot",
+          );
+          missingWriteRetries += 1;
+          this.messages.push({
+            role: "system",
+            content:
+              "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise modify_file, create_file ou rename_file.",
+          });
+          continue;
+        }
+        incompleteContinuations += 1;
+        if (incompleteContinuations > maxIncompleteContinuations) {
+          throw this.createIncompleteGenerationError(
+            outcome.reason,
+            incompleteContinuations,
+            maxIncompleteContinuations,
+          );
+        }
+        this.appendIncompleteContinuation(parsed, outcome.reason);
+        continue;
+      }
+      if (outcome.action === "finish") {
+        incompleteContinuations = 0;
         if (requiresModification && successfulWriteCount > 0) {
           const looksLikeDump = this.isLikelyFullFileDump(parsed.text);
           if (
@@ -769,20 +1030,7 @@ class Agent {
               iterations: iteration,
             };
       }
-      if (finalSummaryRequested) {
-        finalResponse = this.buildSuccessfulWriteFallback(successfulWrites);
-        this.emitModelOutput(
-          "assistant",
-          finalResponse,
-          outputContext,
-          "delta",
-        );
-        return {
-          response: finalResponse,
-          reasoning: finalReasoning,
-          iterations: iteration,
-        };
-      }
+      incompleteContinuations = 0;
       const hasReadCall = parsed.toolCalls.some((call) =>
         readTools.has(call?.function?.name),
       );
@@ -805,12 +1053,19 @@ class Agent {
                 .filter((call) => writeTools.has(call?.function?.name))
                 .slice(0, 1)
             : orderedToolCalls;
-      this.messages.push({
-        ...parsed.assistantMessage,
-        ...(parsed.assistantMessage.tool_calls
-          ? { tool_calls: executableToolCalls }
-          : {}),
-      });
+      this.messages.push(
+        this.createAssistantToolCallMessage(
+          parsed.assistantMessage,
+          executableToolCalls,
+          {
+            source: "run_loop",
+            iteration,
+            runId,
+            provider: runConfig?.providerId,
+            model: runConfig?.model,
+          },
+        ),
+      );
       for (const call of executableToolCalls) {
         this.assertRunActive(runId, controller);
         const toolResult = await this.executeToolCall(call, {
@@ -818,13 +1073,17 @@ class Agent {
           runId,
         });
         this.assertRunActive(runId, controller);
-        this.messages.push({
-          role: "tool",
-          tool_call_id: call.id,
-          content: JSON.stringify(toolResult),
-        });
+        this.messages.push(this.createToolResultMessage(call.id, toolResult));
 
         const toolPayload = toolResult?.result ?? toolResult;
+        let toolArgs = {};
+        try {
+          toolArgs = this.parseCanonicalToolArguments(
+            call?.function?.arguments,
+          );
+        } catch {
+          toolArgs = {};
+        }
         const modificationTool =
           call?.function?.name === "modify_active_file" ||
           call?.function?.name === "replace_text" ||
@@ -832,11 +1091,48 @@ class Agent {
         if (writeTools.has(call?.function?.name) && toolResult?.success) {
           successfulWriteCount += 1;
           missingWriteRetries = 0;
+          const affectedPath = AgentPath.normalize(
+            toolPayload?.newPath ||
+              toolPayload?.path ||
+              toolArgs?.newPath ||
+              toolArgs?.path ||
+              "",
+          );
+          if (this.toolResultConfirmsValidation(toolPayload)) {
+            if (affectedPath) pendingValidationPaths.delete(affectedPath);
+          } else if (affectedPath) {
+            pendingValidationPaths.add(affectedPath);
+          } else {
+            pendingValidationPaths.add("[unknown-write-target]");
+          }
+          validationPending = pendingValidationPaths.size > 0;
           successfulWrites.push({
             tool: call.function.name,
             path: toolPayload?.path || toolPayload?.oldPath || "fichier",
             newPath: toolPayload?.newPath || "",
           });
+        } else if (
+          ["read_file", "read_active_file"].includes(call?.function?.name) &&
+          toolResult?.success
+        ) {
+          const readPath = AgentPath.normalize(
+            toolArgs?.path ||
+              toolPayload?.path ||
+              this.editor?.tabManager?.activeFile?.path ||
+              "",
+          );
+          if (readPath) {
+            for (const pendingPath of pendingValidationPaths) {
+              if (
+                readPath === pendingPath ||
+                readPath.endsWith(`/${pendingPath}`) ||
+                pendingPath.endsWith(`/${readPath}`)
+              ) {
+                pendingValidationPaths.delete(pendingPath);
+              }
+            }
+          }
+          validationPending = pendingValidationPaths.size > 0;
         }
         const retryableErrorCodes = new Set([
           "CONTENT_MISMATCH",
@@ -879,76 +1175,15 @@ class Agent {
               );
             }
             postEditRepairAttempts += 1;
+            const activePath = AgentPath.normalize(
+              this.editor?.tabManager?.activeFile?.path || "",
+            );
+            pendingValidationPaths.add(activePath || "[active-file]");
+            validationPending = true;
             this.messages.push({
               role: "system",
-              content:
-                "VALIDATION POST-MODIFICATION : le fichier modifié contient une erreur de syntaxe. Lis le code actuel, corrige immédiatement la cause de l'erreur et réapplique une modification valide avant de répondre.",
+              content: `VALIDATION POST-MODIFICATION : le fichier modifié contient une erreur de syntaxe (${validation.error}). Lis le code actuel, corrige immédiatement la cause et réapplique une modification valide avant de répondre.`,
             });
-            this.messages.push({
-              role: "user",
-              content: `Le dernier patch a produit une erreur de syntaxe dans le script. Détail de l'erreur : ${validation.error}. Corrige le fichier et réécris uniquement la partie nécessaire pour rendre le code valide.`,
-            });
-            const repairContext = this.createModelOutputContext(
-              runId,
-              "repair",
-            );
-            const repairResponse = await this.requestModel(
-              controller,
-              runConfig,
-            );
-            this.assertRunActive(runId, controller);
-            const repaired = this.parseResponse(repairResponse);
-            if (repaired.reasoning) {
-              this.emitModelOutput(
-                "reasoning",
-                repaired.reasoning,
-                repairContext,
-                "snapshot",
-              );
-            }
-            if (repaired.text) {
-              finalResponse = repaired.text;
-              finalReasoning = repaired.reasoning || finalReasoning;
-              this.emitModelOutput(
-                "assistant",
-                repaired.text,
-                repairContext,
-                "snapshot",
-              );
-            }
-            this.messages.push(repaired.assistantMessage);
-            if (!repaired.toolCalls.length) {
-              const recheck = this.validateActiveFileSyntax();
-              if (recheck.valid) {
-                return {
-                  response: finalResponse,
-                  reasoning: finalReasoning,
-                  iterations: iteration,
-                };
-              }
-            }
-            for (const repairCall of repaired.toolCalls) {
-              const repairToolResult = await this.executeToolCall(repairCall, {
-                sessionId: this.currentSessionId,
-                runId,
-              });
-              this.assertRunActive(runId, controller);
-              this.messages.push({
-                role: "tool",
-                tool_call_id: repairCall.id,
-                content: JSON.stringify(repairToolResult),
-              });
-              if (repairCall?.function?.name === "modify_active_file") {
-                const repairedValidation = this.validateActiveFileSyntax();
-                if (repairedValidation.valid) {
-                  return {
-                    response: finalResponse,
-                    reasoning: finalReasoning,
-                    iterations: iteration,
-                  };
-                }
-              }
-            }
           }
         }
       }
@@ -969,10 +1204,8 @@ class Agent {
             "Une seule écriture a été exécutée. Réévalue les écritures restantes au prochain tour à partir du résultat réel.",
         });
       }
+      toolIterations += 1;
     }
-    throw new Error(
-      `Nombre maximal d'itérations atteint (${runConfig?.maxIterations ?? this.maxIterations}).`,
-    );
   }
 
   async requestModel(
@@ -1215,12 +1448,195 @@ class Agent {
       clearTimeout(timeout);
     }
   }
+  isPlainObject(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+  }
+
+  getSafeValuePreview(value, maxLength = 240) {
+    const seen = new Set();
+    const summarize = (entry, depth = 0, key = "") => {
+      if (/api.?key|authorization|secret|token/i.test(key)) {
+        return "[redacted]";
+      }
+      if (typeof entry === "string") {
+        return entry.length <= 80 ? entry : `${entry.slice(0, 80)}…`;
+      }
+      if (
+        entry === null ||
+        typeof entry === "number" ||
+        typeof entry === "boolean"
+      ) {
+        return entry;
+      }
+      if (typeof entry === "bigint") return `${entry}n`;
+      if (typeof entry !== "object") return `[${typeof entry}]`;
+      if (seen.has(entry)) return "[circular]";
+      if (depth >= 2) return `[${entry.constructor?.name || "Object"}]`;
+      seen.add(entry);
+      if (Array.isArray(entry)) {
+        const result = entry
+          .slice(0, 5)
+          .map((item) => summarize(item, depth + 1));
+        if (entry.length > 5) result.push(`… ${entry.length - 5} more`);
+        return result;
+      }
+      const result = {};
+      const entries = Object.entries(entry).slice(0, 10);
+      for (const [entryKey, item] of entries) {
+        result[entryKey] = summarize(item, depth + 1, entryKey);
+      }
+      if (Object.keys(entry).length > entries.length) result["…"] = "truncated";
+      return result;
+    };
+    let preview = "";
+    try {
+      preview = JSON.stringify(summarize(value));
+    } catch {
+      preview = Object.prototype.toString.call(value);
+    }
+    if (typeof preview !== "string") preview = String(preview);
+    return preview.length <= maxLength
+      ? preview
+      : `${preview.slice(0, maxLength)}…`;
+  }
+
+  assertJsonSafeArguments(value, path = "function.arguments", seen = new Set()) {
+    if (value === null) return;
+    const valueType = typeof value;
+    if (valueType === "string" || valueType === "boolean") return;
+    if (valueType === "number") {
+      if (Number.isFinite(value)) return;
+      throw new TypeError(`${path} contient un nombre non fini`);
+    }
+    if (
+      valueType === "undefined" ||
+      valueType === "function" ||
+      valueType === "symbol" ||
+      valueType === "bigint"
+    ) {
+      throw new TypeError(`${path} contient une valeur ${valueType}`);
+    }
+    if (seen.has(value)) throw new TypeError(`${path} contient une référence circulaire`);
+    seen.add(value);
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) =>
+        this.assertJsonSafeArguments(entry, `${path}[${index}]`, seen),
+      );
+      seen.delete(value);
+      return;
+    }
+    if (!this.isPlainObject(value)) {
+      throw new TypeError(`${path} contient un objet complexe non autorisé`);
+    }
+    for (const [key, entry] of Object.entries(value)) {
+      this.assertJsonSafeArguments(entry, `${path}.${key}`, seen);
+    }
+    seen.delete(value);
+  }
+
+  parseCanonicalToolArguments(value) {
+    if (value === null || value === undefined || value === "") return {};
+    let parsed = value;
+    if (typeof value === "string") parsed = JSON.parse(value);
+    if (!this.isPlainObject(parsed)) {
+      throw new TypeError("les arguments doivent représenter un objet JSON");
+    }
+    this.assertJsonSafeArguments(parsed);
+    return parsed;
+  }
+
+  createToolCallValidationError(toolCall, toolCallIndex, reason, context = {}) {
+    const toolName = toolCall?.function?.name || "(inconnu)";
+    const value = toolCall?.function?.arguments;
+    const error = new Error(
+      `Tool call invalide pour ${toolName} : ${reason || "format incompatible"}.`,
+    );
+    error.name = "AgentToolCallValidationError";
+    error.code = "TOOL_CALL_FINALIZATION_FAILED";
+    error.category = "TOOL_CALL_FINALIZATION_FAILED";
+    error.messageIndex = Number.isInteger(context.messageIndex)
+      ? context.messageIndex
+      : null;
+    error.toolCallIndex = Number.isInteger(toolCallIndex) ? toolCallIndex : null;
+    error.toolName = toolName;
+    error.field = "function.arguments";
+    error.valueType =
+      value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
+    error.reason = reason || "format incompatible";
+    error.source = context.source || "provider_response";
+    error.runId = context.runId ?? this.runId;
+    error.userMessage = `Le modèle a produit un appel invalide pour l'outil ${toolName}.`;
+    console.error("[NCE Tool Call invalid]", {
+      code: error.code,
+      messageIndex: error.messageIndex,
+      toolCallIndex: error.toolCallIndex,
+      toolName,
+      field: error.field,
+      valueType: error.valueType,
+      reason: error.reason,
+      argumentsPreview: this.getSafeValuePreview(value),
+      source: error.source,
+      runId: error.runId,
+      provider: context.provider || this.runConfig?.providerId || null,
+      model: context.model || this.runConfig?.model || this.model || null,
+    });
+    return error;
+  }
+
+  finalizeToolCall(toolCall, toolCallIndex = 0, context = {}) {
+    try {
+      if (!this.isPlainObject(toolCall)) throw new TypeError("tool_call doit être un objet");
+      if (typeof toolCall.id !== "string" || !toolCall.id.trim()) {
+        throw new TypeError("id manquant ou invalide");
+      }
+      if (!this.isPlainObject(toolCall.function)) {
+        throw new TypeError("function doit être un objet");
+      }
+      if (
+        typeof toolCall.function.name !== "string" ||
+        !toolCall.function.name.trim()
+      ) {
+        throw new TypeError("function.name manquant ou invalide");
+      }
+      const args = this.parseCanonicalToolArguments(
+        toolCall.function.arguments,
+      );
+      return {
+        id: toolCall.id.trim(),
+        type: "function",
+        function: {
+          name: toolCall.function.name.trim(),
+          arguments: JSON.stringify(args),
+        },
+      };
+    } catch (error) {
+      throw this.createToolCallValidationError(
+        toolCall,
+        toolCallIndex,
+        error?.message,
+        context,
+      );
+    }
+  }
+
+  finalizeToolCalls(toolCalls, context = {}) {
+    if (!Array.isArray(toolCalls)) return [];
+    return toolCalls.map((toolCall, toolCallIndex) =>
+      this.finalizeToolCall(toolCall, toolCallIndex, context),
+    );
+  }
+
   createMessageSerializationError(
     messageIndex,
     toolCallIndex,
     field,
     value,
     reason,
+    details = {},
   ) {
     const valueType =
       value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
@@ -1239,52 +1655,34 @@ class Agent {
       : null;
     error.field = field;
     error.valueType = valueType;
+    error.toolName = details.toolName || null;
+    error.reason = reason || "format incompatible";
+    error.valuePreview = this.getSafeValuePreview(value);
+    error.runId = details.runId ?? this.runId;
     error.technicalMessage = `${field} contient une valeur de type ${valueType}${reason ? ` (${reason})` : ""}.`;
+    console.error("[NCE Agent serialization]", {
+      code: error.code,
+      messageIndex: error.messageIndex,
+      toolCallIndex: error.toolCallIndex,
+      toolName: error.toolName,
+      field: error.field,
+      valueType: error.valueType,
+      reason: error.reason,
+      argumentsPreview: error.valuePreview,
+      runId: error.runId,
+      provider: this.runConfig?.providerId || this.provider?.id || null,
+      model: this.runConfig?.model || this.model || null,
+    });
     return error;
   }
-  normalizeToolArgumentsForProvider(value, messageIndex, toolCallIndex) {
-    if (value === null || value === undefined) return "{}";
-    if (typeof value === "string") {
-      try {
-        const parsed = JSON.parse(value);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new TypeError("le JSON doit représenter un objet");
-        }
-        return value;
-      } catch (error) {
-        console.error("[NCE Agent serialization]", {
-          messageIndex: error.messageIndex,
-          toolCallIndex: error.toolCallIndex,
-          field: error.field,
-          valueType: error.valueType,
-          technicalMessage: error.technicalMessage,
-        });
-        throw this.createMessageSerializationError(
-          messageIndex,
-          toolCallIndex,
-          "function.arguments",
-          value,
-          error?.message || "JSON invalide",
-        );
-      }
-    }
-    if (typeof value !== "object" || Array.isArray(value)) {
-      throw this.createMessageSerializationError(
-        messageIndex,
-        toolCallIndex,
-        "function.arguments",
-        value,
-        "un objet JSON est requis",
-      );
-    }
+  normalizeToolArgumentsForProvider(
+    value,
+    messageIndex,
+    toolCallIndex,
+    toolName = null,
+  ) {
     try {
-      const serialized = JSON.stringify(value);
-      if (typeof serialized !== "string") throw new TypeError("résultat vide");
-      const parsed = JSON.parse(serialized);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new TypeError("le JSON doit représenter un objet");
-      }
-      return serialized;
+      return JSON.stringify(this.parseCanonicalToolArguments(value));
     } catch (error) {
       throw this.createMessageSerializationError(
         messageIndex,
@@ -1292,14 +1690,120 @@ class Agent {
         "function.arguments",
         value,
         error?.message || "JSON non sérialisable",
+        { toolName },
       );
     }
   }
+
+  normalizeToolResultForHistory(value, path = "result", seen = new Set()) {
+    if (value === null) return null;
+    const valueType = typeof value;
+    if (valueType === "string" || valueType === "boolean") return value;
+    if (valueType === "number") return Number.isFinite(value) ? value : null;
+    if (valueType === "bigint") return value.toString();
+    if (
+      valueType === "undefined" ||
+      valueType === "function" ||
+      valueType === "symbol"
+    ) {
+      return undefined;
+    }
+    const objectTag = Object.prototype.toString.call(value);
+    if (value instanceof Error || objectTag.endsWith("Error]")) {
+      return {
+        name: value.name || "Error",
+        message: value.message || String(value),
+        ...(value.code !== undefined ? { code: String(value.code) } : {}),
+      };
+    }
+    if (value instanceof Date || objectTag === "[object Date]") {
+      return new Date(value).toISOString();
+    }
+    if (value instanceof RegExp || objectTag === "[object RegExp]") {
+      return String(value);
+    }
+    if (seen.has(value)) {
+      const error = new TypeError(`${path} contient une référence circulaire`);
+      error.code = "TOOL_RESULT_SERIALIZATION_FAILED";
+      throw error;
+    }
+    seen.add(value);
+    if (value instanceof Map || objectTag === "[object Map]") {
+      const entries = [...value.entries()];
+      const allStringKeys = entries.every(([key]) => typeof key === "string");
+      const normalized = allStringKeys ? {} : [];
+      for (const [key, entry] of entries) {
+        const safeEntry = this.normalizeToolResultForHistory(
+          entry,
+          `${path}.${String(key)}`,
+          seen,
+        );
+        if (allStringKeys) {
+          if (safeEntry !== undefined) normalized[key] = safeEntry;
+        } else {
+          normalized.push([
+            this.normalizeToolResultForHistory(key, `${path}.key`, seen) ?? null,
+            safeEntry ?? null,
+          ]);
+        }
+      }
+      seen.delete(value);
+      return normalized;
+    }
+    if (value instanceof Set || objectTag === "[object Set]") {
+      const normalized = [...value].map(
+        (entry, index) =>
+          this.normalizeToolResultForHistory(
+            entry,
+            `${path}[${index}]`,
+            seen,
+          ) ?? null,
+      );
+      seen.delete(value);
+      return normalized;
+    }
+    if (ArrayBuffer.isView(value)) {
+      const normalized = Array.from(value);
+      seen.delete(value);
+      return normalized;
+    }
+    if (Array.isArray(value)) {
+      const normalized = value.map(
+        (entry, index) =>
+          this.normalizeToolResultForHistory(
+            entry,
+            `${path}[${index}]`,
+            seen,
+          ) ?? null,
+      );
+      seen.delete(value);
+      return normalized;
+    }
+    if (!this.isPlainObject(value)) {
+      const error = new TypeError(`${path} contient un objet complexe non pris en charge`);
+      error.code = "TOOL_RESULT_SERIALIZATION_FAILED";
+      throw error;
+    }
+    const normalized = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const safeEntry = this.normalizeToolResultForHistory(
+        entry,
+        `${path}.${key}`,
+        seen,
+      );
+      if (safeEntry !== undefined) normalized[key] = safeEntry;
+    }
+    seen.delete(value);
+    return normalized;
+  }
+
   normalizeToolContentForProvider(value, messageIndex) {
     if (typeof value === "string") return value;
     if (value === null || value === undefined) return "";
     try {
-      const serialized = JSON.stringify(value);
+      const serialized = JSON.stringify(
+        this.normalizeToolResultForHistory(value, "content"),
+      );
       if (typeof serialized !== "string") throw new TypeError("résultat vide");
       return serialized;
     } catch (error) {
@@ -1361,14 +1865,37 @@ class Agent {
                 "un objet function est requis",
               );
             }
+            const toolName = toolCall.function.name;
+            if (typeof toolCall.id !== "string" || !toolCall.id.trim()) {
+              throw this.createMessageSerializationError(
+                messageIndex,
+                toolCallIndex,
+                "tool_calls.id",
+                toolCall.id,
+                "un identifiant non vide est requis",
+                { toolName },
+              );
+            }
+            if (typeof toolName !== "string" || !toolName.trim()) {
+              throw this.createMessageSerializationError(
+                messageIndex,
+                toolCallIndex,
+                "tool_calls.function.name",
+                toolName,
+                "un nom non vide est requis",
+                { toolName },
+              );
+            }
             return {
-              ...toolCall,
+              id: toolCall.id.trim(),
+              type: "function",
               function: {
-                ...toolCall.function,
+                name: toolName.trim(),
                 arguments: this.normalizeToolArgumentsForProvider(
                   toolCall.function.arguments,
                   messageIndex,
                   toolCallIndex,
+                  toolName,
                 ),
               },
             };
@@ -1383,6 +1910,61 @@ class Agent {
       }
       return normalized;
     });
+  }
+
+  debugToolMessage(toolCall, messageIndex, context = {}) {
+    console.debug("[NCE Tool Message]", {
+      toolName: toolCall.function.name,
+      toolCallId: toolCall.id,
+      argumentsType: typeof toolCall.function.arguments,
+      argumentsPreview: this.getSafeValuePreview(
+        toolCall.function.arguments,
+      ),
+      messageIndex,
+      source: context.source || "run_loop",
+      iteration: context.iteration ?? null,
+      provider: context.provider || this.runConfig?.providerId || null,
+      model: context.model || this.runConfig?.model || this.model || null,
+    });
+  }
+
+  createAssistantToolCallMessage(assistantMessage, toolCalls, context = {}) {
+    const finalizedCalls = this.finalizeToolCalls(toolCalls, context);
+    const message = {
+      role: "assistant",
+      content: assistantMessage?.content ?? null,
+      ...(assistantMessage?.reasoning
+        ? { reasoning: assistantMessage.reasoning }
+        : {}),
+      tool_calls: finalizedCalls,
+    };
+    const messageIndex = this.messages.length;
+    finalizedCalls.forEach((toolCall) =>
+      this.debugToolMessage(toolCall, messageIndex, context),
+    );
+    return message;
+  }
+
+  createToolResultMessage(toolCallId, result, options = {}) {
+    if (typeof toolCallId !== "string" || !toolCallId.trim()) {
+      throw this.createMessageSerializationError(
+        this.messages.length,
+        null,
+        "tool_call_id",
+        toolCallId,
+        "un identifiant non vide est requis",
+      );
+    }
+    return {
+      role: "tool",
+      tool_call_id: toolCallId.trim(),
+      content:
+        options.contentIsSerialized && typeof result === "string"
+          ? result
+          : JSON.stringify(
+              this.normalizeToolResultForHistory(result) ?? null,
+            ),
+    };
   }
   unwrapModelTransportResult(result) {
     if (
@@ -1836,7 +2418,7 @@ class Agent {
     return provider;
   }
 
-  parseResponse(result) {
+  parseResponse(result, context = {}) {
     const message = result?.choices?.[0]?.message || result?.message;
     if (!message || typeof message !== "object")
       throw new Error("Réponse IA invalide.");
@@ -1849,13 +2431,13 @@ class Agent {
         ? content
         : "";
     const reasoning = this.extractReasoning(message);
-    const toolCalls = Array.isArray(message.tool_calls)
-      ? message.tool_calls
-      : [];
+    const toolCalls = this.finalizeToolCalls(message.tool_calls, context);
+    const finishReason = this.normalizeFinishReason(result, message, toolCalls);
     return {
       text,
       reasoning,
       toolCalls,
+      finishReason,
       assistantMessage: {
         role: "assistant",
         content: content || null,
@@ -2022,13 +2604,15 @@ class Agent {
         agent: this,
         signal: this.abortController?.signal,
       });
-      const result = this.limitResult(rawResult);
+      const result = this.limitResult(
+        this.normalizeToolResultForHistory(rawResult),
+      );
       const toolResult =
         result && result.success === false ? result : { success: true, result };
       const callbackResult =
-        rawResult && rawResult.success === false
-          ? rawResult
-          : { success: true, result: rawResult };
+        result && result.success === false
+          ? result
+          : { success: true, result };
       this.debugTool(name, normalizedArgs, toolResult, {
         activePath: this.editor?.tabManager?.activeFile?.path || null,
         activeTabId: this.editor?.tabManager?.activeFile?.id || null,
@@ -2045,7 +2629,9 @@ class Agent {
       const result = {
         success: false,
         error: {
-          code: this.isAbortError(error) ? "USER_ABORTED" : "INTERNAL_ERROR",
+          code: this.isAbortError(error)
+            ? "USER_ABORTED"
+            : error?.code || "INTERNAL_ERROR",
           message: error?.message || String(error),
         },
       };
@@ -2203,7 +2789,7 @@ class Agent {
     if (!Array.isArray(history)) return;
     const recentHistory = history.slice(-80);
     while (recentHistory[0]?.role === "tool") recentHistory.shift();
-    for (const message of recentHistory) {
+    for (const [historyIndex, message] of recentHistory.entries()) {
       if (message?.role === "user" && typeof message.content === "string") {
         this.messages.push({
           role: "user",
@@ -2217,36 +2803,41 @@ class Agent {
           message.content === null ||
           Array.isArray(message.tool_calls))
       ) {
-        this.messages.push({
+        const assistantMessage = {
           role: "assistant",
           content:
             typeof message.content === "string"
               ? message.content.slice(0, 4000)
               : (message.content ?? null),
           ...(message.reasoning ? { reasoning: message.reasoning } : {}),
-          ...(Array.isArray(message.tool_calls)
-            ? {
-                tool_calls: message.tool_calls.map((toolCall) => ({
-                  ...toolCall,
-                  function:
-                    toolCall?.function && typeof toolCall.function === "object"
-                      ? { ...toolCall.function }
-                      : toolCall?.function,
-                })),
-              }
-            : {}),
-        });
+        };
+        if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+          this.messages.push(
+            this.createAssistantToolCallMessage(
+              assistantMessage,
+              message.tool_calls,
+              {
+                source: "conversation_history",
+                messageIndex: historyIndex,
+              },
+            ),
+          );
+        } else {
+          this.messages.push(assistantMessage);
+        }
         continue;
       }
       if (
         message?.role === "tool" &&
         typeof message.tool_call_id === "string"
       ) {
-        this.messages.push({
-          role: "tool",
-          tool_call_id: message.tool_call_id,
-          content: message.content,
-        });
+        this.messages.push(
+          this.createToolResultMessage(
+            message.tool_call_id,
+            message.content,
+            { contentIsSerialized: typeof message.content === "string" },
+          ),
+        );
       }
     }
   }
