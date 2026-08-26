@@ -5,6 +5,18 @@ const AgentAI = {
   maxIterations: 100,
   maxIncompleteContinuations: 3,
 
+  contextCompaction: {
+    enabled: true,
+    recentIterations: 2,
+    softLimitRatio: 0.4,
+    hardLimitRatio: 0.7,
+    criticalLimitRatio: 0.85,
+    safetyMarginTokens: 8192,
+    charsPerToken: 4,
+    logMetrics: true,
+    debugDecisions: false,
+  },
+
   readOnlyTools: [
     "get_editor_context",
     "get_cursor",
@@ -236,6 +248,8 @@ const AgentAI = {
       maxIterations: this.maxIterations,
 
       maxIncompleteContinuations: this.maxIncompleteContinuations,
+
+      contextCompaction: { ...this.contextCompaction },
 
       permissions: agent.permissions || "read",
 
