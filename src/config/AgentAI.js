@@ -11,6 +11,7 @@ const AgentAI = {
     "read_selection",
     "read_active_file",
     "read_file",
+    "get_project_map",
     "list_project_files",
     "search_active_file",
     "search_project_files",

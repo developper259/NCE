@@ -826,6 +826,7 @@ class AgentSidebar extends Sidebar {
     if (toolName === "create_file") return "create";
     if (toolName === "rename_file") return "rename";
     if (toolName.includes("search")) return "search";
+    if (toolName === "get_project_map") return "list";
     if (toolName.includes("read")) return "read";
     if (toolName.includes("modify") || toolName.includes("replace")) {
       return "edit";
@@ -876,6 +877,7 @@ class AgentSidebar extends Sidebar {
       payload.total,
       payload.count,
       payload.resultCount,
+      payload.files,
     ]) {
       if (Number.isFinite(value)) return Math.max(0, value);
     }
@@ -935,6 +937,9 @@ class AgentSidebar extends Sidebar {
         break;
       case "list_project_files":
         title = `${running ? "Listing" : "Listed"} project files${running ? "…" : ""}`;
+        break;
+      case "get_project_map":
+        title = `${running ? "Mapping" : "Mapped"} project structure${running ? "…" : ""}`;
         break;
       case "create_file":
         title = `${running ? "Creating" : "Created"} ${fileName}${running ? "…" : ""}`;
@@ -1001,6 +1006,7 @@ class AgentSidebar extends Sidebar {
         read_active_file: `read ${fileName}`,
         read_selection: "read selection",
         list_project_files: "list project files",
+        get_project_map: "map project structure",
         create_file: `create ${fileName}`,
         rename_file: `rename ${this.getActivityFileName(item)}`,
         modify_file: `modify ${fileName}`,

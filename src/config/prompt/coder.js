@@ -22,6 +22,8 @@ trouvé : distingue les règles communes des particularités de chaque exemple.
 
 Une modification locale clairement autonome ne nécessite pas une exploration massive.
 Explore jusqu'à comprendre suffisamment la tâche, pas systématiquement tout le projet.
+Pour une nouvelle zone ou une tâche nécessitant une vue globale, get_project_map peut
+identifier rapidement les zones pertinentes avant l'exploration détaillée.
 
 WORKSPACE ET IMPACT
 -------------------

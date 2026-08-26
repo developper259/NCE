@@ -33,6 +33,33 @@ interface SearchResponse {
   hasMore: boolean;
 }
 
+interface ProjectMapOptions {
+  maxDepth?: number;
+  maxFiles?: number;
+}
+
+interface ProjectMapEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+  type: "file" | "directory";
+  depth: number;
+  lineCount: number | null;
+  binary: boolean;
+}
+
+interface ProjectMapResponse {
+  success: boolean;
+  root: string;
+  entries: ProjectMapEntry[];
+  files: number;
+  directories: number;
+  truncated: boolean;
+  maxDepth: number;
+  maxFiles: number;
+  error?: { code: string; message: string };
+}
+
 export class WorkspaceSearch {
   window: Window;
 
@@ -43,6 +70,8 @@ export class WorkspaceSearch {
     "build",
     "out",
     "coverage",
+    "temp",
+    "tmp",
     ".next",
     ".cache",
     ".turbo",
@@ -50,6 +79,12 @@ export class WorkspaceSearch {
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 10000;
+  private readonly binaryExtensions = new Set([
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp",
+    ".pdf", ".zip", ".gz", ".tar", ".7z", ".rar", ".exe", ".dll",
+    ".so", ".dylib", ".woff", ".woff2", ".ttf", ".otf", ".mp3",
+    ".wav", ".ogg", ".mp4", ".mov", ".avi", ".webm",
+  ]);
 
   constructor(window: Window) {
     this.window = window;
@@ -67,6 +102,184 @@ export class WorkspaceSearch {
         return await this.search(rootPath, query, options);
       },
     );
+    ipcMain.handle(
+      "WorkspaceSearch:projectMap",
+      async (
+        _event,
+        rootPath: string,
+        targetPath: string,
+        options: ProjectMapOptions = {},
+      ) => this.getProjectMap(rootPath, targetPath, options),
+    );
+  }
+
+  async getProjectMap(
+    rootPath: string,
+    targetPath: string,
+    options: ProjectMapOptions = {},
+  ): Promise<ProjectMapResponse> {
+    const maxDepth = Math.min(
+      20,
+      Math.max(1, Math.floor(options.maxDepth ?? 6)),
+    );
+    const maxFiles = Math.min(
+      5000,
+      Math.max(1, Math.floor(options.maxFiles ?? 1000)),
+    );
+    const root = path.resolve(rootPath || "");
+    const target = path.resolve(targetPath || root);
+    const empty = (code: string, message: string): ProjectMapResponse => ({
+      success: false,
+      root: "",
+      entries: [],
+      files: 0,
+      directories: 0,
+      truncated: false,
+      maxDepth,
+      maxFiles,
+      error: { code, message },
+    });
+    if (!rootPath || !this.isPathInside(root, target)) {
+      return empty("INVALID_PATH", "Le chemin doit rester dans le workspace.");
+    }
+    try {
+      const [realRoot, realTarget] = await Promise.all([
+        fs.realpath(root),
+        fs.realpath(target),
+      ]);
+      if (!this.isPathInside(realRoot, realTarget)) {
+        return empty("INVALID_PATH", "Le chemin doit rester dans le workspace.");
+      }
+      if (!(await fs.stat(realTarget)).isDirectory()) {
+        return empty("NOT_A_DIRECTORY", "Le chemin demandé n'est pas un dossier.");
+      }
+    } catch {
+      return empty("DIRECTORY_NOT_FOUND", "Le dossier demandé est introuvable.");
+    }
+
+    const entries: ProjectMapEntry[] = [];
+    let files = 0;
+    let directories = 0;
+    let truncated = false;
+    const walk = async (directory: string, depth: number): Promise<void> => {
+      let children;
+      try {
+        children = await fs.readdir(directory, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      children.sort((left, right) => {
+        const typeOrder = Number(left.isFile()) - Number(right.isFile());
+        if (typeOrder) return typeOrder;
+        return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+      });
+      for (const child of children) {
+        if (files >= maxFiles) {
+          truncated = true;
+          return;
+        }
+        if (child.isSymbolicLink()) continue;
+        const absolutePath = path.join(directory, child.name);
+        const relativePath = this.normalizeRelative(
+          path.relative(target, absolutePath),
+        );
+        const workspacePath = this.normalizeRelative(
+          path.relative(root, absolutePath),
+        );
+        if (child.isDirectory()) {
+          if (this.ignoredDirectories.has(child.name)) continue;
+          directories += 1;
+          entries.push({
+            name: child.name,
+            path: workspacePath,
+            relativePath,
+            type: "directory",
+            depth,
+            lineCount: null,
+            binary: false,
+          });
+          if (depth >= maxDepth) {
+            truncated = true;
+          } else {
+            await walk(absolutePath, depth + 1);
+          }
+          continue;
+        }
+        if (!child.isFile()) continue;
+        const inspection = await this.inspectProjectMapFile(absolutePath);
+        files += 1;
+        entries.push({
+          name: child.name,
+          path: workspacePath,
+          relativePath,
+          type: "file",
+          depth,
+          lineCount: inspection.lineCount,
+          binary: inspection.binary,
+        });
+      }
+    };
+    await walk(target, 1);
+    return {
+      success: true,
+      root: this.normalizeRelative(path.relative(root, target)) || ".",
+      entries,
+      files,
+      directories,
+      truncated,
+      maxDepth,
+      maxFiles,
+    };
+  }
+
+  private isPathInside(root: string, candidate: string): boolean {
+    const relative = path.relative(root, candidate);
+    return (
+      relative === "" ||
+      (!relative.startsWith("..") && !path.isAbsolute(relative))
+    );
+  }
+
+  private async inspectProjectMapFile(
+    filePath: string,
+  ): Promise<{ binary: boolean; lineCount: number | null }> {
+    if (this.binaryExtensions.has(path.extname(filePath).toLowerCase())) {
+      return { binary: true, lineCount: null };
+    }
+    let handle;
+    try {
+      handle = await fs.open(filePath, "r");
+      const buffer = Buffer.allocUnsafe(64 * 1024);
+      let position = 0;
+      let lineFeeds = 0;
+      let lastByte: number | null = null;
+      let binary = false;
+      while (true) {
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          buffer.length,
+          position,
+        );
+        if (bytesRead === 0) break;
+        const sampleLimit = Math.min(bytesRead, Math.max(0, 8192 - position));
+        for (let index = 0; index < bytesRead; index += 1) {
+          if (index < sampleLimit && buffer[index] === 0) binary = true;
+          if (buffer[index] === 10) lineFeeds += 1;
+        }
+        if (binary) return { binary: true, lineCount: null };
+        position += bytesRead;
+        lastByte = buffer[bytesRead - 1];
+      }
+      return {
+        binary: false,
+        lineCount: position === 0 ? 0 : lineFeeds + (lastByte === 10 ? 0 : 1),
+      };
+    } catch {
+      return { binary: false, lineCount: null };
+    } finally {
+      await handle?.close();
+    }
   }
 
   async search(
