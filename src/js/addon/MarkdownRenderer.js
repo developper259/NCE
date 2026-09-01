@@ -15,17 +15,7 @@ class MarkdownRenderer {
   }
 
   createMarkdownEngine() {
-    let markdownItFactory = window.markdownit;
-    if (
-      typeof markdownItFactory !== "function" &&
-      typeof require === "function"
-    ) {
-      try {
-        markdownItFactory = require("markdown-it");
-      } catch {
-        markdownItFactory = null;
-      }
-    }
+    const markdownItFactory = window.markdownit;
 
     if (typeof markdownItFactory !== "function") {
       console.error(
