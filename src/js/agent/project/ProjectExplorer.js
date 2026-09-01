@@ -26,6 +26,11 @@ class ProjectExplorer {
       };
     }
     const maxDepth = Number.isInteger(args.maxDepth) ? args.maxDepth : 6;
+    const cacheDecision = this.agent.fileKnowledge.getProjectMapDecision(
+      target,
+      { maxDepth, maxFiles: 1000 },
+    );
+    if (cacheDecision.cached) return cacheDecision.result;
     const map = await this.agent.api.getProjectMap(root, target, {
       maxDepth,
       maxFiles: 1000,
@@ -44,8 +49,9 @@ class ProjectExplorer {
     const entries = await this.agent.addProjectMapLanguages(map.entries);
     const tree = this.agent.buildProjectMapTree(entries);
     const rootLabel = `${AgentPath.basename(target) || "project"}/`;
-    return {
+    const result = {
       success: true,
+      path: this.agent.toProjectRelativePath(target, root),
       root: map.root,
       files: map.files,
       directories: map.directories,
@@ -55,6 +61,8 @@ class ProjectExplorer {
       tree,
       text: this.agent.formatProjectMapText(rootLabel, tree, map),
     };
+    this.agent.fileKnowledge.recordProjectMap(cacheDecision.key, result);
+    return result;
   }
 
   async addProjectMapLanguages(entries = []) {
@@ -193,11 +201,18 @@ class ProjectExplorer {
     const root = this.agent.editor?.fileExplorer?.rootPath;
     if (!root || !args.query)
       return { success: false, error: "Projet ou requête indisponible." };
-    return this.agent.editor.api.searchInFiles(root, args.query, {
+    const cacheDecision =
+      this.agent.fileKnowledge.getProjectSearchDecision(args);
+    if (cacheDecision.cached) return cacheDecision.result;
+    const result = await this.agent.editor.api.searchInFiles(root, args.query, {
       ...args,
       offset: args.offset,
       limit: args.limit,
     });
+    if (result?.success !== false) {
+      this.agent.fileKnowledge.recordProjectSearch(cacheDecision.key, result);
+    }
+    return result;
   }
 
 }

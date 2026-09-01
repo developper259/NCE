@@ -22,6 +22,13 @@ class FileContextManager {
     );
     const rangeContent = lines.slice(safeStartLine - 1, safeEndLine).join("\n");
     const visibleContent = this.agent.truncate(rangeContent, 4000);
+    const truncated = visibleContent !== rangeContent;
+    const visiblePrefix = truncated
+      ? visibleContent.split("\n\n[... contenu tronqué par NCE ...]")[0]
+      : visibleContent;
+    const completeVisibleLines = truncated
+      ? (visiblePrefix.match(/\n/g) || []).length
+      : safeEndLine - safeStartLine + 1;
     const context = {
       path: absolutePath,
       startLine: safeStartLine,
@@ -31,7 +38,11 @@ class FileContextManager {
       timestamp: Date.now(),
       version: ++this.agent.fileContextVersion,
       source,
-      truncated: visibleContent !== rangeContent,
+      truncated,
+      knowledgeEndLine:
+        completeVisibleLines > 0
+          ? safeStartLine + completeVisibleLines - 1
+          : null,
     };
     this.agent.readFileContexts.set(absolutePath, context);
     return context;

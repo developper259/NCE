@@ -122,6 +122,8 @@ class ContextManager {
     );
     const newPath = normalizePath(result?.newPath || args.newPath);
     const revision = result?.revision || result?.verification?.revision || "";
+    const noNewInformation =
+      result?.alreadyKnown === true || result?.noNewInformation === true;
     const readKey = [
       name,
       path,
@@ -147,6 +149,7 @@ class ContextManager {
       path,
       newPath,
       revision,
+      noNewInformation,
       readKey,
       searchKey,
     };
@@ -507,6 +510,7 @@ class ContextManager {
             : Number(initialUsageRatio.toFixed(3)),
         level: pressureLevel,
         disabled: true,
+        readKnowledge: this.agent.fileKnowledge?.getMetrics?.() || null,
       };
       if (config.trackCumulative === true) {
         this.agent.cumulativeEstimatedPromptTokens +=
@@ -526,7 +530,10 @@ class ContextManager {
       (state.writesSucceeded > 0 ||
         state.pendingValidation === true ||
         state.lastModificationError ||
-        state.largeWrite?.active === true);
+        state.largeWrite?.active === true ||
+        state.fileKnowledge?.files?.length > 0 ||
+        state.fileKnowledge?.projectStructureRevision > 0 ||
+        state.fileKnowledge?.workspaceContentRevision > 0);
     const contextMessages = hasCurrentState
       ? [
           ...messages,
@@ -743,7 +750,10 @@ class ContextManager {
         }
 
         if (readTools.has(tool.name) && tool.success) {
-          if (tool.path && laterWrites.has(tool.path)) {
+          if (tool.noNewInformation) {
+            duplicateCount += 1;
+            toolIsDroppable = true;
+          } else if (tool.path && laterWrites.has(tool.path)) {
             staleReadCount += 1;
             toolIsDroppable = true;
           } else if (latestReads.has(tool.readKey)) {
@@ -754,7 +764,10 @@ class ContextManager {
           }
         }
         if (searchTools.has(tool.name) && tool.success) {
-          if (latestSearches.has(tool.searchKey)) {
+          if (tool.noNewInformation) {
+            duplicateCount += 1;
+            toolIsDroppable = true;
+          } else if (latestSearches.has(tool.searchKey)) {
             duplicateCount += 1;
             toolIsDroppable = true;
           } else {
@@ -763,7 +776,10 @@ class ContextManager {
         }
         if (navigationTools.has(tool.name) && tool.success) {
           const navigationKey = `${tool.name}:${tool.path || tool.searchKey}`;
-          if (latestNavigation.has(navigationKey)) {
+          if (tool.noNewInformation) {
+            duplicateCount += 1;
+            toolIsDroppable = true;
+          } else if (latestNavigation.has(navigationKey)) {
             duplicateCount += 1;
             toolIsDroppable = true;
           } else {
@@ -1062,6 +1078,7 @@ class ContextManager {
       cumulativeEstimatedPromptTokens:
         this.agent.cumulativeEstimatedPromptTokens,
       cumulativeActualPromptTokens: this.agent.cumulativeActualPromptTokens,
+      readKnowledge: this.agent.fileKnowledge?.getMetrics?.() || null,
     };
 
     if (config.trackCumulative === true) {

@@ -209,6 +209,9 @@ class ToolExecutor {
         agent: this.agent,
         signal: this.agent.abortController?.signal,
       });
+      if (rawResult?.success !== false) {
+        this.agent.fileKnowledge.observeWrite(name, normalizedArgs, rawResult);
+      }
       const result = this.limitResult(
         this.agent.normalizeToolResultForHistory(rawResult),
       );

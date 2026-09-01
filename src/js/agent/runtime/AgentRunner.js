@@ -75,6 +75,7 @@ class AgentRunner {
     this.agent.readFileContexts = new Map();
     this.agent.fileContextVersion = 0;
     this.agent.readAfterFailurePaths = new Set();
+    this.agent.fileKnowledge.reset();
     this.agent.modelRequestState = null;
     this.agent.modelRequestCounter = 0;
     this.agent.modelOutputStates = new Map();
@@ -584,6 +585,7 @@ class AgentRunner {
       while (true) {
         const iteration = toolIterations + 1;
         modelTurn += 1;
+        this.agent.fileKnowledge.setIteration(iteration);
         this.agent.assertRunActive(runId, controller);
         runConfig.contextState = {
           writesSucceeded: successfulWriteCount,
@@ -593,6 +595,7 @@ class AgentRunner {
           lastModificationError:
             failedModifications[failedModifications.length - 1] || null,
           largeWrite: this.agent.getLargeWriteContextState(largeWrite),
+          fileKnowledge: this.agent.fileKnowledge.getContextState(),
         };
         const outputContext = this.agent.createModelOutputContext(runId, "main");
         const modelResponse = await this.agent.requestModel(controller, runConfig);
@@ -901,6 +904,7 @@ class AgentRunner {
             },
           ),
         );
+        let repeatedExplorationDetected = false;
         for (const call of executableToolCalls) {
           this.agent.assertRunActive(runId, controller);
           const toolResult = await this.agent.executeToolCall(call, {
@@ -911,6 +915,14 @@ class AgentRunner {
           this.agent.messages.push(this.agent.createToolResultMessage(call.id, toolResult));
 
           const toolPayload = toolResult?.result ?? toolResult;
+          if (
+            this.agent.fileKnowledge.observeToolInformation(
+              call?.function?.name,
+              toolPayload,
+            )
+          ) {
+            repeatedExplorationDetected = true;
+          }
           let toolArgs = {};
           try {
             toolArgs = this.agent.parseCanonicalToolArguments(
@@ -1027,6 +1039,13 @@ class AgentRunner {
               });
             }
           }
+        }
+        if (repeatedExplorationDetected) {
+          this.agent.messages.push({
+            role: "system",
+            content:
+              "The requested file, range, project map, listing, or search has already been inspected at the current revision. Do not request it again unless it changed or you need an uncovered range. Continue using the existing project knowledge and proceed with the task.",
+          });
         }
         if (hasReadCall && hasWriteCall) {
           this.agent.messages.push({

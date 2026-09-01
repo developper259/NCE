@@ -56,13 +56,34 @@ class ActiveFileManager {
     );
     const content = lines.slice(startLine - 1, endLine).join("\n");
     const fullContent = lines.join("\n");
+    const absolutePath = AgentPath.normalize(file.path);
+    const readDecision = this.agent.fileKnowledge.checkRead(
+      absolutePath,
+      startLine,
+      endLine,
+      {
+        currentRevision: this.agent.getContentRevision(fullContent),
+        forceRead: this.agent.readAfterFailurePaths.has(absolutePath),
+      },
+    );
+    if (readDecision.alreadyKnown) return readDecision.result;
     const readContext = this.agent.createFileReadContext(
-      AgentPath.normalize(file.path),
+      absolutePath,
       fullContent,
       startLine,
       endLine,
       "read_active_file",
     );
+    this.agent.readAfterFailurePaths.delete(absolutePath);
+    this.agent.fileKnowledge.recordRead(absolutePath, {
+      revision: readContext.revision,
+      startLine,
+      endLine,
+      totalLines: lines.length,
+      diskRead: false,
+      truncated: readContext.truncated,
+      knowledgeEndLine: readContext.knowledgeEndLine,
+    });
     return {
       success: true,
       path: this.agent.toProjectRelativePath(
@@ -586,6 +607,7 @@ class ActiveFileManager {
       },
       beforeText,
       afterText,
+      revision: this.agent.getContentRevision(afterText),
       cursorBefore,
       match: hasTextMatch ? "exact" : "coordinates",
     };

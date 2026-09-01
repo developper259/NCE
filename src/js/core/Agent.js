@@ -63,6 +63,7 @@ class Agent {
     this.modelRequestCounter = 0;
     this.modelOutputStates = new Map();
     this.largeWriteState = null;
+    this.fileKnowledge = new FileKnowledge(this);
     this.toolSerialization = new ToolSerialization(this);
     this.toolRegistry = new ToolRegistry(this);
     this.toolExecutor = new ToolExecutor(this);

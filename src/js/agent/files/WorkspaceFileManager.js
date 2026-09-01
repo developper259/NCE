@@ -937,20 +937,37 @@ class WorkspaceFileManager {
     if (openFile) {
       await this.agent.editor?.fileLoader?.waitForFileLoaded?.(openFile);
     }
-    const content = openFile
+    const openFileContent = openFile
       ? openFile.lines.map((line) => line.getText()).join("\n")
-      : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
+      : null;
+    const requestedRange = this.agent.fileKnowledge.normalizeRange(
+      options.startLine,
+      options.endLine,
+    );
+    const readDecision = this.agent.fileKnowledge.checkRead(
+      absolute,
+      requestedRange.startLine,
+      requestedRange.endLine,
+      {
+        forceRead: this.agent.readAfterFailurePaths.has(absolute),
+        currentRevision:
+          typeof openFileContent === "string"
+            ? this.agent.getContentRevision(openFileContent)
+            : null,
+      },
+    );
+    if (readDecision.alreadyKnown) return readDecision.result;
+
+    const content =
+      typeof openFileContent === "string"
+        ? openFileContent
+        : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
     if (typeof content === "string") {
       this.agent.readAfterFailurePaths.delete(absolute);
       const totalLines = content.split(/\r?\n/).length;
-      const startLine =
-        Number.isInteger(options.startLine) && options.startLine > 0
-          ? options.startLine
-          : 1;
+      const startLine = requestedRange.startLine;
       const endLine = Math.min(
-        Number.isInteger(options.endLine) && options.endLine >= startLine
-          ? options.endLine
-          : startLine + 199,
+        requestedRange.endLine,
         totalLines,
       );
       const readContext = this.agent.createFileReadContext(
@@ -960,6 +977,15 @@ class WorkspaceFileManager {
         endLine,
         "read_file",
       );
+      this.agent.fileKnowledge.recordRead(absolute, {
+        revision: readContext.revision,
+        startLine,
+        endLine,
+        totalLines,
+        diskRead: typeof openFileContent !== "string",
+        truncated: readContext.truncated,
+        knowledgeEndLine: readContext.knowledgeEndLine,
+      });
       return {
         success: true,
         path: filePath,
@@ -986,9 +1012,12 @@ class WorkspaceFileManager {
         success: false,
         error: { code: "INVALID_PATH", message: "Chemin hors du workspace." },
       };
+    const cacheDecision =
+      this.agent.fileKnowledge.getProjectListDecision(target);
+    if (cacheDecision.cached) return cacheDecision.result;
     const files = await this.agent.api?.getFolderContent?.(target);
-    return Array.isArray(files)
-      ? {
+    if (Array.isArray(files)) {
+      const result = {
           success: true,
           path,
           total: files.length,
@@ -997,8 +1026,11 @@ class WorkspaceFileManager {
             type: item.type,
             path: this.agent.toProjectRelativePath(item.path, root),
           })),
-        }
-      : { success: false, error: "Impossible de lire le dossier." };
+        };
+      this.agent.fileKnowledge.recordProjectList(cacheDecision.key, result);
+      return result;
+    }
+    return { success: false, error: "Impossible de lire le dossier." };
   }
 
   resolveWorkspacePath(filePath, rootPath) {
