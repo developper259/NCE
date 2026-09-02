@@ -511,6 +511,7 @@ class ContextManager {
         level: pressureLevel,
         disabled: true,
         readKnowledge: this.agent.fileKnowledge?.getMetrics?.() || null,
+        runtime: this.agent.agentProgress?.getMetrics?.() || null,
       };
       if (config.trackCumulative === true) {
         this.agent.cumulativeEstimatedPromptTokens +=
@@ -533,7 +534,9 @@ class ContextManager {
         state.largeWrite?.active === true ||
         state.fileKnowledge?.files?.length > 0 ||
         state.fileKnowledge?.projectStructureRevision > 0 ||
-        state.fileKnowledge?.workspaceContentRevision > 0);
+        state.fileKnowledge?.workspaceContentRevision > 0 ||
+        state.progress?.phase !== "discover" ||
+        state.progress?.awaitingProgress === true);
     const contextMessages = hasCurrentState
       ? [
           ...messages,
@@ -1079,6 +1082,7 @@ class ContextManager {
         this.agent.cumulativeEstimatedPromptTokens,
       cumulativeActualPromptTokens: this.agent.cumulativeActualPromptTokens,
       readKnowledge: this.agent.fileKnowledge?.getMetrics?.() || null,
+      runtime: this.agent.agentProgress?.getMetrics?.() || null,
     };
 
     if (config.trackCumulative === true) {

@@ -96,6 +96,9 @@ class AgentRunner {
         },
       ];
       const modificationHint = this.agent.detectModificationIntent(userMessage);
+      const requiresModification =
+        runConfig.permissions === "code" && modificationHint;
+      this.agent.agentProgress.reset({ requiresModification });
       if (modificationHint) {
         this.agent.messages.push({
           role: "system",
@@ -106,14 +109,15 @@ class AgentRunner {
       this.agent.appendHistory(options.history);
       this.agent.messages.push({ role: "user", content: userMessage });
       const result = await this.agent.runLoop(runId, controller, runConfig, {
-        requiresModification:
-          runConfig.permissions === "code" &&
-          this.agent.detectModificationIntent(userMessage),
+        requiresModification,
         allowsFullCodeResponse: this.agent.requestsFullCodeResponse(userMessage),
       });
+      result.metrics = this.agent.agentProgress.getMetrics();
+      this.agent.lastRunMetrics = result.metrics;
       this.agent.callbacks.onFinish?.(result, runContext);
       return result;
     } catch (error) {
+      this.agent.lastRunMetrics = this.agent.agentProgress.getMetrics();
       if (!this.agent.isAbortError(error) && runId === this.agent.runId)
         this.agent.callbacks.onError?.(error, runContext);
       throw error;
@@ -432,6 +436,8 @@ class AgentRunner {
     requiresModification = false,
     modificationPerformed = false,
     validationPending = false,
+    requiresExplicitCompletion = false,
+    taskComplete = false,
   } = {}) {
     if (toolCallCount > 0) {
       return { action: "execute_tools", reason: "tool_calls_available" };
@@ -456,6 +462,9 @@ class AgentRunner {
     }
     if (validationPending) {
       return { action: "continue", reason: "post_write_validation_pending" };
+    }
+    if (requiresExplicitCompletion && !taskComplete) {
+      return { action: "continue", reason: "task_not_complete" };
     }
     return { action: "finish", reason: "final_response_complete" };
   }
@@ -525,8 +534,63 @@ class AgentRunner {
           ? "Continue l'exécution. Tu as produit un raisonnement intermédiaire sans action ni réponse finale. Ne répète pas les étapes déjà effectuées."
           : decisionReason === "post_write_validation_pending"
             ? "Continue l'exécution. Une modification a réussi mais sa validation reste incomplète. Relis le fichier concerné et vérifie le résultat réel avant de répondre."
+            : decisionReason === "task_not_complete"
+              ? "[NCE TASK COMPLETION] The task has not been marked complete. Continue from the current state. Implement or validate what remains, then call task_complete only when the requested work is actually finished."
             : "Continue la tâche à partir de l'état actuel. La génération précédente s'est terminée avant sa finalisation. Ne répète pas les étapes déjà effectuées et utilise les tools nécessaires.",
     });
+  }
+
+  validateTaskCompletion({
+    requiresModification = false,
+    successfulWriteCount = 0,
+    validationPending = false,
+    unresolvedWriteFailure = false,
+    unresolvedValidationFailure = false,
+  } = {}) {
+    if (requiresModification && successfulWriteCount === 0) {
+      return {
+        accepted: false,
+        reason: "required_write_missing",
+        message:
+          "La tâche demande une modification du workspace, mais aucune écriture n'a encore réussi.",
+      };
+    }
+    if (unresolvedWriteFailure) {
+      return {
+        accepted: false,
+        reason: "write_failure_unresolved",
+        message:
+          "Un échec d'écriture reste non résolu. Corrige-le avant de terminer.",
+      };
+    }
+    if (unresolvedValidationFailure || validationPending) {
+      return {
+        accepted: false,
+        reason: "validation_unresolved",
+        message:
+          "Une validation requise ou un échec de validation reste non résolu.",
+      };
+    }
+    return { accepted: true, reason: "task_complete" };
+  }
+
+  buildTaskCompletionResponse(completion = {}, fallback = "") {
+    const summary = String(completion.summary || fallback || "Tâche terminée.").trim();
+    const validation = String(completion.validation || "").trim();
+    return validation ? `${summary}\n\nValidation : ${validation}` : summary;
+  }
+
+  clearProgressDirectives() {
+    this.agent.messages = this.agent.messages.filter(
+      (message) => {
+        if (message?.role !== "system") return true;
+        const content = String(message.content || "");
+        return !(
+          content.startsWith("[NCE PROGRESS DIRECTIVE]") ||
+          content.startsWith("[NCE TASK COMPLETION]")
+        );
+      },
+    );
   }
 
   toolResultConfirmsValidation(toolPayload) {
@@ -549,11 +613,19 @@ class AgentRunner {
     let modelTurn = 0;
     let toolIterations = 0;
     let validationPending = false;
+    let unresolvedWriteFailure = false;
+    let unresolvedValidationFailure = false;
+    const requiresExplicitCompletion =
+      runConfig?.permissions === "code" &&
+      runConfig?.supportsTools !== false &&
+      this.agent.getTool("task_complete")?.enabled === true;
+    runState.taskComplete = false;
     const largeWrite = this.agent.createLargeWriteRuntimeState(
       runConfig,
       runState.largeWrite,
     );
     runState.largeWrite = largeWrite;
+    runState.progress = this.agent.agentProgress;
     this.agent.largeWriteState = largeWrite;
     const pendingValidationPaths = new Set();
     const maxIterations = runConfig?.maxIterations ?? this.agent.maxIterations;
@@ -592,12 +664,16 @@ class AgentRunner {
           successfulWrites: successfulWrites.map((write) => ({ ...write })),
           pendingValidation: validationPending,
           pendingValidationPaths: [...pendingValidationPaths],
+          taskComplete: runState.taskComplete,
+          requiresExplicitCompletion,
           lastModificationError:
             failedModifications[failedModifications.length - 1] || null,
           largeWrite: this.agent.getLargeWriteContextState(largeWrite),
           fileKnowledge: this.agent.fileKnowledge.getContextState(),
+          progress: this.agent.agentProgress.getContextState(),
         };
         const outputContext = this.agent.createModelOutputContext(runId, "main");
+        this.agent.agentProgress.recordModelRequest();
         const modelResponse = await this.agent.requestModel(controller, runConfig);
         this.agent.assertRunActive(runId, controller);
         let parsed;
@@ -726,6 +802,8 @@ class AgentRunner {
           requiresModification,
           modificationPerformed: successfulWriteCount > 0,
           validationPending,
+          requiresExplicitCompletion,
+          taskComplete: runState.taskComplete,
         });
         if (
           outcome.action === "execute_tools" &&
@@ -762,6 +840,11 @@ class AgentRunner {
         }
         if (
           parsed.text &&
+          !(
+            requiresExplicitCompletion &&
+            !runState.taskComplete &&
+            parsed.toolCalls.length === 0
+          ) &&
           (!requiresModification ||
             (parsed.toolCalls.length > 0 && !finalSummaryRequested))
         ) {
@@ -771,6 +854,20 @@ class AgentRunner {
             outputContext,
             "snapshot",
           );
+        }
+        const noActionProgress = this.agent.agentProgress.handleModelNoAction({
+          iteration,
+          hasToolCalls: parsed.toolCalls.length > 0,
+          hasReasoning: Boolean(parsed.reasoning),
+          hasText: Boolean(parsed.text.trim()),
+          modificationPerformed: successfulWriteCount > 0,
+        });
+        if (noActionProgress.action === "directive") {
+          this.agent.messages.push({
+            role: "system",
+            content: noActionProgress.content,
+          });
+          continue;
         }
         if (outcome.action === "fail") {
           if (outcome.reason === "max_iterations_reached") {
@@ -904,7 +1001,8 @@ class AgentRunner {
             },
           ),
         );
-        let repeatedExplorationDetected = false;
+        let progressDecision = { action: "none", level: 0 };
+        let completionRequest = null;
         for (const call of executableToolCalls) {
           this.agent.assertRunActive(runId, controller);
           const toolResult = await this.agent.executeToolCall(call, {
@@ -915,13 +1013,19 @@ class AgentRunner {
           this.agent.messages.push(this.agent.createToolResultMessage(call.id, toolResult));
 
           const toolPayload = toolResult?.result ?? toolResult;
-          if (
-            this.agent.fileKnowledge.observeToolInformation(
-              call?.function?.name,
-              toolPayload,
-            )
+          const toolProgress = this.agent.agentProgress.consumeTool(
+            call?.function?.name,
+            toolResult?.meta,
+            iteration,
+          );
+          if (toolProgress.action === "progress") {
+            this.clearProgressDirectives();
+            progressDecision = { action: "none", level: 0 };
+          } else if (
+            toolProgress.action === "directive" &&
+            toolProgress.level >= (progressDecision.level || 0)
           ) {
-            repeatedExplorationDetected = true;
+            progressDecision = toolProgress;
           }
           let toolArgs = {};
           try {
@@ -930,6 +1034,16 @@ class AgentRunner {
             );
           } catch {
             toolArgs = {};
+          }
+          if (
+            call?.function?.name === "task_complete" &&
+            toolResult?.success === true &&
+            toolPayload?.taskCompleteRequested === true
+          ) {
+            completionRequest = {
+              summary: toolPayload.summary || toolArgs.summary || "",
+              validation: toolPayload.validation || toolArgs.validation || "",
+            };
           }
           this.agent.updateLargeWriteStateAfterTool(
             largeWrite,
@@ -943,6 +1057,7 @@ class AgentRunner {
             call?.function?.name === "modify_file";
           if (writeTools.has(call?.function?.name) && toolResult?.success) {
             successfulWriteCount += 1;
+            unresolvedWriteFailure = false;
             missingWriteRetries = 0;
             const affectedPath = AgentPath.normalize(
               toolPayload?.newPath ||
@@ -964,6 +1079,11 @@ class AgentRunner {
               path: toolPayload?.path || toolPayload?.oldPath || "fichier",
               newPath: toolPayload?.newPath || "",
             });
+          } else if (
+            writeTools.has(call?.function?.name) &&
+            toolResult?.success === false
+          ) {
+            unresolvedWriteFailure = true;
           } else if (
             ["read_file", "read_active_file"].includes(call?.function?.name) &&
             toolResult?.success
@@ -996,6 +1116,7 @@ class AgentRunner {
             "SUSPECTED_DUPLICATION",
           ]);
           if (modificationTool && toolResult?.success === false) {
+            unresolvedWriteFailure = true;
             if (retryableErrorCodes.has(toolPayload?.error?.code)) {
               modificationFailures += 1;
             }
@@ -1004,18 +1125,18 @@ class AgentRunner {
             failedModifications.push(
               `${call?.function?.name || "outil de modification"}: ${failureMessage}`,
             );
-            if (modificationFailures >= 2) {
-              return {
-                response:
-                  "Modification arrêtée après deux échecs de validation. Relis le fichier et relance une demande avec un contexte actualisé.",
-                reasoning: finalReasoning,
-                error: toolPayload.error,
-                iterations: iteration,
-              };
-            }
           } else if (modificationTool && toolResult?.success) {
             modificationFailures = 0;
+            unresolvedWriteFailure = false;
             failedModifications.pop();
+          }
+
+          if (toolResult?.meta?.toolCategory === "validation") {
+            unresolvedValidationFailure = toolResult?.success === false;
+            if (toolResult?.success) {
+              pendingValidationPaths.clear();
+              validationPending = false;
+            }
           }
 
           const toolName = call?.function?.name;
@@ -1040,11 +1161,50 @@ class AgentRunner {
             }
           }
         }
-        if (repeatedExplorationDetected) {
+        if (completionRequest) {
+          const completion = this.validateTaskCompletion({
+            requiresModification,
+            successfulWriteCount,
+            validationPending,
+            unresolvedWriteFailure,
+            unresolvedValidationFailure,
+          });
+          if (completion.accepted) {
+            runState.taskComplete = true;
+            this.agent.agentProgress.recordTaskCompletion(
+              iteration,
+              true,
+              completion.reason,
+            );
+            this.clearProgressDirectives();
+            return {
+              response: this.buildTaskCompletionResponse(
+                completionRequest,
+                finalResponse ||
+                  (successfulWriteCount > 0
+                    ? this.agent.buildSuccessfulWriteFallback(successfulWrites)
+                    : "Tâche terminée."),
+              ),
+              reasoning: finalReasoning,
+              taskComplete: true,
+              validation: completionRequest.validation || "",
+              iterations: iteration,
+            };
+          }
+          this.agent.agentProgress.recordTaskCompletion(
+            iteration,
+            false,
+            completion.reason,
+          );
           this.agent.messages.push({
             role: "system",
-            content:
-              "The requested file, range, project map, listing, or search has already been inspected at the current revision. Do not request it again unless it changed or you need an uncovered range. Continue using the existing project knowledge and proceed with the task.",
+            content: `[NCE TASK COMPLETION] task_complete was not accepted: ${completion.message} Continue the task and call task_complete again after resolving it.`,
+          });
+        }
+        if (progressDecision.action === "directive") {
+          this.agent.messages.push({
+            role: "system",
+            content: progressDecision.content,
           });
         }
         if (hasReadCall && hasWriteCall) {

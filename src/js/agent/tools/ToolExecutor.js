@@ -75,6 +75,93 @@ class ToolExecutor {
     return limited;
   }
 
+  getToolResultMeta(name, result) {
+    const writeTools = new Set([
+      "modify_file",
+      "modify_active_file",
+      "replace_text",
+      "create_file",
+      "write_file_chunk",
+      "rename_file",
+      "delete_file",
+    ]);
+    const readTools = new Set(["read_file", "read_active_file"]);
+    const searchTools = new Set([
+      "search_project_files",
+      "search_active_file",
+    ]);
+    const navigationTools = new Set([
+      "get_project_map",
+      "list_project_files",
+      "get_editor_context",
+      "get_cursor",
+      "read_selection",
+    ]);
+    const isValidationTool =
+      /(?:^|_)(?:test|tests|build|lint|check|validate|validation|diagnostic|compile|typecheck)(?:_|$)/i.test(
+        name || "",
+      );
+    const toolCategory =
+      name === "task_complete"
+        ? "completion"
+        : isValidationTool
+          ? "validation"
+          : writeTools.has(name)
+            ? "write"
+            : readTools.has(name)
+              ? "read"
+              : searchTools.has(name)
+                ? "search"
+                : navigationTools.has(name)
+                  ? "navigation"
+                  : "other";
+    const informationStatus =
+      toolCategory === "completion" && result?.success !== false
+        ? "task_complete"
+        : toolCategory === "validation" && result?.success === false
+          ? "error_discovered"
+          : toolCategory === "validation"
+            ? "validation_progress"
+            : result?.success === false
+              ? "error"
+              : result?.alreadyKnown === true ||
+                  result?.noNewInformation === true
+                ? "already_known"
+                : toolCategory === "write"
+                  ? "state_changed"
+                  : ["read", "search", "navigation"].includes(toolCategory)
+                    ? "new"
+                    : "neutral";
+    return {
+      informationStatus,
+      toolCategory,
+      actualExecution:
+        !["already_known", "task_complete"].includes(informationStatus),
+      cached: result?.cached === true,
+      informationSignature:
+        toolCategory === "validation" || result?.success === false
+          ? this.getInformationSignature(name, result)
+          : null,
+    };
+  }
+
+  getInformationSignature(name, result) {
+    const error = result?.error;
+    const errorCode =
+      typeof error === "object" ? error?.code || "" : "";
+    const errorMessage =
+      typeof error === "string" ? error : error?.message || "";
+    const outcome = result?.success === false ? "failed" : "succeeded";
+    return `${name || "unknown"}:${outcome}:${errorCode}:${errorMessage}`.slice(
+      0,
+      1000,
+    );
+  }
+
+  attachMeta(name, result) {
+    return { ...result, meta: this.getToolResultMeta(name, result) };
+  }
+
   async executeToolCall(call, executionContext = {}) {
     const name = call?.function?.name;
     const toolCallId = typeof call?.id === "string" ? call.id : "";
@@ -103,37 +190,37 @@ class ToolExecutor {
         },
       };
       this.debugTool(name, {}, result);
-      return result;
+      return this.attachMeta(name, result);
     }
 
     const tool = this.agent.getTool(name);
     if (!tool) {
-      return {
+      return this.attachMeta(name, {
         success: false,
         error: {
           code: "TOOL_NOT_FOUND",
           message: `Outil inconnu : ${name || "(sans nom)"}`,
         },
-      };
+      });
     }
 
     if (!tool.enabled) {
-      return {
+      return this.attachMeta(name, {
         success: false,
         error: { code: "TOOL_DISABLED", message: `Outil désactivé : ${name}` },
-      };
+      });
     }
 
     const permissions =
       this.agent.runConfig?.permissions ?? this.agent.permissions;
     if (permissions === "read" && !tool.readOnly) {
-      return {
+      return this.attachMeta(name, {
         success: false,
         error: {
           code: "TOOL_NOT_ALLOWED",
           message: `L'outil ${name} n'est pas autorisé dans ce mode.`,
         },
-      };
+      });
     }
 
     let args = {};
@@ -146,23 +233,23 @@ class ToolExecutor {
             : {}
           : raw || {};
     } catch {
-      return {
+      return this.attachMeta(name, {
         success: false,
         error: {
           code: "INVALID_ARGUMENT",
           message: "Arguments JSON invalides.",
         },
-      };
+      });
     }
 
     if (!args || typeof args !== "object" || Array.isArray(args)) {
-      return {
+      return this.attachMeta(name, {
         success: false,
         error: {
           code: "INVALID_ARGUMENT",
           message: "Les arguments doivent être un objet.",
         },
-      };
+      });
     }
 
     const normalizedArgs = { ...args };
@@ -192,7 +279,7 @@ class ToolExecutor {
     if (!validation.valid) {
       const result = { success: false, error: validation.error };
       this.debugTool(name, normalizedArgs, result);
-      return result;
+      return this.attachMeta(name, result);
     }
 
     const callbackContext = {
@@ -215,8 +302,11 @@ class ToolExecutor {
       const result = this.limitResult(
         this.agent.normalizeToolResultForHistory(rawResult),
       );
+      const meta = this.getToolResultMeta(name, result);
       const toolResult =
-        result && result.success === false ? result : { success: true, result };
+        result && result.success === false
+          ? { ...result, meta }
+          : { success: true, result, meta };
       const callbackResult =
         result && result.success === false ? result : { success: true, result };
 
@@ -235,7 +325,7 @@ class ToolExecutor {
       if (toolCallId) this.agent.executedToolCalls.set(toolCallId, toolResult);
       return toolResult;
     } catch (error) {
-      const result = {
+      const result = this.attachMeta(name, {
         success: false,
         error: {
           code: this.agent.isAbortError(error)
@@ -243,7 +333,7 @@ class ToolExecutor {
             : error?.code || "INTERNAL_ERROR",
           message: error?.message || String(error),
         },
-      };
+      });
       this.debugTool(name, normalizedArgs, result, {
         activePath: this.agent.editor?.tabManager?.activeFile?.path || null,
         activeTabId: this.agent.editor?.tabManager?.activeFile?.id || null,

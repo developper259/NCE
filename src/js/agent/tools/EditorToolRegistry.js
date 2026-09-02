@@ -33,6 +33,35 @@ class EditorToolRegistry {
   }
 
   registerEditorTools() {
+    this.agent.registerTool("task_complete", {
+      description:
+        "Indique explicitement que la tâche est terminée après implémentation et validation raisonnable. Ne l'appelle pas tant qu'un travail requis ou un échec de validation connu reste non résolu.",
+      readOnly: true,
+      codeOnly: true,
+      parameters: {
+        type: "object",
+        properties: {
+          summary: {
+            type: "string",
+            maxLength: 2000,
+            description: "Résumé concis du travail réellement terminé.",
+          },
+          validation: {
+            type: "string",
+            maxLength: 2000,
+            description:
+              "Vérifications effectuées et éventuelles limites de validation.",
+          },
+        },
+      },
+      execute: (args) => ({
+        success: true,
+        taskCompleteRequested: true,
+        summary: typeof args.summary === "string" ? args.summary.trim() : "",
+        validation:
+          typeof args.validation === "string" ? args.validation.trim() : "",
+      }),
+    });
     this.agent.registerTool("get_editor_context", {
       description: "Obtenir le contexte minimal de l'éditeur.",
       readOnly: true,

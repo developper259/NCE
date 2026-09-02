@@ -50,6 +50,7 @@ class Agent {
       debugDecisions: false,
     };
     this.lastContextMetrics = null;
+    this.lastRunMetrics = null;
     this.cumulativeEstimatedPromptTokens = 0;
     this.cumulativeActualPromptTokens = 0;
     this.supportsTools = true;
@@ -69,6 +70,7 @@ class Agent {
     this.toolExecutor = new ToolExecutor(this);
     this.contextManager = new ContextManager(this);
     this.modelClient = new ModelClient(this);
+    this.agentProgress = new AgentProgress(this);
     this.agentRunner = new AgentRunner(this);
     this.largeFileWriter = new LargeFileWriter(this);
     this.fileContextManager = new FileContextManager(this);
@@ -773,7 +775,8 @@ class Agent {
     if (Number.isFinite(classified?.retryAfterMs)) {
       return Math.max(0, classified.retryAfterMs);
     }
-    return [2000, 5000][Math.min(retryCount, 1)];
+    const exponentialDelay = 1000 * 2 ** Math.max(0, retryCount || 0);
+    return exponentialDelay + Math.floor(Math.random() * 251);
   }
   formatRetryDelay(delayMs) {
     const seconds = Math.max(0, delayMs) / 1000;
@@ -843,9 +846,13 @@ class Agent {
       return false;
     }
     if (
-      ["AUTH_ERROR", "PERMISSION_ERROR", "QUOTA_EXCEEDED"].includes(
-        classified.category,
-      ) &&
+      [
+        "AUTH_ERROR",
+        "PERMISSION_ERROR",
+        "QUOTA_EXCEEDED",
+        "QUOTA_EXHAUSTED",
+        "CREDITS_EXHAUSTED",
+      ].includes(classified.category) &&
       candidate.providerId === currentConfig.providerId
     ) {
       return false;
@@ -868,10 +875,12 @@ class Agent {
     }
     while (state.fallbackIndex < state.fallbackQueue.length) {
       const candidate = state.fallbackQueue[state.fallbackIndex++];
-      const key = `${candidate.provider || candidate.providerId}:${candidate.model}`;
+      const candidateProviderId = candidate.provider || candidate.providerId;
+      const key = `${candidateProviderId}:${candidate.model}`;
       if (state.triedCandidates.has(key) || state.unhealthyModels.has(key)) {
         continue;
       }
+      if (state.blockedProviders?.has(candidateProviderId)) continue;
       state.triedCandidates.add(key);
       let resolved = null;
       try {

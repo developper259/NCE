@@ -38,6 +38,7 @@ class ToolRegistry {
         definition.readOnly === true ||
         (typeof AgentAI !== "undefined" &&
           AgentAI.readOnlyTools?.includes(name)),
+      codeOnly: definition.codeOnly === true,
       enabled: definition.enabled !== false,
     };
 
@@ -175,6 +176,7 @@ class ToolRegistry {
     return [...this.tools.values()]
       .filter((tool) => tool.enabled)
       .filter((tool) => permissions === "code" || tool.readOnly)
+      .filter((tool) => permissions === "code" || !tool.codeOnly)
       .filter(
         (tool) =>
           !hiddenCompatibilityWriteTools.has(tool.name) &&

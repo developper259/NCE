@@ -31,6 +31,7 @@ class ModelClient {
       providerRetryCount: 0,
       modelFallbackCount: 0,
       authenticationCancelledProviders: new Set(),
+      blockedProviders: new Map(),
     };
     return this.agent.modelRequestState;
   }
@@ -88,6 +89,10 @@ class ModelClient {
     );
     const configuredProvider =
       request.providerId || request.provider?.id || "unknown";
+    const providerLabel =
+      configuredProvider === "openrouter"
+        ? "OpenRouter"
+        : configuredProvider;
     const upstreamProvider =
       metadata?.provider_name || metadata?.upstream_provider || null;
     const model = request.model || "unknown";
@@ -100,6 +105,7 @@ class ModelClient {
     );
     const retryAfterMs = retryAfterMetadata ?? retryAfterHeader;
 
+    const is429 = statusCode === 429 || /\b429\b/.test(text);
     let category = "UNKNOWN";
     if (
       /context.{0,30}(length|window)|too many tokens|maximum context|token limit/.test(
@@ -114,11 +120,35 @@ class ModelClient {
     ) {
       category = "AUTH_ERROR";
     } else if (
-      /(429|rate limit|too many requests|quota|budget|available tokens)/.test(
+      is429 &&
+      /(insufficient credits?|credits? exhausted|credit balance|not enough credits?|payment required)/.test(
         text,
       )
     ) {
-      category = "QUOTA_EXCEEDED";
+      category = "CREDITS_EXHAUSTED";
+    } else if (
+      is429 &&
+      /(quota.{0,40}(exceeded|exhausted)|daily limit|free[._ -]?models?[._ -]?per[._ -]?day|usage limit|budget exceeded|available tokens?.{0,40}(exhausted|zero|none))/i.test(
+        text,
+      )
+    ) {
+      category = "QUOTA_EXHAUSTED";
+    } else if (
+      is429 &&
+      /(model.{0,100}(rate.?limit|too many requests)|rate.?limit.{0,100}model)/.test(
+        text,
+      )
+    ) {
+      category = "MODEL_RATE_LIMITED";
+    } else if (
+      is429 &&
+      (upstreamProvider || /upstream.{0,100}(rate.?limit|too many requests)/.test(text))
+    ) {
+      category = "UPSTREAM_RATE_LIMITED";
+    } else if (is429 && /(rate.?limit|too many requests)/.test(text)) {
+      category = "RATE_LIMITED";
+    } else if (is429) {
+      category = "UNKNOWN_429";
     } else if (/(404|not found|model.*not found|unknown model)/.test(text)) {
       category = "MODEL_NOT_FOUND";
     } else if (
@@ -138,32 +168,64 @@ class ModelClient {
     }
 
     const retryable =
-      ["QUOTA_EXCEEDED", "MODEL_UNAVAILABLE", "NETWORK_ERROR"].includes(
-        category,
-      ) ||
-      statusCode === 429 ||
-      statusCode === 503;
+      [
+        "RATE_LIMITED",
+        "UNKNOWN_429",
+        "MODEL_UNAVAILABLE",
+        "NETWORK_ERROR",
+      ].includes(category) || statusCode === 503;
+
+    const providerGlobal = [
+      "AUTH_ERROR",
+      "PERMISSION_ERROR",
+      "QUOTA_EXHAUSTED",
+      "CREDITS_EXHAUSTED",
+    ].includes(category);
+    const scope = providerGlobal
+      ? "provider"
+      : category === "MODEL_RATE_LIMITED"
+        ? "model"
+        : category === "UPSTREAM_RATE_LIMITED"
+          ? "upstream"
+          : is429
+            ? "unknown"
+            : null;
 
     const fallbackRecommended =
       [
         "MODEL_NOT_FOUND",
         "MODEL_UNAVAILABLE",
-        "QUOTA_EXCEEDED",
+        "QUOTA_EXHAUSTED",
+        "CREDITS_EXHAUSTED",
+        "MODEL_RATE_LIMITED",
+        "UPSTREAM_RATE_LIMITED",
+        "RATE_LIMITED",
+        "UNKNOWN_429",
         "AUTH_ERROR",
       ].includes(category) || retryable;
 
     const userMessage =
       category === "AUTH_ERROR"
-        ? `L'authentification du provider ${configuredProvider} a échoué.`
+        ? `L'authentification du provider ${providerLabel} a échoué.`
         : category === "MODEL_NOT_FOUND"
-          ? `Le modèle ${modelName} n'est pas disponible sur ${configuredProvider}.`
-          : category === "QUOTA_EXCEEDED"
-            ? `Le provider ${configuredProvider} a épuisé sa quota ou ses tokens.`
+          ? `Le modèle ${modelName} n'est pas disponible sur ${providerLabel}.`
+          : category === "CREDITS_EXHAUSTED"
+            ? `Les crédits ${providerLabel} disponibles sont épuisés.`
+          : category === "QUOTA_EXHAUSTED"
+            ? "Le quota disponible pour ce provider est épuisé."
+          : category === "MODEL_RATE_LIMITED"
+            ? `Le modèle ${modelName} est temporairement limité.`
+          : category === "UPSTREAM_RATE_LIMITED"
+            ? `Le service amont de ${providerLabel} est temporairement limité.`
+          : category === "RATE_LIMITED"
+            ? `${providerLabel} limite temporairement les requêtes. Réessaie dans quelques instants.`
+          : category === "UNKNOWN_429"
+            ? `${providerLabel} a refusé temporairement la requête avec une erreur 429.`
             : category === "CONTEXT_LENGTH_EXCEEDED"
               ? `Le contexte est trop large pour ${modelName}.`
               : category === "MODEL_UNAVAILABLE"
                 ? `Le modèle ${modelName} est actuellement indisponible.`
-                : `Le provider ${configuredProvider} a renvoyé une erreur inattendue.`;
+                : `Le provider ${providerLabel} a renvoyé une erreur inattendue.`;
 
     return {
       provider: configuredProvider,
@@ -174,6 +236,8 @@ class ModelClient {
       category,
       retryable,
       fallbackRecommended,
+      providerGlobal,
+      scope,
       retryAfterMs,
       technicalMessage,
       userMessage,
@@ -191,6 +255,8 @@ class ModelClient {
       code: classified.code,
       classification: classified.category,
       retryable: classified.retryable,
+      scope: classified.scope,
+      providerGlobal: classified.providerGlobal,
       retryAfterMs: classified.retryAfterMs,
       retryCount: counters.retryCount || 0,
       fallbackCount: counters.fallbackCount || 0,
@@ -217,7 +283,6 @@ class ModelClient {
         code: "MODEL_NOT_CONFIGURED",
       });
     }
-
     const providerTools =
       config.supportsTools !== false && provider.supportsTools !== false
         ? this.agent.getOpenAITools()
@@ -252,6 +317,8 @@ class ModelClient {
       payload.temperature = config.temperature;
     if (Number.isFinite(config.maxTokens))
       payload.max_tokens = config.maxTokens;
+
+    this.agent.agentProgress?.recordModelAttempt?.();
 
     const sanitizedProvider = { ...provider };
     delete sanitizedProvider.apiKey;
@@ -355,6 +422,15 @@ class ModelClient {
         });
 
         state.failures.push(classified);
+        if (classified.statusCode === 429) {
+          this.agent.agentProgress?.recordModel429?.();
+        }
+        if (classified.providerGlobal) {
+          state.blockedProviders.set(
+            activeConfig.providerId,
+            classified.category,
+          );
+        }
         this.debugModelError(classified, {
           retryCount,
           fallbackCount: state.modelFallbackCount,
@@ -389,6 +465,7 @@ class ModelClient {
               config.provider = { ...config.provider, apiKey };
             }
             state.currentConfig = activeConfig;
+            state.blockedProviders.delete(activeConfig.providerId);
             retryCount = 0;
             continue;
           }
@@ -401,13 +478,14 @@ class ModelClient {
         );
         const mayRetry =
           classified.retryable &&
-          retryCount <
+          state.providerRetryCount <
             (config.maxProviderRetries ?? this.agent.maxProviderRetries) &&
           retryDelay <= (config.maxRetryDelayMs ?? this.agent.maxRetryDelayMs);
 
         if (mayRetry) {
           retryCount += 1;
           state.providerRetryCount += 1;
+          this.agent.agentProgress?.recordModelRetry?.();
           this.emitModelStatus(
             {
               kind: "retry",
@@ -440,6 +518,7 @@ class ModelClient {
           const previous = activeConfig;
           state.currentConfig = fallback;
           state.modelFallbackCount += 1;
+          this.agent.agentProgress?.recordModelFallback?.();
           retryCount = 0;
           this.agent.applyActiveModelConfig(config, fallback);
           this.emitModelStatus(

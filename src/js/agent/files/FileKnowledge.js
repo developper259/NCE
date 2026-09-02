@@ -99,8 +99,9 @@ class FileKnowledge {
       .join(",");
   }
 
-  logReadDecision(path, range, entry, decision, details = {}) {
+  logReadDecision(path, range, entry, decision, details = {}, event = "check") {
     console.info("[NCE Agent read knowledge]", {
+      event,
       path: this.toRelativePath(path),
       requestedRevision: details.requestedRevision || entry?.revision || null,
       knownRevision: entry?.revision || null,
@@ -242,7 +243,7 @@ class FileKnowledge {
     if (details.diskRead === true) this.metrics.actualDiskReads += 1;
     this.logReadDecision(normalizedPath, range, entry, "actual_read", {
       requestedRevision: details.revision,
-    });
+    }, "record");
     return entry;
   }
 
