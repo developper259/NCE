@@ -295,6 +295,7 @@ class ModelClient {
     });
     const providerMessages =
       this.agent.normalizeMessagesForProvider(modelContext);
+    this.agent.contextManager?.updateModelFileVisibility?.(providerMessages);
     const payload = {
       model: config.model,
       messages: providerMessages,

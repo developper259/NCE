@@ -41,9 +41,9 @@ class Agent {
       recentIterations: 2,
       warmIterations: 6,
       maxPreviouslyReadFiles: 100,
-      softLimitRatio: 0.4,
-      hardLimitRatio: 0.7,
-      criticalLimitRatio: 0.85,
+      triggerRatio: 0.8,
+      hardRatio: 0.9,
+      criticalRatio: 0.95,
       safetyMarginTokens: 8192,
       charsPerToken: 4,
       logMetrics: true,
@@ -1192,6 +1192,9 @@ class Agent {
   }
   createFileReadContext(...args) {
     return this.fileContextManager.createFileReadContext(...args);
+  }
+  restoreFileReadContext(...args) {
+    return this.fileContextManager.restoreFileReadContext(...args);
   }
   validateFileReadContext(...args) {
     return this.fileContextManager.validateFileReadContext(...args);

@@ -39,10 +39,39 @@ class FileContextManager {
       version: ++this.agent.fileContextVersion,
       source,
       truncated,
+      cacheContent: visiblePrefix,
       knowledgeEndLine:
         completeVisibleLines > 0
           ? safeStartLine + completeVisibleLines - 1
           : null,
+    };
+    this.agent.readFileContexts.set(absolutePath, context);
+    return context;
+  }
+
+  restoreFileReadContext(absolutePath, cachedContext, revision, source) {
+    if (
+      !cachedContext ||
+      typeof cachedContext.content !== "string" ||
+      !Number.isInteger(cachedContext.startLine) ||
+      !Number.isInteger(cachedContext.endLine) ||
+      typeof revision !== "string"
+    ) {
+      return null;
+    }
+    const context = {
+      path: absolutePath,
+      startLine: cachedContext.startLine,
+      endLine: cachedContext.endLine,
+      content: cachedContext.content,
+      cacheContent: cachedContext.content,
+      revision,
+      timestamp: Date.now(),
+      version: ++this.agent.fileContextVersion,
+      source,
+      truncated: false,
+      knowledgeEndLine: cachedContext.endLine,
+      restoredFromCache: true,
     };
     this.agent.readFileContexts.set(absolutePath, context);
     return context;

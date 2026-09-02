@@ -12,6 +12,7 @@ class FileKnowledge {
     this.projectMapCache = new Map();
     this.projectListCache = new Map();
     this.projectSearchCache = new Map();
+    this.modelVisibleFiles = new Map();
     this.currentIteration = 0;
     this.consecutiveNoNewInformationToolCalls = 0;
     this.metrics = {
@@ -22,6 +23,12 @@ class FileKnowledge {
       duplicateReadAttempts: 0,
       newRangeReads: 0,
       revisionRereads: 0,
+      actualFilesystemReads: 0,
+      alreadyVisibleReads: 0,
+      restoredReads: 0,
+      restoredCharacters: 0,
+      cacheHits: 0,
+      cacheMisses: 0,
       projectMapCalls: 0,
       actualProjectMapBuilds: 0,
       cachedProjectMaps: 0,
@@ -91,6 +98,74 @@ class FileKnowledge {
     );
   }
 
+  getEffectiveRange(entry, range) {
+    const effectiveRange = {
+      startLine: range.startLine,
+      endLine: Number.isInteger(entry?.totalLines)
+        ? Math.min(range.endLine, entry.totalLines)
+        : range.endLine,
+    };
+    return effectiveRange.endLine >= effectiveRange.startLine
+      ? effectiveRange
+      : null;
+  }
+
+  getCachedRange(entry, range) {
+    if (!(entry?.contentLines instanceof Map)) return null;
+    const effectiveRange = this.getEffectiveRange(entry, range);
+    if (!effectiveRange) return null;
+    const lines = [];
+    for (
+      let lineNumber = effectiveRange.startLine;
+      lineNumber <= effectiveRange.endLine;
+      lineNumber += 1
+    ) {
+      if (!entry.contentLines.has(lineNumber)) return null;
+      lines.push(entry.contentLines.get(lineNumber));
+    }
+    return {
+      ...effectiveRange,
+      content: lines.join("\n"),
+    };
+  }
+
+  updateModelVisibility(ranges = []) {
+    const visible = new Map();
+    for (const item of ranges) {
+      const normalizedPath = this.resolveVisiblePath(item?.path);
+      if (!normalizedPath || typeof item?.revision !== "string") continue;
+      const range = this.normalizeRange(item.startLine, item.endLine);
+      const current = visible.get(normalizedPath);
+      if (current && current.revision === item.revision) {
+        current.ranges = this.mergeRanges([...current.ranges, range]);
+      } else {
+        visible.set(normalizedPath, {
+          revision: item.revision,
+          ranges: [range],
+        });
+      }
+    }
+    this.modelVisibleFiles = visible;
+  }
+
+  resolveVisiblePath(path) {
+    if (typeof path !== "string" || !path.trim()) return "";
+    if (AgentPath.isAbsolute(path)) return this.normalizePath(path);
+    const root = this.agent.editor?.fileExplorer?.rootPath;
+    return this.normalizePath(
+      this.agent.resolveWorkspacePath(path, root) || "",
+    );
+  }
+
+  isModelRangeVisible(path, revision, range) {
+    const visible = this.modelVisibleFiles.get(this.normalizePath(path));
+    if (!visible || visible.revision !== revision) return false;
+    return visible.ranges.some(
+      (known) =>
+        known.startLine <= range.startLine && known.endLine >= range.endLine,
+    );
+  }
+
   formatCoverage(entry) {
     if (!entry) return "none";
     if (entry.fullRead) return "full";
@@ -103,9 +178,13 @@ class FileKnowledge {
     console.info("[NCE Agent read knowledge]", {
       event,
       path: this.toRelativePath(path),
+      revision: details.requestedRevision || entry?.revision || null,
       requestedRevision: details.requestedRevision || entry?.revision || null,
       knownRevision: entry?.revision || null,
       requestedRange: `${range.startLine}-${range.endLine}`,
+      ...(event === "restore"
+        ? { restoredRange: `${range.startLine}-${range.endLine}` }
+        : {}),
       knownCoverage: this.formatCoverage(entry),
       decision,
     });
@@ -123,6 +202,7 @@ class FileKnowledge {
     this.metrics.readFileCalls += 1;
 
     if (options.forceRead === true) {
+      this.metrics.cacheMisses += 1;
       this.logReadDecision(normalizedPath, range, entry, "invalidated");
       return { alreadyKnown: false, decision: "invalidated", range, entry };
     }
@@ -138,6 +218,7 @@ class FileKnowledge {
       currentRevision !== entry.revision
     ) {
       entry.invalidated = true;
+      this.metrics.cacheMisses += 1;
       this.logReadDecision(normalizedPath, range, entry, "new_revision", {
         requestedRevision: currentRevision,
       });
@@ -150,6 +231,7 @@ class FileKnowledge {
     }
 
     if (entry?.invalidated) {
+      this.metrics.cacheMisses += 1;
       const decision = entry.revision ? "new_revision" : "invalidated";
       this.logReadDecision(normalizedPath, range, entry, decision, {
         requestedRevision: entry.revision,
@@ -161,30 +243,98 @@ class FileKnowledge {
       entry.requestCount += 1;
       entry.lastReadIteration = this.currentIteration;
       this.metrics.cachedFileReads += 1;
-      this.metrics.duplicateReadAttempts += 1;
-      this.logReadDecision(normalizedPath, range, entry, "already_known");
+      this.metrics.cacheHits += 1;
+      const cachedRange = this.getCachedRange(entry, range);
+      const effectiveRange = this.getEffectiveRange(entry, range);
+      if (
+        effectiveRange &&
+        this.isModelRangeVisible(
+          normalizedPath,
+          entry.revision,
+          effectiveRange,
+        )
+      ) {
+        this.metrics.alreadyVisibleReads += 1;
+        this.metrics.duplicateReadAttempts += 1;
+        this.logReadDecision(normalizedPath, range, entry, "already_visible");
+        return {
+          alreadyKnown: true,
+          decision: "already_visible",
+          range,
+          entry,
+          cachedContext: cachedRange,
+          result: {
+            success: true,
+            cached: true,
+            alreadyKnown: true,
+            noNewInformation: true,
+            informationSource: "model_context",
+            path: this.toRelativePath(normalizedPath),
+            revision: entry.revision,
+            requestedRange: range,
+            coverage: this.formatCoverage(entry),
+            message: "The requested range is already visible in model context.",
+          },
+        };
+      }
+      if (cachedRange) {
+        this.metrics.restoredReads += 1;
+        this.metrics.restoredCharacters += cachedRange.content.length;
+        this.logReadDecision(
+          normalizedPath,
+          range,
+          entry,
+          "restore_from_cache",
+        );
+        this.logReadDecision(
+          normalizedPath,
+          cachedRange,
+          entry,
+          "restored",
+          {},
+          "restore",
+        );
+        return {
+          alreadyKnown: true,
+          decision: "restore_from_cache",
+          range,
+          entry,
+          cachedContext: cachedRange,
+          result: {
+            success: true,
+            cached: true,
+            alreadyKnown: true,
+            noNewInformation: false,
+            restoredFromCache: true,
+            informationSource: "runtime_cache",
+            path: this.toRelativePath(normalizedPath),
+            revision: entry.revision,
+            startLine: cachedRange.startLine,
+            endLine: cachedRange.endLine,
+            contentEndLine: cachedRange.endLine,
+            totalLines: entry.totalLines,
+            truncated:
+              Number.isInteger(entry.totalLines) &&
+              cachedRange.endLine < entry.totalLines,
+            content: cachedRange.content,
+          },
+        };
+      }
+      this.metrics.cacheHits -= 1;
+      this.metrics.cachedFileReads -= 1;
+      this.metrics.cacheMisses += 1;
+      this.logReadDecision(normalizedPath, range, entry, "cache_miss");
       return {
-        alreadyKnown: true,
-        decision: "already_known",
+        alreadyKnown: false,
+        decision: "cache_miss",
         range,
         entry,
-        result: {
-          success: true,
-          cached: true,
-          alreadyKnown: true,
-          noNewInformation: true,
-          path: this.toRelativePath(normalizedPath),
-          revision: entry.revision,
-          requestedRange: range,
-          coverage: this.formatCoverage(entry),
-          message:
-            "File already inspected at the current revision. No new information was produced.",
-        },
       };
     }
 
     const decision = entry?.revision ? "new_range" : "actual_read";
     if (decision === "new_range") this.metrics.newRangeReads += 1;
+    this.metrics.cacheMisses += 1;
     this.logReadDecision(normalizedPath, range, entry, decision);
     return { alreadyKnown: false, decision, range, entry };
   }
@@ -206,6 +356,21 @@ class FileKnowledge {
         Boolean(previous?.previousRevision) &&
         previous.previousRevision !== details.revision);
     if (revisionChanged) this.metrics.revisionRereads += 1;
+    const contentLines = revisionChanged
+      ? new Map()
+      : previous?.contentLines instanceof Map
+        ? previous.contentLines
+        : new Map();
+    if (typeof details.content === "string" && coverageRange) {
+      const lines = details.content.split("\n");
+      const count = Math.min(
+        lines.length,
+        coverageRange.endLine - coverageRange.startLine + 1,
+      );
+      for (let index = 0; index < count; index += 1) {
+        contentLines.set(coverageRange.startLine + index, lines[index]);
+      }
+    }
     const ranges = revisionChanged
       ? coverageRange
         ? [coverageRange]
@@ -237,13 +402,20 @@ class FileKnowledge {
       requestCount: (previous?.requestCount || 0) + 1,
       changed: previous?.changed === true,
       invalidated: false,
+      contentLines,
     };
     this.files.set(normalizedPath, entry);
     this.metrics.actualFileReads += 1;
     if (details.diskRead === true) this.metrics.actualDiskReads += 1;
-    this.logReadDecision(normalizedPath, range, entry, "actual_read", {
-      requestedRevision: details.revision,
-    }, "record");
+    if (details.diskRead === true) this.metrics.actualFilesystemReads += 1;
+    this.logReadDecision(
+      normalizedPath,
+      range,
+      entry,
+      "actual_read",
+      { requestedRevision: details.revision },
+      "record",
+    );
     return entry;
   }
 
@@ -264,6 +436,7 @@ class FileKnowledge {
       invalidated: true,
       invalidationReason: reason,
       previousRevision: previous?.revision || null,
+      contentLines: new Map(),
     });
   }
 
@@ -301,15 +474,8 @@ class FileKnowledge {
     if (toolName === "rename_file") {
       const oldPath = this.resolveToolPath(args, result, "path");
       const newPath = this.resolveToolPath(args, result, "newPath");
-      const previous = this.files.get(oldPath);
       if (oldPath) this.files.delete(oldPath);
-      if (newPath && previous) {
-        this.files.set(AgentPath.normalize(newPath), {
-          ...previous,
-          path: AgentPath.normalize(newPath),
-          changed: true,
-        });
-      }
+      if (newPath) this.invalidateFile(newPath, revision, toolName);
       this.bumpProjectStructureRevision();
       return;
     }
@@ -494,7 +660,19 @@ class FileKnowledge {
   }
 
   getMetrics() {
-    return { ...this.metrics };
+    return {
+      ...this.metrics,
+      readRequests: this.metrics.readFileCalls,
+      newRangeReads: this.metrics.newRangeReads,
+      revisionReads: this.metrics.revisionRereads,
+    };
+  }
+
+  clearTransientContent() {
+    for (const entry of this.files.values()) {
+      entry.contentLines = new Map();
+    }
+    this.modelVisibleFiles.clear();
   }
 }
 

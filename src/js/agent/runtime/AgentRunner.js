@@ -76,6 +76,7 @@ class AgentRunner {
     this.agent.fileContextVersion = 0;
     this.agent.readAfterFailurePaths = new Set();
     this.agent.fileKnowledge.reset();
+    this.agent.contextManager.resetCompactionState();
     this.agent.modelRequestState = null;
     this.agent.modelRequestCounter = 0;
     this.agent.modelOutputStates = new Map();
@@ -123,6 +124,7 @@ class AgentRunner {
       throw error;
     } finally {
       if (runId === this.agent.runId) {
+        this.agent.fileKnowledge.clearTransientContent();
         this.agent.largeWriteState = null;
         this.agent.isRunning = false;
         this.agent.abortController = null;
@@ -437,6 +439,7 @@ class AgentRunner {
     modificationPerformed = false,
     validationPending = false,
     requiresExplicitCompletion = false,
+    taskCompleteRequired = requiresExplicitCompletion,
     taskComplete = false,
   } = {}) {
     if (toolCallCount > 0) {
@@ -463,10 +466,27 @@ class AgentRunner {
     if (validationPending) {
       return { action: "continue", reason: "post_write_validation_pending" };
     }
-    if (requiresExplicitCompletion && !taskComplete) {
+    if (taskCompleteRequired && !taskComplete) {
       return { action: "continue", reason: "task_not_complete" };
     }
     return { action: "finish", reason: "final_response_complete" };
+  }
+
+  startAgenticWork(runState, toolCalls = [], taskCompleteAvailable = false) {
+    const started = toolCalls.some(
+      (call) => call?.function?.name !== "task_complete",
+    );
+    if (!started) return false;
+    runState.agenticWorkStarted = true;
+    runState.taskCompleteRequired = taskCompleteAvailable === true;
+    this.agent.agentProgress.recordAgenticWorkStarted(
+      runState.taskCompleteRequired,
+    );
+    return true;
+  }
+
+  recordCompletionDecision(reason, runState) {
+    this.agent.agentProgress.recordCompletionDecision(reason, runState);
   }
 
   debugIterationDecision(details = {}) {
@@ -480,6 +500,8 @@ class AgentRunner {
       requiresModification: details.requiresModification,
       modificationPerformed: details.modificationPerformed,
       validationPending: details.validationPending,
+      agenticWorkStarted: details.agenticWorkStarted === true,
+      taskCompleteRequired: details.taskCompleteRequired === true,
       incompleteContinuations: details.incompleteContinuations,
       decision: String(details.decision || "").toUpperCase(),
       decisionReason: details.decisionReason,
@@ -615,10 +637,12 @@ class AgentRunner {
     let validationPending = false;
     let unresolvedWriteFailure = false;
     let unresolvedValidationFailure = false;
-    const requiresExplicitCompletion =
+    const taskCompleteAvailable =
       runConfig?.permissions === "code" &&
       runConfig?.supportsTools !== false &&
       this.agent.getTool("task_complete")?.enabled === true;
+    runState.agenticWorkStarted = false;
+    runState.taskCompleteRequired = false;
     runState.taskComplete = false;
     const largeWrite = this.agent.createLargeWriteRuntimeState(
       runConfig,
@@ -665,7 +689,8 @@ class AgentRunner {
           pendingValidation: validationPending,
           pendingValidationPaths: [...pendingValidationPaths],
           taskComplete: runState.taskComplete,
-          requiresExplicitCompletion,
+          agenticWorkStarted: runState.agenticWorkStarted,
+          taskCompleteRequired: runState.taskCompleteRequired,
           lastModificationError:
             failedModifications[failedModifications.length - 1] || null,
           largeWrite: this.agent.getLargeWriteContextState(largeWrite),
@@ -794,6 +819,11 @@ class AgentRunner {
             },
           );
         }
+        this.startAgenticWork(
+          runState,
+          parsed.toolCalls,
+          taskCompleteAvailable,
+        );
         let outcome = this.agent.evaluateIterationOutcome({
           finishReason: parsed.finishReason,
           hasReasoning: Boolean(parsed.reasoning),
@@ -802,7 +832,7 @@ class AgentRunner {
           requiresModification,
           modificationPerformed: successfulWriteCount > 0,
           validationPending,
-          requiresExplicitCompletion,
+          taskCompleteRequired: runState.taskCompleteRequired,
           taskComplete: runState.taskComplete,
         });
         if (
@@ -826,6 +856,8 @@ class AgentRunner {
           requiresModification,
           modificationPerformed: successfulWriteCount > 0,
           validationPending,
+          agenticWorkStarted: runState.agenticWorkStarted,
+          taskCompleteRequired: runState.taskCompleteRequired,
           incompleteContinuations,
           decision: outcome.action,
           decisionReason: outcome.reason,
@@ -841,7 +873,7 @@ class AgentRunner {
         if (
           parsed.text &&
           !(
-            requiresExplicitCompletion &&
+            runState.taskCompleteRequired &&
             !runState.taskComplete &&
             parsed.toolCalls.length === 0
           ) &&
@@ -895,6 +927,9 @@ class AgentRunner {
           throw this.agent.createIterationFailure(parsed.finishReason);
         }
         if (outcome.action === "continue") {
+          if (runState.agenticWorkStarted) {
+            this.recordCompletionDecision("continue_agentic_task", runState);
+          }
           if (outcome.reason === "required_write_missing") {
             this.agent.emitModelOutput(
               "assistant",
@@ -923,6 +958,9 @@ class AgentRunner {
         }
         if (outcome.action === "finish") {
           incompleteContinuations = 0;
+          if (!runState.agenticWorkStarted) {
+            this.recordCompletionDecision("normal_response", runState);
+          }
           if (requiresModification && successfulWriteCount > 0) {
             const looksLikeDump = this.agent.isLikelyFullFileDump(parsed.text);
             if (
@@ -1171,6 +1209,7 @@ class AgentRunner {
           });
           if (completion.accepted) {
             runState.taskComplete = true;
+            this.recordCompletionDecision("task_complete", runState);
             this.agent.agentProgress.recordTaskCompletion(
               iteration,
               true,

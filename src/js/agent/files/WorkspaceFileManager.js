@@ -956,7 +956,17 @@ class WorkspaceFileManager {
             : null,
       },
     );
-    if (readDecision.alreadyKnown) return readDecision.result;
+    if (readDecision.alreadyKnown) {
+      if (readDecision.cachedContext) {
+        this.agent.restoreFileReadContext(
+          absolute,
+          readDecision.cachedContext,
+          readDecision.entry.revision,
+          "runtime-cache",
+        );
+      }
+      return readDecision.result;
+    }
 
     const content =
       typeof openFileContent === "string"
@@ -985,6 +995,7 @@ class WorkspaceFileManager {
         diskRead: typeof openFileContent !== "string",
         truncated: readContext.truncated,
         knowledgeEndLine: readContext.knowledgeEndLine,
+        content: readContext.cacheContent,
       });
       return {
         success: true,
@@ -993,6 +1004,9 @@ class WorkspaceFileManager {
         endLine,
         totalLines,
         revision: readContext.revision,
+        contentEndLine: readContext.knowledgeEndLine,
+        informationSource:
+          typeof openFileContent === "string" ? "editor" : "filesystem",
         truncated: endLine < totalLines || readContext.truncated,
         content: readContext.content,
       };

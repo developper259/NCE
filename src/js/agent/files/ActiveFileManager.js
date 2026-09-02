@@ -66,7 +66,17 @@ class ActiveFileManager {
         forceRead: this.agent.readAfterFailurePaths.has(absolutePath),
       },
     );
-    if (readDecision.alreadyKnown) return readDecision.result;
+    if (readDecision.alreadyKnown) {
+      if (readDecision.cachedContext) {
+        this.agent.restoreFileReadContext(
+          absolutePath,
+          readDecision.cachedContext,
+          readDecision.entry.revision,
+          "runtime-cache",
+        );
+      }
+      return readDecision.result;
+    }
     const readContext = this.agent.createFileReadContext(
       absolutePath,
       fullContent,
@@ -83,6 +93,7 @@ class ActiveFileManager {
       diskRead: false,
       truncated: readContext.truncated,
       knowledgeEndLine: readContext.knowledgeEndLine,
+      content: readContext.cacheContent,
     });
     return {
       success: true,
@@ -95,6 +106,8 @@ class ActiveFileManager {
       totalLines: lines.length,
       truncated: endLine < lines.length,
       revision: readContext.revision,
+      contentEndLine: readContext.knowledgeEndLine,
+      informationSource: "editor",
       content: readContext.content,
     };
   }

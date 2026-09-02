@@ -26,6 +26,7 @@ class AgentProgress {
       modelAttempts: 0,
       toolCalls: 0,
       newInformationToolCalls: 0,
+      restoredInformationToolCalls: 0,
       noNewInformationToolCalls: 0,
       stateChangedToolCalls: 0,
       stagnationEvents: 0,
@@ -39,7 +40,36 @@ class AgentProgress {
       model429s: 0,
       modelRetries: 0,
       modelFallbacks: 0,
+      agenticWorkStarted: false,
+      taskCompleteRequired: false,
+      normalConversationalFinish: 0,
+      agenticContinuation: 0,
+      taskCompleteFinish: 0,
     };
+  }
+
+  recordAgenticWorkStarted(taskCompleteRequired = false) {
+    this.metrics.agenticWorkStarted = true;
+    this.metrics.taskCompleteRequired = taskCompleteRequired === true;
+  }
+
+  recordCompletionDecision(reason, state = {}) {
+    const agenticWorkStarted = state.agenticWorkStarted === true;
+    const taskCompleteRequired = state.taskCompleteRequired === true;
+    this.metrics.agenticWorkStarted = agenticWorkStarted;
+    this.metrics.taskCompleteRequired = taskCompleteRequired;
+    if (reason === "normal_response") {
+      this.metrics.normalConversationalFinish += 1;
+    } else if (reason === "continue_agentic_task") {
+      this.metrics.agenticContinuation += 1;
+    } else if (reason === "task_complete") {
+      this.metrics.taskCompleteFinish += 1;
+    }
+    console.info("[NCE Agent completion]", {
+      reason,
+      agenticWorkStarted,
+      taskCompleteRequired,
+    });
   }
 
   setPhase(phase, details = {}) {
@@ -146,6 +176,13 @@ class AgentProgress {
         lastTool: toolName,
         informationStatus,
       });
+      this.logTool(iteration, toolName, informationStatus, "progress");
+      return { action: "progress", clearDirectives: true };
+    }
+
+    if (informationStatus === "restored") {
+      this.metrics.restoredInformationToolCalls += 1;
+      this.resetStagnation();
       this.logTool(iteration, toolName, informationStatus, "progress");
       return { action: "progress", clearDirectives: true };
     }
@@ -333,7 +370,15 @@ class AgentProgress {
       readRequests: readMetrics.readFileCalls || 0,
       actualReads: readMetrics.actualFileReads || 0,
       actualDiskReads: readMetrics.actualDiskReads || 0,
+      actualFilesystemReads: readMetrics.actualFilesystemReads || 0,
       cachedReads: readMetrics.cachedFileReads || 0,
+      alreadyVisibleReads: readMetrics.alreadyVisibleReads || 0,
+      restoredReads: readMetrics.restoredReads || 0,
+      restoredCharacters: readMetrics.restoredCharacters || 0,
+      cacheHits: readMetrics.cacheHits || 0,
+      cacheMisses: readMetrics.cacheMisses || 0,
+      newRangeReads: readMetrics.newRangeReads || 0,
+      revisionReads: readMetrics.revisionRereads || 0,
       duplicateReadRequests: readMetrics.duplicateReadAttempts || 0,
       projectMapRequests: readMetrics.projectMapCalls || 0,
       actualProjectMapBuilds: readMetrics.actualProjectMapBuilds || 0,

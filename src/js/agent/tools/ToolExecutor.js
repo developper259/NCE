@@ -124,6 +124,8 @@ class ToolExecutor {
             ? "validation_progress"
             : result?.success === false
               ? "error"
+              : result?.restoredFromCache === true
+                ? "restored"
               : result?.alreadyKnown === true ||
                   result?.noNewInformation === true
                 ? "already_known"
@@ -138,6 +140,7 @@ class ToolExecutor {
       actualExecution:
         !["already_known", "task_complete"].includes(informationStatus),
       cached: result?.cached === true,
+      informationSource: result?.informationSource || null,
       informationSignature:
         toolCategory === "validation" || result?.success === false
           ? this.getInformationSignature(name, result)

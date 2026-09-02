@@ -1,6 +1,20 @@
 class ContextManager {
   constructor(agent) {
     this.agent = agent;
+    this.resetCompactionState();
+  }
+
+  resetCompactionState() {
+    this.compactionState = {
+      stableMessages: null,
+      sourceMessageCount: 0,
+      compactionArmed: true,
+      lastCompactionAtIteration: null,
+      lastCompactionUsageRatio: null,
+      lastCompactionLevel: "none",
+      lastPostCompactionUsageRatio: null,
+      compactionGeneration: 0,
+    };
   }
 
   parseContextJSON(value) {
@@ -20,14 +34,23 @@ class ContextManager {
     };
     const number = (value, fallback, minimum = 0) =>
       Number.isFinite(value) ? Math.max(minimum, value) : fallback;
-    const softLimitRatio = Math.min(1, number(source.softLimitRatio, 0.4));
-    const hardLimitRatio = Math.min(
+    const triggerRatio = Math.min(
       1,
-      Math.max(softLimitRatio, number(source.hardLimitRatio, 0.7)),
+      number(source.triggerRatio ?? source.softLimitRatio, 0.8),
     );
-    const criticalLimitRatio = Math.min(
+    const hardRatio = Math.min(
       1,
-      Math.max(hardLimitRatio, number(source.criticalLimitRatio, 0.85)),
+      Math.max(
+        triggerRatio,
+        number(source.hardRatio ?? source.hardLimitRatio, 0.9),
+      ),
+    );
+    const criticalRatio = Math.min(
+      1,
+      Math.max(
+        hardRatio,
+        number(source.criticalRatio ?? source.criticalLimitRatio, 0.95),
+      ),
     );
     return {
       enabled: source.enabled !== false,
@@ -43,10 +66,13 @@ class ContextManager {
         1,
         Math.floor(number(source.maxPreviouslyReadFiles, 100, 1)),
       ),
-      softLimitRatio,
-      hardLimitRatio,
-      criticalLimitRatio,
+      triggerRatio,
+      hardRatio,
+      criticalRatio,
       safetyMarginTokens: Math.floor(number(source.safetyMarginTokens, 8192)),
+      outputReserveTokens: Number.isFinite(source.outputReserveTokens)
+        ? Math.max(0, Math.floor(source.outputReserveTokens))
+        : null,
       charsPerToken: number(source.charsPerToken, 4, 1),
       logMetrics: source.logMetrics !== false,
       debugDecisions: source.debugDecisions === true,
@@ -89,8 +115,13 @@ class ContextManager {
     const contextWindow = Number.isFinite(config.contextWindow)
       ? Math.max(1, Math.floor(config.contextWindow))
       : null;
-    const outputReserve = Number.isFinite(config.maxTokens)
-      ? Math.max(0, Math.floor(config.maxTokens))
+    const configuredOutputReserve = [
+      config.maxTokens,
+      options.outputReserveTokens,
+      config.maxOutputTokens,
+    ].find((value) => Number.isFinite(value));
+    const outputReserve = Number.isFinite(configuredOutputReserve)
+      ? Math.max(0, Math.floor(configuredOutputReserve))
       : 0;
     const budgetKnown = contextWindow !== null;
     return {
@@ -104,6 +135,94 @@ class ContextManager {
           )
         : null,
     };
+  }
+
+  getCompactionLevel(usageRatio, budgetKnown, options) {
+    if (!budgetKnown || !Number.isFinite(usageRatio)) return "none";
+    if (usageRatio >= options.criticalRatio) return "critical";
+    if (usageRatio >= options.hardRatio) return "hard";
+    if (usageRatio >= options.triggerRatio) return "soft";
+    return "none";
+  }
+
+  getCompactionSeverity(level) {
+    return { none: 0, soft: 1, hard: 2, critical: 3 }[level] || 0;
+  }
+
+  shouldTriggerCompaction(level, usageRatio, options) {
+    if (level === "none") {
+      if (
+        Number.isFinite(usageRatio) &&
+        usageRatio < options.triggerRatio
+      ) {
+        this.compactionState.compactionArmed = true;
+      }
+      return false;
+    }
+    return (
+      this.compactionState.compactionArmed ||
+      this.getCompactionSeverity(level) >
+        this.getCompactionSeverity(this.compactionState.lastCompactionLevel)
+    );
+  }
+
+  getStableSourceMessages(messages = [], enabled = true) {
+    const state = this.compactionState;
+    if (!enabled || !Array.isArray(state.stableMessages)) return messages;
+    if (messages.length < state.sourceMessageCount) {
+      this.resetCompactionState();
+      return messages;
+    }
+    const stable = state.stableMessages.map((message) => ({ ...message }));
+    if (messages[0]?.role === "system" && stable[0]?.role === "system") {
+      stable[0] = { ...messages[0] };
+    }
+    return [
+      ...stable,
+      ...messages
+        .slice(state.sourceMessageCount)
+        .map((message) => ({ ...message })),
+    ];
+  }
+
+  getValidatedModelContext(messages = []) {
+    const entries = this.groupModelContextEntries(messages);
+    const modelMessages = [];
+    let invalidToolExchanges = 0;
+    for (const entry of entries) {
+      if (entry.kind === "orphan_tool") {
+        invalidToolExchanges += 1;
+        continue;
+      }
+      if (entry.kind === "tool_exchange" && !entry.protocolValid) {
+        invalidToolExchanges += 1;
+        continue;
+      }
+      modelMessages.push(...entry.messages.map((message) => ({ ...message })));
+    }
+    return { modelMessages, invalidToolExchanges };
+  }
+
+  storeStableContext(modelMessages, sourceMessageCount, details = {}) {
+    const state = this.compactionState;
+    state.stableMessages = modelMessages
+      .filter(
+        (message) =>
+          !(
+            message?.role === "system" &&
+            String(message.content || "").startsWith(
+              "[NCE CURRENT TASK STATE]",
+            )
+          ),
+      )
+      .map((message) => ({ ...message }));
+    state.sourceMessageCount = sourceMessageCount;
+    state.compactionArmed = false;
+    state.lastCompactionAtIteration = details.iteration ?? null;
+    state.lastCompactionUsageRatio = details.preUsageRatio ?? null;
+    state.lastCompactionLevel = details.level || "none";
+    state.lastPostCompactionUsageRatio = details.postUsageRatio ?? null;
+    state.compactionGeneration += 1;
   }
 
   getContextToolMetadata(toolCall, toolMessage = null) {
@@ -122,8 +241,10 @@ class ContextManager {
     );
     const newPath = normalizePath(result?.newPath || args.newPath);
     const revision = result?.revision || result?.verification?.revision || "";
+    const restoredFromCache = result?.restoredFromCache === true;
     const noNewInformation =
-      result?.alreadyKnown === true || result?.noNewInformation === true;
+      !restoredFromCache &&
+      (result?.alreadyKnown === true || result?.noNewInformation === true);
     const readKey = [
       name,
       path,
@@ -149,6 +270,7 @@ class ContextManager {
       path,
       newPath,
       revision,
+      restoredFromCache,
       noNewInformation,
       readKey,
       searchKey,
@@ -303,6 +425,53 @@ class ContextManager {
     return entries;
   }
 
+  collectModelVisibleFileRanges(messages = []) {
+    const readTools = new Set(["read_file", "read_active_file"]);
+    const ranges = [];
+    for (const entry of this.groupModelContextEntries(messages)) {
+      if (entry.kind !== "tool_exchange" || !entry.protocolValid) continue;
+      for (let index = 0; index < entry.calls.length; index += 1) {
+        const call = entry.calls[index];
+        const name = call?.function?.name || "";
+        if (!readTools.has(name)) continue;
+        const toolMessage = entry.toolMessages.find(
+          (message) => message?.tool_call_id === call.id,
+        );
+        const root = this.parseContextJSON(toolMessage?.content);
+        const payload = root?.result ?? root;
+        if (
+          !payload ||
+          payload.success === false ||
+          typeof payload.content !== "string" ||
+          typeof payload.path !== "string" ||
+          typeof payload.revision !== "string" ||
+          !Number.isInteger(payload.startLine)
+        ) {
+          continue;
+        }
+        const endLine = Number.isInteger(payload.contentEndLine)
+          ? payload.contentEndLine
+          : Number.isInteger(payload.endLine) && payload.truncated !== true
+            ? payload.endLine
+            : null;
+        if (!Number.isInteger(endLine) || endLine < payload.startLine) continue;
+        ranges.push({
+          path: payload.path,
+          revision: payload.revision,
+          startLine: payload.startLine,
+          endLine,
+        });
+      }
+    }
+    return ranges;
+  }
+
+  updateModelFileVisibility(messages = []) {
+    this.agent.fileKnowledge?.updateModelVisibility?.(
+      this.collectModelVisibleFileRanges(messages),
+    );
+  }
+
   compactToolResultForModel(toolName, content, options = {}) {
     const root = this.parseContextJSON(content);
     if (!root || typeof root !== "object") return content;
@@ -357,6 +526,7 @@ class ContextManager {
             "path",
             "startLine",
             "endLine",
+            "contentEndLine",
             "totalLines",
             "truncated",
             "revision",
@@ -461,70 +631,10 @@ class ContextManager {
       options.charsPerToken,
     );
     const estimatedFullTokens = estimatedFullMessageTokens + toolSchemaTokens;
-    const initialUsageRatio = budgetKnown
-      ? estimatedFullTokens / inputBudget
-      : null;
-    const pressureLevel = !budgetKnown
-      ? "conservative"
-      : initialUsageRatio >= options.criticalLimitRatio
-        ? "critical"
-        : initialUsageRatio >= options.hardLimitRatio
-          ? "hard"
-          : initialUsageRatio >= options.softLimitRatio
-            ? "moderate"
-            : "light";
-
-    if (!options.enabled) {
-      const modelMessages = messages.map((message) => ({ ...message }));
-      const estimatedModelMessageTokens = this.estimateTokens(
-        modelMessages,
-        options.charsPerToken,
-      );
-      const tokenBreakdown = this.getContextTokenBreakdown(
-        modelMessages,
-        toolSchemas,
-        options.charsPerToken,
-      );
-      const metrics = {
-        fullMessages: messages.length,
-        modelMessages: modelMessages.length,
-        estimatedFullMessageTokens,
-        estimatedModelMessageTokens,
-        estimatedFullTokens,
-        estimatedModelTokens: estimatedModelMessageTokens + toolSchemaTokens,
-        messageTokens: estimatedModelMessageTokens,
-        toolSchemaTokens,
-        totalEstimatedInputTokens:
-          estimatedModelMessageTokens + toolSchemaTokens,
-        systemPromptTokens: tokenBreakdown.systemPrompt,
-        tokenBreakdown,
-        contextWindow,
-        maxOutputTokens: config.maxOutputTokens ?? null,
-        outputReserve,
-        safetyMarginTokens: options.safetyMarginTokens,
-        inputBudget,
-        budgetKnown,
-        usageRatio:
-          initialUsageRatio === null
-            ? null
-            : Number(initialUsageRatio.toFixed(3)),
-        level: pressureLevel,
-        disabled: true,
-        readKnowledge: this.agent.fileKnowledge?.getMetrics?.() || null,
-        runtime: this.agent.agentProgress?.getMetrics?.() || null,
-      };
-      if (config.trackCumulative === true) {
-        this.agent.cumulativeEstimatedPromptTokens +=
-          metrics.estimatedModelTokens;
-        metrics.cumulativeEstimatedPromptTokens =
-          this.agent.cumulativeEstimatedPromptTokens;
-        metrics.cumulativeActualPromptTokens =
-          this.agent.cumulativeActualPromptTokens;
-      }
-      this.agent.lastContextMetrics = metrics;
-      return modelMessages;
-    }
-
+    const stableSourceMessages = this.getStableSourceMessages(
+      messages,
+      options.enabled,
+    );
     const state = config.contextState;
     const hasCurrentState =
       state &&
@@ -539,13 +649,136 @@ class ContextManager {
         state.progress?.awaitingProgress === true);
     const contextMessages = hasCurrentState
       ? [
-          ...messages,
+          ...stableSourceMessages,
           {
             role: "system",
             content: `[NCE CURRENT TASK STATE]\n${JSON.stringify(state)}`,
           },
         ]
-      : messages;
+      : stableSourceMessages;
+    const preCompactionMessageTokens = this.estimateTokens(
+      contextMessages,
+      options.charsPerToken,
+    );
+    const preCompactionTokens =
+      preCompactionMessageTokens + toolSchemaTokens;
+    const initialUsageRatio = budgetKnown
+      ? preCompactionTokens / inputBudget
+      : null;
+    const pressureLevel = this.getCompactionLevel(
+      initialUsageRatio,
+      budgetKnown,
+      options,
+    );
+    const compactionTriggered =
+      options.enabled &&
+      this.shouldTriggerCompaction(
+        pressureLevel,
+        initialUsageRatio,
+        options,
+      );
+
+    if (!options.enabled || !compactionTriggered) {
+      const validated = this.getValidatedModelContext(contextMessages);
+      const modelMessages = validated.modelMessages;
+      const estimatedModelMessageTokens = this.estimateTokens(
+        modelMessages,
+        options.charsPerToken,
+      );
+      const estimatedModelTokens =
+        estimatedModelMessageTokens + toolSchemaTokens;
+      const tokenBreakdown = this.getContextTokenBreakdown(
+        modelMessages,
+        toolSchemas,
+        options.charsPerToken,
+      );
+      const usageRatio = budgetKnown
+        ? estimatedModelTokens / inputBudget
+        : null;
+      const messagesRemoved = contextMessages.length - modelMessages.length;
+      const metrics = {
+        fullMessages: messages.length,
+        modelMessages: modelMessages.length,
+        estimatedFullMessageTokens,
+        estimatedModelMessageTokens,
+        estimatedFullTokens,
+        estimatedModelTokens,
+        estimatedInputTokens: preCompactionTokens,
+        messageTokens: estimatedModelMessageTokens,
+        toolSchemaTokens,
+        totalEstimatedInputTokens: estimatedModelTokens,
+        systemPromptTokens: tokenBreakdown.systemPrompt,
+        tokenBreakdown,
+        contextWindow,
+        maxOutputTokens: config.maxOutputTokens ?? null,
+        outputReserve,
+        safetyMarginTokens: options.safetyMarginTokens,
+        inputBudget,
+        budgetKnown,
+        initialUsageRatio:
+          initialUsageRatio === null
+            ? null
+            : Number(initialUsageRatio.toFixed(3)),
+        usageRatio:
+          usageRatio === null ? null : Number(usageRatio.toFixed(3)),
+        level: pressureLevel,
+        compactionLevel: pressureLevel,
+        compactionTriggered: false,
+        compacted: false,
+        compactionReason: !options.enabled
+          ? "disabled"
+          : !budgetKnown
+            ? "budget_unknown"
+            : pressureLevel === "none"
+              ? "below_trigger"
+              : "hysteresis",
+        compactionGeneration: this.compactionState.compactionGeneration,
+        preCompactionTokens,
+        postCompactionTokens: estimatedModelTokens,
+        tokensRemoved: Math.max(0, preCompactionTokens - estimatedModelTokens),
+        messagesRemoved,
+        invalidToolExchanges: validated.invalidToolExchanges,
+        removedReasoningMessages: 0,
+        removedOldReads: 0,
+        removedStaleReads: 0,
+        removedOldSearches: 0,
+        removedOldProjectMaps: 0,
+        removedOldListings: 0,
+        compactedToolResults: 0,
+        compactedToolCalls: 0,
+        deduplicatedTools: 0,
+        removedResolvedErrors: 0,
+        removedObsoleteRuntimeMessages: 0,
+        removedForBudget: 0,
+        summarizedReadFiles: 0,
+        omittedReadFiles: 0,
+        disabled: !options.enabled,
+        lastCompactionAtIteration:
+          this.compactionState.lastCompactionAtIteration,
+        lastCompactionUsageRatio:
+          this.compactionState.lastCompactionUsageRatio,
+        lastCompactionLevel: this.compactionState.lastCompactionLevel,
+        lastPostCompactionUsageRatio:
+          this.compactionState.lastPostCompactionUsageRatio,
+        readKnowledge: this.agent.fileKnowledge?.getMetrics?.() || null,
+        runtime: this.agent.agentProgress?.getMetrics?.() || null,
+      };
+      if (config.trackCumulative === true) {
+        this.agent.cumulativeEstimatedPromptTokens +=
+          metrics.estimatedModelTokens;
+        metrics.cumulativeEstimatedPromptTokens =
+          this.agent.cumulativeEstimatedPromptTokens;
+        metrics.cumulativeActualPromptTokens =
+          this.agent.cumulativeActualPromptTokens;
+      }
+      this.agent.lastContextMetrics = metrics;
+      this.updateModelFileVisibility(modelMessages);
+      if (options.logMetrics) console.info("[NCE Agent context]", metrics);
+      if (options.logMetrics) {
+        console.info("[NCE Agent context breakdown]", tokenBreakdown);
+      }
+      return modelMessages;
+    }
 
     const entries = this.groupModelContextEntries(contextMessages);
     const exchangeCount = entries.filter(
@@ -589,12 +822,14 @@ class ContextManager {
       "write_file_chunk",
       "rename_file",
     ]);
+    const hardCompaction = ["hard", "critical"].includes(pressureLevel);
 
     const laterWrites = new Set();
     const latestReads = new Set();
     const latestSearches = new Set();
     const latestNavigation = new Set();
     const laterSuccessfulWrites = new Set();
+    const laterSuccessfulTools = new Set();
     const activeErrors = new Set();
     const runtimeSystems = new Set();
     const userMessageIndexes = entries
@@ -697,7 +932,7 @@ class ContextManager {
             (typeof message.content === "string" &&
               message.content.trim().length > 0) ||
             (Array.isArray(message.content) && message.content.length > 0);
-          if (!hasDurableContent && message.reasoning) {
+          if (!hasDurableContent && message.reasoning && !entry.recent) {
             entry.keep = false;
             entry.reasons.push("historical_reasoning");
           } else {
@@ -721,6 +956,7 @@ class ContextManager {
         let toolIsDroppable = false;
         const paths = [tool.path, tool.newPath].filter(Boolean);
         const errorKey = [tool.name, tool.path, tool.errorCode].join(":");
+        const toolOutcomeKey = [tool.name, tool.path].join(":");
         if (writeTools.has(tool.name)) {
           if (tool.success) {
             for (const path of paths) {
@@ -743,13 +979,18 @@ class ContextManager {
             }
           }
         } else if (!tool.success) {
-          if (!activeErrors.has(errorKey)) {
+          if (laterSuccessfulTools.has(toolOutcomeKey)) {
+            resolvedErrorCount += 1;
+            toolIsDroppable = true;
+          } else if (!activeErrors.has(errorKey)) {
             activeErrors.add(errorKey);
             unresolvedErrors.push(tool);
           } else {
             duplicateCount += 1;
             toolIsDroppable = true;
           }
+        } else {
+          laterSuccessfulTools.add(toolOutcomeKey);
         }
 
         if (readTools.has(tool.name) && tool.success) {
@@ -812,16 +1053,16 @@ class ContextManager {
         entry.tools.some((tool) => writeTools.has(tool.name) && tool.success)
       ) {
         entry.critical = true;
-        entry.compactResults = true;
+        entry.compactResults = pressureLevel !== "soft";
         entry.reasons.push("successful_write");
       } else if (unresolvedErrors.length > 0) {
         entry.critical = true;
-        entry.compactResults = true;
+        entry.compactResults = pressureLevel !== "soft";
         entry.reasons.push("unresolved_error");
       } else if (entry.tools.some((tool) => navigationTools.has(tool.name))) {
         entry.priority = 30;
         const names = new Set(entry.tools.map((tool) => tool.name));
-        if (entry.tier === "COLD") {
+        if (hardCompaction && entry.tier === "COLD") {
           entry.keep = false;
           entry.reasons.push("cold_navigation");
           if (names.has("get_project_map")) counters.removedOldProjectMaps += 1;
@@ -833,7 +1074,7 @@ class ContextManager {
         }
       } else if (entry.tools.some((tool) => searchTools.has(tool.name))) {
         entry.priority = 40;
-        if (entry.tier === "COLD") {
+        if (hardCompaction && entry.tier === "COLD") {
           entry.keep = false;
           entry.reasons.push("cold_search");
           counters.removedOldSearches += 1;
@@ -842,7 +1083,7 @@ class ContextManager {
         }
       } else if (entry.tools.some((tool) => readTools.has(tool.name))) {
         entry.priority = 50;
-        if (entry.tier === "COLD") {
+        if (hardCompaction && entry.tier === "COLD") {
           entry.keep = false;
           entry.reasons.push("cold_read_summarized");
           counters.removedOldReads += 1;
@@ -865,13 +1106,6 @@ class ContextManager {
     for (const entry of entries) {
       if (!entry.keep || entry.critical || entry.recent) continue;
       if (
-        pressureLevel === "moderate" &&
-        entry.kind === "message" &&
-        ["assistant", "system"].includes(entry.message?.role)
-      ) {
-        entry.keep = false;
-        entry.reasons.push("adaptive_moderate");
-      } else if (
         ["hard", "critical"].includes(pressureLevel) &&
         ((entry.kind === "message" &&
           ["assistant", "system"].includes(entry.message?.role)) ||
@@ -896,6 +1130,7 @@ class ContextManager {
         const message = { ...entry.message };
         if (
           Object.prototype.hasOwnProperty.call(message, "reasoning") &&
+          !entry.recent &&
           !(config.modelConfig?.requiresReasoningReplay && entry.tier === "HOT")
         ) {
           delete message.reasoning;
@@ -914,6 +1149,7 @@ class ContextManager {
       };
       if (
         Object.prototype.hasOwnProperty.call(assistant, "reasoning") &&
+        !entry.recent &&
         !(config.modelConfig?.requiresReasoningReplay && entry.tier === "HOT")
       ) {
         delete assistant.reasoning;
@@ -974,7 +1210,25 @@ class ContextManager {
       modelMessages,
       options.charsPerToken,
     );
-    if (inputBudget && estimatedModelTokens + toolSchemaTokens > inputBudget) {
+    const targetInputTokens =
+      inputBudget && hardCompaction
+        ? Math.max(
+            1,
+            Math.floor(
+              inputBudget *
+                Math.max(
+                  0.1,
+                  options.triggerRatio -
+                    (pressureLevel === "critical" ? 0.05 : 0.02),
+                ),
+            ),
+          )
+        : inputBudget;
+    if (
+      hardCompaction &&
+      targetInputTokens &&
+      estimatedModelTokens + toolSchemaTokens > targetInputTokens
+    ) {
       for (const entry of entries) {
         if (
           entry.keep &&
@@ -995,9 +1249,18 @@ class ContextManager {
       );
     }
 
-    if (inputBudget && estimatedModelTokens + toolSchemaTokens > inputBudget) {
+    if (
+      hardCompaction &&
+      targetInputTokens &&
+      estimatedModelTokens + toolSchemaTokens > targetInputTokens
+    ) {
       const candidates = entries
-        .filter((entry) => entry.keep && !entry.critical)
+        .filter(
+          (entry) =>
+            entry.keep &&
+            !entry.critical &&
+            (pressureLevel === "critical" || !entry.recent),
+        )
         .sort(
           (left, right) =>
             left.priority - right.priority ||
@@ -1014,7 +1277,7 @@ class ContextManager {
       );
       let projectedTokens = estimatedModelTokens + toolSchemaTokens;
       for (const entry of candidates) {
-        if (projectedTokens <= inputBudget) break;
+        if (projectedTokens <= targetInputTokens) break;
         entry.keep = false;
         entry.reasons.push("input_budget");
         counters.removedForBudget += 1;
@@ -1032,7 +1295,7 @@ class ContextManager {
     ).length;
     counters.removedReasoningMessages = Math.max(
       0,
-      messages.filter(
+      contextMessages.filter(
         (message) =>
           message?.role === "assistant" &&
           Object.prototype.hasOwnProperty.call(message, "reasoning"),
@@ -1045,6 +1308,13 @@ class ContextManager {
     );
     estimatedModelTokens = estimatedModelMessageTokens + toolSchemaTokens;
     const usageRatio = budgetKnown ? estimatedModelTokens / inputBudget : null;
+    this.storeStableContext(modelMessages, messages.length, {
+      iteration:
+        this.agent.agentProgress?.getMetrics?.().modelRequests ?? null,
+      preUsageRatio: initialUsageRatio,
+      postUsageRatio: usageRatio,
+      level: pressureLevel,
+    });
     const tokenBreakdown = this.getContextTokenBreakdown(
       modelMessages,
       toolSchemas,
@@ -1058,6 +1328,7 @@ class ContextManager {
       estimatedFullMessageTokens,
       estimatedModelTokens,
       estimatedModelMessageTokens,
+      estimatedInputTokens: preCompactionTokens,
       messageTokens: estimatedModelMessageTokens,
       toolSchemaTokens,
       totalEstimatedInputTokens: estimatedModelTokens,
@@ -1077,6 +1348,22 @@ class ContextManager {
           : Number(initialUsageRatio.toFixed(3)),
       usageRatio: usageRatio === null ? null : Number(usageRatio.toFixed(3)),
       level: pressureLevel,
+      compactionLevel: pressureLevel,
+      compactionTriggered: true,
+      compacted: true,
+      compactionReason: "usage_ratio",
+      compactionGeneration: this.compactionState.compactionGeneration,
+      preCompactionTokens,
+      postCompactionTokens: estimatedModelTokens,
+      tokensRemoved: Math.max(0, preCompactionTokens - estimatedModelTokens),
+      messagesRemoved: Math.max(0, contextMessages.length - modelMessages.length),
+      lastCompactionAtIteration:
+        this.compactionState.lastCompactionAtIteration,
+      lastCompactionUsageRatio:
+        this.compactionState.lastCompactionUsageRatio,
+      lastCompactionLevel: this.compactionState.lastCompactionLevel,
+      lastPostCompactionUsageRatio:
+        this.compactionState.lastPostCompactionUsageRatio,
       budgetExceeded: budgetKnown && estimatedModelTokens > inputBudget,
       cumulativeEstimatedPromptTokens:
         this.agent.cumulativeEstimatedPromptTokens,
@@ -1096,7 +1383,18 @@ class ContextManager {
     }
 
     this.agent.lastContextMetrics = metrics;
+    this.updateModelFileVisibility(modelMessages);
     if (options.logMetrics) console.info("[NCE Agent context]", metrics);
+    if (options.logMetrics) {
+      console.info("[NCE Agent context compact]", {
+        level: pressureLevel,
+        trigger: "usage_ratio",
+        beforeTokens: preCompactionTokens,
+        afterTokens: estimatedModelTokens,
+        removedMessages: metrics.messagesRemoved,
+        generation: metrics.compactionGeneration,
+      });
+    }
     if (options.logMetrics) {
       console.info("[NCE Agent context breakdown]", tokenBreakdown);
     }
