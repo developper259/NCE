@@ -62,6 +62,7 @@ class ActiveFileManager {
       startLine,
       endLine,
       {
+        toolName: "read_active_file",
         currentRevision: this.agent.getContentRevision(fullContent),
         forceRead: this.agent.readAfterFailurePaths.has(absolutePath),
       },
@@ -97,6 +98,7 @@ class ActiveFileManager {
     });
     return {
       success: true,
+      readDecision: "NEW",
       path: this.agent.toProjectRelativePath(
         file.path,
         this.agent.editor?.fileExplorer?.rootPath,

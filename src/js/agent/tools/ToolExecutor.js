@@ -126,6 +126,8 @@ class ToolExecutor {
               ? "error"
               : result?.restoredFromCache === true
                 ? "restored"
+              : result?.repeatedRedundantAction === true
+                ? "repeated_redundant"
               : result?.alreadyKnown === true ||
                   result?.noNewInformation === true
                 ? "already_known"
@@ -138,13 +140,16 @@ class ToolExecutor {
       informationStatus,
       toolCategory,
       actualExecution:
-        !["already_known", "task_complete"].includes(informationStatus),
+        !["already_known", "repeated_redundant", "task_complete"].includes(
+          informationStatus,
+        ),
       cached: result?.cached === true,
       informationSource: result?.informationSource || null,
       informationSignature:
-        toolCategory === "validation" || result?.success === false
+        result?.readSignature ||
+        (toolCategory === "validation" || result?.success === false
           ? this.getInformationSignature(name, result)
-          : null,
+          : null),
     };
   }
 

@@ -25,6 +25,11 @@ const AgentAI = {
     debugDecisions: false,
   },
 
+  progressGuidance: {
+    overExplorationThreshold: 6,
+    overExplorationEscalationInterval: 4,
+  },
+
   readOnlyTools: [
     "get_editor_context",
     "get_cursor",
@@ -280,6 +285,8 @@ const AgentAI = {
       largeFileWriting: { ...this.largeFileWriting },
 
       contextCompaction: { ...this.contextCompaction },
+
+      progressGuidance: { ...this.progressGuidance },
 
       permissions: agent.permissions || "read",
 

@@ -7,9 +7,22 @@ class AgentProgress {
   }
 
   reset(options = {}) {
+    this.overExplorationThreshold = Math.max(
+      1,
+      Number(this.agent?.progressGuidance?.overExplorationThreshold) || 6,
+    );
+    this.overExplorationEscalationInterval = Math.max(
+      1,
+      Number(
+        this.agent?.progressGuidance?.overExplorationEscalationInterval,
+      ) || 4,
+    );
     this.requiresModification = options.requiresModification === true;
     this.phase = "discover";
     this.consecutiveNoNewInformation = 0;
+    this.consecutiveExplorationActions = 0;
+    this.consecutiveExplorationPeak = 0;
+    this.overExplorationLevel = 0;
     this.stagnationRecoveryLevel = 0;
     this.awaitingProgress = false;
     this.stagnationDetected = false;
@@ -26,6 +39,11 @@ class AgentProgress {
       modelAttempts: 0,
       toolCalls: 0,
       newInformationToolCalls: 0,
+      explorationActions: 0,
+      taskProgressActions: 0,
+      overExplorationSignals: 0,
+      recoveryDirectives: 0,
+      repeatedRedundantActions: 0,
       restoredInformationToolCalls: 0,
       noNewInformationToolCalls: 0,
       stateChangedToolCalls: 0,
@@ -126,6 +144,7 @@ class AgentProgress {
   consumeTool(toolName, meta = {}, iteration = null) {
     let informationStatus = meta.informationStatus || "neutral";
     const category = meta.toolCategory || "other";
+    const isExploration = ["read", "navigation", "search"].includes(category);
     this.metrics.toolCalls += 1;
     if (category === "write") this.metrics.writeToolCalls += 1;
     if (category === "validation") this.metrics.validationCalls += 1;
@@ -156,6 +175,7 @@ class AgentProgress {
 
     if (informationStatus === "task_complete") {
       this.metrics.taskCompleteCalls += 1;
+      this.recordTaskProgress();
       return { action: "task_complete" };
     }
 
@@ -170,7 +190,7 @@ class AgentProgress {
       this.activeErrorCategory = validationRetestPending
         ? "validation"
         : null;
-      this.resetStagnation();
+      this.recordTaskProgress();
       this.setPhase("implement", {
         iteration,
         lastTool: toolName,
@@ -182,9 +202,14 @@ class AgentProgress {
 
     if (informationStatus === "restored") {
       this.metrics.restoredInformationToolCalls += 1;
-      this.resetStagnation();
-      this.logTool(iteration, toolName, informationStatus, "progress");
-      return { action: "progress", clearDirectives: true };
+      this.consecutiveNoNewInformation = 0;
+      const exploration = this.observeExploration(
+        iteration,
+        toolName,
+        informationStatus,
+      );
+      this.logTool(iteration, toolName, informationStatus, "information_gain");
+      return exploration;
     }
 
     if (
@@ -209,15 +234,29 @@ class AgentProgress {
         this.blockingError = false;
         this.activeErrorCategory = null;
       }
-      this.resetStagnation();
-      if (["read", "navigation", "search"].includes(category)) {
+      if (isExploration) {
+        this.consecutiveNoNewInformation = 0;
         this.usefulInspectionCount += 1;
         this.setPhase("understand", {
           iteration,
           lastTool: toolName,
           informationStatus,
         });
-      } else if (category === "validation") {
+        const exploration = this.observeExploration(
+          iteration,
+          toolName,
+          informationStatus,
+        );
+        this.logTool(
+          iteration,
+          toolName,
+          informationStatus,
+          "information_gain",
+        );
+        return exploration;
+      }
+      this.recordTaskProgress();
+      if (category === "validation") {
         this.setPhase("verify", {
           iteration,
           lastTool: toolName,
@@ -228,9 +267,24 @@ class AgentProgress {
       return { action: "progress", clearDirectives: true };
     }
 
+    if (informationStatus === "repeated_redundant") {
+      this.metrics.noNewInformationToolCalls += 1;
+      this.metrics.repeatedRedundantActions += 1;
+      this.consecutiveNoNewInformation += 1;
+      if (isExploration) this.recordExplorationAction();
+      this.logTool(iteration, toolName, informationStatus, "recovery");
+      return this.triggerStagnation(
+        iteration,
+        toolName,
+        informationStatus,
+        "repeated_redundant_action",
+      );
+    }
+
     if (informationStatus === "already_known") {
       this.metrics.noNewInformationToolCalls += 1;
       this.consecutiveNoNewInformation += 1;
+      if (isExploration) this.recordExplorationAction();
       this.logTool(iteration, toolName, informationStatus, "observe");
       if (
         this.awaitingProgress ||
@@ -244,6 +298,51 @@ class AgentProgress {
     this.consecutiveNoNewInformation = 0;
     this.logTool(iteration, toolName, informationStatus, "neutral");
     return { action: "none" };
+  }
+
+  recordExplorationAction() {
+    this.metrics.explorationActions += 1;
+    this.consecutiveExplorationActions += 1;
+    this.consecutiveExplorationPeak = Math.max(
+      this.consecutiveExplorationPeak,
+      this.consecutiveExplorationActions,
+    );
+  }
+
+  observeExploration(iteration, toolName, informationStatus) {
+    this.recordExplorationAction();
+    const nextSignalAt =
+      this.overExplorationThreshold +
+      this.overExplorationLevel * this.overExplorationEscalationInterval;
+    if (
+      this.overExplorationLevel >= 2 ||
+      this.consecutiveExplorationActions < nextSignalAt
+    ) {
+      return { action: "information", informationGain: true };
+    }
+    this.overExplorationLevel += 1;
+    this.metrics.overExplorationSignals += 1;
+    this.metrics.recoveryDirectives += 1;
+    this.log({
+      event: "over_exploration",
+      iteration,
+      lastTool: toolName,
+      informationStatus,
+      reason: "exploration_without_task_progress",
+      level: this.overExplorationLevel,
+    });
+    return {
+      action: "directive",
+      level: this.overExplorationLevel,
+      content: this.getOverExplorationDirective(this.overExplorationLevel),
+    };
+  }
+
+  recordTaskProgress() {
+    this.metrics.taskProgressActions += 1;
+    this.consecutiveExplorationActions = 0;
+    this.overExplorationLevel = 0;
+    this.resetStagnation();
   }
 
   handleModelNoAction(details = {}) {
@@ -261,7 +360,12 @@ class AgentProgress {
     );
   }
 
-  triggerStagnation(iteration, toolName, informationStatus) {
+  triggerStagnation(
+    iteration,
+    toolName,
+    informationStatus,
+    reason = "repeated_no_new_information",
+  ) {
     if (!this.stagnationDetected) {
       this.stagnationDetected = true;
       this.metrics.stagnationEvents += 1;
@@ -274,13 +378,14 @@ class AgentProgress {
           iteration,
           lastTool: toolName,
           informationStatus,
-          reason: "repeated_no_new_information",
+          reason,
         });
       }
       return { action: "none", reason: "recovery_observing" };
     }
     this.stagnationRecoveryLevel += 1;
     this.metrics.stagnationRecoveries += 1;
+    this.metrics.recoveryDirectives += 1;
     this.consecutiveNoNewInformation = 0;
     this.awaitingProgress = true;
     const level = this.stagnationRecoveryLevel;
@@ -289,14 +394,48 @@ class AgentProgress {
       iteration,
       lastTool: toolName,
       informationStatus,
-      reason: "repeated_no_new_information",
+      reason,
       level,
     });
     return {
       action: "directive",
       level,
-      content: this.getDirective(level),
+      content:
+        reason === "repeated_redundant_action"
+          ? this.getRepeatedRedundantDirective(level)
+          : this.getDirective(level),
     };
+  }
+
+  getRepeatedRedundantDirective(level) {
+    const strategy =
+      level >= 2
+        ? " Choose the most plausible implementation and validate it; if it fails, use the concrete failure to guide the next investigation."
+        : " If you have a plausible implementation path, make the smallest coherent attempt and validate it.";
+    return (
+      "[NCE PROGRESS DIRECTIVE] This exact inspection is redundant and cannot provide new information. Do not repeat it. Use the project information already available." +
+      strategy +
+      " Otherwise inspect only a specific missing piece of information."
+    );
+  }
+
+  getOverExplorationDirective(level) {
+    if (level >= 2) {
+      return (
+        "[NCE PROGRESS DIRECTIVE] You are continuing broad exploration " +
+        "without attempting the requested work. Choose the most plausible " +
+        "implementation based on the information already available and try " +
+        "it. Do not eliminate every uncertainty before acting. If it fails, " +
+        "use the actual failure to guide further investigation."
+      );
+    }
+    return (
+      "[NCE PROGRESS DIRECTIVE] You have gathered substantial project " +
+      "context. Do not continue broad exploration merely to increase " +
+      "confidence. Unless a concrete unresolved question blocks " +
+      "implementation, make the smallest coherent implementation attempt " +
+      "now and validate it."
+    );
   }
 
   getDirective(level) {
@@ -341,6 +480,9 @@ class AgentProgress {
       lastTool: details.lastTool || null,
       informationStatus: details.informationStatus || null,
       consecutiveNoNewInformation: this.consecutiveNoNewInformation,
+      consecutiveExplorationActions: this.consecutiveExplorationActions,
+      consecutiveExplorationPeak: this.consecutiveExplorationPeak,
+      overExplorationLevel: this.overExplorationLevel,
       recovery: this.stagnationRecoveryLevel,
       action: details.action || "observe",
       ...(details.reason ? { reason: details.reason } : {}),
@@ -355,6 +497,9 @@ class AgentProgress {
     return {
       phase: this.phase,
       consecutiveNoNewInformation: this.consecutiveNoNewInformation,
+      consecutiveExplorationActions: this.consecutiveExplorationActions,
+      consecutiveExplorationPeak: this.consecutiveExplorationPeak,
+      overExplorationLevel: this.overExplorationLevel,
       stagnationRecoveryLevel: this.stagnationRecoveryLevel,
       awaitingProgress: this.awaitingProgress,
       blockingError: this.blockingError,
@@ -380,12 +525,25 @@ class AgentProgress {
       newRangeReads: readMetrics.newRangeReads || 0,
       revisionReads: readMetrics.revisionRereads || 0,
       duplicateReadRequests: readMetrics.duplicateReadAttempts || 0,
+      duplicateReads: readMetrics.duplicateReadAttempts || 0,
+      repeatedDuplicateReads: readMetrics.repeatedDuplicateReads || 0,
+      consecutiveExplorationPeak: this.consecutiveExplorationPeak,
       projectMapRequests: readMetrics.projectMapCalls || 0,
+      projectMapCalls: readMetrics.projectMapCalls || 0,
+      searchCalls: readMetrics.searchProjectFilesCalls || 0,
       actualProjectMapBuilds: readMetrics.actualProjectMapBuilds || 0,
       cachedProjectMaps: readMetrics.cachedProjectMaps || 0,
       readCalls: readMetrics.readFileCalls || 0,
       writes: this.metrics.writeToolCalls,
       progressRecoveries: this.metrics.stagnationRecoveries,
+      estimatedPromptTokens: this.agent.lastContextMetrics?.estimatedModelTokens || 0,
+      actualPromptTokens: this.agent.lastContextMetrics?.actualPromptTokens || 0,
+      cumulativeEstimatedPromptTokens:
+        this.agent.cumulativeEstimatedPromptTokens || 0,
+      cumulativeActualPromptTokens:
+        this.agent.cumulativeActualPromptTokens || 0,
+      contextCompactions:
+        this.agent.contextManager?.compactionState?.compactionGeneration || 0,
     };
   }
 }

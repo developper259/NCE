@@ -949,6 +949,7 @@ class WorkspaceFileManager {
       requestedRange.startLine,
       requestedRange.endLine,
       {
+        toolName: "read_file",
         forceRead: this.agent.readAfterFailurePaths.has(absolute),
         currentRevision:
           typeof openFileContent === "string"
@@ -999,6 +1000,7 @@ class WorkspaceFileManager {
       });
       return {
         success: true,
+        readDecision: "NEW",
         path: filePath,
         startLine,
         endLine,

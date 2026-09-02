@@ -13,6 +13,7 @@ class FileKnowledge {
     this.projectListCache = new Map();
     this.projectSearchCache = new Map();
     this.modelVisibleFiles = new Map();
+    this.readSignatureCounts = new Map();
     this.currentIteration = 0;
     this.consecutiveNoNewInformationToolCalls = 0;
     this.metrics = {
@@ -21,6 +22,7 @@ class FileKnowledge {
       actualDiskReads: 0,
       cachedFileReads: 0,
       duplicateReadAttempts: 0,
+      repeatedDuplicateReads: 0,
       newRangeReads: 0,
       revisionRereads: 0,
       actualFilesystemReads: 0,
@@ -58,6 +60,28 @@ class FileKnowledge {
     const end =
       Number.isInteger(endLine) && endLine >= start ? endLine : start + 199;
     return { startLine: start, endLine: end };
+  }
+
+  getReadSignature(toolName, path, revision, range, options = {}) {
+    const relevantOptions = Object.fromEntries(
+      Object.entries(options)
+        .filter(([, value]) => value !== undefined && value !== null)
+        .sort(([left], [right]) => left.localeCompare(right)),
+    );
+    return JSON.stringify({
+      tool: toolName || "read_file",
+      path: this.normalizePath(path),
+      revision: revision || null,
+      range: {
+        startLine: range.startLine,
+        endLine: range.endLine,
+      },
+      options: relevantOptions,
+    });
+  }
+
+  resetDuplicateReadSequence() {
+    this.readSignatureCounts.clear();
   }
 
   mergeRanges(ranges = []) {
@@ -187,6 +211,9 @@ class FileKnowledge {
         : {}),
       knownCoverage: this.formatCoverage(entry),
       decision,
+      ...(Number.isInteger(details.duplicateCount)
+        ? { duplicateCount: details.duplicateCount }
+        : {}),
     });
   }
 
@@ -202,6 +229,7 @@ class FileKnowledge {
     this.metrics.readFileCalls += 1;
 
     if (options.forceRead === true) {
+      this.resetDuplicateReadSequence();
       this.metrics.cacheMisses += 1;
       this.logReadDecision(normalizedPath, range, entry, "invalidated");
       return { alreadyKnown: false, decision: "invalidated", range, entry };
@@ -218,6 +246,7 @@ class FileKnowledge {
       currentRevision !== entry.revision
     ) {
       entry.invalidated = true;
+      this.resetDuplicateReadSequence();
       this.metrics.cacheMisses += 1;
       this.logReadDecision(normalizedPath, range, entry, "new_revision", {
         requestedRevision: currentRevision,
@@ -231,6 +260,7 @@ class FileKnowledge {
     }
 
     if (entry?.invalidated) {
+      this.resetDuplicateReadSequence();
       this.metrics.cacheMisses += 1;
       const decision = entry.revision ? "new_revision" : "invalidated";
       this.logReadDecision(normalizedPath, range, entry, decision, {
@@ -254,30 +284,58 @@ class FileKnowledge {
           effectiveRange,
         )
       ) {
+        const readSignature = this.getReadSignature(
+          options.toolName,
+          normalizedPath,
+          entry.revision,
+          range,
+          options.signatureOptions,
+        );
+        const duplicateCount =
+          (this.readSignatureCounts.get(readSignature) || 0) + 1;
+        this.readSignatureCounts.set(readSignature, duplicateCount);
+        const repeatedRedundant = duplicateCount > 1;
         this.metrics.alreadyVisibleReads += 1;
         this.metrics.duplicateReadAttempts += 1;
-        this.logReadDecision(normalizedPath, range, entry, "already_visible");
-        return {
-          alreadyKnown: true,
-          decision: "already_visible",
+        if (repeatedRedundant) this.metrics.repeatedDuplicateReads += 1;
+        this.logReadDecision(
+          normalizedPath,
           range,
           entry,
-          cachedContext: cachedRange,
+          repeatedRedundant ? "repeated_redundant" : "already_available",
+          { requestedRevision: entry.revision, duplicateCount },
+        );
+        return {
+          alreadyKnown: true,
+          decision: repeatedRedundant
+            ? "repeated_redundant"
+            : "already_available",
+          range,
+          entry,
           result: {
             success: true,
             cached: true,
             alreadyKnown: true,
             noNewInformation: true,
+            repeatedRedundantAction: repeatedRedundant,
+            readDecision: repeatedRedundant
+              ? "REPEATED_REDUNDANT"
+              : "ALREADY_AVAILABLE",
+            readSignature,
+            duplicateCount,
             informationSource: "model_context",
             path: this.toRelativePath(normalizedPath),
             revision: entry.revision,
             requestedRange: range,
             coverage: this.formatCoverage(entry),
-            message: "The requested range is already visible in model context.",
+            message: repeatedRedundant
+              ? "This exact file range has been requested repeatedly at the current revision and is still available. Repeating this inspection cannot provide new information. Do not repeat it; use the available project information, attempt a plausible implementation, or inspect only a specific missing piece."
+              : "This exact file range has already been inspected at the current revision and is still available. Repeating this read cannot provide new information. Use the existing information or choose another useful action.",
           },
         };
       }
       if (cachedRange) {
+        this.resetDuplicateReadSequence();
         this.metrics.restoredReads += 1;
         this.metrics.restoredCharacters += cachedRange.content.length;
         this.logReadDecision(
@@ -306,6 +364,7 @@ class FileKnowledge {
             alreadyKnown: true,
             noNewInformation: false,
             restoredFromCache: true,
+            readDecision: "RESTORED",
             informationSource: "runtime_cache",
             path: this.toRelativePath(normalizedPath),
             revision: entry.revision,
@@ -333,6 +392,7 @@ class FileKnowledge {
     }
 
     const decision = entry?.revision ? "new_range" : "actual_read";
+    this.resetDuplicateReadSequence();
     if (decision === "new_range") this.metrics.newRangeReads += 1;
     this.metrics.cacheMisses += 1;
     this.logReadDecision(normalizedPath, range, entry, decision);
@@ -405,6 +465,7 @@ class FileKnowledge {
       contentLines,
     };
     this.files.set(normalizedPath, entry);
+    this.resetDuplicateReadSequence();
     this.metrics.actualFileReads += 1;
     if (details.diskRead === true) this.metrics.actualDiskReads += 1;
     if (details.diskRead === true) this.metrics.actualFilesystemReads += 1;
@@ -468,6 +529,7 @@ class FileKnowledge {
       "delete_file",
     ]);
     if (!contentWrites.has(toolName)) return;
+    this.resetDuplicateReadSequence();
     this.workspaceContentRevision += 1;
     this.projectSearchCache.clear();
 

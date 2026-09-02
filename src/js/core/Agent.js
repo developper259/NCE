@@ -49,6 +49,10 @@ class Agent {
       logMetrics: true,
       debugDecisions: false,
     };
+    this.progressGuidance = {
+      overExplorationThreshold: 6,
+      overExplorationEscalationInterval: 4,
+    };
     this.lastContextMetrics = null;
     this.lastRunMetrics = null;
     this.cumulativeEstimatedPromptTokens = 0;
@@ -177,6 +181,12 @@ class Agent {
       this.contextCompaction = {
         ...this.contextCompaction,
         ...config.contextCompaction,
+      };
+    }
+    if (config.progressGuidance && typeof config.progressGuidance === "object") {
+      this.progressGuidance = {
+        ...this.progressGuidance,
+        ...config.progressGuidance,
       };
     }
     if (typeof config.supportsTools === "boolean") {

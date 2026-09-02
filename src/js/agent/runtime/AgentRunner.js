@@ -39,6 +39,7 @@ class AgentRunner {
         ? this.agent.modelConfig.maxOutputTokens
         : null,
       contextCompaction: { ...this.agent.contextCompaction },
+      progressGuidance: { ...this.agent.progressGuidance },
       supportsTools: this.agent.supportsTools && provider?.supportsTools !== false,
       supportsToolChoice:
         this.agent.supportsToolChoice && provider?.supportsToolChoice !== false,
