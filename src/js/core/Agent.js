@@ -248,6 +248,15 @@ class Agent {
   getTool(...args) {
     return this.toolRegistry.getTool(...args);
   }
+  getAvailableToolNames(...args) {
+    return this.toolRegistry.getAvailableToolNames(...args);
+  }
+  getToolCapabilities(...args) {
+    return this.toolRegistry.getToolCapabilities(...args);
+  }
+  getToolAvailabilityContext(...args) {
+    return this.toolRegistry.getToolAvailabilityContext(...args);
+  }
   validateTool(...args) {
     return this.toolRegistry.validateTool(...args);
   }
@@ -1150,7 +1159,7 @@ class Agent {
     };
   }
   buildSystemMessage(context, systemPrompt = this.systemPrompt) {
-    return `${systemPrompt}\n\nCONTEXTE ACTUEL DE L'ÉDITEUR :\n${JSON.stringify(context)}`;
+    return `${systemPrompt}\n\n${this.getToolAvailabilityContext()}\n\nCONTEXTE ACTUEL DE L'ÉDITEUR :\n${JSON.stringify(context)}`;
   }
   appendHistory(history) {
     if (!Array.isArray(history)) return;

@@ -33,6 +33,7 @@ class AgentProgress {
     this.awaitingFix = false;
     this.activeErrorCategory = null;
     this.observedInformationSignatures = new Set();
+    this.unavailableToolAttempts = new Map();
     this.recentInformationEvents = [];
     this.metrics = {
       modelRequests: 0,
@@ -62,6 +63,12 @@ class AgentProgress {
       toolArgumentsTruncated: 0,
       largeWriteRecoveries: 0,
       duplicateOversizedRetries: 0,
+      unknownToolCalls: 0,
+      toolUnavailableRecoveries: 0,
+      staticValidationActions: 0,
+      commandExecutionAvailable:
+        this.agent?.getToolCapabilities?.().commandExecution === true,
+      taskCompleteWithoutCommandExecution: 0,
       totalIterations: 0,
       model429s: 0,
       modelRetries: 0,
@@ -90,11 +97,18 @@ class AgentProgress {
       this.metrics.agenticContinuation += 1;
     } else if (reason === "task_complete") {
       this.metrics.taskCompleteFinish += 1;
+      if (!this.metrics.commandExecutionAvailable) {
+        this.metrics.taskCompleteWithoutCommandExecution += 1;
+      }
     }
     console.info("[NCE Agent completion]", {
       reason,
       agenticWorkStarted,
       taskCompleteRequired,
+      commandExecutionAvailable: this.metrics.commandExecutionAvailable,
+      validationMode: this.metrics.commandExecutionAvailable
+        ? "registered_validation_tool"
+        : "repository_static",
     });
   }
 
@@ -210,6 +224,38 @@ class AgentProgress {
     }
     if (category === "validation") this.metrics.validationCalls += 1;
 
+    if (informationStatus === "tool_unavailable") {
+      const attempts = (this.unavailableToolAttempts.get(toolName) || 0) + 1;
+      this.unavailableToolAttempts.set(toolName, attempts);
+      if (meta.errorCode === "UNKNOWN_TOOL") this.metrics.unknownToolCalls += 1;
+      this.metrics.toolUnavailableRecoveries += 1;
+      this.addEvent({
+        iteration,
+        tool: toolName,
+        informationStatus,
+        category: "capability",
+      });
+      console.info("[NCE Agent capability]", {
+        tool: toolName || null,
+        available: false,
+        action:
+          attempts > 1
+            ? "reject_repeated_request"
+            : "request_registered_tool",
+      });
+      this.logTool(
+        iteration,
+        toolName,
+        informationStatus,
+        "capability_recovery",
+      );
+      return {
+        action: "directive",
+        level: attempts > 1 ? 2 : 1,
+        content: this.getUnavailableToolDirective(toolName, attempts),
+      };
+    }
+
     if (
       ["error", "error_discovered"].includes(informationStatus) &&
       meta.informationSignature
@@ -282,6 +328,9 @@ class AgentProgress {
       ].includes(informationStatus)
     ) {
       this.metrics.newInformationToolCalls += 1;
+      if (this.writeOccurred && isExploration) {
+        this.metrics.staticValidationActions += 1;
+      }
       if (informationStatus === "error_discovered") {
         this.blockingError = true;
         this.activeErrorCategory = category;
@@ -477,6 +526,25 @@ class AgentProgress {
       "[NCE PROGRESS DIRECTIVE] This exact inspection is redundant and cannot provide new information. Do not repeat it. Use the project information already available." +
       strategy +
       " Otherwise inspect only a specific missing piece of information."
+    );
+  }
+
+  getUnavailableToolDirective(toolName, attempts = 1) {
+    const available = this.agent?.getAvailableToolNames?.() || [];
+    const registered = available.length
+      ? ` Registered tools: ${available.join(", ")}.`
+      : " No tools are currently registered for this run.";
+    if (attempts > 1) {
+      return (
+        `[NCE CAPABILITY] ${toolName || "The requested tool"} is not available and retrying it cannot succeed. ` +
+        "Do not request it again in this run. Complete the task using the available repository tools and reasonable static verification." +
+        registered
+      );
+    }
+    return (
+      `[NCE CAPABILITY] ${toolName || "The requested tool"} is unavailable. ` +
+      "Use the registered tools instead and adapt validation to the capabilities of this environment." +
+      registered
     );
   }
 

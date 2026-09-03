@@ -94,7 +94,7 @@ class AgentSidebar extends Sidebar {
     const payload = fullResult?.result ?? fullResult;
 
     if (
-      (toolName === "create_file" || toolName === "rename_file") &&
+      ["create_file", "write_file_chunk", "rename_file"].includes(toolName) &&
       payload?.success === true
     ) {
       this.recordFileOperationChange(toolName, payload, context);
@@ -190,6 +190,50 @@ class AgentSidebar extends Sidebar {
         snapshotKey: payload.snapshotKey || null,
         created: payload.created === true,
         overwritten: payload.overwritten === true,
+        additions:
+          payload.created === true && Number.isInteger(payload.lineCount)
+            ? payload.lineCount
+            : 0,
+        deletions: 0,
+      };
+    } else if (toolName === "write_file_chunk") {
+      const path = typeof payload.path === "string" ? payload.path : "";
+      if (!path) return;
+      const existing = session.changes.find(
+        (entry) =>
+          entry.status !== "renamed" &&
+          (entry.path === path ||
+            (payload.absolutePath && entry.absolutePath === payload.absolutePath)),
+      );
+      if (existing) {
+        if (
+          existing.status === "created" &&
+          Number.isInteger(payload.totalLines)
+        ) {
+          existing.additions = payload.totalLines;
+          existing.deletions = 0;
+        } else {
+          existing.additions =
+            (existing.additions || 0) +
+            (Number.isInteger(payload.additions) ? payload.additions : 0);
+          existing.deletions =
+            (existing.deletions || 0) +
+            (Number.isInteger(payload.deletions) ? payload.deletions : 0);
+        }
+        session.changesExpanded = true;
+        if (session.id === this.activeSessionId && this.changesElement) {
+          this.renderChangesPanel(this.changesElement);
+        }
+        return;
+      }
+      change = {
+        operation: "modify",
+        status: "modified",
+        path,
+        name: path.replace(/\\/g, "/").split("/").pop() || path,
+        absolutePath: payload.absolutePath || "",
+        additions: Number.isInteger(payload.additions) ? payload.additions : 0,
+        deletions: Number.isInteger(payload.deletions) ? payload.deletions : 0,
       };
     } else if (toolName === "rename_file") {
       const oldPath =

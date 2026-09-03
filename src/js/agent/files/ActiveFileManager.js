@@ -45,22 +45,21 @@ class ActiveFileManager {
       return { success: false, error: "Aucun fichier actif." };
     await this.agent.editor?.fileLoader?.waitForFileLoaded?.(file);
     const lines = controller.getContent().split("\n");
-    const startLine =
+    const requestedStartLine =
       Number.isInteger(args.startLine) && args.startLine > 0
         ? args.startLine
         : 1;
-    const endLine = Math.min(
-      Number.isInteger(args.endLine) ? args.endLine : startLine + 149,
-      startLine + 199,
+    const requestedEndLine = Math.min(
+      Number.isInteger(args.endLine) ? args.endLine : requestedStartLine + 149,
+      requestedStartLine + 199,
       lines.length,
     );
-    const content = lines.slice(startLine - 1, endLine).join("\n");
     const fullContent = lines.join("\n");
     const absolutePath = AgentPath.normalize(file.path);
     const readDecision = this.agent.fileKnowledge.checkRead(
       absolutePath,
-      startLine,
-      endLine,
+      requestedStartLine,
+      requestedEndLine,
       {
         toolName: "read_active_file",
         currentRevision: this.agent.getContentRevision(fullContent),
@@ -78,6 +77,12 @@ class ActiveFileManager {
       }
       return readDecision.result;
     }
+    const readRange = readDecision.range || {
+      startLine: requestedStartLine,
+      endLine: requestedEndLine,
+    };
+    const startLine = readRange.startLine;
+    const endLine = Math.min(readRange.endLine, lines.length);
     const readContext = this.agent.createFileReadContext(
       absolutePath,
       fullContent,
@@ -88,8 +93,11 @@ class ActiveFileManager {
     this.agent.readAfterFailurePaths.delete(absolutePath);
     this.agent.fileKnowledge.recordRead(absolutePath, {
       revision: readContext.revision,
+      toolName: "read_active_file",
       startLine,
       endLine,
+      requestedStartLine,
+      requestedEndLine,
       totalLines: lines.length,
       diskRead: false,
       truncated: readContext.truncated,
@@ -106,7 +114,7 @@ class ActiveFileManager {
       startLine,
       endLine,
       totalLines: lines.length,
-      truncated: endLine < lines.length,
+      truncated: endLine < lines.length || readContext.truncated,
       revision: readContext.revision,
       contentEndLine: readContext.knowledgeEndLine,
       informationSource: "editor",

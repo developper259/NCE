@@ -610,6 +610,7 @@ class AgentRunner {
         const content = String(message.content || "");
         return !(
           content.startsWith("[NCE PROGRESS DIRECTIVE]") ||
+          content.startsWith("[NCE CAPABILITY]") ||
           content.startsWith("[NCE TASK COMPLETION]")
         );
       },

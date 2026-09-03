@@ -116,6 +116,14 @@ class ToolExecutor {
   }
 
   getToolResultMeta(name, result) {
+    const errorCode =
+      typeof result?.error === "object" ? result.error.code || null : null;
+    const toolUnavailable = new Set([
+      "UNKNOWN_TOOL",
+      "TOOL_NOT_FOUND",
+      "TOOL_DISABLED",
+      "TOOL_NOT_ALLOWED",
+    ]).has(errorCode);
     const writeTools = new Set([
       "modify_file",
       "modify_active_file",
@@ -142,7 +150,9 @@ class ToolExecutor {
         name || "",
       );
     const toolCategory =
-      name === "task_complete"
+      toolUnavailable
+        ? "capability"
+        : name === "task_complete"
         ? "completion"
         : isValidationTool
           ? "validation"
@@ -156,7 +166,9 @@ class ToolExecutor {
                   ? "navigation"
                   : "other";
     const informationStatus =
-      toolCategory === "completion" && result?.success !== false
+      toolUnavailable
+        ? "tool_unavailable"
+        : toolCategory === "completion" && result?.success !== false
         ? "task_complete"
         : toolCategory === "validation" && result?.success === false
           ? "error_discovered"
@@ -181,9 +193,12 @@ class ToolExecutor {
       toolCategory,
       succeeded: result?.success !== false,
       actualExecution:
+        !toolUnavailable &&
         !["already_known", "repeated_redundant", "task_complete"].includes(
           informationStatus,
         ),
+      errorCode,
+      requestedToolAvailable: !toolUnavailable,
       cached: result?.cached === true,
       informationSource: result?.informationSource || null,
       informationSignature:
@@ -244,11 +259,21 @@ class ToolExecutor {
 
     const tool = this.agent.getTool(name);
     if (!tool) {
+      const availableTools = this.agent.getAvailableToolNames?.() || [];
+      console.info("[NCE Agent capability]", {
+        tool: typeof name === "string" ? name : null,
+        available: false,
+        action: "rejected_unknown_tool",
+      });
       return this.attachMeta(name, {
         success: false,
         error: {
-          code: "TOOL_NOT_FOUND",
-          message: `Outil inconnu : ${name || "(sans nom)"}`,
+          code: "UNKNOWN_TOOL",
+          message:
+            "The requested tool is not available in this environment. " +
+            "Do not retry it. Use only the registered tools that are actually available.",
+          requestedTool: name || null,
+          availableTools,
         },
       });
     }

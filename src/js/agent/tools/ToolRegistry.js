@@ -34,6 +34,15 @@ class ToolRegistry {
       description: definition.description || "",
       parameters,
       execute: definition.execute,
+      capabilities: Array.isArray(definition.capabilities)
+        ? [
+            ...new Set(
+              definition.capabilities.filter(
+                (value) => typeof value === "string",
+              ),
+            ),
+          ]
+        : [],
       readOnly:
         definition.readOnly === true ||
         (typeof AgentAI !== "undefined" &&
@@ -161,6 +170,17 @@ class ToolRegistry {
   }
 
   getOpenAITools() {
+    return this.getAvailableTools().map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+      },
+    }));
+  }
+
+  getAvailableTools() {
     const permissions =
       this.agent.runConfig?.permissions ?? this.agent.permissions;
     const hasActiveFile = Boolean(this.agent.editor?.tabManager?.activeFile);
@@ -181,15 +201,35 @@ class ToolRegistry {
         (tool) =>
           !hiddenCompatibilityWriteTools.has(tool.name) &&
           (hasActiveFile || !activeFileReadTools.has(tool.name)),
-      )
-      .map((tool) => ({
-        type: "function",
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters,
-        },
-      }));
+      );
+  }
+
+  getAvailableToolNames() {
+    return this.getAvailableTools().map((tool) => tool.name);
+  }
+
+  getToolCapabilities() {
+    const tools = this.getAvailableTools();
+    return {
+      repositoryInspection: tools.some((tool) => tool.readOnly),
+      fileEditing: tools.some((tool) => !tool.readOnly),
+      commandExecution: tools.some((tool) =>
+        tool.capabilities.includes("command_execution"),
+      ),
+    };
+  }
+
+  getToolAvailabilityContext() {
+    const names = this.getAvailableToolNames();
+    const capabilities = this.getToolCapabilities();
+    return [
+      "AVAILABLE TOOLS (runtime registry; this is the source of truth)",
+      names.length ? names.join(", ") : "No tools are available.",
+      `Command execution: ${capabilities.commandExecution ? "available" : "unavailable"}.`,
+      capabilities.commandExecution
+        ? "Use only a registered command-execution tool when relevant."
+        : "Do not request terminal or command-execution tools. Validate with the available repository tools instead.",
+    ].join("\n");
   }
 }
 

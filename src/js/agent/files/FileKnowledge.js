@@ -25,6 +25,7 @@ class FileKnowledge {
       repeatedDuplicateReads: 0,
       newRangeReads: 0,
       revisionRereads: 0,
+      revisionInvalidations: 0,
       actualFilesystemReads: 0,
       alreadyVisibleReads: 0,
       restoredReads: 0,
@@ -122,6 +123,26 @@ class FileKnowledge {
     );
   }
 
+  getFirstUncoveredRange(entry, range) {
+    if (!entry || entry.invalidated) return range;
+    let startLine = range.startLine;
+    for (const known of this.mergeRanges(entry.ranges || [])) {
+      if (known.endLine < startLine) continue;
+      if (known.startLine > range.endLine) break;
+      if (known.startLine > startLine) {
+        return {
+          startLine,
+          endLine: Math.min(range.endLine, known.startLine - 1),
+        };
+      }
+      startLine = Math.max(startLine, known.endLine + 1);
+      if (startLine > range.endLine) return null;
+    }
+    return startLine <= range.endLine
+      ? { startLine, endLine: range.endLine }
+      : null;
+  }
+
   getEffectiveRange(entry, range) {
     const effectiveRange = {
       startLine: range.startLine,
@@ -199,6 +220,7 @@ class FileKnowledge {
   }
 
   logReadDecision(path, range, entry, decision, details = {}, event = "check") {
+    const coveredRange = details.coveredRange;
     console.info("[NCE Agent read knowledge]", {
       event,
       path: this.toRelativePath(path),
@@ -206,6 +228,10 @@ class FileKnowledge {
       requestedRevision: details.requestedRevision || entry?.revision || null,
       knownRevision: entry?.revision || null,
       requestedRange: `${range.startLine}-${range.endLine}`,
+      coveredRange: coveredRange
+        ? `${coveredRange.startLine}-${coveredRange.endLine}`
+        : this.formatCoverage(entry),
+      visible: details.visible === true,
       ...(event === "restore"
         ? { restoredRange: `${range.startLine}-${range.endLine}` }
         : {}),
@@ -269,11 +295,46 @@ class FileKnowledge {
       return { alreadyKnown: false, decision, range, entry };
     }
 
+    const readSignature = entry?.revision
+      ? this.getReadSignature(
+          options.toolName,
+          normalizedPath,
+          entry.revision,
+          range,
+          options.signatureOptions,
+        )
+      : null;
+    const servedRange =
+      readSignature && entry?.servedRequests instanceof Map
+        ? entry.servedRequests.get(readSignature)
+        : null;
+    if (servedRange) {
+      const visible = this.isModelRangeVisible(
+        normalizedPath,
+        entry.revision,
+        servedRange,
+      );
+      if (visible) {
+        return this.createAlreadyAvailableRead(
+          normalizedPath,
+          range,
+          servedRange,
+          entry,
+          readSignature,
+        );
+      }
+      const cachedRange = this.getCachedRange(entry, servedRange);
+      if (cachedRange) {
+        return this.createRestoredRead(
+          normalizedPath,
+          range,
+          cachedRange,
+          entry,
+        );
+      }
+    }
+
     if (entry?.revision && this.isRangeCovered(entry, range)) {
-      entry.requestCount += 1;
-      entry.lastReadIteration = this.currentIteration;
-      this.metrics.cachedFileReads += 1;
-      this.metrics.cacheHits += 1;
       const cachedRange = this.getCachedRange(entry, range);
       const effectiveRange = this.getEffectiveRange(entry, range);
       if (
@@ -284,103 +345,22 @@ class FileKnowledge {
           effectiveRange,
         )
       ) {
-        const readSignature = this.getReadSignature(
-          options.toolName,
-          normalizedPath,
-          entry.revision,
-          range,
-          options.signatureOptions,
-        );
-        const duplicateCount =
-          (this.readSignatureCounts.get(readSignature) || 0) + 1;
-        this.readSignatureCounts.set(readSignature, duplicateCount);
-        const repeatedRedundant = duplicateCount > 1;
-        this.metrics.alreadyVisibleReads += 1;
-        this.metrics.duplicateReadAttempts += 1;
-        if (repeatedRedundant) this.metrics.repeatedDuplicateReads += 1;
-        this.logReadDecision(
+        return this.createAlreadyAvailableRead(
           normalizedPath,
           range,
+          effectiveRange,
           entry,
-          repeatedRedundant ? "repeated_redundant" : "already_available",
-          { requestedRevision: entry.revision, duplicateCount },
+          readSignature,
         );
-        return {
-          alreadyKnown: true,
-          decision: repeatedRedundant
-            ? "repeated_redundant"
-            : "already_available",
-          range,
-          entry,
-          result: {
-            success: true,
-            cached: true,
-            alreadyKnown: true,
-            noNewInformation: true,
-            repeatedRedundantAction: repeatedRedundant,
-            readDecision: repeatedRedundant
-              ? "REPEATED_REDUNDANT"
-              : "ALREADY_AVAILABLE",
-            readSignature,
-            duplicateCount,
-            informationSource: "model_context",
-            path: this.toRelativePath(normalizedPath),
-            revision: entry.revision,
-            requestedRange: range,
-            coverage: this.formatCoverage(entry),
-            message: repeatedRedundant
-              ? "This exact file range has been requested repeatedly at the current revision and is still available. Repeating this inspection cannot provide new information. Do not repeat it; use the available project information, attempt a plausible implementation, or inspect only a specific missing piece."
-              : "This exact file range has already been inspected at the current revision and is still available. Repeating this read cannot provide new information. Use the existing information or choose another useful action.",
-          },
-        };
       }
       if (cachedRange) {
-        this.resetDuplicateReadSequence();
-        this.metrics.restoredReads += 1;
-        this.metrics.restoredCharacters += cachedRange.content.length;
-        this.logReadDecision(
+        return this.createRestoredRead(
           normalizedPath,
           range,
-          entry,
-          "restore_from_cache",
-        );
-        this.logReadDecision(
-          normalizedPath,
           cachedRange,
           entry,
-          "restored",
-          {},
-          "restore",
         );
-        return {
-          alreadyKnown: true,
-          decision: "restore_from_cache",
-          range,
-          entry,
-          cachedContext: cachedRange,
-          result: {
-            success: true,
-            cached: true,
-            alreadyKnown: true,
-            noNewInformation: false,
-            restoredFromCache: true,
-            readDecision: "RESTORED",
-            informationSource: "runtime_cache",
-            path: this.toRelativePath(normalizedPath),
-            revision: entry.revision,
-            startLine: cachedRange.startLine,
-            endLine: cachedRange.endLine,
-            contentEndLine: cachedRange.endLine,
-            totalLines: entry.totalLines,
-            truncated:
-              Number.isInteger(entry.totalLines) &&
-              cachedRange.endLine < entry.totalLines,
-            content: cachedRange.content,
-          },
-        };
       }
-      this.metrics.cacheHits -= 1;
-      this.metrics.cachedFileReads -= 1;
       this.metrics.cacheMisses += 1;
       this.logReadDecision(normalizedPath, range, entry, "cache_miss");
       return {
@@ -392,11 +372,128 @@ class FileKnowledge {
     }
 
     const decision = entry?.revision ? "new_range" : "actual_read";
+    const uncoveredRange = entry?.revision
+      ? this.getFirstUncoveredRange(entry, range) || range
+      : range;
     this.resetDuplicateReadSequence();
     if (decision === "new_range") this.metrics.newRangeReads += 1;
     this.metrics.cacheMisses += 1;
     this.logReadDecision(normalizedPath, range, entry, decision);
-    return { alreadyKnown: false, decision, range, entry };
+    return {
+      alreadyKnown: false,
+      decision,
+      range: uncoveredRange,
+      requestedRange: range,
+      entry,
+    };
+  }
+
+  createAlreadyAvailableRead(
+    path,
+    requestedRange,
+    coveredRange,
+    entry,
+    signature,
+  ) {
+    entry.requestCount += 1;
+    entry.lastReadIteration = this.currentIteration;
+    this.metrics.cachedFileReads += 1;
+    this.metrics.cacheHits += 1;
+    const duplicateCount = (this.readSignatureCounts.get(signature) || 0) + 1;
+    this.readSignatureCounts.set(signature, duplicateCount);
+    const repeatedRedundant = duplicateCount > 1;
+    this.metrics.alreadyVisibleReads += 1;
+    this.metrics.duplicateReadAttempts += 1;
+    if (repeatedRedundant) this.metrics.repeatedDuplicateReads += 1;
+    this.logReadDecision(
+      path,
+      requestedRange,
+      entry,
+      repeatedRedundant ? "repeated_redundant" : "already_available",
+      {
+        requestedRevision: entry.revision,
+        duplicateCount,
+        coveredRange,
+        visible: true,
+      },
+    );
+    return {
+      alreadyKnown: true,
+      decision: repeatedRedundant
+        ? "repeated_redundant"
+        : "already_available",
+      range: requestedRange,
+      entry,
+      result: {
+        success: true,
+        cached: true,
+        alreadyKnown: true,
+        noNewInformation: true,
+        repeatedRedundantAction: repeatedRedundant,
+        readDecision: repeatedRedundant
+          ? "REPEATED_REDUNDANT"
+          : "ALREADY_AVAILABLE",
+        readSignature: signature,
+        duplicateCount,
+        informationSource: "model_context",
+        path: this.toRelativePath(path),
+        revision: entry.revision,
+        requestedRange,
+        coverage: this.formatCoverage(entry),
+        message: repeatedRedundant
+          ? "This exact file range has been requested repeatedly at the current revision and is still available. Repeating this inspection cannot provide new information. Do not repeat it; use the available project information or inspect only a specific missing range."
+          : "This exact file range is already available at the current revision. Repeating this read cannot provide new information.",
+      },
+    };
+  }
+
+  createRestoredRead(path, requestedRange, cachedRange, entry) {
+    entry.requestCount += 1;
+    entry.lastReadIteration = this.currentIteration;
+    this.metrics.cachedFileReads += 1;
+    this.metrics.cacheHits += 1;
+    this.resetDuplicateReadSequence();
+    this.metrics.restoredReads += 1;
+    this.metrics.restoredCharacters += cachedRange.content.length;
+    this.logReadDecision(path, requestedRange, entry, "restore_from_cache", {
+      requestedRevision: entry.revision,
+      coveredRange: cachedRange,
+      visible: false,
+    });
+    this.logReadDecision(
+      path,
+      cachedRange,
+      entry,
+      "restored",
+      { coveredRange: cachedRange, visible: false },
+      "restore",
+    );
+    return {
+      alreadyKnown: true,
+      decision: "restore_from_cache",
+      range: requestedRange,
+      entry,
+      cachedContext: cachedRange,
+      result: {
+        success: true,
+        cached: true,
+        alreadyKnown: true,
+        noNewInformation: false,
+        restoredFromCache: true,
+        readDecision: "RESTORED",
+        informationSource: "runtime_cache",
+        path: this.toRelativePath(path),
+        revision: entry.revision,
+        startLine: cachedRange.startLine,
+        endLine: cachedRange.endLine,
+        contentEndLine: cachedRange.endLine,
+        totalLines: entry.totalLines,
+        truncated:
+          Number.isInteger(entry.totalLines) &&
+          cachedRange.endLine < entry.totalLines,
+        content: cachedRange.content,
+      },
+    };
   }
 
   recordRead(path, details = {}) {
@@ -420,6 +517,11 @@ class FileKnowledge {
       ? new Map()
       : previous?.contentLines instanceof Map
         ? previous.contentLines
+        : new Map();
+    const servedRequests = revisionChanged
+      ? new Map()
+      : previous?.servedRequests instanceof Map
+        ? previous.servedRequests
         : new Map();
     if (typeof details.content === "string" && coverageRange) {
       const lines = details.content.split("\n");
@@ -449,6 +551,23 @@ class FileKnowledge {
           range.startLine === 1 &&
           Number.isInteger(totalLines) &&
           range.endLine >= totalLines;
+    const requestedRange = this.normalizeRange(
+      details.requestedStartLine ?? range.startLine,
+      details.requestedEndLine ?? range.endLine,
+    );
+    if (
+      coverageRange &&
+      coverageRange.startLine === requestedRange.startLine
+    ) {
+      const signature = this.getReadSignature(
+        details.toolName,
+        normalizedPath,
+        details.revision,
+        requestedRange,
+        details.signatureOptions,
+      );
+      servedRequests.set(signature, coverageRange);
+    }
     const entry = {
       path: normalizedPath,
       revision: details.revision,
@@ -463,6 +582,7 @@ class FileKnowledge {
       changed: previous?.changed === true,
       invalidated: false,
       contentLines,
+      servedRequests,
     };
     this.files.set(normalizedPath, entry);
     this.resetDuplicateReadSequence();
@@ -471,10 +591,14 @@ class FileKnowledge {
     if (details.diskRead === true) this.metrics.actualFilesystemReads += 1;
     this.logReadDecision(
       normalizedPath,
-      range,
+      requestedRange,
       entry,
       "actual_read",
-      { requestedRevision: details.revision },
+      {
+        requestedRevision: details.revision,
+        coveredRange: coverageRange,
+        visible: false,
+      },
       "record",
     );
     return entry;
@@ -484,7 +608,7 @@ class FileKnowledge {
     const normalizedPath = this.normalizePath(path);
     if (!normalizedPath) return;
     const previous = this.files.get(normalizedPath);
-    this.files.set(normalizedPath, {
+    const entry = {
       path: normalizedPath,
       revision: typeof revision === "string" ? revision : null,
       fullRead: false,
@@ -498,7 +622,18 @@ class FileKnowledge {
       invalidationReason: reason,
       previousRevision: previous?.revision || null,
       contentLines: new Map(),
-    });
+      servedRequests: new Map(),
+    };
+    this.files.set(normalizedPath, entry);
+    this.metrics.revisionInvalidations += 1;
+    this.logReadDecision(
+      normalizedPath,
+      { startLine: 1, endLine: 1 },
+      entry,
+      "invalidated",
+      { requestedRevision: entry.revision, visible: false },
+      "invalidate",
+    );
   }
 
   resolveToolPath(args = {}, result = {}, key = "path") {

@@ -238,6 +238,8 @@ class WorkspaceFileManager {
       absolutePath: target.absolutePath,
       created: !exists,
       overwritten: Boolean(exists && overwrite),
+      lineCount:
+        verifiedContent === "" ? 0 : verifiedContent.split(/\r?\n/).length,
       openedInTabManager,
       snapshotKey,
       revision: verificationContext.revision,
@@ -386,6 +388,17 @@ class WorkspaceFileManager {
       }
     }
     const totalLines = verifiedContent.split(/\r?\n/).length;
+    const appendedLines = content.split(/\r?\n/).length;
+    const appendStartsOnNewLine =
+      content.startsWith("\n") || content.startsWith("\r\n");
+    const additions =
+      currentContent === ""
+        ? totalLines
+        : appendStartsOnNewLine
+          ? Math.max(0, appendedLines - 1)
+          : appendedLines;
+    const deletions =
+      currentContent !== "" && !appendStartsOnNewLine ? 1 : 0;
     const verificationContext = this.agent.createFileReadContext(
       target.absolutePath,
       verifiedContent,
@@ -399,6 +412,9 @@ class WorkspaceFileManager {
       path: target.relativePath,
       appendedChars: content.length,
       totalChars: verifiedContent.length,
+      totalLines,
+      additions,
+      deletions,
       previousRevision: currentRevision,
       revision: verificationContext.revision,
       verification: {
@@ -991,9 +1007,10 @@ class WorkspaceFileManager {
     if (typeof content === "string") {
       this.agent.readAfterFailurePaths.delete(absolute);
       const totalLines = content.split(/\r?\n/).length;
-      const startLine = requestedRange.startLine;
+      const effectiveReadRange = readDecision.range || requestedRange;
+      const startLine = effectiveReadRange.startLine;
       const endLine = Math.min(
-        requestedRange.endLine,
+        effectiveReadRange.endLine,
         totalLines,
       );
       const readContext = this.agent.createFileReadContext(
@@ -1005,8 +1022,11 @@ class WorkspaceFileManager {
       );
       this.agent.fileKnowledge.recordRead(absolute, {
         revision: readContext.revision,
+        toolName: "read_file",
         startLine,
         endLine,
+        requestedStartLine: requestedRange.startLine,
+        requestedEndLine: requestedRange.endLine,
         totalLines,
         diskRead: typeof openFileContent !== "string",
         truncated: readContext.truncated,
