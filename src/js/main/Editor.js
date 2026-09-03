@@ -55,6 +55,7 @@ class Editor {
     this.cursorController = new CursorController(this);
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
+    this.smartTypingController = new SmartTypingController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);

@@ -1,8 +1,11 @@
 class KeyBindingManager {
   constructor(e) {
     this.editor = e;
+    this.isComposing = false;
 
     addEvent("keydown", this.onKey.bind(this));
+    addEvent("compositionstart", this.onCompositionStart.bind(this));
+    addEvent("compositionend", this.onCompositionEnd.bind(this));
   }
 
   isNativeInputTarget(target) {
@@ -44,7 +47,11 @@ class KeyBindingManager {
       this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
     } else {
       if (this.editor.tabManager.activeFile && e.key.length == 1) {
-        this.editor.writerController.write(e.key);
+        const handled = this.editor.smartTypingController?.handleCharacter(
+          e.key,
+          e,
+        );
+        if (!handled) this.editor.writerController.write(e.key);
       }
     }
 
@@ -66,6 +73,8 @@ class KeyBindingManager {
   }
 
   onKey(e) {
+    if (this.isComposing || e.isComposing || e.keyCode === 229) return;
+
     if (this.isAgentMessageTarget(e.target)) {
       const isModifier = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
@@ -97,5 +106,13 @@ class KeyBindingManager {
     } else {
       this.bind(key, e);
     }
+  }
+
+  onCompositionStart() {
+    this.isComposing = true;
+  }
+
+  onCompositionEnd() {
+    this.isComposing = false;
   }
 }

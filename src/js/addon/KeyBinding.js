@@ -321,6 +321,17 @@ class KeyBinding {
     if (this.editor.selectController.containsSelected) {
       cursor = this.editor.writerController.deleteSelection();
     } else {
+      if (
+        !c &&
+        this.editor.smartTypingController?.handleBackspace({
+          ctrlKey: c,
+          metaKey: m,
+          altKey: a,
+        })
+      ) {
+        return;
+      }
+
       if (c) {
         if (x == 0 && y == 1) return;
         cursor = this.editor.writerController.deleteWord
@@ -356,6 +367,16 @@ class KeyBinding {
   }
 
   key_enter(s, c, m, a) {
+    if (
+      this.editor.smartTypingController?.handleEnter({
+        ctrlKey: c,
+        metaKey: m,
+        altKey: a,
+      })
+    ) {
+      return;
+    }
+
     this.editor.writerController.write("\n");
   }
 
