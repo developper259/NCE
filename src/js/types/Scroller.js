@@ -185,7 +185,7 @@ class Scroller {
 
     const proportion = this.calculProp();
     const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
-    const track = isVertical ? this.parentOBJHeight : this.parentOBJWidth;
+    const track = isVertical ? this.scrollerOBJHeight : this.scrollerOBJWidth;
     const size = Math.max((proportion / 100) * track, 20);
 
     if (isVertical) {

@@ -158,9 +158,9 @@ class CursorController {
     const screenRow = displayIndex - lc.startIndex;
     if (screenRow < 0 || screenRow >= lc.maxViewLines) return false;
 
-    const top = lc.getLineTop(screenRow);
+    const top = lc.getLineTop(screenRow) - lc.offsetY;
     const bottom = top + this.editor.posY;
-    const viewport = lc.outputHeight;
+    const viewport = lc.getViewportHeight();
     return bottom > 0 && top < viewport;
   }
 

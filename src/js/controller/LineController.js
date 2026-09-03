@@ -183,19 +183,10 @@ class LineController {
   }
 
   get maxViewLines() {
-    const lineHeight = this.editor.domManager
-      ? this.editor.domManager.getLineHeight()
-      : this.editor.posY;
-    const horizontalScroller = this.outputScroller?.hScroller;
-    const horizontalHeight = horizontalScroller?.calcIsActive()
-      ? horizontalScroller.scrollerOBJ?.offsetHeight || 10
-      : 0;
-    const availableHeight = Math.max(
-      lineHeight,
-      this.outputHeight - horizontalHeight + lineHeight,
+    return Math.max(
+      1,
+      Math.ceil(this.getViewportHeight() / this.getLineHeight()),
     );
-
-    return Math.max(1, parseInt(availableHeight / lineHeight));
   }
 
   get renderedLineCount() {
@@ -211,25 +202,35 @@ class LineController {
   }
 
   get maxLines() {
-    const lineHeight = this.editor.domManager
+    return Math.max(
+      1,
+      Math.floor(this.getViewportHeight() / this.getLineHeight()),
+    );
+  }
+
+  getLineHeight() {
+    const measuredHeight = this.editor.domManager
       ? this.editor.domManager.getLineHeight()
       : this.editor.posY;
+
+    return Number.isFinite(measuredHeight) && measuredHeight > 0
+      ? measuredHeight
+      : 23;
+  }
+
+  getViewportHeight() {
     const horizontalScroller = this.outputScroller?.hScroller;
     const horizontalHeight = horizontalScroller?.calcIsActive()
-      ? horizontalScroller.scrollerOBJ?.offsetHeight || 10
+      ? horizontalScroller.scrollerOBJ?.clientHeight ||
+        horizontalScroller.scrollerOBJ?.offsetHeight ||
+        10
       : 0;
-    const availableHeight = Math.max(
-      lineHeight,
-      this.outputHeight - horizontalHeight + lineHeight,
-    );
 
-    return parseInt(availableHeight / lineHeight);
+    return Math.max(0, this.outputHeight - horizontalHeight);
   }
 
   getScrollOffsetY() {
-    const lineHeight = this.editor.domManager
-      ? this.editor.domManager.getLineHeight()
-      : this.editor.posY;
+    const lineHeight = this.getLineHeight();
 
     return this.startIndex * lineHeight + this.offsetY;
   }
@@ -239,13 +240,18 @@ class LineController {
       return 0;
     }
 
-    const overflow = this.getDisplayLineCount() - this.maxLines;
+    const overflow =
+      this.getDisplayLineCount() + this.getBottomScrollMargin() - this.maxLines;
 
-    if (overflow <= 0) {
+    return Math.max(0, overflow);
+  }
+
+  getBottomScrollMargin() {
+    if (this.getDisplayLineCount() <= this.maxLines) {
       return 0;
     }
 
-    return overflow;
+    return Math.min(this.marginLines, Math.max(0, this.maxLines - 1));
   }
 
   getLineTop(screenIndex) {
@@ -253,9 +259,7 @@ class LineController {
       ? this.editor.domManager.getOutputY()
       : this.editor.baseY;
 
-    const lineHeight = this.editor.domManager
-      ? this.editor.domManager.getLineHeight()
-      : this.editor.posY;
+    const lineHeight = this.getLineHeight();
 
     return lineHeight * screenIndex;
   }

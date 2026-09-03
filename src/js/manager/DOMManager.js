@@ -240,9 +240,10 @@ class DOMManager {
     this.output.width =
       outputMetrics.width ||
       Math.max(0, this.editorDimensions.width - this.output.x);
-    this.output.height =
-      outputMetrics.height ||
-      Math.max(0, this.editorDimensions.height - this.output.y);
+    // The output is translated while scrolling and can contain an extra
+    // virtualized row. Its own box is therefore not a reliable viewport
+    // measurement. The editor is the clipping viewport.
+    this.output.height = editorMetrics.clientHeight || editorMetrics.height;
 
     this.sidebarRect.left = this.measureElement(
       this.getElement(".sidebar-left"),
@@ -363,10 +364,7 @@ class DOMManager {
 
     this.output.width = Math.max(0, this.editorDimensions.width - baseX);
 
-    this.output.height = Math.max(
-      0,
-      this.outputRect.height || this.editorDimensions.height - baseY,
-    );
+    this.output.height = Math.max(0, this.editorDimensions.height);
   }
 
   // =========================================================

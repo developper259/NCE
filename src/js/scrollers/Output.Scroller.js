@@ -30,14 +30,11 @@ class OutputScroller {
   }
 
   getEffectiveTotalLines() {
-    const totalLines = this.getTotalScrollLines();
-    const maxLines = this.lineController.maxLines;
+    return this.getTotalScrollLines() + this.getBottomScrollMargin();
+  }
 
-    if (totalLines <= maxLines) {
-      return totalLines;
-    }
-
-    return totalLines + this.marginLines;
+  getBottomScrollMargin() {
+    return this.lineController.getBottomScrollMargin();
   }
 
   getVisibleHorizontalWidth() {
@@ -173,7 +170,7 @@ class OutputScroller {
   getVerticalScrollRatioFromState() {
     if (this.getTotalScrollLines() === 0) return 0;
 
-    const posY = this.editor.posY;
+    const posY = this.lineController.getLineHeight();
     const maxStartIndex = this.getMaxStartIndex();
     if (maxStartIndex === 0) return 0;
 
@@ -201,7 +198,7 @@ class OutputScroller {
       return;
     }
 
-    const posY = this.editor.posY;
+    const posY = this.lineController.getLineHeight();
     const maxStartIndex = this.getMaxStartIndex();
 
     scrollRatio = Math.max(0, Math.min(scrollRatio, 1));
@@ -237,7 +234,7 @@ class OutputScroller {
       return;
     }
 
-    const posY = this.editor.posY;
+    const posY = this.lineController.getLineHeight();
     const maxStart = this.getMaxStartIndex();
     if (this.lineController.startIndex > maxStart)
       this.lineController.startIndex = maxStart;
@@ -255,7 +252,8 @@ class OutputScroller {
   getMaxStartIndex() {
     if (this.getTotalScrollLines() === 0) return 0;
 
-    const overflow = this.getTotalScrollLines() - this.lineController.maxLines;
+    const overflow =
+      this.getEffectiveTotalLines() - this.lineController.maxLines;
 
     if (overflow <= 0) {
       return 0;
