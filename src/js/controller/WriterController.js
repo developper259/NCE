@@ -419,7 +419,14 @@ class WriterController {
     return { row: newRow, column: newCol };
   }
 
-  replaceRange(text, startLine, startColumn, endLine, endColumn) {
+  replaceRange(
+    text,
+    startLine,
+    startColumn,
+    endLine,
+    endColumn,
+    options = {},
+  ) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
 
@@ -459,9 +466,11 @@ class WriterController {
     file.lines = lines.map((line) => new LineNode(line));
     file.totalLines = file.lines.length;
     file.maxLineLength = 0;
-    file.startIndex = 0;
-    file.offsetY = 0;
-    file.offsetX = 0;
+    if (!options.preserveViewport) {
+      file.startIndex = 0;
+      file.offsetY = 0;
+      file.offsetX = 0;
+    }
 
     const lastLine = replacementLines.length - 1;
     const cursorRow = startRow + lastLine;

@@ -109,6 +109,30 @@ class SelectController {
     };
   }
 
+  setSelection(start, end) {
+    if (!this.editor.tabManager.activeFile || !start || !end) return;
+
+    const cursor = this.editor.cursorController;
+    const normalizedStart = cursor.normalizePosition(start.row, start.column);
+    const normalizedEnd = cursor.normalizePosition(end.row, end.column);
+
+    this.startSelect = normalizedStart;
+    this.endSelect = normalizedEnd;
+    cursor.setCursorPosition(normalizedEnd.row, normalizedEnd.column);
+
+    if (normalizedStart.row === normalizedEnd.row) {
+      this.calculSelectSimpleLine();
+    } else {
+      this.calculSelectMultiLine();
+    }
+
+    this.editor.events.callEvent(Events.ON_SELECT, {
+      start: this.startSelect,
+      end: this.endSelect,
+      contains: this.containsSelected,
+    });
+  }
+
   refreshSelectionDOM() {
     if (!this.editor.tabManager.activeFile || !this.editor.selectOutput) return;
 

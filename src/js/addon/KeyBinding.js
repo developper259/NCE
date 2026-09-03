@@ -265,6 +265,16 @@ class KeyBinding {
 
   key_tab(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
+    if (
+      this.editor.smartTypingController?.handleTab(s, {
+        ctrlKey: c,
+        metaKey: m,
+        altKey: a,
+      })
+    ) {
+      return;
+    }
+
     this.editor.writerController.write(" ".repeat(CONFIG_GET("tab_width")));
   }
 

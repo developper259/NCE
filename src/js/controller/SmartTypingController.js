@@ -190,4 +190,107 @@ class SmartTypingController {
     this.editor.cursorController.setCursorPosition(context.row + 1, 0);
     return true;
   }
+
+  getIndentation() {
+    return " ".repeat(CONFIG_GET("tab_width"));
+  }
+
+  getSelectedLineRange() {
+    const select = this.editor.selectController;
+    const range = select.getLogicalSelection();
+    if (!range || range.startRow === range.endRow) return null;
+
+    const firstRow = range.startRow;
+    let lastRow = range.endRow;
+
+    if (range.endColumn === 0 && lastRow > firstRow) {
+      lastRow--;
+    }
+
+    if (lastRow <= firstRow) return null;
+
+    return { firstRow, lastRow };
+  }
+
+  getUnindentLength(line, indentation) {
+    if (line.startsWith(indentation)) return indentation.length;
+    if (indentation === "\t") return line.startsWith("\t") ? 1 : 0;
+
+    let length = 0;
+    while (length < indentation.length && line[length] === " ") length++;
+    return length;
+  }
+
+  adjustSelectionPosition(position, firstRow, lastRow, deltas) {
+    if (!position || position.row < firstRow || position.row > lastRow) {
+      return position ? { ...position } : null;
+    }
+
+    const delta = deltas[position.row - firstRow] || 0;
+    return {
+      row: position.row,
+      column:
+        delta >= 0
+          ? position.column + delta
+          : Math.max(0, position.column + delta),
+    };
+  }
+
+  handleTab(shiftKey = false, event) {
+    if (this.shouldIgnoreCommandEvent(event)) return false;
+
+    const selectedRange = this.getSelectedLineRange();
+    if (!selectedRange) return false;
+
+    const { firstRow, lastRow } = selectedRange;
+    const lineController = this.editor.lineController;
+    const selectController = this.editor.selectController;
+    const indentation = this.getIndentation();
+    const lines = lineController.lines
+      .slice(firstRow - 1, lastRow)
+      .map((line) => line.getText());
+    const deltas = [];
+
+    const updatedLines = lines.map((line) => {
+      if (!shiftKey) {
+        deltas.push(indentation.length);
+        return indentation + line;
+      }
+
+      const removedLength = this.getUnindentLength(line, indentation);
+      deltas.push(-removedLength);
+      return line.slice(removedLength);
+    });
+
+    if (shiftKey && deltas.every((delta) => delta === 0)) return true;
+
+    const anchor = this.adjustSelectionPosition(
+      selectController.startSelect,
+      firstRow,
+      lastRow,
+      deltas,
+    );
+    const focus = this.adjustSelectionPosition(
+      selectController.endSelect || {
+        row: this.editor.cursorController.row,
+        column: this.editor.cursorController.column,
+      },
+      firstRow,
+      lastRow,
+      deltas,
+    );
+    const lastLine = lines[lines.length - 1];
+    const result = this.editor.writerController.replaceRange(
+      updatedLines.join("\n"),
+      firstRow,
+      0,
+      lastRow,
+      lastLine.length,
+      { preserveViewport: true },
+    );
+    if (!result || !anchor || !focus) return false;
+
+    selectController.setSelection(anchor, focus);
+    return true;
+  }
 }
