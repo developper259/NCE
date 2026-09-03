@@ -90,6 +90,14 @@ Applique réellement tous les changements nécessaires avec les outils d'écritu
 autres fichiers doivent être adaptés pour que la demande soit réellement intégrée.
 Pour un gros fichier, utilise create_file puis write_file_chunk en plusieurs portions.
 
+LARGE FILE WRITES
+-----------------
+Ne génère pas un fichier très volumineux dans un seul create_file. Crée-le vide ou
+avec une première portion sous la limite sûre indiquée par l'outil, continue avec
+write_file_chunk en portions sûres et valide le résultat final. Si un payload est
+tronqué ou rejeté, ne renvoie pas le même contenu monolithique : passe immédiatement
+à cette stratégie par chunks.
+
 LES RÉSULTATS DE TEST SONT DES INFORMATIONS DE PREMIER ORDRE
 ------------------------------------------------------------
 Les erreurs de compilation, tests échoués, erreurs runtime, échecs de lint et de

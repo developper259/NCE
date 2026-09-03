@@ -717,6 +717,11 @@ class AgentRunner {
           ) {
             throw error;
           }
+          const repeatedOversizedRetry = largeWrite.recoveryAttempts > 0;
+          this.agent.agentProgress.recordToolProtocolFailure?.(
+            error.toolName,
+            { iteration, repeated: repeatedOversizedRetry },
+          );
           if (largeWrite.recoveryAttempts >= maxLargeWriteRecoveryAttempts) {
             if (
               this.agent.forceLargeWriteModelFallback(runConfig, largeWrite, error)
@@ -746,6 +751,7 @@ class AgentRunner {
             content: this.agent.buildLargeWriteRecoveryInstruction(
               error.toolName,
               largeWrite,
+              repeatedOversizedRetry,
             ),
           });
           continue;
@@ -758,6 +764,12 @@ class AgentRunner {
             largeWrite,
           );
           if (!selection.call) {
+            if (selection.oversizedCall) {
+              this.agent.agentProgress.recordDuplicateOversizedRetry?.(
+                selection.oversizedCall.name,
+                { iteration },
+              );
+            }
             if (parsed.reasoning) {
               this.agent.emitModelOutput(
                 "reasoning",
@@ -1084,12 +1096,19 @@ class AgentRunner {
               validation: toolPayload.validation || toolArgs.validation || "",
             };
           }
-          this.agent.updateLargeWriteStateAfterTool(
+          const largeWriteUpdate = this.agent.updateLargeWriteStateAfterTool(
             largeWrite,
             call,
             toolResult,
             toolArgs,
           );
+          if (largeWriteUpdate?.directive) {
+            progressDecision = {
+              action: "directive",
+              level: 2,
+              content: largeWriteUpdate.directive,
+            };
+          }
           const modificationTool =
             call?.function?.name === "modify_active_file" ||
             call?.function?.name === "replace_text" ||

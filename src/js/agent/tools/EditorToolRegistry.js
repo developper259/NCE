@@ -4,13 +4,15 @@ class EditorToolRegistry {
   }
 
   getCreateFileToolDescription() {
-    const recommended = this.agent.largeFileWriting.recommendedChunkCharacters;
-    return `Crée un petit fichier directement. Pour un gros fichier, n'envoie jamais le fichier complet : crée uniquement la première portion (<= ${recommended} caractères), puis continue immédiatement avec write_file_chunk. Utilise modify_file si le fichier existe déjà.`;
+    const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
+    const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
+    return `Crée un fichier petit ou moyen. Garde le contenu initial <= ${safeLimit} caractères (limite runtime absolue : ${hardLimit}) afin de laisser une marge à l'échappement JSON. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
   }
 
   getWriteFileChunkToolDescription() {
-    const recommended = this.agent.largeFileWriting.recommendedChunkCharacters;
-    return `Ajoute la prochaine portion d'un gros fichier après create_file. Garde content <= ${recommended} caractères et passe la dernière revision dans expectedRevision. Après le dernier chunk, valide avec read_file.`;
+    const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
+    const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
+    return `Ajoute exactement la prochaine portion à la fin d'un gros fichier. Garde content <= ${safeLimit} caractères (limite runtime absolue : ${hardLimit}) et passe la dernière revision dans expectedRevision. Chaque succès retourne la revision requise par le chunk suivant. Après le dernier chunk, valide avec read_file.`;
   }
 
   updateLargeFileToolDefinitions() {
@@ -126,7 +128,7 @@ class EditorToolRegistry {
             type: "string",
             maxLength: this.agent.largeFileWriting.maxChunkCharacters,
             description:
-              "Contenu complet d'un petit/moyen fichier, ou première portion d'un gros fichier. Vide par défaut.",
+              `Contenu complet d'un petit/moyen fichier, ou première portion d'un gros fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères. Vide par défaut.`,
           },
           overwrite: {
             type: "boolean",
@@ -154,7 +156,7 @@ class EditorToolRegistry {
             minLength: 1,
             maxLength: this.agent.largeFileWriting.maxChunkCharacters,
             description:
-              "Nouvelle portion à ajouter exactement à la fin du fichier.",
+              `Nouvelle portion à ajouter exactement à la fin du fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères.`,
           },
           expectedRevision: {
             type: "string",

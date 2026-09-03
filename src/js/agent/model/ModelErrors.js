@@ -17,12 +17,25 @@ function createToolCallValidationError(
 ) {
   const toolName = toolCall?.function?.name || "(inconnu)";
   const value = toolCall?.function?.arguments;
+  const reasonText = String(reason || "format incompatible");
+  const truncatedLargeWriteArguments =
+    new Set(["create_file", "write_file_chunk"]).has(toolName) &&
+    typeof value === "string" &&
+    value.trimEnd().slice(-1) !== "}" &&
+    /unterminated string|unexpected end(?: of json)?|end of (?:json )?input|incomplete json|json[^\n]{0,30}truncated|expected[^\n]{0,80}(?:property|delimiter|comma|position|end)/i.test(
+      reasonText,
+    );
   const error = new Error(
-    `Tool call invalide pour ${toolName} : ${reason || "format incompatible"}.`,
+    `Tool call invalide pour ${toolName} : ${reasonText}.`,
   );
   error.name = "AgentToolCallValidationError";
-  error.code = "TOOL_CALL_FINALIZATION_FAILED";
-  error.category = "TOOL_CALL_FINALIZATION_FAILED";
+  error.code = truncatedLargeWriteArguments
+    ? "TOOL_ARGUMENTS_TRUNCATED"
+    : "TOOL_CALL_FINALIZATION_FAILED";
+  error.category = error.code;
+  error.originalCode = "TOOL_CALL_FINALIZATION_FAILED";
+  error.toolProtocolFailure = true;
+  error.retryable = truncatedLargeWriteArguments;
   error.messageIndex = Number.isInteger(context.messageIndex)
     ? context.messageIndex
     : null;
@@ -34,10 +47,12 @@ function createToolCallValidationError(
   error.argumentsLength = typeof value === "string" ? value.length : null;
   error.argumentsLastCharacter =
     typeof value === "string" ? value.trimEnd().slice(-1) : null;
-  error.reason = reason || "format incompatible";
+  error.reason = reasonText;
   error.source = context.source || "provider_response";
   error.runId = context.runId ?? agent?.runId;
-  error.userMessage = `Le modèle a produit un appel invalide pour l'outil ${toolName}.`;
+  error.userMessage = truncatedLargeWriteArguments
+    ? `Les arguments de ${toolName} ont été tronqués avant la fin du JSON. Aucun contenu partiel n'a été exécuté.`
+    : `Le modèle a produit un appel invalide pour l'outil ${toolName}.`;
   console.error("[NCE Tool Call invalid]", {
     code: error.code,
     messageIndex: error.messageIndex,

@@ -94,6 +94,20 @@ class WorkspaceFileManager {
     if (!target.valid) return { success: false, error: target.error };
 
     const content = typeof args.content === "string" ? args.content : "";
+    const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
+    if (content.length > hardLimit) {
+      return {
+        success: false,
+        error: {
+          code: "FILE_WRITE_CONTENT_TOO_LARGE",
+          message: `content dépasse la limite absolue de ${hardLimit} caractères. Créez une première portion plus petite puis utilisez write_file_chunk.`,
+          path: target.relativePath,
+          actualCharacters: content.length,
+          maxCharacters: hardLimit,
+          recovery: "chunked_write_required",
+        },
+      };
+    }
     const overwrite = args.overwrite === true;
     const exists = await this.agent.api?.pathExists?.(target.absolutePath);
     if (exists && !overwrite) {
@@ -269,11 +283,12 @@ class WorkspaceFileManager {
       return {
         success: false,
         error: {
-          code: "CHUNK_TOO_LARGE",
-          message: `La portion dépasse ${this.agent.largeFileWriting.maxChunkCharacters} caractères. Découpez-la en portions plus petites.`,
+          code: "FILE_WRITE_CONTENT_TOO_LARGE",
+          message: `La portion dépasse la limite absolue de ${this.agent.largeFileWriting.maxChunkCharacters} caractères. Découpez-la en portions plus petites.`,
           path: target.relativePath,
-          maxChunkCharacters: this.agent.largeFileWriting.maxChunkCharacters,
+          maxCharacters: this.agent.largeFileWriting.maxChunkCharacters,
           actualCharacters: content.length,
+          recovery: "chunked_write_required",
         },
       };
     }

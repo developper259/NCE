@@ -7,11 +7,11 @@ class LargeFileWriter {
     const configuredLimit =
       runConfig?.largeFileWriting?.maxChunkCharacters ??
       this.agent?.largeFileWriting?.maxChunkCharacters ??
-      12000;
+      10000;
     const recommendedLimit =
       runConfig?.largeFileWriting?.recommendedChunkCharacters ??
       this.agent?.largeFileWriting?.recommendedChunkCharacters ??
-      10000;
+      8000;
     return {
       active: source?.active === true,
       state: source?.active === true ? "ACTIVE" : "IDLE",
@@ -112,7 +112,13 @@ class LargeFileWriter {
     state.recoveryAttempts += 1;
     this.debugLargeWrite(state, "retry_as_chunked_write", {
       finishReason: error?.finishReason || "unknown",
-      classification: error?.category || "LARGE_WRITE_TRUNCATED",
+      classification: error?.category || "TOOL_ARGUMENTS_TRUNCATED",
+    });
+    console.info("[NCE Agent recovery]", {
+      reason: "tool_arguments_truncated",
+      tool: state.toolName,
+      path: state.path || null,
+      recoveryAttempt: state.recoveryAttempts,
     });
     return state;
   }
@@ -140,6 +146,7 @@ class LargeFileWriter {
   selectLargeWriteToolCall(toolCalls, state) {
     const expected = this.getLargeWriteExpectedAction(state);
     const candidates = [];
+    let oversizedCall = null;
     for (const call of toolCalls || []) {
       const name = call?.function?.name;
       if (!expected.tools.has(name)) continue;
@@ -161,6 +168,13 @@ class LargeFileWriter {
         (typeof args.content !== "string" ||
           args.content.length > state.maxChunkChars)
       ) {
+        if (typeof args.content === "string") {
+          oversizedCall = {
+            name,
+            path: AgentPath.normalize(args.path || ""),
+            contentChars: args.content.length,
+          };
+        }
         continue;
       }
       candidates.push({ call, name });
@@ -172,6 +186,7 @@ class LargeFileWriter {
     return {
       call: candidates[0]?.call || null,
       expected,
+      oversizedCall,
     };
   }
 
@@ -179,7 +194,7 @@ class LargeFileWriter {
     const target = state?.path ? ` pour ${state.path}` : "";
     if (!state?.firstChunkCreated) {
       return repeated
-        ? `LARGE_WRITE_ACTIVE: le découpage est déjà obligatoire${target}. Appelle create_file maintenant avec la première portion uniquement (maximum ${state.maxChunkChars} caractères). Ne planifie pas et ne relis pas le projet.`
+        ? `LARGE_WRITE_ACTIVE: cette stratégie d'écriture surdimensionnée a déjà échoué${target}. Ne la répète pas. Appelle create_file maintenant avec une première portion <= ${state.recommendedChunkChars} caractères, puis continue avec write_file_chunk. Ne planifie pas et ne relis pas le projet.`
         : this.agent.buildLargeWriteRecoveryInstruction("create_file", state);
     }
     return `LARGE_WRITE_ACTIVE: continue directement${target}. Appelle write_file_chunk avec la prochaine portion et expectedRevision=${state.currentRevision || "la dernière revision retournée"}, ou read_file uniquement si toutes les portions ont déjà été écrites et qu'il faut valider. Ne planifie pas et ne répète aucune recherche.`;
@@ -208,7 +223,7 @@ class LargeFileWriter {
     const largeCreate =
       name === "create_file" &&
       typeof toolArgs.content === "string" &&
-      toolArgs.content.length >= state.recommendedChunkChars;
+      toolArgs.content.length > state.recommendedChunkChars;
     if (
       success &&
       (state.active || largeCreate || name === "write_file_chunk")
@@ -223,6 +238,8 @@ class LargeFileWriter {
         state.completed = false;
         state.firstChunkCreated = true;
         state.validationPending = true;
+        state.recoveryAttempts = 0;
+        state.planningRetryCount = 0;
         state.chunksApplied += inferredExistingFirstChunk ? 2 : 1;
         state.currentRevision = payload?.revision || state.currentRevision;
         if (path) state.path = path;
@@ -261,10 +278,38 @@ class LargeFileWriter {
       }
     }
     if (
-      state.active &&
       toolResult?.success === false &&
       ["create_file", "write_file_chunk", "read_file"].includes(name)
     ) {
+      if (payload?.error?.code === "FILE_WRITE_CONTENT_TOO_LARGE") {
+        state.active = true;
+        state.state = "ACTIVE";
+        state.completed = false;
+        state.validationPending = true;
+        state.toolName = name;
+        state.firstChunkCreated = name === "write_file_chunk";
+        state.recoveryAttempts += 1;
+        if (path) state.path = path;
+        this.debugLargeWrite(state, "retry_as_chunked_write", {
+          tool: name,
+          reason: "content_too_large",
+          contentChars: payload.error.actualCharacters || null,
+        });
+        console.info("[NCE Agent recovery]", {
+          reason: "content_too_large",
+          tool: name,
+          path: state.path || null,
+          recoveryAttempt: state.recoveryAttempts,
+        });
+        return {
+          directive: this.agent.buildLargeWriteRecoveryInstruction(
+            name,
+            state,
+            state.recoveryAttempts > 1,
+          ),
+        };
+      }
+      if (!state.active) return null;
       if (payload?.error?.actualRevision) {
         state.currentRevision = payload.error.actualRevision;
       }
@@ -273,6 +318,7 @@ class LargeFileWriter {
         errorCode: payload?.error?.code || "TOOL_FAILED",
       });
     }
+    return null;
   }
 }
 

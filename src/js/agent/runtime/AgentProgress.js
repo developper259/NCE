@@ -50,10 +50,18 @@ class AgentProgress {
       stagnationEvents: 0,
       stagnationRecoveries: 0,
       writeToolCalls: 0,
+      successfulWriteToolCalls: 0,
       validationCalls: 0,
       validationFailures: 0,
       fixIterations: 0,
       taskCompleteCalls: 0,
+      createFileCalls: 0,
+      createFileOversizeRejected: 0,
+      chunkWriteCalls: 0,
+      chunkWriteCharacters: 0,
+      toolArgumentsTruncated: 0,
+      largeWriteRecoveries: 0,
+      duplicateOversizedRetries: 0,
       totalIterations: 0,
       model429s: 0,
       modelRetries: 0,
@@ -131,6 +139,56 @@ class AgentProgress {
     this.metrics.modelFallbacks += 1;
   }
 
+  recordFileWriteRequest(toolName, contentChars = 0) {
+    if (toolName === "create_file") this.metrics.createFileCalls += 1;
+    if (toolName === "write_file_chunk") {
+      this.metrics.chunkWriteCalls += 1;
+      this.metrics.chunkWriteCharacters += Math.max(0, contentChars);
+    }
+  }
+
+  recordFileWriteOversizeRejected(toolName) {
+    if (toolName === "create_file") {
+      this.metrics.createFileOversizeRejected += 1;
+    }
+    this.metrics.largeWriteRecoveries += 1;
+  }
+
+  recordToolProtocolFailure(toolName, details = {}) {
+    this.metrics.toolArgumentsTruncated += 1;
+    this.metrics.largeWriteRecoveries += 1;
+    if (details.repeated === true) {
+      this.metrics.duplicateOversizedRetries += 1;
+    }
+    this.consecutiveNoNewInformation = 0;
+    this.addEvent({
+      iteration: details.iteration ?? null,
+      tool: toolName,
+      informationStatus: "tool_protocol_failure",
+      category: "write_protocol",
+    });
+    this.log({
+      event: "tool_protocol_failure",
+      iteration: details.iteration ?? null,
+      lastTool: toolName,
+      informationStatus: "tool_protocol_failure",
+      reason: details.repeated
+        ? "duplicate_oversized_retry"
+        : "tool_arguments_truncated",
+    });
+  }
+
+  recordDuplicateOversizedRetry(toolName, details = {}) {
+    this.metrics.duplicateOversizedRetries += 1;
+    this.log({
+      event: "large_write_retry_rejected",
+      iteration: details.iteration ?? null,
+      lastTool: toolName,
+      informationStatus: "tool_protocol_failure",
+      reason: "duplicate_oversized_retry",
+    });
+  }
+
   recordTaskCompletion(iteration, accepted, reason = null) {
     this.log({
       event: accepted ? "task_complete" : "task_complete_rejected",
@@ -147,6 +205,9 @@ class AgentProgress {
     const isExploration = ["read", "navigation", "search"].includes(category);
     this.metrics.toolCalls += 1;
     if (category === "write") this.metrics.writeToolCalls += 1;
+    if (category === "write" && meta.succeeded === true) {
+      this.metrics.successfulWriteToolCalls += 1;
+    }
     if (category === "validation") this.metrics.validationCalls += 1;
 
     if (
@@ -535,6 +596,7 @@ class AgentProgress {
       cachedProjectMaps: readMetrics.cachedProjectMaps || 0,
       readCalls: readMetrics.readFileCalls || 0,
       writes: this.metrics.writeToolCalls,
+      successfulWrites: this.metrics.successfulWriteToolCalls,
       progressRecoveries: this.metrics.stagnationRecoveries,
       estimatedPromptTokens: this.agent.lastContextMetrics?.estimatedModelTokens || 0,
       actualPromptTokens: this.agent.lastContextMetrics?.actualPromptTokens || 0,

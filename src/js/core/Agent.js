@@ -17,8 +17,8 @@ class Agent {
     this.maxIterations = 30;
     this.maxIncompleteContinuations = 3;
     this.largeFileWriting = {
-      recommendedChunkCharacters: 10000,
-      maxChunkCharacters: 12000,
+      recommendedChunkCharacters: 8000,
+      maxChunkCharacters: 10000,
       maxRecoveryAttempts: 2,
     };
     this.temperature = undefined;
@@ -444,7 +444,13 @@ class Agent {
   }
 
   isRecoverableLargeWriteToolCallError(error, result = null) {
-    if (error?.code !== "TOOL_CALL_FINALIZATION_FAILED") return false;
+    if (
+      !["TOOL_ARGUMENTS_TRUNCATED", "TOOL_CALL_FINALIZATION_FAILED"].includes(
+        error?.code,
+      )
+    ) {
+      return false;
+    }
     if (!new Set(["create_file", "write_file_chunk"]).has(error.toolName)) {
       return false;
     }
@@ -468,19 +474,28 @@ class Agent {
       (finishReason === "length" && stopsBeforeObjectEnd);
     if (!truncatedJson) return false;
     error.finishReason = finishReason;
-    error.category = "LARGE_WRITE_TRUNCATED";
+    error.code = "TOOL_ARGUMENTS_TRUNCATED";
+    error.category = "TOOL_ARGUMENTS_TRUNCATED";
     error.largeWriteTruncated = true;
     return true;
   }
 
-  buildLargeWriteRecoveryInstruction(toolName = "create_file", state = null) {
+  buildLargeWriteRecoveryInstruction(
+    toolName = "create_file",
+    state = null,
+    repeated = false,
+  ) {
     const chunkLimit =
-      state?.maxChunkChars || this.largeFileWriting.recommendedChunkCharacters;
+      state?.recommendedChunkChars ||
+      this.largeFileWriting.recommendedChunkCharacters;
     const target = state?.path ? ` Target: ${state.path}.` : "";
     const nextTool = state?.firstChunkCreated
       ? "Call write_file_chunk now with the next chunk and the last returned revision."
       : "Call create_file now with the first chunk only.";
-    return `LARGE_WRITE_REQUIRED:${target} The previous ${toolName} call was truncated because it was too large. Chunking is now mandatory; do not reconsider or explain the strategy. ${nextTool} Then use write_file_chunk for every remaining chunk, keep each content chunk <= ${chunkLimit} characters, and finish with read_file validation. Do not retry the full file and do not repeat previous reads or searches.`;
+    const failure = repeated
+      ? `This oversized ${toolName} strategy already failed. Do not retry it again.`
+      : `The previous ${toolName} call was truncated because its payload was too large.`;
+    return `LARGE_WRITE_REQUIRED:${target} ${failure} No partial JSON was executed. Chunking is now mandatory; do not reconsider or explain the strategy. ${nextTool} Then use write_file_chunk for every remaining chunk, keep each content chunk <= ${chunkLimit} characters, and finish with read_file validation. Do not retry the full file and do not repeat previous reads or searches.`;
   }
 
   createLargeWriteRecoveryError(cause, attempts, limit) {

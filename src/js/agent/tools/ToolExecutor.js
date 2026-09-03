@@ -3,6 +3,46 @@ class ToolExecutor {
     this.agent = agent;
   }
 
+  getFileWritePayloadLimit(name) {
+    if (!["create_file", "write_file_chunk"].includes(name)) return null;
+    return Math.max(
+      1,
+      Math.floor(this.agent.largeFileWriting?.maxChunkCharacters || 10000),
+    );
+  }
+
+  validateFileWritePayload(name, args = {}) {
+    const hardLimit = this.getFileWritePayloadLimit(name);
+    if (hardLimit === null) return { valid: true };
+    const contentChars =
+      typeof args.content === "string" ? args.content.length : 0;
+    this.agent.agentProgress?.recordFileWriteRequest?.(
+      name,
+      contentChars,
+    );
+    console.info("[NCE Agent write]", {
+      tool: name,
+      path: typeof args.path === "string" ? args.path : null,
+      contentChars,
+      strategy: name === "create_file" ? "initial" : "append_chunk",
+    });
+    if (typeof args.content !== "string" || contentChars <= hardLimit) {
+      return { valid: true };
+    }
+    this.agent.agentProgress?.recordFileWriteOversizeRejected?.(name);
+    return {
+      valid: false,
+      error: {
+        code: "FILE_WRITE_CONTENT_TOO_LARGE",
+        message: `content contient ${contentChars} caractères et dépasse la limite absolue de ${hardLimit}. N'essayez pas de renvoyer le fichier complet : utilisez create_file avec un contenu initial plus petit, puis write_file_chunk en portions sûres.`,
+        path: typeof args.path === "string" ? args.path : null,
+        actualCharacters: contentChars,
+        maxCharacters: hardLimit,
+        recovery: "chunked_write_required",
+      },
+    };
+  }
+
   debugTool(name, args, result, details = {}) {
     const preview = (value) => {
       if (typeof value !== "string") return value;
@@ -139,6 +179,7 @@ class ToolExecutor {
     return {
       informationStatus,
       toolCategory,
+      succeeded: result?.success !== false,
       actualExecution:
         !["already_known", "repeated_redundant", "task_complete"].includes(
           informationStatus,
@@ -281,6 +322,21 @@ class ToolExecutor {
         const asNumber = Number(value);
         if (Number.isFinite(asNumber)) normalizedArgs[key] = asNumber;
       }
+    }
+
+    const writePayloadValidation = this.validateFileWritePayload(
+      name,
+      normalizedArgs,
+    );
+    if (!writePayloadValidation.valid) {
+      const result = {
+        success: false,
+        error: writePayloadValidation.error,
+      };
+      this.debugTool(name, normalizedArgs, result, {
+        rejectedBeforeExecution: true,
+      });
+      return this.attachMeta(name, result);
     }
 
     const validation = this.agent.validateTool(tool, normalizedArgs);

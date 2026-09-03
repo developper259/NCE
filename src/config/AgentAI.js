@@ -6,8 +6,10 @@ const AgentAI = {
   maxIncompleteContinuations: 3,
 
   largeFileWriting: {
-    recommendedChunkCharacters: 10000,
-    maxChunkCharacters: 12000,
+    // Character limits are deliberately conservative: escaped JSON payloads
+    // can consume substantially more model output than their source text.
+    recommendedChunkCharacters: 8000,
+    maxChunkCharacters: 10000,
     maxRecoveryAttempts: 2,
   },
 
