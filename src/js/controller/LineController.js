@@ -429,10 +429,13 @@ class LineController {
   }
 
   setFocusLine(index) {
-    const oldLine = this.editor.domManager.getElement(".line-selected");
+    this.index = index;
 
-    if (oldLine != null) {
-      oldLine.classList.remove("line-selected");
+    const selectedLines = this.editor.lineNumberOutput?.querySelectorAll(
+      ".line-selected",
+    );
+    if (selectedLines) {
+      selectedLines.forEach((line) => line.classList.remove("line-selected"));
     }
 
     const newLine = this.getLineNumberOBJ(index - 1);
@@ -442,8 +445,6 @@ class LineController {
     }
 
     newLine.classList.add("line-selected");
-
-    this.index = index;
   }
 
   clearDiffRows() {
