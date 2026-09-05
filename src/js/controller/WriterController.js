@@ -160,87 +160,100 @@ class WriterController {
   write(txt) {
     if (!this.editor.tabManager.activeFile || txt === undefined) return;
     this.editor.keyBinding.historyX = undefined;
-
-    const lc = this.editor.lineController;
-    let row = this.editor.cursorController.row;
-    let column = this.editor.cursorController.column;
-
-    if (this.editor.selectController.containsSelected) {
-      const newPos = this.deleteSelection();
-      if (newPos) {
-        row = newPos.row;
-        column = newPos.column;
-      }
-    }
-
-    const lineNode = lc.lines[row - 1];
-    const line = lineNode ? lineNode.getText() : "";
-
-    if (!txt.includes("\n")) {
-      let newLine;
-
-      if (!this.insertMode || txt.length > 1) {
-        newLine = line.slice(0, column) + txt + line.slice(column);
-      } else if (txt.length === 1 && this.insertMode) {
-        newLine = line.substring(0, column) + txt + line.substring(column + 1);
-      }
-
-      const newColumn = column + txt.length;
-      lc.changeLine(newLine, row - 1);
-      lc.refresh();
-
-      this.editor.cursorController.setCursorPosition(row, newColumn);
-
-      this.editor.events.callEvent(Events.ON_CHANGE, {
-        action: "insert",
-        text: txt,
-        beforeRow: row,
-        beforeColumn: column,
-        afterRow: row,
-        afterColumn: newColumn,
-      });
-
-      return;
-    }
-
-    let newLines = txt.split("\n");
-
-    for (let i = 0; i < newLines.length; i++) {
-      let currentNewLine = newLines[i] || "";
-
-      if (i === 0) {
-        currentNewLine = line.slice(0, column) + currentNewLine;
-        lc.changeLine(currentNewLine, row - 1);
-      } else if (i === newLines.length - 1) {
-        currentNewLine = currentNewLine + line.slice(column);
-        lc.addLine(currentNewLine, row + i - 1);
-        column = 0;
-      } else {
-        lc.addLine(currentNewLine, row + i - 1);
-      }
-    }
-
-    lc.refresh();
-
-    const lastLineLength = newLines[newLines.length - 1].length;
-    const endRow = row + newLines.length - 1;
-
-    this.editor.cursorController.setCursorPosition(endRow, lastLineLength);
-
-    const screenRow = row - lc.startIndex;
-    if (screenRow >= lc.maxLines - lc.marginLines) {
-      const targetRow = lc.startIndex + newLines.length;
-      lc.scrollTo(targetRow);
-    }
-
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      action: "insert",
-      text: txt,
-      beforeRow: row,
-      beforeColumn: column,
-      afterRow: endRow,
-      afterColumn: lastLineLength,
+    const cursor = this.editor.cursorController;
+    const selection = this.getSelectionRange();
+    const start = selection?.start || {
+      row: cursor.row,
+      column: cursor.column,
+    };
+    const end = selection?.end || start;
+    const afterText = this.insertMode && !selection && txt.length === 1
+      ? this.editor.lineController.lines[start.row - 1]
+          .getText()
+          .slice(start.column, start.column + 1)
+      : "";
+    const editEnd = afterText ? this.advancePosition(start, afterText) : end;
+    return this.applyRangeEdit(start, editEnd, txt, {
+      source: txt.includes("\n") ? "enter" : "typing",
+      insertModeText: afterText,
     });
+  }
+
+  getSelectionRange() {
+    const select = this.editor.selectController;
+    if (!select?.hasActiveSelection?.()) return null;
+    const start = select.startSelect;
+    const end = { row: this.editor.cursorController.row, column: this.editor.cursorController.column };
+    if (start.row > end.row || (start.row === end.row && start.column > end.column)) {
+      return { start: end, end: start };
+    }
+    return { start, end };
+  }
+
+  getTextInRange(start, end) {
+    const lines = this.editor.lineController.lines;
+    if (start.row === end.row) {
+      return lines[start.row - 1].getText().slice(start.column, end.column);
+    }
+    const result = [lines[start.row - 1].getText().slice(start.column)];
+    for (let row = start.row + 1; row < end.row; row++) result.push(lines[row - 1].getText());
+    result.push(lines[end.row - 1].getText().slice(0, end.column));
+    return result.join("\n");
+  }
+
+  advancePosition(start, text) {
+    const parts = String(text || "").split("\n");
+    return parts.length === 1
+      ? { row: start.row, column: start.column + parts[0].length }
+      : { row: start.row + parts.length - 1, column: parts[parts.length - 1].length };
+  }
+
+  applyRangeEdit(start, end, text, options = {}) {
+    const file = this.editor.tabManager.activeFile;
+    const lineController = this.editor.lineController;
+    if (!file || !lineController || typeof text !== "string") return null;
+
+    const beforeText = this.getTextInRange(start, end);
+    const cursorBefore = { row: this.editor.cursorController.row, column: this.editor.cursorController.column };
+    const selectionBefore = this.getSelectionRange();
+    const lines = lineController.lines.map((line) => line.getText());
+    const replacement = text.split("\n");
+    const prefix = lines[start.row - 1].slice(0, start.column);
+    const suffix = lines[end.row - 1].slice(end.column);
+    replacement[0] = prefix + replacement[0];
+    replacement[replacement.length - 1] += suffix;
+    lines.splice(start.row - 1, end.row - start.row + 1, ...replacement);
+    file.lines.splice(
+      start.row - 1,
+      end.row - start.row + 1,
+      ...replacement.map((line) => new LineNode(line)),
+    );
+    file.totalLines = file.lines.length;
+    file.maxLineLength = 0;
+    if (options.preserveViewport === false) {
+      file.startIndex = 0;
+      file.offsetY = 0;
+      file.offsetX = 0;
+    }
+
+    const cursorAfter = options.cursor || this.advancePosition(start, text);
+    file.row = cursorAfter.row;
+    file.column = cursorAfter.column;
+    this.editor.selectController.unSelectAll();
+    if (options.selection) this.editor.selectController.setSelection(options.selection.start, options.selection.end);
+    lineController.markDirtyFrom(start.row - 1);
+    lineController.refresh(false);
+    this.editor.cursorController.setCursorPosition(cursorAfter.row, cursorAfter.column);
+
+    const entry = {
+      start: { ...start }, beforeText, afterText: text,
+      cursorBefore, cursorAfter: { ...cursorAfter },
+      selectionBefore, selectionAfter: options.selection || null,
+      source: options.source || "edit", timestamp: Date.now(),
+    };
+    if (options.recordHistory !== false) this.editor.historyController?.record(entry);
+    this.editor.events.callEvent(Events.ON_CHANGE, { action: options.source || "edit", beforeText, afterText: text, beforeRow: start.row, beforeColumn: start.column, afterRow: cursorAfter.row, afterColumn: cursorAfter.column });
+    return { row: cursorAfter.row, column: cursorAfter.column };
   }
 
   delete(column, row) {
@@ -250,43 +263,18 @@ class WriterController {
     )
       return;
 
-    let newLine = "";
-    const lineNode = this.editor.lineController.lines[row - 1];
-    const line = lineNode.getText();
-    let cursor = { column, row };
-    let deletedChar = "";
-
-    if (cursor.column === 0) {
-      if (cursor.row === 1) return;
-
-      cursor.row -= 1;
-      const prevLineNode = this.editor.lineController.lines[cursor.row - 1];
-      const prevLine = prevLineNode.getText();
-
-      cursor.column = prevLine.length;
-      newLine = prevLine + line;
-      deletedChar = "\n";
-      this.editor.lineController.supLine(row - 1);
-    } else {
-      let newCol = cursor.column - 1;
-      deletedChar = line[newCol] || "";
-      newLine = line.slice(0, newCol) + line.slice(cursor.column);
-      cursor.column = newCol;
+    if (column === 0) {
+      if (row === 1) return;
+      const previousLine = this.editor.lineController.lines[row - 2].getText();
+      return this.deleteRange(
+        { row: row - 1, column: previousLine.length },
+        { row, column: 0 },
+      );
     }
-
-    this.editor.lineController.changeLine(newLine, cursor.row - 1);
-    this.editor.lineController.refresh();
-
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      action: "delete",
-      text: deletedChar,
-      beforeRow: row,
-      beforeColumn: column,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
-    });
-
-    return cursor;
+    return this.deleteRange(
+      { row, column: column - 1 },
+      { row, column },
+    );
   }
 
   deleteWord(column, row) {
@@ -337,19 +325,9 @@ class WriterController {
       }
     }
 
-    this.editor.lineController.changeLine(newLine, cursor.row - 1);
-    this.editor.lineController.refresh();
-
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      action: "delete",
-      text: deletedText,
-      beforeRow: row,
-      beforeColumn: column,
-      afterRow: cursor.row,
-      afterColumn: cursor.column,
-    });
-
-    return cursor;
+    const deleteStart = { row, column: cursor.column };
+    const deleteEnd = { row, column };
+    return this.deleteRange(deleteStart, deleteEnd);
   }
 
   deleteSelection() {
@@ -379,111 +357,22 @@ class WriterController {
     if (!this.editor.tabManager.activeFile) return;
     const lc = this.editor.lineController;
     if (!lc || lc.lines.length === 0) return;
-
-    const startRow = Math.max(0, start.row - 1);
-    const endRow = Math.max(0, end.row - 1);
-
-    const startLineNode = lc.lines[startRow];
-    const endLineNode = lc.lines[endRow];
-
-    if (!startLineNode || !endLineNode) return;
-
-    let startText = startLineNode.getText();
-    let endText = endLineNode.getText();
-
-    let newRow = start.row;
-    let newCol = start.column;
-
-    if (startRow === endRow) {
-      const newLineText =
-        startText.slice(0, start.column) + endText.slice(end.column);
-      lc.changeLine(newLineText, startRow);
-    } else {
-      const newLineText =
-        startText.slice(0, start.column) + endText.slice(end.column);
-      lc.changeLine(newLineText, startRow);
-
-      for (let i = endRow; i > startRow; i--) {
-        lc.supLine(i);
-      }
-    }
-
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      action: "delete",
-      beforeRow: start.row,
-      beforeColumn: start.column,
-      afterRow: end.row,
-      afterColumn: end.column,
-    });
-
-    return { row: newRow, column: newCol };
+    return this.applyRangeEdit(start, end, "", { source: "delete" });
   }
 
   replaceRange(text, startLine, startColumn, endLine, endColumn, options = {}) {
-    const file = this.editor.tabManager.activeFile;
-    const lineController = this.editor.lineController;
-
-    if (!file || !lineController || typeof text !== "string") return null;
-
-    const lines = lineController.lines.map((line) => line.getText());
-    if (lines.length === 0) return null;
-
-    const startRow = Math.min(
-      Math.max(1, Number(startLine) || 1),
-      lines.length,
-    );
-    const endRow = Math.min(
-      Math.max(startRow, Number(endLine) || startRow),
-      lines.length,
-    );
-    const startText = lines[startRow - 1] || "";
-    const endText = lines[endRow - 1] || "";
-    const startCol = Math.min(
-      Math.max(0, Number(startColumn) || 0),
-      startText.length,
-    );
-    const endCol = Math.min(
-      Math.max(0, Number(endColumn) || 0),
-      endText.length,
-    );
-
-    const replacement = text.split("\n");
-    const prefix = startText.slice(0, startCol);
-    const suffix = endText.slice(endCol);
-    const replacementLines = replacement.slice();
-    replacementLines[0] = prefix + replacementLines[0];
-    replacementLines[replacementLines.length - 1] += suffix;
-
-    lines.splice(startRow - 1, endRow - startRow + 1, ...replacementLines);
-
-    file.lines = lines.map((line) => new LineNode(line));
-    file.totalLines = file.lines.length;
-    file.maxLineLength = 0;
-    if (!options.preserveViewport) {
-      file.startIndex = 0;
-      file.offsetY = 0;
-      file.offsetX = 0;
-    }
-
-    const lastLine = replacementLines.length - 1;
-    const cursorRow = startRow + lastLine;
-    const cursorColumn = replacementLines[lastLine].length - suffix.length;
-
-    file.row = cursorRow;
-    file.column = cursorColumn;
-    lineController.markDirtyAll();
-    lineController.refresh(true);
-    this.editor.selectController?.unSelectAll();
-    this.editor.events.callEvent(Events.ON_CHANGE, {
-      action: "replace",
+    const lines = this.editor.lineController.lines;
+    if (!lines.length) return null;
+    const startRow = Math.min(Math.max(1, Number(startLine) || 1), lines.length);
+    const endRow = Math.min(Math.max(startRow, Number(endLine) || startRow), lines.length);
+    const startCol = Math.min(Math.max(0, Number(startColumn) || 0), lines[startRow - 1].getText().length);
+    const endCol = Math.min(Math.max(0, Number(endColumn) || 0), lines[endRow - 1].getText().length);
+    return this.applyRangeEdit(
+      { row: startRow, column: startCol },
+      { row: endRow, column: endCol },
       text,
-      beforeRow: startRow,
-      beforeColumn: startCol,
-      afterRow: cursorRow,
-      afterColumn: cursorColumn,
-    });
-
-    return { row: cursorRow, column: cursorColumn };
+      { ...options, source: options.source || "replace" },
+    );
   }
 
   insertTextAt(text, row, column) {
@@ -493,61 +382,11 @@ class WriterController {
     )
       return;
 
-    const lines = this.editor.lineController.lines;
-    const lineIndex = row - 1;
-
-    if (!text.includes("\n")) {
-      const lineNode = lines[lineIndex];
-      const line = lineNode.getText();
-      const newLine = line.slice(0, column) + text + line.slice(column);
-
-      this.editor.lineController.changeLine(newLine, lineIndex);
-      this.editor.lineController.refresh();
-
-      this.editor.events.callEvent(Events.ON_CHANGE, {
-        action: "insert",
-        text: text,
-        beforeRow: row,
-        beforeColumn: column,
-        afterRow: row,
-        afterColumn: column + text.length,
-      });
-
-      return { row, column: column + text.length };
-    } else {
-      const newLines = text.split("\n");
-      const currentLineNode = lines[lineIndex];
-      const currentLine = currentLineNode.getText();
-
-      const firstPart = currentLine.slice(0, column) + newLines[0];
-      this.editor.lineController.changeLine(firstPart, lineIndex);
-
-      for (let i = 1; i < newLines.length - 1; i++) {
-        this.editor.lineController.addLine(newLines[i], lineIndex + i);
-      }
-
-      const lastPart =
-        newLines[newLines.length - 1] + currentLine.slice(column);
-      this.editor.lineController.addLine(
-        lastPart,
-        lineIndex + newLines.length - 1,
-      );
-
-      this.editor.lineController.refresh();
-
-      const newRow = row + newLines.length - 1;
-      const newColumn = newLines[newLines.length - 1].length;
-
-      this.editor.events.callEvent(Events.ON_CHANGE, {
-        action: "insert",
-        text: text,
-        beforeRow: row,
-        beforeColumn: column,
-        afterRow: newRow,
-        afterColumn: newColumn,
-      });
-
-      return { row: newRow, column: newColumn };
-    }
+    return this.applyRangeEdit(
+      { row, column },
+      { row, column },
+      text,
+      { source: "insert" },
+    );
   }
 }

@@ -51,6 +51,7 @@ class Editor {
     this.sidebarManager.registerMenu(this.agentSidebar);
 
     this.writerController = new WriterController(this);
+    this.historyController = new HistoryController(this);
     this.lineController = new LineController(this);
     this.selectController = new SelectController(this);
     this.cursorController = new CursorController(this);

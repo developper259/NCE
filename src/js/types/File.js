@@ -105,6 +105,7 @@ class FileNode {
     if (!this.path) {
       const content = this.lines.map((line) => line.getText()).join("\n");
       this.editor.lineController.loadContent(content);
+      this.editor.historyController?.clear(this);
       this.isLoaded = true;
       return;
     }
@@ -117,6 +118,7 @@ class FileNode {
         initialLines.join("\n"),
         totalLines,
       );
+      this.editor.historyController?.clear(this);
 
       this.editor.fileLoader.loadRemainingLines(
         this,
@@ -131,6 +133,7 @@ class FileNode {
         this.setIsSaved(false);
         const content = this.lines.map((line) => line.getText()).join("\n");
         this.editor.lineController.loadContent(content);
+        this.editor.historyController?.clear(this);
         this.isLoaded = true;
       } else {
         throw error;
@@ -148,6 +151,7 @@ class FileNode {
 
     if (saved) {
       this.setIsSaved(true);
+      this.editor.historyController?.markSaved(this);
       this.editor.tabManager.refresh();
     }
     return Boolean(saved);
@@ -164,6 +168,7 @@ class FileNode {
     this.path = selectedPath;
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
     this.setIsSaved(true);
+    this.editor.historyController?.markSaved(this);
     await this.loadLanguage();
     this.editor.highlightController.reset();
     this.editor.tabManager.refresh();
@@ -186,7 +191,11 @@ class FileNode {
     if (this.shouldPersistChanges()) {
       this.save();
     } else {
-      this.setIsSaved(false);
+      this.setIsSaved(
+        this.editor.historyController
+          ? this.editor.historyController.isAtSavePoint(this)
+          : false,
+      );
     }
     this.editor.tabManager.refresh();
   }

@@ -129,65 +129,27 @@ class KeyBinding {
     if (!document.hasFocus()) return;
     if (!this.editor.tabManager.activeFile) return;
 
-    let hasSelection = this.editor.selectController.containsSelected;
+    let hasSelection = this.editor.selectController.hasActiveSelection?.();
     await this.control_copy();
 
     if (hasSelection) {
       this.key_backspace();
     } else {
-      if (
-        this.editor.lineController.lines.length !=
-        this.editor.cursorController.row
-      )
-        this.editor.lineController.supLine(
-          this.editor.cursorController.row - 1,
-        );
-      else
-        this.editor.lineController.changeLine(
-          "",
-          this.editor.cursorController.row - 1,
-        );
-
-      this.editor.lineController.refresh();
-      this.editor.cursorController.setCursorPosition(
-        this.editor.cursorController.row,
-        0,
-      );
+      const row = this.editor.cursorController.row;
+      const lines = this.editor.lineController.lines;
+      const end = row < lines.length
+        ? { row: row + 1, column: 0 }
+        : { row, column: lines[row - 1].getText().length };
+      this.editor.writerController.deleteRange({ row, column: 0 }, end);
     }
   }
 
   control_undo(s, c, m, a) {
-    if (!this.editor.tabManager.activeFile) return;
-
-    if (this.editor.historyController) {
-      this.editor.selectController.unSelectAll();
-      this.editor.lineController.markDirtyAll();
-      this.editor.events.callEvent(Events.ON_CHANGE, {
-        action: "undo",
-        text: "",
-        beforeRow: 0,
-        beforeColumn: 0,
-        afterRow: 0,
-        afterColumn: 0,
-      });
-    }
+    return this.editor.historyController?.undo();
   }
 
   control_redo(s, c, m, a) {
-    if (!this.editor.tabManager.activeFile) return;
-
-    if (this.editor.historyController) {
-      this.editor.selectController.unSelectAll();
-      this.editor.lineController.markDirtyAll();
-      this.editor.events.callEvent(Events.ON_CHANGE, {
-        action: "redo",
-        text: "",
-        beforeRow: 0,
-        beforeColumn: 0,
-        afterRow: 0,
-        afterColumn: 0,
-      });
-    }
+    return this.editor.historyController?.redo();
   }
 
   control_find(s, c, m, a) {
@@ -245,11 +207,11 @@ class KeyBinding {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
 
-    this.editor.lineController.supLine(this.editor.cursorController.row - 1);
-    this.editor.lineController.refresh();
-    this.editor.cursorController.setCursorPosition(
-      this.editor.cursorController.row,
-      this.editor.cursorController.column,
+    const row = this.editor.cursorController.row;
+    const endRow = Math.min(row + 1, this.editor.lineController.lines.length);
+    this.editor.writerController.deleteRange(
+      { row, column: 0 },
+      { row: endRow, column: 0 },
     );
   }
 
