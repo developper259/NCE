@@ -22,7 +22,6 @@ class AgentSidebar extends Sidebar {
     this._activityItemCounter = 0;
 
     this.apiKeys = new Map();
-    this.apiKeyPanel = null;
 
     this.agent = editor.agent;
     this.agent.setCallbacks({
@@ -203,7 +202,8 @@ class AgentSidebar extends Sidebar {
         (entry) =>
           entry.status !== "renamed" &&
           (entry.path === path ||
-            (payload.absolutePath && entry.absolutePath === payload.absolutePath)),
+            (payload.absolutePath &&
+              entry.absolutePath === payload.absolutePath)),
       );
       if (existing) {
         if (
@@ -2509,88 +2509,42 @@ class AgentSidebar extends Sidebar {
   }
 
   requestApiKey(provider, options = {}) {
-    if (!this.container) return Promise.resolve("");
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel) return Promise.resolve("");
 
-    if (this.apiKeyPanel) {
-      this.apiKeyPanel.input.focus();
-      return this.apiKeyPanel.promise;
-    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener?.("abort", onAbort);
+        resolve(value);
+      };
+      const onAbort = () => {
+        if (quickPanel.isOpen("agent-api-key")) {
+          quickPanel.close({ notifyCancel: false });
+        }
+        finish("");
+      };
 
-    const overlay = document.createElement("div");
-    overlay.className = "agent-sidebar-api-key-overlay";
+      if (options.signal?.aborted) {
+        finish("");
+        return;
+      }
 
-    const panel = document.createElement("form");
-    panel.className = "agent-sidebar-api-key-panel";
-
-    const title = document.createElement("h3");
-    title.textContent = options.invalid
-      ? `Replace ${provider.name} API key`
-      : `${provider.name} API key`;
-    panel.appendChild(title);
-
-    const description = document.createElement("p");
-    description.textContent = options.invalid
-      ? "The current API key is missing or invalid. Enter a new key to retry."
-      : "Enter your API key to use this model.";
-    panel.appendChild(description);
-
-    const input = document.createElement("input");
-    input.type = "password";
-    input.required = true;
-    input.autocomplete = "off";
-    input.placeholder = "API key";
-    input.className = "agent-sidebar-api-key-input";
-    panel.appendChild(input);
-
-    const actions = document.createElement("div");
-    actions.className = "agent-sidebar-api-key-actions";
-
-    const cancelButton = document.createElement("button");
-    cancelButton.type = "button";
-    cancelButton.textContent = "Cancel";
-    cancelButton.className = "agent-sidebar-api-key-cancel";
-
-    const confirmButton = document.createElement("button");
-    confirmButton.type = "submit";
-    confirmButton.textContent = "Use key";
-    confirmButton.className = "agent-sidebar-api-key-confirm";
-
-    actions.append(cancelButton, confirmButton);
-    panel.appendChild(actions);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
-
-    let resolveRequest;
-    const promise = new Promise((resolve) => {
-      resolveRequest = resolve;
+      options.signal?.addEventListener?.("abort", onAbort, { once: true });
+      quickPanel.open({
+        id: "agent-api-key",
+        mode: "input",
+        title: options.invalid
+          ? `Replace ${provider.name} API key`
+          : `${provider.name} API key`,
+        placeholder: "API key",
+        inputType: "password",
+        onAccept: (value) => finish(String(value || "").trim()),
+        onCancel: () => finish(""),
+      });
     });
-    const close = (value) => {
-      if (!this.apiKeyPanel) return;
-      this.apiKeyPanel = null;
-      options.signal?.removeEventListener?.("abort", onAbort);
-      overlay.remove();
-      resolveRequest(value);
-    };
-    const onAbort = () => close("");
-
-    this.apiKeyPanel = { input, promise, close };
-    panel.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const value = input.value.trim();
-      if (value) close(value);
-    });
-    cancelButton.addEventListener("click", () => close(""));
-    overlay.addEventListener("click", (event) => {
-      if (event.target === overlay) close("");
-    });
-    if (options.signal?.aborted) {
-      close("");
-      return promise;
-    }
-    options.signal?.addEventListener?.("abort", onAbort, { once: true });
-
-    input.focus();
-    return promise;
   }
 
   async replaceInvalidApiKey(classification = {}, context = {}) {

@@ -359,7 +359,7 @@ class QuickPanelController {
       content.className = "quick-panel-item-content";
       const label = document.createElement("span");
       label.className = "quick-panel-item-label";
-      label.textContent = item.label;
+      label.textContent = this.capitalizeLabel(item.label);
       content.appendChild(label);
 
       if (item.description || item.detail) {
@@ -387,6 +387,15 @@ class QuickPanelController {
 
       this.list.appendChild(row);
     });
+  }
+
+  capitalizeLabel(label) {
+    const value = String(label ?? "");
+    return value.replace(
+      /^(\s*)(\S)/,
+      (_, whitespace, firstCharacter) =>
+        whitespace + firstCharacter.toUpperCase(),
+    );
   }
 
   setHoveredItem(row) {
