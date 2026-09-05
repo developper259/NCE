@@ -73,7 +73,7 @@
   cursor: pointer;
 }
 
-.quick-panel-item:hover,
+.quick-panel-item.is-hovered,
 .quick-panel-item[aria-selected="true"] {
   background: var(--bg-hover);
   color: var(--text-selected);

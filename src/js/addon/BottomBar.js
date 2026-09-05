@@ -29,7 +29,7 @@ class BottomBar {
       onAccept: (item) => {
         CONFIG_SET("tab_width", item.data);
         this.refreshScrollers();
-        this.editor.lineController.refreshTabWidth();
+        this.editor.lineController.refresh(true);
       },
     });
   }

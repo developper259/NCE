@@ -4,6 +4,7 @@ class QuickPanelController {
     this.host = document.querySelector(".quick-panel-host");
     this.session = null;
     this.previousFocus = null;
+    this.hoveredItem = null;
     this.requestGeneration = 0;
 
     if (!this.host) return;
@@ -18,6 +19,7 @@ class QuickPanelController {
 
     this.input = document.createElement("input");
     this.input.className = "quick-panel-input";
+    this.input.type = "text";
     this.input.autocomplete = "off";
     this.input.spellcheck = false;
 
@@ -31,20 +33,19 @@ class QuickPanelController {
     this.error = document.createElement("div");
     this.error.className = "quick-panel-error";
 
-    this.panel.append(
-      this.title,
-      this.input,
-      this.error,
-      this.list,
-      this.empty,
-    );
+    this.panel.append(this.title, this.input, this.error, this.list, this.empty);
     this.host.appendChild(this.panel);
     this.host.setAttribute("aria-hidden", "true");
 
     this.input.addEventListener("input", () => this.handleInput());
-    this.input.addEventListener("keydown", (event) =>
-      this.handleKeyDown(event),
+    this.input.addEventListener("keydown", (event) => this.handleKeyDown(event));
+
+    this.list.addEventListener(
+      "click",
+      (event) => this.acceptListItem(event),
+      true,
     );
+
     this.host.addEventListener("click", (event) => {
       if (event.target === this.host) this.close();
     });
@@ -52,7 +53,9 @@ class QuickPanelController {
 
   open(options = {}) {
     if (!this.host) return false;
-    if (this.isOpen()) this.close({ notifyCancel: false, restoreFocus: false });
+    if (this.isOpen()) {
+      this.close({ notifyCancel: false, restoreFocus: false });
+    }
 
     const mode = options.mode === "input" ? "input" : "pick";
     this.previousFocus = document.activeElement;
@@ -77,19 +80,15 @@ class QuickPanelController {
       "aria-label",
       options.placeholder || options.title || "Quick panel",
     );
-    this.panel.setAttribute("aria-labelledby", "quick-panel-title");
-    this.title.id = "quick-panel-title";
     this.title.textContent = options.title || "";
     this.title.hidden = !options.title;
     this.list.hidden = mode !== "pick";
     this.empty.hidden = true;
     this.error.hidden = true;
+
     this.render();
     this.input.focus();
-    this.input.setSelectionRange(
-      this.input.value.length,
-      this.input.value.length,
-    );
+    this.input.setSelectionRange(this.input.value.length, this.input.value.length);
 
     if (mode === "pick") this.loadItems(this.session.query);
     return true;
@@ -103,6 +102,8 @@ class QuickPanelController {
     this.requestGeneration++;
     this.session = null;
     this.previousFocus = null;
+    this.hoveredItem = null;
+
     this.host.classList.remove("is-open");
     this.host.setAttribute("aria-hidden", "true");
     this.input.value = "";
@@ -112,15 +113,14 @@ class QuickPanelController {
     this.error.textContent = "";
 
     if (restoreFocus) {
-      const target = previousFocus;
-      if (target && typeof target.focus === "function" && target.isConnected) {
-        target.focus();
-        if (target === this.editor.output) this.editor.setSelected?.(true);
+      if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
+        previousFocus.focus();
       } else if (this.editor.output?.focus) {
         this.editor.output.focus({ preventScroll: true });
         this.editor.setSelected?.(true);
       }
     }
+
     if (notifyCancel && typeof options.onCancel === "function") {
       options.onCancel();
     }
@@ -128,7 +128,7 @@ class QuickPanelController {
   }
 
   isOpen(id) {
-    return this.session !== null && (!id || this.session.id === id);
+    return Boolean(this.session && (!id || this.session.id === id));
   }
 
   handleInput() {
@@ -191,18 +191,15 @@ class QuickPanelController {
     this.render();
 
     try {
-      const result =
-        typeof provider === "function" ? await provider(query) : provider;
-      if (this.session !== session || generation !== this.requestGeneration)
-        return;
+      const result = typeof provider === "function" ? await provider(query) : provider;
+      if (this.session !== session || generation !== this.requestGeneration) return;
       session.items = Array.isArray(result)
         ? result.filter((item) => item && item.id != null && item.label != null)
         : [];
       session.loading = false;
       this.updateVisibleItems();
     } catch (error) {
-      if (this.session !== session || generation !== this.requestGeneration)
-        return;
+      if (this.session !== session || generation !== this.requestGeneration) return;
       session.items = [];
       session.loading = false;
       this.empty.textContent = "Unable to load results";
@@ -217,7 +214,7 @@ class QuickPanelController {
     const query = this.session.query.trim().toLowerCase();
     this.session.visibleItems = this.session.items.filter((item) => {
       if (!query) return true;
-      const searchable = [
+      return [
         item.label,
         item.description,
         item.detail,
@@ -225,8 +222,8 @@ class QuickPanelController {
       ]
         .filter(Boolean)
         .join(" ")
-        .toLowerCase();
-      return searchable.includes(query);
+        .toLowerCase()
+        .includes(query);
     });
 
     const selectedId = this.session.options.selectedId;
@@ -241,9 +238,22 @@ class QuickPanelController {
   setSelection(index) {
     if (!this.session || this.session.visibleItems.length === 0) return;
     const count = this.session.visibleItems.length;
-    this.session.selectedIndex = (index + count) % count;
-    this.render();
+    const nextIndex = (index + count) % count;
+    if (nextIndex === this.session.selectedIndex) return;
+
+    const previousIndex = this.session.selectedIndex;
+    this.hoveredItem?.classList.remove("is-hovered");
+    this.hoveredItem = null;
+    this.session.selectedIndex = nextIndex;
+    this.updateSelectionDOM(previousIndex, nextIndex);
     this.scrollSelectedIntoView();
+  }
+
+  updateSelectionDOM(previousIndex, nextIndex) {
+    const previousRow = this.list.children[previousIndex];
+    const nextRow = this.list.children[nextIndex];
+    previousRow?.setAttribute("aria-selected", "false");
+    nextRow?.setAttribute("aria-selected", "true");
   }
 
   moveSelection(offset) {
@@ -256,13 +266,29 @@ class QuickPanelController {
     row?.scrollIntoView?.({ block: "nearest" });
   }
 
+  acceptListItem(event) {
+    if (!this.session) return;
+
+    const row = event.target.closest?.(".quick-panel-item");
+    if (!row) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const item = this.session.visibleItems.find(
+      (candidate) => String(candidate.id) === row.dataset.itemId,
+    );
+    if (item) this.accept(item);
+  }
+
   accept(value) {
     if (!this.session) return;
 
     const options = this.session.options;
-    if (this.session.mode === "pick" && value.disabled) return;
-    const validation =
-      typeof options.validate === "function" ? options.validate(value) : null;
+    if (this.session.mode === "pick" && value?.disabled) return;
+
+    const validation = typeof options.validate === "function"
+      ? options.validate(value)
+      : null;
     if (validation) {
       this.error.textContent = validation;
       this.error.hidden = false;
@@ -288,8 +314,7 @@ class QuickPanelController {
       return;
     }
     if (this.session.visibleItems.length === 0) {
-      this.empty.textContent =
-        this.session.options.emptyMessage || "No results";
+      this.empty.textContent = this.session.options.emptyMessage || "No results";
       this.empty.hidden = false;
       return;
     }
@@ -300,10 +325,7 @@ class QuickPanelController {
       row.className = "quick-panel-item";
       row.dataset.itemId = String(item.id);
       row.setAttribute("role", "option");
-      row.setAttribute(
-        "aria-selected",
-        String(index === this.session.selectedIndex),
-      );
+      row.setAttribute("aria-selected", String(index === this.session.selectedIndex));
       row.disabled = Boolean(item.disabled);
 
       if (item.icon) {
@@ -319,6 +341,7 @@ class QuickPanelController {
       label.className = "quick-panel-item-label";
       label.textContent = item.label;
       content.appendChild(label);
+
       if (item.description || item.detail) {
         const description = document.createElement("span");
         description.className = "quick-panel-item-description";
@@ -334,14 +357,28 @@ class QuickPanelController {
         row.appendChild(shortcut);
       }
 
-      row.addEventListener("mouseenter", () => this.setSelection(index));
-      row.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.accept(item);
+      row.addEventListener("mouseenter", () => {
+        this.setSelection(index);
+        this.setHoveredItem(row);
       });
+      row.addEventListener("mouseleave", () => {
+        this.clearHoveredItem(row);
+      });
+
       this.list.appendChild(row);
     });
+  }
+
+  setHoveredItem(row) {
+    if (this.hoveredItem === row) return;
+    this.hoveredItem?.classList.remove("is-hovered");
+    row.classList.add("is-hovered");
+    this.hoveredItem = row;
+  }
+
+  clearHoveredItem(row) {
+    row.classList.remove("is-hovered");
+    if (this.hoveredItem === row) this.hoveredItem = null;
   }
 
   appendShortcut(container, shortcut) {
