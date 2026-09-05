@@ -18,7 +18,8 @@ class HistoryController {
   }
 
   record(entry) {
-    if (this.isReplaying || !entry || entry.beforeText === entry.afterText) return;
+    if (this.isReplaying || !entry || entry.beforeText === entry.afterText)
+      return;
     const file = this.editor.tabManager.activeFile;
     const state = this.getState(file);
     if (!state) return;
@@ -52,7 +53,10 @@ class HistoryController {
   }
 
   entrySize(entry) {
-    return String(entry.beforeText || "").length + String(entry.afterText || "").length;
+    return (
+      String(entry.beforeText || "").length +
+      String(entry.afterText || "").length
+    );
   }
 
   trim(state) {
@@ -82,7 +86,12 @@ class HistoryController {
 
   clear(file = this.editor.tabManager.activeFile) {
     if (!file) return;
-    this.states.set(file, { entries: [], index: 0, savedIndex: 0, textBudget: 0 });
+    this.states.set(file, {
+      entries: [],
+      index: 0,
+      savedIndex: 0,
+      textBudget: 0,
+    });
     file.setIsSaved(true);
   }
 
@@ -127,20 +136,19 @@ class HistoryController {
   async replay(entry, redo) {
     const text = redo ? entry.afterText : entry.beforeText;
     const replaced = redo ? entry.beforeText : entry.afterText;
-    const end = this.editor.writerController.advancePosition(entry.start, replaced);
+    const end = this.editor.writerController.advancePosition(
+      entry.start,
+      replaced,
+    );
     this.isReplaying = true;
     try {
-      this.editor.writerController.applyRangeEdit(
-        entry.start,
-        end,
-        text,
-        {
-          recordHistory: false,
-          source: "history",
-          cursor: redo ? entry.cursorAfter : entry.cursorBefore,
-          selection: redo ? entry.selectionAfter : entry.selectionBefore,
-        },
-      );
+      this.editor.writerController.applyRangeEdit(entry.start, end, text, {
+        recordHistory: false,
+        source: "history",
+        ensureVisible: true,
+        cursor: redo ? entry.cursorAfter : entry.cursorBefore,
+        selection: redo ? entry.selectionAfter : entry.selectionBefore,
+      });
     } finally {
       this.isReplaying = false;
     }

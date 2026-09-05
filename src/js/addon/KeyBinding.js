@@ -137,9 +137,10 @@ class KeyBinding {
     } else {
       const row = this.editor.cursorController.row;
       const lines = this.editor.lineController.lines;
-      const end = row < lines.length
-        ? { row: row + 1, column: 0 }
-        : { row, column: lines[row - 1].getText().length };
+      const end =
+        row < lines.length
+          ? { row: row + 1, column: 0 }
+          : { row, column: lines[row - 1].getText().length };
       this.editor.writerController.deleteRange({ row, column: 0 }, end);
     }
   }

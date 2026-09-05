@@ -39,7 +39,7 @@ class Editor {
     this.threadManager = new ThreadManager();
     this.contextMenuManager = new ContextMenuManager();
     this.quickPanel = new QuickPanelManager(this);
-    
+
     this.agent = new Agent(this);
 
     this.fileExplorer = new FileExplorer(this);
