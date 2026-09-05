@@ -2,26 +2,36 @@ class BottomBar {
   constructor(e) {
     this.editor = e;
 
-    this.scrollersValue = {
-      "config-space": {
-        instance: this.editor.Cconfig_space,
-      },
-    };
-
     this.cursorOBJ = getElement(".bottomBar-cursorPos");
-    this.scrollers = getElements(".scroller-open");
+    this.configSpaceElement = getElement("#config-space");
 
-    this.initButton();
+    this.refreshScrollers();
   }
 
-  initButton() {
-    for (let scroller of this.scrollers) {
-      const instance = this.scrollersValue[scroller.id].instance;
-      instance.refresh();
+  openConfigSpace() {
+    const current = Number(CONFIG_GET("tab_width"));
+    const items = Array.from({ length: 8 }, (_, index) => {
+      const value = index + 1;
+      return {
+        id: String(value),
+        label: `Spaces: ${value}`,
+        data: value,
+      };
+    });
 
-      let title = scroller.childNodes[1];
-      title.innerText = instance.values[instance.value];
-    }
+    this.editor.quickPanel.open({
+      id: "config-space",
+      mode: "pick",
+      title: "Select Tab Size",
+      placeholder: "Select Tab Size",
+      selectedId: String(current),
+      items,
+      onAccept: (item) => {
+        CONFIG_SET("tab_width", item.data);
+        this.refreshScrollers();
+        this.editor.lineController.refreshTabWidth();
+      },
+    });
   }
 
   refresh() {
@@ -50,11 +60,9 @@ class BottomBar {
   }
 
   refreshScrollers() {
-    for (let scroller of this.scrollers) {
-      let instance = this.scrollersValue[scroller.id].instance;
-      let title = scroller.childNodes[1];
-      title.innerText = instance.values[instance.value];
-    }
+    if (!this.configSpaceElement) return;
+    const title = this.configSpaceElement.querySelector(".scroller-title");
+    if (title) title.innerText = `Spaces: ${CONFIG_GET("tab_width")}`;
   }
 
   hide() {

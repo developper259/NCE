@@ -19,7 +19,6 @@ class Editor {
 
     this.selected = false;
     this.isActive = false;
-    this.panel = undefined;
 
     this.baseX = 50; // left margin
     this.baseY = 2; // top margin
@@ -56,12 +55,10 @@ class Editor {
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
     this.smartTypingController = new SmartTypingController(this);
+    this.quickPanel = new QuickPanelController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
-    this.command = new Command(this);
-    this.Ccmd = new CMD(this);
-    this.Cconfig_space = new Config_space(this);
     this.savePopupManager = new SavePopupManager(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
     this.sidebarResizer = new SidebarResizer(this);
@@ -158,7 +155,6 @@ class Editor {
     ) {
       this.setSelected(true);
     } else {
-      if (c.contains("command-el") || c.contains("command-el-title")) return;
       this.setSelected(false);
       if (!this.isButtonChangePosition) {
         this.cursorController.disable();

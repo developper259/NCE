@@ -199,8 +199,47 @@ class KeyBinding {
   control_replace(s, c, m, a) {}
 
   control_open_command(s, c, m, a) {
-    if (this.editor.panel instanceof CMD) this.editor.panel.close();
-    else this.editor.Ccmd.open();
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel) return;
+    if (quickPanel.isOpen("command-palette")) {
+      quickPanel.close();
+      return;
+    }
+
+    const items = USERCONFIG_KEYBINDING.filter(
+      (item) =>
+        item.action !== "open_command" &&
+        item.action !== "escape" &&
+        item.key.toLowerCase().includes("meta"),
+    ).map((item) => ({
+      id: item.action,
+      label: this.getActionLabel(item.action),
+      description: item.description,
+      shortcut: item.key,
+      data: item,
+    }));
+
+    quickPanel.open({
+      id: "command-palette",
+      mode: "pick",
+      title: "Command Palette",
+      placeholder: "Type a command",
+      items,
+      onAccept: (item) => this.executeCommandItem(item),
+    });
+  }
+
+  executeCommandItem(item) {
+    const keybinding = item?.data || item;
+    if (!keybinding?.action) return;
+    this.editor.keyBinding.exec(keybinding);
+  }
+
+  getActionLabel(action) {
+    return action
+      .split("_")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
   }
 
   control_delete_line(s, c, m, a) {
@@ -256,8 +295,8 @@ class KeyBinding {
       return;
     }
 
-    if (this.editor.panel !== undefined) {
-      this.editor.panel.close();
+    if (this.editor.quickPanel?.isOpen()) {
+      this.editor.quickPanel.close();
       return;
     }
 

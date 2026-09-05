@@ -14,7 +14,7 @@
     <link rel="stylesheet" href="../css/index.css" />
     <link rel="stylesheet" href="../css/editor.css" />
     <link rel="stylesheet" href="../css/bottomBar.css" />
-    <link rel="stylesheet" href="../css/command.css" />
+    <link rel="stylesheet" href="../css/quickPanel.css" />
     <link rel="stylesheet" href="../css/tabManager.css" />
     <link rel="stylesheet" href="../css/scroller.css" />
     <link rel="stylesheet" href="../css/emptyMenu.css" />
@@ -42,19 +42,7 @@
   </head>
   <body>
     <section class="main-section">
-      <div class="command box">
-        <div class="command-header">
-          <input
-            type="search"
-            class="command-search"
-            placeholder="Search files by name"
-          />
-          <div class="command-body">
-            <div class="command-els-top box-bottom"></div>
-            <div class="command-els"></div>
-          </div>
-        </div>
-      </div>
+      <div class="quick-panel-host"></div>
       <div class="sidebar-tab-selector box"></div>
       <div class="sidebar-left box">
         <div class="sidebar-menu"></div>
@@ -150,6 +138,7 @@
     <script src="../js/controller/CursorController.js"></script>
     <script src="../js/controller/SearchController.js"></script>
     <script src="../js/controller/SmartTypingController.js"></script>
+    <script src="../js/controller/QuickPanelController.js"></script>
 
     <script src="../js/manager/TabManager.js"></script>
     <script src="../js/manager/KeyBindingManager.js"></script>
@@ -171,7 +160,6 @@
 
     <script src="../js/types/File.js"></script>
     <script src="../js/types/Line.js"></script>
-    <script src="../js/types/Command.js"></script>
     <script src="../js/types/Scroller.js"></script>
     <script src="../js/types/Sidebar.js"></script>
     <script src="../js/types/ContextMenu.js"></script>
@@ -184,9 +172,6 @@
     <script src="../js/sidebar/Agent.Sidebar.js"></script>
 
     <script src="../js/contextMenu/FileExplorer.ContextMenu.js"></script>
-
-    <script src="../js/commands/CMD.Command.js"></script>
-    <script src="../js/commands/ConfigSpace.Command.js"></script>
 
     <script src="../js/main/Editor.js"></script>
 

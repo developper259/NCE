@@ -126,14 +126,6 @@ class Events {
     // ------- Editor.js ------
     this.editor.onClick(e);
 
-    // ------- Command.js ------
-    if (this.editor.panel) this.editor.panel.mouseClick(e);
-
-    if (cl.contains("command-el")) {
-      this.editor.command.onClickEl(e);
-      return;
-    }
-
     // ------- LineController.js ------
     if (cl.contains("line-el")) {
       this.editor.lineController.onClickNumberLine(e);
@@ -152,10 +144,10 @@ class Events {
 
     // ------- BottomBar.js ------
 
-    if (cl.contains("scroller-open") || cl.contains("scroller-title")) {
-      let id = el.id;
-      if (!id) id = el.parentElement.id;
-      this.editor.bottomBar.scrollersValue[id].instance.active();
+    const scroller = el.closest?.(".scroller-open, .scroller-title");
+    if (scroller) {
+      const id = scroller.id || scroller.parentElement?.id;
+      if (id === "config-space") this.editor.bottomBar.openConfigSpace();
       return;
     }
   }
