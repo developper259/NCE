@@ -1,4 +1,4 @@
-class QuickPanelController {
+class QuickPanelManager {
   constructor(editor) {
     this.editor = editor;
     this.host = document.querySelector(".quick-panel-host");

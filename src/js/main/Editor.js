@@ -38,6 +38,8 @@ class Editor {
     this.statesManager = new StatesManager(this);
     this.threadManager = new ThreadManager();
     this.contextMenuManager = new ContextMenuManager();
+    this.quickPanel = new QuickPanelManager(this);
+    
     this.agent = new Agent(this);
 
     this.fileExplorer = new FileExplorer(this);
@@ -55,7 +57,6 @@ class Editor {
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
     this.smartTypingController = new SmartTypingController(this);
-    this.quickPanel = new QuickPanelController(this);
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
