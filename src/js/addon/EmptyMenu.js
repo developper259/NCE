@@ -1,7 +1,19 @@
 class EmptyMenu {
   constructor(e) {
     this.editor = e;
-    this.actions = ["new_file", "open_file", "open_folder", "find_file"];
+    this.actions = ["new_file", "open_file", "open_folder", "toggle_agent"];
+
+    addEvent("dblclick", this.onDoubleClick.bind(this), [
+      this.editor.editorOBJ,
+      this.editor.fileManagerOBJ,
+    ]);
+  }
+
+  onDoubleClick(event) {
+    if (this.editor.tabManager.activeFile) return;
+    if (event.target?.closest?.("button")) return;
+
+    this.editor.tabManager.createEmptyFile();
   }
 
   parseKeyToElements(keyString) {

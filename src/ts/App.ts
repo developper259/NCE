@@ -24,7 +24,7 @@ export class App {
   }
   setupAppEvents() {
     app.on("ready", () => {
-      //this.nsh.start();
+      this.nsh.start();
       
       this.window.create();
     });
