@@ -45,7 +45,7 @@ class KeyBindingManager {
   bindEditor(key, e) {
     if (CONFIG_KEYBINDING_CONTAINSKEY(key)) {
       this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
-    } else {
+    } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
       if (this.editor.tabManager.activeFile && e.key.length == 1) {
         const handled = this.editor.smartTypingController?.handleCharacter(
           e.key,

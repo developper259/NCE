@@ -140,28 +140,38 @@ class FileNode {
 
   async save() {
     if (!this.path) {
-      let r = await this.selectFileToSave();
-      if (!r) return;
-      await this.loadLanguage();
+      return this.saveAs();
     }
 
-    let r = await this.editor.api.saveFile(
-      this.path,
-      this.editor.lineController.getContent(),
-    );
+    const content = this.lines.map((line) => line.getText()).join("\n");
+    const saved = await this.editor.api.saveFile(this.path, content);
 
-    if (r) {
+    if (saved) {
       this.setIsSaved(true);
       this.editor.tabManager.refresh();
     }
+    return Boolean(saved);
+  }
+
+  async saveAs() {
+    const selectedPath = await this.editor.tabManager.selectNewFile();
+    if (typeof selectedPath !== "string" || !selectedPath) return false;
+
+    const content = this.lines.map((line) => line.getText()).join("\n");
+    const saved = await this.editor.api.saveFile(selectedPath, content);
+    if (!saved) return false;
+
+    this.path = selectedPath;
+    this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
+    this.setIsSaved(true);
+    await this.loadLanguage();
+    this.editor.highlightController.reset();
+    this.editor.tabManager.refresh();
+    return true;
   }
 
   async selectFileToSave() {
-    const file = await this.editor.tabManager.selectNewFile();
-    if (!file) return false;
-    this.path = file.path;
-    this.name = file.name;
-    return true;
+    return this.saveAs();
   }
 
   setIsSaved(value) {

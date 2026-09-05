@@ -7,7 +7,7 @@
   "type": "commonjs",
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "start": "tsc && electron --no-sandbox dist/main.js",
+    "start": "tsc && electron dist/main.js",
     "build": "electron-builder",
     "dist": "electron-builder --dir"
   },

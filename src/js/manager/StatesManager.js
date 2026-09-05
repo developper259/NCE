@@ -3,13 +3,15 @@ class StatesManager {
     this.editor = editor;
   }
 
-  save() {
+  async save() {
     try {
       const currentState = this.getState();
-      this.editor.api.saveEditorState(JSON.stringify(currentState));
+      return await this.editor.api.saveEditorState(
+        JSON.stringify(currentState),
+      );
     } catch (error) {
       console.error("Failed to serialize editor state:", error);
-      this.editor.api.saveEditorState("{}");
+      return await this.editor.api.saveEditorState("{}");
     }
   }
 

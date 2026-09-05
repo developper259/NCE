@@ -2,179 +2,129 @@ const USERCONFIG_KEYBINDING = [
   {
     action: "save",
     description: "Save the current file",
-    key: "Meta+S",
+    key: "Mod+S",
     in_editor: false,
   },
   {
     action: "open_file",
     description: "Open a file",
-    key: "Meta+O",
+    key: "Mod+O",
     in_editor: false,
   },
   {
     action: "open_folder",
     description: "Open a folder",
-    key: "Meta+Shift+O",
+    key: "Mod+Shift+O",
     in_editor: false,
   },
   {
     action: "new_file",
     description: "Create a new file",
-    key: "Meta+N",
+    key: "Mod+N",
     in_editor: false,
   },
   {
     action: "close_file",
     description: "Close the current file",
-    key: "Meta+W",
+    key: "Mod+W",
     in_editor: false,
   },
   {
     action: "close_all_file",
     description: "Close all files",
-    key: "Meta+Shift+W",
+    key: "Mod+Shift+W",
     in_editor: false,
   },
   {
     action: "copy",
     description: "Copy the selection",
-    key: "Meta+C",
+    key: "Mod+C",
     in_editor: true,
   },
   {
     action: "paste",
     description: "Paste content",
-    key: "Meta+V",
+    key: "Mod+V",
     in_editor: true,
   },
   {
     action: "cut",
     description: "Cut the selection",
-    key: "Meta+X",
+    key: "Mod+X",
     in_editor: true,
   },
   {
     action: "undo",
     description: "Undo the last action",
-    key: "Meta+Z",
+    key: "Mod+Z",
     in_editor: true,
   },
   {
     action: "redo",
     description: "Redo the last action",
-    key: "Meta+Y",
+    key: "Mod+Y",
     in_editor: true,
   },
   {
     action: "find",
     description: "Find in the current file",
-    key: "Meta+F",
+    key: "Mod+F",
     in_editor: false,
   },
   {
     action: "replace",
     description: "Replace in the current file",
-    key: "Meta+H",
+    key: "Mod+H",
     in_editor: true,
   },
   {
     action: "open_command",
     description: "Open the command palette",
-    key: "Meta+Shift+Y",
+    key: "Mod+Shift+P",
     in_editor: false,
   },
   {
     action: "delete_line",
     description: "Delete the current line",
-    key: "Meta+Shift+K",
+    key: "Mod+Shift+K",
     in_editor: true,
   },
   {
     action: "select_all",
     description: "Select all",
-    key: "Meta+A",
+    key: "Mod+A",
     in_editor: true,
   },
-
   {
     action: "toggle_file_explorer",
     description: "Toggle File Explorer",
-    key: "Meta+B",
+    key: "Mod+B",
     in_editor: false,
   },
   {
     action: "toggle_search",
     description: "Toggle advanced search",
-    key: "Meta+Shift+F",
+    key: "Mod+Shift+F",
     in_editor: false,
   },
   {
     action: "toggle_agent",
     description: "Open Agent",
-    key: "Meta+L",
+    key: "Mod+L",
     in_editor: false,
   },
-
-  {
-    key: "Escape",
-    action: "escape",
-    in_editor: false,
-  },
-  {
-    key: "Tab",
-    action: "indent_right",
-    in_editor: true,
-  },
-  {
-    key: "Delete",
-    action: "delete_right",
-    in_editor: true,
-  },
-  {
-    key: "Backspace",
-    action: "delete_left",
-    in_editor: true,
-  },
-  {
-    key: "Enter",
-    action: "newline",
-    in_editor: true,
-  },
-  {
-    key: "ArrowUp",
-    action: "move_up",
-    in_editor: false,
-  },
-  {
-    key: "ArrowDown",
-    action: "move_down",
-    in_editor: false,
-  },
-  {
-    key: "ArrowLeft",
-    action: "move_left",
-    in_editor: false,
-  },
-  {
-    key: "ArrowRight",
-    action: "move_right",
-    in_editor: false,
-  },
-  {
-    key: "Home",
-    action: "move_to_line_start",
-    in_editor: true,
-  },
-  {
-    key: "End",
-    action: "move_to_line_end",
-    in_editor: true,
-  },
-  {
-    key: "Insert",
-    action: "toggle_insert_mode",
-    in_editor: true,
-  },
+  { key: "Escape", action: "escape", in_editor: false },
+  { key: "Tab", action: "indent_right", in_editor: true },
+  { key: "Delete", action: "delete_right", in_editor: true },
+  { key: "Backspace", action: "delete_left", in_editor: true },
+  { key: "Enter", action: "newline", in_editor: true },
+  { key: "ArrowUp", action: "move_up", in_editor: false },
+  { key: "ArrowDown", action: "move_down", in_editor: false },
+  { key: "ArrowLeft", action: "move_left", in_editor: false },
+  { key: "ArrowRight", action: "move_right", in_editor: false },
+  { key: "Home", action: "move_to_line_start", in_editor: true },
+  { key: "End", action: "move_to_line_end", in_editor: true },
+  { key: "Insert", action: "toggle_insert_mode", in_editor: true },
 ];
 
 USERCONFIG_CONFIG = {
@@ -353,8 +303,34 @@ function CONFIG_KEYBINDING_CONTAINSACTIN(action) {
 
 function CONFIG_KEYBINDING_GET_KEY(key) {
   for (item of USERCONFIG_KEYBINDING) {
-    if (item.key.toLowerCase() == key.toLowerCase()) return item;
+    if (
+      CONFIG_KEYBINDING_NORMALIZE(item.key) == CONFIG_KEYBINDING_NORMALIZE(key)
+    )
+      return item;
   }
+}
+
+function CONFIG_KEYBINDING_PRIMARY_MODIFIER() {
+  return window.api?.platform === "darwin" ? "Meta" : "Ctrl";
+}
+
+function CONFIG_KEYBINDING_NORMALIZE(key) {
+  return String(key || "")
+    .split("+")
+    .map((part) => {
+      const value = part.trim();
+      return value.toLowerCase() === "mod"
+        ? CONFIG_KEYBINDING_PRIMARY_MODIFIER().toLowerCase()
+        : value.toLowerCase();
+    })
+    .join("+");
+}
+
+function CONFIG_KEYBINDING_DISPLAY(key) {
+  return String(key || "").replace(
+    /(^|\+)Mod(?=\+|$)/gi,
+    CONFIG_KEYBINDING_PRIMARY_MODIFIER(),
+  );
 }
 
 function CONFIG_KEYBINDING_GET_ACTION(action) {

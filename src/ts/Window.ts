@@ -1,4 +1,4 @@
-import { BrowserWindow, ipcMain } from "electron";
+import { BrowserWindow, ipcMain, shell } from "electron";
 import path from "path";
 
 import { FileManager } from "./addon/FileManager";
@@ -38,12 +38,12 @@ export class Window {
       icon: path.join(__dirname, "../../assets/logo/NCE/dark-logo.png"),
 
       webPreferences: {
-        sandbox: false,
+        sandbox: true,
 
         preload: path.join(__dirname, "../../src/js/main/Preload.js"),
 
         contextIsolation: true,
-        nodeIntegration: true,
+        nodeIntegration: false,
       },
     });
 
@@ -61,15 +61,21 @@ export class Window {
 
     this.window.loadFile(path.join(__dirname, "../../src/html/index.html"));
 
+    this.window.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+      return { action: "deny" };
+    });
+
+    this.window.webContents.on("will-navigate", (event, url) => {
+      if (!url.startsWith("file://")) event.preventDefault();
+    });
+
     this.window.on("close", (event) => {
       if (this.forceQuit) {
         return;
       }
 
       event.preventDefault();
-
-      this.forceQuit = true;
-
       this.window?.webContents.send("Request:saveState");
     });
 
@@ -102,6 +108,12 @@ export class Window {
 
     ipcMain.handle("App:quit", async () => {
       this.window?.close();
+    });
+
+    ipcMain.handle("App:approveQuit", async () => {
+      this.forceQuit = true;
+      this.window?.close();
+      return true;
     });
 
     this.fileManager.handleIPC();

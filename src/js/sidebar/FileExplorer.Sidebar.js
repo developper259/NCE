@@ -1,6 +1,6 @@
 class FileExplorer extends Sidebar {
   constructor(editor) {
-    super("file-explorer", "File Explorer", "fi fi-rr-folder", "left" ,editor);
+    super("file-explorer", "File Explorer", "fi fi-rr-folder", "left", editor);
 
     this.activeFilePath = null;
     this.files = [];
@@ -613,8 +613,11 @@ class FileExplorer extends Sidebar {
       return;
     }
 
-    const parentDir = target.path.substring(0, target.path.lastIndexOf("/"));
-    const newPath = `${parentDir}/${name}`;
+    const normalizedTargetPath = String(target.path).replace(/\\/g, "/");
+    const separatorIndex = normalizedTargetPath.lastIndexOf("/");
+    const parentDir =
+      separatorIndex >= 0 ? normalizedTargetPath.slice(0, separatorIndex) : "";
+    const newPath = parentDir ? `${parentDir}/${name}` : name;
 
     try {
       const result = await this.fileOperations.rename(target.path, newPath);
@@ -624,10 +627,20 @@ class FileExplorer extends Sidebar {
         return;
       }
 
-      if (this.activeFilePath === target.path) {
-        this.activeFilePath = newPath;
+      const oldPath = target.path;
+      const normalizedOldPath = String(oldPath).replace(/\\/g, "/");
+      const normalizedActivePath = String(this.activeFilePath || "").replace(
+        /\\/g,
+        "/",
+      );
+      if (
+        normalizedActivePath === normalizedOldPath ||
+        normalizedActivePath.startsWith(`${normalizedOldPath}/`)
+      ) {
+        this.activeFilePath =
+          newPath + normalizedActivePath.slice(normalizedOldPath.length);
       }
-      this.editor.tabManager.updateFilePath(target.path, newPath);
+      await this.editor.tabManager.updateFilePath(oldPath, newPath);
 
       target.name = name;
       target.path = newPath;

@@ -190,8 +190,11 @@ class Editor {
   }
 
   initQuitEvent() {
-    this.api.onSaveRequest(() => {
-      this.statesManager.save();
+    this.api.onSaveRequest(async () => {
+      const closed = await this.tabManager.closeFiles();
+      if (!closed) return;
+      const saved = await this.statesManager.save();
+      if (saved !== false) await this.api.approveQuit?.();
     });
   }
 

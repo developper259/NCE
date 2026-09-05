@@ -356,7 +356,7 @@ class WriterController {
     const selectCtrl = this.editor.selectController;
     const cursor = this.editor.cursorController;
 
-    if (!selectCtrl || !selectCtrl.containsSelected) return null;
+    if (!selectCtrl || !selectCtrl.hasActiveSelection?.()) return null;
 
     let start = selectCtrl.startSelect;
     let end = { row: cursor.row, column: cursor.column };
@@ -419,14 +419,7 @@ class WriterController {
     return { row: newRow, column: newCol };
   }
 
-  replaceRange(
-    text,
-    startLine,
-    startColumn,
-    endLine,
-    endColumn,
-    options = {},
-  ) {
+  replaceRange(text, startLine, startColumn, endLine, endColumn, options = {}) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
 

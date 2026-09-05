@@ -321,6 +321,10 @@ class SelectController {
     return this.selectedLines.size;
   }
 
+  hasActiveSelection() {
+    return this.selectedLines.size > 0;
+  }
+
   unSelectAll() {
     if (!this.editor.tabManager.activeFile) return;
 

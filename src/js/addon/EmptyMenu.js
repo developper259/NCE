@@ -80,7 +80,9 @@ class EmptyMenu {
       keybindingDiv.classList.add("editor-el");
       keybindingDiv.className = "keybinding";
 
-      const keyElements = this.parseKeyToElements(keybinding.key);
+      const keyElements = this.parseKeyToElements(
+        CONFIG_KEYBINDING_DISPLAY(keybinding.key),
+      );
       for (const element of keyElements) {
         const keySpan = document.createElement("span");
         keySpan.className = "key";

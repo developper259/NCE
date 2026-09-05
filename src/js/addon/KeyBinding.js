@@ -62,13 +62,12 @@ class KeyBinding {
 
   // --- Control functions ---
 
-  control_save(s, c, m, a) {
+  async control_save(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (s) {
-      this.editor.tabManager.activeFile.selectFileToSave();
-      this.editor.tabManager.activeFile.save();
+      await this.editor.tabManager.activeFile.saveAs();
     } else {
-      this.editor.tabManager.activeFile.save();
+      await this.editor.tabManager.activeFile.save();
     }
   }
 
@@ -86,14 +85,14 @@ class KeyBinding {
     this.editor.tabManager.createEmptyFile();
   }
 
-  control_close_file(s, c, m, a) {
+  async control_close_file(s, c, m, a) {
     if (this.editor.tabManager.files.length != 0)
-      this.editor.tabManager.closeActiveFile();
+      await this.editor.tabManager.closeActiveFile();
     else this.editor.api.quit();
   }
 
-  control_close_all_file(s, c, m, a) {
-    this.editor.tabManager.closeFiles();
+  async control_close_all_file(s, c, m, a) {
+    await this.editor.tabManager.closeFiles();
   }
 
   async control_copy(s, c, m, a) {
@@ -210,12 +209,12 @@ class KeyBinding {
       (item) =>
         item.action !== "open_command" &&
         item.action !== "escape" &&
-        item.key.toLowerCase().includes("meta"),
+        item.in_editor === false,
     ).map((item) => ({
       id: item.action,
       label: this.getActionLabel(item.action),
       description: item.description,
-      shortcut: item.key,
+      shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
 
@@ -321,7 +320,6 @@ class KeyBinding {
   key_delete(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
-    if (m || a) return;
 
     this.editor.tabManager.activeFile.historyX = undefined;
     const lc = this.editor.lineController;
@@ -330,9 +328,9 @@ class KeyBinding {
 
     let cursor;
 
-    if (this.editor.selectController.containsSelected) {
+    if (this.editor.selectController.hasActiveSelection?.()) {
       cursor = this.editor.writerController.deleteSelection();
-    } else {
+    } else if (!m && !a) {
       const lineNode = lc.lines[y - 1];
       const l = lineNode ? lineNode.getText() : "";
 
@@ -348,6 +346,8 @@ class KeyBinding {
       }
 
       cursor = this.editor.writerController.deleteRange(start, end);
+    } else {
+      return;
     }
 
     if (cursor) {
@@ -359,7 +359,6 @@ class KeyBinding {
   key_backspace(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
-    if (m || a) return;
 
     this.editor.tabManager.activeFile.historyX = undefined;
     const lc = this.editor.lineController;
@@ -368,9 +367,9 @@ class KeyBinding {
 
     let cursor;
 
-    if (this.editor.selectController.containsSelected) {
+    if (this.editor.selectController.hasActiveSelection?.()) {
       cursor = this.editor.writerController.deleteSelection();
-    } else {
+    } else if (!m && !a) {
       if (
         !c &&
         this.editor.smartTypingController?.handleBackspace({
@@ -403,6 +402,8 @@ class KeyBinding {
 
         cursor = this.editor.writerController.deleteRange(start, end);
       }
+    } else {
+      return;
     }
 
     if (cursor) {

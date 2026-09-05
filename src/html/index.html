@@ -3,6 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://localhost:1212 ws://127.0.0.1:1212; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
     <title>NCE</title>
     <link
       href="../../node_modules/@flaticon/flaticon-uicons/css/all/all.css"
@@ -27,18 +31,6 @@
 
     <link rel="stylesheet" href="../modules/NSH/themes/dark.css" />
 
-    <style>
-      #fps {
-        position: fixed;
-        top: 10px;
-        right: 10px;
-        font-size: 16px;
-        color: #ffffff;
-        padding: 5px;
-        user-select: none;
-        z-index: 1000;
-      }
-    </style>
   </head>
   <body>
     <section class="main-section">
@@ -192,27 +184,5 @@
     <script src="../config/prompt/index.js"></script>
     <script src="../config/AgentAI.js"></script>
 
-    <div id="fps"></div>
-
-    <script>
-      addEvent("DOMContentLoaded", function () {
-        var fpsContainer = document.getElementById("fps");
-        var lastTime;
-        var fps = 0;
-
-        function updateFPS() {
-          var currentTime = performance.now();
-          var deltaTime = currentTime - (lastTime || currentTime);
-          lastTime = currentTime;
-
-          fps = Math.round(1000 / deltaTime);
-          requestAnimationFrame(updateFPS);
-        }
-        setInterval(() => {
-          fpsContainer.textContent = "FPS: " + fps;
-        }, 150);
-        updateFPS();
-      });
-    </script>
   </body>
 </html>

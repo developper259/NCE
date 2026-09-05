@@ -15,6 +15,7 @@ export interface FileItem {
 export interface FileOperationResult {
   success: boolean;
   path?: string;
+  type?: "file" | "folder";
   code?: string;
   error?: string;
 }
@@ -247,6 +248,9 @@ export class FileManager {
     filePath: string,
     content: string,
   ): Promise<string | undefined> {
+    if (typeof filePath !== "string" || !filePath || typeof content !== "string") {
+      return undefined;
+    }
     try {
       const dir = path.dirname(filePath);
 
@@ -337,6 +341,18 @@ export class FileManager {
     newPath: string,
   ): Promise<FileOperationResult> {
     try {
+      if (
+        typeof oldPath !== "string" ||
+        typeof newPath !== "string" ||
+        !oldPath ||
+        !newPath
+      ) {
+        return {
+          success: false,
+          code: "INVALID_PATH",
+          error: "Les chemins de renommage sont invalides.",
+        };
+      }
       if (!fsSync.existsSync(oldPath)) {
         return {
           success: false,
@@ -352,13 +368,6 @@ export class FileManager {
         };
       }
       const sourceStats = await fs.stat(oldPath);
-      if (!sourceStats.isFile()) {
-        return {
-          success: false,
-          code: "NOT_A_FILE",
-          error: "La source n'est pas un fichier.",
-        };
-      }
       if (!fsSync.existsSync(path.dirname(newPath))) {
         return {
           success: false,
@@ -368,7 +377,11 @@ export class FileManager {
       }
       await fs.rename(oldPath, newPath);
       this.clearFileCache(oldPath);
-      return { success: true, path: newPath };
+      return {
+        success: true,
+        path: newPath,
+        type: sourceStats.isDirectory() ? "folder" : "file",
+      };
     } catch (error: any) {
       console.error("Error renaming entry:", error);
       return {
@@ -594,7 +607,16 @@ export class FileManager {
 
   clearFileCache(filePath?: string) {
     if (filePath) {
-      this.fileCache.delete(filePath);
+      const normalized = path.normalize(filePath);
+      for (const cachedPath of this.fileCache.keys()) {
+        const normalizedCached = path.normalize(cachedPath);
+        if (
+          normalizedCached === normalized ||
+          normalizedCached.startsWith(`${normalized}${path.sep}`)
+        ) {
+          this.fileCache.delete(cachedPath);
+        }
+      }
     } else {
       this.fileCache.clear();
     }

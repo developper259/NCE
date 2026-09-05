@@ -1,7 +1,9 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
+  platform: process.platform,
   quit: () => ipcRenderer.invoke("App:quit"),
+  approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
 
   selectFile: () => ipcRenderer.invoke("FileManager:selectFile"),
 

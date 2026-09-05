@@ -412,6 +412,10 @@ class QuickPanelController {
 
   appendShortcut(container, shortcut) {
     const modifierIcons = {
+      Mod:
+        window.api?.platform === "darwin"
+          ? "fi fi-rr-command"
+          : "fi fi-rr-control",
       Meta: "fi fi-rr-command",
       Ctrl: "fi fi-rr-control",
       Shift: "fi fi-rr-arrow-up",

@@ -44,6 +44,7 @@ class tabManager {
         .replace(/\\/g, "/")
         .replace(/\/+$/g, "");
     const normalizedOldPath = normalizePath(oldPath);
+    const normalizedNewPath = normalizePath(newPath);
 
     for (const file of this.files) {
       if (!file.path) continue;
@@ -51,13 +52,15 @@ class tabManager {
 
       if (normalizedFilePath === normalizedOldPath) {
         file.path = newPath;
-        file.name = newPath.split("/").pop();
+        file.name = normalizedNewPath.split("/").pop();
         changed = true;
 
         await file.loadLanguage();
         this.editor.highlightController.reset();
       } else if (normalizedFilePath.startsWith(`${normalizedOldPath}/`)) {
-        file.path = newPath + normalizedFilePath.slice(normalizedOldPath.length);
+        file.path =
+          normalizedNewPath +
+          normalizedFilePath.slice(normalizedOldPath.length);
         changed = true;
 
         await file.loadLanguage();
@@ -130,23 +133,27 @@ class tabManager {
     if (!isSetFocusFile) this.editor.refreshAll();
   }
 
-  closeFiles() {
-    requestAnimationFrame(() => {
-      delete this.files;
-      this.files = [];
+  async closeFiles() {
+    const dirtyFiles = this.files.filter(
+      (file) => !file.isSaved && !(file.isEmpty() && !file.hasPath()),
+    );
 
-      this.activeFile = undefined;
-      this.editor.fileExplorer.activeFilePath = null;
+    for (const file of dirtyFiles) {
+      const choice = await this.editor.savePopupManager.confirmClose(file.id);
+      if (choice === "cancel") return false;
+      if (choice === "save" && !(await file.save())) return false;
+    }
 
-      this.editor.searchController.close();
-
-      this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
-        file: null,
-        activeFile: undefined,
-      });
-
-      if (!this.editor.isOnInit) this.editor.refreshAll();
+    this.files = [];
+    this.activeFile = undefined;
+    this.editor.fileExplorer.activeFilePath = null;
+    this.editor.searchController.close();
+    this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+      file: null,
+      activeFile: undefined,
     });
+    if (!this.editor.isOnInit) this.editor.refreshAll();
+    return true;
   }
 
   async closeFile(id) {
@@ -175,7 +182,7 @@ class tabManager {
 
     if (this.files.length > 1) this.removeFileByID(id);
     else {
-      this.closeFiles();
+      await this.closeFiles();
       return;
     }
 
@@ -186,10 +193,11 @@ class tabManager {
     if (!this.editor.isOnInit) this.editor.refreshAll();
   }
 
-  closeActiveFile() {
+  async closeActiveFile() {
     if (this.activeFile) {
-      this.closeFile(this.activeFile.id);
+      return this.closeFile(this.activeFile.id);
     }
+    return false;
   }
 
   async setFocusFile(file) {
