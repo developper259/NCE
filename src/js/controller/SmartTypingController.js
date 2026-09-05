@@ -48,6 +48,7 @@ class SmartTypingController {
     return {
       row,
       column,
+      line,
       before: column > 0 ? line[column - 1] : "",
       after: column < line.length ? line[column] : "",
       selection: select.containsSelected || "",
@@ -96,6 +97,10 @@ class SmartTypingController {
       return this.wrapSelection(character, context);
     }
 
+    if (character === "}" && this.handleClosingIndent(character, context)) {
+      return true;
+    }
+
     if (
       this.isClosingCharacter(character) &&
       context.after === character
@@ -104,6 +109,9 @@ class SmartTypingController {
     }
 
     if (this.isOpeningCharacter(character)) {
+      if (this.isQuote(character) && !this.shouldAutoCloseQuote(context)) {
+        return false;
+      }
       return this.insertPair(character, context);
     }
 
@@ -153,46 +161,372 @@ class SmartTypingController {
     if (this.shouldIgnoreCommandEvent(event)) return false;
 
     const context = this.getTypingContext();
+    if (!context || context.selection) return false;
+
     if (
-      !context ||
-      context.selection ||
-      !this.isOpeningCharacter(context.before) ||
-      this.getClosingPair(context.before) !== context.after
+      this.isOpeningCharacter(context.before) &&
+      this.getClosingPair(context.before) === context.after
     ) {
+      return this.deleteAndPlaceCursor(
+        { row: context.row, column: context.column - 1 },
+        { row: context.row, column: context.column + 1 },
+      );
+    }
+
+    const indentationBeforeCaret = context.line.slice(0, context.column);
+    if (!this.isWhitespaceOnly(indentationBeforeCaret) || context.column === 0) {
       return false;
     }
 
-    const result = this.editor.writerController.deleteRange(
-      { row: context.row, column: context.column - 1 },
-      { row: context.row, column: context.column + 1 },
+    const startColumn = this.getPreviousIndentColumn(indentationBeforeCaret);
+    return this.deleteAndPlaceCursor(
+      { row: context.row, column: startColumn },
+      { row: context.row, column: context.column },
     );
-    if (!result) return false;
-
-    this.editor.lineController.refresh();
-    this.editor.cursorController.setCursorPosition(result.row, result.column);
-    return true;
   }
 
   handleEnter(event) {
     if (this.shouldIgnoreCommandEvent(event)) return false;
 
     const context = this.getTypingContext();
+    if (!context) return false;
+    if (context.selection && context.selectionRange) {
+      return this.replaceSelectionWithLineBreak(context.selectionRange);
+    }
+
+    const indentation = this.getLineIndentation(context.line);
+    const beforeCaret = context.line.slice(0, context.column);
+    const afterCaret = context.line.slice(context.column);
+    const contentBeforeCaret = beforeCaret.slice(indentation.length);
+
     if (
-      !context ||
-      context.selection ||
-      context.before !== "{" ||
-      context.after !== "}"
+      contentBeforeCaret.trim() === "/**" &&
+      this.isWhitespaceOnly(afterCaret)
+    ) {
+      const middleIndentation = indentation + " ";
+      this.editor.writerController.write(
+        `\n${middleIndentation}* \n${middleIndentation}*/`,
+      );
+      this.placeCursor(context.row + 1, middleIndentation.length + 2);
+      return true;
+    }
+
+    const lineComment = this.getLineCommentContinuation(
+      contentBeforeCaret,
+      afterCaret,
+    );
+    if (lineComment === "stop") {
+      return this.replaceCurrentLine(
+        context,
+        `${indentation}\n${indentation}`,
+        context.row + 1,
+        indentation.length,
+      );
+    }
+    if (lineComment) {
+      this.editor.writerController.write(`\n${indentation}${lineComment}`);
+      return true;
+    }
+
+    const blockComment = this.getBlockCommentContinuation(
+      contentBeforeCaret,
+      context.row,
+    );
+    if (blockComment) {
+      this.editor.writerController.write(`\n${indentation}${blockComment}`);
+      return true;
+    }
+
+    if (this.isBetweenStructuralPair(context.before, context.after)) {
+      const innerIndentation = indentation + this.getIndentUnit();
+      this.editor.writerController.write(
+        `\n${innerIndentation}\n${indentation}`,
+      );
+      this.placeCursor(context.row + 1, innerIndentation.length);
+      return true;
+    }
+
+    const nextIndentation = this.shouldIncreaseIndent(beforeCaret)
+      ? indentation + this.getIndentUnit()
+      : indentation;
+
+    this.editor.writerController.write(`\n${nextIndentation}`);
+    return true;
+  }
+
+  handleHome(shiftKey = false, event) {
+    if (this.shouldIgnoreCommandEvent(event)) return false;
+
+    const context = this.getTypingContext();
+    if (!context) return false;
+
+    const indentationColumn = this.getLineIndentation(context.line).length;
+    const targetColumn = this.isWhitespaceOnly(context.line)
+      ? 0
+      : context.column === indentationColumn
+        ? 0
+        : indentationColumn;
+    const select = this.editor.selectController;
+
+    if (shiftKey && typeof select.setSelection === "function") {
+      const anchor = select.containsSelected
+        ? select.startSelect
+        : { row: context.row, column: context.column };
+      if (!anchor) return false;
+      select.setSelection(anchor, { row: context.row, column: targetColumn });
+      return true;
+    }
+
+    if (select.containsSelected) select.unSelectAll();
+    this.placeCursor(context.row, targetColumn);
+    return true;
+  }
+
+  handlePaste(text, event) {
+    if (
+      this.isCompositionEvent(event) ||
+      typeof text !== "string" ||
+      (!text.includes("\n") && !text.includes("\r"))
     ) {
       return false;
     }
 
-    this.editor.writerController.write("\n\n");
-    this.editor.cursorController.setCursorPosition(context.row + 1, 0);
+    const context = this.getTypingContext();
+    if (!context) return false;
+
+    const normalizedText = text.replace(/\r\n?/g, "\n");
+    const lines = normalizedText.split("\n");
+    const commonIndentation = this.getCommonIndentationLength(lines);
+    const destination = context.selectionRange
+      ? context.selectionRange.startRow
+      : context.row;
+    const destinationLineNode =
+      this.editor.lineController.lines[destination - 1];
+    const destinationLine = destinationLineNode
+      ? destinationLineNode.getText()
+      : "";
+    const destinationIndentation = this.getLineIndentation(destinationLine);
+    const normalizedLines = lines.map((line) =>
+      this.isWhitespaceOnly(line)
+        ? ""
+        : line.slice(
+            Math.min(
+              commonIndentation,
+              this.getLineIndentation(line).length,
+            ),
+          ),
+    );
+    const transformed = normalizedLines
+      .map((line, index) =>
+        index === 0 ? line : destinationIndentation + line,
+      )
+      .join("\n");
+
+    if (context.selectionRange) {
+      const range = context.selectionRange;
+      const result = this.editor.writerController.replaceRange(
+        transformed,
+        range.startRow,
+        range.startColumn,
+        range.endRow,
+        range.endColumn,
+        { preserveViewport: true },
+      );
+      if (!result) return false;
+      this.placeCursor(result.row, result.column);
+      return true;
+    }
+
+    this.editor.writerController.write(transformed);
     return true;
   }
 
+  getIndentUnit() {
+    const configuredWidth = Number(CONFIG_GET("tab_width"));
+    const width =
+      Number.isFinite(configuredWidth) && configuredWidth > 0
+        ? Math.floor(configuredWidth)
+        : 2;
+    return " ".repeat(width);
+  }
+
   getIndentation() {
-    return " ".repeat(CONFIG_GET("tab_width"));
+    return this.getIndentUnit();
+  }
+
+  getLineIndentation(line) {
+    let index = 0;
+    while (
+      index < line.length &&
+      (line[index] === " " || line[index] === "\t")
+    ) {
+      index++;
+    }
+    return line.slice(0, index);
+  }
+
+  isWhitespaceOnly(text) {
+    for (const character of text) {
+      if (character !== " " && character !== "\t") return false;
+    }
+    return true;
+  }
+
+  isQuote(character) {
+    return character === '"' || character === "'" || character === "`";
+  }
+
+  isEscapedAt(line, column) {
+    let slashCount = 0;
+    for (let index = column - 1; index >= 0 && line[index] === "\\"; index--) {
+      slashCount++;
+    }
+    return slashCount % 2 === 1;
+  }
+
+  shouldAutoCloseQuote(context) {
+    return !this.isEscapedAt(context.line, context.column);
+  }
+
+  isStructuralOpening(character) {
+    return character === "{" || character === "[" || character === "(";
+  }
+
+  isBetweenStructuralPair(before, after) {
+    return (
+      this.isStructuralOpening(before) && this.getClosingPair(before) === after
+    );
+  }
+
+  shouldIncreaseIndent(textBeforeCaret) {
+    let index = textBeforeCaret.length - 1;
+    while (
+      index >= 0 &&
+      (textBeforeCaret[index] === " " || textBeforeCaret[index] === "\t")
+    ) {
+      index--;
+    }
+    return index >= 0 && this.isStructuralOpening(textBeforeCaret[index]);
+  }
+
+  getLineCommentContinuation(contentBeforeCaret, contentAfterCaret) {
+    if (!contentBeforeCaret.startsWith("//")) return "";
+    if (!this.isWhitespaceOnly(contentAfterCaret)) return "// ";
+    return contentBeforeCaret.slice(2).trim() ? "// " : "stop";
+  }
+
+  getBlockCommentContinuation(contentBeforeCaret, row) {
+    const trimmed = contentBeforeCaret.trimStart();
+    if (trimmed.startsWith("*/")) return "";
+    if (trimmed.startsWith("/*")) return " * ";
+    if (trimmed.startsWith("*") && this.hasAdjacentBlockCommentLine(row)) {
+      return "* ";
+    }
+    return "";
+  }
+
+  hasAdjacentBlockCommentLine(row) {
+    if (row <= 1) return false;
+    const previousLineNode = this.editor.lineController.lines[row - 2];
+    const previousLine = previousLineNode ? previousLineNode.getText() : "";
+    const previousContent = previousLine.trimStart();
+    return (
+      previousContent.startsWith("/*") ||
+      (previousContent.startsWith("*") && !previousContent.startsWith("*/"))
+    );
+  }
+
+  getPreviousIndentColumn(indentation) {
+    if (indentation.endsWith("\t")) return indentation.length - 1;
+
+    const width = this.getIndentUnit().length;
+    let trailingSpaces = 0;
+    for (
+      let index = indentation.length - 1;
+      index >= 0 && indentation[index] === " ";
+      index--
+    ) {
+      trailingSpaces++;
+    }
+    const spacesToRemove = trailingSpaces % width || width;
+    return indentation.length - Math.min(trailingSpaces, spacesToRemove);
+  }
+
+  getCommonIndentationLength(lines) {
+    let minimum = Infinity;
+    for (const line of lines) {
+      if (this.isWhitespaceOnly(line)) continue;
+      minimum = Math.min(minimum, this.getLineIndentation(line).length);
+    }
+    return minimum === Infinity ? 0 : minimum;
+  }
+
+  handleClosingIndent(character, context) {
+    if (character !== "}" || context.selection) return false;
+
+    const beforeCaret = context.line.slice(0, context.column);
+    if (!this.isWhitespaceOnly(beforeCaret) || context.column === 0) {
+      return false;
+    }
+
+    const startColumn = this.getPreviousIndentColumn(beforeCaret);
+    const endColumn =
+      context.after === character ? context.column + 1 : context.column;
+    const result = this.editor.writerController.replaceRange(
+      beforeCaret.slice(0, startColumn) + character,
+      context.row,
+      0,
+      context.row,
+      endColumn,
+      { preserveViewport: true },
+    );
+    if (!result) return false;
+    this.placeCursor(result.row, result.column);
+    return true;
+  }
+
+  replaceCurrentLine(context, text, cursorRow, cursorColumn) {
+    const result = this.editor.writerController.replaceRange(
+      text,
+      context.row,
+      0,
+      context.row,
+      context.line.length,
+      { preserveViewport: true },
+    );
+    if (!result) return false;
+    this.placeCursor(cursorRow, cursorColumn);
+    return true;
+  }
+
+  replaceSelectionWithLineBreak(range) {
+    const lineNode = this.editor.lineController.lines[range.startRow - 1];
+    const line = lineNode ? lineNode.getText() : "";
+    const indentation = this.getLineIndentation(line);
+    const result = this.editor.writerController.replaceRange(
+      `\n${indentation}`,
+      range.startRow,
+      range.startColumn,
+      range.endRow,
+      range.endColumn,
+      { preserveViewport: true },
+    );
+    if (!result) return false;
+    this.placeCursor(result.row, result.column);
+    return true;
+  }
+
+  deleteAndPlaceCursor(start, end) {
+    const result = this.editor.writerController.deleteRange(start, end);
+    if (!result) return false;
+    this.editor.lineController.refresh();
+    this.placeCursor(result.row, result.column);
+    return true;
+  }
+
+  placeCursor(row, column) {
+    this.editor.lineController.setFocusLine?.(row);
+    this.editor.cursorController.setCursorPosition(row, column);
   }
 
   getSelectedLineRange() {

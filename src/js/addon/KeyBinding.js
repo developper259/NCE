@@ -119,7 +119,8 @@ class KeyBinding {
     if (!this.editor.tabManager.activeFile) return;
     try {
       const text = await navigator.clipboard.readText();
-      this.editor.writerController.write(text);
+      const handled = this.editor.smartTypingController?.handlePaste(text);
+      if (!handled) this.editor.writerController.write(text);
     } catch (err) {
       console.error("Erreur lors du collage : ", err);
     }
@@ -622,6 +623,15 @@ class KeyBinding {
 
   key_home(s, c, m, a) {
     if (this.editor.lineController.lines.length == 0) return;
+    if (
+      this.editor.smartTypingController?.handleHome(s, {
+        ctrlKey: c,
+        metaKey: m,
+        altKey: a,
+      })
+    ) {
+      return;
+    }
     let y = this.editor.cursorController.row;
     this.editor.cursorController.setCursorPosition(y, 0);
   }
