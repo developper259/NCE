@@ -210,6 +210,7 @@ class tabManager {
     this.editor.fileExplorer.setActiveFile(file.path);
 
     if (!file.isLoaded) {
+      await file.loadLanguage();
       await file.loadContent();
     }
 

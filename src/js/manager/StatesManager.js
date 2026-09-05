@@ -176,8 +176,6 @@ class StatesManager {
         file.startSelect = fileData.startSelect;
         file.endSelect = fileData.endSelect;
 
-        await file.loadLanguage();
-
         if (fileData.selectedLines && Array.isArray(fileData.selectedLines)) {
           file._selectedLines = new Map(fileData.selectedLines);
         } else {
