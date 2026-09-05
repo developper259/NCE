@@ -296,29 +296,30 @@ class SmartTypingController {
 
     const normalizedText = text.replace(/\r\n?/g, "\n");
     const lines = normalizedText.split("\n");
-    const commonIndentation = this.getCommonIndentationLength(lines);
-    const destination = context.selectionRange
+    const commonIndentation = this.getCommonIndentationWidth(lines);
+    const insertionRow = context.selectionRange
       ? context.selectionRange.startRow
       : context.row;
+    const insertionColumn = context.selectionRange
+      ? context.selectionRange.startColumn
+      : context.column;
     const destinationLineNode =
-      this.editor.lineController.lines[destination - 1];
+      this.editor.lineController.lines[insertionRow - 1];
     const destinationLine = destinationLineNode
       ? destinationLineNode.getText()
       : "";
-    const destinationIndentation = this.getLineIndentation(destinationLine);
+    const destinationIndentation = this.getPasteDestinationIndentation(
+      destinationLine,
+      insertionColumn,
+    );
     const normalizedLines = lines.map((line) =>
       this.isWhitespaceOnly(line)
         ? ""
-        : line.slice(
-            Math.min(
-              commonIndentation,
-              this.getLineIndentation(line).length,
-            ),
-          ),
+        : this.removeIndentationWidth(line, commonIndentation),
     );
     const transformed = normalizedLines
       .map((line, index) =>
-        index === 0 ? line : destinationIndentation + line,
+        index === 0 || line === "" ? line : destinationIndentation + line,
       )
       .join("\n");
 
@@ -452,11 +453,54 @@ class SmartTypingController {
     return indentation.length - Math.min(trailingSpaces, spacesToRemove);
   }
 
-  getCommonIndentationLength(lines) {
+  getPasteDestinationIndentation(line, insertionColumn) {
+    const prefix = line.slice(0, insertionColumn);
+    if (this.isWhitespaceOnly(prefix)) return prefix;
+    return this.getLineIndentation(line);
+  }
+
+  getIndentationWidth(line) {
+    const tabWidth = this.getIndentUnit().length;
+    const indentation = this.getLineIndentation(line);
+    let width = 0;
+
+    for (const character of indentation) {
+      width +=
+        character === "\t" ? tabWidth - (width % tabWidth) : 1;
+    }
+    return width;
+  }
+
+  removeIndentationWidth(line, widthToRemove) {
+    if (widthToRemove <= 0) return line;
+
+    const tabWidth = this.getIndentUnit().length;
+    let width = 0;
+    let index = 0;
+
+    while (
+      index < line.length &&
+      (line[index] === " " || line[index] === "\t")
+    ) {
+      const characterWidth =
+        line[index] === "\t" ? tabWidth - (width % tabWidth) : 1;
+      if (width + characterWidth > widthToRemove) {
+        const remainingWidth = width + characterWidth - widthToRemove;
+        return " ".repeat(remainingWidth) + line.slice(index + 1);
+      }
+      width += characterWidth;
+      index++;
+      if (width === widthToRemove) break;
+    }
+
+    return line.slice(index);
+  }
+
+  getCommonIndentationWidth(lines) {
     let minimum = Infinity;
     for (const line of lines) {
       if (this.isWhitespaceOnly(line)) continue;
-      minimum = Math.min(minimum, this.getLineIndentation(line).length);
+      minimum = Math.min(minimum, this.getIndentationWidth(line));
     }
     return minimum === Infinity ? 0 : minimum;
   }
