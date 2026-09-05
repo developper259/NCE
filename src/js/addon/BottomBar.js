@@ -3,9 +3,40 @@ class BottomBar {
     this.editor = e;
 
     this.cursorOBJ = getElement(".bottomBar-cursorPos");
+    this.languageElement = getElement("#language");
     this.configSpaceElement = getElement("#config-space");
 
+    this.refreshLanguage();
     this.refreshScrollers();
+  }
+
+  async openLanguage() {
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return;
+
+    const languages =
+      await this.editor.highlightController.getSupportedLanguage();
+    const items = (Array.isArray(languages) ? languages : [])
+      .filter((language) => typeof language === "string" && language.length > 0)
+      .map((language) => ({
+        id: language.toLowerCase(),
+        label: language,
+        data: language,
+      }));
+
+    this.editor.quickPanel.open({
+      id: "language",
+      mode: "pick",
+      title: "Select Language",
+      placeholder: "Select Language",
+      selectedId: String(file.language || "plaintext").toLowerCase(),
+      items,
+      onAccept: (item) => {
+        file.language = item.data;
+        this.refreshLanguage();
+        this.editor.highlightController.reset();
+      },
+    });
   }
 
   openConfigSpace() {
@@ -38,6 +69,7 @@ class BottomBar {
     if (!this.editor.tabManager.activeFile) return;
 
     this.refreshCursorOBJ();
+    this.refreshLanguage();
     this.refreshScrollers();
   }
 
@@ -63,6 +95,13 @@ class BottomBar {
     if (!this.configSpaceElement) return;
     const title = this.configSpaceElement.querySelector(".scroller-title");
     if (title) title.innerText = `Spaces: ${CONFIG_GET("tab_width")}`;
+  }
+
+  refreshLanguage() {
+    if (!this.languageElement) return;
+    const title = this.languageElement.querySelector(".scroller-title");
+    const language = this.editor.tabManager.activeFile?.language || "Plaintext";
+    if (title) title.innerText = language;
   }
 
   hide() {

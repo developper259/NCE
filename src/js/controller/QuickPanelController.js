@@ -33,12 +33,20 @@ class QuickPanelController {
     this.error = document.createElement("div");
     this.error.className = "quick-panel-error";
 
-    this.panel.append(this.title, this.input, this.error, this.list, this.empty);
+    this.panel.append(
+      this.title,
+      this.input,
+      this.error,
+      this.list,
+      this.empty,
+    );
     this.host.appendChild(this.panel);
     this.host.setAttribute("aria-hidden", "true");
 
     this.input.addEventListener("input", () => this.handleInput());
-    this.input.addEventListener("keydown", (event) => this.handleKeyDown(event));
+    this.input.addEventListener("keydown", (event) =>
+      this.handleKeyDown(event),
+    );
 
     this.list.addEventListener(
       "click",
@@ -88,7 +96,10 @@ class QuickPanelController {
 
     this.render();
     this.input.focus();
-    this.input.setSelectionRange(this.input.value.length, this.input.value.length);
+    this.input.setSelectionRange(
+      this.input.value.length,
+      this.input.value.length,
+    );
 
     if (mode === "pick") this.loadItems(this.session.query);
     return true;
@@ -113,7 +124,10 @@ class QuickPanelController {
     this.error.textContent = "";
 
     if (restoreFocus) {
-      if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
+      if (
+        previousFocus?.isConnected &&
+        typeof previousFocus.focus === "function"
+      ) {
         previousFocus.focus();
       } else if (this.editor.output?.focus) {
         this.editor.output.focus({ preventScroll: true });
@@ -191,15 +205,18 @@ class QuickPanelController {
     this.render();
 
     try {
-      const result = typeof provider === "function" ? await provider(query) : provider;
-      if (this.session !== session || generation !== this.requestGeneration) return;
+      const result =
+        typeof provider === "function" ? await provider(query) : provider;
+      if (this.session !== session || generation !== this.requestGeneration)
+        return;
       session.items = Array.isArray(result)
         ? result.filter((item) => item && item.id != null && item.label != null)
         : [];
       session.loading = false;
       this.updateVisibleItems();
     } catch (error) {
-      if (this.session !== session || generation !== this.requestGeneration) return;
+      if (this.session !== session || generation !== this.requestGeneration)
+        return;
       session.items = [];
       session.loading = false;
       this.empty.textContent = "Unable to load results";
@@ -286,9 +303,8 @@ class QuickPanelController {
     const options = this.session.options;
     if (this.session.mode === "pick" && value?.disabled) return;
 
-    const validation = typeof options.validate === "function"
-      ? options.validate(value)
-      : null;
+    const validation =
+      typeof options.validate === "function" ? options.validate(value) : null;
     if (validation) {
       this.error.textContent = validation;
       this.error.hidden = false;
@@ -314,7 +330,8 @@ class QuickPanelController {
       return;
     }
     if (this.session.visibleItems.length === 0) {
-      this.empty.textContent = this.session.options.emptyMessage || "No results";
+      this.empty.textContent =
+        this.session.options.emptyMessage || "No results";
       this.empty.hidden = false;
       return;
     }
@@ -325,7 +342,10 @@ class QuickPanelController {
       row.className = "quick-panel-item";
       row.dataset.itemId = String(item.id);
       row.setAttribute("role", "option");
-      row.setAttribute("aria-selected", String(index === this.session.selectedIndex));
+      row.setAttribute(
+        "aria-selected",
+        String(index === this.session.selectedIndex),
+      );
       row.disabled = Boolean(item.disabled);
 
       if (item.icon) {

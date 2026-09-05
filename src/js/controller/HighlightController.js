@@ -157,10 +157,12 @@ class HighlightController {
           this.markDirty(l + i);
       }
     } else {
-      for (const lineNode of this.editor.lineController.lines) {
+      const lines = this.editor.lineController.lines;
+      for (let index = 0; index < lines.length; index++) {
+        const lineNode = lines[index];
         lineNode.setState(null);
+        this.dirtyLines.add(index);
       }
-      this.markDirtyFrom(0);
     }
   }
 
@@ -224,12 +226,17 @@ class HighlightController {
   }
 
   reset() {
-    for (const line of this.editor.lineController.lines) {
-      line.setTokens(null);
+    const lines = this.editor.lineController.lines;
+    this.dirtyLines.clear();
+
+    for (const line of lines) {
+      line.clearTokens();
+      line.setState(null);
     }
+
     this.markDirtyAll(false);
-    this.refresh();
     this.editor.lineController.refresh(true);
+    this.refresh();
   }
 
   async refresh() {
