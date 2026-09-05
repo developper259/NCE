@@ -431,9 +431,8 @@ class LineController {
   setFocusLine(index) {
     this.index = index;
 
-    const selectedLines = this.editor.lineNumberOutput?.querySelectorAll(
-      ".line-selected",
-    );
+    const selectedLines =
+      this.editor.lineNumberOutput?.querySelectorAll(".line-selected");
     if (selectedLines) {
       selectedLines.forEach((line) => line.classList.remove("line-selected"));
     }
@@ -683,6 +682,22 @@ class LineController {
     }
 
     const fragment = document.createDocumentFragment();
+
+    const loadError = this.editor.tabManager.activeFile.loadError;
+    if (loadError) {
+      const message = document.createElement("div");
+      message.className = "editor-load-error";
+      message.textContent =
+        loadError.code === "BINARY_FILE"
+          ? "Binary file can't be opened"
+          : loadError.code === "FILE_TOO_LARGE"
+            ? "File is too large to be opened"
+            : "File can't be opened";
+      fragment.appendChild(message);
+      this.editor.output.replaceChildren(fragment);
+      this.editor.highlightController.lineNodes.clear();
+      return;
+    }
 
     for (let i = 0; i < this.renderedLineCount; i++) {
       const displayIndex = this.startIndex + i;
@@ -962,6 +977,16 @@ class LineController {
       return;
     }
 
+    if (this.editor.tabManager.activeFile.loadError) {
+      this.renderLoadError();
+      return;
+    }
+    this.editor.lineNumberOutput.style.display = "block";
+    this.editor.output.style.display = "block";
+    this.editor.output.classList.remove("editor-load-error-output");
+    this.editor.selectOutput?.style.setProperty("display", "block");
+    this.editor.searchOutput?.style.setProperty("display", "block");
+
     if (this.lines.length === 0) {
       this.lines = [new LineNode("")];
     }
@@ -1038,10 +1063,45 @@ class LineController {
     this.outputScroller.hide();
   }
 
+  renderLoadError() {
+    const file = this.editor.tabManager.activeFile;
+    if (!file?.loadError) return;
+
+    this.editor.lineNumberOutput.replaceChildren();
+    this.editor.lineNumberOutput.style.display = "none";
+    this.editor.output.style.display = "block";
+    this.editor.output.classList.add("editor-load-error-output");
+    this.editor.output.replaceChildren();
+
+    const message = document.createElement("div");
+    message.className = "editor-load-error";
+    message.textContent =
+      file.loadError.code === "BINARY_FILE"
+        ? "Binary file can't be opened"
+        : file.loadError.code === "FILE_TOO_LARGE"
+          ? "File is too large to be opened"
+          : "File can't be opened";
+    this.editor.output.appendChild(message);
+
+    this.editor.selectOutput?.replaceChildren();
+    this.editor.selectOutput?.style.setProperty("display", "none");
+    this.editor.searchOutput?.replaceChildren();
+    this.editor.searchOutput?.style.setProperty("display", "none");
+    this.editor.cD.style.display = "none";
+    this.outputScroller.hide();
+  }
+
   show() {
+    if (this.editor.tabManager.activeFile?.loadError) {
+      this.renderLoadError();
+      return;
+    }
     this.editor.lineNumberOutput.style.display = "block";
 
     this.editor.output.style.display = "block";
+    this.editor.selectOutput?.style.setProperty("display", "block");
+    this.editor.searchOutput?.style.setProperty("display", "block");
+    this.editor.output.classList.remove("editor-load-error-output");
 
     const cursor = getElement(".editor-caret");
 

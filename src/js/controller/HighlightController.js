@@ -94,10 +94,10 @@ class HighlightController {
         { fileName: fileName },
       );
 
-      return response?.language || "plaintext";
+      return response?.language || "Plaintext";
     } catch (error) {
       console.error("Erreur lors de la détection du langage :", error);
-      return "plaintext";
+      return "Plaintext";
     }
   }
 
@@ -242,8 +242,8 @@ class HighlightController {
   async refresh() {
     if (this.isProcessingDirty || this.dirtyLines.size === 0) return;
 
-    const language = this.editor.tabManager.activeFile?.language || "plaintext";
-    if (language === "plaintext") {
+    const language = this.editor.tabManager.activeFile?.language || "Plaintext";
+    if (language === "Plaintext") {
       return;
     }
 

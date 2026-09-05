@@ -42,6 +42,9 @@ class FileNode {
 
     // HighlightController
     this.language = undefined;
+    this.eol = "\n";
+    this.hasFinalNewline = false;
+    this.loadError = null;
 
     // Diff State
     this.diffSnapshot = null;
@@ -99,6 +102,9 @@ class FileNode {
     this.insertMode = file.insertMode;
 
     this.language = file.language;
+    this.eol = file.eol || "\n";
+    this.hasFinalNewline = file.hasFinalNewline === true;
+    this.loadError = file.loadError || null;
   }
 
   async loadContent() {
@@ -111,8 +117,11 @@ class FileNode {
     }
 
     try {
-      const { initialLines, totalLines } =
+      const { initialLines, totalLines, eol, hasFinalNewline } =
         await this.editor.fileLoader.loadFile(this.path);
+
+      this.eol = eol || "\n";
+      this.hasFinalNewline = hasFinalNewline === true;
 
       this.editor.lineController.loadContent(
         initialLines.join("\n"),
@@ -136,17 +145,25 @@ class FileNode {
         this.editor.historyController?.clear(this);
         this.isLoaded = true;
       } else {
-        throw error;
+        this.loadError = error;
+        this.lines = [new LineNode("")];
+        this.totalLines = 1;
+        this.editor.lineController.loadContent("");
+        this.editor.historyController?.clear(this);
+        this.isLoaded = true;
       }
     }
   }
 
   async save() {
+    if (this.loadError) return false;
     if (!this.path) {
       return this.saveAs();
     }
 
-    const content = this.lines.map((line) => line.getText()).join("\n");
+    await this.editor.fileLoader.waitForFileLoaded(this);
+
+    const content = this.serializeContent();
     const saved = await this.editor.api.saveFile(this.path, content);
 
     if (saved) {
@@ -158,10 +175,13 @@ class FileNode {
   }
 
   async saveAs() {
+    if (this.loadError) return false;
     const selectedPath = await this.editor.tabManager.selectNewFile();
     if (typeof selectedPath !== "string" || !selectedPath) return false;
 
-    const content = this.lines.map((line) => line.getText()).join("\n");
+    await this.editor.fileLoader.waitForFileLoaded(this);
+
+    const content = this.serializeContent();
     const saved = await this.editor.api.saveFile(selectedPath, content);
     if (!saved) return false;
 
@@ -177,6 +197,11 @@ class FileNode {
 
   async selectFileToSave() {
     return this.saveAs();
+  }
+
+  serializeContent() {
+    const content = this.lines.map((line) => line.getText()).join(this.eol);
+    return content + (this.hasFinalNewline ? this.eol : "");
   }
 
   setIsSaved(value) {

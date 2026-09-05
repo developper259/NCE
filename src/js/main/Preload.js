@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld("api", {
   platform: process.platform,
   quit: () => ipcRenderer.invoke("App:quit"),
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
+  cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
+  rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
 
   selectFile: () => ipcRenderer.invoke("FileManager:selectFile"),
 

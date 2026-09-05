@@ -3,6 +3,7 @@ class BottomBar {
     this.editor = e;
 
     this.cursorOBJ = getElement(".bottomBar-cursorPos");
+    this.cursorStatusElement = getElement(".bottomBar-cursor-status");
     this.languageElement = getElement("#language");
     this.configSpaceElement = getElement("#config-space");
 
@@ -29,7 +30,7 @@ class BottomBar {
       mode: "pick",
       title: "Select Language",
       placeholder: "Select Language",
-      selectedId: String(file.language || "plaintext").toLowerCase(),
+      selectedId: String(file.language || "Plaintext").toLowerCase(),
       items,
       onAccept: (item) => {
         file.language = item.data;
@@ -75,6 +76,14 @@ class BottomBar {
 
   refreshCursorOBJ() {
     if (!this.editor.tabManager.activeFile) return;
+
+    if (this.editor.tabManager.activeFile.loadError) {
+      this.cursorOBJ.innerText = "";
+      this.cursorStatusElement.style.display = "none";
+      return;
+    }
+
+    this.cursorStatusElement.style.display = "";
 
     let r = "";
     let countLine = this.editor.selectController.getNumberLineSelected();

@@ -34,30 +34,6 @@ export class AppMenu {
             label: "About NCE",
             click: () => this.showAbout(),
           },
-
-          {
-            label: "Check for Updates",
-            click: () => this.checkUpdate(),
-          },
-
-          {
-            type: "separator",
-          },
-
-          {
-            label: "NCE Settings",
-            click: () => this.settings(),
-          },
-
-          {
-            label: "NDL Settings",
-            click: () => this.NDLSettings(),
-          },
-
-          {
-            type: "separator",
-          },
-
           {
             label: "Quit NCE",
 

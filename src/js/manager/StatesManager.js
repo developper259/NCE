@@ -123,20 +123,24 @@ class StatesManager {
   async loadStates(state) {
     if (!state) return;
 
-    if (state.fileExplorer) {
-      await this.loadFileExplorerState(state.fileExplorer);
+    if (state.tabManager) {
+      await this.loadTabManagerState(state.tabManager);
     }
 
-    if (state.sidebar) {
-      this.loadSidebarState(state.sidebar);
+    if (state.sidebar) this.loadSidebarState(state.sidebar);
+
+    if (state.fileExplorer) {
+      this.loadFileExplorerState(state.fileExplorer).catch((error) => {
+        console.error("Failed to restore File Explorer state:", error);
+      });
     }
 
     if (state.agent) {
-      this.editor.agentSidebar?.loadConfigState?.(state.agent);
-    }
-
-    if (state.tabManager) {
-      await this.loadTabManagerState(state.tabManager);
+      Promise.resolve(
+        this.editor.agentSidebar?.loadConfigState?.(state.agent),
+      ).catch((error) =>
+        console.error("Failed to restore Agent state:", error),
+      );
     }
   }
 
@@ -148,46 +152,56 @@ class StatesManager {
 
     for (const fileData of tabState.files) {
       if (!fileData) continue;
-      let file = new FileNode(
-        this.editor,
-        fileData.id,
-        fileData.name,
-        fileData.path,
-      );
+      try {
+        let file = new FileNode(
+          this.editor,
+          fileData.id,
+          fileData.name,
+          fileData.path,
+        );
 
-      if (fileData.id >= tabManager.idCounter) {
-        tabManager.idCounter = fileData.id;
-      }
+        if (fileData.id >= tabManager.idCounter) {
+          tabManager.idCounter = fileData.id;
+        }
 
-      file.row = fileData.row;
-      file.column = fileData.column;
+        file.row = fileData.row;
+        file.column = fileData.column;
 
-      file.offsetX = fileData.offsetX || 0;
-      file.offsetY = fileData.offsetY || 0;
-      file.startIndex = fileData.startIndex || 0;
-      file.maxLineLength = fileData.maxLineLength || 0;
-      file.totalLines = fileData.totalLines || 0;
+        file.offsetX = fileData.offsetX || 0;
+        file.offsetY = fileData.offsetY || 0;
+        file.startIndex = fileData.startIndex || 0;
+        file.maxLineLength = fileData.maxLineLength || 0;
+        file.totalLines = fileData.totalLines || 0;
 
-      file.startSelect = fileData.startSelect;
-      file.endSelect = fileData.endSelect;
+        file.startSelect = fileData.startSelect;
+        file.endSelect = fileData.endSelect;
 
-      if (fileData.selectedLines && Array.isArray(fileData.selectedLines)) {
-        file._selectedLines = new Map(fileData.selectedLines);
-      } else {
-        file._selectedLines = new Map();
-      }
+        if (fileData.selectedLines && Array.isArray(fileData.selectedLines)) {
+          file._selectedLines = new Map(fileData.selectedLines);
+        } else {
+          file._selectedLines = new Map();
+        }
 
-      await file.loadLanguage();
+        if (tabState.activeFile && file.id === tabState.activeFile.id) {
+          await file.loadLanguage();
+        }
 
-      tabManager.files.push(file);
+        tabManager.files.push(file);
 
-      if (tabState.activeFile && file.id === tabState.activeFile.id) {
-        activeFileToFocus = file;
+        if (tabState.activeFile && file.id === tabState.activeFile.id) {
+          activeFileToFocus = file;
+        }
+      } catch (error) {
+        console.error(
+          "Failed to restore tab:",
+          fileData.path || fileData.name,
+          error,
+        );
       }
     }
 
     if (activeFileToFocus) {
-      tabManager.setFocusFile(activeFileToFocus);
+      await tabManager.setFocusFile(activeFileToFocus);
 
       if (
         this.editor.selectController &&

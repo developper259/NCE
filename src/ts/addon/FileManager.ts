@@ -20,6 +20,9 @@ export interface FileOperationResult {
   error?: string;
 }
 
+export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
+const BINARY_SAMPLE_SIZE = 8192;
+
 export class FileManager {
   window: Window;
   private fileCache: Map<string, string[]> = new Map();
@@ -531,9 +534,38 @@ export class FileManager {
 
   async initializeFile(
     filePath: string,
-  ): Promise<{ success: boolean; totalLines: number; errorCode?: string }> {
+  ): Promise<{
+    success: boolean;
+    totalLines: number;
+    errorCode?: string;
+    size?: number;
+    maxSize?: number;
+    eol?: string;
+    hasFinalNewline?: boolean;
+  }> {
     try {
+      const stats = await fs.stat(filePath);
+      if (stats.size > MAX_TEXT_FILE_SIZE) {
+        return {
+          success: false,
+          totalLines: 0,
+          errorCode: "FILE_TOO_LARGE",
+          size: stats.size,
+          maxSize: MAX_TEXT_FILE_SIZE,
+        };
+      }
+
+      const sample = await fs.open(filePath, "r");
+      const sampleBuffer = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, stats.size));
+      await sample.read(sampleBuffer, 0, sampleBuffer.length, 0);
+      await sample.close();
+      if (sampleBuffer.includes(0)) {
+        return { success: false, totalLines: 0, errorCode: "BINARY_FILE", size: stats.size };
+      }
+
       const content = await fs.readFile(filePath, "utf-8");
+      const hasFinalNewline = /(?:\r\n|\n)$/.test(content);
+      const eol = content.includes("\r\n") ? "\r\n" : "\n";
       const lines = content.split(/\r?\n/);
       if (lines.length > 0 && lines[lines.length - 1] === "") {
         lines.pop();
@@ -543,6 +575,8 @@ export class FileManager {
       return {
         success: true,
         totalLines: lines.length,
+        eol,
+        hasFinalNewline,
       };
     } catch (error: any) {
       console.error("Error initializing file:", error);

@@ -24,6 +24,18 @@ class FileLoader {
       if (initResponse && initResponse.errorCode === "ENOENT") {
         throw new Error("ENOENT");
       }
+      if (initResponse?.errorCode === "FILE_TOO_LARGE") {
+        const error = new Error("File is too large to be opened");
+        error.code = "FILE_TOO_LARGE";
+        error.size = initResponse.size;
+        error.maxSize = initResponse.maxSize;
+        throw error;
+      }
+      if (initResponse?.errorCode === "BINARY_FILE") {
+        const error = new Error("Binary file can't be opened");
+        error.code = "BINARY_FILE";
+        throw error;
+      }
       throw new Error("Failed to initialize file");
     }
 
@@ -45,6 +57,8 @@ class FileLoader {
     return {
       initialLines: chunkResponse.lines,
       totalLines,
+      eol: initResponse.eol || "\n",
+      hasFinalNewline: initResponse.hasFinalNewline === true,
     };
   }
 

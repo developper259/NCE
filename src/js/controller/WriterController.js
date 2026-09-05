@@ -222,7 +222,8 @@ class WriterController {
   applyRangeEdit(start, end, text, options = {}) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
-    if (!file || !lineController || typeof text !== "string") return null;
+    if (!file || file.loadError || !lineController || typeof text !== "string")
+      return null;
 
     const beforeText = this.getTextInRange(start, end);
     const cursorBefore = {
@@ -231,6 +232,8 @@ class WriterController {
     };
     const selectionBefore = this.getSelectionRange();
     const lines = lineController.lines.map((line) => line.getText());
+    const wasAtDocumentEnd =
+      end.row === lines.length && end.column === lines[end.row - 1].length;
     const replacement = text.split("\n");
     const prefix = lines[start.row - 1].slice(0, start.column);
     const suffix = lines[end.row - 1].slice(end.column);
@@ -242,6 +245,11 @@ class WriterController {
       end.row - start.row + 1,
       ...replacement.map((line) => new LineNode(line)),
     );
+    if (text.endsWith("\n") && wasAtDocumentEnd) {
+      file.hasFinalNewline = true;
+    } else if (text === "" && beforeText.endsWith("\n") && wasAtDocumentEnd) {
+      file.hasFinalNewline = false;
+    }
     file.totalLines = file.lines.length;
     file.maxLineLength = 0;
     if (options.preserveViewport === false) {

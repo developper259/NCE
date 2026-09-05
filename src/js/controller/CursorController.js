@@ -102,6 +102,11 @@ class CursorController {
 
   onClick(event) {
     if (!this.editor.tabManager.activeFile) return;
+    if (
+      !this.editor.tabManager.activeFile ||
+      this.editor.tabManager.activeFile.loadError
+    )
+      return;
     this.editor.keyBinding.historyX = undefined;
 
     const rect = this.editor.domManager.getOutputRect();
@@ -129,6 +134,11 @@ class CursorController {
 
   setCursorPosition(r, c) {
     if (!this.editor.tabManager.activeFile) return;
+    if (
+      !this.editor.tabManager.activeFile ||
+      this.editor.tabManager.activeFile.loadError
+    )
+      return;
 
     const { row, column } = this.normalizePosition(r, c);
 

@@ -122,7 +122,7 @@ class ProjectExplorer {
       await this.agent.editor?.highlightController?.detectLanguage?.(fileName);
     const normalized =
       typeof detected === "string" ? detected.trim().toLowerCase() : "";
-    return normalized && normalized !== "plaintext" ? normalized : "unknown";
+    return normalized && normalized !== "Plaintext" ? normalized : "unknown";
   }
 
   buildProjectMapTree(entries = []) {

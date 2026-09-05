@@ -74,6 +74,9 @@ class Editor {
 
     this.initQuitEvent();
     this.initLoadState();
+    this.api.rendererReady?.().catch?.((error) => {
+      console.error("[Startup] rendererReady failed", error);
+    });
   }
 
   refreshAll() {
@@ -194,9 +197,13 @@ class Editor {
   initQuitEvent() {
     this.api.onSaveRequest(async () => {
       const closed = await this.tabManager.closeFiles();
-      if (!closed) return;
+      if (!closed) {
+        await this.api.cancelQuit?.();
+        return;
+      }
       const saved = await this.statesManager.save();
       if (saved !== false) await this.api.approveQuit?.();
+      else await this.api.cancelQuit?.();
     });
   }
 
@@ -220,7 +227,16 @@ class Editor {
     };
 
     this.api.onLoadState(apply);
-    this.api.loadEditorState().then(apply);
+    this.api
+      .loadEditorState()
+      .then(apply)
+      .catch((error) => {
+        console.error("[Startup] state restore failed", error);
+        if (this.isOnInit) {
+          this.events.callEvent(Events.ON_LOADED, { isStateLoaded: false });
+        }
+        this.reset();
+      });
   }
 }
 

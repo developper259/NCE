@@ -443,7 +443,7 @@ class FileExplorer extends Sidebar {
   }
 
   async restoreExpandedFolders(files, expandedSet) {
-    if (!expandedSet || !files || expandedSet.length === 0) return;
+    if (!expandedSet || !files || expandedSet.size === 0) return;
     for (const file of files) {
       if (file.type === "folder" && expandedSet.has(file.path)) {
         file.expanded = true;
