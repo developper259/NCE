@@ -76,6 +76,7 @@ class DOMManager {
 
     this.lastWindowWidth = 0;
     this.lastWindowHeight = 0;
+    this.applyFrame = null;
 
     this.outputRect = { left: 0, top: 0, width: 0, height: 0 };
     this.sidebarRect = {
@@ -125,22 +126,17 @@ class DOMManager {
   resize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
+    const previousEditorWidth = this.editorDimensions.width;
+    const previousEditorHeight = this.editorDimensions.height;
+    const previousOutputHeight = this.output.height;
 
-    const editorEl = this.editor && this.editor.editorOBJ;
-    const editorHeight = editorEl
-      ? editorEl.getBoundingClientRect().height
-      : height;
-
-    const outputEl = this.editor && this.editor.output;
-    const outputHeight = outputEl
-      ? outputEl.getBoundingClientRect().height
-      : editorHeight;
-
+    this.measureElements();
     const shouldRefresh =
       width !== this.lastWindowWidth ||
       height !== this.lastWindowHeight ||
-      editorHeight !== this.editorDimensions.height ||
-      outputHeight !== this.output.height;
+      this.editorDimensions.width !== previousEditorWidth ||
+      this.editorDimensions.height !== previousEditorHeight ||
+      this.output.height !== previousOutputHeight;
 
     if (!shouldRefresh) {
       return;
@@ -152,9 +148,8 @@ class DOMManager {
     this.lastWindowWidth = width;
     this.lastWindowHeight = height;
 
-    this.measureElements();
     this.calculate();
-    this.apply();
+    this.scheduleApply();
 
     if (this.editor && this.editor.lineController) {
       this.editor.lineController.resize();
@@ -387,7 +382,15 @@ class DOMManager {
       this.editorDimensions.width - this.output.x,
     );
 
-    this.apply();
+    this.scheduleApply();
+  }
+
+  scheduleApply() {
+    if (this.applyFrame !== null) return;
+    this.applyFrame = requestAnimationFrame(() => {
+      this.applyFrame = null;
+      this.apply();
+    });
   }
 
   getLineNumberWidth() {
