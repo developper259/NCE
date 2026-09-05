@@ -18,15 +18,15 @@ class EmptyMenu {
 
   parseKeyToElements(keyString) {
     if (!keyString) return [];
-    
+
     const parts = keyString.split("+");
     const elements = [];
 
     const modifierIcons = {
-      "Meta": "fi fi-rr-command",
-      "Ctrl": "fi fi-rr-control",
-      "Shift": "fi fi-rr-arrow-up",
-      "Alt": "fi fi-rr-option"
+      Meta: "fi fi-rr-command",
+      Ctrl: "fi fi-rr-control",
+      Shift: "fi fi-rr-arrow-up",
+      Alt: "fi fi-rr-option",
     };
 
     for (const part of parts) {
@@ -64,15 +64,20 @@ class EmptyMenu {
       if (!keybinding) continue;
 
       const button = document.createElement("button");
-      button.classList.add('editor-el');
-      button.onclick = () => this.editor.keyBinding.exec(keybinding);
+      button.type = "button";
+      button.classList.add("editor-el");
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.editor.keyBinding.exec(keybinding);
+      });
 
       const buttonText = document.createElement("span");
       buttonText.className = "button-text editor-el";
       buttonText.textContent = keybinding.description;
 
       const keybindingDiv = document.createElement("div");
-      keybindingDiv.classList.add('editor-el');
+      keybindingDiv.classList.add("editor-el");
       keybindingDiv.className = "keybinding";
 
       const keyElements = this.parseKeyToElements(keybinding.key);
@@ -89,7 +94,6 @@ class EmptyMenu {
     }
 
     this.editor.emptyMenuOBJ.replaceChildren(fragment);
-
   }
 
   hide() {
