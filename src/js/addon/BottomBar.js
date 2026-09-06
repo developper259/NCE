@@ -30,12 +30,11 @@ class BottomBar {
       mode: "pick",
       title: "Select Language",
       placeholder: "Select Language",
-      selectedId: String(file.language || "Plaintext").toLowerCase(),
+      selectedId: String(file.language || "plaintext").toLowerCase(),
       items,
       onAccept: (item) => {
-        file.language = item.data;
+        this.editor.highlightController.changeLanguage(file, item.data);
         this.refreshLanguage();
-        this.editor.highlightController.reset();
       },
     });
   }
@@ -109,8 +108,9 @@ class BottomBar {
   refreshLanguage() {
     if (!this.languageElement) return;
     const title = this.languageElement.querySelector(".scroller-title");
-    const language = this.editor.tabManager.activeFile?.language || "Plaintext";
-    if (title) title.innerText = language;
+    const language = this.editor.tabManager.activeFile?.language || "plaintext";
+    if (title)
+      title.innerText = language === "plaintext" ? "Plain Text" : language;
   }
 
   hide() {

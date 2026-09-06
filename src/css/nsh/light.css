@@ -1,0 +1,76 @@
+.nsh-theme-light.nsh-highlighter {
+  color: #000000;
+}
+
+.nsh-theme-light .nsh-line {
+  white-space: pre;
+  min-height: 1em;
+  tab-size: 4;
+}
+
+.nsh-theme-light .nsh-line-number {
+  display: inline-block;
+  user-select: none;
+  margin-right: 1em;
+}
+
+.nsh-theme-light .nsh-keyword {
+  color: #0000ff;
+}
+
+.nsh-theme-light .nsh-control {
+  color: #af00db;
+}
+
+.nsh-theme-light .nsh-string {
+  color: #a31515;
+}
+
+.nsh-theme-light .nsh-number {
+  color: #098658;
+}
+
+.nsh-theme-light .nsh-comment {
+  color: #008000;
+  font-style: italic;
+}
+
+.nsh-theme-light .nsh-function {
+  color: #795e26;
+}
+
+.nsh-theme-light .nsh-variable {
+  color: #001080;
+}
+
+.nsh-theme-light .nsh-property {
+  color: #001080;
+}
+
+.nsh-theme-light .nsh-type {
+  color: #267f99;
+}
+
+.nsh-theme-light .nsh-builtin {
+  color: #0070c1;
+}
+
+.nsh-theme-light .nsh-operator {
+  color: #000000;
+}
+
+.nsh-theme-light .nsh-bracket {
+  color: #000000;
+}
+
+.nsh-theme-light .nsh-regex {
+  color: #811f3f;
+}
+
+.nsh-theme-light .nsh-tag {
+  color: #800000;
+}
+
+.nsh-theme-light .nsh-attribute {
+  color: #ff0000;
+}

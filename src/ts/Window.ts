@@ -4,7 +4,6 @@ import path from "path";
 import { FileManager } from "./addon/FileManager";
 import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
-import { NSH } from "./NSH";
 import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
 import { App } from "./App";
@@ -14,7 +13,6 @@ export class Window {
   fileManager: FileManager | undefined;
   watcher: Watcher | undefined;
   contextMenu: ContextMenu | undefined;
-  nsh: NSH | undefined;
   workspaceSearch: WorkspaceSearch | undefined;
   app: App;
   forceQuit: boolean;
@@ -63,19 +61,27 @@ export class Window {
 
     this.contextMenu = new ContextMenu(this.window);
 
-    this.nsh = new NSH(this);
-
     this.workspaceSearch = new WorkspaceSearch(this);
 
     const menu = new AppMenu(this.window, this);
 
     this.window.loadFile(path.join(__dirname, "../../src/html/index.html"));
 
-    this.window.webContents.on("console-message", (_event, level, message, line, sourceId) => {
-      if (level >= 2) {
-        console.error(`[Renderer] ${message} (${sourceId}:${line})`);
-      }
-    });
+      this.window.webContents.on("console-message", (...args: any[]) => {
+        const details = typeof args[1] === "object"
+          ? args[1]
+          : {
+              level: args[1],
+              message: args[2],
+              lineNumber: args[3],
+              sourceId: args[4],
+            };
+        if (details.level >= 2) {
+          console.error(
+            `[Renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`,
+          );
+        }
+      });
     this.window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
       console.error("[Renderer] did-fail-load", { errorCode, errorDescription, validatedURL });
     });
@@ -151,6 +157,7 @@ export class Window {
         this.clearQuitTimer();
         return true;
       });
+      ipcMain.handle("NSH:getEndpoint", async () => this.app.nshEndpoint);
 
       this.fileManager.handleIPC();
       this.watcher.handleIPC();

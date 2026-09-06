@@ -214,6 +214,8 @@ class tabManager {
       await file.loadContent();
     }
 
+    await this.editor.highlightController.openFile(file);
+
     this.editor.cursorController.setCursorPosition(file.row, file.column);
 
     if (!this.editor.isOnInit) this.editor.refreshAll();

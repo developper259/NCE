@@ -84,6 +84,7 @@ class Events {
   cursorEnabled(arg) {}
   onSelect(arg) {}
   onChange(arg) {
+    this.editor.highlightController?.handleChange(arg);
     // ------- LineController  ------
     this.editor.lineController.recalculatePersistentDiff();
     // ------- SearchController.js ------
@@ -100,9 +101,13 @@ class Events {
     this.editor.statesManager.save();
   }
   onOpenFile(arg) {
+    const file = arg?.activeFile || this.editor.tabManager.activeFile;
+    if (file) this.editor.highlightController?.openFile(file);
     this.editor.statesManager.save();
   }
   onCloseFile(arg) {
+    if (arg?.file) this.editor.highlightController?.closeFile(arg.file);
+    else this.editor.highlightController?.closeAllFiles();
     this.editor.statesManager.save();
   }
   onOpenProject(arg) {
@@ -113,6 +118,9 @@ class Events {
   }
   onLoaded(arg) {
     this.editor.isOnInit = false;
+
+    const activeFile = this.editor.tabManager.activeFile;
+    if (activeFile) this.editor.highlightController?.openFile(activeFile);
 
     if (this.editor.tabManager.files.length === 0) this.editor.reset();
     this.editor.refreshAll();

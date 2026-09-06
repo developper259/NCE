@@ -111,7 +111,14 @@ class WriterController {
       }
 
       const span = document.createElement("span");
-      span.className = `token editor-select ${token.type}`;
+      const tokenClasses = String(token.className || token.type || "")
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((className) =>
+          className.startsWith("nsh-") ? className : `nsh-${className}`,
+        )
+        .join(" ");
+      span.className = `token editor-select ${tokenClasses}`.trim();
       span.textContent = expandTabsForDisplay(token.value);
 
       fragment.appendChild(span);
@@ -292,6 +299,11 @@ class WriterController {
       action: options.source || "edit",
       beforeText,
       afterText: text,
+      nshUpdate: {
+        startLine: start.row - 1,
+        deletedLines: end.row - start.row + 1,
+        insertedLines: replacement,
+      },
       beforeRow: start.row,
       beforeColumn: start.column,
       afterRow: cursorAfter.row,

@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("api", {
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
+  getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
 
   selectFile: () => ipcRenderer.invoke("FileManager:selectFile"),
 

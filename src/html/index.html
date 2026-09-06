@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://localhost:1212 ws://127.0.0.1:1212; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>NCE</title>
     <link
@@ -29,7 +29,7 @@
     <link rel="stylesheet" href="../css/sidebar/search.css" />
     <link rel="stylesheet" href="../css/sidebar/agent.css">
 
-    <link rel="stylesheet" href="../modules/NSH/themes/dark.css" />
+    <link rel="stylesheet" href="../css/nsh/dark.css" />
   </head>
   <body>
     <section class="main-section">
@@ -41,7 +41,7 @@
       <div class="file-manager box-top box-bottom">
         <ul class="files-ul"></ul>
       </div>
-      <div class="editor editor-empty">
+      <div class="editor editor-empty nsh-theme-dark">
         <div class="empty-menu"></div>
         <div class="editor-search-bar">
           <div class="search-bar-input-container">
@@ -128,6 +128,7 @@
     <script src="../js/controller/SelectController.js"></script>
     <script src="../js/controller/WriterController.js"></script>
     <script src="../js/controller/LineController.js"></script>
+    <script src="../js/highlight/NSHClient.js"></script>
     <script src="../js/controller/HighlightController.js"></script>
     <script src="../js/controller/CursorController.js"></script>
     <script src="../js/controller/SearchController.js"></script>

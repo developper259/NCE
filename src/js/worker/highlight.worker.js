@@ -1,7 +1,15 @@
 let ws = null;
 const pendingRequests = new Map();
 let connectionPromise = null;
-const port = 1212;
+let endpoint = null;
+let reconnectTimer = null;
+let hasConnected = false;
+
+function configure(nextEndpoint) {
+  endpoint = nextEndpoint;
+  if (ws) ws.close();
+  return connectWebSocket();
+}
 
 function connectWebSocket() {
   if (
@@ -12,10 +20,13 @@ function connectWebSocket() {
   }
 
   connectionPromise = new Promise((resolve, reject) => {
-    ws = new WebSocket(`ws://localhost:${port}`);
+    if (!endpoint) throw new Error("NSH endpoint is not configured");
+    ws = new WebSocket(`ws://${endpoint.host}:${endpoint.port}`);
 
     ws.onopen = () => {
       console.log("Worker : Connecté au serveur WebSocket NSH (Permanent)");
+      if (hasConnected) self.postMessage({ type: "sessionReset" });
+      hasConnected = true;
       resolve();
     };
 
@@ -39,11 +50,22 @@ function connectWebSocket() {
     };
 
     ws.onclose = () => {
+      self.postMessage({ type: "sessionLost" });
+      for (const pending of pendingRequests.values()) {
+        pending.reject(new Error("NSH WebSocket closed"));
+      }
+      pendingRequests.clear();
+      connectionPromise = null;
       console.warn(
         "⚠️ Worker : Connexion perdue. Reconnexion automatique dans 2s...",
       );
       ws = null;
-      setTimeout(() => connectWebSocket(port), 2000);
+      if (!reconnectTimer && endpoint) {
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          connectWebSocket().catch(() => {});
+        }, 2000);
+      }
     };
   });
 
@@ -72,6 +94,11 @@ self.onmessage = async (event) => {
   const { taskId, taskName, data } = event.data;
 
   try {
+    if (taskName === "configure") {
+      await configure(data.endpoint);
+      self.postMessage({ taskId, result: true });
+      return;
+    }
     let result;
 
     switch (taskName) {
@@ -128,6 +155,17 @@ self.onmessage = async (event) => {
           fileName,
         });
 
+        break;
+      }
+
+      case "openDocument":
+      case "updateDocument":
+      case "getDocumentLines":
+      case "closeDocument": {
+        result = await sendToServer({
+          requestType: taskName,
+          ...data,
+        });
         break;
       }
 
