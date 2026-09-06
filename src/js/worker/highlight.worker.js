@@ -4,6 +4,8 @@ let connectionPromise = null;
 let endpoint = null;
 let reconnectTimer = null;
 let hasConnected = false;
+let reconnectDelay = 500;
+const requestTimeoutMs = 10000;
 
 function configure(nextEndpoint) {
   endpoint = nextEndpoint;
@@ -27,6 +29,7 @@ function connectWebSocket() {
       console.log("Worker : Connecté au serveur WebSocket NSH (Permanent)");
       if (hasConnected) self.postMessage({ type: "sessionReset" });
       hasConnected = true;
+      reconnectDelay = 500;
       resolve();
     };
 
@@ -35,6 +38,7 @@ function connectWebSocket() {
       const pending = pendingRequests.get(data.id);
 
       if (pending) {
+        clearTimeout(pending.timeout);
         if (data.success) {
           pending.resolve(data);
         } else {
@@ -64,7 +68,8 @@ function connectWebSocket() {
         reconnectTimer = setTimeout(() => {
           reconnectTimer = null;
           connectWebSocket().catch(() => {});
-        }, 2000);
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, 4000);
       }
     };
   });
@@ -79,7 +84,11 @@ async function sendToServer(payload) {
     Date.now().toString() + Math.random().toString(36).substring(2, 9);
 
   return new Promise((resolve, reject) => {
-    pendingRequests.set(requestId, { resolve, reject });
+    const timeout = setTimeout(() => {
+      pendingRequests.delete(requestId);
+      reject(new Error(`NSH worker request timed out: ${payload.requestType}`));
+    }, requestTimeoutMs);
+    pendingRequests.set(requestId, { resolve, reject, timeout });
 
     ws.send(
       JSON.stringify({

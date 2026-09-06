@@ -10,8 +10,7 @@ export class App {
   nshStopping = false;
   name = "NCE";
 
-  version = "BETA 0.0.1";   // NCE Version
-  fversion = "BETA 0.0.1";  // NCE Front Version
+  version = app.getVersion();
 
   constructor() {
     this.window = new Window(this);

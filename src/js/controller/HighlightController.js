@@ -98,7 +98,13 @@ class HighlightController {
   }
 
   canUseIncremental(file) {
-    if (!file || !file.language || file.language === "plaintext") return false;
+    if (
+      !file ||
+      file.incrementalEligible !== true ||
+      !file.language ||
+      file.language === "plaintext"
+    )
+      return false;
     const text = this.getLogicalText(file);
     return (
       text.length <= this.incrementalMaxFileSize &&

@@ -15,7 +15,6 @@ class KeyBinding {
       undo: this.control_undo,
       redo: this.control_redo,
       find: this.control_find,
-      replace: this.control_replace,
       open_command: this.control_open_command,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,

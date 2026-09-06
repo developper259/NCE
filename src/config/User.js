@@ -72,12 +72,6 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
-    action: "replace",
-    description: "Replace in the current file",
-    key: "Mod+H",
-    in_editor: true,
-  },
-  {
     action: "open_command",
     description: "Open the command palette",
     key: "Mod+Shift+P",

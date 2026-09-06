@@ -4,6 +4,8 @@ class FileLoader {
     this.loadingStates = new Map();
     this.initialChunkSize = 1000;
     this.backgroundChunkSize = 1000;
+    this.incrementalMaxFileSize = 1024 * 1024;
+    this.incrementalMaxLineLength = 1000;
   }
 
   getState(filePath) {
@@ -40,15 +42,20 @@ class FileLoader {
     }
 
     const totalLines = initResponse.totalLines;
+    const incrementalEligible =
+      initResponse.incrementalEligible === true &&
+      initResponse.size <= this.incrementalMaxFileSize &&
+      initResponse.maxLineLength <= this.incrementalMaxLineLength;
+    const chunkSize = incrementalEligible ? totalLines : this.initialChunkSize;
 
-    if (totalLines <= this.initialChunkSize) {
+    if (incrementalEligible || totalLines <= this.initialChunkSize) {
       state.isFullyLoaded = true;
     }
 
     const chunkResponse = await this.editor.api.getFileChunk(
       filePath,
       0,
-      this.initialChunkSize,
+      chunkSize,
     );
     if (!chunkResponse || !chunkResponse.success) {
       throw new Error("Failed to load initial chunk");
@@ -59,6 +66,10 @@ class FileLoader {
       totalLines,
       eol: initResponse.eol || "\n",
       hasFinalNewline: initResponse.hasFinalNewline === true,
+      incrementalEligible,
+      lineEndings: Array.isArray(initResponse.lineEndings)
+        ? initResponse.lineEndings
+        : [],
     };
   }
 

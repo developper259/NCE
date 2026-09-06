@@ -44,7 +44,9 @@ class FileNode {
     this.language = undefined;
     this.eol = "\n";
     this.hasFinalNewline = false;
+    this.lineEndings = [];
     this.loadError = null;
+    this.incrementalEligible = false;
 
     // Diff State
     this.diffSnapshot = null;
@@ -104,7 +106,11 @@ class FileNode {
     this.language = file.language;
     this.eol = file.eol || "\n";
     this.hasFinalNewline = file.hasFinalNewline === true;
+    this.lineEndings = Array.isArray(file.lineEndings)
+      ? [...file.lineEndings]
+      : [];
     this.loadError = file.loadError || null;
+    this.incrementalEligible = file.incrementalEligible === true;
   }
 
   async loadContent() {
@@ -117,11 +123,19 @@ class FileNode {
     }
 
     try {
-      const { initialLines, totalLines, eol, hasFinalNewline } =
-        await this.editor.fileLoader.loadFile(this.path);
+      const {
+        initialLines,
+        totalLines,
+        eol,
+        hasFinalNewline,
+        incrementalEligible,
+        lineEndings,
+      } = await this.editor.fileLoader.loadFile(this.path);
 
       this.eol = eol || "\n";
       this.hasFinalNewline = hasFinalNewline === true;
+      this.lineEndings = Array.isArray(lineEndings) ? lineEndings : [];
+      this.incrementalEligible = incrementalEligible === true;
 
       this.editor.lineController.loadContent(
         initialLines.join("\n"),
@@ -200,6 +214,17 @@ class FileNode {
   }
 
   serializeContent() {
+    if (this.lineEndings.length > 0) {
+      let content = "";
+      for (let index = 0; index < this.lines.length; index++) {
+        content += this.lines[index].getText();
+        const shouldEndLine =
+          index < this.lines.length - 1 || this.hasFinalNewline;
+        if (shouldEndLine) content += this.lineEndings[index] || this.eol;
+      }
+      return content;
+    }
+
     const content = this.lines.map((line) => line.getText()).join(this.eol);
     return content + (this.hasFinalNewline ? this.eol : "");
   }

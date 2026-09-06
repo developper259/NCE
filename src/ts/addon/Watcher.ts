@@ -33,6 +33,10 @@ export class Watcher {
     this.window = window;
   }
 
+  setWindow(window: BrowserWindow): void {
+    this.window = window;
+  }
+
   handleIPC() {
     ipcMain.handle(
       "Watcher:startWatching",

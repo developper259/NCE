@@ -8,6 +8,7 @@ class tabManager {
     this.tabsOBJ = getElement(".file-manager");
 
     this.idCounter = 0;
+    this.focusGeneration = 0;
 
     this.refresh();
   }
@@ -165,7 +166,7 @@ class tabManager {
         const choice = await this.editor.savePopupManager.confirmClose(id);
         if (choice === "cancel") return;
         if (choice === "save") {
-          if (this.activeFile?.id !== id) this.setFocusFile(file);
+          if (this.activeFile?.id !== id) await this.setFocusFile(file);
           await file.save();
           if (!file.isSaved) return;
         }
@@ -175,8 +176,8 @@ class tabManager {
     if (id == this.activeFile.id) {
       if (this.files.length > 1) {
         const index = this.getFileIndexByID(id);
-        if (index == 0) this.setFocusFile(this.files[index + 1]);
-        else this.setFocusFile(this.files[index - 1]);
+        if (index == 0) await this.setFocusFile(this.files[index + 1]);
+        else await this.setFocusFile(this.files[index - 1]);
       }
     }
 
@@ -202,6 +203,7 @@ class tabManager {
 
   async setFocusFile(file) {
     if (!file) return;
+    const focusGeneration = ++this.focusGeneration;
     this.activeFile = file;
 
     this.editor.lineController.dirtyLines.clear();
@@ -214,7 +216,11 @@ class tabManager {
       await file.loadContent();
     }
 
+    if (focusGeneration !== this.focusGeneration) return;
+
     await this.editor.highlightController.openFile(file);
+
+    if (focusGeneration !== this.focusGeneration) return;
 
     this.editor.cursorController.setCursorPosition(file.row, file.column);
 
@@ -321,7 +327,7 @@ class tabManager {
       btnSpan.className = "file-el-btn file-saved";
 
       const img = document.createElement("img");
-      img.src = "../../assets/icons/close.svg";
+      img.src = "../assets/icons/close.svg";
       img.alt = "close";
       img.className = "file-el-btn-img";
 

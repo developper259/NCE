@@ -6,16 +6,23 @@ class NSHClient {
     this.requestCounter = 0;
     this.timeoutMs = 8000;
     this.disposed = false;
+    this.state = "disconnected";
+    this.connectPromise = null;
+    this.endpoint = null;
     this.onSessionReset = null;
-    this.ready = this.configure();
 
     this.worker.onmessage = (event) => {
       const { taskId, result, error } = event.data;
       if (event.data.type === "sessionReset") {
+        this.state = "ready";
         this.onSessionReset?.();
         return;
       }
-      if (event.data.type === "sessionLost") return;
+      if (event.data.type === "sessionLost") {
+        this.state = "reconnecting";
+        this.rejectPending(new Error("NSH session lost"));
+        return;
+      }
       const pending = this.pendingRequests.get(taskId);
       if (!pending) return;
 
@@ -29,13 +36,36 @@ class NSHClient {
       this.rejectPending(
         error.error || new Error(error.message || "NSH worker failed"),
       );
+      this.state = "disconnected";
     };
+
+    this.connect().catch(() => {});
   }
 
-  async configure() {
-    const endpoint = await this.editor.api.getNshEndpoint();
-    if (!endpoint) throw new Error("NSH server is unavailable");
-    return this.request("configure", { endpoint }, false);
+  async connect() {
+    if (this.disposed) throw new Error("NSH client is disposed");
+    if (this.state === "ready") return;
+    if (this.connectPromise) return this.connectPromise;
+
+    this.state = this.state === "disconnected" ? "connecting" : "reconnecting";
+    this.connectPromise = Promise.resolve()
+      .then(() => this.editor.api.getNshEndpoint())
+      .then((endpoint) => {
+        if (!endpoint) throw new Error("NSH server is unavailable");
+        this.endpoint = endpoint;
+        return this.request("configure", { endpoint }, false);
+      })
+      .then(() => {
+        this.state = "ready";
+      })
+      .catch((error) => {
+        this.state = "disconnected";
+        throw error;
+      })
+      .finally(() => {
+        this.connectPromise = null;
+      });
+    return this.connectPromise;
   }
 
   request(taskName, data = {}, waitForReady = true) {
@@ -54,7 +84,7 @@ class NSHClient {
         this.worker.postMessage({ taskId, taskName, data });
       });
 
-    return (waitForReady ? this.ready : Promise.resolve()).then(send);
+    return (waitForReady ? this.connect() : Promise.resolve()).then(send);
   }
 
   rejectPending(error) {
@@ -68,6 +98,8 @@ class NSHClient {
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
+    this.state = "disposed";
+    this.connectPromise = null;
     this.rejectPending(new Error("NSH client disposed"));
     this.worker.terminate();
   }

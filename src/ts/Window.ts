@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import path from "path";
 
 import { FileManager } from "./addon/FileManager";
@@ -36,6 +36,11 @@ export class Window {
     this.rendererReady = false;
     this.quitState = "idle";
 
+    const appRoot = app.isPackaged
+      ? app.getAppPath()
+      : path.join(__dirname, "../..");
+    const assetRoot = app.isPackaged ? appRoot : path.join(appRoot, "src");
+
     this.window = new BrowserWindow({
       width: 800,
       height: 600,
@@ -43,29 +48,28 @@ export class Window {
       minHeight: 600,
       title: this.app.name,
       fullscreen: true,
-      icon: path.join(__dirname, "../../assets/logo/NCE/dark-logo.png"),
+      icon: path.join(appRoot, "assets/logo/NCE/dark-logo.png"),
 
       webPreferences: {
         sandbox: true,
 
-        preload: path.join(__dirname, "../../src/js/main/Preload.js"),
+        preload: path.join(assetRoot, "js/main/Preload.js"),
 
         contextIsolation: true,
         nodeIntegration: false,
       },
     });
 
-    this.fileManager = new FileManager(this);
-
-    this.watcher = new Watcher(this.window);
-
-    this.contextMenu = new ContextMenu(this.window);
-
-    this.workspaceSearch = new WorkspaceSearch(this);
+    if (!this.fileManager) this.fileManager = new FileManager(this);
+    if (!this.watcher) this.watcher = new Watcher(this.window);
+    else this.watcher.setWindow(this.window);
+    if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
+    else this.contextMenu.window = this.window;
+    if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
 
     const menu = new AppMenu(this.window, this);
 
-    this.window.loadFile(path.join(__dirname, "../../src/html/index.html"));
+    this.window.loadFile(path.join(assetRoot, "html/index.html"));
 
       this.window.webContents.on("console-message", (...args: any[]) => {
         const details = typeof args[1] === "object"

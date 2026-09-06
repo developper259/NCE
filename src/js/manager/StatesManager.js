@@ -130,9 +130,11 @@ class StatesManager {
     if (state.sidebar) this.loadSidebarState(state.sidebar);
 
     if (state.fileExplorer) {
-      this.loadFileExplorerState(state.fileExplorer).catch((error) => {
+      try {
+        await this.loadFileExplorerState(state.fileExplorer);
+      } catch (error) {
         console.error("Failed to restore File Explorer state:", error);
-      });
+      }
     }
 
     if (state.agent) {

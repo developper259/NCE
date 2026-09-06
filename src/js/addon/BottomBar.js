@@ -17,11 +17,18 @@ class BottomBar {
 
     const languages =
       await this.editor.highlightController.getSupportedLanguage();
-    const items = (Array.isArray(languages) ? languages : [])
+    const items = ["plaintext", ...(Array.isArray(languages) ? languages : [])]
       .filter((language) => typeof language === "string" && language.length > 0)
+      .map((language) => language.toLowerCase())
+      .filter((language, index, values) => values.indexOf(language) === index)
       .map((language) => ({
         id: language.toLowerCase(),
-        label: language,
+        label:
+          language === "plaintext"
+            ? "Plain Text"
+            : language === "cpp"
+              ? "C++"
+              : language.charAt(0).toUpperCase() + language.slice(1),
         data: language,
       }));
 

@@ -170,11 +170,7 @@ class MarkdownRenderer {
     state.renderedMarkdown = state.markdown;
     state.lastRenderAt = performance.now();
     state.revision += 1;
-    this.scheduleCodeHighlight(
-      container,
-      state,
-      state.highlightImmediately,
-    );
+    this.scheduleCodeHighlight(container, state, state.highlightImmediately);
 
     const onRendered = state.onRendered;
     state.onRendered = null;
@@ -279,12 +275,13 @@ class MarkdownRenderer {
       this.supportedLanguagesPromise = Promise.resolve(
         controller.getSupportedLanguage(),
       )
-        .then((languages) =>
-          new Set(
-            (Array.isArray(languages) ? languages : [])
-              .filter((language) => typeof language === "string")
-              .map((language) => language.toLowerCase()),
-          ),
+        .then(
+          (languages) =>
+            new Set(
+              (Array.isArray(languages) ? languages : [])
+                .filter((language) => typeof language === "string")
+                .map((language) => language.toLowerCase()),
+            ),
         )
         .catch((error) => {
           this.supportedLanguagesPromise = null;
@@ -381,10 +378,13 @@ class MarkdownRenderer {
 
         const span = document.createElement("span");
         const tokenClass =
-          typeof token.type === "string" &&
-          /^nsh-[a-z0-9-]+$/i.test(token.type)
-            ? token.type
-            : "nsh-token";
+          typeof token.className === "string" &&
+          /^nsh-[a-z0-9-]+$/i.test(token.className)
+            ? token.className
+            : typeof token.type === "string" &&
+                /^nsh-[a-z0-9-]+$/i.test(token.type)
+              ? token.type
+              : "nsh-token";
         span.className = tokenClass;
         span.textContent = value;
         fragment.appendChild(span);

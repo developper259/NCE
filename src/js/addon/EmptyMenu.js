@@ -54,7 +54,7 @@ class EmptyMenu {
     const fragment = document.createDocumentFragment();
 
     const logo = document.createElement("img");
-    logo.src = "../../assets/logo/NCE/dark-logo.png";
+    logo.src = "../assets/logo/NCE/dark-logo.png";
     logo.className = "empty-menu-logo";
     logo.alt = "NCE Logo";
     fragment.appendChild(logo);

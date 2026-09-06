@@ -23,6 +23,19 @@ export interface FileOperationResult {
 export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
 const BINARY_SAMPLE_SIZE = 8192;
 
+function decodeUtf8(buffer: Buffer): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  if (buffer.includes(0)) return true;
+  let controlBytes = 0;
+  for (const byte of buffer) {
+    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) controlBytes++;
+  }
+  return buffer.length > 0 && controlBytes / buffer.length > 0.05;
+}
+
 export class FileManager {
   window: Window;
   private fileCache: Map<string, string[]> = new Map();
@@ -542,6 +555,9 @@ export class FileManager {
     maxSize?: number;
     eol?: string;
     hasFinalNewline?: boolean;
+    maxLineLength?: number;
+    incrementalEligible?: boolean;
+    lineEndings?: string[];
   }> {
     try {
       const stats = await fs.stat(filePath);
@@ -559,24 +575,35 @@ export class FileManager {
       const sampleBuffer = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, stats.size));
       await sample.read(sampleBuffer, 0, sampleBuffer.length, 0);
       await sample.close();
-      if (sampleBuffer.includes(0)) {
+      if (looksBinary(sampleBuffer)) {
         return { success: false, totalLines: 0, errorCode: "BINARY_FILE", size: stats.size };
       }
 
-      const content = await fs.readFile(filePath, "utf-8");
+      const content = decodeUtf8(await fs.readFile(filePath));
       const hasFinalNewline = /(?:\r\n|\n)$/.test(content);
       const eol = content.includes("\r\n") ? "\r\n" : "\n";
+      const lineEndings = [...content.matchAll(/\r\n|\n/g)].map(
+        (match) => match[0],
+      );
       const lines = content.split(/\r?\n/);
       if (lines.length > 0 && lines[lines.length - 1] === "") {
         lines.pop();
       }
       this.fileCache.set(filePath, lines);
+      const maxLineLength = lines.reduce(
+        (maximum, line) => Math.max(maximum, line.length),
+        0,
+      );
 
       return {
         success: true,
         totalLines: lines.length,
         eol,
         hasFinalNewline,
+        maxLineLength,
+        incrementalEligible:
+          stats.size <= 1024 * 1024 && maxLineLength <= 1000,
+        lineEndings,
       };
     } catch (error: any) {
       console.error("Error initializing file:", error);
@@ -600,7 +627,7 @@ export class FileManager {
 
       if (!cachedLines) {
         try {
-          const content = await fs.readFile(filePath, "utf-8");
+          const content = decodeUtf8(await fs.readFile(filePath));
           const loadedLines: string[] = content.split(/\r?\n/);
           if (loadedLines.length > 0 && loadedLines[loadedLines.length - 1] === "") {
             loadedLines.pop();

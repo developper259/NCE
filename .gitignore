@@ -3,6 +3,8 @@ node_modules
 src/libs
 src/assets/fonts/Jetbrains mono/ttf
 src/assets/fonts/Jetbrains mono/variable
+assets/flaticon/
+src/assets/
 release/
 .vscode
 .DS_Store

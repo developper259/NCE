@@ -33,10 +33,8 @@ class Editor {
     this.keyBindingManager = new KeyBindingManager(this);
     this.scrollerManager = new ScrollerManager(this);
     this.sidebarManager = new SidebarManager(this);
-    this.threadManager = new ThreadManager();
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
-    this.threadManager = new ThreadManager();
     this.contextMenuManager = new ContextMenuManager();
     this.quickPanel = new QuickPanelManager(this);
 

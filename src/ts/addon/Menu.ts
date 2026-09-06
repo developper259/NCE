@@ -19,12 +19,6 @@ export class AppMenu {
   }
 
   init() {
-    /*
-     * =======================================================
-     * NCE
-     * =======================================================
-     */
-
     this.menu.append(
       new MenuItem({
         label: "NCE",
@@ -207,14 +201,6 @@ export class AppMenu {
           },
 
           {
-            label: "Replace",
-
-            accelerator: "CommandOrControl+H",
-
-            click: () => this.replace(),
-          },
-
-          {
             type: "separator",
           },
 
@@ -333,18 +319,6 @@ export class AppMenu {
         label: "Help",
 
         submenu: [
-          {
-            label: "Documentation",
-
-            click: () => this.openDocumentation(),
-          },
-
-          {
-            label: "Check for Updates",
-
-            click: () => this.checkUpdate(),
-          },
-
           {
             type: "separator",
           },
