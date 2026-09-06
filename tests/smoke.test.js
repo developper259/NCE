@@ -66,6 +66,8 @@ test("packaged bootstrap invariants remain present", () => {
   assert.equal(fs.existsSync(path.join(root, "src/js/main/Preload.js")), true);
   assert.equal(fs.existsSync(path.join(root, "src/css/nsh/dark.css")), true);
   assert.equal(fs.existsSync(path.join(root, "src/css/nsh/light.css")), true);
+  assert.equal(fs.existsSync(path.join(root, "assets/icons/close.svg")), true);
+  assert.equal(fs.existsSync(path.join(root, "src/assets/icons/close.svg")), true);
   assert.match(html, /assets\/flaticon\/all\.css/);
   assert.match(preload, /exposeInMainWorld\("api"/);
   assert.match(worker, /requestTimeoutMs/);
