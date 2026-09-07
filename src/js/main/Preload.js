@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   platform: process.platform,
+  agentFileOperation: (root, operation, args) => ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
   quit: () => ipcRenderer.invoke("App:quit"),
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),

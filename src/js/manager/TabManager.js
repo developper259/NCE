@@ -27,7 +27,7 @@ class tabManager {
   }
 
   getFileByPath(path) {
-    return this.files.find((file) => file.path == path);
+    return this.files.find((file) => NCEPath.equals(file.path, path));
   }
 
   removeFileByID(id) {
@@ -40,36 +40,26 @@ class tabManager {
   async updateFilePath(oldPath, newPath) {
     if (!oldPath || !newPath) return;
     let changed = false;
-    const normalizePath = (value) =>
-      String(value || "")
-        .replace(/\\/g, "/")
-        .replace(/\/+$/g, "");
-    const normalizedOldPath = normalizePath(oldPath);
-    const normalizedNewPath = normalizePath(newPath);
-
     for (const file of this.files) {
-      if (!file.path) continue;
-      const normalizedFilePath = normalizePath(file.path);
-
-      if (normalizedFilePath === normalizedOldPath) {
-        file.path = newPath;
-        file.name = normalizedNewPath.split("/").pop();
-        changed = true;
-
-        await file.loadLanguage();
-        this.editor.highlightController.reset();
-      } else if (normalizedFilePath.startsWith(`${normalizedOldPath}/`)) {
-        file.path =
-          normalizedNewPath +
-          normalizedFilePath.slice(normalizedOldPath.length);
-        changed = true;
-
-        await file.loadLanguage();
-        this.editor.highlightController.reset();
+      if (!file.path || !NCEPath.isInside(file.path, oldPath)) continue;
+      // Complete the old-path load before moving its identity.
+      if (file.loadingState?.status === "loading") {
+        this.editor.fileLoader.cancelLoading(file.path);
+        file.isLoaded = false;
+        file.contentGeneration++;
       }
+      file.path = NCEPath.rebase(file.path, oldPath, newPath);
+      file.name = NCEPath.basename(file.path);
+      changed = true;
+      await this.editor.highlightController.changeLanguage(file,
+        await this.editor.highlightController.detectLanguage(file.name));
+      if (file === this.activeFile && !file.isLoaded) await this.setFocusFile(file);
     }
 
-    if (changed) this.refresh();
+    if (changed) {
+      this.editor.fileExplorer.setActiveFile(this.activeFile?.path);
+      this.refresh();
+    }
   }
 
   markFileAsDeleted(path) {
@@ -79,7 +69,7 @@ class tabManager {
     for (const file of this.files) {
       if (!file.path) continue;
 
-      if (file.path === path || file.path.startsWith(`${path}/`)) {
+      if (NCEPath.isInside(file.path, path)) {
         file.setIsSaved(false);
         changed = true;
       }
@@ -124,7 +114,7 @@ class tabManager {
     if (lastAddedFile) {
       if (isSetFocusFile) await this.setFocusFile(lastAddedFile);
 
-      this.activeFile.setIsSaved(true);
+      // Focusing an already-open tab must not mark unsaved edits as saved.
     }
 
     this.editor.events.callEvent(Events.ON_OPEN_FILE, {
@@ -134,7 +124,7 @@ class tabManager {
     if (!isSetFocusFile) this.editor.refreshAll();
   }
 
-  async closeFiles() {
+  async prepareForQuit() {
     const dirtyFiles = this.files.filter(
       (file) => !file.isSaved && !(file.isEmpty() && !file.hasPath()),
     );
@@ -142,9 +132,16 @@ class tabManager {
     for (const file of dirtyFiles) {
       const choice = await this.editor.savePopupManager.confirmClose(file.id);
       if (choice === "cancel") return false;
-      if (choice === "save" && !(await file.save())) return false;
+      if (choice === "save" && (!(await file.save()) || !file.isSaved)) return false;
     }
 
+    return true;
+  }
+
+  async closeFiles() {
+    if (!(await this.prepareForQuit())) return false;
+    for (const file of this.files) this.editor.fileLoader.cancelLoading(file.path);
+    this.editor.highlightController.closeAllFiles();
     this.files = [];
     this.activeFile = undefined;
     this.editor.fileExplorer.activeFilePath = null;
@@ -173,7 +170,7 @@ class tabManager {
       }
     }
 
-    if (id == this.activeFile.id) {
+    if (id == this.activeFile?.id) {
       if (this.files.length > 1) {
         const index = this.getFileIndexByID(id);
         if (index == 0) await this.setFocusFile(this.files[index + 1]);
@@ -181,10 +178,14 @@ class tabManager {
       }
     }
 
-    if (this.files.length > 1) this.removeFileByID(id);
-    else {
-      await this.closeFiles();
-      return;
+    this.editor.fileLoader.cancelLoading(file.path);
+    file.contentGeneration++;
+    await this.editor.highlightController.closeFile(file);
+    this.removeFileByID(id);
+    if (!this.files.length) {
+      this.activeFile = undefined;
+      this.editor.fileExplorer.activeFilePath = null;
+      this.editor.searchController.close();
     }
 
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
@@ -238,11 +239,15 @@ class tabManager {
     }
 
     try {
+      this.editor.fileLoader.cancelLoading(file.path);
+      file.contentGeneration++;
+      await this.editor.highlightController.invalidateFile(file);
       if (file === this.activeFile) {
-        this.editor.fileLoader.cancelLoading(file.path);
         file.isLoaded = false;
 
+        await file.loadLanguage();
         await file.loadContent();
+        await this.editor.highlightController.openFile(file);
 
         this.editor.lineController.markDirtyAll();
         this.editor.lineController.refresh(true);
@@ -256,7 +261,7 @@ class tabManager {
   }
 
   async openFileWithPath(path) {
-    let name = path.split("/").pop();
+    let name = NCEPath.basename(path);
     let node = new FileNode(this.editor, this.getNextID(), name, path);
     return this.openFile(node);
   }
@@ -272,7 +277,7 @@ class tabManager {
   async selectFile() {
     const file = await this.editor.api.selectFile();
     if (file) {
-      let name = file.split("/").pop();
+      let name = NCEPath.basename(file);
       let node = new FileNode(this.editor, this.getNextID(), name, file);
       return node;
     }
@@ -286,7 +291,7 @@ class tabManager {
 
     if (files) {
       for (let file of files) {
-        let name = file.split("/").pop();
+        let name = NCEPath.basename(file);
         let node = new FileNode(this.editor, this.getNextID(), name, file);
         result.push(node);
       }
@@ -296,15 +301,7 @@ class tabManager {
   }
 
   async selectNewFile() {
-    const file = await this.editor.api.selectNewFile(this.emptyName);
-
-    if (file) {
-      let name = file.split("/").pop();
-      let node = new FileNode(this.editor, this.getNextID(), name, file);
-      return node;
-    }
-
-    return undefined;
+    return this.editor.api.selectNewFile(this.activeFile?.name || this.emptyName);
   }
 
   createFileOBJ(file) {

@@ -1,7 +1,14 @@
 class Agent {
   constructor(editor) {
     this.editor = editor;
-    this.api = editor?.api || window.api;
+    const api = editor?.api || window.api;
+    this.api = { ...api };
+    for (const operation of ["saveFile", "createFile", "createFolder", "renameEntry", "deleteEntry", "copyEntry", "moveEntry", "duplicateEntry"]) {
+      this.api[operation] = async (...args) => {
+        const result = await api.agentFileOperation(this.editor?.fileExplorer?.rootPath, operation, args);
+        return operation === "saveFile" && result?.success === false ? undefined : result;
+      };
+    }
     this.window = window;
     this.provider = null;
     this.model = null;

@@ -194,14 +194,19 @@ class Editor {
 
   initQuitEvent() {
     this.api.onSaveRequest(async () => {
-      const closed = await this.tabManager.closeFiles();
-      if (!closed) {
+      try {
+        const closed = await this.tabManager.prepareForQuit();
+        if (!closed) {
+          await this.api.cancelQuit?.();
+          return;
+        }
+        const saved = await this.statesManager.save();
+        if (saved !== false) await this.api.approveQuit?.();
+        else await this.api.cancelQuit?.();
+      } catch (error) {
+        console.error("Failed to prepare quit:", error);
         await this.api.cancelQuit?.();
-        return;
       }
-      const saved = await this.statesManager.save();
-      if (saved !== false) await this.api.approveQuit?.();
-      else await this.api.cancelQuit?.();
     });
   }
 

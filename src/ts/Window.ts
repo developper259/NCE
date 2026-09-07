@@ -63,6 +63,7 @@ export class Window {
     if (!this.fileManager) this.fileManager = new FileManager(this);
     if (!this.watcher) this.watcher = new Watcher(this.window);
     else this.watcher.setWindow(this.window);
+    this.watcher.onChange = (filePath) => this.fileManager?.clearFileCache(filePath);
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
@@ -105,7 +106,7 @@ export class Window {
     });
 
     this.window.webContents.on("will-navigate", (event, url) => {
-      if (!url.startsWith("file://")) event.preventDefault();
+      if (url !== this.window?.webContents.getURL()) event.preventDefault();
     });
 
     this.window.on("close", (event) => {

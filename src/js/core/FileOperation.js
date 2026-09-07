@@ -37,8 +37,8 @@ class FileOperations {
 
   copyPathToClipboard(filePath, rootPath, relative) {
     if (relative && rootPath) {
-      const relativePath = filePath.startsWith(rootPath)
-        ? filePath.slice(rootPath.length).replace(/^\/+/, "")
+      const relativePath = NCEPath.isInside(filePath, rootPath)
+        ? NCEPath.normalize(filePath).slice(NCEPath.normalize(rootPath).length).replace(/^\/+/, "")
         : filePath;
       navigator.clipboard.writeText(relativePath);
     } else {

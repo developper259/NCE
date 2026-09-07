@@ -25,7 +25,7 @@ class HistoryController {
     if (!state) return;
 
     if (state.index < state.entries.length) {
-      state.entries.splice(state.index);
+      for (const removed of state.entries.splice(state.index)) state.textBudget -= this.entrySize(removed);
       if (state.savedIndex > state.index) state.savedIndex = -1;
     }
 
@@ -41,6 +41,7 @@ class HistoryController {
 
     if (canGroup) {
       previous.afterText += entry.afterText;
+      state.textBudget += this.entrySize(entry);
       previous.cursorAfter = entry.cursorAfter;
     } else {
       state.entries.push(entry);
@@ -144,6 +145,7 @@ class HistoryController {
     try {
       this.editor.writerController.applyRangeEdit(entry.start, end, text, {
         recordHistory: false,
+        lineEndings: redo ? entry.afterLineEndings : entry.beforeLineEndings,
         source: "history",
         ensureVisible: true,
         cursor: redo ? entry.cursorAfter : entry.cursorBefore,

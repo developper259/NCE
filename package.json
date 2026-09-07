@@ -2,11 +2,11 @@
   "name": "NCE",
   "productName": "NCE",
   "version": "0.0.1-beta.1",
-  "description": "",
+  "description": "A lightweight and fast desktop code editor built from scratch.",
   "main": "dist/main.js",
   "type": "commonjs",
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "typecheck": "tsc --noEmit",
     "pretest": "npm run sync-nsh-themes && npm run build:main",
     "sync-nsh-themes": "node scripts/sync-nsh-themes.js",
@@ -14,8 +14,11 @@
     "prebuild": "npm run sync-nsh-themes",
     "build:main": "tsc",
     "start": "npm run build:main && electron dist/main.js",
-    "build": "npm run sync-nsh-themes && npm run build:main && electron-builder",
-    "dist": "npm run sync-nsh-themes && npm run build:main && electron-builder --dir"
+    "build": "npm run build:main && electron-builder --publish never",
+    "dist": "npm run sync-nsh-themes && npm run build:main && electron-builder --dir --publish never",
+    "check": "npm run typecheck && npm test",
+    "test:electron": "npm run sync-nsh-themes && npm run build:main && node --test tests/electron/smoke.cjs",
+    "test:packaged": "node scripts/check-package.js"
   },
   "author": "Andrea Belvedere",
   "license": "ISC",

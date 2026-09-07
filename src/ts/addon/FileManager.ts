@@ -22,6 +22,14 @@ export interface FileOperationResult {
 
 export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
 const BINARY_SAMPLE_SIZE = 8192;
+function validPath(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0 && !value.includes("\0");
+}
+function validName(value: unknown): value is string {
+  return validPath(value) && !/^(?:[\\/]|[A-Za-z]:)/.test(value) &&
+    value.split(/[\\/]/).every(segment => Boolean(segment) && segment !== "." && segment !== "..");
+}
+const invalidPath = (): FileOperationResult => ({ success: false, code: "INVALID_PATH", error: "Invalid file path or arguments." });
 
 function decodeUtf8(buffer: Buffer): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
@@ -39,12 +47,54 @@ function looksBinary(buffer: Buffer): boolean {
 export class FileManager {
   window: Window;
   private fileCache: Map<string, string[]> = new Map();
+  private stateSaveQueue: Promise<boolean> = Promise.resolve(true);
 
   constructor(window: Window) {
     this.window = window;
   }
 
+  async agentFileOperation(root: string, operation: string, args: unknown[]) {
+    const methods: Record<string, { paths: number[]; run: (...values: any[]) => Promise<any> }> = {
+      saveFile: { paths: [0], run: this.saveFile.bind(this) },
+      createFile: { paths: [0], run: this.createFile.bind(this) },
+      createFolder: { paths: [0], run: this.createFolder.bind(this) },
+      renameEntry: { paths: [0, 1], run: this.renameEntry.bind(this) },
+      deleteEntry: { paths: [0], run: this.deleteEntry.bind(this) },
+      copyEntry: { paths: [0, 1], run: this.copyEntry.bind(this) },
+      moveEntry: { paths: [0, 1], run: this.moveEntry.bind(this) },
+      duplicateEntry: { paths: [0], run: this.duplicateEntry.bind(this) },
+    };
+    if (!validPath(root) || !Array.isArray(args) || !Object.prototype.hasOwnProperty.call(methods, operation)) return invalidPath();
+    const method = methods[operation];
+    try {
+      const realRoot = await fs.realpath(root);
+      const inside = (base: string, target: string) => {
+        const relative = path.relative(base, target);
+        return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+      };
+      const targets = method.paths.map(index => args[index]);
+      if (operation === "createFile" || operation === "createFolder") {
+        if (!validName(args[1]) || !validPath(args[0])) return invalidPath();
+        targets.push(path.join(args[0], args[1]));
+      }
+      for (const target of targets) {
+        if (!validPath(target)) return invalidPath();
+        let existing = path.resolve(target);
+        while (!fsSync.existsSync(existing)) {
+          const parent = path.dirname(existing);
+          if (parent === existing) return invalidPath();
+          existing = parent;
+        }
+        if (!inside(realRoot, await fs.realpath(existing)) || !inside(path.resolve(root), path.resolve(target))) {
+          return { success: false, code: "OUTSIDE_WORKSPACE", error: "Path must remain inside the workspace." };
+        }
+      }
+      return await method.run(...args);
+    } catch { return invalidPath(); }
+  }
+
   handleIPC() {
+    ipcMain.handle("Agent:fileOperation", (_event, root, operation, args) => this.agentFileOperation(root, operation, args));
     ipcMain.handle("FileManager:selectFile", async () => {
       return await this.selectFile();
     });
@@ -199,11 +249,9 @@ export class FileManager {
       properties: ["openFile"],
     });
     if (result.canceled) {
-      console.log("User cancelled the file selection.");
       return undefined;
     }
 
-    console.log("Selected file paths:", result.filePaths[0]);
     return result.filePaths[0];
   }
 
@@ -215,11 +263,9 @@ export class FileManager {
     });
 
     if (result.canceled) {
-      console.log("User cancelled the files selection.");
       return undefined;
     }
 
-    console.log("Selected file paths:", result.filePaths);
     return result.filePaths;
   }
 
@@ -233,17 +279,14 @@ export class FileManager {
     });
 
     if (result.canceled) {
-      console.log("User cancelled the save file dialog.");
       return undefined;
     }
 
-    console.log("File path selected for saving:", result.filePath);
     return result.filePath || undefined;
   }
 
   async getFileContent(file: string[]): Promise<{} | undefined> {
-    if (!file) {
-      console.log("No file selected.");
+    if (!Array.isArray(file) || !file.every(validPath)) {
       return Promise.resolve(undefined);
     }
     const fileContents: { [key: string]: string } = {};
@@ -264,7 +307,7 @@ export class FileManager {
     filePath: string,
     content: string,
   ): Promise<string | undefined> {
-    if (typeof filePath !== "string" || !filePath || typeof content !== "string") {
+    if (!validPath(filePath) || typeof content !== "string") {
       return undefined;
     }
     try {
@@ -279,7 +322,6 @@ export class FileManager {
       await fs.writeFile(filePath, content);
       this.clearFileCache(filePath);
 
-      console.log("File saved successfully:", filePath);
 
       return filePath;
     } catch (error) {
@@ -360,8 +402,8 @@ export class FileManager {
       if (
         typeof oldPath !== "string" ||
         typeof newPath !== "string" ||
-        !oldPath ||
-        !newPath
+        !validPath(oldPath) ||
+        !validPath(newPath)
       ) {
         return {
           success: false,
@@ -393,6 +435,7 @@ export class FileManager {
       }
       await fs.rename(oldPath, newPath);
       this.clearFileCache(oldPath);
+      this.clearFileCache(newPath);
       return {
         success: true,
         path: newPath,
@@ -412,6 +455,7 @@ export class FileManager {
   }
 
   async deleteEntry(targetPath: string): Promise<FileOperationResult> {
+    if (!validPath(targetPath) || path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root) return invalidPath();
     try {
       await fs.rm(targetPath, { recursive: true, force: true });
       this.clearFileCache(targetPath);
@@ -428,6 +472,7 @@ export class FileManager {
     content: string = "",
     overwrite: boolean = false,
   ): Promise<FileOperationResult> {
+    if (!validPath(dirPath) || !validName(fileName) || typeof content !== "string" || typeof overwrite !== "boolean") return invalidPath();
     const fullPath = path.join(dirPath, fileName);
     try {
       if (fsSync.existsSync(fullPath) && !overwrite) {
@@ -464,6 +509,7 @@ export class FileManager {
     dirPath: string,
     folderName: string,
   ): Promise<FileOperationResult> {
+    if (!validPath(dirPath) || !validName(folderName)) return invalidPath();
     const fullPath = path.join(dirPath, folderName);
     try {
       if (fsSync.existsSync(fullPath)) {
@@ -484,11 +530,15 @@ export class FileManager {
     sourcePath: string,
     destPath: string,
   ): Promise<FileOperationResult> {
+    if (!validPath(sourcePath) || !validPath(destPath)) return invalidPath();
+    if (fsSync.existsSync(destPath)) return { success: false, code: "DESTINATION_EXISTS" };
     try {
       await fs.cp(sourcePath, destPath, {
         recursive: true,
         errorOnExist: true,
+        force: false,
       });
+      this.clearFileCache(destPath);
       return { success: true, path: destPath };
     } catch (error: any) {
       console.error("Error copying entry:", error);
@@ -500,17 +550,21 @@ export class FileManager {
     sourcePath: string,
     destPath: string,
   ): Promise<FileOperationResult> {
+    if (!validPath(sourcePath) || !validPath(destPath)) return invalidPath();
+    if (fsSync.existsSync(destPath)) return { success: false, code: "DESTINATION_EXISTS" };
     try {
       await fs.rename(sourcePath, destPath);
       this.clearFileCache(sourcePath);
+      this.clearFileCache(destPath);
       return { success: true, path: destPath };
     } catch (error: any) {
       if (error?.code === "EXDEV") {
         try {
-          await fs.cp(sourcePath, destPath, { recursive: true });
+          await fs.cp(sourcePath, destPath, { recursive: true, force: false, errorOnExist: true });
           await fs.rm(sourcePath, { recursive: true, force: true });
           this.clearFileCache(sourcePath);
-          return { success: true, path: destPath };
+          this.clearFileCache(destPath);
+      return { success: true, path: destPath };
         } catch (fallbackError: any) {
           console.error("Error moving entry (fallback):", fallbackError);
           return {
@@ -525,6 +579,7 @@ export class FileManager {
   }
 
   async duplicateEntry(targetPath: string): Promise<FileOperationResult> {
+    if (!validPath(targetPath) || path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root) return invalidPath();
     try {
       const dir = path.dirname(targetPath);
       const ext = path.extname(targetPath);
@@ -538,6 +593,7 @@ export class FileManager {
       }
 
       await fs.cp(targetPath, candidate, { recursive: true });
+      this.clearFileCache(candidate);
       return { success: true, path: candidate };
     } catch (error: any) {
       console.error("Error duplicating entry:", error);
@@ -560,6 +616,7 @@ export class FileManager {
     lineEndings?: string[];
   }> {
     try {
+      if (!validPath(filePath)) return { success: false, totalLines: 0, errorCode: "INVALID_PATH" };
       const stats = await fs.stat(filePath);
       if (stats.size > MAX_TEXT_FILE_SIZE) {
         return {
@@ -586,7 +643,7 @@ export class FileManager {
         (match) => match[0],
       );
       const lines = content.split(/\r?\n/);
-      if (lines.length > 0 && lines[lines.length - 1] === "") {
+      if (lines.length > 1 && lines[lines.length - 1] === "") {
         lines.pop();
       }
       this.fileCache.set(filePath, lines);
@@ -598,6 +655,7 @@ export class FileManager {
       return {
         success: true,
         totalLines: lines.length,
+        size: stats.size,
         eol,
         hasFinalNewline,
         maxLineLength,
@@ -621,34 +679,13 @@ export class FileManager {
     lineCount: number,
   ): Promise<{ success: boolean; lines: string[] }> {
     try {
-      const safeStartLine = Math.max(0, Number.isFinite(startLine) ? startLine : 0);
-      const safeLineCount = Math.max(0, Number.isFinite(lineCount) ? lineCount : 0);
-      let cachedLines = this.fileCache.get(filePath);
-
-      if (!cachedLines) {
-        try {
-          const content = decodeUtf8(await fs.readFile(filePath));
-          const loadedLines: string[] = content.split(/\r?\n/);
-          if (loadedLines.length > 0 && loadedLines[loadedLines.length - 1] === "") {
-            loadedLines.pop();
-          }
-          cachedLines = loadedLines;
-          this.fileCache.set(filePath, loadedLines);
-        } catch (error) {
-          console.error("Error loading file into cache for chunk request:", error);
-          return {
-            success: false,
-            lines: [],
-          };
-        }
-      }
-
-      if (!cachedLines) {
-        return {
-          success: false,
-          lines: [],
-        };
-      }
+      if (!validPath(filePath) || !Number.isInteger(startLine) || startLine < 0 ||
+          !Number.isInteger(lineCount) || lineCount < 0) return { success: false, lines: [] };
+      const safeStartLine = startLine;
+      const safeLineCount = lineCount;
+      const cachedLines = this.fileCache.get(filePath);
+      // Never splice a new disk version into an existing partial load.
+      if (!cachedLines) return { success: false, lines: [] };
 
       const endLine = Math.min(safeStartLine + safeLineCount, cachedLines.length);
       const lines = cachedLines.slice(safeStartLine, endLine);
@@ -683,10 +720,22 @@ export class FileManager {
     }
   }
 
-  async saveState(stateString: string): Promise<boolean> {
+  saveState(stateString: string): Promise<boolean> {
+    const next = this.stateSaveQueue.catch(() => false).then(() => this.writeState(stateString));
+    this.stateSaveQueue = next;
+    return next;
+  }
+
+  private async writeState(stateString: string): Promise<boolean> {
     try {
       const filePath = path.join(app.getPath("userData"), "state.json");
-      await fs.writeFile(filePath, stateString, "utf-8");
+      if (typeof stateString !== "string") return false;
+      const state = JSON.parse(stateString);
+      if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+      if (state.agent) delete state.agent.apiKeys;
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(`${filePath}.tmp`, JSON.stringify(state), "utf-8");
+      await fs.rename(`${filePath}.tmp`, filePath);
 
       return true;
     } catch (error) {
@@ -734,8 +783,13 @@ export class FileManager {
     return path.join(app.getPath("userData"), "agent-secrets.json");
   }
 
+  private encryptionAvailable(): boolean {
+    return safeStorage.isEncryptionAvailable() &&
+      safeStorage.getSelectedStorageBackend?.() !== "basic_text";
+  }
+
   private async readAgentSecrets(): Promise<Record<string, string>> {
-    if (!safeStorage.isEncryptionAvailable()) return {};
+    if (!this.encryptionAvailable()) return {};
     try {
       const parsed = JSON.parse(
         await fs.readFile(this.getSecretsPath(), "utf-8"),
@@ -747,7 +801,7 @@ export class FileManager {
   }
 
   private async getAgentApiKey(providerId: string): Promise<string> {
-    if (typeof providerId !== "string" || !safeStorage.isEncryptionAvailable())
+    if (typeof providerId !== "string" || !this.encryptionAvailable())
       return "";
     const secrets = await this.readAgentSecrets();
     try {
@@ -758,7 +812,8 @@ export class FileManager {
   }
 
   private async setAgentApiKey(providerId: string, apiKey: string): Promise<boolean> {
-    if (!providerId || !safeStorage.isEncryptionAvailable()) return false;
+    if (typeof providerId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(providerId) ||
+        typeof apiKey !== "string" || !this.encryptionAvailable()) return false;
     const secrets = await this.readAgentSecrets();
     if (apiKey) {
       secrets[providerId] = safeStorage.encryptString(apiKey).toString("base64");

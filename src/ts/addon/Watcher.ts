@@ -29,6 +29,8 @@ export class Watcher {
 
   private ignoredChanges: Set<string> = new Set();
 
+  onChange: ((filePath: string) => void) | null = null;
+
   constructor(window: BrowserWindow) {
     this.window = window;
   }
@@ -51,6 +53,7 @@ export class Watcher {
   }
 
   async startWatching(projectPath: string): Promise<void> {
+    if (typeof projectPath !== "string" || !projectPath.trim() || projectPath.includes("\0")) return;
     await this.stopWatching();
 
     this.watchedPath = projectPath;
@@ -67,6 +70,7 @@ export class Watcher {
     });
 
     this.watcher.on("all", (event: string, filePath: string) => {
+      this.onChange?.(filePath);
       const normalizedPath = path.normalize(filePath);
 
       if (event === "change" && this.ignoredChanges.has(normalizedPath)) {

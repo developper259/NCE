@@ -11,7 +11,7 @@ class StatesManager {
       );
     } catch (error) {
       console.error("Failed to serialize editor state:", error);
-      return await this.editor.api.saveEditorState("{}");
+      return false;
     }
   }
 
@@ -152,7 +152,7 @@ class StatesManager {
 
     let activeFileToFocus = null;
 
-    for (const fileData of tabState.files) {
+    for (const fileData of Array.isArray(tabState.files) ? tabState.files : []) {
       if (!fileData) continue;
       try {
         let file = new FileNode(

@@ -40,11 +40,14 @@ class LineController {
   }
 
   getDisplayRow(displayIndex) {
-    return this.getDisplayRows()[displayIndex] || null;
+    if (this.diffRows?.length) return this.diffRows[displayIndex] || null;
+    const line = this.lines[displayIndex];
+    return line ? { type: "unchanged", text: line.getText(), documentIndex: displayIndex } : null;
   }
 
   getDisplayIndexForDocument(documentIndex) {
-    const displayIndex = this.getDisplayRows().findIndex(
+    if (!this.diffRows?.length) return documentIndex;
+    const displayIndex = this.diffRows.findIndex(
       (row) => row.documentIndex === documentIndex,
     );
     return displayIndex >= 0 ? displayIndex : documentIndex;
@@ -55,7 +58,7 @@ class LineController {
   }
 
   getDisplayLineCount() {
-    return this.getDisplayRows().length;
+    return this.diffRows?.length || this.lines.length;
   }
 
   set lines(value) {
@@ -348,6 +351,7 @@ class LineController {
     const textLines = content.split("\n");
 
     this.lines = textLines.map((text) => new LineNode(text));
+    if (this.editor.tabManager.activeFile) this.editor.tabManager.activeFile.syntaxMetrics = null;
     if (this.editor.tabManager.activeFile) {
       this.editor.tabManager.activeFile.diffRows = null;
     }
@@ -577,20 +581,15 @@ class LineController {
       return;
     }
 
-    this.dirtyLines.forEach((lineNode) => {
-      const dataIndex = this.lines.indexOf(lineNode);
-
-      if (dataIndex < 0) {
-        return;
+    // Only visible rows can produce DOM work. Avoid indexOf across the entire
+    // file for each dirty line when editing near the end of a large document.
+    const end = Math.min(this.getDisplayLineCount(), this.startIndex + this.renderedLineCount);
+    for (let displayIndex = this.startIndex; displayIndex < end; displayIndex++) {
+      const documentIndex = this.diffRows?.length ? this.diffRows[displayIndex]?.documentIndex : displayIndex;
+      if (this.dirtyLines.has(this.lines[documentIndex])) {
+        this.refreshLineOutput(displayIndex - this.startIndex);
       }
-
-      const displayIndex = this.getDisplayIndexForDocument(dataIndex);
-      const screenIndex = displayIndex - this.startIndex;
-
-      if (screenIndex >= 0 && screenIndex < this.renderedLineCount) {
-        this.refreshLineOutput(screenIndex);
-      }
-    });
+    }
 
     const firstEmptyIndex = Math.max(
       0,

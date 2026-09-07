@@ -6,214 +6,129 @@ class FileLoader {
     this.backgroundChunkSize = 1000;
     this.incrementalMaxFileSize = 1024 * 1024;
     this.incrementalMaxLineLength = 1000;
+    this.requestTimeoutMs = 15000;
   }
 
   getState(filePath) {
-    let state = this.loadingStates.get(filePath);
-    if (!state) {
-      state = { isLoading: false, isFullyLoaded: false, timer: undefined };
-      this.loadingStates.set(filePath, state);
+    if (!this.loadingStates.has(filePath)) {
+      this.loadingStates.set(filePath, {
+        status: "idle", isLoading: false, isFullyLoaded: false,
+        expectedTotalLines: 0, loadedLineCount: 0, timer: null,
+      });
     }
-    return state;
+    return this.loadingStates.get(filePath);
+  }
+
+  finish(state, status, error = null) {
+    state.timer?.close();
+    state.timer = null;
+    state.status = status;
+    state.isLoading = status === "loading";
+    state.isFullyLoaded = status === "loaded";
+    state.error = error;
+    if (status !== "loading") state.resolve?.();
+  }
+
+  async request(promise) {
+    let timer;
+    try {
+      return await Promise.race([promise, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("File loading timed out")), this.requestTimeoutMs);
+      })]);
+    } finally { clearTimeout(timer); }
   }
 
   async loadFile(filePath) {
+    this.cancelLoading(filePath);
+    this.loadingStates.delete(filePath);
     const state = this.getState(filePath);
-    state.isFullyLoaded = false;
-
-    const initResponse = await this.editor.api.initializeFile(filePath);
-    if (!initResponse || !initResponse.success) {
-      if (initResponse && initResponse.errorCode === "ENOENT") {
-        throw new Error("ENOENT");
+    state.completion = new Promise((resolve) => { state.resolve = resolve; });
+    this.finish(state, "loading");
+    try {
+      const init = await this.request(this.editor.api.initializeFile(filePath));
+      if (!init?.success) {
+        const code = init?.errorCode || "FILE_LOAD_FAILED";
+        const message = code === "FILE_TOO_LARGE" ? "File is too large to be opened"
+          : code === "BINARY_FILE" ? "Binary file can't be opened" : code;
+        throw Object.assign(new Error(message), { code });
       }
-      if (initResponse?.errorCode === "FILE_TOO_LARGE") {
-        const error = new Error("File is too large to be opened");
-        error.code = "FILE_TOO_LARGE";
-        error.size = initResponse.size;
-        error.maxSize = initResponse.maxSize;
-        throw error;
+      state.expectedTotalLines = init.totalLines;
+      const incrementalEligible = init.incrementalEligible === true &&
+        init.size <= this.incrementalMaxFileSize && init.maxLineLength <= this.incrementalMaxLineLength;
+      const count = Math.min(init.totalLines, incrementalEligible ? init.totalLines : this.initialChunkSize);
+      const chunk = await this.request(this.editor.api.getFileChunk(filePath, 0, count));
+      if (state.status !== "loading") throw new Error("File loading cancelled");
+      if (!chunk?.success || !Array.isArray(chunk.lines) || chunk.lines.length !== count) {
+        throw new Error("Failed to load initial chunk");
       }
-      if (initResponse?.errorCode === "BINARY_FILE") {
-        const error = new Error("Binary file can't be opened");
-        error.code = "BINARY_FILE";
-        throw error;
-      }
-      throw new Error("Failed to initialize file");
+      state.loadedLineCount = count;
+      if (count === init.totalLines) this.finish(state, "loaded");
+      return { initialLines: chunk.lines, totalLines: init.totalLines,
+        eol: init.eol || "\n", hasFinalNewline: init.hasFinalNewline === true,
+        lineEndings: init.lineEndings || [], incrementalEligible, state };
+    } catch (error) {
+      if (state.status !== "cancelled") this.finish(state, "failed", error);
+      throw error;
     }
-
-    const totalLines = initResponse.totalLines;
-    const incrementalEligible =
-      initResponse.incrementalEligible === true &&
-      initResponse.size <= this.incrementalMaxFileSize &&
-      initResponse.maxLineLength <= this.incrementalMaxLineLength;
-    const chunkSize = incrementalEligible ? totalLines : this.initialChunkSize;
-
-    if (incrementalEligible || totalLines <= this.initialChunkSize) {
-      state.isFullyLoaded = true;
-    }
-
-    const chunkResponse = await this.editor.api.getFileChunk(
-      filePath,
-      0,
-      chunkSize,
-    );
-    if (!chunkResponse || !chunkResponse.success) {
-      throw new Error("Failed to load initial chunk");
-    }
-
-    return {
-      initialLines: chunkResponse.lines,
-      totalLines,
-      eol: initResponse.eol || "\n",
-      hasFinalNewline: initResponse.hasFinalNewline === true,
-      incrementalEligible,
-      lineEndings: Array.isArray(initResponse.lineEndings)
-        ? initResponse.lineEndings
-        : [],
-    };
   }
 
   loadRemainingLines(file, currentLineCount, totalLines) {
-    const filePath = file.path;
-    const state = this.getState(filePath);
-
-    if (state.isFullyLoaded || currentLineCount >= totalLines) {
-      state.isFullyLoaded = true;
-      return;
-    }
-
-    if (state.isLoading) {
-      return;
-    }
-
-    state.isLoading = true;
-
-    const loadChunk = (startLine) => {
-      if (startLine >= totalLines) {
-        state.isLoading = false;
-        state.isFullyLoaded = true;
-        if (state.timer) state.timer.close();
-        return;
+    const state = file.loadingState || this.getState(file.path);
+    file.loadingState = state;
+    if (state.status !== "loading" || state.backgroundStarted) return;
+    state.backgroundStarted = true;
+    const next = (start) => {
+      if (state.status !== "loading") return;
+      if (start === totalLines) { this.finish(state, "loaded"); return; }
+      const end = Math.min(start + this.backgroundChunkSize, totalLines);
+      const callback = () => this.performChunkLoad(file, file.path, start, end, totalLines, next, state);
+      if (typeof window.requestIdleCallback === "function") {
+        const handle = window.requestIdleCallback(callback, { timeout: 100 });
+        state.timer = { close: () => window.cancelIdleCallback(handle) };
+      } else {
+        const handle = setTimeout(callback, 1);
+        state.timer = { close: () => clearTimeout(handle) };
       }
-
-      const endLine = Math.min(
-        startLine + this.backgroundChunkSize,
-        totalLines,
-      );
-
-      const loadWithIdleCallback = () => {
-        if (state.isFullyLoaded || !state.isLoading) return;
-        if ("requestIdleCallback" in window) {
-          const handle = requestIdleCallback(
-            () =>
-              this.performChunkLoad(
-                file,
-                filePath,
-                startLine,
-                endLine,
-                totalLines,
-                loadChunk,
-              ),
-            { timeout: 100 },
-          );
-          state.timer = { close: () => cancelIdleCallback(handle) };
-        } else {
-          const handle = setTimeout(
-            () =>
-              this.performChunkLoad(
-                file,
-                filePath,
-                startLine,
-                endLine,
-                totalLines,
-                loadChunk,
-              ),
-            1,
-          );
-          state.timer = { close: () => clearTimeout(handle) };
-        }
-      };
-
-      loadWithIdleCallback();
     };
-
-    loadChunk(currentLineCount);
+    next(currentLineCount);
   }
 
   async waitForFileLoaded(file) {
     if (!file?.path) return;
-
-    while (true) {
-      const state = this.loadingStates.get(file.path);
-      if (!state || !state.isLoading || state.isFullyLoaded) return;
-      await new Promise((resolve) => setTimeout(resolve, 0));
+    const state = file.loadingState || this.loadingStates.get(file.path);
+    if (state?.status === "loading") await state.completion;
+    if (state?.status === "failed") {
+      throw Object.assign(new Error("File loading failed; save refused"), { code: "FILE_LOAD_FAILED" });
+    }
+    if (!state || state.status !== "loaded" || state.loadedLineCount !== state.expectedTotalLines) {
+      throw Object.assign(new Error("File is not fully loaded"), { code: "FILE_NOT_FULLY_LOADED" });
     }
   }
 
-  async performChunkLoad(
-    file,
-    filePath,
-    startLine,
-    endLine,
-    totalLines,
-    nextCallback,
-  ) {
-    const state = this.getState(filePath);
-
-    if (!state.isLoading) {
-      return;
-    }
-
+  async performChunkLoad(file, filePath, start, end, total, next, state = file.loadingState) {
+    if (!state || state.status !== "loading") return;
     try {
-      const response = await this.editor.api.getFileChunk(
-        filePath,
-        startLine,
-        endLine - startLine,
-      );
-
-      if (
-        response &&
-        response.success &&
-        response.lines &&
-        response.lines.length > 0
-      ) {
-        if (file === this.editor.tabManager.activeFile) {
-          this.editor.lineController.appendLines(response.lines);
-          this.editor.scrollerManager.refreshAll();
-        } else {
-          const newLineNodes = response.lines.map((text) => new LineNode(text));
-          file.lines = file.lines.concat(newLineNodes);
-          file.totalLines = file.lines.length;
-        }
-
-        nextCallback(endLine);
-      } else {
-        state.isLoading = false;
-        state.isFullyLoaded = true;
-        if (state.timer) state.timer.close();
+      const response = await this.request(this.editor.api.getFileChunk(filePath, start, end - start));
+      if (state.status !== "loading" || file.loadingState !== state) return;
+      if (!response?.success || !Array.isArray(response.lines) || response.lines.length !== end - start ||
+          state.loadedLineCount !== start || file.lines.length !== start) {
+        throw new Error("Failed to load complete file chunk");
       }
+      file.lines.push(...response.lines.map((text) => new LineNode(text)));
+      file.totalLines = file.lines.length;
+      file.syntaxMetrics = null;
+      state.loadedLineCount = end;
+      if (file === this.editor.tabManager.activeFile) this.editor.scrollerManager.refreshAll();
+      next(end);
     } catch (error) {
-      console.error("Error loading chunk:", error);
-      state.isLoading = false;
-      if (state.timer) state.timer.close();
+      if (state.status === "loading") this.finish(state, "failed", error);
     }
   }
 
   cancelLoading(filePath) {
-    if (filePath) {
-      const state = this.loadingStates.get(filePath);
-      if (state) {
-        state.isLoading = false;
-        if (state.timer) state.timer.close();
-        this.loadingStates.delete(filePath);
-      }
-      return;
+    const states = filePath ? [this.loadingStates.get(filePath)] : this.loadingStates.values();
+    for (const state of states) {
+      if (state && state.status !== "loaded") this.finish(state, "cancelled");
     }
-
-    for (const state of this.loadingStates.values()) {
-      state.isLoading = false;
-      if (state.timer) state.timer.close();
-    }
-    this.loadingStates.clear();
   }
 }

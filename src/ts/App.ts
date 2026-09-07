@@ -32,6 +32,10 @@ export class App {
     app.on("before-quit", (event) => {
       if (this.nshStopping) return;
       event.preventDefault();
+      if (this.window.window && !this.window.forceQuit) {
+        this.window.requestQuit();
+        return;
+      }
       this.stopNsh().finally(() => app.quit());
     });
 

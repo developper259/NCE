@@ -4,6 +4,8 @@ class HighlightController {
     this.nshClient = new NSHClient(editor);
     this.nshClient.onSessionReset = () => this.handleSessionReset();
     this.documentModes = new Map();
+    this.documentEpochs = new Map();
+    this.nextDocumentId = 0;
     this.documentQueues = new Map();
     this.documentIds = new Map();
     this.rangeRequests = new Map();
@@ -88,7 +90,7 @@ class HighlightController {
 
   getDocumentId(file) {
     if (!this.documentIds.has(file.id)) {
-      this.documentIds.set(file.id, `nce-document-${file.id}`);
+      this.documentIds.set(file.id, `nce-document-${file.id}-${++this.nextDocumentId}`);
     }
     return this.documentIds.get(file.id);
   }
@@ -105,13 +107,9 @@ class HighlightController {
       file.language === "plaintext"
     )
       return false;
-    const text = this.getLogicalText(file);
-    return (
-      text.length <= this.incrementalMaxFileSize &&
-      file.lines.every(
-        (line) => line.getText().length <= this.incrementalMaxLineLength,
-      )
-    );
+    if (file.loadingState && file.loadingState.status !== "loaded") return false;
+    const metrics = file.getSyntaxMetrics();
+    return metrics.logicalLength <= this.incrementalMaxFileSize && metrics.longLineCount === 0;
   }
 
   async openFile(file) {
@@ -123,6 +121,7 @@ class HighlightController {
     }
 
     const documentId = this.getDocumentId(file);
+    const epoch = this.documentEpochs.get(file.id);
     this.documentModes.set(file.id, "incremental");
     try {
       await this.nshClient.request("openDocument", {
@@ -130,7 +129,8 @@ class HighlightController {
         language: file.language,
         code: this.getLogicalText(file),
       });
-      const startLine = Math.max(0, this.editor.lineController.startIndex || 0);
+      if (this.documentEpochs.get(file.id) !== epoch) return;
+      const startLine = Math.max(0, file.startIndex || 0);
       const visibleLines = Math.max(
         1,
         this.editor.lineController.maxViewLines || 1,
@@ -141,6 +141,7 @@ class HighlightController {
       );
       await this.loadDocumentLines(file, startLine, endLine);
     } catch (error) {
+      if (this.documentEpochs.get(file.id) !== epoch) return;
       console.error("[NSH] Incremental document unavailable", error);
       this.documentModes.set(file.id, "line");
       this.reset();
@@ -148,29 +149,42 @@ class HighlightController {
   }
 
   async changeLanguage(file, language) {
-    if (this.documentModes.get(file.id) === "incremental") {
-      await this.closeFile(file);
-    }
-    this.documentModes.delete(file.id);
+    await this.invalidateFile(file);
     file.language = String(language || "plaintext").toLowerCase();
-    this.reset();
-    await this.openFile(file);
+    if (file === this.editor.tabManager.activeFile) {
+      await this.openFile(file);
+      this.editor.lineController.refresh(true);
+    }
+  }
+
+  invalidateFile(file) {
+    const closing = this.closeFile(file);
+    for (const line of file.lines) { line.clearTokens(); line.setState(null); }
+    return closing;
   }
 
   handleSessionReset() {
-    const activeFile = this.editor.tabManager.activeFile;
+    for (const file of this.editor.tabManager.files || []) {
+      this.documentEpochs.set(file.id, (this.documentEpochs.get(file.id) || 0) + 1);
+      for (const line of file.lines) { line.clearTokens(); line.setState(null); }
+    }
     this.documentModes.clear();
+    this.documentIds.clear();
     this.documentQueues.clear();
+    this.rangeRequests.clear();
+    this.lastLoadedRanges.clear();
+    const activeFile = this.editor.tabManager.activeFile;
     if (activeFile) this.openFile(activeFile);
   }
 
   async loadDocumentLines(file, startLine, endLine) {
+    const epoch = this.documentEpochs.get(file.id);
     const response = await this.nshClient.request("getDocumentLines", {
       documentId: this.getDocumentId(file),
       startLine,
       endLine,
     });
-    this.applyCachedLines(file, response.lines || [], startLine);
+    if (this.documentEpochs.get(file.id) === epoch) this.applyCachedLines(file, response.lines || [], startLine);
   }
 
   loadVisibleDocumentLines(file) {
@@ -220,7 +234,10 @@ class HighlightController {
 
   queueDocumentRequest(file, task) {
     const previous = this.documentQueues.get(file.id) || Promise.resolve();
-    const next = previous.catch(() => {}).then(task);
+    const epoch = this.documentEpochs.get(file.id);
+    const next = previous.catch(() => {}).then(() => {
+      if (this.documentEpochs.get(file.id) === epoch) return task();
+    });
     this.documentQueues.set(file.id, next);
     return next.finally(() => {
       if (this.documentQueues.get(file.id) === next)
@@ -241,11 +258,13 @@ class HighlightController {
       return;
     }
 
+    const epoch = this.documentEpochs.get(file.id);
     this.queueDocumentRequest(file, async () => {
       const response = await this.nshClient.request("updateDocument", {
         documentId: this.getDocumentId(file),
         ...update,
       });
+      if (this.documentEpochs.get(file.id) !== epoch) return;
       this.applyCachedLines(
         file,
         response.lines || [],
@@ -256,35 +275,20 @@ class HighlightController {
 
   closeFile(file) {
     const documentId = this.documentIds.get(file.id);
-    if (!documentId || this.documentModes.get(file.id) !== "incremental")
-      return Promise.resolve();
-    const closeRequest = this.queueDocumentRequest(file, () =>
-      this.nshClient.request("closeDocument", { documentId }),
-    );
-    closeRequest
-      .catch(() => {})
-      .finally(() => {
-        this.documentModes.delete(file.id);
-        this.documentIds.delete(file.id);
-        this.documentQueues.delete(file.id);
-        this.rangeRequests.delete(file.id);
-        this.lastLoadedRanges.delete(file.id);
-      });
-    return closeRequest;
+    const previous = this.documentQueues.get(file.id) || Promise.resolve();
+    this.documentEpochs.set(file.id, (this.documentEpochs.get(file.id) || 0) + 1);
+    this.documentModes.delete(file.id);
+    this.documentIds.delete(file.id);
+    this.documentQueues.delete(file.id);
+    this.rangeRequests.delete(file.id);
+    this.lastLoadedRanges.delete(file.id);
+    return previous.catch(() => {}).then(() => {
+      if (documentId) return this.nshClient.request("closeDocument", { documentId }).catch(() => {});
+    });
   }
 
   closeAllFiles() {
-    for (const [fileId, mode] of this.documentModes.entries()) {
-      if (mode !== "incremental") continue;
-      const documentId = this.documentIds.get(fileId);
-      if (documentId)
-        this.nshClient.request("closeDocument", { documentId }).catch(() => {});
-    }
-    this.documentModes.clear();
-    this.documentIds.clear();
-    this.documentQueues.clear();
-    this.rangeRequests.clear();
-    this.lastLoadedRanges.clear();
+    for (const fileId of [...this.documentModes.keys()]) this.closeFile({ id: fileId });
   }
 
   splitValidWord(tokenValue) {
@@ -484,6 +488,9 @@ class HighlightController {
             },
           });
 
+          if (activeFile !== this.editor.tabManager.activeFile ||
+              activeFile.language !== language || activeFile.lines[lineNumber] !== lineNode ||
+              lineNode.getText() !== lineText) continue;
           if (result && result.tokens) {
             lineNode.setTokens(result.tokens);
             lineNode.setHighlighted(true);

@@ -1,17 +1,17 @@
-name: CI
+name: Release artifacts
 on:
   push:
-  pull_request:
+    tags: ['v*']
 permissions:
   contents: read
 jobs:
-  validate:
+  build:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,13 +19,17 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run typecheck
-      - run: npm test
-      - run: npm run dist
+      - run: npm run check
+      - run: npm run build
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - run: npm run test:packaged
-      - if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:electron
-      - if: runner.os != 'Linux'
-        run: npm run test:electron
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NCE-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.exe
+            release/*.AppImage
+            release/*.deb
+            release/*.zip

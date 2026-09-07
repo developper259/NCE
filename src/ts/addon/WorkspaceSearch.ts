@@ -118,6 +118,9 @@ export class WorkspaceSearch {
     targetPath: string,
     options: ProjectMapOptions = {},
   ): Promise<ProjectMapResponse> {
+    options = options && typeof options === "object" ? options : {};
+    rootPath = typeof rootPath === "string" ? rootPath : "";
+    targetPath = typeof targetPath === "string" ? targetPath : "";
     const maxDepth = Math.min(
       20,
       Math.max(1, Math.floor(options.maxDepth ?? 6)),
@@ -296,7 +299,8 @@ export class WorkspaceSearch {
       hasMore: false,
     };
 
-    if (!rootPath || !query) {
+    if (typeof rootPath !== "string" || !rootPath || typeof query !== "string" || !query ||
+        !options || typeof options !== "object") {
       return empty;
     }
 

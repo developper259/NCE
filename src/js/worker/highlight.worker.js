@@ -9,7 +9,8 @@ const requestTimeoutMs = 10000;
 
 function configure(nextEndpoint) {
   endpoint = nextEndpoint;
-  if (ws) ws.close();
+  if (ws && ws.readyState === WebSocket.OPEN) return Promise.resolve();
+  if (ws && ws.readyState === WebSocket.CONNECTING) return connectionPromise;
   return connectWebSocket();
 }
 
@@ -26,7 +27,7 @@ function connectWebSocket() {
     ws = new WebSocket(`ws://${endpoint.host}:${endpoint.port}`);
 
     ws.onopen = () => {
-      console.log("Worker : Connecté au serveur WebSocket NSH (Permanent)");
+
       if (hasConnected) self.postMessage({ type: "sessionReset" });
       hasConnected = true;
       reconnectDelay = 500;
@@ -34,7 +35,8 @@ function connectWebSocket() {
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data;
+      try { data = JSON.parse(event.data); } catch { return; }
       const pending = pendingRequests.get(data.id);
 
       if (pending) {
@@ -54,15 +56,15 @@ function connectWebSocket() {
     };
 
     ws.onclose = () => {
+      reject(new Error("NSH WebSocket closed"));
       self.postMessage({ type: "sessionLost" });
       for (const pending of pendingRequests.values()) {
+        clearTimeout(pending.timeout);
         pending.reject(new Error("NSH WebSocket closed"));
       }
       pendingRequests.clear();
       connectionPromise = null;
-      console.warn(
-        "⚠️ Worker : Connexion perdue. Reconnexion automatique dans 2s...",
-      );
+
       ws = null;
       if (!reconnectTimer && endpoint) {
         reconnectTimer = setTimeout(() => {

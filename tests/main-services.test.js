@@ -66,3 +66,46 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
     await fsp.rm(root, { recursive: true, force: true });
   }
 });
+
+test('FileManager mutation safety, cache invalidation and nested creation', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'nce-operations-'));
+  const manager = new FileManager({});
+  try {
+    assert.equal((await manager.createFile(root, 'nested/a.txt', 'original')).success, true);
+    const a = path.join(root, 'nested', 'a.txt'); const b = path.join(root, 'nested', 'b.txt');
+    await manager.initializeFile(a);
+    assert.equal((await manager.copyEntry(a, b)).success, true);
+    assert.equal((await manager.copyEntry(a, b)).success, false);
+    assert.equal((await manager.moveEntry(a, b)).success, false);
+    assert.equal(await fsp.readFile(a, 'utf8'), 'original');
+    const duplicate = await manager.duplicateEntry(a); assert.equal(duplicate.success, true);
+    const moved = path.join(root, 'moved.txt'); assert.equal((await manager.moveEntry(a, moved)).success, true);
+    assert.equal((await manager.getFileChunk(a, 0, 1)).success, false);
+    await manager.initializeFile(moved);
+    const renamed = path.join(root, 'renamed.txt'); assert.equal((await manager.renameEntry(moved, renamed)).success, true);
+    assert.equal((await manager.getFileChunk(moved, 0, 1)).success, false);
+    await manager.initializeFile(renamed); assert.equal((await manager.deleteEntry(renamed)).success, true);
+    assert.equal((await manager.getFileChunk(renamed, 0, 1)).success, false);
+    for (const invalid of [null, 123, {}, '', '   ', 'bad\0path']) {
+      assert.equal(await manager.saveFile(invalid, 'x'), undefined);
+      assert.equal((await manager.deleteEntry(invalid)).success, false);
+      assert.equal((await manager.createFile(invalid, 'file', 'x')).success, false);
+      assert.equal((await manager.copyEntry(invalid, b)).success, false);
+    }
+    assert.equal((await manager.createFile(root, '../escape.txt', 'bad')).success, false);
+    assert.equal((await manager.createFolder(root, '..\\escape')).success, false);
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test('FileManager rejects a sparse file above 20 MiB and handles empty files', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'nce-size-'));
+  const manager = new FileManager({});
+  try {
+    const large = path.join(root, 'large'); const handle = await fsp.open(large, 'w');
+    await handle.truncate(20 * 1024 * 1024 + 1); await handle.close();
+    assert.equal((await manager.initializeFile(large)).errorCode, 'FILE_TOO_LARGE');
+    const empty = path.join(root, 'empty'); await fsp.writeFile(empty, '');
+    const initialized = await manager.initializeFile(empty); assert.equal(initialized.totalLines, 1); assert.equal(initialized.size, 0);
+    assert.deepEqual((await manager.getFileChunk(empty, 0, 1)).lines, ['']);
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});

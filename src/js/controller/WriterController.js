@@ -229,36 +229,45 @@ class WriterController {
   applyRangeEdit(start, end, text, options = {}) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
-    if (!file || file.loadError || !lineController || typeof text !== "string")
+    if (!file || file.loadError || (file.loadingState && file.loadingState.status !== "loaded") || !lineController || typeof text !== "string")
       return null;
 
+    file.editVersion = (file.editVersion || 0) + 1;
     const beforeText = this.getTextInRange(start, end);
     const cursorBefore = {
       row: this.editor.cursorController.row,
       column: this.editor.cursorController.column,
     };
     const selectionBefore = this.getSelectionRange();
-    const lines = lineController.lines.map((line) => line.getText());
-    const wasAtDocumentEnd =
-      end.row === lines.length && end.column === lines[end.row - 1].length;
-    const replacement = text.split("\n");
-    const prefix = lines[start.row - 1].slice(0, start.column);
-    const suffix = lines[end.row - 1].slice(end.column);
+    const lines = lineController.lines;
+    const replacement = text.replace(/\r\n/g, "\n").split("\n");
+    text = replacement.join("\n");
+    const prefix = lines[start.row - 1].getText().slice(0, start.column);
+    const suffix = lines[end.row - 1].getText().slice(end.column);
     replacement[0] = prefix + replacement[0];
     replacement[replacement.length - 1] += suffix;
-    lines.splice(start.row - 1, end.row - start.row + 1, ...replacement);
-    file.lines.splice(
-      start.row - 1,
-      end.row - start.row + 1,
-      ...replacement.map((line) => new LineNode(line)),
-    );
-    if (text.endsWith("\n") && wasAtDocumentEnd) {
-      file.hasFinalNewline = true;
-    } else if (text === "" && beforeText.endsWith("\n") && wasAtDocumentEnd) {
-      file.hasFinalNewline = false;
+    const removed = lines.slice(start.row - 1, end.row);
+    const oldEndings = (file.lineEndings || []).slice(start.row - 1, end.row - 1);
+    const newEndings = options.lineEndings || Array(replacement.length - 1).fill(file.eol || "\n");
+    // Separators within the replaced range belong to that edit; the separator
+    // after its last line remains attached to the surviving suffix.
+    if (!file.lineEndings) file.lineEndings = [];
+    file.lineEndings.splice(start.row - 1, end.row - start.row, ...newEndings);
+    if (file.syntaxMetrics) {
+      file.syntaxMetrics.logicalLength += replacement.length - removed.length;
+      for (const line of removed) {
+        const length = line.getText().length;
+        file.syntaxMetrics.logicalLength -= length;
+        if (length > 1000) file.syntaxMetrics.longLineCount--;
+      }
+      for (const line of replacement) {
+        file.syntaxMetrics.logicalLength += line.length;
+        if (line.length > 1000) file.syntaxMetrics.longLineCount++;
+      }
     }
+    file.lines.splice(start.row - 1, end.row - start.row + 1,
+      ...replacement.map((line) => new LineNode(line)));
     file.totalLines = file.lines.length;
-    file.maxLineLength = 0;
     if (options.preserveViewport === false) {
       file.startIndex = 0;
       file.offsetY = 0;
@@ -285,6 +294,8 @@ class WriterController {
     const entry = {
       start: { ...start },
       beforeText,
+      beforeLineEndings: oldEndings,
+      afterLineEndings: newEndings,
       afterText: text,
       cursorBefore,
       cursorAfter: { ...cursorAfter },

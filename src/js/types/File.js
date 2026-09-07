@@ -7,6 +7,7 @@ class FileNode {
 
     this.isSaved = true;
     this.autoSave = false;
+    this.editVersion = 0;
 
     // KeyBinding
     this.historyX = undefined;
@@ -24,6 +25,9 @@ class FileNode {
     this.offsetY = 0;
     this.offsetX = 0;
     this.isLoaded = false;
+    this.loadingState = null;
+    this.syntaxMetrics = null;
+    this.contentGeneration = 0;
 
     // Select Controller
     this.isMouseDown = false;
@@ -114,97 +118,106 @@ class FileNode {
   }
 
   async loadContent() {
-    if (!this.path) {
-      const content = this.lines.map((line) => line.getText()).join("\n");
-      this.editor.lineController.loadContent(content);
-      this.editor.historyController?.clear(this);
-      this.isLoaded = true;
-      return;
-    }
-
+    const generation = ++this.contentGeneration;
+    if (!this.path) { this.isLoaded = true; return; }
     try {
-      const {
-        initialLines,
-        totalLines,
-        eol,
-        hasFinalNewline,
-        incrementalEligible,
-        lineEndings,
-      } = await this.editor.fileLoader.loadFile(this.path);
-
-      this.eol = eol || "\n";
-      this.hasFinalNewline = hasFinalNewline === true;
-      this.lineEndings = Array.isArray(lineEndings) ? lineEndings : [];
-      this.incrementalEligible = incrementalEligible === true;
-
-      this.editor.lineController.loadContent(
-        initialLines.join("\n"),
-        totalLines,
-      );
+      const result = await this.editor.fileLoader.loadFile(this.path);
+      if (generation !== this.contentGeneration) return;
+      this.loadingState = result.state;
+      this.eol = result.eol;
+      this.hasFinalNewline = result.hasFinalNewline;
+      this.lineEndings = result.lineEndings;
+      this.incrementalEligible = result.incrementalEligible;
+      this.lines = result.initialLines.map((text) => new LineNode(text));
+      if (!this.lines.length) this.lines = [new LineNode("")];
+      this.totalLines = this.lines.length;
+      this.syntaxMetrics = null;
+      this.loadError = null;
       this.editor.historyController?.clear(this);
-
-      this.editor.fileLoader.loadRemainingLines(
-        this,
-        initialLines.length,
-        totalLines,
-      );
-
+      this.editor.fileLoader.loadRemainingLines(this, result.initialLines.length, result.totalLines);
       this.isLoaded = true;
     } catch (error) {
-      if (error.message === "ENOENT") {
-        console.log(`File not found: ${this.path}, marking as unsaved`);
-        this.setIsSaved(false);
-        const content = this.lines.map((line) => line.getText()).join("\n");
-        this.editor.lineController.loadContent(content);
-        this.editor.historyController?.clear(this);
-        this.isLoaded = true;
-      } else {
-        this.loadError = error;
-        this.lines = [new LineNode("")];
-        this.totalLines = 1;
-        this.editor.lineController.loadContent("");
-        this.editor.historyController?.clear(this);
-        this.isLoaded = true;
-      }
+      if (generation !== this.contentGeneration) return;
+      this.loadError = error;
+      this.isLoaded = true;
     }
+  }
+
+  async ensureSaveable() {
+    if (this.loadError) return false;
+    try {
+      await this.editor.fileLoader.waitForFileLoaded(this);
+      this.saveError = null;
+      return true;
+    } catch (error) {
+      this.reportSaveError(error);
+      return false;
+    }
+  }
+
+  getSyntaxMetrics() {
+    if (!this.syntaxMetrics) {
+      let logicalLength = Math.max(0, this.lines.length - 1);
+      let longLineCount = 0;
+      for (const line of this.lines) {
+        const length = line.getText().length;
+        logicalLength += length;
+        if (length > 1000) longLineCount++;
+      }
+      this.syntaxMetrics = { logicalLength, longLineCount };
+    }
+    return this.syntaxMetrics;
+  }
+
+  reportSaveError(error) {
+    this.saveError = error;
+    const message = error.code === "FILE_LOAD_FAILED" ? "File loading failed. Reload the file before saving."
+      : error.code === "FILE_NOT_FULLY_LOADED" ? "File is not fully loaded. Save was cancelled."
+      : "Failed to save file.";
+    if (typeof alert === "function") alert(message);
+    else console.warn(message);
   }
 
   async save() {
-    if (this.loadError) return false;
-    if (!this.path) {
-      return this.saveAs();
-    }
-
-    await this.editor.fileLoader.waitForFileLoaded(this);
-
+    if (this.loadError) { this.reportSaveError(this.loadError); return false; }
+    if (!this.path) return this.saveAs();
+    if (!(await this.ensureSaveable())) return false;
     const content = this.serializeContent();
-    const saved = await this.editor.api.saveFile(this.path, content);
-
-    if (saved) {
-      this.setIsSaved(true);
-      this.editor.historyController?.markSaved(this);
+    const version = this.editVersion;
+    try {
+      const saved = await this.editor.api.saveFile(this.path, content);
+      if (!saved) throw new Error("Failed to save file");
+      if (version === this.editVersion) {
+        this.setIsSaved(true);
+        this.editor.historyController?.markSaved(this);
+      }
       this.editor.tabManager.refresh();
-    }
-    return Boolean(saved);
+      return true;
+    } catch (error) { this.reportSaveError(error); return false; }
   }
 
   async saveAs() {
-    if (this.loadError) return false;
+    if (this.loadError) { this.reportSaveError(this.loadError); return false; }
+    if (!(await this.ensureSaveable())) return false;
     const selectedPath = await this.editor.tabManager.selectNewFile();
     if (typeof selectedPath !== "string" || !selectedPath) return false;
-
-    await this.editor.fileLoader.waitForFileLoaded(this);
-
     const content = this.serializeContent();
-    const saved = await this.editor.api.saveFile(selectedPath, content);
-    if (!saved) return false;
+    const version = this.editVersion;
+    try {
+      const saved = await this.editor.api.saveFile(selectedPath, content);
+      if (!saved) throw new Error("Failed to save file");
+    } catch (error) { this.reportSaveError(error); return false; }
 
+    if (!this.path) this.loadingState = { status: "loaded", loadedLineCount: this.lines.length, expectedTotalLines: this.lines.length };
     this.path = selectedPath;
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
-    this.setIsSaved(true);
-    this.editor.historyController?.markSaved(this);
-    await this.loadLanguage();
-    this.editor.highlightController.reset();
+    if (version === this.editVersion) {
+      this.setIsSaved(true);
+      this.editor.historyController?.markSaved(this);
+    }
+    const language = await this.editor.highlightController.detectLanguage(this.name);
+    await this.editor.highlightController.changeLanguage(this, language);
+    if (this === this.editor.tabManager.activeFile) this.editor.fileExplorer?.setActiveFile(this.path);
     this.editor.tabManager.refresh();
     return true;
   }

@@ -128,7 +128,7 @@ class AgentSidebar extends Sidebar {
 
     const change = {
       path: filePath || absolutePath,
-      name: (filePath || absolutePath).split("/").pop() || "fichier",
+      name: NCEPath.basename(filePath || absolutePath) || "fichier",
       status: "modified",
       additions: diffStats.additions,
       deletions: diffStats.deletions,
@@ -1996,7 +1996,7 @@ class AgentSidebar extends Sidebar {
 
     const nameSpan = document.createElement("span");
     nameSpan.className = "agent-sidebar-change-name";
-    nameSpan.textContent = change.name || change.path.split("/").pop();
+    nameSpan.textContent = change.name || NCEPath.basename(change.path);
     nameSpan.title = change.path;
     li.appendChild(nameSpan);
 

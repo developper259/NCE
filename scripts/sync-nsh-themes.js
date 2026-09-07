@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const source = path.resolve(__dirname, "../node_modules/nsh/dist/themes");
+const source = path.dirname(require.resolve("nsh/themes/dark.css"));
 const destination = path.resolve(__dirname, "../src/css/nsh");
 const flaticonSource = path.resolve(
   __dirname,

@@ -644,6 +644,7 @@ class FileExplorer extends Sidebar {
 
       target.name = name;
       target.path = newPath;
+      await this.refreshFolder(parentDir);
       this.refresh();
     } catch (error) {
       console.error("Error renaming entry:", error);
@@ -666,7 +667,7 @@ class FileExplorer extends Sidebar {
 
       this.editor.tabManager.markFileAsDeleted(file.path);
 
-      const parentPath = file.path.substring(0, file.path.lastIndexOf("/"));
+      const parentPath = NCEPath.dirname(file.path);
       await this.refreshFolder(parentPath);
     } catch (error) {
       console.error("Error deleting entry:", error);
@@ -688,7 +689,7 @@ class FileExplorer extends Sidebar {
     if (
       this.clipboard.type === "folder" &&
       (targetFolderPath === this.clipboard.path ||
-        targetFolderPath.startsWith(`${this.clipboard.path}/`))
+        NCEPath.isInside(targetFolderPath, this.clipboard.path))
     ) {
       alert("You can't paste a folder into itself.");
       return;
@@ -742,7 +743,7 @@ class FileExplorer extends Sidebar {
         alert(result?.error || "Impossible de dupliquer l'élément.");
         return;
       }
-      const parentPath = file.path.substring(0, file.path.lastIndexOf("/"));
+      const parentPath = NCEPath.dirname(file.path);
       await this.refreshFolder(parentPath);
     } catch (error) {
       console.error("Error duplicating entry:", error);
