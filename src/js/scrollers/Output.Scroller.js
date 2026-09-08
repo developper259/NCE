@@ -228,10 +228,17 @@ class OutputScroller {
   }
 
   clampScrollState() {
+    const previousStartIndex = this.lineController.startIndex;
+    const previousOffsetY = this.lineController.offsetY;
+    const previousOffsetX = this.lineController.offsetX;
+
     if (this.getTotalScrollLines() === 0) {
       this.lineController.startIndex = 0;
       this.lineController.offsetY = 0;
-      return;
+      this.lineController.offsetX = 0;
+      return (
+        previousStartIndex !== 0 || previousOffsetY !== 0 || previousOffsetX !== 0
+      );
     }
 
     const posY = this.lineController.getLineHeight();
@@ -247,6 +254,47 @@ class OutputScroller {
     if (this.lineController.offsetY > maxOffsetY)
       this.lineController.offsetY = maxOffsetY;
     if (this.lineController.offsetY < 0) this.lineController.offsetY = 0;
+
+    const visibleWidthChars = Math.floor(
+      this.getVisibleHorizontalWidth() / this.editor.letterSize,
+    );
+    const maxScrollX = Math.max(
+      0,
+      this.lineController.maxLineLength + this.marginChars - visibleWidthChars,
+    );
+    this.lineController.offsetX = Math.max(
+      0,
+      Math.min(this.lineController.offsetX, maxScrollX),
+    );
+
+    return (
+      previousStartIndex !== this.lineController.startIndex ||
+      previousOffsetY !== this.lineController.offsetY ||
+      previousOffsetX !== this.lineController.offsetX
+    );
+  }
+
+  setHorizontalOffset(offsetX) {
+    const visibleWidthChars = Math.floor(
+      this.getVisibleHorizontalWidth() / this.editor.letterSize,
+    );
+    const maxScrollX = Math.max(
+      0,
+      this.lineController.maxLineLength + this.marginChars - visibleWidthChars,
+    );
+    const nextOffset = Math.max(0, Math.min(Math.round(offsetX), maxScrollX));
+    if (nextOffset === this.lineController.offsetX) return false;
+
+    this.lineController.offsetX = nextOffset;
+    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
+    this.applyScrollTransform();
+    this.lineController.markDirtyAll();
+    this.lineController.refreshOutput();
+    this.hScroller.refresh();
+    this.editor.cursorController.updateCaretPosition();
+    this.editor.selectController.refreshSelectPositions();
+    this.editor.searchController.refreshSelectionDOM();
+    return true;
   }
 
   getMaxStartIndex() {
@@ -374,6 +422,7 @@ class OutputScroller {
     }
 
     if (verticalChanged || horizontalChanged) {
+      this.editor.highlightController.lineNodes.clear();
       this.lineController.markDirtyAll();
       this.lineController.refreshOutput();
       this.lineController.refreshNumberLines();

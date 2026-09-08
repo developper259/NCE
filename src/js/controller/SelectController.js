@@ -330,6 +330,8 @@ class SelectController {
 
     this.containsSelected = "";
     this.selectedLines.clear();
+    this.startSelect = undefined;
+    this.endSelect = undefined;
 
     if (this.editor.selectOutput) {
       const currentDOMNodes = this.editor.selectOutput.children;
@@ -701,11 +703,10 @@ class SelectController {
 
     this.editor.keyBinding.historyX = undefined;
 
-    if (new Date().getTime() - this.lastClickTime > this.clickTime) {
-      if (this.containsSelected.length > 0) {
-        this.unSelectAll();
-      }
-    }
+    // A new unshifted pointer gesture always ends the previous selection.
+    // clickCount/HstartSelect remain independent so double/triple click keeps
+    // working from the new cursor position.
+    if (!event.shiftKey && this.hasActiveSelection()) this.unSelectAll();
 
     this.editor.cursorController.onClick(event);
 

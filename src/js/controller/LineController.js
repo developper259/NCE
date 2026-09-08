@@ -294,7 +294,16 @@ class LineController {
   }
 
   clampScrollState() {
-    this.outputScroller.clampScrollState();
+    return this.outputScroller.clampScrollState();
+  }
+
+  recalculateMaxLineLength() {
+    let maxLength = 0;
+    for (const line of this.lines) {
+      maxLength = Math.max(maxLength, this.getViewTextLength(line.getText()));
+    }
+    this.maxLineLength = maxLength;
+    return maxLength;
   }
 
   getScrollRatioFromState() {
@@ -651,7 +660,13 @@ class LineController {
 
     let line = this.getSlicedLine(fullText);
 
-    if (child.textContent !== line.text) {
+    const mappedDocumentIndex =
+      documentIndex === null ? "" : String(documentIndex);
+    const mappingChanged =
+      child.dataset.line !== mappedDocumentIndex ||
+      child.dataset.displayLine !== String(displayIndex);
+
+    if (child.textContent !== line.text || mappingChanged) {
       let lineOBJ = this.createLineOBJ(line, screenIndex);
 
       if (!lineOBJ) {
@@ -672,6 +687,8 @@ class LineController {
           this.editor.highlightController.markDirty(documentIndex);
         }
       }
+    } else if (documentIndex !== null) {
+      this.editor.highlightController.setLineNode(documentIndex, child);
     }
   }
 
@@ -681,6 +698,7 @@ class LineController {
     }
 
     const fragment = document.createDocumentFragment();
+    this.editor.highlightController.lineNodes.clear();
 
     const loadError = this.editor.tabManager.activeFile.loadError;
     if (loadError) {
@@ -988,6 +1006,13 @@ class LineController {
 
     if (this.lines.length === 0) {
       this.lines = [new LineNode("")];
+    }
+
+    // The model may have shrunk since the last frame. Clamp before choosing
+    // dirty rows so the DOM is always projected from the current viewport.
+    if (this.outputScroller.clampScrollState()) {
+      this.editor.highlightController.lineNodes.clear();
+      this.markDirtyAll();
     }
 
     if (this.index !== this.editor.cursorController.row) {

@@ -268,6 +268,25 @@ class WriterController {
     file.lines.splice(start.row - 1, end.row - start.row + 1,
       ...replacement.map((line) => new LineNode(line)));
     file.totalLines = file.lines.length;
+    if (typeof lineController.getViewTextLength === "function") {
+      const removedMax = removed.reduce(
+        (max, line) =>
+          Math.max(max, lineController.getViewTextLength(line.getText())),
+        0,
+      );
+      const replacementMax = replacement.reduce(
+        (max, line) => Math.max(max, lineController.getViewTextLength(line)),
+        0,
+      );
+      if (replacementMax >= lineController.maxLineLength) {
+        lineController.maxLineLength = replacementMax;
+      } else if (
+        removedMax >= lineController.maxLineLength &&
+        typeof lineController.recalculateMaxLineLength === "function"
+      ) {
+        lineController.recalculateMaxLineLength();
+      }
+    }
     if (options.preserveViewport === false) {
       file.startIndex = 0;
       file.offsetY = 0;

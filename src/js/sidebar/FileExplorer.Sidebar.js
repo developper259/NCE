@@ -242,18 +242,10 @@ class FileExplorer extends Sidebar {
         }
       });
 
-      if (this.files.length === 0) {
-        const emptyState = document.createElement("div");
-        emptyState.className = "empty-state-message";
-        emptyState.textContent = "You have not yet opened a folder.";
-
-        const openBtn = document.createElement("button");
-        openBtn.className = "open-folder-btn";
-        openBtn.textContent = "Open Folder";
-        openBtn.addEventListener("click", this.selectFolder.bind(this));
-
-        emptyState.appendChild(openBtn);
-        treeContainer.appendChild(emptyState);
+      if (!this.rootPath) {
+        this.renderNoFolderState(treeContainer);
+      } else if (this.files.length === 0) {
+        this.renderEmptyFolderState(treeContainer);
       } else {
         this.renderFiles(this.files, 0, treeContainer);
       }
@@ -261,6 +253,26 @@ class FileExplorer extends Sidebar {
     }
 
     return container;
+  }
+
+  renderNoFolderState(container) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state-message";
+    emptyState.textContent = "You have not yet opened a folder.";
+
+    const openBtn = document.createElement("button");
+    openBtn.className = "open-folder-btn";
+    openBtn.textContent = "Open Folder";
+    openBtn.addEventListener("click", this.selectFolder.bind(this));
+    emptyState.appendChild(openBtn);
+    container.appendChild(emptyState);
+  }
+
+  renderEmptyFolderState(container) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state-message empty-folder-message";
+    emptyState.textContent = "Folder empty";
+    container.appendChild(emptyState);
   }
 
   renderFiles(files, depth, container) {

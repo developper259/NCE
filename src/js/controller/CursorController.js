@@ -159,7 +159,38 @@ class CursorController {
       }
     }
 
+    if (!this.editor.isOnInit) this.ensureCursorVisible();
     this.updateCaretPosition();
+  }
+
+  ensureCursorVisible() {
+    const lc = this.editor.lineController;
+    if (!lc?.outputScroller || !this.editor.tabManager.activeFile) return false;
+
+    const displayIndex = lc.getDisplayIndexForCursor(this.row);
+    if (displayIndex < lc.startIndex) {
+      lc.scrollTo(displayIndex);
+    } else if (displayIndex >= lc.startIndex + lc.maxViewLines) {
+      lc.scrollTo(displayIndex - lc.maxViewLines + 1);
+    }
+
+    const viewColumn = this.getViewPosition(this.row, this.column).column;
+    const visibleColumns = Math.max(
+      1,
+      Math.floor(
+        lc.outputScroller.getVisibleHorizontalWidth() / this.editor.letterSize,
+      ),
+    );
+    const margin = Math.min(3, Math.max(0, visibleColumns - 1));
+    let nextOffset = lc.offsetX;
+
+    if (viewColumn < lc.offsetX + margin) {
+      nextOffset = Math.max(0, viewColumn - margin);
+    } else if (viewColumn > lc.offsetX + visibleColumns - margin - 1) {
+      nextOffset = viewColumn - visibleColumns + margin + 1;
+    }
+
+    return lc.outputScroller.setHorizontalOffset(nextOffset);
   }
 
   isRowVisible(row) {
