@@ -4,6 +4,10 @@ const { loadGlobal } = require('./helpers/runtime');
 const LineNode = loadGlobal('src/js/types/Line.js', 'LineNode');
 const FileNode = loadGlobal('src/js/types/File.js', 'FileNode', { LineNode });
 const NCEPath = loadGlobal('src/js/core/Path.js', 'NCEPath');
+const Writer = loadGlobal('src/js/controller/WriterController.js', 'WriterController', {
+  LineNode,
+  Events: { ON_CHANGE: 'change' },
+});
 function setup() {
   const calls = [], documents = new Map();
   class Client {
@@ -83,4 +87,75 @@ test('reconnect reopens active document, invalidates ranges, leaves inactive doc
   h.handleSessionReset(); await new Promise(r => setImmediate(r));
   assert.equal(h.documentModes.has(2), false); assert.equal(h.lastLoadedRanges.size, 0);
   assert.equal(calls.filter(c => c.type === 'openDocument').length, 2);
+});
+
+test('incremental edits queue updateDocument before visible ranges', async () => {
+  const { editor, file, h, calls } = setup();
+  file.incrementalEligible = true;
+  file.language = 'javascript';
+  h.documentModes.set(file.id, 'incremental');
+  h.documentEpochs.set(file.id, 0);
+  editor.highlightController = h;
+  editor.events = {};
+  editor.lineController.markDirtyFrom = () => {};
+  editor.cursorController = {
+    row: 1,
+    column: 0,
+    setCursorPosition(row, column) {
+      this.row = row;
+      this.column = column;
+    },
+  };
+  editor.selectController = {
+    hasActiveSelection: () => false,
+    unSelectAll() {},
+    setSelection() {},
+  };
+  editor.events.callEvent = (name, payload) => {
+    if (name === 'change') h.handleChange(payload);
+  };
+  editor.lineController.refresh = () => h.refresh();
+  editor.writerController = new Writer(editor);
+
+  editor.writerController.applyRangeEdit(
+    { row: 1, column: 0 },
+    { row: 1, column: 0 },
+    'new\n',
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const updateIndex = calls.findIndex((call) => call.type === 'updateDocument');
+  const rangeIndex = calls.findIndex((call) => call.type === 'getDocumentLines');
+  assert.ok(updateIndex >= 0);
+  assert.ok(rangeIndex > updateIndex);
+});
+
+test('visible range recovery clamps stale viewport and retries once', async () => {
+  const { editor, file, h, calls } = setup();
+  file.incrementalEligible = true;
+  file.language = 'javascript';
+  h.documentModes.set(file.id, 'incremental');
+  h.documentEpochs.set(file.id, 0);
+  file.lines = Array.from({ length: 50 }, (_, index) => new LineNode(`line ${index}`));
+  editor.lineController.lines = file.lines;
+  editor.lineController.startIndex = 450;
+  let attempts = 0;
+  const ranges = [];
+  h.nshClient.request = async (type, data) => {
+    if (type !== 'getDocumentLines') return {};
+    attempts++;
+    ranges.push({ startLine: data.startLine, endLine: data.endLine });
+    if (attempts === 1) throw new Error('line range is outside the document');
+    return { lines: [] };
+  };
+
+  await h.loadVisibleDocumentLines(file);
+
+  assert.equal(editor.lineController.startIndex, 49);
+  assert.equal(attempts, 2);
+  assert.deepEqual(ranges, [
+    { startLine: 49, endLine: 50 },
+    { startLine: 49, endLine: 50 },
+  ]);
 });

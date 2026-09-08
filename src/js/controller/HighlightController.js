@@ -10,6 +10,7 @@ class HighlightController {
     this.documentIds = new Map();
     this.rangeRequests = new Map();
     this.lastLoadedRanges = new Map();
+    this.rangeFailures = new Map();
     this.incrementalMaxFileSize = 1024 * 1024;
     this.incrementalMaxLineLength = 1000;
 
@@ -124,22 +125,16 @@ class HighlightController {
     const epoch = this.documentEpochs.get(file.id);
     this.documentModes.set(file.id, "incremental");
     try {
-      await this.nshClient.request("openDocument", {
-        documentId,
-        language: file.language,
-        code: this.getLogicalText(file),
+      await this.queueDocumentRequest(file, async () => {
+        await this.nshClient.request("openDocument", {
+          documentId,
+          language: file.language,
+          code: this.getLogicalText(file),
+        });
+        if (this.documentEpochs.get(file.id) !== epoch) return;
+        const range = this.getVisibleDocumentRange(file);
+        if (range) await this.loadDocumentLines(file, range.startLine, range.endLine);
       });
-      if (this.documentEpochs.get(file.id) !== epoch) return;
-      const startLine = Math.max(0, file.startIndex || 0);
-      const visibleLines = Math.max(
-        1,
-        this.editor.lineController.maxViewLines || 1,
-      );
-      const endLine = Math.min(
-        file.lines.length,
-        startLine + visibleLines + this.marginHighlight,
-      );
-      await this.loadDocumentLines(file, startLine, endLine);
     } catch (error) {
       if (this.documentEpochs.get(file.id) !== epoch) return;
       console.error("[NSH] Incremental document unavailable", error);
@@ -173,11 +168,17 @@ class HighlightController {
     this.documentQueues.clear();
     this.rangeRequests.clear();
     this.lastLoadedRanges.clear();
+    this.rangeFailures.clear();
     const activeFile = this.editor.tabManager.activeFile;
     if (activeFile) this.openFile(activeFile);
   }
 
   async loadDocumentLines(file, startLine, endLine) {
+    if (
+      startLine < 0 ||
+      endLine <= startLine ||
+      endLine > file.lines.length
+    ) return;
     const epoch = this.documentEpochs.get(file.id);
     const response = await this.nshClient.request("getDocumentLines", {
       documentId: this.getDocumentId(file),
@@ -188,16 +189,9 @@ class HighlightController {
   }
 
   loadVisibleDocumentLines(file) {
-    const startLine = Math.max(0, this.editor.lineController.startIndex || 0);
-    const visibleLines = Math.max(
-      1,
-      this.editor.lineController.maxViewLines || 1,
-    );
-    const endLine = Math.min(
-      file.lines.length,
-      startLine + visibleLines + this.marginHighlight,
-    );
-    const rangeKey = `${startLine}:${endLine}`;
+    const range = this.getVisibleDocumentRange(file);
+    if (!range) return Promise.resolve();
+    const rangeKey = `${range.startLine}:${range.endLine}`;
     if (this.lastLoadedRanges.get(file.id) === rangeKey)
       return Promise.resolve();
 
@@ -205,8 +199,48 @@ class HighlightController {
     if (pending?.rangeKey === rangeKey) return pending.promise;
 
     const promise = this.queueDocumentRequest(file, async () => {
-      await this.loadDocumentLines(file, startLine, endLine);
-      this.lastLoadedRanges.set(file.id, rangeKey);
+      const currentRange = this.getVisibleDocumentRange(file);
+      if (!currentRange) return;
+      const currentKey = `${currentRange.startLine}:${currentRange.endLine}`;
+      const requestEpoch = this.documentEpochs.get(file.id);
+      const failureKey = `${file.id}:${requestEpoch}:${currentKey}`;
+      if (this.rangeFailures.has(failureKey)) return;
+
+      try {
+        await this.loadDocumentLines(
+          file,
+          currentRange.startLine,
+          currentRange.endLine,
+        );
+        this.lastLoadedRanges.set(file.id, currentKey);
+        this.rangeFailures.delete(failureKey);
+      } catch (error) {
+        if (this.documentEpochs.get(file.id) !== requestEpoch) return;
+        if (!this.isRangeError(error)) throw error;
+        this.rangeFailures.set(failureKey, true);
+
+        const retryRange = this.getVisibleDocumentRange(file);
+        if (!retryRange) return;
+        try {
+          await this.loadDocumentLines(
+            file,
+            retryRange.startLine,
+            retryRange.endLine,
+          );
+          this.lastLoadedRanges.set(
+            file.id,
+            `${retryRange.startLine}:${retryRange.endLine}`,
+          );
+          this.rangeFailures.delete(failureKey);
+        } catch (retryError) {
+          if (this.documentEpochs.get(file.id) !== requestEpoch) return;
+          console.error("[NSH] Visible document range recovery failed", {
+            error: retryError,
+            fileId: file.id,
+            epoch: this.documentEpochs.get(file.id),
+          });
+        }
+      }
     }).finally(() => {
       if (this.rangeRequests.get(file.id)?.promise === promise) {
         this.rangeRequests.delete(file.id);
@@ -214,6 +248,38 @@ class HighlightController {
     });
     this.rangeRequests.set(file.id, { rangeKey, promise });
     return promise;
+  }
+
+  getVisibleDocumentRange(file) {
+    const lineCount = file?.lines?.length || 0;
+    if (lineCount === 0) return null;
+
+    const requestedStart = Number.isFinite(this.editor.lineController.startIndex)
+      ? this.editor.lineController.startIndex
+      : 0;
+    const startLine = Math.max(
+      0,
+      Math.min(Math.floor(requestedStart), lineCount - 1),
+    );
+    if (requestedStart !== startLine) {
+      this.editor.lineController.startIndex = startLine;
+      this.editor.lineController.offsetY = 0;
+    }
+
+    const visibleLines = Math.max(
+      1,
+      this.editor.lineController.maxViewLines || 1,
+    );
+    const endLine = Math.min(
+      lineCount,
+      startLine + visibleLines + this.marginHighlight,
+    );
+    if (endLine <= startLine) return null;
+    return { startLine, endLine };
+  }
+
+  isRangeError(error) {
+    return /line range is outside the document/i.test(error?.message || error);
   }
 
   applyCachedLines(file, cachedLines, startLine = 0) {
@@ -258,6 +324,9 @@ class HighlightController {
       return;
     }
 
+    for (const key of this.rangeFailures.keys()) {
+      if (key.startsWith(`${file.id}:`)) this.rangeFailures.delete(key);
+    }
     const epoch = this.documentEpochs.get(file.id);
     this.queueDocumentRequest(file, async () => {
       const response = await this.nshClient.request("updateDocument", {
@@ -282,6 +351,9 @@ class HighlightController {
     this.documentQueues.delete(file.id);
     this.rangeRequests.delete(file.id);
     this.lastLoadedRanges.delete(file.id);
+    for (const key of this.rangeFailures.keys()) {
+      if (key.startsWith(`${file.id}:`)) this.rangeFailures.delete(key);
+    }
     return previous.catch(() => {}).then(() => {
       if (documentId) return this.nshClient.request("closeDocument", { documentId }).catch(() => {});
     });

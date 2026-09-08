@@ -391,7 +391,6 @@ class WriterController {
         options.selection.end,
       );
     lineController.markDirtyFrom(start.row - 1);
-    lineController.refresh(false);
     this.editor.cursorController.setCursorPosition(
       cursorAfter.row,
       cursorAfter.column,
@@ -427,6 +426,7 @@ class WriterController {
       afterRow: cursorAfter.row,
       afterColumn: cursorAfter.column,
     });
+    lineController.refresh(false);
     return { row: cursorAfter.row, column: cursorAfter.column };
   }
 
