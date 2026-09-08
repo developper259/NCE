@@ -530,7 +530,17 @@ class HighlightController {
 
     if (!text) return;
 
-    const fragment = this.editor.writerController.textToOBJ(text, tokens);
+    // Highlighting is asynchronous, so it must use the same horizontal
+    // projection as the line renderer at the time the response is applied.
+    const slicedLine = this.editor.lineController.getSlicedLine(text);
+    const visibleTokens = this.editor.lineController.getVisibleTokens(
+      tokens,
+      slicedLine,
+    );
+    const fragment = this.editor.writerController.textToOBJ(
+      slicedLine.text,
+      visibleTokens,
+    );
 
     lineNode.replaceChildren(fragment);
     return true;

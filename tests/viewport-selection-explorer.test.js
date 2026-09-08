@@ -106,6 +106,63 @@ test("scroll state clamps vertically and horizontally after content shrinks", ()
   assert.equal(scroller.clampScrollState(), false);
 });
 
+test("async highlighting preserves the partial renderer horizontal slice", () => {
+  const HighlightController = loadGlobal(
+    "src/js/controller/HighlightController.js",
+    "HighlightController",
+    { NSHClient: class {} },
+  );
+  const fullText = "LINE-003-abcdefghijklmnopqrstuvwxyz";
+  const parent = element("section");
+  parent.style.transform = "translate(0px, 0px)";
+  const renderedLine = element();
+  parent.appendChild(renderedLine);
+  let renderedText = null;
+  let renderedTokens = null;
+  const controller = Object.create(HighlightController.prototype);
+  controller.lineNodes = new Map([[0, renderedLine]]);
+  controller.editor = {
+    lineController: {
+      startIndex: 0,
+      offsetX: 10,
+      lines: [new LineNode(fullText)],
+      getSlicedLine(text) { return { text: text.slice(this.offsetX), startChar: this.offsetX }; },
+      getVisibleTokens(tokens, slice) {
+        return tokens.map((token) => ({
+          ...token,
+          value: token.value.slice(slice.startChar),
+          column: 1,
+        }));
+      },
+    },
+    writerController: {
+      textToOBJ(text, tokens) {
+        renderedText = text;
+        renderedTokens = tokens;
+        return { text, tokens };
+      },
+    },
+  };
+
+  const originalParent = renderedLine.parentElement;
+  assert.equal(
+    controller.applyHighlightToLine(0, [
+      { column: 1, value: fullText, className: "identifier" },
+    ]),
+    true,
+  );
+  assert.equal(renderedText, fullText.slice(10));
+  assert.equal(renderedTokens[0].value, fullText.slice(10));
+  assert.equal(renderedLine.parentElement, originalParent);
+  assert.equal(parent.style.transform, "translate(0px, 0px)");
+
+  controller.editor.lineController.offsetX = 0;
+  controller.applyHighlightToLine(0, [
+    { column: 1, value: fullText, className: "identifier" },
+  ]);
+  assert.equal(renderedText, fullText);
+});
+
 test("cursor follows visual columns right and returns left without jitter", () => {
   const { editor, file } = createEditor("\tabcdefghijklmnopqrstuvwxyz");
   let offsetX = 0;
