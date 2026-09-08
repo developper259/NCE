@@ -7,6 +7,28 @@ const { loadGlobal } = require("./helpers/runtime");
 const root = path.resolve(__dirname, "..");
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 
+test("Windows packaging icon contains a 256px frame", () => {
+  const icon = fs.readFileSync(path.join(root, "assets/logo/NCE/dark-logo.ico"));
+  assert.equal(icon.readUInt16LE(0), 0, "ICO reserved field");
+  assert.equal(icon.readUInt16LE(2), 1, "ICO image type");
+  const count = icon.readUInt16LE(4);
+  assert.ok(count > 0, "ICO must contain at least one frame");
+
+  const frames = Array.from({ length: count }, (_, index) => {
+    const offset = 6 + index * 16;
+    return {
+      width: icon[offset] || 256,
+      height: icon[offset + 1] || 256,
+      bits: icon.readUInt16LE(offset + 6),
+    };
+  });
+  assert.ok(
+    frames.some(({ width, height, bits }) =>
+      width >= 256 && height >= 256 && bits === 32),
+    `Expected a 256x256 32-bit frame, got ${JSON.stringify(frames)}`,
+  );
+});
+
 test("NSHClient configures, resolves requests, rejects session loss, and disposes", async () => {
   const messages = [];
   class FakeWorker {

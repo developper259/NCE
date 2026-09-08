@@ -26,6 +26,16 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - run: npm run test:packaged
       - if: runner.os == 'Linux'
+        name: Configure Electron Chromium sandbox
+        shell: bash
+        run: |
+          test -f node_modules/electron/dist/chrome-sandbox
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+          test "$(stat -c '%U:%G %a' node_modules/electron/dist/chrome-sandbox)" = "root:root 4755"
+      - if: runner.os == 'Linux'
+        name: Electron smoke
         run: xvfb-run -a npm run test:electron
       - if: runner.os != 'Linux'
+        name: Electron smoke
         run: npm run test:electron
