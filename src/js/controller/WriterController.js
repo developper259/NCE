@@ -226,6 +226,91 @@ class WriterController {
         };
   }
 
+  projectTokens(tokens, oldText, newText, lineNumber) {
+    if (!Array.isArray(tokens) || tokens.length === 0) return tokens;
+    if (oldText === newText) return tokens;
+
+    let editStart = 0;
+    const sharedLimit = Math.min(oldText.length, newText.length);
+    while (
+      editStart < sharedLimit &&
+      oldText[editStart] === newText[editStart]
+    ) {
+      editStart++;
+    }
+
+    let oldEnd = oldText.length;
+    let newEnd = newText.length;
+    while (
+      oldEnd > editStart &&
+      newEnd > editStart &&
+      oldText[oldEnd - 1] === newText[newEnd - 1]
+    ) {
+      oldEnd--;
+      newEnd--;
+    }
+
+    const delta = newEnd - editStart - (oldEnd - editStart);
+    const projected = [];
+    for (const token of tokens) {
+      const tokenStart = Math.max(0, (Number(token.column) || 1) - 1);
+      const tokenEnd = tokenStart + String(token.value || "").length;
+      let start = tokenStart;
+      let end = tokenEnd;
+
+      if (tokenStart >= oldEnd) {
+        start += delta;
+        end += delta;
+      } else if (tokenEnd > editStart) {
+        start = Math.min(tokenStart, editStart);
+        end = Math.max(editStart, tokenEnd + delta, newEnd);
+      }
+
+      start = Math.max(0, Math.min(start, newText.length));
+      end = Math.max(start, Math.min(end, newText.length));
+      if (end === start) continue;
+      projected.push({
+        ...token,
+        line: lineNumber,
+        column: start + 1,
+        value: newText.slice(start, end),
+      });
+    }
+    return projected;
+  }
+
+  mutateLineRange(startIndex, oldCount, replacementTexts) {
+    const lines = this.editor.lineController.lines;
+    const existing = lines.slice(startIndex, startIndex + oldCount);
+    const reuseCount = Math.min(existing.length, replacementTexts.length);
+    const replacementNodes = [];
+
+    for (let index = 0; index < reuseCount; index++) {
+      const line = existing[index];
+      const oldText = line.getText();
+      const newText = replacementTexts[index];
+      line.setTokens(
+        this.projectTokens(
+          line.getTokens(),
+          oldText,
+          newText,
+          startIndex + index + 1,
+        ),
+      );
+      line.setText(newText);
+      replacementNodes.push(line);
+    }
+
+    for (let index = reuseCount; index < replacementTexts.length; index++) {
+      replacementNodes.push(new LineNode(replacementTexts[index]));
+    }
+
+    if (oldCount !== replacementNodes.length) {
+      lines.splice(startIndex, oldCount, ...replacementNodes);
+    }
+    return replacementNodes;
+  }
+
   applyRangeEdit(start, end, text, options = {}) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
@@ -265,8 +350,11 @@ class WriterController {
         if (line.length > 1000) file.syntaxMetrics.longLineCount++;
       }
     }
-    file.lines.splice(start.row - 1, end.row - start.row + 1,
-      ...replacement.map((line) => new LineNode(line)));
+    this.mutateLineRange(
+      start.row - 1,
+      end.row - start.row + 1,
+      replacement,
+    );
     file.totalLines = file.lines.length;
     if (typeof lineController.getViewTextLength === "function") {
       const removedMax = removed.reduce(

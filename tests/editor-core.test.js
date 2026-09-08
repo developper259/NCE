@@ -43,6 +43,118 @@ test("writer handles multiline insertion, deletion, join, and replacement", () =
   assert.equal(text(file), "hello worksthird");
 });
 
+test("range edits preserve existing LineNode identities", () => {
+  const { editor, file } = setup("alpha\nbeta\ngamma");
+  const first = file.lines[0];
+  const second = file.lines[1];
+
+  editor.writerController.write("X");
+  assert.equal(file.lines[0], first);
+
+  editor.writerController.delete(1, 1);
+  assert.equal(file.lines[0], first);
+
+  editor.writerController.replaceRange("A", 1, 0, 1, 1);
+  assert.equal(file.lines[0], first);
+
+  editor.writerController.replaceRange("A\nB", 1, 0, 1, 1);
+  assert.equal(file.lines[0], first);
+  assert.notEqual(file.lines[1], second);
+
+  const lineBeforeJoin = file.lines[0];
+  const removedByJoin = file.lines[1];
+  editor.writerController.deleteRange(
+    { row: 1, column: file.lines[0].getText().length },
+    { row: 2, column: 0 },
+  );
+  assert.equal(file.lines[0], lineBeforeJoin);
+  assert.equal(file.lines.includes(removedByJoin), false);
+});
+
+test("N to M edits reuse as many LineNodes as possible", () => {
+  const { editor, file } = setup("one\ntwo\nthree");
+  const [first, second, third] = file.lines;
+
+  editor.writerController.replaceRange("ONE\nTWO", 1, 0, 2, 3);
+  assert.equal(file.lines[0], first);
+  assert.equal(file.lines[1], second);
+  assert.equal(file.lines[2], third);
+
+  editor.writerController.replaceRange("joined", 1, 0, 2, 3);
+  assert.equal(file.lines[0], first);
+  assert.equal(file.lines.includes(second), false);
+});
+
+test("typing keeps and projects renderable tokens until NSH replaces them", () => {
+  const { editor, file } = setup("const value=1");
+  const line = file.lines[0];
+  line.setTokens([
+    { line: 1, column: 1, value: "const", className: "keyword" },
+    { line: 1, column: 7, value: "value", className: "variable" },
+    { line: 1, column: 12, value: "=", className: "operator" },
+    { line: 1, column: 13, value: "1", className: "number" },
+  ]);
+  line.setHighlighted(true);
+  editor.cursorController.setCursorPosition(1, 11);
+
+  editor.writerController.write(" ");
+
+  assert.equal(file.lines[0], line);
+  assert.equal(line.isHighlight, false);
+  assert.ok(Array.isArray(line.getTokens()));
+  assert.equal(line.getTokens()[0].value, "const");
+  assert.equal(line.getTokens()[2].column, 13);
+  assert.equal(line.getTokens().map((token) => token.value).join(""), "constvalue=1");
+});
+
+test("rapid typing keeps one colored LineNode", () => {
+  const { editor, file } = setup("const value = 1;");
+  const line = file.lines[0];
+  line.setTokens([
+    { line: 1, column: 1, value: "const", className: "keyword" },
+    { line: 1, column: 7, value: "value", className: "variable" },
+  ]);
+  editor.cursorController.setCursorPosition(1, 11);
+
+  for (const character of "NameWithTwentyChars") {
+    editor.writerController.write(character);
+    assert.equal(file.lines[0], line);
+    assert.ok(line.getTokens()?.length > 0);
+  }
+});
+
+test("a dirty line with optimistic tokens still renders token spans", () => {
+  const makeParent = () => ({
+    children: [],
+    appendChild(child) {
+      this.children.push(child);
+      return child;
+    },
+  });
+  const document = {
+    createDocumentFragment: makeParent,
+    createTextNode: (textContent) => ({ textContent }),
+    createElement: () => ({
+      ...makeParent(),
+      className: "",
+      textContent: "",
+    }),
+  };
+  const WriterController = loadGlobal(
+    "src/js/controller/WriterController.js",
+    "WriterController",
+    { document, expandTabsForDisplay: (value) => value },
+  );
+  const writer = new WriterController({});
+  const line = writer.textToOBJ("const x", [
+    { column: 1, value: "const", className: "keyword" },
+  ]);
+
+  const fragment = line.children[0];
+  assert.match(fragment.children[0].className, /\btoken\b/);
+  assert.equal(fragment.children[0].textContent, "const");
+});
+
 test("history supports undo, redo, save points, and redo invalidation", async () => {
   const { editor, file } = setup("");
   editor.writerController.write("A");
