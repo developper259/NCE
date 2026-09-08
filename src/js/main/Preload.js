@@ -92,6 +92,9 @@ contextBridge.exposeInMainWorld("api", {
   pathExists: (targetPath) =>
     ipcRenderer.invoke("FileManager:pathExists", targetPath),
 
+  pathStatus: (targetPath) =>
+    ipcRenderer.invoke("FileManager:pathStatus", targetPath),
+
   searchInFiles: (rootPath, query, options = {}) =>
     ipcRenderer.invoke("WorkspaceSearch:search", rootPath, query, options),
 

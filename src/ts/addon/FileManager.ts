@@ -3,6 +3,7 @@ import { Window } from "../Window";
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 export type UnsavedCloseChoice = "save" | "dontSave" | "cancel";
 
@@ -28,6 +29,24 @@ function validPath(value: unknown): value is string {
 function validName(value: unknown): value is string {
   return validPath(value) && !/^(?:[\\/]|[A-Za-z]:)/.test(value) &&
     value.split(/[\\/]/).every(segment => Boolean(segment) && segment !== "." && segment !== "..");
+}
+export function validateEntryName(
+  value: unknown,
+  platform: NodeJS.Platform =
+    typeof process === "undefined" ? "linux" : process.platform,
+): string | null {
+  if (typeof value !== "string" || !value.trim()) return "INVALID_NAME";
+  if (value !== value.trim() || value === "." || value === "..")
+    return "INVALID_NAME";
+  if (/[\\/\0]/.test(value)) return "INVALID_NAME";
+  if (platform === "win32") {
+    if (/[<>:\"|?*]/.test(value) || /[. ]$/.test(value))
+      return "INVALID_NAME";
+    const stem = value.split(".")[0].toUpperCase();
+    if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem))
+      return "INVALID_NAME";
+  }
+  return null;
 }
 const invalidPath = (): FileOperationResult => ({ success: false, code: "INVALID_PATH", error: "Invalid file path or arguments." });
 
@@ -240,6 +259,17 @@ export class FileManager {
         return fsSync.existsSync(targetPath);
       },
     );
+
+    ipcMain.handle("FileManager:pathStatus", async (_event, targetPath: string) => {
+      if (!validPath(targetPath)) return { exists: false, code: "INVALID_PATH" };
+      try {
+        const stats = await fs.stat(targetPath);
+        return { exists: true, isDirectory: stats.isDirectory() };
+      } catch (error: any) {
+        if (error?.code === "ENOENT") return { exists: false, code: "SOURCE_NOT_FOUND" };
+        return { exists: false, code: error?.code || "STAT_FAILED", error: error?.message };
+      }
+    });
   }
 
   async selectFile(): Promise<string | undefined> {
@@ -371,8 +401,9 @@ export class FileManager {
         }
         return a.type === "folder" ? -1 : 1;
       });
-    } catch (error) {
-      console.error("Erreur lors de la lecture du dossier :", error);
+    } catch (error: any) {
+      if (error?.code !== "ENOENT")
+        console.error("Erreur lors de la lecture du dossier :", error);
       return [];
     }
   }
@@ -411,29 +442,49 @@ export class FileManager {
           error: "Les chemins de renommage sont invalides.",
         };
       }
-      if (!fsSync.existsSync(oldPath)) {
-        return {
-          success: false,
-          code: "FILE_NOT_FOUND",
-          error: "Le fichier source n'existe pas.",
-        };
-      }
-      if (fsSync.existsSync(newPath)) {
-        return {
-          success: false,
-          code: "DESTINATION_EXISTS",
-          error: "Un fichier ou dossier portant ce nom existe déjà.",
-        };
+      const oldResolved = path.resolve(oldPath);
+      const newResolved = path.resolve(newPath);
+      if (path.dirname(oldResolved) !== path.dirname(newResolved) ||
+          validateEntryName(path.basename(newResolved))) {
+        return { success: false, code: "INVALID_NAME", error: "Invalid file name." };
       }
       const sourceStats = await fs.stat(oldPath);
-      if (!fsSync.existsSync(path.dirname(newPath))) {
+      if (oldResolved === newResolved)
         return {
-          success: false,
-          code: "PARENT_NOT_FOUND",
-          error: "Le dossier de destination n'existe pas.",
+          success: true,
+          path: newPath,
+          type: sourceStats.isDirectory() ? "folder" : "file",
         };
+      let destinationStats: any = null;
+      try {
+        destinationStats = await fs.stat(newPath);
+      } catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
       }
-      await fs.rename(oldPath, newPath);
+      const sameEntry = destinationStats &&
+        sourceStats.dev === destinationStats.dev &&
+        sourceStats.ino === destinationStats.ino;
+      if (destinationStats && !sameEntry) {
+        return { success: false, code: "TARGET_EXISTS", error: "A file or folder with this name already exists." };
+      }
+
+      if (sameEntry) {
+        const temporaryPath = path.join(
+          path.dirname(oldResolved),
+          `.${path.basename(oldResolved)}.nce-rename-${crypto.randomUUID()}`,
+        );
+        await fs.rename(oldPath, temporaryPath);
+        try {
+          await fs.rename(temporaryPath, newPath);
+        } catch (error) {
+          try { await fs.rename(temporaryPath, oldPath); } catch (rollbackError) {
+            console.error("Case-only rename rollback failed:", rollbackError);
+          }
+          throw error;
+        }
+      } else {
+        await fs.rename(oldPath, newPath);
+      }
       this.clearFileCache(oldPath);
       this.clearFileCache(newPath);
       return {
@@ -442,11 +493,15 @@ export class FileManager {
         type: sourceStats.isDirectory() ? "folder" : "file",
       };
     } catch (error: any) {
-      console.error("Error renaming entry:", error);
+      if (error?.code !== "ENOENT") console.error("Error renaming entry:", error);
       return {
         success: false,
         code:
-          error?.code === "EACCES" || error?.code === "EPERM"
+          error?.code === "ENOENT"
+            ? "SOURCE_NOT_FOUND"
+            : error?.code === "EEXIST" || error?.code === "ENOTEMPTY"
+              ? "TARGET_EXISTS"
+          : error?.code === "EACCES" || error?.code === "EPERM"
             ? "PERMISSION_DENIED"
             : "RENAME_FAILED",
         error: error?.message || "Rename failed.",

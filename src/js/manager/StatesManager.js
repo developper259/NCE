@@ -235,14 +235,9 @@ class StatesManager {
     const fileExplorer = this.editor.fileExplorer;
     if (!fileExplorer || !explorerState.rootPath) return;
 
-    fileExplorer.rootPath = explorerState.rootPath;
-    fileExplorer.projectName = explorerState.projectName;
-    fileExplorer.activeFilePath = explorerState.activeFilePath;
     fileExplorer.projectExpanded = explorerState.projectExpanded;
-
-    await window.api.startWatching(fileExplorer.rootPath);
-
-    await fileExplorer.loadFiles();
+    if (!(await fileExplorer.loadProject(explorerState.rootPath))) return;
+    fileExplorer.activeFilePath = explorerState.activeFilePath;
 
     if (explorerState.expandedPaths && explorerState.expandedPaths.length > 0) {
       const expandedSet = new Set(explorerState.expandedPaths);

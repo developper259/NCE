@@ -35,7 +35,7 @@ test('before-quit does not stop NSH until renderer approves; shutdown runs once'
 test('watcher batches events, ignores own save and cleans up timers', async () => {
   const source = new EventEmitter(); let closed = 0; source.close = async () => closed++;
   let timer, cancelled = 0; const sent = [], invalidated = [];
-  const { Watcher } = loadMain('dist/ts/addon/Watcher.js', { electron: {}, chokidar: { watch: () => source } }, { setTimeout: (fn, delay) => { assert.equal(delay, 150); timer = fn; return 1; }, clearTimeout: () => cancelled++ });
+  const { Watcher } = loadMain('dist/ts/addon/Watcher.js', { electron: {}, chokidar: { watch: () => source }, 'node:fs/promises': { stat: async () => ({ isDirectory: () => true }) } }, { setTimeout: (fn, delay) => { assert.equal(delay, 150); timer = fn; return 1; }, clearTimeout: () => cancelled++ });
   const watcher = new Watcher({ webContents: { send: (...args) => sent.push(args) } }); watcher.onChange = p => invalidated.push(p);
   await watcher.startWatching('/temporary');
   source.emit('all', 'add', '/temporary/a'); source.emit('all', 'change', '/temporary/a'); source.emit('all', 'unlink', '/temporary/b');
@@ -43,6 +43,52 @@ test('watcher batches events, ignores own save and cleans up timers', async () =
   timer(); assert.equal(sent.length, 1); assert.equal(sent[0][1].length, 2); assert.equal(invalidated.length, 4);
   source.emit('all', 'change', '/temporary/saved'); timer(); assert.equal(sent.length, 2);
   await watcher.stopWatching(); assert.equal(closed, 1); assert.equal(watcher.isWatching(), false); assert.ok(cancelled);
+});
+
+test('watcher stops and reports a deleted workspace root exactly once', async () => {
+  const source = new EventEmitter(); let closed = 0; source.close = async () => closed++;
+  const sent = [];
+  const { Watcher } = loadMain('dist/ts/addon/Watcher.js', {
+    electron: {}, chokidar: { watch: () => source },
+    'node:fs/promises': { stat: async () => ({ isDirectory: () => true }) },
+  });
+  const watcher = new Watcher({ webContents: { send: (...args) => sent.push(args) } });
+  await watcher.startWatching('/temporary');
+  source.emit('all', 'unlinkDir', '/temporary');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(closed, 1);
+  assert.equal(watcher.isWatching(), false);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0][1][0].event, 'root-deleted');
+  await watcher.startWatching('/new-workspace');
+  assert.equal(watcher.isWatching(), true);
+  assert.equal(watcher.getWatchedPath(), '/new-workspace');
+  await watcher.stopWatching();
+  assert.equal(closed, 2);
+});
+
+test('case-only rename rolls its temporary path back when commit fails', async () => {
+  const renames = [];
+  const promises = {
+    stat: async () => ({ dev: 1, ino: 2, isDirectory: () => false }),
+    rename: async (from, to) => {
+      renames.push([from, to]);
+      if (renames.length === 2) {
+        const error = Error('denied'); error.code = 'EACCES'; throw error;
+      }
+    },
+  };
+  const { FileManager } = loadMain('dist/ts/addon/FileManager.js', {
+    electron: {},
+    fs: { promises, existsSync: () => true },
+    crypto: { randomUUID: () => 'unique-id' },
+  });
+  const manager = new FileManager({});
+  const result = await manager.renameEntry('/project/Controller.js', '/project/controller.js');
+  assert.equal(result.code, 'PERMISSION_DENIED');
+  assert.equal(renames.length, 3);
+  assert.deepEqual(renames[0], ['/project/Controller.js', '/project/.Controller.js.nce-rename-unique-id']);
+  assert.deepEqual(renames[2], ['/project/.Controller.js.nce-rename-unique-id', '/project/Controller.js']);
 });
 
 test('API keys use encrypted storage and are removed from editor state', async () => {

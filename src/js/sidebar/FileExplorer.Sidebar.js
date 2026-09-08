@@ -42,12 +42,19 @@ class FileExplorer extends Sidebar {
 
   setupFileSystemWatcher() {
     window.api.onFileSystemChange((data) => {
-      this.handleFileSystemChanges(data);
+      Promise.resolve(this.handleFileSystemChanges(data)).catch((error) =>
+        console.error("Error handling filesystem changes:", error),
+      );
     });
   }
 
-  handleFileSystemChanges(changes) {
+  async handleFileSystemChanges(changes) {
     if (!this.rootPath || !Array.isArray(changes) || changes.length === 0) {
+      return;
+    }
+
+    if (changes.some((change) => change.event === "root-deleted")) {
+      await this.invalidateWorkspace();
       return;
     }
 
@@ -56,15 +63,20 @@ class FileExplorer extends Sidebar {
         this.editor.tabManager.reloadFileFromDisk(change.filePath);
       } else if (change.event === "unlink" || change.event === "unlinkDir") {
         this.editor.tabManager.markFileAsDeleted(change.filePath);
+        if (
+          this.editingState?.target?.path &&
+          NCEPath.isInside(this.editingState.target.path, change.filePath)
+        ) {
+          this.cancelEdit({ refresh: false });
+        }
       }
     }
 
     const dirPaths = new Set(changes.map((change) => change.dirPath));
 
     if (dirPaths.has(this.rootPath)) {
-      this.loadFiles(this.getExpandedPaths(this.files)).then(() => {
-        this.refresh();
-      });
+      await this.loadFiles(this.getExpandedPaths(this.files));
+      this.refresh();
       return;
     }
 
@@ -96,9 +108,35 @@ class FileExplorer extends Sidebar {
   }
 
   async loadFiles(expandedPaths = new Set()) {
-    if (!this.rootPath) return;
+    const rootPath = this.rootPath;
+    if (!rootPath) return false;
     try {
-      const items = await window.api.getFolderContent(this.rootPath);
+      const status = await this.fileOperations.pathStatus(rootPath);
+      if (!status?.exists) {
+        if (status?.code !== "SOURCE_NOT_FOUND") {
+          console.error("Unable to inspect workspace:", status);
+          return false;
+        }
+        await this.invalidateWorkspace();
+        return false;
+      }
+      if (!status.isDirectory) {
+        await this.invalidateWorkspace();
+        return false;
+      }
+      const items = await window.api.getFolderContent(rootPath);
+      if (rootPath !== this.rootPath) return false;
+      const finalStatus = items.length === 0
+        ? await this.fileOperations.pathStatus(rootPath)
+        : status;
+      if (!finalStatus?.exists) {
+        if (finalStatus?.code === "SOURCE_NOT_FOUND") {
+          await this.invalidateWorkspace();
+        } else {
+          console.error("Unable to verify workspace after refresh:", finalStatus);
+        }
+        return false;
+      }
       const newFiles = items.map((item) => ({
         name: item.name,
         type: item.type,
@@ -113,32 +151,72 @@ class FileExplorer extends Sidebar {
 
       this.files = newFiles;
       this.isLoaded = true;
+      return true;
     } catch (error) {
       console.error("Error loading files:", error);
-      this.files = [];
+      const status = await this.fileOperations.pathStatus(rootPath);
+      if (!status?.exists && status?.code === "SOURCE_NOT_FOUND") {
+        await this.invalidateWorkspace();
+      }
+      return false;
     }
   }
 
   async loadProject(projectPath) {
-    if (!projectPath) return;
-    const segments = projectPath
-      .replace(/\\/g, "/")
-      .replace(/\/$/, "")
-      .split("/")
-      .filter((segment) => segment.length > 0);
+    if (!projectPath) return false;
+    const status = await this.fileOperations.pathStatus(projectPath);
+    if (!status?.exists || !status.isDirectory) {
+      if (status?.code && status.code !== "SOURCE_NOT_FOUND")
+        console.error("Unable to open workspace:", status);
+      return false;
+    }
 
     this.rootPath = projectPath;
-    this.projectName = segments.pop() || "Project";
+    this.projectName = NCEPath.basename(projectPath) || "Project";
 
-    await window.api.startWatching(projectPath);
+    try {
+      await window.api.startWatching(projectPath);
+    } catch (error) {
+      console.error("Unable to watch workspace:", error);
+      await this.invalidateWorkspace();
+      return false;
+    }
 
-    await this.loadFiles();
+    if (!(await this.loadFiles())) return false;
     this.refresh();
 
     this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
       rootPath: this.rootPath,
       projectName: this.projectName,
     });
+    return true;
+  }
+
+  resetWorkspaceState() {
+    this.cancelEdit({ refresh: false });
+    this.rootPath = "";
+    this.projectName = "";
+    this.files = [];
+    this.activeFilePath = null;
+    this.isLoaded = false;
+    this.clipboard = null;
+  }
+
+  async invalidateWorkspace() {
+    if (!this.rootPath) return;
+    const previousRootPath = this.rootPath;
+    const previousProjectName = this.projectName;
+    try { await window.api.stopWatching(); } catch (error) {
+      console.error("Error stopping invalid workspace watcher:", error);
+    }
+    this.resetWorkspaceState();
+    this.refresh();
+    if (Events.ON_CLOSE_PROJECT) {
+      this.editor.events.callEvent(Events.ON_CLOSE_PROJECT, {
+        rootPath: previousRootPath,
+        projectName: previousProjectName,
+      });
+    }
   }
 
   async loadFolderContent(folderPath) {
@@ -165,13 +243,7 @@ class FileExplorer extends Sidebar {
     const previousRootPath = this.rootPath;
     const previousProjectName = this.projectName;
 
-    this.rootPath = "";
-    this.projectName = "";
-    this.files = [];
-    this.activeFilePath = null;
-    this.isLoaded = false;
-    this.clipboard = null;
-    this.editingState = null;
+    this.resetWorkspaceState();
 
     this.refresh();
 
@@ -371,34 +443,27 @@ class FileExplorer extends Sidebar {
     fileItem.appendChild(input);
     container.appendChild(fileItem);
 
-    let settled = false;
-    const settle = (commit) => {
-      if (settled) return;
-      settled = true;
-      if (commit) {
-        this.commitEdit(input.value, file);
-      } else {
-        this.editingState = null;
-        if (file.isNew) this.removePlaceholder(file);
-        this.refresh();
-      }
-    };
+    if (this.editingState?.target === file) this.editingState.input = input;
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
         e.stopPropagation();
-        settle(true);
+        this.commitEdit(input.value, file);
       } else if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
-        settle(false);
+        this.cancelEdit();
       }
     });
     input.addEventListener("click", (e) => e.stopPropagation());
-    input.addEventListener("blur", () => settle(true));
+    input.addEventListener("blur", () => this.commitEdit(input.value, file));
 
     requestAnimationFrame(() => {
+      if (
+        this.editingState?.target !== file ||
+        this.editingState?.input !== input
+      ) return;
       input.focus();
       const dotIndex = (file.name || "").lastIndexOf(".");
       if (file.type === "file" && dotIndex > 0) {
@@ -425,7 +490,7 @@ class FileExplorer extends Sidebar {
     const folderPath = await window.api.selectFolder();
     if (folderPath) {
       this.isLoaded = false;
-      this.loadProject(folderPath);
+      await this.loadProject(folderPath);
     }
   }
 
@@ -538,6 +603,7 @@ class FileExplorer extends Sidebar {
   }
 
   async startCreateEntry(parentPath, entryType) {
+    this.cancelEdit({ refresh: false });
     let childrenArray;
 
     if (parentPath === this.rootPath) {
@@ -563,28 +629,48 @@ class FileExplorer extends Sidebar {
     };
 
     childrenArray.unshift(placeholder);
-    this.editingState = { mode: "create", target: placeholder };
+    this.editingState = { mode: "create", status: "editing", target: placeholder, input: null };
     this.refresh();
   }
 
   startRename(file) {
-    this.editingState = { mode: "rename", target: file };
+    this.cancelEdit({ refresh: false });
+    this.editingState = { mode: "rename", status: "editing", target: file, input: null };
     this.refresh();
   }
 
+  cancelEdit({ refresh = true } = {}) {
+    const target = this.editingState?.target;
+    this.editingState = null;
+    if (target?.isNew) this.removePlaceholder(target);
+    if (refresh) this.refresh();
+  }
+
+  recoverEdit(message) {
+    const session = this.editingState;
+    if (!session) return;
+    session.status = "recovering";
+    alert(message);
+    if (this.editingState !== session) return;
+    session.status = "editing";
+    session.input?.focus();
+    session.input?.select();
+  }
+
   async commitEdit(rawValue, target) {
+    const session = this.editingState;
+    if (!session || session.target !== target || session.status !== "editing")
+      return;
+    session.status = "committing";
     const name = rawValue.trim();
 
     if (!name) {
-      this.editingState = null;
-      if (target.isNew) this.removePlaceholder(target);
-      this.refresh();
+      this.recoverEdit("Invalid file name");
       return;
     }
 
     if (target.isNew) {
       const parentPath = target.parentPath;
-      this.editingState = null;
       try {
         const result =
           target.type === "folder"
@@ -592,12 +678,11 @@ class FileExplorer extends Sidebar {
             : await this.fileOperations.createFile(parentPath, name);
 
         if (!result?.success) {
-          alert(result?.error || "Impossible de créer l'élément.");
-          this.removePlaceholder(target);
-          this.refresh();
+          this.recoverEdit(result?.error || "Impossible de créer l'élément.");
           return;
         }
 
+        this.editingState = null;
         await this.refreshFolder(parentPath);
 
         const segments = name.split("/").filter(Boolean);
@@ -612,55 +697,50 @@ class FileExplorer extends Sidebar {
         }
       } catch (error) {
         console.error("Error creating entry:", error);
-        this.removePlaceholder(target);
-        this.refresh();
+        this.cancelEdit();
       }
       return;
     }
 
-    this.editingState = null;
-
     if (name === target.name) {
-      this.refresh();
+      this.cancelEdit();
       return;
     }
 
-    const normalizedTargetPath = String(target.path).replace(/\\/g, "/");
-    const separatorIndex = normalizedTargetPath.lastIndexOf("/");
-    const parentDir =
-      separatorIndex >= 0 ? normalizedTargetPath.slice(0, separatorIndex) : "";
-    const newPath = parentDir ? `${parentDir}/${name}` : name;
+    if (name === "." || name === ".." || /[\\/\0]/.test(name)) {
+      this.recoverEdit("Invalid file name");
+      return;
+    }
+
+    const parentDir = NCEPath.dirname(target.path);
+    const separator = String(target.path).includes("\\") ? "\\" : "/";
+    const newPath = `${parentDir}${parentDir.endsWith(separator) ? "" : separator}${name}`;
 
     try {
       const result = await this.fileOperations.rename(target.path, newPath);
       if (!result?.success) {
-        alert(result?.error || "Impossible de renommer l'élément.");
-        this.refresh();
+        if (result?.code === "SOURCE_NOT_FOUND") {
+          this.cancelEdit({ refresh: false });
+          await this.refreshFolder(parentDir);
+          return;
+        }
+        this.recoverEdit(result?.error || "Impossible de renommer l'élément.");
         return;
       }
 
       const oldPath = target.path;
-      const normalizedOldPath = String(oldPath).replace(/\\/g, "/");
-      const normalizedActivePath = String(this.activeFilePath || "").replace(
-        /\\/g,
-        "/",
-      );
-      if (
-        normalizedActivePath === normalizedOldPath ||
-        normalizedActivePath.startsWith(`${normalizedOldPath}/`)
-      ) {
-        this.activeFilePath =
-          newPath + normalizedActivePath.slice(normalizedOldPath.length);
-      }
+      if (NCEPath.isInside(this.activeFilePath, oldPath))
+        this.activeFilePath = NCEPath.rebase(this.activeFilePath, oldPath, newPath);
       await this.editor.tabManager.updateFilePath(oldPath, newPath);
 
       target.name = name;
       target.path = newPath;
+      this.editingState = null;
       await this.refreshFolder(parentDir);
       this.refresh();
     } catch (error) {
       console.error("Error renaming entry:", error);
-      this.refresh();
+      this.cancelEdit();
     }
   }
 

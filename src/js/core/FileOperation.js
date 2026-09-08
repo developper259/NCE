@@ -31,6 +31,10 @@ class FileOperations {
     return window.api.pathExists(targetPath);
   }
 
+  async pathStatus(targetPath) {
+    return window.api.pathStatus(targetPath);
+  }
+
   revealInExplorer(targetPath) {
     return window.api.revealInExplorer(targetPath);
   }

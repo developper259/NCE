@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { FileManager } = require("../dist/ts/addon/FileManager.js");
+const { FileManager, validateEntryName } = require("../dist/ts/addon/FileManager.js");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch.js");
 
 async function tempWorkspace() {
@@ -95,6 +95,44 @@ test('FileManager mutation safety, cache invalidation and nested creation', asyn
     assert.equal((await manager.createFile(root, '../escape.txt', 'bad')).success, false);
     assert.equal((await manager.createFolder(root, '..\\escape')).success, false);
   } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test('FileManager handles case-only file/folder renames, conflicts and missing sources', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'nce-case-rename-'));
+  const manager = new FileManager({});
+  try {
+    const oldFile = path.join(root, 'Controller.js');
+    const newFile = path.join(root, 'controller.js');
+    await fsp.writeFile(oldFile, 'unchanged');
+    assert.equal((await manager.renameEntry(oldFile, newFile)).success, true);
+    assert.equal(await fsp.readFile(newFile, 'utf8'), 'unchanged');
+
+    const oldFolder = path.join(root, 'Components');
+    const newFolder = path.join(root, 'components');
+    await fsp.mkdir(oldFolder);
+    await fsp.writeFile(path.join(oldFolder, 'A.js'), 'A');
+    assert.equal((await manager.renameEntry(oldFolder, newFolder)).success, true);
+    assert.equal(await fsp.readFile(path.join(newFolder, 'A.js'), 'utf8'), 'A');
+
+    const a = path.join(root, 'a.js'); const b = path.join(root, 'b.js');
+    await fsp.writeFile(a, 'a'); await fsp.writeFile(b, 'b');
+    const conflict = await manager.renameEntry(a, b);
+    assert.equal(conflict.code, 'TARGET_EXISTS');
+    assert.equal(await fsp.readFile(a, 'utf8'), 'a');
+    assert.equal(await fsp.readFile(b, 'utf8'), 'b');
+    assert.equal((await manager.renameEntry(path.join(root, 'missing'), path.join(root, 'new'))).code, 'SOURCE_NOT_FOUND');
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test('rename basename validation is platform-aware', () => {
+  for (const name of ['', '   ', '.', '..', 'a/b', 'a\\b'])
+    assert.equal(validateEntryName(name, 'linux'), 'INVALID_NAME');
+  for (const name of ['CON', 'nul.txt', 'bad:name', 'trailing.', 'trailing '])
+    assert.equal(validateEntryName(name, 'win32'), 'INVALID_NAME');
+  for (const name of ['my file.js', '.test.js', 'résumé.ts', '你好.js']) {
+    assert.equal(validateEntryName(name, 'linux'), null);
+    assert.equal(validateEntryName(name, 'darwin'), null);
+  }
 });
 
 test('FileManager rejects a sparse file above 20 MiB and handles empty files', async () => {

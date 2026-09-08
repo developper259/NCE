@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain } from "electron";
 const chokidar = require("chokidar");
 const path = require("path");
+const fs = require("node:fs/promises");
 
 const DEFAULT_IGNORED = [
   /(^|[\/\\])\../,
@@ -56,6 +57,13 @@ export class Watcher {
     if (typeof projectPath !== "string" || !projectPath.trim() || projectPath.includes("\0")) return;
     await this.stopWatching();
 
+    const stats = await fs.stat(projectPath);
+    if (!stats.isDirectory()) {
+      const error: any = new Error("Workspace path is not a directory.");
+      error.code = "ENOTDIR";
+      throw error;
+    }
+
     this.watchedPath = projectPath;
 
     this.watcher = chokidar.watch(projectPath, {
@@ -80,6 +88,19 @@ export class Watcher {
       }
 
       const dirPath = path.dirname(filePath);
+
+      if (
+        event === "unlinkDir" &&
+        path.resolve(filePath) === path.resolve(this.watchedPath)
+      ) {
+        this.window.webContents.send("file-system-change", [
+          { event: "root-deleted", filePath, dirPath },
+        ]);
+        void this.stopWatching().catch((error) =>
+          console.error("[Watcher] failed to stop after root deletion:", error),
+        );
+        return;
+      }
 
       this.queueEvent(event, filePath, dirPath);
     });
