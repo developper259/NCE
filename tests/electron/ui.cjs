@@ -1,5 +1,42 @@
 module.exports = async function exerciseUI() {
   const check = (condition, message) => { if (!condition) throw Error(message); };
+  check(Boolean(document.querySelector('.nce-titlebar')), 'NCE Title Bar');
+  check(getComputedStyle(document.querySelector('.nce-titlebar')).webkitAppRegion === 'drag', 'Title Bar drag region');
+
+  editor.titleBar.destroy();
+  const commandCalls = [];
+  const titleEditor = {
+    api: {
+      platform: 'win32',
+      quit: () => commandCalls.push('exit'),
+      appCommand: command => commandCalls.push(command),
+    },
+    tabManager: { activeFile: { name: 'this-is-a-very-long-typescript-file-name-used-for-testing.ts', isSaved: false } },
+    fileExplorer: { projectName: 'A very long NCE project name used for layout testing' },
+    keyBinding: {
+      control_save: () => commandCalls.push('save'),
+      control_undo: () => commandCalls.push('undo'),
+      control_toggle_file_explorer: () => commandCalls.push('explorer'),
+      control_open_command: () => commandCalls.push('palette'),
+    },
+  };
+  const titleBar = new TitleBar(titleEditor);
+  check(titleBar.menuButtons.length === 4, 'Windows renderer menus');
+  check(titleBar.title.textContent.startsWith('● '), 'Dirty title indicator');
+  titleBar.toggleMenu('file'); check(titleBar.openMenuId === 'file', 'Open File menu');
+  titleBar.openMenu('edit'); check(titleBar.openMenuId === 'edit', 'Switch menu');
+  titleBar.handleDocumentKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
+  check(titleBar.openMenuId === null, 'Escape closes menu');
+  titleBar.openMenu('file');
+  titleBar.handleDocumentPointerDown({ target: document.body });
+  check(titleBar.openMenuId === null, 'Outside click closes menu');
+  titleBar.execute('save'); titleBar.execute('undo');
+  titleBar.execute('toggle_file_explorer'); titleBar.execute('open_command');
+  titleBar.execute('help.about');
+  check(commandCalls.join(',') === 'save,undo,explorer,palette,help.about', 'Title Bar command dispatch');
+  titleBar.destroy();
+  editor.titleBar = new TitleBar(editor);
+
   const file = editor.tabManager.createEmptyFile();
   await editor.tabManager.setFocusFile(file);
   editor.writerController.write('one two\nthree');

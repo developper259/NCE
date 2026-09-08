@@ -8,9 +8,31 @@ import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
 import { App } from "./App";
 
+const TITLEBAR_HEIGHT = 38;
+
+export function getWindowChromeConfig(
+  platform: NodeJS.Platform = process.platform,
+) {
+  if (platform === "darwin") {
+    return {
+      titleBarStyle: "hiddenInset" as const,
+      trafficLightPosition: { x: 14, y: 13 },
+    };
+  }
+  return {
+    titleBarStyle: "hidden" as const,
+    titleBarOverlay: {
+      color: "#181818",
+      symbolColor: "#b8b8b8",
+      height: TITLEBAR_HEIGHT,
+    },
+  };
+}
+
 export class Window {
   window: InstanceType<typeof BrowserWindow> | null;
   fileManager: FileManager | undefined;
+  appMenu: AppMenu | undefined;
   watcher: Watcher | undefined;
   contextMenu: ContextMenu | undefined;
   workspaceSearch: WorkspaceSearch | undefined;
@@ -47,7 +69,9 @@ export class Window {
       minWidth: 800,
       minHeight: 600,
       title: this.app.name,
-      fullscreen: true,
+      show: false,
+      backgroundColor: "#181818",
+      ...getWindowChromeConfig(),
       icon: path.join(appRoot, "assets/logo/NCE/dark-logo.png"),
 
       webPreferences: {
@@ -68,9 +92,13 @@ export class Window {
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
 
-    const menu = new AppMenu(this.window, this);
+    this.appMenu = new AppMenu(this.window, this);
 
     this.window.loadFile(path.join(assetRoot, "html/index.html"));
+    this.window.once("ready-to-show", () => {
+      this.window?.maximize();
+      this.window?.show();
+    });
 
       this.window.webContents.on("console-message", (...args: any[]) => {
         const details = typeof args[1] === "object"
@@ -147,6 +175,9 @@ export class Window {
 
     if (!this.ipcRegistered) {
       ipcMain.handle("App:quit", async () => this.requestQuit());
+      ipcMain.handle("App:command", async (_event, command) =>
+        this.executeWindowCommand(command),
+      );
       ipcMain.handle("App:rendererReady", async () => {
         this.rendererReady = true;
         return true;
@@ -169,6 +200,25 @@ export class Window {
       this.contextMenu.handleIPC();
       this.workspaceSearch.handleIPC();
       this.ipcRegistered = true;
+    }
+  }
+
+  async executeWindowCommand(command: unknown) {
+    if (!this.window || typeof command !== "string") return false;
+    switch (command) {
+      case "view.fullscreen":
+        this.window.setFullScreen(!this.window.isFullScreen());
+        return true;
+      case "view.devtools":
+        if (this.window.webContents.isDevToolsOpened())
+          this.window.webContents.closeDevTools();
+        else this.window.webContents.openDevTools();
+        return true;
+      case "help.about":
+        await this.appMenu?.showAbout();
+        return true;
+      default:
+        return false;
     }
   }
 

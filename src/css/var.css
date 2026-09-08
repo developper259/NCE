@@ -37,6 +37,17 @@
   --shadow-color: black;
   --unsaved-indicator: white;
 
+  --titlebar-height: 38px;
+  --titlebar-background: var(--bg-primary);
+  --titlebar-border: var(--border-primary);
+  --titlebar-text: var(--text-primary);
+  --titlebar-text-muted: var(--text-secondary);
+  --titlebar-hover: var(--bg-hover-alt);
+  --titlebar-active: var(--bg-tertiary);
+  --menu-background: var(--bg-secondary);
+  --menu-border: var(--border-secondary);
+  --menu-hover: var(--bg-hover);
+
   --scroller-size: 15px;
 
   --output-height: calc(90% - 18px);

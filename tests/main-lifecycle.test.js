@@ -6,6 +6,44 @@ const os = require('node:os');
 const { EventEmitter } = require('node:events');
 const { loadMain } = require('./helpers/main-runtime');
 
+test('window chrome is integrated without forced fullscreen on every platform', () => {
+  const { getWindowChromeConfig } = loadMain('dist/ts/Window.js', {
+    electron: {},
+    './addon/FileManager': { FileManager: class {} },
+    './addon/Watcher': { Watcher: class {} },
+    './addon/Menu': { AppMenu: class {} },
+    './addon/ContextMenu': { ContextMenu: class {} },
+    './addon/WorkspaceSearch': { WorkspaceSearch: class {} },
+    './App': { App: class {} },
+  });
+  const mac = getWindowChromeConfig('darwin');
+  const windows = getWindowChromeConfig('win32');
+  const linux = getWindowChromeConfig('linux');
+  assert.equal(mac.titleBarStyle, 'hiddenInset');
+  assert.equal(mac.titleBarOverlay, undefined);
+  assert.equal(windows.titleBarStyle, 'hidden');
+  assert.equal(windows.titleBarOverlay.height, 38);
+  assert.equal(linux.titleBarStyle, 'hidden');
+  assert.equal(linux.titleBarOverlay.height, 38);
+  assert.equal('fullscreen' in windows, false);
+});
+
+test('native application menu is kept only on macOS', () => {
+  function exercise(platform) {
+    const installed = [];
+    class Menu { append() {} static setApplicationMenu(value) { installed.push(value); } }
+    class MenuItem { constructor(options) { Object.assign(this, options); } }
+    const { AppMenu } = loadMain('dist/ts/addon/Menu.js', {
+      electron: { Menu, MenuItem, dialog: {} },
+    }, { process: { platform } });
+    new AppMenu({ webContents: {} }, { app: {} });
+    return installed;
+  }
+  assert.notEqual(exercise('darwin')[0], null);
+  assert.equal(exercise('win32')[0], null);
+  assert.equal(exercise('linux')[0], null);
+});
+
 for (const mode of ['not-ready', 'destroyed', 'timeout-cancel', 'timeout-force', 'approve', 'cancel']) {
   test(`main quit handshake: ${mode}`, async () => {
     let timer, closed = 0, sent = 0;

@@ -354,6 +354,7 @@ class tabManager {
     }
 
     ul.replaceChildren(fragment);
+    this.editor.titleBar?.refresh();
 
     if (this.files.length === 0) {
       if (!this.editor.isOnInit) this.editor.reset();

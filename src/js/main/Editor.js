@@ -61,6 +61,7 @@ class Editor {
     this.keyBinding = new KeyBinding(this);
     this.savePopupManager = new SavePopupManager(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
+    this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
 
     this.writerController.insertMode = true;

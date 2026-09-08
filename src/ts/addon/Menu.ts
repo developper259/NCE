@@ -3,7 +3,7 @@ import { Menu, MenuItem, BrowserWindow, dialog } from "electron";
 import { Window } from "../Window";
 
 export class AppMenu {
-  menu: InstanceType<typeof Menu>;
+  menu: InstanceType<typeof Menu> | null;
   window: BrowserWindow;
   WinAPP: Window;
 
@@ -11,14 +11,18 @@ export class AppMenu {
     this.window = window;
     this.WinAPP = WinAPP;
 
-    this.menu = new Menu();
-
-    this.init();
-
-    Menu.setApplicationMenu(this.menu);
+    this.menu = null;
+    if (process.platform === "darwin") {
+      this.menu = new Menu();
+      this.init();
+      Menu.setApplicationMenu(this.menu);
+    } else {
+      Menu.setApplicationMenu(null);
+    }
   }
 
   init() {
+    if (!this.menu) return;
     this.menu.append(
       new MenuItem({
         label: "NCE",

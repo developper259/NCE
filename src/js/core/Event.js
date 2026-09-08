@@ -92,6 +92,7 @@ class Events {
     // ------- File.js ------
     if (this.editor.tabManager.activeFile)
       this.editor.tabManager.activeFile.onChange();
+    this.editor.titleBar?.refresh();
   }
   onEvent(arg) {
     // ------- BottomBar.js ------
@@ -99,22 +100,27 @@ class Events {
   }
   onSave(arg) {
     this.editor.statesManager.save();
+    this.editor.titleBar?.refresh();
   }
   onOpenFile(arg) {
     const file = arg?.activeFile || this.editor.tabManager.activeFile;
     if (file) this.editor.highlightController?.openFile(file);
     this.editor.statesManager.save();
+    this.editor.titleBar?.refresh();
   }
   onCloseFile(arg) {
     if (arg?.file) this.editor.highlightController?.closeFile(arg.file);
     else this.editor.highlightController?.closeAllFiles();
     this.editor.statesManager.save();
+    this.editor.titleBar?.refresh();
   }
   onOpenProject(arg) {
     this.editor.statesManager.save();
+    this.editor.titleBar?.refresh();
   }
   onCloseProject(arg) {
     this.editor.statesManager.save();
+    this.editor.titleBar?.refresh();
   }
   onLoaded(arg) {
     this.editor.isOnInit = false;
@@ -124,6 +130,7 @@ class Events {
 
     if (this.editor.tabManager.files.length === 0) this.editor.reset();
     this.editor.refreshAll();
+    this.editor.titleBar?.refresh();
   }
 
   // DOM Event
