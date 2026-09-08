@@ -19,30 +19,27 @@ class EmptyMenu {
   parseKeyToElements(keyString) {
     if (!keyString) return [];
 
-    const parts = keyString.split("+");
+    const parts = String(keyString || "").split("+");
     const elements = [];
-
-    const modifierIcons = {
-      Meta: "fi fi-rr-command",
-      Ctrl: "fi fi-rr-control",
-      Shift: "fi fi-rr-arrow-up",
-      Alt: "fi fi-rr-option",
+    const modifierMap = {
+      Meta: "⌘",
+      Cmd: "⌘",
+      Win: "Win",
+      Super: "Super",
+      Ctrl: "Ctrl",
+      Shift: "Shift",
+      Alt: "Alt",
     };
 
     for (const part of parts) {
       const trimmed = part.trim();
-      const iconClass = modifierIcons[trimmed];
+      if (!trimmed) continue;
 
-      if (iconClass) {
-        const i = document.createElement("i");
-        i.className = iconClass + " editor-el";
-        elements.push(i);
-      } else {
-        const span = document.createElement("span");
-        span.className = "key-text editor-el";
-        span.textContent = trimmed;
-        elements.push(span);
-      }
+      const normalized = modifierMap[trimmed] || trimmed;
+      const span = document.createElement("span");
+      span.className = "key-text editor-el";
+      span.textContent = normalized;
+      elements.push(span);
     }
 
     return elements;

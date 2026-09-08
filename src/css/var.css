@@ -37,7 +37,8 @@
   --shadow-color: black;
   --unsaved-indicator: white;
 
-  --titlebar-height: 38px;
+  --titlebar-controls-height: 35px;
+  --titlebar-height: 36px;
   --titlebar-background: var(--bg-primary);
   --titlebar-border: var(--border-primary);
   --titlebar-text: var(--text-primary);

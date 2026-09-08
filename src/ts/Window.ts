@@ -8,7 +8,7 @@ import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
 import { App } from "./App";
 
-const TITLEBAR_HEIGHT = 38;
+const TITLEBAR_CONTROLS_HEIGHT = 35;
 
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
@@ -24,7 +24,7 @@ export function getWindowChromeConfig(
     titleBarOverlay: {
       color: "#181818",
       symbolColor: "#b8b8b8",
-      height: TITLEBAR_HEIGHT,
+      height: TITLEBAR_CONTROLS_HEIGHT,
     },
   };
 }

@@ -1,19 +1,45 @@
-.nce-titlebar {
-  position: fixed;
+.nce-titlebar-content {
+  position: absolute;
+  inset: 0;
   top: 0;
   left: env(titlebar-area-x, 0);
   width: env(titlebar-area-width, 100%);
-  height: var(--titlebar-height);
+  height: var(--titlebar-controls-height);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(120px, 1fr) minmax(0, 1fr);
   align-items: center;
-  box-sizing: border-box;
+  min-width: 0;
   color: var(--titlebar-text);
-  background: var(--titlebar-background);
-  border-bottom: 1px solid var(--titlebar-border);
-  z-index: 20;
   -webkit-app-region: drag;
   app-region: drag;
+}
+
+.nce-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--titlebar-height);
+  background: var(--titlebar-background);
+  color: var(--titlebar-text);
+  font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px;
+  line-height: 1.2;
+  z-index: 20;
+  contain: layout style;
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.nce-titlebar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--titlebar-controls-height);
+  height: 1px;
+  background: var(--titlebar-border);
+  pointer-events: none;
 }
 
 .nce-titlebar-left,
@@ -31,13 +57,16 @@
   height: 100%;
   display: flex;
   align-items: center;
-  padding-left: 10px;
+  padding-left: 0;
+  margin-left: 0;
 }
 
 .nce-titlebar-menubar {
   height: 100%;
   display: flex;
   align-items: stretch;
+  margin: 0;
+  padding: 0;
 }
 
 .nce-titlebar-menu-group {
@@ -47,15 +76,16 @@
 
 .nce-titlebar button {
   border: 0;
-  font: inherit;
+  font: var(--titlebar-font, 13px/1.4 var(--ui-font-stack));
   color: inherit;
 }
 
 .nce-titlebar-menu-button {
   min-width: 42px;
-  padding: 0 9px;
+  padding: 0 8px;
   background: transparent;
-  font-size: 12px;
+  font-size: var(--titlebar-font-size);
+  line-height: var(--titlebar-line-height);
   cursor: default;
 }
 
@@ -75,11 +105,13 @@
   padding: 0 12px;
   overflow: hidden;
   color: var(--titlebar-text-muted);
-  font-size: 12px;
+  font-size: var(--titlebar-font-size);
+  line-height: var(--titlebar-line-height);
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
+  font-family: var(--ui-font-stack);
 }
 
 .nce-titlebar-drag-space {
@@ -114,7 +146,8 @@
   padding: 0 9px;
   background: transparent;
   border-radius: 3px;
-  font-size: 12px;
+  font-size: var(--titlebar-font-size);
+  line-height: var(--titlebar-line-height);
   text-align: left;
   white-space: nowrap;
 }
@@ -171,6 +204,11 @@
   border-left: 0;
 }
 
+html[data-platform="darwin"] .nce-titlebar-content {
+  left: env(titlebar-area-x, 0);
+  width: env(titlebar-area-width, 100%);
+}
+
 html[data-platform="darwin"] .nce-titlebar-left {
   padding-left: 82px;
 }
@@ -180,8 +218,7 @@ html[data-platform="darwin"] .nce-titlebar-menubar {
 }
 
 @media (max-width: 860px) {
-  .nce-titlebar {
+  .nce-titlebar-content {
     grid-template-columns: minmax(0, 1fr) minmax(100px, 1fr) minmax(0, 1fr);
   }
-
 }

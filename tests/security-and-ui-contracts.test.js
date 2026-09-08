@@ -48,6 +48,28 @@ test("Agent tool surface is present and remains local-testable", () => {
   assert.doesNotMatch(read("src/js/agent/model/ModelClient.js"), /fetch\([^)]*openai\.com/);
 });
 
+test("titlebar full wrapper and internal safe content area stay structurally separated", () => {
+  const html = read("src/html/index.html");
+  const css = read("src/css/titlebar.css");
+  const windowTs = read("src/ts/Window.ts");
+  const vars = read("src/css/var.css");
+  assert.match(html, /<header class="nce-titlebar">[\s\S]*<div class="nce-titlebar-content">/);
+  assert.match(css, /\.nce-titlebar::after/);
+  assert.match(css, /\.nce-titlebar-content\s*\{/);
+  assert.match(css, /top:\s*var\(--titlebar-controls-height\)/);
+  assert.match(css, /height:\s*var\(--titlebar-controls-height\)/);
+  assert.match(css, /height:\s*var\(--titlebar-height\)/);
+  assert.match(css, /padding-left:\s*0/);
+  assert.match(css, /margin-left:\s*0/);
+  assert.match(windowTs, /TITLEBAR_CONTROLS_HEIGHT\s*=\s*35/);
+  assert.match(windowTs, /height:\s*TITLEBAR_CONTROLS_HEIGHT/);
+  assert.match(vars, /--titlebar-controls-height:\s*35px/);
+  assert.match(vars, /--titlebar-height:\s*36px/);
+  assert.match(css, /left:\s*env\(titlebar-area-x,\s*0\)/);
+  assert.doesNotMatch(css, /^\.nce-titlebar \{[^}]*left:\s*env\(titlebar-area-x/);
+  assert.doesNotMatch(css, /^\.nce-titlebar \{[^}]*width:\s*env\(titlebar-area-width/);
+});
+
 test("asset and command availability contracts stay aligned", () => {
   const html = read("src/html/index.html");
   const keybindings = read("src/config/User.js");
