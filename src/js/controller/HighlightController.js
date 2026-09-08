@@ -91,7 +91,10 @@ class HighlightController {
 
   getDocumentId(file) {
     if (!this.documentIds.has(file.id)) {
-      this.documentIds.set(file.id, `nce-document-${file.id}-${++this.nextDocumentId}`);
+      this.documentIds.set(
+        file.id,
+        `nce-document-${file.id}-${++this.nextDocumentId}`,
+      );
     }
     return this.documentIds.get(file.id);
   }
@@ -108,9 +111,13 @@ class HighlightController {
       file.language === "plaintext"
     )
       return false;
-    if (file.loadingState && file.loadingState.status !== "loaded") return false;
+    if (file.loadingState && file.loadingState.status !== "loaded")
+      return false;
     const metrics = file.getSyntaxMetrics();
-    return metrics.logicalLength <= this.incrementalMaxFileSize && metrics.longLineCount === 0;
+    return (
+      metrics.logicalLength <= this.incrementalMaxFileSize &&
+      metrics.longLineCount === 0
+    );
   }
 
   async openFile(file) {
@@ -133,7 +140,8 @@ class HighlightController {
         });
         if (this.documentEpochs.get(file.id) !== epoch) return;
         const range = this.getVisibleDocumentRange(file);
-        if (range) await this.loadDocumentLines(file, range.startLine, range.endLine);
+        if (range)
+          await this.loadDocumentLines(file, range.startLine, range.endLine);
       });
     } catch (error) {
       if (this.documentEpochs.get(file.id) !== epoch) return;
@@ -154,14 +162,23 @@ class HighlightController {
 
   invalidateFile(file) {
     const closing = this.closeFile(file);
-    for (const line of file.lines) { line.clearTokens(); line.setState(null); }
+    for (const line of file.lines) {
+      line.clearTokens();
+      line.setState(null);
+    }
     return closing;
   }
 
   handleSessionReset() {
     for (const file of this.editor.tabManager.files || []) {
-      this.documentEpochs.set(file.id, (this.documentEpochs.get(file.id) || 0) + 1);
-      for (const line of file.lines) { line.clearTokens(); line.setState(null); }
+      this.documentEpochs.set(
+        file.id,
+        (this.documentEpochs.get(file.id) || 0) + 1,
+      );
+      for (const line of file.lines) {
+        line.clearTokens();
+        line.setState(null);
+      }
     }
     this.documentModes.clear();
     this.documentIds.clear();
@@ -174,18 +191,16 @@ class HighlightController {
   }
 
   async loadDocumentLines(file, startLine, endLine) {
-    if (
-      startLine < 0 ||
-      endLine <= startLine ||
-      endLine > file.lines.length
-    ) return;
+    if (startLine < 0 || endLine <= startLine || endLine > file.lines.length)
+      return;
     const epoch = this.documentEpochs.get(file.id);
     const response = await this.nshClient.request("getDocumentLines", {
       documentId: this.getDocumentId(file),
       startLine,
       endLine,
     });
-    if (this.documentEpochs.get(file.id) === epoch) this.applyCachedLines(file, response.lines || [], startLine);
+    if (this.documentEpochs.get(file.id) === epoch)
+      this.applyCachedLines(file, response.lines || [], startLine);
   }
 
   loadVisibleDocumentLines(file) {
@@ -254,7 +269,9 @@ class HighlightController {
     const lineCount = file?.lines?.length || 0;
     if (lineCount === 0) return null;
 
-    const requestedStart = Number.isFinite(this.editor.lineController.startIndex)
+    const requestedStart = Number.isFinite(
+      this.editor.lineController.startIndex,
+    )
       ? this.editor.lineController.startIndex
       : 0;
     const startLine = Math.max(
@@ -301,9 +318,11 @@ class HighlightController {
   queueDocumentRequest(file, task) {
     const previous = this.documentQueues.get(file.id) || Promise.resolve();
     const epoch = this.documentEpochs.get(file.id);
-    const next = previous.catch(() => {}).then(() => {
-      if (this.documentEpochs.get(file.id) === epoch) return task();
-    });
+    const next = previous
+      .catch(() => {})
+      .then(() => {
+        if (this.documentEpochs.get(file.id) === epoch) return task();
+      });
     this.documentQueues.set(file.id, next);
     return next.finally(() => {
       if (this.documentQueues.get(file.id) === next)
@@ -345,7 +364,10 @@ class HighlightController {
   closeFile(file) {
     const documentId = this.documentIds.get(file.id);
     const previous = this.documentQueues.get(file.id) || Promise.resolve();
-    this.documentEpochs.set(file.id, (this.documentEpochs.get(file.id) || 0) + 1);
+    this.documentEpochs.set(
+      file.id,
+      (this.documentEpochs.get(file.id) || 0) + 1,
+    );
     this.documentModes.delete(file.id);
     this.documentIds.delete(file.id);
     this.documentQueues.delete(file.id);
@@ -354,13 +376,19 @@ class HighlightController {
     for (const key of this.rangeFailures.keys()) {
       if (key.startsWith(`${file.id}:`)) this.rangeFailures.delete(key);
     }
-    return previous.catch(() => {}).then(() => {
-      if (documentId) return this.nshClient.request("closeDocument", { documentId }).catch(() => {});
-    });
+    return previous
+      .catch(() => {})
+      .then(() => {
+        if (documentId)
+          return this.nshClient
+            .request("closeDocument", { documentId })
+            .catch(() => {});
+      });
   }
 
   closeAllFiles() {
-    for (const fileId of [...this.documentModes.keys()]) this.closeFile({ id: fileId });
+    for (const fileId of [...this.documentModes.keys()])
+      this.closeFile({ id: fileId });
   }
 
   splitValidWord(tokenValue) {
@@ -560,9 +588,13 @@ class HighlightController {
             },
           });
 
-          if (activeFile !== this.editor.tabManager.activeFile ||
-              activeFile.language !== language || activeFile.lines[lineNumber] !== lineNode ||
-              lineNode.getText() !== lineText) continue;
+          if (
+            activeFile !== this.editor.tabManager.activeFile ||
+            activeFile.language !== language ||
+            activeFile.lines[lineNumber] !== lineNode ||
+            lineNode.getText() !== lineText
+          )
+            continue;
           if (result && result.tokens) {
             lineNode.setTokens(result.tokens);
             lineNode.setHighlighted(true);

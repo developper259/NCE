@@ -314,7 +314,13 @@ class WriterController {
   applyRangeEdit(start, end, text, options = {}) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
-    if (!file || file.loadError || (file.loadingState && file.loadingState.status !== "loaded") || !lineController || typeof text !== "string")
+    if (
+      !file ||
+      file.loadError ||
+      (file.loadingState && file.loadingState.status !== "loaded") ||
+      !lineController ||
+      typeof text !== "string"
+    )
       return null;
 
     file.editVersion = (file.editVersion || 0) + 1;
@@ -332,8 +338,13 @@ class WriterController {
     replacement[0] = prefix + replacement[0];
     replacement[replacement.length - 1] += suffix;
     const removed = lines.slice(start.row - 1, end.row);
-    const oldEndings = (file.lineEndings || []).slice(start.row - 1, end.row - 1);
-    const newEndings = options.lineEndings || Array(replacement.length - 1).fill(file.eol || "\n");
+    const oldEndings = (file.lineEndings || []).slice(
+      start.row - 1,
+      end.row - 1,
+    );
+    const newEndings =
+      options.lineEndings ||
+      Array(replacement.length - 1).fill(file.eol || "\n");
     // Separators within the replaced range belong to that edit; the separator
     // after its last line remains attached to the surviving suffix.
     if (!file.lineEndings) file.lineEndings = [];
@@ -350,11 +361,7 @@ class WriterController {
         if (line.length > 1000) file.syntaxMetrics.longLineCount++;
       }
     }
-    this.mutateLineRange(
-      start.row - 1,
-      end.row - start.row + 1,
-      replacement,
-    );
+    this.mutateLineRange(start.row - 1, end.row - start.row + 1, replacement);
     file.totalLines = file.lines.length;
     if (typeof lineController.getViewTextLength === "function") {
       const removedMax = removed.reduce(
