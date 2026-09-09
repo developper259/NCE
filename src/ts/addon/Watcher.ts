@@ -244,6 +244,7 @@ export class Watcher {
   }
 
   private consumeOwnWrite(filePath: string): boolean {
+    filePath = path.normalize(filePath);
     const now = Date.now();
     const signature = this.fileSignature(filePath);
     const allWrites = this.ownWrites.get(filePath) || [];
