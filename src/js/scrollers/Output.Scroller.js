@@ -294,6 +294,7 @@ class OutputScroller {
     this.editor.cursorController.updateCaretPosition();
     this.editor.selectController.refreshSelectPositions();
     this.editor.searchController.refreshSelectionDOM();
+    this.editor.highlightController.refresh();
     return true;
   }
 
@@ -432,6 +433,7 @@ class OutputScroller {
       this.editor.cursorController.updateCaretPosition();
       this.editor.selectController.refreshSelectPositions();
       this.editor.searchController.refreshSelectionDOM();
+      this.editor.highlightController.refresh();
     }
   }
 }

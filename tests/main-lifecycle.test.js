@@ -236,6 +236,75 @@ test("watcher stops and reports a deleted workspace root exactly once", async ()
   assert.equal(closed, 2);
 });
 
+test("watcher falls back once for recoverable native errors and stays native for a new workspace", async () => {
+  const sources = [];
+  const options = [];
+  const warnings = [];
+  const errors = [];
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {},
+    chokidar: { watch: (_path, config) => {
+      const source = new EventEmitter();
+      source.close = async () => {};
+      sources.push(source);
+      options.push(config);
+      return source;
+    } },
+    "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+  }, { console: { warn: (...args) => warnings.push(args), error: (...args) => errors.push(args) } });
+  const watcher = new Watcher({ webContents: { send() {} } });
+
+  await watcher.startWatching("/temporary");
+  assert.equal(options[0].usePolling, false);
+  sources[0].emit("error", { code: "UNKNOWN" });
+  sources[0].emit("error", { code: "EPERM" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sources.length, 2);
+  assert.equal(options[1].usePolling, true);
+  assert.equal(warnings.length, 1);
+  sources[1].emit("error", { code: "EBUSY" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sources.length, 2);
+
+  sources[1].emit("error", { code: "EIO" });
+  assert.equal(errors.length, 1);
+  await watcher.startWatching("/new-workspace");
+  assert.equal(options[2].usePolling, false);
+  await watcher.stopWatching();
+});
+
+test("stopping or deleting the root while fallback is pending cannot resurrect the watcher", async () => {
+  let releaseClose;
+  const sources = [];
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {},
+    chokidar: { watch: () => {
+      const source = new EventEmitter();
+      source.close = () => new Promise((resolve) => { releaseClose = resolve; });
+      sources.push(source);
+      return source;
+    } },
+    "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+  }, { console: { warn() {}, error() {} } });
+  const watcher = new Watcher({ webContents: { send() {} } });
+
+  await watcher.startWatching("/temporary");
+  sources[0].emit("error", { code: "UNKNOWN" });
+  const stopping = watcher.stopWatching();
+  releaseClose();
+  await stopping;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sources.length, 1);
+  assert.equal(watcher.isWatching(), false);
+
+  await watcher.startWatching("/temporary");
+  sources[1].close = async () => {};
+  sources[1].emit("all", "unlinkDir", "/temporary");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(sources.length, 2);
+  assert.equal(watcher.isWatching(), false);
+});
+
 test("case-only rename rolls its temporary path back when commit fails", async () => {
   const renames = [];
   const promises = {

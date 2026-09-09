@@ -30,6 +30,12 @@ export class Watcher {
 
   private ignoredChanges: Set<string> = new Set();
 
+  private usePolling: boolean = false;
+
+  private restarting: boolean = false;
+
+  private watchGeneration: number = 0;
+
   onChange: ((filePath: string) => void) | null = null;
 
   constructor(window: BrowserWindow) {
@@ -57,7 +63,10 @@ export class Watcher {
     if (typeof projectPath !== "string" || !projectPath.trim() || projectPath.includes("\0")) return;
     await this.stopWatching();
 
+    const generation = this.watchGeneration;
+
     const stats = await fs.stat(projectPath);
+    if (generation !== this.watchGeneration) return;
     if (!stats.isDirectory()) {
       const error: any = new Error("Workspace path is not a directory.");
       error.code = "ENOTDIR";
@@ -66,10 +75,20 @@ export class Watcher {
 
     this.watchedPath = projectPath;
 
-    this.watcher = chokidar.watch(projectPath, {
+    this.usePolling = false;
+
+    this.createWatcher(projectPath, generation);
+  }
+
+  private createWatcher(projectPath: string, generation: number): void {
+    const watcher = chokidar.watch(projectPath, {
       ignored: DEFAULT_IGNORED,
       persistent: true,
       ignoreInitial: true,
+
+      usePolling: this.usePolling,
+      interval: 400,
+      binaryInterval: 1000,
 
       awaitWriteFinish: {
         stabilityThreshold: 300,
@@ -77,7 +96,10 @@ export class Watcher {
       },
     });
 
-    this.watcher.on("all", (event: string, filePath: string) => {
+    this.watcher = watcher;
+
+    watcher.on("all", (event: string, filePath: string) => {
+      if (generation !== this.watchGeneration || this.watcher !== watcher) return;
       this.onChange?.(filePath);
       const normalizedPath = path.normalize(filePath);
 
@@ -105,9 +127,51 @@ export class Watcher {
       this.queueEvent(event, filePath, dirPath);
     });
 
-    this.watcher.on("error", (err: unknown) => {
-      console.error("[Watcher] error:", err);
+    watcher.on("error", (err: unknown) => {
+      if (generation !== this.watchGeneration || this.watcher !== watcher) return;
+      this.handleError(err, projectPath, generation, watcher);
     });
+  }
+
+  private handleError(
+    err: unknown,
+    projectPath: string,
+    generation: number,
+    watcher: any,
+  ): void {
+    const code = (err as { code?: string } | null)?.code;
+    const recoverable = code === "UNKNOWN" || code === "EPERM" || code === "EBUSY";
+
+    if (!recoverable) {
+      console.error("[Watcher] error:", err);
+      return;
+    }
+    if (this.usePolling || this.restarting) return;
+
+    this.restarting = true;
+    this.usePolling = true;
+    console.warn(
+      `[Watcher] native file watching failed (${code}), falling back to polling.`,
+    );
+
+    void (async () => {
+      try {
+        if (this.watcher === watcher) this.watcher = null;
+        await watcher.close();
+        if (
+          generation !== this.watchGeneration ||
+          this.watchedPath !== projectPath ||
+          !this.usePolling
+        ) return;
+        this.createWatcher(projectPath, generation);
+      } catch (error) {
+        if (generation === this.watchGeneration) {
+          console.error("[Watcher] polling fallback failed:", error);
+        }
+      } finally {
+        if (generation === this.watchGeneration) this.restarting = false;
+      }
+    })();
   }
 
   ignoreNextChange(filePath: string): void {
@@ -145,6 +209,9 @@ export class Watcher {
   }
 
   async stopWatching(): Promise<void> {
+    this.watchGeneration++;
+    this.restarting = false;
+    this.usePolling = false;
     if (this.flushTimeout) {
       clearTimeout(this.flushTimeout);
 
@@ -155,12 +222,10 @@ export class Watcher {
 
     this.ignoredChanges.clear();
 
-    if (this.watcher) {
-      await this.watcher.close();
-
-      this.watcher = null;
-      this.watchedPath = "";
-    }
+    const watcher = this.watcher;
+    this.watcher = null;
+    this.watchedPath = "";
+    if (watcher) await watcher.close();
   }
 
   isWatching(): boolean {

@@ -229,6 +229,75 @@ test("a rapid unshifted click clears selection state and its DOM", () => {
   assert.equal(selection.startSelect.column, file.column);
 });
 
+test("dragging after a double click on an empty line keeps a valid anchor", () => {
+  const { editor, file } = createEditor("\nsecond line");
+  editor.selectOutput = element();
+  editor.output = element();
+  editor.cD = element();
+  editor.cursorController.onClick = () => ({ row: file.row, column: file.column });
+  editor.cursorController.getViewPosition = (row, column) => ({ row, column });
+  file._selectedLines = new Map();
+  file.containsSelected = "";
+  file.clickCount = 0;
+  file.lastClickTime = Date.now();
+  const SelectController = loadGlobal("src/js/controller/SelectController.js", "SelectController", {
+    addEvent() {}, Events: { ON_SELECT: "select" }, document: { createElement: element },
+  });
+  const selection = new SelectController(editor);
+  editor.selectController = selection;
+
+  selection.mouseDown({ button: 0, shiftKey: false });
+  selection.mouseDown({ button: 0, shiftKey: false });
+  assert.equal(selection.clickCount, 2);
+  assert.equal(selection.startSelect.row, 1);
+  assert.equal(selection.startSelect.column, 0);
+
+  file.column = 4;
+  assert.doesNotThrow(() => selection.mouseMove({ button: 0 }));
+  assert.equal(selection.endSelect.row, 1);
+  assert.equal(selection.endSelect.column, 4);
+});
+
+test("programmatic vertical and horizontal viewport rebuilds refresh highlighting last", () => {
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller", {
+    realColumnToViewColumn: (_line, column) => column,
+  });
+  const calls = [];
+  const scroller = Object.create(OutputScroller.prototype);
+  scroller.marginChars = 10;
+  scroller.editor = {
+    letterSize: 10,
+    cursorController: { row: 1, updateCaretPosition: () => calls.push("caret") },
+    selectController: { refreshSelectPositions: () => calls.push("selection") },
+    searchController: { refreshSelectionDOM: () => calls.push("search") },
+    highlightController: { lineNodes: new Map(), refresh: () => calls.push("highlight") },
+  };
+  scroller.lineController = {
+    lines: Array.from({ length: 500 }, (_, i) => new LineNode(`const value${i} = ${i};`)),
+    startIndex: 0, offsetY: 0, offsetX: 0, maxLineLength: 500, maxLines: 10,
+    markDirtyAll: () => calls.push("dirty"),
+    refreshOutput: () => calls.push("output"),
+    refreshNumberLines: () => calls.push("numbers"),
+    getLineHeight: () => 20,
+  };
+  scroller.getTotalScrollLines = () => 500;
+  scroller.getEffectiveTotalLines = () => 500;
+  scroller.getVisibleHorizontalWidth = () => 100;
+  scroller.applyScrollTransform = () => calls.push("transform");
+  scroller.vScroller = { setScrollRatio() {}, refresh: () => calls.push("vertical-scroller") };
+  scroller.hScroller = { setScrollRatio() {}, refresh: () => calls.push("horizontal-scroller") };
+
+  scroller.scrollTo(200);
+  assert.ok(calls.indexOf("dirty") < calls.indexOf("output"));
+  assert.ok(calls.indexOf("output") < calls.indexOf("highlight"));
+  assert.equal(calls.at(-1), "highlight");
+
+  calls.length = 0;
+  assert.equal(scroller.setHorizontalOffset(20), true);
+  assert.ok(calls.indexOf("dirty") < calls.indexOf("output"));
+  assert.equal(calls.at(-1), "highlight");
+});
+
 test("File Explorer distinguishes no workspace, empty workspace and files", () => {
   class Sidebar {}
   const document = { createElement: element };

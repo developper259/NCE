@@ -719,6 +719,11 @@ class SelectController {
     this.isMouseDown = true;
 
     this.mouseClick(event);
+
+    if (!this.startSelect) {
+      this.startSelect = { column: c, row: r };
+      this.endSelect = { column: c, row: r };
+    }
   }
 
   mouseUp() {
@@ -751,6 +756,10 @@ class SelectController {
     let c = this.editor.cursorController.column;
 
     let r = this.editor.cursorController.row;
+
+    if (!this.startSelect) {
+      this.startSelect = this.endSelect || { column: c, row: r };
+    }
 
     if (
       this.endSelect &&
