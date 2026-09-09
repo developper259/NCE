@@ -106,6 +106,47 @@ test("scroll state clamps vertically and horizontally after content shrinks", ()
   assert.equal(scroller.clampScrollState(), false);
 });
 
+test("scrollTo requests a highlight pass for the newly rendered lines", () => {
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller", {
+    realColumnToViewColumn: (_line, column) => column,
+  });
+  const scroller = Object.create(OutputScroller.prototype);
+  const calls = [];
+  const state = {
+    startIndex: 0,
+    offsetY: 0,
+    offsetX: 0,
+    maxLineLength: 12,
+    maxLines: 10,
+    lines: [],
+    getLineHeight: () => 20,
+    markDirtyAll: () => calls.push("markDirtyAll"),
+    refreshOutput: () => calls.push("refreshOutput"),
+    refreshNumberLines() {},
+  };
+  scroller.marginChars = 10;
+  scroller.lineController = state;
+  scroller.editor = {
+    letterSize: 10,
+    highlightController: { lineNodes: new Map(), refresh: () => calls.push("highlight") },
+    cursorController: { updateCaretPosition() {} },
+    selectController: { refreshSelectPositions() {} },
+    searchController: { refreshSelectionDOM() {} },
+  };
+  scroller.getTotalScrollLines = () => 400;
+  scroller.getEffectiveTotalLines = () => 400;
+  scroller.getVisibleHorizontalWidth = () => 100;
+  scroller.getVerticalScrollRatioFromState = () => 0;
+  scroller.applyScrollTransform = () => {};
+  scroller.vScroller = { setScrollRatio() {}, refresh() {} };
+  scroller.hScroller = { setScrollRatio() {}, refresh() {} };
+
+  scroller.scrollTo(200);
+
+  assert.equal(state.startIndex, 200);
+  assert.deepEqual(calls, ["markDirtyAll", "refreshOutput", "highlight"]);
+});
+
 test("async highlighting preserves the partial renderer horizontal slice", () => {
   const HighlightController = loadGlobal(
     "src/js/controller/HighlightController.js",
