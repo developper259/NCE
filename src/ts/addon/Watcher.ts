@@ -30,6 +30,10 @@ export class Watcher {
 
   private ignoredChanges: Set<string> = new Set();
 
+  private usePolling: boolean = false;
+
+  private restarting: boolean = false;
+
   onChange: ((filePath: string) => void) | null = null;
 
   constructor(window: BrowserWindow) {
@@ -70,6 +74,9 @@ export class Watcher {
       ignored: DEFAULT_IGNORED,
       persistent: true,
       ignoreInitial: true,
+      usePolling: this.usePolling,
+      interval: 400,
+      binaryInterval: 1000,
 
       awaitWriteFinish: {
         stabilityThreshold: 300,
@@ -106,8 +113,45 @@ export class Watcher {
     });
 
     this.watcher.on("error", (err: unknown) => {
-      console.error("[Watcher] error:", err);
+      this.handleError(err);
     });
+  }
+
+  // Windows raises UNKNOWN/EPERM from ReadDirectoryChangesW on paths it cannot
+  // watch natively (OneDrive, network shares, locked folders). Polling is the
+  // only way to keep watching those, and the errors repeat endlessly otherwise.
+  private handleError(err: unknown): void {
+    const code = (err as { code?: string } | null)?.code;
+
+    const recoverable =
+      code === "UNKNOWN" || code === "EPERM" || code === "EBUSY";
+
+    if (!recoverable) {
+      console.error("[Watcher] error:", err);
+      return;
+    }
+
+    if (this.usePolling || this.restarting) return;
+
+    this.restarting = true;
+
+    console.warn(
+      "[Watcher] native file watching failed (" +
+        code +
+        "), falling back to polling.",
+    );
+
+    const projectPath = this.watchedPath;
+
+    this.usePolling = true;
+
+    void this.startWatching(projectPath)
+      .catch((error) =>
+        console.error("[Watcher] polling fallback failed:", error),
+      )
+      .finally(() => {
+        this.restarting = false;
+      });
   }
 
   ignoreNextChange(filePath: string): void {
