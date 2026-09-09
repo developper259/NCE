@@ -5,6 +5,14 @@ const fsSync = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
+function statOpaqueEntry(filePath: string): Promise<any> {
+  try {
+    return require("original-fs").promises.stat(filePath);
+  } catch {
+    return fs.stat(filePath);
+  }
+}
+
 export type UnsavedCloseChoice = "save" | "dontSave" | "cancel";
 
 export interface FileItem {
@@ -386,7 +394,7 @@ export class FileManager {
       const items = await Promise.all(
         entries.map(async (entry: string): Promise<FileItem> => {
           const fullPath = path.join(dirPath, entry);
-          const stats = await fs.stat(fullPath);
+          const stats = await statOpaqueEntry(fullPath);
           return {
             name: entry,
             path: fullPath,

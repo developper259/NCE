@@ -241,6 +241,10 @@ test("watcher falls back once for recoverable native errors and stays native for
   const options = [];
   const warnings = [];
   const errors = [];
+  class FakePollingWatcher extends EventEmitter {
+    constructor() { super(); sources.push(this); options.push({ usePolling: true }); }
+    async close() {}
+  }
   const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
     electron: {},
     chokidar: { watch: (_path, config) => {
@@ -250,9 +254,12 @@ test("watcher falls back once for recoverable native errors and stays native for
       options.push(config);
       return source;
     } },
+    "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
   }, { console: { warn: (...args) => warnings.push(args), error: (...args) => errors.push(args) } });
   const watcher = new Watcher({ webContents: { send() {} } });
+  const changed = [];
+  watcher.onChange = (filePath) => changed.push(filePath);
 
   await watcher.startWatching("/temporary");
   assert.equal(options[0].usePolling, false);
@@ -262,6 +269,12 @@ test("watcher falls back once for recoverable native errors and stays native for
   assert.equal(sources.length, 2);
   assert.equal(options[1].usePolling, true);
   assert.equal(warnings.length, 1);
+  for (let index = 0; index < 3; index++) {
+    sources[1].emit("error", new Error("Invalid package C:\\temporary\\foo.asar"));
+  }
+  sources[1].emit("all", "change", "/temporary/normal.js");
+  assert.deepEqual(changed, ["/temporary/normal.js"]);
+  assert.equal(warnings.length, 2);
   sources[1].emit("error", { code: "EBUSY" });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sources.length, 2);
@@ -270,6 +283,73 @@ test("watcher falls back once for recoverable native errors and stays native for
   assert.equal(errors.length, 1);
   await watcher.startWatching("/new-workspace");
   assert.equal(options[2].usePolling, false);
+  await watcher.stopWatching();
+});
+
+test("polling ignores malformed ASAR files and continues reporting ordinary changes", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-polling-asar-"));
+  const normal = path.join(root, "normal.js");
+  const created = path.join(root, "new.js");
+  const renamed = path.join(root, "test.js");
+  await fs.writeFile(normal, "const value = 1;\n");
+  await fs.writeFile(path.join(root, "foo.asar"), Buffer.from([1, 2, 3, 4, 5]));
+  await fs.writeFile(path.join(root, "FOO.ASAR"), Buffer.from([6, 7, 8]));
+  const { PollingWatcher } = require("../dist/ts/addon/WatcherPolling.js");
+  const watcher = new PollingWatcher(root);
+  const events = [];
+  watcher.on("all", (event, filePath) => events.push([event, filePath]));
+  const waitForEvent = async (predicate) => {
+    const deadline = Date.now() + 4000;
+    while (!events.some(predicate) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(events.some(predicate));
+  };
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("polling watcher was not ready")), 5000);
+      watcher.once("ready", () => { clearTimeout(timer); resolve(); });
+    });
+    await fs.writeFile(normal, "const value = 2;\n");
+    await waitForEvent(([event, filePath]) => event === "change" && filePath === normal);
+    await fs.writeFile(created, "export {};\n");
+    await waitForEvent(([event, filePath]) => event === "add" && filePath === created);
+    await fs.rename(normal, renamed);
+    await waitForEvent(([, filePath]) => filePath === renamed);
+    await fs.unlink(created);
+    await waitForEvent(([event, filePath]) => event === "unlink" && filePath === created);
+    assert.equal(events.some(([, filePath]) => /\.asar(?:[\\/]|$)/i.test(filePath)), false);
+  } finally {
+    await watcher.close();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed ASAR watcher errors are warned once per normalized path", async () => {
+  const native = new EventEmitter();
+  native.close = async () => {};
+  const warnings = [];
+  let polling;
+  class FakePollingWatcher extends EventEmitter {
+    constructor() { super(); polling = this; }
+    async close() {}
+  }
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {}, chokidar: { watch: () => native },
+    "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
+    "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+  }, { console: { warn: (...args) => warnings.push(args), error() {} } });
+  const watcher = new Watcher({ webContents: { send() {} } });
+  await watcher.startWatching("C:\\workspace");
+  for (let index = 0; index < 3; index++) {
+    native.emit("error", new Error("Invalid package C:\\workspace\\foo.asar"));
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  for (let index = 0; index < 3; index++) {
+    polling.emit("error", new Error("Invalid package C:\\workspace\\bar.ASAR"));
+  }
+  assert.equal(warnings.length, 2);
+  assert.equal(watcher.isWatching(), true);
   await watcher.stopWatching();
 });
 
@@ -303,6 +383,35 @@ test("stopping or deleting the root while fallback is pending cannot resurrect t
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sources.length, 2);
   assert.equal(watcher.isWatching(), false);
+});
+
+test("a pending fallback from workspace A cannot replace workspace B", async () => {
+  let releaseClose;
+  const nativeSources = [];
+  class FakePollingWatcher extends EventEmitter { async close() {} }
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {},
+    chokidar: { watch: () => {
+      const source = new EventEmitter();
+      source.close = nativeSources.length === 0
+        ? () => new Promise((resolve) => { releaseClose = resolve; })
+        : async () => {};
+      nativeSources.push(source);
+      return source;
+    } },
+    "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
+    "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+  }, { console: { warn() {}, error() {} } });
+  const watcher = new Watcher({ webContents: { send() {} } });
+  await watcher.startWatching("/workspace-a");
+  nativeSources[0].emit("error", { code: "UNKNOWN" });
+  await watcher.startWatching("/workspace-b");
+  assert.equal(watcher.getWatchedPath(), "/workspace-b");
+  releaseClose();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(nativeSources.length, 2);
+  assert.equal(watcher.getWatchedPath(), "/workspace-b");
+  await watcher.stopWatching();
 });
 
 test("case-only rename rolls its temporary path back when commit fails", async () => {

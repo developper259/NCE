@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain } from "electron";
+import { PollingWatcher } from "./WatcherPolling";
 const chokidar = require("chokidar");
 const path = require("path");
 const fs = require("node:fs/promises");
@@ -11,6 +12,7 @@ const DEFAULT_IGNORED = [
   /[\/\\]out[\/\\]/,
   /[\/\\]\.next[\/\\]/,
   /[\/\\]coverage[\/\\]/,
+  /(?:^|[\/\\])[^\/\\]+\.asar(?:$|[\/\\])/i,
 ];
 
 interface FileChange {
@@ -35,6 +37,8 @@ export class Watcher {
   private restarting: boolean = false;
 
   private watchGeneration: number = 0;
+
+  private reportedWatcherErrors: Set<string> = new Set();
 
   onChange: ((filePath: string) => void) | null = null;
 
@@ -81,7 +85,9 @@ export class Watcher {
   }
 
   private createWatcher(projectPath: string, generation: number): void {
-    const watcher = chokidar.watch(projectPath, {
+    const watcher = this.usePolling
+      ? new PollingWatcher(projectPath)
+      : chokidar.watch(projectPath, {
       ignored: DEFAULT_IGNORED,
       persistent: true,
       ignoreInitial: true,
@@ -94,7 +100,7 @@ export class Watcher {
         stabilityThreshold: 300,
         pollInterval: 100,
       },
-    });
+        });
 
     this.watcher = watcher;
 
@@ -140,6 +146,16 @@ export class Watcher {
     watcher: any,
   ): void {
     const code = (err as { code?: string } | null)?.code;
+    const asarPath = this.getUnreadableAsarPath(err);
+    if (asarPath) {
+      const normalizedPath = path.normalize(asarPath);
+      if (!this.reportedWatcherErrors.has(normalizedPath)) {
+        this.reportedWatcherErrors.add(normalizedPath);
+        console.warn(`[Watcher] skipping unreadable ASAR entry: ${normalizedPath}`);
+      }
+      this.restartWithPolling(projectPath, generation, watcher);
+      return;
+    }
     const recoverable = code === "UNKNOWN" || code === "EPERM" || code === "EBUSY";
 
     if (!recoverable) {
@@ -147,12 +163,22 @@ export class Watcher {
       return;
     }
     if (this.usePolling || this.restarting) return;
-
-    this.restarting = true;
-    this.usePolling = true;
     console.warn(
       `[Watcher] native file watching failed (${code}), falling back to polling.`,
     );
+
+    this.restartWithPolling(projectPath, generation, watcher);
+  }
+
+  private restartWithPolling(
+    projectPath: string,
+    generation: number,
+    watcher: any,
+  ): void {
+    if (this.usePolling || this.restarting) return;
+
+    this.restarting = true;
+    this.usePolling = true;
 
     void (async () => {
       try {
@@ -172,6 +198,16 @@ export class Watcher {
         if (generation === this.watchGeneration) this.restarting = false;
       }
     })();
+  }
+
+  private getUnreadableAsarPath(err: unknown): string | null {
+    const candidate = err as { path?: unknown; message?: unknown } | null;
+    if (typeof candidate?.path === "string" && path.extname(candidate.path).toLowerCase() === ".asar") {
+      return candidate.path;
+    }
+    const message = typeof candidate?.message === "string" ? candidate.message : "";
+    const match = /^Invalid package\s+(.+?\.asar)(?:[\/\\].*)?$/i.exec(message);
+    return match?.[1] || null;
   }
 
   ignoreNextChange(filePath: string): void {
@@ -221,6 +257,8 @@ export class Watcher {
     this.pendingEvents.clear();
 
     this.ignoredChanges.clear();
+
+    this.reportedWatcherErrors.clear();
 
     const watcher = this.watcher;
     this.watcher = null;
