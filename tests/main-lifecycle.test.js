@@ -413,7 +413,8 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
       const timer = setTimeout(() => reject(new Error("polling watcher was not ready")), 5000);
       watcher.once("ready", () => { clearTimeout(timer); resolve(); });
     });
-    await fs.writeFile(normal, "const value = 2;\n");
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    await fs.writeFile(normal, "const value = 22222;\n");
     await waitForEvent(([event, filePath]) => event === "change" && filePath === normal);
     await fs.writeFile(created, "export {};\n");
     await waitForEvent(([event, filePath]) => event === "add" && filePath === created);
