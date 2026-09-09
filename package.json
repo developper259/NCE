@@ -21,7 +21,10 @@
     "test:electron": "npm run sync-assets && npm run build:main && node --test tests/electron/smoke.cjs",
     "test:packaged": "node scripts/check-package.js"
   },
-  "author": "Andrea Belvedere",
+  "author": {
+    "name": "Andrea Belvedere",
+    "email": "andreablv.collab@gmail.com"
+  },
   "license": "ISC",
   "dependencies": {
     "chokidar": "^5.0.0",
@@ -77,7 +80,10 @@
     },
     "linux": {
       "target": ["AppImage", "deb"],
-      "icon": "assets/logo/NCE/dark-logo.png"
+      "icon": "assets/logo/NCE/dark-logo.png",
+      "category": "Development",
+      "desktopName": "NCE.desktop",
+      "syncDesktopName": true
     }
   },
   "devDependencies": {
