@@ -229,6 +229,35 @@ test("a rapid unshifted click clears selection state and its DOM", () => {
   assert.equal(selection.startSelect.column, file.column);
 });
 
+test("dragging after a double click on an empty line keeps a selection anchor", () => {
+  const { editor, file } = createEditor("\nsecond line");
+  editor.selectOutput = element();
+  editor.output = element();
+  editor.cD = element();
+  editor.cursorController.onClick = () => ({ row: file.row, column: file.column });
+  editor.cursorController.getViewPosition = (row, column) => ({ row, column });
+  file._selectedLines = new Map();
+  file.containsSelected = "";
+  file.clickCount = 0;
+  file.lastClickTime = Date.now();
+  const SelectController = loadGlobal("src/js/controller/SelectController.js", "SelectController", {
+    addEvent() {}, Events: { ON_SELECT: "select" }, document: { createElement: element },
+  });
+  const selection = new SelectController(editor);
+  editor.selectController = selection;
+
+  selection.mouseDown({ button: 0, shiftKey: false });
+  selection.mouseDown({ button: 0, shiftKey: false });
+
+  assert.equal(selection.clickCount, 2);
+  assert.ok(selection.startSelect);
+
+  file.column = 4;
+  assert.doesNotThrow(() => selection.mouseMove({ button: 0 }));
+  assert.equal(selection.startSelect.row, 1);
+  assert.equal(selection.endSelect.column, 4);
+});
+
 test("File Explorer distinguishes no workspace, empty workspace and files", () => {
   class Sidebar {}
   const document = { createElement: element };
