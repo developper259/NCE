@@ -69,7 +69,8 @@ class TitleBar {
           ["Command Palette", "open_command"],
           null,
           ["Toggle Fullscreen", "view.fullscreen"],
-          ["Developer Tools", "view.devtools"],
+          // DEV ONLY — uncomment for local development.
+          // ["Developer Tools", "view.devtools"],
         ],
       },
       {

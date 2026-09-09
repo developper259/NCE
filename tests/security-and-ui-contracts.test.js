@@ -81,3 +81,20 @@ test("asset and command availability contracts stay aligned", () => {
   assert.doesNotMatch(keybindings, /action:\s*"replace"/);
   assert.doesNotMatch(menu, /label:\s*"(?:Replace|Documentation|Check for Updates)"/);
 });
+
+test("public UI and runtime expose no renderer reload or DevTools controls", () => {
+  const titlebar = read("src/js/addon/TitleBar.js");
+  const menu = read("src/ts/addon/Menu.ts");
+  const windowTs = read("src/ts/Window.ts");
+  const activeLines = (source) => source
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("//"))
+    .join("\n");
+
+  assert.doesNotMatch(activeLines(titlebar), /view\.devtools|Developer Tools/);
+  assert.doesNotMatch(activeLines(menu), /Reload Window|Toggle Developer Tools|reloadWindow\(|openDevTools\(|CommandOrControl\+R|Ctrl\+Shift\+I|Alt\+Cmd\+I/);
+  assert.doesNotMatch(activeLines(windowTs), /before-input-event|case "view\.devtools"|\.reload\(\)|\.openDevTools\(\)|\.closeDevTools\(\)/);
+  assert.match(activeLines(titlebar), /view\.fullscreen/);
+  assert.match(activeLines(windowTs), /case "view\.fullscreen"/);
+  assert.match(activeLines(windowTs), /case "help\.about"/);
+});

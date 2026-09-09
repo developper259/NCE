@@ -150,28 +150,18 @@ export class Window {
       this.window = null;
     });
 
-    this.window.webContents.on("before-input-event", (event, input) => {
-      if (input.type !== "keyDown") {
-        return;
-      }
+    // DEV ONLY — uncomment for local development.
+    // this.window.webContents.on("before-input-event", (event, input) => {
+    //   if (input.type !== "keyDown") return;
+    //   const isReload =
+    //     (input.meta || input.control) && input.key.toLowerCase() === "r";
+    //   if (!isReload) return;
+    //   event.preventDefault();
+    //   this.window?.webContents.reload();
+    // });
 
-      const isReload =
-        (input.meta || input.control) && input.key.toLowerCase() === "r";
-
-      if (!isReload) {
-        return;
-      }
-
-      event.preventDefault();
-
-      this.window?.webContents.reload();
-    });
-
+    // DEV ONLY — uncomment for local development.
     // this.window.webContents.openDevTools();
-
-    if (!this.fileManager) {
-      console.log("FileManager is not defined");
-    }
 
     if (!this.ipcRegistered) {
       ipcMain.handle("App:quit", async () => this.requestQuit());
@@ -214,11 +204,12 @@ export class Window {
       case "view.fullscreen":
         this.window.setFullScreen(!this.window.isFullScreen());
         return true;
-      case "view.devtools":
-        if (this.window.webContents.isDevToolsOpened())
-          this.window.webContents.closeDevTools();
-        else this.window.webContents.openDevTools();
-        return true;
+      // DEV ONLY — uncomment for local development.
+      // case "view.devtools":
+      //   if (this.window.webContents.isDevToolsOpened())
+      //     this.window.webContents.closeDevTools();
+      //   else this.window.webContents.openDevTools();
+      //   return true;
       case "help.about":
         await this.appMenu?.showAbout();
         return true;

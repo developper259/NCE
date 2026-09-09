@@ -51,10 +51,8 @@ class KeyBinding {
       a = e.altKey;
     }
     if (this.func[key.action]) {
-      console.log(`Executing action: ${key.action} (${key.description})`);
       this.func[key.action].call(this, s, c, m, a);
     } else if (this.func[key.key]) {
-      console.log(`Executing action: ${key.key}`);
       this.func[key.key].call(this, s, c, m, a);
     }
   }

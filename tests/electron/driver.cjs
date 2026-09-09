@@ -29,6 +29,13 @@ app.whenReady().then(() => {
       assert.equal(win.isVisible(), true);
       const prefs = win.webContents.getLastWebPreferences();
       assert.equal(prefs.sandbox, true); assert.equal(prefs.contextIsolation, true); assert.equal(prefs.nodeIntegration, false);
+      assert.equal(win.webContents.isDevToolsOpened(), false);
+      assert.equal(await nce.window.executeWindowCommand('view.devtools'), false);
+      await run('window.__nceReloadGuard = true');
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
+      await new Promise(resolve => setTimeout(resolve, 250));
+      assert.equal(await run('window.__nceReloadGuard === true'), true);
       if (phase === 'write') {
         await run(`(${require('./ui.cjs').toString()})()`);
         await run(`(async () => {

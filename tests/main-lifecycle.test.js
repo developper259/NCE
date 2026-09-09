@@ -32,7 +32,8 @@ test("native application menu is kept only on macOS", () => {
   function exercise(platform) {
     const installed = [];
     class Menu {
-      append() {}
+      constructor() { this.items = []; }
+      append(item) { this.items.push(item); }
       static setApplicationMenu(value) {
         installed.push(value);
       }
@@ -52,9 +53,42 @@ test("native application menu is kept only on macOS", () => {
     new AppMenu({ webContents: {} }, { app: {} });
     return installed;
   }
-  assert.notEqual(exercise("darwin")[0], null);
+  const macMenu = exercise("darwin")[0];
+  assert.notEqual(macMenu, null);
+  const macLabels = macMenu.items.flatMap((item) =>
+    [item.label, ...(item.submenu ?? []).map((child) => child.label)],
+  );
+  assert.equal(macLabels.includes("Reload Window"), false);
+  assert.equal(macLabels.includes("Toggle Developer Tools"), false);
   assert.equal(exercise("win32")[0], null);
   assert.equal(exercise("linux")[0], null);
+});
+
+test("window commands reject DevTools while fullscreen and About remain available", async () => {
+  const { Window } = loadMain("dist/ts/Window.js", {
+    electron: {},
+    "./addon/FileManager": { FileManager: class {} },
+    "./addon/Watcher": { Watcher: class {} },
+    "./addon/Menu": { AppMenu: class {} },
+    "./addon/ContextMenu": { ContextMenu: class {} },
+    "./addon/WorkspaceSearch": { WorkspaceSearch: class {} },
+    "./App": { App: class {} },
+  });
+  let fullscreen = false;
+  let aboutCalls = 0;
+  const win = new Window({});
+  win.window = {
+    isFullScreen: () => fullscreen,
+    setFullScreen: (value) => { fullscreen = value; },
+    webContents: {},
+  };
+  win.appMenu = { showAbout: async () => { aboutCalls++; } };
+
+  assert.equal(await win.executeWindowCommand("view.devtools"), false);
+  assert.equal(await win.executeWindowCommand("view.fullscreen"), true);
+  assert.equal(fullscreen, true);
+  assert.equal(await win.executeWindowCommand("help.about"), true);
+  assert.equal(aboutCalls, 1);
 });
 
 test("native macOS File menu exposes an IPC-backed Auto Save checkbox", () => {

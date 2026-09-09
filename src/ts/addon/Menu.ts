@@ -267,13 +267,12 @@ export class AppMenu {
         label: "View",
 
         submenu: [
-          {
-            label: "Reload Window",
-
-            accelerator: "CommandOrControl+R",
-
-            click: () => this.reloadWindow(),
-          },
+          // DEV ONLY — uncomment for local development.
+          // {
+          //   label: "Reload Window",
+          //   accelerator: "CommandOrControl+R",
+          //   click: () => this.reloadWindow(),
+          // },
 
           {
             type: "separator",
@@ -315,14 +314,13 @@ export class AppMenu {
             click: () => this.toggleFullscreen(),
           },
 
-          {
-            label: "Toggle Developer Tools",
-
-            accelerator:
-              process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
-
-            click: () => this.openDevTools(),
-          },
+          // DEV ONLY — uncomment for local development.
+          // {
+          //   label: "Toggle Developer Tools",
+          //   accelerator:
+          //     process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
+          //   click: () => this.openDevTools(),
+          // },
         ],
       }),
     );
@@ -672,9 +670,10 @@ export class AppMenu {
     this.executeEditor("control_open_command");
   }
 
-  reloadWindow() {
-    this.window.webContents.reload();
-  }
+  // DEV ONLY — uncomment for local development.
+  // reloadWindow() {
+  //   this.window.webContents.reload();
+  // }
 
   toggleFullscreen() {
     const fullscreen = this.window.isFullScreen();
@@ -682,13 +681,14 @@ export class AppMenu {
     this.window.setFullScreen(!fullscreen);
   }
 
-  openDevTools() {
-    if (this.window.webContents.isDevToolsOpened()) {
-      this.window.webContents.closeDevTools();
-    } else {
-      this.window.webContents.openDevTools();
-    }
-  }
+  // DEV ONLY — uncomment for local development.
+  // openDevTools() {
+  //   if (this.window.webContents.isDevToolsOpened()) {
+  //     this.window.webContents.closeDevTools();
+  //   } else {
+  //     this.window.webContents.openDevTools();
+  //   }
+  // }
 
   // =========================================================
   // APPLICATION
@@ -696,22 +696,6 @@ export class AppMenu {
 
   exitApp() {
     this.window.close();
-  }
-
-  settings() {
-    console.log("Open NCE Settings");
-  }
-
-  NDLSettings() {
-    console.log("Open NDL Settings");
-  }
-
-  checkUpdate() {
-    console.log("Check for updates");
-  }
-
-  openDocumentation() {
-    console.log("Open documentation");
   }
 
   // =========================================================

@@ -25,6 +25,7 @@ module.exports = async function exerciseUI() {
   };
   const titleBar = new TitleBar(titleEditor);
   check(titleBar.menuButtons.length === 4, 'Windows renderer menus');
+  check(!titleBar.root.querySelector('[data-command="view.devtools"]'), 'No renderer DevTools menu item');
   check(titleBar.title.textContent.startsWith('● '), 'Dirty title indicator');
   titleBar.toggleMenu('file'); check(titleBar.openMenuId === 'file', 'Open File menu');
   const autoSaveItem = titleBar.root.querySelector('[data-command="auto_save"]');
