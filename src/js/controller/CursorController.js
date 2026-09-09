@@ -100,7 +100,27 @@ class CursorController {
     return { row: row, column: column };
   }
 
-  onClick(event) {
+  positionFromClientCoordinates(clientX, clientY, clampToViewport = false) {
+    const rect = this.editor.domManager.getOutputRect();
+    const right = Number.isFinite(rect.right) ? rect.right : rect.left + rect.width;
+    const bottom = Number.isFinite(rect.bottom) ? rect.bottom : rect.top + rect.height;
+    if (clampToViewport) {
+      clientX = Math.max(rect.left, Math.min(clientX, right - 1));
+      clientY = Math.max(rect.top, Math.min(clientY, bottom - 1));
+    }
+    const localX = clientX - rect.left;
+    const localY = clientY - rect.top - this.mY;
+    const scrollOffsetY = this.editor.lineController.getScrollOffsetY();
+    const scrollOffsetXChars = this.editor.lineController.offsetX || 0;
+    const displayIndex = this.yToRow(localY + scrollOffsetY) - 1;
+    const displayRow = this.editor.lineController.getDisplayRow(displayIndex);
+    if (!displayRow || displayRow.documentIndex === null) return;
+    const targetRow = displayRow.documentIndex + 1;
+    const targetViewColumn = this.xToColumn(localX) + scrollOffsetXChars;
+    return this.getPosition(targetRow, targetViewColumn);
+  }
+
+  onClick(event, options = {}) {
     if (!this.editor.tabManager.activeFile) return;
     if (
       !this.editor.tabManager.activeFile ||
@@ -109,30 +129,21 @@ class CursorController {
       return;
     this.editor.keyBinding.historyX = undefined;
 
-    const rect = this.editor.domManager.getOutputRect();
-    const localX = event.clientX - rect.left;
-    const localY = event.clientY - rect.top - this.mY;
-
-    const scrollOffsetY = this.editor.lineController.getScrollOffsetY();
-    const scrollOffsetXChars = this.editor.lineController.offsetX || 0;
-
-    const displayIndex = this.yToRow(localY + scrollOffsetY) - 1;
-    const displayRow = this.editor.lineController.getDisplayRow(displayIndex);
-    if (!displayRow || displayRow.documentIndex === null) return;
-    const targetRow = displayRow.documentIndex + 1;
-    const targetViewColumn = this.xToColumn(localX) + scrollOffsetXChars;
-
-    const posReal = this.getPosition(targetRow, targetViewColumn);
+    const posReal = this.positionFromClientCoordinates(
+      event.clientX,
+      event.clientY,
+      options.clampToViewport === true,
+    );
     if (!posReal) return;
 
     if (this.isNewPosition(posReal.row, posReal.column)) {
-      this.setCursorPosition(posReal.row, posReal.column);
+      this.setCursorPosition(posReal.row, posReal.column, options);
     }
 
     return posReal;
   }
 
-  setCursorPosition(r, c) {
+  setCursorPosition(r, c, options = {}) {
     if (!this.editor.tabManager.activeFile) return;
     if (
       !this.editor.tabManager.activeFile ||
@@ -159,7 +170,8 @@ class CursorController {
       }
     }
 
-    if (!this.editor.isOnInit) this.ensureCursorVisible();
+    if (!this.editor.isOnInit && options.ensureVisible !== false)
+      this.ensureCursorVisible();
     this.updateCaretPosition();
   }
 

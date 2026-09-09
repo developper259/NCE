@@ -2,6 +2,8 @@ class SelectController {
   constructor(e) {
     this.editor = e;
     this.clickTime = 500;
+    this.selectionAutoScrollFrame = null;
+    this.dragClientPosition = null;
     this.initEventListeners();
   }
 
@@ -730,6 +732,7 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
 
     this.isMouseDown = false;
+    this.stopAutoScroll();
 
     this.endSelect = {
       column: this.editor.cursorController.column,
@@ -742,12 +745,85 @@ class SelectController {
     if (!this.editor.tabManager.activeFile) return;
 
     if (this.isMouseDown) {
+      this.dragClientPosition = { x: event.clientX, y: event.clientY };
       this.clickCount = 0;
 
-      this.editor.cursorController.onClick(event);
+      this.updateDragPosition();
 
-      this.move();
+      this.updateAutoScroll();
+
     }
+  }
+
+  updateDragPosition() {
+    if (!this.dragClientPosition || !this.editor.tabManager.activeFile) return;
+    this.editor.cursorController.onClick(
+      { clientX: this.dragClientPosition.x, clientY: this.dragClientPosition.y },
+      { clampToViewport: true, ensureVisible: false },
+    );
+
+    this.move();
+  }
+
+  getOutsideDistances() {
+    if (!this.dragClientPosition) return null;
+    const rect = this.editor.domManager.getOutputRect();
+    const right = Number.isFinite(rect.right) ? rect.right : rect.left + rect.width;
+    const bottom = Number.isFinite(rect.bottom) ? rect.bottom : rect.top + rect.height;
+    return {
+      x: this.dragClientPosition.x < rect.left
+        ? this.dragClientPosition.x - rect.left
+        : this.dragClientPosition.x > right ? this.dragClientPosition.x - right : 0,
+      y: this.dragClientPosition.y < rect.top
+        ? this.dragClientPosition.y - rect.top
+        : this.dragClientPosition.y > bottom ? this.dragClientPosition.y - bottom : 0,
+    };
+  }
+
+  getAutoScrollStep(distance, unit) {
+    if (distance === 0) return 0;
+    return Math.sign(distance) * Math.min(3, Math.max(1, Math.ceil(Math.abs(distance) / unit)));
+  }
+
+  updateAutoScroll() {
+    const outside = this.getOutsideDistances();
+    if (!this.isMouseDown || !outside || (outside.x === 0 && outside.y === 0)) {
+      this.stopAutoScroll();
+      return;
+    }
+    if (this.selectionAutoScrollFrame === null) {
+      this.selectionAutoScrollFrame = requestAnimationFrame(() => this.autoScroll());
+    }
+  }
+
+  autoScroll() {
+    this.selectionAutoScrollFrame = null;
+    if (!this.isMouseDown || !this.editor.tabManager.activeFile) return;
+    const outside = this.getOutsideDistances();
+    if (!outside || (outside.x === 0 && outside.y === 0)) return;
+    const lc = this.editor.lineController;
+    const vertical = this.getAutoScrollStep(outside.y, this.editor.posY || 23);
+    const horizontal = this.getAutoScrollStep(
+      outside.x,
+      Math.max(1, this.editor.letterSize * 4),
+    );
+    if (vertical) lc.scrollTo(lc.startIndex + vertical);
+    if (horizontal) lc.outputScroller.setHorizontalOffset(lc.offsetX + horizontal);
+    this.updateDragPosition();
+    this.updateAutoScroll();
+  }
+
+  stopAutoScroll() {
+    if (this.selectionAutoScrollFrame !== null) {
+      cancelAnimationFrame(this.selectionAutoScrollFrame);
+      this.selectionAutoScrollFrame = null;
+    }
+    this.dragClientPosition = null;
+  }
+
+  cancelMouseGesture() {
+    if (!this.isMouseDown) return;
+    this.mouseUp();
   }
 
   move() {
@@ -801,6 +877,8 @@ class SelectController {
 
     addEvent("mouseup", this.mouseUp.bind(this), document);
 
-    addEvent("mousemove", this.mouseMove.bind(this), this.editor.output);
+    addEvent("mousemove", this.mouseMove.bind(this), document);
+    if (typeof window !== "undefined")
+      addEvent("blur", this.cancelMouseGesture.bind(this), window);
   }
 }

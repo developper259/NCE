@@ -258,6 +258,84 @@ test("dragging after a double click on an empty line keeps a valid anchor", () =
   assert.equal(selection.endSelect.column, 4);
 });
 
+test("document drag keeps selecting outside, auto-scrolls, and stops on mouseup", () => {
+  const { editor, file } = createEditor(Array.from({ length: 120 }, (_, i) => `line ${i}`).join("\n"));
+  file._selectedLines = new Map();
+  file.containsSelected = "";
+  file.clickCount = 0;
+  file.lastClickTime = 0;
+  const listeners = new Map();
+  const documentTarget = {
+    createElement: element,
+    addEventListener(type, listener) { listeners.set(type, listener); },
+  };
+  const windowTarget = { addEventListener(type, listener) { listeners.set(`window:${type}`, listener); } };
+  let nextFrame = 1;
+  const frames = new Map();
+  const cancelled = [];
+  const requestFrame = (callback) => { const id = nextFrame++; frames.set(id, callback); return id; };
+  const cancelFrame = (id) => { cancelled.push(id); frames.delete(id); };
+  editor.output = element();
+  editor.cD = element();
+  editor.selectOutput = element();
+  editor.domManager.getOutputRect = () => ({ left: 10, top: 10, right: 110, bottom: 110, width: 100, height: 100 });
+  editor.lineController.startIndex = 0;
+  editor.lineController.offsetX = 0;
+  editor.lineController.outputScroller = {
+    setHorizontalOffset(value) { editor.lineController.offsetX = Math.max(0, value); return true; },
+  };
+  editor.lineController.scrollTo = (row) => { editor.lineController.startIndex = Math.max(0, Math.min(row, 110)); };
+  editor.cursorController.onClick = (event) => {
+    const x = Math.max(10, Math.min(event.clientX, 109));
+    const y = Math.max(10, Math.min(event.clientY, 109));
+    file.row = Math.min(file.lines.length, editor.lineController.startIndex + Math.floor((y - 10) / 20) + 1);
+    file.column = Math.min(file.lines[file.row - 1].getText().length, Math.floor((x - 10) / 10) + editor.lineController.offsetX);
+  };
+  editor.cursorController.getViewPosition = (row, column) => ({ row, column });
+  const SelectController = loadGlobal("src/js/controller/SelectController.js", "SelectController", {
+    addEvent(type, listener, target = documentTarget) {
+      for (const item of Array.isArray(target) ? target : [target]) item.addEventListener(type, listener);
+    },
+    Events: { ON_SELECT: "select" }, document: documentTarget, window: windowTarget,
+    requestAnimationFrame: requestFrame, cancelAnimationFrame: cancelFrame,
+  });
+  const selection = new SelectController(editor);
+  editor.selectController = selection;
+
+  selection.mouseDown({ button: 0, shiftKey: false, clientX: 20, clientY: 20 });
+  listeners.get("mousemove")({ clientX: 150, clientY: 150 });
+  assert.ok(selection.endSelect.row > 1);
+  assert.equal(frames.size, 1);
+  const frame = frames.values().next().value;
+  frames.clear();
+  frame();
+  assert.ok(editor.lineController.startIndex > 0);
+  assert.ok(editor.lineController.offsetX > 0);
+  assert.ok(selection.endSelect.row > 5);
+
+  listeners.get("mouseup")({ clientX: 150, clientY: 150 });
+  const stoppedEnd = { ...selection.endSelect };
+  const stoppedScroll = editor.lineController.startIndex;
+  listeners.get("mousemove")({ clientX: 150, clientY: 150 });
+  assert.equal(selection.isMouseDown, false);
+  assert.deepEqual({ ...selection.endSelect }, stoppedEnd);
+  assert.equal(editor.lineController.startIndex, stoppedScroll);
+  assert.equal(frames.size, 0);
+  assert.ok(cancelled.length <= 1);
+
+  editor.lineController.startIndex = 4;
+  editor.lineController.offsetX = 4;
+  selection.mouseDown({ button: 0, shiftKey: false, clientX: 50, clientY: 50 });
+  listeners.get("mousemove")({ clientX: 0, clientY: 0 });
+  const reverseFrame = frames.values().next().value;
+  frames.clear();
+  reverseFrame();
+  assert.ok(editor.lineController.startIndex < 4);
+  assert.ok(editor.lineController.offsetX < 4);
+  assert.ok(selection.endSelect.row >= 1);
+  listeners.get("mouseup")({ clientX: 0, clientY: 0 });
+});
+
 test("programmatic vertical and horizontal viewport rebuilds refresh highlighting last", () => {
   const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller", {
     realColumnToViewColumn: (_line, column) => column,
