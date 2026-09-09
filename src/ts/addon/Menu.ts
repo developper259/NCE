@@ -6,6 +6,7 @@ export class AppMenu {
   menu: InstanceType<typeof Menu> | null;
   window: BrowserWindow;
   WinAPP: Window;
+  autoSaveItem: InstanceType<typeof MenuItem> | null = null;
 
   constructor(window: BrowserWindow, WinAPP: Window) {
     this.window = window;
@@ -107,6 +108,19 @@ export class AppMenu {
           },
 
           {
+            id: "auto-save",
+            label: "Auto Save",
+            type: "checkbox",
+            checked: false,
+            click: () =>
+              this.window.webContents.send("auto-save-toggle-requested"),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
             label: "Close File",
 
             accelerator: "CommandOrControl+W",
@@ -136,6 +150,7 @@ export class AppMenu {
         ],
       }),
     );
+    this.autoSaveItem = this.menu.getMenuItemById?.("auto-save") || null;
 
     /*
      * =======================================================
@@ -335,6 +350,10 @@ export class AppMenu {
         ],
       }),
     );
+  }
+
+  setAutoSaveState(enabled: boolean) {
+    if (this.autoSaveItem) this.autoSaveItem.checked = enabled === true;
   }
 
   async editAction(action: string) {

@@ -178,6 +178,11 @@ export class Window {
       ipcMain.handle("App:command", async (_event, command) =>
         this.executeWindowCommand(command),
       );
+      ipcMain.handle("App:setAutoSaveState", async (_event, enabled) => {
+        if (typeof enabled !== "boolean") return false;
+        this.appMenu?.setAutoSaveState(enabled);
+        return true;
+      });
       ipcMain.handle("App:rendererReady", async () => {
         this.rendererReady = true;
         return true;

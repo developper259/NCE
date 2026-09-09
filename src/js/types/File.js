@@ -6,7 +6,6 @@ class FileNode {
     this.path = path;
 
     this.isSaved = true;
-    this.autoSave = false;
     this.editVersion = 0;
 
     // KeyBinding
@@ -250,19 +249,22 @@ class FileNode {
     this.isSaved = value;
   }
 
+  get autoSave() {
+    return this.editor.getAutoSaveState?.() === true;
+  }
+
   shouldPersistChanges() {
     return this.autoSave === true && Boolean(this.path);
   }
 
   onChange() {
+    this.setIsSaved(
+      this.editor.historyController
+        ? this.editor.historyController.isAtSavePoint(this)
+        : false,
+    );
     if (this.shouldPersistChanges()) {
-      this.save();
-    } else {
-      this.setIsSaved(
-        this.editor.historyController
-          ? this.editor.historyController.isAtSavePoint(this)
-          : false,
-      );
+      void this.save();
     }
     this.editor.tabManager.refresh();
   }

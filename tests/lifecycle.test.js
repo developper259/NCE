@@ -85,6 +85,60 @@ test('serialization failure never overwrites the previous state with {}', async 
   finally { console.error = originalError; }
 });
 
+test('existing FileNode auto-save follows the shared state and safe save pipeline', async () => {
+  const editor = setup();
+  editor.autoSaveEnabled = false;
+  editor.getAutoSaveState = Editor.prototype.getAutoSaveState;
+  editor.setAutoSaveState = Editor.prototype.setAutoSaveState;
+  editor.toggleAutoSave = Editor.prototype.toggleAutoSave;
+  editor.api = { setAutoSaveState() {} };
+  editor.statesManager = { save: async () => true };
+  let writes = 0;
+  editor.api.saveFile = async (filePath) => { writes++; return filePath; };
+  const file = new FileNode(editor, 1, 'saved.txt', '/saved.txt');
+  file.loadingState = { status: 'loaded', loadedLineCount: 1, expectedTotalLines: 1 };
+  file.lines = [new LineNode('changed')];
+  editor.tabManager.files = [file]; editor.tabManager.activeFile = file;
+
+  file.onChange(); await new Promise(r => setImmediate(r));
+  assert.equal(writes, 0); assert.equal(file.isSaved, false);
+  editor.setAutoSaveState(true, { persist: false });
+  file.onChange(); await new Promise(r => setImmediate(r));
+  assert.equal(writes, 1); assert.equal(file.isSaved, true);
+
+  editor.api.saveFile = async () => false;
+  const originalWarn = console.warn; console.warn = () => {};
+  try { file.onChange(); await new Promise(r => setImmediate(r)); }
+  finally { console.warn = originalWarn; }
+  assert.equal(file.isSaved, false);
+  editor.api.saveFile = async (filePath) => { writes++; return filePath; };
+
+  const untitled = new FileNode(editor, 2, 'New file', null);
+  editor.tabManager.files.push(untitled); editor.tabManager.activeFile = untitled;
+  untitled.onChange(); await new Promise(r => setImmediate(r));
+  assert.equal(writes, 1);
+
+  const loading = new FileNode(editor, 3, 'large.txt', '/large.txt');
+  loading.loadingState = { status: 'loading', loadedLineCount: 1, expectedTotalLines: 2,
+    completion: new Promise(() => {}) };
+  editor.tabManager.files.push(loading); editor.tabManager.activeFile = loading;
+  loading.onChange(); await new Promise(r => setImmediate(r));
+  assert.equal(writes, 1);
+});
+
+test('auto-save preference is serialized and restored before tabs', async () => {
+  const editor = setup();
+  editor.fileExplorer = null;
+  editor.autoSaveEnabled = true;
+  editor.getAutoSaveState = () => editor.autoSaveEnabled;
+  const state = new StatesManager(editor).getState();
+  assert.equal(state.preferences.autoSave, true);
+  let restored;
+  editor.setAutoSaveState = (enabled, options) => { restored = [enabled, options.persist]; };
+  await new StatesManager(editor).loadStates({ preferences: { autoSave: true } });
+  assert.deepEqual(restored, [true, false]);
+});
+
 for (const mode of ['failure', 'cancel', 'complete', 'save-as', 'short-chunk']) {
   test(`15000-line file: ${mode} preserves data or saves complete content`, async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-partial-'));

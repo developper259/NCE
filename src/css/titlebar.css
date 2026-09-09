@@ -164,6 +164,16 @@
   background: transparent;
 }
 
+.nce-titlebar-menu-item.is-checkbox::before {
+  content: "";
+  width: 12px;
+  flex: 0 0 12px;
+}
+
+.nce-titlebar-menu-item.is-checkbox[aria-checked="true"]::before {
+  content: "✓";
+}
+
 .nce-titlebar-shortcut {
   color: var(--titlebar-text-muted);
   margin-left: auto;

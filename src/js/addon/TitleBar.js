@@ -33,6 +33,8 @@ class TitleBar {
           ["Save", "save", { needsFile: true }],
           ["Save As...", "saveAs", { needsFile: true }],
           null,
+          ["Auto Save", "auto_save", { checkbox: true }],
+          null,
           ["Close File", "close_file", { needsFile: true }],
           ["Close All Files", "close_all_file", { needsFile: true }],
           null,
@@ -126,7 +128,12 @@ class TitleBar {
       button.className = "nce-titlebar-menu-item";
       button.dataset.command = command;
       button.dataset.needsFile = String(Boolean(options.needsFile));
-      button.setAttribute("role", "menuitem");
+      button.dataset.checkbox = String(Boolean(options.checkbox));
+      button.setAttribute("role", options.checkbox ? "menuitemcheckbox" : "menuitem");
+      if (options.checkbox) {
+        button.classList.add("is-checkbox");
+        button.setAttribute("aria-checked", "false");
+      }
       button.tabIndex = -1;
       const text = document.createElement("span");
       text.textContent = label;
@@ -193,10 +200,17 @@ class TitleBar {
     this.root.querySelectorAll(".nce-titlebar-menu-item").forEach((item) => {
       item.disabled = item.dataset.needsFile === "true" && !hasFile;
     });
+    this.refreshAutoSaveState();
+  }
+
+  refreshAutoSaveState() {
+    const item = this.root?.querySelector('[data-command="auto_save"]');
+    if (item) item.setAttribute("aria-checked", String(this.editor.getAutoSaveState?.() === true));
   }
 
   execute(command) {
     this.closeMenus({ restoreFocus: false });
+    if (command === "auto_save") return this.editor.toggleAutoSave?.();
     if (command === "exit") return this.editor.api.quit();
     if (command.includes(".")) return this.editor.api.appCommand(command);
     const method = command === "saveAs" ? "control_save" : `control_${command}`;

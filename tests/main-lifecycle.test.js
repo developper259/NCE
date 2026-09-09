@@ -57,6 +57,33 @@ test("native application menu is kept only on macOS", () => {
   assert.equal(exercise("linux")[0], null);
 });
 
+test("native macOS File menu exposes an IPC-backed Auto Save checkbox", () => {
+  const sent = [];
+  class Menu {
+    constructor() { this.items = []; }
+    append(item) { this.items.push(item); }
+    getMenuItemById(id) {
+      for (const top of this.items) {
+        const match = top.submenu?.find?.((item) => item.id === id);
+        if (match) return match;
+      }
+      return null;
+    }
+    static setApplicationMenu() {}
+  }
+  class MenuItem { constructor(options) { Object.assign(this, options); } }
+  const { AppMenu } = loadMain("dist/ts/addon/Menu.js", {
+    electron: { Menu, MenuItem, dialog: {} },
+  }, { process: { platform: "darwin" } });
+  const menu = new AppMenu({ webContents: { send: (...args) => sent.push(args) } }, { app: {} });
+  assert.equal(menu.autoSaveItem.type, "checkbox");
+  assert.equal(menu.autoSaveItem.checked, false);
+  menu.setAutoSaveState(true);
+  assert.equal(menu.autoSaveItem.checked, true);
+  menu.autoSaveItem.click();
+  assert.deepEqual(sent, [["auto-save-toggle-requested"]]);
+});
+
 for (const mode of [
   "not-ready",
   "destroyed",

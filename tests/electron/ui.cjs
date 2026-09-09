@@ -6,6 +6,9 @@ module.exports = async function exerciseUI() {
   editor.titleBar.destroy();
   const commandCalls = [];
   const titleEditor = {
+    autoSaveEnabled: false,
+    getAutoSaveState() { return this.autoSaveEnabled; },
+    toggleAutoSave() { this.autoSaveEnabled = !this.autoSaveEnabled; titleBar.refreshAutoSaveState(); },
     api: {
       platform: 'win32',
       quit: () => commandCalls.push('exit'),
@@ -24,6 +27,13 @@ module.exports = async function exerciseUI() {
   check(titleBar.menuButtons.length === 4, 'Windows renderer menus');
   check(titleBar.title.textContent.startsWith('● '), 'Dirty title indicator');
   titleBar.toggleMenu('file'); check(titleBar.openMenuId === 'file', 'Open File menu');
+  const autoSaveItem = titleBar.root.querySelector('[data-command="auto_save"]');
+  check(autoSaveItem?.getAttribute('role') === 'menuitemcheckbox', 'Auto Save checkbox role');
+  check(autoSaveItem.getAttribute('aria-checked') === 'false', 'Auto Save initially off');
+  autoSaveItem.click(); check(titleEditor.autoSaveEnabled && autoSaveItem.getAttribute('aria-checked') === 'true', 'Auto Save mouse toggle on');
+  titleBar.openMenu('file'); autoSaveItem.focus();
+  titleBar.handleDocumentKeyDown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+  check(!titleEditor.autoSaveEnabled && autoSaveItem.getAttribute('aria-checked') === 'false', 'Auto Save keyboard toggle off');
   titleBar.openMenu('edit'); check(titleBar.openMenuId === 'edit', 'Switch menu');
   titleBar.handleDocumentKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} });
   check(titleBar.openMenuId === null, 'Escape closes menu');

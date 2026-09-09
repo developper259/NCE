@@ -5,6 +5,13 @@ contextBridge.exposeInMainWorld("api", {
   agentFileOperation: (root, operation, args) => ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
   quit: () => ipcRenderer.invoke("App:quit"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
+  setAutoSaveState: (enabled) =>
+    ipcRenderer.invoke("App:setAutoSaveState", enabled === true),
+  onAutoSaveToggleRequested: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("auto-save-toggle-requested", listener);
+    return () => ipcRenderer.removeListener("auto-save-toggle-requested", listener);
+  },
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),

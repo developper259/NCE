@@ -20,6 +20,7 @@ class StatesManager {
       tabManager: this.getTabManagerState(),
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(),
+      preferences: { autoSave: this.editor.getAutoSaveState?.() === true },
       agent: this.getAgentState(),
     };
   }
@@ -122,6 +123,10 @@ class StatesManager {
 
   async loadStates(state) {
     if (!state) return;
+
+    this.editor.setAutoSaveState?.(state.preferences?.autoSave === true, {
+      persist: false,
+    });
 
     if (state.tabManager) {
       await this.loadTabManagerState(state.tabManager);

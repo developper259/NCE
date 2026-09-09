@@ -3,6 +3,7 @@ class Editor {
     this.isOnInit = true;
     this.isOnRefresh = false;
     this.isButtonChangePosition = false;
+    this.autoSaveEnabled = false;
 
     this.domManager = new DOMManager(this);
 
@@ -72,6 +73,7 @@ class Editor {
     }
 
     this.initQuitEvent();
+    this.api.onAutoSaveToggleRequested?.(() => this.toggleAutoSave());
     this.initLoadState();
     this.api.rendererReady?.().catch?.((error) => {
       console.error("[Startup] rendererReady failed", error);
@@ -91,6 +93,25 @@ class Editor {
     this.sidebarManager.refreshAll();
 
     this.isOnRefresh = false;
+  }
+
+  getAutoSaveState() {
+    return this.autoSaveEnabled === true;
+  }
+
+  setAutoSaveState(enabled, { persist = true } = {}) {
+    this.autoSaveEnabled = enabled === true;
+    this.titleBar?.refreshAutoSaveState?.();
+    const synchronization = this.api.setAutoSaveState?.(this.autoSaveEnabled);
+    synchronization?.catch?.((error) =>
+      console.error("[Auto Save] menu synchronization failed", error),
+    );
+    if (persist && !this.isOnInit) this.statesManager.save();
+    return this.autoSaveEnabled;
+  }
+
+  toggleAutoSave() {
+    return this.setAutoSaveState(!this.getAutoSaveState());
   }
 
   hideAll() {
