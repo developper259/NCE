@@ -124,6 +124,13 @@ test('existing FileNode auto-save follows the shared state and safe save pipelin
   editor.tabManager.files.push(loading); editor.tabManager.activeFile = loading;
   loading.onChange(); await new Promise(r => setImmediate(r));
   assert.equal(writes, 1);
+
+  editor.tabManager.activeFile = file;
+  editor.tabManager.markFileAsDeleted(file.path);
+  file.onChange(); await new Promise(r => setImmediate(r));
+  assert.equal(writes, 1);
+  assert.equal(file.isSaved, false);
+  assert.equal(file.deletedFromDisk, true);
 });
 
 test('auto-save preference is serialized and restored before tabs', async () => {

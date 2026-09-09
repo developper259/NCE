@@ -70,6 +70,7 @@ class tabManager {
       if (!file.path) continue;
 
       if (NCEPath.isInside(file.path, path)) {
+        file.deletedFromDisk = true;
         file.setIsSaved(false);
         changed = true;
       }
@@ -319,7 +320,9 @@ class tabManager {
     titleSpan.textContent = file.name;
     li.appendChild(titleSpan);
 
-    if (file.isSaved) {
+    // Auto Save owns persistence while enabled. Keep the close affordance
+    // stable instead of flashing the transient unsaved dot during its write.
+    if (file.isSaved || (file.autoSave === true && !file.deletedFromDisk)) {
       const btnSpan = document.createElement("span");
       btnSpan.className = "file-el-btn file-saved";
 

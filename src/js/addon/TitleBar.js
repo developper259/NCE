@@ -281,7 +281,9 @@ class TitleBar {
     const context = file?.name
       ? `${file.name}${project ? ` · ${project}` : ""}`
       : project || "NCE";
-    this.title.textContent = `${file && !file.isSaved ? "● " : ""}${context}`;
+    const showDirtyIndicator =
+      file && !file.isSaved && (file.autoSave !== true || file.deletedFromDisk);
+    this.title.textContent = `${showDirtyIndicator ? "● " : ""}${context}`;
     this.title.title = context;
     this.refreshDisabledItems();
   }

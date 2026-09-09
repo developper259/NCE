@@ -6,6 +6,7 @@ class FileNode {
     this.path = path;
 
     this.isSaved = true;
+    this.deletedFromDisk = false;
     this.editVersion = 0;
 
     // KeyBinding
@@ -78,6 +79,7 @@ class FileNode {
     this.name = file.name;
     this.path = file.path;
     this.isSaved = file.isSaved;
+    this.deletedFromDisk = file.deletedFromDisk === true;
 
     this.historyX = file.historyX;
 
@@ -135,6 +137,7 @@ class FileNode {
       this.totalLines = this.lines.length;
       this.syntaxMetrics = null;
       this.loadError = null;
+      this.deletedFromDisk = false;
       this.editor.historyController?.clear(this);
       this.editor.fileLoader.loadRemainingLines(this, result.initialLines.length, result.totalLines);
       this.isLoaded = true;
@@ -191,6 +194,7 @@ class FileNode {
       const saved = await this.editor.api.saveFile(this.path, content);
       if (!saved) throw new Error("Failed to save file");
       if (version === this.editVersion) {
+        this.deletedFromDisk = false;
         this.setIsSaved(true);
         this.editor.historyController?.markSaved(this);
       }
@@ -213,6 +217,7 @@ class FileNode {
 
     if (!this.path) this.loadingState = { status: "loaded", loadedLineCount: this.lines.length, expectedTotalLines: this.lines.length };
     this.path = selectedPath;
+    this.deletedFromDisk = false;
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
     if (version === this.editVersion) {
       this.setIsSaved(true);
@@ -254,7 +259,7 @@ class FileNode {
   }
 
   shouldPersistChanges() {
-    return this.autoSave === true && Boolean(this.path);
+    return this.autoSave === true && Boolean(this.path) && !this.deletedFromDisk;
   }
 
   onChange() {

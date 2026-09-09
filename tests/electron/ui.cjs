@@ -49,6 +49,22 @@ module.exports = async function exerciseUI() {
 
   const file = editor.tabManager.createEmptyFile();
   await editor.tabManager.setFocusFile(file);
+  editor.setAutoSaveState(true, { persist: false });
+  check(file.autoSave === true, 'Auto Save state reaches FileNode');
+  file.setIsSaved(false);
+  const autoSaveTab = editor.tabManager.createFileOBJ(file);
+  check(autoSaveTab?.querySelector('.file-saved img'), 'Auto Save tab always keeps close button');
+  editor.titleBar.refresh();
+  check(!editor.titleBar.title.textContent.startsWith('● '), 'Auto Save title never shows dirty indicator');
+  file.deletedFromDisk = true;
+  const deletedTab = editor.tabManager.createFileOBJ(file);
+  check(deletedTab?.querySelector('.file-unsaved'), 'Deleted Auto Save file stays visibly unsaved');
+  editor.titleBar.refresh();
+  check(editor.titleBar.title.textContent.startsWith('● '), 'Deleted Auto Save file stays dirty in title');
+  file.deletedFromDisk = false;
+  editor.setAutoSaveState(false, { persist: false });
+  file.setIsSaved(true);
+  editor.tabManager.refresh();
   editor.writerController.write('one two\nthree');
   editor.selectController.setSelection({ row: 2, column: 3 }, { row: 1, column: 4 });
   check(editor.selectController.containsSelected === 'two\nthr', 'Backward multiline selection');
