@@ -1,6 +1,7 @@
 {
   "name": "NCE",
   "productName": "NCE",
+  "desktopName": "fr.ndl.nce.desktop",
   "version": "0.0.1-beta.1",
   "description": "A lightweight and fast desktop code editor built from scratch.",
   "main": "dist/main.js",
@@ -82,7 +83,6 @@
       "target": ["AppImage", "deb"],
       "icon": "assets/logo/NCE/dark-logo.png",
       "category": "Development",
-      "desktopName": "NCE.desktop",
       "syncDesktopName": true
     }
   },
