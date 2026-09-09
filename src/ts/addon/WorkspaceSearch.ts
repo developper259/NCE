@@ -84,6 +84,7 @@ export class WorkspaceSearch {
     ".pdf", ".zip", ".gz", ".tar", ".7z", ".rar", ".exe", ".dll",
     ".so", ".dylib", ".woff", ".woff2", ".ttf", ".otf", ".mp3",
     ".wav", ".ogg", ".mp4", ".mov", ".avi", ".webm",
+    ".asar",
   ]);
 
   constructor(window: Window) {
@@ -377,6 +378,8 @@ export class WorkspaceSearch {
         if (!entry.isFile()) {
           continue;
         }
+
+        if (path.extname(entry.name).toLowerCase() === ".asar") continue;
 
         if (this.matchesAny(relativePath, excludePatterns)) {
           continue;

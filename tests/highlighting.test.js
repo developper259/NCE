@@ -33,13 +33,12 @@ function setup() {
       if (type === "closeDocument") documents.delete(data.documentId);
       if (type === "getDocumentLines")
         return {
-          lines: documents
-            .get(data.documentId)
-            .code.split("\n")
+          lines: (documents.get(data.documentId)?.code || "")
+            .split("\n")
             .map((text) => ({
               text,
               tokens: [
-                { value: text, type: documents.get(data.documentId).language },
+                { value: text, type: documents.get(data.documentId)?.language || "plaintext" },
               ],
             })),
         };

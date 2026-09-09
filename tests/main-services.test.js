@@ -4,7 +4,7 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 
-const { FileManager, validateEntryName } = require("../dist/ts/addon/FileManager.js");
+const { FileManager, validateEntryName, atomicWriteFile } = require("../dist/ts/addon/FileManager.js");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch.js");
 
 async function tempWorkspace() {
@@ -64,6 +64,70 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
     assert.equal(project.entries.some((entry) => entry.name === "node_modules"), false);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("invalid ASAR stays opaque in explorer, search, and project map", async () => {
+  const root = await tempWorkspace();
+  const archive = path.join(root, "broken.asar");
+  await fsp.writeFile(archive, Buffer.from("not an Electron archive\0target"));
+  try {
+    const manager = new FileManager({});
+    const names = await manager.getFolderContent(root);
+    assert.equal(names.find((entry) => entry.name === "broken.asar")?.type, "file");
+    assert.equal((await manager.initializeFile(archive)).errorCode, "BINARY_FILE");
+    assert.equal((await manager.getFileContent([archive]))[archive], undefined);
+    const search = new WorkspaceSearch({ window: null });
+    const result = await search.search(root, "target");
+    assert.equal(result.results.some((entry) => entry.name === "broken.asar"), false);
+    assert.equal(result.results.some((entry) => entry.name === "a.js"), true);
+    const map = await search.getProjectMap(root, root);
+    const entry = map.entries.find((item) => item.name === "broken.asar");
+    assert.deepEqual({ binary: entry.binary, lineCount: entry.lineCount }, { binary: true, lineCount: null });
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test("atomic save preserves bytes, cleans its sibling temp, and brackets watcher state", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-atomic-save-"));
+  const target = path.join(root, "unicode.txt");
+  const calls = [];
+  const watcher = {
+    beginOwnWrite(file) { calls.push(["begin", file]); return Symbol("save"); },
+    commitOwnWrite(file, token) { calls.push(["commit", file, typeof token]); },
+    cancelOwnWrite() { calls.push(["cancel"]); },
+  };
+  try {
+    await fsp.writeFile(target, "old");
+    const manager = new FileManager({ watcher });
+    assert.equal(await manager.saveFile(target, "é 你好 😀\r\nLF\nmixed"), target);
+    assert.equal(await fsp.readFile(target, "utf8"), "é 你好 😀\r\nLF\nmixed");
+    assert.deepEqual(calls.map((call) => call[0]), ["begin", "commit"]);
+    assert.equal((await fsp.readdir(root)).some((name) => name.includes(".nce-") && name.endsWith(".tmp")), false);
+  } finally { await fsp.rm(root, { recursive: true, force: true }); }
+});
+
+test("atomic write failures keep the original and clean temporary files", async () => {
+  for (const failure of ["write", "rename"]) {
+    const original = new Map([["/workspace/file", "original"]]);
+    const temporary = new Map();
+    const operations = {
+      stat: async () => ({ mode: 0o640 }),
+      open: async (name) => ({
+        writeFile: async (content) => {
+          if (failure === "write") throw Object.assign(new Error("denied"), { code: "EACCES" });
+          temporary.set(name, content);
+        },
+        sync: async () => {}, close: async () => {},
+      }),
+      rename: async (from, to) => {
+        if (failure === "rename") throw Object.assign(new Error("denied"), { code: "EACCES" });
+        original.set(to, temporary.get(from)); temporary.delete(from);
+      },
+      unlink: async (name) => { temporary.delete(name); },
+    };
+    await assert.rejects(atomicWriteFile("/workspace/file", "replacement", operations), { code: "EACCES" });
+    assert.equal(original.get("/workspace/file"), "original");
+    assert.equal(temporary.size, 0);
   }
 });
 

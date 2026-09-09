@@ -964,6 +964,11 @@ class WorkspaceFileManager {
         success: false,
         error: { code: "INVALID_PATH", message: "Chemin hors du workspace." },
       };
+    if (/\.asar$/i.test(absolute))
+      return {
+        success: false,
+        error: { code: "BINARY_FILE", message: "Les archives ASAR sont des fichiers opaques." },
+      };
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(absolute);
     if (openFile) {
       await this.agent.editor?.fileLoader?.waitForFileLoaded?.(openFile);

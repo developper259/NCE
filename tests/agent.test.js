@@ -34,6 +34,8 @@ test('Agent create/chunk/rename use actual temporary files and verify revisions'
     assert.equal(renamed.success, true, JSON.stringify(renamed));
     assert.equal(await fs.readFile(path.join(root, 'b.txt'), 'utf8'), 'first\nsecond');
     const map = await agent.getProjectMap({}); assert.equal(map.success, true); assert.match(map.text, /b.txt/);
+    await fs.writeFile(path.join(root, 'broken.asar'), Buffer.from('invalid\0archive'));
+    assert.equal((await agent.readFile('broken.asar')).error.code, 'BINARY_FILE');
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

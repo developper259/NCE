@@ -8,26 +8,25 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "typecheck": "tsc --noEmit",
-    "pretest": "npm run sync-nsh-themes && npm run build:main",
-    "sync-nsh-themes": "node scripts/sync-nsh-themes.js",
-    "prestart": "npm run sync-nsh-themes",
-    "prebuild": "npm run sync-nsh-themes",
+    "pretest": "npm run sync-assets && npm run build:main",
+    "sync-assets": "node scripts/sync-assets.js",
+    "sync-nsh-themes": "npm run sync-assets",
+    "prestart": "npm run sync-assets",
+    "prebuild": "npm run sync-assets",
     "build:main": "tsc",
     "start": "npm run build:main && electron dist/main.js",
     "build": "npm run build:main && electron-builder --publish never",
-    "dist": "npm run sync-nsh-themes && npm run build:main && electron-builder --dir --publish never",
+    "dist": "npm run sync-assets && npm run build:main && electron-builder --dir --publish never",
     "check": "npm run typecheck && npm test",
-    "test:electron": "npm run sync-nsh-themes && npm run build:main && node --test tests/electron/smoke.cjs",
+    "test:electron": "npm run sync-assets && npm run build:main && node --test tests/electron/smoke.cjs",
     "test:packaged": "node scripts/check-package.js"
   },
   "author": "Andrea Belvedere",
   "license": "ISC",
   "dependencies": {
-    "@flaticon/flaticon-uicons": "^3.3.1",
     "chokidar": "^5.0.0",
     "markdown-it": "^15.0.0",
-    "nsh": "github:developper259/NSH#4b5d48f341e06595cf04c80b77382f5a9a587ff9",
-    "typescript": "^5.2.2"
+    "nsh": "github:developper259/NSH#4b5d48f341e06595cf04c80b77382f5a9a587ff9"
   },
   "build": {
     "appId": "fr.ndl.nce",
@@ -73,15 +72,18 @@
       "icon": "assets/logo/NCE/dark-logo.ico"
     },
     "mac": {
-      "target": "dmg",
+      "target": ["dmg", "zip"],
       "icon": "assets/logo/NCE/dark-logo.icns"
     },
     "linux": {
+      "target": ["AppImage", "deb"],
       "icon": "assets/logo/NCE/dark-logo.png"
     }
   },
   "devDependencies": {
+    "@flaticon/flaticon-uicons": "^3.3.1",
     "electron": "^42.4.1",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.2.2"
   }
 }

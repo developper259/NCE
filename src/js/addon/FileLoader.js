@@ -27,6 +27,7 @@ class FileLoader {
     state.isFullyLoaded = status === "loaded";
     state.error = error;
     if (status !== "loading") state.resolve?.();
+    this.editor.bottomBar?.refreshFileStatus?.();
   }
 
   async request(promise) {

@@ -1,19 +1,11 @@
 import { BrowserWindow, ipcMain } from "electron";
 import { PollingWatcher } from "./WatcherPolling";
+import { watcherIgnored } from "./WatcherIgnore";
 const chokidar = require("chokidar");
 const path = require("path");
 const fs = require("node:fs/promises");
 
-const DEFAULT_IGNORED = [
-  /(^|[\/\\])\../,
-  /[\/\\]node_modules[\/\\]/,
-  /[\/\\]dist[\/\\]/,
-  /[\/\\]build[\/\\]/,
-  /[\/\\]out[\/\\]/,
-  /[\/\\]\.next[\/\\]/,
-  /[\/\\]coverage[\/\\]/,
-  /(?:^|[\/\\])[^\/\\]+\.asar(?:$|[\/\\])/i,
-];
+const fsSync = require("node:fs");
 
 interface FileChange {
   event: string;
@@ -30,7 +22,8 @@ export class Watcher {
 
   private flushTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  private ignoredChanges: Set<string> = new Set();
+  private ownWrites: Map<string, Array<{ token: symbol; signature: string | null; expiresAt: number; timer: ReturnType<typeof setTimeout> }>> = new Map();
+  private readonly ownWriteLifetimeMs = 5000;
 
   private usePolling: boolean = false;
 
@@ -88,7 +81,7 @@ export class Watcher {
     const watcher = this.usePolling
       ? new PollingWatcher(projectPath)
       : chokidar.watch(projectPath, {
-      ignored: DEFAULT_IGNORED,
+      ignored: watcherIgnored,
       persistent: true,
       ignoreInitial: true,
 
@@ -109,9 +102,7 @@ export class Watcher {
       this.onChange?.(filePath);
       const normalizedPath = path.normalize(filePath);
 
-      if (event === "change" && this.ignoredChanges.has(normalizedPath)) {
-        this.ignoredChanges.delete(normalizedPath);
-
+      if (event === "change" && this.consumeOwnWrite(normalizedPath)) {
         return;
       }
 
@@ -210,10 +201,64 @@ export class Watcher {
     return match?.[1] || null;
   }
 
-  ignoreNextChange(filePath: string): void {
-    if (!filePath) return;
+  beginOwnWrite(filePath: string): symbol | null {
+    if (!filePath) return null;
+    const normalizedPath = path.normalize(filePath);
+    const token = Symbol(normalizedPath);
+    const writes = this.ownWrites.get(normalizedPath) || [];
+    const timer = setTimeout(() => this.cancelOwnWrite(normalizedPath, token), this.ownWriteLifetimeMs);
+    writes.push({ token, signature: null, expiresAt: Date.now() + this.ownWriteLifetimeMs, timer });
+    this.ownWrites.set(normalizedPath, writes);
+    return token;
+  }
 
-    this.ignoredChanges.add(path.normalize(filePath));
+  commitOwnWrite(filePath: string, token: symbol | null): void {
+    if (!token) return;
+    const normalizedPath = path.normalize(filePath);
+    const write = this.ownWrites.get(normalizedPath)?.find((entry) => entry.token === token);
+    if (!write) return;
+    clearTimeout(write.timer);
+    write.signature = this.fileSignature(normalizedPath);
+    write.expiresAt = Date.now() + this.ownWriteLifetimeMs;
+    write.timer = setTimeout(() => this.cancelOwnWrite(normalizedPath, token), this.ownWriteLifetimeMs);
+  }
+
+  cancelOwnWrite(filePath: string, token: symbol | null): void {
+    if (!token) return;
+    const normalizedPath = path.normalize(filePath);
+    const writes = this.ownWrites.get(normalizedPath) || [];
+    const removed = writes.find((entry) => entry.token === token);
+    if (removed) clearTimeout(removed.timer);
+    const remaining = writes.filter((entry) => entry.token !== token);
+    if (remaining.length) this.ownWrites.set(normalizedPath, remaining);
+    else this.ownWrites.delete(normalizedPath);
+  }
+
+  private fileSignature(filePath: string): string | null {
+    try {
+      const stat = fsSync.statSync(filePath);
+      return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
+    } catch {
+      return null;
+    }
+  }
+
+  private consumeOwnWrite(filePath: string): boolean {
+    const now = Date.now();
+    const signature = this.fileSignature(filePath);
+    const allWrites = this.ownWrites.get(filePath) || [];
+    const writes = allWrites.filter((entry) => entry.expiresAt > now);
+    for (const entry of allWrites)
+      if (entry.expiresAt <= now) clearTimeout(entry.timer);
+    const match = [...writes].reverse().find((entry) => entry.signature !== null && entry.signature === signature);
+    if (!match) {
+      if (writes.length) this.ownWrites.set(filePath, writes);
+      else this.ownWrites.delete(filePath);
+      return false;
+    }
+    for (const entry of writes) clearTimeout(entry.timer);
+    this.ownWrites.delete(filePath);
+    return true;
   }
 
   private queueEvent(event: string, filePath: string, dirPath: string) {
@@ -256,7 +301,9 @@ export class Watcher {
 
     this.pendingEvents.clear();
 
-    this.ignoredChanges.clear();
+    for (const writes of this.ownWrites.values())
+      for (const write of writes) clearTimeout(write.timer);
+    this.ownWrites.clear();
 
     this.reportedWatcherErrors.clear();
 

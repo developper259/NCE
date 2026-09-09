@@ -92,3 +92,29 @@ test("file loading chooses complete incremental or chunked fallback mode", async
   assert.equal(fallback.initialLines.length, 1000);
   assert.deepEqual(calls, [{ start: 0, count: 1000 }]);
 });
+
+test("bottom bar exposes loading and failure only for the active file", () => {
+  const statusText = { innerText: "" };
+  const status = { style: {}, querySelector: () => statusText };
+  const elements = new Map([
+    [".bottomBar-cursorPos", {}], [".bottomBar-cursor-status", { style: {} }],
+    [".bottomBar-file-status", status], ["#language", { querySelector: () => null }], ["#config-space", null],
+  ]);
+  const BottomBar = loadGlobal("src/js/addon/BottomBar.js", "BottomBar", {
+    getElement: (selector) => elements.get(selector), CONFIG_GET: () => 2,
+  });
+  const activeFile = { loadingState: { status: "loading" } };
+  const editor = { tabManager: { activeFile }, highlightController: {} };
+  const bar = new BottomBar(editor);
+  assert.match(statusText.innerText, /Loading file/);
+  assert.equal(status.style.display, "");
+  activeFile.loadingState.status = "loaded";
+  bar.refreshFileStatus();
+  assert.equal(status.style.display, "none");
+  activeFile.loadingState.status = "failed";
+  bar.refreshFileStatus();
+  assert.match(statusText.innerText, /failed/);
+  editor.tabManager.activeFile = { loadingState: { status: "cancelled" } };
+  bar.refreshFileStatus();
+  assert.equal(status.style.display, "none");
+});

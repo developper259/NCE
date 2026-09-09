@@ -162,7 +162,7 @@ test("before-quit does not stop NSH until renderer approves; shutdown runs once"
   assert.equal(quits, 1);
 });
 
-test("watcher batches events, ignores own save and cleans up timers", async () => {
+test("watcher batches events, matches one committed own save and cleans up timers", async () => {
   const source = new EventEmitter();
   let closed = 0;
   source.close = async () => closed++;
@@ -176,11 +176,12 @@ test("watcher batches events, ignores own save and cleans up timers", async () =
       electron: {},
       chokidar: { watch: () => source },
       "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+      "node:fs": { statSync: () => ({ dev: 1, ino: 2, size: 3, mtimeMs: 4 }) },
     },
     {
       setTimeout: (fn, delay) => {
-        assert.equal(delay, 150);
-        timer = fn;
+        assert.ok(delay === 150 || delay === 5000);
+        if (delay === 150) timer = fn;
         return 1;
       },
       clearTimeout: () => cancelled++,
@@ -194,7 +195,8 @@ test("watcher batches events, ignores own save and cleans up timers", async () =
   source.emit("all", "add", "/temporary/a");
   source.emit("all", "change", "/temporary/a");
   source.emit("all", "unlink", "/temporary/b");
-  watcher.ignoreNextChange("/temporary/saved");
+  const token = watcher.beginOwnWrite("/temporary/saved");
+  watcher.commitOwnWrite("/temporary/saved", token);
   source.emit("all", "change", "/temporary/saved");
   timer();
   assert.equal(sent.length, 1);
@@ -207,6 +209,43 @@ test("watcher batches events, ignores own save and cleans up timers", async () =
   assert.equal(closed, 1);
   assert.equal(watcher.isWatching(), false);
   assert.ok(cancelled);
+});
+
+test("watcher ignore rules are shared, explicit, and preserve workspace dotfiles", () => {
+  const { isWatcherPathIgnored } = require("../dist/ts/addon/WatcherIgnore.js");
+  for (const directory of ["node_modules", "dist", "build", "out", "coverage", ".next", ".cache", ".turbo", "release", ".git", ".svn", ".hg"])
+    assert.equal(isWatcherPathIgnored(path.join("workspace", directory, "file.js")), true, directory);
+  assert.equal(isWatcherPathIgnored(path.join("workspace", "broken.asar")), true);
+  assert.equal(isWatcherPathIgnored(path.join("workspace", ".env")), false);
+  assert.equal(isWatcherPathIgnored(path.join("workspace", ".vscode", "settings.json")), false);
+  assert.equal(isWatcherPathIgnored(path.join("workspace", "normal.js")), false);
+});
+
+test("failed, expired, and concurrent own writes cannot hide a later external change", () => {
+  let signature = { dev: 1, ino: 1, size: 10, mtimeMs: 10 };
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {}, chokidar: {},
+    "node:fs": { statSync: () => signature },
+    "node:fs/promises": {},
+  });
+  const watcher = new Watcher({ webContents: { send() {} } });
+  const failed = watcher.beginOwnWrite("/file");
+  watcher.cancelOwnWrite("/file", failed);
+  assert.equal(watcher.consumeOwnWrite("/file"), false);
+
+  const expired = watcher.beginOwnWrite("/file");
+  watcher.commitOwnWrite("/file", expired);
+  watcher.ownWrites.get(path.normalize("/file"))[0].expiresAt = 0;
+  assert.equal(watcher.consumeOwnWrite("/file"), false);
+
+  const first = watcher.beginOwnWrite("/file");
+  watcher.commitOwnWrite("/file", first);
+  signature = { ...signature, size: 20, mtimeMs: 20 };
+  const second = watcher.beginOwnWrite("/file");
+  watcher.commitOwnWrite("/file", second);
+  assert.equal(watcher.consumeOwnWrite("/file"), true);
+  signature = { ...signature, size: 21, mtimeMs: 21 };
+  assert.equal(watcher.consumeOwnWrite("/file"), false);
 });
 
 test("watcher stops and reports a deleted workspace root exactly once", async () => {
@@ -291,9 +330,12 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
   const normal = path.join(root, "normal.js");
   const created = path.join(root, "new.js");
   const renamed = path.join(root, "test.js");
+  const dotEnv = path.join(root, ".env");
+  const ignoredDirectory = path.join(root, "node_modules");
   await fs.writeFile(normal, "const value = 1;\n");
   await fs.writeFile(path.join(root, "foo.asar"), Buffer.from([1, 2, 3, 4, 5]));
   await fs.writeFile(path.join(root, "FOO.ASAR"), Buffer.from([6, 7, 8]));
+  await fs.mkdir(ignoredDirectory);
   const { PollingWatcher } = require("../dist/ts/addon/WatcherPolling.js");
   const watcher = new PollingWatcher(root);
   const events = [];
@@ -319,6 +361,11 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
     await fs.unlink(created);
     await waitForEvent(([event, filePath]) => event === "unlink" && filePath === created);
     assert.equal(events.some(([, filePath]) => /\.asar(?:[\\/]|$)/i.test(filePath)), false);
+    await fs.writeFile(dotEnv, "VISIBLE=1\n");
+    await waitForEvent(([event, filePath]) => event === "add" && filePath === dotEnv);
+    await fs.writeFile(path.join(ignoredDirectory, "ignored.js"), "ignored\n");
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    assert.equal(events.some(([, filePath]) => filePath.includes("node_modules")), false);
   } finally {
     await watcher.close();
     await fs.rm(root, { recursive: true, force: true });
@@ -438,7 +485,10 @@ test("case-only rename rolls its temporary path back when commit fails", async (
     path.dirname(path.resolve(oldPath)),
     `.${path.basename(path.resolve(oldPath))}.nce-rename-unique-id`,
   );
-  const result = await manager.renameEntry(oldPath, "/project/controller.js");
+  const originalError = console.error; console.error = () => {};
+  let result;
+  try { result = await manager.renameEntry(oldPath, "/project/controller.js"); }
+  finally { console.error = originalError; }
   assert.equal(result.code, "PERMISSION_DENIED");
   assert.equal(renames.length, 3);
   assert.deepEqual(renames[0], [oldPath, expectedTemporaryPath]);
@@ -480,7 +530,9 @@ test("API keys use encrypted storage and are removed from editor state", async (
     assert.equal(await manager.setAgentApiKey("mock", "new"), false);
     assert.equal(await manager.getAgentApiKey("mock"), "");
     await fs.writeFile(path.join(root, "state.json"), "{broken");
-    assert.equal(await manager.loadState(), null);
+    const originalError = console.error; console.error = () => {};
+    try { assert.equal(await manager.loadState(), null); }
+    finally { console.error = originalError; }
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

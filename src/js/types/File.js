@@ -121,7 +121,10 @@ class FileNode {
     const generation = ++this.contentGeneration;
     if (!this.path) { this.isLoaded = true; return; }
     try {
-      const result = await this.editor.fileLoader.loadFile(this.path);
+      const loading = this.editor.fileLoader.loadFile(this.path);
+      this.loadingState = this.editor.fileLoader.getState(this.path);
+      this.editor.bottomBar?.refreshFileStatus?.();
+      const result = await loading;
       if (generation !== this.contentGeneration) return;
       this.loadingState = result.state;
       this.eol = result.eol;
@@ -140,6 +143,7 @@ class FileNode {
       if (generation !== this.contentGeneration) return;
       this.loadError = error;
       this.isLoaded = true;
+      this.editor.bottomBar?.refreshFileStatus?.();
     }
   }
 

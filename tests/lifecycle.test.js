@@ -68,7 +68,10 @@ for (const failure of ['save-false', 'save-throws', 'state-false', 'state-throws
     let callback, cancelled = 0;
     editor.api = { onSaveRequest(fn) { callback = fn; }, cancelQuit: async () => cancelled++, approveQuit: async () => assert.fail('unexpected quit') };
     editor.statesManager = { save: async () => { if (failure === 'state-throws') throw Error('state failed'); return false; } };
-    Editor.prototype.initQuitEvent.call(editor); await callback();
+    const originalError = console.error;
+    if (failure.endsWith('throws')) console.error = () => {};
+    try { Editor.prototype.initQuitEvent.call(editor); await callback(); }
+    finally { console.error = originalError; }
     assert.equal(cancelled, 1); assert.equal(editor.tabManager.files.length, 1);
   });
 }
@@ -77,7 +80,9 @@ test('serialization failure never overwrites the previous state with {}', async 
   let writes = 0;
   const manager = new StatesManager({ api: { saveEditorState: async () => writes++ } });
   manager.getState = () => { throw Error('serialization failed'); };
-  assert.equal(await manager.save(), false); assert.equal(writes, 0);
+  const originalError = console.error; console.error = () => {};
+  try { assert.equal(await manager.save(), false); assert.equal(writes, 0); }
+  finally { console.error = originalError; }
 });
 
 for (const mode of ['failure', 'cancel', 'complete', 'save-as', 'short-chunk']) {
@@ -107,12 +112,18 @@ for (const mode of ['failure', 'cancel', 'complete', 'save-as', 'short-chunk']) 
       await file.loadContent();
       assert.equal(file.lines.length, 1000);
       if (mode === 'cancel') editor.fileLoader.cancelLoading(filePath);
-      const result = mode === 'save-as' ? await file.saveAs() : await file.save();
+      const warnings = [];
+      const originalWarn = console.warn;
+      console.warn = (message) => warnings.push(String(message));
+      let result;
+      try { result = mode === 'save-as' ? await file.saveAs() : await file.save(); }
+      finally { console.warn = originalWarn; }
       const success = ['complete', 'save-as'].includes(mode);
       assert.equal(result, success); assert.equal(writes, success ? 1 : 0);
       assert.equal(hash(await fs.readFile(filePath)), hash(original));
       if (mode === 'save-as') assert.equal(await fs.readFile(file.path, 'utf8'), original);
       if (!success) assert.match(file.saveError.code, /^FILE_(LOAD_FAILED|NOT_FULLY_LOADED)$/);
+      if (!success) assert.equal(warnings.length, 1);
     } finally { editor.fileLoader.cancelLoading(); await fs.rm(directory, { recursive: true, force: true }); }
   });
 }

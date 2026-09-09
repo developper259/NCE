@@ -1,12 +1,11 @@
 const chokidar = require("chokidar");
-
-const ASAR_IGNORED = /(?:^|[\\/])[^\\/]+\.asar(?:$|[\\/])/i;
+const { watcherIgnored } = require("./WatcherIgnore");
 const projectPath = process.argv[2];
 
 if (!projectPath) process.exit(1);
 
 const watcher = chokidar.watch(projectPath, {
-  ignored: [ASAR_IGNORED],
+  ignored: watcherIgnored,
   persistent: true,
   ignoreInitial: true,
   usePolling: true,

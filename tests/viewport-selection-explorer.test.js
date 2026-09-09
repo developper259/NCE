@@ -106,6 +106,43 @@ test("scroll state clamps vertically and horizontally after content shrinks", ()
   assert.equal(scroller.clampScrollState(), false);
 });
 
+test("scrollTo uses zero-based display rows and converts horizontal-only cursor rows", () => {
+  const observed = [];
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller", {
+    realColumnToViewColumn: (line, column) => { observed.push([line, column]); return column; },
+  });
+  const scroller = Object.create(OutputScroller.prototype);
+  const lines = [new LineNode("first"), new LineNode("\tsecond-long"), new LineNode("last")];
+  const state = {
+    lines, startIndex: 0, offsetX: 0, offsetY: 0, maxLineLength: 20,
+    getDisplayRow: (index) => index === 1 ? { documentIndex: 2 } : { documentIndex: index },
+    markDirtyAll() {}, refreshOutput() {}, refreshNumberLines() {},
+  };
+  scroller.lineController = state;
+  scroller.editor = {
+    letterSize: 1,
+    cursorController: { row: 2, updateCaretPosition() {} },
+    selectController: { refreshSelectPositions() {} },
+    searchController: { refreshSelectionDOM() {} },
+    highlightController: { lineNodes: new Map(), refresh() {} },
+  };
+  scroller.marginChars = 0;
+  scroller.getTotalScrollLines = () => 3;
+  scroller.getMaxStartIndex = () => 2;
+  scroller.getVisibleHorizontalWidth = () => 5;
+  scroller.getVerticalScrollRatioFromState = () => 0;
+  scroller.getHorizontalScrollRatioFromState = () => 0;
+  scroller.applyScrollTransform = () => {};
+  scroller.applyHorizontalScrollFromRatio = () => {};
+  scroller.vScroller = { setScrollRatio() {}, refresh() {} };
+  scroller.hScroller = { setScrollRatio() {}, refresh() {} };
+  scroller.scrollTo(undefined, 6);
+  assert.equal(observed[0][0], "\tsecond-long");
+  scroller.scrollTo(1, 4);
+  assert.equal(observed[1][0], "last");
+  assert.equal(state.startIndex, 1);
+});
+
 test("async highlighting preserves the partial renderer horizontal slice", () => {
   const HighlightController = loadGlobal(
     "src/js/controller/HighlightController.js",

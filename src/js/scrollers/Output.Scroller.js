@@ -369,32 +369,35 @@ class OutputScroller {
     this.hScroller.nbItem = this.lineController.maxLineLength + 2;
   }
 
-  scrollTo(row, column) {
+  // `displayIndex` is always zero-based. Cursor rows are document rows and
+  // remain one-based everywhere else in the editor.
+  scrollTo(displayIndex, column) {
     if (this.getTotalScrollLines() === 0) return;
 
     let verticalChanged = false;
     let horizontalChanged = false;
 
-    if (row !== undefined && row !== null && !isNaN(row)) {
-      row = Math.max(0, Math.min(row, this.getTotalScrollLines() - 1));
+    const hasDisplayIndex =
+      displayIndex !== undefined && displayIndex !== null && !isNaN(displayIndex);
+    let safeDisplayIndex = null;
+    if (hasDisplayIndex) {
+      safeDisplayIndex = Math.max(0, Math.min(displayIndex, this.getTotalScrollLines() - 1));
       const maxStartIndex = this.getMaxStartIndex();
 
-      this.lineController.startIndex = Math.min(row, maxStartIndex);
+      this.lineController.startIndex = Math.min(safeDisplayIndex, maxStartIndex);
       this.lineController.offsetY = 0;
       verticalChanged = true;
     }
 
     if (column !== undefined && column !== null && !isNaN(column)) {
-      const activeRow =
-        row !== undefined && row !== null && !isNaN(row)
-          ? row
-          : this.editor.cursorController?.row || 0;
-
-      const safeRow = Math.max(
+      const documentIndex = hasDisplayIndex
+        ? this.lineController.getDisplayRow(safeDisplayIndex)?.documentIndex
+        : Math.max(0, (this.editor.cursorController?.row || 1) - 1);
+      const safeDocumentIndex = Math.max(
         0,
-        Math.min(activeRow, this.lineController.lines.length - 1),
+        Math.min(documentIndex ?? 0, this.lineController.lines.length - 1),
       );
-      const lineNode = this.lineController.lines[safeRow];
+      const lineNode = this.lineController.lines[safeDocumentIndex];
       const line = lineNode ? lineNode.getText() : "";
       column = Math.max(0, Math.min(column, line.length));
 

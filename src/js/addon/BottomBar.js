@@ -4,11 +4,13 @@ class BottomBar {
 
     this.cursorOBJ = getElement(".bottomBar-cursorPos");
     this.cursorStatusElement = getElement(".bottomBar-cursor-status");
+    this.fileStatusElement = getElement(".bottomBar-file-status");
     this.languageElement = getElement("#language");
     this.configSpaceElement = getElement("#config-space");
 
     this.refreshLanguage();
     this.refreshScrollers();
+    this.refreshFileStatus();
   }
 
   async openLanguage() {
@@ -78,6 +80,20 @@ class BottomBar {
     this.refreshCursorOBJ();
     this.refreshLanguage();
     this.refreshScrollers();
+    this.refreshFileStatus();
+  }
+
+  refreshFileStatus() {
+    if (!this.fileStatusElement) return;
+    const file = this.editor.tabManager.activeFile;
+    const status = file?.loadingState?.status;
+    const text = this.fileStatusElement.querySelector(".bottomBar-text");
+    let message = "";
+    if (status === "loading") message = "Loading file… Editing is temporarily disabled.";
+    else if (status === "failed" || file?.loadError)
+      message = "File loading failed. Reload the file to try again.";
+    if (text) text.innerText = message;
+    this.fileStatusElement.style.display = message ? "" : "none";
   }
 
   refreshCursorOBJ() {

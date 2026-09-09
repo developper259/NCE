@@ -34,6 +34,9 @@ const BINARY_SAMPLE_SIZE = 8192;
 function validPath(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0 && !value.includes("\0");
 }
+function isAsarPath(filePath: string): boolean {
+  return path.extname(filePath).toLowerCase() === ".asar";
+}
 function validName(value: unknown): value is string {
   return validPath(value) && !/^(?:[\\/]|[A-Za-z]:)/.test(value) &&
     value.split(/[\\/]/).every(segment => Boolean(segment) && segment !== "." && segment !== "..");
@@ -69,6 +72,43 @@ function looksBinary(buffer: Buffer): boolean {
     if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) controlBytes++;
   }
   return buffer.length > 0 && controlBytes / buffer.length > 0.05;
+}
+
+export async function atomicWriteFile(
+  filePath: string,
+  content: string,
+  operations: any = fs,
+): Promise<void> {
+  const dir = path.dirname(filePath);
+  const basename = path.basename(filePath);
+  let temporaryPath = path.join(
+    dir,
+    `.${basename}.nce-${process.pid}-${crypto.randomBytes(8).toString("hex")}.tmp`,
+  );
+  try {
+    let mode: number | undefined;
+    try { mode = (await operations.stat(filePath)).mode; } catch {}
+    const handle = await operations.open(temporaryPath, "wx", mode);
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await operations.rename(temporaryPath, filePath);
+    temporaryPath = "";
+    // Persisting the directory entry is supported on POSIX. Some platforms,
+    // notably Windows, reject directory handles; that best-effort flush must
+    // not turn an otherwise successful replacement into a failed save.
+    try {
+      const directory = await operations.open(dir, "r");
+      try { await directory.sync(); } finally { await directory.close(); }
+    } catch {}
+  } finally {
+    if (temporaryPath) {
+      try { await operations.unlink(temporaryPath); } catch {}
+    }
+  }
 }
 
 export class FileManager {
@@ -330,6 +370,7 @@ export class FileManager {
     const fileContents: { [key: string]: string } = {};
 
     for (const filePath of file) {
+      if (isAsarPath(filePath)) continue;
       try {
         const content = await fs.readFile(filePath, "utf-8");
         fileContents[filePath] = content;
@@ -348,6 +389,7 @@ export class FileManager {
     if (!validPath(filePath) || typeof content !== "string") {
       return undefined;
     }
+    let ownWriteToken: symbol | null = null;
     try {
       const dir = path.dirname(filePath);
 
@@ -355,14 +397,15 @@ export class FileManager {
         recursive: true,
       });
 
-      this.window.watcher?.ignoreNextChange(filePath);
-
-      await fs.writeFile(filePath, content);
+      ownWriteToken = this.window.watcher?.beginOwnWrite(filePath) || null;
+      await atomicWriteFile(filePath, content);
+      this.window.watcher?.commitOwnWrite(filePath, ownWriteToken);
       this.clearFileCache(filePath);
 
 
       return filePath;
     } catch (error) {
+      this.window.watcher?.cancelOwnWrite(filePath, ownWriteToken);
       console.error("Error saving file:", error);
     }
 
@@ -680,6 +723,7 @@ export class FileManager {
   }> {
     try {
       if (!validPath(filePath)) return { success: false, totalLines: 0, errorCode: "INVALID_PATH" };
+      if (isAsarPath(filePath)) return { success: false, totalLines: 0, errorCode: "BINARY_FILE" };
       const stats = await fs.stat(filePath);
       if (stats.size > MAX_TEXT_FILE_SIZE) {
         return {
