@@ -29,6 +29,7 @@ test("Quick Open stays open without a project and shows an explicit message", ()
   const { manager, panelCalls } = createQuickOpen({ rootPath: "" });
   assert.equal(manager.open(), true);
   assert.equal(panelCalls.length, 1);
+  assert.equal(panelCalls[0].title, "Quick Open");
   assert.equal(Array.isArray(panelCalls[0].items), true);
   assert.equal(panelCalls[0].items.length, 0);
   assert.equal(panelCalls[0].emptyMessage(""), "Open a project first.");

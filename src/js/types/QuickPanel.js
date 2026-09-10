@@ -85,6 +85,7 @@ class QuickPanel {
 
     this.host.classList.add("is-open");
     this.host.setAttribute("aria-hidden", "false");
+    this.panel.dataset.panelId = this.session.id;
     this.input.type = options.inputType === "password" ? "password" : "text";
     this.input.placeholder = options.placeholder || "";
     this.input.value = mode === "input" ? String(options.value ?? "") : "";
@@ -121,6 +122,7 @@ class QuickPanel {
 
     this.host.classList.remove("is-open");
     this.host.setAttribute("aria-hidden", "true");
+    delete this.panel.dataset.panelId;
     this.input.value = "";
     this.input.type = "text";
     this.list.replaceChildren();

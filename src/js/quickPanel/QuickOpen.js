@@ -56,6 +56,7 @@ class QuickOpen {
     return panel.open({
       id: "quick-open",
       mode: "pick",
+      title: "Quick Open",
       placeholder: "Search files...",
       items: rootPath ? () => this.getFiles(rootPath) : [],
       reloadOnInput: false,

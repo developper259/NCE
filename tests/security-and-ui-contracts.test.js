@@ -82,6 +82,17 @@ test("asset and command availability contracts stay aligned", () => {
   assert.doesNotMatch(menu, /label:\s*"(?:Replace|Documentation|Check for Updates)"/);
 });
 
+test("Quick Panel keeps Command Palette and Quick Open compact and scrollable", () => {
+  const css = read("src/css/quickPanel.css");
+  assert.match(css, /\.quick-panel-input\s*\{[\s\S]*?height:\s*30px/);
+  assert.match(css, /\.quick-panel-item\s*\{[\s\S]*?min-height:\s*30px/);
+  assert.match(css, /data-panel-id="command-palette"[\s\S]*?min-height:\s*40px/);
+  assert.doesNotMatch(css, /data-panel-id="quick-open"/);
+  assert.match(css, /\.quick-panel-list\s*\{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(css, /max-height:\s*min\(420px, calc\(100vh - 60px\)\)/);
+  assert.doesNotMatch(css, /border-color:\s*var\(--border-accent\)/);
+});
+
 test("public UI and runtime expose no renderer reload or DevTools controls", () => {
   const titlebar = read("src/js/addon/TitleBar.js");
   const menu = read("src/ts/addon/Menu.ts");
