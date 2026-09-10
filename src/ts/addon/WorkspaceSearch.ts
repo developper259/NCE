@@ -60,6 +60,13 @@ interface ProjectMapResponse {
   error?: { code: string; message: string };
 }
 
+interface ProjectFileEntry { name: string; path: string; relativePath: string; }
+interface ProjectFilesResponse {
+  success: boolean;
+  entries: ProjectFileEntry[];
+  error?: { code: string; message: string };
+}
+
 export class WorkspaceSearch {
   window: Window;
 
@@ -112,6 +119,43 @@ export class WorkspaceSearch {
         options: ProjectMapOptions = {},
       ) => this.getProjectMap(rootPath, targetPath, options),
     );
+    ipcMain.handle("WorkspaceSearch:projectFiles", async (_event, rootPath: string) =>
+      this.listProjectFiles(rootPath));
+  }
+
+  async listProjectFiles(rootPath: string): Promise<ProjectFilesResponse> {
+    const failure = (code: string, message: string): ProjectFilesResponse =>
+      ({ success: false, entries: [], error: { code, message } });
+    if (typeof rootPath !== "string" || !rootPath)
+      return failure("INVALID_PATH", "A workspace is required.");
+    const root = path.resolve(rootPath);
+    try {
+      if (!(await fs.stat(root)).isDirectory())
+        return failure("NOT_A_DIRECTORY", "The workspace is not a directory.");
+    } catch {
+      return failure("DIRECTORY_NOT_FOUND", "The workspace was not found.");
+    }
+
+    const entries: ProjectFileEntry[] = [];
+    const walk = async (directory: string): Promise<void> => {
+      let children;
+      try { children = await fs.readdir(directory, { withFileTypes: true }); }
+      catch { return; }
+      children.sort((left, right) => left.name.localeCompare(right.name));
+      for (const child of children) {
+        if (child.isSymbolicLink()) continue;
+        const absolutePath = path.join(directory, child.name);
+        if (child.isDirectory()) {
+          if (!this.ignoredDirectories.has(child.name)) await walk(absolutePath);
+          continue;
+        }
+        if (!child.isFile() || path.extname(child.name).toLowerCase() === ".asar") continue;
+        entries.push({ name: child.name, path: absolutePath,
+          relativePath: this.normalizeRelative(path.relative(root, absolutePath)) });
+      }
+    };
+    await walk(root);
+    return { success: true, entries };
   }
 
   async getProjectMap(

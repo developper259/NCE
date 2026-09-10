@@ -1,4 +1,4 @@
-class SavePopupManager {
+class SavePopup {
   constructor(editor, tabManager) {
     this.editor = editor;
     this.tabManager = tabManager;

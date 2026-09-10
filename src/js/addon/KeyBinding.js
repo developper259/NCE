@@ -5,6 +5,7 @@ class KeyBinding {
     this.func = {
       save: this.control_save,
       open_file: this.control_open_file,
+      quick_open: this.control_quick_open,
       open_folder: this.control_open_folder,
       new_file: this.control_new_file,
       close_file: this.control_close_file,
@@ -71,6 +72,10 @@ class KeyBinding {
   async control_open_file(s, c, m, a) {
     const file = await this.editor.tabManager.selectFiles();
     this.editor.tabManager.openFiles(file);
+  }
+
+  control_quick_open() {
+    return this.editor.quickOpen?.open();
   }
 
   async control_open_folder(s, c, m, a) {

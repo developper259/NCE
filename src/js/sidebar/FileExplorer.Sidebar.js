@@ -53,6 +53,8 @@ class FileExplorer extends Sidebar {
       return;
     }
 
+    this.editor.quickOpen?.invalidate(this.rootPath);
+
     if (changes.some((change) => change.event === "root-deleted")) {
       await this.invalidateWorkspace();
       return;
@@ -193,6 +195,7 @@ class FileExplorer extends Sidebar {
   }
 
   resetWorkspaceState() {
+    this.editor.quickOpen?.invalidate(this.rootPath);
     this.cancelEdit({ refresh: false });
     this.rootPath = "";
     this.projectName = "";

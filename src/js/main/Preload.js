@@ -114,6 +114,9 @@ contextBridge.exposeInMainWorld("api", {
       options,
     ),
 
+  listProjectFiles: (rootPath) =>
+    ipcRenderer.invoke("WorkspaceSearch:projectFiles", rootPath),
+
   onSaveRequest: (callback) =>
     ipcRenderer.on("Request:saveState", () => callback()),
 

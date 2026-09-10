@@ -31,6 +31,16 @@ app.whenReady().then(() => {
       assert.equal(prefs.sandbox, true); assert.equal(prefs.contextIsolation, true); assert.equal(prefs.nodeIntegration, false);
       assert.equal(win.webContents.isDevToolsOpened(), false);
       assert.equal(await nce.window.executeWindowCommand('view.devtools'), false);
+      const quickOpenModifier = process.platform === 'darwin' ? 'meta' : 'control';
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'P', modifiers: [quickOpenModifier] });
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'P', modifiers: [quickOpenModifier] });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), true);
+      assert.equal(await run('document.querySelector(".quick-panel-empty").textContent'), 'Open a project first.');
+      assert.equal(await run('document.activeElement === document.querySelector(".quick-panel-input")'), true);
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+      assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), false);
       await run('window.__nceReloadGuard = true');
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });

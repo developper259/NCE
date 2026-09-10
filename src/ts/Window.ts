@@ -87,7 +87,8 @@ export class Window {
     if (!this.fileManager) this.fileManager = new FileManager(this);
     if (!this.watcher) this.watcher = new Watcher(this.window);
     else this.watcher.setWindow(this.window);
-    this.watcher.onChange = (filePath) => this.fileManager?.clearFileCache(filePath);
+    this.watcher.onChange = (filePath) =>
+      this.fileManager?.clearFileCache(filePath);
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
@@ -100,8 +101,9 @@ export class Window {
       this.window?.show();
     });
 
-      this.window.webContents.on("console-message", (...args: any[]) => {
-        const details = typeof args[1] === "object"
+    this.window.webContents.on("console-message", (...args: any[]) => {
+      const details =
+        typeof args[1] === "object"
           ? args[1]
           : {
               level: args[1],
@@ -109,24 +111,37 @@ export class Window {
               lineNumber: args[3],
               sourceId: args[4],
             };
-        if (details.level >= 2) {
-          console.error(
-            `[Renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`,
-          );
-        }
-      });
-    this.window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-      console.error("[Renderer] did-fail-load", { errorCode, errorDescription, validatedURL });
+      if (details.level >= 2) {
+        console.error(
+          `[Renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`,
+        );
+      }
     });
+    this.window.webContents.on(
+      "did-fail-load",
+      (_event, errorCode, errorDescription, validatedURL) => {
+        console.error("[Renderer] did-fail-load", {
+          errorCode,
+          errorDescription,
+          validatedURL,
+        });
+      },
+    );
     this.window.webContents.on("render-process-gone", (_event, details) => {
       console.error("[Renderer] render-process-gone", details);
       this.rendererReady = false;
       this.clearQuitTimer();
     });
-    this.window.webContents.on("preload-error", (_event, preloadPath, error) => {
-      console.error("[Renderer] preload-error", { preloadPath, message: error?.message });
-      this.rendererReady = false;
-    });
+    this.window.webContents.on(
+      "preload-error",
+      (_event, preloadPath, error) => {
+        console.error("[Renderer] preload-error", {
+          preloadPath,
+          message: error?.message,
+        });
+        this.rendererReady = false;
+      },
+    );
 
     this.window.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -151,14 +166,14 @@ export class Window {
     });
 
     // DEV ONLY — uncomment for local development.
-    // this.window.webContents.on("before-input-event", (event, input) => {
-    //   if (input.type !== "keyDown") return;
-    //   const isReload =
-    //     (input.meta || input.control) && input.key.toLowerCase() === "r";
-    //   if (!isReload) return;
-    //   event.preventDefault();
-    //   this.window?.webContents.reload();
-    // });
+    this.window.webContents.on("before-input-event", (event, input) => {
+      if (input.type !== "keyDown") return;
+      const isReload =
+        (input.meta || input.control) && input.key.toLowerCase() === "r";
+      if (!isReload) return;
+      event.preventDefault();
+      this.window?.webContents.reload();
+    });
 
     // DEV ONLY — uncomment for local development.
     // this.window.webContents.openDevTools();
@@ -219,7 +234,8 @@ export class Window {
   }
 
   requestQuit() {
-    if (!this.window || this.forceQuit || this.quitState !== "idle") return false;
+    if (!this.window || this.forceQuit || this.quitState !== "idle")
+      return false;
     if (!this.rendererReady || this.window.webContents.isDestroyed()) {
       this.forceQuit = true;
       this.window.close();
@@ -231,24 +247,27 @@ export class Window {
     this.quitTimer = setTimeout(() => {
       this.quitTimer = null;
       if (this.quitState !== "waiting-renderer" || !this.window) return;
-      dialog.showMessageBox(this.window, {
-        type: "warning",
-        buttons: ["Force Quit", "Cancel"],
-        defaultId: 1,
-        cancelId: 1,
-        message: "NCE is not responding.",
-        detail: "Force quit may lose unsaved changes.",
-      }).then(({ response }) => {
-        if (response === 0 && this.window) {
-          this.forceQuit = true;
-          this.quitState = "approved";
-          this.window.close();
-        } else {
+      dialog
+        .showMessageBox(this.window, {
+          type: "warning",
+          buttons: ["Force Quit", "Cancel"],
+          defaultId: 1,
+          cancelId: 1,
+          message: "NCE is not responding.",
+          detail: "Force quit may lose unsaved changes.",
+        })
+        .then(({ response }) => {
+          if (response === 0 && this.window) {
+            this.forceQuit = true;
+            this.quitState = "approved";
+            this.window.close();
+          } else {
+            this.quitState = "idle";
+          }
+        })
+        .catch(() => {
           this.quitState = "idle";
-        }
-      }).catch(() => {
-        this.quitState = "idle";
-      });
+        });
     }, 2500);
     return true;
   }

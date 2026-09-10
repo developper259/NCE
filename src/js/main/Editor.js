@@ -37,7 +37,8 @@ class Editor {
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
     this.contextMenuManager = new ContextMenuManager();
-    this.quickPanel = new QuickPanelManager(this);
+    this.quickPanel = new QuickPanel(this);
+    this.quickOpen = new QuickOpen(this);
 
     this.agent = new Agent(this);
 
@@ -60,7 +61,7 @@ class Editor {
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
-    this.savePopupManager = new SavePopupManager(this, this.tabManager);
+    this.savePopupManager = new SavePopup(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);

@@ -114,7 +114,7 @@ test("critical renderer components and build assets are registered", () => {
     "controller/CursorController.js",
     "controller/SelectController.js",
     "controller/SmartTypingController.js",
-    "manager/QuickPanelManager.js",
+    "types/QuickPanel.js",
     "manager/StatesManager.js",
     "addon/MarkdownRenderer.js",
     "sidebar/FileExplorer.Sidebar.js",
@@ -128,4 +128,13 @@ test("critical renderer components and build assets are registered", () => {
   const packageJson = JSON.parse(read("package.json"));
   assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
   assert.match(packageJson.scripts.test, /node --test/);
+});
+
+test("Editor instantiates the loaded SavePopup addon", () => {
+  const html = read("src/html/index.html");
+  const editor = read("src/js/main/Editor.js");
+  const savePopup = read("src/js/addon/SavePopup.js");
+  assert.match(html, /js\/addon\/SavePopup\.js/);
+  assert.match(savePopup, /class SavePopup/);
+  assert.match(editor, /new SavePopup\(this, this\.tabManager\)/);
 });

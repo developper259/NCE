@@ -75,6 +75,17 @@ class KeyBindingManager {
   onKey(e) {
     if (this.isComposing || e.isComposing || e.keyCode === 229) return;
 
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey &&
+        e.key.toLowerCase() === "p") {
+      const binding = CONFIG_KEYBINDING_GET_ACTION("quick_open");
+      if (binding) {
+        this.editor.keyBinding.exec(binding, e);
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+
     if (this.isAgentMessageTarget(e.target)) {
       const isModifier = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();

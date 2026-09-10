@@ -12,6 +12,12 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "quick_open",
+    description: "Quick Open",
+    key: "Mod+P",
+    in_editor: false,
+  },
+  {
     action: "open_folder",
     description: "Open a folder",
     key: "Mod+Shift+O",

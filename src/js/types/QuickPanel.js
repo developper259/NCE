@@ -1,4 +1,4 @@
-class QuickPanelManager {
+class QuickPanel {
   constructor(editor) {
     this.editor = editor;
     this.host = document.querySelector(".quick-panel-host");
@@ -62,6 +62,10 @@ class QuickPanelManager {
   open(options = {}) {
     if (!this.host) return false;
     if (this.isOpen()) {
+      if (this.isOpen(options.id)) {
+        this.input.focus();
+        return true;
+      }
       this.close({ notifyCancel: false, restoreFocus: false });
     }
 
@@ -149,7 +153,10 @@ class QuickPanelManager {
     if (!this.session) return;
     this.session.query = this.input.value;
     this.error.hidden = true;
-    if (this.session.mode === "pick") this.loadItems(this.session.query);
+    if (this.session.mode === "pick") {
+      if (this.session.options.reloadOnInput === false) this.updateVisibleItems();
+      else this.loadItems(this.session.query);
+    }
   }
 
   handleKeyDown(event) {
@@ -229,19 +236,17 @@ class QuickPanelManager {
     if (!this.session) return;
 
     const query = this.session.query.trim().toLowerCase();
-    this.session.visibleItems = this.session.items.filter((item) => {
-      if (!query) return true;
-      return [
-        item.label,
-        item.description,
-        item.detail,
-        ...(Array.isArray(item.keywords) ? item.keywords : []),
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase()
-        .includes(query);
-    });
+    const filterItems = this.session.options.filterItems;
+    const filtered = typeof filterItems === "function"
+      ? filterItems(this.session.items, query)
+      : this.session.items.filter((item) => {
+          if (!query) return true;
+          return [item.label, item.description, item.detail,
+            ...(Array.isArray(item.keywords) ? item.keywords : [])]
+            .filter(Boolean).join(" ").toLowerCase().includes(query);
+        });
+    const limit = Math.max(1, this.session.options.renderLimit || filtered.length || 1);
+    this.session.visibleItems = filtered.slice(0, limit);
 
     const selectedId = this.session.options.selectedId;
     const selectedIndex = this.session.visibleItems.findIndex(
@@ -330,8 +335,10 @@ class QuickPanelManager {
       return;
     }
     if (this.session.visibleItems.length === 0) {
-      this.empty.textContent =
-        this.session.options.emptyMessage || "No results";
+      const emptyMessage = this.session.options.emptyMessage;
+      this.empty.textContent = typeof emptyMessage === "function"
+        ? emptyMessage(this.session.query)
+        : emptyMessage || "No results";
       this.empty.hidden = false;
       return;
     }
@@ -359,7 +366,9 @@ class QuickPanelManager {
       content.className = "quick-panel-item-content";
       const label = document.createElement("span");
       label.className = "quick-panel-item-label";
-      label.textContent = this.capitalizeLabel(item.label);
+      label.textContent = this.session.options.preserveLabelCase
+        ? String(item.label)
+        : this.capitalizeLabel(item.label);
       content.appendChild(label);
 
       if (item.description || item.detail) {

@@ -67,6 +67,26 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
   }
 });
 
+test("Quick Open project listing is recursive, relative, and uses workspace ignores", async () => {
+  const root = await tempWorkspace();
+  try {
+    await fsp.writeFile(path.join(root, ".env"), "SECRET=test\n");
+    await fsp.mkdir(path.join(root, "src", "nested"), { recursive: true });
+    await fsp.writeFile(path.join(root, "src", "nested", "App.js"), "app\n");
+    await fsp.writeFile(path.join(root, "archive.asar"), "opaque\n");
+    const search = new WorkspaceSearch({ window: null });
+    const result = await search.listProjectFiles(root);
+    assert.equal(result.success, true);
+    assert.deepEqual(result.entries.map((entry) => entry.relativePath).sort(), [
+      ".env", "a.js", "b.txt", "src/nested/App.js", "sub/c.js",
+    ]);
+    assert.equal(result.entries.every((entry) => path.isAbsolute(entry.path)), true);
+    assert.equal(result.entries.some((entry) => entry.relativePath.includes("node_modules")), false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("invalid ASAR stays opaque in explorer, search, and project map", async () => {
   const root = await tempWorkspace();
   const archive = path.join(root, "broken.asar");

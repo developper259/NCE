@@ -76,7 +76,7 @@ test("asset and command availability contracts stay aligned", () => {
   const menu = read("src/ts/addon/Menu.ts");
   assert.match(html, /assets\/flaticon\/all\.css/);
   assert.match(read("src/js/manager/TabManager.js"), /assets\/icons\/close\.svg/);
-  assert.match(html, /js\/manager\/QuickPanelManager\.js/);
+  assert.match(html, /js\/types\/QuickPanel\.js/);
   assert.match(keybindings, /action:\s*"open_command"/);
   assert.doesNotMatch(keybindings, /action:\s*"replace"/);
   assert.doesNotMatch(menu, /label:\s*"(?:Replace|Documentation|Check for Updates)"/);
