@@ -115,7 +115,7 @@
   cursor: default;
 }
 
-.quick-panel-item > i {
+.quick-panel-item > i:not(.file-icon) {
   width: 18px;
   color: var(--accent-primary);
   text-align: center;

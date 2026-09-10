@@ -17,7 +17,14 @@ function createQuickOpen({ rootPath = "/project", entries = [] } = {}) {
   };
   const editor = {
     quickPanel: panel,
-    fileExplorer: { rootPath },
+    fileExplorer: {
+      rootPath,
+      getFileIcon(name) {
+        return name.toLowerCase().endsWith(".js")
+          ? "fi fi-brands-js"
+          : "fi fi-rr-file";
+      },
+    },
     api: { async listProjectFiles() { return { success: true, entries }; } },
     tabManager: { openFileWithPath(filePath) { openCalls.push(filePath); } },
   };
@@ -44,6 +51,7 @@ test("Quick Open filters case-insensitively, ranks filenames, and limits DOM res
   const { manager, panelCalls } = createQuickOpen({ entries });
   manager.open();
   const items = await panelCalls[0].items();
+  assert.equal(items[0].icon, "fi fi-brands-js file-icon");
   assert.equal(JSON.stringify(manager.filter(items, "index").map((item) => item.label)),
     JSON.stringify(["src/INDEX.js", "src/index-helper.js", "index/other.js"]));
   assert.equal(panelCalls[0].renderLimit, 100);

@@ -26,6 +26,7 @@ class QuickOpen {
     this.cachedFiles = response.entries.map((entry) => ({
       id: entry.path,
       label: entry.relativePath,
+      icon: `${this.editor.fileExplorer.getFileIcon(entry.name)} file-icon`,
       data: entry,
     }));
     return this.cachedFiles;
