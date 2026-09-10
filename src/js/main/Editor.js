@@ -36,7 +36,8 @@ class Editor {
     this.sidebarManager = new SidebarManager(this);
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
-    this.contextMenuManager = new ContextMenuManager();
+    this.contextMenuManager = new ContextMenuManager(this);
+    this.contextMenuManager.setMenu("tab", buildTabContextMenu(this.tabManager));
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);

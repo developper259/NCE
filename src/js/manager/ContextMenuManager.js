@@ -33,13 +33,18 @@ class ContextMenuManager {
       }
 
       const actionName = action.name || key;
-      if (action.callback) {
+      const enabled =
+        typeof action.enabled === "function"
+          ? action.enabled(context)
+          : action.enabled !== false;
+      if (enabled && action.callback) {
         this.activeCallbacks.set(actionName, () => action.callback(context));
       }
 
       payload.push({
         name: actionName,
         keys: action.keys || null,
+        enabled,
       });
     }
 

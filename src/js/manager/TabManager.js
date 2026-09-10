@@ -157,16 +157,21 @@ class tabManager {
 
   async closeFile(id) {
     const file = this.getFileByID(id);
-    if (!file) return;
+    if (!file) return false;
 
     if (!file.isSaved) {
       if (!(file.isEmpty() && !file.hasPath())) {
         const choice = await this.editor.savePopupManager.confirmClose(id);
-        if (choice === "cancel") return;
+        if (choice === "cancel") return false;
         if (choice === "save") {
           if (this.activeFile?.id !== id) await this.setFocusFile(file);
-          await file.save();
-          if (!file.isSaved) return;
+          try {
+            const saved = await file.save();
+            if (saved === false || !file.isSaved) return false;
+          } catch (error) {
+            console.error("Error saving file before close:", error);
+            return false;
+          }
         }
       }
     }
@@ -194,6 +199,60 @@ class tabManager {
       activeFile: this.activeFile,
     });
     if (!this.editor.isOnInit) this.editor.refreshAll();
+    return true;
+  }
+
+  async closeFileSet(fileIds, preservedFileId = null) {
+    const snapshot = [...fileIds];
+    const restorePreservedFile = async () => {
+      const preservedFile = this.getFileByID(preservedFileId);
+      if (preservedFile && this.activeFile?.id !== preservedFileId) {
+        await this.setFocusFile(preservedFile);
+      }
+    };
+
+    await restorePreservedFile();
+    for (const id of snapshot) {
+      if (!this.getFileByID(id)) continue;
+
+      let closed = false;
+      try {
+        closed = await this.closeFile(id);
+      } catch (error) {
+        console.error("Error closing file:", error);
+      }
+
+      await restorePreservedFile();
+      if (!closed) return false;
+    }
+
+    return true;
+  }
+
+  async closeOtherFiles(file) {
+    if (!file || !this.getFileByID(file.id)) return false;
+    const fileIds = this.files
+      .filter((candidate) => candidate.id !== file.id)
+      .map((candidate) => candidate.id);
+    return this.closeFileSet(fileIds, file.id);
+  }
+
+  async closeFilesToLeft(file) {
+    const index = file ? this.getFileIndexByID(file.id) : -1;
+    if (index < 0) return false;
+    return this.closeFileSet(
+      this.files.slice(0, index).map((candidate) => candidate.id),
+      file.id,
+    );
+  }
+
+  async closeFilesToRight(file) {
+    const index = file ? this.getFileIndexByID(file.id) : -1;
+    if (index < 0) return false;
+    return this.closeFileSet(
+      this.files.slice(index + 1).map((candidate) => candidate.id),
+      file.id,
+    );
   }
 
   async closeActiveFile() {
@@ -314,6 +373,11 @@ class tabManager {
       li.classList.add("file-active");
     }
     li.id = file.id;
+    li.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu("tab", file);
+    });
 
     const titleSpan = document.createElement("span");
     titleSpan.className = "file-el-title";

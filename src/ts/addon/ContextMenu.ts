@@ -15,14 +15,22 @@ export class ContextMenu {
   handleIPC() {
     ipcMain.handle(
       "ContextMenu:show",
-      async (event, actions: Array<{ name: string; keys?: string }>) => {
+      async (
+        event,
+        actions: Array<{ name: string; keys?: string; enabled?: boolean }>,
+      ) => {
         return this.openContext(actions);
       },
     );
   }
 
   async openContext(
-    actions: Array<{ name: string; type?: string; keys?: string }>,
+    actions: Array<{
+      name: string;
+      type?: string;
+      keys?: string;
+      enabled?: boolean;
+    }>,
   ) {
     const template: MenuItemConstructorOptions[] = actions.map((action) => {
       if (action.type === "separator") {
@@ -31,6 +39,7 @@ export class ContextMenu {
       return {
         label: action.name,
         accelerator: action.keys,
+        enabled: action.enabled !== false,
         click: () => {
           this.window.webContents.send("ContextMenu:triggered", action.name);
         },

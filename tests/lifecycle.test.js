@@ -214,6 +214,75 @@ test('Windows paths compare separators and rename only complete segments', async
   assert.equal(editor.tabManager.getFileByPath('C:/project/source/a.js'), file);
 });
 
+test('tab bulk close uses a stable snapshot, preserves its target, and stops on cancel', async () => {
+  const editor = setup();
+  const files = ['a', 'b', 'c', 'd'].map(
+    (name, index) => new FileNode(editor, index + 1, name, `/${name}`),
+  );
+  editor.tabManager.files = files;
+  editor.tabManager.activeFile = files[0];
+  const [aId, bId, cId] = files.map((file) => file.id);
+  const target = files[1];
+
+  const attempted = [];
+  editor.tabManager.setFocusFile = async (file) => {
+    editor.tabManager.activeFile = file;
+  };
+  editor.tabManager.closeFile = async (id) => {
+    attempted.push(id);
+    if (id === cId) return false;
+    editor.tabManager.removeFileByID(id);
+    return true;
+  };
+
+  assert.equal(await editor.tabManager.closeOtherFiles(target), false);
+  assert.deepEqual(attempted, [aId, cId]);
+  assert.deepEqual(editor.tabManager.files.map((file) => file.id), [bId, cId, 4]);
+  assert.equal(editor.tabManager.activeFile, target);
+});
+
+test('tab bulk close selects exactly the tabs to the left or right', async () => {
+  const editor = setup();
+  const files = ['a', 'b', 'c', 'd'].map(
+    (name, index) => new FileNode(editor, index + 1, name, `/${name}`),
+  );
+  editor.tabManager.files = [...files];
+  editor.tabManager.activeFile = files[2];
+  const closed = [];
+  editor.tabManager.closeFile = async (id) => {
+    closed.push(id);
+    editor.tabManager.removeFileByID(id);
+    return true;
+  };
+
+  assert.equal(await editor.tabManager.closeFilesToLeft(files[2]), true);
+  assert.deepEqual(closed, [files[0].id, files[1].id]);
+  assert.deepEqual(editor.tabManager.files, [files[2], files[3]]);
+
+  closed.length = 0;
+  assert.equal(await editor.tabManager.closeFilesToRight(files[2]), true);
+  assert.deepEqual(closed, [files[3].id]);
+  assert.deepEqual(editor.tabManager.files, [files[2]]);
+  assert.equal(editor.tabManager.activeFile, files[2]);
+});
+
+test('closing a dirty tab reports cancel and save failure without removing it', async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 1, 'dirty', '/dirty');
+  file.isSaved = false;
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+
+  editor.savePopupManager = { confirmClose: async () => 'cancel' };
+  assert.equal(await editor.tabManager.closeFile(file.id), false);
+  assert.deepEqual(editor.tabManager.files, [file]);
+
+  editor.savePopupManager = { confirmClose: async () => 'save' };
+  file.save = async () => false;
+  assert.equal(await editor.tabManager.closeFile(file.id), false);
+  assert.deepEqual(editor.tabManager.files, [file]);
+});
+
 test('lazy state restore keeps A/B/C, B active, cursor/selection/scroll', async () => {
   const editor = setup();
   const loaded = [];
