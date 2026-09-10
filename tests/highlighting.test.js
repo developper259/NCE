@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { loadGlobal } = require("./helpers/runtime");
 const LineNode = loadGlobal("src/js/types/Line.js", "LineNode");
-const FileNode = loadGlobal("src/js/types/File.js", "FileNode", { LineNode });
+const FileNode = loadGlobal("src/js/types/Tab.js", "FileNode", { LineNode });
 const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
 const Writer = loadGlobal(
   "src/js/controller/WriterController.js",

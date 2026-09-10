@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { loadGlobal, createEditor } = require('./helpers/runtime');
 const LineNode = loadGlobal('src/js/types/Line.js', 'LineNode');
-const FileNode = loadGlobal('src/js/types/File.js', 'FileNode', { LineNode });
+const FileNode = loadGlobal('src/js/types/Tab.js', 'FileNode', { LineNode });
 const Writer = loadGlobal('src/js/controller/WriterController.js', 'WriterController', { LineNode, Events: { ON_CHANGE: 'change' } });
 const History = loadGlobal('src/js/controller/HistoryController.js', 'HistoryController');
 function setup(content) {

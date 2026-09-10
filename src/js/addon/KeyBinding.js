@@ -18,6 +18,7 @@ class KeyBinding {
       redo: this.control_redo,
       find: this.control_find,
       open_command: this.control_open_command,
+      open_settings: this.control_open_settings,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,
 
@@ -93,7 +94,7 @@ class KeyBinding {
   }
 
   async control_close_file(s, c, m, a) {
-    if (this.editor.tabManager.files.length != 0)
+    if (this.editor.tabManager.tabs.length != 0)
       await this.editor.tabManager.closeActiveFile();
     else this.editor.api.quit();
   }
@@ -196,6 +197,10 @@ class KeyBinding {
       items,
       onAccept: (item) => this.executeCommandItem(item),
     });
+  }
+
+  control_open_settings() {
+    return this.editor.openSettings();
   }
 
   executeCommandItem(item) {

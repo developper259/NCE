@@ -97,5 +97,15 @@ async function SETTINGS_SET(key, value) {
   RENDERER_SETTINGS[section][property] = value;
   const saved = await window.api.setSetting(key, value);
   if (!saved) RENDERER_SETTINGS[section][property] = previous;
+  if (
+    saved &&
+    section === "keybindings" &&
+    typeof USERCONFIG_KEYBINDING !== "undefined"
+  ) {
+    const binding = USERCONFIG_KEYBINDING.find(
+      (item) => item.action === property,
+    );
+    if (binding) binding.key = value;
+  }
   return saved;
 }

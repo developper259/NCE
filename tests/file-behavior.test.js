@@ -7,7 +7,7 @@ const test = require("node:test");
 const { createEditor, loadGlobal } = require("./helpers/runtime");
 
 const LineNode = loadGlobal("src/js/types/Line.js", "LineNode");
-const FileNode = loadGlobal("src/js/types/File.js", "FileNode", { LineNode });
+const FileNode = loadGlobal("src/js/types/Tab.js", "FileNode", { LineNode });
 
 test("FileNode serializes LF, CRLF, and mixed EOL without byte drift", () => {
   const editor = { lineController: { loadContent() {} }, historyController: { clear() {} } };

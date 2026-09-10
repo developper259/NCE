@@ -6,15 +6,17 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { loadGlobal, createEditor } = require('./helpers/runtime');
 const LineNode = loadGlobal('src/js/types/Line.js', 'LineNode');
-const FileNode = loadGlobal('src/js/types/File.js', 'FileNode', { LineNode });
+const [TAB_TYPES, Tab, SettingsTab, FileNode] = loadGlobal(
+  'src/js/types/Tab.js', '[TAB_TYPES, Tab, SettingsTab, FileNode]', { LineNode },
+);
 const NCEPath = loadGlobal('src/js/core/Path.js', 'NCEPath');
 const FileLoader = loadGlobal('src/js/addon/FileLoader.js', 'FileLoader', { LineNode, window: {} });
-const TabManager = loadGlobal('src/js/manager/TabManager.js', 'tabManager', { FileNode, NCEPath, getElement: () => null, Events: {} });
+const TabManager = loadGlobal('src/js/manager/TabManager.js', 'tabManager', { FileNode, SettingsTab, TAB_TYPES, NCEPath, getElement: () => null, Events: {} });
 const Editor = loadGlobal('src/js/main/Editor.js', 'Editor', {
   document: { addEventListener() {} }, window: {},
   SETTINGS_GET: () => false, SETTINGS_SET: async () => true,
 });
-const StatesManager = loadGlobal('src/js/manager/StatesManager.js', 'StatesManager', { FileNode });
+const StatesManager = loadGlobal('src/js/manager/StatesManager.js', 'StatesManager', { FileNode, SettingsTab, TAB_TYPES });
 const quiet = { ...console, warn() {}, error() {} };
 
 function setup() {

@@ -80,6 +80,19 @@ class SidebarManager {
 
       fragment.appendChild(iconDiv);
     }
+
+    const settingsButton = document.createElement("button");
+    settingsButton.type = "button";
+    settingsButton.className = "sidebar-tab-icon sidebar-settings-icon";
+    settingsButton.title = "Settings";
+    settingsButton.setAttribute("aria-label", "Open Settings");
+    const settingsIcon = document.createElement("i");
+    settingsIcon.className = "fi fi-rr-settings-sliders";
+    settingsIcon.setAttribute("aria-hidden", "true");
+    settingsButton.appendChild(settingsIcon);
+    settingsButton.addEventListener("click", () => this.editor.openSettings());
+    fragment.appendChild(settingsButton);
+
     this.tabSelector.replaceChildren(fragment);
   }
 

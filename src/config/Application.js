@@ -100,6 +100,11 @@ const USERCONFIG_KEYBINDING = [
     description: "Open Agent",
     in_editor: false,
   },
+  {
+    action: "open_settings",
+    description: "Open Settings",
+    in_editor: false,
+  },
   { action: "escape", in_editor: false },
   { action: "indent_right", in_editor: true },
   { action: "delete_right", in_editor: true },

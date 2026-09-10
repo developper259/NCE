@@ -37,32 +37,44 @@ class StatesManager {
     const tabManager = this.editor.tabManager;
     if (!tabManager) return null;
 
+    const tabs = tabManager.tabs.map((tab) =>
+      tab.type === TAB_TYPES.SETTINGS
+        ? { id: tab.id, type: TAB_TYPES.SETTINGS }
+        : {
+            id: tab.id,
+            type: TAB_TYPES.FILE,
+            name: tab.name,
+            path: tab.path,
+
+            row: tab.row,
+            column: tab.column,
+
+            offsetX: tab.offsetX,
+            offsetY: tab.offsetY,
+            startIndex: tab.startIndex,
+            maxLineLength: tab.maxLineLength,
+            totalLines: tab.totalLines,
+
+            startSelect: tab.startSelect,
+            endSelect: tab.endSelect,
+            selectedLines: tab._selectedLines
+              ? Array.from(tab._selectedLines.entries())
+              : [],
+          },
+    );
+
     return {
-      activeFile: tabManager.activeFile
+      activeTab: tabManager.activeTab
         ? {
-            id: tabManager.activeFile.id,
+            id: tabManager.activeTab.id,
           }
         : null,
-      files: tabManager.files.map((file) => ({
-        id: file.id,
-        name: file.name,
-        path: file.path,
-
-        row: file.row,
-        column: file.column,
-
-        offsetX: file.offsetX,
-        offsetY: file.offsetY,
-        startIndex: file.startIndex,
-        maxLineLength: file.maxLineLength,
-        totalLines: file.totalLines,
-
-        startSelect: file.startSelect,
-        endSelect: file.endSelect,
-        selectedLines: file._selectedLines
-          ? Array.from(file._selectedLines.entries())
-          : [],
-      })),
+      activeFile: tabManager.activeFile
+        ? { id: tabManager.activeFile.id }
+        : null,
+      tabs,
+      // Kept for consumers written against the pre-generic tab state shape.
+      files: tabs.filter((tab) => tab.type === TAB_TYPES.FILE),
     };
   }
 
@@ -150,11 +162,26 @@ class StatesManager {
     const tabManager = this.editor.tabManager;
     if (!tabManager) return;
 
-    let activeFileToFocus = null;
+    let activeTabToFocus = null;
+    const savedTabs = Array.isArray(tabState.tabs)
+      ? tabState.tabs
+      : Array.isArray(tabState.files)
+        ? tabState.files
+        : [];
+    const savedActiveTab = tabState.activeTab || tabState.activeFile;
 
-    for (const fileData of Array.isArray(tabState.files) ? tabState.files : []) {
+    for (const fileData of savedTabs) {
       if (!fileData) continue;
       try {
+        if (fileData.type === TAB_TYPES.SETTINGS) {
+          const settingsTab = new SettingsTab(fileData.id);
+          tabManager.tabs.push(settingsTab);
+          if (fileData.id >= tabManager.idCounter)
+            tabManager.idCounter = fileData.id;
+          if (savedActiveTab?.id === fileData.id)
+            activeTabToFocus = settingsTab;
+          continue;
+        }
         let file = new FileNode(
           this.editor,
           fileData.id,
@@ -184,10 +211,10 @@ class StatesManager {
           file._selectedLines = new Map();
         }
 
-        tabManager.files.push(file);
+        tabManager.tabs.push(file);
 
-        if (tabState.activeFile && file.id === tabState.activeFile.id) {
-          activeFileToFocus = file;
+        if (savedActiveTab && file.id === savedActiveTab.id) {
+          activeTabToFocus = file;
         }
       } catch (error) {
         console.error(
@@ -198,12 +225,17 @@ class StatesManager {
       }
     }
 
-    if (activeFileToFocus) {
-      await tabManager.setFocusFile(activeFileToFocus);
+    if (activeTabToFocus) {
+      if (activeTabToFocus.type === TAB_TYPES.FILE) {
+        await tabManager.setFocusFile(activeTabToFocus);
+      } else {
+        await tabManager.setFocusTab(activeTabToFocus);
+      }
 
       if (
+        activeTabToFocus.type === TAB_TYPES.FILE &&
         this.editor.selectController &&
-        activeFileToFocus._selectedLines.size > 0
+        activeTabToFocus._selectedLines.size > 0
       ) {
         this.editor.selectController.refreshContaisSelected();
         this.editor.selectController.refreshSelectionDOM();

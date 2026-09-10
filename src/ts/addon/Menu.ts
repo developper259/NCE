@@ -255,6 +255,12 @@ export class AppMenu {
 
             click: () => this.deleteLine(),
           },
+          { type: "separator" },
+          {
+            label: "Settings...",
+            click: () =>
+              this.window.webContents.send("open-settings-requested"),
+          },
         ],
       }),
     );
@@ -270,13 +276,6 @@ export class AppMenu {
         label: "View",
 
         submenu: [
-          // DEV ONLY — uncomment for local development.
-          // {
-          //   label: "Reload Window",
-          //   accelerator: "CommandOrControl+R",
-          //   click: () => this.reloadWindow(),
-          // },
-
           {
             type: "separator",
           },
@@ -316,14 +315,6 @@ export class AppMenu {
 
             click: () => this.toggleFullscreen(),
           },
-
-          // DEV ONLY — uncomment for local development.
-          // {
-          //   label: "Toggle Developer Tools",
-          //   accelerator:
-          //     process.platform === "darwin" ? "Alt+Cmd+I" : "Ctrl+Shift+I",
-          //   click: () => this.openDevTools(),
-          // },
         ],
       }),
     );
@@ -674,10 +665,6 @@ export class AppMenu {
   }
 
   // DEV ONLY — uncomment for local development.
-  // reloadWindow() {
-  //   this.window.webContents.reload();
-  // }
-
   toggleFullscreen() {
     const fullscreen = this.window.isFullScreen();
 
@@ -685,13 +672,6 @@ export class AppMenu {
   }
 
   // DEV ONLY — uncomment for local development.
-  // openDevTools() {
-  //   if (this.window.webContents.isDevToolsOpened()) {
-  //     this.window.webContents.closeDevTools();
-  //   } else {
-  //     this.window.webContents.openDevTools();
-  //   }
-  // }
 
   // =========================================================
   // APPLICATION

@@ -56,6 +56,8 @@ class TitleBar {
           null,
           ["Select All", "select_all", { needsFile: true }],
           ["Delete Line", "delete_line", { needsFile: true }],
+          null,
+          ["Settings", "open_settings"],
         ],
       },
       {
@@ -70,7 +72,6 @@ class TitleBar {
           null,
           ["Toggle Fullscreen", "view.fullscreen"],
           // DEV ONLY — uncomment for local development.
-          // ["Developer Tools", "view.devtools"],
         ],
       },
       {
@@ -130,7 +131,10 @@ class TitleBar {
       button.dataset.command = command;
       button.dataset.needsFile = String(Boolean(options.needsFile));
       button.dataset.checkbox = String(Boolean(options.checkbox));
-      button.setAttribute("role", options.checkbox ? "menuitemcheckbox" : "menuitem");
+      button.setAttribute(
+        "role",
+        options.checkbox ? "menuitemcheckbox" : "menuitem",
+      );
       if (options.checkbox) {
         button.classList.add("is-checkbox");
         button.setAttribute("aria-checked", "false");
@@ -206,7 +210,11 @@ class TitleBar {
 
   refreshAutoSaveState() {
     const item = this.root?.querySelector('[data-command="auto_save"]');
-    if (item) item.setAttribute("aria-checked", String(this.editor.getAutoSaveState?.() === true));
+    if (item)
+      item.setAttribute(
+        "aria-checked",
+        String(this.editor.getAutoSaveState?.() === true),
+      );
   }
 
   execute(command) {

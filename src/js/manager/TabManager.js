@@ -1,8 +1,8 @@
 class tabManager {
   constructor(e) {
     this.editor = e;
-    this.files = []; //opened files
-    this.activeFile = null; //file on editor
+    this.tabs = [];
+    this.activeTab = null;
     this.emptyName = "New file";
 
     this.tabsOBJ = getElement(".file-manager");
@@ -13,17 +13,37 @@ class tabManager {
     this.refresh();
   }
 
+  get files() {
+    // Keep the legacy collection identity for file-only integrations while
+    // excluding non-file tabs from file-specific code paths.
+    return this.tabs.every((tab) => tab.type === TAB_TYPES.FILE)
+      ? this.tabs
+      : this.tabs.filter((tab) => tab.type === TAB_TYPES.FILE);
+  }
+  set files(files) {
+    this.tabs = files;
+  }
+  get activeFile() {
+    return this.activeTab?.type === TAB_TYPES.FILE &&
+      this.tabs.includes(this.activeTab)
+      ? this.activeTab
+      : null;
+  }
+  set activeFile(file) {
+    this.activeTab = file || null;
+  }
+
   getNextID() {
     this.idCounter++;
     return this.idCounter;
   }
 
   getFileIndexByID(id) {
-    return this.files.findIndex((file) => file.id == id);
+    return this.tabs.findIndex((tab) => tab.id == id);
   }
 
   getFileByID(id) {
-    return this.files.find((file) => file.id == id);
+    return this.tabs.find((tab) => tab.id == id);
   }
 
   getFileByPath(path) {
@@ -33,7 +53,7 @@ class tabManager {
   removeFileByID(id) {
     const index = this.getFileIndexByID(id);
     if (index !== -1) {
-      this.files.splice(index, 1);
+      this.tabs.splice(index, 1);
     }
   }
 
@@ -51,9 +71,12 @@ class tabManager {
       file.path = NCEPath.rebase(file.path, oldPath, newPath);
       file.name = NCEPath.basename(file.path);
       changed = true;
-      await this.editor.highlightController.changeLanguage(file,
-        await this.editor.highlightController.detectLanguage(file.name));
-      if (file === this.activeFile && !file.isLoaded) await this.setFocusFile(file);
+      await this.editor.highlightController.changeLanguage(
+        file,
+        await this.editor.highlightController.detectLanguage(file.name),
+      );
+      if (file === this.activeFile && !file.isLoaded)
+        await this.setFocusFile(file);
     }
 
     if (changed) {
@@ -84,6 +107,18 @@ class tabManager {
     return this.openFiles([file]);
   }
 
+  async openSettings() {
+    let tab = this.tabs.find(
+      (candidate) => candidate.type === TAB_TYPES.SETTINGS,
+    );
+    if (!tab) {
+      tab = new SettingsTab(this.getNextID());
+      this.tabs.push(tab);
+    }
+    await this.setFocusTab(tab);
+    return tab;
+  }
+
   async openFiles(files, isSetFocusFile = true) {
     if (files.length === 0) return;
     let lastAddedFile = null;
@@ -108,7 +143,7 @@ class tabManager {
         this.activeFile.replaceFile(file);
         lastAddedFile = this.activeFile;
       } else {
-        this.files.push(file);
+        this.tabs.push(file);
         lastAddedFile = file;
       }
     }
@@ -133,7 +168,8 @@ class tabManager {
     for (const file of dirtyFiles) {
       const choice = await this.editor.savePopupManager.confirmClose(file.id);
       if (choice === "cancel") return false;
-      if (choice === "save" && (!(await file.save()) || !file.isSaved)) return false;
+      if (choice === "save" && (!(await file.save()) || !file.isSaved))
+        return false;
     }
 
     return true;
@@ -141,10 +177,11 @@ class tabManager {
 
   async closeFiles() {
     if (!(await this.prepareForQuit())) return false;
-    for (const file of this.files) this.editor.fileLoader.cancelLoading(file.path);
+    for (const file of this.files)
+      this.editor.fileLoader.cancelLoading(file.path);
     this.editor.highlightController.closeAllFiles();
-    this.files = [];
-    this.activeFile = undefined;
+    this.tabs = [];
+    this.activeTab = null;
     this.editor.fileExplorer.activeFilePath = null;
     this.editor.searchController.close();
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
@@ -156,8 +193,10 @@ class tabManager {
   }
 
   async closeFile(id) {
-    const file = this.getFileByID(id);
-    if (!file) return false;
+    const tab = this.getFileByID(id);
+    if (!tab) return false;
+    if (tab.type !== TAB_TYPES.FILE) return this.closeTab(tab);
+    const file = tab;
 
     if (!file.isSaved) {
       if (!(file.isEmpty() && !file.hasPath())) {
@@ -177,10 +216,10 @@ class tabManager {
     }
 
     if (id == this.activeFile?.id) {
-      if (this.files.length > 1) {
+      if (this.tabs.length > 1) {
         const index = this.getFileIndexByID(id);
-        if (index == 0) await this.setFocusFile(this.files[index + 1]);
-        else await this.setFocusFile(this.files[index - 1]);
+        if (index == 0) await this.setFocusTab(this.tabs[index + 1]);
+        else await this.setFocusTab(this.tabs[index - 1]);
       }
     }
 
@@ -188,8 +227,8 @@ class tabManager {
     file.contentGeneration++;
     await this.editor.highlightController.closeFile(file);
     this.removeFileByID(id);
-    if (!this.files.length) {
-      this.activeFile = undefined;
+    if (!this.tabs.length) {
+      this.activeTab = null;
       this.editor.fileExplorer.activeFilePath = null;
       this.editor.searchController.close();
     }
@@ -199,6 +238,24 @@ class tabManager {
       activeFile: this.activeFile,
     });
     if (!this.editor.isOnInit) this.editor.refreshAll();
+    return true;
+  }
+
+  async closeTab(tab) {
+    if (!tab || !this.getFileByID(tab.id)) return false;
+    if (tab.type === TAB_TYPES.FILE) return this.closeFile(tab.id);
+    if (tab.id === this.activeTab?.id && this.tabs.length > 1) {
+      const index = this.getFileIndexByID(tab.id);
+      await this.setFocusTab(this.tabs[index === 0 ? 1 : index - 1]);
+    }
+    this.removeFileByID(tab.id);
+    if (!this.tabs.length) this.activeTab = null;
+    this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
+      file: null,
+      activeFile: this.activeFile,
+    });
+    this.refresh();
+    this.editor.refreshMainContent?.();
     return true;
   }
 
@@ -231,7 +288,7 @@ class tabManager {
 
   async closeOtherFiles(file) {
     if (!file || !this.getFileByID(file.id)) return false;
-    const fileIds = this.files
+    const fileIds = this.tabs
       .filter((candidate) => candidate.id !== file.id)
       .map((candidate) => candidate.id);
     return this.closeFileSet(fileIds, file.id);
@@ -241,7 +298,7 @@ class tabManager {
     const index = file ? this.getFileIndexByID(file.id) : -1;
     if (index < 0) return false;
     return this.closeFileSet(
-      this.files.slice(0, index).map((candidate) => candidate.id),
+      this.tabs.slice(0, index).map((candidate) => candidate.id),
       file.id,
     );
   }
@@ -250,22 +307,34 @@ class tabManager {
     const index = file ? this.getFileIndexByID(file.id) : -1;
     if (index < 0) return false;
     return this.closeFileSet(
-      this.files.slice(index + 1).map((candidate) => candidate.id),
+      this.tabs.slice(index + 1).map((candidate) => candidate.id),
       file.id,
     );
   }
 
   async closeActiveFile() {
-    if (this.activeFile) {
-      return this.closeFile(this.activeFile.id);
+    if (this.activeTab) {
+      return this.closeFile(this.activeTab.id);
     }
     return false;
   }
 
   async setFocusFile(file) {
-    if (!file) return;
+    return this.setFocusTab(file);
+  }
+
+  async setFocusTab(tab) {
+    if (!tab) return;
     const focusGeneration = ++this.focusGeneration;
-    this.activeFile = file;
+    this.activeTab = tab;
+    if (tab.type !== TAB_TYPES.FILE) {
+      this.editor.fileExplorer?.setActiveFile?.(null);
+      this.editor.searchController?.close?.();
+      this.editor.refreshMainContent?.();
+      this.refresh();
+      return;
+    }
+    const file = tab;
 
     this.editor.lineController.dirtyLines.clear();
     this.editor.highlightController.dirtyLines.clear();
@@ -286,6 +355,7 @@ class tabManager {
     this.editor.cursorController.setCursorPosition(file.row, file.column);
 
     if (!this.editor.isOnInit) this.editor.refreshAll();
+    this.editor.refreshMainContent?.();
   }
 
   async reloadFileFromDisk(path) {
@@ -361,7 +431,9 @@ class tabManager {
   }
 
   async selectNewFile() {
-    return this.editor.api.selectNewFile(this.activeFile?.name || this.emptyName);
+    return this.editor.api.selectNewFile(
+      this.activeFile?.name || this.emptyName,
+    );
   }
 
   createFileOBJ(file) {
@@ -369,7 +441,7 @@ class tabManager {
 
     const li = document.createElement("li");
     li.className = "file-el";
-    if (this.activeFile && this.activeFile.id === file.id) {
+    if (this.activeTab && this.activeTab.id === file.id) {
       li.classList.add("file-active");
     }
     li.id = file.id;
@@ -386,7 +458,11 @@ class tabManager {
 
     // Auto Save owns persistence while enabled. Keep the close affordance
     // stable instead of flashing the transient unsaved dot during its write.
-    if (file.isSaved || (file.autoSave === true && !file.deletedFromDisk)) {
+    if (
+      file.type !== TAB_TYPES.FILE ||
+      file.isSaved ||
+      (file.autoSave === true && !file.deletedFromDisk)
+    ) {
       const btnSpan = document.createElement("span");
       btnSpan.className = "file-el-btn file-saved";
 
@@ -412,8 +488,8 @@ class tabManager {
 
     const fragment = document.createDocumentFragment();
 
-    for (let i = 0; i < this.files.length; i++) {
-      const file = this.files[i];
+    for (let i = 0; i < this.tabs.length; i++) {
+      const file = this.tabs[i];
       const fileEl = this.createFileOBJ(file);
       if (fileEl) {
         fragment.appendChild(fileEl);
@@ -423,7 +499,7 @@ class tabManager {
     ul.replaceChildren(fragment);
     this.editor.titleBar?.refresh();
 
-    if (this.files.length === 0) {
+    if (this.tabs.length === 0) {
       if (!this.editor.isOnInit) this.editor.reset();
     } else {
       if (!this.editor.isActive) this.editor.reactive();
@@ -437,7 +513,7 @@ class tabManager {
       if (!id) return;
     }
     let file = this.getFileByID(id);
-    this.setFocusFile(file);
+    this.setFocusTab(file);
   }
 
   onClickClose(e) {

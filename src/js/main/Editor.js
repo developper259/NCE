@@ -37,7 +37,10 @@ class Editor {
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
     this.contextMenuManager = new ContextMenuManager(this);
-    this.contextMenuManager.setMenu("tab", buildTabContextMenu(this.tabManager));
+    this.contextMenuManager.setMenu(
+      "tab",
+      buildTabContextMenu(this.tabManager),
+    );
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);
@@ -67,6 +70,7 @@ class Editor {
     this.bottomBar = new BottomBar(this);
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
+    this.settingsView = new SettingsView(this);
 
     this.writerController.insertMode = true;
 
@@ -77,6 +81,7 @@ class Editor {
 
     this.initQuitEvent();
     this.api.onAutoSaveToggleRequested?.(() => this.toggleAutoSave());
+    this.api.onOpenSettingsRequested?.(() => this.openSettings());
     this.initLoadState();
     this.api.rendererReady?.().catch?.((error) => {
       console.error("[Startup] rendererReady failed", error);
@@ -88,6 +93,12 @@ class Editor {
 
     this.emptyMenu.refresh();
     this.tabManager.refresh();
+    this.refreshMainContent();
+    if (!this.tabManager.activeFile) {
+      this.titleBar?.refresh();
+      this.isOnRefresh = false;
+      return;
+    }
     this.cursorController.updateCaretPosition();
     this.lineController.refresh(true);
     this.lineController.restoreScroll();
@@ -105,19 +116,40 @@ class Editor {
   setAutoSaveState(enabled, { persist = true } = {}) {
     this.autoSaveEnabled = enabled === true;
     this.titleBar?.refreshAutoSaveState?.();
-    const synchronization = SETTINGS_SET(
-      "files.autoSave",
-      this.autoSaveEnabled,
-    );
-    synchronization?.catch?.((error) =>
-      console.error("[Auto Save] menu synchronization failed", error),
-    );
-    if (persist && !this.isOnInit) this.statesManager.save();
+    if (persist) {
+      const synchronization = SETTINGS_SET(
+        "files.autoSave",
+        this.autoSaveEnabled,
+      );
+      synchronization?.catch?.((error) =>
+        console.error("[Auto Save] menu synchronization failed", error),
+      );
+    }
+    this.settingsView?.sync("files.autoSave");
     return this.autoSaveEnabled;
   }
 
   toggleAutoSave() {
     return this.setAutoSaveState(!this.getAutoSaveState());
+  }
+
+  openSettings() {
+    return this.tabManager.openSettings();
+  }
+
+  refreshMainContent() {
+    const settingsActive =
+      this.tabManager.activeTab?.type === TAB_TYPES.SETTINGS;
+    this.editorOBJ.classList.toggle("editor-settings-active", settingsActive);
+    if (settingsActive) {
+      this.settingsView?.show();
+      this.bottomBar?.hide();
+      this.cursorController?.disable();
+      this.setSelected(false);
+    } else {
+      this.settingsView?.hide();
+      if (this.tabManager.activeFile) this.bottomBar?.show();
+    }
   }
 
   hideAll() {

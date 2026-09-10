@@ -24,6 +24,14 @@
   position: relative;
 }
 
+.sidebar-settings-icon {
+  margin-top: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+}
+
 .sidebar-tab-icon:hover {
   color: var(--text-white);
 }

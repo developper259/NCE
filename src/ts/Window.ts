@@ -166,14 +166,14 @@ export class Window {
     });
 
     // DEV ONLY — uncomment for local development.
-    this.window.webContents.on("before-input-event", (event, input) => {
+    /*this.window.webContents.on("before-input-event", (event, input) => {
       if (input.type !== "keyDown") return;
       const isReload =
         (input.meta || input.control) && input.key.toLowerCase() === "r";
       if (!isReload) return;
       event.preventDefault();
       this.window?.webContents.reload();
-    });
+    });*/
 
     // DEV ONLY — uncomment for local development.
     // this.window.webContents.openDevTools();

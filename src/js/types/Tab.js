@@ -1,8 +1,27 @@
-class FileNode {
-  constructor(e, id, name, path) {
-    this.editor = e;
+const TAB_TYPES = Object.freeze({
+  FILE: "file",
+  SETTINGS: "settings",
+});
+
+class Tab {
+  constructor(id, type, name, closable = true) {
     this.id = id;
+    this.type = type;
     this.name = name;
+    this.closable = closable;
+  }
+}
+
+class SettingsTab extends Tab {
+  constructor(id) {
+    super(id, TAB_TYPES.SETTINGS, "Settings");
+  }
+}
+
+class FileNode extends Tab {
+  constructor(e, id, name, path) {
+    super(id, TAB_TYPES.FILE, name);
+    this.editor = e;
     this.path = path;
 
     this.isSaved = true;
@@ -120,7 +139,10 @@ class FileNode {
 
   async loadContent() {
     const generation = ++this.contentGeneration;
-    if (!this.path) { this.isLoaded = true; return; }
+    if (!this.path) {
+      this.isLoaded = true;
+      return;
+    }
     try {
       const loading = this.editor.fileLoader.loadFile(this.path);
       this.loadingState = this.editor.fileLoader.getState(this.path);
@@ -139,7 +161,11 @@ class FileNode {
       this.loadError = null;
       this.deletedFromDisk = false;
       this.editor.historyController?.clear(this);
-      this.editor.fileLoader.loadRemainingLines(this, result.initialLines.length, result.totalLines);
+      this.editor.fileLoader.loadRemainingLines(
+        this,
+        result.initialLines.length,
+        result.totalLines,
+      );
       this.isLoaded = true;
     } catch (error) {
       if (generation !== this.contentGeneration) return;
@@ -177,15 +203,21 @@ class FileNode {
 
   reportSaveError(error) {
     this.saveError = error;
-    const message = error.code === "FILE_LOAD_FAILED" ? "File loading failed. Reload the file before saving."
-      : error.code === "FILE_NOT_FULLY_LOADED" ? "File is not fully loaded. Save was cancelled."
-      : "Failed to save file.";
+    const message =
+      error.code === "FILE_LOAD_FAILED"
+        ? "File loading failed. Reload the file before saving."
+        : error.code === "FILE_NOT_FULLY_LOADED"
+          ? "File is not fully loaded. Save was cancelled."
+          : "Failed to save file.";
     if (typeof alert === "function") alert(message);
     else console.warn(message);
   }
 
   async save() {
-    if (this.loadError) { this.reportSaveError(this.loadError); return false; }
+    if (this.loadError) {
+      this.reportSaveError(this.loadError);
+      return false;
+    }
     if (!this.path) return this.saveAs();
     if (!(await this.ensureSaveable())) return false;
     const content = this.serializeContent();
@@ -200,11 +232,17 @@ class FileNode {
       }
       this.editor.tabManager.refresh();
       return true;
-    } catch (error) { this.reportSaveError(error); return false; }
+    } catch (error) {
+      this.reportSaveError(error);
+      return false;
+    }
   }
 
   async saveAs() {
-    if (this.loadError) { this.reportSaveError(this.loadError); return false; }
+    if (this.loadError) {
+      this.reportSaveError(this.loadError);
+      return false;
+    }
     if (!(await this.ensureSaveable())) return false;
     const selectedPath = await this.editor.tabManager.selectNewFile();
     if (typeof selectedPath !== "string" || !selectedPath) return false;
@@ -213,9 +251,17 @@ class FileNode {
     try {
       const saved = await this.editor.api.saveFile(selectedPath, content);
       if (!saved) throw new Error("Failed to save file");
-    } catch (error) { this.reportSaveError(error); return false; }
+    } catch (error) {
+      this.reportSaveError(error);
+      return false;
+    }
 
-    if (!this.path) this.loadingState = { status: "loaded", loadedLineCount: this.lines.length, expectedTotalLines: this.lines.length };
+    if (!this.path)
+      this.loadingState = {
+        status: "loaded",
+        loadedLineCount: this.lines.length,
+        expectedTotalLines: this.lines.length,
+      };
     this.path = selectedPath;
     this.deletedFromDisk = false;
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
@@ -223,9 +269,12 @@ class FileNode {
       this.setIsSaved(true);
       this.editor.historyController?.markSaved(this);
     }
-    const language = await this.editor.highlightController.detectLanguage(this.name);
+    const language = await this.editor.highlightController.detectLanguage(
+      this.name,
+    );
     await this.editor.highlightController.changeLanguage(this, language);
-    if (this === this.editor.tabManager.activeFile) this.editor.fileExplorer?.setActiveFile(this.path);
+    if (this === this.editor.tabManager.activeFile)
+      this.editor.fileExplorer?.setActiveFile(this.path);
     this.editor.tabManager.refresh();
     return true;
   }
@@ -259,7 +308,9 @@ class FileNode {
   }
 
   shouldPersistChanges() {
-    return this.autoSave === true && Boolean(this.path) && !this.deletedFromDisk;
+    return (
+      this.autoSave === true && Boolean(this.path) && !this.deletedFromDisk
+    );
   }
 
   onChange() {

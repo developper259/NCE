@@ -1,6 +1,7 @@
 function buildTabContextMenu(tabManager) {
-  const getIndex = (file) =>
-    file ? tabManager.getFileIndexByID(file.id) : -1;
+  const getTabs = () =>
+    Array.isArray(tabManager.tabs) ? tabManager.tabs : tabManager.files;
+  const getIndex = (file) => (file ? tabManager.getFileIndexByID(file.id) : -1);
 
   return {
     close: {
@@ -11,7 +12,7 @@ function buildTabContextMenu(tabManager) {
     },
     closeOthers: {
       name: "Close Others",
-      enabled: (file) => getIndex(file) !== -1 && tabManager.files.length > 1,
+      enabled: (file) => getIndex(file) !== -1 && getTabs().length > 1,
       callback: (file) => tabManager.closeOtherFiles(file),
     },
     sep1: { type: "separator" },
@@ -24,14 +25,14 @@ function buildTabContextMenu(tabManager) {
       name: "Close to the Right",
       enabled: (file) => {
         const index = getIndex(file);
-        return index !== -1 && index < tabManager.files.length - 1;
+        return index !== -1 && index < getTabs().length - 1;
       },
       callback: (file) => tabManager.closeFilesToRight(file),
     },
     sep2: { type: "separator" },
     closeAll: {
       name: "Close All",
-      enabled: () => tabManager.files.length > 0,
+      enabled: () => getTabs().length > 0,
       callback: () => tabManager.closeFiles(),
     },
   };

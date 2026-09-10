@@ -15,6 +15,11 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("auto-save-toggle-requested", listener);
     return () => ipcRenderer.removeListener("auto-save-toggle-requested", listener);
   },
+  onOpenSettingsRequested: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("open-settings-requested", listener);
+    return () => ipcRenderer.removeListener("open-settings-requested", listener);
+  },
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
