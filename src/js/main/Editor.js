@@ -3,7 +3,7 @@ class Editor {
     this.isOnInit = true;
     this.isOnRefresh = false;
     this.isButtonChangePosition = false;
-    this.autoSaveEnabled = false;
+    this.autoSaveEnabled = SETTINGS_GET("files.autoSave") === true;
 
     this.domManager = new DOMManager(this);
 
@@ -105,7 +105,10 @@ class Editor {
   setAutoSaveState(enabled, { persist = true } = {}) {
     this.autoSaveEnabled = enabled === true;
     this.titleBar?.refreshAutoSaveState?.();
-    const synchronization = this.api.setAutoSaveState?.(this.autoSaveEnabled);
+    const synchronization = SETTINGS_SET(
+      "files.autoSave",
+      this.autoSaveEnabled,
+    );
     synchronization?.catch?.((error) =>
       console.error("[Auto Save] menu synchronization failed", error),
     );
@@ -272,7 +275,12 @@ var editor = null;
 
 document.addEventListener(
   "DOMContentLoaded",
-  (event) => {
+  async (event) => {
+    try {
+      SETTINGS_INITIALIZE(await window.api.getSettings());
+    } catch (error) {
+      console.error("[Startup] settings load failed; using defaults", error);
+    }
     editor = new Editor();
   },
   window,

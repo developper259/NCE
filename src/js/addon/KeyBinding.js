@@ -284,7 +284,9 @@ class KeyBinding {
       return;
     }
 
-    this.editor.writerController.write(" ".repeat(CONFIG_GET("tab_width")));
+    this.editor.writerController.write(
+      " ".repeat(SETTINGS_GET("editor.tabWidth")),
+    );
   }
 
   key_delete(s, c, m, a) {

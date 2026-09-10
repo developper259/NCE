@@ -343,7 +343,7 @@ class SmartTypingController {
   }
 
   getIndentUnit() {
-    const configuredWidth = Number(CONFIG_GET("tab_width"));
+    const configuredWidth = Number(SETTINGS_GET("editor.tabWidth"));
     const width =
       Number.isFinite(configuredWidth) && configuredWidth > 0
         ? Math.floor(configuredWidth)

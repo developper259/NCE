@@ -72,7 +72,7 @@ test("titlebar full wrapper and internal safe content area stay structurally sep
 
 test("asset and command availability contracts stay aligned", () => {
   const html = read("src/html/index.html");
-  const keybindings = read("src/config/User.js");
+  const keybindings = read("src/config/Application.js");
   const menu = read("src/ts/addon/Menu.ts");
   assert.match(html, /assets\/flaticon\/all\.css/);
   assert.match(read("src/js/manager/TabManager.js"), /assets\/icons\/close\.svg/);

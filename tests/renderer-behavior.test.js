@@ -101,7 +101,7 @@ test("bottom bar exposes loading and failure only for the active file", () => {
     [".bottomBar-file-status", status], ["#language", { querySelector: () => null }], ["#config-space", null],
   ]);
   const BottomBar = loadGlobal("src/js/addon/BottomBar.js", "BottomBar", {
-    getElement: (selector) => elements.get(selector), CONFIG_GET: () => 2,
+    getElement: (selector) => elements.get(selector), SETTINGS_GET: () => 2,
   });
   const activeFile = { loadingState: { status: "loading" } };
   const editor = { tabManager: { activeFile }, highlightController: {} };
@@ -136,7 +136,7 @@ test("language selector exposes technology logos with a neutral fallback", async
     quickPanel: { open(value) { options = value; } },
   };
   const BottomBar = loadGlobal("src/js/addon/BottomBar.js", "BottomBar", {
-    getElement: (selector) => elements.get(selector), CONFIG_GET: () => 2,
+    getElement: (selector) => elements.get(selector), SETTINGS_GET: () => 2,
   });
   const bar = new BottomBar(editor);
   await bar.openLanguage();

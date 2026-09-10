@@ -17,6 +17,9 @@ export class AppMenu {
       this.menu = new Menu();
       this.init();
       Menu.setApplicationMenu(this.menu);
+      this.setAutoSaveState(
+        this.WinAPP.app.settings?.get?.("files.autoSave") === true,
+      );
     } else {
       Menu.setApplicationMenu(null);
     }

@@ -77,7 +77,7 @@ test("packaged bootstrap invariants remain present", () => {
 });
 
 test("unfinished commands are not exposed", () => {
-  const userConfig = read("src/config/User.js");
+  const userConfig = read("src/config/Application.js");
   const menu = read("src/ts/addon/Menu.ts");
   const keyBinding = read("src/js/addon/KeyBinding.js");
 

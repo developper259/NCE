@@ -80,8 +80,8 @@ test("Quick Open caches one scan, invalidates on changes, and uses TabManager op
 test("Quick Open shortcut is registered through the central keybinding registry", () => {
   const fs = require("node:fs");
   const path = require("node:path");
-  const config = fs.readFileSync(path.join(__dirname, "../src/config/User.js"), "utf8");
+  const config = fs.readFileSync(path.join(__dirname, "../src/ts/manager/SettingsManager.ts"), "utf8");
   const binding = fs.readFileSync(path.join(__dirname, "../src/js/addon/KeyBinding.js"), "utf8");
-  assert.match(config, /action: "quick_open"[\s\S]*?key: "Mod\+P"/);
+  assert.match(config, /quick_open: "Mod\+P"/);
   assert.match(binding, /quick_open: this\.control_quick_open/);
 });

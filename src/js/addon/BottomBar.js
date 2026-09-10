@@ -65,7 +65,7 @@ class BottomBar {
   }
 
   openConfigSpace() {
-    const current = Number(CONFIG_GET("tab_width"));
+    const current = Number(SETTINGS_GET("editor.tabWidth"));
     const items = Array.from({ length: 8 }, (_, index) => {
       const value = index + 1;
       return {
@@ -82,8 +82,8 @@ class BottomBar {
       placeholder: "Select Tab Size",
       selectedId: String(current),
       items,
-      onAccept: (item) => {
-        CONFIG_SET("tab_width", item.data);
+      onAccept: async (item) => {
+        if (!(await SETTINGS_SET("editor.tabWidth", item.data))) return;
         this.refreshScrollers();
         this.editor.lineController.refresh(true);
       },
@@ -141,7 +141,7 @@ class BottomBar {
   refreshScrollers() {
     if (!this.configSpaceElement) return;
     const title = this.configSpaceElement.querySelector(".scroller-title");
-    if (title) title.innerText = `Spaces: ${CONFIG_GET("tab_width")}`;
+    if (title) title.innerText = `Spaces: ${SETTINGS_GET("editor.tabWidth")}`;
   }
 
   refreshLanguage() {

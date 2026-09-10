@@ -37,7 +37,7 @@ test("virtual viewport remaps every visible slot after delete and scrollTo", () 
   const LineController = loadGlobal(
     "src/js/controller/LineController.js",
     "LineController",
-    { OutputScroller: OutputScrollerStub, CONFIG_GET: () => 4, getOccurrence: () => 0 },
+    { OutputScroller: OutputScrollerStub, SETTINGS_GET: () => 4, getOccurrence: () => 0 },
   );
   const lines = Array.from({ length: 60 }, (_, index) => new LineNode(`LINE-${String(index).padStart(3, "0")}`));
   const slots = Array.from({ length: 6 }, (_, index) => {

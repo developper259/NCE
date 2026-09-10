@@ -185,8 +185,22 @@ export class Window {
       );
       ipcMain.handle("App:setAutoSaveState", async (_event, enabled) => {
         if (typeof enabled !== "boolean") return false;
+        const saved = await this.app.settings.set("files.autoSave", enabled);
+        if (!saved) return false;
         this.appMenu?.setAutoSaveState(enabled);
         return true;
+      });
+      ipcMain.handle("Settings:getAll", async () => this.app.settings.getAll());
+      ipcMain.handle("Settings:get", async (_event, key) =>
+        typeof key === "string" ? this.app.settings.get(key) : undefined,
+      );
+      ipcMain.handle("Settings:set", async (_event, key, value) => {
+        if (typeof key !== "string") return false;
+        const saved = await this.app.settings.set(key, value);
+        if (saved && key === "files.autoSave") {
+          this.appMenu?.setAutoSaveState(value === true);
+        }
+        return saved;
       });
       ipcMain.handle("App:rendererReady", async () => {
         this.rendererReady = true;

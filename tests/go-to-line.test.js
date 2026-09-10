@@ -86,8 +86,8 @@ test("Go to Line keeps one panel instance and is centrally registered", () => {
   f.goToLine.open();
   assert.equal(f.panelCalls.length, 1);
   assert.equal(f.panel.input.focusCalls, 1);
-  const config = fs.readFileSync(path.join(__dirname, "../src/config/User.js"), "utf8");
+  const config = fs.readFileSync(path.join(__dirname, "../src/ts/manager/SettingsManager.ts"), "utf8");
   const binding = fs.readFileSync(path.join(__dirname, "../src/js/addon/KeyBinding.js"), "utf8");
-  assert.match(config, /action: "go_to_line"[\s\S]*?key: "Mod\+G"/);
+  assert.match(config, /go_to_line: "Mod\+G"/);
   assert.match(binding, /go_to_line: this\.control_go_to_line/);
 });

@@ -109,11 +109,14 @@ test("native macOS File menu exposes an IPC-backed Auto Save checkbox", () => {
   const { AppMenu } = loadMain("dist/ts/addon/Menu.js", {
     electron: { Menu, MenuItem, dialog: {} },
   }, { process: { platform: "darwin" } });
-  const menu = new AppMenu({ webContents: { send: (...args) => sent.push(args) } }, { app: {} });
+  const menu = new AppMenu(
+    { webContents: { send: (...args) => sent.push(args) } },
+    { app: { settings: { get: () => true } } },
+  );
   assert.equal(menu.autoSaveItem.type, "checkbox");
-  assert.equal(menu.autoSaveItem.checked, false);
-  menu.setAutoSaveState(true);
   assert.equal(menu.autoSaveItem.checked, true);
+  menu.setAutoSaveState(false);
+  assert.equal(menu.autoSaveItem.checked, false);
   menu.autoSaveItem.click();
   assert.deepEqual(sent, [["auto-save-toggle-requested"]]);
 });

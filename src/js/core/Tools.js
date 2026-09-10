@@ -59,7 +59,7 @@ normalizeTabWidth = (tabWidth) => {
   return Number.isFinite(width) && width > 0 ? Math.floor(width) : 1;
 };
 
-expandTabsForDisplay = (text, tabWidth = CONFIG_GET("tab_width")) => {
+expandTabsForDisplay = (text, tabWidth = SETTINGS_GET("editor.tabWidth")) => {
   const value = typeof text === "string" ? text : "";
   return value.replace(/\t/g, " ".repeat(normalizeTabWidth(tabWidth)));
 };
@@ -67,7 +67,7 @@ expandTabsForDisplay = (text, tabWidth = CONFIG_GET("tab_width")) => {
 realColumnToViewColumn = (
   text,
   realColumn,
-  tabWidth = CONFIG_GET("tab_width"),
+  tabWidth = SETTINGS_GET("editor.tabWidth"),
 ) => {
   const value = typeof text === "string" ? text : "";
   const safeColumn = Math.max(0, Math.min(Number(realColumn) || 0, value.length));
@@ -80,7 +80,7 @@ realColumnToViewColumn = (
 viewColumnToRealColumn = (
   text,
   viewColumn,
-  tabWidth = CONFIG_GET("tab_width"),
+  tabWidth = SETTINGS_GET("editor.tabWidth"),
 ) => {
   const value = typeof text === "string" ? text : "";
   const target = Number(viewColumn) || 0;
@@ -109,7 +109,7 @@ viewColumnToRealColumn = (
   return realColumn;
 };
 
-getVisualTextLength = (text, tabWidth = CONFIG_GET("tab_width")) => {
+getVisualTextLength = (text, tabWidth = SETTINGS_GET("editor.tabWidth")) => {
   const value = typeof text === "string" ? text : "";
   return realColumnToViewColumn(value, value.length, tabWidth);
 };

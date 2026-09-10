@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("api", {
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
   setAutoSaveState: (enabled) =>
     ipcRenderer.invoke("App:setAutoSaveState", enabled === true),
+  getSettings: () => ipcRenderer.invoke("Settings:getAll"),
+  getSetting: (key) => ipcRenderer.invoke("Settings:get", key),
+  setSetting: (key, value) => ipcRenderer.invoke("Settings:set", key, value),
   onAutoSaveToggleRequested: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("auto-save-toggle-requested", listener);

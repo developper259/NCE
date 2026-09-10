@@ -426,7 +426,7 @@ class LineController {
 
     return (
       value.length +
-      getOccurrence("\t", value) * CONFIG_GET("tab_width") -
+      getOccurrence("\t", value) * SETTINGS_GET("editor.tabWidth") -
       getOccurrence("\t", value)
     );
   }
@@ -560,7 +560,7 @@ class LineController {
   getSlicedLine(line) {
     let startChar = 0;
     let visualStart = 0;
-    const tabWidth = CONFIG_GET("tab_width");
+    const tabWidth = SETTINGS_GET("editor.tabWidth");
 
     if (this.offsetX > 0) {
       while (startChar < line.length && visualStart < this.offsetX) {

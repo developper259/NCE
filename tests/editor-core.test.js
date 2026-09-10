@@ -196,7 +196,7 @@ test("writer splitWord and range text preserve editor semantics", () => {
 test("smart typing inserts pairs, skips closing characters, and removes pairs", () => {
   const { editor, file } = setup("");
   const SmartTypingController = loadGlobal("src/js/controller/SmartTypingController.js", "SmartTypingController", {
-    CONFIG_GET: () => 2,
+    SETTINGS_GET: () => 2,
   });
   const smart = new SmartTypingController(editor);
   assert.equal(smart.handleCharacter("(", {}), true);
@@ -212,7 +212,7 @@ test("smart typing inserts pairs, skips closing characters, and removes pairs", 
 test("smart typing handles structural enter and multiline paste", () => {
   const { editor, file } = setup("{}");
   const SmartTypingController = loadGlobal("src/js/controller/SmartTypingController.js", "SmartTypingController", {
-    CONFIG_GET: () => 2,
+    SETTINGS_GET: () => 2,
   });
   const smart = new SmartTypingController(editor);
   editor.cursorController.setCursorPosition(1, 1);

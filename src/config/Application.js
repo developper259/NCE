@@ -1,141 +1,118 @@
+// Static application configuration. Persistent preferences live in settings.json.
 const USERCONFIG_KEYBINDING = [
   {
     action: "save",
     description: "Save the current file",
-    key: "Mod+S",
     in_editor: false,
   },
   {
     action: "open_file",
     description: "Open a file",
-    key: "Mod+O",
     in_editor: false,
   },
   {
     action: "quick_open",
     description: "Quick Open",
-    key: "Mod+P",
     in_editor: false,
   },
   {
     action: "go_to_line",
     description: "Go to Line",
-    key: "Mod+G",
     in_editor: false,
   },
   {
     action: "open_folder",
     description: "Open a folder",
-    key: "Mod+Shift+O",
     in_editor: false,
   },
   {
     action: "new_file",
     description: "Create a new file",
-    key: "Mod+N",
     in_editor: false,
   },
   {
     action: "close_file",
     description: "Close the current file",
-    key: "Mod+W",
     in_editor: false,
   },
   {
     action: "close_all_file",
     description: "Close all files",
-    key: "Mod+Shift+W",
     in_editor: false,
   },
   {
     action: "copy",
     description: "Copy the selection",
-    key: "Mod+C",
     in_editor: true,
   },
   {
     action: "paste",
     description: "Paste content",
-    key: "Mod+V",
     in_editor: true,
   },
   {
     action: "cut",
     description: "Cut the selection",
-    key: "Mod+X",
     in_editor: true,
   },
   {
     action: "undo",
     description: "Undo the last action",
-    key: "Mod+Z",
     in_editor: true,
   },
   {
     action: "redo",
     description: "Redo the last action",
-    key: "Mod+Y",
     in_editor: true,
   },
   {
     action: "find",
     description: "Find in the current file",
-    key: "Mod+F",
     in_editor: false,
   },
   {
     action: "open_command",
     description: "Open the command palette",
-    key: "Mod+Shift+P",
     in_editor: false,
   },
   {
     action: "delete_line",
     description: "Delete the current line",
-    key: "Mod+Shift+K",
     in_editor: true,
   },
   {
     action: "select_all",
     description: "Select all",
-    key: "Mod+A",
     in_editor: true,
   },
   {
     action: "toggle_file_explorer",
     description: "Toggle File Explorer",
-    key: "Mod+B",
     in_editor: false,
   },
   {
     action: "toggle_search",
     description: "Toggle advanced search",
-    key: "Mod+Shift+F",
     in_editor: false,
   },
   {
     action: "toggle_agent",
     description: "Open Agent",
-    key: "Mod+L",
     in_editor: false,
   },
-  { key: "Escape", action: "escape", in_editor: false },
-  { key: "Tab", action: "indent_right", in_editor: true },
-  { key: "Delete", action: "delete_right", in_editor: true },
-  { key: "Backspace", action: "delete_left", in_editor: true },
-  { key: "Enter", action: "newline", in_editor: true },
-  { key: "ArrowUp", action: "move_up", in_editor: false },
-  { key: "ArrowDown", action: "move_down", in_editor: false },
-  { key: "ArrowLeft", action: "move_left", in_editor: false },
-  { key: "ArrowRight", action: "move_right", in_editor: false },
-  { key: "Home", action: "move_to_line_start", in_editor: true },
-  { key: "End", action: "move_to_line_end", in_editor: true },
-  { key: "Insert", action: "toggle_insert_mode", in_editor: true },
+  { action: "escape", in_editor: false },
+  { action: "indent_right", in_editor: true },
+  { action: "delete_right", in_editor: true },
+  { action: "delete_left", in_editor: true },
+  { action: "newline", in_editor: true },
+  { action: "move_up", in_editor: false },
+  { action: "move_down", in_editor: false },
+  { action: "move_left", in_editor: false },
+  { action: "move_right", in_editor: false },
+  { action: "move_to_line_start", in_editor: true },
+  { action: "move_to_line_end", in_editor: true },
+  { action: "toggle_insert_mode", in_editor: true },
 ];
-
-USERCONFIG_CONFIG = {
-  tab_width: 2,
-};
 
 USERCONFIG_SIDEBAR_MENUS = [
   {
@@ -343,12 +320,4 @@ function CONFIG_KEYBINDING_GET_ACTION(action) {
   for (item of USERCONFIG_KEYBINDING) {
     if (item.action.toLowerCase() == action.toLowerCase()) return item;
   }
-}
-
-function CONFIG_GET(key) {
-  return USERCONFIG_CONFIG[key];
-}
-
-function CONFIG_SET(key, val) {
-  USERCONFIG_CONFIG[key] = val;
 }

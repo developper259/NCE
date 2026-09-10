@@ -10,7 +10,10 @@ const FileNode = loadGlobal('src/js/types/File.js', 'FileNode', { LineNode });
 const NCEPath = loadGlobal('src/js/core/Path.js', 'NCEPath');
 const FileLoader = loadGlobal('src/js/addon/FileLoader.js', 'FileLoader', { LineNode, window: {} });
 const TabManager = loadGlobal('src/js/manager/TabManager.js', 'tabManager', { FileNode, NCEPath, getElement: () => null, Events: {} });
-const Editor = loadGlobal('src/js/main/Editor.js', 'Editor', { document: { addEventListener() {} }, window: {} });
+const Editor = loadGlobal('src/js/main/Editor.js', 'Editor', {
+  document: { addEventListener() {} }, window: {},
+  SETTINGS_GET: () => false, SETTINGS_SET: async () => true,
+});
 const StatesManager = loadGlobal('src/js/manager/StatesManager.js', 'StatesManager', { FileNode });
 const quiet = { ...console, warn() {}, error() {} };
 
@@ -133,17 +136,17 @@ test('existing FileNode auto-save follows the shared state and safe save pipelin
   assert.equal(file.deletedFromDisk, true);
 });
 
-test('auto-save preference is serialized and restored before tabs', async () => {
+test('auto-save preference is absent from session state and legacy state is ignored', async () => {
   const editor = setup();
   editor.fileExplorer = null;
   editor.autoSaveEnabled = true;
   editor.getAutoSaveState = () => editor.autoSaveEnabled;
   const state = new StatesManager(editor).getState();
-  assert.equal(state.preferences.autoSave, true);
-  let restored;
-  editor.setAutoSaveState = (enabled, options) => { restored = [enabled, options.persist]; };
+  assert.equal('preferences' in state, false);
+  let restored = false;
+  editor.setAutoSaveState = () => { restored = true; };
   await new StatesManager(editor).loadStates({ preferences: { autoSave: true } });
-  assert.deepEqual(restored, [true, false]);
+  assert.equal(restored, false);
 });
 
 for (const mode of ['failure', 'cancel', 'complete', 'save-as', 'short-chunk']) {

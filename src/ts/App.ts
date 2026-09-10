@@ -1,6 +1,7 @@
 import { app } from 'electron';
 import { Window } from './Window';
 import { NSHServer } from 'nsh/server';
+import { SettingsManager } from './manager/SettingsManager';
 
 export class App {
   window: Window;
@@ -8,6 +9,7 @@ export class App {
   nshEndpoint: { host: string; port: number } | null = null;
   nshStarting = false;
   nshStopping = false;
+  settings!: SettingsManager;
   name = "NCE";
 
   version = app.getVersion();
@@ -25,6 +27,8 @@ export class App {
   }
   setupAppEvents() {
     app.on("ready", async () => {
+      this.settings = new SettingsManager(app.getPath("userData"));
+      await this.settings.initialize();
       await this.startNsh();
       this.window.create();
     });
