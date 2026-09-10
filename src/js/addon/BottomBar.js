@@ -25,6 +25,7 @@ class BottomBar {
       .filter((language, index, values) => values.indexOf(language) === index)
       .map((language) => ({
         id: language.toLowerCase(),
+        icon: this.getLanguageLogo(language),
         label:
           language === "plaintext"
             ? "Plain Text"
@@ -46,6 +47,21 @@ class BottomBar {
         this.refreshLanguage();
       },
     });
+  }
+
+  getLanguageLogo(language) {
+    const logos = {
+      javascript: "fi fi-brands-js language-logo-javascript",
+      typescript: "fi fi-brands-typescript language-logo-typescript",
+      python: "fi fi-brands-python language-logo-python",
+      html: "fi fi-brands-html5 language-logo-html",
+      css: "fi fi-brands-css3 language-logo-css",
+      php: "fi fi-brands-php language-logo-php",
+      java: "fi fi-brands-java language-logo-java",
+      c: "fi fi-brands-c language-logo-c",
+      cpp: "fi fi-brands-c language-logo-c",
+    };
+    return `${logos[language] || "fi fi-rr-code-simple"} quick-panel-language-logo`;
   }
 
   openConfigSpace() {

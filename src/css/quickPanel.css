@@ -121,6 +121,19 @@
   text-align: center;
 }
 
+.quick-panel-item > i.language-logo-javascript { color: #f7df1e; }
+.quick-panel-item > i.language-logo-typescript { color: #3178c6; }
+.quick-panel-item > i.language-logo-python { color: #3776ab; }
+.quick-panel-item > i.language-logo-html { color: #e34f26; }
+.quick-panel-item > i.language-logo-css { color: #1572b6; }
+.quick-panel-item > i.language-logo-php { color: #777bb4; }
+.quick-panel-item > i.language-logo-java { color: #e76f00; }
+.quick-panel-item > i.language-logo-c { color: #a8b9cc; }
+
+.quick-panel-item > i.quick-panel-language-logo:not([class*="language-logo-"]) {
+  color: var(--text-secondary);
+}
+
 .quick-panel-item-content {
   display: flex;
   min-width: 0;

@@ -118,3 +118,32 @@ test("bottom bar exposes loading and failure only for the active file", () => {
   bar.refreshFileStatus();
   assert.equal(status.style.display, "none");
 });
+
+test("language selector exposes technology logos with a neutral fallback", async () => {
+  const elements = new Map([
+    [".bottomBar-cursorPos", {}], [".bottomBar-cursor-status", { style: {} }],
+    [".bottomBar-file-status", { style: {}, querySelector: () => ({ innerText: "" }) }],
+    ["#language", { querySelector: () => ({ innerText: "" }) }],
+    ["#config-space", { querySelector: () => ({ innerText: "" }) }],
+  ]);
+  let options;
+  const editor = {
+    tabManager: { activeFile: { language: "javascript" } },
+    highlightController: {
+      getSupportedLanguage: async () => ["javascript", "typescript", "json"],
+      changeLanguage: async () => {},
+    },
+    quickPanel: { open(value) { options = value; } },
+  };
+  const BottomBar = loadGlobal("src/js/addon/BottomBar.js", "BottomBar", {
+    getElement: (selector) => elements.get(selector), CONFIG_GET: () => 2,
+  });
+  const bar = new BottomBar(editor);
+  await bar.openLanguage();
+  assert.equal(options.items.find((item) => item.id === "javascript").icon,
+    "fi fi-brands-js language-logo-javascript quick-panel-language-logo");
+  assert.equal(options.items.find((item) => item.id === "typescript").icon,
+    "fi fi-brands-typescript language-logo-typescript quick-panel-language-logo");
+  assert.equal(options.items.find((item) => item.id === "json").icon,
+    "fi fi-rr-code-simple quick-panel-language-logo");
+});
