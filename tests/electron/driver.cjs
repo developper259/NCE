@@ -41,6 +41,15 @@ app.whenReady().then(() => {
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
       assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), false);
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'G', modifiers: [quickOpenModifier] });
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'G', modifiers: [quickOpenModifier] });
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(await run('editor.quickPanel.isOpen("go-to-line")'), true);
+      assert.equal(await run('document.querySelector(".quick-panel-empty").textContent'), 'No file open.');
+      assert.equal(await run('document.activeElement === document.querySelector(".quick-panel-input")'), true);
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
+      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+      assert.equal(await run('editor.quickPanel.isOpen("go-to-line")'), false);
       await run('window.__nceReloadGuard = true');
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });

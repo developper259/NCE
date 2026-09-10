@@ -115,6 +115,7 @@ test("critical renderer components and build assets are registered", () => {
     "controller/SelectController.js",
     "controller/SmartTypingController.js",
     "types/QuickPanel.js",
+    "quickPanel/GoToLine.js",
     "manager/StatesManager.js",
     "addon/MarkdownRenderer.js",
     "sidebar/FileExplorer.Sidebar.js",

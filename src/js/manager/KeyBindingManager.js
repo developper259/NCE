@@ -75,9 +75,11 @@ class KeyBindingManager {
   onKey(e) {
     if (this.isComposing || e.isComposing || e.keyCode === 229) return;
 
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey &&
-        e.key.toLowerCase() === "p") {
-      const binding = CONFIG_KEYBINDING_GET_ACTION("quick_open");
+    const quickAction = { p: "quick_open", g: "go_to_line" }[
+      e.key.toLowerCase()
+    ];
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && quickAction) {
+      const binding = CONFIG_KEYBINDING_GET_ACTION(quickAction);
       if (binding) {
         this.editor.keyBinding.exec(binding, e);
         e.preventDefault();

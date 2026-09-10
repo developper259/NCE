@@ -330,7 +330,15 @@ class QuickPanel {
     this.error.hidden = true;
     this.empty.hidden = true;
 
-    if (this.session.mode === "input") return;
+    if (this.session.mode === "input") {
+      const message = this.session.options.message;
+      if (message) {
+        this.empty.textContent = typeof message === "function"
+          ? message() : message;
+        this.empty.hidden = false;
+      }
+      return;
+    }
     if (this.session.loading) {
       this.empty.textContent = "Loading...";
       this.empty.hidden = false;

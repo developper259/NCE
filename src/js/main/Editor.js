@@ -39,6 +39,7 @@ class Editor {
     this.contextMenuManager = new ContextMenuManager();
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
+    this.goToLine = new GoToLine(this);
 
     this.agent = new Agent(this);
 

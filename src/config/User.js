@@ -18,6 +18,12 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "go_to_line",
+    description: "Go to Line",
+    key: "Mod+G",
+    in_editor: false,
+  },
+  {
     action: "open_folder",
     description: "Open a folder",
     key: "Mod+Shift+O",
