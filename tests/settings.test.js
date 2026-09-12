@@ -127,6 +127,10 @@ test('keybindings are validated, merged and persisted as settings', async () => 
     const restarted = new SettingsManager(root);
     await restarted.initialize();
     assert.equal(restarted.get('keybindings.quick_open'), 'Mod+K');
+    assert.equal(await manager.set('keybindings.quick_open', null), true);
+    const withoutQuickOpen = new SettingsManager(root);
+    await withoutQuickOpen.initialize();
+    assert.equal(withoutQuickOpen.get('keybindings.quick_open'), null);
     assert.equal(await manager.set('keybindings.save', ''), false);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });

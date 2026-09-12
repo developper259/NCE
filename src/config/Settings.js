@@ -66,11 +66,13 @@ function SETTINGS_INITIALIZE(settings) {
     keybindings: Object.fromEntries(
       Object.entries(DEFAULT_KEYBINDINGS).map(([action, shortcut]) => [
         action,
-        typeof settings?.keybindings?.[action] === "string" &&
-        settings.keybindings[action].trim() &&
-        settings.keybindings[action].length <= 128
-          ? settings.keybindings[action]
-          : shortcut,
+        settings?.keybindings?.[action] === null
+          ? null
+          : typeof settings?.keybindings?.[action] === "string" &&
+              settings.keybindings[action].trim() &&
+              settings.keybindings[action].length <= 128
+            ? settings.keybindings[action]
+            : shortcut,
       ]),
     ),
   };

@@ -84,6 +84,9 @@
 .settings-section {
   max-width: 760px;
 }
+.settings-section + .settings-section {
+  margin-top: 24px;
+}
 .settings-section h2 {
   margin: 0 0 12px;
   font-size: 17px;
@@ -226,7 +229,8 @@
 .setting-shortcut-key.recording {
   color: inherit;
 }
-.setting-shortcut-reset {
+.setting-shortcut-reset,
+.setting-shortcut-delete {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -241,12 +245,17 @@
   cursor: pointer;
   transition: color 120ms ease, background 120ms ease;
 }
-.setting-shortcut-reset:hover {
+.setting-shortcut-reset:hover,
+.setting-shortcut-delete:hover {
   color: var(--text-primary);
   background: var(--bg-hover-alt);
 }
-.setting-shortcut-reset:active {
+.setting-shortcut-reset:active,
+.setting-shortcut-delete:active {
   background: var(--bg-tertiary);
+}
+.setting-shortcut-delete:hover {
+  color: var(--error, #d66);
 }
 @media (max-width: 760px) {
   .settings-nav {

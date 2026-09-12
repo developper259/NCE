@@ -79,6 +79,8 @@ class SettingsView {
         button.dataset.category = category;
         button.addEventListener("click", () => {
           this.category = category;
+          this.query = "";
+          if (this.search) this.search.value = "";
           this.renderNavigation();
           this.render();
         });
@@ -226,6 +228,14 @@ class SettingsView {
     resetBtn.innerHTML = '<i class="fi fi-rr-undo" aria-hidden="true"></i>';
     resetBtn.tabIndex = -1;
 
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "setting-shortcut-delete";
+    deleteBtn.title = "Delete shortcut";
+    deleteBtn.setAttribute("aria-label", `Delete shortcut for ${setting.label}`);
+    deleteBtn.innerHTML = '<i class="fi fi-rr-trash" aria-hidden="true"></i>';
+    deleteBtn.tabIndex = -1;
+
     let listening = false;
     let keydownHandler = null;
     let keyupHandler = null;
@@ -350,7 +360,13 @@ class SettingsView {
       }
     });
 
-    wrapper.append(display, resetBtn);
+    deleteBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      stopListening();
+      await applyShortcut(null);
+    });
+
+    wrapper.append(display, resetBtn, deleteBtn);
     return wrapper;
   }
 

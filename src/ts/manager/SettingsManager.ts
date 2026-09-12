@@ -4,10 +4,10 @@ import path from "node:path";
 export interface Settings {
   editor: { tabWidth: number };
   files: { autoSave: boolean };
-  keybindings: Record<string, string>;
+  keybindings: Record<string, string | null>;
 }
 
-export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string>> =
+export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   Object.freeze({
     save: "Mod+S",
     open_file: "Mod+O",
@@ -29,7 +29,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string>> =
     toggle_file_explorer: "Mod+B",
     toggle_search: "Mod+Shift+F",
     toggle_agent: "Mod+L",
-    open_settings: "Mod+,",
+    open_settings: null,
     reload_window: "Mod+R",
     escape: "Escape",
     indent_right: "Tab",
@@ -175,6 +175,7 @@ export class SettingsManager {
     }
     if (key === "files.autoSave") return typeof value === "boolean";
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
+      if (value === null) return true;
       return (
         typeof value === "string" &&
         value.trim().length > 0 &&
