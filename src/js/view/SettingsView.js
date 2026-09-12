@@ -54,13 +54,14 @@ class SettingsView {
     const shortcuts =
       typeof USERCONFIG_KEYBINDING === "undefined"
         ? []
-        : USERCONFIG_KEYBINDING.map((binding) => ({
+        : USERCONFIG_KEYBINDING.filter((binding) => binding.description)
+          .map((binding) => ({
             key: `keybindings.${binding.action}`,
             category: "Shortcuts",
-            label: binding.description || binding.action,
+            label: binding.description,
             description: `Keyboard shortcut for ${binding.action.replace(/_/g, " ")}.`,
             keywords: [binding.action, "shortcut", "keybinding"],
-            control: "text",
+            control: "shortcut",
           }));
     return [...SETTINGS_UI, ...shortcuts];
   }
@@ -144,7 +145,9 @@ class SettingsView {
         ? this.createSelect(setting, controlId)
         : setting.control === "checkbox"
           ? this.createCheckbox(setting, controlId)
-          : this.createTextInput(setting, controlId);
+          : setting.control === "shortcut"
+            ? this.createShortcutInput(setting, controlId)
+            : this.createTextInput(setting, controlId);
     row.append(text, control);
     return row;
   }
@@ -201,6 +204,190 @@ class SettingsView {
       }
     });
     return input;
+  }
+
+  createShortcutInput(setting, id) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "setting-shortcut-wrap";
+
+    const display = document.createElement("button");
+    display.id = id;
+    display.type = "button";
+    display.className = "setting-shortcut-btn";
+    display.setAttribute("aria-label", `Change shortcut for ${setting.label}`);
+
+    const currentKey = SETTINGS_GET(setting.key) || "";
+    this._renderShortcutKeys(display, currentKey);
+
+    const resetBtn = document.createElement("button");
+    resetBtn.type = "button";
+    resetBtn.className = "setting-shortcut-reset";
+    resetBtn.title = "Reset to default";
+    resetBtn.innerHTML = '<i class="fi fi-rr-undo" aria-hidden="true"></i>';
+    resetBtn.tabIndex = -1;
+
+    let listening = false;
+    let keydownHandler = null;
+    let keyupHandler = null;
+
+    const buildCurrentParts = (e) => {
+      const parts = [];
+      if (e.ctrlKey || e.metaKey) parts.push("Mod");
+      if (e.shiftKey) parts.push("Shift");
+      if (e.altKey) parts.push("Alt");
+      return parts;
+    };
+
+    const renderLiveParts = (parts) => {
+      display.replaceChildren();
+      if (!parts.length) {
+        display.textContent = "Press a key combination...";
+        return;
+      }
+      const shortcut = document.createElement("span");
+      shortcut.className = "setting-shortcut-key recording";
+      shortcut.textContent = `${this._formatShortcutDisplay(parts.join("+"))} …`;
+      display.appendChild(shortcut);
+    };
+
+    const startListening = () => {
+      if (listening) return;
+      listening = true;
+      display.classList.add("listening");
+      display.textContent = "Press a key combination...";
+
+      keydownHandler = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        // Show modifiers progressively
+        if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+          renderLiveParts(buildCurrentParts(e));
+          return;
+        }
+
+        // Final key pressed — build full combo
+        const parts = buildCurrentParts(e);
+        let key = e.key;
+        if (key === " ") key = "Space";
+        else if (key.length === 1) key = key.toUpperCase();
+        parts.push(key);
+
+        const combo = parts.join("+");
+        stopListening();
+        applyShortcut(combo);
+      };
+
+      keyupHandler = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+
+        // Update display when a modifier is released
+        if (["Shift", "Control", "Alt", "Meta"].includes(e.key)) {
+          const parts = buildCurrentParts(e);
+          renderLiveParts(parts);
+        }
+      };
+
+      document.addEventListener("keydown", keydownHandler, true);
+      document.addEventListener("keyup", keyupHandler, true);
+
+      // Cancel on click outside
+      setTimeout(() => {
+        document.addEventListener("mousedown", cancelOnClickOutside, true);
+      }, 0);
+    };
+
+    const cancelOnClickOutside = (e) => {
+      if (!display.contains(e.target)) {
+        stopListening();
+      }
+    };
+
+    const stopListening = () => {
+      if (!listening) return;
+      listening = false;
+      display.classList.remove("listening");
+      document.removeEventListener("keydown", keydownHandler, true);
+      document.removeEventListener("keyup", keyupHandler, true);
+      document.removeEventListener("mousedown", cancelOnClickOutside, true);
+      keydownHandler = null;
+      keyupHandler = null;
+      const currentVal = SETTINGS_GET(setting.key) || "";
+      this._renderShortcutKeys(display, currentVal);
+    };
+
+    const applyShortcut = async (combo) => {
+      const previous = SETTINGS_GET(setting.key) || "";
+      if (!(await SETTINGS_SET(setting.key, combo))) {
+        this._renderShortcutKeys(display, previous);
+      } else {
+        this._renderShortcutKeys(display, combo);
+      }
+    };
+
+    display.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startListening();
+    });
+
+    display.addEventListener("keydown", (e) => {
+      if (!listening && (e.key === "Enter" || e.key === " ")) {
+        e.preventDefault();
+        startListening();
+      }
+    });
+
+    resetBtn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      stopListening();
+      const action = setting.key.split(".")[1];
+      const defaultKey = DEFAULT_KEYBINDINGS[action];
+      if (defaultKey) {
+        await applyShortcut(defaultKey);
+      }
+    });
+
+    wrapper.append(display, resetBtn);
+    return wrapper;
+  }
+
+  _renderShortcutKeys(container, keyCombo) {
+    container.replaceChildren();
+    const displayKey = this._formatShortcutDisplay(keyCombo);
+    if (!displayKey) {
+      container.textContent = "Not set";
+      return;
+    }
+    const shortcut = document.createElement("span");
+    shortcut.className = "setting-shortcut-key";
+    shortcut.textContent = displayKey;
+    container.appendChild(shortcut);
+  }
+
+  _formatShortcutDisplay(keyCombo) {
+    const parts = CONFIG_KEYBINDING_DISPLAY(keyCombo)
+      .split("+")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (window.api?.platform !== "darwin") return parts.join(" ");
+
+    const macSymbols = {
+      meta: "⌘",
+      cmd: "⌘",
+      command: "⌘",
+      shift: "⇧",
+      alt: "⌥",
+      option: "⌥",
+      ctrl: "⌃",
+      control: "⌃",
+    };
+    return parts
+      .map((part) => macSymbols[part.toLowerCase()] || part)
+      .join(" ");
   }
 
   sync(key) {

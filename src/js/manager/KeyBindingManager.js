@@ -75,18 +75,8 @@ class KeyBindingManager {
   onKey(e) {
     if (this.isComposing || e.isComposing || e.keyCode === 229) return;
 
-    const quickAction = { p: "quick_open", g: "go_to_line" }[
-      e.key.toLowerCase()
-    ];
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && quickAction) {
-      const binding = CONFIG_KEYBINDING_GET_ACTION(quickAction);
-      if (binding) {
-        this.editor.keyBinding.exec(binding, e);
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-    }
+    // Skip when a shortcut capture is active in settings
+    if (document.querySelector(".setting-shortcut-btn.listening")) return;
 
     if (this.isAgentMessageTarget(e.target)) {
       const isModifier = e.metaKey || e.ctrlKey;

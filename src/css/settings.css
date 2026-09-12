@@ -170,6 +170,84 @@
   margin: 4px 0;
   color: var(--text-tertiary);
 }
+
+/* Shortcut capture button */
+.setting-shortcut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.setting-shortcut-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  height: 24px;
+  box-sizing: border-box;
+  padding: 0 7px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  user-select: none;
+}
+.setting-shortcut-btn:hover {
+  border-color: var(--text-tertiary);
+  background: var(--bg-hover-alt);
+  color: var(--text-primary);
+}
+.setting-shortcut-btn:focus-visible {
+  border-color: var(--accent-primary);
+  outline: 1px solid var(--accent-primary);
+  outline-offset: 1px;
+}
+.setting-shortcut-btn.listening {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+  font-style: italic;
+}
+.setting-shortcut-key {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+}
+.setting-shortcut-key.recording {
+  color: inherit;
+}
+.setting-shortcut-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.setting-shortcut-reset:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover-alt);
+}
+.setting-shortcut-reset:active {
+  background: var(--bg-tertiary);
+}
 @media (max-width: 760px) {
   .settings-nav {
     width: 150px;
