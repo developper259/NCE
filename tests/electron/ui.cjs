@@ -14,7 +14,7 @@ module.exports = async function exerciseUI() {
       quit: () => commandCalls.push('exit'),
       appCommand: command => commandCalls.push(command),
     },
-    tabManager: { activeFile: { name: 'this-is-a-very-long-typescript-file-name-used-for-testing.ts', isSaved: false } },
+    tabManager: { activeFile: { name: 'this-is-a-very-long-typescript-file-name-used-for-testing.ts', isSaved: false, isVisuallyDirty() { return !this.isSaved; } } },
     fileExplorer: { projectName: 'A very long NCE project name used for layout testing' },
     keyBinding: {
       control_save: () => commandCalls.push('save'),

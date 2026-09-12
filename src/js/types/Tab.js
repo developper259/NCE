@@ -307,6 +307,13 @@ class FileNode extends Tab {
     return this.editor.getAutoSaveState?.() === true;
   }
 
+  isVisuallyDirty() {
+    return (
+      this.deletedFromDisk === true ||
+      (this.isSaved !== true && this.autoSave !== true)
+    );
+  }
+
   shouldPersistChanges() {
     return (
       this.autoSave === true && Boolean(this.path) && !this.deletedFromDisk

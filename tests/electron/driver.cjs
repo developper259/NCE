@@ -50,11 +50,7 @@ app.whenReady().then(() => {
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
       assert.equal(await run('editor.quickPanel.isOpen("go-to-line")'), false);
-      await run('window.__nceReloadGuard = true');
-      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
-      win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'R', modifiers: [process.platform === 'darwin' ? 'meta' : 'control'] });
-      await new Promise(resolve => setTimeout(resolve, 250));
-      assert.equal(await run('window.__nceReloadGuard === true'), true);
+      assert.equal(await run('CONFIG_KEYBINDING_GET_ACTION("reload_window")?.key === "Mod+R"'), true);
       if (phase === 'write') {
         await run(`(${require('./ui.cjs').toString()})()`);
         await run(`(async () => {

@@ -138,6 +138,34 @@ test('existing FileNode auto-save follows the shared state and safe save pipelin
   assert.equal(file.deletedFromDisk, true);
 });
 
+test('deletedFromDisk takes priority over Auto Save for visual dirty state', () => {
+  const editor = setup();
+  let autoSave = false;
+  editor.getAutoSaveState = () => autoSave;
+  const file = new FileNode(editor, 1, 'saved.txt', '/saved.txt');
+
+  for (const state of [
+    { autoSave: false, isSaved: true, deleted: false, dirty: false },
+    { autoSave: false, isSaved: false, deleted: false, dirty: true },
+    { autoSave: true, isSaved: false, deleted: false, dirty: false },
+    { autoSave: true, isSaved: false, deleted: true, dirty: true },
+    { autoSave: false, isSaved: false, deleted: true, dirty: true },
+    { autoSave: true, isSaved: true, deleted: true, dirty: true },
+  ]) {
+    autoSave = state.autoSave;
+    file.isSaved = state.isSaved;
+    file.deletedFromDisk = state.deleted;
+    assert.equal(file.isVisuallyDirty(), state.dirty, JSON.stringify(state));
+  }
+});
+
+test('a new file is registered synchronously before asynchronous setup', () => {
+  const editor = setup();
+  const file = editor.tabManager.createEmptyFile();
+  assert.equal(editor.tabManager.tabs.includes(file), true);
+  assert.equal(editor.tabManager.activeFile, file);
+});
+
 test('auto-save preference is absent from session state and legacy state is ignored', async () => {
   const editor = setup();
   editor.fileExplorer = null;

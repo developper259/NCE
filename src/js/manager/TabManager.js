@@ -397,9 +397,24 @@ class tabManager {
   }
 
   createEmptyFile() {
-    let node = new FileNode(this.editor, this.getNextID(), this.emptyName, "");
+    const node = new FileNode(
+      this.editor,
+      this.getNextID(),
+      this.emptyName,
+      "",
+    );
     node.isLoaded = true;
-    this.openFile(node);
+    this.tabs.push(node);
+    this.activeTab = node;
+    this.refresh();
+    void (async () => {
+      await node.loadLanguage();
+      await this.setFocusFile(node);
+      this.editor.events.callEvent(Events.ON_OPEN_FILE, {
+        files: [node],
+        activeFile: node,
+      });
+    })();
 
     return node;
   }
@@ -458,11 +473,7 @@ class tabManager {
 
     // Auto Save owns persistence while enabled. Keep the close affordance
     // stable instead of flashing the transient unsaved dot during its write.
-    if (
-      file.type !== TAB_TYPES.FILE ||
-      file.isSaved ||
-      (file.autoSave === true && !file.deletedFromDisk)
-    ) {
+    if (file.type !== TAB_TYPES.FILE || !file.isVisuallyDirty()) {
       const btnSpan = document.createElement("span");
       btnSpan.className = "file-el-btn file-saved";
 
