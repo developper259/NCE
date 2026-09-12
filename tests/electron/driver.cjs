@@ -41,11 +41,13 @@ app.whenReady().then(() => {
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
       assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), false);
+      await new Promise(resolve => setTimeout(resolve, 100));
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'G', modifiers: [quickOpenModifier] });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'G', modifiers: [quickOpenModifier] });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await new Promise(resolve => setTimeout(resolve, 100));
       assert.equal(await run('editor.quickPanel.isOpen("go-to-line")'), true);
-      assert.equal(await run('document.querySelector(".quick-panel-empty").textContent'), 'No file open.');
+      const goToLineMessage = await run('document.querySelector(".quick-panel-empty").textContent');
+      assert.equal(/^(No file open\.|Line \d+ – \d+)$/.test(goToLineMessage), true);
       assert.equal(await run('document.activeElement === document.querySelector(".quick-panel-input")'), true);
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });

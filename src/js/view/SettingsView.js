@@ -54,15 +54,16 @@ class SettingsView {
     const shortcuts =
       typeof USERCONFIG_KEYBINDING === "undefined"
         ? []
-        : USERCONFIG_KEYBINDING.filter((binding) => binding.description)
-          .map((binding) => ({
-            key: `keybindings.${binding.action}`,
-            category: "Shortcuts",
-            label: binding.description,
-            description: `Keyboard shortcut for ${binding.action.replace(/_/g, " ")}.`,
-            keywords: [binding.action, "shortcut", "keybinding"],
-            control: "shortcut",
-          }));
+        : USERCONFIG_KEYBINDING.filter((binding) => binding.description).map(
+            (binding) => ({
+              key: `keybindings.${binding.action}`,
+              category: "Shortcuts",
+              label: binding.description,
+              description: `Keyboard shortcut for ${binding.action.replace(/_/g, " ")}.`,
+              keywords: [binding.action, "shortcut", "keybinding"],
+              control: "shortcut",
+            }),
+          );
     return [...SETTINGS_UI, ...shortcuts];
   }
 
@@ -232,7 +233,10 @@ class SettingsView {
     deleteBtn.type = "button";
     deleteBtn.className = "setting-shortcut-delete";
     deleteBtn.title = "Delete shortcut";
-    deleteBtn.setAttribute("aria-label", `Delete shortcut for ${setting.label}`);
+    deleteBtn.setAttribute(
+      "aria-label",
+      `Delete shortcut for ${setting.label}`,
+    );
     deleteBtn.innerHTML = '<i class="fi fi-rr-trash" aria-hidden="true"></i>';
     deleteBtn.tabIndex = -1;
 

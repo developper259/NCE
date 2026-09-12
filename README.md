@@ -26,6 +26,8 @@ The editor core was designed and implemented from scratch, without relying on pr
 
 Text rendering, cursor handling, selections, history, scrolling, file management and editing behaviour are handled by NCE's own architecture.
 
+**Current version**: **0.0.1-beta.2**
+
 ## Features
 
 - Fast custom editing engine
@@ -33,10 +35,16 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 - Multiple files and tabs
 - File explorer
 - Workspace search
-- Find in file
+- Find in file with selection prefill
+- Quick Open (Mod+P)
+- Go to Line (Mod+G)
+- Command Palette (Mod+Shift+P)
+- Configurable settings and keyboard shortcuts
 - Undo & Redo
 - Smart typing and automatic pairs
 - Smart indentation
+- Context menus (editor, tabs, output)
+- Auto Save
 - Cut, copy and paste
 - File and folder operations
 - Session restoration

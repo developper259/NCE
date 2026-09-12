@@ -79,7 +79,11 @@ class SearchController {
     let initialQuery = this.input.value;
     if (options.useSelection) {
       const selectedText = this.editor.selectController?.containsSelected;
-      if (selectedText && typeof selectedText === "string" && selectedText.trim()) {
+      if (
+        selectedText &&
+        typeof selectedText === "string" &&
+        selectedText.trim()
+      ) {
         // Only use single-line selections to avoid breaking the search
         if (!selectedText.includes("\n")) {
           initialQuery = selectedText;
@@ -124,7 +128,11 @@ class SearchController {
       // If already open and we have a selection, update the query
       if (options.useSelection) {
         const selectedText = this.editor.selectController?.containsSelected;
-        if (selectedText && typeof selectedText === "string" && selectedText.trim()) {
+        if (
+          selectedText &&
+          typeof selectedText === "string" &&
+          selectedText.trim()
+        ) {
           if (!selectedText.includes("\n")) {
             this.input.value = selectedText;
             this.search(selectedText);
