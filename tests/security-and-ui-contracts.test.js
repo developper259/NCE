@@ -78,6 +78,7 @@ test("asset and command availability contracts stay aligned", () => {
   assert.match(read("src/js/manager/TabManager.js"), /assets\/icons\/close\.svg/);
   assert.match(html, /js\/types\/QuickPanel\.js/);
   assert.match(keybindings, /action:\s*"open_command"/);
+  assert.match(keybindings, /action:\s*"reload_window"/);
   assert.doesNotMatch(keybindings, /action:\s*"replace"/);
   assert.doesNotMatch(menu, /label:\s*"(?:Replace|Documentation|Check for Updates)"/);
 });
@@ -93,8 +94,9 @@ test("Quick Panel keeps Command Palette and Quick Open compact and scrollable", 
   assert.doesNotMatch(css, /border-color:\s*var\(--border-accent\)/);
 });
 
-test("public UI and runtime expose no renderer reload or DevTools controls", () => {
+test("reload is keybinding-backed while DevTools remain unavailable", () => {
   const titlebar = read("src/js/addon/TitleBar.js");
+  const keybindings = read("src/config/Application.js");
   const menu = read("src/ts/addon/Menu.ts");
   const windowTs = read("src/ts/Window.ts");
   const activeLines = (source) => source
@@ -104,7 +106,9 @@ test("public UI and runtime expose no renderer reload or DevTools controls", () 
 
   assert.doesNotMatch(activeLines(titlebar), /view\.devtools|Developer Tools/);
   assert.doesNotMatch(activeLines(menu), /Reload Window|Toggle Developer Tools|reloadWindow\(|openDevTools\(|CommandOrControl\+R|Ctrl\+Shift\+I|Alt\+Cmd\+I/);
-  assert.doesNotMatch(activeLines(windowTs), /before-input-event|case "view\.devtools"|\.reload\(\)|\.openDevTools\(\)|\.closeDevTools\(\)/);
+  assert.doesNotMatch(activeLines(windowTs), /before-input-event|case "view\.devtools"|\.openDevTools\(\)|\.closeDevTools\(\)/);
+  assert.match(activeLines(keybindings), /action:\s*"reload_window"/);
+  assert.match(activeLines(windowTs), /case "view\.reload"/);
   assert.match(activeLines(titlebar), /view\.fullscreen/);
   assert.match(activeLines(windowTs), /case "view\.fullscreen"/);
   assert.match(activeLines(windowTs), /case "help\.about"/);

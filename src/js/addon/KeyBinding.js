@@ -19,6 +19,7 @@ class KeyBinding {
       find: this.control_find,
       open_command: this.control_open_command,
       open_settings: this.control_open_settings,
+      reload_window: this.control_reload_window,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,
 
@@ -201,6 +202,10 @@ class KeyBinding {
 
   control_open_settings() {
     return this.editor.openSettings();
+  }
+
+  control_reload_window() {
+    return this.editor.api.appCommand("view.reload");
   }
 
   executeCommandItem(item) {

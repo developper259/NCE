@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const {
   SettingsManager, DEFAULT_SETTINGS, DEFAULT_KEYBINDINGS,
@@ -128,6 +129,36 @@ test('keybindings are validated, merged and persisted as settings', async () => 
     assert.equal(restarted.get('keybindings.quick_open'), 'Mod+K');
     assert.equal(await manager.set('keybindings.save', ''), false);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('every configurable renderer shortcut has a persisted default', async () => {
+  const application = await fs.readFile(
+    path.join(__dirname, '../src/config/Application.js'),
+    'utf8',
+  );
+  const rendererSettings = await fs.readFile(
+    path.join(__dirname, '../src/config/Settings.js'),
+    'utf8',
+  );
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    `${application}\n${rendererSettings}\nthis.bindings = USERCONFIG_KEYBINDING; this.defaults = DEFAULT_KEYBINDINGS;`,
+    context,
+  );
+
+  for (const binding of context.bindings.filter((item) => item.description)) {
+    assert.equal(
+      Object.hasOwn(context.defaults, binding.action),
+      true,
+      `${binding.action} must have a renderer default`,
+    );
+    assert.equal(
+      Object.hasOwn(DEFAULT_KEYBINDINGS, binding.action),
+      true,
+      `${binding.action} must have a persisted default`,
+    );
+  }
 });
 
 test('settings remain IPC-scoped and session state contains no preferences', async () => {

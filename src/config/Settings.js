@@ -19,6 +19,8 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
   toggle_file_explorer: "Mod+B",
   toggle_search: "Mod+Shift+F",
   toggle_agent: "Mod+L",
+  open_settings: "Mod+,",
+  reload_window: "Mod+R",
   escape: "Escape",
   indent_right: "Tab",
   delete_right: "Delete",

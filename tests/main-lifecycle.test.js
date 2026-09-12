@@ -64,7 +64,7 @@ test("native application menu is kept only on macOS", () => {
   assert.equal(exercise("linux")[0], null);
 });
 
-test("window commands reject DevTools while fullscreen and About remain available", async () => {
+test("window commands reject DevTools while reload, fullscreen and About remain available", async () => {
   const { Window } = loadMain("dist/ts/Window.js", {
     electron: {},
     "./addon/FileManager": { FileManager: class {} },
@@ -76,17 +76,20 @@ test("window commands reject DevTools while fullscreen and About remain availabl
   });
   let fullscreen = false;
   let aboutCalls = 0;
+  let reloadCalls = 0;
   const win = new Window({});
   win.window = {
     isFullScreen: () => fullscreen,
     setFullScreen: (value) => { fullscreen = value; },
-    webContents: {},
+    webContents: { reload: () => { reloadCalls++; } },
   };
   win.appMenu = { showAbout: async () => { aboutCalls++; } };
 
   assert.equal(await win.executeWindowCommand("view.devtools"), false);
   assert.equal(await win.executeWindowCommand("view.fullscreen"), true);
   assert.equal(fullscreen, true);
+  assert.equal(await win.executeWindowCommand("view.reload"), true);
+  assert.equal(reloadCalls, 1);
   assert.equal(await win.executeWindowCommand("help.about"), true);
   assert.equal(aboutCalls, 1);
 });

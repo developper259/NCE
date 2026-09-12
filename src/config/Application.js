@@ -105,6 +105,11 @@ const USERCONFIG_KEYBINDING = [
     description: "Open Settings",
     in_editor: false,
   },
+  {
+    action: "reload_window",
+    description: "Reload Window",
+    in_editor: false,
+  },
   { action: "escape", in_editor: false },
   { action: "indent_right", in_editor: true },
   { action: "delete_right", in_editor: true },
