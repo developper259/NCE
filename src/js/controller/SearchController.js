@@ -72,12 +72,29 @@ class SearchController {
     this.editor.cursorController.disable();
   }
 
-  open() {
+  open(options = {}) {
     if (!this.editor.tabManager.activeFile) return;
+
+    // Get selected text if requested and selection exists
+    let initialQuery = this.input.value;
+    if (options.useSelection) {
+      const selectedText = this.editor.selectController?.containsSelected;
+      if (selectedText && typeof selectedText === "string" && selectedText.trim()) {
+        // Only use single-line selections to avoid breaking the search
+        if (!selectedText.includes("\n")) {
+          initialQuery = selectedText;
+        }
+      }
+    }
 
     this.isOpen = true;
 
     this.searchBar.classList.add("search-bar-visible");
+
+    // Set the input value before focusing if we have a selection
+    if (options.useSelection && initialQuery !== this.input.value) {
+      this.input.value = initialQuery;
+    }
 
     this.focusInput();
 
@@ -102,13 +119,27 @@ class SearchController {
     this.editor.cursorController.updateCaretPosition();
   }
 
-  toggle() {
+  toggle(options = {}) {
     if (this.isOpen) {
+      // If already open and we have a selection, update the query
+      if (options.useSelection) {
+        const selectedText = this.editor.selectController?.containsSelected;
+        if (selectedText && typeof selectedText === "string" && selectedText.trim()) {
+          if (!selectedText.includes("\n")) {
+            this.input.value = selectedText;
+            this.search(selectedText);
+            if (this.results.length > 0) {
+              this.currentIndex = 0;
+              this.goToResult(true, true);
+            }
+          }
+        }
+      }
       this.focusInput();
       return;
     }
 
-    this.open();
+    this.open(options);
   }
 
   onInput() {

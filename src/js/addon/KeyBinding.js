@@ -165,7 +165,7 @@ class KeyBinding {
   control_find(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
 
-    this.editor.searchController.toggle();
+    this.editor.searchController.toggle({ useSelection: true });
   }
   control_replace(s, c, m, a) {}
 
