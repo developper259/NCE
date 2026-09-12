@@ -106,6 +106,57 @@ test("scroll state clamps vertically and horizontally after content shrinks", ()
   assert.equal(scroller.clampScrollState(), false);
 });
 
+test("fractional vertical scroll keeps the rendered layers covering the viewport", () => {
+  class OutputScrollerStub {}
+  const LineController = loadGlobal(
+    "src/js/controller/LineController.js",
+    "LineController",
+    { OutputScroller: OutputScrollerStub, SETTINGS_GET: () => 4, getOccurrence: () => 0 },
+  );
+  const layers = {
+    output: element(),
+    lineNumberOutput: element(),
+    selectOutput: element(),
+    searchOutput: element(),
+  };
+  const file = {
+    lines: Array.from({ length: 100 }, (_, index) => new LineNode(`LINE-${index}`)),
+    totalLines: 100,
+    startIndex: 10,
+    offsetY: 0,
+  };
+  const controller = Object.create(LineController.prototype);
+  controller.editor = {
+    ...layers,
+    posY: 20,
+    tabManager: { activeFile: file },
+  };
+  controller.outputHeight = 100;
+
+  assert.equal(controller.renderedLineCount, 6);
+  assert.equal(controller.getRenderedLayerHeight(), 120);
+
+  for (const offsetY of [0, 5, 10, 19]) {
+    controller.offsetY = offsetY;
+    controller.applyOutputTransform();
+
+    const lastSlotBottom =
+      controller.renderedLineCount * controller.getLineHeight() - offsetY;
+    assert.ok(lastSlotBottom >= controller.getViewportHeight());
+
+    for (const layer of Object.values(layers)) {
+      assert.equal(layer.style.height, "120px");
+      assert.equal(layer.style.transform, `translate(0px, ${-offsetY}px)`);
+    }
+  }
+
+  controller.startIndex = 11;
+  controller.offsetY = 0;
+  controller.applyOutputTransform();
+  assert.equal(controller.editor.output.style.transform, "translate(0px, 0px)");
+  assert.equal(controller.getRenderedLayerHeight(), 120);
+});
+
 test("scrollTo uses zero-based display rows and converts horizontal-only cursor rows", () => {
   const observed = [];
   const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller", {

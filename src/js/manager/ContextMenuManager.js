@@ -43,7 +43,10 @@ class ContextMenuManager {
 
       payload.push({
         name: actionName,
-        keys: action.keys || null,
+        keys:
+          typeof action.keys === "function"
+            ? action.keys(context)
+            : action.keys || null,
         enabled,
       });
     }

@@ -272,8 +272,19 @@ class LineController {
     return `translate(0px, ${y}px)`;
   }
 
+  getRenderedLayerHeight() {
+    return this.renderedLineCount * this.getLineHeight();
+  }
+
   applyOutputTransform() {
     const transform = this.getOutputTransform();
+
+    const height = `${this.getRenderedLayerHeight()}px`;
+
+    this.editor.output.style.height = height;
+    this.editor.lineNumberOutput.style.height = height;
+    this.editor.selectOutput.style.height = height;
+    this.editor.searchOutput.style.height = height;
 
     this.editor.output.style.transform = transform;
     this.editor.lineNumberOutput.style.transform = transform;

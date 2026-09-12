@@ -41,6 +41,10 @@ class Editor {
       "tab",
       buildTabContextMenu(this.tabManager),
     );
+    this.contextMenuManager.setMenu(
+      "output",
+      buildOutputContextMenu(this),
+    );
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);
@@ -63,6 +67,23 @@ class Editor {
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
     this.smartTypingController = new SmartTypingController(this);
+
+    this.output.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const file = this.tabManager.activeFile;
+      const hasSelection =
+        this.selectController.hasActiveSelection?.() === true;
+      this.contextMenuManager.openContextMenu("output", {
+        isFile: Boolean(file),
+        file,
+        filePath: file?.hasPath?.() ? file.path : "",
+        rootPath: this.fileExplorer?.rootPath || "",
+        selectedText: hasSelection
+          ? String(this.selectController.containsSelected || "")
+          : "",
+      });
+    });
 
     this.events = new Events(this);
     this.keyBinding = new KeyBinding(this);
