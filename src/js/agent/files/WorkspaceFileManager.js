@@ -214,6 +214,13 @@ class WorkspaceFileManager {
       Math.min(200, verifiedContent.split(/\r?\n/).length),
       "post-create-verification",
     );
+    this.agent.runChangeTracker?.recordCreate?.({
+      success: true,
+      path: target.relativePath,
+      content: verifiedContent,
+      revision: verificationContext.revision,
+      verification: { revision: verificationContext.revision, content: verifiedContent },
+    });
     let openedInTabManager = false;
     if (
       !exists &&
@@ -546,6 +553,13 @@ class WorkspaceFileManager {
         content: verificationContext.content,
       };
     }
+    this.agent.runChangeTracker?.recordRename?.({
+      success: true,
+      oldPath: source.relativePath,
+      newPath: destination.relativePath,
+      verification,
+      renamed: true,
+    });
     return {
       success: true,
       operation: "rename",
@@ -622,6 +636,7 @@ class WorkspaceFileManager {
       };
     }
 
+    const beforeContent = (await this.agent.api?.getFileContent?.([target.absolutePath]))?.[target.absolutePath] ?? null;
     if (openFile) {
       const closed = await tabManager?.closeFile?.(openFile.id);
       if (!closed) tabManager?.markFileAsDeleted?.(target.absolutePath);
@@ -630,6 +645,7 @@ class WorkspaceFileManager {
     this.agent.editor?.quickOpen?.invalidate?.(target.root);
     await this.agent.refreshWorkspaceFolders([target.parentPath]);
 
+    this.agent.runChangeTracker?.recordDelete?.({ success: true, path: target.relativePath }, beforeContent);
     return {
       success: true,
       operation: "delete",
@@ -904,6 +920,7 @@ class WorkspaceFileManager {
         0,
         replacementText,
       );
+      this.agent.runChangeTracker?.recordModify?.(result);
       this.agent.executedModificationRequests.set(requestKey, result);
       return result;
     }
@@ -1036,6 +1053,7 @@ class WorkspaceFileManager {
       editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
       replacementText.replace(/\r\n?/g, "\n"),
     );
+    this.agent.runChangeTracker?.recordModify?.(result);
     this.agent.executedModificationRequests.set(requestKey, result);
     return result;
   }

@@ -56,13 +56,49 @@ class EditorToolRegistry {
           },
         },
       },
-      execute: (args) => ({
-        success: true,
-        taskCompleteRequested: true,
-        summary: typeof args.summary === "string" ? args.summary.trim() : "",
-        validation:
-          typeof args.validation === "string" ? args.validation.trim() : "",
-      }),
+      execute: (args = {}) => {
+        const validation = this.agent.validateTaskComplete(args);
+        if (!validation.success) {
+          return { success: false, error: validation.error };
+        }
+        return {
+          success: true,
+          taskCompleteRequested: true,
+          summary: typeof args.summary === "string" ? args.summary.trim() : "",
+          validation:
+            typeof args.validation === "string" ? args.validation.trim() : "",
+          changedFiles: this.agent.runChangeTracker?.current?.changes?.size ?? 0,
+        };
+      },
+    });
+    this.agent.registerTool("get_changed_files", {
+      description:
+        "Retourne uniquement les fichiers affectés par le run Agent courant, sans historiographie Git ou système parallèle.",
+      readOnly: true,
+      codeOnly: true,
+      parameters: { type: "object", properties: {} },
+      execute: (args = {}) => {
+        const result = this.agent.getChangedFiles(args);
+        this.agent.runChangeTracker?.markReviewChangedFiles?.();
+        return result;
+      },
+    });
+    this.agent.registerTool("get_diff", {
+      description:
+        "Retourne le diff unifié local du run Agent courant, limité au fichier demandé si un path est fourni.",
+      readOnly: true,
+      codeOnly: true,
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", minLength: 1, maxLength: 4000 },
+        },
+      },
+      execute: (args = {}) => {
+        const result = this.agent.getDiff(args);
+        this.agent.runChangeTracker?.markReviewDiff?.();
+        return result;
+      },
     });
     this.agent.registerTool("create_file", {
       description: this.agent.getCreateFileToolDescription(),

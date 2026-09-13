@@ -8,7 +8,7 @@ class ResponseBudgetEstimator {
     return list
       .map((entry) => {
         if (Number.isFinite(entry)) return entry;
-        if (entry && typeof entry === 'object') {
+        if (entry && typeof entry === "object") {
           const value = Number.isFinite(entry?.estimatedTokens)
             ? entry.estimatedTokens
             : Number.isFinite(entry?.promptTokens)
@@ -25,7 +25,8 @@ class ResponseBudgetEstimator {
 
   clamp(value, minimum, maximum) {
     if (!Number.isFinite(value)) return minimum;
-    if (Number.isFinite(maximum)) return Math.min(Math.max(value, minimum), maximum);
+    if (Number.isFinite(maximum))
+      return Math.min(Math.max(value, minimum), maximum);
     return Math.max(value, minimum);
   }
 
@@ -52,7 +53,8 @@ class ResponseBudgetEstimator {
             ? agent.maxTokens
             : null;
 
-    const configured = agent?.responseBudget || agent?.runConfig?.responseBudget || {};
+    const configured =
+      agent?.responseBudget || agent?.runConfig?.responseBudget || {};
     const baseReserved = Number.isFinite(configured.reservedForResponseTokens)
       ? configured.reservedForResponseTokens
       : 512;
@@ -72,31 +74,41 @@ class ResponseBudgetEstimator {
       : 0;
 
     const usage = this.normalizeUsage(previousUsage);
-    const lastRegularizedUsage = usage.length
-      ? usage[usage.length - 1]
-      : null;
+    const lastRegularizedUsage = usage.length ? usage[usage.length - 1] : null;
     let heuristicEstimate = Number.isFinite(lastRegularizedUsage)
       ? lastRegularizedUsage
       : baseReserved;
 
-    const runtimeKind = String(runtimeState?.kind || '').toLowerCase();
-    const largeWriteActive = runtimeState?.largeWriteActive === true || runtimeState?.largeWrite === true;
-    const lastTool = String(runtimeState?.lastTool || '').toLowerCase();
-    if (largeWriteActive || runtimeKind.includes('write') || lastTool.includes('write')) {
+    const runtimeKind = String(runtimeState?.kind || "").toLowerCase();
+    const largeWriteActive =
+      runtimeState?.largeWriteActive === true ||
+      runtimeState?.largeWrite === true;
+    const lastTool = String(runtimeState?.lastTool || "").toLowerCase();
+    if (
+      largeWriteActive ||
+      runtimeKind.includes("write") ||
+      lastTool.includes("write")
+    ) {
       heuristicEstimate += 2048;
     }
-    if (lastTool.includes('modify_file') || lastTool.includes('write_file_chunk')) {
+    if (
+      lastTool.includes("modify_file") ||
+      lastTool.includes("write_file_chunk")
+    ) {
       heuristicEstimate += 1024;
     }
 
-    if (runtimeKind.includes('read') || lastTool.includes('read_file')) {
+    if (runtimeKind.includes("read") || lastTool.includes("read_file")) {
       heuristicEstimate = Math.max(heuristicEstimate, 256);
     }
 
-    if (typeof modelHint === 'string' && modelHint.trim()) {
+    if (typeof modelHint === "string" && modelHint.trim()) {
       const parsedHint = Number.parseInt(modelHint.trim(), 10);
       if (Number.isFinite(parsedHint)) {
-        heuristicEstimate = Math.max(heuristicEstimate, Math.round(parsedHint * 0.75));
+        heuristicEstimate = Math.max(
+          heuristicEstimate,
+          Math.round(parsedHint * 0.75),
+        );
       }
     }
 
@@ -107,7 +119,10 @@ class ResponseBudgetEstimator {
     const averageUsage = usage.length
       ? usage.reduce((sum, value) => sum + value, 0) / usage.length
       : heuristicEstimate;
-    heuristicEstimate = Math.max(heuristicEstimate, Math.round(averageUsage * 0.75));
+    heuristicEstimate = Math.max(
+      heuristicEstimate,
+      Math.round(averageUsage * 0.75),
+    );
 
     // The estimator intentionally stays conservative but deterministic.
     const estimatedResponseTokens = Math.round(
@@ -142,7 +157,7 @@ class ResponseBudgetEstimator {
       safetyFactor,
       modelHintBias,
       modelHint,
-      source: 'local-deterministic-estimator',
+      source: "local-deterministic-estimator",
     };
   }
 }

@@ -3,10 +3,25 @@ class Agent {
     this.editor = editor;
     const api = editor?.api || window.api;
     this.api = { ...api };
-    for (const operation of ["saveFile", "createFile", "createFolder", "renameEntry", "deleteEntry", "copyEntry", "moveEntry", "duplicateEntry"]) {
+    for (const operation of [
+      "saveFile",
+      "createFile",
+      "createFolder",
+      "renameEntry",
+      "deleteEntry",
+      "copyEntry",
+      "moveEntry",
+      "duplicateEntry",
+    ]) {
       this.api[operation] = async (...args) => {
-        const result = await api.agentFileOperation(this.editor?.fileExplorer?.rootPath, operation, args);
-        return operation === "saveFile" && result?.success === false ? undefined : result;
+        const result = await api.agentFileOperation(
+          this.editor?.fileExplorer?.rootPath,
+          operation,
+          args,
+        );
+        return operation === "saveFile" && result?.success === false
+          ? undefined
+          : result;
       };
     }
     this.window = window;
@@ -93,6 +108,7 @@ class Agent {
     this.modelClient = new ModelClient(this);
     this.agentProgress = new AgentProgress(this);
     this.agentRunner = new AgentRunner(this);
+    this.runChangeTracker = new RunChangeTracker(this);
     this.largeFileWriter = new LargeFileWriter(this);
     this.fileContextManager = new FileContextManager(this);
     this.workspaceFileManager = new WorkspaceFileManager(this);
@@ -206,7 +222,10 @@ class Agent {
         ...config.contextCompaction,
       };
     }
-    if (config.progressGuidance && typeof config.progressGuidance === "object") {
+    if (
+      config.progressGuidance &&
+      typeof config.progressGuidance === "object"
+    ) {
       this.progressGuidance = {
         ...this.progressGuidance,
         ...config.progressGuidance,
@@ -1142,8 +1161,31 @@ class Agent {
         console.warn("[Agent] contextProvider failed:", error);
       }
     return {
+      workspace: this.editor?.fileExplorer?.rootPath || null,
       ...this.buildEditorContext(),
       ...(typeof custom === "object" ? custom : {}),
+    };
+  }
+
+  getChangedFiles(args = {}) {
+    return this.runChangeTracker?.getChangedFiles?.(args) || {
+      success: true,
+      runId: this.runId,
+      files: [],
+    };
+  }
+
+  getDiff(args = {}) {
+    return this.runChangeTracker?.getDiff?.(args) || {
+      success: false,
+      error: { code: 'NO_ACTIVE_RUN', message: 'Aucun run actif.' },
+    };
+  }
+
+  validateTaskComplete(args = {}) {
+    return this.runChangeTracker?.validateTaskComplete?.(args) || {
+      success: false,
+      error: { code: 'NO_ACTIVE_RUN', message: 'Aucun run actif.' },
     };
   }
   buildEditorContext() {

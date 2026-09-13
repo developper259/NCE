@@ -13,8 +13,7 @@ class AgentRunner {
     const config = {
       sessionId: overrides.sessionId ?? this.agent.currentSessionId ?? null,
       runId: overrides.runId ?? this.agent.runId,
-      workspaceRoot:
-        this.agent.editor?.fileExplorer?.rootPath || null,
+      workspaceRoot: this.agent.editor?.fileExplorer?.rootPath || null,
       agentId: overrides.agentId ?? this.agent.agentId,
       providerId,
       provider: provider ? { ...provider } : null,
@@ -22,7 +21,9 @@ class AgentRunner {
       temperature: Number.isFinite(this.agent.temperature)
         ? this.agent.temperature
         : undefined,
-      maxTokens: Number.isFinite(this.agent.maxTokens) ? this.agent.maxTokens : undefined,
+      maxTokens: Number.isFinite(this.agent.maxTokens)
+        ? this.agent.maxTokens
+        : undefined,
       maxIterations: Number.isFinite(this.agent.maxIterations)
         ? this.agent.maxIterations
         : undefined,
@@ -35,7 +36,9 @@ class AgentRunner {
       permissions: this.agent.permissions || "read",
       systemPrompt: this.agent.systemPrompt || "",
       modelFamily: this.agent.modelFamily,
-      modelConfig: this.agent.modelConfig ? { ...this.agent.modelConfig } : null,
+      modelConfig: this.agent.modelConfig
+        ? { ...this.agent.modelConfig }
+        : null,
       contextWindow: this.agent.contextWindow,
       maxOutputTokens: Number.isFinite(this.agent.modelConfig?.maxOutputTokens)
         ? this.agent.modelConfig.maxOutputTokens
@@ -43,10 +46,13 @@ class AgentRunner {
       responseBudget: { ...this.agent.responseBudget },
       contextCompaction: { ...this.agent.contextCompaction },
       progressGuidance: { ...this.agent.progressGuidance },
-      supportsTools: this.agent.supportsTools && provider?.supportsTools !== false,
+      supportsTools:
+        this.agent.supportsTools && provider?.supportsTools !== false,
       supportsToolChoice:
         this.agent.supportsToolChoice && provider?.supportsToolChoice !== false,
-      fallbackChain: this.agent.fallbackChain.map((candidate) => ({ ...candidate })),
+      fallbackChain: this.agent.fallbackChain.map((candidate) => ({
+        ...candidate,
+      })),
       maxProviderRetries: this.agent.maxProviderRetries,
       maxModelFallbacks: this.agent.maxModelFallbacks,
       maxRetryDelayMs: this.agent.maxRetryDelayMs,
@@ -63,6 +69,8 @@ class AgentRunner {
     this.agent.stopRequested = false;
     this.agent.abortController = new AbortController();
     const runId = ++this.agent.runId;
+    const workspaceIdentity = this.agent.editor?.fileExplorer?.rootPath || null;
+    this.agent.runChangeTracker?.beginRun?.(runId, workspaceIdentity);
     const controller = this.agent.abortController;
     const runContext = { sessionId: options.sessionId || null, runId };
     this.agent.currentSessionId = runContext.sessionId;
@@ -114,7 +122,8 @@ class AgentRunner {
       this.agent.messages.push({ role: "user", content: userMessage });
       const result = await this.agent.runLoop(runId, controller, runConfig, {
         requiresModification,
-        allowsFullCodeResponse: this.agent.requestsFullCodeResponse(userMessage),
+        allowsFullCodeResponse:
+          this.agent.requestsFullCodeResponse(userMessage),
       });
       result.metrics = this.agent.agentProgress.getMetrics();
       this.agent.lastRunMetrics = result.metrics;
@@ -561,7 +570,7 @@ class AgentRunner {
             ? "Continue l'exécution. Une modification a réussi mais sa validation reste incomplète. Relis le fichier concerné et vérifie le résultat réel avant de répondre."
             : decisionReason === "task_not_complete"
               ? "[NCE TASK COMPLETION] The task has not been marked complete. Continue from the current state. Implement or validate what remains, then call task_complete only when the requested work is actually finished."
-            : "Continue la tâche à partir de l'état actuel. La génération précédente s'est terminée avant sa finalisation. Ne répète pas les étapes déjà effectuées et utilise les tools nécessaires.",
+              : "Continue la tâche à partir de l'état actuel. La génération précédente s'est terminée avant sa finalisation. Ne répète pas les étapes déjà effectuées et utilise les tools nécessaires.",
     });
   }
 
@@ -600,30 +609,35 @@ class AgentRunner {
   }
 
   buildTaskCompletionResponse(completion = {}, fallback = "") {
-    const summary = String(completion.summary || fallback || "Tâche terminée.").trim();
+    const summary = String(
+      completion.summary || fallback || "Tâche terminée.",
+    ).trim();
     const validation = String(completion.validation || "").trim();
     return validation ? `${summary}\n\nValidation : ${validation}` : summary;
   }
 
   clearProgressDirectives() {
-    this.agent.messages = this.agent.messages.filter(
-      (message) => {
-        if (message?.role !== "system") return true;
-        const content = String(message.content || "");
-        return !(
-          content.startsWith("[NCE PROGRESS DIRECTIVE]") ||
-          content.startsWith("[NCE CAPABILITY]") ||
-          content.startsWith("[NCE TASK COMPLETION]")
-        );
-      },
-    );
+    this.agent.messages = this.agent.messages.filter((message) => {
+      if (message?.role !== "system") return true;
+      const content = String(message.content || "");
+      return !(
+        content.startsWith("[NCE PROGRESS DIRECTIVE]") ||
+        content.startsWith("[NCE CAPABILITY]") ||
+        content.startsWith("[NCE TASK COMPLETION]")
+      );
+    });
   }
 
   toolResultConfirmsValidation(toolPayload) {
     return toolPayload?.verification?.verified === true;
   }
 
-  async runLoop(runId, controller, runConfig = this.agent.runConfig, runState = {}) {
+  async runLoop(
+    runId,
+    controller,
+    runConfig = this.agent.runConfig,
+    runState = {},
+  ) {
     let finalResponse = "";
     let finalReasoning = "";
     let modificationFailures = 0;
@@ -657,7 +671,8 @@ class AgentRunner {
     const pendingValidationPaths = new Set();
     const maxIterations = runConfig?.maxIterations ?? this.agent.maxIterations;
     const maxIncompleteContinuations =
-      runConfig?.maxIncompleteContinuations ?? this.agent.maxIncompleteContinuations;
+      runConfig?.maxIncompleteContinuations ??
+      this.agent.maxIncompleteContinuations;
     const maxLargeWriteRecoveryAttempts =
       runConfig?.largeFileWriting?.maxRecoveryAttempts ??
       this.agent.largeFileWriting.maxRecoveryAttempts;
@@ -668,11 +683,7 @@ class AgentRunner {
       "rename_file",
       "delete_file",
     ]);
-    const readTools = new Set([
-      "read_file",
-      "search_code",
-      "get_project_map",
-    ]);
+    const readTools = new Set(["read_file", "search_code", "get_project_map"]);
     try {
       while (true) {
         const iteration = toolIterations + 1;
@@ -693,9 +704,15 @@ class AgentRunner {
           fileKnowledge: this.agent.fileKnowledge.getContextState(),
           progress: this.agent.agentProgress.getContextState(),
         };
-        const outputContext = this.agent.createModelOutputContext(runId, "main");
+        const outputContext = this.agent.createModelOutputContext(
+          runId,
+          "main",
+        );
         this.agent.agentProgress.recordModelRequest();
-        const modelResponse = await this.agent.requestModel(controller, runConfig);
+        const modelResponse = await this.agent.requestModel(
+          controller,
+          runConfig,
+        );
         this.agent.assertRunActive(runId, controller);
         let parsed;
         try {
@@ -708,24 +725,32 @@ class AgentRunner {
           });
         } catch (error) {
           if (
-            !this.agent.isRecoverableLargeWriteToolCallError(error, modelResponse)
+            !this.agent.isRecoverableLargeWriteToolCallError(
+              error,
+              modelResponse,
+            )
           ) {
             throw error;
           }
           const repeatedOversizedRetry = largeWrite.recoveryAttempts > 0;
-          this.agent.agentProgress.recordToolProtocolFailure?.(
-            error.toolName,
-            { iteration, repeated: repeatedOversizedRetry },
-          );
+          this.agent.agentProgress.recordToolProtocolFailure?.(error.toolName, {
+            iteration,
+            repeated: repeatedOversizedRetry,
+          });
           if (largeWrite.recoveryAttempts >= maxLargeWriteRecoveryAttempts) {
             if (
-              this.agent.forceLargeWriteModelFallback(runConfig, largeWrite, error)
+              this.agent.forceLargeWriteModelFallback(
+                runConfig,
+                largeWrite,
+                error,
+              )
             ) {
               largeWrite.recoveryAttempts = 0;
               largeWrite.planningRetryCount = 0;
               this.agent.messages.push({
                 role: "system",
-                content: this.agent.buildLargeWriteActionInstruction(largeWrite),
+                content:
+                  this.agent.buildLargeWriteActionInstruction(largeWrite),
               });
               continue;
             }
@@ -740,7 +765,11 @@ class AgentRunner {
               maxLargeWriteRecoveryAttempts,
             );
           }
-          this.agent.activateLargeWriteRecovery(largeWrite, error, modelResponse);
+          this.agent.activateLargeWriteRecovery(
+            largeWrite,
+            error,
+            modelResponse,
+          );
           this.agent.messages.push({
             role: "system",
             content: this.agent.buildLargeWriteRecoveryInstruction(
@@ -782,11 +811,15 @@ class AgentRunner {
                   true,
                 ),
               });
-              this.agent.debugLargeWrite(largeWrite, selection.expected.decision, {
-                reasoningOnly:
-                  Boolean(parsed.reasoning) && parsed.toolCalls.length === 0,
-                action: "force_write_tool",
-              });
+              this.agent.debugLargeWrite(
+                largeWrite,
+                selection.expected.decision,
+                {
+                  reasoningOnly:
+                    Boolean(parsed.reasoning) && parsed.toolCalls.length === 0,
+                  action: "force_write_tool",
+                },
+              );
               continue;
             }
             if (
@@ -800,7 +833,8 @@ class AgentRunner {
               largeWrite.recoveryAttempts = 0;
               this.agent.messages.push({
                 role: "system",
-                content: this.agent.buildLargeWriteActionInstruction(largeWrite),
+                content:
+                  this.agent.buildLargeWriteActionInstruction(largeWrite),
               });
               continue;
             }
@@ -911,7 +945,10 @@ class AgentRunner {
         }
         if (outcome.action === "fail") {
           if (outcome.reason === "max_iterations_reached") {
-            throw this.agent.createMaxIterationsError(toolIterations, maxIterations);
+            throw this.agent.createMaxIterationsError(
+              toolIterations,
+              maxIterations,
+            );
           }
           if (outcome.reason === "required_write_not_performed") {
             this.agent.emitModelOutput(
@@ -1056,7 +1093,9 @@ class AgentRunner {
             runId,
           });
           this.agent.assertRunActive(runId, controller);
-          this.agent.messages.push(this.agent.createToolResultMessage(call.id, toolResult));
+          this.agent.messages.push(
+            this.agent.createToolResultMessage(call.id, toolResult),
+          );
 
           const toolPayload = toolResult?.result ?? toolResult;
           const toolProgress = this.agent.agentProgress.consumeTool(
@@ -1189,7 +1228,6 @@ class AgentRunner {
               validationPending = false;
             }
           }
-
         }
         if (completionRequest) {
           const completion = this.validateTaskCompletion({
@@ -1261,7 +1299,9 @@ class AgentRunner {
     } catch (error) {
       if (largeWrite.active) {
         largeWrite.active = false;
-        largeWrite.state = this.agent.isAbortError(error) ? "ABORTED" : "FAILED";
+        largeWrite.state = this.agent.isAbortError(error)
+          ? "ABORTED"
+          : "FAILED";
         this.agent.debugLargeWrite(largeWrite, "fail", {
           reason: this.agent.isAbortError(error)
             ? "user_aborted"
@@ -1271,7 +1311,6 @@ class AgentRunner {
       throw error;
     }
   }
-
 }
 
 window.AgentRunner = AgentRunner;

@@ -43,11 +43,7 @@ const AgentAI = {
     overExplorationEscalationInterval: 4,
   },
 
-  readOnlyTools: [
-    "read_file",
-    "get_project_map",
-    "search_code",
-  ],
+  readOnlyTools: ["read_file", "get_project_map", "search_code"],
 
   providers: {
     ollama: {

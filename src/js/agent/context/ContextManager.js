@@ -115,7 +115,8 @@ class ContextManager {
     const contextWindow = Number.isFinite(config.contextWindow)
       ? Math.max(1, Math.floor(config.contextWindow))
       : null;
-    const responseBudget = config.responseBudget || options.responseBudget || {};
+    const responseBudget =
+      config.responseBudget || options.responseBudget || {};
     const configuredOutputReserve = [
       config.maxTokens,
       options.outputReserveTokens,
@@ -128,9 +129,14 @@ class ContextManager {
     const safetyMarginTokens = Number.isFinite(options.safetyMarginTokens)
       ? Math.max(0, Math.floor(options.safetyMarginTokens))
       : Number.isFinite(responseBudget.contextCompactionSafetyMarginTokens)
-        ? Math.max(0, Math.floor(responseBudget.contextCompactionSafetyMarginTokens))
+        ? Math.max(
+            0,
+            Math.floor(responseBudget.contextCompactionSafetyMarginTokens),
+          )
         : 0;
-    const reservedForResponseTokens = Number.isFinite(responseBudget.reservedForResponseTokens)
+    const reservedForResponseTokens = Number.isFinite(
+      responseBudget.reservedForResponseTokens,
+    )
       ? Math.max(0, Math.floor(responseBudget.reservedForResponseTokens))
       : outputReserve;
     const budgetKnown = contextWindow !== null;
@@ -163,10 +169,7 @@ class ContextManager {
 
   shouldTriggerCompaction(level, usageRatio, options) {
     if (level === "none") {
-      if (
-        Number.isFinite(usageRatio) &&
-        usageRatio < options.triggerRatio
-      ) {
+      if (Number.isFinite(usageRatio) && usageRatio < options.triggerRatio) {
         this.compactionState.compactionArmed = true;
       }
       return false;
@@ -222,9 +225,7 @@ class ContextManager {
         (message) =>
           !(
             message?.role === "system" &&
-            String(message.content || "").startsWith(
-              "[NCE CURRENT TASK STATE]",
-            )
+            String(message.content || "").startsWith("[NCE CURRENT TASK STATE]")
           ),
       )
       .map((message) => ({ ...message }));
@@ -497,9 +498,7 @@ class ContextManager {
     ]).has(toolName);
     const isRead = toolName === "read_file";
     const isSearch = toolName === "search_code";
-    const isNavigation = new Set([
-      "get_project_map",
-    ]).has(toolName);
+    const isNavigation = new Set(["get_project_map"]).has(toolName);
 
     if (!isWrite && !options.metadataOnly) return content;
 
@@ -662,8 +661,7 @@ class ContextManager {
       contextMessages,
       options.charsPerToken,
     );
-    const preCompactionTokens =
-      preCompactionMessageTokens + toolSchemaTokens;
+    const preCompactionTokens = preCompactionMessageTokens + toolSchemaTokens;
     const initialUsageRatio = budgetKnown
       ? preCompactionTokens / inputBudget
       : null;
@@ -674,11 +672,7 @@ class ContextManager {
     );
     const compactionTriggered =
       options.enabled &&
-      this.shouldTriggerCompaction(
-        pressureLevel,
-        initialUsageRatio,
-        options,
-      );
+      this.shouldTriggerCompaction(pressureLevel, initialUsageRatio, options);
 
     if (!options.enabled || !compactionTriggered) {
       const validated = this.getValidatedModelContext(contextMessages);
@@ -721,8 +715,7 @@ class ContextManager {
           initialUsageRatio === null
             ? null
             : Number(initialUsageRatio.toFixed(3)),
-        usageRatio:
-          usageRatio === null ? null : Number(usageRatio.toFixed(3)),
+        usageRatio: usageRatio === null ? null : Number(usageRatio.toFixed(3)),
         level: pressureLevel,
         compactionLevel: pressureLevel,
         compactionTriggered: false,
@@ -757,8 +750,7 @@ class ContextManager {
         disabled: !options.enabled,
         lastCompactionAtIteration:
           this.compactionState.lastCompactionAtIteration,
-        lastCompactionUsageRatio:
-          this.compactionState.lastCompactionUsageRatio,
+        lastCompactionUsageRatio: this.compactionState.lastCompactionUsageRatio,
         lastCompactionLevel: this.compactionState.lastCompactionLevel,
         lastPostCompactionUsageRatio:
           this.compactionState.lastPostCompactionUsageRatio,
@@ -809,9 +801,7 @@ class ContextManager {
 
     const readTools = new Set(["read_file"]);
     const searchTools = new Set(["search_code"]);
-    const navigationTools = new Set([
-      "get_project_map",
-    ]);
+    const navigationTools = new Set(["get_project_map"]);
     const writeTools = new Set([
       "modify_file",
       "create_file",
@@ -1063,8 +1053,7 @@ class ContextManager {
           entry.keep = false;
           entry.reasons.push("cold_navigation");
           if (names.has("get_project_map")) counters.removedOldProjectMaps += 1;
-          if (!names.has("get_project_map"))
-            counters.removedOldListings += 1;
+          if (!names.has("get_project_map")) counters.removedOldListings += 1;
         } else {
           entry.reasons.push(entry.recent ? "recent" : "navigation_result");
         }
@@ -1305,8 +1294,7 @@ class ContextManager {
     estimatedModelTokens = estimatedModelMessageTokens + toolSchemaTokens;
     const usageRatio = budgetKnown ? estimatedModelTokens / inputBudget : null;
     this.storeStableContext(modelMessages, messages.length, {
-      iteration:
-        this.agent.agentProgress?.getMetrics?.().modelRequests ?? null,
+      iteration: this.agent.agentProgress?.getMetrics?.().modelRequests ?? null,
       preUsageRatio: initialUsageRatio,
       postUsageRatio: usageRatio,
       level: pressureLevel,
@@ -1352,11 +1340,12 @@ class ContextManager {
       preCompactionTokens,
       postCompactionTokens: estimatedModelTokens,
       tokensRemoved: Math.max(0, preCompactionTokens - estimatedModelTokens),
-      messagesRemoved: Math.max(0, contextMessages.length - modelMessages.length),
-      lastCompactionAtIteration:
-        this.compactionState.lastCompactionAtIteration,
-      lastCompactionUsageRatio:
-        this.compactionState.lastCompactionUsageRatio,
+      messagesRemoved: Math.max(
+        0,
+        contextMessages.length - modelMessages.length,
+      ),
+      lastCompactionAtIteration: this.compactionState.lastCompactionAtIteration,
+      lastCompactionUsageRatio: this.compactionState.lastCompactionUsageRatio,
       lastCompactionLevel: this.compactionState.lastCompactionLevel,
       lastPostCompactionUsageRatio:
         this.compactionState.lastPostCompactionUsageRatio,
