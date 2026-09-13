@@ -111,27 +111,39 @@ class ContextManager {
     );
   }
 
-  getContextBudget(config, options) {
+  getContextBudget(config, options = {}) {
     const contextWindow = Number.isFinite(config.contextWindow)
       ? Math.max(1, Math.floor(config.contextWindow))
       : null;
+    const responseBudget = config.responseBudget || options.responseBudget || {};
     const configuredOutputReserve = [
       config.maxTokens,
       options.outputReserveTokens,
       config.maxOutputTokens,
+      responseBudget.reservedForResponseTokens,
     ].find((value) => Number.isFinite(value));
     const outputReserve = Number.isFinite(configuredOutputReserve)
       ? Math.max(0, Math.floor(configuredOutputReserve))
       : 0;
+    const safetyMarginTokens = Number.isFinite(options.safetyMarginTokens)
+      ? Math.max(0, Math.floor(options.safetyMarginTokens))
+      : Number.isFinite(responseBudget.contextCompactionSafetyMarginTokens)
+        ? Math.max(0, Math.floor(responseBudget.contextCompactionSafetyMarginTokens))
+        : 0;
+    const reservedForResponseTokens = Number.isFinite(responseBudget.reservedForResponseTokens)
+      ? Math.max(0, Math.floor(responseBudget.reservedForResponseTokens))
+      : outputReserve;
     const budgetKnown = contextWindow !== null;
     return {
       contextWindow,
       outputReserve,
+      reservedForResponseTokens,
+      safetyMarginTokens,
       budgetKnown,
       inputBudget: budgetKnown
         ? Math.max(
             1,
-            contextWindow - outputReserve - options.safetyMarginTokens,
+            contextWindow - reservedForResponseTokens - safetyMarginTokens,
           )
         : null,
     };

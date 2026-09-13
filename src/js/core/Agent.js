@@ -70,6 +70,17 @@ class Agent {
     this.maxProviderRetries = 2;
     this.maxModelFallbacks = 3;
     this.maxRetryDelayMs = 30000;
+    this.responseBudget = {
+      minReservedForResponseTokens: 128,
+      maxReservedForResponseTokens: 16384,
+      reservedForResponseTokens: 512,
+      safetyFactor: 1.35,
+      modelHintBias: 0,
+      toolInputLimitTokens: 4096,
+      toolOutputLimitTokens: 4096,
+      contextCompactionSafetyMarginTokens: 8192,
+    };
+    this.responseBudgetEstimator = new ResponseBudgetEstimator(this);
     this.modelRequestState = null;
     this.modelRequestCounter = 0;
     this.modelOutputStates = new Map();
@@ -176,6 +187,12 @@ class Agent {
     }
     if (config.modelConfig && typeof config.modelConfig === "object") {
       this.modelConfig = { ...config.modelConfig };
+    }
+    if (config.responseBudget && typeof config.responseBudget === "object") {
+      this.responseBudget = {
+        ...this.responseBudget,
+        ...config.responseBudget,
+      };
     }
     this.contextWindow = Number.isFinite(config.contextWindow)
       ? config.contextWindow

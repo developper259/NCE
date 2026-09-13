@@ -13,6 +13,17 @@ const AgentAI = {
     maxRecoveryAttempts: 2,
   },
 
+  responseBudget: {
+    minReservedForResponseTokens: 128,
+    maxReservedForResponseTokens: 16384,
+    reservedForResponseTokens: 512,
+    safetyFactor: 1.35,
+    modelHintBias: 0,
+    toolInputLimitTokens: 4096,
+    toolOutputLimitTokens: 4096,
+    contextCompactionSafetyMarginTokens: 8192,
+  },
+
   contextCompaction: {
     enabled: true,
     recentIterations: 2,
@@ -279,6 +290,8 @@ const AgentAI = {
       maxIncompleteContinuations: this.maxIncompleteContinuations,
 
       largeFileWriting: { ...this.largeFileWriting },
+
+      responseBudget: { ...this.responseBudget },
 
       contextCompaction: { ...this.contextCompaction },
 

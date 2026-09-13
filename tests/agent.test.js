@@ -186,6 +186,33 @@ test('delete_file rejects escaped symlinks and dirty tabs, then closes a clean o
   }
 });
 
+test('ResponseBudgetEstimator provides a bounded local estimate without extra AI calls', async () => {
+  const { root, agent } = await setup();
+  try {
+    const budget = agent.responseBudgetEstimator.estimateResponseBudget({
+      agent,
+      model: {
+        contextWindow: 128000,
+        maxOutputTokens: 16384,
+      },
+      runtimeState: {
+        kind: 'normal-edit',
+        lastTool: 'modify_file',
+        largeWriteActive: false,
+      },
+      previousUsage: [],
+      modelHint: null,
+    });
+    assert.equal(budget.success, true);
+    assert.equal(typeof budget.estimatedResponseTokens, 'number');
+    assert.equal(typeof budget.reservedForResponseTokens, 'number');
+    assert.equal(typeof budget.effectiveMaxOutputTokens, 'number');
+    assert.equal(budget.reservedForResponseTokens >= budget.estimatedResponseTokens, true);
+    assert.equal(budget.reservedForResponseTokens <= budget.effectiveMaxOutputTokens, true);
+    assert.equal(agent.getTool('read_file').readOnly, true);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test('Agent public project, search, read and completion tools remain functional', async () => {
   const { root, agent } = await setup();
   try {

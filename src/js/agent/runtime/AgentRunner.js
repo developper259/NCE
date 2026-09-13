@@ -40,6 +40,7 @@ class AgentRunner {
       maxOutputTokens: Number.isFinite(this.agent.modelConfig?.maxOutputTokens)
         ? this.agent.modelConfig.maxOutputTokens
         : null,
+      responseBudget: { ...this.agent.responseBudget },
       contextCompaction: { ...this.agent.contextCompaction },
       progressGuidance: { ...this.agent.progressGuidance },
       supportsTools: this.agent.supportsTools && provider?.supportsTools !== false,
