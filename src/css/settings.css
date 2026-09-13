@@ -262,6 +262,26 @@
 .setting-shortcut-delete:hover {
   color: var(--error, #d66);
 }
+
+.setting-shortcut-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: 0 0 auto;
+}
+
+.setting-shortcut-error {
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: rgba(255, 70, 70, 0.1);
+  border: 1px solid rgba(255, 70, 70, 0.3);
+  border-radius: 4px;
+  color: #ff4646;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
 @media (max-width: 760px) {
   .settings-nav {
     width: 150px;

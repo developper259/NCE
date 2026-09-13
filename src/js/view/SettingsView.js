@@ -168,7 +168,8 @@ class SettingsView {
     select.value = String(SETTINGS_GET(setting.key));
     select.addEventListener("change", async () => {
       const previous = SETTINGS_GET(setting.key);
-      if (!(await SETTINGS_SET(setting.key, Number(select.value))))
+      const res = await SETTINGS_SET(setting.key, Number(select.value));
+      if (!res || (typeof res === "object" && !res.success))
         select.value = String(previous);
       this.editor.bottomBar?.refreshScrollers?.();
     });
@@ -202,7 +203,8 @@ class SettingsView {
     input.addEventListener("change", async () => {
       const previous = String(SETTINGS_GET(setting.key) || "");
       const value = input.value.trim();
-      if (!(await SETTINGS_SET(setting.key, value))) {
+      const res = await SETTINGS_SET(setting.key, value);
+      if (!res || (typeof res === "object" && !res.success)) {
         input.value = previous;
       }
     });
@@ -210,6 +212,9 @@ class SettingsView {
   }
 
   createShortcutInput(setting, id) {
+    const container = document.createElement("div");
+    container.className = "setting-shortcut-container";
+
     const wrapper = document.createElement("div");
     wrapper.className = "setting-shortcut-wrap";
 
@@ -267,6 +272,7 @@ class SettingsView {
     const startListening = () => {
       if (listening) return;
       listening = true;
+      this._hideShortcutError(container);
       display.classList.add("listening");
       display.textContent = "Press a key combination...";
 
@@ -331,14 +337,21 @@ class SettingsView {
       keyupHandler = null;
       const currentVal = SETTINGS_GET(setting.key) || "";
       this._renderShortcutKeys(display, currentVal);
+      this._hideShortcutError(container);
     };
 
     const applyShortcut = async (combo) => {
       const previous = SETTINGS_GET(setting.key) || "";
-      if (!(await SETTINGS_SET(setting.key, combo))) {
+      const result = await SETTINGS_SET(setting.key, combo);
+
+      if (result?.success === false && result?.error) {
+        this._showShortcutError(container, result.error);
         this._renderShortcutKeys(display, previous);
-      } else {
+      } else if (result?.success || result === true) {
+        this._hideShortcutError(container);
         this._renderShortcutKeys(display, combo);
+      } else {
+        this._renderShortcutKeys(display, previous);
       }
     };
 
@@ -371,7 +384,8 @@ class SettingsView {
     });
 
     wrapper.append(display, resetBtn, deleteBtn);
-    return wrapper;
+    container.append(wrapper);
+    return container;
   }
 
   _renderShortcutKeys(container, keyCombo) {
@@ -408,6 +422,22 @@ class SettingsView {
     return parts
       .map((part) => macSymbols[part.toLowerCase()] || part)
       .join(" ");
+  }
+
+  _showShortcutError(container, error) {
+    this._hideShortcutError(container);
+    const errorEl = document.createElement("div");
+    errorEl.className = "setting-shortcut-error";
+    const formattedShortcut = this._formatShortcutDisplay(
+      error.conflictRawShortcut || error.conflictShortcut,
+    );
+    errorEl.textContent = `${formattedShortcut} is already assigned to ${error.conflictLabel}.`;
+    container.appendChild(errorEl);
+  }
+
+  _hideShortcutError(container) {
+    const errorEl = container.querySelector(".setting-shortcut-error");
+    if (errorEl) errorEl.remove();
   }
 
   sync(key) {

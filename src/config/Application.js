@@ -295,7 +295,7 @@ function CONFIG_KEYBINDING_CONTAINSACTIN(action) {
 }
 
 function CONFIG_KEYBINDING_GET_KEY(key) {
-  for (item of USERCONFIG_KEYBINDING) {
+  for (const item of USERCONFIG_KEYBINDING) {
     if (
       CONFIG_KEYBINDING_NORMALIZE(item.key) == CONFIG_KEYBINDING_NORMALIZE(key)
     )
@@ -304,19 +304,38 @@ function CONFIG_KEYBINDING_GET_KEY(key) {
 }
 
 function CONFIG_KEYBINDING_PRIMARY_MODIFIER() {
-  return window.api?.platform === "darwin" ? "Meta" : "Ctrl";
+  if (typeof window !== "undefined" && window?.api?.platform) {
+    return window.api.platform === "darwin" ? "Meta" : "Ctrl";
+  }
+  if (typeof process !== "undefined" && process?.platform) {
+    return process.platform === "darwin" ? "Meta" : "Ctrl";
+  }
+  return "Ctrl";
 }
 
 function CONFIG_KEYBINDING_NORMALIZE(key) {
-  return String(key || "")
+  if (!key || !String(key).trim()) return "";
+  const primaryModifier = CONFIG_KEYBINDING_PRIMARY_MODIFIER().toLowerCase();
+  const parts = String(key)
     .split("+")
     .map((part) => {
-      const value = part.trim();
-      return value.toLowerCase() === "mod"
-        ? CONFIG_KEYBINDING_PRIMARY_MODIFIER().toLowerCase()
-        : value.toLowerCase();
-    })
-    .join("+");
+      const value = part.trim().toLowerCase();
+      if (value === "mod") return primaryModifier;
+      if (value === "cmd" || value === "command") return "meta";
+      if (value === "control") return "ctrl";
+      if (value === "option") return "alt";
+      return value;
+    });
+
+  // Sort modifiers to ensure Mod+Shift+S and Shift+Mod+S normalize identically
+  // Keep the last part (actual trigger key) at the end, sort preceding modifiers
+  if (parts.length > 1) {
+    const lastKey = parts.pop();
+    parts.sort();
+    parts.push(lastKey);
+  }
+
+  return parts.join("+");
 }
 
 function CONFIG_KEYBINDING_DISPLAY(key) {
@@ -327,7 +346,7 @@ function CONFIG_KEYBINDING_DISPLAY(key) {
 }
 
 function CONFIG_KEYBINDING_GET_ACTION(action) {
-  for (item of USERCONFIG_KEYBINDING) {
+  for (const item of USERCONFIG_KEYBINDING) {
     if (item.action.toLowerCase() == action.toLowerCase()) return item;
   }
 }

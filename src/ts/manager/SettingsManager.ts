@@ -65,6 +65,32 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+export function normalizeKeybinding(
+  key: string | null | undefined,
+  platform: string = process.platform,
+): string {
+  if (!key || !String(key).trim()) return "";
+  const primaryModifier = platform === "darwin" ? "meta" : "ctrl";
+  const parts = String(key)
+    .split("+")
+    .map((part) => {
+      const value = part.trim().toLowerCase();
+      if (value === "mod") return primaryModifier;
+      if (value === "cmd" || value === "command") return "meta";
+      if (value === "control") return "ctrl";
+      if (value === "option") return "alt";
+      return value;
+    });
+
+  if (parts.length > 1) {
+    const lastKey = parts.pop()!;
+    parts.sort();
+    parts.push(lastKey);
+  }
+
+  return parts.join("+");
+}
+
 export class SettingsManager {
   readonly settingsPath: string;
   private settings: any = clone(DEFAULT_SETTINGS);
@@ -123,9 +149,54 @@ export class SettingsManager {
     };
   }
 
+  validateKeybindingAssignment(
+    action: string,
+    shortcut: string | null | undefined,
+  ): {
+    valid: boolean;
+    conflictAction?: string;
+    conflictShortcut?: string;
+  } {
+    if (
+      shortcut === null ||
+      shortcut === undefined ||
+      String(shortcut).trim() === ""
+    ) {
+      return { valid: true };
+    }
+
+    const normalized = normalizeKeybinding(shortcut);
+    if (!normalized) return { valid: true };
+
+    for (const [otherAction, otherShortcut] of Object.entries(
+      this.settings.keybindings || {},
+    )) {
+      if (otherAction === action) continue;
+      if (!otherShortcut || !String(otherShortcut).trim()) continue;
+
+      const otherNormalized = normalizeKeybinding(otherShortcut as string);
+      if (normalized === otherNormalized) {
+        return {
+          valid: false,
+          conflictAction: otherAction,
+          conflictShortcut: otherShortcut as string,
+        };
+      }
+    }
+
+    return { valid: true };
+  }
+
   set(key: string, value: unknown): Promise<boolean> {
     if (!this.isValid(key, value)) return Promise.resolve(false);
     const [section, property] = key.split(".");
+    if (section === "keybindings") {
+      const validation = this.validateKeybindingAssignment(
+        property,
+        value as string | null,
+      );
+      if (!validation.valid) return Promise.resolve(false);
+    }
     (this.settings as any)[section][property] = value;
     return this.save();
   }
@@ -156,11 +227,36 @@ export class SettingsManager {
     )
       ? merged.files.autoSave
       : DEFAULT_SETTINGS.files.autoSave;
+
+    const seenShortcuts = new Map<string, string>();
     for (const [action, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
       const key = `keybindings.${action}`;
-      merged.keybindings[action] = this.isValid(key, merged.keybindings[action])
-        ? merged.keybindings[action]
-        : shortcut;
+      const candidate = merged.keybindings[action];
+      if (candidate === null) {
+        merged.keybindings[action] = null;
+      } else if (this.isValid(key, candidate)) {
+        const normalized = normalizeKeybinding(candidate);
+        if (seenShortcuts.has(normalized)) {
+          const defaultNorm = shortcut ? normalizeKeybinding(shortcut) : "";
+          if (shortcut && !seenShortcuts.has(defaultNorm)) {
+            merged.keybindings[action] = shortcut;
+            seenShortcuts.set(defaultNorm, action);
+          } else {
+            merged.keybindings[action] = null;
+          }
+        } else {
+          merged.keybindings[action] = candidate;
+          if (normalized) seenShortcuts.set(normalized, action);
+        }
+      } else {
+        const defaultNorm = shortcut ? normalizeKeybinding(shortcut) : "";
+        if (shortcut && !seenShortcuts.has(defaultNorm)) {
+          merged.keybindings[action] = shortcut;
+          if (defaultNorm) seenShortcuts.set(defaultNorm, action);
+        } else {
+          merged.keybindings[action] = null;
+        }
+      }
     }
     return merged;
   }
