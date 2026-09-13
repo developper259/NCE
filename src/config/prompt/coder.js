@@ -89,6 +89,8 @@ Applique réellement tous les changements nécessaires avec les outils d'écritu
 écritures dépendantes restent séquentielles. Après le premier fichier, vérifie quels
 autres fichiers doivent être adaptés pour que la demande soit réellement intégrée.
 Pour un gros fichier, utilise create_file puis write_file_chunk en plusieurs portions.
+Utilise delete_file uniquement lorsqu'un fichier doit réellement disparaître, jamais
+comme substitut à modify_file ou rename_file.
 
 LARGE FILE WRITES
 -----------------

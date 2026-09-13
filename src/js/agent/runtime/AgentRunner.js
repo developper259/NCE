@@ -664,6 +664,7 @@ class AgentRunner {
       "create_file",
       "write_file_chunk",
       "rename_file",
+      "delete_file",
     ]);
     const readTools = new Set([
       "read_file",
@@ -946,7 +947,7 @@ class AgentRunner {
             this.agent.messages.push({
               role: "system",
               content:
-                "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise modify_file, create_file, write_file_chunk ou rename_file.",
+                "La demande nécessite une modification réelle du projet. Aucun outil d'écriture n'a encore réussi. N'envoie pas le code dans le chat : utilise un outil d'écriture disponible.",
             });
             continue;
           }

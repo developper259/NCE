@@ -13,6 +13,7 @@ async function setup() {
   const editor = { fileExplorer: { rootPath: root }, tabManager: { getFileByPath: () => null }, api: {
     agentFileOperation: manager.agentFileOperation.bind(manager),
     pathExists: async p => { try { await fs.stat(p); return true; } catch { return false; } },
+    pathStatus: async p => { try { const stat = await fs.stat(p); return { exists: true, isDirectory: stat.isDirectory(), readable: true }; } catch (error) { return { exists: false, code: error.code }; } },
     getFileContent: manager.getFileContent.bind(manager),
     getProjectMap: search.getProjectMap.bind(search),
     searchInFiles: search.search.bind(search),
@@ -23,6 +24,7 @@ async function setup() {
 
 const CODE_TOOLS = [
   'create_file',
+  'delete_file',
   'get_project_map',
   'modify_file',
   'read_file',
@@ -60,8 +62,92 @@ test('Agent exposes the minimal public tool surface for read and code modes', as
     agent.setConfig({ permissions: 'read' });
     assert.deepEqual([...agent.getAvailableToolNames()].sort(), READ_TOOLS);
     assert.equal(agent.getTool('modify_file').readOnly, false);
+    assert.equal(agent.getTool('delete_file').readOnly, false);
     assert.equal(agent.getTool('task_complete').codeOnly, true);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('delete_file removes only safe workspace files and refreshes project caches', async () => {
+  const { root, agent, editor } = await setup();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-delete-outside-'));
+  try {
+    await fs.writeFile(path.join(root, 'keep.txt'), 'keep');
+    await fs.writeFile(path.join(root, 'delete.txt'), 'delete');
+    await fs.mkdir(path.join(root, 'directory'));
+    await fs.writeFile(path.join(outside, 'outside.txt'), 'outside');
+    let invalidatedRoot = null;
+    let refreshedFolder = null;
+    editor.quickOpen = { invalidate: value => { invalidatedRoot = value; } };
+    editor.fileExplorer.refreshFolder = async value => { refreshedFolder = value; };
+
+    const firstMap = await agent.getProjectMap({});
+    assert.match(firstMap.text, /delete\.txt/);
+    const result = await agent.executeToolCall({
+      id: 'delete-safe-file',
+      function: { name: 'delete_file', arguments: JSON.stringify({ path: 'delete.txt' }) },
+    });
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.equal(result.result.path, 'delete.txt');
+    assert.equal(await editor.api.pathExists(path.join(root, 'delete.txt')), false);
+    assert.equal(await fs.readFile(path.join(root, 'keep.txt'), 'utf8'), 'keep');
+    assert.doesNotMatch((await agent.getProjectMap({})).text, /delete\.txt/);
+    assert.equal((await agent.getTool('search_code').execute({ query: 'delete' })).totalMatches, 0);
+    assert.equal(invalidatedRoot, root);
+    assert.equal(refreshedFolder, root);
+
+    assert.equal((await agent.deleteWorkspaceFile({ path: 'missing.txt' })).error.code, 'FILE_NOT_FOUND');
+    assert.equal((await agent.deleteWorkspaceFile({ path: 'directory' })).error.code, 'NOT_A_FILE');
+    for (const unsafe of ['../outside.txt', '../../etc/passwd', path.join(outside, 'outside.txt')]) {
+      assert.equal((await agent.deleteWorkspaceFile({ path: unsafe })).success, false, unsafe);
+    }
+    assert.equal(await fs.readFile(path.join(outside, 'outside.txt'), 'utf8'), 'outside');
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test('delete_file rejects escaped symlinks and dirty tabs, then closes a clean open tab', async () => {
+  const { root, agent, editor } = await setup();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-delete-symlink-'));
+  try {
+    const outsideFile = path.join(outside, 'outside.txt');
+    await fs.writeFile(outsideFile, 'outside');
+    await fs.symlink(outsideFile, path.join(root, 'escape.txt'), process.platform === 'win32' ? 'file' : undefined);
+    const escaped = await agent.deleteWorkspaceFile({ path: 'escape.txt' });
+    assert.equal(escaped.success, false);
+    assert.equal(escaped.error.code, 'OUTSIDE_WORKSPACE');
+    assert.equal(await fs.readFile(outsideFile, 'utf8'), 'outside');
+
+    const openPath = path.join(root, 'open.txt');
+    await fs.writeFile(openPath, 'disk');
+    const openFile = { id: 7, path: openPath, isSaved: false };
+    editor.tabManager.activeFile = openFile;
+    editor.tabManager.getFileByPath = p => p === openPath ? openFile : null;
+    let closeCalls = 0;
+    editor.tabManager.closeFile = async id => {
+      closeCalls++;
+      assert.equal(id, openFile.id);
+      editor.tabManager.activeFile = null;
+      editor.tabManager.getFileByPath = () => null;
+      return true;
+    };
+    const dirty = await agent.deleteWorkspaceFile({ path: 'open.txt' });
+    assert.equal(dirty.error.code, 'DIRTY_FILE');
+    assert.equal(await fs.readFile(openPath, 'utf8'), 'disk');
+    assert.equal(closeCalls, 0);
+
+    openFile.isSaved = true;
+    editor.tabManager.getFileByPath = p => p === openPath ? openFile : null;
+    const clean = await agent.deleteWorkspaceFile({ path: 'open.txt' });
+    assert.equal(clean.success, true, JSON.stringify(clean));
+    assert.equal(closeCalls, 1);
+    assert.equal(editor.tabManager.activeFile, null);
+    assert.equal(await editor.api.pathExists(openPath), false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(outside, { recursive: true, force: true });
+  }
 });
 
 test('Agent public project, search, read and completion tools remain functional', async () => {

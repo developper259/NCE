@@ -866,6 +866,7 @@ class AgentSidebar extends Sidebar {
     if (toolName === "create_file") return "create";
     if (toolName === "write_file_chunk") return "edit";
     if (toolName === "rename_file") return "rename";
+    if (toolName === "delete_file") return "edit";
     if (toolName.includes("search")) return "search";
     if (toolName === "get_project_map") return "list";
     if (toolName.includes("read")) return "read";
@@ -995,6 +996,9 @@ class AgentSidebar extends Sidebar {
       case "modify_file":
         title = `${running ? "Modifying" : "Modified"} ${fileName}${running ? "…" : ""}`;
         break;
+      case "delete_file":
+        title = `${running ? "Deleting" : "Deleted"} ${fileName}${running ? "…" : ""}`;
+        break;
       default: {
         const readableName = item.toolName.replace(/_/g, " ");
         title = `${running ? "Running" : "Ran"} ${readableName}${running ? "…" : ""}`;
@@ -1028,6 +1032,7 @@ class AgentSidebar extends Sidebar {
         create_file: `create ${fileName}`,
         rename_file: `rename ${this.getActivityFileName(item)}`,
         modify_file: `modify ${fileName}`,
+        delete_file: `delete ${fileName}`,
       }[item.toolName];
       title = `Failed to ${failedAction || item.toolName.replace(/_/g, " ")}`;
       detail = this.getActivityError(result);

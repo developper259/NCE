@@ -1319,6 +1319,9 @@ class Agent {
   async renameWorkspaceFile(...args) {
     return this.workspaceFileManager.renameWorkspaceFile(...args);
   }
+  async deleteWorkspaceFile(...args) {
+    return this.workspaceFileManager.deleteWorkspaceFile(...args);
+  }
   async readSelection(...args) {
     return this.activeFileManager.readSelection(...args);
   }

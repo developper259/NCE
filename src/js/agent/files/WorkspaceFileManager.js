@@ -559,6 +559,88 @@ class WorkspaceFileManager {
     };
   }
 
+  async deleteWorkspaceFile(args = {}) {
+    const target = this.agent.getWorkspaceFileTarget(args.path);
+    if (!target.valid) return { success: false, error: target.error };
+
+    const status = await this.agent.api?.pathStatus?.(target.absolutePath);
+    if (!status?.exists) {
+      return {
+        success: false,
+        error: {
+          code: "FILE_NOT_FOUND",
+          message: "Le fichier à supprimer n'existe pas.",
+          path: target.relativePath,
+        },
+      };
+    }
+    if (status.isDirectory) {
+      return {
+        success: false,
+        error: {
+          code: "NOT_A_FILE",
+          message: "delete_file ne peut pas supprimer un dossier.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    const tabManager = this.agent.editor?.tabManager;
+    const openFile = tabManager?.getFileByPath?.(target.absolutePath);
+    if (openFile && !openFile.isSaved) {
+      return {
+        success: false,
+        error: {
+          code: "DIRTY_FILE",
+          message:
+            "Le fichier contient des modifications non sauvegardées et ne peut pas être supprimé.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    const operation = await this.agent.api?.deleteEntry?.(target.absolutePath);
+    if (!operation?.success) {
+      return {
+        success: false,
+        error: this.agent.getFileOperationError(
+          operation,
+          "DELETE_FAILED",
+          "La suppression du fichier a échoué.",
+          target.relativePath,
+        ),
+      };
+    }
+
+    if (await this.agent.api?.pathExists?.(target.absolutePath)) {
+      return {
+        success: false,
+        error: {
+          code: "DELETE_VERIFICATION_FAILED",
+          message: "La disparition du fichier n'a pas pu être vérifiée.",
+          path: target.relativePath,
+        },
+      };
+    }
+
+    if (openFile) {
+      const closed = await tabManager?.closeFile?.(openFile.id);
+      if (!closed) tabManager?.markFileAsDeleted?.(target.absolutePath);
+    }
+    this.agent.readFileContexts.delete(target.absolutePath);
+    this.agent.readAfterFailurePaths.delete(target.absolutePath);
+    this.agent.editor?.quickOpen?.invalidate?.(target.root);
+    await this.agent.refreshWorkspaceFolders([target.parentPath]);
+
+    return {
+      success: true,
+      operation: "delete",
+      path: target.relativePath,
+      absolutePath: target.absolutePath,
+      deleted: true,
+    };
+  }
+
   async modifyFile(args = {}) {
     const relativePath = typeof args.path === "string" ? args.path.trim() : "";
     if (!relativePath) {

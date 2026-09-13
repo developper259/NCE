@@ -144,6 +144,23 @@ class EditorToolRegistry {
       },
       execute: (args) => this.agent.renameWorkspaceFile(args),
     });
+    this.agent.registerTool("delete_file", {
+      description:
+        "Supprime un fichier existant du workspace uniquement lorsque sa disparition est requise. Les dossiers, fichiers dirty et chemins dangereux sont refusés.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: 4000,
+            description: "Chemin du fichier à supprimer, relatif au workspace.",
+          },
+        },
+        required: ["path"],
+      },
+      execute: (args) => this.agent.deleteWorkspaceFile(args),
+    });
     this.agent.registerTool("modify_file", {
       description:
         "Modifie exactement une occurrence dans un fichier du workspace. Lis d'abord la zone ciblée avec read_file et fournis sa revision; les écritures obsolètes ou ambiguës sont refusées.",

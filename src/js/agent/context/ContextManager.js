@@ -314,6 +314,7 @@ class ContextManager {
       "create_file",
       "write_file_chunk",
       "rename_file",
+      "delete_file",
     ]);
 
     for (const message of messages) {
@@ -480,6 +481,7 @@ class ContextManager {
       "create_file",
       "write_file_chunk",
       "rename_file",
+      "delete_file",
     ]).has(toolName);
     const isRead = toolName === "read_file";
     const isSearch = toolName === "search_code";
@@ -803,6 +805,7 @@ class ContextManager {
       "create_file",
       "write_file_chunk",
       "rename_file",
+      "delete_file",
     ]);
     const hardCompaction = ["hard", "critical"].includes(pressureLevel);
 
