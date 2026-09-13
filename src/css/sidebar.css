@@ -198,7 +198,7 @@
   position: absolute;
   bottom: var(--bottombar-height);
   width: 4px;
-  height: var(--sidebar-height);
+  height: calc(100% - var(--bottombar-height));
   background-color: transparent;
   cursor: col-resize;
   z-index: 25;

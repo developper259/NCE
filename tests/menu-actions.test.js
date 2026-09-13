@@ -45,4 +45,6 @@ test("renderer and native application menus expose every user-facing action", ()
 
   assert.deepEqual(titleBarActions, expected);
   assert.deepEqual(nativeActions, expected);
+  assert.match(nativeMenuSource, /id:\s*"unselect-all"/);
+  assert.match(nativeMenuSource, /"unselect-all",/);
 });

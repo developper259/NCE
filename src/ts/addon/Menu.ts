@@ -23,6 +23,7 @@ export class AppMenu {
     "find",
     "go-to-line",
     "select-all",
+    "unselect-all",
     "new-line",
     "delete-line",
   ];
@@ -321,6 +322,7 @@ export class AppMenu {
           },
 
           {
+            id: "unselect-all",
             label: "Unselect All",
 
             click: () => this.unSelectAll(),
