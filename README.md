@@ -28,28 +28,43 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 
 **Current version**: **0.0.1-beta.2**
 
+## Beta 2 highlights
+
+- **Open Recent** with a persistent
+- Searchable **Settings tab** with category navigation and dedicated scrolling
+- Fully configurable keyboard shortcuts, including shortcut removal and special-key capture
+- Shortcuts synchronized across the editor, Command Palette and native macOS menu
+- Context menus for the editor output, tabs and File Explorer
+- Find in File prefill from a single-line selection
+- Safe workspace switching with dirty-file confirmation and watcher/search/cache cleanup
+- Session-safe Reload Window and protected handling of concurrent or external file changes
+
 ## Features
 
 - Fast custom editing engine
+- Virtualized vertical and horizontal rendering for large documents
 - Syntax highlighting powered by [NSH](https://github.com/developper259/NSH)
-- Multiple files and tabs
-- File explorer
-- Workspace search
+- Multiple file tabs and a dedicated Settings tab
+- File Explorer with create, rename, copy, move, duplicate and delete operations
+- Recursive workspace search with include/exclude filters
+- Persistent recent workspaces with Open Recent
 - Find in file with selection prefill
 - Quick Open (Mod+P)
 - Go to Line (Mod+G)
 - Command Palette (Mod+Shift+P)
-- Configurable settings and keyboard shortcuts
+- Searchable settings and configurable keyboard shortcuts
 - Undo & Redo
 - Smart typing and automatic pairs
 - Smart indentation
-- Context menus (editor, tabs, output)
+- Context menus for the editor, tabs and File Explorer
+- Native macOS menu and integrated Windows/Linux title bar menu
 - Auto Save
 - Cut, copy and paste
-- File and folder operations
-- Session restoration
+- Session restoration for workspaces, tabs, cursor, selection and scroll position
+- Safe dirty-file flows for close, quit, reload and workspace switching
+- Atomic file saves with large, binary and invalid UTF-8 file protection
 - Integrated AI assistant
-- Large and binary file protection
+- Local NSH failure fallback so the editor remains usable without highlighting
 - Cross-platform desktop support
 
 ## Getting Started
