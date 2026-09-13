@@ -5,7 +5,9 @@ const NCEPath = {
     const path = value.replace(/\\/g, "/");
     return path.replace(/\/+$/g, "") || (path.startsWith("/") ? "/" : "");
   },
-  basename(value) { return this.normalize(value).split("/").pop() || ""; },
+  basename(value) {
+    return this.normalize(value).split("/").pop() || "";
+  },
   dirname(value) {
     const path = this.normalize(value);
     const index = path.lastIndexOf("/");
@@ -17,11 +19,19 @@ const NCEPath = {
       ? normalized.toLowerCase()
       : normalized;
   },
-  equals(a, b) { return this.comparisonKey(a) === this.comparisonKey(b); },
-  samePath(a, b) { return this.equals(a, b); },
+  equals(a, b) {
+    return this.comparisonKey(a) === this.comparisonKey(b);
+  },
+  samePath(a, b) {
+    return this.equals(a, b);
+  },
   isInside(value, root) {
-    const path = this.comparisonKey(value), base = this.comparisonKey(root);
-    return Boolean(base) && (path === base || path.startsWith(base === "/" ? base : `${base}/`));
+    const path = this.comparisonKey(value),
+      base = this.comparisonKey(root);
+    return (
+      Boolean(base) &&
+      (path === base || path.startsWith(base === "/" ? base : `${base}/`))
+    );
   },
   rebase(value, oldRoot, newRoot) {
     if (!this.isInside(value, oldRoot)) return value;

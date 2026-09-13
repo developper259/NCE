@@ -5,11 +5,13 @@ class RunChangeTracker {
   }
 
   beginRun(runId, workspaceIdentity = null) {
-    const root =
-      this.agent?.editor?.fileExplorer?.rootPath || workspaceIdentity || null;
+    const requestedRoot =
+      typeof workspaceIdentity === "string" && workspaceIdentity.trim()
+        ? workspaceIdentity.trim()
+        : this.agent?.editor?.fileExplorer?.rootPath || null;
     const identity =
-      typeof root === "string" && root.trim()
-        ? AgentPath.normalize(root.trim())
+      typeof requestedRoot === "string" && requestedRoot.trim()
+        ? AgentPath.normalize(requestedRoot.trim())
         : null;
     this.current = {
       runId: Number.isInteger(runId) ? runId : (this.agent?.runId ?? 0),
@@ -21,6 +23,9 @@ class RunChangeTracker {
       unresolvedFailures: new Map(),
       reviewedChangedFiles: false,
       reviewedDiff: false,
+      reviewedChangedFilesVersion: null,
+      reviewedDiffVersion: null,
+      changeVersion: 0,
       invalidated: false,
     };
     this.agent.currentRunState = this.current;
@@ -109,10 +114,10 @@ class RunChangeTracker {
           existing.originalContent ??
           existing.beforeContent ??
           null,
-        beforeContent: change.beforeContent ?? existing.beforeContent ?? null,
+        beforeContent: existing.beforeContent ?? change.beforeContent ?? null,
         afterContent: change.afterContent ?? existing.afterContent ?? null,
         beforeRevision:
-          change.beforeRevision ?? existing.beforeRevision ?? null,
+          existing.beforeRevision ?? change.beforeRevision ?? null,
         afterRevision: change.afterRevision ?? existing.afterRevision ?? null,
         created: change.created ?? existing.created ?? false,
         modified: change.modified ?? existing.modified ?? false,
@@ -127,6 +132,7 @@ class RunChangeTracker {
         reviewed: change.reviewed ?? existing.reviewed ?? false,
         review: change.review ?? existing.review ?? null,
       };
+      this.current.changeVersion += 1;
       this.current.changes.set(key, merged);
       return merged;
     }
@@ -148,6 +154,7 @@ class RunChangeTracker {
       reviewed: false,
       review: null,
     };
+    this.current.changeVersion += 1;
     this.current.changes.set(key, record);
     return record;
   }
@@ -313,12 +320,14 @@ class RunChangeTracker {
   markReviewChangedFiles() {
     if (!this.current) return false;
     this.current.reviewedChangedFiles = true;
+    this.current.reviewedChangedFilesVersion = this.current.changeVersion;
     return true;
   }
 
   markReviewDiff() {
     if (!this.current) return false;
     this.current.reviewedDiff = true;
+    this.current.reviewedDiffVersion = this.current.changeVersion;
     return true;
   }
 
@@ -374,18 +383,79 @@ class RunChangeTracker {
       diff.push(this.renderDiff(entry));
     }
     const text = diff.join("\n");
+    const limit = this.agent?.toolExecutor?.getToolOutputLimit?.(
+      "get_diff",
+    ) || {
+      maxChars: 12000,
+    };
+    const maxChars = Number.isFinite(limit.maxChars)
+      ? Math.max(1, Math.floor(limit.maxChars))
+      : 12000;
     const patch = {
       success: true,
       runId: this.current.runId,
       truncated: false,
+      hasMore: false,
       path: requestedPath || null,
       diff: text,
     };
-    if (text.length > 12000) {
+    if (text.length > maxChars) {
       patch.truncated = true;
-      patch.diff = `${text.slice(0, 12000)}\n... [truncated]`;
+      patch.hasMore = true;
+      patch.diff = `${text.slice(0, maxChars)}\n... [truncated]`;
     }
+
+    const fileChanged = requestedPath
+      ? this.detectUserChangeAfterAgent(requestedPath)
+      : this.detectAnyUserChangeAfterAgent();
+    if (fileChanged) {
+      patch.currentFileChangedSinceAgentEdit = true;
+    }
+
     return patch;
+  }
+
+  detectUserChangeAfterAgent(path = null) {
+    if (!this.current || !this.agent?.editor?.tabManager) return false;
+    const normalizedPath =
+      typeof path === "string" ? this.normalizePath(path) : "";
+    if (!normalizedPath) return false;
+    const change = this.current.changes.get(normalizedPath);
+    if (!change || typeof change.afterContent !== "string") return false;
+
+    const absolute = this.agent.resolveWorkspacePath(
+      normalizedPath,
+      this.current.workspaceIdentity ||
+        this.agent.editor?.fileExplorer?.rootPath ||
+        "",
+    );
+    if (!absolute) return false;
+
+    const openFile = this.agent.editor?.tabManager?.getFileByPath?.(absolute);
+    if (!openFile || !Array.isArray(openFile.lines)) return false;
+
+    const liveText = openFile.lines.map((line) => line.getText()).join("\n");
+    return (
+      this.normalizeLineEndings(liveText) !==
+      this.normalizeLineEndings(change.afterContent)
+    );
+  }
+
+  detectAnyUserChangeAfterAgent() {
+    if (!this.current || !this.agent?.editor?.tabManager) return false;
+    for (const [key, change] of this.current.changes.entries()) {
+      if (
+        typeof change.afterContent === "string" &&
+        this.detectUserChangeAfterAgent(key)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  normalizeLineEndings(value = "") {
+    return typeof value === "string" ? value.replace(/\r\n?/g, "\n") : "";
   }
 
   renderDiff(change) {
@@ -503,18 +573,21 @@ class RunChangeTracker {
         },
       };
     }
-    if (
-      this.hasEffectiveChanges() &&
-      !this.current.reviewedChangedFiles &&
-      !this.current.reviewedDiff
-    ) {
-      return {
-        success: false,
-        error: {
-          code: "CHANGES_NOT_REVIEWED",
-          message: "Revoyez get_changed_files ou get_diff avant task_complete.",
-        },
-      };
+    if (this.hasEffectiveChanges()) {
+      const reviewCurrentForChangedFiles =
+        this.current.reviewedChangedFilesVersion === this.current.changeVersion;
+      const reviewCurrentForDiff =
+        this.current.reviewedDiffVersion === this.current.changeVersion;
+      if (!reviewCurrentForChangedFiles && !reviewCurrentForDiff) {
+        return {
+          success: false,
+          error: {
+            code: "CHANGES_NOT_REVIEWED",
+            message:
+              "Revoyez get_changed_files ou get_diff avant task_complete.",
+          },
+        };
+      }
     }
     this.current.status = "completed";
     this.current.reviewedChangedFiles = true;
@@ -527,28 +600,52 @@ class RunChangeTracker {
     };
   }
 
-  markPending(toolCallId) {
+  markPending(toolCallId, runId = this.current?.runId ?? null) {
     if (!this.current) return;
+    if (runId !== null && runId !== this.current.runId) return;
     if (typeof toolCallId === "string" && toolCallId.trim()) {
       this.current.pendingToolCalls.add(toolCallId);
     }
   }
 
-  clearPending(toolCallId) {
+  clearPending(toolCallId, runId = this.current?.runId ?? null) {
     if (!this.current) return;
+    if (runId !== null && runId !== this.current.runId) return;
     if (typeof toolCallId === "string" && toolCallId.trim()) {
       this.current.pendingToolCalls.delete(toolCallId);
     }
   }
 
-  addUnresolvedFailure(code, message) {
+  addUnresolvedFailure(code, message, classification = "unresolved") {
     if (!this.current) return;
-    this.current.unresolvedFailures.set(code, { code, message });
+    if (typeof code === "string" && code.trim()) {
+      this.current.unresolvedFailures.set(code, {
+        code,
+        message: typeof message === "string" ? message : String(message || ""),
+        classification,
+        status: "open",
+      });
+    }
   }
 
-  resolveFailure(code) {
+  resolveFailure(code, classification = "resolved") {
     if (!this.current) return;
-    if (typeof code === "string") this.current.unresolvedFailures.delete(code);
+    if (typeof code === "string") {
+      const failure = this.current.unresolvedFailures.get(code);
+      if (failure) {
+        failure.status = "resolved";
+        failure.classification = classification;
+      }
+      this.current.unresolvedFailures.delete(code);
+    }
+  }
+
+  classifyFailure(code, classification = "unresolved") {
+    if (!this.current || typeof code !== "string") return null;
+    const existing = this.current.unresolvedFailures.get(code);
+    if (!existing) return null;
+    existing.classification = classification;
+    return existing;
   }
 }
 

@@ -3,6 +3,31 @@ class ToolExecutor {
     this.agent = agent;
   }
 
+  getToolOutputLimit(name) {
+    const defaults = {
+      read_file: {
+        maxChars: 4000,
+        maxTokens: 1000,
+        nextStartLine: true,
+      },
+      search_code: {
+        maxChars: 4000,
+        maxTokens: 1000,
+        maxResults: 100,
+        nextOffset: true,
+      },
+      get_project_map: {
+        maxChars: 4000,
+        maxTokens: 1000,
+      },
+      get_diff: {
+        maxChars: 12000,
+        maxTokens: 12000,
+      },
+    };
+    return defaults[name] || null;
+  }
+
   getFileWritePayloadLimit(name) {
     if (!["create_file", "write_file_chunk"].includes(name)) return null;
     return Math.max(
@@ -16,10 +41,7 @@ class ToolExecutor {
     if (hardLimit === null) return { valid: true };
     const contentChars =
       typeof args.content === "string" ? args.content.length : 0;
-    this.agent.agentProgress?.recordFileWriteRequest?.(
-      name,
-      contentChars,
-    );
+    this.agent.agentProgress?.recordFileWriteRequest?.(name, contentChars);
     console.info("[NCE Agent write]", {
       tool: name,
       path: typeof args.path === "string" ? args.path : null,
@@ -90,13 +112,105 @@ class ToolExecutor {
     });
   }
 
-  limitResult(result) {
+  limitResult(name, result) {
     const maxContent = 4000;
     if (typeof result === "string")
       return this.agent.truncate(result, maxContent);
     if (!result || typeof result !== "object") return result;
 
+    const limits = this.getToolOutputLimit(name) || {};
     const limited = { ...result };
+
+    if (name === "read_file") {
+      const readMaxChars = Number.isFinite(limits.maxChars)
+        ? Math.max(1, limits.maxChars)
+        : maxContent;
+      if (typeof limited.content === "string") {
+        if (limited.content.length > readMaxChars) {
+          limited.content = this.agent.truncate(limited.content, readMaxChars);
+          limited.truncated = true;
+          limited.hasMore = true;
+          limited.nextStartLine = Number.isInteger(limited.endLine)
+            ? Math.min(
+                limited.endLine + 1,
+                Math.max(1, limited.totalLines || limited.endLine + 1),
+              )
+            : null;
+        } else if (Number.isInteger(limited.totalLines)) {
+          limited.hasMore = Number.isInteger(limited.endLine)
+            ? limited.endLine < limited.totalLines
+            : false;
+          limited.nextStartLine = limited.hasMore
+            ? Math.min(limited.endLine + 1, limited.totalLines)
+            : null;
+        }
+      }
+      return limited;
+    }
+
+    if (name === "search_code") {
+      const searchMaxChars = Number.isFinite(limits.maxChars)
+        ? Math.max(1, limits.maxChars)
+        : maxContent;
+      const maxResults = Number.isFinite(limits.maxResults)
+        ? Math.max(1, limits.maxResults)
+        : 100;
+      if (
+        Array.isArray(limited.results) &&
+        limited.results.length > maxResults
+      ) {
+        limited.results = limited.results.slice(0, maxResults);
+        limited.truncated = true;
+        limited.hasMore = true;
+        limited.nextOffset = Number.isInteger(limited.offset)
+          ? Math.min(
+              limited.offset + maxResults,
+              limited.totalMatches || Infinity,
+            )
+          : maxResults;
+      }
+      for (const key of ["content", "text", "snippet", "preview"]) {
+        if (
+          typeof limited[key] === "string" &&
+          limited[key].length > searchMaxChars
+        ) {
+          limited[key] = this.agent.truncate(limited[key], searchMaxChars);
+          limited.truncated = true;
+        }
+      }
+      return limited;
+    }
+
+    if (name === "get_project_map") {
+      const mapMaxChars = Number.isFinite(limits.maxChars)
+        ? Math.max(1, limits.maxChars)
+        : maxContent;
+      if (
+        typeof limited.text === "string" &&
+        limited.text.length > mapMaxChars
+      ) {
+        limited.text = this.agent.truncate(limited.text, mapMaxChars);
+        limited.truncated = true;
+        limited.hasMore = true;
+      }
+      return limited;
+    }
+
+    if (name === "get_diff") {
+      const diffMaxChars = Number.isFinite(limits.maxChars)
+        ? Math.max(1, limits.maxChars)
+        : 12000;
+      if (
+        typeof limited.diff === "string" &&
+        limited.diff.length > diffMaxChars
+      ) {
+        limited.diff = this.agent.truncate(limited.diff, diffMaxChars);
+        limited.truncated = true;
+        limited.hasMore = true;
+      }
+      return limited;
+    }
+
     for (const key of ["content", "beforeText", "afterText"]) {
       if (
         typeof limited[key] === "string" &&
@@ -133,17 +247,14 @@ class ToolExecutor {
     ]);
     const readTools = new Set(["read_file"]);
     const searchTools = new Set(["search_code"]);
-    const navigationTools = new Set([
-      "get_project_map",
-    ]);
+    const navigationTools = new Set(["get_project_map"]);
     const isValidationTool =
       /(?:^|_)(?:test|tests|build|lint|check|validate|validation|diagnostic|compile|typecheck)(?:_|$)/i.test(
         name || "",
       );
-    const toolCategory =
-      toolUnavailable
-        ? "capability"
-        : name === "task_complete"
+    const toolCategory = toolUnavailable
+      ? "capability"
+      : name === "task_complete"
         ? "completion"
         : isValidationTool
           ? "validation"
@@ -156,10 +267,9 @@ class ToolExecutor {
                 : navigationTools.has(name)
                   ? "navigation"
                   : "other";
-    const informationStatus =
-      toolUnavailable
-        ? "tool_unavailable"
-        : toolCategory === "completion" && result?.success !== false
+    const informationStatus = toolUnavailable
+      ? "tool_unavailable"
+      : toolCategory === "completion" && result?.success !== false
         ? "task_complete"
         : toolCategory === "validation" && result?.success === false
           ? "error_discovered"
@@ -169,16 +279,16 @@ class ToolExecutor {
               ? "error"
               : result?.restoredFromCache === true
                 ? "restored"
-              : result?.repeatedRedundantAction === true
-                ? "repeated_redundant"
-              : result?.alreadyKnown === true ||
-                  result?.noNewInformation === true
-                ? "already_known"
-                : toolCategory === "write"
-                  ? "state_changed"
-                  : ["read", "search", "navigation"].includes(toolCategory)
-                    ? "new"
-                    : "neutral";
+                : result?.repeatedRedundantAction === true
+                  ? "repeated_redundant"
+                  : result?.alreadyKnown === true ||
+                      result?.noNewInformation === true
+                    ? "already_known"
+                    : toolCategory === "write"
+                      ? "state_changed"
+                      : ["read", "search", "navigation"].includes(toolCategory)
+                        ? "new"
+                        : "neutral";
     return {
       informationStatus,
       toolCategory,
@@ -202,8 +312,7 @@ class ToolExecutor {
 
   getInformationSignature(name, result) {
     const error = result?.error;
-    const errorCode =
-      typeof error === "object" ? error?.code || "" : "";
+    const errorCode = typeof error === "object" ? error?.code || "" : "";
     const errorMessage =
       typeof error === "string" ? error : error?.message || "";
     const outcome = result?.success === false ? "failed" : "succeeded";
@@ -268,7 +377,8 @@ class ToolExecutor {
     if (!tool.readOnly) {
       if (
         executionContext.runId !== undefined &&
-        (this.agent.stopRequested || executionContext.runId !== this.agent.runId)
+        (this.agent.stopRequested ||
+          executionContext.runId !== this.agent.runId)
       ) {
         return this.attachMeta(name, {
           success: false,
@@ -288,8 +398,7 @@ class ToolExecutor {
           success: false,
           error: {
             code: "WORKSPACE_CHANGED",
-            message:
-              "Le workspace a changé depuis le démarrage du run Agent.",
+            message: "Le workspace a changé depuis le démarrage du run Agent.",
           },
         });
       }
@@ -387,6 +496,7 @@ class ToolExecutor {
         this.agent.fileKnowledge.observeWrite(name, normalizedArgs, rawResult);
       }
       const result = this.limitResult(
+        name,
         this.agent.normalizeToolResultForHistory(rawResult),
       );
       const meta = this.getToolResultMeta(name, result);

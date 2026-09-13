@@ -503,7 +503,9 @@ class WorkspaceFileManager {
       destination.absolutePath,
     );
     const explorer = this.agent.editor?.fileExplorer;
-    if (AgentPath.samePath(explorer?.activeFilePath || "", source.absolutePath)) {
+    if (
+      AgentPath.samePath(explorer?.activeFilePath || "", source.absolutePath)
+    ) {
       explorer.activeFilePath = destination.absolutePath;
     }
     if (this.agent.readFileContexts.has(source.absolutePath)) {

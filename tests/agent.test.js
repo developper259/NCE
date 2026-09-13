@@ -10,9 +10,84 @@ async function setup() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-agent-"));
   const manager = new FileManager({});
   const search = new WorkspaceSearch({});
+  const files = new Map();
+  const originalWriteFile = fs.writeFile.bind(fs);
+  fs.writeFile = async (file, data, options) => {
+    const result = await originalWriteFile(file, data, options);
+    const absolute = path.resolve(file);
+    const target = files.get(absolute);
+    if (target && typeof data === "string") {
+      target.lines = data
+        .replace(/\r\n?/g, "\n")
+        .split("\n")
+        .map((text) => ({
+          text,
+          getText() {
+            return this.text;
+          },
+          diffState: null,
+          diffSegments: [],
+        }));
+      target.totalLines = data.split(/\r?\n/).length;
+      target.maxLineLength = 0;
+      target.isSaved = true;
+    }
+    return result;
+  };
   const editor = {
     fileExplorer: { rootPath: root },
-    tabManager: { getFileByPath: () => null },
+    tabManager: {
+      activeFile: null,
+      files,
+      getFileByPath(filePath) {
+        return files.get(path.resolve(filePath)) || null;
+      },
+      async openFileWithPath(candidate) {
+        const filePath = path.resolve(candidate);
+        if (!files.has(filePath)) {
+          const content = await fs.readFile(filePath, "utf8");
+          const file = {
+            id: 1,
+            name: path.basename(filePath),
+            path: filePath,
+            lines: content
+              .replace(/\r\n?/g, "\n")
+              .split("\n")
+              .map((text) => ({
+                text,
+                getText() {
+                  return this.text;
+                },
+                diffState: null,
+                diffSegments: [],
+              })),
+            totalLines: content.split(/\r?\n/).length,
+            maxLineLength: 0,
+            isSaved: true,
+            autoSave: false,
+            diffSnapshot: null,
+            diffActive: false,
+            diffRows: [],
+            setIsSaved(value) {
+              this.isSaved = value;
+            },
+          };
+          files.set(filePath, file);
+        }
+        const file = files.get(filePath);
+        this.activeFile = file;
+        return file;
+      },
+      async setFocusFile(file) {
+        this.activeFile = file;
+      },
+    },
+    fileLoader: { async waitForFileLoaded() {} },
+    lineController: {
+      loadContent() {},
+      refresh() {},
+      markDirtyAll() {},
+    },
     api: {
       agentFileOperation: manager.agentFileOperation.bind(manager),
       pathExists: async (p) => {
@@ -265,6 +340,293 @@ test("delete_file rejects escaped symlinks and dirty tabs, then closes a clean o
   } finally {
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("RunChangeTracker invalidates stale review gates when the change journal moves", async () => {
+  const { root, agent, editor } = await setup();
+  try {
+    agent.runChangeTracker.beginRun(1, root);
+    const first = {
+      success: true,
+      path: "alpha.txt",
+      beforeText: "old",
+      afterText: "new",
+      previousRevision: "r0",
+      revision: "r1",
+    };
+    agent.runChangeTracker.recordModify(first);
+    agent.runChangeTracker.markReviewChangedFiles();
+    agent.runChangeTracker.markReviewDiff();
+
+    const second = {
+      success: true,
+      path: "alpha.txt",
+      beforeText: "new",
+      afterText: "newer",
+      previousRevision: "r1",
+      revision: "r2",
+    };
+    agent.runChangeTracker.recordModify(second);
+
+    const validation = agent.validateTaskComplete({});
+    assert.equal(validation.success, false);
+    assert.equal(validation.error.code, "CHANGES_NOT_REVIEWED");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Agent supports a real end-to-end workflow chain from inspection to review and completion", async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.writeFile(path.join(root, "alpha.txt"), "alpha\n", "utf8");
+    await fs.writeFile(path.join(root, "beta.txt"), "beta\n", "utf8");
+
+    agent.runChangeTracker.beginRun(1, root);
+
+    const projectMap = await agent.executeToolCall({
+      id: "scenario-project-map",
+      function: {
+        name: "get_project_map",
+        arguments: JSON.stringify({ path: "" }),
+      },
+    });
+    assert.equal(projectMap.success, true);
+
+    const search = await agent.executeToolCall({
+      id: "scenario-search",
+      function: {
+        name: "search_code",
+        arguments: JSON.stringify({ query: "alpha", offset: 0, limit: 10 }),
+      },
+    });
+    assert.equal(search.success, true);
+
+    const read = await agent.executeToolCall({
+      id: "scenario-read",
+      function: {
+        name: "read_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          startLine: 1,
+          endLine: 50,
+        }),
+      },
+    });
+    assert.equal(read.success, true);
+    assert.equal(read.result.path, "alpha.txt");
+
+    const firstModify = await agent.executeToolCall({
+      id: "scenario-modify-1",
+      function: {
+        name: "modify_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          oldText: "alpha",
+          newText: "beta",
+          revision: read.result.revision,
+        }),
+      },
+    });
+    assert.equal(firstModify.success, true);
+
+    const secondModify = await agent.executeToolCall({
+      id: "scenario-modify-2",
+      function: {
+        name: "modify_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          oldText: "beta",
+          newText: "gamma",
+          revision: firstModify.result.revision,
+        }),
+      },
+    });
+    assert.equal(secondModify.success, true);
+
+    const changedFiles = await agent.executeToolCall({
+      id: "scenario-changed-files",
+      function: {
+        name: "get_changed_files",
+        arguments: JSON.stringify({}),
+      },
+    });
+    assert.equal(changedFiles.success, true);
+    assert.equal(changedFiles.result.files.length >= 1, true);
+
+    const diff = await agent.executeToolCall({
+      id: "scenario-diff",
+      function: {
+        name: "get_diff",
+        arguments: JSON.stringify({ path: "alpha.txt" }),
+      },
+    });
+    assert.equal(diff.success, true);
+    assert.match(diff.result.diff, /--- a\/alpha.txt/);
+
+    const complete = await agent.executeToolCall({
+      id: "scenario-complete",
+      function: {
+        name: "task_complete",
+        arguments: JSON.stringify({
+          summary: "Scenario completed.",
+          validation: "Read, search, edit, diff and review confirmed.",
+        }),
+      },
+    });
+    assert.equal(complete.success, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("get_diff reports currentFileChangedSinceAgentEdit when the user mutates the file after the agent write", async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.writeFile(path.join(root, "alpha.txt"), "alpha\n", "utf8");
+    agent.runChangeTracker.beginRun(1, root);
+
+    const read = await agent.executeToolCall({
+      id: "edit-detect-read",
+      function: {
+        name: "read_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          startLine: 1,
+          endLine: 50,
+        }),
+      },
+    });
+    assert.equal(read.success, true);
+
+    const firstModify = await agent.executeToolCall({
+      id: "edit-detect-modify",
+      function: {
+        name: "modify_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          oldText: "alpha",
+          newText: "beta",
+          revision: read.result.revision,
+        }),
+      },
+    });
+    assert.equal(firstModify.success, true);
+
+    await fs.writeFile(path.join(root, "alpha.txt"), "gamma\n", "utf8");
+
+    const diff = await agent.executeToolCall({
+      id: "edit-detect-diff",
+      function: {
+        name: "get_diff",
+        arguments: JSON.stringify({ path: "alpha.txt" }),
+      },
+    });
+    assert.equal(diff.success, true);
+    assert.equal(diff.result.currentFileChangedSinceAgentEdit, true);
+    assert.match(diff.result.diff, /--- a\/alpha.txt/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Agent rejects stale revisions and blocks task completion when runs are aborted or workspaces drift", async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.writeFile(path.join(root, "alpha.txt"), "alpha\n", "utf8");
+    agent.runChangeTracker.beginRun(1, root);
+
+    const read = await agent.executeToolCall({
+      id: "stale-read",
+      function: {
+        name: "read_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          startLine: 1,
+          endLine: 50,
+        }),
+      },
+    });
+    assert.equal(read.success, true);
+
+    const firstModify = await agent.executeToolCall({
+      id: "stale-modify",
+      function: {
+        name: "modify_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          oldText: "alpha",
+          newText: "beta",
+          revision: read.result.revision,
+        }),
+      },
+    });
+    assert.equal(firstModify.success, true);
+
+    const stale = await agent.executeToolCall({
+      id: "stale-revision-attempt",
+      function: {
+        name: "modify_file",
+        arguments: JSON.stringify({
+          path: "alpha.txt",
+          oldText: "beta",
+          newText: "gamma",
+          revision: "wrong-revision",
+        }),
+      },
+    });
+    assert.equal(stale.success, false);
+    assert.equal(stale.error.code, "STALE_REVISION");
+
+    agent.runChangeTracker.setRunStatus("aborted");
+    const aborted = agent.validateTaskComplete({});
+    assert.equal(aborted.success, false);
+    assert.equal(aborted.error.code, "RUN_ABORTED");
+
+    const driftedRoot = path.join(root, "drift");
+    agent.runChangeTracker.beginRun(2, driftedRoot);
+    agent.runChangeTracker.current.status = "running";
+    const amidDrift = agent.validateTaskComplete({});
+    assert.equal(amidDrift.success, false);
+    assert.equal(amidDrift.error.code, "WORKSPACE_CHANGED");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Agent run journal preserves create then rename semantics without breaking diff review", async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.writeFile(path.join(root, "alpha.txt"), "alpha\n", "utf8");
+    agent.runChangeTracker.beginRun(1, root);
+
+    agent.runChangeTracker.recordCreate({
+      success: true,
+      path: "alpha.txt",
+      content: "alpha\n",
+      revision: "r-create",
+      verification: { revision: "r-create", content: "alpha\n" },
+    });
+
+    agent.runChangeTracker.recordRename({
+      success: true,
+      oldPath: "alpha.txt",
+      newPath: "renamed.txt",
+      verification: { revision: "r-rename" },
+    });
+
+    const journal = agent.runChangeTracker.getChangedFiles({});
+    assert.equal(journal.success, true);
+    assert.equal(journal.files.length, 1);
+    assert.equal(journal.files[0].status, "renamed");
+    assert.equal(journal.files[0].path, "renamed.txt");
+
+    const diff = agent.runChangeTracker.getDiff({ path: "renamed.txt" });
+    assert.equal(diff.success, true);
+    assert.match(diff.diff, /renamed.txt/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
   }
 });
 

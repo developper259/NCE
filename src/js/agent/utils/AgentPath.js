@@ -34,8 +34,11 @@ const AgentPath = {
   comparisonKey(value) {
     if (typeof value !== "string") return "";
     const normalized = this.normalize(value);
-    const looksWindows = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
-    return looksWindows ? normalized.replace(/\\/g, "/").toLowerCase() : normalized;
+    const looksWindows =
+      /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
+    return looksWindows
+      ? normalized.replace(/\\/g, "/").toLowerCase()
+      : normalized;
   },
   equals(a, b) {
     if (a === b) return true;
