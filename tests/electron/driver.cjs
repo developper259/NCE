@@ -2,6 +2,7 @@ const { app, dialog, session } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
+const { waitForCondition } = require('./wait-for-condition.cjs');
 const [directory, phase] = process.argv.slice(2);
 if (!directory || !path.isAbsolute(directory) || !fs.existsSync(path.join(directory, '.nce-smoke'))) throw Error('Temporary smoke directory required');
 app.setPath('userData', path.join(directory, 'profile'));
@@ -34,23 +35,36 @@ app.whenReady().then(() => {
       const quickOpenModifier = process.platform === 'darwin' ? 'meta' : 'control';
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'P', modifiers: [quickOpenModifier] });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'P', modifiers: [quickOpenModifier] });
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await waitForCondition(
+        async () => (await run('editor.quickPanel.isOpen("quick-open")')) === true,
+        { description: 'Quick Open to open after its shortcut' },
+      );
       assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), true);
       assert.equal(await run('document.querySelector(".quick-panel-empty").textContent'), 'Open a project first.');
       assert.equal(await run('document.activeElement === document.querySelector(".quick-panel-input")'), true);
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+      await waitForCondition(
+        async () => (await run('editor.quickPanel.isOpen("quick-open")')) === false,
+        { description: 'Quick Open to close after Escape' },
+      );
       assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), false);
-      await new Promise(resolve => setTimeout(resolve, 100));
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'G', modifiers: [quickOpenModifier] });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'G', modifiers: [quickOpenModifier] });
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await waitForCondition(
+        async () => (await run('editor.quickPanel.isOpen("go-to-line")')) === true,
+        { description: 'Go to Line to open after its shortcut' },
+      );
       assert.equal(await run('editor.quickPanel.isOpen("go-to-line")'), true);
       const goToLineMessage = await run('document.querySelector(".quick-panel-empty").textContent');
       assert.equal(/^(No file open\.|Line \d+ – \d+)$/.test(goToLineMessage), true);
       assert.equal(await run('document.activeElement === document.querySelector(".quick-panel-input")'), true);
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' });
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' });
+      await waitForCondition(
+        async () => (await run('editor.quickPanel.isOpen("go-to-line")')) === false,
+        { description: 'Go to Line to close after Escape' },
+      );
       assert.equal(await run('editor.quickPanel.isOpen("go-to-line")'), false);
       assert.equal(await run('CONFIG_KEYBINDING_GET_ACTION("reload_window")?.key === "Mod+R"'), true);
       if (phase === 'write') {
