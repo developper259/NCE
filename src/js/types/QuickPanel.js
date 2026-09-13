@@ -123,6 +123,7 @@ class QuickPanel {
     this.host.classList.remove("is-open");
     this.host.setAttribute("aria-hidden", "true");
     delete this.panel.dataset.panelId;
+    this.input.blur();
     this.input.value = "";
     this.input.type = "text";
     this.list.replaceChildren();
