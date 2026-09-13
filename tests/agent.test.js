@@ -76,7 +76,7 @@ async function setupEditable(content, { open = true, saved = true } = {}) {
   fixture.editor.tabManager = {
     activeFile: currentFile,
     getFileByPath: (candidate) =>
-      candidate === currentFile?.path ? currentFile : null,
+      fixture.agent.samePath(candidate, currentFile?.path) ? currentFile : null,
     async openFileWithPath(candidate) {
       currentFile = makeFile(await fs.readFile(candidate, "utf8"), candidate);
       this.activeFile = currentFile;
@@ -187,8 +187,8 @@ test("delete_file removes only safe workspace files and refreshes project caches
         .totalMatches,
       0,
     );
-    assert.equal(invalidatedRoot, root);
-    assert.equal(refreshedFolder, root);
+    assert.equal(agent.samePath(invalidatedRoot, root), true);
+    assert.equal(agent.samePath(refreshedFolder, root), true);
 
     assert.equal(
       (await agent.deleteWorkspaceFile({ path: "missing.txt" })).error.code,
@@ -266,6 +266,12 @@ test("delete_file rejects escaped symlinks and dirty tabs, then closes a clean o
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(outside, { recursive: true, force: true });
   }
+});
+
+test("AgentPath.samePath normalizes slash/backslash without changing POSIX case semantics", async () => {
+  const { agent } = await setup();
+  assert.equal(agent.samePath("C:\\Temp\\foo.txt", "C:/Temp/foo.txt"), true);
+  assert.equal(agent.samePath("/tmp/Foo", "/tmp/foo"), false);
 });
 
 test("ResponseBudgetEstimator provides a bounded local estimate without extra AI calls", async () => {

@@ -1168,25 +1168,31 @@ class Agent {
   }
 
   getChangedFiles(args = {}) {
-    return this.runChangeTracker?.getChangedFiles?.(args) || {
-      success: true,
-      runId: this.runId,
-      files: [],
-    };
+    return (
+      this.runChangeTracker?.getChangedFiles?.(args) || {
+        success: true,
+        runId: this.runId,
+        files: [],
+      }
+    );
   }
 
   getDiff(args = {}) {
-    return this.runChangeTracker?.getDiff?.(args) || {
-      success: false,
-      error: { code: 'NO_ACTIVE_RUN', message: 'Aucun run actif.' },
-    };
+    return (
+      this.runChangeTracker?.getDiff?.(args) || {
+        success: false,
+        error: { code: "NO_ACTIVE_RUN", message: "Aucun run actif." },
+      }
+    );
   }
 
   validateTaskComplete(args = {}) {
-    return this.runChangeTracker?.validateTaskComplete?.(args) || {
-      success: false,
-      error: { code: 'NO_ACTIVE_RUN', message: 'Aucun run actif.' },
-    };
+    return (
+      this.runChangeTracker?.validateTaskComplete?.(args) || {
+        success: false,
+        error: { code: "NO_ACTIVE_RUN", message: "Aucun run actif." },
+      }
+    );
   }
   buildEditorContext() {
     const file = this.editor?.tabManager?.activeFile;
@@ -1330,6 +1336,9 @@ class Agent {
   }
   lineColumnToIndex(...args) {
     return this.fileContextManager.lineColumnToIndex(...args);
+  }
+  samePath(a, b) {
+    return AgentPath?.samePath?.(a, b) ?? NCEPath?.samePath?.(a, b) ?? false;
   }
   getStrictRange(...args) {
     return this.fileContextManager.getStrictRange(...args);

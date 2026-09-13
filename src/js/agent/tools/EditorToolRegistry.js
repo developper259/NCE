@@ -26,7 +26,8 @@ class EditorToolRegistry {
     }
     const writeFileChunk = this.agent.getTool("write_file_chunk");
     if (writeFileChunk) {
-      writeFileChunk.description = this.agent.getWriteFileChunkToolDescription();
+      writeFileChunk.description =
+        this.agent.getWriteFileChunkToolDescription();
       if (writeFileChunk.parameters?.properties?.content) {
         writeFileChunk.parameters.properties.content.maxLength =
           maxChunkCharacters;
@@ -67,7 +68,8 @@ class EditorToolRegistry {
           summary: typeof args.summary === "string" ? args.summary.trim() : "",
           validation:
             typeof args.validation === "string" ? args.validation.trim() : "",
-          changedFiles: this.agent.runChangeTracker?.current?.changes?.size ?? 0,
+          changedFiles:
+            this.agent.runChangeTracker?.current?.changes?.size ?? 0,
         };
       },
     });
@@ -114,8 +116,7 @@ class EditorToolRegistry {
           content: {
             type: "string",
             maxLength: this.agent.largeFileWriting.maxChunkCharacters,
-            description:
-              `Contenu complet d'un petit/moyen fichier, ou première portion d'un gros fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères. Vide par défaut.`,
+            description: `Contenu complet d'un petit/moyen fichier, ou première portion d'un gros fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères. Vide par défaut.`,
           },
           overwrite: {
             type: "boolean",
@@ -148,8 +149,7 @@ class EditorToolRegistry {
             type: "string",
             minLength: 1,
             maxLength: this.agent.largeFileWriting.maxChunkCharacters,
-            description:
-              `Nouvelle portion à ajouter exactement à la fin du fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères.`,
+            description: `Nouvelle portion à ajouter exactement à la fin du fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères.`,
           },
           expectedRevision: {
             type: "string",
@@ -291,7 +291,6 @@ class EditorToolRegistry {
       execute: (args) => this.agent.searchProjectFiles(args),
     });
   }
-
 }
 
 window.EditorToolRegistry = EditorToolRegistry;

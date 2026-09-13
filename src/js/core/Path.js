@@ -18,6 +18,7 @@ const NCEPath = {
       : normalized;
   },
   equals(a, b) { return this.comparisonKey(a) === this.comparisonKey(b); },
+  samePath(a, b) { return this.equals(a, b); },
   isInside(value, root) {
     const path = this.comparisonKey(value), base = this.comparisonKey(root);
     return Boolean(base) && (path === base || path.startsWith(base === "/" ? base : `${base}/`));

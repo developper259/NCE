@@ -190,7 +190,9 @@ class WorkspaceFileManager {
 
     if (openFile && overwrite) {
       openFile.isLoaded = false;
-      await this.agent.editor?.tabManager?.reloadFileFromDisk?.(target.absolutePath);
+      await this.agent.editor?.tabManager?.reloadFileFromDisk?.(
+        target.absolutePath,
+      );
     }
     await this.agent.refreshWorkspaceFolders([target.parentPath]);
     const verifiedContent = (
@@ -219,7 +221,10 @@ class WorkspaceFileManager {
       path: target.relativePath,
       content: verifiedContent,
       revision: verificationContext.revision,
-      verification: { revision: verificationContext.revision, content: verifiedContent },
+      verification: {
+        revision: verificationContext.revision,
+        content: verifiedContent,
+      },
     });
     let openedInTabManager = false;
     if (
@@ -347,10 +352,7 @@ class WorkspaceFileManager {
       target.absolutePath,
       updatedContent,
     );
-    if (
-      AgentPath.normalize(savedPath || "") !==
-      AgentPath.normalize(target.absolutePath)
-    ) {
+    if (!AgentPath.samePath(savedPath || "", target.absolutePath)) {
       return {
         success: false,
         error: {
@@ -380,7 +382,9 @@ class WorkspaceFileManager {
 
     if (openFile) {
       openFile.isLoaded = false;
-      await this.agent.editor?.tabManager?.reloadFileFromDisk?.(target.absolutePath);
+      await this.agent.editor?.tabManager?.reloadFileFromDisk?.(
+        target.absolutePath,
+      );
       const refreshedFile = this.agent.editor?.tabManager?.getFileByPath?.(
         target.absolutePath,
       );
@@ -403,8 +407,7 @@ class WorkspaceFileManager {
         : appendStartsOnNewLine
           ? Math.max(0, appendedLines - 1)
           : appendedLines;
-    const deletions =
-      currentContent !== "" && !appendStartsOnNewLine ? 1 : 0;
+    const deletions = currentContent !== "" && !appendStartsOnNewLine ? 1 : 0;
     const verificationContext = this.agent.createFileReadContext(
       target.absolutePath,
       verifiedContent,
@@ -437,10 +440,7 @@ class WorkspaceFileManager {
     if (!destination.valid) {
       return { success: false, error: destination.error };
     }
-    if (
-      AgentPath.normalize(source.absolutePath) ===
-      AgentPath.normalize(destination.absolutePath)
-    ) {
+    if (AgentPath.samePath(source.absolutePath, destination.absolutePath)) {
       return {
         success: false,
         error: {
@@ -503,10 +503,7 @@ class WorkspaceFileManager {
       destination.absolutePath,
     );
     const explorer = this.agent.editor?.fileExplorer;
-    if (
-      AgentPath.normalize(explorer?.activeFilePath || "") ===
-      AgentPath.normalize(source.absolutePath)
-    ) {
+    if (AgentPath.samePath(explorer?.activeFilePath || "", source.absolutePath)) {
       explorer.activeFilePath = destination.absolutePath;
     }
     if (this.agent.readFileContexts.has(source.absolutePath)) {
@@ -520,7 +517,9 @@ class WorkspaceFileManager {
       source.parentPath,
       destination.parentPath,
     ]);
-    const sourceStillExists = await this.agent.api?.pathExists?.(source.absolutePath);
+    const sourceStillExists = await this.agent.api?.pathExists?.(
+      source.absolutePath,
+    );
     const destinationExists = await this.agent.api?.pathExists?.(
       destination.absolutePath,
     );
@@ -636,7 +635,10 @@ class WorkspaceFileManager {
       };
     }
 
-    const beforeContent = (await this.agent.api?.getFileContent?.([target.absolutePath]))?.[target.absolutePath] ?? null;
+    const beforeContent =
+      (await this.agent.api?.getFileContent?.([target.absolutePath]))?.[
+        target.absolutePath
+      ] ?? null;
     if (openFile) {
       const closed = await tabManager?.closeFile?.(openFile.id);
       if (!closed) tabManager?.markFileAsDeleted?.(target.absolutePath);
@@ -645,7 +647,10 @@ class WorkspaceFileManager {
     this.agent.editor?.quickOpen?.invalidate?.(target.root);
     await this.agent.refreshWorkspaceFolders([target.parentPath]);
 
-    this.agent.runChangeTracker?.recordDelete?.({ success: true, path: target.relativePath }, beforeContent);
+    this.agent.runChangeTracker?.recordDelete?.(
+      { success: true, path: target.relativePath },
+      beforeContent,
+    );
     return {
       success: true,
       operation: "delete",
@@ -740,7 +745,9 @@ class WorkspaceFileManager {
     const persistToDisk = this.agent.shouldPersistAgentEdit(absolutePath);
     const currentText = alreadyOpen
       ? alreadyOpen.lines.map((line) => line.getText()).join("\n")
-      : (await this.agent.api?.getFileContent?.([absolutePath]))?.[absolutePath];
+      : (await this.agent.api?.getFileContent?.([absolutePath]))?.[
+          absolutePath
+        ];
     if (typeof currentText !== "string") {
       return {
         success: false,
@@ -768,7 +775,8 @@ class WorkspaceFileManager {
         success: false,
         error: {
           code: "INVALID_OLD_TEXT",
-          message: "oldText ne peut pas contenir le marqueur de troncature NCE.",
+          message:
+            "oldText ne peut pas contenir le marqueur de troncature NCE.",
           path: this.agent.toProjectRelativePath(absolutePath, root),
         },
       };
@@ -852,9 +860,7 @@ class WorkspaceFileManager {
           },
         };
       }
-      if (
-        AgentPath.normalize(openFile.path) !== AgentPath.normalize(absolutePath)
-      ) {
+      if (!AgentPath.samePath(openFile.path, absolutePath)) {
         this.agent.executedModificationRequests.delete(requestKey);
         return {
           success: false,
@@ -866,7 +872,8 @@ class WorkspaceFileManager {
       }
       if (openFile) {
         const concurrentChange = getConcurrentChangeError(openFile);
-        if (concurrentChange) return { success: false, error: concurrentChange };
+        if (concurrentChange)
+          return { success: false, error: concurrentChange };
         openFile.isLoaded = false;
         await tabManager.setFocusFile(openFile);
         this.agent.editor.lineController?.loadContent?.(normalizedUpdatedText);
@@ -900,8 +907,11 @@ class WorkspaceFileManager {
         }
         openFile.setIsSaved(false);
         if (persistToDisk && typeof this.agent.api?.saveFile === "function") {
-          const savedPath = await this.agent.api.saveFile(absolutePath, updatedText);
-          if (savedPath !== absolutePath) {
+          const savedPath = await this.agent.api.saveFile(
+            absolutePath,
+            updatedText,
+          );
+          if (!AgentPath.samePath(savedPath || "", absolutePath)) {
             return {
               success: false,
               error: {
@@ -925,7 +935,11 @@ class WorkspaceFileManager {
       return result;
     }
 
-    const textMatch = this.agent.findUniqueTextMatch(currentText, oldText, nearLine);
+    const textMatch = this.agent.findUniqueTextMatch(
+      currentText,
+      oldText,
+      nearLine,
+    );
     if (textMatch.status === "missing") {
       return {
         success: false,
@@ -985,9 +999,7 @@ class WorkspaceFileManager {
         },
       };
     }
-    if (
-      AgentPath.normalize(openFile.path) !== AgentPath.normalize(absolutePath)
-    ) {
+    if (!AgentPath.samePath(openFile.path, absolutePath)) {
       this.agent.executedModificationRequests.delete(requestKey);
       return {
         success: false,
@@ -1033,7 +1045,10 @@ class WorkspaceFileManager {
       }
       openFile.setIsSaved(false);
       if (persistToDisk && typeof this.agent.api?.saveFile === "function") {
-        const savedPath = await this.agent.api.saveFile(absolutePath, updatedText);
+        const savedPath = await this.agent.api.saveFile(
+          absolutePath,
+          updatedText,
+        );
         if (savedPath !== absolutePath) {
           return {
             success: false,
@@ -1069,7 +1084,10 @@ class WorkspaceFileManager {
     if (/\.asar$/i.test(absolute))
       return {
         success: false,
-        error: { code: "BINARY_FILE", message: "Les archives ASAR sont des fichiers opaques." },
+        error: {
+          code: "BINARY_FILE",
+          message: "Les archives ASAR sont des fichiers opaques.",
+        },
       };
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(absolute);
     if (openFile) {
@@ -1114,10 +1132,7 @@ class WorkspaceFileManager {
       const totalLines = content.split(/\r?\n/).length;
       const effectiveReadRange = readDecision.range || requestedRange;
       const startLine = effectiveReadRange.startLine;
-      const endLine = Math.min(
-        effectiveReadRange.endLine,
-        totalLines,
-      );
+      const endLine = Math.min(effectiveReadRange.endLine, totalLines);
       const readContext = this.agent.createFileReadContext(
         absolute,
         content,
@@ -1174,15 +1189,15 @@ class WorkspaceFileManager {
     const files = await this.agent.api?.getFolderContent?.(target);
     if (Array.isArray(files)) {
       const result = {
-          success: true,
-          path,
-          total: files.length,
-          files: files.slice(0, 200).map((item) => ({
-            name: item.name,
-            type: item.type,
-            path: this.agent.toProjectRelativePath(item.path, root),
-          })),
-        };
+        success: true,
+        path,
+        total: files.length,
+        files: files.slice(0, 200).map((item) => ({
+          name: item.name,
+          type: item.type,
+          path: this.agent.toProjectRelativePath(item.path, root),
+        })),
+      };
       this.agent.fileKnowledge.recordProjectList(cacheDecision.key, result);
       return result;
     }
@@ -1204,7 +1219,6 @@ class WorkspaceFileManager {
       return null;
     return candidate;
   }
-
 }
 
 window.WorkspaceFileManager = WorkspaceFileManager;

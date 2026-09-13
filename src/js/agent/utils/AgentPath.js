@@ -31,6 +31,19 @@ const AgentPath = {
     if (absoluteUnix) return `/${joined}`.replace(/\/+$/g, "") || "/";
     return joined;
   },
+  comparisonKey(value) {
+    if (typeof value !== "string") return "";
+    const normalized = this.normalize(value);
+    const looksWindows = /^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//");
+    return looksWindows ? normalized.replace(/\\/g, "/").toLowerCase() : normalized;
+  },
+  equals(a, b) {
+    if (a === b) return true;
+    return this.comparisonKey(a) === this.comparisonKey(b);
+  },
+  samePath(a, b) {
+    return this.equals(a, b);
+  },
   isAbsolute(value) {
     if (typeof value !== "string") return false;
     const normalized = value.replace(/\\/g, "/");
