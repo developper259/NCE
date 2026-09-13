@@ -235,7 +235,9 @@ class KeyBinding {
     return this.editor.api.quit();
   }
 
-  control_reload_window() {
+  async control_reload_window() {
+    const saved = await this.editor.statesManager.save();
+    if (saved === false) return false;
     return this.editor.api.appCommand("view.reload");
   }
 

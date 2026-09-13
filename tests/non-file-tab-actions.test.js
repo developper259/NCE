@@ -89,6 +89,42 @@ test("the command palette hides file commands outside a file tab", () => {
   );
 });
 
+test("Reload Window saves the current state before reloading", async () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    tabManager: { activeFile: null },
+    statesManager: {
+      save: async () => {
+        calls.push("save-state");
+        return true;
+      },
+    },
+    api: {
+      appCommand: async (command) => {
+        calls.push(command);
+        return true;
+      },
+    },
+  });
+
+  assert.equal(await keyBinding.control_reload_window(), true);
+  assert.deepEqual(calls, ["save-state", "view.reload"]);
+});
+
+test("Reload Window is cancelled when saving the state fails", async () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    tabManager: { activeFile: null },
+    statesManager: { save: async () => false },
+    api: { appCommand: (command) => calls.push(command) },
+  });
+
+  assert.equal(await keyBinding.control_reload_window(), false);
+  assert.deepEqual(calls, []);
+});
+
 test("tab and titlebar propagate the active file context to both menus", () => {
   const root = path.resolve(__dirname, "..");
   const tabManager = fs.readFileSync(
