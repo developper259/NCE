@@ -14,6 +14,12 @@ contextBridge.exposeInMainWorld("api", {
   getSettings: () => ipcRenderer.invoke("Settings:getAll"),
   getSetting: (key) => ipcRenderer.invoke("Settings:get", key),
   setSetting: (key, value) => ipcRenderer.invoke("Settings:set", key, value),
+  getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),
+  addRecentFolder: (folderPath) =>
+    ipcRenderer.invoke("RecentFolders:add", folderPath),
+  removeRecentFolder: (folderPath) =>
+    ipcRenderer.invoke("RecentFolders:remove", folderPath),
+  clearRecentFolders: () => ipcRenderer.invoke("RecentFolders:clear"),
   onAutoSaveToggleRequested: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("auto-save-toggle-requested", listener);
@@ -23,6 +29,17 @@ contextBridge.exposeInMainWorld("api", {
     const listener = () => callback();
     ipcRenderer.on("open-settings-requested", listener);
     return () => ipcRenderer.removeListener("open-settings-requested", listener);
+  },
+  onOpenRecentFolderRequested: (callback) => {
+    const listener = (_event, folderPath) => callback(folderPath);
+    ipcRenderer.on("open-recent-folder-requested", listener);
+    return () =>
+      ipcRenderer.removeListener("open-recent-folder-requested", listener);
+  },
+  onRecentFoldersChanged: (callback) => {
+    const listener = (_event, folders) => callback(folders);
+    ipcRenderer.on("recent-folders-changed", listener);
+    return () => ipcRenderer.removeListener("recent-folders-changed", listener);
   },
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),

@@ -491,10 +491,39 @@ class FileExplorer extends Sidebar {
 
   async selectFolder() {
     const folderPath = await window.api.selectFolder();
-    if (folderPath) {
-      this.isLoaded = false;
-      await this.loadProject(folderPath);
+    if (!folderPath) return false;
+    return this.requestWorkspaceSwitch(folderPath);
+  }
+
+  async openRecentFolder(folderPath) {
+    return this.requestWorkspaceSwitch(folderPath, { fromRecent: true });
+  }
+
+  async requestWorkspaceSwitch(folderPath, { fromRecent = false } = {}) {
+    if (!folderPath) return false;
+
+    const status = await this.fileOperations.pathStatus(folderPath);
+    if (!status?.exists || !status.isDirectory) {
+      if (fromRecent) await this.editor.api.removeRecentFolder?.(folderPath);
+      return false;
     }
+
+    if (this.rootPath && NCEPath.equals(folderPath, this.rootPath)) {
+      await this.editor.api.addRecentFolder?.(folderPath);
+      return true;
+    }
+
+    if (!(await this.editor.tabManager.closeFiles())) return false;
+
+    this.editor.searchSidebar?.resetWorkspace?.();
+    if (this.rootPath) await this.closeProject();
+
+    this.isLoaded = false;
+    if (!(await this.loadProject(folderPath))) return false;
+
+    const stateSaved = await this.editor.statesManager.save();
+    await this.editor.api.addRecentFolder?.(folderPath);
+    return stateSaved !== false;
   }
 
   async toggleFolder(folderPath) {

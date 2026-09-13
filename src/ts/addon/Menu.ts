@@ -67,6 +67,24 @@ export class AppMenu {
     }
   }
 
+  getRecentFolderItems() {
+    const folders = this.WinAPP.app.recentFolders?.getAll?.() || [];
+    if (folders.length === 0) {
+      return [{ label: "No Recent Folders", enabled: false }];
+    }
+    return [
+      ...folders.map((folderPath: string) => ({
+        label: folderPath,
+        click: () => this.WinAPP.requestOpenRecentFolder(folderPath),
+      })),
+      { type: "separator" as const },
+      {
+        label: "Clear Recently Opened",
+        click: () => void this.WinAPP.clearRecentFolders(),
+      },
+    ];
+  }
+
   init() {
     if (!this.menu) return;
     const quitAccelerator = this.getAccelerator("quit_app");
@@ -130,11 +148,8 @@ export class AppMenu {
           },
 
           {
-            label: "Quick Open...",
-
-            accelerator: this.getAccelerator("quick_open"),
-
-            click: () => this.quickOpen(),
+            label: "Open Recent",
+            submenu: this.getRecentFolderItems(),
           },
 
           {
@@ -380,6 +395,14 @@ export class AppMenu {
             accelerator: this.getAccelerator("toggle_agent"),
 
             click: () => this.toggleAgent(),
+          },
+
+          {
+            label: "Quick Open...",
+
+            accelerator: this.getAccelerator("quick_open"),
+
+            click: () => this.quickOpen(),
           },
 
           {

@@ -103,6 +103,12 @@ class Editor {
     this.initQuitEvent();
     this.api.onAutoSaveToggleRequested?.(() => this.toggleAutoSave());
     this.api.onOpenSettingsRequested?.(() => this.openSettings());
+    this.api.onOpenRecentFolderRequested?.((folderPath) =>
+      this.openRecentFolder(folderPath),
+    );
+    this.api.onRecentFoldersChanged?.((folders) =>
+      this.titleBar?.setRecentFolders(folders),
+    );
     this.initLoadState();
     this.api.rendererReady?.().catch?.((error) => {
       console.error("[Startup] rendererReady failed", error);
@@ -156,6 +162,14 @@ class Editor {
 
   openSettings() {
     return this.tabManager.openSettings();
+  }
+
+  openRecentFolder(folderPath) {
+    return this.fileExplorer.openRecentFolder(folderPath);
+  }
+
+  clearRecentFolders() {
+    return this.api.clearRecentFolders();
   }
 
   refreshMainContent() {

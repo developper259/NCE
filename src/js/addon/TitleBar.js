@@ -9,6 +9,7 @@ class TitleBar {
     this.activeItemIndex = -1;
     this.previousFocus = null;
     this.menuButtons = [];
+    this.recentFolders = [];
     this.onDocumentPointerDown = this.handleDocumentPointerDown.bind(this);
     this.onDocumentKeyDown = this.handleDocumentKeyDown.bind(this);
 
@@ -18,6 +19,7 @@ class TitleBar {
     document.addEventListener("pointerdown", this.onDocumentPointerDown);
     document.addEventListener("keydown", this.onDocumentKeyDown, true);
     this.refresh();
+    this.loadRecentFolders();
   }
 
   get menuDefinitions() {
@@ -29,7 +31,7 @@ class TitleBar {
           ["New File", "new_file"],
           ["Open File...", "open_file"],
           ["Open Folder...", "open_folder"],
-          ["Quick Open...", "quick_open"],
+          ["Open Recent", "open_recent_menu", { recentSubmenu: true }],
           null,
           ["Save", "save", { needsFile: true }],
           ["Save As...", "saveAs", { needsFile: true }],
@@ -127,6 +129,10 @@ class TitleBar {
         continue;
       }
       const [label, command, options = {}] = item;
+      if (options.recentSubmenu) {
+        menu.appendChild(this.createRecentSubmenu(label));
+        continue;
+      }
       const button = document.createElement("button");
       button.type = "button";
       button.className = "nce-titlebar-menu-item";
@@ -153,6 +159,111 @@ class TitleBar {
       menu.appendChild(button);
     }
     return menu;
+  }
+
+  createRecentSubmenu(label) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "nce-titlebar-submenu-item";
+
+    const trigger = document.createElement("button");
+    trigger.type = "button";
+    trigger.className = "nce-titlebar-menu-item";
+    trigger.dataset.command = "open_recent_menu";
+    trigger.setAttribute("role", "menuitem");
+    trigger.setAttribute("aria-haspopup", "true");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.tabIndex = -1;
+
+    const text = document.createElement("span");
+    text.textContent = label;
+    const arrow = document.createElement("span");
+    arrow.className = "nce-titlebar-submenu-arrow";
+    arrow.textContent = "›";
+    trigger.append(text, arrow);
+
+    const submenu = document.createElement("div");
+    submenu.className = "nce-titlebar-dropdown nce-titlebar-submenu";
+    submenu.setAttribute("role", "menu");
+    submenu.hidden = true;
+    this.populateRecentSubmenu(submenu);
+
+    const open = () => {
+      submenu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+    };
+    trigger.addEventListener("mouseenter", open);
+    wrapper.addEventListener("mouseleave", () => {
+      submenu.hidden = true;
+      trigger.setAttribute("aria-expanded", "false");
+    });
+    trigger.addEventListener("mousedown", (event) => event.preventDefault());
+    trigger.addEventListener("click", () => {
+      if (submenu.hidden) open();
+      else {
+        submenu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+      }
+    });
+    wrapper.append(trigger, submenu);
+    return wrapper;
+  }
+
+  populateRecentSubmenu(submenu) {
+    submenu.replaceChildren();
+    if (this.recentFolders.length === 0) {
+      const empty = document.createElement("button");
+      empty.type = "button";
+      empty.className = "nce-titlebar-menu-item";
+      empty.textContent = "No Recent Folders";
+      empty.disabled = true;
+      submenu.appendChild(empty);
+      return;
+    }
+
+    for (const folderPath of this.recentFolders) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "nce-titlebar-menu-item nce-titlebar-recent-folder";
+      item.textContent = folderPath;
+      item.title = folderPath;
+      item.addEventListener("mousedown", (event) => event.preventDefault());
+      item.addEventListener("click", () => {
+        this.closeMenus({ restoreFocus: false });
+        this.editor.openRecentFolder(folderPath);
+      });
+      submenu.appendChild(item);
+    }
+
+    const separator = document.createElement("div");
+    separator.className = "nce-titlebar-separator";
+    separator.setAttribute("role", "separator");
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "nce-titlebar-menu-item";
+    clear.textContent = "Clear Recently Opened";
+    clear.addEventListener("mousedown", (event) => event.preventDefault());
+    clear.addEventListener("click", () => {
+      this.closeMenus({ restoreFocus: false });
+      this.editor.clearRecentFolders();
+    });
+    submenu.append(separator, clear);
+  }
+
+  async loadRecentFolders() {
+    try {
+      this.setRecentFolders(await this.editor.api.getRecentFolders?.());
+    } catch (error) {
+      console.error("Unable to load recent folders:", error);
+    }
+  }
+
+  setRecentFolders(folders) {
+    this.recentFolders = Array.isArray(folders)
+      ? folders.filter((folderPath) => typeof folderPath === "string")
+      : [];
+    this.root
+      ?.querySelectorAll(".nce-titlebar-submenu")
+      .forEach((submenu) => this.populateRecentSubmenu(submenu));
   }
 
   getShortcut(command) {

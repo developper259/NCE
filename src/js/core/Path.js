@@ -11,9 +11,15 @@ const NCEPath = {
     const index = path.lastIndexOf("/");
     return index < 0 ? "" : path.slice(0, index) || "/";
   },
-  equals(a, b) { return this.normalize(a) === this.normalize(b); },
+  comparisonKey(value) {
+    const normalized = this.normalize(value);
+    return /^[a-z]:\//i.test(normalized) || normalized.startsWith("//")
+      ? normalized.toLowerCase()
+      : normalized;
+  },
+  equals(a, b) { return this.comparisonKey(a) === this.comparisonKey(b); },
   isInside(value, root) {
-    const path = this.normalize(value), base = this.normalize(root);
+    const path = this.comparisonKey(value), base = this.comparisonKey(root);
     return Boolean(base) && (path === base || path.startsWith(base === "/" ? base : `${base}/`));
   },
   rebase(value, oldRoot, newRoot) {

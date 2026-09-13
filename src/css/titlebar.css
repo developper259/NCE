@@ -52,6 +52,28 @@
   app-region: no-drag;
 }
 
+.nce-titlebar-submenu-item {
+  position: relative;
+}
+
+.nce-titlebar-submenu {
+  top: -6px;
+  left: calc(100% - 2px);
+  min-width: 280px;
+  max-width: min(480px, calc(100vw - 260px));
+}
+
+.nce-titlebar-submenu-arrow {
+  margin-left: auto;
+  color: var(--titlebar-text-muted);
+}
+
+.nce-titlebar-recent-folder {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .nce-titlebar-left {
   min-width: 0;
   height: 100%;

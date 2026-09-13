@@ -26,6 +26,7 @@ class SearchSidebar extends Sidebar {
 
     this.isSearching = false;
     this.searchTimer = null;
+    this.workspaceGeneration = 0;
   }
 
   render() {
@@ -218,6 +219,7 @@ class SearchSidebar extends Sidebar {
     }
 
     const rootPath = this.editor.fileExplorer.rootPath;
+    const workspaceGeneration = this.workspaceGeneration;
 
     if (!rootPath) {
       this.clearResults();
@@ -241,7 +243,11 @@ class SearchSidebar extends Sidebar {
         },
       );
 
-      if (!this.isOpen) {
+      if (
+        !this.isOpen ||
+        workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(rootPath, this.editor.fileExplorer.rootPath)
+      ) {
         return;
       }
 
@@ -262,6 +268,13 @@ class SearchSidebar extends Sidebar {
     this.totalMatches = 0;
     this.filesSearched = 0;
     this.isSearching = false;
+  }
+
+  resetWorkspace() {
+    clearTimeout(this.searchTimer);
+    this.workspaceGeneration++;
+    this.clearResults();
+    this.refresh();
   }
 
   getSummaryText() {

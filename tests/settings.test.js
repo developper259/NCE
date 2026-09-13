@@ -135,6 +135,12 @@ test('keybindings are validated, merged and persisted as settings', async () => 
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('native settings defaults stay aligned with the renderer defaults', async () => {
+  assert.equal(DEFAULT_KEYBINDINGS.open_settings, 'Mod+,');
+  assert.equal(DEFAULT_KEYBINDINGS.open_folder, 'Mod+Shift+O');
+  assert.equal(DEFAULT_KEYBINDINGS.quit_app, 'Mod+Q');
+});
+
 test('every configurable renderer shortcut has a persisted default', async () => {
   const application = await fs.readFile(
     path.join(__dirname, '../src/config/Application.js'),

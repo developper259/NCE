@@ -190,6 +190,18 @@ export class Window {
       ipcMain.handle("Settings:set", async (_event, key, value) => {
         return this.setSetting(key, value);
       });
+      ipcMain.handle("RecentFolders:getAll", async () =>
+        this.app.recentFolders.getAll(),
+      );
+      ipcMain.handle("RecentFolders:add", async (_event, folderPath) =>
+        this.addRecentFolder(folderPath),
+      );
+      ipcMain.handle("RecentFolders:remove", async (_event, folderPath) =>
+        this.removeRecentFolder(folderPath),
+      );
+      ipcMain.handle("RecentFolders:clear", async () =>
+        this.clearRecentFolders(),
+      );
       ipcMain.handle("App:rendererReady", async () => {
         this.rendererReady = true;
         return true;
@@ -226,6 +238,34 @@ export class Window {
       this.appMenu?.refreshKeybindings();
     }
     return true;
+  }
+
+  async addRecentFolder(folderPath: unknown) {
+    const saved = await this.app.recentFolders.add(folderPath);
+    if (saved) this.refreshRecentFolders();
+    return saved;
+  }
+
+  async removeRecentFolder(folderPath: unknown) {
+    const saved = await this.app.recentFolders.remove(folderPath);
+    if (saved) this.refreshRecentFolders();
+    return saved;
+  }
+
+  async clearRecentFolders() {
+    const saved = await this.app.recentFolders.clear();
+    if (saved) this.refreshRecentFolders();
+    return saved;
+  }
+
+  refreshRecentFolders() {
+    const folders = this.app.recentFolders.getAll();
+    this.appMenu?.refreshKeybindings();
+    this.window?.webContents.send("recent-folders-changed", folders);
+  }
+
+  requestOpenRecentFolder(folderPath: string) {
+    this.window?.webContents.send("open-recent-folder-requested", folderPath);
   }
 
   setMenuShortcutsIgnored(ignored: unknown) {

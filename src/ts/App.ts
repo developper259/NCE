@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { Window } from './Window';
 import { NSHServer } from 'nsh/server';
 import { SettingsManager } from './manager/SettingsManager';
+import { RecentFoldersManager } from './manager/RecentFoldersManager';
 
 export class App {
   window: Window;
@@ -10,6 +11,7 @@ export class App {
   nshStarting = false;
   nshStopping = false;
   settings!: SettingsManager;
+  recentFolders!: RecentFoldersManager;
   name = "NCE";
 
   version = app.getVersion();
@@ -29,6 +31,8 @@ export class App {
     app.on("ready", async () => {
       this.settings = new SettingsManager(app.getPath("userData"));
       await this.settings.initialize();
+      this.recentFolders = new RecentFoldersManager(app.getPath("userData"));
+      await this.recentFolders.initialize();
       await this.startNsh();
       this.window.create();
     });
