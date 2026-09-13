@@ -51,28 +51,29 @@ export class RecentFoldersManager {
   async add(folderPath: unknown): Promise<boolean> {
     const normalized = normalizeRecentFolderPath(folderPath, this.platform);
     if (!normalized) return false;
-    const key = recentFolderKey(normalized, this.platform);
-    this.folders = [
-      normalized,
-      ...this.folders.filter(
-        (folder) => recentFolderKey(folder, this.platform) !== key,
-      ),
-    ].slice(0, RECENT_FOLDERS_LIMIT);
-    return this.save();
+    return this.update((folders) => {
+      const key = recentFolderKey(normalized, this.platform);
+      return [
+        normalized,
+        ...folders.filter(
+          (folder) => recentFolderKey(folder, this.platform) !== key,
+        ),
+      ].slice(0, RECENT_FOLDERS_LIMIT);
+    });
   }
 
   async remove(folderPath: unknown): Promise<boolean> {
     const key = recentFolderKey(folderPath, this.platform);
     if (!key) return false;
-    this.folders = this.folders.filter(
-      (folder) => recentFolderKey(folder, this.platform) !== key,
+    return this.update((folders) =>
+      folders.filter(
+        (folder) => recentFolderKey(folder, this.platform) !== key,
+      ),
     );
-    return this.save();
   }
 
   async clear(): Promise<boolean> {
-    this.folders = [];
-    return this.save();
+    return this.update(() => []);
   }
 
   private sanitize(value: unknown): string[] {
@@ -94,6 +95,18 @@ export class RecentFoldersManager {
     this.writeQueue = this.writeQueue
       .catch(() => false)
       .then(() => this.writeSnapshot(this.folders));
+    return this.writeQueue;
+  }
+
+  private update(change: (folders: string[]) => string[]): Promise<boolean> {
+    this.writeQueue = this.writeQueue
+      .catch(() => false)
+      .then(async () => {
+        const nextFolders = change(this.folders);
+        const saved = await this.writeSnapshot(nextFolders);
+        if (saved) this.folders = nextFolders;
+        return saved;
+      });
     return this.writeQueue;
   }
 

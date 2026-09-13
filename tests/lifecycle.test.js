@@ -159,6 +159,45 @@ test('deletedFromDisk takes priority over Auto Save for visual dirty state', () 
   }
 });
 
+test('an external change cannot be overwritten by a dirty editor buffer', async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 1, 'conflict.txt', '/conflict.txt');
+  file.loadingState = {
+    status: 'loaded',
+    loadedLineCount: 1,
+    expectedTotalLines: 1,
+  };
+  file.lines = [new LineNode('local edits')];
+  file.isSaved = false;
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+  let writes = 0;
+  editor.api = {
+    saveFile: async (filePath) => {
+      writes++;
+      return filePath;
+    },
+  };
+
+  await editor.tabManager.reloadFileFromDisk(file.path);
+  assert.equal(file.externalModified, true);
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    assert.equal(await file.save(), false);
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(writes, 0);
+  assert.equal(file.serializeContent(), 'local edits');
+
+  editor.tabManager.selectNewFile = async () => '/conflict-copy.txt';
+  editor.highlightController.changeLanguage = async () => {};
+  assert.equal(await file.saveAs(), true);
+  assert.equal(writes, 1);
+  assert.equal(file.externalModified, false);
+});
+
 test('a new file is registered synchronously before asynchronous setup', () => {
   const editor = setup();
   const file = editor.tabManager.createEmptyFile();
@@ -350,6 +389,37 @@ test('save completion does not mark newer edits as saved', async () => {
   const saved = file.save(); await new Promise(r => setImmediate(r));
   file.editVersion++; file.lines[0].setText('newer'); finish('/a'); await saved;
   assert.equal(file.isSaved, false);
+});
+
+test('concurrent saves are serialized so an older revision cannot win last', async () => {
+  const editor = setup();
+  const writes = [];
+  const finishes = [];
+  editor.api = {
+    saveFile: (_path, content) => new Promise(resolve => {
+      writes.push(content);
+      finishes.push(resolve);
+    }),
+  };
+  const file = new FileNode(editor, 1, 'a', '/a');
+  file.loadingState = { status: 'loaded', expectedTotalLines: 1, loadedLineCount: 1 };
+  file.lines[0].setText('old');
+  file.editVersion = 1;
+
+  const first = file.save();
+  await new Promise(resolve => setImmediate(resolve));
+  file.lines[0].setText('new');
+  file.editVersion = 2;
+  const second = file.save();
+
+  assert.deepEqual(writes, ['old']);
+  finishes[0]('/a');
+  await first;
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(writes, ['old', 'new']);
+  finishes[1]('/a');
+  await second;
+  assert.equal(file.isSaved, true);
 });
 
 test('Close All is a real close, and Cancel leaves all tabs open', async () => {

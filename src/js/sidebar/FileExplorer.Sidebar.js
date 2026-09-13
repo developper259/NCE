@@ -9,6 +9,7 @@ class FileExplorer extends Sidebar {
 
     this.projectExpanded = true;
     this.isLoaded = false;
+    this.workspaceSwitching = false;
 
     this.clipboard = null;
 
@@ -500,11 +501,26 @@ class FileExplorer extends Sidebar {
   }
 
   async requestWorkspaceSwitch(folderPath, { fromRecent = false } = {}) {
-    if (!folderPath) return false;
+    if (!folderPath || this.workspaceSwitching) return false;
+    this.workspaceSwitching = true;
 
+    try {
+      return await this.performWorkspaceSwitch(folderPath, { fromRecent });
+    } finally {
+      this.workspaceSwitching = false;
+    }
+  }
+
+  async performWorkspaceSwitch(folderPath, { fromRecent = false } = {}) {
     const status = await this.fileOperations.pathStatus(folderPath);
-    if (!status?.exists || !status.isDirectory) {
-      if (fromRecent) await this.editor.api.removeRecentFolder?.(folderPath);
+    if (!status?.exists || !status.isDirectory || status.readable === false) {
+      if (
+        fromRecent &&
+        ((!status?.exists && status?.code === "SOURCE_NOT_FOUND") ||
+          (status?.exists && !status.isDirectory))
+      ) {
+        await this.editor.api.removeRecentFolder?.(folderPath);
+      }
       return false;
     }
 

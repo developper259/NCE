@@ -26,7 +26,9 @@ class FileNode extends Tab {
 
     this.isSaved = true;
     this.deletedFromDisk = false;
+    this.externalModified = false;
     this.editVersion = 0;
+    this.saveQueue = Promise.resolve(true);
 
     // KeyBinding
     this.historyX = undefined;
@@ -99,6 +101,7 @@ class FileNode extends Tab {
     this.path = file.path;
     this.isSaved = file.isSaved;
     this.deletedFromDisk = file.deletedFromDisk === true;
+    this.externalModified = file.externalModified === true;
 
     this.historyX = file.historyX;
 
@@ -160,6 +163,7 @@ class FileNode extends Tab {
       this.syntaxMetrics = null;
       this.loadError = null;
       this.deletedFromDisk = false;
+      this.externalModified = false;
       this.editor.historyController?.clear(this);
       this.editor.fileLoader.loadRemainingLines(
         this,
@@ -175,8 +179,16 @@ class FileNode extends Tab {
     }
   }
 
-  async ensureSaveable() {
+  async ensureSaveable({ allowExternalConflict = false } = {}) {
     if (this.loadError) return false;
+    if (this.externalModified && !allowExternalConflict) {
+      this.reportSaveError(
+        Object.assign(new Error("File changed on disk"), {
+          code: "FILE_CHANGED_ON_DISK",
+        }),
+      );
+      return false;
+    }
     try {
       await this.editor.fileLoader.waitForFileLoaded(this);
       this.saveError = null;
@@ -206,6 +218,8 @@ class FileNode extends Tab {
     const message =
       error.code === "FILE_LOAD_FAILED"
         ? "File loading failed. Reload the file before saving."
+        : error.code === "FILE_CHANGED_ON_DISK"
+          ? "File changed on disk. Use Save As to preserve your changes."
         : error.code === "FILE_NOT_FULLY_LOADED"
           ? "File is not fully loaded. Save was cancelled."
           : "Failed to save file.";
@@ -213,12 +227,19 @@ class FileNode extends Tab {
     else console.warn(message);
   }
 
-  async save() {
+  save() {
+    this.saveQueue = this.saveQueue
+      .catch(() => false)
+      .then(() => this.performSave());
+    return this.saveQueue;
+  }
+
+  async performSave() {
     if (this.loadError) {
       this.reportSaveError(this.loadError);
       return false;
     }
-    if (!this.path) return this.saveAs();
+    if (!this.path) return this.performSaveAs();
     if (!(await this.ensureSaveable())) return false;
     const content = this.serializeContent();
     const version = this.editVersion;
@@ -238,12 +259,20 @@ class FileNode extends Tab {
     }
   }
 
-  async saveAs() {
+  saveAs() {
+    this.saveQueue = this.saveQueue
+      .catch(() => false)
+      .then(() => this.performSaveAs());
+    return this.saveQueue;
+  }
+
+  async performSaveAs() {
     if (this.loadError) {
       this.reportSaveError(this.loadError);
       return false;
     }
-    if (!(await this.ensureSaveable())) return false;
+    if (!(await this.ensureSaveable({ allowExternalConflict: true })))
+      return false;
     const selectedPath = await this.editor.tabManager.selectNewFile();
     if (typeof selectedPath !== "string" || !selectedPath) return false;
     const content = this.serializeContent();
@@ -264,6 +293,7 @@ class FileNode extends Tab {
       };
     this.path = selectedPath;
     this.deletedFromDisk = false;
+    this.externalModified = false;
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
     if (version === this.editVersion) {
       this.setIsSaved(true);
@@ -310,13 +340,17 @@ class FileNode extends Tab {
   isVisuallyDirty() {
     return (
       this.deletedFromDisk === true ||
+      this.externalModified === true ||
       (this.isSaved !== true && this.autoSave !== true)
     );
   }
 
   shouldPersistChanges() {
     return (
-      this.autoSave === true && Boolean(this.path) && !this.deletedFromDisk
+      this.autoSave === true &&
+      Boolean(this.path) &&
+      !this.deletedFromDisk &&
+      !this.externalModified
     );
   }
 

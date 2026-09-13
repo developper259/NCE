@@ -217,6 +217,7 @@ class TitleBar {
       empty.type = "button";
       empty.className = "nce-titlebar-menu-item";
       empty.textContent = "No Recent Folders";
+      empty.dataset.staticDisabled = "true";
       empty.disabled = true;
       submenu.appendChild(empty);
       return;
@@ -318,7 +319,10 @@ class TitleBar {
   refreshDisabledItems() {
     const hasFile = Boolean(this.editor.tabManager.activeFile);
     this.root.querySelectorAll(".nce-titlebar-menu-item").forEach((item) => {
-      item.disabled = item.dataset.needsFile === "true" && !hasFile;
+      if (item.dataset.staticDisabled === "true") item.disabled = true;
+      else if (item.dataset.needsFile !== undefined) {
+        item.disabled = item.dataset.needsFile === "true" && !hasFile;
+      }
     });
     this.refreshAutoSaveState();
   }
@@ -348,9 +352,25 @@ class TitleBar {
     const panel = this.root.querySelector(
       `[data-menu-panel="${this.openMenuId}"]`,
     );
-    return Array.from(
-      panel?.querySelectorAll(".nce-titlebar-menu-item") || [],
-    ).filter((item) => !item.disabled);
+    const activeSubmenu = document.activeElement?.closest?.(
+      ".nce-titlebar-submenu:not([hidden])",
+    );
+    if (activeSubmenu) {
+      return Array.from(activeSubmenu.children).filter(
+        (item) =>
+          item.classList?.contains("nce-titlebar-menu-item") && !item.disabled,
+      );
+    }
+    return Array.from(panel?.children || [])
+      .map((item) =>
+        item.classList?.contains("nce-titlebar-submenu-item")
+          ? item.querySelector(":scope > .nce-titlebar-menu-item")
+          : item,
+      )
+      .filter(
+        (item) =>
+          item?.classList?.contains("nce-titlebar-menu-item") && !item.disabled,
+      );
   }
 
   moveItemFocus(direction) {
@@ -388,7 +408,30 @@ class TitleBar {
     if (event.key === "Escape") this.closeMenus();
     else if (event.key === "ArrowDown") this.moveItemFocus(1);
     else if (event.key === "ArrowUp") this.moveItemFocus(-1);
-    else if (event.key === "ArrowRight") this.switchMenu(1);
+    else if (
+      event.key === "ArrowRight" &&
+      document.activeElement?.dataset.command === "open_recent_menu"
+    ) {
+      const trigger = document.activeElement;
+      const submenu = trigger.nextElementSibling;
+      submenu.hidden = false;
+      trigger.setAttribute("aria-expanded", "true");
+      const firstItem = submenu.querySelector(
+        ".nce-titlebar-menu-item:not(:disabled)",
+      );
+      firstItem?.focus();
+      if (firstItem) this.activeItemIndex = 0;
+    } else if (
+      event.key === "ArrowLeft" &&
+      document.activeElement?.closest?.(".nce-titlebar-submenu")
+    ) {
+      const submenu = document.activeElement.closest(".nce-titlebar-submenu");
+      submenu.hidden = true;
+      const trigger = submenu.previousElementSibling;
+      trigger?.setAttribute("aria-expanded", "false");
+      trigger?.focus();
+      this.activeItemIndex = this.getOpenItems().indexOf(trigger);
+    } else if (event.key === "ArrowRight") this.switchMenu(1);
     else if (event.key === "ArrowLeft") this.switchMenu(-1);
     else if (event.key === "Enter" && document.activeElement?.dataset.command)
       document.activeElement.click();

@@ -127,6 +127,20 @@ test("queued concurrent writes leave a complete latest settings document", async
   }
 });
 
+test("a failed settings write does not change the in-memory source of truth", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    manager.writeSnapshot = async () => false;
+
+    assert.equal(await manager.set("editor.tabWidth", 8), false);
+    assert.equal(manager.get("editor.tabWidth"), 2);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy autoSave migrates only when settings.json is first created", async () => {
   const root = await temporaryUserData();
   try {

@@ -26,6 +26,18 @@ module.exports = async function exerciseUI() {
   };
   const titleBar = new TitleBar(titleEditor);
   check(titleBar.menuButtons.length === 4, 'Windows renderer menus');
+  check(titleBar.root.querySelector('[data-command="open_recent_menu"]'), 'Open Recent renderer submenu');
+  check(titleBar.root.querySelector('.nce-titlebar-submenu .nce-titlebar-menu-item')?.disabled === true, 'Empty Open Recent state');
+  titleBar.setRecentFolders(['/tmp/workspace']);
+  titleBar.openMenu('file');
+  const recentTrigger = titleBar.root.querySelector('[data-command="open_recent_menu"]');
+  recentTrigger.focus();
+  titleBar.handleDocumentKeyDown({ key: 'ArrowRight', preventDefault() {}, stopPropagation() {} });
+  check(document.activeElement?.textContent === '/tmp/workspace', 'Open Recent keyboard submenu entry');
+  titleBar.handleDocumentKeyDown({ key: 'ArrowLeft', preventDefault() {}, stopPropagation() {} });
+  check(document.activeElement === recentTrigger, 'Open Recent keyboard submenu exit');
+  titleBar.setRecentFolders([]);
+  titleBar.closeMenus({ restoreFocus: false });
   check(!titleBar.root.querySelector('[data-command="view.devtools"]'), 'No renderer DevTools menu item');
   check(titleBar.title.textContent.startsWith('● '), 'Dirty title indicator');
   titleBar.toggleMenu('file'); check(titleBar.openMenuId === 'file', 'Open File menu');

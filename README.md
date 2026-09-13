@@ -108,7 +108,7 @@ Build artifacts are generated in `release/`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.1**
+Current version: **0.0.1-beta.2**
 
 ## License
 

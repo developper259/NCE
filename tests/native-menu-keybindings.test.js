@@ -8,6 +8,11 @@ const {
 
 function createMenuHarness(overrides = {}) {
   const installed = [];
+  const recentFolders = Array.isArray(overrides.recentFolders)
+    ? overrides.recentFolders
+    : [];
+  const openRecentCalls = [];
+  let clearRecentCalls = 0;
 
   class Menu {
     constructor() {
@@ -72,18 +77,38 @@ function createMenuHarness(overrides = {}) {
   );
   const appMenu = new AppMenu(
     { webContents: { send() {} } },
-    { app: { settings: { get: (key) => values.get(key) } } },
+    {
+      app: {
+        settings: { get: (key) => values.get(key) },
+        recentFolders: { getAll: () => [...recentFolders] },
+      },
+      requestOpenRecentFolder: (folderPath) => openRecentCalls.push(folderPath),
+      clearRecentFolders: async () => { clearRecentCalls++; },
+    },
   );
 
   function item(label) {
-    for (const topLevel of appMenu.menu.items) {
-      const found = topLevel.submenu?.find?.((child) => child.label === label);
-      if (found) return found;
-    }
+    const find = (entries) => {
+      for (const entry of entries || []) {
+        if (entry.label === label) return entry;
+        const nested = find(entry.submenu);
+        if (nested) return nested;
+      }
+      return null;
+    };
+    const found = find(appMenu.menu.items);
+    if (found) return found;
     throw new Error(`Missing native menu item: ${label}`);
   }
 
-  return { appMenu, installed, item, values };
+  return {
+    appMenu,
+    installed,
+    item,
+    values,
+    openRecentCalls,
+    get clearRecentCalls() { return clearRecentCalls; },
+  };
 }
 
 test("NCE shortcuts convert to Electron accelerators through one normalizer", () => {
@@ -168,6 +193,19 @@ test("native menu rebuilds from current keybindings and preserves static items",
     appMenu.menu.items.filter((entry) => entry.label === "Edit").length,
     1,
   );
+});
+
+test("native Open Recent exposes folders, dispatches selection and clears history", async () => {
+  const fixture = createMenuHarness({
+    recentFolders: ["/projects/NSH", "/projects/NCE"],
+  });
+  fixture.item("/projects/NCE").click();
+  assert.deepEqual(fixture.openRecentCalls, ["/projects/NCE"]);
+  await fixture.item("Clear Recently Opened").click();
+  assert.equal(fixture.clearRecentCalls, 1);
+
+  const empty = createMenuHarness();
+  assert.equal(empty.item("No Recent Folders").enabled, false);
 });
 
 test("Window refreshes the native menu only after a persisted keybinding change", async () => {

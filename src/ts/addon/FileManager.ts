@@ -312,7 +312,21 @@ export class FileManager {
       if (!validPath(targetPath)) return { exists: false, code: "INVALID_PATH" };
       try {
         const stats = await fs.stat(targetPath);
-        return { exists: true, isDirectory: stats.isDirectory() };
+        const isDirectory = stats.isDirectory();
+        if (isDirectory) {
+          try {
+            await fs.access(targetPath, fsSync.constants.R_OK);
+          } catch (error: any) {
+            return {
+              exists: true,
+              isDirectory: true,
+              readable: false,
+              code: error?.code || "ACCESS_DENIED",
+              error: error?.message,
+            };
+          }
+        }
+        return { exists: true, isDirectory, readable: true };
       } catch (error: any) {
         if (error?.code === "ENOENT") return { exists: false, code: "SOURCE_NOT_FOUND" };
         return { exists: false, code: error?.code || "STAT_FAILED", error: error?.message };

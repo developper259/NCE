@@ -190,16 +190,25 @@ export class SettingsManager {
 
   set(key: string, value: unknown): Promise<boolean> {
     if (!this.isValid(key, value)) return Promise.resolve(false);
-    const [section, property] = key.split(".");
-    if (section === "keybindings") {
-      const validation = this.validateKeybindingAssignment(
-        property,
-        value as string | null,
-      );
-      if (!validation.valid) return Promise.resolve(false);
-    }
-    (this.settings as any)[section][property] = value;
-    return this.save();
+    this.writeQueue = this.writeQueue
+      .catch(() => false)
+      .then(async () => {
+        const [section, property] = key.split(".");
+        if (section === "keybindings") {
+          const validation = this.validateKeybindingAssignment(
+            property,
+            value as string | null,
+          );
+          if (!validation.valid) return false;
+        }
+
+        const nextSettings = clone(this.settings);
+        (nextSettings as any)[section][property] = value;
+        const saved = await this.writeSnapshot(nextSettings);
+        if (saved) this.settings = nextSettings;
+        return saved;
+      });
+    return this.writeQueue;
   }
 
   save(): Promise<boolean> {

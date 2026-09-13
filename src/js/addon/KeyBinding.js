@@ -236,6 +236,7 @@ class KeyBinding {
   }
 
   async control_reload_window() {
+    if (!(await this.editor.tabManager.prepareForQuit())) return false;
     const saved = await this.editor.statesManager.save();
     if (saved === false) return false;
     return this.editor.api.appCommand("view.reload");

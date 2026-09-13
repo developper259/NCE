@@ -365,6 +365,8 @@ class tabManager {
     if (!file) return;
 
     if (!file.isSaved) {
+      file.externalModified = true;
+      this.refresh();
       return;
     }
 

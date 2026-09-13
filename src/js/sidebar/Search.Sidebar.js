@@ -27,6 +27,7 @@ class SearchSidebar extends Sidebar {
     this.isSearching = false;
     this.searchTimer = null;
     this.workspaceGeneration = 0;
+    this.searchGeneration = 0;
   }
 
   render() {
@@ -220,6 +221,7 @@ class SearchSidebar extends Sidebar {
 
     const rootPath = this.editor.fileExplorer.rootPath;
     const workspaceGeneration = this.workspaceGeneration;
+    const searchGeneration = ++this.searchGeneration;
 
     if (!rootPath) {
       this.clearResults();
@@ -245,6 +247,7 @@ class SearchSidebar extends Sidebar {
 
       if (
         !this.isOpen ||
+        searchGeneration !== this.searchGeneration ||
         workspaceGeneration !== this.workspaceGeneration ||
         !NCEPath.equals(rootPath, this.editor.fileExplorer.rootPath)
       ) {
@@ -258,8 +261,10 @@ class SearchSidebar extends Sidebar {
       console.error("Error searching workspace:", error);
       this.clearResults();
     } finally {
-      this.isSearching = false;
-      this.refresh();
+      if (searchGeneration === this.searchGeneration) {
+        this.isSearching = false;
+        this.refresh();
+      }
     }
   }
 
@@ -273,6 +278,7 @@ class SearchSidebar extends Sidebar {
   resetWorkspace() {
     clearTimeout(this.searchTimer);
     this.workspaceGeneration++;
+    this.searchGeneration++;
     this.clearResults();
     this.refresh();
   }
