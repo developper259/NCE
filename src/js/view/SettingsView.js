@@ -24,6 +24,7 @@ class SettingsView {
     this.host = editor.domManager.getElement(".settings-view-host");
     this.category = SETTINGS_UI[0].category;
     this.query = "";
+    this.scroller = null;
     this.build();
   }
 
@@ -40,6 +41,7 @@ class SettingsView {
         <main class="settings-content"></main>
       </div>`;
     this.search = this.host.querySelector(".settings-search");
+    this.layout = this.host.querySelector(".settings-layout");
     this.nav = this.host.querySelector(".settings-nav");
     this.content = this.host.querySelector(".settings-content");
     this.search.addEventListener("input", () => {
@@ -48,6 +50,31 @@ class SettingsView {
     });
     this.renderNavigation();
     this.render();
+    this.initScroller();
+  }
+
+  initScroller() {
+    if (
+      this.scroller ||
+      !this.editor.scrollerManager ||
+      !this.layout ||
+      !this.content
+    ) {
+      return;
+    }
+
+    this.scroller = new SettingsScroller(
+      this.editor,
+      this.layout,
+      this.content,
+    );
+    this.scroller.init();
+  }
+
+  refreshScroller() {
+    if (!this.scroller) return;
+    this.scroller.updateMetrics();
+    this.scroller.refresh();
   }
 
   getSettings() {
@@ -105,6 +132,7 @@ class SettingsView {
 
   render() {
     if (!this.content) return;
+    this.content.scrollTop = 0;
     const settings = this.getVisibleSettings();
     this.content.replaceChildren();
     if (!settings.length) {
@@ -112,6 +140,7 @@ class SettingsView {
       empty.className = "settings-empty";
       empty.textContent = "No settings found.";
       this.content.appendChild(empty);
+      this.refreshScroller();
       return;
     }
     const categories = [...new Set(settings.map((item) => item.category))];
@@ -128,6 +157,7 @@ class SettingsView {
       }
       this.content.appendChild(section);
     }
+    this.refreshScroller();
   }
 
   createRow(setting) {
@@ -450,6 +480,7 @@ class SettingsView {
   show() {
     if (this.host) this.host.hidden = false;
     this.render();
+    this.refreshScroller();
   }
   hide() {
     if (this.host) this.host.hidden = true;
