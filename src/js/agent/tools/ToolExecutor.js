@@ -265,6 +265,36 @@ class ToolExecutor {
       });
     }
 
+    if (!tool.readOnly) {
+      if (
+        executionContext.runId !== undefined &&
+        (this.agent.stopRequested || executionContext.runId !== this.agent.runId)
+      ) {
+        return this.attachMeta(name, {
+          success: false,
+          error: {
+            code: "RUN_ABORTED",
+            message: "Le run Agent associé à cette écriture n'est plus actif.",
+          },
+        });
+      }
+      const expectedRoot = this.agent.runConfig?.workspaceRoot;
+      const currentRoot = this.agent.editor?.fileExplorer?.rootPath;
+      if (
+        typeof expectedRoot === "string" &&
+        AgentPath.normalize(expectedRoot) !== AgentPath.normalize(currentRoot)
+      ) {
+        return this.attachMeta(name, {
+          success: false,
+          error: {
+            code: "WORKSPACE_CHANGED",
+            message:
+              "Le workspace a changé depuis le démarrage du run Agent.",
+          },
+        });
+      }
+    }
+
     let args = {};
     try {
       const raw = call.function.arguments;

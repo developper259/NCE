@@ -22,6 +22,42 @@ async function setup() {
   return { root, editor, agent: createAgent(editor), manager };
 }
 
+async function setupEditable(content, { open = true, saved = true } = {}) {
+  const fixture = await setup();
+  const filePath = path.join(fixture.root, 'editable.txt');
+  await fs.writeFile(filePath, content);
+  const makeLine = text => ({ text, getText() { return this.text; }, diffState: null, diffSegments: [] });
+  const makeFile = (text, targetPath = filePath) => ({
+    id: 17,
+    name: 'editable.txt',
+    path: targetPath,
+    lines: text.replace(/\r\n?/g, '\n').split('\n').map(makeLine),
+    totalLines: text.split(/\r?\n/).length,
+    maxLineLength: 0,
+    isSaved: saved,
+    autoSave: false,
+    diffSnapshot: null,
+    diffActive: false,
+    diffRows: [],
+    setIsSaved(value) { this.isSaved = value; },
+  });
+  let currentFile = open ? makeFile(content) : null;
+  fixture.editor.tabManager = {
+    activeFile: currentFile,
+    getFileByPath: candidate => candidate === currentFile?.path ? currentFile : null,
+    async openFileWithPath(candidate) {
+      currentFile = makeFile(await fs.readFile(candidate, 'utf8'), candidate);
+      this.activeFile = currentFile;
+      return currentFile;
+    },
+    async setFocusFile(file) { this.activeFile = file; },
+  };
+  fixture.editor.fileLoader = { async waitForFileLoaded() {} };
+  fixture.editor.lineController = { loadContent() {}, refresh() {}, markDirtyAll() {} };
+  fixture.getFile = () => currentFile;
+  return fixture;
+}
+
 const CODE_TOOLS = [
   'create_file',
   'delete_file',
@@ -169,13 +205,132 @@ test('Agent public project, search, read and completion tools remain functional'
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test('modify_file uses explicit revisions for immediate and repeated edits', async () => {
+  const fixture = await setupEditable('alpha beta gamma');
+  const { root, agent } = fixture;
+  try {
+    const read = await agent.readFile('editable.txt');
+    const first = await agent.modifyFile({ path: 'editable.txt', revision: read.revision, oldText: 'alpha', newText: 'one' });
+    assert.equal(first.success, true, JSON.stringify(first));
+    assert.equal(first.previousRevision, read.revision);
+    const second = await agent.modifyFile({ path: 'editable.txt', revision: first.revision, oldText: 'beta', newText: 'two' });
+    const third = await agent.modifyFile({ path: 'editable.txt', revision: second.revision, oldText: 'gamma', newText: 'three' });
+    assert.equal(third.success, true, JSON.stringify(third));
+    assert.equal(fixture.getFile().lines.map(line => line.getText()).join('\n'), 'one two three');
+    assert.equal(agent.readFileContexts.get(path.join(root, 'editable.txt')).revision, third.revision);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('modify_file rejects stale revisions and recovers after reading the changed buffer', async () => {
+  const fixture = await setupEditable('before');
+  const { root, agent } = fixture;
+  try {
+    const read = await agent.readFile('editable.txt');
+    fixture.getFile().lines = [{ getText: () => 'user change', diffState: null, diffSegments: [] }];
+    fixture.getFile().isSaved = false;
+    const stale = await agent.modifyFile({ path: 'editable.txt', revision: read.revision, oldText: 'before', newText: 'agent change' });
+    assert.equal(stale.error.code, 'STALE_REVISION');
+    assert.equal(fixture.getFile().lines[0].getText(), 'user change');
+
+    const reread = await agent.readFile('editable.txt');
+    const recovered = await agent.modifyFile({ path: 'editable.txt', revision: reread.revision, oldText: 'user change', newText: 'user + agent' });
+    assert.equal(recovered.success, true, JSON.stringify(recovered));
+    assert.equal(fixture.getFile().lines[0].getText(), 'user + agent');
+    assert.equal(fixture.getFile().isSaved, false);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('modify_file separates revision validation from exact and ambiguous matching', async () => {
+  const fixture = await setupEditable('same\nmiddle\nsame');
+  const { root, agent } = fixture;
+  try {
+    const read = await agent.readFile('editable.txt');
+    const missingRevision = await agent.modifyFile({ path: 'editable.txt', oldText: 'middle', newText: 'center' });
+    assert.equal(missingRevision.error.code, 'REVISION_REQUIRED');
+    const missing = await agent.modifyFile({ path: 'editable.txt', revision: read.revision, oldText: 'absent', newText: 'value' });
+    assert.equal(missing.error.code, 'OLD_TEXT_NOT_FOUND');
+    const ambiguous = await agent.modifyFile({ path: 'editable.txt', revision: read.revision, oldText: 'same', newText: 'value' });
+    assert.equal(ambiguous.error.code, 'AMBIGUOUS_MATCH');
+    assert.equal(fixture.getFile().lines.map(line => line.getText()).join('\n'), 'same\nmiddle\nsame');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('partial and truncated reads do not become hidden write preconditions', async () => {
+  const longPrefix = 'x'.repeat(5000);
+  const fixture = await setupEditable(`${longPrefix}\ntarget\ntail`);
+  const { root, agent } = fixture;
+  try {
+    const partial = await agent.readFile('editable.txt', { startLine: 2, endLine: 2 });
+    const partialEdit = await agent.modifyFile({ path: 'editable.txt', revision: partial.revision, oldText: 'target', newText: 'changed' });
+    assert.equal(partialEdit.success, true, JSON.stringify(partialEdit));
+
+    const full = await agent.readFile('editable.txt', { startLine: 1, endLine: 3 });
+    assert.equal(full.truncated, true);
+    assert.doesNotMatch(full.content, /tail/);
+    const outsideVisiblePrefix = await agent.modifyFile({ path: 'editable.txt', revision: full.revision, oldText: 'tail', newText: 'done' });
+    assert.equal(outsideVisiblePrefix.success, true, JSON.stringify(outsideVisiblePrefix));
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('closed CRLF files and newly created files follow the same revision chain', async () => {
+  const fixture = await setupEditable('first\r\nsecond', { open: false });
+  const { root, agent } = fixture;
+  try {
+    const read = await agent.readFile('editable.txt');
+    const crlfEdit = await agent.modifyFile({ path: 'editable.txt', revision: read.revision, oldText: 'first\nsecond', newText: 'first\nupdated' });
+    assert.equal(crlfEdit.success, true, JSON.stringify(crlfEdit));
+
+    const created = await agent.createWorkspaceFile({ path: 'created.txt', content: 'created value' });
+    const createdEdit = await agent.modifyFile({ path: 'created.txt', revision: created.revision, oldText: 'created', newText: 'updated' });
+    assert.equal(createdEdit.success, true, JSON.stringify(createdEdit));
+    assert.equal(createdEdit.previousRevision, created.revision);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('create_file overwrite requires the explicit revision of existing content', async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.writeFile(path.join(root, 'existing.txt'), 'known');
+    const refused = await agent.createWorkspaceFile({ path: 'existing.txt', content: 'replacement', overwrite: true });
+    assert.equal(refused.error.code, 'REVISION_REQUIRED');
+    assert.equal(await fs.readFile(path.join(root, 'existing.txt'), 'utf8'), 'known');
+
+    const read = await agent.readFile('existing.txt');
+    const overwritten = await agent.createWorkspaceFile({ path: 'existing.txt', content: 'replacement', overwrite: true, revision: read.revision });
+    assert.equal(overwritten.success, true, JSON.stringify(overwritten));
+    assert.equal(await fs.readFile(path.join(root, 'existing.txt'), 'utf8'), 'replacement');
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('write guards reject stopped runs and workspace changes before mutation', async () => {
+  const { root, agent, editor } = await setup();
+  const otherRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-other-workspace-'));
+  try {
+    agent.runId = 4;
+    agent.runConfig = { permissions: 'code', workspaceRoot: root };
+    agent.stopRequested = true;
+    const stopped = await agent.executeToolCall({ function: { name: 'create_file', arguments: '{"path":"blocked.txt"}' } }, { runId: 4 });
+    assert.equal(stopped.error.code, 'RUN_ABORTED');
+    assert.equal(await editor.api.pathExists(path.join(root, 'blocked.txt')), false);
+
+    agent.stopRequested = false;
+    editor.fileExplorer.rootPath = otherRoot;
+    const switched = await agent.executeToolCall({ function: { name: 'create_file', arguments: '{"path":"blocked.txt"}' } }, { runId: 4 });
+    assert.equal(switched.error.code, 'WORKSPACE_CHANGED');
+    assert.equal(await editor.api.pathExists(path.join(otherRoot, 'blocked.txt')), false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(otherRoot, { recursive: true, force: true });
+  }
+});
+
 test('Agent create/chunk/rename use actual temporary files and verify revisions', async () => {
   const { root, agent } = await setup();
   try {
     const created = await agent.createWorkspaceFile({ path: 'a.txt', content: 'first' });
     assert.equal(created.success, true, JSON.stringify(created)); assert.equal(created.verification.verified, true);
     const bad = await agent.writeWorkspaceFileChunk({ path: 'a.txt', content: '\nsecond', expectedRevision: 'wrong' });
-    assert.equal(bad.error.code, 'REVISION_MISMATCH');
+    assert.equal(bad.error.code, 'STALE_REVISION');
     const appended = await agent.writeWorkspaceFileChunk({ path: 'a.txt', content: '\nsecond', expectedRevision: created.revision });
     assert.equal(appended.success, true, JSON.stringify(appended)); assert.equal(appended.verification.verified, true);
     assert.equal(await fs.readFile(path.join(root, 'a.txt'), 'utf8'), 'first\nsecond');

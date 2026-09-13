@@ -35,7 +35,6 @@ class Agent {
     this.fileSnapshots = new Map();
     this.readFileContexts = new Map();
     this.fileContextVersion = 0;
-    this.readAfterFailurePaths = new Set();
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
     this.systemPrompt = "";
@@ -1237,8 +1236,8 @@ class Agent {
   restoreFileReadContext(...args) {
     return this.fileContextManager.restoreFileReadContext(...args);
   }
-  validateFileReadContext(...args) {
-    return this.fileContextManager.validateFileReadContext(...args);
+  validateExpectedRevision(...args) {
+    return this.fileContextManager.validateExpectedRevision(...args);
   }
   buildModificationVerification(...args) {
     return this.fileContextManager.buildModificationVerification(...args);

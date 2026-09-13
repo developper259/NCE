@@ -13,6 +13,8 @@ class AgentRunner {
     const config = {
       sessionId: overrides.sessionId ?? this.agent.currentSessionId ?? null,
       runId: overrides.runId ?? this.agent.runId,
+      workspaceRoot:
+        this.agent.editor?.fileExplorer?.rootPath || null,
       agentId: overrides.agentId ?? this.agent.agentId,
       providerId,
       provider: provider ? { ...provider } : null,
@@ -75,7 +77,6 @@ class AgentRunner {
     this.agent.executedModificationRequests = new Map();
     this.agent.readFileContexts = new Map();
     this.agent.fileContextVersion = 0;
-    this.agent.readAfterFailurePaths = new Set();
     this.agent.fileKnowledge.reset();
     this.agent.contextManager.resetCompactionState();
     this.agent.modelRequestState = null;
@@ -1158,7 +1159,8 @@ class AgentRunner {
           const retryableErrorCodes = new Set([
             "CONTENT_MISMATCH",
             "INVALID_RANGE",
-            "NO_MATCH",
+            "OLD_TEXT_NOT_FOUND",
+            "STALE_REVISION",
             "AMBIGUOUS_MATCH",
             "MODIFICATION_VERIFICATION_FAILED",
             "SUSPECTED_DUPLICATION",

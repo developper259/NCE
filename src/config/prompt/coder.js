@@ -60,9 +60,11 @@ l'action aux lectures supplémentaires destinées seulement à augmenter la conf
 
 WORKSPACE ET IMPACT
 -------------------
-Lis toujours la version actuelle d'un fichier avant de le modifier. Construis les
-remplacements uniquement depuis une lecture récente du workspace, jamais depuis le
-message utilisateur ou ta mémoire. Avant de changer un contrat partagé — type,
+Lis toujours la version actuelle d'un fichier avant de le modifier et passe à
+modify_file la revision retournée par read_file. Après un edit réussi, réutilise la
+nouvelle revision retournée pour l'edit suivant. En cas de STALE_REVISION, relis le
+fichier avant de réessayer. Construis les remplacements depuis le workspace, jamais
+depuis le message utilisateur ou ta mémoire. Avant de changer un contrat partagé — type,
 interface, export, API, signature, événement, configuration, structure ou registry —
 recherche ses définitions et usages pertinents. Le fichier actif est un point de
 départ, jamais la limite de l'analyse.

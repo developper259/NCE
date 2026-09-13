@@ -63,7 +63,6 @@ class ActiveFileManager {
       {
         toolName: "internal_active_read",
         currentRevision: this.agent.getContentRevision(fullContent),
-        forceRead: this.agent.readAfterFailurePaths.has(absolutePath),
       },
     );
     if (readDecision.alreadyKnown) {
@@ -90,7 +89,6 @@ class ActiveFileManager {
       endLine,
       "internal_active_read",
     );
-    this.agent.readAfterFailurePaths.delete(absolutePath);
     this.agent.fileKnowledge.recordRead(absolutePath, {
       revision: readContext.revision,
       toolName: "internal_active_read",

@@ -77,54 +77,30 @@ class FileContextManager {
     return context;
   }
 
-  validateFileReadContext(absolutePath, currentText, oldText) {
-    const context = this.agent.readFileContexts.get(absolutePath);
-    if (!context) {
-      return {
-        valid: false,
-        error: {
-          code: "FILE_CONTEXT_REQUIRED",
-          message: "Read the current file before modifying it.",
-        },
-      };
-    }
+  validateExpectedRevision(currentText, expectedRevision) {
     const currentRevision = this.agent.getContentRevision(currentText);
-    if (context.revision !== currentRevision) {
-      this.agent.readFileContexts.delete(absolutePath);
+    if (typeof expectedRevision !== "string" || !expectedRevision.trim()) {
       return {
         valid: false,
         error: {
-          code: "STALE_CONTEXT",
-          message: "The file changed since it was read. Read it again.",
-          expectedRevision: context.revision,
+          code: "REVISION_REQUIRED",
+          message: "Une revision explicite est requise pour cette opération.",
           actualRevision: currentRevision,
         },
       };
     }
-    if (oldText.includes("[... contenu tronqué par NCE ...]")) {
+    if (expectedRevision !== currentRevision) {
       return {
         valid: false,
         error: {
-          code: "INVALID_OLD_TEXT",
-          message: "oldText cannot contain NCE's truncation marker.",
+          code: "STALE_REVISION",
+          message: "Le fichier a changé depuis la revision fournie.",
+          expectedRevision,
+          actualRevision: currentRevision,
         },
       };
     }
-    const oldTextWasRead =
-      oldText.length > 0
-        ? context.content.includes(oldText.replace(/\r\n?/g, "\n"))
-        : context.startLine === 1;
-    if (!oldTextWasRead) {
-      return {
-        valid: false,
-        error: {
-          code: "FILE_CONTEXT_REQUIRED",
-          message:
-            "Read the current file section containing oldText before modifying it.",
-        },
-      };
-    }
-    return { valid: true, context, currentRevision };
+    return { valid: true, currentRevision };
   }
 
   buildModificationVerification(

@@ -152,16 +152,15 @@ class WorkspaceFileManager {
           },
         };
       }
-      const readContextValidation = this.agent.validateFileReadContext(
-        target.absolutePath,
+      const revisionValidation = this.agent.validateExpectedRevision(
         previous,
-        "",
+        args.revision,
       );
-      if (!readContextValidation.valid) {
+      if (!revisionValidation.valid) {
         return {
           success: false,
           error: {
-            ...readContextValidation.error,
+            ...revisionValidation.error,
             path: target.relativePath,
           },
         };
@@ -326,7 +325,7 @@ class WorkspaceFileManager {
       return {
         success: false,
         error: {
-          code: "REVISION_MISMATCH",
+          code: "STALE_REVISION",
           message:
             "Le fichier a changé depuis le chunk précédent. Relisez-le avant de continuer.",
           path: target.relativePath,
@@ -628,7 +627,6 @@ class WorkspaceFileManager {
       if (!closed) tabManager?.markFileAsDeleted?.(target.absolutePath);
     }
     this.agent.readFileContexts.delete(target.absolutePath);
-    this.agent.readAfterFailurePaths.delete(target.absolutePath);
     this.agent.editor?.quickOpen?.invalidate?.(target.root);
     await this.agent.refreshWorkspaceFolders([target.parentPath]);
 
@@ -736,53 +734,54 @@ class WorkspaceFileManager {
         },
       };
     }
-    const readContextValidation = this.agent.validateFileReadContext(
-      absolutePath,
+    const revisionValidation = this.agent.validateExpectedRevision(
       currentText,
-      oldText,
+      args.revision,
     );
-    if (!readContextValidation.valid) {
+    if (!revisionValidation.valid) {
       return {
         success: false,
         error: {
-          ...readContextValidation.error,
+          ...revisionValidation.error,
           path: this.agent.toProjectRelativePath(absolutePath, root),
         },
       };
     }
-    if (this.agent.readAfterFailurePaths.has(absolutePath)) {
+    if (oldText.includes("[... contenu tronqué par NCE ...]")) {
       return {
         success: false,
         error: {
-          code: "READ_AFTER_NO_MATCH",
-          message:
-            "Relisez ce fichier avec read_file avant de réessayer après NO_MATCH.",
+          code: "INVALID_OLD_TEXT",
+          message: "oldText ne peut pas contenir le marqueur de troncature NCE.",
           path: this.agent.toProjectRelativePath(absolutePath, root),
         },
       };
     }
-    const currentRevision = readContextValidation.currentRevision;
-    if (
-      typeof args.revision === "string" &&
-      args.revision !== currentRevision
-    ) {
-      return {
-        success: false,
-        error: {
-          code: "STALE_CONTEXT",
-          message: "Le fichier a changé depuis sa dernière lecture.",
-          path: this.agent.toProjectRelativePath(absolutePath, root),
-          expectedRevision: args.revision,
-          actualRevision: currentRevision,
-        },
-      };
-    }
+    const currentRevision = revisionValidation.currentRevision;
     const replacementText = this.agent.adaptReplacementLineEndings(
       newText,
       currentText,
     );
     const editorUpdatedText = (updatedText) =>
       updatedText.replace(/\r\n?/g, "\n");
+    const getConcurrentChangeError = (openFile) => {
+      const liveText = openFile?.lines
+        ?.map((line) => line.getText())
+        .join("\n");
+      if (
+        typeof liveText !== "string" ||
+        liveText === editorUpdatedText(currentText)
+      ) {
+        return null;
+      }
+      return {
+        code: "STALE_REVISION",
+        message: "Le fichier a changé pendant la préparation de l'écriture.",
+        path: this.agent.toProjectRelativePath(absolutePath, root),
+        expectedRevision: currentRevision,
+        actualRevision: this.agent.getContentRevision(liveText),
+      };
+    };
 
     if (oldText.length === 0 && replacementText === "") {
       return {
@@ -819,6 +818,7 @@ class WorkspaceFileManager {
         afterText: updatedText,
         match: "insert-start",
         nearLine: nearLine ?? null,
+        previousRevision: currentRevision,
         revision: this.agent.getContentRevision(updatedText),
       };
 
@@ -849,6 +849,8 @@ class WorkspaceFileManager {
         };
       }
       if (openFile) {
+        const concurrentChange = getConcurrentChangeError(openFile);
+        if (concurrentChange) return { success: false, error: concurrentChange };
         openFile.isLoaded = false;
         await tabManager.setFocusFile(openFile);
         this.agent.editor.lineController?.loadContent?.(normalizedUpdatedText);
@@ -908,17 +910,14 @@ class WorkspaceFileManager {
 
     const textMatch = this.agent.findUniqueTextMatch(currentText, oldText, nearLine);
     if (textMatch.status === "missing") {
-      this.agent.readAfterFailurePaths.add(absolutePath);
       return {
         success: false,
         error: {
-          code: "NO_MATCH",
+          code: "OLD_TEXT_NOT_FOUND",
           message:
-            "Aucune occurrence trouvée pour oldText. Relisez le fichier et copiez un fragment minimal depuis le dernier résultat de read_file.",
+            "Aucune occurrence exacte de oldText n'existe dans le fichier à cette revision.",
           path: this.agent.toProjectRelativePath(absolutePath, root),
           nearLine: nearLine ?? null,
-          readRequired: true,
-          hint: "Relisez la zone autour de nearLine et utilisez un oldText exact.",
         },
       };
     }
@@ -951,6 +950,7 @@ class WorkspaceFileManager {
       afterText: updatedText,
       match: textMatch.match,
       nearLine: nearLine ?? null,
+      previousRevision: currentRevision,
       revision: this.agent.getContentRevision(updatedText),
     };
 
@@ -981,6 +981,8 @@ class WorkspaceFileManager {
       };
     }
     if (openFile) {
+      const concurrentChange = getConcurrentChangeError(openFile);
+      if (concurrentChange) return { success: false, error: concurrentChange };
       openFile.isLoaded = false;
       await tabManager.setFocusFile(openFile);
       this.agent.editor.lineController?.loadContent?.(normalizedUpdatedText);
@@ -1068,7 +1070,6 @@ class WorkspaceFileManager {
       requestedRange.endLine,
       {
         toolName: "read_file",
-        forceRead: this.agent.readAfterFailurePaths.has(absolute),
         currentRevision:
           typeof openFileContent === "string"
             ? this.agent.getContentRevision(openFileContent)
@@ -1092,7 +1093,6 @@ class WorkspaceFileManager {
         ? openFileContent
         : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
     if (typeof content === "string") {
-      this.agent.readAfterFailurePaths.delete(absolute);
       const totalLines = content.split(/\r?\n/).length;
       const effectiveReadRange = readDecision.range || requestedRange;
       const startLine = effectiveReadRange.startLine;

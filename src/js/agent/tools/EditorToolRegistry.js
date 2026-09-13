@@ -86,6 +86,12 @@ class EditorToolRegistry {
             description:
               "Écrase explicitement un fichier existant. false par défaut; préfère modify_file pour un fichier existant.",
           },
+          revision: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Revision actuelle obligatoire uniquement avec overwrite=true sur un fichier existant.",
+          },
         },
         required: ["path"],
       },
@@ -163,7 +169,7 @@ class EditorToolRegistry {
     });
     this.agent.registerTool("modify_file", {
       description:
-        "Modifie exactement une occurrence dans un fichier du workspace. Lis d'abord la zone ciblée avec read_file et fournis sa revision; les écritures obsolètes ou ambiguës sont refusées.",
+        "Modifie exactement une occurrence dans un fichier du workspace à la revision fournie. Réutilise la nouvelle revision retournée pour l'édition suivante.",
       parameters: {
         type: "object",
         properties: {
@@ -192,7 +198,7 @@ class EditorToolRegistry {
               "Révision retournée par read_file. Le write est refusé si le fichier a changé depuis cette lecture.",
           },
         },
-        required: ["path", "oldText", "newText"],
+        required: ["path", "revision", "oldText", "newText"],
       },
       execute: (args) => this.agent.modifyFile(args),
     });
