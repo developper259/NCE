@@ -97,6 +97,7 @@
   width: 2px;
   position: absolute;
   z-index: 5;
+  pointer-events: none;
 }
 
 .insert-mode {
