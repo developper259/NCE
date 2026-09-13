@@ -63,16 +63,22 @@ app.whenReady().then(() => {
       );
       const quickOpenModifier =
         process.platform === "darwin" ? "meta" : "control";
-      win.webContents.sendInputEvent({
-        type: "keyDown",
-        keyCode: "P",
-        modifiers: [quickOpenModifier],
-      });
-      win.webContents.sendInputEvent({
-        type: "keyUp",
-        keyCode: "P",
-        modifiers: [quickOpenModifier],
-      });
+      if (process.platform === "darwin") {
+        const quickOpenMenuItem = findMenuItem(Menu.getApplicationMenu(), "Quick Open...");
+        assert.ok(quickOpenMenuItem, "Quick Open menu item should exist on macOS");
+        quickOpenMenuItem.click(undefined, win, undefined);
+      } else {
+        win.webContents.sendInputEvent({
+          type: "keyDown",
+          keyCode: "P",
+          modifiers: [quickOpenModifier],
+        });
+        win.webContents.sendInputEvent({
+          type: "keyUp",
+          keyCode: "P",
+          modifiers: [quickOpenModifier],
+        });
+      }
       await waitForCondition(
         async () =>
           (await run('editor.quickPanel.isOpen("quick-open")')) === true,
@@ -98,16 +104,24 @@ app.whenReady().then(() => {
       );
       assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), false);
       const hasActiveFile = await run("Boolean(editor.tabManager.activeFile)");
-      win.webContents.sendInputEvent({
-        type: "keyDown",
-        keyCode: "G",
-        modifiers: [quickOpenModifier],
-      });
-      win.webContents.sendInputEvent({
-        type: "keyUp",
-        keyCode: "G",
-        modifiers: [quickOpenModifier],
-      });
+      if (process.platform === "darwin") {
+        const goToLineMenuItem = findMenuItem(Menu.getApplicationMenu(), "Go to Line...");
+        if (hasActiveFile) {
+          assert.ok(goToLineMenuItem, "Go to Line menu item should exist on macOS");
+          goToLineMenuItem.click(undefined, win, undefined);
+        }
+      } else {
+        win.webContents.sendInputEvent({
+          type: "keyDown",
+          keyCode: "G",
+          modifiers: [quickOpenModifier],
+        });
+        win.webContents.sendInputEvent({
+          type: "keyUp",
+          keyCode: "G",
+          modifiers: [quickOpenModifier],
+        });
+      }
       if (hasActiveFile) {
         await waitForCondition(
           async () =>
