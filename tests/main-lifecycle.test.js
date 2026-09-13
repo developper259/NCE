@@ -58,7 +58,7 @@ test("native application menu is kept only on macOS", () => {
   const macLabels = macMenu.items.flatMap((item) =>
     [item.label, ...(item.submenu ?? []).map((child) => child.label)],
   );
-  assert.equal(macLabels.includes("Reload Window"), false);
+  assert.equal(macLabels.includes("Reload Window"), true);
   assert.equal(macLabels.includes("Toggle Developer Tools"), false);
   assert.equal(exercise("win32")[0], null);
   assert.equal(exercise("linux")[0], null);

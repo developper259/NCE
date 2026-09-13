@@ -1,0 +1,111 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const { loadGlobal } = require("./helpers/runtime");
+
+test("file editing commands do nothing when the active tab is not a file", async () => {
+  const calls = [];
+  const editor = {
+    tabManager: {
+      activeFile: null,
+      closeActiveFile: () => calls.push("close-file"),
+      closeFiles: () => calls.push("close-all-files"),
+    },
+    goToLine: { open: () => calls.push("go-to-line") },
+    searchController: { toggle: () => calls.push("find") },
+    historyController: {
+      undo: () => calls.push("undo"),
+      redo: () => calls.push("redo"),
+    },
+    lineController: { lines: [{}] },
+    cursorController: { row: 1 },
+    writerController: { deleteRange: () => calls.push("delete-line") },
+    selectController: {
+      containsSelected: "",
+      hasActiveSelection: () => false,
+      selectAll: () => calls.push("select-all"),
+    },
+    api: { quit: () => calls.push("quit") },
+  };
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    document: { hasFocus: () => true },
+    navigator: {
+      clipboard: {
+        readText: async () => "text",
+        writeText: async () => {},
+      },
+    },
+  });
+  const keyBinding = new KeyBinding(editor);
+
+  keyBinding.control_go_to_line();
+  await keyBinding.control_close_file();
+  await keyBinding.control_close_all_file();
+  keyBinding.control_find();
+  keyBinding.control_delete_line();
+  keyBinding.control_select_all();
+  keyBinding.control_undo();
+  keyBinding.control_redo();
+  await keyBinding.control_copy();
+  await keyBinding.control_paste();
+  await keyBinding.control_cut();
+
+  assert.deepEqual(calls, []);
+
+  keyBinding.control_quit_app();
+  assert.deepEqual(calls, ["quit"]);
+});
+
+test("the command palette hides file commands outside a file tab", () => {
+  let panelOptions;
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    USERCONFIG_KEYBINDING: [
+      { action: "open_command", key: "Meta+Shift+P", in_editor: false },
+      { action: "quick_open", key: "Meta+P", in_editor: false },
+      { action: "find", key: "Meta+F", in_editor: false },
+      { action: "go_to_line", key: "Meta+G", in_editor: false },
+      { action: "delete_line", key: "Meta+Shift+K", in_editor: false },
+      { action: "toggle_search", key: "Meta+Shift+F", in_editor: false },
+    ],
+    CONFIG_KEYBINDING_DISPLAY: (key) => key,
+  });
+  const keyBinding = new KeyBinding({
+    tabManager: { activeFile: null },
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => {
+        panelOptions = options;
+      },
+    },
+  });
+
+  keyBinding.control_open_command();
+
+  assert.deepEqual(
+    panelOptions.items.map((item) => item.id),
+    ["quick_open", "toggle_search"],
+  );
+});
+
+test("tab and titlebar propagate the active file context to both menus", () => {
+  const root = path.resolve(__dirname, "..");
+  const tabManager = fs.readFileSync(
+    path.join(root, "src/js/manager/TabManager.js"),
+    "utf8",
+  );
+  const titleBar = fs.readFileSync(
+    path.join(root, "src/js/addon/TitleBar.js"),
+    "utf8",
+  );
+
+  assert.match(
+    tabManager,
+    /setActiveFileContext\?\.\(Boolean\(this\.activeFile\)\)/,
+  );
+  assert.match(
+    titleBar,
+    /\["Go to Line\.\.\.", "go_to_line", \{ needsFile: true \}\]/,
+  );
+});

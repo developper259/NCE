@@ -106,6 +106,11 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "quit_app",
+    description: "Quit NCE",
+    in_editor: false,
+  },
+  {
     action: "reload_window",
     description: "Reload Window",
     in_editor: false,
@@ -311,6 +316,17 @@ function CONFIG_KEYBINDING_PRIMARY_MODIFIER() {
     return process.platform === "darwin" ? "Meta" : "Ctrl";
   }
   return "Ctrl";
+}
+
+function CONFIG_KEYBINDING_EVENT_KEY(event) {
+  const key = String(event?.key || "");
+  if (key !== "Dead") return key;
+
+  if (event?.code === "BracketLeft") {
+    return event.shiftKey ? "¨" : "^";
+  }
+
+  return "";
 }
 
 function CONFIG_KEYBINDING_NORMALIZE(key) {

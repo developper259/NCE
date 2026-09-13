@@ -302,6 +302,7 @@ class SettingsView {
     const startListening = () => {
       if (listening) return;
       listening = true;
+      window.api.setMenuShortcutsIgnored?.(true);
       this._hideShortcutError(container);
       display.classList.add("listening");
       display.textContent = "Press a key combination...";
@@ -319,7 +320,11 @@ class SettingsView {
 
         // Final key pressed — build full combo
         const parts = buildCurrentParts(e);
-        let key = e.key;
+        let key = CONFIG_KEYBINDING_EVENT_KEY(e);
+        if (!key) {
+          display.textContent = "Unsupported dead key";
+          return;
+        }
         if (key === " ") key = "Space";
         else if (key.length === 1) key = key.toUpperCase();
         parts.push(key);
@@ -359,6 +364,7 @@ class SettingsView {
     const stopListening = () => {
       if (!listening) return;
       listening = false;
+      window.api.setMenuShortcutsIgnored?.(false);
       display.classList.remove("listening");
       document.removeEventListener("keydown", keydownHandler, true);
       document.removeEventListener("keyup", keyupHandler, true);

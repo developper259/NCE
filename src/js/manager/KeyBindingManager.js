@@ -74,18 +74,20 @@ class KeyBindingManager {
 
   onKey(e) {
     if (this.isComposing || e.isComposing || e.keyCode === 229) return;
+    const eventKey = CONFIG_KEYBINDING_EVENT_KEY(e);
+    if (!eventKey) return;
 
     // Skip when a shortcut capture is active in settings
     if (document.querySelector(".setting-shortcut-btn.listening")) return;
 
     if (this.isAgentMessageTarget(e.target)) {
       const isModifier = e.metaKey || e.ctrlKey;
-      const key = e.key.toLowerCase();
+      const key = eventKey.toLowerCase();
       if (isModifier && (key === "c" || key === "a")) return;
     }
 
     if (
-      (this.isNativeInputTarget(e.target) && e.key !== "Escape") ||
+      (this.isNativeInputTarget(e.target) && eventKey !== "Escape") ||
       !document.hasFocus()
     ) {
       e.stopPropagation();
@@ -95,14 +97,14 @@ class KeyBindingManager {
 
     let key = "";
 
-    if (e.key.length == 1) {
+    if (eventKey.length == 1) {
       if (e.ctrlKey) key += "Ctrl+";
       if (e.metaKey) key += "Meta+";
       if (e.shiftKey) key += "Shift+";
       if (e.altKey) key += "Alt+";
     }
 
-    key += e.key;
+    key += eventKey;
 
     if (this.editor.selected) {
       this.bindEditor(key, e);

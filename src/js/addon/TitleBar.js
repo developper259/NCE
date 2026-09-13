@@ -29,6 +29,7 @@ class TitleBar {
           ["New File", "new_file"],
           ["Open File...", "open_file"],
           ["Open Folder...", "open_folder"],
+          ["Quick Open...", "quick_open"],
           null,
           ["Save", "save", { needsFile: true }],
           ["Save As...", "saveAs", { needsFile: true }],
@@ -38,7 +39,7 @@ class TitleBar {
           ["Close File", "close_file", { needsFile: true }],
           ["Close All Files", "close_all_file", { needsFile: true }],
           null,
-          ["Exit NCE", "exit"],
+          ["Exit NCE", "quit_app"],
         ],
       },
       {
@@ -53,6 +54,7 @@ class TitleBar {
           ["Paste", "paste", { needsFile: true }],
           null,
           ["Find", "find", { needsFile: true }],
+          ["Go to Line...", "go_to_line", { needsFile: true }],
           null,
           ["Select All", "select_all", { needsFile: true }],
           ["Delete Line", "delete_line", { needsFile: true }],
@@ -71,7 +73,7 @@ class TitleBar {
           ["Command Palette", "open_command"],
           null,
           ["Toggle Fullscreen", "view.fullscreen"],
-          // DEV ONLY — uncomment for local development.
+          ["Reload Window", "reload_window"],
         ],
       },
       {
@@ -220,7 +222,6 @@ class TitleBar {
   execute(command) {
     this.closeMenus({ restoreFocus: false });
     if (command === "auto_save") return this.editor.toggleAutoSave?.();
-    if (command === "exit") return this.editor.api.quit();
     if (command.includes(".")) return this.editor.api.appCommand(command);
     const method = command === "saveAs" ? "control_save" : `control_${command}`;
     const action = this.editor.keyBinding?.[method];

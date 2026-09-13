@@ -79,6 +79,7 @@ test("asset and command availability contracts stay aligned", () => {
   assert.match(html, /js\/types\/QuickPanel\.js/);
   assert.match(keybindings, /action:\s*"open_command"/);
   assert.match(keybindings, /action:\s*"reload_window"/);
+  assert.match(keybindings, /action:\s*"quit_app"/);
   assert.doesNotMatch(keybindings, /action:\s*"replace"/);
   assert.doesNotMatch(menu, /label:\s*"(?:Replace|Documentation|Check for Updates)"/);
 });
@@ -105,9 +106,11 @@ test("reload is keybinding-backed while DevTools remain unavailable", () => {
     .join("\n");
 
   assert.doesNotMatch(activeLines(titlebar), /view\.devtools|Developer Tools/);
-  assert.doesNotMatch(activeLines(menu), /Reload Window|Toggle Developer Tools|reloadWindow\(|openDevTools\(|CommandOrControl\+R|Ctrl\+Shift\+I|Alt\+Cmd\+I/);
+  assert.doesNotMatch(activeLines(menu), /Toggle Developer Tools|openDevTools\(|CommandOrControl\+R|Ctrl\+Shift\+I|Alt\+Cmd\+I/);
   assert.doesNotMatch(activeLines(windowTs), /before-input-event|case "view\.devtools"|\.openDevTools\(\)|\.closeDevTools\(\)/);
   assert.match(activeLines(keybindings), /action:\s*"reload_window"/);
+  assert.match(activeLines(titlebar), /\["Reload Window", "reload_window"\]/);
+  assert.match(activeLines(menu), /this\.getAccelerator\("reload_window"\)/);
   assert.match(activeLines(windowTs), /case "view\.reload"/);
   assert.match(activeLines(titlebar), /view\.fullscreen/);
   assert.match(activeLines(windowTs), /case "view\.fullscreen"/);

@@ -508,6 +508,7 @@ class tabManager {
     }
 
     ul.replaceChildren(fragment);
+    this.editor.api?.setActiveFileContext?.(Boolean(this.activeFile));
     this.editor.titleBar?.refresh();
 
     if (this.tabs.length === 0) {

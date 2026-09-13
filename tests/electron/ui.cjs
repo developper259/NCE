@@ -21,6 +21,7 @@ module.exports = async function exerciseUI() {
       control_undo: () => commandCalls.push('undo'),
       control_toggle_file_explorer: () => commandCalls.push('explorer'),
       control_open_command: () => commandCalls.push('palette'),
+      control_quit_app: () => commandCalls.push('exit'),
     },
   };
   const titleBar = new TitleBar(titleEditor);
@@ -43,8 +44,9 @@ module.exports = async function exerciseUI() {
   check(titleBar.openMenuId === null, 'Outside click closes menu');
   titleBar.execute('save'); titleBar.execute('undo');
   titleBar.execute('toggle_file_explorer'); titleBar.execute('open_command');
+  titleBar.execute('quit_app');
   titleBar.execute('help.about');
-  check(commandCalls.join(',') === 'save,undo,explorer,palette,help.about', 'Title Bar command dispatch');
+  check(commandCalls.join(',') === 'save,undo,explorer,palette,exit,help.about', 'Title Bar command dispatch');
   titleBar.destroy();
   editor.titleBar = new TitleBar(editor);
 

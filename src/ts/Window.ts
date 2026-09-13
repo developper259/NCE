@@ -170,6 +170,12 @@ export class Window {
       ipcMain.handle("App:command", async (_event, command) =>
         this.executeWindowCommand(command),
       );
+      ipcMain.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
+        this.setMenuShortcutsIgnored(ignored),
+      );
+      ipcMain.handle("App:setActiveFileContext", async (_event, hasActiveFile) =>
+        this.setActiveFileContext(hasActiveFile),
+      );
       ipcMain.handle("App:setAutoSaveState", async (_event, enabled) => {
         if (typeof enabled !== "boolean") return false;
         const saved = await this.app.settings.set("files.autoSave", enabled);
@@ -182,12 +188,7 @@ export class Window {
         typeof key === "string" ? this.app.settings.get(key) : undefined,
       );
       ipcMain.handle("Settings:set", async (_event, key, value) => {
-        if (typeof key !== "string") return false;
-        const saved = await this.app.settings.set(key, value);
-        if (saved && key === "files.autoSave") {
-          this.appMenu?.setAutoSaveState(value === true);
-        }
-        return saved;
+        return this.setSetting(key, value);
       });
       ipcMain.handle("App:rendererReady", async () => {
         this.rendererReady = true;
@@ -212,6 +213,31 @@ export class Window {
       this.workspaceSearch.handleIPC();
       this.ipcRegistered = true;
     }
+  }
+
+  async setSetting(key: unknown, value: unknown) {
+    if (typeof key !== "string") return false;
+    const saved = await this.app.settings.set(key, value);
+    if (!saved) return false;
+
+    if (key === "files.autoSave") {
+      this.appMenu?.setAutoSaveState(value === true);
+    } else if (key.startsWith("keybindings.")) {
+      this.appMenu?.refreshKeybindings();
+    }
+    return true;
+  }
+
+  setMenuShortcutsIgnored(ignored: unknown) {
+    if (!this.window || typeof ignored !== "boolean") return false;
+    this.window.webContents.setIgnoreMenuShortcuts(ignored);
+    return true;
+  }
+
+  setActiveFileContext(hasActiveFile: unknown) {
+    if (typeof hasActiveFile !== "boolean") return false;
+    this.appMenu?.setFileActionsEnabled(hasActiveFile);
+    return true;
   }
 
   async executeWindowCommand(command: unknown) {

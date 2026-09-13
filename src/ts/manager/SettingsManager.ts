@@ -30,6 +30,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
     toggle_search: "Mod+Shift+F",
     toggle_agent: "Mod+L",
     open_settings: null,
+    quit_app: "Mod+Q",
     reload_window: "Mod+R",
     escape: "Escape",
     indent_right: "Tab",

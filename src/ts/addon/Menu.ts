@@ -1,12 +1,31 @@
 import { Menu, MenuItem, BrowserWindow, dialog } from "electron";
 
 import { Window } from "../Window";
+import { toElectronAccelerator } from "../keybindings/ElectronAccelerator";
 
 export class AppMenu {
   menu: InstanceType<typeof Menu> | null;
   window: BrowserWindow;
   WinAPP: Window;
   autoSaveItem: InstanceType<typeof MenuItem> | null = null;
+  hasActiveFile = false;
+
+  readonly fileActionIds = [
+    "save",
+    "save-as",
+    "close-file",
+    "close-all-files",
+    "undo",
+    "redo",
+    "cut",
+    "copy",
+    "paste",
+    "find",
+    "go-to-line",
+    "select-all",
+    "new-line",
+    "delete-line",
+  ];
 
   constructor(window: BrowserWindow, WinAPP: Window) {
     this.window = window;
@@ -14,19 +33,43 @@ export class AppMenu {
 
     this.menu = null;
     if (process.platform === "darwin") {
-      this.menu = new Menu();
-      this.init();
-      Menu.setApplicationMenu(this.menu);
-      this.setAutoSaveState(
-        this.WinAPP.app.settings?.get?.("files.autoSave") === true,
-      );
+      this.refreshKeybindings();
     } else {
       Menu.setApplicationMenu(null);
     }
   }
 
+  getAccelerator(action: string): string | undefined {
+    const shortcut = this.WinAPP.app.settings?.get?.(`keybindings.${action}`);
+    return toElectronAccelerator(
+      typeof shortcut === "string" || shortcut === null ? shortcut : null,
+    );
+  }
+
+  refreshKeybindings() {
+    if (process.platform !== "darwin") return;
+
+    this.menu = new Menu();
+    this.autoSaveItem = null;
+    this.init();
+    this.setAutoSaveState(
+      this.WinAPP.app.settings?.get?.("files.autoSave") === true,
+    );
+    this.setFileActionsEnabled(this.hasActiveFile);
+    Menu.setApplicationMenu(this.menu);
+  }
+
+  setFileActionsEnabled(enabled: boolean) {
+    this.hasActiveFile = enabled === true;
+    for (const id of this.fileActionIds) {
+      const item = this.menu?.getMenuItemById?.(id);
+      if (item) item.enabled = this.hasActiveFile;
+    }
+  }
+
   init() {
     if (!this.menu) return;
+    const quitAccelerator = this.getAccelerator("quit_app");
     this.menu.append(
       new MenuItem({
         label: "NCE",
@@ -39,7 +82,7 @@ export class AppMenu {
           {
             label: "Quit NCE",
 
-            accelerator: process.platform === "darwin" ? "Cmd+Q" : "Alt+F4",
+            accelerator: quitAccelerator,
 
             click: () => this.exitApp(),
           },
@@ -61,7 +104,7 @@ export class AppMenu {
           {
             label: "New File",
 
-            accelerator: "CommandOrControl+N",
+            accelerator: this.getAccelerator("new_file"),
 
             click: () => this.newFile(),
           },
@@ -73,7 +116,7 @@ export class AppMenu {
           {
             label: "Open File...",
 
-            accelerator: "CommandOrControl+O",
+            accelerator: this.getAccelerator("open_file"),
 
             click: () => this.openFile(),
           },
@@ -81,9 +124,17 @@ export class AppMenu {
           {
             label: "Open Folder...",
 
-            accelerator: "CommandOrControl+Shift+O",
+            accelerator: this.getAccelerator("open_folder"),
 
             click: () => this.openFolder(),
+          },
+
+          {
+            label: "Quick Open...",
+
+            accelerator: this.getAccelerator("quick_open"),
+
+            click: () => this.quickOpen(),
           },
 
           {
@@ -91,14 +142,16 @@ export class AppMenu {
           },
 
           {
+            id: "save",
             label: "Save",
 
-            accelerator: "CommandOrControl+S",
+            accelerator: this.getAccelerator("save"),
 
             click: () => this.saveFile(),
           },
 
           {
+            id: "save-as",
             label: "Save As...",
 
             accelerator: "CommandOrControl+Shift+S",
@@ -124,17 +177,19 @@ export class AppMenu {
           },
 
           {
+            id: "close-file",
             label: "Close File",
 
-            accelerator: "CommandOrControl+W",
+            accelerator: this.getAccelerator("close_file"),
 
             click: () => this.closeFile(),
           },
 
           {
+            id: "close-all-files",
             label: "Close All Files",
 
-            accelerator: "CommandOrControl+Shift+W",
+            accelerator: this.getAccelerator("close_all_file"),
 
             click: () => this.closeAllFiles(),
           },
@@ -146,7 +201,7 @@ export class AppMenu {
           {
             label: "Quit NCE",
 
-            accelerator: process.platform === "darwin" ? "Cmd+Q" : "Alt+F4",
+            accelerator: quitAccelerator,
 
             click: () => this.exitApp(),
           },
@@ -167,17 +222,19 @@ export class AppMenu {
 
         submenu: [
           {
+            id: "undo",
             label: "Undo",
 
-            accelerator: "CommandOrControl+Z",
+            accelerator: this.getAccelerator("undo"),
 
             click: () => this.editAction("undo"),
           },
 
           {
+            id: "redo",
             label: "Redo",
 
-            accelerator: "CommandOrControl+Shift+Z",
+            accelerator: this.getAccelerator("redo"),
 
             click: () => this.editAction("redo"),
           },
@@ -187,25 +244,28 @@ export class AppMenu {
           },
 
           {
+            id: "cut",
             label: "Cut",
 
-            accelerator: "CommandOrControl+X",
+            accelerator: this.getAccelerator("cut"),
 
             click: () => this.editAction("cut"),
           },
 
           {
+            id: "copy",
             label: "Copy",
 
-            accelerator: "CommandOrControl+C",
+            accelerator: this.getAccelerator("copy"),
 
             click: () => this.editAction("copy"),
           },
 
           {
+            id: "paste",
             label: "Paste",
 
-            accelerator: "CommandOrControl+V",
+            accelerator: this.getAccelerator("paste"),
 
             click: () => this.editAction("paste"),
           },
@@ -215,11 +275,21 @@ export class AppMenu {
           },
 
           {
+            id: "find",
             label: "Find",
 
-            accelerator: "CommandOrControl+F",
+            accelerator: this.getAccelerator("find"),
 
             click: () => this.find(),
+          },
+
+          {
+            id: "go-to-line",
+            label: "Go to Line...",
+
+            accelerator: this.getAccelerator("go_to_line"),
+
+            click: () => this.goToLine(),
           },
 
           {
@@ -227,9 +297,10 @@ export class AppMenu {
           },
 
           {
+            id: "select-all",
             label: "Select All",
 
-            accelerator: "CommandOrControl+A",
+            accelerator: this.getAccelerator("select_all"),
 
             click: () => this.editAction("selectAll"),
           },
@@ -245,19 +316,26 @@ export class AppMenu {
           },
 
           {
+            id: "new-line",
             label: "New Line",
 
             click: () => this.newLine(),
           },
 
           {
+            id: "delete-line",
             label: "Delete Line",
+
+            accelerator: this.getAccelerator("delete_line"),
 
             click: () => this.deleteLine(),
           },
           { type: "separator" },
           {
             label: "Settings...",
+
+            accelerator: this.getAccelerator("open_settings"),
+
             click: () =>
               this.window.webContents.send("open-settings-requested"),
           },
@@ -283,7 +361,7 @@ export class AppMenu {
           {
             label: "File Explorer",
 
-            accelerator: "CommandOrControl+Shift+E",
+            accelerator: this.getAccelerator("toggle_file_explorer"),
 
             click: () => this.toggleFileExplorer(),
           },
@@ -291,15 +369,23 @@ export class AppMenu {
           {
             label: "Search",
 
-            accelerator: "CommandOrControl+Shift+F",
+            accelerator: this.getAccelerator("toggle_search"),
 
             click: () => this.toggleSearch(),
           },
 
           {
+            label: "Agent",
+
+            accelerator: this.getAccelerator("toggle_agent"),
+
+            click: () => this.toggleAgent(),
+          },
+
+          {
             label: "Command Palette",
 
-            accelerator: "CommandOrControl+Shift+P",
+            accelerator: this.getAccelerator("open_command"),
 
             click: () => this.openCommandPalette(),
           },
@@ -314,6 +400,14 @@ export class AppMenu {
             accelerator: process.platform === "darwin" ? "Ctrl+Cmd+F" : "F11",
 
             click: () => this.toggleFullscreen(),
+          },
+
+          {
+            label: "Reload Window",
+
+            accelerator: this.getAccelerator("reload_window"),
+
+            click: () => this.reloadWindow(),
           },
         ],
       }),
@@ -484,6 +578,10 @@ export class AppMenu {
     this.executeEditor("control_open_folder");
   }
 
+  quickOpen() {
+    this.executeEditor("control_quick_open");
+  }
+
   saveFile() {
     this.executeEditor("control_save");
   }
@@ -619,6 +717,10 @@ export class AppMenu {
     this.executeEditor("control_find");
   }
 
+  goToLine() {
+    this.executeEditor("control_go_to_line");
+  }
+
   replace() {
     this.executeEditor("control_replace");
   }
@@ -660,18 +762,23 @@ export class AppMenu {
     this.executeEditor("control_toggle_search");
   }
 
+  toggleAgent() {
+    this.executeEditor("control_toggle_agent");
+  }
+
   openCommandPalette() {
     this.executeEditor("control_open_command");
   }
 
-  // DEV ONLY — uncomment for local development.
   toggleFullscreen() {
     const fullscreen = this.window.isFullScreen();
 
     this.window.setFullScreen(!fullscreen);
   }
 
-  // DEV ONLY — uncomment for local development.
+  reloadWindow() {
+    this.executeEditor("control_reload_window");
+  }
 
   // =========================================================
   // APPLICATION

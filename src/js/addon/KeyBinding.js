@@ -1,6 +1,20 @@
 class KeyBinding {
   constructor(e) {
     this.editor = e;
+    this.fileActions = new Set([
+      "save",
+      "go_to_line",
+      "close_file",
+      "close_all_file",
+      "copy",
+      "paste",
+      "cut",
+      "undo",
+      "redo",
+      "find",
+      "delete_line",
+      "select_all",
+    ]);
 
     this.func = {
       save: this.control_save,
@@ -19,6 +33,7 @@ class KeyBinding {
       find: this.control_find,
       open_command: this.control_open_command,
       open_settings: this.control_open_settings,
+      quit_app: this.control_quit_app,
       reload_window: this.control_reload_window,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,
@@ -43,6 +58,13 @@ class KeyBinding {
   }
 
   exec(key, e) {
+    if (
+      this.fileActions.has(key?.action) &&
+      !this.editor.tabManager.activeFile
+    ) {
+      return;
+    }
+
     let s = false;
     let c = false;
     let m = false;
@@ -82,6 +104,7 @@ class KeyBinding {
   }
 
   control_go_to_line() {
+    if (!this.editor.tabManager.activeFile) return;
     return this.editor.goToLine?.open();
   }
 
@@ -95,12 +118,12 @@ class KeyBinding {
   }
 
   async control_close_file(s, c, m, a) {
-    if (this.editor.tabManager.tabs.length != 0)
-      await this.editor.tabManager.closeActiveFile();
-    else this.editor.api.quit();
+    if (!this.editor.tabManager.activeFile) return;
+    await this.editor.tabManager.closeActiveFile();
   }
 
   async control_close_all_file(s, c, m, a) {
+    if (!this.editor.tabManager.activeFile) return;
     await this.editor.tabManager.closeFiles();
   }
 
@@ -155,10 +178,12 @@ class KeyBinding {
   }
 
   control_undo(s, c, m, a) {
+    if (!this.editor.tabManager.activeFile) return;
     return this.editor.historyController?.undo();
   }
 
   control_redo(s, c, m, a) {
+    if (!this.editor.tabManager.activeFile) return;
     return this.editor.historyController?.redo();
   }
 
@@ -181,7 +206,9 @@ class KeyBinding {
       (item) =>
         item.action !== "open_command" &&
         item.action !== "escape" &&
-        item.in_editor === false,
+        item.in_editor === false &&
+        (this.editor.tabManager.activeFile ||
+          !this.fileActions.has(item.action)),
     ).map((item) => ({
       id: item.action,
       label: this.getActionLabel(item.action),
@@ -202,6 +229,10 @@ class KeyBinding {
 
   control_open_settings() {
     return this.editor.openSettings();
+  }
+
+  control_quit_app() {
+    return this.editor.api.quit();
   }
 
   control_reload_window() {

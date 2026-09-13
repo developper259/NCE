@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld("api", {
   agentFileOperation: (root, operation, args) => ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
   quit: () => ipcRenderer.invoke("App:quit"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
+  setMenuShortcutsIgnored: (ignored) =>
+    ipcRenderer.invoke("App:setIgnoreMenuShortcuts", ignored === true),
+  setActiveFileContext: (hasActiveFile) =>
+    ipcRenderer.invoke("App:setActiveFileContext", hasActiveFile === true),
   setAutoSaveState: (enabled) =>
     ipcRenderer.invoke("App:setAutoSaveState", enabled === true),
   getSettings: () => ipcRenderer.invoke("Settings:getAll"),
