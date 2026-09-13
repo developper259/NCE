@@ -33,15 +33,9 @@ const AgentAI = {
   },
 
   readOnlyTools: [
-    "get_editor_context",
-    "get_cursor",
-    "read_selection",
-    "read_active_file",
     "read_file",
     "get_project_map",
-    "list_project_files",
-    "search_active_file",
-    "search_project_files",
+    "search_code",
   ],
 
   providers: {

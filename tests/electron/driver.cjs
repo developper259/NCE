@@ -64,8 +64,14 @@ app.whenReady().then(() => {
       const quickOpenModifier =
         process.platform === "darwin" ? "meta" : "control";
       if (process.platform === "darwin") {
-        const quickOpenMenuItem = findMenuItem(Menu.getApplicationMenu(), "Quick Open...");
-        assert.ok(quickOpenMenuItem, "Quick Open menu item should exist on macOS");
+        const quickOpenMenuItem = findMenuItem(
+          Menu.getApplicationMenu(),
+          "Quick Open...",
+        );
+        assert.ok(
+          quickOpenMenuItem,
+          "Quick Open menu item should exist on macOS",
+        );
         quickOpenMenuItem.click(undefined, win, undefined);
       } else {
         win.webContents.sendInputEvent({
@@ -105,9 +111,15 @@ app.whenReady().then(() => {
       assert.equal(await run('editor.quickPanel.isOpen("quick-open")'), false);
       const hasActiveFile = await run("Boolean(editor.tabManager.activeFile)");
       if (process.platform === "darwin") {
-        const goToLineMenuItem = findMenuItem(Menu.getApplicationMenu(), "Go to Line...");
+        const goToLineMenuItem = findMenuItem(
+          Menu.getApplicationMenu(),
+          "Go to Line...",
+        );
         if (hasActiveFile) {
-          assert.ok(goToLineMenuItem, "Go to Line menu item should exist on macOS");
+          assert.ok(
+            goToLineMenuItem,
+            "Go to Line menu item should exist on macOS",
+          );
           goToLineMenuItem.click(undefined, win, undefined);
         }
       } else {

@@ -307,12 +307,10 @@ class ContextManager {
       }
     }
 
-    const reads = new Set(["read_file", "read_active_file"]);
-    const searches = new Set(["search_project_files", "search_active_file"]);
+    const reads = new Set(["read_file"]);
+    const searches = new Set(["search_code"]);
     const writes = new Set([
       "modify_file",
-      "modify_active_file",
-      "replace_text",
       "create_file",
       "write_file_chunk",
       "rename_file",
@@ -349,7 +347,6 @@ class ContextManager {
         if (reads.has(name)) breakdown.readResults += tokens;
         else if (searches.has(name)) breakdown.searchResults += tokens;
         else if (name === "get_project_map") breakdown.projectMaps += tokens;
-        else if (name === "list_project_files") breakdown.listings += tokens;
         else if (writes.has(name)) breakdown.writeResults += tokens;
         else breakdown.otherToolResults += tokens;
       }
@@ -426,7 +423,7 @@ class ContextManager {
   }
 
   collectModelVisibleFileRanges(messages = []) {
-    const readTools = new Set(["read_file", "read_active_file"]);
+    const readTools = new Set(["read_file"]);
     const ranges = [];
     for (const entry of this.groupModelContextEntries(messages)) {
       if (entry.kind !== "tool_exchange" || !entry.protocolValid) continue;
@@ -480,23 +477,14 @@ class ContextManager {
 
     const isWrite = new Set([
       "modify_file",
-      "modify_active_file",
-      "replace_text",
       "create_file",
       "write_file_chunk",
       "rename_file",
     ]).has(toolName);
-    const isRead = new Set(["read_file", "read_active_file"]).has(toolName);
-    const isSearch = new Set([
-      "search_project_files",
-      "search_active_file",
-    ]).has(toolName);
+    const isRead = toolName === "read_file";
+    const isSearch = toolName === "search_code";
     const isNavigation = new Set([
-      "list_project_files",
       "get_project_map",
-      "get_editor_context",
-      "get_cursor",
-      "read_selection",
     ]).has(toolName);
 
     if (!isWrite && !options.metadataOnly) return content;
@@ -805,19 +793,13 @@ class ContextManager {
           entry.exchangeIndex >= warmExchangeStart,
       )?.start ?? firstHotIndex;
 
-    const readTools = new Set(["read_file", "read_active_file"]);
-    const searchTools = new Set(["search_project_files", "search_active_file"]);
+    const readTools = new Set(["read_file"]);
+    const searchTools = new Set(["search_code"]);
     const navigationTools = new Set([
-      "list_project_files",
       "get_project_map",
-      "get_editor_context",
-      "get_cursor",
-      "read_selection",
     ]);
     const writeTools = new Set([
       "modify_file",
-      "modify_active_file",
-      "replace_text",
       "create_file",
       "write_file_chunk",
       "rename_file",
@@ -1066,8 +1048,7 @@ class ContextManager {
           entry.keep = false;
           entry.reasons.push("cold_navigation");
           if (names.has("get_project_map")) counters.removedOldProjectMaps += 1;
-          if (names.has("list_project_files")) counters.removedOldListings += 1;
-          if (!names.has("get_project_map") && !names.has("list_project_files"))
+          if (!names.has("get_project_map"))
             counters.removedOldListings += 1;
         } else {
           entry.reasons.push(entry.recent ? "recent" : "navigation_result");

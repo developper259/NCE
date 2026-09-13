@@ -61,7 +61,7 @@ class ActiveFileManager {
       requestedStartLine,
       requestedEndLine,
       {
-        toolName: "read_active_file",
+        toolName: "internal_active_read",
         currentRevision: this.agent.getContentRevision(fullContent),
         forceRead: this.agent.readAfterFailurePaths.has(absolutePath),
       },
@@ -88,12 +88,12 @@ class ActiveFileManager {
       fullContent,
       startLine,
       endLine,
-      "read_active_file",
+      "internal_active_read",
     );
     this.agent.readAfterFailurePaths.delete(absolutePath);
     this.agent.fileKnowledge.recordRead(absolutePath, {
       revision: readContext.revision,
-      toolName: "read_active_file",
+      toolName: "internal_active_read",
       startLine,
       endLine,
       requestedStartLine,

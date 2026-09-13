@@ -15,10 +15,73 @@ async function setup() {
     pathExists: async p => { try { await fs.stat(p); return true; } catch { return false; } },
     getFileContent: manager.getFileContent.bind(manager),
     getProjectMap: search.getProjectMap.bind(search),
+    searchInFiles: search.search.bind(search),
     getFolderContent: manager.getFolderContent.bind(manager),
   } };
   return { root, editor, agent: createAgent(editor), manager };
 }
+
+const CODE_TOOLS = [
+  'create_file',
+  'get_project_map',
+  'modify_file',
+  'read_file',
+  'rename_file',
+  'search_code',
+  'task_complete',
+  'write_file_chunk',
+];
+
+const READ_TOOLS = [
+  'get_project_map',
+  'read_file',
+  'search_code',
+];
+
+test('Agent exposes the minimal public tool surface for read and code modes', async () => {
+  const { root, agent } = await setup();
+  try {
+    assert.deepEqual([...agent.getAvailableToolNames()].sort(), CODE_TOOLS);
+    assert.equal(agent.tools.size, CODE_TOOLS.length);
+    for (const removed of [
+      'get_editor_context',
+      'get_cursor',
+      'read_selection',
+      'read_active_file',
+      'search_active_file',
+      'list_project_files',
+      'search_project_files',
+      'modify_active_file',
+      'replace_text',
+    ]) {
+      assert.equal(agent.getTool(removed), undefined, removed);
+    }
+
+    agent.setConfig({ permissions: 'read' });
+    assert.deepEqual([...agent.getAvailableToolNames()].sort(), READ_TOOLS);
+    assert.equal(agent.getTool('modify_file').readOnly, false);
+    assert.equal(agent.getTool('task_complete').codeOnly, true);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test('Agent public project, search, read and completion tools remain functional', async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.writeFile(path.join(root, 'sample.js'), 'const needle = true;\n');
+    const map = await agent.getTool('get_project_map').execute({});
+    assert.equal(map.success, true);
+    assert.match(map.text, /sample\.js/);
+
+    const search = await agent.getTool('search_code').execute({ query: 'needle' });
+    assert.equal(search.totalMatches, 1);
+    const read = await agent.getTool('read_file').execute({ path: 'sample.js' });
+    assert.equal(read.success, true);
+    assert.match(read.content, /needle/);
+
+    const completion = await agent.getTool('task_complete').execute({ summary: 'done' });
+    assert.equal(completion.taskCompleteRequested, true);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
 
 test('Agent create/chunk/rename use actual temporary files and verify revisions', async () => {
   const { root, agent } = await setup();

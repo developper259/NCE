@@ -624,7 +624,6 @@ class AgentRunner {
   async runLoop(runId, controller, runConfig = this.agent.runConfig, runState = {}) {
     let finalResponse = "";
     let finalReasoning = "";
-    let postEditRepairAttempts = 0;
     let modificationFailures = 0;
     let failedModifications = [];
     const requiresModification = runState.requiresModification === true;
@@ -665,19 +664,11 @@ class AgentRunner {
       "create_file",
       "write_file_chunk",
       "rename_file",
-      "modify_active_file",
-      "replace_text",
     ]);
     const readTools = new Set([
       "read_file",
-      "read_active_file",
-      "search_active_file",
-      "search_project_files",
-      "list_project_files",
+      "search_code",
       "get_project_map",
-      "get_editor_context",
-      "get_cursor",
-      "read_selection",
     ]);
     try {
       while (true) {
@@ -1110,10 +1101,7 @@ class AgentRunner {
               content: largeWriteUpdate.directive,
             };
           }
-          const modificationTool =
-            call?.function?.name === "modify_active_file" ||
-            call?.function?.name === "replace_text" ||
-            call?.function?.name === "modify_file";
+          const modificationTool = call?.function?.name === "modify_file";
           if (writeTools.has(call?.function?.name) && toolResult?.success) {
             successfulWriteCount += 1;
             unresolvedWriteFailure = false;
@@ -1144,7 +1132,7 @@ class AgentRunner {
           ) {
             unresolvedWriteFailure = true;
           } else if (
-            ["read_file", "read_active_file"].includes(call?.function?.name) &&
+            call?.function?.name === "read_file" &&
             toolResult?.success
           ) {
             const readPath = AgentPath.normalize(
@@ -1198,27 +1186,6 @@ class AgentRunner {
             }
           }
 
-          const toolName = call?.function?.name;
-          if (toolName === "modify_active_file" && toolResult?.success) {
-            const validation = this.agent.validateActiveFileSyntax();
-            if (!validation.valid) {
-              if (postEditRepairAttempts >= 3) {
-                throw new Error(
-                  `La validation du fichier échoue après correction automatique : ${validation.error}`,
-                );
-              }
-              postEditRepairAttempts += 1;
-              const activePath = AgentPath.normalize(
-                this.agent.editor?.tabManager?.activeFile?.path || "",
-              );
-              pendingValidationPaths.add(activePath || "[active-file]");
-              validationPending = true;
-              this.agent.messages.push({
-                role: "system",
-                content: `VALIDATION POST-MODIFICATION : le fichier modifié contient une erreur de syntaxe (${validation.error}). Lis le code actuel, corrige immédiatement la cause et réapplique une modification valide avant de répondre.`,
-              });
-            }
-          }
         }
         if (completionRequest) {
           const completion = this.validateTaskCompletion({

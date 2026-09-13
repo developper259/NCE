@@ -100,11 +100,7 @@ class AgentSidebar extends Sidebar {
       return;
     }
 
-    if (
-      (toolName !== "modify_active_file" && toolName !== "modify_file") ||
-      !payload ||
-      payload.success !== true
-    ) {
+    if (toolName !== "modify_file" || !payload || payload.success !== true) {
       return;
     }
 
@@ -873,11 +869,8 @@ class AgentSidebar extends Sidebar {
     if (toolName.includes("search")) return "search";
     if (toolName === "get_project_map") return "list";
     if (toolName.includes("read")) return "read";
-    if (toolName.includes("modify") || toolName.includes("replace")) {
+    if (toolName === "modify_file") {
       return "edit";
-    }
-    if (toolName.includes("context") || toolName === "get_cursor") {
-      return "context";
     }
     if (toolName.includes("list")) return "list";
     if (/verify|check|test|build/.test(toolName)) return "verify";
@@ -965,23 +958,13 @@ class AgentSidebar extends Sidebar {
     let detail = "";
 
     switch (item.toolName) {
-      case "search_project_files":
+      case "search_code":
         title = `${running ? "Searching" : "Searched"} workspace${query ? ` for "${query}"` : ""}${running ? "…" : ""}`;
         break;
-      case "search_active_file":
-        title = `${running ? "Searching" : "Searched"} active file${query ? ` for "${query}"` : ""}${running ? "…" : ""}`;
-        break;
       case "read_file":
-      case "read_active_file":
         title = `${running ? "Reading" : "Read"} ${fileName}${running ? "…" : ""}`;
         if (rangeStart && rangeEnd) detail = `lines ${rangeStart}–${rangeEnd}`;
         else if (rangeStart) detail = `line ${rangeStart}`;
-        break;
-      case "read_selection":
-        title = `${running ? "Reading" : "Read"} selection${running ? "…" : ""}`;
-        break;
-      case "list_project_files":
-        title = `${running ? "Listing" : "Listed"} project files${running ? "…" : ""}`;
         break;
       case "get_project_map":
         title = `${running ? "Mapping" : "Mapped"} project structure${running ? "…" : ""}`;
@@ -1012,18 +995,6 @@ class AgentSidebar extends Sidebar {
       case "modify_file":
         title = `${running ? "Modifying" : "Modified"} ${fileName}${running ? "…" : ""}`;
         break;
-      case "modify_active_file":
-        title = `${running ? "Modifying" : "Modified"} active file${running ? "…" : ""}`;
-        break;
-      case "replace_text":
-        title = `${running ? "Replacing" : "Replaced"} text in ${fileName}${running ? "…" : ""}`;
-        break;
-      case "get_editor_context":
-        title = `${running ? "Inspecting" : "Inspected"} editor context${running ? "…" : ""}`;
-        break;
-      case "get_cursor":
-        title = `${running ? "Inspecting" : "Inspected"} cursor position${running ? "…" : ""}`;
-        break;
       default: {
         const readableName = item.toolName.replace(/_/g, " ");
         title = `${running ? "Running" : "Ran"} ${readableName}${running ? "…" : ""}`;
@@ -1051,20 +1022,12 @@ class AgentSidebar extends Sidebar {
 
     if (failed) {
       const failedAction = {
-        search_project_files: `search workspace${query ? ` for "${query}"` : ""}`,
-        search_active_file: `search active file${query ? ` for "${query}"` : ""}`,
+        search_code: `search workspace${query ? ` for "${query}"` : ""}`,
         read_file: `read ${fileName}`,
-        read_active_file: `read ${fileName}`,
-        read_selection: "read selection",
-        list_project_files: "list project files",
         get_project_map: "map project structure",
         create_file: `create ${fileName}`,
         rename_file: `rename ${this.getActivityFileName(item)}`,
         modify_file: `modify ${fileName}`,
-        modify_active_file: "modify active file",
-        replace_text: `replace text in ${fileName}`,
-        get_editor_context: "inspect editor context",
-        get_cursor: "inspect cursor position",
       }[item.toolName];
       title = `Failed to ${failedAction || item.toolName.replace(/_/g, " ")}`;
       detail = this.getActivityError(result);

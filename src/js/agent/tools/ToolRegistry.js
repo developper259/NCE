@@ -183,25 +183,10 @@ class ToolRegistry {
   getAvailableTools() {
     const permissions =
       this.agent.runConfig?.permissions ?? this.agent.permissions;
-    const hasActiveFile = Boolean(this.agent.editor?.tabManager?.activeFile);
-    const hiddenCompatibilityWriteTools = new Set([
-      "modify_active_file",
-      "replace_text",
-    ]);
-    const activeFileReadTools = new Set([
-      "read_active_file",
-      "search_active_file",
-    ]);
-
     return [...this.tools.values()]
       .filter((tool) => tool.enabled)
       .filter((tool) => permissions === "code" || tool.readOnly)
-      .filter((tool) => permissions === "code" || !tool.codeOnly)
-      .filter(
-        (tool) =>
-          !hiddenCompatibilityWriteTools.has(tool.name) &&
-          (hasActiveFile || !activeFileReadTools.has(tool.name)),
-      );
+      .filter((tool) => permissions === "code" || !tool.codeOnly);
   }
 
   getAvailableToolNames() {

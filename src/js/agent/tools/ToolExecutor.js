@@ -126,24 +126,15 @@ class ToolExecutor {
     ]).has(errorCode);
     const writeTools = new Set([
       "modify_file",
-      "modify_active_file",
-      "replace_text",
       "create_file",
       "write_file_chunk",
       "rename_file",
       "delete_file",
     ]);
-    const readTools = new Set(["read_file", "read_active_file"]);
-    const searchTools = new Set([
-      "search_project_files",
-      "search_active_file",
-    ]);
+    const readTools = new Set(["read_file"]);
+    const searchTools = new Set(["search_code"]);
     const navigationTools = new Set([
       "get_project_map",
-      "list_project_files",
-      "get_editor_context",
-      "get_cursor",
-      "read_selection",
     ]);
     const isValidationTool =
       /(?:^|_)(?:test|tests|build|lint|check|validate|validation|diagnostic|compile|typecheck)(?:_|$)/i.test(
@@ -232,29 +223,6 @@ class ToolExecutor {
 
     if (toolCallId && this.agent.executedToolCalls.has(toolCallId)) {
       return this.agent.executedToolCalls.get(toolCallId);
-    }
-
-    const activeFileTools = new Set([
-      "read_active_file",
-      "search_active_file",
-      "modify_active_file",
-      "replace_text",
-    ]);
-
-    if (
-      activeFileTools.has(name) &&
-      !this.agent.editor?.tabManager?.activeFile
-    ) {
-      const result = {
-        success: false,
-        error: {
-          code: "NO_ACTIVE_FILE",
-          message:
-            "Aucun fichier n'est ouvert. Utilisez les outils workspace avec un chemin de fichier.",
-        },
-      };
-      this.debugTool(name, {}, result);
-      return this.attachMeta(name, result);
     }
 
     const tool = this.agent.getTool(name);

@@ -656,8 +656,6 @@ class FileKnowledge {
     const revision = result.revision || result.verification?.revision || null;
     const contentWrites = new Set([
       "modify_file",
-      "modify_active_file",
-      "replace_text",
       "create_file",
       "write_file_chunk",
       "rename_file",
@@ -677,10 +675,7 @@ class FileKnowledge {
       return;
     }
 
-    const path =
-      toolName === "modify_active_file" || toolName === "replace_text"
-        ? this.agent.editor?.tabManager?.activeFile?.path || ""
-        : this.resolveToolPath(args, result);
+    const path = this.resolveToolPath(args, result);
     if (path) this.invalidateFile(path, revision, toolName);
 
     if (toolName === "create_file" && result.created !== false) {
