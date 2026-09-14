@@ -84,6 +84,10 @@ export class Window {
       },
     });
 
+    // Let renderer KeyBindingManager own keyboard shortcuts regardless of
+    // whether the custom editor output or a native input currently has focus.
+    this.window.webContents.setIgnoreMenuShortcuts(true);
+
     if (!this.fileManager) this.fileManager = new FileManager(this);
     if (!this.watcher) this.watcher = new Watcher(this.window);
     else this.watcher.setWindow(this.window);

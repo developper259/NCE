@@ -72,6 +72,112 @@ class KeyBindingManager {
     }
   }
 
+  getShortcutKey(eventKey, e) {
+    let key = "";
+    if (eventKey.length == 1) {
+      if (e.ctrlKey) key += "Ctrl+";
+      if (e.metaKey) key += "Meta+";
+      if (e.shiftKey) key += "Shift+";
+      if (e.altKey) key += "Alt+";
+    }
+    return key + eventKey;
+  }
+
+  bindNativeInput(key, e) {
+    if (
+      [
+        "ArrowUp",
+        "ArrowDown",
+        "ArrowLeft",
+        "ArrowRight",
+        "Home",
+        "End",
+        "PageUp",
+        "PageDown",
+        "Backspace",
+        "Delete",
+        "Enter",
+        "Tab",
+      ].includes(e.key) &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey
+    ) {
+      return false;
+    }
+    if (!CONFIG_KEYBINDING_CONTAINSKEY(key)) return false;
+    const item = CONFIG_KEYBINDING_GET_KEY(key);
+    if (item?.in_editor !== false) {
+      if (!this.executeNativeInputAction(item?.action, e.target)) return false;
+      e.preventDefault();
+      e.stopPropagation();
+      return true;
+    }
+    this.editor.keyBinding.exec(item, e);
+    e.preventDefault();
+    e.stopPropagation();
+    return true;
+  }
+
+  executeNativeInputAction(action, target) {
+    const element =
+      target instanceof Element
+        ? target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']")
+        : null;
+    if (!element) return false;
+
+    if (["copy", "cut", "undo", "redo"].includes(action)) {
+      document.execCommand(action);
+      return true;
+    }
+
+    if (action === "select_all") {
+      if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement
+      ) {
+        element.select();
+      } else {
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      return true;
+    }
+
+    if (action !== "paste") return false;
+    void navigator.clipboard.readText().then((text) => {
+      if (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement
+      ) {
+        const start = element.selectionStart ?? element.value.length;
+        const end = element.selectionEnd ?? start;
+        element.setRangeText(text, start, end, "end");
+        element.dispatchEvent(new Event("input", { bubbles: true }));
+      } else {
+        element.focus();
+        document.execCommand("insertText", false, text);
+      }
+    }).catch((error) => console.error("Native input paste error:", error));
+    return true;
+  }
+
+  executeAction(action, modifiers = {}) {
+    const item = CONFIG_KEYBINDING_GET_ACTION(action);
+    if (!item) return false;
+
+    this.editor.keyBinding.exec(item, {
+      shiftKey: modifiers.shiftKey === true,
+      ctrlKey: modifiers.ctrlKey === true,
+      metaKey: modifiers.metaKey === true,
+      altKey: modifiers.altKey === true,
+    });
+    return true;
+  }
+
   onKey(e) {
     if (this.isComposing || e.isComposing || e.keyCode === 229) return;
     const eventKey = CONFIG_KEYBINDING_EVENT_KEY(e);
@@ -86,25 +192,13 @@ class KeyBindingManager {
       if (isModifier && (key === "c" || key === "a")) return;
     }
 
-    if (
-      (this.isNativeInputTarget(e.target) && eventKey !== "Escape") ||
-      !document.hasFocus()
-    ) {
-      e.stopPropagation();
+    if (!document.hasFocus()) return;
 
+    const key = this.getShortcutKey(eventKey, e);
+    if (this.isNativeInputTarget(e.target) && eventKey !== "Escape") {
+      this.bindNativeInput(key, e);
       return;
     }
-
-    let key = "";
-
-    if (eventKey.length == 1) {
-      if (e.ctrlKey) key += "Ctrl+";
-      if (e.metaKey) key += "Meta+";
-      if (e.shiftKey) key += "Shift+";
-      if (e.altKey) key += "Alt+";
-    }
-
-    key += eventKey;
 
     if (this.editor.selected) {
       this.bindEditor(key, e);

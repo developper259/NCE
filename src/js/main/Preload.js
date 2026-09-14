@@ -30,6 +30,13 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("open-settings-requested", listener);
     return () => ipcRenderer.removeListener("open-settings-requested", listener);
   },
+  onKeybindingActionRequested: (callback) => {
+    const listener = (_event, action, modifiers) =>
+      callback(action, modifiers || {});
+    ipcRenderer.on("keybinding-action-requested", listener);
+    return () =>
+      ipcRenderer.removeListener("keybinding-action-requested", listener);
+  },
   onOpenRecentFolderRequested: (callback) => {
     const listener = (_event, folderPath) => callback(folderPath);
     ipcRenderer.on("open-recent-folder-requested", listener);

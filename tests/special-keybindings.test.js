@@ -22,7 +22,7 @@ test("French dead-key events resolve to bindable circumflex and diaeresis keys",
   assert.equal(resolveKey({ key: "Dead", code: "Quote" }), "");
 });
 
-test("native menu shortcuts can be suspended only while Settings captures a key", () => {
+test("renderer remains the shortcut owner before and after Settings capture", () => {
   const ignoredStates = [];
   const { Window } = loadMain("dist/ts/Window.js", {
     electron: {},
@@ -41,7 +41,7 @@ test("native menu shortcuts can be suspended only while Settings captures a key"
   };
 
   assert.equal(window.setMenuShortcutsIgnored(true), true);
-  assert.equal(window.setMenuShortcutsIgnored(false), true);
-  assert.deepEqual(ignoredStates, [true, false]);
+  assert.equal(window.setMenuShortcutsIgnored(true), true);
+  assert.deepEqual(ignoredStates, [true, true]);
   assert.equal(window.setMenuShortcutsIgnored("true"), false);
 });

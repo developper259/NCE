@@ -353,8 +353,7 @@ export class AppMenu {
 
             accelerator: this.getAccelerator("open_settings"),
 
-            click: () =>
-              this.window.webContents.send("open-settings-requested"),
+            click: () => this.executeKeybinding("open_settings"),
           },
         ],
       }),
@@ -592,35 +591,35 @@ export class AppMenu {
   // =========================================================
 
   newFile() {
-    this.executeEditor("control_new_file");
+    this.executeKeybinding("new_file");
   }
 
   openFile() {
-    this.executeEditor("control_open_file");
+    this.executeKeybinding("open_file");
   }
 
   openFolder() {
-    this.executeEditor("control_open_folder");
+    this.executeKeybinding("open_folder");
   }
 
   quickOpen() {
-    this.executeEditor("control_quick_open");
+    this.executeKeybinding("quick_open");
   }
 
   saveFile() {
-    this.executeEditor("control_save");
+    this.executeKeybinding("save");
   }
 
   saveFileAs() {
-    this.executeEditor("control_save", "true");
+    this.executeKeybinding("save", { shiftKey: true });
   }
 
   closeFile() {
-    this.executeEditor("control_close_file");
+    this.executeKeybinding("close_file");
   }
 
   closeAllFiles() {
-    this.executeEditor("control_close_all_file");
+    this.executeKeybinding("close_all_file");
   }
 
   // =========================================================
@@ -628,19 +627,19 @@ export class AppMenu {
   // =========================================================
 
   undo() {
-    this.executeEditor("control_undo");
+    this.executeKeybinding("undo");
   }
 
   redo() {
-    this.executeEditor("control_redo");
+    this.executeKeybinding("redo");
   }
 
   cut() {
-    this.executeEditor("control_cut");
+    this.executeKeybinding("cut");
   }
 
   copy() {
-    this.executeEditor("control_copy");
+    this.executeKeybinding("copy");
   }
 
   async paste() {
@@ -735,15 +734,15 @@ export class AppMenu {
       console.error("Paste error:", error);
     }
 
-    this.executeEditor("control_paste");
+    this.executeKeybinding("paste");
   }
 
   find() {
-    this.executeEditor("control_find");
+    this.executeKeybinding("find");
   }
 
   goToLine() {
-    this.executeEditor("control_go_to_line");
+    this.executeKeybinding("go_to_line");
   }
 
   replace() {
@@ -751,7 +750,7 @@ export class AppMenu {
   }
 
   selectAll() {
-    this.executeEditor("control_select_all");
+    this.executeKeybinding("select_all");
   }
 
   unSelectAll() {
@@ -772,7 +771,7 @@ export class AppMenu {
   }
 
   deleteLine() {
-    this.executeEditor("control_delete_line");
+    this.executeKeybinding("delete_line");
   }
 
   // =========================================================
@@ -780,19 +779,19 @@ export class AppMenu {
   // =========================================================
 
   toggleFileExplorer() {
-    this.executeEditor("control_toggle_file_explorer");
+    this.executeKeybinding("toggle_file_explorer");
   }
 
   toggleSearch() {
-    this.executeEditor("control_toggle_search");
+    this.executeKeybinding("toggle_search");
   }
 
   toggleAgent() {
-    this.executeEditor("control_toggle_agent");
+    this.executeKeybinding("toggle_agent");
   }
 
   openCommandPalette() {
-    this.executeEditor("control_open_command");
+    this.executeKeybinding("open_command");
   }
 
   toggleFullscreen() {
@@ -802,7 +801,7 @@ export class AppMenu {
   }
 
   reloadWindow() {
-    this.executeEditor("control_reload_window");
+    this.executeKeybinding("reload_window");
   }
 
   // =========================================================
@@ -810,7 +809,7 @@ export class AppMenu {
   // =========================================================
 
   exitApp() {
-    this.window.close();
+    this.executeKeybinding("quit_app");
   }
 
   // =========================================================
@@ -859,5 +858,16 @@ export class AppMenu {
     `;
 
     this.window.webContents.executeJavaScript(script);
+  }
+
+  executeKeybinding(
+    action: string,
+    modifiers: Record<string, boolean> = {},
+  ) {
+    this.window.webContents.send(
+      "keybinding-action-requested",
+      action,
+      modifiers,
+    );
   }
 }

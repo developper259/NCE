@@ -364,7 +364,9 @@ class SettingsView {
     const stopListening = () => {
       if (!listening) return;
       listening = false;
-      window.api.setMenuShortcutsIgnored?.(false);
+      // Native accelerators stay disabled: KeyBindingManager is the single
+      // shortcut dispatcher after capture ends as well.
+      window.api.setMenuShortcutsIgnored?.(true);
       display.classList.remove("listening");
       document.removeEventListener("keydown", keydownHandler, true);
       document.removeEventListener("keyup", keyupHandler, true);

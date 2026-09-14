@@ -103,6 +103,9 @@ class Editor {
     this.initQuitEvent();
     this.api.onAutoSaveToggleRequested?.(() => this.toggleAutoSave());
     this.api.onOpenSettingsRequested?.(() => this.openSettings());
+    this.api.onKeybindingActionRequested?.((action, modifiers) =>
+      this.keyBindingManager.executeAction(action, modifiers),
+    );
     this.api.onOpenRecentFolderRequested?.((folderPath) =>
       this.openRecentFolder(folderPath),
     );

@@ -12,6 +12,7 @@ function createMenuHarness(overrides = {}) {
     ? overrides.recentFolders
     : [];
   const openRecentCalls = [];
+  const rendererMessages = [];
   let clearRecentCalls = 0;
 
   class Menu {
@@ -76,7 +77,7 @@ function createMenuHarness(overrides = {}) {
     { process: { platform: "darwin" } },
   );
   const appMenu = new AppMenu(
-    { webContents: { send() {} } },
+    { webContents: { send: (...args) => rendererMessages.push(args) } },
     {
       app: {
         settings: { get: (key) => values.get(key) },
@@ -107,6 +108,7 @@ function createMenuHarness(overrides = {}) {
     item,
     values,
     openRecentCalls,
+    rendererMessages,
     get clearRecentCalls() { return clearRecentCalls; },
   };
 }
@@ -130,6 +132,20 @@ test("NCE shortcuts convert to Electron accelerators through one normalizer", ()
   assert.equal(toElectronAccelerator("Mod+Shift+¨"), undefined);
   assert.equal(toElectronAccelerator("Hyper+X"), undefined);
   assert.equal(toElectronAccelerator(null), undefined);
+});
+
+test("native menu actions are routed back through the renderer keybinding manager", () => {
+  const fixture = createMenuHarness();
+
+  fixture.item("Quick Open...").click();
+  fixture.item("Save As...").click();
+  fixture.item("Settings...").click();
+
+  assert.deepEqual(JSON.parse(JSON.stringify(fixture.rendererMessages)), [
+    ["keybinding-action-requested", "quick_open", {}],
+    ["keybinding-action-requested", "save", { shiftKey: true }],
+    ["keybinding-action-requested", "open_settings", {}],
+  ]);
 });
 
 test("native menu rebuilds from current keybindings and preserves static items", () => {
