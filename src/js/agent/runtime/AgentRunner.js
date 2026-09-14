@@ -397,12 +397,15 @@ class AgentRunner {
         : this.agent.callbacks.onToken;
     this.agent.safeInvokeCallback(
       channel === "reasoning" ? "onReasoning" : "onToken",
-      [normalized.delta, {
-      ...context,
-      contentMode: "delta",
-      resetSegment: normalized.reset,
-      segmentId: `${context.requestId}:${channel}:${normalized.revision}`,
-      }],
+      [
+        normalized.delta,
+        {
+          ...context,
+          contentMode: "delta",
+          resetSegment: normalized.reset,
+          segmentId: `${context.requestId}:${channel}:${normalized.revision}`,
+        },
+      ],
     );
   }
 
@@ -766,11 +769,13 @@ class AgentRunner {
               modelResponse,
             )
           ) {
-            if ([
-              "TOOL_ARGUMENTS_MALFORMED",
-              "TOOL_ARGUMENTS_TRUNCATED",
-              "TOOL_CALL_FINALIZATION_FAILED",
-            ].includes(error?.code)) {
+            if (
+              [
+                "TOOL_ARGUMENTS_MALFORMED",
+                "TOOL_ARGUMENTS_TRUNCATED",
+                "TOOL_CALL_FINALIZATION_FAILED",
+              ].includes(error?.code)
+            ) {
               if (
                 consecutiveToolArgumentRecoveries >=
                   maxConsecutiveToolArgumentRecoveries ||
@@ -785,7 +790,8 @@ class AgentRunner {
               this.agent.agentProgress.metrics.toolArgumentRecoveryRequests++;
               this.agent.messages.push({
                 role: "system",
-                content: "[NCE TOOL ARGUMENT RECOVERY] The previous response contained invalid JSON tool arguments. " +
+                content:
+                  "[NCE TOOL ARGUMENT RECOVERY] The previous response contained invalid JSON tool arguments. " +
                   "None of that response's tool calls were executed. Resend the tool calls with valid JSON and new tool call IDs. " +
                   "Escape newlines, tabs, quotes and backslashes correctly. Do not repeat already completed actions.",
               });
@@ -798,34 +804,57 @@ class AgentRunner {
             iteration,
             repeated: repeatedOversizedRetry,
           });
-          if (largeWrite.recoveryAttempts >= maxLargeWriteRecoveryAttempts) {
-            if (
-              this.agent.forceLargeWriteModelFallback(
-                runConfig,
+
+          const toolSignature =
+            this.agent.largeFileWriter.getToolCallStrategySignature(
+              error?.toolName || largeWrite?.toolName || "create_file",
+              this.agent.largeFileWriter.extractToolCallArgsFromError(
+                error,
+                modelResponse,
+              ) || {},
+            );
+          if (
+            largeWrite.strategySignature &&
+            largeWrite.strategySignature === toolSignature
+          ) {
+            largeWrite.strategyFailures = Number.isInteger(
+              largeWrite.strategyFailures,
+            )
+              ? largeWrite.strategyFailures + 1
+              : 1;
+          } else {
+            largeWrite.strategyFailures = 1;
+            largeWrite.strategySignature = toolSignature;
+          }
+
+          if (largeWrite.strategyFailures >= maxLargeWriteRecoveryAttempts) {
+            try {
+              this.agent.largeFileWriter.requestStrategyReplan(
                 largeWrite,
                 error,
-              )
-            ) {
-              largeWrite.recoveryAttempts = 0;
-              largeWrite.planningRetryCount = 0;
+                modelResponse,
+              );
+              largeWrite.strategyFailures = 0;
+              largeWrite.strategyReplanRequired = true;
               this.agent.messages.push({
                 role: "system",
                 content:
-                  this.agent.buildLargeWriteActionInstruction(largeWrite),
+                  this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(
+                    largeWrite,
+                    error,
+                  ),
               });
               continue;
+            } catch (strategyError) {
+              largeWrite.active = false;
+              largeWrite.state = "FAILED";
+              this.agent.debugLargeWrite(largeWrite, "fail", {
+                reason: "recovery_exhausted",
+              });
+              throw strategyError;
             }
-            largeWrite.active = false;
-            largeWrite.state = "FAILED";
-            this.agent.debugLargeWrite(largeWrite, "fail", {
-              reason: "recovery_exhausted",
-            });
-            throw this.agent.createLargeWriteRecoveryError(
-              error,
-              largeWrite.recoveryAttempts,
-              maxLargeWriteRecoveryAttempts,
-            );
           }
+
           this.agent.activateLargeWriteRecovery(
             largeWrite,
             error,
@@ -1258,9 +1287,7 @@ class AgentRunner {
             );
             if (readPath) {
               for (const pendingPath of pendingValidationPaths) {
-                if (
-                  AgentPath.samePath(readPath, pendingPath)
-                ) {
+                if (AgentPath.samePath(readPath, pendingPath)) {
                   pendingValidationPaths.delete(pendingPath);
                 }
               }
@@ -1311,18 +1338,24 @@ class AgentRunner {
             unresolvedValidationFailure,
             largeWriteActive: largeWrite.active,
           });
-          const completion = trackerCompletion.success === false
-            ? {
-                accepted: false,
-                reason: trackerCompletion.error?.code || "tracker_rejected",
-                message: trackerCompletion.error?.message || "Le run ne peut pas encore terminer.",
-              }
-            : runtimeCompletion;
+          const completion =
+            trackerCompletion.success === false
+              ? {
+                  accepted: false,
+                  reason: trackerCompletion.error?.code || "tracker_rejected",
+                  message:
+                    trackerCompletion.error?.message ||
+                    "Le run ne peut pas encore terminer.",
+                }
+              : runtimeCompletion;
           if (completion.accepted) {
             if (!this.commitRunCompleted(runId)) {
-              throw Object.assign(new Error("La transition de complétion du run a été refusée."), {
-                code: "INVALID_RUN_TRANSITION",
-              });
+              throw Object.assign(
+                new Error("La transition de complétion du run a été refusée."),
+                {
+                  code: "INVALID_RUN_TRANSITION",
+                },
+              );
             }
             runState.taskComplete = true;
             this.agent.agentProgress.metrics.completionSuccesses += 1;

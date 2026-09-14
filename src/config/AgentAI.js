@@ -10,7 +10,8 @@ const AgentAI = {
     // can consume substantially more model output than their source text.
     recommendedChunkCharacters: 8000,
     maxChunkCharacters: 10000,
-    maxRecoveryAttempts: 2,
+    maxRecoveryAttempts: 3,
+    maxStrategyReplans: 3,
   },
 
   responseBudget: {

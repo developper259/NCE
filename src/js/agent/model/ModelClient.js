@@ -94,9 +94,7 @@ class ModelClient {
     const configuredProvider =
       request.providerId || request.provider?.id || "unknown";
     const providerLabel =
-      configuredProvider === "openrouter"
-        ? "OpenRouter"
-        : configuredProvider;
+      configuredProvider === "openrouter" ? "OpenRouter" : configuredProvider;
     const upstreamProvider =
       metadata?.provider_name || metadata?.upstream_provider || null;
     const model = request.model || "unknown";
@@ -148,7 +146,8 @@ class ModelClient {
       category = "MODEL_RATE_LIMITED";
     } else if (
       is429 &&
-      (upstreamProvider || /upstream.{0,100}(rate.?limit|too many requests)/.test(text))
+      (upstreamProvider ||
+        /upstream.{0,100}(rate.?limit|too many requests)/.test(text))
     ) {
       category = "UPSTREAM_RATE_LIMITED";
     } else if (is429 && /(rate.?limit|too many requests)/.test(text)) {
@@ -220,21 +219,21 @@ class ModelClient {
           ? `Le modèle ${modelName} n'est pas disponible sur ${providerLabel}.`
           : category === "CREDITS_EXHAUSTED"
             ? `Les crédits ${providerLabel} disponibles sont épuisés.`
-          : category === "QUOTA_EXHAUSTED"
-            ? "Le quota disponible pour ce provider est épuisé."
-          : category === "MODEL_RATE_LIMITED"
-            ? `Le modèle ${modelName} est temporairement limité.`
-          : category === "UPSTREAM_RATE_LIMITED"
-            ? `Le service amont de ${providerLabel} est temporairement limité.`
-          : category === "RATE_LIMITED"
-            ? `${providerLabel} limite temporairement les requêtes. Réessaie dans quelques instants.`
-          : category === "UNKNOWN_429"
-            ? `${providerLabel} a refusé temporairement la requête avec une erreur 429.`
-            : category === "CONTEXT_LENGTH_EXCEEDED"
-              ? `Le contexte est trop large pour ${modelName}.`
-              : category === "MODEL_UNAVAILABLE"
-                ? `Le modèle ${modelName} est actuellement indisponible.`
-                : `Le provider ${providerLabel} a renvoyé une erreur inattendue.`;
+            : category === "QUOTA_EXHAUSTED"
+              ? "Le quota disponible pour ce provider est épuisé."
+              : category === "MODEL_RATE_LIMITED"
+                ? `Le modèle ${modelName} est temporairement limité.`
+                : category === "UPSTREAM_RATE_LIMITED"
+                  ? `Le service amont de ${providerLabel} est temporairement limité.`
+                  : category === "RATE_LIMITED"
+                    ? `${providerLabel} limite temporairement les requêtes. Réessaie dans quelques instants.`
+                    : category === "UNKNOWN_429"
+                      ? `${providerLabel} a refusé temporairement la requête avec une erreur 429.`
+                      : category === "CONTEXT_LENGTH_EXCEEDED"
+                        ? `Le contexte est trop large pour ${modelName}.`
+                        : category === "MODEL_UNAVAILABLE"
+                          ? `Le modèle ${modelName} est actuellement indisponible.`
+                          : `Le provider ${providerLabel} a renvoyé une erreur inattendue.`;
 
     return {
       provider: configuredProvider,
@@ -275,10 +274,13 @@ class ModelClient {
   }
 
   emitModelStatus(event, config) {
-    this.agent.safeInvokeCallback("onModelStatus", [event, {
-      sessionId: config.sessionId ?? this.agent.currentSessionId,
-      runId: config.runId ?? this.agent.runId,
-    }]);
+    this.agent.safeInvokeCallback("onModelStatus", [
+      event,
+      {
+        sessionId: config.sessionId ?? this.agent.currentSessionId,
+        runId: config.runId ?? this.agent.runId,
+      },
+    ]);
   }
 
   async requestSingleModel(controller, config) {
@@ -331,12 +333,13 @@ class ModelClient {
 
     if (Number.isFinite(config.temperature))
       payload.temperature = config.temperature;
-    const responseBudget = this.agent.responseBudgetEstimator.estimateResponseBudget({
-      agent: this.agent,
-      model: config,
-      runtimeState: config.contextState || {},
-      previousUsage: this.agent.modelRequestState?.previousOutputUsage || [],
-    });
+    const responseBudget =
+      this.agent.responseBudgetEstimator.estimateResponseBudget({
+        agent: this.agent,
+        model: config,
+        runtimeState: config.contextState || {},
+        previousUsage: this.agent.modelRequestState?.previousOutputUsage || [],
+      });
     const messageTokens = this.agent.estimateTokens(providerMessages);
     const toolSchemaTokens = providerTools.length
       ? this.agent.estimateTokens(providerTools)
@@ -353,9 +356,12 @@ class ModelClient {
       ? responseBudget.contextWindow - promptTokens - safetyMargin
       : responseBudget.effectiveMaxOutputTokens;
     if (Number.isFinite(responseBudget.contextWindow) && contextAllowance < 1) {
-      throw Object.assign(new Error("Le contexte doit être compacté avant la requête."), {
-        code: "CONTEXT_LENGTH_EXCEEDED",
-      });
+      throw Object.assign(
+        new Error("Le contexte doit être compacté avant la requête."),
+        {
+          code: "CONTEXT_LENGTH_EXCEEDED",
+        },
+      );
     }
     payload.max_tokens = Math.max(
       1,
@@ -515,12 +521,18 @@ class ModelClient {
         ) {
           let replacementKey = "";
           try {
-            replacementKey =
-              await this.agent.safeInvokeCallback("onAuthenticationRequired", [classified, {
-                sessionId: config.sessionId ?? this.agent.currentSessionId,
-                runId: config.runId ?? this.agent.runId,
-                providerId: activeConfig.providerId,
-              }], { awaitResult: true, fallback: "" });
+            replacementKey = await this.agent.safeInvokeCallback(
+              "onAuthenticationRequired",
+              [
+                classified,
+                {
+                  sessionId: config.sessionId ?? this.agent.currentSessionId,
+                  runId: config.runId ?? this.agent.runId,
+                  providerId: activeConfig.providerId,
+                },
+              ],
+              { awaitResult: true, fallback: "" },
+            );
           } catch (authenticationError) {
             console.error(
               "[NCE Agent model] impossible de remplacer la clé API",
@@ -543,7 +555,8 @@ class ModelClient {
         }
 
         const candidateKey = `${activeConfig.providerId}:${activeConfig.model}`;
-        const candidateRetries = state.retryCountsByCandidate.get(candidateKey) || 0;
+        const candidateRetries =
+          state.retryCountsByCandidate.get(candidateKey) || 0;
         if (
           classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
           (state.contextRecoveries.get(candidateKey) || 0) < 1

@@ -41,7 +41,8 @@ class Agent {
     this.largeFileWriting = {
       recommendedChunkCharacters: 8000,
       maxChunkCharacters: 10000,
-      maxRecoveryAttempts: 2,
+      maxRecoveryAttempts: 3,
+      maxStrategyReplans: 3,
     };
     this.temperature = undefined;
     this.maxTokens = undefined;
@@ -187,6 +188,12 @@ class Agent {
           Math.floor(largeFileWriting.maxRecoveryAttempts),
         );
       }
+      if (Number.isFinite(largeFileWriting.maxStrategyReplans)) {
+        this.largeFileWriting.maxStrategyReplans = Math.max(
+          0,
+          Math.floor(largeFileWriting.maxStrategyReplans),
+        );
+      }
       this.updateLargeFileToolDefinitions();
     }
     if (Number.isFinite(config.temperature)) {
@@ -310,7 +317,10 @@ class Agent {
     }
     console.warn("[NCE Agent callback] observer failure", {
       callback: name,
-      message: String(error?.message || error || "Callback failure").slice(0, 240),
+      message: String(error?.message || error || "Callback failure").slice(
+        0,
+        240,
+      ),
     });
   }
   getMutationGuardError(runId = this.runConfig?.runId) {
@@ -620,8 +630,8 @@ class Agent {
       `La création du gros fichier a été arrêtée après ${attempts} tentatives de récupération : le modèle continue à produire un appel ${cause?.toolName || "d'écriture"} tronqué.`,
     );
     error.name = "AgentLargeWriteRecoveryError";
-    error.code = "LARGE_WRITE_RECOVERY_EXHAUSTED";
-    error.category = "LARGE_WRITE_RECOVERY_EXHAUSTED";
+    error.code = "WRITE_RECOVERY_EXHAUSTED";
+    error.category = "WRITE_RECOVERY_EXHAUSTED";
     error.toolName = cause?.toolName || null;
     error.attempts = attempts;
     error.maxRecoveryAttempts = limit;
@@ -1101,16 +1111,20 @@ class Agent {
     }
   }
   shouldFallbackModelForFailure(error = {}) {
-    const origin = String(error?.failureOrigin || error?.origin || "").toLowerCase();
+    const origin = String(
+      error?.failureOrigin || error?.origin || "",
+    ).toLowerCase();
     const category = String(error?.category || error?.code || "").toUpperCase();
     const code = String(error?.code || "").toUpperCase();
     const contextRecoveryTried = Boolean(
       error?.contextRecoveryTried ||
-        error?.localRecoveryDone ||
-        error?.compactionAlreadyTried,
+      error?.localRecoveryDone ||
+      error?.compactionAlreadyTried,
     );
 
-    if (["task", "tool", "protocol", "lifecycle", "internal"].includes(origin)) {
+    if (
+      ["task", "tool", "protocol", "lifecycle", "internal"].includes(origin)
+    ) {
       return false;
     }
     if (["provider", "provider_global"].includes(origin)) {
@@ -1119,36 +1133,40 @@ class Agent {
     if (origin === "context") {
       return contextRecoveryTried;
     }
-    if ([
-      "RATE_LIMITED",
-      "MODEL_UNAVAILABLE",
-      "UNKNOWN_429",
-      "MODEL_NOT_FOUND",
-      "QUOTA_EXHAUSTED",
-      "CREDITS_EXHAUSTED",
-      "AUTH_ERROR",
-      "PERMISSION_ERROR",
-      "NO_CAPACITY",
-      "NO_TOKENS_AVAILABLE",
-      "UPSTREAM_RATE_LIMITED",
-      "MODEL_RATE_LIMITED",
-    ].includes(category)) {
+    if (
+      [
+        "RATE_LIMITED",
+        "MODEL_UNAVAILABLE",
+        "UNKNOWN_429",
+        "MODEL_NOT_FOUND",
+        "QUOTA_EXHAUSTED",
+        "CREDITS_EXHAUSTED",
+        "AUTH_ERROR",
+        "PERMISSION_ERROR",
+        "NO_CAPACITY",
+        "NO_TOKENS_AVAILABLE",
+        "UPSTREAM_RATE_LIMITED",
+        "MODEL_RATE_LIMITED",
+      ].includes(category)
+    ) {
       return true;
     }
-    if ([
-      "RATE_LIMITED",
-      "MODEL_UNAVAILABLE",
-      "UNKNOWN_429",
-      "MODEL_NOT_FOUND",
-      "QUOTA_EXHAUSTED",
-      "CREDITS_EXHAUSTED",
-      "AUTH_ERROR",
-      "PERMISSION_ERROR",
-      "NO_CAPACITY",
-      "NO_TOKENS_AVAILABLE",
-      "UPSTREAM_RATE_LIMITED",
-      "MODEL_RATE_LIMITED",
-    ].includes(code)) {
+    if (
+      [
+        "RATE_LIMITED",
+        "MODEL_UNAVAILABLE",
+        "UNKNOWN_429",
+        "MODEL_NOT_FOUND",
+        "QUOTA_EXHAUSTED",
+        "CREDITS_EXHAUSTED",
+        "AUTH_ERROR",
+        "PERMISSION_ERROR",
+        "NO_CAPACITY",
+        "NO_TOKENS_AVAILABLE",
+        "UPSTREAM_RATE_LIMITED",
+        "MODEL_RATE_LIMITED",
+      ].includes(code)
+    ) {
       return true;
     }
     return false;

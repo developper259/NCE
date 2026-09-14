@@ -33,6 +33,27 @@ class LargeFileWriter {
       planningRetryCount: Number.isInteger(source?.planningRetryCount)
         ? source.planningRetryCount
         : 0,
+      strategyFailures: Number.isInteger(source?.strategyFailures)
+        ? source.strategyFailures
+        : 0,
+      strategyReplanCount: Number.isInteger(source?.strategyReplanCount)
+        ? source.strategyReplanCount
+        : 0,
+      strategyReplanRequired: source?.strategyReplanRequired === true,
+      strategySignature: source?.strategySignature || null,
+      maxStrategyReplans: Number.isInteger(
+        runConfig?.largeFileWriting?.maxStrategyReplans ??
+          this.agent?.largeFileWriting?.maxStrategyReplans,
+      )
+        ? Math.max(
+            0,
+            Math.floor(
+              runConfig?.largeFileWriting?.maxStrategyReplans ??
+                this.agent?.largeFileWriting?.maxStrategyReplans ??
+                3,
+            ),
+          )
+        : 3,
       fallbackCount: Number.isInteger(source?.fallbackCount)
         ? source.fallbackCount
         : 0,
@@ -75,12 +96,109 @@ class LargeFileWriter {
       chunkLimit: state.maxChunkChars,
       recoveryAttempts: state.recoveryAttempts,
       planningRetryCount: state.planningRetryCount,
+      strategyFailures: state.strategyFailures,
+      strategyReplanCount: state.strategyReplanCount,
       currentRevision: state.currentRevision,
       chunksApplied: state.chunksApplied,
       validationPending: state.validationPending,
       decision,
       ...details,
     });
+  }
+
+  getToolCallStrategySignature(name, args = {}) {
+    const path = AgentPath.normalize(args?.path || args?.oldPath || "");
+    const signature = {
+      tool: name || null,
+      path,
+      args: args || {},
+    };
+    try {
+      return JSON.stringify(signature);
+    } catch {
+      return `${name}:${path}:${String(args)}`;
+    }
+  }
+
+  observeStrategyFailure(state, error, result = null) {
+    if (!state) return;
+    state.recoveryAttempts = Number.isInteger(state.recoveryAttempts)
+      ? state.recoveryAttempts + 1
+      : 1;
+    state.strategyFailures = Number.isInteger(state.strategyFailures)
+      ? state.strategyFailures + 1
+      : 1;
+    state.strategySignature = this.getToolCallStrategySignature(
+      error?.toolName || state.toolName,
+      this.extractToolCallArgsFromError(error, result) || {},
+    );
+    return state;
+  }
+
+  extractToolCallArgsFromError(error, result = null) {
+    const message = result?.choices?.[0]?.message || result?.message || null;
+    const toolCall = Array.isArray(message?.tool_calls)
+      ? message.tool_calls[error?.toolCallIndex || 0]
+      : null;
+    if (!toolCall?.function?.arguments) return {};
+    try {
+      return this.agent.parseCanonicalToolArguments(
+        toolCall.function.arguments,
+      );
+    } catch {
+      return {};
+    }
+  }
+
+  buildWriteStrategyRecoveryInstruction(state, error = null) {
+    const path = state?.path || error?.path || "";
+    const tool = error?.toolName || state?.toolName || "write_file";
+    const limit =
+      state?.maxChunkChars || this.agent.largeFileWriting.maxChunkCharacters;
+    const recommended =
+      state?.recommendedChunkChars ||
+      this.agent.largeFileWriting.recommendedChunkCharacters;
+    const failure =
+      error?.code || error?.category || "TOOL_ARGUMENTS_TRUNCATED";
+    const dynamicTarget = Math.max(
+      1000,
+      Math.min(3000, Math.floor(recommended * 0.4)),
+    );
+    const suggestion =
+      tool === "write_file_chunk"
+        ? "réduire la taille du chunk et respecter expectedRevision"
+        : "créer le fichier vide ou une très petite première portion puis continuer avec write_file_chunk";
+    return `[NCE WRITE STRATEGY RECOVERY]\nYour current write strategy has failed 3 consecutive times.\nDo not repeat the same tool call or the same payload strategy.\nRe-evaluate the current file state and choose a materially different approach.\nCurrent objective: ${tool}${path ? ` @ ${path}` : ""}\nPrevious failure: ${failure}\nTool limits: create_file/write_file_chunk recommended <= ${recommended} chars, hard max = ${limit} chars; dynamic recovery target should be <= ${dynamicTarget} chars.\nRecommended alternatives: ${suggestion}.\nContinue with the SAME model.\nDo not exceed the hard limit and do not repeat the same request.`;
+  }
+
+  requestStrategyReplan(state, error = null, result = null) {
+    if (!state) return null;
+    const maxStrategyReplans = Number.isInteger(state?.maxStrategyReplans)
+      ? state.maxStrategyReplans
+      : Number.isInteger(this.agent?.largeFileWriting?.maxStrategyReplans)
+        ? this.agent.largeFileWriting.maxStrategyReplans
+        : 3;
+    if (state.strategyReplanCount >= maxStrategyReplans) {
+      const exhausted = this.agent.createLargeWriteRecoveryError(
+        error,
+        state.recoveryAttempts,
+        state.maxRecoveryAttempts ||
+          this.agent.largeFileWriting.maxRecoveryAttempts,
+      );
+      exhausted.code = "WRITE_RECOVERY_EXHAUSTED";
+      exhausted.category = "WRITE_RECOVERY_EXHAUSTED";
+      throw exhausted;
+    }
+    state.strategyFailures = 0;
+    state.strategyReplanRequired = true;
+    state.strategyReplanCount = Number.isInteger(state.strategyReplanCount)
+      ? state.strategyReplanCount + 1
+      : 1;
+    state.strategySignature = this.getToolCallStrategySignature(
+      error?.toolName || state.toolName || "create_file",
+      this.extractToolCallArgsFromError(error, result) || {},
+    );
+    return state;
   }
 
   extractTruncatedLargeWritePath(result, toolCallIndex = 0) {
