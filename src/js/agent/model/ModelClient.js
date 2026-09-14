@@ -181,6 +181,9 @@ class ModelClient {
         "NETWORK_ERROR",
       ].includes(category) || statusCode === 503;
 
+    const failureOrigin =
+      category === "CONTEXT_LENGTH_EXCEEDED" ? "context" : "provider";
+
     const providerGlobal = [
       "AUTH_ERROR",
       "PERMISSION_ERROR",
@@ -208,7 +211,6 @@ class ModelClient {
         "RATE_LIMITED",
         "UNKNOWN_429",
         "AUTH_ERROR",
-        "CONTEXT_LENGTH_EXCEEDED",
       ].includes(category) || retryable;
 
     const userMessage =
@@ -250,6 +252,7 @@ class ModelClient {
       userMessage,
       response,
       error,
+      failureOrigin,
     };
   }
 
@@ -545,6 +548,9 @@ class ModelClient {
           classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
           (state.contextRecoveries.get(candidateKey) || 0) < 1
         ) {
+          classified.failureOrigin = "context";
+          classified.contextRecoveryTried = true;
+          classified.fallbackRecommended = false;
           state.contextRecoveries.set(candidateKey, 1);
           this.agent.contextManager.compactionState.compactionArmed = true;
           activeConfig.contextCompaction = {
@@ -559,6 +565,14 @@ class ModelClient {
           this.agent.agentProgress.metrics.contextRecoveries =
             (this.agent.agentProgress.metrics.contextRecoveries || 0) + 1;
           continue;
+        }
+        if (
+          classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
+          (state.contextRecoveries.get(candidateKey) || 0) >= 1
+        ) {
+          classified.failureOrigin = "context";
+          classified.contextRecoveryTried = true;
+          classified.fallbackRecommended = true;
         }
         const retryDelay = this.agent.getModelRetryDelay(
           classified,
@@ -607,9 +621,11 @@ class ModelClient {
           );
         }
 
-        const fallback = classified.fallbackRecommended
-          ? this.agent.takeNextFallback(state, classified, config)
-          : null;
+        const fallback =
+          this.agent.shouldFallbackModelForFailure(classified) &&
+          classified.fallbackRecommended
+            ? this.agent.takeNextFallback(state, classified, config)
+            : null;
         if (fallback) {
           const previous = activeConfig;
           state.currentConfig = fallback;

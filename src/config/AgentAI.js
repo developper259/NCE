@@ -76,11 +76,8 @@ const AgentAI = {
       defaultModel: "cohere/north-mini-code:free",
 
       fallbackModels: [
-        "poolside/laguna-s-2.1:free",
         "nvidia/nemotron-3-ultra-550b-a55b:free",
-        "z-ai/glm-5.2:free",
         "qwen/qwen3-coder:free",
-        "openai/gpt-4o-mini",
       ],
 
       models: {
@@ -90,14 +87,6 @@ const AgentAI = {
           contextWindow: 256000,
           maxOutputTokens: 64000,
         },
-
-        "poolside/laguna-s-2.1:free": {
-          id: "poolside/laguna-s-2.1:free",
-          name: "Laguna S 2.1 Free",
-          contextWindow: 1048576,
-          maxOutputTokens: 131072,
-        },
-
         "nvidia/nemotron-3-ultra-550b-a55b:free": {
           id: "nvidia/nemotron-3-ultra-550b-a55b:free",
           name: "Nemotron 3 Ultra Free",
@@ -105,26 +94,10 @@ const AgentAI = {
           maxOutputTokens: 16384,
         },
 
-        "z-ai/glm-5.2:free": {
-          id: "z-ai/glm-5.2:free",
-          name: "GLM 5.2 Free",
-          contextWindow: 1048576,
-          maxOutputTokens: 131072,
-        },
-
         "qwen/qwen3-coder:free": {
           id: "qwen/qwen3-coder:free",
           name: "Qwen3 Coder 480B Free",
           contextWindow: 1048576,
-        },
-
-        "openai/gpt-4o-mini": {
-          id: "openai/gpt-4o-mini",
-          name: "GPT-4o mini",
-          contextWindow: 128000,
-          maxOutputTokens: 16384,
-          supportsTools: false,
-          supportsToolChoice: false,
         },
       },
     },

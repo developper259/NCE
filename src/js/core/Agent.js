@@ -1051,7 +1051,8 @@ class Agent {
       category: "LARGE_WRITE_PROTOCOL_FAILED",
       code: "LARGE_WRITE_PROTOCOL_FAILED",
       retryable: false,
-      fallbackRecommended: true,
+      fallbackRecommended: false,
+      failureOrigin: "protocol",
       provider: current.providerId,
       configuredProvider: current.providerId,
       upstreamProvider: null,
@@ -1060,30 +1061,13 @@ class Agent {
       technicalMessage: cause?.message || "Large write protocol failed",
       userMessage: `${this.getModelDisplayName(current)} n'a pas respecté le protocole d'écriture progressive.`,
     };
-    const fallback = this.takeNextFallback(requestState, classified, runConfig);
-    if (!fallback) return false;
-    requestState.unhealthyModels.add(`${current.providerId}:${current.model}`);
-    requestState.currentConfig = fallback;
-    requestState.modelFallbackCount += 1;
-    this.applyActiveModelConfig(runConfig, fallback);
-    largeWrite.fallbackCount += 1;
-    this.emitModelStatus(
-      {
-        kind: "fallback",
-        classification: classified,
-        fromProvider: current.providerId,
-        fromModel: current.model,
-        toProvider: fallback.providerId,
-        toModel: fallback.model,
-        userMessage: `${this.getModelDisplayName(current)} n'a pas respecté le chunking. Basculement vers ${this.getModelDisplayName(fallback)}…`,
-      },
-      runConfig,
-    );
-    this.debugLargeWrite(largeWrite, "fallback", {
-      fromModel: current.model,
-      toModel: fallback.model,
-    });
-    return true;
+    if (!this.shouldFallbackModelForFailure(classified)) {
+      this.debugLargeWrite(largeWrite, "protocol_failure", {
+        reason: classified.code,
+      });
+      return false;
+    }
+    return false;
   }
   applyActiveModelConfig(runConfig, activeConfig) {
     const previousPrompt = runConfig.systemPrompt;
@@ -1115,6 +1099,59 @@ class Agent {
         ),
       };
     }
+  }
+  shouldFallbackModelForFailure(error = {}) {
+    const origin = String(error?.failureOrigin || error?.origin || "").toLowerCase();
+    const category = String(error?.category || error?.code || "").toUpperCase();
+    const code = String(error?.code || "").toUpperCase();
+    const contextRecoveryTried = Boolean(
+      error?.contextRecoveryTried ||
+        error?.localRecoveryDone ||
+        error?.compactionAlreadyTried,
+    );
+
+    if (["task", "tool", "protocol", "lifecycle", "internal"].includes(origin)) {
+      return false;
+    }
+    if (["provider", "provider_global"].includes(origin)) {
+      return true;
+    }
+    if (origin === "context") {
+      return contextRecoveryTried;
+    }
+    if ([
+      "RATE_LIMITED",
+      "MODEL_UNAVAILABLE",
+      "UNKNOWN_429",
+      "MODEL_NOT_FOUND",
+      "QUOTA_EXHAUSTED",
+      "CREDITS_EXHAUSTED",
+      "AUTH_ERROR",
+      "PERMISSION_ERROR",
+      "NO_CAPACITY",
+      "NO_TOKENS_AVAILABLE",
+      "UPSTREAM_RATE_LIMITED",
+      "MODEL_RATE_LIMITED",
+    ].includes(category)) {
+      return true;
+    }
+    if ([
+      "RATE_LIMITED",
+      "MODEL_UNAVAILABLE",
+      "UNKNOWN_429",
+      "MODEL_NOT_FOUND",
+      "QUOTA_EXHAUSTED",
+      "CREDITS_EXHAUSTED",
+      "AUTH_ERROR",
+      "PERMISSION_ERROR",
+      "NO_CAPACITY",
+      "NO_TOKENS_AVAILABLE",
+      "UPSTREAM_RATE_LIMITED",
+      "MODEL_RATE_LIMITED",
+    ].includes(code)) {
+      return true;
+    }
+    return false;
   }
   getModelDisplayName(...args) {
     return this.modelClient.getModelDisplayName(...args);

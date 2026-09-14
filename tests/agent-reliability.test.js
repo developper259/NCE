@@ -367,6 +367,15 @@ test("an uncertain appended chunk is reconciled and never duplicated", async () 
   assert.equal(saves, 1);
 });
 
+test("fallback policy centralizes origin-aware rules", () => {
+  const agent = createAgent(editor());
+  assert.equal(agent.shouldFallbackModelForFailure({ failureOrigin: "task" }), false);
+  assert.equal(agent.shouldFallbackModelForFailure({ failureOrigin: "tool" }), false);
+  assert.equal(agent.shouldFallbackModelForFailure({ failureOrigin: "protocol" }), false);
+  assert.equal(agent.shouldFallbackModelForFailure({ failureOrigin: "provider" }), true);
+  assert.equal(agent.shouldFallbackModelForFailure({ failureOrigin: "context" }), false);
+});
+
 test("one model turn cannot create orphan protocol entries beyond the tool limit", async () => {
   const e = editor();
   let request = 0;
