@@ -58,10 +58,6 @@ class EditorToolRegistry {
         },
       },
       execute: (args = {}) => {
-        const validation = this.agent.validateTaskComplete(args);
-        if (!validation.success) {
-          return { success: false, error: validation.error };
-        }
         return {
           success: true,
           taskCompleteRequested: true,
@@ -81,7 +77,9 @@ class EditorToolRegistry {
       parameters: { type: "object", properties: {} },
       execute: (args = {}) => {
         const result = this.agent.getChangedFiles(args);
-        this.agent.runChangeTracker?.markReviewChangedFiles?.();
+        if (result?.success !== false) {
+          this.agent.runChangeTracker?.markReviewChangedFiles?.();
+        }
         return result;
       },
     });
@@ -98,7 +96,9 @@ class EditorToolRegistry {
       },
       execute: (args = {}) => {
         const result = this.agent.getDiff(args);
-        this.agent.runChangeTracker?.markReviewDiff?.();
+        if (result?.success !== false) {
+          this.agent.runChangeTracker?.markReviewDiff?.(args?.path, result);
+        }
         return result;
       },
     });

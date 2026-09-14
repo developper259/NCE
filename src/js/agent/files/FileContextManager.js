@@ -27,12 +27,13 @@ class FileContextManager {
       ? visibleContent.split("\n\n[... contenu tronqué par NCE ...]")[0]
       : visibleContent;
     const completeVisibleLines = truncated
-      ? (visiblePrefix.match(/\n/g) || []).length
+      ? Math.max(1, (visiblePrefix.match(/\n/g) || []).length)
       : safeEndLine - safeStartLine + 1;
     const context = {
       path: absolutePath,
       startLine: safeStartLine,
       endLine: safeEndLine,
+      requestedEndLine: safeEndLine,
       content: visibleContent,
       revision: this.agent.getContentRevision(content),
       timestamp: Date.now(),

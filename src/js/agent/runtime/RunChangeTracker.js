@@ -42,13 +42,22 @@ class RunChangeTracker {
     );
   }
 
-  setRunStatus(status) {
-    if (!this.current) return null;
-    if (status === "completed") this.current.status = "completed";
-    if (status === "aborted") this.current.status = "aborted";
-    if (status === "failed") this.current.status = "failed";
-    if (status === "running") this.current.status = "running";
+  setRunStatus(status, runId = this.current?.runId) {
+    if (!this.current || this.current.runId !== runId) return null;
+    const terminal = new Set(["completed", "aborted", "failed"]);
+    if (terminal.has(this.current.status)) return this.current;
+    if (["completed", "aborted", "failed", "running"].includes(status)) {
+      this.current.status = status;
+    }
     return this.current;
+  }
+
+  commitCompletedState(runId = this.current?.runId) {
+    if (!this.current || this.current.runId !== runId) return false;
+    if (this.current.status !== "running") return false;
+    this.current.status = "completed";
+    this.current.completedAt = Date.now();
+    return true;
   }
 
   workspaceMatches(
@@ -62,16 +71,15 @@ class RunChangeTracker {
     return (
       identity &&
       this.current.workspaceIdentity &&
-      AgentPath.normalize(this.current.workspaceIdentity) ===
-        AgentPath.normalize(identity)
+      AgentPath.samePath(this.current.workspaceIdentity, identity)
     );
   }
 
   normalizePath(path) {
     if (typeof path !== "string" || !path.trim()) return "";
     const relative = path.trim().replace(/\\/g, "/");
-    return relative.startsWith("/")
-      ? AgentPath.toProjectRelativePath(
+    return AgentPath.isAbsolute(relative)
+      ? this.agent.toProjectRelativePath(
           relative,
           this.current?.workspaceIdentity ||
             this.agent?.editor?.fileExplorer?.rootPath ||
@@ -104,8 +112,8 @@ class RunChangeTracker {
           key,
         status: change.status || existing.status || "modified",
         originalPath:
-          change.originalPath ||
           existing.originalPath ||
+          change.originalPath ||
           existing.oldPath ||
           existing.path ||
           key,
@@ -198,16 +206,17 @@ class RunChangeTracker {
       typeof result.beforeText === "string" ? result.beforeText : null;
     const after =
       typeof result.afterText === "string" ? result.afterText : null;
+    const existing = this.current.changes.get(relativePath);
     const change = {
       path: relativePath,
       originalPath: relativePath,
       currentPath: relativePath,
-      status: "modified",
+      status: existing?.status === "created" ? "created" : existing?.status === "renamed" ? "renamed" : "modified",
       beforeContent: before,
       afterContent: after,
       beforeRevision: result.previousRevision || null,
       afterRevision: result.revision || null,
-      created: false,
+      created: existing?.created === true,
       modified: true,
       renamed: false,
       deleted: false,
@@ -229,6 +238,17 @@ class RunChangeTracker {
     const newPath = this.normalizePath(result.newPath);
     const existing =
       this.current.changes.get(oldPath) || this.current.changes.get(newPath);
+    if (existing?.status === "created") {
+      this.current.changes.delete(oldPath);
+      existing.path = newPath;
+      existing.currentPath = newPath;
+      existing.originalPath = newPath;
+      existing.renamed = true;
+      existing.afterRevision = result.verification?.revision || existing.afterRevision;
+      this.current.changeVersion += 1;
+      this.current.changes.set(newPath, existing);
+      return existing;
+    }
     if (existing && existing.status === "renamed") {
       existing.status = "renamed";
       existing.renamed = true;
@@ -243,6 +263,7 @@ class RunChangeTracker {
       existing.afterRevision = existing.afterRevision ?? null;
       this.current.changes.delete(oldPath);
       this.current.changes.set(newPath, existing);
+      this.current.changeVersion += 1;
       return existing;
     }
     const generated = {
@@ -274,14 +295,15 @@ class RunChangeTracker {
     const existing = this.current.changes.get(relativePath);
     if (existing && existing.status === "created") {
       this.current.changes.delete(relativePath);
+      this.current.changeVersion += 1;
       return null;
     }
     const deletion = {
       path: relativePath,
-      originalPath: relativePath,
+      originalPath: existing?.originalPath || relativePath,
       currentPath: relativePath,
       status: "deleted",
-      beforeContent,
+      beforeContent: existing?.beforeContent ?? beforeContent,
       afterContent: null,
       beforeRevision: null,
       afterRevision: null,
@@ -296,9 +318,8 @@ class RunChangeTracker {
   }
 
   countLines(content) {
-    return typeof content === "string"
-      ? Math.max(0, content.split(/\r?\n/).length - 1)
-      : 0;
+    if (typeof content !== "string" || content === "") return 0;
+    return content.split(/\r?\n/).length;
   }
 
   countAddedLines(beforeText, afterText) {
@@ -324,8 +345,16 @@ class RunChangeTracker {
     return true;
   }
 
-  markReviewDiff() {
+  markReviewDiff(path = null, result = null) {
     if (!this.current) return false;
+    if (path) {
+      const change = this.current.changes.get(this.normalizePath(path));
+      if (!change) return false;
+      change.reviewed = true;
+      change.reviewVersion = this.current.changeVersion;
+      return true;
+    }
+    if (result?.truncated === true) return false;
     this.current.reviewedDiff = true;
     this.current.reviewedDiffVersion = this.current.changeVersion;
     return true;
@@ -493,17 +522,43 @@ class RunChangeTracker {
   unifiedDiffLines(before, after) {
     const beforeLines = String(before || "").split(/\r?\n/);
     const afterLines = String(after || "").split(/\r?\n/);
-    const max = Math.max(beforeLines.length, afterLines.length);
+    const cells = beforeLines.length * afterLines.length;
+    if (cells > 1_000_000) {
+      return [
+        `@@ -1,${beforeLines.length} +1,${afterLines.length} @@`,
+        ...beforeLines.map((line) => `-${line}`),
+        ...afterLines.map((line) => `+${line}`),
+      ];
+    }
+    const table = Array.from(
+      { length: beforeLines.length + 1 },
+      () => new Uint32Array(afterLines.length + 1),
+    );
+    for (let i = beforeLines.length - 1; i >= 0; i -= 1) {
+      for (let j = afterLines.length - 1; j >= 0; j -= 1) {
+        table[i][j] = beforeLines[i] === afterLines[j]
+          ? table[i + 1][j + 1] + 1
+          : Math.max(table[i + 1][j], table[i][j + 1]);
+      }
+    }
     const lines = [];
-    for (let i = 0; i < max; i++) {
-      if (beforeLines[i] === afterLines[i]) continue;
-      if (i < beforeLines.length && i < afterLines.length) {
-        lines.push(`-${beforeLines[i]}`);
-        lines.push(`+${afterLines[i]}`);
-      } else if (i < beforeLines.length) {
-        lines.push(`-${beforeLines[i]}`);
-      } else if (i < afterLines.length) {
-        lines.push(`+${afterLines[i]}`);
+    let i = 0;
+    let j = 0;
+    while (i < beforeLines.length || j < afterLines.length) {
+      if (
+        i < beforeLines.length &&
+        j < afterLines.length &&
+        beforeLines[i] === afterLines[j]
+      ) {
+        i += 1;
+        j += 1;
+      } else if (
+        j < afterLines.length &&
+        (i === beforeLines.length || table[i][j + 1] >= table[i + 1][j])
+      ) {
+        lines.push(`+${afterLines[j++]}`);
+      } else {
+        lines.push(`-${beforeLines[i++]}`);
       }
     }
     return lines.length
@@ -540,6 +595,12 @@ class RunChangeTracker {
         error: { code: "RUN_COMPLETED", message: "Le run est déjà terminé." },
       };
     }
+    if (this.current.status === "failed") {
+      return {
+        success: false,
+        error: { code: "RUN_FAILED", message: "Le run a déjà échoué." },
+      };
+    }
     if (
       this.current.invalidated ||
       !this.workspaceMatches(this.agent.editor?.fileExplorer?.rootPath)
@@ -563,7 +624,9 @@ class RunChangeTracker {
     }
     if (
       this.current.unresolvedFailures &&
-      this.current.unresolvedFailures.size
+      [...this.current.unresolvedFailures.values()].some(
+        (failure) => failure.blocking !== false,
+      )
     ) {
       return {
         success: false,
@@ -578,7 +641,10 @@ class RunChangeTracker {
         this.current.reviewedChangedFilesVersion === this.current.changeVersion;
       const reviewCurrentForDiff =
         this.current.reviewedDiffVersion === this.current.changeVersion;
-      if (!reviewCurrentForChangedFiles && !reviewCurrentForDiff) {
+      const everyFileReviewed = [...this.current.changes.values()].every(
+        (change) => change.reviewVersion === this.current.changeVersion,
+      );
+      if (!reviewCurrentForChangedFiles && !reviewCurrentForDiff && !everyFileReviewed) {
         return {
           success: false,
           error: {
@@ -589,13 +655,10 @@ class RunChangeTracker {
         };
       }
     }
-    this.current.status = "completed";
-    this.current.reviewedChangedFiles = true;
-    this.current.reviewedDiff = true;
     return {
       success: true,
       taskCompleteRequested: true,
-      validation: "accepted",
+      validation: "eligible",
       changedFiles: this.current.changes.size,
     };
   }
@@ -616,8 +679,32 @@ class RunChangeTracker {
     }
   }
 
-  addUnresolvedFailure(code, message, classification = "unresolved") {
+  addUnresolvedFailure(codeOrFailure, message, classification = "unresolved") {
     if (!this.current) return;
+    if (codeOrFailure && typeof codeOrFailure === "object") {
+      const failure = codeOrFailure;
+      const error = failure.error || {};
+      const code = error.code || "TOOL_FAILED";
+      const path = this.normalizePath(failure.path || "");
+      const identity = `${failure.toolName || "unknown"}:${path}:${code}`;
+      const previous = this.current.unresolvedFailures.get(identity);
+      this.current.unresolvedFailures.set(identity, {
+        identity,
+        code,
+        toolCallId: failure.toolCallId || previous?.toolCallId || null,
+        toolName: failure.toolName || previous?.toolName || null,
+        path: path || null,
+        message: error.message || previous?.message || "Tool failure",
+        classification: failure.classification || error.retryStrategy || "unresolved",
+        blocking: failure.blocking !== false,
+        firstSeen: previous?.firstSeen || Date.now(),
+        lastSeen: Date.now(),
+        recoveryAction: failure.recoveryAction || null,
+        status: "open",
+      });
+      return identity;
+    }
+    const code = codeOrFailure;
     if (typeof code === "string" && code.trim()) {
       this.current.unresolvedFailures.set(code, {
         code,
@@ -626,6 +713,45 @@ class RunChangeTracker {
         status: "open",
       });
     }
+  }
+
+  resolveFailuresForTool(toolName, path = null, classification = "recovered") {
+    if (!this.current) return 0;
+    const normalizedPath = this.normalizePath(path || "");
+    let count = 0;
+    for (const [identity, failure] of this.current.unresolvedFailures) {
+      if (
+        failure.toolName === toolName &&
+        (!normalizedPath || !failure.path || AgentPath.samePath(failure.path, normalizedPath))
+      ) {
+        failure.status = "resolved";
+        failure.classification = classification;
+        this.current.unresolvedFailures.delete(identity);
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  resolveFailuresForPath(path, codes = null, classification = "recovered") {
+    if (!this.current) return 0;
+    const normalizedPath = this.normalizePath(path || "");
+    if (!normalizedPath) return 0;
+    const allowed = Array.isArray(codes) ? new Set(codes) : null;
+    let count = 0;
+    for (const [identity, failure] of this.current.unresolvedFailures) {
+      if (
+        failure.path &&
+        AgentPath.samePath(failure.path, normalizedPath) &&
+        (!allowed || allowed.has(failure.code))
+      ) {
+        failure.status = "resolved";
+        failure.classification = classification;
+        this.current.unresolvedFailures.delete(identity);
+        count += 1;
+      }
+    }
+    return count;
   }
 
   resolveFailure(code, classification = "resolved") {

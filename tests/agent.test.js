@@ -248,6 +248,13 @@ test("delete_file removes only safe workspace files and refreshes project caches
     });
     assert.equal(result.success, true, JSON.stringify(result));
     assert.equal(result.result.path, "delete.txt");
+    assert.equal(result.result.beforeContent, "delete");
+    assert.equal(result.result.beforeRevision, agent.getContentRevision("delete"));
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(result.result.verification)),
+      { verified: true, kind: "absence", exists: false },
+    );
+    assert.equal(result.result.mutationOutcome, "APPLIED_AND_VERIFIED");
     assert.equal(
       await editor.api.pathExists(path.join(root, "delete.txt")),
       false,
@@ -621,7 +628,8 @@ test("Agent run journal preserves create then rename semantics without breaking 
     const journal = agent.runChangeTracker.getChangedFiles({});
     assert.equal(journal.success, true);
     assert.equal(journal.files.length, 1);
-    assert.equal(journal.files[0].status, "renamed");
+    // A file created and renamed within one run is still a net creation.
+    assert.equal(journal.files[0].status, "created");
     assert.equal(journal.files[0].path, "renamed.txt");
 
     const diff = agent.runChangeTracker.getDiff({ path: "renamed.txt" });
@@ -779,8 +787,10 @@ test("modify_file autosave accepts equivalent path separators and rejects failed
           "one beta",
         );
       } else {
-        assert.equal(result.success, false);
-        assert.equal(result.error.code, "SAVE_FAILED");
+        assert.equal(result.success, true);
+        assert.equal(result.mutationOutcome, "APPLIED_BUT_UNCERTAIN");
+        assert.equal(result.persistence.saved, false);
+        assert.equal(result.persistence.error.code, "SAVE_FAILED");
       }
     } finally {
       await fs.rm(root, { recursive: true, force: true });

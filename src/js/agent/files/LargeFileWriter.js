@@ -14,7 +14,12 @@ class LargeFileWriter {
       8000;
     return {
       active: source?.active === true,
-      state: source?.active === true ? "ACTIVE" : "IDLE",
+      state:
+        source?.active === true
+          ? source?.firstChunkCreated === true
+            ? "ACTIVE_APPEND"
+            : "ACTIVE_NEEDS_CREATE"
+          : "IDLE",
       path: AgentPath.normalize(source?.path || ""),
       toolName: source?.toolName || null,
       maxChunkChars: Math.max(1000, Math.floor(configuredLimit)),
@@ -101,14 +106,13 @@ class LargeFileWriter {
       error?.toolCallIndex || 0,
     );
     state.active = true;
-    state.state = "ACTIVE";
+    state.state = state.firstChunkCreated
+      ? "ACTIVE_APPEND"
+      : "ACTIVE_NEEDS_CREATE";
     state.completed = false;
     state.validationPending = true;
     state.toolName = error?.toolName || state.toolName;
     if (detectedPath) state.path = detectedPath;
-    if (error?.toolName === "write_file_chunk") {
-      state.firstChunkCreated = true;
-    }
     state.recoveryAttempts += 1;
     this.debugLargeWrite(state, "retry_as_chunked_write", {
       finishReason: error?.finishReason || "unknown",
@@ -127,7 +131,7 @@ class LargeFileWriter {
     const a = AgentPath.normalize(left || "");
     const b = AgentPath.normalize(right || "");
     if (!a || !b) return false;
-    return a === b || a.endsWith(`/${b}`) || b.endsWith(`/${a}`);
+    return AgentPath.samePath(a, b);
   }
 
   getLargeWriteExpectedAction(state) {
@@ -234,7 +238,7 @@ class LargeFileWriter {
           !state.active &&
           state.chunksApplied === 0;
         state.active = true;
-        state.state = "ACTIVE";
+        state.state = "ACTIVE_APPEND";
         state.completed = false;
         state.firstChunkCreated = true;
         state.validationPending = true;
@@ -283,11 +287,12 @@ class LargeFileWriter {
     ) {
       if (payload?.error?.code === "FILE_WRITE_CONTENT_TOO_LARGE") {
         state.active = true;
-        state.state = "ACTIVE";
+        state.state = state.firstChunkCreated
+          ? "ACTIVE_APPEND"
+          : "ACTIVE_NEEDS_CREATE";
         state.completed = false;
         state.validationPending = true;
         state.toolName = name;
-        state.firstChunkCreated = name === "write_file_chunk";
         state.recoveryAttempts += 1;
         if (path) state.path = path;
         this.debugLargeWrite(state, "retry_as_chunked_write", {

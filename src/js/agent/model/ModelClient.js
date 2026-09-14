@@ -29,6 +29,9 @@ class ModelClient {
       unhealthyModels: new Set(),
       failures: [],
       providerRetryCount: 0,
+      retryCountsByCandidate: new Map(),
+      totalRetryCount: 0,
+      contextRecoveries: new Map(),
       modelFallbackCount: 0,
       authenticationCancelledProviders: new Set(),
       blockedProviders: new Map(),
@@ -107,7 +110,9 @@ class ModelClient {
 
     const is429 = statusCode === 429 || /\b429\b/.test(text);
     let category = "UNKNOWN";
-    if (
+    if (code === "CONTEXT_LENGTH_EXCEEDED") {
+      category = "CONTEXT_LENGTH_EXCEEDED";
+    } else if (
       /context.{0,30}(length|window)|too many tokens|maximum context|token limit/.test(
         text,
       )
@@ -265,10 +270,10 @@ class ModelClient {
   }
 
   emitModelStatus(event, config) {
-    this.agent.callbacks.onModelStatus?.(event, {
+    this.agent.safeInvokeCallback("onModelStatus", [event, {
       sessionId: config.sessionId ?? this.agent.currentSessionId,
       runId: config.runId ?? this.agent.runId,
-    });
+    }]);
   }
 
   async requestSingleModel(controller, config) {
@@ -295,6 +300,11 @@ class ModelClient {
     });
     const providerMessages =
       this.agent.normalizeMessagesForProvider(modelContext);
+    const liveEditorContext = await this.agent.getContext();
+    providerMessages.push({
+      role: "system",
+      content: `CONTEXTE EDITEUR EPHEMERE (état actuel) :\n${JSON.stringify(liveEditorContext)}`,
+    });
     this.agent.contextManager?.updateModelFileVisibility?.(providerMessages);
     const payload = {
       model: config.model,
@@ -316,8 +326,29 @@ class ModelClient {
 
     if (Number.isFinite(config.temperature))
       payload.temperature = config.temperature;
-    if (Number.isFinite(config.maxTokens))
-      payload.max_tokens = config.maxTokens;
+    const responseBudget = this.agent.responseBudgetEstimator.estimateResponseBudget({
+      agent: this.agent,
+      model: config,
+      runtimeState: config.contextState || {},
+    });
+    const promptTokens = this.agent.estimateTokens(providerMessages);
+    const safetyMargin = Math.max(
+      0,
+      config.responseBudget?.contextCompactionSafetyMarginTokens || 0,
+    );
+    const contextAllowance = Number.isFinite(responseBudget.contextWindow)
+      ? responseBudget.contextWindow - promptTokens - safetyMargin
+      : responseBudget.effectiveMaxOutputTokens;
+    if (Number.isFinite(responseBudget.contextWindow) && contextAllowance < 1) {
+      throw Object.assign(new Error("Le contexte doit être compacté avant la requête."), {
+        code: "CONTEXT_LENGTH_EXCEEDED",
+      });
+    }
+    payload.max_tokens = Math.max(
+      1,
+      Math.min(responseBudget.effectiveMaxOutputTokens, contextAllowance),
+    );
+    config.effectiveMaxOutputTokens = payload.max_tokens;
 
     this.agent.agentProgress?.recordModelAttempt?.();
 
@@ -447,11 +478,11 @@ class ModelClient {
           let replacementKey = "";
           try {
             replacementKey =
-              await this.agent.callbacks.onAuthenticationRequired(classified, {
+              await this.agent.safeInvokeCallback("onAuthenticationRequired", [classified, {
                 sessionId: config.sessionId ?? this.agent.currentSessionId,
                 runId: config.runId ?? this.agent.runId,
                 providerId: activeConfig.providerId,
-              });
+              }], { awaitResult: true, fallback: "" });
           } catch (authenticationError) {
             console.error(
               "[NCE Agent model] impossible de remplacer la clé API",
@@ -473,19 +504,48 @@ class ModelClient {
           state.authenticationCancelledProviders.add(activeConfig.providerId);
         }
 
+        const candidateKey = `${activeConfig.providerId}:${activeConfig.model}`;
+        const candidateRetries = state.retryCountsByCandidate.get(candidateKey) || 0;
+        if (
+          classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
+          (state.contextRecoveries.get(candidateKey) || 0) < 1
+        ) {
+          state.contextRecoveries.set(candidateKey, 1);
+          this.agent.contextManager.compactionState.compactionArmed = true;
+          activeConfig.contextCompaction = {
+            ...(activeConfig.contextCompaction || {}),
+            enabled: true,
+            triggerRatio: 0,
+            hardRatio: 0,
+            criticalRatio: 0,
+            recentIterations: 1,
+          };
+          config.contextCompaction = { ...activeConfig.contextCompaction };
+          this.agent.agentProgress.metrics.contextRecoveries =
+            (this.agent.agentProgress.metrics.contextRecoveries || 0) + 1;
+          continue;
+        }
         const retryDelay = this.agent.getModelRetryDelay(
           classified,
-          retryCount,
+          candidateRetries,
+        );
+        const totalRetryCap = Math.max(
+          1,
+          (config.maxProviderRetries ?? this.agent.maxProviderRetries) *
+            ((config.maxModelFallbacks ?? this.agent.maxModelFallbacks) + 1),
         );
         const mayRetry =
           classified.retryable &&
-          state.providerRetryCount <
+          candidateRetries <
             (config.maxProviderRetries ?? this.agent.maxProviderRetries) &&
+          state.totalRetryCount < totalRetryCap &&
           retryDelay <= (config.maxRetryDelayMs ?? this.agent.maxRetryDelayMs);
 
         if (mayRetry) {
           retryCount += 1;
           state.providerRetryCount += 1;
+          state.totalRetryCount += 1;
+          state.retryCountsByCandidate.set(candidateKey, candidateRetries + 1);
           this.agent.agentProgress?.recordModelRetry?.();
           this.emitModelStatus(
             {

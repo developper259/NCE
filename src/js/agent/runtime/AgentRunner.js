@@ -56,6 +56,7 @@ class AgentRunner {
       maxProviderRetries: this.agent.maxProviderRetries,
       maxModelFallbacks: this.agent.maxModelFallbacks,
       maxRetryDelayMs: this.agent.maxRetryDelayMs,
+      maxToolCallsPerTurn: this.agent.maxToolCallsPerTurn,
     };
     return config;
   }
@@ -125,14 +126,29 @@ class AgentRunner {
         allowsFullCodeResponse:
           this.agent.requestsFullCodeResponse(userMessage),
       });
+      if (result?.error) {
+        this.agent.runChangeTracker?.setRunStatus?.("failed", runId);
+      } else if (
+        this.agent.runChangeTracker?.current?.status === "running" &&
+        !this.commitRunCompleted(runId)
+      ) {
+        throw Object.assign(new Error("La complétion du run a été refusée."), {
+          code: "INVALID_RUN_TRANSITION",
+        });
+      }
       result.metrics = this.agent.agentProgress.getMetrics();
       this.agent.lastRunMetrics = result.metrics;
-      this.agent.callbacks.onFinish?.(result, runContext);
+      this.agent.safeInvokeCallback("onFinish", [result, runContext]);
       return result;
     } catch (error) {
       this.agent.lastRunMetrics = this.agent.agentProgress.getMetrics();
-      if (!this.agent.isAbortError(error) && runId === this.agent.runId)
-        this.agent.callbacks.onError?.(error, runContext);
+      this.agent.runChangeTracker?.setRunStatus?.(
+        this.agent.isAbortError(error) ? "aborted" : "failed",
+        runId,
+      );
+      if (!this.agent.isAbortError(error) && runId === this.agent.runId) {
+        this.agent.safeInvokeCallback("onError", [error, runContext]);
+      }
       throw error;
     } finally {
       if (runId === this.agent.runId) {
@@ -152,12 +168,17 @@ class AgentRunner {
 
   stop() {
     this.agent.stopRequested = true;
+    this.agent.runChangeTracker?.setRunStatus?.("aborted", this.agent.runId);
     if (this.agent.largeWriteState?.active) {
       this.agent.largeWriteState.active = false;
       this.agent.largeWriteState.state = "ABORTED";
       this.agent.largeWriteState.decision = "fail";
     }
     this.agent.abortController?.abort();
+  }
+
+  commitRunCompleted(runId) {
+    return this.agent.runChangeTracker?.commitCompletedState?.(runId) === true;
   }
 
   detectModificationIntent(message) {
@@ -374,12 +395,15 @@ class AgentRunner {
       channel === "reasoning"
         ? this.agent.callbacks.onReasoning
         : this.agent.callbacks.onToken;
-    callback?.(normalized.delta, {
+    this.agent.safeInvokeCallback(
+      channel === "reasoning" ? "onReasoning" : "onToken",
+      [normalized.delta, {
       ...context,
       contentMode: "delta",
       resetSegment: normalized.reset,
       segmentId: `${context.requestId}:${channel}:${normalized.revision}`,
-    });
+      }],
+    );
   }
 
   resolveToolChoice(message) {
@@ -580,6 +604,7 @@ class AgentRunner {
     validationPending = false,
     unresolvedWriteFailure = false,
     unresolvedValidationFailure = false,
+    largeWriteActive = false,
   } = {}) {
     if (requiresModification && successfulWriteCount === 0) {
       return {
@@ -603,6 +628,13 @@ class AgentRunner {
         reason: "validation_unresolved",
         message:
           "Une validation requise ou un échec de validation reste non résolu.",
+      };
+    }
+    if (largeWriteActive) {
+      return {
+        accepted: false,
+        reason: "large_write_incomplete",
+        message: "L'écriture progressive du fichier n'est pas encore terminée.",
       };
     }
     return { accepted: true, reason: "task_complete" };
@@ -1093,6 +1125,17 @@ class AgentRunner {
                   .filter((call) => writeTools.has(call?.function?.name))
                   .slice(0, 1)
               : orderedToolCalls;
+        const toolCallLimit = Math.max(
+          1,
+          Math.floor(runConfig?.maxToolCallsPerTurn || 20),
+        );
+        if (executableToolCalls.length > toolCallLimit) {
+          executableToolCalls.length = toolCallLimit;
+          this.agent.messages.push({
+            role: "system",
+            content: `[NCE TOOL LIMIT] ${toolCallLimit} appels au maximum sont acceptés par tour. Les appels excédentaires n'ont pas été inscrits dans l'historique ni exécutés; réévalue-les au prochain tour.`,
+          });
+        }
         this.agent.messages.push(
           this.agent.createAssistantToolCallMessage(
             parsed.assistantMessage,
@@ -1208,9 +1251,7 @@ class AgentRunner {
             if (readPath) {
               for (const pendingPath of pendingValidationPaths) {
                 if (
-                  readPath === pendingPath ||
-                  readPath.endsWith(`/${pendingPath}`) ||
-                  pendingPath.endsWith(`/${readPath}`)
+                  AgentPath.samePath(readPath, pendingPath)
                 ) {
                   pendingValidationPaths.delete(pendingPath);
                 }
@@ -1252,15 +1293,31 @@ class AgentRunner {
           }
         }
         if (completionRequest) {
-          const completion = this.validateTaskCompletion({
+          this.agent.agentProgress.metrics.completionRequests += 1;
+          const trackerCompletion = this.agent.validateTaskComplete({});
+          const runtimeCompletion = this.validateTaskCompletion({
             requiresModification,
             successfulWriteCount,
             validationPending,
             unresolvedWriteFailure,
             unresolvedValidationFailure,
+            largeWriteActive: largeWrite.active,
           });
+          const completion = trackerCompletion.success === false
+            ? {
+                accepted: false,
+                reason: trackerCompletion.error?.code || "tracker_rejected",
+                message: trackerCompletion.error?.message || "Le run ne peut pas encore terminer.",
+              }
+            : runtimeCompletion;
           if (completion.accepted) {
+            if (!this.commitRunCompleted(runId)) {
+              throw Object.assign(new Error("La transition de complétion du run a été refusée."), {
+                code: "INVALID_RUN_TRANSITION",
+              });
+            }
             runState.taskComplete = true;
+            this.agent.agentProgress.metrics.completionSuccesses += 1;
             this.recordCompletionDecision("task_complete", runState);
             this.agent.agentProgress.recordTaskCompletion(
               iteration,
@@ -1282,6 +1339,7 @@ class AgentRunner {
               iterations: iteration,
             };
           }
+          this.agent.agentProgress.metrics.completionRejections += 1;
           this.agent.agentProgress.recordTaskCompletion(
             iteration,
             false,

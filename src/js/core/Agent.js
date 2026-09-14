@@ -85,6 +85,7 @@ class Agent {
     this.maxProviderRetries = 2;
     this.maxModelFallbacks = 3;
     this.maxRetryDelayMs = 30000;
+    this.maxToolCallsPerTurn = 20;
     this.responseBudget = {
       minReservedForResponseTokens: 128,
       maxReservedForResponseTokens: 16384,
@@ -280,6 +281,67 @@ class Agent {
       }
     }
     return this;
+  }
+  safeInvokeCallback(name, args = [], options = {}) {
+    const callback = this.callbacks?.[name];
+    if (typeof callback !== "function") return options.fallback;
+    try {
+      const result = callback(...args);
+      if (options.awaitResult === true && result?.then) {
+        return result.catch((error) => {
+          this.recordCallbackFailure(name, error);
+          return options.fallback;
+        });
+      }
+      if (result?.catch) {
+        result.catch((error) => this.recordCallbackFailure(name, error));
+      }
+      return result;
+    } catch (error) {
+      this.recordCallbackFailure(name, error);
+      return options.fallback;
+    }
+  }
+  recordCallbackFailure(name, error) {
+    if (this.agentProgress?.metrics) {
+      this.agentProgress.metrics.callbackFailures =
+        (this.agentProgress.metrics.callbackFailures || 0) + 1;
+    }
+    console.warn("[NCE Agent callback] observer failure", {
+      callback: name,
+      message: String(error?.message || error || "Callback failure").slice(0, 240),
+    });
+  }
+  getMutationGuardError(runId = this.runConfig?.runId) {
+    if (
+      this.stopRequested ||
+      (runId !== undefined && runId !== null && runId !== this.runId) ||
+      this.abortController?.signal?.aborted
+    ) {
+      return {
+        code: "RUN_ABORTED",
+        message: "Le run Agent associé à cette écriture n'est plus actif.",
+        category: "lifecycle",
+        recoverable: false,
+        retryStrategy: "abort",
+      };
+    }
+    const expectedRoot = this.runConfig?.workspaceRoot;
+    const currentRoot = this.editor?.fileExplorer?.rootPath;
+    if (
+      expectedRoot &&
+      currentRoot &&
+      !AgentPath.samePath(expectedRoot, currentRoot)
+    ) {
+      return {
+        code: "WORKSPACE_CHANGED",
+        message: "Le workspace a changé depuis le démarrage du run Agent.",
+        category: "lifecycle",
+        recoverable: false,
+        retryStrategy: "abort",
+      };
+    }
+    return null;
   }
   registerTool(...args) {
     return this.toolRegistry.registerTool(...args);

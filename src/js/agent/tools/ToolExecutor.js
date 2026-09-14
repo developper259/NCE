@@ -1,6 +1,122 @@
 class ToolExecutor {
   constructor(agent) {
     this.agent = agent;
+    this.mutationTail = Promise.resolve();
+  }
+
+  stableStringify(value) {
+    if (Array.isArray(value)) {
+      return `[${value.map((entry) => this.stableStringify(entry)).join(",")}]`;
+    }
+    if (value && typeof value === "object") {
+      return `{${Object.keys(value).sort().map(
+        (key) => `${JSON.stringify(key)}:${this.stableStringify(value[key])}`,
+      ).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  }
+
+  getCallIdentity(call, executionContext = {}) {
+    let args;
+    try {
+      args = this.agent.parseCanonicalToolArguments(call?.function?.arguments);
+    } catch {
+      args = { invalidRawArguments: String(call?.function?.arguments || "") };
+    }
+    return `${executionContext.runId ?? this.agent.runId}:${call?.function?.name || ""}:${this.stableStringify(args)}`;
+  }
+
+  async acquireMutationLane(executionContext = {}) {
+    let release;
+    const previous = this.mutationTail;
+    this.mutationTail = new Promise((resolve) => { release = resolve; });
+    await previous;
+    if (
+      this.agent.stopRequested ||
+      (executionContext.runId !== undefined && executionContext.runId !== this.agent.runId)
+    ) {
+      release();
+      throw Object.assign(new Error("Le run Agent n'est plus actif."), {
+        code: "RUN_ABORTED",
+      });
+    }
+    return release;
+  }
+
+  async executeToolCall(call, executionContext = {}) {
+    const name = call?.function?.name;
+    const toolCallId = typeof call?.id === "string" ? call.id : "";
+    const identity = this.getCallIdentity(call, executionContext);
+    const cached = toolCallId ? this.agent.executedToolCalls.get(toolCallId) : null;
+    if (cached) {
+      if (cached.executionIdentity === identity) return cached;
+      return this.attachMeta(name, {
+        success: false,
+        error: {
+          code: "TOOL_CALL_ID_CONFLICT",
+          message: "Le même identifiant tool a été réutilisé avec un appel différent.",
+          category: "protocol",
+          recoverable: true,
+          retryStrategy: "replan",
+        },
+      });
+    }
+
+    const runId = executionContext.runId ?? this.agent.runId;
+    const pendingIdentity = `${toolCallId || "anonymous"}:${identity}`;
+    this.agent.runChangeTracker?.markPending?.(pendingIdentity, runId);
+    let releaseMutation = null;
+    try {
+      const tool = this.agent.getTool(name);
+      if (tool && !tool.readOnly) {
+        try {
+          releaseMutation = await this.acquireMutationLane(executionContext);
+        } catch (error) {
+          return this.attachMeta(name, {
+            success: false,
+            error: {
+              code: error?.code || "RUN_ABORTED",
+              message: error?.message || "Le run Agent n'est plus actif.",
+            },
+          });
+        }
+      }
+      const toolResult = await this.executeToolCallInternal(call, executionContext);
+      if (toolCallId) {
+        this.agent.executedToolCalls.set(toolCallId, {
+          ...toolResult,
+          executionIdentity: identity,
+        });
+      }
+      const payload = toolResult?.result ?? toolResult;
+      const args = (() => {
+        try { return this.agent.parseCanonicalToolArguments(call?.function?.arguments); }
+        catch { return {}; }
+      })();
+      const path = args.path || args.oldPath || payload?.path || payload?.oldPath || null;
+      if (toolResult?.success === false && name !== "task_complete") {
+        const code = payload?.error?.code || "TOOL_FAILED";
+        this.agent.runChangeTracker?.addUnresolvedFailure?.({
+          toolCallId,
+          toolName: name,
+          path,
+          error: payload?.error || { code, message: "Tool failure" },
+          blocking: !["UNKNOWN_TOOL", "TOOL_DISABLED", "TOOL_NOT_ALLOWED", "INVALID_ARGUMENT"].includes(code),
+          recoveryAction: payload?.error?.retryStrategy || null,
+        });
+      } else if (toolResult?.success !== false) {
+        this.agent.runChangeTracker?.resolveFailuresForTool?.(name, path);
+        if (name === "read_file") {
+          this.agent.runChangeTracker?.resolveFailuresForPath?.(path, [
+            "STALE_REVISION", "OLD_TEXT_NOT_FOUND", "AMBIGUOUS_MATCH",
+          ], "reread_completed");
+        }
+      }
+      return toolResult;
+    } finally {
+      releaseMutation?.();
+      this.agent.runChangeTracker?.clearPending?.(pendingIdentity, runId);
+    }
   }
 
   getToolOutputLimit(name) {
@@ -127,15 +243,16 @@ class ToolExecutor {
         : maxContent;
       if (typeof limited.content === "string") {
         if (limited.content.length > readMaxChars) {
-          limited.content = this.agent.truncate(limited.content, readMaxChars);
+          const prefix = limited.content.slice(0, readMaxChars);
+          const lastNewline = prefix.lastIndexOf("\n");
+          limited.content = lastNewline > 0 ? prefix.slice(0, lastNewline) : prefix;
           limited.truncated = true;
           limited.hasMore = true;
-          limited.nextStartLine = Number.isInteger(limited.endLine)
-            ? Math.min(
-                limited.endLine + 1,
-                Math.max(1, limited.totalLines || limited.endLine + 1),
-              )
-            : null;
+          const visibleLines = Math.max(1, (limited.content.match(/\n/g) || []).length);
+          limited.contentEndLine =
+            (limited.contentStartLine || limited.startLine || 1) + visibleLines - 1;
+          limited.endLine = limited.contentEndLine;
+          limited.nextStartLine = limited.contentEndLine + 1;
         } else if (Number.isInteger(limited.totalLines)) {
           limited.hasMore = Number.isInteger(limited.endLine)
             ? limited.endLine < limited.totalLines
@@ -322,17 +439,53 @@ class ToolExecutor {
     );
   }
 
-  attachMeta(name, result) {
-    return { ...result, meta: this.getToolResultMeta(name, result) };
+  normalizeAgentError(error, fallbackCode = "TOOL_FAILED") {
+    const source = error && typeof error === "object" ? error : {};
+    const code = String(source.code || fallbackCode);
+    const categoryByCode = {
+      STALE_REVISION: "concurrency",
+      REVISION_REQUIRED: "concurrency",
+      OLD_TEXT_NOT_FOUND: "validation",
+      AMBIGUOUS_MATCH: "validation",
+      INVALID_ARGUMENT: "argument",
+      UNKNOWN_TOOL: "capability",
+      TOOL_DISABLED: "capability",
+      TOOL_CALL_ID_CONFLICT: "protocol",
+      RUN_ABORTED: "lifecycle",
+      USER_ABORTED: "lifecycle",
+      WORKSPACE_CHANGED: "lifecycle",
+      CONTEXT_LENGTH_EXCEEDED: "context",
+    };
+    const retryByCode = {
+      STALE_REVISION: "reread",
+      OLD_TEXT_NOT_FOUND: "reread",
+      AMBIGUOUS_MATCH: "replan",
+      TOOL_CALL_ID_CONFLICT: "replan",
+      CONTEXT_LENGTH_EXCEEDED: "compact",
+      RUN_ABORTED: "abort",
+      USER_ABORTED: "abort",
+      WORKSPACE_CHANGED: "abort",
+    };
+    return {
+      ...source,
+      code,
+      message: String(source.message || (typeof error === "string" ? error : "Échec de l'outil.")).slice(0, 2000),
+      category: source.category || categoryByCode[code] || "filesystem",
+      recoverable: source.recoverable ?? !["RUN_ABORTED", "USER_ABORTED", "WORKSPACE_CHANGED", "INTERNAL_ERROR"].includes(code),
+      retryStrategy: source.retryStrategy || retryByCode[code] || "replan",
+    };
   }
 
-  async executeToolCall(call, executionContext = {}) {
+  attachMeta(name, result) {
+    const normalized = result?.success === false
+      ? { ...result, error: this.normalizeAgentError(result.error) }
+      : result;
+    return { ...normalized, meta: this.getToolResultMeta(name, normalized) };
+  }
+
+  async executeToolCallInternal(call, executionContext = {}) {
     const name = call?.function?.name;
     const toolCallId = typeof call?.id === "string" ? call.id : "";
-
-    if (toolCallId && this.agent.executedToolCalls.has(toolCallId)) {
-      return this.agent.executedToolCalls.get(toolCallId);
-    }
 
     const tool = this.agent.getTool(name);
     if (!tool) {
@@ -478,7 +631,7 @@ class ToolExecutor {
       toolCallId: toolCallId || null,
     };
 
-    this.agent.callbacks.onToolStart?.(name, normalizedArgs, callbackContext);
+    this.agent.safeInvokeCallback("onToolStart", [name, normalizedArgs, callbackContext]);
 
     try {
       const rawResult = await tool.execute(normalizedArgs, {
@@ -489,10 +642,13 @@ class ToolExecutor {
       if (rawResult?.success !== false) {
         this.agent.fileKnowledge.observeWrite(name, normalizedArgs, rawResult);
       }
-      const result = this.limitResult(
+      let result = this.limitResult(
         name,
         this.agent.normalizeToolResultForHistory(rawResult),
       );
+      if (result?.success === false) {
+        result = { ...result, error: this.normalizeAgentError(result.error) };
+      }
       const meta = this.getToolResultMeta(name, result);
       const toolResult =
         result && result.success === false
@@ -506,14 +662,10 @@ class ToolExecutor {
         activeTabId: this.agent.editor?.tabManager?.activeFile?.id || null,
       });
 
-      this.agent.callbacks.onToolEnd?.(
-        name,
-        toolResult,
-        callbackContext,
-        callbackResult,
-      );
+      this.agent.safeInvokeCallback("onToolEnd", [
+        name, toolResult, callbackContext, callbackResult,
+      ]);
 
-      if (toolCallId) this.agent.executedToolCalls.set(toolCallId, toolResult);
       return toolResult;
     } catch (error) {
       const result = this.attachMeta(name, {
@@ -529,8 +681,7 @@ class ToolExecutor {
         activePath: this.agent.editor?.tabManager?.activeFile?.path || null,
         activeTabId: this.agent.editor?.tabManager?.activeFile?.id || null,
       });
-      this.agent.callbacks.onToolEnd?.(name, result, callbackContext);
-      if (toolCallId) this.agent.executedToolCalls.set(toolCallId, result);
+      this.agent.safeInvokeCallback("onToolEnd", [name, result, callbackContext]);
       return result;
     }
   }

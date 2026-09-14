@@ -169,6 +169,8 @@ class WorkspaceFileManager {
       this.agent.fileSnapshots.set(snapshotKey, previous);
     }
 
+    const createGuard = this.agent.getMutationGuardError();
+    if (createGuard) return { success: false, error: createGuard };
     const operation = await this.agent.api?.createFile?.(
       target.parentPath,
       target.fileName,
@@ -188,19 +190,66 @@ class WorkspaceFileManager {
       };
     }
 
+    const uiWarnings = [];
     if (openFile && overwrite) {
-      openFile.isLoaded = false;
-      await this.agent.editor?.tabManager?.reloadFileFromDisk?.(
-        target.absolutePath,
-      );
+      try {
+        openFile.isLoaded = false;
+        await this.agent.editor?.tabManager?.reloadFileFromDisk?.(
+          target.absolutePath,
+        );
+      } catch {
+        uiWarnings.push("tab_reload_failed");
+      }
     }
-    await this.agent.refreshWorkspaceFolders([target.parentPath]);
-    const verifiedContent = (
-      await this.agent.api?.getFileContent?.([target.absolutePath])
-    )?.[target.absolutePath];
+    try {
+      await this.agent.refreshWorkspaceFolders([target.parentPath]);
+    } catch {
+      uiWarnings.push("explorer_refresh_failed");
+    }
+    let verifiedContent;
+    try {
+      verifiedContent = (
+        await this.agent.api?.getFileContent?.([target.absolutePath])
+      )?.[target.absolutePath];
+    } catch {
+      verifiedContent = undefined;
+    }
     if (typeof verifiedContent !== "string" || verifiedContent !== content) {
+      let existsAfterCreate = null;
+      try {
+        const observed = await this.agent.api?.pathExists?.(target.absolutePath);
+        if (typeof observed === "boolean") existsAfterCreate = observed;
+      } catch {}
+      if (existsAfterCreate !== false) {
+        this.agent.runChangeTracker?.addChange?.({
+          path: target.relativePath,
+          status: exists ? "modified" : "created",
+          beforeContent: snapshotKey
+            ? this.agent.fileSnapshots.get(snapshotKey) ?? null
+            : null,
+          afterContent: null,
+          created: !exists,
+          modified: exists,
+        });
+        return {
+          success: true,
+          operation: "create",
+          path: target.relativePath,
+          absolutePath: target.absolutePath,
+          created: !exists,
+          overwritten: Boolean(exists && overwrite),
+          mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+          verification: {
+            verified: false,
+            exists: existsAfterCreate,
+            reason: "content_unavailable_or_mismatch",
+          },
+          uiWarnings,
+        };
+      }
       return {
         success: false,
+        mutationOutcome: "NOT_APPLIED",
         error: {
           code: "CREATE_VERIFICATION_FAILED",
           message:
@@ -231,15 +280,19 @@ class WorkspaceFileManager {
       !exists &&
       typeof this.agent.editor?.tabManager?.openFileWithPath === "function"
     ) {
-      await this.agent.editor.tabManager.openFileWithPath(target.absolutePath);
-      openedInTabManager = true;
-      const createdFile = this.agent.editor.tabManager.getFileByPath?.(
-        target.absolutePath,
-      );
-      if (createdFile) {
-        this.agent.markFileDiffHighlights("", verifiedContent, createdFile);
-        this.agent.editor?.lineController?.markDirtyAll?.();
-        this.agent.editor?.lineController?.refresh?.(true);
+      try {
+        await this.agent.editor.tabManager.openFileWithPath(target.absolutePath);
+        openedInTabManager = true;
+        const createdFile = this.agent.editor.tabManager.getFileByPath?.(
+          target.absolutePath,
+        );
+        if (createdFile) {
+          this.agent.markFileDiffHighlights("", verifiedContent, createdFile);
+          this.agent.editor?.lineController?.markDirtyAll?.();
+          this.agent.editor?.lineController?.refresh?.(true);
+        }
+      } catch {
+        uiWarnings.push("tab_open_failed");
       }
     }
     return {
@@ -252,6 +305,8 @@ class WorkspaceFileManager {
       lineCount:
         verifiedContent === "" ? 0 : verifiedContent.split(/\r?\n/).length,
       openedInTabManager,
+      mutationOutcome: "APPLIED_AND_VERIFIED",
+      uiWarnings,
       snapshotKey,
       revision: verificationContext.revision,
       verification: {
@@ -348,6 +403,8 @@ class WorkspaceFileManager {
     }
 
     const updatedContent = `${currentContent}${content}`;
+    const chunkGuard = this.agent.getMutationGuardError();
+    if (chunkGuard) return { success: false, error: chunkGuard };
     const savedPath = await this.agent.api?.saveFile?.(
       target.absolutePath,
       updatedContent,
@@ -362,40 +419,52 @@ class WorkspaceFileManager {
         },
       };
     }
-    const verifiedContent = (
-      await this.agent.api?.getFileContent?.([target.absolutePath])
-    )?.[target.absolutePath];
+    let verifiedContent;
+    try {
+      verifiedContent = (
+        await this.agent.api?.getFileContent?.([target.absolutePath])
+      )?.[target.absolutePath];
+    } catch {
+      verifiedContent = undefined;
+    }
     if (
       typeof verifiedContent !== "string" ||
       verifiedContent !== updatedContent
     ) {
       return {
         success: false,
+        mutationOutcome: "APPLIED_BUT_UNCERTAIN",
         error: {
           code: "APPEND_VERIFICATION_FAILED",
           message:
             "Le contenu du fichier ne correspond pas au résultat attendu après l'ajout.",
           path: target.relativePath,
+          actualRevision:
+            typeof verifiedContent === "string"
+              ? this.agent.getContentRevision(verifiedContent)
+              : null,
         },
       };
     }
 
     if (openFile) {
-      openFile.isLoaded = false;
-      await this.agent.editor?.tabManager?.reloadFileFromDisk?.(
-        target.absolutePath,
-      );
-      const refreshedFile = this.agent.editor?.tabManager?.getFileByPath?.(
-        target.absolutePath,
-      );
-      if (refreshedFile) {
-        this.agent.markFileDiffHighlights(
-          currentContent,
-          verifiedContent,
-          refreshedFile,
+      try {
+        openFile.isLoaded = false;
+        await this.agent.editor?.tabManager?.reloadFileFromDisk?.(
+          target.absolutePath,
         );
-        this.agent.editor?.lineController?.refresh?.(true);
-      }
+        const refreshedFile = this.agent.editor?.tabManager?.getFileByPath?.(
+          target.absolutePath,
+        );
+        if (refreshedFile) {
+          this.agent.markFileDiffHighlights(
+            currentContent,
+            verifiedContent,
+            refreshedFile,
+          );
+          this.agent.editor?.lineController?.refresh?.(true);
+        }
+      } catch {}
     }
     const totalLines = verifiedContent.split(/\r?\n/).length;
     const appendedLines = content.split(/\r?\n/).length;
@@ -415,7 +484,7 @@ class WorkspaceFileManager {
       totalLines,
       "post-chunk-verification",
     );
-    return {
+    const result = {
       success: true,
       operation: "append",
       path: target.relativePath,
@@ -426,11 +495,16 @@ class WorkspaceFileManager {
       deletions,
       previousRevision: currentRevision,
       revision: verificationContext.revision,
+      beforeText: currentContent,
+      afterText: verifiedContent,
+      mutationOutcome: "APPLIED_AND_VERIFIED",
       verification: {
         verified: true,
         revision: verificationContext.revision,
       },
     };
+    this.agent.runChangeTracker?.recordModify?.(result);
+    return result;
   }
 
   async renameWorkspaceFile(args = {}) {
@@ -481,6 +555,8 @@ class WorkspaceFileManager {
       };
     }
 
+    const renameGuard = this.agent.getMutationGuardError();
+    if (renameGuard) return { success: false, error: renameGuard };
     const operation = await this.agent.api?.renameEntry?.(
       source.absolutePath,
       destination.absolutePath,
@@ -498,10 +574,15 @@ class WorkspaceFileManager {
     }
 
     const tabManager = this.agent.editor?.tabManager;
-    await tabManager?.updateFilePath?.(
-      source.absolutePath,
-      destination.absolutePath,
-    );
+    const uiWarnings = [];
+    try {
+      await tabManager?.updateFilePath?.(
+        source.absolutePath,
+        destination.absolutePath,
+      );
+    } catch {
+      uiWarnings.push("tab_path_update_failed");
+    }
     const explorer = this.agent.editor?.fileExplorer;
     if (
       AgentPath.samePath(explorer?.activeFilePath || "", source.absolutePath)
@@ -515,19 +596,44 @@ class WorkspaceFileManager {
       );
       this.agent.readFileContexts.delete(source.absolutePath);
     }
-    await this.agent.refreshWorkspaceFolders([
-      source.parentPath,
-      destination.parentPath,
-    ]);
-    const sourceStillExists = await this.agent.api?.pathExists?.(
-      source.absolutePath,
-    );
-    const destinationExists = await this.agent.api?.pathExists?.(
-      destination.absolutePath,
-    );
+    try {
+      await this.agent.refreshWorkspaceFolders([
+        source.parentPath,
+        destination.parentPath,
+      ]);
+    } catch {
+      uiWarnings.push("explorer_refresh_failed");
+    }
+    let sourceStillExists = null;
+    let destinationExists = null;
+    try {
+      sourceStillExists = await this.agent.api?.pathExists?.(source.absolutePath);
+      destinationExists = await this.agent.api?.pathExists?.(destination.absolutePath);
+    } catch {}
+    if (sourceStillExists === null || destinationExists === null) {
+      this.agent.runChangeTracker?.recordRename?.({
+        success: true,
+        oldPath: source.relativePath,
+        newPath: destination.relativePath,
+        verification: { verified: false },
+      });
+      return {
+        success: true,
+        operation: "rename",
+        oldPath: source.relativePath,
+        newPath: destination.relativePath,
+        mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+        verification: { verified: false, sourceStillExists, destinationExists },
+        uiWarnings,
+      };
+    }
     if (sourceStillExists || !destinationExists) {
       return {
         success: false,
+        mutationOutcome:
+          !sourceStillExists || destinationExists
+            ? "APPLIED_BUT_UNCERTAIN"
+            : "NOT_APPLIED",
         error: {
           code: "RENAME_VERIFICATION_FAILED",
           message: "Le renommage n'a pas pu être vérifié dans le workspace.",
@@ -560,6 +666,8 @@ class WorkspaceFileManager {
       newPath: destination.relativePath,
       verification,
       renamed: true,
+      mutationOutcome: "APPLIED_AND_VERIFIED",
+      uiWarnings,
     });
     return {
       success: true,
@@ -569,6 +677,8 @@ class WorkspaceFileManager {
       oldAbsolutePath: source.absolutePath,
       newAbsolutePath: destination.absolutePath,
       renamed: true,
+      mutationOutcome: "APPLIED_AND_VERIFIED",
+      uiWarnings,
       verification,
     };
   }
@@ -613,6 +723,17 @@ class WorkspaceFileManager {
       };
     }
 
+    const beforeContent = openFile?.lines
+      ? openFile.lines.map((line) => line.getText()).join("\n")
+      : (await this.agent.api?.getFileContent?.([target.absolutePath]))?.[
+          target.absolutePath
+        ] ?? null;
+    const beforeRevision =
+      typeof beforeContent === "string"
+        ? this.agent.getContentRevision(beforeContent)
+        : null;
+    const deleteGuard = this.agent.getMutationGuardError();
+    if (deleteGuard) return { success: false, error: deleteGuard };
     const operation = await this.agent.api?.deleteEntry?.(target.absolutePath);
     if (!operation?.success) {
       return {
@@ -626,9 +747,15 @@ class WorkspaceFileManager {
       };
     }
 
-    if (await this.agent.api?.pathExists?.(target.absolutePath)) {
+    let existsAfterDelete = null;
+    try {
+      const observed = await this.agent.api?.pathExists?.(target.absolutePath);
+      if (typeof observed === "boolean") existsAfterDelete = observed;
+    } catch {}
+    if (existsAfterDelete === true) {
       return {
         success: false,
+        mutationOutcome: "NOT_APPLIED",
         error: {
           code: "DELETE_VERIFICATION_FAILED",
           message: "La disparition du fichier n'a pas pu être vérifiée.",
@@ -637,17 +764,29 @@ class WorkspaceFileManager {
       };
     }
 
-    const beforeContent =
-      (await this.agent.api?.getFileContent?.([target.absolutePath]))?.[
-        target.absolutePath
-      ] ?? null;
+    const uiWarnings = [];
     if (openFile) {
-      const closed = await tabManager?.closeFile?.(openFile.id);
-      if (!closed) tabManager?.markFileAsDeleted?.(target.absolutePath);
+      try {
+        const closed = await tabManager?.closeFile?.(openFile.id);
+        if (!closed) tabManager?.markFileAsDeleted?.(target.absolutePath);
+      } catch (error) {
+        uiWarnings.push("tab_close_failed");
+        console.warn("[NCE Agent delete] tab synchronization failed", {
+          message: String(error?.message || error).slice(0, 240),
+        });
+      }
     }
     this.agent.readFileContexts.delete(target.absolutePath);
-    this.agent.editor?.quickOpen?.invalidate?.(target.root);
-    await this.agent.refreshWorkspaceFolders([target.parentPath]);
+    try {
+      this.agent.editor?.quickOpen?.invalidate?.(target.root);
+    } catch {
+      uiWarnings.push("quick_open_invalidation_failed");
+    }
+    try {
+      await this.agent.refreshWorkspaceFolders([target.parentPath]);
+    } catch {
+      uiWarnings.push("explorer_refresh_failed");
+    }
 
     this.agent.runChangeTracker?.recordDelete?.(
       { success: true, path: target.relativePath },
@@ -659,6 +798,18 @@ class WorkspaceFileManager {
       path: target.relativePath,
       absolutePath: target.absolutePath,
       deleted: true,
+      beforeContent,
+      beforeRevision,
+      mutationOutcome:
+        existsAfterDelete === false
+          ? "APPLIED_AND_VERIFIED"
+          : "APPLIED_BUT_UNCERTAIN",
+      verification: {
+        verified: existsAfterDelete === false,
+        kind: "absence",
+        exists: existsAfterDelete,
+      },
+      uiWarnings,
     };
   }
 
@@ -909,19 +1060,42 @@ class WorkspaceFileManager {
         }
         openFile.setIsSaved(false);
         if (persistToDisk && typeof this.agent.api?.saveFile === "function") {
+          const saveGuard = this.agent.getMutationGuardError();
+          if (saveGuard) {
+            const applied = {
+              ...result,
+              success: true,
+              revision: this.agent.getContentRevision(normalizedUpdatedText),
+              mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+              persistence: { saved: false, error: saveGuard },
+              verification: this.agent.buildModificationVerification(
+                absolutePath, normalizedUpdatedText, 0, replacementText,
+              ),
+            };
+            this.agent.runChangeTracker?.recordModify?.(applied);
+            return applied;
+          }
           const savedPath = await this.agent.api.saveFile(
             absolutePath,
             updatedText,
           );
           if (!AgentPath.samePath(savedPath || "", absolutePath)) {
-            return {
-              success: false,
-              error: {
+            const applied = {
+              ...result,
+              success: true,
+              revision: this.agent.getContentRevision(normalizedUpdatedText),
+              mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+              persistence: { saved: false, error: {
                 code: "SAVE_FAILED",
                 message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
                 path: relativePath,
-              },
+              } },
+              verification: this.agent.buildModificationVerification(
+                absolutePath, normalizedUpdatedText, 0, replacementText,
+              ),
             };
+            this.agent.runChangeTracker?.recordModify?.(applied);
+            return applied;
           }
         }
       }
@@ -932,6 +1106,8 @@ class WorkspaceFileManager {
         0,
         replacementText,
       );
+      result.mutationOutcome = "APPLIED_AND_VERIFIED";
+      result.persistence = { saved: persistToDisk };
       this.agent.runChangeTracker?.recordModify?.(result);
       this.agent.executedModificationRequests.set(requestKey, result);
       return result;
@@ -1047,19 +1223,48 @@ class WorkspaceFileManager {
       }
       openFile.setIsSaved(false);
       if (persistToDisk && typeof this.agent.api?.saveFile === "function") {
+        const saveGuard = this.agent.getMutationGuardError();
+        if (saveGuard) {
+          const applied = {
+            ...result,
+            success: true,
+            revision: this.agent.getContentRevision(normalizedUpdatedText),
+            mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+            persistence: { saved: false, error: saveGuard },
+            verification: this.agent.buildModificationVerification(
+              absolutePath,
+              normalizedUpdatedText,
+              editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
+              replacementText.replace(/\r\n?/g, "\n"),
+            ),
+          };
+          this.agent.runChangeTracker?.recordModify?.(applied);
+          return applied;
+        }
         const savedPath = await this.agent.api.saveFile(
           absolutePath,
           updatedText,
         );
         if (!AgentPath.samePath(savedPath || "", absolutePath)) {
-          return {
-            success: false,
-            error: {
+          const applied = {
+            ...result,
+            success: true,
+            revision: this.agent.getContentRevision(normalizedUpdatedText),
+            mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+            persistence: { saved: false, error: {
               code: "SAVE_FAILED",
               message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
               path: relativePath,
-            },
+            } },
+            verification: this.agent.buildModificationVerification(
+              absolutePath,
+              normalizedUpdatedText,
+              editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
+              replacementText.replace(/\r\n?/g, "\n"),
+            ),
           };
+          this.agent.runChangeTracker?.recordModify?.(applied);
+          return applied;
         }
       }
     }
@@ -1070,6 +1275,8 @@ class WorkspaceFileManager {
       editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
       replacementText.replace(/\r\n?/g, "\n"),
     );
+    result.mutationOutcome = "APPLIED_AND_VERIFIED";
+    result.persistence = { saved: persistToDisk };
     this.agent.runChangeTracker?.recordModify?.(result);
     this.agent.executedModificationRequests.set(requestKey, result);
     return result;
@@ -1159,14 +1366,24 @@ class WorkspaceFileManager {
         success: true,
         readDecision: "NEW",
         path: filePath,
+        requestedStartLine: requestedRange.startLine,
+        requestedEndLine: requestedRange.endLine,
         startLine,
-        endLine,
+        endLine: readContext.knowledgeEndLine ?? startLine,
+        contentStartLine: startLine,
         totalLines,
         revision: readContext.revision,
         contentEndLine: readContext.knowledgeEndLine,
         informationSource:
           typeof openFileContent === "string" ? "editor" : "filesystem",
-        truncated: endLine < totalLines || readContext.truncated,
+        truncated:
+          readContext.truncated ||
+          (readContext.knowledgeEndLine ?? startLine) < totalLines,
+        hasMore: (readContext.knowledgeEndLine ?? startLine) < totalLines,
+        nextStartLine:
+          (readContext.knowledgeEndLine ?? startLine) < totalLines
+            ? (readContext.knowledgeEndLine ?? startLine) + 1
+            : null,
         content: readContext.content,
       };
     }
