@@ -10,7 +10,7 @@ class EmptyMenu {
   }
 
   onDoubleClick(event) {
-    if (this.editor.tabManager.activeFile) return;
+    if (this.editor.tabManager.activeTab) return;
     if (event.target?.closest?.("button")) return;
 
     this.editor.tabManager.createEmptyFile();

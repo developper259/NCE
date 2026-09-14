@@ -1051,7 +1051,7 @@ class WorkspaceFileManager {
           absolutePath,
           updatedText,
         );
-        if (savedPath !== absolutePath) {
+        if (!AgentPath.samePath(savedPath || "", absolutePath)) {
           return {
             success: false,
             error: {

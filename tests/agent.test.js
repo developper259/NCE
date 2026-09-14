@@ -316,7 +316,8 @@ test("delete_file rejects escaped symlinks and dirty tabs, then closes a clean o
     await fs.writeFile(openPath, "disk");
     const openFile = { id: 7, path: openPath, isSaved: false };
     editor.tabManager.activeFile = openFile;
-    editor.tabManager.getFileByPath = (p) => (p === openPath ? openFile : null);
+    editor.tabManager.getFileByPath = (candidate) =>
+      agent.samePath(candidate, openPath) ? openFile : null;
     let closeCalls = 0;
     editor.tabManager.closeFile = async (id) => {
       closeCalls++;
@@ -331,7 +332,8 @@ test("delete_file rejects escaped symlinks and dirty tabs, then closes a clean o
     assert.equal(closeCalls, 0);
 
     openFile.isSaved = true;
-    editor.tabManager.getFileByPath = (p) => (p === openPath ? openFile : null);
+    editor.tabManager.getFileByPath = (candidate) =>
+      agent.samePath(candidate, openPath) ? openFile : null;
     const clean = await agent.deleteWorkspaceFile({ path: "open.txt" });
     assert.equal(clean.success, true, JSON.stringify(clean));
     assert.equal(closeCalls, 1);
@@ -731,12 +733,58 @@ test("modify_file uses explicit revisions for immediate and repeated edits", asy
         .join("\n"),
       "one two three",
     );
-    assert.equal(
-      agent.readFileContexts.get(path.join(root, "editable.txt")).revision,
-      third.revision,
-    );
+    const expectedPath = path.join(root, "editable.txt");
+    const contextEntry = [...agent.readFileContexts.entries()].find(
+      ([candidate]) => agent.samePath(candidate, expectedPath),
+    )?.[1];
+    assert.ok(contextEntry);
+    assert.equal(contextEntry.revision, third.revision);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("modify_file autosave accepts equivalent path separators and rejects failed or different save paths", async () => {
+  for (const outcome of ["equivalent", "different", "failed"]) {
+    const fixture = await setupEditable("alpha beta");
+    const { root, agent } = fixture;
+    try {
+      fixture.getFile().autoSave = true;
+      let saveCalls = 0;
+      agent.api.saveFile = async (candidate, content) => {
+        saveCalls++;
+        assert.equal(
+          agent.samePath(candidate, path.join(root, "editable.txt")),
+          true,
+        );
+        assert.equal(content, "one beta");
+        if (outcome === "failed") return undefined;
+        if (outcome === "different") return path.join(root, "different.txt");
+        await fs.writeFile(candidate, content);
+        return candidate.replace(/\//g, "\\");
+      };
+      const read = await agent.readFile("editable.txt");
+      const result = await agent.modifyFile({
+        path: "editable.txt",
+        revision: read.revision,
+        oldText: "alpha",
+        newText: "one",
+      });
+      assert.equal(saveCalls, 1);
+      if (outcome === "equivalent") {
+        assert.equal(result.success, true, JSON.stringify(result));
+        assert.equal(result.previousRevision, read.revision);
+        assert.equal(
+          await fs.readFile(path.join(root, "editable.txt"), "utf8"),
+          "one beta",
+        );
+      } else {
+        assert.equal(result.success, false);
+        assert.equal(result.error.code, "SAVE_FAILED");
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   }
 });
 
