@@ -681,8 +681,10 @@ class AgentRunner {
     let missingWriteRetries = 0;
     let finalSummaryRequested = false;
     let incompleteContinuations = 0;
-    let toolArgumentRecoveryRequests = 0;
-    const maxToolArgumentRecoveryAttempts = 2;
+    let consecutiveToolArgumentRecoveries = 0;
+    let globalToolArgumentRecoveries = 0;
+    const maxConsecutiveToolArgumentRecoveries = 2;
+    const maxGlobalToolArgumentRecoveries = 10;
     let modelTurn = 0;
     let toolIterations = 0;
     let validationPending = false;
@@ -769,12 +771,17 @@ class AgentRunner {
               "TOOL_ARGUMENTS_TRUNCATED",
               "TOOL_CALL_FINALIZATION_FAILED",
             ].includes(error?.code)) {
-              if (toolArgumentRecoveryRequests >= maxToolArgumentRecoveryAttempts) {
+              if (
+                consecutiveToolArgumentRecoveries >=
+                  maxConsecutiveToolArgumentRecoveries ||
+                globalToolArgumentRecoveries >= maxGlobalToolArgumentRecoveries
+              ) {
                 this.agent.agentProgress.metrics.toolArgumentRecoveryFailures++;
                 error.retryable = false;
                 throw error;
               }
-              toolArgumentRecoveryRequests++;
+              consecutiveToolArgumentRecoveries++;
+              globalToolArgumentRecoveries++;
               this.agent.agentProgress.metrics.toolArgumentRecoveryRequests++;
               this.agent.messages.push({
                 role: "system",
@@ -834,6 +841,7 @@ class AgentRunner {
           });
           continue;
         }
+        consecutiveToolArgumentRecoveries = 0;
         finalResponse = parsed.text || "";
         finalReasoning = parsed.reasoning || finalReasoning;
         if (largeWrite.active) {

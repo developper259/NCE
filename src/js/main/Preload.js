@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld("api", {
   agentFileOperation: (root, operation, args) => ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
   quit: () => ipcRenderer.invoke("App:quit"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
+  readClipboardText: () => ipcRenderer.invoke("Clipboard:readText"),
   setMenuShortcutsIgnored: (ignored) =>
     ipcRenderer.invoke("App:setIgnoreMenuShortcuts", ignored === true),
   setActiveFileContext: (hasActiveFile) =>

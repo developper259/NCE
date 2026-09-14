@@ -268,6 +268,10 @@ class WorkspaceFileManager {
     this.agent.runChangeTracker?.recordCreate?.({
       success: true,
       path: target.relativePath,
+      overwritten: Boolean(exists && overwrite),
+      beforeText: snapshotKey
+        ? this.agent.fileSnapshots.get(snapshotKey) ?? null
+        : null,
       content: verifiedContent,
       revision: verificationContext.revision,
       verification: {
@@ -347,6 +351,7 @@ class WorkspaceFileManager {
         },
       };
     }
+    const uncertainKey = `append:${target.relativePath}:${expectedRevision}:${this.agent.getContentRevision(content)}`;
     if (content.length > this.agent.largeFileWriting.maxChunkCharacters) {
       return {
         success: false,
@@ -374,9 +379,51 @@ class WorkspaceFileManager {
         },
       };
     }
-    const currentContent = (
-      await this.agent.api?.getFileContent?.([target.absolutePath])
-    )?.[target.absolutePath];
+    let currentContent;
+    try {
+      currentContent = (
+        await this.agent.api?.getFileContent?.([target.absolutePath])
+      )?.[target.absolutePath];
+    } catch {
+      currentContent = undefined;
+    }
+    const uncertain = this.agent.uncertainMutations?.get(uncertainKey);
+    if (uncertain) {
+      if (currentContent === uncertain.expectedAfterContent) {
+        this.agent.uncertainMutations.delete(uncertainKey);
+        const revision = this.agent.getContentRevision(currentContent);
+        const reconciled = {
+          success: true,
+          operation: "append",
+          path: target.relativePath,
+          appendedChars: content.length,
+          totalChars: currentContent.length,
+          previousRevision: uncertain.beforeRevision,
+          revision,
+          beforeText: uncertain.beforeContent,
+          afterText: currentContent,
+          mutationOutcome: "APPLIED_AND_VERIFIED",
+          reconciled: true,
+          safeToRetry: false,
+          verification: { verified: true, revision },
+        };
+        this.agent.runChangeTracker?.recordModify?.(reconciled);
+        return reconciled;
+      }
+      if (currentContent !== uncertain.beforeContent) {
+        return {
+          success: false,
+          mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+          safeToRetry: false,
+          error: {
+            code: typeof currentContent === "string" ? "EXTERNAL_CHANGE" : "APPEND_STATE_UNCERTAIN",
+            message: "Le chunk précédent ne peut pas être réappliqué sans risque de duplication.",
+            path: target.relativePath,
+          },
+        };
+      }
+      this.agent.uncertainMutations.delete(uncertainKey);
+    }
     if (typeof currentContent !== "string") {
       return {
         success: false,
@@ -431,9 +478,19 @@ class WorkspaceFileManager {
       typeof verifiedContent !== "string" ||
       verifiedContent !== updatedContent
     ) {
+      this.agent.uncertainMutations?.set(uncertainKey, {
+        operation: "append",
+        path: target.relativePath,
+        beforeContent: currentContent,
+        expectedAfterContent: updatedContent,
+        beforeRevision: currentRevision,
+        expectedRevisionAfter: this.agent.getContentRevision(updatedContent),
+        chunkContent: content,
+      });
       return {
         success: false,
         mutationOutcome: "APPLIED_BUT_UNCERTAIN",
+        safeToRetry: false,
         error: {
           code: "APPEND_VERIFICATION_FAILED",
           message:
@@ -1315,6 +1372,7 @@ class WorkspaceFileManager {
       requestedRange.endLine,
       {
         toolName: "read_file",
+        forceRead: Number.isInteger(options.startColumn),
         currentRevision:
           typeof openFileContent === "string"
             ? this.agent.getContentRevision(openFileContent)
@@ -1338,10 +1396,57 @@ class WorkspaceFileManager {
         ? openFileContent
         : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
     if (typeof content === "string") {
-      const totalLines = content.split(/\r?\n/).length;
+      const contentLines = content.split(/\r?\n/);
+      const totalLines = contentLines.length;
       const effectiveReadRange = readDecision.range || requestedRange;
       const startLine = effectiveReadRange.startLine;
       const endLine = Math.min(effectiveReadRange.endLine, totalLines);
+      const startColumn = Number.isInteger(options.startColumn)
+        ? Math.max(0, options.startColumn)
+        : 0;
+      const selected = contentLines.slice(startLine - 1, endLine).join("\n");
+      if (startColumn > selected.length) {
+        return {
+          success: false,
+          error: { code: "INVALID_RANGE", message: "startColumn dépasse la ligne demandée." },
+        };
+      }
+      const remaining = selected.slice(startColumn);
+      if (
+        startColumn > 0 ||
+        contentLines[startLine - 1].length - startColumn > 4000
+      ) {
+        const visible = remaining.slice(0, 4000);
+        const truncated = visible.length < remaining.length;
+        const newlineCount = (visible.match(/\n/g) || []).length;
+        const lastNewline = visible.lastIndexOf("\n");
+        const endColumn = lastNewline === -1
+          ? startColumn + visible.length
+          : visible.length - lastNewline - 1;
+        const contentEndLine = startLine + newlineCount;
+        return {
+          success: true,
+          readDecision: "NEW",
+          path: filePath,
+          requestedStartLine: requestedRange.startLine,
+          requestedEndLine: requestedRange.endLine,
+          startLine,
+          endLine: contentEndLine,
+          contentStartLine: startLine,
+          contentStartColumn: startColumn,
+          contentEndLine,
+          contentEndColumn: endColumn,
+          lineTruncated: truncated && newlineCount === 0,
+          totalLines,
+          revision: this.agent.getContentRevision(content),
+          informationSource: typeof openFileContent === "string" ? "editor" : "filesystem",
+          truncated,
+          hasMore: truncated || contentEndLine < totalLines,
+          nextStartLine: truncated ? contentEndLine : (contentEndLine < totalLines ? contentEndLine + 1 : null),
+          nextStartColumn: truncated ? endColumn : null,
+          content: visible,
+        };
+      }
       const readContext = this.agent.createFileReadContext(
         absolute,
         content,

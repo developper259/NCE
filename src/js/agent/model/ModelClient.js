@@ -35,6 +35,7 @@ class ModelClient {
       modelFallbackCount: 0,
       authenticationCancelledProviders: new Set(),
       blockedProviders: new Map(),
+      previousOutputUsage: [],
     };
     return this.agent.modelRequestState;
   }
@@ -207,6 +208,7 @@ class ModelClient {
         "RATE_LIMITED",
         "UNKNOWN_429",
         "AUTH_ERROR",
+        "CONTEXT_LENGTH_EXCEEDED",
       ].includes(category) || retryable;
 
     const userMessage =
@@ -330,8 +332,16 @@ class ModelClient {
       agent: this.agent,
       model: config,
       runtimeState: config.contextState || {},
+      previousUsage: this.agent.modelRequestState?.previousOutputUsage || [],
     });
-    const promptTokens = this.agent.estimateTokens(providerMessages);
+    const messageTokens = this.agent.estimateTokens(providerMessages);
+    const toolSchemaTokens = providerTools.length
+      ? this.agent.estimateTokens(providerTools)
+      : 0;
+    const toolChoiceTokens = payload.tool_choice
+      ? this.agent.estimateTokens(payload.tool_choice)
+      : 0;
+    const promptTokens = messageTokens + toolSchemaTokens + toolChoiceTokens;
     const safetyMargin = Math.max(
       0,
       config.responseBudget?.contextCompactionSafetyMarginTokens || 0,
@@ -349,6 +359,17 @@ class ModelClient {
       Math.min(responseBudget.effectiveMaxOutputTokens, contextAllowance),
     );
     config.effectiveMaxOutputTokens = payload.max_tokens;
+    this.agent.lastContextMetrics = {
+      ...(this.agent.lastContextMetrics || {}),
+      messageTokens,
+      toolSchemaTokens,
+      toolChoiceTokens,
+      estimatedInputTokens: promptTokens,
+      requestedOutputTokens: payload.max_tokens,
+      safetyMarginTokens: safetyMargin,
+      contextWindow: responseBudget.contextWindow,
+      hardOutputLimit: responseBudget.hardOutputLimit,
+    };
 
     this.agent.agentProgress?.recordModelAttempt?.();
 
@@ -360,18 +381,18 @@ class ModelClient {
         provider: sanitizedProvider,
         payload,
       });
-      return this.agent.recordModelPromptUsage(
-        this.agent.unwrapModelTransportResult(result),
-      );
+      const unwrapped = this.agent.unwrapModelTransportResult(result);
+      this.recordPreviousOutputUsage(unwrapped);
+      return this.agent.recordModelPromptUsage(unwrapped);
     }
     if (typeof this.agent.api?.requestAI === "function") {
       const result = await this.agent.api.requestAI({
         provider: sanitizedProvider,
         payload,
       });
-      return this.agent.recordModelPromptUsage(
-        this.agent.unwrapModelTransportResult(result),
-      );
+      const unwrapped = this.agent.unwrapModelTransportResult(result);
+      this.recordPreviousOutputUsage(unwrapped);
+      return this.agent.recordModelPromptUsage(unwrapped);
     }
 
     const headers = { "Content-Type": "application/json" };
@@ -409,7 +430,9 @@ class ModelClient {
         throw transportError;
       }
 
-      return this.agent.recordModelPromptUsage(await response.json());
+      const result = await response.json();
+      this.recordPreviousOutputUsage(result);
+      return this.agent.recordModelPromptUsage(result);
     } catch (error) {
       if (
         error?.name === "AbortError" &&
@@ -424,6 +447,18 @@ class ModelClient {
       throw error;
     } finally {
       clearTimeout(timeout);
+    }
+  }
+
+  recordPreviousOutputUsage(result) {
+    const usage = result?.usage || result?.data?.usage || {};
+    const tokens = Number(
+      usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens,
+    );
+    const history = this.agent.modelRequestState?.previousOutputUsage;
+    if (Array.isArray(history) && Number.isFinite(tokens) && tokens >= 0) {
+      history.push(tokens);
+      if (history.length > 8) history.splice(0, history.length - 8);
     }
   }
 

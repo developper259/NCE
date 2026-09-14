@@ -28,7 +28,7 @@ class HTMLTextAreaElement extends HTMLElement {
 }
 class HTMLSelectElement extends HTMLElement {}
 
-function fixture(binding) {
+function fixture(binding, options = {}) {
   const calls = [];
   const KeyBindingManager = loadGlobal(
     "src/js/manager/KeyBindingManager.js",
@@ -43,9 +43,13 @@ function fixture(binding) {
       document: {
         hasFocus: () => true,
         querySelector: () => null,
-        execCommand: () => true,
+        execCommand: () => options.execCommandResult !== false,
       },
-      navigator: { clipboard: { readText: async () => " world" } },
+      navigator: { clipboard: { readText: async () => {
+        if (options.clipboardFailure) throw new Error("denied");
+        return " world";
+      } } },
+      window: { api: { readClipboardText: options.readClipboardText } },
       Event: class {},
       CONFIG_KEYBINDING_EVENT_KEY: () => "p",
       CONFIG_KEYBINDING_CONTAINSKEY: (key) => key === "Meta+p",
@@ -85,6 +89,30 @@ test("global shortcuts work from an input when no file is open", () => {
   assert.deepEqual(calls, ["quick_open"]);
   assert.equal(event.defaultPrevented, true);
   assert.equal(event.propagationStopped, true);
+});
+
+test("named shortcut keys retain modifiers and modifier-only keys stay sane", () => {
+  const { manager } = fixture({ action: "unused", in_editor: false });
+  assert.equal(manager.getShortcutKey("Enter", { ctrlKey: true }), "Ctrl+Enter");
+  assert.equal(manager.getShortcutKey("Tab", { shiftKey: true }), "Shift+Tab");
+  assert.equal(manager.getShortcutKey("ArrowLeft", { ctrlKey: true }), "Ctrl+ArrowLeft");
+  assert.equal(manager.getShortcutKey("Control", { ctrlKey: true }), "Control");
+});
+
+test("failed execCommand is not swallowed and clipboard IPC is the paste fallback", async () => {
+  const copy = fixture({ action: "copy", in_editor: true }, { execCommandResult: false });
+  const copyEvent = keyboardEvent(new HTMLTextAreaElement());
+  copy.manager.onKey(copyEvent);
+  assert.equal(copyEvent.defaultPrevented, false);
+
+  const paste = fixture(
+    { action: "paste", in_editor: true },
+    { clipboardFailure: true, readClipboardText: async () => " fallback" },
+  );
+  const input = new HTMLTextAreaElement();
+  paste.manager.onKey(keyboardEvent(input));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(input.value, "hello fallback");
 });
 
 test("native menu actions execute through KeyBindingManager", () => {

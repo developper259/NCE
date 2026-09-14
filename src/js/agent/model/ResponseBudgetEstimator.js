@@ -43,24 +43,24 @@ class ResponseBudgetEstimator {
         ? agent.contextWindow
         : null;
 
-    const modelOutputLimit = Number.isFinite(model.maxOutputTokens)
-      ? model.maxOutputTokens
-      : Number.isFinite(agent?.modelConfig?.maxOutputTokens)
-        ? agent.modelConfig.maxOutputTokens
-        : Number.isFinite(agent?.runConfig?.maxOutputTokens)
-          ? agent.runConfig.maxOutputTokens
-          : Number.isFinite(agent?.maxTokens)
-            ? agent.maxTokens
-            : null;
+    const outputLimits = [
+      model.maxTokens,
+      model.maxOutputTokens,
+      agent?.runConfig?.maxTokens,
+      agent?.maxTokens,
+    ].filter((value) => Number.isFinite(value) && value > 0);
+    const modelOutputLimit = outputLimits.length
+      ? Math.min(...outputLimits)
+      : null;
 
     const configured =
       agent?.responseBudget || agent?.runConfig?.responseBudget || {};
     const baseReserved = Number.isFinite(configured.reservedForResponseTokens)
       ? configured.reservedForResponseTokens
-      : 512;
+      : 4096;
     const minReserved = Number.isFinite(configured.minReservedForResponseTokens)
       ? configured.minReservedForResponseTokens
-      : 128;
+      : 2048;
     const maxReserved = Number.isFinite(configured.maxReservedForResponseTokens)
       ? configured.maxReservedForResponseTokens
       : Number.isFinite(modelOutputLimit)
@@ -82,7 +82,8 @@ class ResponseBudgetEstimator {
     const runtimeKind = String(runtimeState?.kind || "").toLowerCase();
     const largeWriteActive =
       runtimeState?.largeWriteActive === true ||
-      runtimeState?.largeWrite === true;
+      runtimeState?.largeWrite === true ||
+      runtimeState?.largeWrite?.active === true;
     const lastTool = String(runtimeState?.lastTool || "").toLowerCase();
     if (
       largeWriteActive ||
@@ -149,6 +150,7 @@ class ResponseBudgetEstimator {
       success: true,
       contextWindow: modelContextWindow,
       maxOutputTokens: modelOutputLimit,
+      hardOutputLimit: modelOutputLimit,
       effectiveMaxOutputTokens,
       estimatedResponseTokens,
       reservedForResponseTokens,

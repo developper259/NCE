@@ -177,21 +177,26 @@ class RunChangeTracker {
         : typeof result.content === "string"
           ? result.content
           : "";
+    const overwritten = result.overwritten === true;
+    const before = overwritten && typeof result.beforeText === "string"
+      ? result.beforeText
+      : null;
+    const stats = this.getDiffStats(before || "", content);
     const record = {
       path: relativePath,
       originalPath: relativePath,
       currentPath: relativePath,
-      status: "created",
-      beforeContent: null,
+      status: overwritten ? "modified" : "created",
+      beforeContent: before,
       afterContent: content,
       beforeRevision: null,
       afterRevision: result.revision || result.verification?.revision || null,
-      created: true,
-      modified: false,
+      created: !overwritten,
+      modified: overwritten,
       renamed: false,
       deleted: false,
-      additions: Math.max(0, (content.match(/\n/g) || []).length),
-      deletions: 0,
+      additions: overwritten ? stats.additions : this.countLines(content),
+      deletions: overwritten ? stats.deletions : 0,
       reviewed: false,
       review: null,
     };
@@ -220,8 +225,8 @@ class RunChangeTracker {
       modified: true,
       renamed: false,
       deleted: false,
-      additions: this.countAddedLines(before, after),
-      deletions: this.countDeletedLines(before, after),
+      additions: this.getDiffStats(before, after).additions,
+      deletions: this.getDiffStats(before, after).deletions,
     };
     return this.addChange(change);
   }
@@ -238,27 +243,26 @@ class RunChangeTracker {
     const newPath = this.normalizePath(result.newPath);
     const existing =
       this.current.changes.get(oldPath) || this.current.changes.get(newPath);
-    if (existing?.status === "created") {
+    if (existing?.created === true) {
       this.current.changes.delete(oldPath);
       existing.path = newPath;
       existing.currentPath = newPath;
-      existing.originalPath = newPath;
       existing.renamed = true;
       existing.afterRevision = result.verification?.revision || existing.afterRevision;
       this.current.changeVersion += 1;
       this.current.changes.set(newPath, existing);
       return existing;
     }
-    if (existing && existing.status === "renamed") {
-      existing.status = "renamed";
+    if (existing) {
+      existing.status = existing.created ? "created" : "renamed";
       existing.renamed = true;
-      existing.modified = Boolean(existing.modified || result.renamed);
+      existing.modified = Boolean(existing.modified);
       existing.originalPath = existing.originalPath || oldPath;
       existing.currentPath = newPath;
       existing.path = newPath;
       existing.oldPath = oldPath;
-      existing.beforeContent = existing.beforeContent ?? null;
-      existing.afterContent = existing.afterContent ?? null;
+      existing.beforeContent = existing.beforeContent ?? result.beforeText ?? null;
+      existing.afterContent = existing.afterContent ?? result.afterText ?? result.verification?.content ?? null;
       existing.beforeRevision = existing.beforeRevision ?? null;
       existing.afterRevision = existing.afterRevision ?? null;
       this.current.changes.delete(oldPath);
@@ -323,19 +327,20 @@ class RunChangeTracker {
   }
 
   countAddedLines(beforeText, afterText) {
-    if (typeof beforeText !== "string" || typeof afterText !== "string")
-      return 0;
-    const beforeLines = beforeText.split(/\r?\n/);
-    const afterLines = afterText.split(/\r?\n/);
-    return Math.max(0, afterLines.length - beforeLines.length);
+    return this.getDiffStats(beforeText, afterText).additions;
   }
 
   countDeletedLines(beforeText, afterText) {
-    if (typeof beforeText !== "string" || typeof afterText !== "string")
-      return 0;
-    const beforeLines = beforeText.split(/\r?\n/);
-    const afterLines = afterText.split(/\r?\n/);
-    return Math.max(0, beforeLines.length - afterLines.length);
+    return this.getDiffStats(beforeText, afterText).deletions;
+  }
+
+  getDiffStats(beforeText, afterText) {
+    const result = this.computeLineDiff(beforeText, afterText);
+    return {
+      additions: result.lines.filter((line) => line.startsWith("+")).length,
+      deletions: result.lines.filter((line) => line.startsWith("-")).length,
+      diffTooLarge: result.diffTooLarge,
+    };
   }
 
   markReviewChangedFiles() {
@@ -354,7 +359,7 @@ class RunChangeTracker {
       change.reviewVersion = this.current.changeVersion;
       return true;
     }
-    if (result?.truncated === true) return false;
+    if (result?.truncated === true || result?.diffTooLarge === true) return false;
     this.current.reviewedDiff = true;
     this.current.reviewedDiffVersion = this.current.changeVersion;
     return true;
@@ -408,8 +413,11 @@ class RunChangeTracker {
       ? [wanted]
       : [...this.current.changes.values()];
     const diff = [];
+    let diffTooLarge = false;
     for (const entry of changes) {
-      diff.push(this.renderDiff(entry));
+      const rendered = this.renderDiff(entry);
+      diff.push(rendered.text);
+      diffTooLarge ||= rendered.diffTooLarge === true;
     }
     const text = diff.join("\n");
     const limit = this.agent?.toolExecutor?.getToolOutputLimit?.(
@@ -427,8 +435,9 @@ class RunChangeTracker {
       hasMore: false,
       path: requestedPath || null,
       diff: text,
+      diffTooLarge,
     };
-    if (text.length > maxChars) {
+    if (text.length > maxChars || diffTooLarge) {
       patch.truncated = true;
       patch.hasMore = true;
       patch.diff = `${text.slice(0, maxChars)}\n... [truncated]`;
@@ -493,50 +502,70 @@ class RunChangeTracker {
     const oldPath = change.oldPath || change.originalPath || change.path;
     const newPath = change.path;
     if (change.status === "created") {
-      return [
+      return { text: [
         `--- /dev/null`,
         `+++ b/${newPath}`,
         `@@ -0,0 +1,${this.countLines(after)} @@`,
         ...after.split(/\r?\n/).map((line) => `+${line}`),
-      ].join("\n");
+      ].join("\n"), diffTooLarge: false };
     }
     if (change.status === "deleted") {
-      return [
+      return { text: [
         `--- a/${oldPath}`,
         `+++ /dev/null`,
         `@@ -1,${this.countLines(before)} +0,0 @@`,
         ...before.split(/\r?\n/).map((line) => `-${line}`),
-      ].join("\n");
+      ].join("\n"), diffTooLarge: false };
     }
-    if (change.status === "renamed") {
-      return [
-        `--- a/${oldPath}`,
-        `+++ b/${newPath}`,
-        `@@ -1,${Math.max(1, this.countLines(before || after || ""))} +1,${Math.max(1, this.countLines(after || before || ""))} @@`,
-      ].join("\n");
+    if (change.status === "renamed" && before === after) {
+      return {
+        text: [`--- a/${oldPath}`, `+++ b/${newPath}`].join("\n"),
+        diffTooLarge: false,
+      };
     }
-    const lines = this.unifiedDiffLines(before, after);
-    return [`--- a/${oldPath}`, `+++ b/${newPath}`, ...lines].join("\n");
+    const result = this.computeLineDiff(before, after);
+    return {
+      text: [`--- a/${oldPath}`, `+++ b/${newPath}`, ...result.lines].join("\n"),
+      diffTooLarge: result.diffTooLarge,
+    };
   }
 
   unifiedDiffLines(before, after) {
+    return this.computeLineDiff(before, after).lines;
+  }
+
+  computeLineDiff(before, after) {
     const beforeLines = String(before || "").split(/\r?\n/);
     const afterLines = String(after || "").split(/\r?\n/);
-    const cells = beforeLines.length * afterLines.length;
+    let prefix = 0;
+    while (
+      prefix < beforeLines.length &&
+      prefix < afterLines.length &&
+      beforeLines[prefix] === afterLines[prefix]
+    ) prefix += 1;
+    let suffix = 0;
+    while (
+      suffix < beforeLines.length - prefix &&
+      suffix < afterLines.length - prefix &&
+      beforeLines[beforeLines.length - 1 - suffix] ===
+        afterLines[afterLines.length - 1 - suffix]
+    ) suffix += 1;
+    const oldMiddle = beforeLines.slice(prefix, beforeLines.length - suffix);
+    const newMiddle = afterLines.slice(prefix, afterLines.length - suffix);
+    const cells = oldMiddle.length * newMiddle.length;
     if (cells > 1_000_000) {
-      return [
-        `@@ -1,${beforeLines.length} +1,${afterLines.length} @@`,
-        ...beforeLines.map((line) => `-${line}`),
-        ...afterLines.map((line) => `+${line}`),
-      ];
+      return {
+        lines: [`@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`, "... [diff too large]"],
+        diffTooLarge: true,
+      };
     }
     const table = Array.from(
-      { length: beforeLines.length + 1 },
-      () => new Uint32Array(afterLines.length + 1),
+      { length: oldMiddle.length + 1 },
+      () => new Uint32Array(newMiddle.length + 1),
     );
-    for (let i = beforeLines.length - 1; i >= 0; i -= 1) {
-      for (let j = afterLines.length - 1; j >= 0; j -= 1) {
-        table[i][j] = beforeLines[i] === afterLines[j]
+    for (let i = oldMiddle.length - 1; i >= 0; i -= 1) {
+      for (let j = newMiddle.length - 1; j >= 0; j -= 1) {
+        table[i][j] = oldMiddle[i] === newMiddle[j]
           ? table[i + 1][j + 1] + 1
           : Math.max(table[i + 1][j], table[i][j + 1]);
       }
@@ -544,29 +573,29 @@ class RunChangeTracker {
     const lines = [];
     let i = 0;
     let j = 0;
-    while (i < beforeLines.length || j < afterLines.length) {
+    while (i < oldMiddle.length || j < newMiddle.length) {
       if (
-        i < beforeLines.length &&
-        j < afterLines.length &&
-        beforeLines[i] === afterLines[j]
+        i < oldMiddle.length &&
+        j < newMiddle.length &&
+        oldMiddle[i] === newMiddle[j]
       ) {
         i += 1;
         j += 1;
       } else if (
-        j < afterLines.length &&
-        (i === beforeLines.length || table[i][j + 1] >= table[i + 1][j])
+        j < newMiddle.length &&
+        (i === oldMiddle.length || table[i][j + 1] >= table[i + 1][j])
       ) {
-        lines.push(`+${afterLines[j++]}`);
+        lines.push(`+${newMiddle[j++]}`);
       } else {
-        lines.push(`-${beforeLines[i++]}`);
+        lines.push(`-${oldMiddle[i++]}`);
       }
     }
-    return lines.length
-      ? [
-          `@@ -1,${Math.max(1, beforeLines.length)} +1,${Math.max(1, afterLines.length)} @@`,
-          ...lines,
-        ]
-      : [`@@ -1,0 +1,0 @@`];
+    return {
+      lines: lines.length
+        ? [`@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`, ...lines]
+        : [`@@ -1,0 +1,0 @@`],
+      diffTooLarge: false,
+    };
   }
 
   hasEffectiveChanges() {
@@ -644,13 +673,13 @@ class RunChangeTracker {
       const everyFileReviewed = [...this.current.changes.values()].every(
         (change) => change.reviewVersion === this.current.changeVersion,
       );
-      if (!reviewCurrentForChangedFiles && !reviewCurrentForDiff && !everyFileReviewed) {
+      if (!reviewCurrentForDiff && !everyFileReviewed) {
         return {
           success: false,
           error: {
             code: "CHANGES_NOT_REVIEWED",
             message:
-              "Revoyez get_changed_files ou get_diff avant task_complete.",
+              "Revoyez un diff complet avec get_diff avant task_complete.",
           },
         };
       }
@@ -748,6 +777,25 @@ class RunChangeTracker {
         failure.status = "resolved";
         failure.classification = classification;
         this.current.unresolvedFailures.delete(identity);
+        count += 1;
+      }
+    }
+    return count;
+  }
+
+  markFailuresRecoveryReady(path, codes = null) {
+    if (!this.current) return 0;
+    const normalizedPath = this.normalizePath(path || "");
+    const allowed = Array.isArray(codes) ? new Set(codes) : null;
+    let count = 0;
+    for (const failure of this.current.unresolvedFailures.values()) {
+      if (
+        failure.path &&
+        AgentPath.samePath(failure.path, normalizedPath) &&
+        (!allowed || allowed.has(failure.code))
+      ) {
+        failure.status = "recovery_ready";
+        failure.classification = "reread_completed";
         count += 1;
       }
     }

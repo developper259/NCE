@@ -2,6 +2,7 @@ class ToolExecutor {
   constructor(agent) {
     this.agent = agent;
     this.mutationTail = Promise.resolve();
+    this.mutationTailRunId = null;
   }
 
   stableStringify(value) {
@@ -29,8 +30,22 @@ class ToolExecutor {
   async acquireMutationLane(executionContext = {}) {
     let release;
     const previous = this.mutationTail;
+    const previousRunId = this.mutationTailRunId;
+    const requestedRunId = executionContext.runId ?? this.agent.runId;
     this.mutationTail = new Promise((resolve) => { release = resolve; });
-    await previous;
+    this.mutationTailRunId = requestedRunId;
+    if (previousRunId !== null && previousRunId !== requestedRunId) {
+      const timeoutMs = 250;
+      let timeout;
+      await Promise.race([
+        previous,
+        new Promise((resolve) => {
+          timeout = setTimeout(resolve, timeoutMs);
+        }),
+      ]).finally(() => clearTimeout(timeout));
+    } else {
+      await previous;
+    }
     if (
       this.agent.stopRequested ||
       (executionContext.runId !== undefined && executionContext.runId !== this.agent.runId)
@@ -107,9 +122,9 @@ class ToolExecutor {
       } else if (toolResult?.success !== false) {
         this.agent.runChangeTracker?.resolveFailuresForTool?.(name, path);
         if (name === "read_file") {
-          this.agent.runChangeTracker?.resolveFailuresForPath?.(path, [
+          this.agent.runChangeTracker?.markFailuresRecoveryReady?.(path, [
             "STALE_REVISION", "OLD_TEXT_NOT_FOUND", "AMBIGUOUS_MATCH",
-          ], "reread_completed");
+          ]);
         }
       }
       return toolResult;

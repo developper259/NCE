@@ -14,9 +14,9 @@ const AgentAI = {
   },
 
   responseBudget: {
-    minReservedForResponseTokens: 128,
-    maxReservedForResponseTokens: 16384,
-    reservedForResponseTokens: 512,
+    minReservedForResponseTokens: 2048,
+    maxReservedForResponseTokens: 8192,
+    reservedForResponseTokens: 4096,
     safetyFactor: 1.35,
     modelHintBias: 0,
     toolInputLimitTokens: 4096,

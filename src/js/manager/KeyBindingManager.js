@@ -74,12 +74,11 @@ class KeyBindingManager {
 
   getShortcutKey(eventKey, e) {
     let key = "";
-    if (eventKey.length == 1) {
-      if (e.ctrlKey) key += "Ctrl+";
-      if (e.metaKey) key += "Meta+";
-      if (e.shiftKey) key += "Shift+";
-      if (e.altKey) key += "Alt+";
-    }
+    if (["Control", "Meta", "Shift", "Alt"].includes(eventKey)) return eventKey;
+    if (e.ctrlKey) key += "Ctrl+";
+    if (e.metaKey) key += "Meta+";
+    if (e.shiftKey) key += "Shift+";
+    if (e.altKey) key += "Alt+";
     return key + eventKey;
   }
 
@@ -127,8 +126,7 @@ class KeyBindingManager {
     if (!element) return false;
 
     if (["copy", "cut", "undo", "redo"].includes(action)) {
-      document.execCommand(action);
-      return true;
+      return document.execCommand(action) === true;
     }
 
     if (action === "select_all") {
@@ -148,7 +146,17 @@ class KeyBindingManager {
     }
 
     if (action !== "paste") return false;
-    void navigator.clipboard.readText().then((text) => {
+    const readClipboard = async () => {
+      try {
+        return await navigator.clipboard.readText();
+      } catch (browserError) {
+        if (typeof window.api?.readClipboardText === "function") {
+          return window.api.readClipboardText();
+        }
+        throw browserError;
+      }
+    };
+    void readClipboard().then((text) => {
       if (
         element instanceof HTMLInputElement ||
         element instanceof HTMLTextAreaElement

@@ -128,6 +128,22 @@ test("workspace mutation lane serializes conflicting operations", async () => {
   assert.equal(agent.runChangeTracker.current.pendingToolCalls.size, 0);
 });
 
+test("a new run is not deadlocked by an abandoned mutation lane", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  agent.runChangeTracker.beginRun(1, "/workspace");
+  const releaseOld = await agent.toolExecutor.acquireMutationLane({ runId: 1 });
+  agent.runChangeTracker.setRunStatus("aborted", 1);
+  agent.runId = 2;
+  agent.runChangeTracker.beginRun(2, "/workspace");
+  const started = Date.now();
+  const releaseNew = await agent.toolExecutor.acquireMutationLane({ runId: 2 });
+  assert.ok(Date.now() - started < 1000);
+  assert.equal(agent.getMutationGuardError(1)?.code, "RUN_ABORTED");
+  releaseNew();
+  releaseOld();
+});
+
 test("failure identities are path-specific and reread resolves only matching concurrency failures", () => {
   const agent = createAgent(editor());
   agent.runId = 1;
@@ -190,6 +206,165 @@ test("read pagination resumes after the last model-visible line", async () => {
   });
   assert.equal(second.startLine, first.nextStartLine);
   assert.match(second.content, new RegExp(`^${String(first.nextStartLine).padStart(3, "0")}:`));
+});
+
+test("coding response budget respects the Agent hard limit without collapsing to hundreds of tokens", () => {
+  const agent = createAgent(editor());
+  agent.maxTokens = 8192;
+  agent.runConfig = { maxTokens: 8192 };
+  const budget = agent.responseBudgetEstimator.estimateResponseBudget({
+    agent,
+    model: { maxTokens: 8192, maxOutputTokens: 64000, contextWindow: 256000 },
+    runtimeState: { kind: "coding", largeWrite: { active: true } },
+  });
+  assert.equal(budget.hardOutputLimit, 8192);
+  assert.ok(budget.effectiveMaxOutputTokens >= 4096);
+  assert.ok(budget.effectiveMaxOutputTokens <= 8192);
+});
+
+test("provider accounting includes large tool schemas in the real input budget", async () => {
+  let payload;
+  const e = editor();
+  e.api.aiChat = async (request) => {
+    payload = request.payload;
+    return { choices: [{ message: { role: "assistant", content: "ok" } }] };
+  };
+  const agent = createAgent(e);
+  agent.setProvider({ id: "mock", baseURL: "https://mock.invalid" });
+  agent.setModel("mock");
+  agent.contextWindow = 12000;
+  agent.maxTokens = 4096;
+  agent.registerTool("large_schema", {
+    readOnly: true,
+    description: "x".repeat(8000),
+    parameters: { type: "object", properties: {} },
+    execute: () => ({ success: true }),
+  });
+  agent.messages = [{ role: "user", content: "hello" }];
+  await agent.requestModel(new AbortController(), agent.createRunConfig({ runId: 1 }));
+  const metrics = agent.lastContextMetrics;
+  assert.ok(metrics.toolSchemaTokens > 1000);
+  assert.equal(metrics.estimatedInputTokens, metrics.messageTokens + metrics.toolSchemaTokens + metrics.toolChoiceTokens);
+  assert.ok(metrics.estimatedInputTokens + payload.max_tokens + metrics.safetyMarginTokens <= metrics.contextWindow);
+});
+
+test("read_file paginates every character of a very long line without gaps", async () => {
+  const content = "0123456789".repeat(5000);
+  const e = editor();
+  e.api.getFileContent = async (paths) => ({ [paths[0]]: content });
+  const agent = createAgent(e);
+  let column = 0;
+  let rebuilt = "";
+  do {
+    const page = await agent.readFile("min.js", { startLine: 1, endLine: 1, startColumn: column });
+    assert.equal(page.success, true);
+    assert.equal(page.contentStartColumn, column);
+    rebuilt += page.content;
+    column = page.nextStartColumn;
+  } while (column !== null);
+  assert.equal(rebuilt, content);
+});
+
+test("change tracking composes modify, rename chains, real stats and mandatory diff review", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.recordModify({ success: true, path: "a.js", beforeText: "one\ntwo", afterText: "one\nchanged", previousRevision: "r1", revision: "r2" });
+  tracker.recordRename({ success: true, oldPath: "a.js", newPath: "b.js" });
+  tracker.recordRename({ success: true, oldPath: "b.js", newPath: "c.js" });
+  const change = tracker.current.changes.get("c.js");
+  assert.equal(change.originalPath, "a.js");
+  assert.equal(change.beforeContent, "one\ntwo");
+  assert.equal(change.afterContent, "one\nchanged");
+  assert.equal(change.additions, 1);
+  assert.equal(change.deletions, 1);
+  tracker.markReviewChangedFiles();
+  assert.equal(tracker.validateTaskComplete().error.code, "CHANGES_NOT_REVIEWED");
+  const diff = tracker.getDiff();
+  assert.match(diff.diff, /-two/);
+  assert.match(diff.diff, /\+changed/);
+  tracker.markReviewDiff(null, diff);
+  assert.equal(tracker.validateTaskComplete().success, true);
+});
+
+test("create overwrite is tracked as a modification with its original baseline", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.recordCreate({
+    success: true,
+    path: "existing.js",
+    overwritten: true,
+    beforeText: "const value = 1;",
+    content: "const value = 2;",
+    revision: "r2",
+  });
+  const change = tracker.current.changes.get("existing.js");
+  assert.equal(change.status, "modified");
+  assert.equal(change.created, false);
+  assert.equal(change.beforeContent, "const value = 1;");
+  assert.equal(change.additions, 1);
+  assert.equal(change.deletions, 1);
+  assert.match(tracker.getDiff().diff, /--- a\/existing\.js/);
+});
+
+test("reread makes a write failure recovery-ready but only a successful write resolves it", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.addUnresolvedFailure({ toolName: "modify_file", path: "a.js", error: { code: "STALE_REVISION" } });
+  tracker.markFailuresRecoveryReady("a.js", ["STALE_REVISION"]);
+  const pending = [...tracker.current.unresolvedFailures.values()][0];
+  assert.equal(pending.status, "recovery_ready");
+  assert.equal(tracker.validateTaskComplete().error.code, "UNRESOLVED_FAILURES");
+  tracker.resolveFailuresForTool("modify_file", "a.js");
+  assert.equal(tracker.current.unresolvedFailures.size, 0);
+});
+
+test("a 5000-line one-line edit produces a localized diff", () => {
+  const agent = createAgent(editor());
+  const before = Array.from({ length: 5000 }, (_, index) => `line ${index}`);
+  const after = [...before];
+  after[2499] = "changed";
+  const result = agent.runChangeTracker.computeLineDiff(before.join("\n"), after.join("\n"));
+  assert.equal(result.diffTooLarge, false);
+  assert.ok(result.lines.length < 10);
+  assert.deepEqual(Array.from(result.lines.slice(1)), ["+changed", "-line 2499"]);
+});
+
+test("an uncertain appended chunk is reconciled and never duplicated", async () => {
+  const e = editor();
+  let content = "ABC";
+  let reads = 0;
+  let saves = 0;
+  e.api.pathExists = async () => true;
+  e.api.saveFile = async (filePath, next) => {
+    saves += 1;
+    content = next;
+    return filePath;
+  };
+  e.api.getFileContent = async (paths) => {
+    reads += 1;
+    if (reads === 2) throw new Error("verification unavailable");
+    return { [paths[0]]: content };
+  };
+  const agent = createAgent(e);
+  agent.api.pathExists = e.api.pathExists;
+  agent.api.saveFile = e.api.saveFile;
+  agent.api.getFileContent = e.api.getFileContent;
+  agent.runId = 1;
+  agent.runChangeTracker.beginRun(1, "/workspace");
+  const revision = agent.getContentRevision(content);
+  const first = await agent.writeWorkspaceFileChunk({ path: "large.txt", content: "DEF", expectedRevision: revision });
+  assert.equal(first.mutationOutcome, "APPLIED_BUT_UNCERTAIN");
+  const retry = await agent.writeWorkspaceFileChunk({ path: "large.txt", content: "DEF", expectedRevision: revision });
+  assert.equal(retry.success, true);
+  assert.equal(retry.reconciled, true);
+  assert.equal(content, "ABCDEF");
+  assert.equal(saves, 1);
 });
 
 test("one model turn cannot create orphan protocol entries beyond the tool limit", async () => {
@@ -258,4 +433,46 @@ test("context length failure compacts once and retries the same candidate", asyn
   assert.equal(requests, 2);
   assert.equal(agent.lastRunMetrics.contextRecoveries, 1);
   assert.equal(agent.runChangeTracker.current.status, "completed");
+});
+
+test("a second context overflow falls back only to a larger tool-capable model", async () => {
+  const agent = createAgent(editor());
+  let attempts = 0;
+  agent.modelClient.requestSingleModel = async (_controller, config) => {
+    attempts += 1;
+    if (config.model === "small") {
+      throw Object.assign(new Error("maximum context length exceeded"), { code: "CONTEXT_LENGTH_EXCEEDED" });
+    }
+    return { choices: [{ message: { role: "assistant", content: "fallback" } }] };
+  };
+  agent.modelConfigResolver = (_agentId, providerId, model) => ({
+    provider: { id: providerId, baseURL: "https://mock.invalid", requiresApiKey: false, supportsTools: model !== "no-tools" },
+    providerId,
+    model,
+    modelConfig: { id: model },
+    contextWindow: model === "large" ? 200000 : 1000,
+    maxTokens: 8192,
+    supportsTools: model !== "no-tools",
+  });
+  const config = {
+    runId: 1,
+    sessionId: 1,
+    agentId: "coder",
+    providerId: "primary",
+    provider: { id: "primary", baseURL: "https://mock.invalid", supportsTools: true },
+    model: "small",
+    modelConfig: {},
+    contextWindow: 40000,
+    maxTokens: 8192,
+    supportsTools: true,
+    fallbackChain: [
+      { provider: "fallback", model: "smaller" },
+      { provider: "fallback", model: "no-tools" },
+      { provider: "fallback", model: "large" },
+    ],
+  };
+  const result = await agent.requestModel(new AbortController(), config);
+  assert.equal(result.choices[0].message.content, "fallback");
+  assert.equal(config.model, "large");
+  assert.equal(attempts, 3);
 });

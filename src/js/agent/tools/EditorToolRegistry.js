@@ -247,6 +247,11 @@ class EditorToolRegistry {
         properties: {
           path: { type: "string" },
           startLine: { type: "integer", minimum: 1 },
+          startColumn: {
+            type: "integer",
+            minimum: 0,
+            description: "Colonne 0-based utilisée pour continuer une ligne tronquée.",
+          },
           endLine: { type: "integer", minimum: 1 },
         },
         required: ["path"],

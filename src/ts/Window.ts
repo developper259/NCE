@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
 import path from "path";
 
 import { FileManager } from "./addon/FileManager";
@@ -174,6 +174,7 @@ export class Window {
       ipcMain.handle("App:command", async (_event, command) =>
         this.executeWindowCommand(command),
       );
+      ipcMain.handle("Clipboard:readText", async () => clipboard.readText());
       ipcMain.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
         this.setMenuShortcutsIgnored(ignored),
       );

@@ -52,6 +52,7 @@ class Agent {
     this.fileContextVersion = 0;
     this.executedToolCalls = new Map();
     this.executedModificationRequests = new Map();
+    this.uncertainMutations = new Map();
     this.systemPrompt = "";
     this.agentId = null;
     this.modelFamily = null;
@@ -87,9 +88,9 @@ class Agent {
     this.maxRetryDelayMs = 30000;
     this.maxToolCallsPerTurn = 20;
     this.responseBudget = {
-      minReservedForResponseTokens: 128,
-      maxReservedForResponseTokens: 16384,
-      reservedForResponseTokens: 512,
+      minReservedForResponseTokens: 2048,
+      maxReservedForResponseTokens: 8192,
+      reservedForResponseTokens: 4096,
       safetyFactor: 1.35,
       modelHintBias: 0,
       toolInputLimitTokens: 4096,
