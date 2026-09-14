@@ -649,6 +649,8 @@ class AgentRunner {
     let missingWriteRetries = 0;
     let finalSummaryRequested = false;
     let incompleteContinuations = 0;
+    let toolArgumentRecoveryRequests = 0;
+    const maxToolArgumentRecoveryAttempts = 2;
     let modelTurn = 0;
     let toolIterations = 0;
     let validationPending = false;
@@ -730,6 +732,26 @@ class AgentRunner {
               modelResponse,
             )
           ) {
+            if ([
+              "TOOL_ARGUMENTS_MALFORMED",
+              "TOOL_ARGUMENTS_TRUNCATED",
+              "TOOL_CALL_FINALIZATION_FAILED",
+            ].includes(error?.code)) {
+              if (toolArgumentRecoveryRequests >= maxToolArgumentRecoveryAttempts) {
+                this.agent.agentProgress.metrics.toolArgumentRecoveryFailures++;
+                error.retryable = false;
+                throw error;
+              }
+              toolArgumentRecoveryRequests++;
+              this.agent.agentProgress.metrics.toolArgumentRecoveryRequests++;
+              this.agent.messages.push({
+                role: "system",
+                content: "[NCE TOOL ARGUMENT RECOVERY] The previous response contained invalid JSON tool arguments. " +
+                  "None of that response's tool calls were executed. Resend the tool calls with valid JSON and new tool call IDs. " +
+                  "Escape newlines, tabs, quotes and backslashes correctly. Do not repeat already completed actions.",
+              });
+              continue;
+            }
             throw error;
           }
           const repeatedOversizedRetry = largeWrite.recoveryAttempts > 0;

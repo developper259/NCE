@@ -406,13 +406,7 @@ class ToolExecutor {
 
     let args = {};
     try {
-      const raw = call.function.arguments;
-      args =
-        typeof raw === "string"
-          ? raw.trim()
-            ? JSON.parse(raw)
-            : {}
-          : raw || {};
+      args = this.agent.parseCanonicalToolArguments(call.function.arguments);
     } catch {
       return this.attachMeta(name, {
         success: false,

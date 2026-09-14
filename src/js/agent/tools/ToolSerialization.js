@@ -45,10 +45,49 @@ function assertJsonSafeArguments(
   seen.delete(value);
 }
 
-function parseCanonicalToolArguments(value) {
+function repairJsonStringControlCharacters(raw) {
+  let inString = false;
+  let escaped = false;
+  let repaired = "";
+  const escapes = { 8: "\\b", 9: "\\t", 10: "\\n", 12: "\\f", 13: "\\r" };
+  for (const character of raw) {
+    if (escaped) {
+      repaired += character;
+      escaped = false;
+    } else if (inString && character === "\\") {
+      repaired += character;
+      escaped = true;
+    } else if (character === '"') {
+      inString = !inString;
+      repaired += character;
+    } else if (inString && character.charCodeAt(0) <= 31) {
+      const code = character.charCodeAt(0);
+      repaired += escapes[code] || `\\u${code.toString(16).padStart(4, "0")}`;
+    } else {
+      repaired += character;
+    }
+  }
+  return repaired;
+}
+
+function parseCanonicalToolArguments(value, metrics = null) {
   if (value === null || value === undefined || value === "") return {};
   let parsed = value;
-  if (typeof value === "string") parsed = JSON.parse(value);
+  if (typeof value === "string") {
+    try {
+      parsed = JSON.parse(value);
+    } catch (initialError) {
+      if (metrics) metrics.toolArgumentRepairAttempts++;
+      const repaired = repairJsonStringControlCharacters(value);
+      try {
+        if (repaired === value) throw initialError;
+        parsed = JSON.parse(repaired);
+        if (metrics) metrics.toolArgumentRepairSuccesses++;
+      } catch (parseError) {
+        throw createToolArgumentParseError(parseError, repaired.length);
+      }
+    }
+  }
   if (!isPlainObject(parsed)) {
     throw new TypeError("les arguments doivent représenter un objet JSON");
   }
@@ -101,7 +140,10 @@ function finalizeToolCall(
     ) {
       throw new TypeError("function.name manquant ou invalide");
     }
-    const args = parseCanonicalToolArguments(toolCall.function.arguments);
+    const args = parseCanonicalToolArguments(
+      toolCall.function.arguments,
+      agent?.agentProgress?.metrics,
+    );
     return {
       id: toolCall.id.trim(),
       type: "function",
@@ -116,7 +158,11 @@ function finalizeToolCall(
         toolCall,
         toolCallIndex,
         error?.message,
-        context,
+        {
+          ...context,
+          argumentErrorCode: error.code,
+          errorPosition: error.errorPosition,
+        },
       );
     }
     throw error;
@@ -145,7 +191,7 @@ class ToolSerialization {
     return assertJsonSafeArguments(value, path, seen);
   }
   parseCanonicalToolArguments(value) {
-    return parseCanonicalToolArguments(value);
+    return parseCanonicalToolArguments(value, this.agent?.agentProgress?.metrics);
   }
   finalizeToolCall(toolCall, toolCallIndex = 0, context = {}) {
     return finalizeToolCall(toolCall, toolCallIndex, context, this.agent);
@@ -173,6 +219,7 @@ window.ToolSerialization = ToolSerialization;
 window.isPlainObject = isPlainObject;
 window.assertJsonSafeArguments = assertJsonSafeArguments;
 window.parseCanonicalToolArguments = parseCanonicalToolArguments;
+window.repairJsonStringControlCharacters = repairJsonStringControlCharacters;
 window.finalizeToolCall = finalizeToolCall;
 window.finalizeToolCalls = finalizeToolCalls;
 window.normalizeToolArgumentsForProvider = normalizeToolArgumentsForProvider;

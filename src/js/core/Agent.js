@@ -496,9 +496,11 @@ class Agent {
 
   isRecoverableLargeWriteToolCallError(error, result = null) {
     if (
-      !["TOOL_ARGUMENTS_TRUNCATED", "TOOL_CALL_FINALIZATION_FAILED"].includes(
-        error?.code,
-      )
+      ![
+        "TOOL_ARGUMENTS_TRUNCATED",
+        "TOOL_ARGUMENTS_MALFORMED",
+        "TOOL_CALL_FINALIZATION_FAILED",
+      ].includes(error?.code)
     ) {
       return false;
     }
@@ -520,6 +522,7 @@ class Agent {
         reason,
       );
     const truncatedJson =
+      error.code === "TOOL_ARGUMENTS_TRUNCATED" ||
       explicitlyTruncatedJson ||
       likelyTruncatedAtPosition ||
       (finishReason === "length" && stopsBeforeObjectEnd);
@@ -1117,7 +1120,19 @@ class Agent {
         ? content
         : "";
     const reasoning = this.extractReasoning(message);
-    const toolCalls = this.finalizeToolCalls(message.tool_calls, context);
+    const rawFinishReason = this.normalizeFinishReason(result, message, []);
+    if (rawFinishReason === "length" && message.tool_calls?.length) {
+      throw this.createToolCallValidationError(
+        message.tool_calls[0],
+        0,
+        "Incomplete JSON arguments: output token limit reached",
+        { ...context, finishReason: rawFinishReason },
+      );
+    }
+    const toolCalls = this.finalizeToolCalls(message.tool_calls, {
+      ...context,
+      finishReason: rawFinishReason,
+    });
     const finishReason = this.normalizeFinishReason(result, message, toolCalls);
     return {
       text,

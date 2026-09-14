@@ -8,6 +8,25 @@ class AgentModelError extends Error {
   }
 }
 
+function createToolArgumentParseError(parseError, argumentsLength) {
+  // Engine diagnostics may contain source code or secrets. Keep only the
+  // category and position in the JSON representation that failed parsing.
+  const reason = String(parseError.message);
+  const position = reason.match(/at position (\d+)/i)?.[1];
+  const errorPosition = position === undefined ? null : Number(position);
+  const incomplete =
+    /^(?:unterminated string|unexpected end)/i.test(reason) ||
+    errorPosition === argumentsLength;
+  const error = new SyntaxError(
+    incomplete ? "Incomplete JSON arguments" : "Malformed JSON arguments",
+  );
+  error.code = incomplete
+    ? "TOOL_ARGUMENTS_TRUNCATED"
+    : "TOOL_ARGUMENTS_MALFORMED";
+  error.errorPosition = errorPosition;
+  return error;
+}
+
 function createToolCallValidationError(
   agent,
   toolCall,
@@ -29,13 +48,22 @@ function createToolCallValidationError(
     `Tool call invalide pour ${toolName} : ${reasonText}.`,
   );
   error.name = "AgentToolCallValidationError";
-  error.code = truncatedLargeWriteArguments
+  const truncated =
+    context.finishReason === "length" ||
+    context.argumentErrorCode === "TOOL_ARGUMENTS_TRUNCATED" ||
+    truncatedLargeWriteArguments;
+  error.code = truncated
     ? "TOOL_ARGUMENTS_TRUNCATED"
-    : "TOOL_CALL_FINALIZATION_FAILED";
+    : context.argumentErrorCode === "TOOL_ARGUMENTS_MALFORMED"
+      ? "TOOL_ARGUMENTS_MALFORMED"
+      : "TOOL_CALL_FINALIZATION_FAILED";
   error.category = error.code;
   error.originalCode = "TOOL_CALL_FINALIZATION_FAILED";
   error.toolProtocolFailure = true;
-  error.retryable = truncatedLargeWriteArguments;
+  error.retryable = [
+    "TOOL_ARGUMENTS_TRUNCATED", "TOOL_ARGUMENTS_MALFORMED",
+  ].includes(error.code);
+  error.errorPosition = context.errorPosition ?? null;
   error.messageIndex = Number.isInteger(context.messageIndex)
     ? context.messageIndex
     : null;
@@ -50,7 +78,7 @@ function createToolCallValidationError(
   error.reason = reasonText;
   error.source = context.source || "provider_response";
   error.runId = context.runId ?? agent?.runId;
-  error.userMessage = truncatedLargeWriteArguments
+  error.userMessage = truncated
     ? `Les arguments de ${toolName} ont été tronqués avant la fin du JSON. Aucun contenu partiel n'a été exécuté.`
     : `Le modèle a produit un appel invalide pour l'outil ${toolName}.`;
   console.error("[NCE Tool Call invalid]", {
@@ -61,7 +89,8 @@ function createToolCallValidationError(
     field: error.field,
     valueType: error.valueType,
     reason: error.reason,
-    argumentsPreview: agent?.getSafeValuePreview?.(value),
+    argumentsLength: error.argumentsLength,
+    errorPosition: error.errorPosition,
     source: error.source,
     runId: error.runId,
     provider: context.provider || agent?.runConfig?.providerId || null,

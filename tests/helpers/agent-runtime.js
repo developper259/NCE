@@ -11,7 +11,7 @@ function createAgent(editor, fetchMock = () => { throw Error('External AI networ
     }
     getText() { return this.text; }
   }
-  const context = { window: {}, console: { ...console, info() {}, debug() {}, log() {} }, setTimeout, clearTimeout, AbortController, AbortSignal, TextDecoder, TextEncoder, LineNode: TestLineNode, fetch: fetchMock };
+  const context = { window: {}, console: { ...console, info() {}, debug() {}, log() {} }, setTimeout, clearTimeout, AbortController, AbortSignal, DOMException, TextDecoder, TextEncoder, LineNode: TestLineNode, fetch: fetchMock };
   vm.createContext(context);
   const html = fs.readFileSync(path.join(root, 'src/html/index.html'), 'utf8');
   const files = [...html.matchAll(/src="\.\.\/(js\/(?:agent\/[^"\n]+|core\/Agent.js))"/g)].map(m => m[1]);
