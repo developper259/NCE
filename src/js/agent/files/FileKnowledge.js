@@ -486,6 +486,9 @@ class FileKnowledge {
         revision: entry.revision,
         startLine: cachedRange.startLine,
         endLine: cachedRange.endLine,
+        requestedStartLine: requestedRange.startLine,
+        requestedEndLine: requestedRange.endLine,
+        contentStartLine: cachedRange.startLine,
         contentEndLine: cachedRange.endLine,
         totalLines: entry.totalLines,
         truncated:

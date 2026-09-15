@@ -19,6 +19,7 @@ class AgentSidebar extends Sidebar {
     this.activityItems = new Map();
     this.activityItemElements = new Map();
     this.pendingActivityItems = new Map();
+    this.deferredReadItems = new Map();
     this._activityItemCounter = 0;
 
     this.apiKeys = new Map();
@@ -88,9 +89,24 @@ class AgentSidebar extends Sidebar {
     if (!session || !session.isGenerating || session.runId !== context.runId) {
       return;
     }
-    const activityItem = this.completeActivityItem(toolName, result, context);
-
     const payload = fullResult?.result ?? fullResult;
+    if (toolName === "read_file") {
+      const key = this.getDeferredReadKey(context);
+      const pending = this.deferredReadItems.get(key) || [];
+      const args = pending.shift();
+      if (pending.length) this.deferredReadItems.set(key, pending);
+      else this.deferredReadItems.delete(key);
+      const failed = result?.success === false || payload?.success === false;
+      const restoredContent = payload?.restoredFromCache === true &&
+        typeof payload?.content === "string";
+      const redundant = !failed && !restoredContent &&
+        (payload?.noNewInformation === true ||
+          payload?.repeatedRedundantAction === true ||
+          (payload?.alreadyKnown === true && typeof payload?.content !== "string"));
+      if (redundant) return;
+      if (args) this.startActivityItem(toolName, args, context);
+    }
+    const activityItem = this.completeActivityItem(toolName, result, context);
 
     if (
       ["create_file", "write_file_chunk", "rename_file"].includes(toolName) &&
@@ -556,6 +572,10 @@ class AgentSidebar extends Sidebar {
     return `${context.sessionId || ""}:${context.runId || ""}:${toolName}`;
   }
 
+  getDeferredReadKey(context = {}) {
+    return `${context.sessionId || ""}:${context.runId || ""}:${context.toolCallId || "read_file"}`;
+  }
+
   getActivityItemId(context = {}) {
     if (context.toolCallId) {
       return `${context.sessionId}:${context.runId}:${context.toolCallId}`;
@@ -565,6 +585,19 @@ class AgentSidebar extends Sidebar {
   }
 
   handleToolStart(toolName, args = {}, context = {}) {
+    if (toolName === "read_file") {
+      const session = this.getSession(context.sessionId);
+      if (!session || !session.isGenerating || session.runId !== context.runId) return;
+      const key = this.getDeferredReadKey(context);
+      const pending = this.deferredReadItems.get(key) || [];
+      pending.push({ ...args });
+      this.deferredReadItems.set(key, pending);
+      return;
+    }
+    this.startActivityItem(toolName, args, context);
+  }
+
+  startActivityItem(toolName, args = {}, context = {}) {
     const session = this.getSession(context.sessionId);
     if (!session || !session.isGenerating || session.runId !== context.runId) {
       return;
@@ -820,6 +853,9 @@ class AgentSidebar extends Sidebar {
     for (const key of this.pendingActivityItems.keys()) {
       if (key.startsWith(pendingPrefix)) this.pendingActivityItems.delete(key);
     }
+    for (const key of this.deferredReadItems.keys()) {
+      if (key.startsWith(pendingPrefix)) this.deferredReadItems.delete(key);
+    }
     this.updateActivityHeader(group);
   }
 
@@ -955,6 +991,11 @@ class AgentSidebar extends Sidebar {
       : Number.isInteger(item.args?.endLine)
         ? item.args.endLine
         : null;
+    const delivered = payload?.deliveredRange;
+    const readStart = Number.isInteger(delivered?.startLine) ? delivered.startLine :
+      Number.isInteger(payload?.contentStartLine) ? payload.contentStartLine : rangeStart;
+    const readEnd = Number.isInteger(delivered?.endLine) ? delivered.endLine :
+      Number.isInteger(payload?.contentEndLine) ? payload.contentEndLine : rangeEnd;
     let title = "";
     let detail = "";
 
@@ -964,8 +1005,19 @@ class AgentSidebar extends Sidebar {
         break;
       case "read_file":
         title = `${running ? "Reading" : "Read"} ${fileName}${running ? "…" : ""}`;
-        if (rangeStart && rangeEnd) detail = `lines ${rangeStart}–${rangeEnd}`;
-        else if (rangeStart) detail = `line ${rangeStart}`;
+        if (!running && !failed && Number.isInteger(readStart) &&
+            Number.isInteger(readEnd) &&
+            (payload?.lineTruncated === true ||
+              Number.isInteger(payload?.contentStartColumn) && payload.contentStartColumn > 0 ||
+              Number.isInteger(payload?.nextStartColumn))) {
+          const startColumn = Number.isInteger(payload?.contentStartColumn)
+            ? payload.contentStartColumn : 0;
+          const endColumn = payload?.contentEndColumn;
+          detail = readStart === readEnd && Number.isInteger(endColumn)
+            ? `line ${readStart}, chars ${startColumn + 1}–${endColumn}`
+            : `lines ${readStart}–${readEnd}, ending at char ${endColumn ?? "?"}`;
+        } else if (readStart && readEnd) detail = `lines ${readStart}–${readEnd}`;
+        else if (readStart) detail = `line ${readStart}`;
         break;
       case "get_project_map":
         title = `${running ? "Mapping" : "Mapped"} project structure${running ? "…" : ""}`;

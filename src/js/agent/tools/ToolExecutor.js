@@ -277,6 +277,28 @@ class ToolExecutor {
             : null;
         }
       }
+      if (limited.success !== false && typeof limited.content === "string") {
+        const requestedStart = Number.isInteger(limited.requestedStartLine)
+          ? limited.requestedStartLine : limited.startLine;
+        const requestedEnd = Number.isInteger(limited.requestedEndLine)
+          ? limited.requestedEndLine : limited.endLine;
+        if (Number.isInteger(requestedStart) && Number.isInteger(requestedEnd)) {
+          limited.requestedRange = { startLine: requestedStart, endLine: requestedEnd };
+        }
+        const deliveredStart = Number.isInteger(limited.contentStartLine)
+          ? limited.contentStartLine : limited.startLine;
+        const deliveredEnd = Number.isInteger(limited.contentEndLine)
+          ? limited.contentEndLine : limited.endLine;
+        if (Number.isInteger(deliveredStart) && Number.isInteger(deliveredEnd)) {
+          limited.deliveredRange = { startLine: deliveredStart, endLine: deliveredEnd };
+          console.debug("[NCE Agent read]", {
+            path: limited.path || null,
+            requestedRange: limited.requestedRange || null,
+            deliveredRange: limited.deliveredRange,
+            source: limited.informationSource || "unknown",
+          });
+        }
+      }
       return limited;
     }
 
