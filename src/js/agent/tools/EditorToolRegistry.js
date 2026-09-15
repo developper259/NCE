@@ -226,7 +226,11 @@ class EditorToolRegistry {
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", minLength: 1, maxLength: this.getPathLimit() },
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: this.getPathLimit(),
+          },
         },
         required: ["path"],
       },
@@ -237,7 +241,11 @@ class EditorToolRegistry {
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", minLength: 1, maxLength: this.getPathLimit() },
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: this.getPathLimit(),
+          },
         },
         required: ["path"],
       },

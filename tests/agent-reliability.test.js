@@ -26,27 +26,69 @@ function call(name, args = {}, id = "call-1") {
 test("malformed write metadata classifies strategy without executable arguments", () => {
   const agent = createAgent(editor());
   const raw = '{"path":"snake-game.html","content":"' + "a".repeat(6500);
-  const metadata = agent.largeFileWriter.extractMalformedToolCallMetadata(raw, "create_file", "length");
+  const metadata = agent.largeFileWriter.extractMalformedToolCallMetadata(
+    raw,
+    "create_file",
+    "length",
+  );
   assert.equal(metadata.pathHint, "snake-game.html");
   assert.equal(metadata.rawArgumentsLength, raw.length);
   assert.ok(metadata.contentLengthApprox >= 6500);
   assert.equal(metadata.malformed, true);
   assert.equal(Object.hasOwn(metadata, "content"), false);
   assert.throws(() => agent.parseCanonicalToolArguments(raw));
-  const response = { choices: [{ message: { tool_calls: [{ function: { name: "create_file", arguments: raw } }] } }] };
-  const recovered = agent.largeFileWriter.extractToolCallArgsFromError({ toolName: "create_file", toolCallIndex: 0 }, response);
+  const response = {
+    choices: [
+      {
+        message: {
+          tool_calls: [{ function: { name: "create_file", arguments: raw } }],
+        },
+      },
+    ],
+  };
+  const recovered = agent.largeFileWriter.extractToolCallArgsFromError(
+    { toolName: "create_file", toolCallIndex: 0 },
+    response,
+  );
   assert.equal(recovered.pathHint, "snake-game.html");
-  const large = agent.largeFileWriter.getToolCallStrategySignature("create_file", recovered);
-  assert.equal(large, agent.largeFileWriter.getToolCallStrategySignature("create_file", { path: "snake-game.html", content: "a".repeat(6200) }));
-  assert.notEqual(large, agent.largeFileWriter.getToolCallStrategySignature("create_file", { path: "snake-game.html", content: "a".repeat(1500) }));
+  const large = agent.largeFileWriter.getToolCallStrategySignature(
+    "create_file",
+    recovered,
+  );
+  assert.equal(
+    large,
+    agent.largeFileWriter.getToolCallStrategySignature("create_file", {
+      path: "snake-game.html",
+      content: "a".repeat(6200),
+    }),
+  );
+  assert.notEqual(
+    large,
+    agent.largeFileWriter.getToolCallStrategySignature("create_file", {
+      path: "snake-game.html",
+      content: "a".repeat(1500),
+    }),
+  );
 });
 
 test("replan rejects the failed large create and accepts a small create", () => {
   const agent = createAgent(editor());
   const state = agent.largeFileWriter.createLargeWriteRuntimeState();
   const raw = '{"path":"snake-game.html","content":"' + "a".repeat(6500);
-  const response = { choices: [{ message: { tool_calls: [{ function: { name: "create_file", arguments: raw } }] } }] };
-  const error = { code: "TOOL_ARGUMENTS_TRUNCATED", toolName: "create_file", toolCallIndex: 0 };
+  const response = {
+    choices: [
+      {
+        message: {
+          tool_calls: [{ function: { name: "create_file", arguments: raw } }],
+        },
+      },
+    ],
+  };
+  const error = {
+    code: "TOOL_ARGUMENTS_TRUNCATED",
+    toolName: "create_file",
+    toolCallIndex: 0,
+  };
   state.path = "snake-game.html";
   state.strategyFailures = 3;
   agent.largeFileWriter.requestStrategyReplan(state, error, response);
@@ -54,9 +96,24 @@ test("replan rejects the failed large create and accepts a small create", () => 
   assert.equal(state.strategyReplanCount, 1);
   assert.equal(state.strategyReplanRequired, true);
   assert.ok(state.temporaryRecoveryMax <= 2500);
-  assert.equal(agent.largeFileWriter.isRepeatedFailedStrategy(state, "create_file", { path: "snake-game.html", content: "a".repeat(6000) }), true);
-  assert.equal(agent.largeFileWriter.isRepeatedFailedStrategy(state, "create_file", { path: "snake-game.html", content: "a".repeat(1500) }), false);
-  agent.largeFileWriter.resetStrategyAfterProgress(state, "create_file", { path: "snake-game.html", content: "a".repeat(1500) });
+  assert.equal(
+    agent.largeFileWriter.isRepeatedFailedStrategy(state, "create_file", {
+      path: "snake-game.html",
+      content: "a".repeat(6000),
+    }),
+    true,
+  );
+  assert.equal(
+    agent.largeFileWriter.isRepeatedFailedStrategy(state, "create_file", {
+      path: "snake-game.html",
+      content: "a".repeat(1500),
+    }),
+    false,
+  );
+  agent.largeFileWriter.resetStrategyAfterProgress(state, "create_file", {
+    path: "snake-game.html",
+    content: "a".repeat(1500),
+  });
   assert.equal(state.strategyReplanRequired, false);
   assert.equal(state.strategyFailures, 0);
   assert.equal(state.temporaryRecoveryMax, null);
@@ -66,7 +123,13 @@ test("strategy replan hard cap is terminal", () => {
   const agent = createAgent(editor());
   const state = agent.largeFileWriter.createLargeWriteRuntimeState();
   state.strategyReplanCount = state.maxStrategyReplans;
-  assert.throws(() => agent.largeFileWriter.requestStrategyReplan(state, { toolName: "create_file" }), { code: "WRITE_RECOVERY_EXHAUSTED" });
+  assert.throws(
+    () =>
+      agent.largeFileWriter.requestStrategyReplan(state, {
+        toolName: "create_file",
+      }),
+    { code: "WRITE_RECOVERY_EXHAUSTED" },
+  );
 });
 
 test("task_complete is a request and only the runner commits completed state", async () => {

@@ -6,7 +6,7 @@ const os = require("node:os");
 const { createAgent } = require("./helpers/agent-runtime");
 const { FileManager } = require("../dist/ts/addon/FileManager");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch");
-async function setup() {
+async function setup(fetchMock) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-agent-"));
   const manager = new FileManager({});
   const search = new WorkspaceSearch({});
@@ -116,7 +116,7 @@ async function setup() {
       getFolderContent: manager.getFolderContent.bind(manager),
     },
   };
-  return { root, editor, agent: createAgent(editor), manager };
+  return { root, editor, agent: createAgent(editor, fetchMock), manager };
 }
 
 async function setupEditable(content, { open = true, saved = true } = {}) {
@@ -251,11 +251,15 @@ test("delete_file removes only safe workspace files and refreshes project caches
     assert.equal(result.success, true, JSON.stringify(result));
     assert.equal(result.result.path, "delete.txt");
     assert.equal(result.result.beforeContent, "delete");
-    assert.equal(result.result.beforeRevision, agent.getContentRevision("delete"));
-    assert.deepEqual(
-      JSON.parse(JSON.stringify(result.result.verification)),
-      { verified: true, kind: "absence", exists: false },
+    assert.equal(
+      result.result.beforeRevision,
+      agent.getContentRevision("delete"),
     );
+    assert.deepEqual(JSON.parse(JSON.stringify(result.result.verification)), {
+      verified: true,
+      kind: "absence",
+      exists: false,
+    });
     assert.equal(result.result.mutationOutcome, "APPLIED_AND_VERIFIED");
     assert.equal(
       await editor.api.pathExists(path.join(root, "delete.txt")),
@@ -1177,4 +1181,79 @@ test("ModelClient performs only mocked transport and strips API key from bridge 
   assert.equal(state.state, "IDLE");
   await assert.rejects(agent.agentRunner.execute(""), /obligatoire/);
   assert.equal((await agent.activeFileManager.readActiveFile()).success, false);
+});
+
+test("ModelClient applies optional provider and session headers consistently", async () => {
+  const requests = [];
+  const fetchMock = async (_url, request) => {
+    requests.push(request);
+    return {
+      ok: true,
+      async json() {
+        return { choices: [{ message: { role: "assistant", content: "ok" } }] };
+      },
+    };
+  };
+  const fixture = await setup(fetchMock);
+  try {
+    fixture.agent.messages = [{ role: "user", content: "test" }];
+    fixture.agent.contextCompaction.logMetrics = false;
+    await fixture.agent.requestSingleModel(new AbortController(), {
+      provider: {
+        id: "optional",
+        baseURL: "https://invalid.example",
+        apiKey: "secret-key",
+        requestHeaders: {
+          "User-Agent": "nce-agent/0.1.0",
+          "X-Count": 7,
+          "X-Empty": null,
+        },
+        sessionHeader: "x-session-id",
+      },
+      model: "optional-model",
+      sessionId: "session-123",
+      supportsTools: false,
+    });
+
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].headers["User-Agent"], "nce-agent/0.1.0");
+    assert.equal(requests[0].headers["X-Count"], "7");
+    assert.equal(requests[0].headers["X-Empty"], undefined);
+    assert.equal(requests[0].headers.Authorization, "Bearer secret-key");
+    assert.equal(requests[0].headers["x-session-id"], "session-123");
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("ModelClient keeps optional headers absent and bridge sessions separate from API keys", async () => {
+  let request;
+  const fixture = await setup();
+  try {
+    fixture.agent.api.aiChat = async (data) => {
+      request = data;
+      return {
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+      };
+    };
+    fixture.agent.messages = [{ role: "user", content: "test" }];
+    fixture.agent.contextCompaction.logMetrics = false;
+    await fixture.agent.requestSingleModel(new AbortController(), {
+      provider: {
+        id: "plain",
+        baseURL: "https://invalid.example",
+        apiKey: "secret-key",
+      },
+      model: "plain-model",
+      sessionId: "session-456",
+      supportsTools: false,
+    });
+
+    assert.equal(request.provider.apiKey, undefined);
+    assert.equal(request.provider.requestHeaders, undefined);
+    assert.equal(request.provider.sessionHeader, undefined);
+    assert.equal(request.sessionId, "session-456");
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
 });

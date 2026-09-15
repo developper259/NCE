@@ -195,9 +195,7 @@ class tabManager {
   async prepareFilesForDeletion(deletedPath) {
     const dirtyFiles = this.files.filter(
       (file) =>
-        file.path &&
-        NCEPath.isInside(file.path, deletedPath) &&
-        !file.isSaved,
+        file.path && NCEPath.isInside(file.path, deletedPath) && !file.isSaved,
     );
     for (const file of dirtyFiles) {
       const choice = await this.editor.savePopupManager.confirmClose(file.id);

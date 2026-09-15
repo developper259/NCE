@@ -2,7 +2,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   platform: process.platform,
-  agentFileOperation: (root, operation, args) => ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
+  agentFileOperation: (root, operation, args) =>
+    ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
   quit: () => ipcRenderer.invoke("App:quit"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
   readClipboardText: () => ipcRenderer.invoke("Clipboard:readText"),
@@ -24,12 +25,14 @@ contextBridge.exposeInMainWorld("api", {
   onAutoSaveToggleRequested: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("auto-save-toggle-requested", listener);
-    return () => ipcRenderer.removeListener("auto-save-toggle-requested", listener);
+    return () =>
+      ipcRenderer.removeListener("auto-save-toggle-requested", listener);
   },
   onOpenSettingsRequested: (callback) => {
     const listener = () => callback();
     ipcRenderer.on("open-settings-requested", listener);
-    return () => ipcRenderer.removeListener("open-settings-requested", listener);
+    return () =>
+      ipcRenderer.removeListener("open-settings-requested", listener);
   },
   onKeybindingActionRequested: (callback) => {
     const listener = (_event, action, modifiers) =>

@@ -71,7 +71,12 @@ class WorkspaceFileManager {
   getWorkspaceFolderTarget(folderPath) {
     const input = typeof folderPath === "string" ? folderPath.trim() : "";
     const root = this.agent.editor?.fileExplorer?.rootPath;
-    if (!input || input.includes("\0") || typeof root !== "string" || !root.trim()) {
+    if (
+      !input ||
+      input.includes("\0") ||
+      typeof root !== "string" ||
+      !root.trim()
+    ) {
       return {
         valid: false,
         error: {
@@ -931,28 +936,60 @@ class WorkspaceFileManager {
     const target = this.agent.getWorkspaceFolderTarget(args.path);
     if (!target.valid) return { success: false, error: target.error };
     if (!(await this.agent.api?.pathExists?.(target.parentPath))) {
-      return { success: false, error: { code: "PARENT_NOT_FOUND", message: "Le dossier parent n'existe pas.", path: target.relativePath } };
+      return {
+        success: false,
+        error: {
+          code: "PARENT_NOT_FOUND",
+          message: "Le dossier parent n'existe pas.",
+          path: target.relativePath,
+        },
+      };
     }
     if (await this.agent.api?.pathExists?.(target.absolutePath)) {
-      return { success: false, error: { code: "FOLDER_ALREADY_EXISTS", message: "Le dossier existe déjà.", path: target.relativePath } };
+      return {
+        success: false,
+        error: {
+          code: "FOLDER_ALREADY_EXISTS",
+          message: "Le dossier existe déjà.",
+          path: target.relativePath,
+        },
+      };
     }
     const guard = this.agent.getMutationGuardError();
     if (guard) return { success: false, error: guard };
-    const operation = await this.agent.api?.createFolder?.(target.parentPath, target.folderName);
+    const operation = await this.agent.api?.createFolder?.(
+      target.parentPath,
+      target.folderName,
+    );
     if (!operation?.success) {
-      return { success: false, error: this.agent.getFileOperationError(operation, "CREATE_FOLDER_FAILED", "La création du dossier a échoué.", target.relativePath) };
+      return {
+        success: false,
+        error: this.agent.getFileOperationError(
+          operation,
+          "CREATE_FOLDER_FAILED",
+          "La création du dossier a échoué.",
+          target.relativePath,
+        ),
+      };
     }
     let exists = null;
-    try { exists = await this.agent.api?.pathExists?.(target.absolutePath); } catch {}
+    try {
+      exists = await this.agent.api?.pathExists?.(target.absolutePath);
+    } catch {}
     const uiWarnings = [];
-    try { await this.agent.refreshWorkspaceFolders([target.parentPath]); } catch { uiWarnings.push("explorer_refresh_failed"); }
+    try {
+      await this.agent.refreshWorkspaceFolders([target.parentPath]);
+    } catch {
+      uiWarnings.push("explorer_refresh_failed");
+    }
     return {
       success: true,
       operation: "create_folder",
       path: target.relativePath,
       absolutePath: target.absolutePath,
       created: true,
-      mutationOutcome: exists === true ? "APPLIED_AND_VERIFIED" : "APPLIED_BUT_UNCERTAIN",
+      mutationOutcome:
+        exists === true ? "APPLIED_AND_VERIFIED" : "APPLIED_BUT_UNCERTAIN",
       verification: { verified: exists === true, exists },
       uiWarnings,
     };
@@ -963,19 +1000,46 @@ class WorkspaceFileManager {
     if (!target.valid) return { success: false, error: target.error };
     const status = await this.agent.api?.pathStatus?.(target.absolutePath);
     if (!status?.exists) {
-      return { success: false, error: { code: "FOLDER_NOT_FOUND", message: "Le dossier à supprimer n'existe pas.", path: target.relativePath } };
+      return {
+        success: false,
+        error: {
+          code: "FOLDER_NOT_FOUND",
+          message: "Le dossier à supprimer n'existe pas.",
+          path: target.relativePath,
+        },
+      };
     }
     if (!status.isDirectory) {
-      return { success: false, error: { code: "NOT_A_FOLDER", message: "delete_folder ne peut supprimer qu'un dossier.", path: target.relativePath } };
+      return {
+        success: false,
+        error: {
+          code: "NOT_A_FOLDER",
+          message: "delete_folder ne peut supprimer qu'un dossier.",
+          path: target.relativePath,
+        },
+      };
     }
     const guard = this.agent.getMutationGuardError();
     if (guard) return { success: false, error: guard };
-    const operation = await this.agent.api?.deleteEntry?.(target.absolutePath, true);
+    const operation = await this.agent.api?.deleteEntry?.(
+      target.absolutePath,
+      true,
+    );
     if (!operation?.success) {
-      return { success: false, error: this.agent.getFileOperationError(operation, "DELETE_FOLDER_FAILED", "La suppression du dossier a échoué.", target.relativePath) };
+      return {
+        success: false,
+        error: this.agent.getFileOperationError(
+          operation,
+          "DELETE_FOLDER_FAILED",
+          "La suppression du dossier a échoué.",
+          target.relativePath,
+        ),
+      };
     }
     let exists = null;
-    try { exists = await this.agent.api?.pathExists?.(target.absolutePath); } catch {}
+    try {
+      exists = await this.agent.api?.pathExists?.(target.absolutePath);
+    } catch {}
     const uiWarnings = [];
     const tabManager = this.agent.editor?.tabManager;
     const openFiles = (tabManager?.files || []).filter((file) =>
@@ -997,14 +1061,17 @@ class WorkspaceFileManager {
     try {
       this.agent.editor?.quickOpen?.invalidate?.(target.root);
       await this.agent.refreshWorkspaceFolders([target.parentPath]);
-    } catch { uiWarnings.push("explorer_refresh_failed"); }
+    } catch {
+      uiWarnings.push("explorer_refresh_failed");
+    }
     return {
       success: true,
       operation: "delete_folder",
       path: target.relativePath,
       absolutePath: target.absolutePath,
       deleted: true,
-      mutationOutcome: exists === false ? "APPLIED_AND_VERIFIED" : "APPLIED_BUT_UNCERTAIN",
+      mutationOutcome:
+        exists === false ? "APPLIED_AND_VERIFIED" : "APPLIED_BUT_UNCERTAIN",
       verification: { verified: exists === false, exists },
       uiWarnings,
     };

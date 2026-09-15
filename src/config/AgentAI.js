@@ -61,6 +61,55 @@ const AgentAI = {
   readOnlyTools: ["read_file", "get_project_map", "search_code"],
 
   providers: {
+    opencode: {
+      id: "opencode",
+      name: "OpenCode Go",
+      baseURL: "https://opencode.ai/zen/go/v1/chat/completions",
+
+      requiresApiKey: true,
+      supportsTools: true,
+      supportsToolChoice: true,
+
+      requestHeaders: {
+        "User-Agent": "nce-agent/0.1.0",
+      },
+
+      sessionHeader: "x-opencode-session",
+
+      defaultModel: "kimi-k2.7-code",
+
+      fallbackModels: ["glm-5.3-flash", "kimi-k3", "deepseek-v4.1-flash"],
+
+      models: {
+        "kimi-k2.7-code": {
+          id: "kimi-k2.7-code",
+          name: "Kimi K2.7 Code",
+          contextWindow: 262144,
+          maxOutputTokens: 32768,
+        },
+
+        "glm-5.3-flash": {
+          id: "glm-5.3-flash",
+          name: "GLM-5.3 Flash",
+          contextWindow: 1000000,
+          maxOutputTokens: 131072,
+        },
+
+        "kimi-k3": {
+          id: "kimi-k3",
+          name: "Kimi K3",
+          contextWindow: 1048576,
+          maxOutputTokens: 131072,
+        },
+
+        "deepseek-v4.1-flash": {
+          id: "deepseek-v4.1-flash",
+          name: "DeepSeek V4.1 Flash",
+          contextWindow: 1048576,
+          maxOutputTokens: 131072,
+        },
+      },
+    },
     openrouter: {
       id: "openrouter",
       name: "OpenRouter",

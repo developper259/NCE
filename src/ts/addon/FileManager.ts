@@ -1,4 +1,11 @@
-import { app, dialog, shell, BrowserWindow, ipcMain, safeStorage } from "electron";
+import {
+  app,
+  dialog,
+  shell,
+  BrowserWindow,
+  ipcMain,
+  safeStorage,
+} from "electron";
 import { Window } from "../Window";
 const fs = require("fs").promises;
 const fsSync = require("fs");
@@ -33,34 +40,49 @@ export interface FileOperationResult {
 export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
 const BINARY_SAMPLE_SIZE = 8192;
 function validPath(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && !value.includes("\0");
+  return (
+    typeof value === "string" &&
+    value.trim().length > 0 &&
+    !value.includes("\0")
+  );
 }
 function isAsarPath(filePath: string): boolean {
   return path.extname(filePath).toLowerCase() === ".asar";
 }
 function validName(value: unknown): value is string {
-  return validPath(value) && !/^(?:[\\/]|[A-Za-z]:)/.test(value) &&
-    value.split(/[\\/]/).every(segment => Boolean(segment) && segment !== "." && segment !== "..");
+  return (
+    validPath(value) &&
+    !/^(?:[\\/]|[A-Za-z]:)/.test(value) &&
+    value
+      .split(/[\\/]/)
+      .every(
+        (segment) => Boolean(segment) && segment !== "." && segment !== "..",
+      )
+  );
 }
 export function validateEntryName(
   value: unknown,
-  platform: NodeJS.Platform =
-    typeof process === "undefined" ? "linux" : process.platform,
+  platform: NodeJS.Platform = typeof process === "undefined"
+    ? "linux"
+    : process.platform,
 ): string | null {
   if (typeof value !== "string" || !value.trim()) return "INVALID_NAME";
   if (value !== value.trim() || value === "." || value === "..")
     return "INVALID_NAME";
   if (/[\\/\0]/.test(value)) return "INVALID_NAME";
   if (platform === "win32") {
-    if (/[<>:\"|?*]/.test(value) || /[. ]$/.test(value))
-      return "INVALID_NAME";
+    if (/[<>:\"|?*]/.test(value) || /[. ]$/.test(value)) return "INVALID_NAME";
     const stem = value.split(".")[0].toUpperCase();
     if (/^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem))
       return "INVALID_NAME";
   }
   return null;
 }
-const invalidPath = (): FileOperationResult => ({ success: false, code: "INVALID_PATH", error: "Invalid file path or arguments." });
+const invalidPath = (): FileOperationResult => ({
+  success: false,
+  code: "INVALID_PATH",
+  error: "Invalid file path or arguments.",
+});
 
 function decodeUtf8(buffer: Buffer): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
@@ -88,7 +110,9 @@ export async function atomicWriteFile(
   );
   try {
     let mode: number | undefined;
-    try { mode = (await operations.stat(filePath)).mode; } catch {}
+    try {
+      mode = (await operations.stat(filePath)).mode;
+    } catch {}
     const handle = await operations.open(temporaryPath, "wx", mode);
     try {
       await handle.writeFile(content, "utf8");
@@ -103,11 +127,17 @@ export async function atomicWriteFile(
     // not turn an otherwise successful replacement into a failed save.
     try {
       const directory = await operations.open(dir, "r");
-      try { await directory.sync(); } finally { await directory.close(); }
+      try {
+        await directory.sync();
+      } finally {
+        await directory.close();
+      }
     } catch {}
   } finally {
     if (temporaryPath) {
-      try { await operations.unlink(temporaryPath); } catch {}
+      try {
+        await operations.unlink(temporaryPath);
+      } catch {}
     }
   }
 }
@@ -122,7 +152,10 @@ export class FileManager {
   }
 
   async agentFileOperation(root: string, operation: string, args: unknown[]) {
-    const methods: Record<string, { paths: number[]; run: (...values: any[]) => Promise<any> }> = {
+    const methods: Record<
+      string,
+      { paths: number[]; run: (...values: any[]) => Promise<any> }
+    > = {
       saveFile: { paths: [0], run: this.saveFile.bind(this) },
       createFile: { paths: [0], run: this.createFile.bind(this) },
       createFolder: { paths: [0], run: this.createFolder.bind(this) },
@@ -132,15 +165,24 @@ export class FileManager {
       moveEntry: { paths: [0, 1], run: this.moveEntry.bind(this) },
       duplicateEntry: { paths: [0], run: this.duplicateEntry.bind(this) },
     };
-    if (!validPath(root) || !Array.isArray(args) || !Object.prototype.hasOwnProperty.call(methods, operation)) return invalidPath();
+    if (
+      !validPath(root) ||
+      !Array.isArray(args) ||
+      !Object.prototype.hasOwnProperty.call(methods, operation)
+    )
+      return invalidPath();
     const method = methods[operation];
     try {
       const realRoot = await fs.realpath(root);
       const inside = (base: string, target: string) => {
         const relative = path.relative(base, target);
-        return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+        return (
+          relative !== ".." &&
+          !relative.startsWith(`..${path.sep}`) &&
+          !path.isAbsolute(relative)
+        );
       };
-      const targets = method.paths.map(index => args[index]);
+      const targets = method.paths.map((index) => args[index]);
       if (operation === "createFile" || operation === "createFolder") {
         if (!validName(args[1]) || !validPath(args[0])) return invalidPath();
         targets.push(path.join(args[0], args[1]));
@@ -153,16 +195,27 @@ export class FileManager {
           if (parent === existing) return invalidPath();
           existing = parent;
         }
-        if (!inside(realRoot, await fs.realpath(existing)) || !inside(path.resolve(root), path.resolve(target))) {
-          return { success: false, code: "OUTSIDE_WORKSPACE", error: "Path must remain inside the workspace." };
+        if (
+          !inside(realRoot, await fs.realpath(existing)) ||
+          !inside(path.resolve(root), path.resolve(target))
+        ) {
+          return {
+            success: false,
+            code: "OUTSIDE_WORKSPACE",
+            error: "Path must remain inside the workspace.",
+          };
         }
       }
       return await method.run(...args);
-    } catch { return invalidPath(); }
+    } catch {
+      return invalidPath();
+    }
   }
 
   handleIPC() {
-    ipcMain.handle("Agent:fileOperation", (_event, root, operation, args) => this.agentFileOperation(root, operation, args));
+    ipcMain.handle("Agent:fileOperation", (_event, root, operation, args) =>
+      this.agentFileOperation(root, operation, args),
+    );
     ipcMain.handle("FileManager:selectFile", async () => {
       return await this.selectFile();
     });
@@ -249,9 +302,15 @@ export class FileManager {
       },
     );
 
-    ipcMain.handle("FileManager:delete", async (event, targetPath: string, force: unknown = false) => {
-      return await this.deleteEntry(targetPath, typeof force === "boolean" ? force : false);
-    });
+    ipcMain.handle(
+      "FileManager:delete",
+      async (event, targetPath: string, force: unknown = false) => {
+        return await this.deleteEntry(
+          targetPath,
+          typeof force === "boolean" ? force : false,
+        );
+      },
+    );
 
     ipcMain.handle(
       "FileManager:createFile",
@@ -309,30 +368,39 @@ export class FileManager {
       },
     );
 
-    ipcMain.handle("FileManager:pathStatus", async (_event, targetPath: string) => {
-      if (!validPath(targetPath)) return { exists: false, code: "INVALID_PATH" };
-      try {
-        const stats = await fs.stat(targetPath);
-        const isDirectory = stats.isDirectory();
-        if (isDirectory) {
-          try {
-            await fs.access(targetPath, fsSync.constants.R_OK);
-          } catch (error: any) {
-            return {
-              exists: true,
-              isDirectory: true,
-              readable: false,
-              code: error?.code || "ACCESS_DENIED",
-              error: error?.message,
-            };
+    ipcMain.handle(
+      "FileManager:pathStatus",
+      async (_event, targetPath: string) => {
+        if (!validPath(targetPath))
+          return { exists: false, code: "INVALID_PATH" };
+        try {
+          const stats = await fs.stat(targetPath);
+          const isDirectory = stats.isDirectory();
+          if (isDirectory) {
+            try {
+              await fs.access(targetPath, fsSync.constants.R_OK);
+            } catch (error: any) {
+              return {
+                exists: true,
+                isDirectory: true,
+                readable: false,
+                code: error?.code || "ACCESS_DENIED",
+                error: error?.message,
+              };
+            }
           }
+          return { exists: true, isDirectory, readable: true };
+        } catch (error: any) {
+          if (error?.code === "ENOENT")
+            return { exists: false, code: "SOURCE_NOT_FOUND" };
+          return {
+            exists: false,
+            code: error?.code || "STAT_FAILED",
+            error: error?.message,
+          };
         }
-        return { exists: true, isDirectory, readable: true };
-      } catch (error: any) {
-        if (error?.code === "ENOENT") return { exists: false, code: "SOURCE_NOT_FOUND" };
-        return { exists: false, code: error?.code || "STAT_FAILED", error: error?.message };
-      }
-    });
+      },
+    );
   }
 
   async selectFile(): Promise<string | undefined> {
@@ -416,7 +484,6 @@ export class FileManager {
       await atomicWriteFile(filePath, content);
       this.window.watcher?.commitOwnWrite(filePath, ownWriteToken);
       this.clearFileCache(filePath);
-
 
       return filePath;
     } catch (error) {
@@ -510,9 +577,15 @@ export class FileManager {
       }
       const oldResolved = path.resolve(oldPath);
       const newResolved = path.resolve(newPath);
-      if (path.dirname(oldResolved) !== path.dirname(newResolved) ||
-          validateEntryName(path.basename(newResolved))) {
-        return { success: false, code: "INVALID_NAME", error: "Invalid file name." };
+      if (
+        path.dirname(oldResolved) !== path.dirname(newResolved) ||
+        validateEntryName(path.basename(newResolved))
+      ) {
+        return {
+          success: false,
+          code: "INVALID_NAME",
+          error: "Invalid file name.",
+        };
       }
       const sourceStats = await fs.stat(oldPath);
       if (oldResolved === newResolved)
@@ -527,11 +600,16 @@ export class FileManager {
       } catch (error: any) {
         if (error?.code !== "ENOENT") throw error;
       }
-      const sameEntry = destinationStats &&
+      const sameEntry =
+        destinationStats &&
         sourceStats.dev === destinationStats.dev &&
         sourceStats.ino === destinationStats.ino;
       if (destinationStats && !sameEntry) {
-        return { success: false, code: "TARGET_EXISTS", error: "A file or folder with this name already exists." };
+        return {
+          success: false,
+          code: "TARGET_EXISTS",
+          error: "A file or folder with this name already exists.",
+        };
       }
 
       if (sameEntry) {
@@ -543,7 +621,9 @@ export class FileManager {
         try {
           await fs.rename(temporaryPath, newPath);
         } catch (error) {
-          try { await fs.rename(temporaryPath, oldPath); } catch (rollbackError) {
+          try {
+            await fs.rename(temporaryPath, oldPath);
+          } catch (rollbackError) {
             console.error("Case-only rename rollback failed:", rollbackError);
           }
           throw error;
@@ -559,7 +639,8 @@ export class FileManager {
         type: sourceStats.isDirectory() ? "folder" : "file",
       };
     } catch (error: any) {
-      if (error?.code !== "ENOENT") console.error("Error renaming entry:", error);
+      if (error?.code !== "ENOENT")
+        console.error("Error renaming entry:", error);
       return {
         success: false,
         code:
@@ -567,21 +648,29 @@ export class FileManager {
             ? "SOURCE_NOT_FOUND"
             : error?.code === "EEXIST" || error?.code === "ENOTEMPTY"
               ? "TARGET_EXISTS"
-          : error?.code === "EACCES" || error?.code === "EPERM"
-            ? "PERMISSION_DENIED"
-            : "RENAME_FAILED",
+              : error?.code === "EACCES" || error?.code === "EPERM"
+                ? "PERMISSION_DENIED"
+                : "RENAME_FAILED",
         error: error?.message || "Rename failed.",
       };
     }
   }
 
-  async deleteEntry(targetPath: string, force: boolean = false): Promise<FileOperationResult> {
+  async deleteEntry(
+    targetPath: string,
+    force: boolean = false,
+  ): Promise<FileOperationResult> {
     if (
       !validPath(targetPath) ||
       path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root
-    ) return invalidPath();
+    )
+      return invalidPath();
     if (typeof force !== "boolean") {
-      return { success: false, code: "INVALID_ARGUMENT", error: "force must be boolean." };
+      return {
+        success: false,
+        code: "INVALID_ARGUMENT",
+        error: "force must be boolean.",
+      };
     }
     try {
       const stats = await fs.lstat(targetPath);
@@ -633,7 +722,13 @@ export class FileManager {
     content: string = "",
     overwrite: boolean = false,
   ): Promise<FileOperationResult> {
-    if (!validPath(dirPath) || !validName(fileName) || typeof content !== "string" || typeof overwrite !== "boolean") return invalidPath();
+    if (
+      !validPath(dirPath) ||
+      !validName(fileName) ||
+      typeof content !== "string" ||
+      typeof overwrite !== "boolean"
+    )
+      return invalidPath();
     const fullPath = path.join(dirPath, fileName);
     try {
       if (fsSync.existsSync(fullPath) && !overwrite) {
@@ -692,7 +787,8 @@ export class FileManager {
     destPath: string,
   ): Promise<FileOperationResult> {
     if (!validPath(sourcePath) || !validPath(destPath)) return invalidPath();
-    if (fsSync.existsSync(destPath)) return { success: false, code: "DESTINATION_EXISTS" };
+    if (fsSync.existsSync(destPath))
+      return { success: false, code: "DESTINATION_EXISTS" };
     try {
       await fs.cp(sourcePath, destPath, {
         recursive: true,
@@ -712,7 +808,8 @@ export class FileManager {
     destPath: string,
   ): Promise<FileOperationResult> {
     if (!validPath(sourcePath) || !validPath(destPath)) return invalidPath();
-    if (fsSync.existsSync(destPath)) return { success: false, code: "DESTINATION_EXISTS" };
+    if (fsSync.existsSync(destPath))
+      return { success: false, code: "DESTINATION_EXISTS" };
     try {
       await fs.rename(sourcePath, destPath);
       this.clearFileCache(sourcePath);
@@ -721,11 +818,15 @@ export class FileManager {
     } catch (error: any) {
       if (error?.code === "EXDEV") {
         try {
-          await fs.cp(sourcePath, destPath, { recursive: true, force: false, errorOnExist: true });
+          await fs.cp(sourcePath, destPath, {
+            recursive: true,
+            force: false,
+            errorOnExist: true,
+          });
           await fs.rm(sourcePath, { recursive: true, force: true });
           this.clearFileCache(sourcePath);
           this.clearFileCache(destPath);
-      return { success: true, path: destPath };
+          return { success: true, path: destPath };
         } catch (fallbackError: any) {
           console.error("Error moving entry (fallback):", fallbackError);
           return {
@@ -740,7 +841,11 @@ export class FileManager {
   }
 
   async duplicateEntry(targetPath: string): Promise<FileOperationResult> {
-    if (!validPath(targetPath) || path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root) return invalidPath();
+    if (
+      !validPath(targetPath) ||
+      path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root
+    )
+      return invalidPath();
     try {
       const dir = path.dirname(targetPath);
       const ext = path.extname(targetPath);
@@ -762,9 +867,7 @@ export class FileManager {
     }
   }
 
-  async initializeFile(
-    filePath: string,
-  ): Promise<{
+  async initializeFile(filePath: string): Promise<{
     success: boolean;
     totalLines: number;
     errorCode?: string;
@@ -777,8 +880,10 @@ export class FileManager {
     lineEndings?: string[];
   }> {
     try {
-      if (!validPath(filePath)) return { success: false, totalLines: 0, errorCode: "INVALID_PATH" };
-      if (isAsarPath(filePath)) return { success: false, totalLines: 0, errorCode: "BINARY_FILE" };
+      if (!validPath(filePath))
+        return { success: false, totalLines: 0, errorCode: "INVALID_PATH" };
+      if (isAsarPath(filePath))
+        return { success: false, totalLines: 0, errorCode: "BINARY_FILE" };
       const stats = await fs.stat(filePath);
       if (stats.size > MAX_TEXT_FILE_SIZE) {
         return {
@@ -791,11 +896,18 @@ export class FileManager {
       }
 
       const sample = await fs.open(filePath, "r");
-      const sampleBuffer = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, stats.size));
+      const sampleBuffer = Buffer.alloc(
+        Math.min(BINARY_SAMPLE_SIZE, stats.size),
+      );
       await sample.read(sampleBuffer, 0, sampleBuffer.length, 0);
       await sample.close();
       if (looksBinary(sampleBuffer)) {
-        return { success: false, totalLines: 0, errorCode: "BINARY_FILE", size: stats.size };
+        return {
+          success: false,
+          totalLines: 0,
+          errorCode: "BINARY_FILE",
+          size: stats.size,
+        };
       }
 
       const content = decodeUtf8(await fs.readFile(filePath));
@@ -821,8 +933,7 @@ export class FileManager {
         eol,
         hasFinalNewline,
         maxLineLength,
-        incrementalEligible:
-          stats.size <= 1024 * 1024 && maxLineLength <= 1000,
+        incrementalEligible: stats.size <= 1024 * 1024 && maxLineLength <= 1000,
         lineEndings,
       };
     } catch (error: any) {
@@ -841,15 +952,24 @@ export class FileManager {
     lineCount: number,
   ): Promise<{ success: boolean; lines: string[] }> {
     try {
-      if (!validPath(filePath) || !Number.isInteger(startLine) || startLine < 0 ||
-          !Number.isInteger(lineCount) || lineCount < 0) return { success: false, lines: [] };
+      if (
+        !validPath(filePath) ||
+        !Number.isInteger(startLine) ||
+        startLine < 0 ||
+        !Number.isInteger(lineCount) ||
+        lineCount < 0
+      )
+        return { success: false, lines: [] };
       const safeStartLine = startLine;
       const safeLineCount = lineCount;
       const cachedLines = this.fileCache.get(filePath);
       // Never splice a new disk version into an existing partial load.
       if (!cachedLines) return { success: false, lines: [] };
 
-      const endLine = Math.min(safeStartLine + safeLineCount, cachedLines.length);
+      const endLine = Math.min(
+        safeStartLine + safeLineCount,
+        cachedLines.length,
+      );
       const lines = cachedLines.slice(safeStartLine, endLine);
 
       return {
@@ -883,7 +1003,9 @@ export class FileManager {
   }
 
   saveState(stateString: string): Promise<boolean> {
-    const next = this.stateSaveQueue.catch(() => false).then(() => this.writeState(stateString));
+    const next = this.stateSaveQueue
+      .catch(() => false)
+      .then(() => this.writeState(stateString));
     this.stateSaveQueue = next;
     return next;
   }
@@ -893,7 +1015,8 @@ export class FileManager {
       const filePath = path.join(app.getPath("userData"), "state.json");
       if (typeof stateString !== "string") return false;
       const state = JSON.parse(stateString);
-      if (!state || typeof state !== "object" || Array.isArray(state)) return false;
+      if (!state || typeof state !== "object" || Array.isArray(state))
+        return false;
       if (state.agent) delete state.agent.apiKeys;
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(`${filePath}.tmp`, JSON.stringify(state), "utf-8");
@@ -946,8 +1069,10 @@ export class FileManager {
   }
 
   private encryptionAvailable(): boolean {
-    return safeStorage.isEncryptionAvailable() &&
-      safeStorage.getSelectedStorageBackend?.() !== "basic_text";
+    return (
+      safeStorage.isEncryptionAvailable() &&
+      safeStorage.getSelectedStorageBackend?.() !== "basic_text"
+    );
   }
 
   private async readAgentSecrets(): Promise<Record<string, string>> {
@@ -967,18 +1092,30 @@ export class FileManager {
       return "";
     const secrets = await this.readAgentSecrets();
     try {
-      return safeStorage.decryptString(Buffer.from(secrets[providerId], "base64"));
+      return safeStorage.decryptString(
+        Buffer.from(secrets[providerId], "base64"),
+      );
     } catch {
       return "";
     }
   }
 
-  private async setAgentApiKey(providerId: string, apiKey: string): Promise<boolean> {
-    if (typeof providerId !== "string" || !/^[a-zA-Z0-9_-]+$/.test(providerId) ||
-        typeof apiKey !== "string" || !this.encryptionAvailable()) return false;
+  private async setAgentApiKey(
+    providerId: string,
+    apiKey: string,
+  ): Promise<boolean> {
+    if (
+      typeof providerId !== "string" ||
+      !/^[a-zA-Z0-9_-]+$/.test(providerId) ||
+      typeof apiKey !== "string" ||
+      !this.encryptionAvailable()
+    )
+      return false;
     const secrets = await this.readAgentSecrets();
     if (apiKey) {
-      secrets[providerId] = safeStorage.encryptString(apiKey).toString("base64");
+      secrets[providerId] = safeStorage
+        .encryptString(apiKey)
+        .toString("base64");
     } else {
       delete secrets[providerId];
     }

@@ -64,15 +64,24 @@ class FileExplorer extends Sidebar {
     for (const change of changes) {
       if (change.event === "change") {
         this.editor.agent?.fileKnowledge?.invalidateFile?.(
-          change.filePath, null, "external_change");
+          change.filePath,
+          null,
+          "external_change",
+        );
         this.editor.tabManager.reloadFileFromDisk(change.filePath);
       } else if (change.event === "add") {
         this.editor.agent?.fileKnowledge?.invalidateFile?.(
-          change.filePath, null, "external_add");
+          change.filePath,
+          null,
+          "external_add",
+        );
       } else if (change.event === "unlink" || change.event === "unlinkDir") {
         if (change.event === "unlink") {
           this.editor.agent?.fileKnowledge?.invalidateFile?.(
-            change.filePath, null, "external_unlink");
+            change.filePath,
+            null,
+            "external_unlink",
+          );
         }
         this.editor.tabManager.markFileAsDeleted(change.filePath);
         if (
@@ -138,14 +147,18 @@ class FileExplorer extends Sidebar {
       }
       const items = await window.api.getFolderContent(rootPath);
       if (rootPath !== this.rootPath) return false;
-      const finalStatus = items.length === 0
-        ? await this.fileOperations.pathStatus(rootPath)
-        : status;
+      const finalStatus =
+        items.length === 0
+          ? await this.fileOperations.pathStatus(rootPath)
+          : status;
       if (!finalStatus?.exists) {
         if (finalStatus?.code === "SOURCE_NOT_FOUND") {
           await this.invalidateWorkspace();
         } else {
-          console.error("Unable to verify workspace after refresh:", finalStatus);
+          console.error(
+            "Unable to verify workspace after refresh:",
+            finalStatus,
+          );
         }
         return false;
       }
@@ -219,7 +232,9 @@ class FileExplorer extends Sidebar {
     if (!this.rootPath) return;
     const previousRootPath = this.rootPath;
     const previousProjectName = this.projectName;
-    try { await window.api.stopWatching(); } catch (error) {
+    try {
+      await window.api.stopWatching();
+    } catch (error) {
       console.error("Error stopping invalid workspace watcher:", error);
     }
     this.resetWorkspaceState();
@@ -476,7 +491,8 @@ class FileExplorer extends Sidebar {
       if (
         this.editingState?.target !== file ||
         this.editingState?.input !== input
-      ) return;
+      )
+        return;
       input.focus();
       const dotIndex = (file.name || "").lastIndexOf(".");
       if (file.type === "file" && dotIndex > 0) {
@@ -686,13 +702,23 @@ class FileExplorer extends Sidebar {
     };
 
     childrenArray.unshift(placeholder);
-    this.editingState = { mode: "create", status: "editing", target: placeholder, input: null };
+    this.editingState = {
+      mode: "create",
+      status: "editing",
+      target: placeholder,
+      input: null,
+    };
     this.refresh();
   }
 
   startRename(file) {
     this.cancelEdit({ refresh: false });
-    this.editingState = { mode: "rename", status: "editing", target: file, input: null };
+    this.editingState = {
+      mode: "rename",
+      status: "editing",
+      target: file,
+      input: null,
+    };
     this.refresh();
   }
 
@@ -787,7 +813,11 @@ class FileExplorer extends Sidebar {
 
       const oldPath = target.path;
       if (NCEPath.isInside(this.activeFilePath, oldPath))
-        this.activeFilePath = NCEPath.rebase(this.activeFilePath, oldPath, newPath);
+        this.activeFilePath = NCEPath.rebase(
+          this.activeFilePath,
+          oldPath,
+          newPath,
+        );
       await this.editor.tabManager.updateFilePath(oldPath, newPath);
 
       target.name = name;
@@ -816,16 +846,23 @@ class FileExplorer extends Sidebar {
         return;
       }
       let result = await this.fileOperations.delete(file.path, false);
-      if (!result?.success && file.type === "folder" && result.code === "FOLDER_NOT_EMPTY") {
-        if (!confirm(
-          `Folder "${file.name}" is not empty.\n\n` +
-          "Deleting it will permanently delete all files and subfolders inside it.\n\n" +
-          "Do you really want to continue?",
-        )) {
+      if (
+        !result?.success &&
+        file.type === "folder" &&
+        result.code === "FOLDER_NOT_EMPTY"
+      ) {
+        if (
+          !confirm(
+            `Folder "${file.name}" is not empty.\n\n` +
+              "Deleting it will permanently delete all files and subfolders inside it.\n\n" +
+              "Do you really want to continue?",
+          )
+        ) {
           return;
         }
         if (
-          typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
+          typeof this.editor.tabManager.prepareFilesForDeletion ===
+            "function" &&
           !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
         ) {
           return;

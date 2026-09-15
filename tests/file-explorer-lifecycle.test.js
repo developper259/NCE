@@ -13,10 +13,18 @@ function loadFileExplorer(windowApi = {}, confirmImpl = () => true) {
     window: { api: windowApi },
     alert() {},
     confirm: confirmImpl,
-    requestAnimationFrame(callback) { callback(); },
-    document: { createElement() { return {}; } },
-    buildFileContextMenu() {}, buildFolderContextMenu() {},
-    buildBackgroundContextMenu() {}, buildProjectContextMenu() {},
+    requestAnimationFrame(callback) {
+      callback();
+    },
+    document: {
+      createElement() {
+        return {};
+      },
+    },
+    buildFileContextMenu() {},
+    buildFolderContextMenu() {},
+    buildBackgroundContextMenu() {},
+    buildProjectContextMenu() {},
   });
 }
 
@@ -32,11 +40,23 @@ function explorerFixture(rename) {
     isLoaded: true,
     clipboard: null,
     editingState: null,
-    fileOperations: { rename, pathStatus: async () => ({ exists: true, isDirectory: true }) },
-    refresh() { calls.refresh++; },
-    async refreshFolder() { calls.refreshFolder++; },
+    fileOperations: {
+      rename,
+      pathStatus: async () => ({ exists: true, isDirectory: true }),
+    },
+    refresh() {
+      calls.refresh++;
+    },
+    async refreshFolder() {
+      calls.refreshFolder++;
+    },
     editor: {
-      tabManager: { async updateFilePath() { calls.updatePath++; }, markFileAsDeleted() {} },
+      tabManager: {
+        async updateFilePath() {
+          calls.updatePath++;
+        },
+        markFileAsDeleted() {},
+      },
       events: { callEvent() {} },
     },
   });
@@ -47,7 +67,9 @@ test("non-empty folder deletion requires explicit force confirmation", async () 
   const FileExplorer = loadFileExplorer();
   const calls = [];
   const confirmations = [true, true];
-  const explorer = Object.create(loadFileExplorer({}, () => confirmations.shift()).prototype);
+  const explorer = Object.create(
+    loadFileExplorer({}, () => confirmations.shift()).prototype,
+  );
   Object.assign(explorer, {
     fileOperations: {
       async delete(path, force) {
@@ -60,19 +82,30 @@ test("non-empty folder deletion requires explicit force confirmation", async () 
     editor: {
       tabManager: {
         markFileAsDeleted() {},
-        async prepareFilesForDeletion() { return true; },
+        async prepareFilesForDeletion() {
+          return true;
+        },
       },
     },
     async refreshFolder() {},
   });
-  await explorer.deleteEntry({ name: "components", path: "/project/components", type: "folder" });
-  assert.deepEqual(calls, [["/project/components", false], ["/project/components", true]]);
+  await explorer.deleteEntry({
+    name: "components",
+    path: "/project/components",
+    type: "folder",
+  });
+  assert.deepEqual(calls, [
+    ["/project/components", false],
+    ["/project/components", true],
+  ]);
 });
 
 test("cancelling the force confirmation never retries deletion", async () => {
   const calls = [];
   const confirmations = [true, false];
-  const explorer = Object.create(loadFileExplorer({}, () => confirmations.shift()).prototype);
+  const explorer = Object.create(
+    loadFileExplorer({}, () => confirmations.shift()).prototype,
+  );
   Object.assign(explorer, {
     fileOperations: {
       async delete(path, force) {
@@ -83,7 +116,11 @@ test("cancelling the force confirmation never retries deletion", async () => {
     editor: { tabManager: { markFileAsDeleted() {} } },
     async refreshFolder() {},
   });
-  await explorer.deleteEntry({ name: "components", path: "/project/components", type: "folder" });
+  await explorer.deleteEntry({
+    name: "components",
+    path: "/project/components",
+    type: "folder",
+  });
   assert.deepEqual(calls, [["/project/components", false]]);
 });
 
@@ -96,7 +133,12 @@ test("inline rename recovers from invalid input and a later rename succeeds", as
   const first = { name: "a.js", path: "/project/a.js", type: "file" };
   explorer.startRename(first);
   let focused = 0;
-  explorer.editingState.input = { focus() { focused++; }, select() {} };
+  explorer.editingState.input = {
+    focus() {
+      focused++;
+    },
+    select() {},
+  };
   await explorer.commitEdit("../bad", first);
   assert.equal(explorer.editingState.status, "editing");
   assert.equal(renameCalls, 0);
@@ -115,7 +157,9 @@ test("inline rename recovers from invalid input and a later rename succeeds", as
 test("Enter and blur share one committing guard", async () => {
   let resolveRename;
   let renameCalls = 0;
-  const pending = new Promise(resolve => { resolveRename = resolve; });
+  const pending = new Promise((resolve) => {
+    resolveRename = resolve;
+  });
   const { explorer } = explorerFixture(async () => {
     renameCalls++;
     return pending;
@@ -146,7 +190,9 @@ test("a source deleted during rename closes the session and refreshes", async ()
 test("deleted workspace is invalidated and a new workspace can open", async () => {
   let stopped = 0;
   const api = {
-    stopWatching: async () => { stopped++; },
+    stopWatching: async () => {
+      stopped++;
+    },
     startWatching: async () => {},
     getFolderContent: async () => [],
   };
@@ -161,7 +207,13 @@ test("deleted workspace is invalidated and a new workspace can open", async () =
     isLoaded: true,
     clipboard: {},
     editingState: null,
-    fileOperations: { pathStatus: async () => ({ exists, isDirectory: exists, code: exists ? undefined : "SOURCE_NOT_FOUND" }) },
+    fileOperations: {
+      pathStatus: async () => ({
+        exists,
+        isDirectory: exists,
+        code: exists ? undefined : "SOURCE_NOT_FOUND",
+      }),
+    },
     refresh() {},
     editor: {
       tabManager: { markFileAsDeleted() {} },
@@ -192,9 +244,15 @@ test("state restoration skips a workspace that no longer exists", async () => {
   manager.editor = {
     fileExplorer: {
       projectExpanded: true,
-      async loadProject() { attempts++; return false; },
+      async loadProject() {
+        attempts++;
+        return false;
+      },
     },
   };
-  await manager.loadFileExplorerState({ rootPath: "/missing", expandedPaths: ["/missing/sub"] });
+  await manager.loadFileExplorerState({
+    rootPath: "/missing",
+    expandedPaths: ["/missing/sub"],
+  });
   assert.equal(attempts, 1);
 });

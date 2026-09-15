@@ -44,6 +44,58 @@ class ModelClient {
     return config?.modelConfig?.name || config?.model || "Le modèle";
   }
 
+  buildProviderHeaders({ provider, apiKey = null, sessionId = null } = {}) {
+    const isValidHeaderName = (name) =>
+      /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+    const headers = {
+      "Content-Type": "application/json",
+      "User-Agent": "nce-agent/0.0.1",
+    };
+    const requestHeaders = provider?.requestHeaders;
+    const isPlainHeaders =
+      requestHeaders &&
+      typeof requestHeaders === "object" &&
+      !Array.isArray(requestHeaders);
+
+    if (isPlainHeaders) {
+      for (const [name, value] of Object.entries(requestHeaders)) {
+        if (
+          typeof name !== "string" ||
+          !name.trim() ||
+          !isValidHeaderName(name.trim()) ||
+          value === null ||
+          value === undefined ||
+          (typeof value !== "string" &&
+            typeof value !== "number" &&
+            typeof value !== "boolean" &&
+            typeof value !== "bigint")
+        ) {
+          continue;
+        }
+        headers[name] = String(value);
+      }
+    }
+
+    for (const name of Object.keys(headers)) {
+      if (name.toLowerCase() === "authorization") delete headers[name];
+    }
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const sessionHeader = provider?.sessionHeader;
+    if (
+      typeof sessionHeader === "string" &&
+      sessionHeader.trim() &&
+      isValidHeaderName(sessionHeader.trim()) &&
+      sessionId !== null &&
+      sessionId !== undefined &&
+      String(sessionId)
+    ) {
+      headers[sessionHeader.trim()] = String(sessionId);
+    }
+
+    return headers;
+  }
+
   getHeaderValue(response, name) {
     const headers = response?.headers;
     if (!headers) return null;
@@ -384,11 +436,13 @@ class ModelClient {
 
     const sanitizedProvider = { ...provider };
     delete sanitizedProvider.apiKey;
+    const sessionId = config.sessionId ?? this.agent.currentSessionId ?? null;
 
     if (typeof this.agent.api?.aiChat === "function") {
       const result = await this.agent.api.aiChat({
         provider: sanitizedProvider,
         payload,
+        sessionId,
       });
       const unwrapped = this.agent.unwrapModelTransportResult(result);
       this.recordPreviousOutputUsage(unwrapped);
@@ -398,15 +452,18 @@ class ModelClient {
       const result = await this.agent.api.requestAI({
         provider: sanitizedProvider,
         payload,
+        sessionId,
       });
       const unwrapped = this.agent.unwrapModelTransportResult(result);
       this.recordPreviousOutputUsage(unwrapped);
       return this.agent.recordModelPromptUsage(unwrapped);
     }
 
-    const headers = { "Content-Type": "application/json" };
-    if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
-    headers["User-Agent"] = "nce-agent/0.0.1";
+    const headers = this.buildProviderHeaders({
+      provider,
+      apiKey: provider.apiKey,
+      sessionId,
+    });
     const url = `${provider.baseURL.replace(/\/+$/, "")}`;
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(), 60000);
