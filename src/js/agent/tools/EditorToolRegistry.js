@@ -6,13 +6,13 @@ class EditorToolRegistry {
   getCreateFileToolDescription() {
     const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
     const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
-    return `Crée un fichier petit ou moyen. Garde le contenu initial <= ${safeLimit} caractères (limite runtime absolue : ${hardLimit}) afin de laisser une marge à l'échappement JSON. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
+    return `Crée un fichier petit ou moyen. Limite recommandée <= ${safeLimit} caractères ; limite runtime absolue ${hardLimit}. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. Si NCE indique temporaryRecoveryMax, cette valeur devient la limite active pour ce fichier pendant le recovery. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
   }
 
   getWriteFileChunkToolDescription() {
     const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
     const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
-    return `Ajoute exactement la prochaine portion à la fin d'un gros fichier. Garde content <= ${safeLimit} caractères (limite runtime absolue : ${hardLimit}) et passe la dernière revision dans expectedRevision. Chaque succès retourne la revision requise par le chunk suivant. Après le dernier chunk, valide avec read_file.`;
+    return `Ajoute exactement la prochaine portion à la fin d'un gros fichier. Limite recommandée <= ${safeLimit} caractères ; limite runtime absolue ${hardLimit}. Le recoveryTarget indiqué par NCE peut être plus petit. expectedRevision est obligatoire : utilise la revision retournée par le chunk précédent. Après le dernier chunk, valide avec read_file.`;
   }
 
   updateLargeFileToolDefinitions() {

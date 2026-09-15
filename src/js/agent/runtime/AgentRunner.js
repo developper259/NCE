@@ -813,6 +813,23 @@ class AgentRunner {
                 modelResponse,
               ) || {},
             );
+          if (largeWrite.strategyReplanRequired &&
+              this.agent.largeFileWriter.isRepeatedFailedStrategy(largeWrite,
+                error.toolName, this.agent.largeFileWriter.extractToolCallArgsFromError(error, modelResponse))) {
+            largeWrite.consecutiveRejectedStrategies += 1;
+            this.agent.agentProgress.metrics.repeatedFailedStrategiesRejected += 1;
+            console.info("[NCE Agent write recovery]", { action: "strategy_rejected",
+              code: "REPEATED_FAILED_STRATEGY", executed: false, path: largeWrite.path });
+            this.agent.messages.push({ role: "system", content:
+              largeWrite.consecutiveRejectedStrategies >= 2
+                ? "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with the last returned revision. Repeated large calls are rejected before execution."
+                : this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(largeWrite, error) });
+            if (largeWrite.consecutiveRejectedStrategies >= 3) {
+              this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
+              throw this.agent.createLargeWriteRecoveryError(error, 3, 3);
+            }
+            continue;
+          }
           if (
             largeWrite.strategySignature &&
             largeWrite.strategySignature === toolSignature
@@ -827,6 +844,8 @@ class AgentRunner {
             largeWrite.strategySignature = toolSignature;
           }
 
+          largeWrite.totalWriteRecoveryEvents += 1;
+          this.agent.agentProgress.metrics.writeStrategyFailures += 1;
           if (largeWrite.strategyFailures >= maxLargeWriteRecoveryAttempts) {
             try {
               this.agent.largeFileWriter.requestStrategyReplan(
@@ -836,6 +855,20 @@ class AgentRunner {
               );
               largeWrite.strategyFailures = 0;
               largeWrite.strategyReplanRequired = true;
+              this.agent.agentProgress.metrics.writeStrategyReplans += 1;
+              this.agent.agentProgress.metrics.writeRecoveryTemporaryLimitApplied += 1;
+              for (let index = this.agent.messages.length - 1; index >= 0; index--) {
+                const message = this.agent.messages[index];
+                if (message?.role === "system" &&
+                    /^\[NCE WRITE (?:RECOVERY|STRATEGY ENFORCEMENT)\]/.test(message.content || "")) {
+                  this.agent.messages.splice(index, 1);
+                }
+              }
+              console.info("[NCE Agent write recovery]", { path: largeWrite.path,
+                tool: error.toolName, strategyFailures: 3,
+                strategyReplanCount: largeWrite.strategyReplanCount,
+                action: "strategy_replan", failedPayloadApproxChars: error.argumentsLength,
+                temporaryRecoveryMax: largeWrite.temporaryRecoveryMax, sameModel: true });
               this.agent.messages.push({
                 role: "system",
                 content:
@@ -862,11 +895,7 @@ class AgentRunner {
           );
           this.agent.messages.push({
             role: "system",
-            content: this.agent.buildLargeWriteRecoveryInstruction(
-              error.toolName,
-              largeWrite,
-              repeatedOversizedRetry,
-            ),
+            content: `[NCE WRITE RECOVERY] Failure ${largeWrite.strategyFailures}/3. Hard limit ${largeWrite.maxChunkChars}, normal recommended ${largeWrite.recommendedChunkChars}, recoveryTarget ${this.agent.largeFileWriter.getRecoveryContentTarget(largeWrite, this.agent.largeFileWriter.extractToolCallArgsFromError(error, modelResponse))}. Send a smaller valid JSON write. Same model.`,
           });
           continue;
         }
@@ -911,22 +940,6 @@ class AgentRunner {
                   action: "force_write_tool",
                 },
               );
-              continue;
-            }
-            if (
-              this.agent.forceLargeWriteModelFallback(
-                runConfig,
-                largeWrite,
-                this.agent.createLargeWriteProtocolError(largeWrite),
-              )
-            ) {
-              largeWrite.planningRetryCount = 0;
-              largeWrite.recoveryAttempts = 0;
-              this.agent.messages.push({
-                role: "system",
-                content:
-                  this.agent.buildLargeWriteActionInstruction(largeWrite),
-              });
               continue;
             }
             largeWrite.active = false;
@@ -1190,7 +1203,25 @@ class AgentRunner {
         let completionRequest = null;
         for (const call of executableToolCalls) {
           this.agent.assertRunActive(runId, controller);
-          const toolResult = await this.agent.executeToolCall(call, {
+          const callName = call?.function?.name;
+          const callArgs = this.agent.parseCanonicalToolArguments(call?.function?.arguments);
+          const rejectedStrategy = ["create_file", "write_file_chunk"].includes(callName) &&
+            this.agent.largeFileWriter.isRepeatedFailedStrategy(largeWrite, callName, callArgs);
+          const recoveryOversize = ["create_file", "write_file_chunk"].includes(callName) &&
+            largeWrite.strategyReplanRequired && largeWrite.temporaryRecoveryMax &&
+            (!largeWrite.path || this.agent.largeFileWriter.pathsReferToSameFile(largeWrite.path, callArgs.path)) &&
+            typeof callArgs.content === "string" && callArgs.content.length > largeWrite.temporaryRecoveryMax;
+          const localCode = rejectedStrategy ? "REPEATED_FAILED_STRATEGY" :
+            recoveryOversize ? "WRITE_RECOVERY_CONTENT_TOO_LARGE" : null;
+          if (localCode) {
+            largeWrite.consecutiveRejectedStrategies += 1;
+            this.agent.agentProgress.metrics.repeatedFailedStrategiesRejected += 1;
+            console.info("[NCE Agent write recovery]", { action: "strategy_rejected",
+              code: localCode, executed: false, path: callArgs.path });
+          }
+          const toolResult = localCode ? { success: false, result: { error: {
+            code: localCode, message: `The previous large create strategy failed repeatedly. This call was NOT executed. Current recovery max: ${largeWrite.temporaryRecoveryMax}. Create a minimal scaffold <= 1000-2000 chars, then append chunks <= 2000-3000 chars using each returned revision.` } } }
+            : await this.agent.executeToolCall(call, {
             sessionId: this.agent.currentSessionId,
             runId,
           });
@@ -1198,6 +1229,14 @@ class AgentRunner {
           this.agent.messages.push(
             this.agent.createToolResultMessage(call.id, toolResult),
           );
+          if (localCode && largeWrite.consecutiveRejectedStrategies >= 2) {
+            this.agent.messages.push({ role: "system", content:
+              "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with each returned revision. Any repeated large call will be rejected locally." });
+          }
+          if (localCode && largeWrite.consecutiveRejectedStrategies >= 3) {
+            this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
+            throw this.agent.createLargeWriteRecoveryError({ toolName: callName }, 3, 3);
+          }
 
           const toolPayload = toolResult?.result ?? toolResult;
           const toolProgress = this.agent.agentProgress.consumeTool(
@@ -1238,6 +1277,10 @@ class AgentRunner {
             toolResult,
             toolArgs,
           );
+          if (toolResult?.success && ["create_file", "write_file_chunk"].includes(callName)) {
+            this.agent.largeFileWriter.resetStrategyAfterProgress(largeWrite, callName, callArgs);
+            this.agent.agentProgress.metrics.writeRecoverySuccesses += 1;
+          }
           if (largeWriteUpdate?.directive) {
             progressDecision = {
               action: "directive",

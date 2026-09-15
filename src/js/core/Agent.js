@@ -601,6 +601,8 @@ class Agent {
       (finishReason === "length" && stopsBeforeObjectEnd);
     if (!truncatedJson) return false;
     error.finishReason = finishReason;
+    error.truncationCause = finishReason === "length" ? "output_limit" :
+      finishReason === "stop" ? "incomplete_model_json" : "unknown";
     error.code = "TOOL_ARGUMENTS_TRUNCATED";
     error.category = "TOOL_ARGUMENTS_TRUNCATED";
     error.largeWriteTruncated = true;
