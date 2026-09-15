@@ -47,29 +47,10 @@ const AgentAI = {
   readOnlyTools: ["read_file", "get_project_map", "search_code"],
 
   providers: {
-    ollama: {
-      id: "ollama",
-      name: "Ollama",
-      baseURL: "http://localhost:11434/v1",
-      requiresApiKey: false,
-      supportsTools: true,
-      supportsToolChoice: true,
-      defaultModel: "qwen3",
-      fallbackModels: [],
-
-      models: {
-        qwen3: {
-          id: "qwen3",
-          name: "Qwen 3",
-          contextWindow: 40960,
-        },
-      },
-    },
-
     openrouter: {
       id: "openrouter",
       name: "OpenRouter",
-      baseURL: "https://openrouter.ai/api/v1",
+      baseURL: "https://openrouter.ai/api/v1/chat/completions",
       requiresApiKey: true,
       supportsTools: true,
       supportsToolChoice: true,

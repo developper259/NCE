@@ -406,7 +406,8 @@ class ModelClient {
 
     const headers = { "Content-Type": "application/json" };
     if (provider.apiKey) headers.Authorization = `Bearer ${provider.apiKey}`;
-    const url = `${provider.baseURL.replace(/\/+$/, "")}/chat/completions`;
+    headers["User-Agent"] = "nce-agent/0.0.1";
+    const url = `${provider.baseURL.replace(/\/+$/, "")}`;
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(), 60000);
 
