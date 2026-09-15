@@ -1143,11 +1143,18 @@ class FileKnowledge {
       "write_file_chunk",
       "rename_file",
       "delete_file",
+      "create_folder",
+      "delete_folder",
     ]);
     if (!contentWrites.has(toolName)) return;
     this.resetDuplicateReadSequence();
     this.workspaceContentRevision += 1;
     this.projectSearchCache.clear();
+
+    if (toolName === "create_folder" || toolName === "delete_folder") {
+      this.bumpProjectStructureRevision();
+      return;
+    }
 
     if (toolName === "rename_file") {
       const oldPath = this.resolveToolPath(args, result, "path");

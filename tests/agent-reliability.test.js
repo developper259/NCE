@@ -377,7 +377,7 @@ test("provider accounting includes large tool schemas in the real input budget",
   const agent = createAgent(e);
   agent.setProvider({ id: "mock", baseURL: "https://mock.invalid" });
   agent.setModel("mock");
-  agent.contextWindow = 12000;
+  agent.contextWindow = 13000;
   agent.maxTokens = 4096;
   agent.registerTool("large_schema", {
     readOnly: true,

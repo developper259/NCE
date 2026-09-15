@@ -285,65 +285,28 @@ class ActiveFileManager {
     file.diffRows = [];
     const beforeLines = originalText === "" ? [] : originalText.split(/\r?\n/);
     const afterLines = afterText === "" ? [] : afterText.split(/\r?\n/);
-    const rows = beforeLines.length + 1;
-    const cols = afterLines.length + 1;
-    const lcs = Array.from({ length: rows }, () => Array(cols).fill(0));
-
-    for (
-      let beforeIndex = beforeLines.length - 1;
-      beforeIndex >= 0;
-      beforeIndex -= 1
-    ) {
-      for (
-        let afterIndex = afterLines.length - 1;
-        afterIndex >= 0;
-        afterIndex -= 1
-      ) {
-        lcs[beforeIndex][afterIndex] =
-          beforeLines[beforeIndex] === afterLines[afterIndex]
-            ? lcs[beforeIndex + 1][afterIndex + 1] + 1
-            : Math.max(
-                lcs[beforeIndex + 1][afterIndex],
-                lcs[beforeIndex][afterIndex + 1],
-              );
-      }
-    }
-
-    let beforeIndex = 0;
+    const operations = this.buildScalableLineDiff(beforeLines, afterLines);
     let documentIndex = 0;
-    let afterIndex = 0;
-    while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
-      if (
-        beforeIndex < beforeLines.length &&
-        afterIndex < afterLines.length &&
-        beforeLines[beforeIndex] === afterLines[afterIndex]
-      ) {
+    for (const operation of operations) {
+      if (operation.type === "equal") {
         file.diffRows.push({
           type: "unchanged",
-          text: afterLines[afterIndex],
+          text: operation.text,
           documentIndex,
         });
-        beforeIndex += 1;
-        afterIndex += 1;
         documentIndex += 1;
-      } else if (
-        beforeIndex < beforeLines.length &&
-        (afterIndex >= afterLines.length ||
-          lcs[beforeIndex + 1][afterIndex] >= lcs[beforeIndex][afterIndex + 1])
-      ) {
+      } else if (operation.type === "delete") {
         file.diffRows.push({
           type: "removed",
-          text: beforeLines[beforeIndex],
+          text: operation.text,
           documentIndex: null,
         });
-        beforeIndex += 1;
       } else {
         file.diffRows.push({
           type: "added",
-          text: afterLines[afterIndex],
+          text: operation.text,
           documentIndex,
         });
-        afterIndex += 1;
         documentIndex += 1;
       }
     }
@@ -358,6 +321,116 @@ class ActiveFileManager {
     if (beforeText === afterText) {
       file.diffRows = [];
     }
+  }
+
+  buildScalableLineDiff(beforeLines, afterLines) {
+    const prefix = [];
+    let prefixLength = 0;
+    while (
+      prefixLength < beforeLines.length &&
+      prefixLength < afterLines.length &&
+      beforeLines[prefixLength] === afterLines[prefixLength]
+    ) {
+      prefix.push({ type: "equal", text: beforeLines[prefixLength] });
+      prefixLength += 1;
+    }
+    let suffixLength = 0;
+    while (
+      suffixLength < beforeLines.length - prefixLength &&
+      suffixLength < afterLines.length - prefixLength &&
+      beforeLines[beforeLines.length - suffixLength - 1] ===
+        afterLines[afterLines.length - suffixLength - 1]
+    )
+      suffixLength += 1;
+
+    const before = beforeLines.slice(
+      prefixLength,
+      beforeLines.length - suffixLength,
+    );
+    const after = afterLines.slice(
+      prefixLength,
+      afterLines.length - suffixLength,
+    );
+    const maxD = 2000;
+    let frontier = new Map([[0, 0]]);
+    const trace = [];
+    let solution = null;
+    for (let distance = 0; distance <= maxD && !solution; distance += 1) {
+      trace.push(new Map(frontier));
+      for (let k = -distance; k <= distance; k += 2) {
+        const down =
+          k === -distance ||
+          (k !== distance &&
+            (frontier.get(k - 1) || 0) < (frontier.get(k + 1) || 0));
+        let x = down
+          ? frontier.get(k + 1) || 0
+          : (frontier.get(k - 1) || 0) + 1;
+        let y = x - k;
+        while (
+          x < before.length &&
+          y < after.length &&
+          before[x] === after[y]
+        ) {
+          x += 1;
+          y += 1;
+        }
+        frontier.set(k, x);
+        if (x >= before.length && y >= after.length) {
+          solution = distance;
+          break;
+        }
+      }
+    }
+
+    const middle = [];
+    if (solution === null) {
+      console.warn("[NCE Diff] large diff fallback", {
+        event: "large_diff_fallback",
+        beforeLines: beforeLines.length,
+        afterLines: afterLines.length,
+      });
+      for (const text of before) middle.push({ type: "delete", text });
+      for (const text of after) middle.push({ type: "insert", text });
+    } else {
+      let x = before.length;
+      let y = after.length;
+      const reversed = [];
+      for (let distance = solution; distance > 0; distance -= 1) {
+        const previous = trace[distance];
+        const k = x - y;
+        const down =
+          k === -distance ||
+          (k !== distance &&
+            (previous.get(k - 1) || 0) < (previous.get(k + 1) || 0));
+        const previousK = down ? k + 1 : k - 1;
+        const previousX = previous.get(previousK) || 0;
+        const previousY = previousX - previousK;
+        while (x > previousX && y > previousY) {
+          reversed.push({ type: "equal", text: before[x - 1] });
+          x -= 1;
+          y -= 1;
+        }
+        if (down) reversed.push({ type: "insert", text: after[previousY] });
+        else reversed.push({ type: "delete", text: before[previousX] });
+        x = previousX;
+        y = previousY;
+      }
+      while (x > 0 && y > 0) {
+        reversed.push({ type: "equal", text: before[x - 1] });
+        x -= 1;
+        y -= 1;
+      }
+      while (x > 0) reversed.push({ type: "delete", text: before[--x] });
+      while (y > 0) reversed.push({ type: "insert", text: after[--y] });
+      middle.push(...reversed.reverse());
+    }
+    for (let index = 0; index < suffixLength; index += 1) {
+      middle.push({
+        type: "equal",
+        text: afterLines[afterLines.length - suffixLength + index],
+      });
+    }
+    return prefix.concat(middle);
   }
 
   validateActiveFileSyntax() {

@@ -160,6 +160,32 @@ class HighlightController {
     }
   }
 
+  async recoverDocumentHighlight(file, reason) {
+    if (!file) return;
+    const epoch = this.documentEpochs.get(file.id);
+    if (this.documentModes.get(file.id) !== "incremental") return;
+
+    console.warn("[NSH] Recovering document highlighting", {
+      event: "document_highlight_recovery",
+      fileId: file.id,
+      reason: reason?.message || String(reason || "unknown"),
+    });
+
+    await this.invalidateFile(file);
+    if (this.documentEpochs.get(file.id) === epoch) return;
+
+    try {
+      await this.openFile(file);
+      if (file === this.editor.tabManager.activeFile) {
+        this.editor.lineController.refresh(true);
+      }
+    } catch (error) {
+      console.error("[NSH] Document highlighting recovery failed", error);
+      this.documentModes.set(file.id, "line");
+      this.reset();
+    }
+  }
+
   invalidateFile(file) {
     const closing = this.closeFile(file);
     for (const line of file.lines) {
@@ -269,28 +295,53 @@ class HighlightController {
     const lineCount = file?.lines?.length || 0;
     if (lineCount === 0) return null;
 
-    const requestedStart = Number.isFinite(
-      this.editor.lineController.startIndex,
-    )
-      ? this.editor.lineController.startIndex
+    const lineController = this.editor.lineController;
+    const displayLineCount =
+      typeof lineController.getDisplayLineCount === "function"
+        ? lineController.getDisplayLineCount()
+        : lineCount;
+    const displayStart = Number.isFinite(lineController.startIndex)
+      ? Math.max(
+          0,
+          Math.min(
+            Math.floor(lineController.startIndex),
+            Math.max(0, displayLineCount - 1),
+          ),
+        )
       : 0;
-    const startLine = Math.max(
-      0,
-      Math.min(Math.floor(requestedStart), lineCount - 1),
+    const visibleLines = Math.max(1, lineController.maxViewLines || 1);
+    const displayEnd = Math.min(
+      displayLineCount,
+      displayStart + visibleLines + this.marginHighlight,
     );
-    if (requestedStart !== startLine) {
-      this.editor.lineController.startIndex = startLine;
-      this.editor.lineController.offsetY = 0;
+    const documentIndexes = [];
+    for (
+      let displayIndex = displayStart;
+      displayIndex < displayEnd;
+      displayIndex++
+    ) {
+      const row =
+        typeof lineController.getDisplayRow === "function"
+          ? lineController.getDisplayRow(displayIndex)
+          : { documentIndex: displayIndex };
+      if (
+        Number.isInteger(row?.documentIndex) &&
+        row.documentIndex >= 0 &&
+        row.documentIndex < lineCount
+      ) {
+        documentIndexes.push(row.documentIndex);
+      }
     }
-
-    const visibleLines = Math.max(
-      1,
-      this.editor.lineController.maxViewLines || 1,
-    );
+    if (documentIndexes.length === 0) return null;
+    const startLine = Math.min(...documentIndexes);
     const endLine = Math.min(
       lineCount,
-      startLine + visibleLines + this.marginHighlight,
+      Math.max(...documentIndexes) + this.marginHighlight + 1,
     );
+    if (lineController.startIndex !== displayStart) {
+      lineController.startIndex = displayStart;
+      this.editor.lineController.offsetY = 0;
+    }
     if (endLine <= startLine) return null;
     return { startLine, endLine };
   }
@@ -358,7 +409,10 @@ class HighlightController {
         response.lines || [],
         response.changedStartLine || update.startLine,
       );
-    }).catch((error) => console.error("[NSH] Document update failed", error));
+    }).catch((error) => {
+      console.error("[NSH] Document update failed", error);
+      return this.recoverDocumentHighlight(file, error);
+    });
   }
 
   closeFile(file) {
@@ -398,26 +452,30 @@ class HighlightController {
   }
 
   refreshLineNode() {
+    this.lineNodes.clear();
     this.editor.output.childNodes.forEach((node) => {
       const lineNumber = parseInt(node.dataset.line, 10);
-      const screenRow = lineNumber - this.editor.lineController.startIndex;
-      this.lineNodes.set(screenRow, node);
+      if (Number.isInteger(lineNumber) && lineNumber >= 0) {
+        this.lineNodes.set(lineNumber, node);
+      }
     });
   }
 
-  setLineNode(lineNumber, node) {
-    const screenRow = lineNumber - this.editor.lineController.startIndex;
-    this.lineNodes.set(screenRow, node);
+  setLineNode(documentIndex, node) {
+    if (!Number.isInteger(documentIndex) || documentIndex < 0 || !node) return;
+    this.lineNodes.set(documentIndex, node);
   }
 
-  getLineNode(lineNumber) {
-    const screenRow = lineNumber - this.editor.lineController.startIndex;
-    return this.lineNodes.get(screenRow);
+  getLineNode(documentIndex) {
+    if (!Number.isInteger(documentIndex) || documentIndex < 0) return null;
+    return this.lineNodes.get(documentIndex) || null;
   }
 
   markDirty(lineNumber) {
     if (
-      lineNumber > this.editor.lineController.lines.length ||
+      !Number.isInteger(lineNumber) ||
+      lineNumber < 0 ||
+      lineNumber >= this.editor.lineController.lines.length ||
       this.dirtyLines.has(lineNumber)
     )
       return;
@@ -478,7 +536,7 @@ class HighlightController {
     lineNode.setState(finalState);
 
     const nextLineExists =
-      lineNumber + 1 <= this.editor.lineController.lines.length;
+      lineNumber + 1 < this.editor.lineController.lines.length;
 
     if (nextLineExists && !this.statesEqual(previousState, finalState)) {
       this.markDirty(lineNumber + 1);
@@ -572,6 +630,8 @@ class HighlightController {
           continue;
         }
 
+        const renderNode = this.getLineNode(lineNumber);
+        const renderGeneration = renderNode?.dataset?.renderGeneration;
         try {
           const result = await this.nshClient.request("highlightLine", {
             requestType: "highlightLine",
@@ -599,7 +659,12 @@ class HighlightController {
             lineNode.setTokens(result.tokens);
             lineNode.setHighlighted(true);
 
-            this.applyHighlightToLine(lineNumber, result.tokens);
+            this.applyHighlightToLine(
+              lineNumber,
+              result.tokens,
+              renderNode,
+              renderGeneration,
+            );
             this.dirtyLines.delete(lineNumber);
           }
 
@@ -625,14 +690,32 @@ class HighlightController {
     }
   }
 
-  applyHighlightToLine(lineNumber, tokens) {
+  applyHighlightToLine(
+    lineNumber,
+    tokens,
+    expectedNode = null,
+    expectedGeneration = null,
+  ) {
     const lineNode = this.getLineNode(lineNumber);
 
     if (!lineNode) return;
+    if (expectedNode && lineNode !== expectedNode) return;
+    if (
+      expectedGeneration !== null &&
+      lineNode.dataset?.renderGeneration !== expectedGeneration
+    )
+      return;
 
-    const text = this.editor.lineController.lines[lineNumber]?.getText();
+    const documentLine = this.editor.lineController.lines[lineNumber];
+    const text = documentLine?.getText();
 
     if (!text) return;
+    if (
+      lineNode.dataset?.line !== undefined &&
+      parseInt(lineNode.dataset.line, 10) !== lineNumber
+    )
+      return;
+    if (lineNode.isConnected === false) return;
 
     // Highlighting is asynchronous, so it must use the same horizontal
     // projection as the line renderer at the time the response is applied.
@@ -646,7 +729,17 @@ class HighlightController {
       visibleTokens,
     );
 
-    lineNode.replaceChildren(fragment);
+    try {
+      lineNode.replaceChildren(fragment);
+    } catch (error) {
+      console.warn("[NCE Highlight] stale DOM mapping skipped", {
+        event: "stale_dom_mapping_skipped",
+        documentIndex: lineNumber,
+        error,
+      });
+      this.markDirty(lineNumber);
+      return false;
+    }
     return true;
   }
 }

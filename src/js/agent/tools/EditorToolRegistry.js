@@ -221,6 +221,28 @@ class EditorToolRegistry {
       },
       execute: (args) => this.agent.deleteWorkspaceFile(args),
     });
+    this.agent.registerTool("create_folder", {
+      description: "Crée un dossier dans le workspace. Le parent doit exister.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", minLength: 1, maxLength: this.getPathLimit() },
+        },
+        required: ["path"],
+      },
+      execute: (args) => this.agent.createWorkspaceFolder(args),
+    });
+    this.agent.registerTool("delete_folder", {
+      description: "Supprime un dossier et son contenu du workspace.",
+      parameters: {
+        type: "object",
+        properties: {
+          path: { type: "string", minLength: 1, maxLength: this.getPathLimit() },
+        },
+        required: ["path"],
+      },
+      execute: (args) => this.agent.deleteWorkspaceFolder(args),
+    });
     this.agent.registerTool("modify_file", {
       description: `Remplace une occurrence à la revision fournie. path <= ${this.getPathLimit()} caractères ; oldText/newText n'ont pas de maxLength artificiel. Pour une grosse modification, préfère plusieurs edits ciblés.`,
       parameters: {

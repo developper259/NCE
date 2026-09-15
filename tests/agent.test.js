@@ -173,7 +173,9 @@ async function setupEditable(content, { open = true, saved = true } = {}) {
 
 const CODE_TOOLS = [
   "create_file",
+  "create_folder",
   "delete_file",
+  "delete_folder",
   "get_changed_files",
   "get_diff",
   "get_project_map",

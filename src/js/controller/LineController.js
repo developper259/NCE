@@ -6,6 +6,7 @@ class LineController {
     this.outputHeight = 0;
 
     this.dirtyLines = new Set();
+    this.renderGeneration = 0;
 
     this.marginChars = 10;
     this.marginLines = 3;
@@ -42,7 +43,9 @@ class LineController {
   getDisplayRow(displayIndex) {
     if (this.diffRows?.length) return this.diffRows[displayIndex] || null;
     const line = this.lines[displayIndex];
-    return line ? { type: "unchanged", text: line.getText(), documentIndex: displayIndex } : null;
+    return line
+      ? { type: "unchanged", text: line.getText(), documentIndex: displayIndex }
+      : null;
   }
 
   getDisplayIndexForDocument(documentIndex) {
@@ -371,7 +374,8 @@ class LineController {
     const textLines = content.split("\n");
 
     this.lines = textLines.map((text) => new LineNode(text));
-    if (this.editor.tabManager.activeFile) this.editor.tabManager.activeFile.syntaxMetrics = null;
+    if (this.editor.tabManager.activeFile)
+      this.editor.tabManager.activeFile.syntaxMetrics = null;
     if (this.editor.tabManager.activeFile) {
       this.editor.tabManager.activeFile.diffRows = null;
     }
@@ -603,9 +607,18 @@ class LineController {
 
     // Only visible rows can produce DOM work. Avoid indexOf across the entire
     // file for each dirty line when editing near the end of a large document.
-    const end = Math.min(this.getDisplayLineCount(), this.startIndex + this.renderedLineCount);
-    for (let displayIndex = this.startIndex; displayIndex < end; displayIndex++) {
-      const documentIndex = this.diffRows?.length ? this.diffRows[displayIndex]?.documentIndex : displayIndex;
+    const end = Math.min(
+      this.getDisplayLineCount(),
+      this.startIndex + this.renderedLineCount,
+    );
+    for (
+      let displayIndex = this.startIndex;
+      displayIndex < end;
+      displayIndex++
+    ) {
+      const documentIndex = this.diffRows?.length
+        ? this.diffRows[displayIndex]?.documentIndex
+        : displayIndex;
       if (this.dirtyLines.has(this.lines[documentIndex])) {
         this.refreshLineOutput(displayIndex - this.startIndex);
       }
@@ -686,6 +699,7 @@ class LineController {
 
       lineOBJ.dataset.line = documentIndex === null ? "" : documentIndex;
       lineOBJ.dataset.displayLine = displayIndex;
+      lineOBJ.dataset.renderGeneration = String(this.renderGeneration);
 
       child.replaceWith(lineOBJ);
 
@@ -707,6 +721,8 @@ class LineController {
     if (!this.editor.tabManager.activeFile) {
       return;
     }
+
+    this.renderGeneration += 1;
 
     const fragment = document.createDocumentFragment();
     this.editor.highlightController.lineNodes.clear();
@@ -750,6 +766,7 @@ class LineController {
 
         lineOBJ.dataset.line = documentIndex === null ? "" : documentIndex;
         lineOBJ.dataset.displayLine = displayIndex;
+        lineOBJ.dataset.renderGeneration = String(this.renderGeneration);
 
         if (documentIndex !== null) {
           this.editor.highlightController.setLineNode(documentIndex, lineOBJ);

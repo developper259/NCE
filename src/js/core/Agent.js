@@ -1529,6 +1529,9 @@ class Agent {
   getWorkspaceFileTarget(...args) {
     return this.workspaceFileManager.getWorkspaceFileTarget(...args);
   }
+  getWorkspaceFolderTarget(...args) {
+    return this.workspaceFileManager.getWorkspaceFolderTarget(...args);
+  }
   getFileOperationError(...args) {
     return this.workspaceFileManager.getFileOperationError(...args);
   }
@@ -1546,6 +1549,12 @@ class Agent {
   }
   async deleteWorkspaceFile(...args) {
     return this.workspaceFileManager.deleteWorkspaceFile(...args);
+  }
+  async createWorkspaceFolder(...args) {
+    return this.workspaceFileManager.createWorkspaceFolder(...args);
+  }
+  async deleteWorkspaceFolder(...args) {
+    return this.workspaceFileManager.deleteWorkspaceFolder(...args);
   }
   async readSelection(...args) {
     return this.activeFileManager.readSelection(...args);
