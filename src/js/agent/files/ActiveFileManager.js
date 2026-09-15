@@ -62,6 +62,8 @@ class ActiveFileManager {
       requestedEndLine,
       {
         toolName: "internal_active_read",
+        startColumn: Number.isInteger(args.startColumn)
+          ? Math.max(0, args.startColumn) : 0,
         currentRevision: this.agent.getContentRevision(fullContent),
       },
     );
@@ -82,6 +84,36 @@ class ActiveFileManager {
     };
     const startLine = readRange.startLine;
     const endLine = Math.min(readRange.endLine, lines.length);
+    const startColumn = Number.isInteger(args.startColumn)
+      ? Math.max(0, args.startColumn) : 0;
+    const firstLine = lines[startLine - 1] || "";
+    if (startColumn > firstLine.length) return { success: false,
+      error: { code: "INVALID_RANGE", message: "startColumn exceeds the line." } };
+    if (startColumn > 0 || firstLine.length > 4000) {
+      const content = firstLine.slice(startColumn, startColumn + 4000);
+      const endColumn = startColumn + content.length;
+      const revision = this.agent.getContentRevision(fullContent);
+      this.agent.fileKnowledge.recordPartialSegment(absolutePath, {
+        revision, toolName: "internal_active_read", line: startLine,
+        startColumn, endColumn, lineLength: firstLine.length,
+        content, totalLines: lines.length, diskRead: false });
+      return { success: true, readDecision: "NEW",
+        path: this.agent.toProjectRelativePath(file.path,
+          this.agent.editor?.fileExplorer?.rootPath),
+        revision, requestedRange: { startLine: requestedStartLine,
+          endLine: requestedEndLine, startColumn },
+        deliveredRange: { startLine, endLine: startLine,
+          startColumn, endColumn },
+        completeLineRange: null,
+        partialSegment: { line: startLine, startColumn, endColumn,
+          lineLength: firstLine.length },
+        lineTruncated: true, contentStartLine: startLine,
+        contentEndLine: startLine, contentStartColumn: startColumn,
+        contentEndColumn: endColumn,
+        nextStartLine: endColumn < firstLine.length ? startLine : startLine + 1,
+        nextStartColumn: endColumn < firstLine.length ? endColumn : 0,
+        content };
+    }
     const readContext = this.agent.createFileReadContext(
       absolutePath,
       fullContent,
@@ -110,7 +142,13 @@ class ActiveFileManager {
         this.agent.editor?.fileExplorer?.rootPath,
       ),
       startLine,
-      endLine,
+      endLine: readContext.knowledgeEndLine ?? startLine,
+      requestedRange: { startLine: requestedStartLine,
+        endLine: requestedEndLine },
+      deliveredRange: { startLine,
+        endLine: readContext.knowledgeEndLine ?? startLine },
+      completeLineRange: readContext.knowledgeEndLine
+        ? { startLine, endLine: readContext.knowledgeEndLine } : null,
       totalLines: lines.length,
       truncated: endLine < lines.length || readContext.truncated,
       revision: readContext.revision,

@@ -260,14 +260,27 @@ class ToolExecutor {
         if (limited.content.length > readMaxChars) {
           const prefix = limited.content.slice(0, readMaxChars);
           const lastNewline = prefix.lastIndexOf("\n");
-          limited.content = lastNewline > 0 ? prefix.slice(0, lastNewline) : prefix;
+          limited.content = lastNewline >= 0 ? prefix.slice(0, lastNewline) : prefix;
           limited.truncated = true;
           limited.hasMore = true;
-          const visibleLines = Math.max(1, (limited.content.match(/\n/g) || []).length);
-          limited.contentEndLine =
-            (limited.contentStartLine || limited.startLine || 1) + visibleLines - 1;
-          limited.endLine = limited.contentEndLine;
-          limited.nextStartLine = limited.contentEndLine + 1;
+          const firstLine = limited.contentStartLine || limited.startLine || 1;
+          if (lastNewline >= 0) {
+            const completeLines = (prefix.slice(0, lastNewline + 1).match(/\n/g) || []).length;
+            limited.contentEndLine = firstLine + completeLines - 1;
+            limited.completeLineRange = { startLine: firstLine,
+              endLine: limited.contentEndLine };
+            limited.endLine = limited.contentEndLine;
+            limited.nextStartLine = limited.contentEndLine + 1;
+            limited.nextStartColumn = 0;
+          } else {
+            limited.contentEndLine = null;
+            limited.completeLineRange = null;
+            limited.lineTruncated = true;
+            limited.partialSegment = { line: firstLine, startColumn: 0,
+              endColumn: prefix.length };
+            limited.nextStartLine = firstLine;
+            limited.nextStartColumn = prefix.length;
+          }
         } else if (Number.isInteger(limited.totalLines)) {
           limited.hasMore = Number.isInteger(limited.endLine)
             ? limited.endLine < limited.totalLines
@@ -283,19 +296,29 @@ class ToolExecutor {
         const requestedEnd = Number.isInteger(limited.requestedEndLine)
           ? limited.requestedEndLine : limited.endLine;
         if (Number.isInteger(requestedStart) && Number.isInteger(requestedEnd)) {
-          limited.requestedRange = { startLine: requestedStart, endLine: requestedEnd };
+          limited.requestedRange = { startLine: requestedStart, endLine: requestedEnd,
+            ...(Number.isInteger(limited.requestedStartColumn)
+              ? { startColumn: limited.requestedStartColumn } : {}) };
         }
         const deliveredStart = Number.isInteger(limited.contentStartLine)
           ? limited.contentStartLine : limited.startLine;
-        const deliveredEnd = Number.isInteger(limited.contentEndLine)
-          ? limited.contentEndLine : limited.endLine;
+        const deliveredEnd = limited.partialSegment?.line ||
+          (Number.isInteger(limited.contentEndLine)
+            ? limited.contentEndLine : limited.endLine);
         if (Number.isInteger(deliveredStart) && Number.isInteger(deliveredEnd)) {
-          limited.deliveredRange = { startLine: deliveredStart, endLine: deliveredEnd };
+          limited.deliveredRange = { startLine: deliveredStart, endLine: deliveredEnd,
+            ...(limited.partialSegment
+              ? { startColumn: limited.partialSegment.startColumn,
+                  endColumn: limited.partialSegment.endColumn } : {}) };
           console.debug("[NCE Agent read]", {
             path: limited.path || null,
+            revision: limited.revision || null,
             requestedRange: limited.requestedRange || null,
             deliveredRange: limited.deliveredRange,
+            completeLineRange: limited.completeLineRange || null,
+            partialSegment: limited.partialSegment || null,
             source: limited.informationSource || "unknown",
+            charactersDelivered: limited.content.length,
           });
         }
       }
@@ -687,6 +710,11 @@ class ToolExecutor {
         result = { ...result, error: this.normalizeAgentError(result.error) };
       }
       const meta = this.getToolResultMeta(name, result);
+      if (name !== "read_file" &&
+          ["new", "restored", "state_changed", "validation_progress",
+            "error_discovered", "error_resolved"].includes(meta.informationStatus)) {
+        this.agent.fileKnowledge.resetDuplicateReadSequence();
+      }
       const toolResult =
         result && result.success === false
           ? { ...result, meta }

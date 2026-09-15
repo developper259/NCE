@@ -415,7 +415,9 @@ class AgentProgress {
         this.awaitingProgress ||
         this.consecutiveNoNewInformation >= this.noInformationThreshold
       ) {
-        return this.triggerStagnation(iteration, toolName, informationStatus);
+        return this.triggerStagnation(iteration, toolName, informationStatus,
+          toolName === "read_file" ? "repeated_redundant_action" :
+            "repeated_no_new_information");
       }
       return { action: "none" };
     }
@@ -533,15 +535,7 @@ class AgentProgress {
   }
 
   getRepeatedRedundantDirective(level) {
-    const strategy =
-      level >= 2
-        ? " Choose the most plausible implementation and validate it; if it fails, use the concrete failure to guide the next investigation."
-        : " If you have a plausible implementation path, make the smallest coherent attempt and validate it.";
-    return (
-      "[NCE PROGRESS DIRECTIVE] This exact inspection is redundant and cannot provide new information. Do not repeat it. Use the project information already available." +
-      strategy +
-      " Otherwise inspect only a specific missing piece of information."
-    );
+    return "[NCE PROGRESS DIRECTIVE] This requested read cannot provide new information because its content is already visible. Use the existing context or inspect only a currently missing range, another file, a newer revision, or the indicated nextStartLine/nextStartColumn continuation. Necessary reads remain available.";
   }
 
   getUnavailableToolDirective(toolName, attempts = 1) {

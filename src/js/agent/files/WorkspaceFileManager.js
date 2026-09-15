@@ -1372,7 +1372,7 @@ class WorkspaceFileManager {
       requestedRange.endLine,
       {
         toolName: "read_file",
-        forceRead: Number.isInteger(options.startColumn),
+        startColumn: Number.isInteger(options.startColumn) ? Math.max(0, options.startColumn) : 0,
         currentRevision:
           typeof openFileContent === "string"
             ? this.agent.getContentRevision(openFileContent)
@@ -1388,7 +1388,68 @@ class WorkspaceFileManager {
           "runtime-cache",
         );
       }
-      return readDecision.result;
+      const restored = readDecision.result;
+      const nextLine = restored?.nextStartLine;
+      const remainingBudget = 4000 - (restored?.content?.length || 0) - 1;
+      if (restored?.restoredFromCache === true && !restored.partialSegment &&
+          Number.isInteger(nextLine) && nextLine <= requestedRange.endLine &&
+          remainingBudget > 0 && !readDecision.entry?.contentLines?.has(nextLine)) {
+        const visible = this.agent.fileKnowledge.modelVisibleFiles.get(
+          AgentPath.normalize(absolute));
+        const alreadyVisible = visible?.revision === restored.revision &&
+          visible.ranges?.some((range) =>
+            range.startLine <= nextLine && range.endLine >= nextLine);
+        if (!alreadyVisible) {
+          const source = typeof openFileContent === "string" ? openFileContent :
+            (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
+          if (typeof source === "string") {
+            const revision = this.agent.getContentRevision(source);
+            if (revision !== restored.revision) {
+              this.agent.fileKnowledge.invalidateFile(absolute, revision,
+                "new_revision");
+              return this.readFile(filePath, options);
+            }
+            const lines = source.split(/\r?\n/);
+            const fresh = [];
+            let chars = 0;
+            for (let line = nextLine;
+                line <= Math.min(requestedRange.endLine, lines.length); line++) {
+              if (readDecision.entry?.contentLines?.has(line) ||
+                  visible?.revision === revision && visible.ranges?.some((range) =>
+                    range.startLine <= line && range.endLine >= line)) break;
+              const value = lines[line - 1];
+              const required = value.length + (fresh.length ? 1 : 0);
+              if (chars + required > remainingBudget) break;
+              fresh.push(value);
+              chars += required;
+            }
+            if (fresh.length) {
+              const end = nextLine + fresh.length - 1;
+              const added = fresh.join("\n");
+              this.agent.fileKnowledge.recordRead(absolute, {
+                revision, toolName: "read_file", startLine: nextLine,
+                endLine: end, requestedStartLine: requestedRange.startLine,
+                requestedEndLine: requestedRange.endLine,
+                knowledgeEndLine: end, totalLines: lines.length,
+                content: added, diskRead: typeof openFileContent !== "string" });
+              return { ...restored, readDecision: "RESTORED_AND_NEW",
+                informationGain: "PARTIAL_NEW_CONTENT",
+                content: `${restored.content}\n${added}`,
+                contentEndLine: end, endLine: end,
+                completeLineRange: { startLine: restored.contentStartLine,
+                  endLine: end },
+                deliveredRange: { startLine: restored.contentStartLine,
+                  endLine: end },
+                nextStartLine: end < requestedRange.endLine && end < lines.length
+                  ? end + 1 : null,
+                hasMore: end < requestedRange.endLine && end < lines.length,
+                informationSource: typeof openFileContent === "string"
+                  ? "runtime_cache+editor" : "runtime_cache+filesystem" };
+            }
+          }
+        }
+      }
+      return restored;
     }
 
     const content =
@@ -1404,45 +1465,56 @@ class WorkspaceFileManager {
       const startColumn = Number.isInteger(options.startColumn)
         ? Math.max(0, options.startColumn)
         : 0;
-      const selected = contentLines.slice(startLine - 1, endLine).join("\n");
-      if (startColumn > selected.length) {
+      const firstLine = contentLines[startLine - 1] || "";
+      if (startColumn > firstLine.length) {
         return {
           success: false,
           error: { code: "INVALID_RANGE", message: "startColumn dépasse la ligne demandée." },
         };
       }
-      const remaining = selected.slice(startColumn);
       if (
         startColumn > 0 ||
-        contentLines[startLine - 1].length - startColumn > 4000
+        firstLine.length - startColumn > 4000
       ) {
-        const visible = remaining.slice(0, 4000);
-        const truncated = visible.length < remaining.length;
-        const newlineCount = (visible.match(/\n/g) || []).length;
-        const lastNewline = visible.lastIndexOf("\n");
-        const endColumn = lastNewline === -1
-          ? startColumn + visible.length
-          : visible.length - lastNewline - 1;
-        const contentEndLine = startLine + newlineCount;
+        const visible = firstLine.slice(startColumn, startColumn + 4000);
+        const endColumn = startColumn + visible.length;
+        const truncated = endColumn < firstLine.length;
+        const revision = this.agent.getContentRevision(content);
+        this.agent.fileKnowledge.recordPartialSegment(absolute, {
+          revision, toolName: "read_file", line: startLine,
+          startColumn, endColumn, lineLength: firstLine.length,
+          content: visible, totalLines,
+          requestedStartLine: requestedRange.startLine,
+          requestedEndLine: requestedRange.endLine,
+          diskRead: typeof openFileContent !== "string",
+        });
         return {
           success: true,
           readDecision: "NEW",
+          informationGain: "PARTIAL_NEW_CONTENT",
           path: filePath,
           requestedStartLine: requestedRange.startLine,
           requestedEndLine: requestedRange.endLine,
+          requestedStartColumn: startColumn,
+          requestedRange: { ...requestedRange, startColumn },
+          deliveredRange: { startLine, endLine: startLine,
+            startColumn, endColumn },
           startLine,
-          endLine: contentEndLine,
+          endLine: startLine,
           contentStartLine: startLine,
           contentStartColumn: startColumn,
-          contentEndLine,
+          contentEndLine: startLine,
           contentEndColumn: endColumn,
-          lineTruncated: truncated && newlineCount === 0,
+          completeLineRange: null,
+          partialSegment: { line: startLine, startColumn, endColumn,
+            lineLength: firstLine.length },
+          lineTruncated: true,
           totalLines,
-          revision: this.agent.getContentRevision(content),
+          revision,
           informationSource: typeof openFileContent === "string" ? "editor" : "filesystem",
           truncated,
-          hasMore: truncated || contentEndLine < totalLines,
-          nextStartLine: truncated ? contentEndLine : (contentEndLine < totalLines ? contentEndLine + 1 : null),
+          hasMore: truncated || startLine < endLine || startLine < totalLines,
+          nextStartLine: truncated ? startLine : (startLine < totalLines ? startLine + 1 : null),
           nextStartColumn: truncated ? endColumn : null,
           content: visible,
         };
@@ -1470,12 +1542,19 @@ class WorkspaceFileManager {
       return {
         success: true,
         readDecision: "NEW",
+        informationGain: readDecision.informationGain === "PARTIAL_NEW_CONTENT"
+          ? "PARTIAL_NEW_CONTENT" : "NEW_CONTENT",
         path: filePath,
         requestedStartLine: requestedRange.startLine,
         requestedEndLine: requestedRange.endLine,
+        requestedRange,
+        deliveredRange: { startLine,
+          endLine: readContext.knowledgeEndLine ?? startLine },
         startLine,
         endLine: readContext.knowledgeEndLine ?? startLine,
         contentStartLine: startLine,
+        completeLineRange: readContext.knowledgeEndLine
+          ? { startLine, endLine: readContext.knowledgeEndLine } : null,
         totalLines,
         revision: readContext.revision,
         contentEndLine: readContext.knowledgeEndLine,
@@ -1489,6 +1568,7 @@ class WorkspaceFileManager {
           (readContext.knowledgeEndLine ?? startLine) < totalLines
             ? (readContext.knowledgeEndLine ?? startLine) + 1
             : null,
+        nextStartColumn: (readContext.knowledgeEndLine ?? startLine) < totalLines ? 0 : null,
         content: readContext.content,
       };
     }

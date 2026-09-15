@@ -218,6 +218,33 @@ class ContextManager {
     return { modelMessages, invalidToolExchanges };
   }
 
+  deduplicateRedundantReadExchanges(messages = []) {
+    const entries = this.groupModelContextEntries(messages);
+    const redundant = entries.filter((entry) =>
+      entry.kind === "tool_exchange" && entry.protocolValid &&
+      !String(entry.assistant?.content || "").trim() &&
+      !String(entry.assistant?.reasoning_content ||
+        entry.assistant?.reasoning || entry.assistant?.reasoningText || "").trim() &&
+      entry.calls.length > 0 &&
+      entry.calls.every((call) => call?.function?.name === "read_file") &&
+      entry.toolMessages.every((tool) => {
+        const root = this.parseContextJSON(tool.content);
+        const payload = root?.result ?? root;
+        return root?.success !== false && payload?.success !== false &&
+          payload?.noNewInformation === true && typeof payload.content !== "string";
+      }));
+    if (redundant.length <= 1) return messages;
+    const remove = new Set(redundant.slice(0, -1));
+    const omitted = redundant.slice(0, -1).flatMap((entry) => entry.messages);
+    const metrics = this.agent.fileKnowledge?.metrics;
+    if (metrics) {
+      metrics.proactiveRedundantExchangesRemoved += remove.size;
+      metrics.redundantContextTokensAvoided += this.estimateTokens(omitted);
+    }
+    return entries.filter((entry) => !remove.has(entry))
+      .flatMap((entry) => entry.messages);
+  }
+
   storeStableContext(modelMessages, sourceMessageCount, details = {}) {
     const state = this.compactionState;
     state.stableMessages = modelMessages
@@ -456,22 +483,20 @@ class ContextManager {
           typeof payload.content !== "string" ||
           typeof payload.path !== "string" ||
           typeof payload.revision !== "string" ||
-          !Number.isInteger(payload.startLine)
+          !Number.isInteger(payload.startLine) &&
+          !Number.isInteger(payload.contentStartLine)
         ) {
           continue;
         }
-        const endLine = Number.isInteger(payload.contentEndLine)
-          ? payload.contentEndLine
-          : Number.isInteger(payload.endLine) && payload.truncated !== true
-            ? payload.endLine
-            : null;
-        if (!Number.isInteger(endLine) || endLine < payload.startLine) continue;
-        ranges.push({
-          path: payload.path,
-          revision: payload.revision,
-          startLine: payload.startLine,
-          endLine,
-        });
+        const complete = payload.completeLineRange ||
+          (payload.partialSegment || payload.lineTruncated || payload.truncated === true
+            ? null : Number.isInteger(payload.contentEndLine)
+              ? { startLine: payload.contentStartLine || payload.startLine,
+                  endLine: payload.contentEndLine } : null);
+        const partial = payload.partialSegment || null;
+        if (!complete && !partial) continue;
+        ranges.push({ path: payload.path, revision: payload.revision,
+          completeLineRange: complete, partialSegment: partial });
       }
     }
     return ranges;
@@ -528,9 +553,15 @@ class ContextManager {
             "startLine",
             "endLine",
             "contentEndLine",
+            "completeLineRange",
+            "partialSegment",
             "totalLines",
             "truncated",
             "revision",
+            "alreadyKnown",
+            "noNewInformation",
+            "readDecision",
+            "restoredFromCache",
           ]
         : isSearch
           ? ["success", "query", "path", "totalMatches", "total"]
@@ -632,10 +663,10 @@ class ContextManager {
       options.charsPerToken,
     );
     const estimatedFullTokens = estimatedFullMessageTokens + toolSchemaTokens;
-    const stableSourceMessages = this.getStableSourceMessages(
+    const stableSourceMessages = this.deduplicateRedundantReadExchanges(this.getStableSourceMessages(
       messages,
       options.enabled,
-    );
+    ));
     const state = config.contextState;
     const hasCurrentState =
       state &&

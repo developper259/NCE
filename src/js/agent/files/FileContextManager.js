@@ -20,15 +20,19 @@ class FileContextManager {
       lines.length,
       Math.max(safeStartLine, endLine || safeStartLine),
     );
-    const rangeContent = lines.slice(safeStartLine - 1, safeEndLine).join("\n");
-    const visibleContent = this.agent.truncate(rangeContent, 4000);
-    const truncated = visibleContent !== rangeContent;
-    const visiblePrefix = truncated
-      ? visibleContent.split("\n\n[... contenu tronqué par NCE ...]")[0]
-      : visibleContent;
-    const completeVisibleLines = truncated
-      ? Math.max(1, (visiblePrefix.match(/\n/g) || []).length)
-      : safeEndLine - safeStartLine + 1;
+    const deliveredLines = [];
+    let deliveredChars = 0;
+    for (let line = safeStartLine; line <= safeEndLine; line++) {
+      const value = lines[line - 1];
+      const required = value.length + (deliveredLines.length ? 1 : 0);
+      if (deliveredChars + required > 4000) break;
+      deliveredLines.push(value);
+      deliveredChars += required;
+    }
+    const visibleContent = deliveredLines.join("\n");
+    const completeEndLine = deliveredLines.length
+      ? safeStartLine + deliveredLines.length - 1 : null;
+    const truncated = completeEndLine !== safeEndLine;
     const context = {
       path: absolutePath,
       startLine: safeStartLine,
@@ -40,11 +44,8 @@ class FileContextManager {
       version: ++this.agent.fileContextVersion,
       source,
       truncated,
-      cacheContent: visiblePrefix,
-      knowledgeEndLine:
-        completeVisibleLines > 0
-          ? safeStartLine + completeVisibleLines - 1
-          : null,
+      cacheContent: visibleContent,
+      knowledgeEndLine: completeEndLine,
     };
     this.agent.readFileContexts.set(absolutePath, context);
     return context;

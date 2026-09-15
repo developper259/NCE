@@ -63,8 +63,17 @@ class FileExplorer extends Sidebar {
 
     for (const change of changes) {
       if (change.event === "change") {
+        this.editor.agent?.fileKnowledge?.invalidateFile?.(
+          change.filePath, null, "external_change");
         this.editor.tabManager.reloadFileFromDisk(change.filePath);
+      } else if (change.event === "add") {
+        this.editor.agent?.fileKnowledge?.invalidateFile?.(
+          change.filePath, null, "external_add");
       } else if (change.event === "unlink" || change.event === "unlinkDir") {
+        if (change.event === "unlink") {
+          this.editor.agent?.fileKnowledge?.invalidateFile?.(
+            change.filePath, null, "external_unlink");
+        }
         this.editor.tabManager.markFileAsDeleted(change.filePath);
         if (
           this.editingState?.target?.path &&

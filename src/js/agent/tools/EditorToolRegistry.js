@@ -240,7 +240,7 @@ class EditorToolRegistry {
     });
     this.agent.registerTool("read_file", {
       description:
-        "Lit une plage de lignes d'un fichier du workspace et retourne sa revision.",
+        "Lit une quantité bornée de contenu et retourne sa revision. Suivez nextStartLine et nextStartColumn pour continuer, y compris sur une longue ligne. Ne redemandez pas une plage déjà visible : NCE réduit automatiquement une demande partiellement visible à sa partie manquante. Toute lecture de contenu réellement manquant reste autorisée.",
       readOnly: true,
       parameters: {
         type: "object",
