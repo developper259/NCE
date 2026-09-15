@@ -115,7 +115,14 @@ class EditorToolRegistry {
       execute: (args = {}) => {
         const result = this.agent.getDiff(args);
         if (result?.success !== false) {
-          this.agent.runChangeTracker?.markReviewDiff?.(args?.path, result);
+          const tracker = this.agent.runChangeTracker;
+          tracker?.markReviewDiff?.(args?.path, result);
+          result.unreviewedPaths = tracker?.getUnreviewedPaths?.() || [];
+          result.reviewComplete = result.unreviewedPaths.length === 0;
+          if (!args?.path && result.truncated) {
+            result.reviewInstruction =
+              "The global diff was truncated. Review the remaining changed files with get_diff({ path }) before task_complete.";
+          }
         }
         return result;
       },

@@ -23,8 +23,8 @@ class RunChangeTracker {
       unresolvedFailures: new Map(),
       reviewedChangedFiles: false,
       reviewedDiff: false,
-      reviewedChangedFilesVersion: null,
       reviewedDiffVersion: null,
+      globalDiffTruncated: false,
       changeVersion: 0,
       invalidated: false,
     };
@@ -137,10 +137,15 @@ class RunChangeTracker {
         deletions: Number.isFinite(change.deletions)
           ? change.deletions
           : (existing.deletions ?? 0),
-        reviewed: change.reviewed ?? existing.reviewed ?? false,
-        review: change.review ?? existing.review ?? null,
+        reviewed: false,
+        review: null,
+        version: (existing.version || 0) + 1,
+        reviewedVersion: null,
       };
       this.current.changeVersion += 1;
+      this.current.reviewedDiff = false;
+      this.current.globalDiffTruncated = false;
+      this.current.reviewedChangedFiles = false;
       this.current.changes.set(key, merged);
       return merged;
     }
@@ -161,8 +166,13 @@ class RunChangeTracker {
       deletions: Number.isFinite(change.deletions) ? change.deletions : 0,
       reviewed: false,
       review: null,
+      version: 1,
+      reviewedVersion: null,
     };
     this.current.changeVersion += 1;
+    this.current.reviewedDiff = false;
+    this.current.globalDiffTruncated = false;
+    this.current.reviewedChangedFiles = false;
     this.current.changes.set(key, record);
     return record;
   }
@@ -250,6 +260,12 @@ class RunChangeTracker {
       existing.renamed = true;
       existing.afterRevision = result.verification?.revision || existing.afterRevision;
       this.current.changeVersion += 1;
+      existing.version = (existing.version || 0) + 1;
+      existing.reviewed = false;
+      existing.reviewedVersion = null;
+      this.current.reviewedDiff = false;
+      this.current.globalDiffTruncated = false;
+      this.current.reviewedChangedFiles = false;
       this.current.changes.set(newPath, existing);
       return existing;
     }
@@ -268,6 +284,12 @@ class RunChangeTracker {
       this.current.changes.delete(oldPath);
       this.current.changes.set(newPath, existing);
       this.current.changeVersion += 1;
+      existing.version = (existing.version || 0) + 1;
+      existing.reviewed = false;
+      existing.reviewedVersion = null;
+      this.current.reviewedDiff = false;
+      this.current.globalDiffTruncated = false;
+      this.current.reviewedChangedFiles = false;
       return existing;
     }
     const generated = {
@@ -300,6 +322,9 @@ class RunChangeTracker {
     if (existing && existing.status === "created") {
       this.current.changes.delete(relativePath);
       this.current.changeVersion += 1;
+      this.current.reviewedDiff = false;
+      this.current.globalDiffTruncated = false;
+      this.current.reviewedChangedFiles = false;
       return null;
     }
     const deletion = {
@@ -346,22 +371,58 @@ class RunChangeTracker {
   markReviewChangedFiles() {
     if (!this.current) return false;
     this.current.reviewedChangedFiles = true;
-    this.current.reviewedChangedFilesVersion = this.current.changeVersion;
     return true;
+  }
+
+  getUnreviewedPaths() {
+    if (!this.current) return [];
+    return [...this.current.changes.values()]
+      .filter((change) => change.reviewedVersion !== change.version)
+      .map((change) => change.path);
+  }
+
+  getCompletionDiagnostics() {
+    const changes = [...(this.current?.changes.values() || [])];
+    const unreviewedFiles = this.getUnreviewedPaths();
+    return {
+      changeVersion: this.current?.changeVersion ?? 0,
+      changedFiles: changes.map((change) => change.path),
+      reviewedFiles: changes
+        .filter((change) => change.reviewedVersion === change.version)
+        .map((change) => change.path),
+      unreviewedFiles,
+      globalDiffReviewed: this.current?.reviewedDiff === true &&
+        this.current?.reviewedDiffVersion === this.current?.changeVersion,
+      globalDiffTruncated: this.current?.globalDiffTruncated === true,
+      pendingToolCalls: [...(this.current?.pendingToolCalls || [])],
+      unresolvedFailures: [...(this.current?.unresolvedFailures.values() || [])]
+        .filter((failure) => failure.blocking !== false)
+        .map((failure) => ({ code: failure.code, toolName: failure.toolName,
+          path: failure.path, status: failure.status })),
+    };
   }
 
   markReviewDiff(path = null, result = null) {
     if (!this.current) return false;
+    if (result?.success === false) return false;
+    if (result?.truncated === true || result?.diffTooLarge === true) {
+      if (!path) this.current.globalDiffTruncated = true;
+      return false;
+    }
     if (path) {
       const change = this.current.changes.get(this.normalizePath(path));
       if (!change) return false;
       change.reviewed = true;
-      change.reviewVersion = this.current.changeVersion;
+      change.reviewedVersion = change.version;
       return true;
     }
-    if (result?.truncated === true || result?.diffTooLarge === true) return false;
+    for (const change of this.current.changes.values()) {
+      change.reviewed = true;
+      change.reviewedVersion = change.version;
+    }
     this.current.reviewedDiff = true;
     this.current.reviewedDiffVersion = this.current.changeVersion;
+    this.current.globalDiffTruncated = false;
     return true;
   }
 
@@ -441,6 +502,12 @@ class RunChangeTracker {
       patch.truncated = true;
       patch.hasMore = true;
       patch.diff = `${text.slice(0, maxChars)}\n... [truncated]`;
+    }
+    patch.reviewComplete = !patch.truncated && !patch.diffTooLarge;
+    patch.unreviewedPaths = this.getUnreviewedPaths();
+    if (!requestedPath && patch.truncated) {
+      patch.reviewInstruction =
+        "The global diff was truncated. Review the remaining changed files with get_diff({ path }) before task_complete.";
     }
 
     const fileChanged = requestedPath
@@ -666,20 +733,17 @@ class RunChangeTracker {
       };
     }
     if (this.hasEffectiveChanges()) {
-      const reviewCurrentForChangedFiles =
-        this.current.reviewedChangedFilesVersion === this.current.changeVersion;
-      const reviewCurrentForDiff =
-        this.current.reviewedDiffVersion === this.current.changeVersion;
-      const everyFileReviewed = [...this.current.changes.values()].every(
-        (change) => change.reviewVersion === this.current.changeVersion,
-      );
-      if (!reviewCurrentForDiff && !everyFileReviewed) {
+      const unreviewedPaths = this.getUnreviewedPaths();
+      if (unreviewedPaths.length) {
         return {
           success: false,
           error: {
             code: "CHANGES_NOT_REVIEWED",
-            message:
-              "Revoyez un diff complet avec get_diff avant task_complete.",
+            message: this.current.globalDiffTruncated
+              ? "The global diff was truncated. Review the remaining changed files with get_diff({ path }) before task_complete."
+              : "Review the remaining changed files with get_diff({ path }) before task_complete.",
+            unreviewedPaths,
+            globalDiffTruncated: this.current.globalDiffTruncated,
           },
         };
       }

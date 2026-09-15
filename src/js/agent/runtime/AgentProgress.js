@@ -218,13 +218,14 @@ class AgentProgress {
     });
   }
 
-  recordTaskCompletion(iteration, accepted, reason = null) {
+  recordTaskCompletion(iteration, accepted, reason = null, diagnostics = {}) {
     this.log({
       event: accepted ? "task_complete" : "task_complete_rejected",
       iteration,
       lastTool: "task_complete",
       informationStatus: "task_complete",
       reason,
+      ...(accepted ? {} : diagnostics),
     });
   }
 
@@ -627,6 +628,18 @@ class AgentProgress {
       ...(Number.isInteger(details.level) ? { level: details.level } : {}),
       ...(details.previousPhase
         ? { previousPhase: details.previousPhase }
+        : {}),
+      ...(details.event === "task_complete_rejected"
+        ? {
+            changeVersion: details.changeVersion,
+            changedFiles: details.changedFiles,
+            reviewedFiles: details.reviewedFiles,
+            unreviewedFiles: details.unreviewedFiles,
+            globalDiffReviewed: details.globalDiffReviewed,
+            globalDiffTruncated: details.globalDiffTruncated,
+            pendingToolCalls: details.pendingToolCalls,
+            unresolvedFailures: details.unresolvedFailures,
+          }
         : {}),
     });
   }

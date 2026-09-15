@@ -1226,6 +1226,7 @@ class AgentRunner {
             runId,
           });
           this.agent.assertRunActive(runId, controller);
+          const toolMessageIndex = this.agent.messages.length;
           this.agent.messages.push(
             this.agent.createToolResultMessage(call.id, toolResult),
           );
@@ -1269,6 +1270,8 @@ class AgentRunner {
             completionRequest = {
               summary: toolPayload.summary || toolArgs.summary || "",
               validation: toolPayload.validation || toolArgs.validation || "",
+              toolMessageIndex,
+              toolCallId: call.id,
             };
           }
           const largeWriteUpdate = this.agent.updateLargeWriteStateAfterTool(
@@ -1389,6 +1392,7 @@ class AgentRunner {
                   message:
                     trackerCompletion.error?.message ||
                     "Le run ne peut pas encore terminer.",
+                  error: trackerCompletion.error,
                 }
               : runtimeCompletion;
           if (completion.accepted) {
@@ -1424,14 +1428,32 @@ class AgentRunner {
             };
           }
           this.agent.agentProgress.metrics.completionRejections += 1;
+          const diagnostics =
+            this.agent.runChangeTracker?.getCompletionDiagnostics?.() || {};
+          console.warn("[NCE Agent task_complete rejected]", {
+            reason: completion.reason,
+            errorCode: completion.error?.code || completion.reason,
+            ...diagnostics,
+          });
           this.agent.agentProgress.recordTaskCompletion(
             iteration,
             false,
             completion.reason,
+            diagnostics,
           );
+          if (Number.isInteger(completionRequest.toolMessageIndex)) {
+            this.agent.messages[completionRequest.toolMessageIndex] =
+              this.agent.createToolResultMessage(completionRequest.toolCallId, {
+                success: false,
+                error: completion.error || {
+                  code: completion.reason,
+                  message: completion.message,
+                },
+              });
+          }
           this.agent.messages.push({
             role: "system",
-            content: `[NCE TASK COMPLETION] task_complete was not accepted: ${completion.message} Continue the task and call task_complete again after resolving it.`,
+            content: `[NCE TASK COMPLETION] task_complete was not accepted: ${completion.message}${completion.error?.unreviewedPaths?.length ? ` Remaining paths: ${completion.error.unreviewedPaths.join(", ")}.` : ""} Continue the task and call task_complete again after resolving it.`,
           });
         }
         if (progressDecision.action === "directive") {
