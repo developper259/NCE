@@ -156,7 +156,7 @@ const AgentAI = {
       description:
         "Agent principal pour comprendre, modifier et corriger directement le projet.",
 
-      temperature: 0.2,
+      temperature: 1,
       maxTokens: 8192,
 
       permissions: "code",

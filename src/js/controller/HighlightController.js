@@ -724,9 +724,14 @@ class HighlightController {
       tokens,
       slicedLine,
     );
+    const visibleDiffSegments = this.editor.lineController.getVisibleDiffSegments?.(
+      documentLine?.diffSegments,
+      slicedLine,
+    );
     const fragment = this.editor.writerController.textToOBJ(
       slicedLine.text,
       visibleTokens,
+      visibleDiffSegments,
     );
 
     try {

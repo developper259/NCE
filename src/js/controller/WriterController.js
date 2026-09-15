@@ -143,13 +143,40 @@ class WriterController {
 
     if (Array.isArray(diffSegments) && diffSegments.length > 0) {
       fragment = document.createDocumentFragment();
+      let offset = 0;
+      let tokenIndex = 0;
       for (const segment of diffSegments) {
+        const segmentText = String(segment.text ?? "");
         const span = document.createElement("span");
         span.className = segment.type
           ? `diff-segment diff-${segment.type}`
           : "diff-segment";
-        span.textContent = expandTabsForDisplay(segment.text ?? "");
+        if (tokens?.length) {
+          const segmentEnd = offset + segmentText.length;
+          while (tokenIndex < tokens.length) {
+            const token = tokens[tokenIndex];
+            const end = (Number(token.column) || 1) - 1 + String(token.value ?? "").length;
+            if (end > offset) break;
+            tokenIndex++;
+          }
+          const segmentTokens = [];
+          for (let index = tokenIndex; index < tokens.length; index++) {
+            const token = tokens[index];
+            const start = (Number(token.column) || 1) - 1;
+            if (start >= segmentEnd) break;
+            const end = start + String(token.value ?? "").length;
+            const from = Math.max(start, offset);
+            const to = Math.min(end, segmentEnd);
+            if (from < to)
+              segmentTokens.push({ ...token, column: from - offset + 1,
+                value: segmentText.slice(from - offset, to - offset) });
+          }
+          span.appendChild(this.tokenToDOM(segmentText, segmentTokens));
+        } else {
+          span.textContent = expandTabsForDisplay(segmentText);
+        }
         fragment.appendChild(span);
+        offset += segmentText.length;
       }
     } else if (tokens && tokens.length !== 0) {
       fragment = this.tokenToDOM(txt, tokens);

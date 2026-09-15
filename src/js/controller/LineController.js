@@ -953,7 +953,7 @@ class LineController {
     const diffSegments =
       displayRow?.type === "removed"
         ? [{ type: "removed", text: displayText }]
-        : null;
+        : this.getVisibleDiffSegments(lineNode?.diffSegments, slicedLine);
     const diffState = displayRow?.type || null;
     const tokens = lineNode?.getTokens();
     const visibleTokens = this.getVisibleTokens(tokens, slicedLine);
@@ -973,6 +973,27 @@ class LineController {
     lineOBJ.style.left = "0px";
 
     return lineOBJ;
+  }
+
+  getVisibleDiffSegments(segments, slicedLine) {
+    if (!Array.isArray(segments) || segments.length === 0 || !slicedLine)
+      return null;
+    const start = slicedLine.startChar || 0;
+    const end = start + slicedLine.text.length;
+    let offset = 0;
+    const visible = [];
+    for (const segment of segments) {
+      const text = String(segment.text ?? "");
+      const from = Math.max(start, offset);
+      const to = Math.min(end, offset + text.length);
+      if (from < to)
+        visible.push({ ...segment, text: text.slice(from - offset, to - offset) });
+      offset += text.length;
+      if (offset >= end) break;
+    }
+    return visible.length && visible.map((segment) => segment.text).join("") === slicedLine.text
+      ? visible
+      : null;
   }
 
   getLineOBJ(row) {
