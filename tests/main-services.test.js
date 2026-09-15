@@ -181,6 +181,63 @@ test('FileManager mutation safety, cache invalidation and nested creation', asyn
   } finally { await fsp.rm(root, { recursive: true, force: true }); }
 });
 
+test('FileManager deletes files and folders only with explicit recursive force', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'nce-delete-contract-'));
+  const manager = new FileManager({});
+  try {
+    const file = path.join(root, 'file.txt');
+    await fsp.writeFile(file, 'content');
+    assert.deepEqual(await manager.deleteEntry(file, false), {
+      success: true,
+      path: file,
+      type: 'file',
+    });
+
+    const emptyFolder = path.join(root, 'empty');
+    await fsp.mkdir(emptyFolder);
+    assert.deepEqual(await manager.deleteEntry(emptyFolder, false), {
+      success: true,
+      path: emptyFolder,
+      type: 'folder',
+    });
+
+    const nonEmpty = path.join(root, 'non-empty');
+    const child = path.join(nonEmpty, 'child.txt');
+    await fsp.mkdir(nonEmpty);
+    await fsp.writeFile(child, 'keep');
+    const refused = await manager.deleteEntry(nonEmpty, false);
+    assert.equal(refused.success, false);
+    assert.equal(refused.code, 'FOLDER_NOT_EMPTY');
+    assert.equal(await fsp.readFile(child, 'utf8'), 'keep');
+
+    const forced = await manager.deleteEntry(nonEmpty, true);
+    assert.equal(forced.success, true);
+    assert.equal(forced.type, 'folder');
+    assert.equal(forced.forced, true);
+    await assert.rejects(fsp.access(nonEmpty));
+
+    const missing = await manager.deleteEntry(path.join(root, 'missing'), false);
+    assert.equal(missing.code, 'SOURCE_NOT_FOUND');
+
+    assert.equal((await manager.deleteEntry(path.parse(root).root, true)).code, 'INVALID_PATH');
+    if (process.platform !== 'win32') {
+      const external = await fsp.mkdtemp(path.join(os.tmpdir(), 'nce-delete-link-target-'));
+      const link = path.join(root, 'external-link');
+      try {
+        await fsp.writeFile(path.join(external, 'keep.txt'), 'keep');
+        await fsp.symlink(external, link, 'dir');
+        const linkResult = await manager.deleteEntry(link, true);
+        assert.equal(linkResult.success, true);
+        await fsp.access(path.join(external, 'keep.txt'));
+      } finally {
+        await fsp.rm(external, { recursive: true, force: true });
+      }
+    }
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test('FileManager handles case-only file/folder renames, conflicts and missing sources', async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'nce-case-rename-'));
   const manager = new FileManager({});

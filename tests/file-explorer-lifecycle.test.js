@@ -4,7 +4,7 @@ const { loadGlobal } = require("./helpers/runtime");
 
 const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
 
-function loadFileExplorer(windowApi = {}) {
+function loadFileExplorer(windowApi = {}, confirmImpl = () => true) {
   return loadGlobal("src/js/sidebar/FileExplorer.Sidebar.js", "FileExplorer", {
     Sidebar: class {},
     FileOperations: class {},
@@ -12,6 +12,7 @@ function loadFileExplorer(windowApi = {}) {
     Events: { ON_OPEN_PROJECT: "open", ON_CLOSE_PROJECT: "close" },
     window: { api: windowApi },
     alert() {},
+    confirm: confirmImpl,
     requestAnimationFrame(callback) { callback(); },
     document: { createElement() { return {}; } },
     buildFileContextMenu() {}, buildFolderContextMenu() {},
@@ -41,6 +42,50 @@ function explorerFixture(rename) {
   });
   return { explorer, calls };
 }
+
+test("non-empty folder deletion requires explicit force confirmation", async () => {
+  const FileExplorer = loadFileExplorer();
+  const calls = [];
+  const confirmations = [true, true];
+  const explorer = Object.create(loadFileExplorer({}, () => confirmations.shift()).prototype);
+  Object.assign(explorer, {
+    fileOperations: {
+      async delete(path, force) {
+        calls.push([path, force]);
+        return force
+          ? { success: true }
+          : { success: false, code: "FOLDER_NOT_EMPTY" };
+      },
+    },
+    editor: {
+      tabManager: {
+        markFileAsDeleted() {},
+        async prepareFilesForDeletion() { return true; },
+      },
+    },
+    async refreshFolder() {},
+  });
+  await explorer.deleteEntry({ name: "components", path: "/project/components", type: "folder" });
+  assert.deepEqual(calls, [["/project/components", false], ["/project/components", true]]);
+});
+
+test("cancelling the force confirmation never retries deletion", async () => {
+  const calls = [];
+  const confirmations = [true, false];
+  const explorer = Object.create(loadFileExplorer({}, () => confirmations.shift()).prototype);
+  Object.assign(explorer, {
+    fileOperations: {
+      async delete(path, force) {
+        calls.push([path, force]);
+        return { success: false, code: "FOLDER_NOT_EMPTY" };
+      },
+    },
+    editor: { tabManager: { markFileAsDeleted() {} } },
+    async refreshFolder() {},
+  });
+  await explorer.deleteEntry({ name: "components", path: "/project/components", type: "folder" });
+  assert.deepEqual(calls, [["/project/components", false]]);
+});
 
 test("inline rename recovers from invalid input and a later rename succeeds", async () => {
   let renameCalls = 0;

@@ -970,7 +970,7 @@ class WorkspaceFileManager {
     }
     const guard = this.agent.getMutationGuardError();
     if (guard) return { success: false, error: guard };
-    const operation = await this.agent.api?.deleteEntry?.(target.absolutePath);
+    const operation = await this.agent.api?.deleteEntry?.(target.absolutePath, true);
     if (!operation?.success) {
       return { success: false, error: this.agent.getFileOperationError(operation, "DELETE_FOLDER_FAILED", "La suppression du dossier a échoué.", target.relativePath) };
     }

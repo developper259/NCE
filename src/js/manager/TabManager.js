@@ -192,6 +192,30 @@ class tabManager {
     return true;
   }
 
+  async prepareFilesForDeletion(deletedPath) {
+    const dirtyFiles = this.files.filter(
+      (file) =>
+        file.path &&
+        NCEPath.isInside(file.path, deletedPath) &&
+        !file.isSaved,
+    );
+    for (const file of dirtyFiles) {
+      const choice = await this.editor.savePopupManager.confirmClose(file.id);
+      if (choice === "cancel") return false;
+      if (choice === "save") {
+        if (this.activeFile?.id !== file.id) await this.setFocusFile(file);
+        try {
+          const saved = await file.save();
+          if (saved === false || !file.isSaved) return false;
+        } catch (error) {
+          console.error("Error saving file before deletion:", error);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   async closeFile(id) {
     const tab = this.getFileByID(id);
     if (!tab) return false;

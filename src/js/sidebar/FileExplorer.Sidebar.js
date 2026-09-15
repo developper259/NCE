@@ -808,9 +808,36 @@ class FileExplorer extends Sidebar {
     }
 
     try {
-      const result = await this.fileOperations.delete(file.path);
+      if (
+        file.type === "file" &&
+        typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
+        !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
+      ) {
+        return;
+      }
+      let result = await this.fileOperations.delete(file.path, false);
+      if (!result?.success && file.type === "folder" && result.code === "FOLDER_NOT_EMPTY") {
+        if (!confirm(
+          `Folder "${file.name}" is not empty.\n\n` +
+          "Deleting it will permanently delete all files and subfolders inside it.\n\n" +
+          "Do you really want to continue?",
+        )) {
+          return;
+        }
+        if (
+          typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
+          !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
+        ) {
+          return;
+        }
+        result = await this.fileOperations.delete(file.path, true);
+      }
       if (!result?.success) {
-        alert(result?.error || "Impossible de supprimer l'élément.");
+        alert(
+          result?.code === "FOLDER_NOT_EMPTY"
+            ? `Folder "${file.name}" is not empty.`
+            : result?.error || "Unable to delete the item.",
+        );
         return;
       }
 

@@ -107,8 +107,12 @@ contextBridge.exposeInMainWorld("api", {
   renameEntry: (oldPath, newPath) =>
     ipcRenderer.invoke("FileManager:rename", oldPath, newPath),
 
-  deleteEntry: (targetPath) =>
-    ipcRenderer.invoke("FileManager:delete", targetPath),
+  deleteEntry: (targetPath, force = false) =>
+    ipcRenderer.invoke(
+      "FileManager:delete",
+      targetPath,
+      typeof force === "boolean" ? force : false,
+    ),
 
   createFile: (dirPath, fileName, content = "", overwrite = false) =>
     ipcRenderer.invoke(

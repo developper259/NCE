@@ -25,6 +25,7 @@ export interface FileOperationResult {
   success: boolean;
   path?: string;
   type?: "file" | "folder";
+  forced?: boolean;
   code?: string;
   error?: string;
 }
@@ -248,8 +249,8 @@ export class FileManager {
       },
     );
 
-    ipcMain.handle("FileManager:delete", async (event, targetPath: string) => {
-      return await this.deleteEntry(targetPath);
+    ipcMain.handle("FileManager:delete", async (event, targetPath: string, force: unknown = false) => {
+      return await this.deleteEntry(targetPath, typeof force === "boolean" ? force : false);
     });
 
     ipcMain.handle(
@@ -574,15 +575,55 @@ export class FileManager {
     }
   }
 
-  async deleteEntry(targetPath: string): Promise<FileOperationResult> {
-    if (!validPath(targetPath) || path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root) return invalidPath();
+  async deleteEntry(targetPath: string, force: boolean = false): Promise<FileOperationResult> {
+    if (
+      !validPath(targetPath) ||
+      path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root
+    ) return invalidPath();
+    if (typeof force !== "boolean") {
+      return { success: false, code: "INVALID_ARGUMENT", error: "force must be boolean." };
+    }
     try {
-      await fs.rm(targetPath, { recursive: true, force: true });
+      const stats = await fs.lstat(targetPath);
+      if (stats.isDirectory()) {
+        if (force) {
+          await fs.rm(targetPath, { recursive: true, force: true });
+        } else {
+          await fs.rmdir(targetPath);
+        }
+        this.clearFileCache(targetPath);
+        return {
+          success: true,
+          path: targetPath,
+          type: "folder",
+          ...(force ? { forced: true } : {}),
+        };
+      }
+      await fs.unlink(targetPath);
       this.clearFileCache(targetPath);
-      return { success: true };
+      return { success: true, path: targetPath, type: "file" };
     } catch (error: any) {
-      console.error("Error deleting entry:", error);
-      return { success: false, error: error?.message || "Delete failed." };
+      const code =
+        error?.code === "ENOENT"
+          ? "SOURCE_NOT_FOUND"
+          : error?.code === "ENOTEMPTY" || error?.code === "EEXIST"
+            ? "FOLDER_NOT_EMPTY"
+            : error?.code === "EACCES" || error?.code === "EPERM"
+              ? "PERMISSION_DENIED"
+              : "DELETE_FAILED";
+      if (code !== "SOURCE_NOT_FOUND" && code !== "FOLDER_NOT_EMPTY") {
+        console.error("Error deleting entry:", error);
+      }
+      return {
+        success: false,
+        code,
+        type: code === "FOLDER_NOT_EMPTY" ? "folder" : undefined,
+        path: targetPath,
+        error:
+          code === "FOLDER_NOT_EMPTY"
+            ? "The folder is not empty."
+            : error?.message || "Delete failed.",
+      };
     }
   }
 
