@@ -10,9 +10,12 @@ class ToolExecutor {
       return `[${value.map((entry) => this.stableStringify(entry)).join(",")}]`;
     }
     if (value && typeof value === "object") {
-      return `{${Object.keys(value).sort().map(
-        (key) => `${JSON.stringify(key)}:${this.stableStringify(value[key])}`,
-      ).join(",")}}`;
+      return `{${Object.keys(value)
+        .sort()
+        .map(
+          (key) => `${JSON.stringify(key)}:${this.stableStringify(value[key])}`,
+        )
+        .join(",")}}`;
     }
     return JSON.stringify(value);
   }
@@ -32,7 +35,9 @@ class ToolExecutor {
     const previous = this.mutationTail;
     const previousRunId = this.mutationTailRunId;
     const requestedRunId = executionContext.runId ?? this.agent.runId;
-    this.mutationTail = new Promise((resolve) => { release = resolve; });
+    this.mutationTail = new Promise((resolve) => {
+      release = resolve;
+    });
     this.mutationTailRunId = requestedRunId;
     if (previousRunId !== null && previousRunId !== requestedRunId) {
       const timeoutMs = 250;
@@ -48,7 +53,8 @@ class ToolExecutor {
     }
     if (
       this.agent.stopRequested ||
-      (executionContext.runId !== undefined && executionContext.runId !== this.agent.runId)
+      (executionContext.runId !== undefined &&
+        executionContext.runId !== this.agent.runId)
     ) {
       release();
       throw Object.assign(new Error("Le run Agent n'est plus actif."), {
@@ -62,14 +68,17 @@ class ToolExecutor {
     const name = call?.function?.name;
     const toolCallId = typeof call?.id === "string" ? call.id : "";
     const identity = this.getCallIdentity(call, executionContext);
-    const cached = toolCallId ? this.agent.executedToolCalls.get(toolCallId) : null;
+    const cached = toolCallId
+      ? this.agent.executedToolCalls.get(toolCallId)
+      : null;
     if (cached) {
       if (cached.executionIdentity === identity) return cached;
       return this.attachMeta(name, {
         success: false,
         error: {
           code: "TOOL_CALL_ID_CONFLICT",
-          message: "Le même identifiant tool a été réutilisé avec un appel différent.",
+          message:
+            "Le même identifiant tool a été réutilisé avec un appel différent.",
           category: "protocol",
           recoverable: true,
           retryStrategy: "replan",
@@ -96,7 +105,10 @@ class ToolExecutor {
           });
         }
       }
-      const toolResult = await this.executeToolCallInternal(call, executionContext);
+      const toolResult = await this.executeToolCallInternal(
+        call,
+        executionContext,
+      );
       if (toolCallId) {
         this.agent.executedToolCalls.set(toolCallId, {
           ...toolResult,
@@ -105,10 +117,16 @@ class ToolExecutor {
       }
       const payload = toolResult?.result ?? toolResult;
       const args = (() => {
-        try { return this.agent.parseCanonicalToolArguments(call?.function?.arguments); }
-        catch { return {}; }
+        try {
+          return this.agent.parseCanonicalToolArguments(
+            call?.function?.arguments,
+          );
+        } catch {
+          return {};
+        }
       })();
-      const path = args.path || args.oldPath || payload?.path || payload?.oldPath || null;
+      const path =
+        args.path || args.oldPath || payload?.path || payload?.oldPath || null;
       if (toolResult?.success === false && name !== "task_complete") {
         const code = payload?.error?.code || "TOOL_FAILED";
         this.agent.runChangeTracker?.addUnresolvedFailure?.({
@@ -116,14 +134,21 @@ class ToolExecutor {
           toolName: name,
           path,
           error: payload?.error || { code, message: "Tool failure" },
-          blocking: !["UNKNOWN_TOOL", "TOOL_DISABLED", "TOOL_NOT_ALLOWED", "INVALID_ARGUMENT"].includes(code),
+          blocking: ![
+            "UNKNOWN_TOOL",
+            "TOOL_DISABLED",
+            "TOOL_NOT_ALLOWED",
+            "INVALID_ARGUMENT",
+          ].includes(code),
           recoveryAction: payload?.error?.retryStrategy || null,
         });
       } else if (toolResult?.success !== false) {
         this.agent.runChangeTracker?.resolveFailuresForTool?.(name, path);
         if (name === "read_file") {
           this.agent.runChangeTracker?.markFailuresRecoveryReady?.(path, [
-            "STALE_REVISION", "OLD_TEXT_NOT_FOUND", "AMBIGUOUS_MATCH",
+            "STALE_REVISION",
+            "OLD_TEXT_NOT_FOUND",
+            "AMBIGUOUS_MATCH",
           ]);
         }
       }
@@ -135,28 +160,14 @@ class ToolExecutor {
   }
 
   getToolOutputLimit(name) {
-    const defaults = {
-      read_file: {
-        maxChars: 4000,
-        maxTokens: 1000,
-        nextStartLine: true,
-      },
-      search_code: {
-        maxChars: 4000,
-        maxTokens: 1000,
-        maxResults: 100,
-        nextOffset: true,
-      },
-      get_project_map: {
-        maxChars: 4000,
-        maxTokens: 1000,
-      },
-      get_diff: {
-        maxChars: 12000,
-        maxTokens: 12000,
-      },
+    const configured = this.agent.toolLimits?.[name];
+    if (!configured) return null;
+    return {
+      maxChars: configured.outputCharacters,
+      maxResults: configured.maxResults,
+      nextStartLine: name === "read_file",
+      nextOffset: name === "search_code",
     };
-    return defaults[name] || null;
   }
 
   getFileWritePayloadLimit(name) {
@@ -244,7 +255,7 @@ class ToolExecutor {
   }
 
   limitResult(name, result) {
-    const maxContent = 4000;
+    const maxContent = this.agent.toolLimits?.common?.pathCharacters || 4000;
     if (typeof result === "string")
       return this.agent.truncate(result, maxContent);
     if (!result || typeof result !== "object") return result;
@@ -260,15 +271,25 @@ class ToolExecutor {
         if (limited.content.length > readMaxChars) {
           const prefix = limited.content.slice(0, readMaxChars);
           const lastNewline = prefix.lastIndexOf("\n");
-          limited.content = lastNewline >= 0 ? prefix.slice(0, lastNewline) : prefix;
+          limited.content =
+            lastNewline >= 0 ? prefix.slice(0, lastNewline) : prefix;
           limited.truncated = true;
           limited.hasMore = true;
           const firstLine = limited.contentStartLine || limited.startLine || 1;
+          const firstColumn = Number.isInteger(limited.contentStartColumn)
+            ? limited.contentStartColumn
+            : Number.isInteger(limited.partialSegment?.startColumn)
+              ? limited.partialSegment.startColumn
+              : 0;
           if (lastNewline >= 0) {
-            const completeLines = (prefix.slice(0, lastNewline + 1).match(/\n/g) || []).length;
+            const completeLines = (
+              prefix.slice(0, lastNewline + 1).match(/\n/g) || []
+            ).length;
             limited.contentEndLine = firstLine + completeLines - 1;
-            limited.completeLineRange = { startLine: firstLine,
-              endLine: limited.contentEndLine };
+            limited.completeLineRange = {
+              startLine: firstLine,
+              endLine: limited.contentEndLine,
+            };
             limited.endLine = limited.contentEndLine;
             limited.nextStartLine = limited.contentEndLine + 1;
             limited.nextStartColumn = 0;
@@ -276,40 +297,72 @@ class ToolExecutor {
             limited.contentEndLine = null;
             limited.completeLineRange = null;
             limited.lineTruncated = true;
-            limited.partialSegment = { line: firstLine, startColumn: 0,
-              endColumn: prefix.length };
+            limited.partialSegment = {
+              line: firstLine,
+              startColumn: firstColumn,
+              endColumn: firstColumn + prefix.length,
+            };
             limited.nextStartLine = firstLine;
-            limited.nextStartColumn = prefix.length;
+            limited.nextStartColumn = firstColumn + prefix.length;
           }
-        } else if (Number.isInteger(limited.totalLines)) {
-          limited.hasMore = Number.isInteger(limited.endLine)
-            ? limited.endLine < limited.totalLines
-            : false;
+        } else if (
+          !limited.partialSegment &&
+          limited.lineTruncated !== true &&
+          !Number.isInteger(limited.nextStartColumn) &&
+          !Number.isInteger(limited.contentStartColumn) &&
+          !Number.isInteger(limited.contentEndColumn)
+        ) {
+          limited.hasMore =
+            Number.isInteger(limited.requestedEndLine) &&
+            Number.isInteger(limited.contentEndLine) &&
+            limited.contentEndLine < limited.requestedEndLine;
           limited.nextStartLine = limited.hasMore
-            ? Math.min(limited.endLine + 1, limited.totalLines)
+            ? limited.contentEndLine + 1
             : null;
+          limited.nextStartColumn = null;
         }
       }
       if (limited.success !== false && typeof limited.content === "string") {
         const requestedStart = Number.isInteger(limited.requestedStartLine)
-          ? limited.requestedStartLine : limited.startLine;
+          ? limited.requestedStartLine
+          : limited.startLine;
         const requestedEnd = Number.isInteger(limited.requestedEndLine)
-          ? limited.requestedEndLine : limited.endLine;
-        if (Number.isInteger(requestedStart) && Number.isInteger(requestedEnd)) {
-          limited.requestedRange = { startLine: requestedStart, endLine: requestedEnd,
+          ? limited.requestedEndLine
+          : limited.endLine;
+        if (
+          Number.isInteger(requestedStart) &&
+          Number.isInteger(requestedEnd)
+        ) {
+          limited.requestedRange = {
+            startLine: requestedStart,
+            endLine: requestedEnd,
             ...(Number.isInteger(limited.requestedStartColumn)
-              ? { startColumn: limited.requestedStartColumn } : {}) };
+              ? { startColumn: limited.requestedStartColumn }
+              : {}),
+          };
         }
         const deliveredStart = Number.isInteger(limited.contentStartLine)
-          ? limited.contentStartLine : limited.startLine;
-        const deliveredEnd = limited.partialSegment?.line ||
+          ? limited.contentStartLine
+          : limited.startLine;
+        const deliveredEnd =
+          limited.partialSegment?.line ||
           (Number.isInteger(limited.contentEndLine)
-            ? limited.contentEndLine : limited.endLine);
-        if (Number.isInteger(deliveredStart) && Number.isInteger(deliveredEnd)) {
-          limited.deliveredRange = { startLine: deliveredStart, endLine: deliveredEnd,
+            ? limited.contentEndLine
+            : limited.endLine);
+        if (
+          Number.isInteger(deliveredStart) &&
+          Number.isInteger(deliveredEnd)
+        ) {
+          limited.deliveredRange = {
+            startLine: deliveredStart,
+            endLine: deliveredEnd,
             ...(limited.partialSegment
-              ? { startColumn: limited.partialSegment.startColumn,
-                  endColumn: limited.partialSegment.endColumn } : {}) };
+              ? {
+                  startColumn: limited.partialSegment.startColumn,
+                  endColumn: limited.partialSegment.endColumn,
+                }
+              : {}),
+          };
           console.debug("[NCE Agent read]", {
             path: limited.path || null,
             revision: limited.revision || null,
@@ -331,7 +384,7 @@ class ToolExecutor {
         : maxContent;
       const maxResults = Number.isFinite(limits.maxResults)
         ? Math.max(1, limits.maxResults)
-        : 100;
+        : this.agent.toolLimits?.search_code?.maxResults || 100;
       if (
         Array.isArray(limited.results) &&
         limited.results.length > maxResults
@@ -361,7 +414,8 @@ class ToolExecutor {
     if (name === "get_project_map") {
       const mapMaxChars = Number.isFinite(limits.maxChars)
         ? Math.max(1, limits.maxChars)
-        : maxContent;
+        : this.agent.toolLimits?.get_project_map?.outputCharacters ||
+          maxContent;
       if (
         typeof limited.text === "string" &&
         limited.text.length > mapMaxChars
@@ -376,7 +430,7 @@ class ToolExecutor {
     if (name === "get_diff") {
       const diffMaxChars = Number.isFinite(limits.maxChars)
         ? Math.max(1, limits.maxChars)
-        : 12000;
+        : this.agent.toolLimits?.get_diff?.outputCharacters || 12000;
       if (
         typeof limited.diff === "string" &&
         limited.diff.length > diffMaxChars
@@ -398,8 +452,13 @@ class ToolExecutor {
       }
     }
 
-    if (Array.isArray(limited.results) && limited.results.length > 100) {
-      limited.results = limited.results.slice(0, 100);
+    const genericMaxResults =
+      this.agent.toolLimits?.search_code?.maxResults || 100;
+    if (
+      Array.isArray(limited.results) &&
+      limited.results.length > genericMaxResults
+    ) {
+      limited.results = limited.results.slice(0, genericMaxResults);
       limited.truncated = true;
     }
 
@@ -529,17 +588,28 @@ class ToolExecutor {
     return {
       ...source,
       code,
-      message: String(source.message || (typeof error === "string" ? error : "Échec de l'outil.")).slice(0, 2000),
+      message: String(
+        source.message ||
+          (typeof error === "string" ? error : "Échec de l'outil."),
+      ).slice(0, 2000),
       category: source.category || categoryByCode[code] || "filesystem",
-      recoverable: source.recoverable ?? !["RUN_ABORTED", "USER_ABORTED", "WORKSPACE_CHANGED", "INTERNAL_ERROR"].includes(code),
+      recoverable:
+        source.recoverable ??
+        ![
+          "RUN_ABORTED",
+          "USER_ABORTED",
+          "WORKSPACE_CHANGED",
+          "INTERNAL_ERROR",
+        ].includes(code),
       retryStrategy: source.retryStrategy || retryByCode[code] || "replan",
     };
   }
 
   attachMeta(name, result) {
-    const normalized = result?.success === false
-      ? { ...result, error: this.normalizeAgentError(result.error) }
-      : result;
+    const normalized =
+      result?.success === false
+        ? { ...result, error: this.normalizeAgentError(result.error) }
+        : result;
     return { ...normalized, meta: this.getToolResultMeta(name, normalized) };
   }
 
@@ -691,7 +761,11 @@ class ToolExecutor {
       toolCallId: toolCallId || null,
     };
 
-    this.agent.safeInvokeCallback("onToolStart", [name, normalizedArgs, callbackContext]);
+    this.agent.safeInvokeCallback("onToolStart", [
+      name,
+      normalizedArgs,
+      callbackContext,
+    ]);
 
     try {
       const rawResult = await tool.execute(normalizedArgs, {
@@ -710,9 +784,17 @@ class ToolExecutor {
         result = { ...result, error: this.normalizeAgentError(result.error) };
       }
       const meta = this.getToolResultMeta(name, result);
-      if (name !== "read_file" &&
-          ["new", "restored", "state_changed", "validation_progress",
-            "error_discovered", "error_resolved"].includes(meta.informationStatus)) {
+      if (
+        name !== "read_file" &&
+        [
+          "new",
+          "restored",
+          "state_changed",
+          "validation_progress",
+          "error_discovered",
+          "error_resolved",
+        ].includes(meta.informationStatus)
+      ) {
         this.agent.fileKnowledge.resetDuplicateReadSequence();
       }
       const toolResult =
@@ -728,7 +810,10 @@ class ToolExecutor {
       });
 
       this.agent.safeInvokeCallback("onToolEnd", [
-        name, toolResult, callbackContext, callbackResult,
+        name,
+        toolResult,
+        callbackContext,
+        callbackResult,
       ]);
 
       return toolResult;
@@ -746,7 +831,11 @@ class ToolExecutor {
         activePath: this.agent.editor?.tabManager?.activeFile?.path || null,
         activeTabId: this.agent.editor?.tabManager?.activeFile?.id || null,
       });
-      this.agent.safeInvokeCallback("onToolEnd", [name, result, callbackContext]);
+      this.agent.safeInvokeCallback("onToolEnd", [
+        name,
+        result,
+        callbackContext,
+      ]);
       return result;
     }
   }

@@ -14,6 +14,20 @@ const AgentAI = {
     maxStrategyReplans: 3,
   },
 
+  toolLimits: {
+    common: { pathCharacters: 4000 },
+    task_complete: { summaryCharacters: 2000, validationCharacters: 2000 },
+    read_file: { outputCharacters: 4000, defaultLines: 200 },
+    search_code: {
+      queryCharacters: 500,
+      maxOffset: 100000,
+      maxResults: 100,
+      outputCharacters: 4000,
+    },
+    get_project_map: { maxDepth: 20, outputCharacters: 4000 },
+    get_diff: { outputCharacters: 12000 },
+  },
+
   responseBudget: {
     minReservedForResponseTokens: 2048,
     maxReservedForResponseTokens: 8192,

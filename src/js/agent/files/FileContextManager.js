@@ -22,16 +22,19 @@ class FileContextManager {
     );
     const deliveredLines = [];
     let deliveredChars = 0;
+    const readLimit =
+      this.agent.toolLimits?.read_file?.outputCharacters || 4000;
     for (let line = safeStartLine; line <= safeEndLine; line++) {
       const value = lines[line - 1];
       const required = value.length + (deliveredLines.length ? 1 : 0);
-      if (deliveredChars + required > 4000) break;
+      if (deliveredChars + required > readLimit) break;
       deliveredLines.push(value);
       deliveredChars += required;
     }
     const visibleContent = deliveredLines.join("\n");
     const completeEndLine = deliveredLines.length
-      ? safeStartLine + deliveredLines.length - 1 : null;
+      ? safeStartLine + deliveredLines.length - 1
+      : null;
     const truncated = completeEndLine !== safeEndLine;
     const context = {
       path: absolutePath,
@@ -181,10 +184,16 @@ class FileContextManager {
       };
     }
     if (exactMatches.length > 1) {
-      return this.agent.selectMatchNearLine(source, search, exactMatches, nearLine);
+      return this.agent.selectMatchNearLine(
+        source,
+        search,
+        exactMatches,
+        nearLine,
+      );
     }
 
-    const normalizedSource = this.agent.normalizeLineEndingsWithBoundaries(source);
+    const normalizedSource =
+      this.agent.normalizeLineEndingsWithBoundaries(source);
     const normalizedSearch = search.replace(/\r\n?|\n/g, "\n");
     const normalizedMatches = findMatches(
       normalizedSource.normalized,
@@ -416,7 +425,6 @@ class FileContextManager {
       ? normalizedPath.slice(rootPrefix.length + 1)
       : normalizedPath;
   }
-
 }
 
 window.FileContextManager = FileContextManager;

@@ -13,6 +13,7 @@ class FileKnowledge {
     this.projectListCache = new Map();
     this.projectSearchCache = new Map();
     this.modelVisibleFiles = new Map();
+    this.transientSources = new Map();
     this.readSignatureCounts = new Map();
     this.currentIteration = 0;
     this.consecutiveRedundantReads = 0;
@@ -55,6 +56,10 @@ class FileKnowledge {
       partialSegmentsDelivered: 0,
       proactiveRedundantExchangesRemoved: 0,
       redundantContextTokensAvoided: 0,
+      overlappingCharactersAvoided: 0,
+      columnRangeReductions: 0,
+      sourceCacheHits: 0,
+      sourceCacheMisses: 0,
     };
   }
 
@@ -70,8 +75,11 @@ class FileKnowledge {
 
   normalizeRange(startLine, endLine) {
     const start = Number.isInteger(startLine) && startLine > 0 ? startLine : 1;
+    const defaultLines = this.agent.toolLimits?.read_file?.defaultLines || 200;
     const end =
-      Number.isInteger(endLine) && endLine >= start ? endLine : start + 199;
+      Number.isInteger(endLine) && endLine >= start
+        ? endLine
+        : start + defaultLines - 1;
     return { startLine: start, endLine: end };
   }
 
@@ -99,48 +107,145 @@ class FileKnowledge {
   }
 
   mergeSegments(segments = []) {
-    const sorted = segments.filter((segment) =>
-      Number.isInteger(segment?.line) &&
-      Number.isInteger(segment?.startColumn) &&
-      Number.isInteger(segment?.endColumn) &&
-      segment.endColumn > segment.startColumn)
+    const sorted = segments
+      .filter(
+        (segment) =>
+          Number.isInteger(segment?.line) &&
+          Number.isInteger(segment?.startColumn) &&
+          Number.isInteger(segment?.endColumn) &&
+          segment.endColumn > segment.startColumn,
+      )
       .sort((a, b) => a.line - b.line || a.startColumn - b.startColumn);
     const merged = [];
     for (const segment of sorted) {
       const previous = merged[merged.length - 1];
-      if (previous && previous.line === segment.line &&
-          segment.startColumn <= previous.endColumn) {
+      if (
+        previous &&
+        previous.line === segment.line &&
+        segment.startColumn <= previous.endColumn
+      ) {
         previous.endColumn = Math.max(previous.endColumn, segment.endColumn);
-      } else merged.push({ line: segment.line, startColumn: segment.startColumn,
-        endColumn: segment.endColumn });
+      } else
+        merged.push({
+          line: segment.line,
+          startColumn: segment.startColumn,
+          endColumn: segment.endColumn,
+        });
     }
     return merged;
   }
 
+  getColumnCoverage(segments = [], line) {
+    return this.mergeSegments(
+      segments.filter((segment) => segment?.line === line),
+    ).map(({ startColumn, endColumn }) => ({ startColumn, endColumn }));
+  }
+
+  getFirstUncoveredColumn(segments = [], startColumn = 0, lineLength = null) {
+    let cursor = Math.max(0, startColumn);
+    for (const segment of this.mergeSegments(segments)) {
+      if (segment.endColumn <= cursor) continue;
+      if (segment.startColumn > cursor) return cursor;
+      cursor = Math.max(cursor, segment.endColumn);
+      if (Number.isInteger(lineLength) && cursor >= lineLength) return null;
+    }
+    return Number.isInteger(lineLength) && cursor >= lineLength ? null : cursor;
+  }
+
+  getCachedPartialSegment(entry, line, startColumn) {
+    const candidate = (entry?.partialSegments || [])
+      .filter(
+        (segment) => segment.line === line && segment.endColumn > startColumn,
+      )
+      .sort((left, right) => left.startColumn - right.startColumn)[0];
+    if (!candidate) return null;
+    const offset = Math.max(0, startColumn - candidate.startColumn);
+    return {
+      ...candidate,
+      startColumn: candidate.startColumn + offset,
+      content: candidate.content.slice(offset),
+    };
+  }
+
+  getTransientSource(path, revision) {
+    const normalizedPath = this.normalizePath(path);
+    const cached = this.transientSources.get(normalizedPath);
+    if (!cached || cached.revision !== revision) {
+      this.metrics.sourceCacheMisses += 1;
+      return null;
+    }
+    this.metrics.sourceCacheHits += 1;
+    return cached.content;
+  }
+
+  setTransientSource(path, revision, content) {
+    const normalizedPath = this.normalizePath(path);
+    if (
+      !normalizedPath ||
+      typeof revision !== "string" ||
+      typeof content !== "string"
+    )
+      return;
+    this.transientSources.delete(normalizedPath);
+    this.transientSources.set(normalizedPath, { revision, content });
+    while (this.transientSources.size > Math.max(1, this.maxContextFiles)) {
+      this.transientSources.delete(this.transientSources.keys().next().value);
+    }
+  }
+
   isModelSegmentVisible(path, revision, line, startColumn, endColumn) {
     const visible = this.modelVisibleFiles.get(this.normalizePath(path));
-    return visible?.revision === revision &&
-      (visible.ranges?.some((range) => range.startLine <= line && range.endLine >= line) ||
-       visible.partialSegments?.some((segment) => segment.line === line &&
-         segment.startColumn <= startColumn && segment.endColumn >= endColumn));
+    if (visible?.revision !== revision) return false;
+    if (
+      visible.ranges?.some(
+        (range) => range.startLine <= line && range.endLine >= line,
+      )
+    )
+      return true;
+    return (
+      this.getFirstUncoveredColumn(
+        visible.partialSegments?.filter((segment) => segment.line === line) ||
+          [],
+        startColumn,
+        endColumn,
+      ) === null
+    );
   }
 
   recordPartialSegment(path, details = {}) {
     const normalizedPath = this.normalizePath(path);
-    if (!normalizedPath || typeof details.revision !== "string" ||
-        typeof details.content !== "string") return null;
+    if (
+      !normalizedPath ||
+      typeof details.revision !== "string" ||
+      typeof details.content !== "string"
+    )
+      return null;
     const previous = this.files.get(normalizedPath);
-    const revisionChanged = previous?.revision !== details.revision ||
-      previous?.invalidated === true;
-    const entry = revisionChanged || !previous ? {
-      path: normalizedPath, revision: details.revision, ranges: [],
-      partialSegments: [], contentLines: new Map(), servedRequests: new Map(),
-      totalLines: details.totalLines, fullRead: false,
-      readCount: 0, requestCount: 0, invalidated: false,
-    } : previous;
-    const segment = { line: details.line, startColumn: details.startColumn,
-      endColumn: details.endColumn, lineLength: details.lineLength,
-      content: details.content };
+    const revisionChanged =
+      previous?.revision !== details.revision || previous?.invalidated === true;
+    const entry =
+      revisionChanged || !previous
+        ? {
+            path: normalizedPath,
+            revision: details.revision,
+            ranges: [],
+            partialSegments: [],
+            contentLines: new Map(),
+            servedRequests: new Map(),
+            totalLines: details.totalLines,
+            fullRead: false,
+            readCount: 0,
+            requestCount: 0,
+            invalidated: false,
+          }
+        : previous;
+    const segment = {
+      line: details.line,
+      startColumn: details.startColumn,
+      endColumn: details.endColumn,
+      lineLength: details.lineLength,
+      content: details.content,
+    };
     entry.partialSegments.push(segment);
     entry.readCount++;
     entry.requestCount++;
@@ -148,21 +253,30 @@ class FileKnowledge {
     entry.revision = details.revision;
     entry.invalidated = false;
     entry.totalLines = details.totalLines;
-    const coverage = this.mergeSegments(entry.partialSegments.filter((part) =>
-      part.line === details.line));
-    if (coverage.length === 1 && coverage[0].startColumn === 0 &&
-        coverage[0].endColumn >= details.lineLength) {
-      const parts = entry.partialSegments.filter((part) => part.line === details.line)
+    const coverage = this.mergeSegments(
+      entry.partialSegments.filter((part) => part.line === details.line),
+    );
+    if (
+      coverage.length === 1 &&
+      coverage[0].startColumn === 0 &&
+      coverage[0].endColumn >= details.lineLength
+    ) {
+      const parts = entry.partialSegments
+        .filter((part) => part.line === details.line)
         .sort((a, b) => a.startColumn - b.startColumn);
       let reconstructed = "";
       for (const part of parts) {
         if (part.startColumn > reconstructed.length) break;
-        reconstructed += part.content.slice(Math.max(0, reconstructed.length - part.startColumn));
+        reconstructed += part.content.slice(
+          Math.max(0, reconstructed.length - part.startColumn),
+        );
       }
       if (reconstructed.length === details.lineLength) {
         entry.contentLines.set(details.line, reconstructed);
-        entry.ranges = this.mergeRanges([...entry.ranges,
-          { startLine: details.line, endLine: details.line }]);
+        entry.ranges = this.mergeRanges([
+          ...entry.ranges,
+          { startLine: details.line, endLine: details.line },
+        ]);
       }
     }
     this.files.set(normalizedPath, entry);
@@ -175,10 +289,17 @@ class FileKnowledge {
     this.metrics.partialContentReads++;
     this.metrics.partialSegmentsDelivered++;
     this.metrics.charactersDelivered += details.content.length;
-    this.logReadDecision(normalizedPath,
-      { startLine: details.line, endLine: details.line }, entry,
-      "partial_segment", { requestedRevision: details.revision,
-        charactersDelivered: details.content.length }, "record");
+    this.logReadDecision(
+      normalizedPath,
+      { startLine: details.line, endLine: details.line },
+      entry,
+      "partial_segment",
+      {
+        requestedRevision: details.revision,
+        charactersDelivered: details.content.length,
+      },
+      "record",
+    );
     return entry;
   }
 
@@ -271,57 +392,152 @@ class FileKnowledge {
     };
   }
 
-  getFirstCachedRange(entry, range, maxChars = 4000, visibleRanges = []) {
-    if (!(entry?.contentLines instanceof Map) ||
-        !entry.contentLines.has(range.startLine)) return null;
+  getFirstCachedRange(entry, range, maxChars = null, visibleRanges = []) {
+    if (
+      !(entry?.contentLines instanceof Map) ||
+      !entry.contentLines.has(range.startLine)
+    )
+      return null;
+    const outputLimit =
+      maxChars || this.agent.toolLimits?.read_file?.outputCharacters || 4000;
     const lines = [];
     let chars = 0;
     for (let line = range.startLine; line <= range.endLine; line++) {
-      if (visibleRanges.some((visible) =>
-        visible.startLine <= line && visible.endLine >= line)) break;
+      if (
+        visibleRanges.some(
+          (visible) => visible.startLine <= line && visible.endLine >= line,
+        )
+      )
+        break;
       if (!entry.contentLines.has(line)) break;
       const value = entry.contentLines.get(line);
       const required = value.length + (lines.length ? 1 : 0);
-      if (chars + required > maxChars) break;
+      if (chars + required > outputLimit) break;
       lines.push(value);
       chars += required;
     }
-    return lines.length ? { startLine: range.startLine,
-      endLine: range.startLine + lines.length - 1,
-      content: lines.join("\n") } : null;
+    return lines.length
+      ? {
+          startLine: range.startLine,
+          endLine: range.startLine + lines.length - 1,
+          content: lines.join("\n"),
+        }
+      : null;
   }
 
   planReadDelivery(path, requestedRange, entry, startColumn = 0) {
-    const visible = entry?.revision &&
-      this.modelVisibleFiles.get(this.normalizePath(path))?.revision === entry.revision
-      ? this.modelVisibleFiles.get(this.normalizePath(path)) : null;
-    const effective = this.getEffectiveRange(entry, requestedRange) || requestedRange;
-    const segment = entry?.partialSegments?.find((part) =>
-      part.line === effective.startLine && part.startColumn === startColumn);
-    if (segment && !this.isModelRangeVisible(path, entry.revision,
-      { startLine: segment.line, endLine: segment.line })) {
-      if (this.isModelSegmentVisible(path, entry.revision, segment.line,
-        startColumn, segment.endColumn)) return { kind: "ALREADY_VISIBLE",
-        range: { startLine: segment.line, endLine: segment.line }, segment };
-      return { kind: "RESTORE_SEGMENT", range: effective, segment };
+    const visible =
+      entry?.revision &&
+      this.modelVisibleFiles.get(this.normalizePath(path))?.revision ===
+        entry.revision
+        ? this.modelVisibleFiles.get(this.normalizePath(path))
+        : null;
+    const effective =
+      this.getEffectiveRange(entry, requestedRange) || requestedRange;
+    const lineLength = entry?.partialSegments?.find(
+      (part) => part.line === effective.startLine,
+    )?.lineLength;
+    if (
+      effective.startLine === effective.endLine &&
+      (startColumn > 0 ||
+        Number.isInteger(lineLength) ||
+        visible?.partialSegments?.some(
+          (part) => part.line === effective.startLine,
+        ))
+    ) {
+      const exactVisibleSegment = visible?.partialSegments?.find(
+        (part) =>
+          part.line === effective.startLine && part.startColumn === startColumn,
+      );
+      if (
+        exactVisibleSegment &&
+        startColumn === 0 &&
+        entry?.partialSegments?.some(
+          (part) =>
+            part.line === effective.startLine &&
+            part.startColumn === 0 &&
+            part.endColumn >= exactVisibleSegment.endColumn,
+        )
+      ) {
+        return {
+          kind: "ALREADY_VISIBLE",
+          range: effective,
+          segment: exactVisibleSegment,
+        };
+      }
+      if (this.isModelRangeVisible(path, entry.revision, effective)) {
+        return { kind: "ALREADY_VISIBLE", range: effective };
+      }
+      const effectiveStart = this.getFirstUncoveredColumn(
+        visible?.partialSegments?.filter(
+          (part) => part.line === effective.startLine,
+        ) || [],
+        startColumn,
+        lineLength,
+      );
+      if (effectiveStart === null)
+        return { kind: "ALREADY_VISIBLE", range: effective };
+      if (effectiveStart > startColumn) this.metrics.columnRangeReductions += 1;
+      const segment = this.getCachedPartialSegment(
+        entry,
+        effective.startLine,
+        effectiveStart,
+      );
+      if (segment) {
+        this.metrics.overlappingCharactersAvoided += Math.max(
+          0,
+          effectiveStart - startColumn,
+        );
+        return {
+          kind: "RESTORE_SEGMENT",
+          range: {
+            startLine: effective.startLine,
+            endLine: effective.endLine,
+            startColumn: effectiveStart,
+          },
+          segment,
+        };
+      }
+      return {
+        kind:
+          effectiveStart !== startColumn
+            ? "PARTIAL_NEW_CONTENT"
+            : "READ_NEW_CONTENT",
+        range: { ...effective, startColumn: effectiveStart },
+      };
     }
     const missing = this.getFirstUncoveredRange(
-      { ranges: visible?.ranges || [] }, effective);
+      { ranges: visible?.ranges || [] },
+      effective,
+    );
     if (!missing) return { kind: "ALREADY_VISIBLE", range: effective };
-    const cached = this.getFirstCachedRange(entry, missing, 4000,
-      visible?.ranges || []);
+    const cached = this.getFirstCachedRange(
+      entry,
+      missing,
+      null,
+      visible?.ranges || [],
+    );
     if (cached) return { kind: "RESTORE_FROM_CACHE", range: cached };
     let endLine = missing.endLine;
     for (let line = missing.startLine + 1; line <= missing.endLine; line++) {
-      if (entry?.contentLines?.has(line) ||
-          visible?.ranges?.some((range) => range.startLine <= line && range.endLine >= line)) {
+      if (
+        entry?.contentLines?.has(line) ||
+        visible?.ranges?.some(
+          (range) => range.startLine <= line && range.endLine >= line,
+        )
+      ) {
         endLine = line - 1;
         break;
       }
     }
-    return { kind: missing.startLine !== requestedRange.startLine ||
-      endLine !== requestedRange.endLine ? "PARTIAL_NEW_CONTENT" : "READ_NEW_CONTENT",
-      range: { startLine: missing.startLine, endLine } };
+    return {
+      kind:
+        missing.startLine !== requestedRange.startLine ||
+        endLine !== requestedRange.endLine
+          ? "PARTIAL_NEW_CONTENT"
+          : "READ_NEW_CONTENT",
+      range: { startLine: missing.startLine, endLine },
+    };
   }
 
   updateModelVisibility(ranges = []) {
@@ -330,25 +546,40 @@ class FileKnowledge {
       const normalizedPath = this.resolveVisiblePath(item?.path);
       if (!normalizedPath || typeof item?.revision !== "string") continue;
       const current = visible.get(normalizedPath);
-      const state = current?.revision === item.revision ? current :
-        { revision: item.revision, ranges: [], partialSegments: [] };
-      const complete = item.completeLineRange ||
+      const state =
+        current?.revision === item.revision
+          ? current
+          : { revision: item.revision, ranges: [], partialSegments: [] };
+      const complete =
+        item.completeLineRange ||
         (Number.isInteger(item.startLine) && Number.isInteger(item.endLine)
-          ? { startLine: item.startLine, endLine: item.endLine } : null);
-      if (complete) state.ranges = this.mergeRanges([...state.ranges, complete]);
-      if (item.partialSegment) state.partialSegments = this.mergeSegments([
-        ...state.partialSegments, item.partialSegment]);
+          ? { startLine: item.startLine, endLine: item.endLine }
+          : null);
+      if (complete)
+        state.ranges = this.mergeRanges([...state.ranges, complete]);
+      if (item.partialSegment)
+        state.partialSegments = this.mergeSegments([
+          ...state.partialSegments,
+          item.partialSegment,
+        ]);
       visible.set(normalizedPath, state);
     }
     for (const [path, state] of visible) {
       const entry = this.files.get(path);
       if (entry?.revision !== state.revision) continue;
       for (const [line, content] of entry.contentLines || []) {
-        const segments = state.partialSegments.filter((segment) => segment.line === line);
-        if (segments.length === 1 && segments[0].startColumn === 0 &&
-            segments[0].endColumn >= content.length) {
-          state.ranges = this.mergeRanges([...state.ranges,
-            { startLine: line, endLine: line }]);
+        const segments = state.partialSegments.filter(
+          (segment) => segment.line === line,
+        );
+        if (
+          segments.length === 1 &&
+          segments[0].startColumn === 0 &&
+          segments[0].endColumn >= content.length
+        ) {
+          state.ranges = this.mergeRanges([
+            ...state.ranges,
+            { startLine: line, endLine: line },
+          ]);
         }
       }
     }
@@ -367,7 +598,9 @@ class FileKnowledge {
   isModelRangeVisible(path, revision, range) {
     const visible = this.modelVisibleFiles.get(this.normalizePath(path));
     if (!visible || visible.revision !== revision) return false;
-    return this.getFirstUncoveredRange({ ranges: visible.ranges }, range) === null;
+    return (
+      this.getFirstUncoveredRange({ ranges: visible.ranges }, range) === null
+    );
   }
 
   formatCoverage(entry) {
@@ -397,10 +630,12 @@ class FileKnowledge {
       knownCoverage: this.formatCoverage(entry),
       decision,
       charactersDelivered: details.charactersDelivered || 0,
-      currentlyVisibleCoverage: details.visible === true
-        ? (this.modelVisibleFiles.get(this.normalizePath(path))?.ranges || [])
-            .map((item) => `${item.startLine}-${item.endLine}`).join(",")
-        : null,
+      currentlyVisibleCoverage:
+        details.visible === true
+          ? (this.modelVisibleFiles.get(this.normalizePath(path))?.ranges || [])
+              .map((item) => `${item.startLine}-${item.endLine}`)
+              .join(",")
+          : null,
       ...(Number.isInteger(details.duplicateCount)
         ? { duplicateCount: details.duplicateCount }
         : {}),
@@ -465,23 +700,44 @@ class FileKnowledge {
           normalizedPath,
           entry.revision,
           range,
-          { ...(options.signatureOptions || {}),
+          {
+            ...(options.signatureOptions || {}),
             ...(Number.isInteger(options.startColumn)
-              ? { startColumn: options.startColumn } : {}) },
+              ? { startColumn: options.startColumn }
+              : {}),
+          },
         )
       : null;
     const plan = entry?.revision
-      ? this.planReadDelivery(normalizedPath, range, entry, options.startColumn || 0)
+      ? this.planReadDelivery(
+          normalizedPath,
+          range,
+          entry,
+          options.startColumn || 0,
+        )
       : { kind: "READ_NEW_CONTENT", range };
-    if (plan.kind === "ALREADY_VISIBLE") return this.createAlreadyAvailableRead(
-      normalizedPath, range, plan.range, entry, readSignature,
-      { nextStartLine: plan.segment?.line || null,
-        nextStartColumn: plan.segment?.endColumn || null,
-        avoidedChars: plan.segment?.content?.length || 0 });
-    if (plan.kind === "RESTORE_SEGMENT") return this.createRestoredSegmentRead(
-      normalizedPath, range, plan.segment, entry);
-    if (plan.kind === "RESTORE_FROM_CACHE") return this.createRestoredRead(
-      normalizedPath, range, plan.range, entry);
+    if (plan.kind === "ALREADY_VISIBLE")
+      return this.createAlreadyAvailableRead(
+        normalizedPath,
+        range,
+        plan.range,
+        entry,
+        readSignature,
+        {
+          nextStartLine: plan.segment?.line || null,
+          nextStartColumn: plan.segment?.endColumn || null,
+          avoidedChars: plan.segment?.content?.length || 0,
+        },
+      );
+    if (plan.kind === "RESTORE_SEGMENT")
+      return this.createRestoredSegmentRead(
+        normalizedPath,
+        range,
+        plan.segment,
+        entry,
+      );
+    if (plan.kind === "RESTORE_FROM_CACHE")
+      return this.createRestoredRead(normalizedPath, range, plan.range, entry);
     const decision = entry?.revision ? "new_range" : "actual_read";
     this.resetDuplicateReadSequence();
     if (decision === "new_range") this.metrics.newRangeReads += 1;
@@ -519,15 +775,19 @@ class FileKnowledge {
     this.metrics.redundantReads += 1;
     const cached = this.getCachedRange(entry, coveredRange);
     if (cached) this.metrics.charactersAvoidedByDedup += cached.content.length;
-    else if (options.avoidedChars) this.metrics.charactersAvoidedByDedup += options.avoidedChars;
+    else if (options.avoidedChars)
+      this.metrics.charactersAvoidedByDedup += options.avoidedChars;
     if (hardBlocked) this.metrics.hardBlockedRedundantReads += 1;
     if (repeatedRedundant) this.metrics.repeatedDuplicateReads += 1;
     this.logReadDecision(
       path,
       requestedRange,
       entry,
-      hardBlocked ? "redundant_hard_block" :
-        repeatedRedundant ? "repeated_redundant" : "already_available",
+      hardBlocked
+        ? "redundant_hard_block"
+        : repeatedRedundant
+          ? "repeated_redundant"
+          : "already_available",
       {
         requestedRevision: entry.revision,
         duplicateCount,
@@ -537,9 +797,7 @@ class FileKnowledge {
     );
     return {
       alreadyKnown: true,
-      decision: repeatedRedundant
-        ? "repeated_redundant"
-        : "already_available",
+      decision: repeatedRedundant ? "repeated_redundant" : "already_available",
       range: requestedRange,
       entry,
       result: {
@@ -549,8 +807,11 @@ class FileKnowledge {
         noNewInformation: true,
         informationGain: "ZERO_NEW_INFORMATION",
         repeatedRedundantAction: repeatedRedundant,
-        readDecision: hardBlocked ? "REDUNDANT_READ_HARD_BLOCK" :
-          repeatedRedundant ? "REPEATED_REDUNDANT_READ" : "ALREADY_AVAILABLE",
+        readDecision: hardBlocked
+          ? "REDUNDANT_READ_HARD_BLOCK"
+          : repeatedRedundant
+            ? "REPEATED_REDUNDANT_READ"
+            : "ALREADY_AVAILABLE",
         readSignature: signature,
         duplicateCount,
         informationSource: "model_context",
@@ -558,7 +819,8 @@ class FileKnowledge {
         revision: entry.revision,
         requestedRange,
         coverage: this.formatCoverage(entry),
-        visibleCoverage: this.modelVisibleFiles.get(this.normalizePath(path))?.ranges || [],
+        visibleCoverage:
+          this.modelVisibleFiles.get(this.normalizePath(path))?.ranges || [],
         nextStartLine: options.nextStartLine || null,
         nextStartColumn: options.nextStartColumn,
         message: hardBlocked
@@ -580,7 +842,8 @@ class FileKnowledge {
     this.metrics.cacheRestores += 1;
     this.metrics.restoredCharacters += cachedRange.content.length;
     this.metrics.charactersDelivered += cachedRange.content.length;
-    this.metrics.completeLinesDelivered += cachedRange.endLine - cachedRange.startLine + 1;
+    this.metrics.completeLinesDelivered +=
+      cachedRange.endLine - cachedRange.startLine + 1;
     this.logReadDecision(path, requestedRange, entry, "restore_from_cache", {
       requestedRevision: entry.revision,
       coveredRange: cachedRange,
@@ -616,14 +879,20 @@ class FileKnowledge {
         requestedStartLine: requestedRange.startLine,
         requestedEndLine: requestedRange.endLine,
         requestedRange,
-        deliveredRange: { startLine: cachedRange.startLine,
-          endLine: cachedRange.endLine },
+        deliveredRange: {
+          startLine: cachedRange.startLine,
+          endLine: cachedRange.endLine,
+        },
         contentStartLine: cachedRange.startLine,
         contentEndLine: cachedRange.endLine,
-        completeLineRange: { startLine: cachedRange.startLine,
-          endLine: cachedRange.endLine },
-        nextStartLine: cachedRange.endLine < requestedRange.endLine
-          ? cachedRange.endLine + 1 : null,
+        completeLineRange: {
+          startLine: cachedRange.startLine,
+          endLine: cachedRange.endLine,
+        },
+        nextStartLine:
+          cachedRange.endLine < requestedRange.endLine
+            ? cachedRange.endLine + 1
+            : null,
         nextStartColumn: null,
         totalLines: entry.totalLines,
         truncated:
@@ -643,27 +912,54 @@ class FileKnowledge {
     this.metrics.charactersDelivered += segment.content.length;
     this.metrics.partialSegmentsDelivered++;
     this.resetDuplicateReadSequence();
-    return { alreadyKnown: true, decision: "restore_from_cache",
-      range: requestedRange, entry,
-      result: { success: true, cached: true, alreadyKnown: true,
-        restoredFromCache: true, noNewInformation: false,
+    return {
+      alreadyKnown: true,
+      decision: "restore_from_cache",
+      range: requestedRange,
+      entry,
+      result: {
+        success: true,
+        cached: true,
+        alreadyKnown: true,
+        restoredFromCache: true,
+        noNewInformation: false,
         informationGain: "RESTORED_CONTENT",
-        readDecision: "RESTORED", path: this.toRelativePath(path),
-        revision: entry.revision, requestedStartLine: requestedRange.startLine,
+        readDecision: "RESTORED",
+        path: this.toRelativePath(path),
+        revision: entry.revision,
+        requestedStartLine: requestedRange.startLine,
         requestedEndLine: requestedRange.endLine,
         requestedRange,
-        deliveredRange: { startLine: segment.line, endLine: segment.line,
-          startColumn: segment.startColumn, endColumn: segment.endColumn },
-        contentStartLine: segment.line, contentEndLine: segment.line,
+        deliveredRange: {
+          startLine: segment.line,
+          endLine: segment.line,
+          startColumn: segment.startColumn,
+          endColumn: segment.endColumn,
+        },
+        contentStartLine: segment.line,
+        contentEndLine: segment.line,
         contentStartColumn: segment.startColumn,
         contentEndColumn: segment.endColumn,
-        partialSegment: { line: segment.line,
-          startColumn: segment.startColumn, endColumn: segment.endColumn,
-          lineLength: segment.lineLength },
-        completeLineRange: null, lineTruncated: true,
-        nextStartLine: segment.endColumn < segment.lineLength ? segment.line : segment.line + 1,
-        nextStartColumn: segment.endColumn < segment.lineLength ? segment.endColumn : 0,
-        content: segment.content } };
+        partialSegment: {
+          line: segment.line,
+          startColumn: segment.startColumn,
+          endColumn: segment.endColumn,
+          lineLength: segment.lineLength,
+        },
+        completeLineRange: null,
+        lineTruncated: true,
+        hasMore:
+          segment.endColumn < segment.lineLength ||
+          segment.line < requestedRange.endLine,
+        nextStartLine:
+          segment.endColumn < segment.lineLength
+            ? segment.line
+            : segment.line + 1,
+        nextStartColumn:
+          segment.endColumn < segment.lineLength ? segment.endColumn : 0,
+        content: segment.content,
+      },
+    };
   }
 
   recordRead(path, details = {}) {
@@ -724,10 +1020,7 @@ class FileKnowledge {
       details.requestedStartLine ?? range.startLine,
       details.requestedEndLine ?? range.endLine,
     );
-    if (
-      coverageRange &&
-      coverageRange.startLine === requestedRange.startLine
-    ) {
+    if (coverageRange && coverageRange.startLine === requestedRange.startLine) {
       const signature = this.getReadSignature(
         details.toolName,
         normalizedPath,
@@ -758,14 +1051,18 @@ class FileKnowledge {
     this.resetDuplicateReadSequence();
     this.metrics.actualFileReads += 1;
     this.metrics.newContentReads += 1;
-    if (coverageRange && (coverageRange.startLine !== requestedRange.startLine ||
-        coverageRange.endLine !== requestedRange.endLine)) {
+    if (
+      coverageRange &&
+      (coverageRange.startLine !== requestedRange.startLine ||
+        coverageRange.endLine !== requestedRange.endLine)
+    ) {
       this.metrics.partialContentReads += 1;
     }
-    this.metrics.charactersDelivered += typeof details.content === "string"
-      ? details.content.length : 0;
+    this.metrics.charactersDelivered +=
+      typeof details.content === "string" ? details.content.length : 0;
     this.metrics.completeLinesDelivered += coverageRange
-      ? coverageRange.endLine - coverageRange.startLine + 1 : 0;
+      ? coverageRange.endLine - coverageRange.startLine + 1
+      : 0;
     if (details.diskRead === true) this.metrics.actualDiskReads += 1;
     if (details.diskRead === true) this.metrics.actualFilesystemReads += 1;
     this.logReadDecision(
@@ -776,8 +1073,8 @@ class FileKnowledge {
       {
         requestedRevision: details.revision,
         coveredRange: coverageRange,
-        charactersDelivered: typeof details.content === "string"
-          ? details.content.length : 0,
+        charactersDelivered:
+          typeof details.content === "string" ? details.content.length : 0,
         visible: false,
       },
       "record",
@@ -807,6 +1104,7 @@ class FileKnowledge {
       servedRequests: new Map(),
     };
     this.files.set(normalizedPath, entry);
+    this.transientSources.delete(normalizedPath);
     this.modelVisibleFiles.delete(normalizedPath);
     this.resetDuplicateReadSequence();
     this.metrics.revisionInvalidations += 1;
@@ -822,13 +1120,14 @@ class FileKnowledge {
 
   resolveToolPath(args = {}, result = {}, key = "path") {
     const root = this.agent.editor?.fileExplorer?.rootPath;
-    const candidate = key === "newPath"
-      ? result?.newAbsolutePath || args?.newPath || result?.newPath || ""
-      : result?.absolutePath ||
-        result?.oldAbsolutePath ||
-        args?.path ||
-        result?.path ||
-        "";
+    const candidate =
+      key === "newPath"
+        ? result?.newAbsolutePath || args?.newPath || result?.newPath || ""
+        : result?.absolutePath ||
+          result?.oldAbsolutePath ||
+          args?.path ||
+          result?.path ||
+          "";
     if (!candidate) return "";
     return AgentPath.isAbsolute(candidate)
       ? AgentPath.normalize(candidate)
@@ -999,8 +1298,10 @@ class FileKnowledge {
   }
 
   observeToolInformation(toolName, payload = {}) {
-    if (payload?.noNewInformation === true ||
-        payload?.alreadyKnown === true && payload?.restoredFromCache !== true) {
+    if (
+      payload?.noNewInformation === true ||
+      (payload?.alreadyKnown === true && payload?.restoredFromCache !== true)
+    ) {
       this.consecutiveNoNewInformationToolCalls += 1;
       this.metrics.noNewInformationToolCalls += 1;
     } else {
@@ -1017,21 +1318,24 @@ class FileKnowledge {
   getContextState() {
     const entries = [...this.files.values()]
       .filter((entry) => entry.revision)
-      .sort(
-        (left, right) => right.lastReadIteration - left.lastReadIteration,
-      );
+      .sort((left, right) => right.lastReadIteration - left.lastReadIteration);
     const files = entries.slice(0, this.maxContextFiles).map((entry) => ({
       path: this.toRelativePath(entry.path),
       revision: entry.revision,
       coverage: this.formatCoverage(entry),
       partialSegments: (entry.partialSegments || []).map((part) => ({
-        line: part.line, startColumn: part.startColumn,
-        endColumn: part.endColumn })),
-      visibleRanges: this.modelVisibleFiles.get(entry.path)?.revision === entry.revision
-        ? this.modelVisibleFiles.get(entry.path).ranges : [],
+        line: part.line,
+        startColumn: part.startColumn,
+        endColumn: part.endColumn,
+      })),
+      visibleRanges:
+        this.modelVisibleFiles.get(entry.path)?.revision === entry.revision
+          ? this.modelVisibleFiles.get(entry.path).ranges
+          : [],
       visiblePartialSegments:
         this.modelVisibleFiles.get(entry.path)?.revision === entry.revision
-          ? this.modelVisibleFiles.get(entry.path).partialSegments : [],
+          ? this.modelVisibleFiles.get(entry.path).partialSegments
+          : [],
       changed: entry.changed === true,
       invalidated: entry.invalidated === true,
       lastReadIteration: entry.lastReadIteration,
@@ -1060,6 +1364,7 @@ class FileKnowledge {
       entry.partialSegments = [];
     }
     this.modelVisibleFiles.clear();
+    this.transientSources.clear();
   }
 }
 

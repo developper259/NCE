@@ -3,6 +3,14 @@ class EditorToolRegistry {
     this.agent = agent;
   }
 
+  getLimit(name, field, fallback) {
+    return this.agent.toolLimits?.[name]?.[field] ?? fallback;
+  }
+
+  getPathLimit() {
+    return this.agent.toolLimits?.common?.pathCharacters || 4000;
+  }
+
   getCreateFileToolDescription() {
     const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
     const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
@@ -37,8 +45,7 @@ class EditorToolRegistry {
 
   registerEditorTools() {
     this.agent.registerTool("task_complete", {
-      description:
-        "Indique explicitement que la tâche est terminée après implémentation et validation raisonnable. Ne l'appelle pas tant qu'un travail requis ou un échec de validation connu reste non résolu.",
+      description: `Termine la tâche après implémentation et validation. summary <= ${this.getLimit("task_complete", "summaryCharacters", 2000)} ; validation <= ${this.getLimit("task_complete", "validationCharacters", 2000)}. Ne l'appelle pas si un travail requis ou un échec reste non résolu.`,
       readOnly: true,
       codeOnly: true,
       parameters: {
@@ -46,12 +53,20 @@ class EditorToolRegistry {
         properties: {
           summary: {
             type: "string",
-            maxLength: 2000,
+            maxLength: this.getLimit(
+              "task_complete",
+              "summaryCharacters",
+              2000,
+            ),
             description: "Résumé concis du travail réellement terminé.",
           },
           validation: {
             type: "string",
-            maxLength: 2000,
+            maxLength: this.getLimit(
+              "task_complete",
+              "validationCharacters",
+              2000,
+            ),
             description:
               "Vérifications effectuées et éventuelles limites de validation.",
           },
@@ -71,7 +86,7 @@ class EditorToolRegistry {
     });
     this.agent.registerTool("get_changed_files", {
       description:
-        "Retourne uniquement les fichiers affectés par le run Agent courant, sans historiographie Git ou système parallèle.",
+        "Retourne la liste compacte des fichiers affectés, sans leur contenu. Utilise get_diff pour la review.",
       readOnly: true,
       codeOnly: true,
       parameters: { type: "object", properties: {} },
@@ -84,14 +99,17 @@ class EditorToolRegistry {
       },
     });
     this.agent.registerTool("get_diff", {
-      description:
-        "Retourne le diff unifié local du run Agent courant, limité au fichier demandé si un path est fourni.",
+      description: `Retourne le diff local, éventuellement filtré par path. Sortie <= ${this.getLimit("get_diff", "outputCharacters", 12000)} caractères ; si le diff global est tronqué, utilise get_diff(path).`,
       readOnly: true,
       codeOnly: true,
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string", minLength: 1, maxLength: 4000 },
+          path: {
+            type: "string",
+            minLength: 1,
+            maxLength: this.getPathLimit(),
+          },
         },
       },
       execute: (args = {}) => {
@@ -110,7 +128,7 @@ class EditorToolRegistry {
           path: {
             type: "string",
             minLength: 1,
-            maxLength: 4000,
+            maxLength: this.getPathLimit(),
             description: "Chemin du nouveau fichier relatif au workspace.",
           },
           content: {
@@ -142,7 +160,7 @@ class EditorToolRegistry {
           path: {
             type: "string",
             minLength: 1,
-            maxLength: 4000,
+            maxLength: this.getPathLimit(),
             description: "Chemin du fichier existant relatif au workspace.",
           },
           content: {
@@ -171,13 +189,13 @@ class EditorToolRegistry {
           path: {
             type: "string",
             minLength: 1,
-            maxLength: 4000,
+            maxLength: this.getPathLimit(),
             description: "Chemin actuel du fichier dans le workspace.",
           },
           newPath: {
             type: "string",
             minLength: 1,
-            maxLength: 4000,
+            maxLength: this.getPathLimit(),
             description:
               "Nouveau chemin du fichier dans le workspace. Le dossier parent doit exister.",
           },
@@ -195,7 +213,7 @@ class EditorToolRegistry {
           path: {
             type: "string",
             minLength: 1,
-            maxLength: 4000,
+            maxLength: this.getPathLimit(),
             description: "Chemin du fichier à supprimer, relatif au workspace.",
           },
         },
@@ -204,13 +222,13 @@ class EditorToolRegistry {
       execute: (args) => this.agent.deleteWorkspaceFile(args),
     });
     this.agent.registerTool("modify_file", {
-      description:
-        "Modifie exactement une occurrence dans un fichier du workspace à la revision fournie. Réutilise la nouvelle revision retournée pour l'édition suivante.",
+      description: `Remplace une occurrence à la revision fournie. path <= ${this.getPathLimit()} caractères ; oldText/newText n'ont pas de maxLength artificiel. Pour une grosse modification, préfère plusieurs edits ciblés.`,
       parameters: {
         type: "object",
         properties: {
           path: {
             type: "string",
+            maxLength: this.getPathLimit(),
             description:
               "Chemin du fichier à modifier, relatif au workspace ou absolu.",
           },
@@ -239,18 +257,18 @@ class EditorToolRegistry {
       execute: (args) => this.agent.modifyFile(args),
     });
     this.agent.registerTool("read_file", {
-      description:
-        "Lit une quantité bornée de contenu et retourne sa revision. Suivez nextStartLine et nextStartColumn pour continuer, y compris sur une longue ligne. Ne redemandez pas une plage déjà visible : NCE réduit automatiquement une demande partiellement visible à sa partie manquante. Toute lecture de contenu réellement manquant reste autorisée.",
+      description: `Lit <= ${this.getLimit("read_file", "outputCharacters", 4000)} caractères. startLine/endLine sont 1-based, startColumn 0-based. Suivez nextStartLine + nextStartColumn, y compris pour continuer une longue ligne. Une plage visible n'est pas renvoyée ; une demande partiellement visible est réduite à sa partie manquante.`,
       readOnly: true,
       parameters: {
         type: "object",
         properties: {
-          path: { type: "string" },
+          path: { type: "string", maxLength: this.getPathLimit() },
           startLine: { type: "integer", minimum: 1 },
           startColumn: {
             type: "integer",
             minimum: 0,
-            description: "Colonne 0-based utilisée pour continuer une ligne tronquée.",
+            description:
+              "Colonne 0-based utilisée pour continuer une ligne tronquée.",
           },
           endLine: { type: "integer", minimum: 1 },
         },
@@ -259,21 +277,20 @@ class EditorToolRegistry {
       execute: (args) => this.agent.readFile(args.path, args),
     });
     this.agent.registerTool("get_project_map", {
-      description:
-        "Retourne une carte compacte du workspace avec fichiers, langages et nombres de lignes.",
+      description: `Carte compacte du workspace. maxDepth <= ${this.getLimit("get_project_map", "maxDepth", 20)}, sortie <= ${this.getLimit("get_project_map", "outputCharacters", 4000)} caractères ; réduis path/profondeur si nécessaire.`,
       parameters: {
         type: "object",
         properties: {
           path: {
             type: "string",
-            maxLength: 4000,
+            maxLength: this.getPathLimit(),
             description:
               "Sous-dossier relatif au workspace. La racine du projet est utilisée par défaut.",
           },
           maxDepth: {
             type: "integer",
             minimum: 1,
-            maximum: 20,
+            maximum: this.getLimit("get_project_map", "maxDepth", 20),
             description: "Profondeur maximale de l'arborescence. 6 par défaut.",
           },
         },
@@ -282,14 +299,26 @@ class EditorToolRegistry {
       execute: (args) => this.agent.getProjectMap(args),
     });
     this.agent.registerTool("search_code", {
-      description: "Recherche du texte dans les fichiers du workspace.",
+      description: `Recherche workspace : query <= ${this.getLimit("search_code", "queryCharacters", 500)}, limit <= ${this.getLimit("search_code", "maxResults", 100)}, offset <= ${this.getLimit("search_code", "maxOffset", 100000)}, sortie <= ${this.getLimit("search_code", "outputCharacters", 4000)}. Utilise nextOffset si tronqué.`,
       readOnly: true,
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", minLength: 1, maxLength: 500 },
-          offset: { type: "integer", minimum: 0, maximum: 100000 },
-          limit: { type: "integer", minimum: 1, maximum: 100 },
+          query: {
+            type: "string",
+            minLength: 1,
+            maxLength: this.getLimit("search_code", "queryCharacters", 500),
+          },
+          offset: {
+            type: "integer",
+            minimum: 0,
+            maximum: this.getLimit("search_code", "maxOffset", 100000),
+          },
+          limit: {
+            type: "integer",
+            minimum: 1,
+            maximum: this.getLimit("search_code", "maxResults", 100),
+          },
         },
         required: ["query"],
       },

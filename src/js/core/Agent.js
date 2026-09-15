@@ -44,6 +44,25 @@ class Agent {
       maxRecoveryAttempts: 3,
       maxStrategyReplans: 3,
     };
+    this.toolLimits =
+      typeof AgentAI !== "undefined" && AgentAI.toolLimits
+        ? AgentAI.toolLimits
+        : {
+            common: { pathCharacters: 4000 },
+            task_complete: {
+              summaryCharacters: 2000,
+              validationCharacters: 2000,
+            },
+            read_file: { outputCharacters: 4000, defaultLines: 200 },
+            search_code: {
+              queryCharacters: 500,
+              maxOffset: 100000,
+              maxResults: 100,
+              outputCharacters: 4000,
+            },
+            get_project_map: { maxDepth: 20, outputCharacters: 4000 },
+            get_diff: { outputCharacters: 12000 },
+          };
     this.temperature = undefined;
     this.maxTokens = undefined;
     this.permissions = "code";
@@ -601,8 +620,12 @@ class Agent {
       (finishReason === "length" && stopsBeforeObjectEnd);
     if (!truncatedJson) return false;
     error.finishReason = finishReason;
-    error.truncationCause = finishReason === "length" ? "output_limit" :
-      finishReason === "stop" ? "incomplete_model_json" : "unknown";
+    error.truncationCause =
+      finishReason === "length"
+        ? "output_limit"
+        : finishReason === "stop"
+          ? "incomplete_model_json"
+          : "unknown";
     error.code = "TOOL_ARGUMENTS_TRUNCATED";
     error.category = "TOOL_ARGUMENTS_TRUNCATED";
     error.largeWriteTruncated = true;

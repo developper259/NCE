@@ -25,7 +25,11 @@ class ProjectExplorer {
         },
       };
     }
-    const maxDepth = Number.isInteger(args.maxDepth) ? args.maxDepth : 6;
+    const maxDepthLimit =
+      this.agent.toolLimits?.get_project_map?.maxDepth || 20;
+    const maxDepth = Number.isInteger(args.maxDepth)
+      ? Math.min(args.maxDepth, maxDepthLimit)
+      : 6;
     const cacheDecision = this.agent.fileKnowledge.getProjectMapDecision(
       target,
       { maxDepth, maxFiles: 1000 },

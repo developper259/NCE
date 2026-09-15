@@ -50,8 +50,14 @@ class ActiveFileManager {
         ? args.startLine
         : 1;
     const requestedEndLine = Math.min(
-      Number.isInteger(args.endLine) ? args.endLine : requestedStartLine + 149,
-      requestedStartLine + 199,
+      Number.isInteger(args.endLine)
+        ? args.endLine
+        : requestedStartLine +
+            (this.agent.toolLimits?.read_file?.defaultLines || 200) -
+            1,
+      requestedStartLine +
+        (this.agent.toolLimits?.read_file?.defaultLines || 200) -
+        1,
       lines.length,
     );
     const fullContent = lines.join("\n");
@@ -63,7 +69,8 @@ class ActiveFileManager {
       {
         toolName: "internal_active_read",
         startColumn: Number.isInteger(args.startColumn)
-          ? Math.max(0, args.startColumn) : 0,
+          ? Math.max(0, args.startColumn)
+          : 0,
         currentRevision: this.agent.getContentRevision(fullContent),
       },
     );
@@ -85,34 +92,104 @@ class ActiveFileManager {
     const startLine = readRange.startLine;
     const endLine = Math.min(readRange.endLine, lines.length);
     const startColumn = Number.isInteger(args.startColumn)
-      ? Math.max(0, args.startColumn) : 0;
+      ? Math.max(0, readDecision.range?.startColumn ?? args.startColumn)
+      : 0;
     const firstLine = lines[startLine - 1] || "";
-    if (startColumn > firstLine.length) return { success: false,
-      error: { code: "INVALID_RANGE", message: "startColumn exceeds the line." } };
-    if (startColumn > 0 || firstLine.length > 4000) {
-      const content = firstLine.slice(startColumn, startColumn + 4000);
+    if (startColumn > firstLine.length)
+      return {
+        success: false,
+        error: {
+          code: "INVALID_RANGE",
+          message: "startColumn exceeds the line.",
+        },
+      };
+    if (startColumn === firstLine.length) {
+      if (startLine < endLine) {
+        return this.readActiveFile({
+          ...args,
+          startLine: startLine + 1,
+          startColumn: 0,
+        });
+      }
+      return {
+        success: true,
+        readDecision: "NEW",
+        path: this.agent.toProjectRelativePath(
+          file.path,
+          this.agent.editor?.fileExplorer?.rootPath,
+        ),
+        revision: this.agent.getContentRevision(fullContent),
+        requestedRange: {
+          startLine: requestedStartLine,
+          endLine: requestedEndLine,
+          startColumn,
+        },
+        deliveredRange: null,
+        completeLineRange: null,
+        content: "",
+        hasMore: false,
+        nextStartLine: null,
+        nextStartColumn: null,
+      };
+    }
+    const readLimit =
+      this.agent.toolLimits?.read_file?.outputCharacters || 4000;
+    if (startColumn > 0 || firstLine.length - startColumn > readLimit) {
+      const content = firstLine.slice(startColumn, startColumn + readLimit);
       const endColumn = startColumn + content.length;
       const revision = this.agent.getContentRevision(fullContent);
       this.agent.fileKnowledge.recordPartialSegment(absolutePath, {
-        revision, toolName: "internal_active_read", line: startLine,
-        startColumn, endColumn, lineLength: firstLine.length,
-        content, totalLines: lines.length, diskRead: false });
-      return { success: true, readDecision: "NEW",
-        path: this.agent.toProjectRelativePath(file.path,
-          this.agent.editor?.fileExplorer?.rootPath),
-        revision, requestedRange: { startLine: requestedStartLine,
-          endLine: requestedEndLine, startColumn },
-        deliveredRange: { startLine, endLine: startLine,
-          startColumn, endColumn },
+        revision,
+        toolName: "internal_active_read",
+        line: startLine,
+        startColumn,
+        endColumn,
+        lineLength: firstLine.length,
+        content,
+        totalLines: lines.length,
+        diskRead: false,
+      });
+      return {
+        success: true,
+        readDecision: "NEW",
+        path: this.agent.toProjectRelativePath(
+          file.path,
+          this.agent.editor?.fileExplorer?.rootPath,
+        ),
+        revision,
+        requestedRange: {
+          startLine: requestedStartLine,
+          endLine: requestedEndLine,
+          startColumn,
+        },
+        deliveredRange: {
+          startLine,
+          endLine: startLine,
+          startColumn,
+          endColumn,
+        },
         completeLineRange: null,
-        partialSegment: { line: startLine, startColumn, endColumn,
-          lineLength: firstLine.length },
-        lineTruncated: true, contentStartLine: startLine,
-        contentEndLine: startLine, contentStartColumn: startColumn,
+        partialSegment: {
+          line: startLine,
+          startColumn,
+          endColumn,
+          lineLength: firstLine.length,
+        },
+        lineTruncated: true,
+        contentStartLine: startLine,
+        contentEndLine: startLine,
+        contentStartColumn: startColumn,
         contentEndColumn: endColumn,
-        nextStartLine: endColumn < firstLine.length ? startLine : startLine + 1,
+        hasMore: endColumn < firstLine.length || startLine < endLine,
+        nextStartLine:
+          endColumn < firstLine.length
+            ? startLine
+            : startLine < endLine
+              ? startLine + 1
+              : null,
         nextStartColumn: endColumn < firstLine.length ? endColumn : 0,
-        content };
+        content,
+      };
     }
     const readContext = this.agent.createFileReadContext(
       absolutePath,
@@ -143,12 +220,17 @@ class ActiveFileManager {
       ),
       startLine,
       endLine: readContext.knowledgeEndLine ?? startLine,
-      requestedRange: { startLine: requestedStartLine,
-        endLine: requestedEndLine },
-      deliveredRange: { startLine,
-        endLine: readContext.knowledgeEndLine ?? startLine },
+      requestedRange: {
+        startLine: requestedStartLine,
+        endLine: requestedEndLine,
+      },
+      deliveredRange: {
+        startLine,
+        endLine: readContext.knowledgeEndLine ?? startLine,
+      },
       completeLineRange: readContext.knowledgeEndLine
-        ? { startLine, endLine: readContext.knowledgeEndLine } : null,
+        ? { startLine, endLine: readContext.knowledgeEndLine }
+        : null,
       totalLines: lines.length,
       truncated: endLine < lines.length || readContext.truncated,
       revision: readContext.revision,
@@ -336,7 +418,8 @@ class ActiveFileManager {
       }
 
       const errorMessage = validation.error;
-      const fileContent = this.agent.editor?.lineController?.getContent?.() || "";
+      const fileContent =
+        this.agent.editor?.lineController?.getContent?.() || "";
       const snippet = (fileContent || "").slice(0, 4000);
 
       currentArgs = {
@@ -538,7 +621,11 @@ class ActiveFileManager {
         return { success: false, error: strictRange.error };
       const adjustedRange =
         typeof args.expectedText === "string"
-          ? this.agent.adjustRangeForMissingIndentation(beforeText, args, strictRange)
+          ? this.agent.adjustRangeForMissingIndentation(
+              beforeText,
+              args,
+              strictRange,
+            )
           : strictRange;
       if (
         typeof args.expectedText !== "string" ||
@@ -673,7 +760,6 @@ class ActiveFileManager {
     this.agent.executedModificationRequests.set(requestKey, result);
     return result;
   }
-
 }
 
 window.ActiveFileManager = ActiveFileManager;

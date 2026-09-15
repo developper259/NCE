@@ -217,7 +217,9 @@ class WorkspaceFileManager {
     if (typeof verifiedContent !== "string" || verifiedContent !== content) {
       let existsAfterCreate = null;
       try {
-        const observed = await this.agent.api?.pathExists?.(target.absolutePath);
+        const observed = await this.agent.api?.pathExists?.(
+          target.absolutePath,
+        );
         if (typeof observed === "boolean") existsAfterCreate = observed;
       } catch {}
       if (existsAfterCreate !== false) {
@@ -225,7 +227,7 @@ class WorkspaceFileManager {
           path: target.relativePath,
           status: exists ? "modified" : "created",
           beforeContent: snapshotKey
-            ? this.agent.fileSnapshots.get(snapshotKey) ?? null
+            ? (this.agent.fileSnapshots.get(snapshotKey) ?? null)
             : null,
           afterContent: null,
           created: !exists,
@@ -270,7 +272,7 @@ class WorkspaceFileManager {
       path: target.relativePath,
       overwritten: Boolean(exists && overwrite),
       beforeText: snapshotKey
-        ? this.agent.fileSnapshots.get(snapshotKey) ?? null
+        ? (this.agent.fileSnapshots.get(snapshotKey) ?? null)
         : null,
       content: verifiedContent,
       revision: verificationContext.revision,
@@ -285,7 +287,9 @@ class WorkspaceFileManager {
       typeof this.agent.editor?.tabManager?.openFileWithPath === "function"
     ) {
       try {
-        await this.agent.editor.tabManager.openFileWithPath(target.absolutePath);
+        await this.agent.editor.tabManager.openFileWithPath(
+          target.absolutePath,
+        );
         openedInTabManager = true;
         const createdFile = this.agent.editor.tabManager.getFileByPath?.(
           target.absolutePath,
@@ -416,8 +420,12 @@ class WorkspaceFileManager {
           mutationOutcome: "APPLIED_BUT_UNCERTAIN",
           safeToRetry: false,
           error: {
-            code: typeof currentContent === "string" ? "EXTERNAL_CHANGE" : "APPEND_STATE_UNCERTAIN",
-            message: "Le chunk précédent ne peut pas être réappliqué sans risque de duplication.",
+            code:
+              typeof currentContent === "string"
+                ? "EXTERNAL_CHANGE"
+                : "APPEND_STATE_UNCERTAIN",
+            message:
+              "Le chunk précédent ne peut pas être réappliqué sans risque de duplication.",
             path: target.relativePath,
           },
         };
@@ -664,8 +672,12 @@ class WorkspaceFileManager {
     let sourceStillExists = null;
     let destinationExists = null;
     try {
-      sourceStillExists = await this.agent.api?.pathExists?.(source.absolutePath);
-      destinationExists = await this.agent.api?.pathExists?.(destination.absolutePath);
+      sourceStillExists = await this.agent.api?.pathExists?.(
+        source.absolutePath,
+      );
+      destinationExists = await this.agent.api?.pathExists?.(
+        destination.absolutePath,
+      );
     } catch {}
     if (sourceStillExists === null || destinationExists === null) {
       this.agent.runChangeTracker?.recordRename?.({
@@ -782,9 +794,9 @@ class WorkspaceFileManager {
 
     const beforeContent = openFile?.lines
       ? openFile.lines.map((line) => line.getText()).join("\n")
-      : (await this.agent.api?.getFileContent?.([target.absolutePath]))?.[
+      : ((await this.agent.api?.getFileContent?.([target.absolutePath]))?.[
           target.absolutePath
-        ] ?? null;
+        ] ?? null);
     const beforeRevision =
       typeof beforeContent === "string"
         ? this.agent.getContentRevision(beforeContent)
@@ -1126,7 +1138,10 @@ class WorkspaceFileManager {
               mutationOutcome: "APPLIED_BUT_UNCERTAIN",
               persistence: { saved: false, error: saveGuard },
               verification: this.agent.buildModificationVerification(
-                absolutePath, normalizedUpdatedText, 0, replacementText,
+                absolutePath,
+                normalizedUpdatedText,
+                0,
+                replacementText,
               ),
             };
             this.agent.runChangeTracker?.recordModify?.(applied);
@@ -1142,13 +1157,19 @@ class WorkspaceFileManager {
               success: true,
               revision: this.agent.getContentRevision(normalizedUpdatedText),
               mutationOutcome: "APPLIED_BUT_UNCERTAIN",
-              persistence: { saved: false, error: {
-                code: "SAVE_FAILED",
-                message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
-                path: relativePath,
-              } },
+              persistence: {
+                saved: false,
+                error: {
+                  code: "SAVE_FAILED",
+                  message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+                  path: relativePath,
+                },
+              },
               verification: this.agent.buildModificationVerification(
-                absolutePath, normalizedUpdatedText, 0, replacementText,
+                absolutePath,
+                normalizedUpdatedText,
+                0,
+                replacementText,
               ),
             };
             this.agent.runChangeTracker?.recordModify?.(applied);
@@ -1291,7 +1312,8 @@ class WorkspaceFileManager {
             verification: this.agent.buildModificationVerification(
               absolutePath,
               normalizedUpdatedText,
-              editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
+              editorUpdatedText(currentText.slice(0, textMatch.startIndex))
+                .length,
               replacementText.replace(/\r\n?/g, "\n"),
             ),
           };
@@ -1308,15 +1330,19 @@ class WorkspaceFileManager {
             success: true,
             revision: this.agent.getContentRevision(normalizedUpdatedText),
             mutationOutcome: "APPLIED_BUT_UNCERTAIN",
-            persistence: { saved: false, error: {
-              code: "SAVE_FAILED",
-              message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
-              path: relativePath,
-            } },
+            persistence: {
+              saved: false,
+              error: {
+                code: "SAVE_FAILED",
+                message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+                path: relativePath,
+              },
+            },
             verification: this.agent.buildModificationVerification(
               absolutePath,
               normalizedUpdatedText,
-              editorUpdatedText(currentText.slice(0, textMatch.startIndex)).length,
+              editorUpdatedText(currentText.slice(0, textMatch.startIndex))
+                .length,
               replacementText.replace(/\r\n?/g, "\n"),
             ),
           };
@@ -1372,7 +1398,9 @@ class WorkspaceFileManager {
       requestedRange.endLine,
       {
         toolName: "read_file",
-        startColumn: Number.isInteger(options.startColumn) ? Math.max(0, options.startColumn) : 0,
+        startColumn: Number.isInteger(options.startColumn)
+          ? Math.max(0, options.startColumn)
+          : 0,
         currentRevision:
           typeof openFileContent === "string"
             ? this.agent.getContentRevision(openFileContent)
@@ -1390,33 +1418,58 @@ class WorkspaceFileManager {
       }
       const restored = readDecision.result;
       const nextLine = restored?.nextStartLine;
-      const remainingBudget = 4000 - (restored?.content?.length || 0) - 1;
-      if (restored?.restoredFromCache === true && !restored.partialSegment &&
-          Number.isInteger(nextLine) && nextLine <= requestedRange.endLine &&
-          remainingBudget > 0 && !readDecision.entry?.contentLines?.has(nextLine)) {
+      const readLimit =
+        this.agent.toolLimits?.read_file?.outputCharacters || 4000;
+      const remainingBudget = readLimit - (restored?.content?.length || 0) - 1;
+      if (
+        restored?.restoredFromCache === true &&
+        !restored.partialSegment &&
+        Number.isInteger(nextLine) &&
+        nextLine <= requestedRange.endLine &&
+        remainingBudget > 0 &&
+        !readDecision.entry?.contentLines?.has(nextLine)
+      ) {
         const visible = this.agent.fileKnowledge.modelVisibleFiles.get(
-          AgentPath.normalize(absolute));
-        const alreadyVisible = visible?.revision === restored.revision &&
-          visible.ranges?.some((range) =>
-            range.startLine <= nextLine && range.endLine >= nextLine);
+          AgentPath.normalize(absolute),
+        );
+        const alreadyVisible =
+          visible?.revision === restored.revision &&
+          visible.ranges?.some(
+            (range) => range.startLine <= nextLine && range.endLine >= nextLine,
+          );
         if (!alreadyVisible) {
-          const source = typeof openFileContent === "string" ? openFileContent :
-            (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
+          const source =
+            typeof openFileContent === "string"
+              ? openFileContent
+              : (await this.agent.api?.getFileContent?.([absolute]))?.[
+                  absolute
+                ];
           if (typeof source === "string") {
             const revision = this.agent.getContentRevision(source);
             if (revision !== restored.revision) {
-              this.agent.fileKnowledge.invalidateFile(absolute, revision,
-                "new_revision");
+              this.agent.fileKnowledge.invalidateFile(
+                absolute,
+                revision,
+                "new_revision",
+              );
               return this.readFile(filePath, options);
             }
             const lines = source.split(/\r?\n/);
             const fresh = [];
             let chars = 0;
-            for (let line = nextLine;
-                line <= Math.min(requestedRange.endLine, lines.length); line++) {
-              if (readDecision.entry?.contentLines?.has(line) ||
-                  visible?.revision === revision && visible.ranges?.some((range) =>
-                    range.startLine <= line && range.endLine >= line)) break;
+            for (
+              let line = nextLine;
+              line <= Math.min(requestedRange.endLine, lines.length);
+              line++
+            ) {
+              if (
+                readDecision.entry?.contentLines?.has(line) ||
+                (visible?.revision === revision &&
+                  visible.ranges?.some(
+                    (range) => range.startLine <= line && range.endLine >= line,
+                  ))
+              )
+                break;
               const value = lines[line - 1];
               const required = value.length + (fresh.length ? 1 : 0);
               if (chars + required > remainingBudget) break;
@@ -1427,24 +1480,42 @@ class WorkspaceFileManager {
               const end = nextLine + fresh.length - 1;
               const added = fresh.join("\n");
               this.agent.fileKnowledge.recordRead(absolute, {
-                revision, toolName: "read_file", startLine: nextLine,
-                endLine: end, requestedStartLine: requestedRange.startLine,
+                revision,
+                toolName: "read_file",
+                startLine: nextLine,
+                endLine: end,
+                requestedStartLine: requestedRange.startLine,
                 requestedEndLine: requestedRange.endLine,
-                knowledgeEndLine: end, totalLines: lines.length,
-                content: added, diskRead: typeof openFileContent !== "string" });
-              return { ...restored, readDecision: "RESTORED_AND_NEW",
+                knowledgeEndLine: end,
+                totalLines: lines.length,
+                content: added,
+                diskRead: typeof openFileContent !== "string",
+              });
+              return {
+                ...restored,
+                readDecision: "RESTORED_AND_NEW",
                 informationGain: "PARTIAL_NEW_CONTENT",
                 content: `${restored.content}\n${added}`,
-                contentEndLine: end, endLine: end,
-                completeLineRange: { startLine: restored.contentStartLine,
-                  endLine: end },
-                deliveredRange: { startLine: restored.contentStartLine,
-                  endLine: end },
-                nextStartLine: end < requestedRange.endLine && end < lines.length
-                  ? end + 1 : null,
-                hasMore: end < requestedRange.endLine && end < lines.length,
-                informationSource: typeof openFileContent === "string"
-                  ? "runtime_cache+editor" : "runtime_cache+filesystem" };
+                contentEndLine: end,
+                endLine: end,
+                completeLineRange: {
+                  startLine: restored.contentStartLine,
+                  endLine: end,
+                },
+                deliveredRange: {
+                  startLine: restored.contentStartLine,
+                  endLine: end,
+                },
+                nextStartLine:
+                  end < requestedRange.endLine && end < lines.length
+                    ? end + 1
+                    : null,
+                hasMore: end < requestedRange.endLine,
+                informationSource:
+                  typeof openFileContent === "string"
+                    ? "runtime_cache+editor"
+                    : "runtime_cache+filesystem",
+              };
             }
           }
         }
@@ -1452,38 +1523,93 @@ class WorkspaceFileManager {
       return restored;
     }
 
+    const cachedSource = this.agent.fileKnowledge.getTransientSource(
+      absolute,
+      readDecision.entry?.revision,
+    );
     const content =
       typeof openFileContent === "string"
         ? openFileContent
-        : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
+        : cachedSource !== null
+          ? cachedSource
+          : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
     if (typeof content === "string") {
+      this.agent.fileKnowledge.setTransientSource(
+        absolute,
+        this.agent.getContentRevision(content),
+        content,
+      );
       const contentLines = content.split(/\r?\n/);
       const totalLines = contentLines.length;
       const effectiveReadRange = readDecision.range || requestedRange;
       const startLine = effectiveReadRange.startLine;
       const endLine = Math.min(effectiveReadRange.endLine, totalLines);
       const startColumn = Number.isInteger(options.startColumn)
-        ? Math.max(0, options.startColumn)
+        ? Math.max(0, readDecision.range?.startColumn ?? options.startColumn)
         : 0;
       const firstLine = contentLines[startLine - 1] || "";
       if (startColumn > firstLine.length) {
         return {
           success: false,
-          error: { code: "INVALID_RANGE", message: "startColumn dépasse la ligne demandée." },
+          error: {
+            code: "INVALID_RANGE",
+            message: "startColumn dépasse la ligne demandée.",
+          },
+        };
+      }
+      if (startColumn === firstLine.length) {
+        if (startLine < endLine) {
+          return this.readFile(filePath, {
+            ...options,
+            startLine: startLine + 1,
+            startColumn: 0,
+          });
+        }
+        return {
+          success: true,
+          readDecision: "NEW",
+          path: filePath,
+          requestedStartLine: requestedRange.startLine,
+          requestedEndLine: requestedRange.endLine,
+          requestedStartColumn: startColumn,
+          requestedRange: { ...requestedRange, startColumn },
+          deliveredRange: null,
+          startLine,
+          endLine: startLine,
+          contentStartLine: startLine,
+          contentEndLine: startLine,
+          completeLineRange: null,
+          totalLines,
+          revision: this.agent.getContentRevision(content),
+          informationSource:
+            typeof openFileContent === "string" ? "editor" : "filesystem",
+          truncated: false,
+          hasMore: false,
+          nextStartLine: null,
+          nextStartColumn: null,
+          content: "",
         };
       }
       if (
         startColumn > 0 ||
-        firstLine.length - startColumn > 4000
+        firstLine.length - startColumn >
+          (this.agent.toolLimits?.read_file?.outputCharacters || 4000)
       ) {
-        const visible = firstLine.slice(startColumn, startColumn + 4000);
+        const readLimit =
+          this.agent.toolLimits?.read_file?.outputCharacters || 4000;
+        const visible = firstLine.slice(startColumn, startColumn + readLimit);
         const endColumn = startColumn + visible.length;
         const truncated = endColumn < firstLine.length;
         const revision = this.agent.getContentRevision(content);
         this.agent.fileKnowledge.recordPartialSegment(absolute, {
-          revision, toolName: "read_file", line: startLine,
-          startColumn, endColumn, lineLength: firstLine.length,
-          content: visible, totalLines,
+          revision,
+          toolName: "read_file",
+          line: startLine,
+          startColumn,
+          endColumn,
+          lineLength: firstLine.length,
+          content: visible,
+          totalLines,
           requestedStartLine: requestedRange.startLine,
           requestedEndLine: requestedRange.endLine,
           diskRead: typeof openFileContent !== "string",
@@ -1497,8 +1623,12 @@ class WorkspaceFileManager {
           requestedEndLine: requestedRange.endLine,
           requestedStartColumn: startColumn,
           requestedRange: { ...requestedRange, startColumn },
-          deliveredRange: { startLine, endLine: startLine,
-            startColumn, endColumn },
+          deliveredRange: {
+            startLine,
+            endLine: startLine,
+            startColumn,
+            endColumn,
+          },
           startLine,
           endLine: startLine,
           contentStartLine: startLine,
@@ -1506,15 +1636,24 @@ class WorkspaceFileManager {
           contentEndLine: startLine,
           contentEndColumn: endColumn,
           completeLineRange: null,
-          partialSegment: { line: startLine, startColumn, endColumn,
-            lineLength: firstLine.length },
+          partialSegment: {
+            line: startLine,
+            startColumn,
+            endColumn,
+            lineLength: firstLine.length,
+          },
           lineTruncated: true,
           totalLines,
           revision,
-          informationSource: typeof openFileContent === "string" ? "editor" : "filesystem",
+          informationSource:
+            typeof openFileContent === "string" ? "editor" : "filesystem",
           truncated,
-          hasMore: truncated || startLine < endLine || startLine < totalLines,
-          nextStartLine: truncated ? startLine : (startLine < totalLines ? startLine + 1 : null),
+          hasMore: truncated || startLine < endLine,
+          nextStartLine: truncated
+            ? startLine
+            : startLine < endLine
+              ? startLine + 1
+              : null,
           nextStartColumn: truncated ? endColumn : null,
           content: visible,
         };
@@ -1542,19 +1681,24 @@ class WorkspaceFileManager {
       return {
         success: true,
         readDecision: "NEW",
-        informationGain: readDecision.informationGain === "PARTIAL_NEW_CONTENT"
-          ? "PARTIAL_NEW_CONTENT" : "NEW_CONTENT",
+        informationGain:
+          readDecision.informationGain === "PARTIAL_NEW_CONTENT"
+            ? "PARTIAL_NEW_CONTENT"
+            : "NEW_CONTENT",
         path: filePath,
         requestedStartLine: requestedRange.startLine,
         requestedEndLine: requestedRange.endLine,
         requestedRange,
-        deliveredRange: { startLine,
-          endLine: readContext.knowledgeEndLine ?? startLine },
+        deliveredRange: {
+          startLine,
+          endLine: readContext.knowledgeEndLine ?? startLine,
+        },
         startLine,
         endLine: readContext.knowledgeEndLine ?? startLine,
         contentStartLine: startLine,
         completeLineRange: readContext.knowledgeEndLine
-          ? { startLine, endLine: readContext.knowledgeEndLine } : null,
+          ? { startLine, endLine: readContext.knowledgeEndLine }
+          : null,
         totalLines,
         revision: readContext.revision,
         contentEndLine: readContext.knowledgeEndLine,
@@ -1563,12 +1707,13 @@ class WorkspaceFileManager {
         truncated:
           readContext.truncated ||
           (readContext.knowledgeEndLine ?? startLine) < totalLines,
-        hasMore: (readContext.knowledgeEndLine ?? startLine) < totalLines,
+        hasMore: (readContext.knowledgeEndLine ?? startLine) < endLine,
         nextStartLine:
-          (readContext.knowledgeEndLine ?? startLine) < totalLines
+          (readContext.knowledgeEndLine ?? startLine) < endLine
             ? (readContext.knowledgeEndLine ?? startLine) + 1
             : null,
-        nextStartColumn: (readContext.knowledgeEndLine ?? startLine) < totalLines ? 0 : null,
+        nextStartColumn:
+          (readContext.knowledgeEndLine ?? startLine) < endLine ? 0 : null,
         content: readContext.content,
       };
     }
