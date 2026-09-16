@@ -938,6 +938,61 @@ test("modify_file rejects stale revisions and recovers after reading the changed
   }
 });
 
+test("Agent multi-line edits synchronize NSH before refresh and permit new-revision reads", async () => {
+  const initial = Array.from({ length: 40 }, (_, i) => `line-${i}`).join("\n");
+  const expanded = Array.from({ length: 80 }, (_, i) => `expanded-${i}`).join("\n");
+  const shortened = Array.from({ length: 5 }, (_, i) => `short-${i}`).join("\n");
+  const fixture = await setupEditable(initial);
+  const { root, agent, editor } = fixture;
+  try {
+    agent.runChangeTracker.beginRun(1, root);
+    const synchronized = [];
+    editor.highlightController = {
+      async syncDocumentFromEditor(file, previousText) {
+        synchronized.push([previousText.split("\n").length, file.lines.length]);
+      },
+    };
+    const firstRead = await agent.readFile("editable.txt", { startLine: 1, endLine: 40 });
+    const modify = (id, revision, oldText, newText) => agent.executeToolCall({
+      id,
+      function: { name: "modify_file", arguments: JSON.stringify({
+        path: "editable.txt", revision, oldText, newText,
+      }) },
+    });
+    const first = await modify("grow", firstRead.revision, initial, expanded);
+    assert.equal(first.success, true, JSON.stringify(first));
+    const second = await modify("shrink", first.result.revision, expanded, shortened);
+    assert.equal(second.success, true, JSON.stringify(second));
+    assert.deepEqual(synchronized, [[40, 80], [80, 5]]);
+    const current = await agent.readFile("editable.txt", { startLine: 1, endLine: 5 });
+    assert.equal(current.revision, second.result.revision);
+    agent.contextManager.updateModelFileVisibility([
+      { role: "assistant", tool_calls: [{ id: "current", type: "function", function: {
+        name: "read_file", arguments: JSON.stringify({ path: "editable.txt" }),
+      } }] },
+      { role: "tool", tool_call_id: "current", content: JSON.stringify({ success: true, result: current }) },
+    ]);
+    const duplicate = await agent.readFile("editable.txt", { startLine: 1, endLine: 5 });
+    assert.equal(duplicate.readDecision, "REPEATED_REDUNDANT_READ");
+    assert.equal(Object.hasOwn(duplicate, "content"), false);
+    const third = await modify("change-again", current.revision, shortened, "latest");
+    assert.equal(third.success, true, JSON.stringify(third));
+    const fresh = await agent.readFile("editable.txt", { startLine: 1, endLine: 1 });
+    assert.equal(fresh.content, "latest");
+    assert.equal(fresh.revision, third.result.revision);
+    const call = (id, name, args) => agent.executeToolCall({
+      id, function: { name, arguments: JSON.stringify(args) },
+    });
+    assert.equal((await call("review-changes", "get_changed_files", {})).success, true);
+    assert.equal((await call("review-diff", "get_diff", { path: "editable.txt" })).success, true);
+    assert.equal((await call("review-complete", "task_complete", {
+      summary: "Edits complete.", validation: "Changes reviewed.",
+    })).success, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("modify_file separates revision validation from exact and ambiguous matching", async () => {
   const fixture = await setupEditable("same\nmiddle\nsame");
   const { root, agent } = fixture;

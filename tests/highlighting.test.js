@@ -248,3 +248,145 @@ test("visible range recovery clamps stale viewport and retries once", async () =
     { startLine: 49, endLine: 50 },
   ]);
 });
+
+test("pending old range is discarded when a 100-line document shrinks to 20", async () => {
+  const { editor, file, h, documents } = setup();
+  file.lines = Array.from({ length: 100 }, (_, i) => new LineNode(`old ${i}`));
+  editor.lineController.lines = file.lines;
+  await h.openFile(file);
+  h.lastLoadedRanges.clear();
+  const original = h.nshClient.request.bind(h.nshClient);
+  let release;
+  let requested;
+  h.nshClient.request = async (type, data) => {
+    if (type === "getDocumentLines" && !requested) {
+      requested = data;
+      return new Promise((resolve, reject) => { release = () => reject(new Error("line range is outside the document")); });
+    }
+    if (type === "updateDocument") {
+      documents.get(data.documentId).code = data.insertedLines.join("\n");
+      return { lines: [] };
+    }
+    return original(type, data);
+  };
+  const pending = h.loadVisibleDocumentLines(file);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(requested);
+  file.lines = Array.from({ length: 20 }, (_, i) => new LineNode(`new ${i}`));
+  editor.lineController.lines = file.lines;
+  const sync = h.syncDocumentFromEditor(file, 100);
+  release();
+  await Promise.all([pending, sync]);
+  assert.equal(documents.get(h.getDocumentId(file)).code.split("\n").length, 20);
+  assert.equal(file.lines.length, 20);
+});
+
+test("new visible range waits for worker update when document grows from 20 to 100", async () => {
+  const { editor, file, h, documents } = setup();
+  file.lines = Array.from({ length: 20 }, (_, i) => new LineNode(`old ${i}`));
+  editor.lineController.lines = file.lines;
+  await h.openFile(file);
+  let release;
+  let rangeCalls = 0;
+  const original = h.nshClient.request.bind(h.nshClient);
+  h.nshClient.request = async (type, data) => {
+    if (type === "updateDocument") {
+      await new Promise((resolve) => { release = resolve; });
+      documents.get(data.documentId).code = data.insertedLines.join("\n");
+      return { lines: [] };
+    }
+    if (type === "getDocumentLines") rangeCalls++;
+    return original(type, data);
+  };
+  file.lines = Array.from({ length: 100 }, (_, i) => new LineNode(`new ${i}`));
+  editor.lineController.lines = file.lines;
+  const sync = h.syncDocumentFromEditor(file, 20);
+  const visible = h.loadVisibleDocumentLines(file);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(rangeCalls, 0);
+  release();
+  await Promise.all([sync, visible]);
+  assert.equal(rangeCalls, 1);
+  assert.equal(documents.get(h.getDocumentId(file)).code.split("\n").length, 100);
+});
+
+test("late response from an older document revision cannot color the new lines", async () => {
+  const { editor, file, h } = setup();
+  await h.openFile(file);
+  h.lastLoadedRanges.clear();
+  let release;
+  const original = h.nshClient.request.bind(h.nshClient);
+  h.nshClient.request = (type, data) => {
+    if (type === "getDocumentLines") return new Promise((resolve) => { release = resolve; });
+    if (type === "updateDocument") return Promise.resolve({ lines: [] });
+    return original(type, data);
+  };
+  const old = h.loadVisibleDocumentLines(file);
+  await new Promise((resolve) => setImmediate(resolve));
+  file.lines = [new LineNode("new revision")];
+  editor.lineController.lines = file.lines;
+  const sync = h.syncDocumentFromEditor(file, 1);
+  release({ lines: [{ text: "new revision", tokens: [{ value: "stale" }] }] });
+  await Promise.all([old, sync]);
+  assert.equal(file.lines[0].getTokens(), null);
+});
+
+test("successive document replacements keep only the newest visible revision", async () => {
+  const { editor, file, h, documents } = setup();
+  await h.openFile(file);
+  const original = h.nshClient.request.bind(h.nshClient);
+  h.nshClient.request = async (type, data) => {
+    if (type === "updateDocument") {
+      documents.get(data.documentId).code = data.insertedLines.join("\n");
+      return { lines: [] };
+    }
+    return original(type, data);
+  };
+  file.lines = Array.from({ length: 80 }, (_, i) => new LineNode(`middle ${i}`));
+  editor.lineController.lines = file.lines;
+  const first = h.syncDocumentFromEditor(file, 1);
+  file.lines = Array.from({ length: 5 }, (_, i) => new LineNode(`final ${i}`));
+  editor.lineController.lines = file.lines;
+  const second = h.syncDocumentFromEditor(file, 80);
+  await Promise.all([first, second]);
+  await h.loadVisibleDocumentLines(file);
+  assert.equal(documents.get(h.getDocumentId(file)).code, file.lines.map((line) => line.getText()).join("\n"));
+  assert.equal(file.lines[0].getTokens()[0].value, "final 0");
+});
+
+test("Agent document synchronization sends only changed lines near the end", async () => {
+  const { editor, file, h, documents } = setup();
+  file.lines = Array.from({ length: 100 }, (_, i) => new LineNode(`line ${i}`));
+  editor.lineController.lines = file.lines;
+  await h.openFile(file);
+  const before = file.lines.map((line) => line.getText()).join("\n");
+  const updates = [];
+  const original = h.nshClient.request.bind(h.nshClient);
+  h.nshClient.request = async (type, data) => {
+    if (type === "updateDocument") {
+      updates.push(data);
+      const document = documents.get(data.documentId);
+      const lines = document.code.split("\n");
+      lines.splice(data.startLine, data.deletedLines, ...data.insertedLines);
+      document.code = lines.join("\n");
+      return { lines: [] };
+    }
+    return original(type, data);
+  };
+  file.lines[98] = new LineNode("changed near end");
+  editor.lineController.lines = file.lines;
+  await h.syncDocumentFromEditor(file, before);
+  assert.equal(updates.length, 1);
+  assert.equal(updates[0].startLine, 98);
+  assert.equal(updates[0].deletedLines, 1);
+  assert.deepEqual(updates[0].insertedLines, ["changed near end"]);
+  assert.equal(documents.get(h.getDocumentId(file)).code.split("\n")[98], "changed near end");
+});
+
+test("genuine NSH range failures remain observable", async () => {
+  const { file, h } = setup();
+  await h.openFile(file);
+  h.lastLoadedRanges.clear();
+  h.nshClient.request = async () => { throw new Error("NSH unavailable"); };
+  await assert.rejects(h.loadVisibleDocumentLines(file), /NSH unavailable/);
+});

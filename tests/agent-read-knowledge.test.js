@@ -553,7 +553,7 @@ test("three zero-information subranges hard-block, then a new range and file wor
     assert.equal(Object.hasOwn(result, "content"), false);
   }
   assert.deepEqual(decisions, [
-    "ALREADY_AVAILABLE",
+    "REPEATED_REDUNDANT_READ",
     "REPEATED_REDUNDANT_READ",
     "REDUNDANT_READ_HARD_BLOCK",
   ]);
@@ -585,7 +585,7 @@ test("a useful search resets only the consecutive redundant-read sequence", asyn
     startLine: 30,
     endLine: 40,
   });
-  assert.equal(duplicate.readDecision, "ALREADY_AVAILABLE");
+  assert.equal(duplicate.readDecision, "REPEATED_REDUNDANT_READ");
   const search = await agent.executeToolCall({
     id: "search",
     type: "function",
@@ -597,7 +597,76 @@ test("a useful search resets only the consecutive redundant-read sequence", asyn
   assert.equal(search.success, true);
   assert.equal(agent.fileKnowledge.consecutiveRedundantReads, 0);
   const after = await agent.readFile("a.js", { startLine: 35, endLine: 45 });
-  assert.equal(after.readDecision, "ALREADY_AVAILABLE");
+  assert.equal(after.readDecision, "REPEATED_REDUNDANT_READ");
+});
+
+test("semantic read and search deduplication respects revisions, ranges, and Windows spelling", async () => {
+  const agent = fixture({ "a.js": "one\ntwo\nthree", "b.js": "other" });
+  const first = await agent.readFile("a.js", { startLine: 1, endLine: 3 });
+  visible(agent, [first]);
+  const duplicate = await agent.readFile("a.js", { startLine: 2, endLine: 2 });
+  assert.equal(duplicate.readDecision, "REPEATED_REDUNDANT_READ");
+  assert.equal(duplicate.repeatedRedundantAction, true);
+  assert.equal(Object.hasOwn(duplicate, "content"), false);
+  assert.equal(duplicate.reason, "same_revision_range_already_known");
+  assert.equal((await agent.readFile("b.js", { startLine: 1, endLine: 1 })).content, "other");
+
+  const knowledge = agent.fileKnowledge;
+  const search = { query: "one", path: "C:\\Project\\Src", limit: 20 };
+  const searchFirst = knowledge.getProjectSearchDecision(search);
+  assert.equal(searchFirst.cached, false);
+  knowledge.recordProjectSearch(searchFirst.key, { totalMatches: 1 });
+  assert.equal(knowledge.getProjectSearchDecision({ ...search, path: "c:/project/src" }).cached, true);
+  knowledge.observeWrite("modify_file", { path: "a.js" }, { success: true, path: "a.js", revision: "new" });
+  assert.equal(knowledge.getProjectSearchDecision(search).cached, false);
+
+  const mapFirst = knowledge.getProjectMapDecision("/workspace", { maxDepth: 2 });
+  knowledge.recordProjectMap(mapFirst.key, { path: "", files: 2, directories: 1 });
+  const mapAgain = knowledge.getProjectMapDecision("/workspace", { maxDepth: 2 });
+  assert.equal(mapAgain.cached, true);
+  assert.equal(Object.hasOwn(mapAgain.result, "tree"), false);
+  knowledge.observeWrite("create_folder", { path: "new" }, { success: true });
+  assert.equal(knowledge.getProjectMapDecision("/workspace", { maxDepth: 2 }).cached, false);
+});
+
+test("search_code and get_project_map return compact cached tool results until a relevant write", async () => {
+  const agent = fixture({ "a.js": "needle" });
+  let searches = 0;
+  let maps = 0;
+  agent.editor.api.searchInFiles = async () => {
+    searches++;
+    return { success: true, results: [{ path: "a.js", line: 1 }], totalMatches: 1 };
+  };
+  agent.api.getProjectMap = async () => {
+    maps++;
+    return { success: true, root: "/workspace", entries: [], files: 1, directories: 0 };
+  };
+  const call = (id, name, args) => agent.executeToolCall({
+    id, function: { name, arguments: JSON.stringify(args) },
+  });
+  const firstSearch = await call("search-1", "search_code", { query: "needle" });
+  const sameSearch = await call("search-2", "search_code", { query: "needle" });
+  assert.equal(firstSearch.success, true);
+  assert.equal(sameSearch.result.alreadyKnown, true);
+  assert.equal(Object.hasOwn(sameSearch.result, "results"), false);
+  assert.equal(searches, 1);
+  const firstMap = await call("map-1", "get_project_map", {});
+  const sameMap = await call("map-2", "get_project_map", {});
+  assert.equal(firstMap.success, true);
+  assert.equal(sameMap.result.alreadyKnown, true);
+  assert.equal(Object.hasOwn(sameMap.result, "text"), false);
+  assert.equal(maps, 1);
+
+  agent.fileKnowledge.observeWrite("modify_file", { path: "a.js" }, {
+    success: true, path: "a.js", revision: "r2",
+  });
+  assert.equal((await call("search-3", "search_code", { query: "needle" })).result.alreadyKnown, undefined);
+  assert.equal(searches, 2);
+  agent.fileKnowledge.observeWrite("rename_file", { path: "a.js", newPath: "b.js" }, {
+    success: true, oldAbsolutePath: "/workspace/a.js", newAbsolutePath: "/workspace/b.js",
+  });
+  assert.equal((await call("map-3", "get_project_map", {})).result.alreadyKnown, undefined);
+  assert.equal(maps, 2);
 });
 
 test("mixed visible, cached, and unknown coverage delivers only missing content", async () => {

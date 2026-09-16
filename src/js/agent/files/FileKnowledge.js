@@ -70,7 +70,7 @@ class FileKnowledge {
   }
 
   normalizePath(path) {
-    return typeof path === "string" ? AgentPath.normalize(path) : "";
+    return typeof path === "string" ? AgentPath.comparisonKey(path) : "";
   }
 
   normalizeRange(startLine, endLine) {
@@ -644,6 +644,10 @@ class FileKnowledge {
 
   toRelativePath(path) {
     const root = this.agent.editor?.fileExplorer?.rootPath;
+    if (AgentPath.isInside(path, root)) {
+      const relative = this.normalizePath(path).slice(this.normalizePath(root).length);
+      return relative.replace(/^\//, "") || "";
+    }
     return this.agent.toProjectRelativePath(path, root) || path;
   }
 
@@ -768,7 +772,7 @@ class FileKnowledge {
     const duplicateCount = (this.readSignatureCounts.get(signature) || 0) + 1;
     this.readSignatureCounts.set(signature, duplicateCount);
     this.consecutiveRedundantReads += 1;
-    const repeatedRedundant = this.consecutiveRedundantReads >= 2;
+    const repeatedRedundant = true;
     const hardBlocked = this.consecutiveRedundantReads >= 3;
     this.metrics.alreadyVisibleReads += 1;
     this.metrics.duplicateReadAttempts += 1;
@@ -779,6 +783,15 @@ class FileKnowledge {
       this.metrics.charactersAvoidedByDedup += options.avoidedChars;
     if (hardBlocked) this.metrics.hardBlockedRedundantReads += 1;
     if (repeatedRedundant) this.metrics.repeatedDuplicateReads += 1;
+    console.debug("[NCE Agent redundant tool]", {
+      tool: "read_file",
+      path: this.toRelativePath(path),
+      requestedRevision: entry.revision,
+      knownRevision: entry.revision,
+      requestedRange,
+      coveredBy: coveredRange,
+      reason: "same_revision_range_already_known",
+    });
     this.logReadDecision(
       path,
       requestedRange,
@@ -818,6 +831,8 @@ class FileKnowledge {
         path: this.toRelativePath(path),
         revision: entry.revision,
         requestedRange,
+        knownRevision: entry.revision,
+        reason: "same_revision_range_already_known",
         coverage: this.formatCoverage(entry),
         visibleCoverage:
           this.modelVisibleFiles.get(this.normalizePath(path))?.ranges || [],
@@ -1267,7 +1282,7 @@ class FileKnowledge {
     const key = this.makeCacheKey({
       revision: this.workspaceContentRevision,
       query: args.query,
-      path: args.path || "",
+      path: this.normalizePath(args.path || ""),
       offset: args.offset || 0,
       limit: args.limit || null,
       include: args.include || null,

@@ -1363,6 +1363,10 @@ class WorkspaceFileManager {
             },
           };
         }
+        await this.agent.editor.highlightController?.syncDocumentFromEditor?.(
+          openFile,
+          currentText,
+        );
         this.agent.markFileDiffHighlights(currentText, updatedText, openFile);
         if (this.agent.editor.lineController?.refresh) {
           this.agent.editor.lineController.refresh(true);
@@ -1535,6 +1539,10 @@ class WorkspaceFileManager {
           },
         };
       }
+      await this.agent.editor.highlightController?.syncDocumentFromEditor?.(
+        openFile,
+        currentText,
+      );
       this.agent.markFileDiffHighlights(currentText, updatedText, openFile);
       if (this.agent.editor.lineController?.refresh) {
         this.agent.editor.lineController.refresh(true);

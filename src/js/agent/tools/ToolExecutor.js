@@ -538,6 +538,14 @@ class ToolExecutor {
       requestedToolAvailable: !toolUnavailable,
       cached: result?.cached === true,
       informationSource: result?.informationSource || null,
+      redundantRead: result?.reason === "same_revision_range_already_known"
+        ? {
+            path: result.path,
+            revision: result.revision,
+            range: result.requestedRange,
+            coverage: result.coverage,
+          }
+        : null,
       informationSignature:
         result?.readSignature ||
         (toolCategory === "validation" || result?.success === false

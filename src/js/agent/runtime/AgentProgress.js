@@ -404,6 +404,7 @@ class AgentProgress {
         toolName,
         informationStatus,
         "repeated_redundant_action",
+        meta.redundantRead,
       );
     }
 
@@ -493,6 +494,7 @@ class AgentProgress {
     toolName,
     informationStatus,
     reason = "repeated_no_new_information",
+    redundantRead = null,
   ) {
     if (!this.stagnationDetected) {
       this.stagnationDetected = true;
@@ -530,13 +532,16 @@ class AgentProgress {
       level,
       content:
         reason === "repeated_redundant_action"
-          ? this.getRepeatedRedundantDirective(level)
+          ? this.getRepeatedRedundantDirective(level, redundantRead)
           : this.getDirective(level),
     };
   }
 
-  getRepeatedRedundantDirective(level) {
-    return "[NCE PROGRESS DIRECTIVE] This requested read cannot provide new information because its content is already visible. Use the existing context or inspect only a currently missing range, another file, a newer revision, or the indicated nextStartLine/nextStartColumn continuation. Necessary reads remain available.";
+  getRepeatedRedundantDirective(level, read = null) {
+    const subject = read?.path
+      ? `\`${read.path}\` revision ${read.revision || "unknown"}, lines ${read.range?.startLine ?? "?"}-${read.range?.endLine ?? "?"}, is already present in current file knowledge (coverage: ${read.coverage || "known"}). `
+      : "This requested read is already present in current file knowledge. ";
+    return `[NCE PROGRESS DIRECTIVE] ${subject}No mutation has changed this revision. Use the existing content, inspect an uncovered range or another relevant file, or proceed to implementation and validation. Necessary reads remain available.`;
   }
 
   getUnavailableToolDirective(toolName, attempts = 1) {

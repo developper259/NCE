@@ -5,6 +5,7 @@ class HighlightController {
     this.nshClient.onSessionReset = () => this.handleSessionReset();
     this.documentModes = new Map();
     this.documentEpochs = new Map();
+    this.documentRevisions = new Map();
     this.nextDocumentId = 0;
     this.documentQueues = new Map();
     this.documentIds = new Map();
@@ -201,6 +202,7 @@ class HighlightController {
         file.id,
         (this.documentEpochs.get(file.id) || 0) + 1,
       );
+      this.bumpDocumentRevision(file);
       for (const line of file.lines) {
         line.clearTokens();
         line.setState(null);
@@ -220,19 +222,87 @@ class HighlightController {
     if (startLine < 0 || endLine <= startLine || endLine > file.lines.length)
       return;
     const epoch = this.documentEpochs.get(file.id);
+    const revision = this.documentRevisions.get(file.id) || 0;
     const response = await this.nshClient.request("getDocumentLines", {
       documentId: this.getDocumentId(file),
       startLine,
       endLine,
     });
-    if (this.documentEpochs.get(file.id) === epoch)
+    if (
+      this.documentEpochs.get(file.id) === epoch &&
+      (this.documentRevisions.get(file.id) || 0) === revision
+    )
       this.applyCachedLines(file, response.lines || [], startLine);
+    return this.documentEpochs.get(file.id) === epoch &&
+      (this.documentRevisions.get(file.id) || 0) === revision;
+  }
+
+  bumpDocumentRevision(file) {
+    const revision = (this.documentRevisions.get(file.id) || 0) + 1;
+    this.documentRevisions.set(file.id, revision);
+    this.lastLoadedRanges.delete(file.id);
+    this.rangeRequests.delete(file.id);
+    return revision;
+  }
+
+  async syncDocumentFromEditor(file, previousText) {
+    if (this.documentModes.get(file.id) !== "incremental") return;
+    if (!this.canUseIncremental(file)) {
+      await this.closeFile(file);
+      this.documentModes.set(file.id, "line");
+      this.reset();
+      return;
+    }
+    const revision = this.bumpDocumentRevision(file);
+    const currentLines = file.lines.map((line) => line.getText());
+    const previousLines = typeof previousText === "string"
+      ? previousText.replace(/\r\n?/g, "\n").split("\n")
+      : null;
+    let startLine = 0;
+    let previousEnd = previousLines?.length ?? previousText;
+    let currentEnd = currentLines.length;
+    if (previousLines) {
+      while (
+        startLine < previousEnd && startLine < currentEnd &&
+        previousLines[startLine] === currentLines[startLine]
+      ) startLine++;
+      while (
+        previousEnd > startLine && currentEnd > startLine &&
+        previousLines[previousEnd - 1] === currentLines[currentEnd - 1]
+      ) {
+        previousEnd--;
+        currentEnd--;
+      }
+    }
+    const insertedLines = currentLines.slice(startLine, currentEnd);
+    const deletedLines = previousEnd - startLine;
+    if (deletedLines === 0 && insertedLines.length === 0) return;
+    const epoch = this.documentEpochs.get(file.id);
+    try {
+      await this.queueDocumentRequest(file, async () => {
+        const response = await this.nshClient.request("updateDocument", {
+          documentId: this.getDocumentId(file),
+          startLine,
+          deletedLines,
+          insertedLines,
+        });
+        if (
+          this.documentEpochs.get(file.id) === epoch &&
+          this.documentRevisions.get(file.id) === revision
+        ) this.applyCachedLines(file, response.lines || [], response.changedStartLine || 0);
+      });
+    } catch (error) {
+      if (this.documentEpochs.get(file.id) !== epoch) return;
+      await this.recoverDocumentHighlight(file, error);
+    }
   }
 
   loadVisibleDocumentLines(file) {
     const range = this.getVisibleDocumentRange(file);
     if (!range) return Promise.resolve();
-    const rangeKey = `${range.startLine}:${range.endLine}`;
+    const requestEpoch = this.documentEpochs.get(file.id);
+    const requestRevision = this.documentRevisions.get(file.id) || 0;
+    const rangeKey = `${requestEpoch}:${requestRevision}:${range.startLine}:${range.endLine}`;
     if (this.lastLoadedRanges.get(file.id) === rangeKey)
       return Promise.resolve();
 
@@ -240,11 +310,11 @@ class HighlightController {
     if (pending?.rangeKey === rangeKey) return pending.promise;
 
     const promise = this.queueDocumentRequest(file, async () => {
+      if ((this.documentRevisions.get(file.id) || 0) !== requestRevision) return;
       const currentRange = this.getVisibleDocumentRange(file);
       if (!currentRange) return;
-      const currentKey = `${currentRange.startLine}:${currentRange.endLine}`;
-      const requestEpoch = this.documentEpochs.get(file.id);
-      const failureKey = `${file.id}:${requestEpoch}:${currentKey}`;
+      const currentKey = `${requestEpoch}:${requestRevision}:${currentRange.startLine}:${currentRange.endLine}`;
+      const failureKey = `${file.id}:${currentKey}`;
       if (this.rangeFailures.has(failureKey)) return;
 
       try {
@@ -253,35 +323,30 @@ class HighlightController {
           currentRange.startLine,
           currentRange.endLine,
         );
+        if (
+          this.documentEpochs.get(file.id) !== requestEpoch ||
+          (this.documentRevisions.get(file.id) || 0) !== requestRevision
+        ) return;
         this.lastLoadedRanges.set(file.id, currentKey);
         this.rangeFailures.delete(failureKey);
       } catch (error) {
-        if (this.documentEpochs.get(file.id) !== requestEpoch) return;
+        if (
+          this.documentEpochs.get(file.id) !== requestEpoch ||
+          (this.documentRevisions.get(file.id) || 0) !== requestRevision
+        ) {
+          console.debug("[NCE NSH stale range]", {
+            fileId: file.id, requestEpoch, currentEpoch: this.documentEpochs.get(file.id),
+            requestRevision, currentRevision: this.documentRevisions.get(file.id) || 0,
+            requestedRange: currentRange,
+          });
+          return;
+        }
         if (!this.isRangeError(error)) throw error;
         this.rangeFailures.set(failureKey, true);
-
-        const retryRange = this.getVisibleDocumentRange(file);
-        if (!retryRange) return;
-        try {
-          await this.loadDocumentLines(
-            file,
-            retryRange.startLine,
-            retryRange.endLine,
-          );
-          this.lastLoadedRanges.set(
-            file.id,
-            `${retryRange.startLine}:${retryRange.endLine}`,
-          );
-          this.rangeFailures.delete(failureKey);
-        } catch (retryError) {
-          if (this.documentEpochs.get(file.id) !== requestEpoch) return;
-          console.error("[NSH] Visible document range recovery failed", {
-            error: retryError,
-            fileId: file.id,
-            epoch: this.documentEpochs.get(file.id),
-          });
-        }
+        return { recover: error };
       }
+    }).then(async (result) => {
+      if (result?.recover) await this.recoverDocumentHighlight(file, result.recover);
     }).finally(() => {
       if (this.rangeRequests.get(file.id)?.promise === promise) {
         this.rangeRequests.delete(file.id);
@@ -397,13 +462,17 @@ class HighlightController {
     for (const key of this.rangeFailures.keys()) {
       if (key.startsWith(`${file.id}:`)) this.rangeFailures.delete(key);
     }
+    const revision = this.bumpDocumentRevision(file);
     const epoch = this.documentEpochs.get(file.id);
     this.queueDocumentRequest(file, async () => {
       const response = await this.nshClient.request("updateDocument", {
         documentId: this.getDocumentId(file),
         ...update,
       });
-      if (this.documentEpochs.get(file.id) !== epoch) return;
+      if (
+        this.documentEpochs.get(file.id) !== epoch ||
+        this.documentRevisions.get(file.id) !== revision
+      ) return;
       this.applyCachedLines(
         file,
         response.lines || [],
@@ -422,6 +491,7 @@ class HighlightController {
       file.id,
       (this.documentEpochs.get(file.id) || 0) + 1,
     );
+    this.bumpDocumentRevision(file);
     this.documentModes.delete(file.id);
     this.documentIds.delete(file.id);
     this.documentQueues.delete(file.id);
