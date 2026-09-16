@@ -35,6 +35,10 @@ async function setup(fetchMock) {
     return result;
   };
   const editor = {
+    autoSaveEnabled: false,
+    getAutoSaveState() {
+      return this.autoSaveEnabled === true;
+    },
     fileExplorer: { rootPath: root },
     tabManager: {
       activeFile: null,
@@ -139,6 +143,7 @@ async function setupEditable(content, { open = true, saved = true } = {}) {
     totalLines: text.split(/\r?\n/).length,
     maxLineLength: 0,
     isSaved: saved,
+    editVersion: 0,
     autoSave: false,
     diffSnapshot: null,
     diffActive: false,
@@ -864,7 +869,7 @@ test("modify_file autosave accepts equivalent path separators and rejects failed
     const fixture = await setupEditable("alpha beta");
     const { root, agent } = fixture;
     try {
-      fixture.getFile().autoSave = true;
+      fixture.editor.autoSaveEnabled = true;
       let saveCalls = 0;
       agent.api.saveFile = async (candidate, content) => {
         saveCalls++;
@@ -935,6 +940,131 @@ test("modify_file rejects stale revisions and recovers after reading the changed
     assert.equal(fixture.getFile().isSaved, false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("modify_file persists a file that was initially closed when Auto Save is on", async () => {
+  const fixture = await setupEditable("before", { open: false });
+  const { root, agent, editor } = fixture;
+  editor.autoSaveEnabled = true;
+  try {
+    const read = await agent.readFile("editable.txt");
+    const result = await agent.modifyFile({
+      path: "editable.txt",
+      revision: read.revision,
+      oldText: "before",
+      newText: "after",
+    });
+    assert.equal(result.mutationOutcome, "APPLIED_AND_VERIFIED", JSON.stringify(result));
+    assert.equal(result.persistence.saved, true);
+    assert.equal(await fs.readFile(path.join(root, "editable.txt"), "utf8"), "after");
+    assert.equal(fixture.getFile().isSaved, true);
+    assert.equal(fixture.getFile().lines.map((line) => line.getText()).join("\n"), "after");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("create_file followed by modify_file keeps editor and filesystem in sync", async () => {
+  const fixture = await setup();
+  const { root, agent, editor } = fixture;
+  editor.autoSaveEnabled = true;
+  try {
+    const created = await agent.executeToolCall({
+      id: "generated-create",
+      function: { name: "create_file", arguments: JSON.stringify({ path: "generated.js", content: "A" }) },
+    });
+    assert.equal(created.result.mutationOutcome, "APPLIED_AND_VERIFIED", JSON.stringify(created));
+    const read = await agent.readFile("generated.js");
+    const modified = await agent.modifyFile({
+      path: "generated.js",
+      revision: read.revision,
+      oldText: "A",
+      newText: "B",
+    });
+    assert.equal(modified.mutationOutcome, "APPLIED_AND_VERIFIED", JSON.stringify(modified));
+    assert.equal(modified.verification.content, "B");
+    assert.equal(await fs.readFile(path.join(root, "generated.js"), "utf8"), "B");
+    assert.equal(editor.tabManager.getFileByPath(path.join(root, "generated.js")).isSaved, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("modify_file reports uncertain persistence and stays dirty when Auto Save save fails", async () => {
+  const fixture = await setupEditable("before");
+  const { agent, editor } = fixture;
+  editor.autoSaveEnabled = true;
+  agent.api.saveFile = async () => undefined;
+  try {
+    const read = await agent.readFile("editable.txt");
+    const result = await agent.modifyFile({
+      path: "editable.txt",
+      revision: read.revision,
+      oldText: "before",
+      newText: "after",
+    });
+    assert.equal(result.mutationOutcome, "APPLIED_BUT_UNCERTAIN");
+    assert.equal(result.persistence.saved, false);
+    assert.equal(result.persistence.error.code, "SAVE_FAILED");
+    assert.equal(fixture.getFile().isSaved, false);
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("an older Agent save cannot mark a newer user edit as saved", async () => {
+  const fixture = await setupEditable("before");
+  const { agent, editor } = fixture;
+  editor.autoSaveEnabled = true;
+  let releaseSave;
+  agent.api.saveFile = () => new Promise((resolve) => { releaseSave = resolve; });
+  try {
+    const read = await agent.readFile("editable.txt");
+    const pending = agent.modifyFile({
+      path: "editable.txt",
+      revision: read.revision,
+      oldText: "before",
+      newText: "agent",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    const file = fixture.getFile();
+    file.editVersion += 1;
+    file.setIsSaved(false);
+    releaseSave(path.join(fixture.root, "editable.txt"));
+    const result = await pending;
+    assert.equal(result.mutationOutcome, "APPLIED_BUT_UNCERTAIN");
+    assert.equal(result.persistence.error.code, "CONCURRENT_EDIT");
+    assert.equal(file.isSaved, false);
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("modify_file keeps a closed file dirty when Auto Save is off", async () => {
+  const fixture = await setupEditable("before", { open: false });
+  const { agent, editor } = fixture;
+  editor.autoSaveEnabled = false;
+  let saveCalls = 0;
+  agent.api.saveFile = async () => {
+    saveCalls += 1;
+    return path.join(fixture.root, "editable.txt");
+  };
+  try {
+    const read = await agent.readFile("editable.txt");
+    const result = await agent.modifyFile({
+      path: "editable.txt",
+      revision: read.revision,
+      oldText: "before",
+      newText: "after",
+    });
+    assert.equal(result.mutationOutcome, "APPLIED_AND_VERIFIED");
+    assert.equal(result.persistence.saved, false);
+    assert.equal(saveCalls, 0);
+    assert.equal(fixture.getFile().isSaved, false);
+    assert.equal(await fs.readFile(path.join(fixture.root, "editable.txt"), "utf8"), "before");
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
   }
 });
 

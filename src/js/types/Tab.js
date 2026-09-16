@@ -341,6 +341,7 @@ class FileNode extends Tab {
     return (
       this.deletedFromDisk === true ||
       this.externalModified === true ||
+      Boolean(this.saveError) ||
       (this.isSaved !== true && this.autoSave !== true)
     );
   }

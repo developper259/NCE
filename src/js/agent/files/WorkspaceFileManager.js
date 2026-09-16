@@ -4,14 +4,51 @@ class WorkspaceFileManager {
   }
 
   shouldPersistAgentEdit(filePath) {
-    const file =
-      typeof filePath === "string"
-        ? this.agent.editor?.tabManager?.getFileByPath?.(filePath)
-        : null;
-    if (file && typeof file.autoSave === "boolean") {
-      return file.autoSave === true;
+    return this.agent.editor?.getAutoSaveState?.() === true;
+  }
+
+  async persistAgentEdit({ openFile, absolutePath, relativePath, content, editVersion }) {
+    const failed = (error) => {
+      openFile.saveError = error;
+      return { saved: false, error };
+    };
+    if (typeof this.agent.api?.saveFile !== "function") {
+      return failed({
+        code: "SAVE_FAILED",
+        message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+        path: relativePath,
+      });
     }
-    return false;
+    const saveGuard = this.agent.getMutationGuardError();
+    if (saveGuard) return failed(saveGuard);
+    let savedPath;
+    try {
+      savedPath = await this.agent.api.saveFile(absolutePath, content);
+    } catch (error) {
+      return failed({
+        code: "SAVE_FAILED",
+        message: error?.message || `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+        path: relativePath,
+      });
+    }
+    if (!AgentPath.samePath(savedPath || "", absolutePath)) {
+      return failed({
+        code: "SAVE_FAILED",
+        message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+        path: relativePath,
+      });
+    }
+    if ((openFile.editVersion || 0) !== editVersion) {
+      return failed({
+        code: "CONCURRENT_EDIT",
+        message: "Le fichier a changé pendant la sauvegarde Agent.",
+        path: relativePath,
+      });
+    }
+    openFile.saveError = null;
+    openFile.setIsSaved(true);
+    this.agent.editor.historyController?.markSaved?.(openFile);
+    return { saved: true };
   }
 
   getWorkspaceFileTarget(filePath) {
@@ -1371,44 +1408,24 @@ class WorkspaceFileManager {
         if (this.agent.editor.lineController?.refresh) {
           this.agent.editor.lineController.refresh(true);
         }
+        const editVersion = (openFile.editVersion || 0) + 1;
+        openFile.editVersion = editVersion;
         openFile.setIsSaved(false);
-        if (persistToDisk && typeof this.agent.api?.saveFile === "function") {
-          const saveGuard = this.agent.getMutationGuardError();
-          if (saveGuard) {
-            const applied = {
-              ...result,
-              success: true,
-              revision: this.agent.getContentRevision(normalizedUpdatedText),
-              mutationOutcome: "APPLIED_BUT_UNCERTAIN",
-              persistence: { saved: false, error: saveGuard },
-              verification: this.agent.buildModificationVerification(
-                absolutePath,
-                normalizedUpdatedText,
-                0,
-                replacementText,
-              ),
-            };
-            this.agent.runChangeTracker?.recordModify?.(applied);
-            return applied;
-          }
-          const savedPath = await this.agent.api.saveFile(
+        if (persistToDisk) {
+          const persistence = await this.persistAgentEdit({
+            openFile,
             absolutePath,
-            updatedText,
-          );
-          if (!AgentPath.samePath(savedPath || "", absolutePath)) {
+            relativePath,
+            content: updatedText,
+            editVersion,
+          });
+          if (!persistence.saved) {
             const applied = {
               ...result,
               success: true,
               revision: this.agent.getContentRevision(normalizedUpdatedText),
               mutationOutcome: "APPLIED_BUT_UNCERTAIN",
-              persistence: {
-                saved: false,
-                error: {
-                  code: "SAVE_FAILED",
-                  message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
-                  path: relativePath,
-                },
-              },
+              persistence,
               verification: this.agent.buildModificationVerification(
                 absolutePath,
                 normalizedUpdatedText,
@@ -1547,45 +1564,24 @@ class WorkspaceFileManager {
       if (this.agent.editor.lineController?.refresh) {
         this.agent.editor.lineController.refresh(true);
       }
+      const editVersion = (openFile.editVersion || 0) + 1;
+      openFile.editVersion = editVersion;
       openFile.setIsSaved(false);
-      if (persistToDisk && typeof this.agent.api?.saveFile === "function") {
-        const saveGuard = this.agent.getMutationGuardError();
-        if (saveGuard) {
-          const applied = {
-            ...result,
-            success: true,
-            revision: this.agent.getContentRevision(normalizedUpdatedText),
-            mutationOutcome: "APPLIED_BUT_UNCERTAIN",
-            persistence: { saved: false, error: saveGuard },
-            verification: this.agent.buildModificationVerification(
-              absolutePath,
-              normalizedUpdatedText,
-              editorUpdatedText(currentText.slice(0, textMatch.startIndex))
-                .length,
-              replacementText.replace(/\r\n?/g, "\n"),
-            ),
-          };
-          this.agent.runChangeTracker?.recordModify?.(applied);
-          return applied;
-        }
-        const savedPath = await this.agent.api.saveFile(
+      if (persistToDisk) {
+        const persistence = await this.persistAgentEdit({
+          openFile,
           absolutePath,
-          updatedText,
-        );
-        if (!AgentPath.samePath(savedPath || "", absolutePath)) {
+          relativePath,
+          content: updatedText,
+          editVersion,
+        });
+        if (!persistence.saved) {
           const applied = {
             ...result,
             success: true,
             revision: this.agent.getContentRevision(normalizedUpdatedText),
             mutationOutcome: "APPLIED_BUT_UNCERTAIN",
-            persistence: {
-              saved: false,
-              error: {
-                code: "SAVE_FAILED",
-                message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
-                path: relativePath,
-              },
-            },
+            persistence,
             verification: this.agent.buildModificationVerification(
               absolutePath,
               normalizedUpdatedText,
