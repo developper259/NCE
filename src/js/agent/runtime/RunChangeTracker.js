@@ -21,6 +21,8 @@ class RunChangeTracker {
       changes: new Map(),
       pendingToolCalls: new Set(),
       unresolvedFailures: new Map(),
+      failureHistory: [],
+      validationRecords: [],
       reviewedChangedFiles: false,
       reviewedDiff: false,
       reviewedDiffVersion: null,
@@ -91,6 +93,31 @@ class RunChangeTracker {
   changeKeyForPath(path) {
     const normalized = this.normalizePath(path);
     return normalized || path;
+  }
+
+  invalidateValidationsForPath(path) {
+    const normalizedPath = this.normalizePath(path || "");
+    if (!normalizedPath || !this.current) return;
+    for (const validation of this.current.validationRecords) {
+      if (validation.status !== "PASSED" || validation.fresh === false)
+        continue;
+      const scope = validation.scope || {};
+      const target = this.normalizePath(
+        scope.target || validation.target || "",
+      );
+      const projectRoot =
+        this.normalizePath(
+          scope.projectRoot || validation.projectRoot || ".",
+        ) || ".";
+      const covered =
+        scope.mode === "target"
+          ? Boolean(target) &&
+            (normalizedPath === target ||
+              AgentPath.isInside(normalizedPath, target))
+          : normalizedPath === projectRoot ||
+            AgentPath.isInside(normalizedPath, projectRoot);
+      if (covered) validation.fresh = false;
+    }
   }
 
   refreshChangeStats(change) {
@@ -180,6 +207,7 @@ class RunChangeTracker {
       };
       this.refreshChangeStats(merged);
       this.current.changeVersion += 1;
+      this.invalidateValidationsForPath(key);
       this.current.reviewedDiff = false;
       this.current.globalDiffTruncated = false;
       this.current.reviewedChangedFiles = false;
@@ -220,6 +248,7 @@ class RunChangeTracker {
     };
     this.refreshChangeStats(record);
     this.current.changeVersion += 1;
+    this.invalidateValidationsForPath(key);
     this.current.reviewedDiff = false;
     this.current.globalDiffTruncated = false;
     this.current.reviewedChangedFiles = false;
@@ -449,6 +478,18 @@ class RunChangeTracker {
   getCompletionDiagnostics() {
     const changes = [...(this.current?.changes.values() || [])];
     const unreviewedFiles = this.getUnreviewedPaths();
+    const staleValidations = (this.current?.validationRecords || [])
+      .filter(
+        (validation) =>
+          validation.status === "PASSED" && validation.fresh === false,
+      )
+      .map((validation) => ({
+        id: validation.id,
+        target: validation.target,
+        projectRoot: validation.projectRoot,
+        validationKind: validation.validationKind,
+        changeVersion: validation.changeVersion,
+      }));
     return {
       changeVersion: this.current?.changeVersion ?? 0,
       changedFiles: changes.map((change) => change.path),
@@ -461,13 +502,31 @@ class RunChangeTracker {
         this.current?.reviewedDiffVersion === this.current?.changeVersion,
       globalDiffTruncated: this.current?.globalDiffTruncated === true,
       pendingToolCalls: [...(this.current?.pendingToolCalls || [])],
+      staleValidations,
       unresolvedFailures: [...(this.current?.unresolvedFailures.values() || [])]
-        .filter((failure) => failure.blocking !== false)
+        .filter(
+          (failure) =>
+            failure.blocking !== false &&
+            ["unresolved", "recovery_ready"].includes(failure.status),
+        )
+        .map((failure) => ({
+          code: failure.code,
+          toolName: failure.toolName,
+          path: failure.path,
+          target: failure.target,
+          projectRoot: failure.projectRoot,
+          status: failure.status,
+        })),
+      supersededFailures: (this.current?.failureHistory || [])
+        .filter((failure) =>
+          ["resolved", "superseded"].includes(failure.status),
+        )
         .map((failure) => ({
           code: failure.code,
           toolName: failure.toolName,
           path: failure.path,
           status: failure.status,
+          resolvedBy: failure.resolvedBy || null,
         })),
     };
   }
@@ -808,14 +867,24 @@ class RunChangeTracker {
     if (
       this.current.unresolvedFailures &&
       [...this.current.unresolvedFailures.values()].some(
-        (failure) => failure.blocking !== false,
+        (failure) =>
+          failure.blocking !== false &&
+          ["unresolved", "recovery_ready"].includes(failure.status),
       )
     ) {
+      const diagnostics = this.getCompletionDiagnostics();
       return {
         success: false,
         error: {
           code: "UNRESOLVED_FAILURES",
           message: "Une erreur importante du run reste non résolue.",
+          unresolvedFailures: diagnostics.unresolvedFailures,
+          supersededFailures: diagnostics.supersededFailures,
+          nextActions: diagnostics.unresolvedFailures.map((failure) =>
+            failure.toolName === "run_tests"
+              ? `Fix and retest ${failure.target || failure.path || "the relevant validation scope"}.`
+              : `Resolve ${failure.toolName || "the failed tool"} (${failure.code}).`,
+          ),
         },
       };
     }
@@ -868,12 +937,19 @@ class RunChangeTracker {
       const path = this.normalizePath(failure.path || "");
       const identity = `${failure.toolName || "unknown"}:${path}:${code}`;
       const previous = this.current.unresolvedFailures.get(identity);
-      this.current.unresolvedFailures.set(identity, {
+      const record = {
         identity,
         code,
         toolCallId: failure.toolCallId || previous?.toolCallId || null,
         toolName: failure.toolName || previous?.toolName || null,
         path: path || null,
+        target: this.normalizePath(failure.target || path) || null,
+        projectRoot: this.normalizePath(failure.projectRoot || ".") || ".",
+        scope: failure.scope || null,
+        category:
+          failure.category ||
+          (failure.toolName === "run_tests" ? "validation" : "tool"),
+        recoverable: failure.recoverable !== false,
         message: error.message || previous?.message || "Tool failure",
         classification:
           failure.classification || error.retryStrategy || "unresolved",
@@ -881,8 +957,22 @@ class RunChangeTracker {
         firstSeen: previous?.firstSeen || Date.now(),
         lastSeen: Date.now(),
         recoveryAction: failure.recoveryAction || null,
-        status: "open",
-      });
+        status:
+          previous?.status === "recovery_ready"
+            ? "recovery_ready"
+            : "unresolved",
+        createdAtIteration:
+          failure.iteration ?? previous?.createdAtIteration ?? null,
+        createdAtChangeVersion:
+          failure.changeVersion ??
+          previous?.createdAtChangeVersion ??
+          this.current.changeVersion,
+        runId: this.current.runId,
+        workspaceIdentity: this.current.workspaceIdentity,
+        resolvedBy: null,
+      };
+      this.current.unresolvedFailures.set(identity, record);
+      if (!previous) this.current.failureHistory.push(record);
       return identity;
     }
     const code = codeOrFailure;
@@ -909,6 +999,10 @@ class RunChangeTracker {
       ) {
         failure.status = "resolved";
         failure.classification = classification;
+        failure.resolvedBy = {
+          toolName,
+          changeVersion: this.current.changeVersion,
+        };
         this.current.unresolvedFailures.delete(identity);
         count += 1;
       }
@@ -930,6 +1024,10 @@ class RunChangeTracker {
       ) {
         failure.status = "resolved";
         failure.classification = classification;
+        failure.resolvedBy = {
+          toolName: "path-recovery",
+          changeVersion: this.current.changeVersion,
+        };
         this.current.unresolvedFailures.delete(identity);
         count += 1;
       }
@@ -963,9 +1061,139 @@ class RunChangeTracker {
       if (failure) {
         failure.status = "resolved";
         failure.classification = classification;
+        failure.resolvedBy = {
+          toolName: "direct",
+          changeVersion: this.current.changeVersion,
+        };
+        this.current.unresolvedFailures.delete(code);
       }
-      this.current.unresolvedFailures.delete(code);
     }
+  }
+
+  canValidationSupersedeFailure(validation, failure) {
+    if (!validation || !failure || failure.category !== "validation")
+      return false;
+    if (
+      failure.runId !== this.current?.runId ||
+      failure.workspaceIdentity !== this.current?.workspaceIdentity
+    )
+      return false;
+    if (
+      !["INVALID_TARGET", "MULTIPLE_PROJECTS", "FAILED", "TIMEOUT"].includes(
+        failure.code,
+      )
+    )
+      return false;
+    const validationRoot =
+      this.normalizePath(validation.projectRoot || ".") || ".";
+    const failureRoot = this.normalizePath(failure.projectRoot || ".") || ".";
+    if (validationRoot !== failureRoot) return false;
+    if (
+      failure.code === "INVALID_TARGET" ||
+      failure.code === "MULTIPLE_PROJECTS"
+    )
+      return true;
+    const validationTarget = this.normalizePath(validation.target || "");
+    const failureTarget = this.normalizePath(
+      failure.target || failure.path || "",
+    );
+    return (
+      !failureTarget ||
+      !validationTarget ||
+      AgentPath.samePath(failureTarget, validationTarget)
+    );
+  }
+
+  recordValidation(validation = {}) {
+    if (
+      !this.current ||
+      (validation.runId !== undefined &&
+        validation.runId !== this.current.runId)
+    )
+      return null;
+    const record = {
+      id:
+        validation.toolCallId ||
+        `${this.current.runId}:run_tests:${this.current.validationRecords.length + 1}`,
+      tool: "run_tests",
+      status: validation.status || "UNKNOWN",
+      validationKind: validation.validationKind || "test",
+      projectRoot: this.normalizePath(validation.projectRoot || ".") || ".",
+      target: this.normalizePath(validation.target || "") || null,
+      scope: validation.scope || null,
+      changeVersion: this.current.changeVersion,
+      iteration: validation.iteration ?? null,
+      runId: this.current.runId,
+      workspaceIdentity: this.current.workspaceIdentity,
+      signature: validation.signature || null,
+      fresh: true,
+    };
+    this.current.validationRecords.push(record);
+    let resolvedFailureCount = 0;
+    let supersededFailureCount = 0;
+    if (
+      [
+        "PASSED",
+        "FAILED",
+        "TIMEOUT",
+        "INVALID_TARGET",
+        "MULTIPLE_PROJECTS",
+      ].includes(record.status)
+    ) {
+      for (const failure of this.current.unresolvedFailures.values()) {
+        if (
+          record.status === "PASSED" &&
+          this.canValidationSupersedeFailure(record, failure)
+        ) {
+          const superseded =
+            failure.code === "INVALID_TARGET" ||
+            failure.code === "MULTIPLE_PROJECTS";
+          failure.status = superseded ? "superseded" : "resolved";
+          failure.resolvedBy = {
+            tool: "run_tests",
+            status: record.status,
+            changeVersion: record.changeVersion,
+            iteration: record.iteration,
+          };
+          this.current.unresolvedFailures.delete(failure.identity);
+          if (superseded) supersededFailureCount += 1;
+          else resolvedFailureCount += 1;
+        }
+      }
+    }
+    if (
+      ["INVALID_TARGET", "MULTIPLE_PROJECTS", "FAILED", "TIMEOUT"].includes(
+        record.status,
+      )
+    ) {
+      this.addUnresolvedFailure({
+        toolName: "run_tests",
+        target: record.target,
+        path: record.target,
+        projectRoot: record.projectRoot,
+        scope: record.scope,
+        category: "validation",
+        recoverable: true,
+        iteration: record.iteration,
+        changeVersion: record.changeVersion,
+        error: {
+          code: record.status,
+          message: validation.reason || record.status,
+        },
+      });
+    }
+    record.resolution = { resolvedFailureCount, supersededFailureCount };
+    return record;
+  }
+
+  getBlockingFailures(category = null) {
+    if (!this.current) return [];
+    return [...this.current.unresolvedFailures.values()].filter(
+      (failure) =>
+        failure.blocking !== false &&
+        ["unresolved", "recovery_ready"].includes(failure.status) &&
+        (!category || failure.category === category),
+    );
   }
 
   classifyFailure(code, classification = "unresolved") {

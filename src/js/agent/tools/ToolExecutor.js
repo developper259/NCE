@@ -92,7 +92,7 @@ class ToolExecutor {
     let releaseMutation = null;
     try {
       const tool = this.agent.getTool(name);
-      if (tool && !tool.readOnly) {
+      if (tool && (!tool.readOnly || tool.serializesWithMutations === true)) {
         try {
           releaseMutation = await this.acquireMutationLane(executionContext);
         } catch (error) {
@@ -127,6 +127,22 @@ class ToolExecutor {
       })();
       const path =
         args.path || args.oldPath || payload?.path || payload?.oldPath || null;
+      if (name === "run_tests" && payload?.status) {
+        const validationRecord =
+          this.agent.runChangeTracker?.recordValidation?.({
+            status: payload.status,
+            validationKind: payload.validationKind,
+            projectRoot: payload.projectRoot || ".",
+            target: payload.target || args.path || null,
+            scope: payload.scope || null,
+            reason: payload.reason || payload.error?.message || null,
+            toolCallId,
+          });
+        if (validationRecord && payload && typeof payload === "object") {
+          payload.validationId = validationRecord.id || null;
+          payload.validationResolution = validationRecord.resolution || null;
+        }
+      }
       if (toolResult?.success === false && name !== "task_complete") {
         const code = payload?.error?.code || "TOOL_FAILED";
         this.agent.runChangeTracker?.addUnresolvedFailure?.({
@@ -442,6 +458,22 @@ class ToolExecutor {
       return limited;
     }
 
+    if (name === "run_tests") {
+      const testMaxChars = Number.isFinite(limits.maxChars)
+        ? Math.max(100, limits.maxChars)
+        : maxContent;
+      for (const key of ["output", "outputHead", "outputTail"]) {
+        if (
+          typeof limited[key] === "string" &&
+          limited[key].length > testMaxChars
+        ) {
+          limited[key] = this.agent.truncate(limited[key], testMaxChars);
+          limited.truncated = true;
+        }
+      }
+      return limited;
+    }
+
     for (const key of ["content", "beforeText", "afterText"]) {
       if (
         typeof limited[key] === "string" &&
@@ -507,24 +539,44 @@ class ToolExecutor {
       ? "tool_unavailable"
       : toolCategory === "completion" && result?.success !== false
         ? "task_complete"
-        : toolCategory === "validation" && result?.success === false
-          ? "error_discovered"
-          : toolCategory === "validation"
-            ? "validation_progress"
-            : result?.success === false
-              ? "error"
-              : result?.restoredFromCache === true
-                ? "restored"
-                : result?.repeatedRedundantAction === true
-                  ? "repeated_redundant"
-                  : result?.alreadyKnown === true ||
-                      result?.noNewInformation === true
-                    ? "already_known"
-                    : toolCategory === "write"
-                      ? "state_changed"
-                      : ["read", "search", "navigation"].includes(toolCategory)
-                        ? "new"
-                        : "neutral";
+        : toolCategory === "validation" && result?.status === "PASSED"
+          ? "validation_progress"
+          : toolCategory === "validation" &&
+              result?.status === "MULTIPLE_PROJECTS"
+            ? "validation_selection_required"
+            : toolCategory === "validation" &&
+                result?.status === "UNSAVED_CHANGES"
+              ? "validation_blocked"
+              : toolCategory === "validation" &&
+                  [
+                    "NO_TEST_RUNNER",
+                    "NO_TESTS",
+                    "RUNTIME_UNAVAILABLE",
+                    "DEPENDENCIES_UNAVAILABLE",
+                  ].includes(result?.status)
+                ? "validation_unavailable"
+                : toolCategory === "validation" && result?.status === "TIMEOUT"
+                  ? "error_discovered"
+                  : toolCategory === "validation" && result?.status === "FAILED"
+                    ? "error_discovered"
+                    : toolCategory === "validation"
+                      ? "error_discovered"
+                      : result?.success === false
+                        ? "error"
+                        : result?.restoredFromCache === true
+                          ? "restored"
+                          : result?.repeatedRedundantAction === true
+                            ? "repeated_redundant"
+                            : result?.alreadyKnown === true ||
+                                result?.noNewInformation === true
+                              ? "already_known"
+                              : toolCategory === "write"
+                                ? "state_changed"
+                                : ["read", "search", "navigation"].includes(
+                                      toolCategory,
+                                    )
+                                  ? "new"
+                                  : "neutral";
     return {
       informationStatus,
       toolCategory,
@@ -538,14 +590,17 @@ class ToolExecutor {
       requestedToolAvailable: !toolUnavailable,
       cached: result?.cached === true,
       informationSource: result?.informationSource || null,
-      redundantRead: result?.reason === "same_revision_range_already_known"
-        ? {
-            path: result.path,
-            revision: result.revision,
-            range: result.requestedRange,
-            coverage: result.coverage,
-          }
-        : null,
+      validationStatus:
+        toolCategory === "validation" ? result?.status || null : null,
+      redundantRead:
+        result?.reason === "same_revision_range_already_known"
+          ? {
+              path: result.path,
+              revision: result.revision,
+              range: result.requestedRange,
+              coverage: result.coverage,
+            }
+          : null,
       informationSignature:
         result?.readSignature ||
         (toolCategory === "validation" || result?.success === false
@@ -559,8 +614,18 @@ class ToolExecutor {
     const errorCode = typeof error === "object" ? error?.code || "" : "";
     const errorMessage =
       typeof error === "string" ? error : error?.message || "";
-    const outcome = result?.success === false ? "failed" : "succeeded";
-    return `${name || "unknown"}:${outcome}:${errorCode}:${errorMessage}`.slice(
+    const outcome =
+      result?.status || (result?.success === false ? "FAILED" : "OK");
+    const runner = result?.runner?.name || result?.runner?.executable || "";
+    const target =
+      result?.scope?.target || result?.target || result?.requestedTarget || "";
+    const projectRoot =
+      result?.scope?.projectRoot || result?.projectRoot || ".";
+    const validationKind = result?.validationKind || "";
+    const changeVersion =
+      this.agent.runChangeTracker?.current?.changeVersion ?? "";
+    const summary = result?.summary || {};
+    return `${name || "unknown"}:${outcome}:${validationKind}:${projectRoot}:${target}:${changeVersion}:${runner}:${summary.passed ?? ""}:${summary.failed ?? ""}:${errorCode}:${errorMessage}`.slice(
       0,
       1000,
     );

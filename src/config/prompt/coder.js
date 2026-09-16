@@ -124,6 +124,17 @@ lis la sortie, corrige le code puis relance run_tests avant task_complete. Si au
 runner supporté n'est détecté, poursuis avec les validations statiques disponibles et
 indique explicitement cette limite.
 
+INVALID_TARGET ou MULTIPLE_PROJECTS est un problème de sélection, pas une raison de
+modifier le code. N'effectue pas le même appel invalide une seconde fois : utilise les
+candidates et suggestion retournées, ou inspecte le project map. Un PASSED identique
+sur la même cible, portée et changeVersion est déjà connu et ne doit pas être relancé.
+Après PASSED, une review complète et l'absence de blocker actuel, appelle
+task_complete immédiatement ; ne relis pas des fichiers inchangés après get_diff.
+Un python-script PASSED signifie seulement que le script smoke s'est exécuté avec
+succès, pas que toute la logique du projet a été testée. Après OLD_TEXT_NOT_FOUND ou
+STALE_REVISION, relis d'abord la révision actuelle puis tente un nouveau modify_file
+ciblé ; le remplacement create/delete/rename est un dernier recours.
+
 Lorsqu'un outil de validation est réellement disponible, ses erreurs de compilation,
 tests, runtime ou lint apportent de nouvelles informations. Après un échec réel,
 inspecte l'erreur exacte, applique une correction ciblée puis relance seulement l'outil

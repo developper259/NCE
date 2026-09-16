@@ -682,6 +682,114 @@ test("reread makes a write failure recovery-ready but only a successful write re
   assert.equal(tracker.current.unresolvedFailures.size, 0);
 });
 
+test("a valid run_tests target supersedes an earlier invalid target failure", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.addUnresolvedFailure({
+    toolName: "run_tests",
+    path: "missing.py",
+    error: { code: "INVALID_TARGET" },
+  });
+
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    target: "racine_carree.py",
+    scope: { mode: "target", projectRoot: ".", target: "racine_carree.py" },
+  });
+
+  assert.equal(tracker.getCompletionDiagnostics().unresolvedFailures.length, 0);
+});
+
+test("a failed validation is resolved only by a fresh passing validation in the same scope", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.recordValidation({
+    status: "FAILED",
+    projectRoot: ".",
+    target: "tests/test_math.py",
+    scope: { mode: "target", projectRoot: ".", target: "tests/test_math.py" },
+    iteration: 1,
+  });
+  assert.equal(tracker.getBlockingFailures("validation").length, 1);
+
+  tracker.addChange({
+    path: "tests/test_math.py",
+    beforeContent: "old",
+    afterContent: "new",
+  });
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    target: "tests/test_math.py",
+    scope: { mode: "target", projectRoot: ".", target: "tests/test_math.py" },
+    iteration: 3,
+  });
+
+  assert.equal(tracker.getBlockingFailures("validation").length, 0);
+  assert.equal(tracker.current.failureHistory.at(-1).status, "resolved");
+});
+
+test("identical validation signatures are recorded without becoming new progress", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const progress = agent.agentProgress;
+  progress.consumeTool(
+    "run_tests",
+    {
+      toolCategory: "validation",
+      validationStatus: "PASSED",
+      informationStatus: "validation_progress",
+      informationSignature: "run_tests:PASSED:test:.:foo.py:0",
+    },
+    1,
+  );
+  const second = progress.consumeTool(
+    "run_tests",
+    {
+      toolCategory: "validation",
+      validationStatus: "PASSED",
+      informationStatus: "validation_progress",
+      informationSignature: "run_tests:PASSED:test:.:foo.py:0",
+    },
+    2,
+  );
+
+  assert.equal(second.action, "none");
+  assert.equal(progress.metrics.redundantValidationCalls, 1);
+});
+
+test("a change invalidates only validations whose scope covers the changed path", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    target: "frontend/test.js",
+    scope: { mode: "target", projectRoot: ".", target: "frontend/test.js" },
+  });
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    target: "backend/test.py",
+    scope: { mode: "target", projectRoot: ".", target: "backend/test.py" },
+  });
+  tracker.addChange({
+    path: "frontend/test.js",
+    beforeContent: "a",
+    afterContent: "b",
+  });
+
+  assert.equal(tracker.current.validationRecords[0].fresh, false);
+  assert.equal(tracker.current.validationRecords[1].fresh, true);
+});
+
 test("a 5000-line one-line edit produces a localized diff", () => {
   const agent = createAgent(editor());
   const before = Array.from({ length: 5000 }, (_, index) => `line ${index}`);

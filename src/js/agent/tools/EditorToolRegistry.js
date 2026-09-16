@@ -47,6 +47,9 @@ class EditorToolRegistry {
     this.agent.registerTool("run_tests", {
       description: `Détecte et exécute le runner de tests déjà présent dans le workspace, sans installer de dépendance ni exécuter une commande arbitraire. Sortie <= ${this.getLimit("run_tests", "outputCharacters", 12000)} caractères ; timeout <= ${this.getLimit("run_tests", "timeoutMs", 120000)} ms. Un résultat FAILED est une validation exécutée et doit être corrigé avant task_complete.`,
       readOnly: true,
+      serializesWithMutations: true,
+      executesCode: true,
+      mayMutateWorkspace: true,
       codeOnly: true,
       capabilities: ["command_execution"],
       parameters: {
@@ -55,7 +58,8 @@ class EditorToolRegistry {
           path: {
             type: "string",
             maxLength: this.getPathLimit(),
-            description: "Sous-dossier du workspace dans lequel lancer les tests.",
+            description:
+              "Sous-dossier du workspace dans lequel lancer les tests.",
           },
         },
       },

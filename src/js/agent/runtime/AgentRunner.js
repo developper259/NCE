@@ -168,6 +168,10 @@ class AgentRunner {
 
   stop() {
     this.agent.stopRequested = true;
+    if (this.agent.activeTestRequestId) {
+      void this.agent.api?.cancelAgentProcess?.(this.agent.activeTestRequestId);
+      this.agent.activeTestRequestId = null;
+    }
     this.agent.runChangeTracker?.setRunStatus?.("aborted", this.agent.runId);
     if (this.agent.largeWriteState?.active) {
       this.agent.largeWriteState.active = false;
@@ -813,17 +817,35 @@ class AgentRunner {
                 modelResponse,
               ) || {},
             );
-          if (largeWrite.strategyReplanRequired &&
-              this.agent.largeFileWriter.isRepeatedFailedStrategy(largeWrite,
-                error.toolName, this.agent.largeFileWriter.extractToolCallArgsFromError(error, modelResponse))) {
+          if (
+            largeWrite.strategyReplanRequired &&
+            this.agent.largeFileWriter.isRepeatedFailedStrategy(
+              largeWrite,
+              error.toolName,
+              this.agent.largeFileWriter.extractToolCallArgsFromError(
+                error,
+                modelResponse,
+              ),
+            )
+          ) {
             largeWrite.consecutiveRejectedStrategies += 1;
             this.agent.agentProgress.metrics.repeatedFailedStrategiesRejected += 1;
-            console.info("[NCE Agent write recovery]", { action: "strategy_rejected",
-              code: "REPEATED_FAILED_STRATEGY", executed: false, path: largeWrite.path });
-            this.agent.messages.push({ role: "system", content:
-              largeWrite.consecutiveRejectedStrategies >= 2
-                ? "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with the last returned revision. Repeated large calls are rejected before execution."
-                : this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(largeWrite, error) });
+            console.info("[NCE Agent write recovery]", {
+              action: "strategy_rejected",
+              code: "REPEATED_FAILED_STRATEGY",
+              executed: false,
+              path: largeWrite.path,
+            });
+            this.agent.messages.push({
+              role: "system",
+              content:
+                largeWrite.consecutiveRejectedStrategies >= 2
+                  ? "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with the last returned revision. Repeated large calls are rejected before execution."
+                  : this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(
+                      largeWrite,
+                      error,
+                    ),
+            });
             if (largeWrite.consecutiveRejectedStrategies >= 3) {
               this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
               throw this.agent.createLargeWriteRecoveryError(error, 3, 3);
@@ -857,18 +879,31 @@ class AgentRunner {
               largeWrite.strategyReplanRequired = true;
               this.agent.agentProgress.metrics.writeStrategyReplans += 1;
               this.agent.agentProgress.metrics.writeRecoveryTemporaryLimitApplied += 1;
-              for (let index = this.agent.messages.length - 1; index >= 0; index--) {
+              for (
+                let index = this.agent.messages.length - 1;
+                index >= 0;
+                index--
+              ) {
                 const message = this.agent.messages[index];
-                if (message?.role === "system" &&
-                    /^\[NCE WRITE (?:RECOVERY|STRATEGY ENFORCEMENT)\]/.test(message.content || "")) {
+                if (
+                  message?.role === "system" &&
+                  /^\[NCE WRITE (?:RECOVERY|STRATEGY ENFORCEMENT)\]/.test(
+                    message.content || "",
+                  )
+                ) {
                   this.agent.messages.splice(index, 1);
                 }
               }
-              console.info("[NCE Agent write recovery]", { path: largeWrite.path,
-                tool: error.toolName, strategyFailures: 3,
+              console.info("[NCE Agent write recovery]", {
+                path: largeWrite.path,
+                tool: error.toolName,
+                strategyFailures: 3,
                 strategyReplanCount: largeWrite.strategyReplanCount,
-                action: "strategy_replan", failedPayloadApproxChars: error.argumentsLength,
-                temporaryRecoveryMax: largeWrite.temporaryRecoveryMax, sameModel: true });
+                action: "strategy_replan",
+                failedPayloadApproxChars: error.argumentsLength,
+                temporaryRecoveryMax: largeWrite.temporaryRecoveryMax,
+                sameModel: true,
+              });
               this.agent.messages.push({
                 role: "system",
                 content:
@@ -1204,39 +1239,75 @@ class AgentRunner {
         for (const call of executableToolCalls) {
           this.agent.assertRunActive(runId, controller);
           const callName = call?.function?.name;
-          const callArgs = this.agent.parseCanonicalToolArguments(call?.function?.arguments);
-          const rejectedStrategy = ["create_file", "write_file_chunk"].includes(callName) &&
-            this.agent.largeFileWriter.isRepeatedFailedStrategy(largeWrite, callName, callArgs);
-          const recoveryOversize = ["create_file", "write_file_chunk"].includes(callName) &&
-            largeWrite.strategyReplanRequired && largeWrite.temporaryRecoveryMax &&
-            (!largeWrite.path || this.agent.largeFileWriter.pathsReferToSameFile(largeWrite.path, callArgs.path)) &&
-            typeof callArgs.content === "string" && callArgs.content.length > largeWrite.temporaryRecoveryMax;
-          const localCode = rejectedStrategy ? "REPEATED_FAILED_STRATEGY" :
-            recoveryOversize ? "WRITE_RECOVERY_CONTENT_TOO_LARGE" : null;
+          const callArgs = this.agent.parseCanonicalToolArguments(
+            call?.function?.arguments,
+          );
+          const rejectedStrategy =
+            ["create_file", "write_file_chunk"].includes(callName) &&
+            this.agent.largeFileWriter.isRepeatedFailedStrategy(
+              largeWrite,
+              callName,
+              callArgs,
+            );
+          const recoveryOversize =
+            ["create_file", "write_file_chunk"].includes(callName) &&
+            largeWrite.strategyReplanRequired &&
+            largeWrite.temporaryRecoveryMax &&
+            (!largeWrite.path ||
+              this.agent.largeFileWriter.pathsReferToSameFile(
+                largeWrite.path,
+                callArgs.path,
+              )) &&
+            typeof callArgs.content === "string" &&
+            callArgs.content.length > largeWrite.temporaryRecoveryMax;
+          const localCode = rejectedStrategy
+            ? "REPEATED_FAILED_STRATEGY"
+            : recoveryOversize
+              ? "WRITE_RECOVERY_CONTENT_TOO_LARGE"
+              : null;
           if (localCode) {
             largeWrite.consecutiveRejectedStrategies += 1;
             this.agent.agentProgress.metrics.repeatedFailedStrategiesRejected += 1;
-            console.info("[NCE Agent write recovery]", { action: "strategy_rejected",
-              code: localCode, executed: false, path: callArgs.path });
+            console.info("[NCE Agent write recovery]", {
+              action: "strategy_rejected",
+              code: localCode,
+              executed: false,
+              path: callArgs.path,
+            });
           }
-          const toolResult = localCode ? { success: false, result: { error: {
-            code: localCode, message: `The previous large create strategy failed repeatedly. This call was NOT executed. Current recovery max: ${largeWrite.temporaryRecoveryMax}. Create a minimal scaffold <= 1000-2000 chars, then append chunks <= 2000-3000 chars using each returned revision.` } } }
+          const toolResult = localCode
+            ? {
+                success: false,
+                result: {
+                  error: {
+                    code: localCode,
+                    message: `The previous large create strategy failed repeatedly. This call was NOT executed. Current recovery max: ${largeWrite.temporaryRecoveryMax}. Create a minimal scaffold <= 1000-2000 chars, then append chunks <= 2000-3000 chars using each returned revision.`,
+                  },
+                },
+              }
             : await this.agent.executeToolCall(call, {
-            sessionId: this.agent.currentSessionId,
-            runId,
-          });
+                sessionId: this.agent.currentSessionId,
+                runId,
+              });
           this.agent.assertRunActive(runId, controller);
           const toolMessageIndex = this.agent.messages.length;
           this.agent.messages.push(
             this.agent.createToolResultMessage(call.id, toolResult),
           );
           if (localCode && largeWrite.consecutiveRejectedStrategies >= 2) {
-            this.agent.messages.push({ role: "system", content:
-              "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with each returned revision. Any repeated large call will be rejected locally." });
+            this.agent.messages.push({
+              role: "system",
+              content:
+                "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with each returned revision. Any repeated large call will be rejected locally.",
+            });
           }
           if (localCode && largeWrite.consecutiveRejectedStrategies >= 3) {
             this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
-            throw this.agent.createLargeWriteRecoveryError({ toolName: callName }, 3, 3);
+            throw this.agent.createLargeWriteRecoveryError(
+              { toolName: callName },
+              3,
+              3,
+            );
           }
 
           const toolPayload = toolResult?.result ?? toolResult;
@@ -1280,8 +1351,15 @@ class AgentRunner {
             toolResult,
             toolArgs,
           );
-          if (toolResult?.success && ["create_file", "write_file_chunk"].includes(callName)) {
-            this.agent.largeFileWriter.resetStrategyAfterProgress(largeWrite, callName, callArgs);
+          if (
+            toolResult?.success &&
+            ["create_file", "write_file_chunk"].includes(callName)
+          ) {
+            this.agent.largeFileWriter.resetStrategyAfterProgress(
+              largeWrite,
+              callName,
+              callArgs,
+            );
             this.agent.agentProgress.metrics.writeRecoverySuccesses += 1;
           }
           if (largeWriteUpdate?.directive) {
@@ -1366,10 +1444,29 @@ class AgentRunner {
           }
 
           if (toolResult?.meta?.toolCategory === "validation") {
-            unresolvedValidationFailure = toolResult?.success === false;
-            if (toolResult?.success) {
-              pendingValidationPaths.clear();
-              validationPending = false;
+            const validationStatus = toolPayload?.status;
+            if (["FAILED", "TIMEOUT"].includes(validationStatus)) {
+              unresolvedValidationFailure = true;
+            } else if (validationStatus === "PASSED") {
+              unresolvedValidationFailure = false;
+            }
+            if (validationStatus === "PASSED") {
+              const scope = toolPayload?.scope || {};
+              const projectRoot = AgentPath.normalize(scope.projectRoot || "");
+              const target = AgentPath.normalize(scope.target || "");
+              for (const pendingPath of pendingValidationPaths) {
+                const normalized = AgentPath.normalize(pendingPath);
+                const covered =
+                  scope.mode === "target"
+                    ? Boolean(target) &&
+                      (normalized === target ||
+                        AgentPath.isInside(normalized, target))
+                    : !projectRoot ||
+                      normalized === projectRoot ||
+                      AgentPath.isInside(normalized, projectRoot);
+                if (covered) pendingValidationPaths.delete(pendingPath);
+              }
+              validationPending = pendingValidationPaths.size > 0;
             }
           }
         }

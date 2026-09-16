@@ -1,4 +1,11 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  ipcMain,
+  shell,
+} from "electron";
 import path from "path";
 
 import { FileManager } from "./addon/FileManager";
@@ -85,7 +92,6 @@ export class Window {
         contextIsolation: true,
         nodeIntegration: false,
         backgroundThrottling: false,
-        
       },
     });
 
@@ -101,7 +107,8 @@ export class Window {
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
-    if (!this.agentProcessRunner) this.agentProcessRunner = new AgentProcessRunner(this);
+    if (!this.agentProcessRunner)
+      this.agentProcessRunner = new AgentProcessRunner(this);
 
     this.appMenu = new AppMenu(this.window, this);
 
@@ -186,8 +193,10 @@ export class Window {
       ipcMain.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
         this.setMenuShortcutsIgnored(ignored),
       );
-      ipcMain.handle("App:setActiveFileContext", async (_event, hasActiveFile) =>
-        this.setActiveFileContext(hasActiveFile),
+      ipcMain.handle(
+        "App:setActiveFileContext",
+        async (_event, hasActiveFile) =>
+          this.setActiveFileContext(hasActiveFile),
       );
       ipcMain.handle("App:setAutoSaveState", async (_event, enabled) => {
         if (typeof enabled !== "boolean") return false;

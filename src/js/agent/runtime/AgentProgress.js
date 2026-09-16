@@ -13,9 +13,8 @@ class AgentProgress {
     );
     this.overExplorationEscalationInterval = Math.max(
       1,
-      Number(
-        this.agent?.progressGuidance?.overExplorationEscalationInterval,
-      ) || 4,
+      Number(this.agent?.progressGuidance?.overExplorationEscalationInterval) ||
+        4,
     );
     this.requiresModification = options.requiresModification === true;
     this.phase = "discover";
@@ -54,6 +53,19 @@ class AgentProgress {
       successfulWriteToolCalls: 0,
       validationCalls: 0,
       validationFailures: 0,
+      validationFailuresDiscovered: 0,
+      validationFailuresResolved: 0,
+      validationFailuresSuperseded: 0,
+      invalidTargetRecoveries: 0,
+      redundantValidationCalls: 0,
+      taskCompleteBlockedByUnresolvedFailure: 0,
+      readyToCompleteSignals: 0,
+      testRuns: 0,
+      testRunsPassed: 0,
+      testRunsFailed: 0,
+      testRunsUnavailable: 0,
+      testRunsTimedOut: 0,
+      testRunsAborted: 0,
       fixIterations: 0,
       taskCompleteCalls: 0,
       createFileCalls: 0,
@@ -239,6 +251,41 @@ class AgentProgress {
       this.metrics.successfulWriteToolCalls += 1;
     }
     if (category === "validation") this.metrics.validationCalls += 1;
+    if (category === "validation" && meta.validationStatus) {
+      this.metrics.testRuns += 1;
+      if (meta.validationStatus === "PASSED") this.metrics.testRunsPassed += 1;
+      if (meta.validationStatus === "FAILED") {
+        this.metrics.testRunsFailed += 1;
+        this.metrics.validationFailures += 1;
+      }
+      if (meta.validationStatus === "TIMEOUT") {
+        this.metrics.testRunsTimedOut += 1;
+        this.metrics.validationFailures += 1;
+      }
+      if (
+        [
+          "NO_TEST_RUNNER",
+          "NO_TESTS",
+          "RUNTIME_UNAVAILABLE",
+          "DEPENDENCIES_UNAVAILABLE",
+          "MULTIPLE_PROJECTS",
+          "UNSAVED_CHANGES",
+        ].includes(meta.validationStatus)
+      )
+        this.metrics.testRunsUnavailable += 1;
+      if (meta.validationStatus === "ABORTED")
+        this.metrics.testRunsAborted += 1;
+      const resolution = meta.validationResolution || {};
+      this.metrics.validationFailuresResolved +=
+        Number(resolution.resolvedFailureCount) || 0;
+      this.metrics.validationFailuresSuperseded +=
+        Number(resolution.supersededFailureCount) || 0;
+      if (Number(resolution.supersededFailureCount) > 0) {
+        this.metrics.invalidTargetRecoveries += Number(
+          resolution.supersededFailureCount,
+        );
+      }
+    }
 
     if (informationStatus === "tool_unavailable") {
       const attempts = (this.unavailableToolAttempts.get(toolName) || 0) + 1;
@@ -255,9 +302,7 @@ class AgentProgress {
         tool: toolName || null,
         available: false,
         action:
-          attempts > 1
-            ? "reject_repeated_request"
-            : "request_registered_tool",
+          attempts > 1 ? "reject_repeated_request" : "request_registered_tool",
       });
       this.logTool(
         iteration,
@@ -283,6 +328,14 @@ class AgentProgress {
         informationStatus = "error_discovered";
       }
     }
+    if (category === "validation" && meta.informationSignature) {
+      if (this.observedInformationSignatures.has(meta.informationSignature)) {
+        informationStatus = "already_known";
+        this.metrics.redundantValidationCalls += 1;
+      } else {
+        this.observedInformationSignatures.add(meta.informationSignature);
+      }
+    }
     if (
       informationStatus === "validation_progress" &&
       this.activeErrorCategory === "validation"
@@ -305,14 +358,11 @@ class AgentProgress {
     if (informationStatus === "state_changed") {
       this.metrics.stateChangedToolCalls += 1;
       if (this.awaitingFix) this.metrics.fixIterations += 1;
-      const validationRetestPending =
-        this.activeErrorCategory === "validation";
+      const validationRetestPending = this.activeErrorCategory === "validation";
       this.writeOccurred = true;
       this.blockingError = validationRetestPending;
       this.awaitingFix = false;
-      this.activeErrorCategory = validationRetestPending
-        ? "validation"
-        : null;
+      this.activeErrorCategory = validationRetestPending ? "validation" : null;
       this.recordTaskProgress();
       this.setPhase("implement", {
         iteration,
@@ -352,6 +402,8 @@ class AgentProgress {
         this.activeErrorCategory = category;
         this.awaitingFix = ["write", "validation"].includes(category);
         if (category === "validation") this.metrics.validationFailures += 1;
+        if (category === "validation")
+          this.metrics.validationFailuresDiscovered += 1;
       } else if (category === "validation") {
         this.blockingError = false;
         this.awaitingFix = false;
@@ -417,9 +469,14 @@ class AgentProgress {
         this.awaitingProgress ||
         this.consecutiveNoNewInformation >= this.noInformationThreshold
       ) {
-        return this.triggerStagnation(iteration, toolName, informationStatus,
-          toolName === "read_file" ? "repeated_redundant_action" :
-            "repeated_no_new_information");
+        return this.triggerStagnation(
+          iteration,
+          toolName,
+          informationStatus,
+          toolName === "read_file"
+            ? "repeated_redundant_action"
+            : "repeated_no_new_information",
+        );
       }
       return { action: "none" };
     }
@@ -482,11 +539,7 @@ class AgentProgress {
       details.hasReasoning ||
       (this.requiresModification && !this.writeOccurred && details.hasText);
     if (!needsAction) return { action: "none" };
-    return this.triggerStagnation(
-      details.iteration ?? null,
-      null,
-      "no_action",
-    );
+    return this.triggerStagnation(details.iteration ?? null, null, "no_action");
   }
 
   triggerStagnation(
@@ -693,8 +746,10 @@ class AgentProgress {
       writes: this.metrics.writeToolCalls,
       successfulWrites: this.metrics.successfulWriteToolCalls,
       progressRecoveries: this.metrics.stagnationRecoveries,
-      estimatedPromptTokens: this.agent.lastContextMetrics?.estimatedModelTokens || 0,
-      actualPromptTokens: this.agent.lastContextMetrics?.actualPromptTokens || 0,
+      estimatedPromptTokens:
+        this.agent.lastContextMetrics?.estimatedModelTokens || 0,
+      actualPromptTokens:
+        this.agent.lastContextMetrics?.actualPromptTokens || 0,
       cumulativeEstimatedPromptTokens:
         this.agent.cumulativeEstimatedPromptTokens || 0,
       cumulativeActualPromptTokens:

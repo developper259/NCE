@@ -146,18 +146,26 @@ async function setupEditable(content, { open = true, saved = true } = {}) {
     editVersion: 0,
     saveQueue: Promise.resolve(true),
     enqueueSaveSnapshot(content, version, saveFile) {
-      this.saveQueue = this.saveQueue.catch(() => false).then(async () => {
-        if (version !== this.editVersion) return { saved: false, stale: true };
-        const result = await saveFile(this.path, content);
-        if (!result) {
-          return { saved: false, error: Object.assign(new Error("Save failed"), { code: "SAVE_FAILED" }) };
-        }
-        if (version !== this.editVersion) {
-          return { saved: false, stale: true, persisted: true };
-        }
-        this.setIsSaved(true);
-        return { saved: true, result };
-      });
+      this.saveQueue = this.saveQueue
+        .catch(() => false)
+        .then(async () => {
+          if (version !== this.editVersion)
+            return { saved: false, stale: true };
+          const result = await saveFile(this.path, content);
+          if (!result) {
+            return {
+              saved: false,
+              error: Object.assign(new Error("Save failed"), {
+                code: "SAVE_FAILED",
+              }),
+            };
+          }
+          if (version !== this.editVersion) {
+            return { saved: false, stale: true, persisted: true };
+          }
+          this.setIsSaved(true);
+          return { saved: true, result };
+        });
       return this.saveQueue;
     },
     autoSave: false,
@@ -223,8 +231,13 @@ test("delete_folder removes the directory and cleans only descendant tabs and re
     const inside = path.join(target, "a.js");
     const deep = path.join(nested, "b.js");
     const outside = path.join(neighbor, "c.js");
-    for (const file of [inside, deep, outside]) await fs.writeFile(file, "content");
-    const openFiles = [inside, deep, outside].map((file, id) => ({ id, path: file, isSaved: true }));
+    for (const file of [inside, deep, outside])
+      await fs.writeFile(file, "content");
+    const openFiles = [inside, deep, outside].map((file, id) => ({
+      id,
+      path: file,
+      isSaved: true,
+    }));
     const closed = [];
     const marked = [];
     editor.tabManager.files = openFiles;
@@ -233,13 +246,19 @@ test("delete_folder removes the directory and cleans only descendant tabs and re
       return id !== 1;
     };
     editor.tabManager.markFileAsDeleted = (file) => marked.push(file);
-    for (const file of [inside, deep, outside]) agent.readFileContexts.set(file, {});
+    for (const file of [inside, deep, outside])
+      agent.readFileContexts.set(file, {});
     let refreshed = null;
-    editor.fileExplorer.refreshFolder = async (folder) => { refreshed = folder; };
+    editor.fileExplorer.refreshFolder = async (folder) => {
+      refreshed = folder;
+    };
 
     const result = await agent.executeToolCall({
       id: "delete-folder-regression",
-      function: { name: "delete_folder", arguments: JSON.stringify({ path: "tmp" }) },
+      function: {
+        name: "delete_folder",
+        arguments: JSON.stringify({ path: "tmp" }),
+      },
     });
     assert.equal(result.success, true, JSON.stringify(result));
     assert.equal(result.result.success, true);
@@ -273,7 +292,9 @@ test("delete_folder reconciles a filesystem error after deletion and reports cle
       await actualDelete(...args);
       throw new Error("response lost after deletion");
     };
-    editor.fileExplorer.refreshFolder = async () => { throw new Error("refresh failed"); };
+    editor.fileExplorer.refreshFolder = async () => {
+      throw new Error("refresh failed");
+    };
     const result = await agent.deleteWorkspaceFolder({ path: "tmp" });
     assert.equal(result.success, true);
     assert.equal(result.mutationOutcome, "APPLIED_AND_VERIFIED");
@@ -291,20 +312,35 @@ test("create_folder, create_file, delete_folder leaves no unresolved tool failur
   const { root, agent, editor } = await setup();
   try {
     agent.runChangeTracker.beginRun(1, root);
-    const call = (id, name, args) => agent.executeToolCall({
-      id,
-      function: { name, arguments: JSON.stringify(args) },
+    const call = (id, name, args) =>
+      agent.executeToolCall({
+        id,
+        function: { name, arguments: JSON.stringify(args) },
+      });
+    assert.equal(
+      (await call("folder-create", "create_folder", { path: "tmp" })).success,
+      true,
+    );
+    assert.equal(
+      (
+        await call("file-create", "create_file", {
+          path: "tmp/test.js",
+          content: "ok",
+        })
+      ).success,
+      true,
+    );
+    const deleted = await call("folder-delete", "delete_folder", {
+      path: "tmp",
     });
-    assert.equal((await call("folder-create", "create_folder", { path: "tmp" })).success, true);
-    assert.equal((await call("file-create", "create_file", { path: "tmp/test.js", content: "ok" })).success, true);
-    const deleted = await call("folder-delete", "delete_folder", { path: "tmp" });
     assert.equal(deleted.success, true, JSON.stringify(deleted));
     assert.equal(deleted.result.mutationOutcome, "APPLIED_AND_VERIFIED");
     assert.equal(await editor.api.pathExists(path.join(root, "tmp")), false);
     assert.equal(agent.runChangeTracker.current.unresolvedFailures.size, 0);
     assert.equal(agent.runChangeTracker.current.changes.size, 0);
     const complete = await call("folder-complete", "task_complete", {
-      summary: "Temporary folder removed.", validation: "Deletion verified.",
+      summary: "Temporary folder removed.",
+      validation: "Deletion verified.",
     });
     assert.equal(complete.success, true, JSON.stringify(complete));
   } finally {
@@ -354,7 +390,8 @@ test("run_tests executes a detected runner and keeps red tests as validation out
     });
     agent.api.runAgentProcess = async (request) => {
       assert.equal(request.cwd, root);
-      assert.equal(Array.from(request.args).join(" "), "run test");
+      assert.equal(request.strategy, "npm-test");
+      assert.equal(request.target, null);
       return {
         success: true,
         exitCode: 1,
@@ -373,7 +410,7 @@ test("run_tests executes a detected runner and keeps red tests as validation out
     assert.equal(result.success, true, JSON.stringify(result));
     assert.equal(result.result.status, "FAILED");
     assert.equal(result.meta.toolCategory, "validation");
-    assert.equal(result.meta.informationStatus, "validation_progress");
+    assert.equal(result.meta.informationStatus, "error_discovered");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -1010,11 +1047,24 @@ test("modify_file persists a file that was initially closed when Auto Save is on
       oldText: "before",
       newText: "after",
     });
-    assert.equal(result.mutationOutcome, "APPLIED_AND_VERIFIED", JSON.stringify(result));
+    assert.equal(
+      result.mutationOutcome,
+      "APPLIED_AND_VERIFIED",
+      JSON.stringify(result),
+    );
     assert.equal(result.persistence.saved, true);
-    assert.equal(await fs.readFile(path.join(root, "editable.txt"), "utf8"), "after");
+    assert.equal(
+      await fs.readFile(path.join(root, "editable.txt"), "utf8"),
+      "after",
+    );
     assert.equal(fixture.getFile().isSaved, true);
-    assert.equal(fixture.getFile().lines.map((line) => line.getText()).join("\n"), "after");
+    assert.equal(
+      fixture
+        .getFile()
+        .lines.map((line) => line.getText())
+        .join("\n"),
+      "after",
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -1027,9 +1077,16 @@ test("create_file followed by modify_file keeps editor and filesystem in sync", 
   try {
     const created = await agent.executeToolCall({
       id: "generated-create",
-      function: { name: "create_file", arguments: JSON.stringify({ path: "generated.js", content: "A" }) },
+      function: {
+        name: "create_file",
+        arguments: JSON.stringify({ path: "generated.js", content: "A" }),
+      },
     });
-    assert.equal(created.result.mutationOutcome, "APPLIED_AND_VERIFIED", JSON.stringify(created));
+    assert.equal(
+      created.result.mutationOutcome,
+      "APPLIED_AND_VERIFIED",
+      JSON.stringify(created),
+    );
     const read = await agent.readFile("generated.js");
     const modified = await agent.modifyFile({
       path: "generated.js",
@@ -1037,10 +1094,20 @@ test("create_file followed by modify_file keeps editor and filesystem in sync", 
       oldText: "A",
       newText: "B",
     });
-    assert.equal(modified.mutationOutcome, "APPLIED_AND_VERIFIED", JSON.stringify(modified));
+    assert.equal(
+      modified.mutationOutcome,
+      "APPLIED_AND_VERIFIED",
+      JSON.stringify(modified),
+    );
     assert.equal(modified.verification.content, "B");
-    assert.equal(await fs.readFile(path.join(root, "generated.js"), "utf8"), "B");
-    assert.equal(editor.tabManager.getFileByPath(path.join(root, "generated.js")).isSaved, true);
+    assert.equal(
+      await fs.readFile(path.join(root, "generated.js"), "utf8"),
+      "B",
+    );
+    assert.equal(
+      editor.tabManager.getFileByPath(path.join(root, "generated.js")).isSaved,
+      true,
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -1073,7 +1140,10 @@ test("an older Agent save cannot mark a newer user edit as saved", async () => {
   const { agent, editor } = fixture;
   editor.autoSaveEnabled = true;
   let releaseSave;
-  agent.api.saveFile = () => new Promise((resolve) => { releaseSave = resolve; });
+  agent.api.saveFile = () =>
+    new Promise((resolve) => {
+      releaseSave = resolve;
+    });
   try {
     const read = await agent.readFile("editable.txt");
     const pending = agent.modifyFile({
@@ -1106,7 +1176,9 @@ test("queued Agent snapshots skip stale work and persist the latest version", as
       writes.push(content);
       if (content === "agent-a") {
         resolve();
-        await new Promise((release) => { releaseFirst = release; });
+        await new Promise((release) => {
+          releaseFirst = release;
+        });
       }
       await fs.writeFile(filePath, content);
       return filePath;
@@ -1114,10 +1186,18 @@ test("queued Agent snapshots skip stale work and persist the latest version", as
   });
   try {
     file.editVersion = 1;
-    const first = file.enqueueSaveSnapshot("agent-a", 1, fixture.editor.api.saveFile);
+    const first = file.enqueueSaveSnapshot(
+      "agent-a",
+      1,
+      fixture.editor.api.saveFile,
+    );
     await firstStarted;
     file.editVersion = 2;
-    const second = file.enqueueSaveSnapshot("agent-b", 2, fixture.editor.api.saveFile);
+    const second = file.enqueueSaveSnapshot(
+      "agent-b",
+      2,
+      fixture.editor.api.saveFile,
+    );
     releaseFirst();
     const results = await Promise.all([first, second]);
     assert.equal(results[0].stale, true);
@@ -1151,7 +1231,10 @@ test("modify_file keeps a closed file dirty when Auto Save is off", async () => 
     assert.equal(result.persistence.saved, false);
     assert.equal(saveCalls, 0);
     assert.equal(fixture.getFile().isSaved, false);
-    assert.equal(await fs.readFile(path.join(fixture.root, "editable.txt"), "utf8"), "before");
+    assert.equal(
+      await fs.readFile(path.join(fixture.root, "editable.txt"), "utf8"),
+      "before",
+    );
   } finally {
     await fs.rm(fixture.root, { recursive: true, force: true });
   }
@@ -1159,8 +1242,12 @@ test("modify_file keeps a closed file dirty when Auto Save is off", async () => 
 
 test("Agent multi-line edits synchronize NSH before refresh and permit new-revision reads", async () => {
   const initial = Array.from({ length: 40 }, (_, i) => `line-${i}`).join("\n");
-  const expanded = Array.from({ length: 80 }, (_, i) => `expanded-${i}`).join("\n");
-  const shortened = Array.from({ length: 5 }, (_, i) => `short-${i}`).join("\n");
+  const expanded = Array.from({ length: 80 }, (_, i) => `expanded-${i}`).join(
+    "\n",
+  );
+  const shortened = Array.from({ length: 5 }, (_, i) => `short-${i}`).join(
+    "\n",
+  );
   const fixture = await setupEditable(initial);
   const { root, agent, editor } = fixture;
   try {
@@ -1171,42 +1258,102 @@ test("Agent multi-line edits synchronize NSH before refresh and permit new-revis
         synchronized.push([previousText.split("\n").length, file.lines.length]);
       },
     };
-    const firstRead = await agent.readFile("editable.txt", { startLine: 1, endLine: 40 });
-    const modify = (id, revision, oldText, newText) => agent.executeToolCall({
-      id,
-      function: { name: "modify_file", arguments: JSON.stringify({
-        path: "editable.txt", revision, oldText, newText,
-      }) },
+    const firstRead = await agent.readFile("editable.txt", {
+      startLine: 1,
+      endLine: 40,
     });
+    const modify = (id, revision, oldText, newText) =>
+      agent.executeToolCall({
+        id,
+        function: {
+          name: "modify_file",
+          arguments: JSON.stringify({
+            path: "editable.txt",
+            revision,
+            oldText,
+            newText,
+          }),
+        },
+      });
     const first = await modify("grow", firstRead.revision, initial, expanded);
     assert.equal(first.success, true, JSON.stringify(first));
-    const second = await modify("shrink", first.result.revision, expanded, shortened);
+    const second = await modify(
+      "shrink",
+      first.result.revision,
+      expanded,
+      shortened,
+    );
     assert.equal(second.success, true, JSON.stringify(second));
-    assert.deepEqual(synchronized, [[40, 80], [80, 5]]);
-    const current = await agent.readFile("editable.txt", { startLine: 1, endLine: 5 });
+    assert.deepEqual(synchronized, [
+      [40, 80],
+      [80, 5],
+    ]);
+    const current = await agent.readFile("editable.txt", {
+      startLine: 1,
+      endLine: 5,
+    });
     assert.equal(current.revision, second.result.revision);
     agent.contextManager.updateModelFileVisibility([
-      { role: "assistant", tool_calls: [{ id: "current", type: "function", function: {
-        name: "read_file", arguments: JSON.stringify({ path: "editable.txt" }),
-      } }] },
-      { role: "tool", tool_call_id: "current", content: JSON.stringify({ success: true, result: current }) },
+      {
+        role: "assistant",
+        tool_calls: [
+          {
+            id: "current",
+            type: "function",
+            function: {
+              name: "read_file",
+              arguments: JSON.stringify({ path: "editable.txt" }),
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_call_id: "current",
+        content: JSON.stringify({ success: true, result: current }),
+      },
     ]);
-    const duplicate = await agent.readFile("editable.txt", { startLine: 1, endLine: 5 });
+    const duplicate = await agent.readFile("editable.txt", {
+      startLine: 1,
+      endLine: 5,
+    });
     assert.equal(duplicate.readDecision, "REPEATED_REDUNDANT_READ");
     assert.equal(Object.hasOwn(duplicate, "content"), false);
-    const third = await modify("change-again", current.revision, shortened, "latest");
+    const third = await modify(
+      "change-again",
+      current.revision,
+      shortened,
+      "latest",
+    );
     assert.equal(third.success, true, JSON.stringify(third));
-    const fresh = await agent.readFile("editable.txt", { startLine: 1, endLine: 1 });
+    const fresh = await agent.readFile("editable.txt", {
+      startLine: 1,
+      endLine: 1,
+    });
     assert.equal(fresh.content, "latest");
     assert.equal(fresh.revision, third.result.revision);
-    const call = (id, name, args) => agent.executeToolCall({
-      id, function: { name, arguments: JSON.stringify(args) },
-    });
-    assert.equal((await call("review-changes", "get_changed_files", {})).success, true);
-    assert.equal((await call("review-diff", "get_diff", { path: "editable.txt" })).success, true);
-    assert.equal((await call("review-complete", "task_complete", {
-      summary: "Edits complete.", validation: "Changes reviewed.",
-    })).success, true);
+    const call = (id, name, args) =>
+      agent.executeToolCall({
+        id,
+        function: { name, arguments: JSON.stringify(args) },
+      });
+    assert.equal(
+      (await call("review-changes", "get_changed_files", {})).success,
+      true,
+    );
+    assert.equal(
+      (await call("review-diff", "get_diff", { path: "editable.txt" })).success,
+      true,
+    );
+    assert.equal(
+      (
+        await call("review-complete", "task_complete", {
+          summary: "Edits complete.",
+          validation: "Changes reviewed.",
+        })
+      ).success,
+      true,
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

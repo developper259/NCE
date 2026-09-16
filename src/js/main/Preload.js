@@ -57,6 +57,10 @@ contextBridge.exposeInMainWorld("api", {
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
   getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
   runAgentProcess: (request) => ipcRenderer.invoke("Agent:runProcess", request),
+  cancelAgentProcess: (requestId) =>
+    ipcRenderer.invoke("Agent:cancelProcess", requestId),
+  resolveAgentRuntime: (request) =>
+    ipcRenderer.invoke("Agent:resolveRuntime", request),
 
   selectFile: () => ipcRenderer.invoke("FileManager:selectFile"),
 
