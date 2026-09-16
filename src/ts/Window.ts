@@ -81,6 +81,8 @@ export class Window {
 
         contextIsolation: true,
         nodeIntegration: false,
+        backgroundThrottling: false,
+        
       },
     });
 
