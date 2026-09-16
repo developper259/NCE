@@ -189,6 +189,107 @@ const CODE_TOOLS = [
 
 const READ_TOOLS = ["get_project_map", "read_file", "search_code"];
 
+test("delete_folder removes the directory and cleans only descendant tabs and read contexts", async () => {
+  const { root, agent, editor } = await setup();
+  try {
+    agent.runChangeTracker.beginRun(1, root);
+    const target = path.join(root, "tmp");
+    const nested = path.join(target, "sub");
+    const neighbor = path.join(root, "tmp2");
+    await fs.mkdir(nested, { recursive: true });
+    await fs.mkdir(neighbor);
+    const inside = path.join(target, "a.js");
+    const deep = path.join(nested, "b.js");
+    const outside = path.join(neighbor, "c.js");
+    for (const file of [inside, deep, outside]) await fs.writeFile(file, "content");
+    const openFiles = [inside, deep, outside].map((file, id) => ({ id, path: file, isSaved: true }));
+    const closed = [];
+    const marked = [];
+    editor.tabManager.files = openFiles;
+    editor.tabManager.closeFile = async (id) => {
+      closed.push(id);
+      return id !== 1;
+    };
+    editor.tabManager.markFileAsDeleted = (file) => marked.push(file);
+    for (const file of [inside, deep, outside]) agent.readFileContexts.set(file, {});
+    let refreshed = null;
+    editor.fileExplorer.refreshFolder = async (folder) => { refreshed = folder; };
+
+    const result = await agent.executeToolCall({
+      id: "delete-folder-regression",
+      function: { name: "delete_folder", arguments: JSON.stringify({ path: "tmp" }) },
+    });
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.equal(result.result.success, true);
+    assert.equal(result.result.mutationOutcome, "APPLIED_AND_VERIFIED");
+    assert.equal(await editor.api.pathExists(target), false);
+    assert.deepEqual(closed, [0, 1]);
+    assert.deepEqual(marked, [deep]);
+    assert.equal(agent.readFileContexts.has(inside), false);
+    assert.equal(agent.readFileContexts.has(deep), false);
+    assert.equal(agent.readFileContexts.has(outside), true);
+    assert.equal(await editor.api.pathExists(outside), true);
+    assert.equal(agent.samePath(refreshed, root), true);
+    assert.equal(agent.runChangeTracker.current.unresolvedFailures.size, 0);
+
+    const rootDelete = await agent.deleteWorkspaceFolder({ path: root });
+    assert.equal(rootDelete.success, false);
+    assert.equal(rootDelete.mutationOutcome, "NOT_APPLIED");
+    assert.equal(await editor.api.pathExists(root), true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("delete_folder reconciles a filesystem error after deletion and reports cleanup warnings", async () => {
+  const { root, agent, editor } = await setup();
+  try {
+    const target = path.join(root, "tmp");
+    await fs.mkdir(target);
+    const actualDelete = agent.api.deleteEntry;
+    agent.api.deleteEntry = async (...args) => {
+      await actualDelete(...args);
+      throw new Error("response lost after deletion");
+    };
+    editor.fileExplorer.refreshFolder = async () => { throw new Error("refresh failed"); };
+    const result = await agent.deleteWorkspaceFolder({ path: "tmp" });
+    assert.equal(result.success, true);
+    assert.equal(result.mutationOutcome, "APPLIED_AND_VERIFIED");
+    assert.equal(await editor.api.pathExists(target), false);
+    assert.deepEqual(Array.from(result.uiWarnings), [
+      "filesystem_delete_reported_error_but_absence_verified",
+      "explorer_refresh_failed",
+    ]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("create_folder, create_file, delete_folder leaves no unresolved tool failure", async () => {
+  const { root, agent, editor } = await setup();
+  try {
+    agent.runChangeTracker.beginRun(1, root);
+    const call = (id, name, args) => agent.executeToolCall({
+      id,
+      function: { name, arguments: JSON.stringify(args) },
+    });
+    assert.equal((await call("folder-create", "create_folder", { path: "tmp" })).success, true);
+    assert.equal((await call("file-create", "create_file", { path: "tmp/test.js", content: "ok" })).success, true);
+    const deleted = await call("folder-delete", "delete_folder", { path: "tmp" });
+    assert.equal(deleted.success, true, JSON.stringify(deleted));
+    assert.equal(deleted.result.mutationOutcome, "APPLIED_AND_VERIFIED");
+    assert.equal(await editor.api.pathExists(path.join(root, "tmp")), false);
+    assert.equal(agent.runChangeTracker.current.unresolvedFailures.size, 0);
+    assert.equal(agent.runChangeTracker.current.changes.size, 0);
+    const complete = await call("folder-complete", "task_complete", {
+      summary: "Temporary folder removed.", validation: "Deletion verified.",
+    });
+    assert.equal(complete.success, true, JSON.stringify(complete));
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Agent exposes the minimal public tool surface for read and code modes", async () => {
   const { root, agent } = await setup();
   try {

@@ -997,11 +997,20 @@ class WorkspaceFileManager {
 
   async deleteWorkspaceFolder(args = {}) {
     const target = this.agent.getWorkspaceFolderTarget(args.path);
-    if (!target.valid) return { success: false, error: target.error };
-    const status = await this.agent.api?.pathStatus?.(target.absolutePath);
+    if (!target.valid) return { success: false, mutationOutcome: "NOT_APPLIED", error: target.error };
+    let status;
+    try {
+      status = await this.agent.api?.pathStatus?.(target.absolutePath);
+    } catch (error) {
+      console.warn("[NCE Agent delete_folder] path_status failed", { path: target.relativePath, error });
+      return { success: false, mutationOutcome: "NOT_APPLIED", error: {
+        code: "FOLDER_STATUS_FAILED", message: "Le statut du dossier n'a pas pu être vérifié.", path: target.relativePath, stage: "path_status",
+      } };
+    }
     if (!status?.exists) {
       return {
         success: false,
+        mutationOutcome: "NOT_APPLIED",
         error: {
           code: "FOLDER_NOT_FOUND",
           message: "Le dossier à supprimer n'existe pas.",
@@ -1012,6 +1021,7 @@ class WorkspaceFileManager {
     if (!status.isDirectory) {
       return {
         success: false,
+        mutationOutcome: "NOT_APPLIED",
         error: {
           code: "NOT_A_FOLDER",
           message: "delete_folder ne peut supprimer qu'un dossier.",
@@ -1020,49 +1030,84 @@ class WorkspaceFileManager {
       };
     }
     const guard = this.agent.getMutationGuardError();
-    if (guard) return { success: false, error: guard };
-    const operation = await this.agent.api?.deleteEntry?.(
-      target.absolutePath,
-      true,
-    );
-    if (!operation?.success) {
-      return {
-        success: false,
-        error: this.agent.getFileOperationError(
-          operation,
-          "DELETE_FOLDER_FAILED",
-          "La suppression du dossier a échoué.",
-          target.relativePath,
-        ),
-      };
+    if (guard) return { success: false, mutationOutcome: "NOT_APPLIED", error: guard };
+    let operation;
+    let deletionError = null;
+    try {
+      operation = await this.agent.api?.deleteEntry?.(target.absolutePath, true);
+    } catch (error) {
+      deletionError = error;
+      console.warn("[NCE Agent delete_folder] filesystem_delete failed", { path: target.relativePath, error });
     }
     let exists = null;
     try {
-      exists = await this.agent.api?.pathExists?.(target.absolutePath);
-    } catch {}
-    const uiWarnings = [];
-    const tabManager = this.agent.editor?.tabManager;
-    const openFiles = (tabManager?.files || []).filter((file) =>
-      AgentPath.isInside(file.path, target.absolutePath),
-    );
-    for (const openFile of openFiles) {
-      try {
-        const closed = await tabManager?.closeFile?.(openFile.id);
-        if (!closed) tabManager?.markFileAsDeleted?.(openFile.path);
-      } catch {
-        uiWarnings.push("tab_close_failed");
-      }
+      const observed = await this.agent.api?.pathExists?.(target.absolutePath);
+      if (typeof observed === "boolean") exists = observed;
+    } catch (error) {
+      console.warn("[NCE Agent delete_folder] post_delete_verification failed", { path: target.relativePath, error });
     }
-    for (const [contextPath] of this.agent.readFileContexts) {
-      if (AgentPath.isInside(contextPath, target.absolutePath)) {
-        this.agent.readFileContexts.delete(contextPath);
+    if (exists === true || (!operation?.success && exists !== false)) {
+      return {
+        success: false,
+        mutationOutcome: exists === true ? "NOT_APPLIED" : "APPLIED_BUT_UNCERTAIN",
+        error: {
+          ...this.agent.getFileOperationError(operation, "DELETE_FOLDER_FAILED", "La suppression du dossier a échoué.", target.relativePath),
+          stage: deletionError || !operation?.success ? "filesystem_delete" : "post_delete_verification",
+        },
+      };
+    }
+    const uiWarnings = [];
+    if (deletionError || !operation?.success) uiWarnings.push("filesystem_delete_reported_error_but_absence_verified");
+    const tabManager = this.agent.editor?.tabManager;
+    try {
+      const openFiles = [...(tabManager?.files || [])].filter((file) =>
+        AgentPath.isInside(file.path, target.absolutePath),
+      );
+      for (const openFile of openFiles) {
+        try {
+          const closed = await tabManager?.closeFile?.(openFile.id);
+          if (!closed) tabManager?.markFileAsDeleted?.(openFile.path);
+        } catch (error) {
+          uiWarnings.push("tab_close_failed");
+          console.warn("[NCE Agent delete_folder] tab_cleanup failed", { path: openFile.path, error });
+        }
       }
+    } catch (error) {
+      uiWarnings.push("tab_cleanup_failed");
+      console.warn("[NCE Agent delete_folder] tab_cleanup failed", { path: target.relativePath, error });
+    }
+    try {
+      for (const contextPath of this.agent.readFileContexts.keys()) {
+        if (AgentPath.isInside(contextPath, target.absolutePath)) {
+          this.agent.readFileContexts.delete(contextPath);
+        }
+      }
+    } catch (error) {
+      uiWarnings.push("context_cleanup_failed");
+      console.warn("[NCE Agent delete_folder] context_cleanup failed", { path: target.relativePath, error });
     }
     try {
       this.agent.editor?.quickOpen?.invalidate?.(target.root);
+    } catch (error) {
+      uiWarnings.push("quick_open_invalidation_failed");
+      console.warn("[NCE Agent delete_folder] quick_open_cleanup failed", { path: target.relativePath, error });
+    }
+    try {
       await this.agent.refreshWorkspaceFolders([target.parentPath]);
-    } catch {
+    } catch (error) {
       uiWarnings.push("explorer_refresh_failed");
+      console.warn("[NCE Agent delete_folder] explorer_refresh failed", { path: target.relativePath, error });
+    }
+    try {
+      const tracker = this.agent.runChangeTracker;
+      for (const changePath of [...(tracker?.current?.changes.keys() || [])]) {
+        if (AgentPath.isInside(changePath, target.relativePath)) {
+          tracker.recordDelete({ success: true, path: changePath });
+        }
+      }
+    } catch (error) {
+      uiWarnings.push("change_tracking_failed");
+      console.warn("[NCE Agent delete_folder] change_tracking failed", { path: target.relativePath, error });
     }
     return {
       success: true,
