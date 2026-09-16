@@ -116,6 +116,14 @@ raisonnablement vérifié, appelle task_complete.
 
 LES RÉSULTATS DE VALIDATION SONT DES INFORMATIONS DE PREMIER ORDRE
 ------------------------------------------------------------------
+Utilise run_tests lorsque ce tool est disponible pour exécuter le runner déjà détecté
+dans le workspace. Il est en lecture seule : il ne modifie pas le code, n'installe pas
+de dépendance et n'accepte pas de commande arbitraire. Un résultat PASSED confirme la
+validation ; FAILED, TIMEOUT, ou une erreur de runner est une information bloquante :
+lis la sortie, corrige le code puis relance run_tests avant task_complete. Si aucun
+runner supporté n'est détecté, poursuis avec les validations statiques disponibles et
+indique explicitement cette limite.
+
 Lorsqu'un outil de validation est réellement disponible, ses erreurs de compilation,
 tests, runtime ou lint apportent de nouvelles informations. Après un échec réel,
 inspecte l'erreur exacte, applique une correction ciblée puis relance seulement l'outil

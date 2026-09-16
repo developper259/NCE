@@ -44,6 +44,23 @@ class EditorToolRegistry {
   }
 
   registerEditorTools() {
+    this.agent.registerTool("run_tests", {
+      description: `Détecte et exécute le runner de tests déjà présent dans le workspace, sans installer de dépendance ni exécuter une commande arbitraire. Sortie <= ${this.getLimit("run_tests", "outputCharacters", 12000)} caractères ; timeout <= ${this.getLimit("run_tests", "timeoutMs", 120000)} ms. Un résultat FAILED est une validation exécutée et doit être corrigé avant task_complete.`,
+      readOnly: true,
+      codeOnly: true,
+      capabilities: ["command_execution"],
+      parameters: {
+        type: "object",
+        properties: {
+          path: {
+            type: "string",
+            maxLength: this.getPathLimit(),
+            description: "Sous-dossier du workspace dans lequel lancer les tests.",
+          },
+        },
+      },
+      execute: (args = {}) => this.agent.runTests(args),
+    });
     this.agent.registerTool("task_complete", {
       description: `Termine la tâche après implémentation et validation. summary <= ${this.getLimit("task_complete", "summaryCharacters", 2000)} ; validation <= ${this.getLimit("task_complete", "validationCharacters", 2000)}. Ne l'appelle pas si un travail requis ou un échec reste non résolu.`,
       readOnly: true,

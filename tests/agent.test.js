@@ -203,6 +203,7 @@ const CODE_TOOLS = [
   "modify_file",
   "read_file",
   "rename_file",
+  "run_tests",
   "search_code",
   "task_complete",
   "write_file_chunk",
@@ -335,6 +336,44 @@ test("Agent exposes the minimal public tool surface for read and code modes", as
     assert.equal(agent.getTool("modify_file").readOnly, false);
     assert.equal(agent.getTool("delete_file").readOnly, false);
     assert.equal(agent.getTool("task_complete").codeOnly, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("run_tests executes a detected runner and keeps red tests as validation output", async () => {
+  const { root, agent, editor } = await setup();
+  try {
+    await fs.writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ scripts: { test: "node --test" } }),
+    );
+    agent.api.listProjectFiles = async () => ({
+      success: true,
+      entries: [{ relativePath: "package.json" }],
+    });
+    agent.api.runAgentProcess = async (request) => {
+      assert.equal(request.cwd, root);
+      assert.equal(Array.from(request.args).join(" "), "run test");
+      return {
+        success: true,
+        exitCode: 1,
+        signal: null,
+        timedOut: false,
+        durationMs: 4,
+        stdout: "one failing test",
+        stderr: "",
+        truncated: false,
+      };
+    };
+    const result = await agent.executeToolCall({
+      id: "run-tests",
+      function: { name: "run_tests", arguments: "{}" },
+    });
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.equal(result.result.status, "FAILED");
+    assert.equal(result.meta.toolCategory, "validation");
+    assert.equal(result.meta.informationStatus, "validation_progress");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

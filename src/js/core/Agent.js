@@ -136,6 +136,7 @@ class Agent {
     this.workspaceFileManager = new WorkspaceFileManager(this);
     this.activeFileManager = new ActiveFileManager(this);
     this.projectExplorer = new ProjectExplorer(this);
+    this.testRunner = new TestRunner(this);
     this.editorToolRegistry = new EditorToolRegistry(this);
     this.tools = this.toolRegistry.tools;
     this.registerEditorTools();
@@ -1600,6 +1601,9 @@ class Agent {
   }
   async searchProjectFiles(...args) {
     return this.projectExplorer.searchProjectFiles(...args);
+  }
+  async runTests(...args) {
+    return this.testRunner.run(...args);
   }
   resolveWorkspacePath(...args) {
     return this.workspaceFileManager.resolveWorkspacePath(...args);

@@ -6,6 +6,7 @@ import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
 import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
+import { AgentProcessRunner } from "./addon/AgentProcessRunner";
 import { App } from "./App";
 
 const TITLEBAR_CONTROLS_HEIGHT = 35;
@@ -36,6 +37,7 @@ export class Window {
   watcher: Watcher | undefined;
   contextMenu: ContextMenu | undefined;
   workspaceSearch: WorkspaceSearch | undefined;
+  agentProcessRunner: AgentProcessRunner | undefined;
   app: App;
   forceQuit: boolean;
   rendererReady: boolean;
@@ -51,6 +53,7 @@ export class Window {
     this.quitState = "idle";
     this.quitTimer = null;
     this.ipcRegistered = false;
+    this.agentProcessRunner = undefined;
   }
 
   create() {
@@ -98,6 +101,7 @@ export class Window {
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
+    if (!this.agentProcessRunner) this.agentProcessRunner = new AgentProcessRunner(this);
 
     this.appMenu = new AppMenu(this.window, this);
 
@@ -149,7 +153,7 @@ export class Window {
       },
     );
 
-    //this.window.webContents.toggleDevTools();
+    this.window.webContents.toggleDevTools();
 
     this.window.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -232,6 +236,7 @@ export class Window {
       this.watcher.handleIPC();
       this.contextMenu.handleIPC();
       this.workspaceSearch.handleIPC();
+      this.agentProcessRunner.handleIPC();
       this.ipcRegistered = true;
     }
   }

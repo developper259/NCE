@@ -26,6 +26,7 @@ const AgentAI = {
     },
     get_project_map: { maxDepth: 20, outputCharacters: 4000 },
     get_diff: { outputCharacters: 12000 },
+    run_tests: { outputCharacters: 12000, timeoutMs: 120000 },
   },
 
   responseBudget: {

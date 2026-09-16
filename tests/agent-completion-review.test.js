@@ -39,7 +39,7 @@ test('small global diff reviews all changed files and static completion is eligi
   assert.equal(result.truncated, false);
   assert.equal(result.reviewComplete, true);
   assert.deepEqual(Array.from(result.unreviewedPaths), []);
-  assert.equal(agent.getToolCapabilities().commandExecution, false);
+  assert.equal(agent.getToolCapabilities().commandExecution, true);
   assert.equal(agent.validateTaskComplete().success, true);
   assert.equal(agent.agentRunner.validateTaskCompletion({
     requiresModification: true, successfulWriteCount: 2,
