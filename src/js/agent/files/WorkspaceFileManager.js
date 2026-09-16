@@ -21,6 +21,41 @@ class WorkspaceFileManager {
     }
     const saveGuard = this.agent.getMutationGuardError();
     if (saveGuard) return failed(saveGuard);
+    if (typeof openFile.enqueueSaveSnapshot === "function") {
+      const queued = await openFile.enqueueSaveSnapshot(
+        content,
+        editVersion,
+        this.agent.api.saveFile.bind(this.agent.api),
+      );
+      if (!queued?.saved) {
+        return failed(
+          queued?.stale
+            ? {
+                code: "CONCURRENT_EDIT",
+                message: "Le fichier a changé pendant la sauvegarde Agent.",
+                path: relativePath,
+              }
+            : queued?.error || {
+                code: "SAVE_FAILED",
+                message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+                path: relativePath,
+              },
+        );
+      }
+      if (
+        typeof queued.result === "string" &&
+        !AgentPath.samePath(queued.result, absolutePath)
+      ) {
+        return failed({
+          code: "SAVE_FAILED",
+          message: `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+          path: relativePath,
+        });
+      }
+      openFile.saveError = null;
+      return { saved: true };
+    }
+
     let savedPath;
     try {
       savedPath = await this.agent.api.saveFile(absolutePath, content);

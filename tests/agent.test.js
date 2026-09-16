@@ -144,6 +144,22 @@ async function setupEditable(content, { open = true, saved = true } = {}) {
     maxLineLength: 0,
     isSaved: saved,
     editVersion: 0,
+    saveQueue: Promise.resolve(true),
+    enqueueSaveSnapshot(content, version, saveFile) {
+      this.saveQueue = this.saveQueue.catch(() => false).then(async () => {
+        if (version !== this.editVersion) return { saved: false, stale: true };
+        const result = await saveFile(this.path, content);
+        if (!result) {
+          return { saved: false, error: Object.assign(new Error("Save failed"), { code: "SAVE_FAILED" }) };
+        }
+        if (version !== this.editVersion) {
+          return { saved: false, stale: true, persisted: true };
+        }
+        this.setIsSaved(true);
+        return { saved: true, result };
+      });
+      return this.saveQueue;
+    },
     autoSave: false,
     diffSnapshot: null,
     diffActive: false,
@@ -1036,6 +1052,40 @@ test("an older Agent save cannot mark a newer user edit as saved", async () => {
     assert.equal(result.mutationOutcome, "APPLIED_BUT_UNCERTAIN");
     assert.equal(result.persistence.error.code, "CONCURRENT_EDIT");
     assert.equal(file.isSaved, false);
+  } finally {
+    await fs.rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("queued Agent snapshots skip stale work and persist the latest version", async () => {
+  const fixture = await setupEditable("before");
+  const file = fixture.getFile();
+  const writes = [];
+  let releaseFirst;
+  const firstStarted = new Promise((resolve) => {
+    fixture.editor.api.saveFile = async (filePath, content) => {
+      writes.push(content);
+      if (content === "agent-a") {
+        resolve();
+        await new Promise((release) => { releaseFirst = release; });
+      }
+      await fs.writeFile(filePath, content);
+      return filePath;
+    };
+  });
+  try {
+    file.editVersion = 1;
+    const first = file.enqueueSaveSnapshot("agent-a", 1, fixture.editor.api.saveFile);
+    await firstStarted;
+    file.editVersion = 2;
+    const second = file.enqueueSaveSnapshot("agent-b", 2, fixture.editor.api.saveFile);
+    releaseFirst();
+    const results = await Promise.all([first, second]);
+    assert.equal(results[0].stale, true);
+    assert.equal(results[1].saved, true);
+    assert.deepEqual(writes, ["agent-a", "agent-b"]);
+    assert.equal(await fs.readFile(file.path, "utf8"), "agent-b");
+    assert.equal(file.isSaved, true);
   } finally {
     await fs.rm(fixture.root, { recursive: true, force: true });
   }

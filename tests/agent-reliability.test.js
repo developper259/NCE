@@ -543,6 +543,124 @@ test("create overwrite is tracked as a modification with its original baseline",
   assert.match(tracker.getDiff().diff, /--- a\/existing\.js/);
 });
 
+test("changed-file statistics compare the run baseline with final content", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+
+  tracker.recordModify({
+    success: true,
+    path: "edited.js",
+    beforeText: "one\ntwo\nthree",
+    afterText: "one\nchanged\nthree",
+  });
+  tracker.recordModify({
+    success: true,
+    path: "edited.js",
+    beforeText: "one\nchanged\nthree",
+    afterText: "one\nchanged\nfinal",
+  });
+  let change = tracker.current.changes.get("edited.js");
+  assert.equal(change.additions, 2);
+  assert.equal(change.deletions, 2);
+
+  tracker.recordCreate({ success: true, path: "created.js", content: "A" });
+  tracker.recordModify({
+    success: true,
+    path: "created.js",
+    beforeText: "A",
+    afterText: "A\nB",
+  });
+  change = tracker.current.changes.get("created.js");
+  assert.equal(change.additions, 2);
+  assert.equal(change.deletions, 0);
+
+  tracker.recordRename({
+    success: true,
+    oldPath: "edited.js",
+    newPath: "renamed.js",
+  });
+  tracker.recordModify({
+    success: true,
+    path: "renamed.js",
+    beforeText: "one\nchanged\nfinal",
+    afterText: "one\nfinal",
+  });
+  change = tracker.current.changes.get("renamed.js");
+  assert.equal(change.additions, 1);
+  assert.equal(change.deletions, 2);
+  const listed = tracker
+    .getChangedFiles()
+    .files.find((file) => file.path === "renamed.js");
+  assert.deepEqual(
+    { additions: listed.additions, deletions: listed.deletions },
+    { additions: change.additions, deletions: change.deletions },
+  );
+});
+
+test("reverted modifications leave no net change and do not block completion", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+  tracker.recordModify({
+    success: true,
+    path: "reverted.js",
+    beforeText: "A",
+    afterText: "B",
+  });
+  tracker.recordModify({
+    success: true,
+    path: "reverted.js",
+    beforeText: "B",
+    afterText: "A",
+  });
+  assert.equal(tracker.current.changes.has("reverted.js"), false);
+  assert.equal(tracker.validateTaskComplete().success, true);
+});
+
+test("rename-only, rename-delete, and modify-rename-modify preserve net semantics", () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const tracker = agent.runChangeTracker;
+  tracker.beginRun(1, "/workspace");
+
+  tracker.recordRename({
+    success: true,
+    oldPath: "old.js",
+    newPath: "new.js",
+    beforeText: "same",
+    afterText: "same",
+  });
+  let change = tracker.current.changes.get("new.js");
+  assert.equal(change.status, "renamed");
+  assert.equal(change.additions, 0);
+  assert.equal(change.deletions, 0);
+
+  tracker.recordModify({
+    success: true,
+    path: "new.js",
+    beforeText: "same",
+    afterText: "changed",
+  });
+  change = tracker.current.changes.get("new.js");
+  assert.equal(change.originalPath, "old.js");
+  assert.equal(change.additions, 1);
+  assert.equal(change.deletions, 1);
+
+  tracker.recordRename({
+    success: true,
+    oldPath: "new.js",
+    newPath: "gone.js",
+  });
+  tracker.recordDelete({ success: true, path: "gone.js" }, "changed");
+  change = tracker.current.changes.get("gone.js");
+  assert.equal(change.status, "deleted");
+  assert.equal(change.originalPath, "old.js");
+  assert.equal(change.deletions, 1);
+});
+
 test("reread makes a write failure recovery-ready but only a successful write resolves it", () => {
   const agent = createAgent(editor());
   agent.runId = 1;

@@ -93,6 +93,39 @@ class RunChangeTracker {
     return normalized || path;
   }
 
+  refreshChangeStats(change) {
+    if (!change) return change;
+    if (
+      change.status === "renamed" &&
+      typeof change.originalContent !== "string" &&
+      typeof change.afterContent !== "string"
+    ) {
+      change.additions = 0;
+      change.deletions = 0;
+      return change;
+    }
+    if (change.created && typeof change.originalContent !== "string") {
+      change.additions = this.countLines(change.afterContent || "");
+      change.deletions = 0;
+      return change;
+    }
+    const before = change.created
+      ? typeof change.originalContent === "string"
+        ? change.originalContent
+        : ""
+      : typeof change.originalContent === "string"
+        ? change.originalContent
+        : typeof change.beforeContent === "string"
+          ? change.beforeContent
+          : "";
+    const after =
+      typeof change.afterContent === "string" ? change.afterContent : "";
+    const stats = this.getDiffStats(before, after);
+    change.additions = stats.additions;
+    change.deletions = stats.deletions;
+    return change;
+  }
+
   addChange(change) {
     if (!this.current) return null;
     const key = this.changeKeyForPath(
@@ -117,13 +150,20 @@ class RunChangeTracker {
           existing.oldPath ||
           existing.path ||
           key,
-        originalContent:
-          change.originalContent ??
-          existing.originalContent ??
-          existing.beforeContent ??
-          null,
+        originalContent: existing.created
+          ? (existing.originalContent ?? null)
+          : (change.originalContent ??
+            existing.originalContent ??
+            existing.beforeContent ??
+            change.beforeContent ??
+            null),
         beforeContent: existing.beforeContent ?? change.beforeContent ?? null,
-        afterContent: change.afterContent ?? existing.afterContent ?? null,
+        afterContent: Object.prototype.hasOwnProperty.call(
+          change,
+          "afterContent",
+        )
+          ? change.afterContent
+          : (existing.afterContent ?? null),
         beforeRevision:
           existing.beforeRevision ?? change.beforeRevision ?? null,
         afterRevision: change.afterRevision ?? existing.afterRevision ?? null,
@@ -131,22 +171,30 @@ class RunChangeTracker {
         modified: change.modified ?? existing.modified ?? false,
         renamed: change.renamed ?? existing.renamed ?? false,
         deleted: change.deleted ?? existing.deleted ?? false,
-        additions: Number.isFinite(change.additions)
-          ? change.additions
-          : (existing.additions ?? 0),
-        deletions: Number.isFinite(change.deletions)
-          ? change.deletions
-          : (existing.deletions ?? 0),
+        additions: existing.additions ?? 0,
+        deletions: existing.deletions ?? 0,
         reviewed: false,
         review: null,
         version: (existing.version || 0) + 1,
         reviewedVersion: null,
       };
+      this.refreshChangeStats(merged);
       this.current.changeVersion += 1;
       this.current.reviewedDiff = false;
       this.current.globalDiffTruncated = false;
       this.current.reviewedChangedFiles = false;
       this.current.changes.set(key, merged);
+      if (
+        !merged.created &&
+        !merged.renamed &&
+        !merged.deleted &&
+        typeof merged.originalContent === "string" &&
+        typeof merged.afterContent === "string" &&
+        this.normalizeLineEndings(merged.originalContent) ===
+          this.normalizeLineEndings(merged.afterContent)
+      ) {
+        this.current.changes.delete(key);
+      }
       return merged;
     }
     const record = {
@@ -156,19 +204,21 @@ class RunChangeTracker {
       status: change.status || "modified",
       beforeContent: change.beforeContent ?? null,
       afterContent: change.afterContent ?? null,
+      originalContent: change.originalContent ?? change.beforeContent ?? null,
       beforeRevision: change.beforeRevision ?? null,
       afterRevision: change.afterRevision ?? null,
       created: Boolean(change.created),
       modified: Boolean(change.modified),
       renamed: Boolean(change.renamed),
       deleted: Boolean(change.deleted),
-      additions: Number.isFinite(change.additions) ? change.additions : 0,
-      deletions: Number.isFinite(change.deletions) ? change.deletions : 0,
+      additions: 0,
+      deletions: 0,
       reviewed: false,
       review: null,
       version: 1,
       reviewedVersion: null,
     };
+    this.refreshChangeStats(record);
     this.current.changeVersion += 1;
     this.current.reviewedDiff = false;
     this.current.globalDiffTruncated = false;
@@ -188,9 +238,10 @@ class RunChangeTracker {
           ? result.content
           : "";
     const overwritten = result.overwritten === true;
-    const before = overwritten && typeof result.beforeText === "string"
-      ? result.beforeText
-      : null;
+    const before =
+      overwritten && typeof result.beforeText === "string"
+        ? result.beforeText
+        : null;
     const stats = this.getDiffStats(before || "", content);
     const record = {
       path: relativePath,
@@ -226,7 +277,12 @@ class RunChangeTracker {
       path: relativePath,
       originalPath: relativePath,
       currentPath: relativePath,
-      status: existing?.status === "created" ? "created" : existing?.status === "renamed" ? "renamed" : "modified",
+      status:
+        existing?.status === "created"
+          ? "created"
+          : existing?.status === "renamed"
+            ? "renamed"
+            : "modified",
       beforeContent: before,
       afterContent: after,
       beforeRevision: result.previousRevision || null,
@@ -258,11 +314,13 @@ class RunChangeTracker {
       existing.path = newPath;
       existing.currentPath = newPath;
       existing.renamed = true;
-      existing.afterRevision = result.verification?.revision || existing.afterRevision;
+      existing.afterRevision =
+        result.verification?.revision || existing.afterRevision;
       this.current.changeVersion += 1;
       existing.version = (existing.version || 0) + 1;
       existing.reviewed = false;
       existing.reviewedVersion = null;
+      this.refreshChangeStats(existing);
       this.current.reviewedDiff = false;
       this.current.globalDiffTruncated = false;
       this.current.reviewedChangedFiles = false;
@@ -277,8 +335,13 @@ class RunChangeTracker {
       existing.currentPath = newPath;
       existing.path = newPath;
       existing.oldPath = oldPath;
-      existing.beforeContent = existing.beforeContent ?? result.beforeText ?? null;
-      existing.afterContent = existing.afterContent ?? result.afterText ?? result.verification?.content ?? null;
+      existing.beforeContent =
+        existing.beforeContent ?? result.beforeText ?? null;
+      existing.afterContent =
+        existing.afterContent ??
+        result.afterText ??
+        result.verification?.content ??
+        null;
       existing.beforeRevision = existing.beforeRevision ?? null;
       existing.afterRevision = existing.afterRevision ?? null;
       this.current.changes.delete(oldPath);
@@ -287,6 +350,7 @@ class RunChangeTracker {
       existing.version = (existing.version || 0) + 1;
       existing.reviewed = false;
       existing.reviewedVersion = null;
+      this.refreshChangeStats(existing);
       this.current.reviewedDiff = false;
       this.current.globalDiffTruncated = false;
       this.current.reviewedChangedFiles = false;
@@ -298,8 +362,8 @@ class RunChangeTracker {
       originalPath: oldPath,
       currentPath: newPath,
       status: "renamed",
-      beforeContent: null,
-      afterContent: null,
+      beforeContent: result.beforeText ?? null,
+      afterContent: result.afterText ?? result.verification?.content ?? null,
       beforeRevision: null,
       afterRevision: result.verification?.revision || null,
       created: false,
@@ -308,6 +372,7 @@ class RunChangeTracker {
       deleted: false,
       additions: 0,
       deletions: 0,
+      originalContent: result.beforeText ?? null,
     };
     this.current.changes.delete(oldPath);
     const change = this.addChange(generated);
@@ -391,14 +456,19 @@ class RunChangeTracker {
         .filter((change) => change.reviewedVersion === change.version)
         .map((change) => change.path),
       unreviewedFiles,
-      globalDiffReviewed: this.current?.reviewedDiff === true &&
+      globalDiffReviewed:
+        this.current?.reviewedDiff === true &&
         this.current?.reviewedDiffVersion === this.current?.changeVersion,
       globalDiffTruncated: this.current?.globalDiffTruncated === true,
       pendingToolCalls: [...(this.current?.pendingToolCalls || [])],
       unresolvedFailures: [...(this.current?.unresolvedFailures.values() || [])]
         .filter((failure) => failure.blocking !== false)
-        .map((failure) => ({ code: failure.code, toolName: failure.toolName,
-          path: failure.path, status: failure.status })),
+        .map((failure) => ({
+          code: failure.code,
+          toolName: failure.toolName,
+          path: failure.path,
+          status: failure.status,
+        })),
     };
   }
 
@@ -569,20 +639,26 @@ class RunChangeTracker {
     const oldPath = change.oldPath || change.originalPath || change.path;
     const newPath = change.path;
     if (change.status === "created") {
-      return { text: [
-        `--- /dev/null`,
-        `+++ b/${newPath}`,
-        `@@ -0,0 +1,${this.countLines(after)} @@`,
-        ...after.split(/\r?\n/).map((line) => `+${line}`),
-      ].join("\n"), diffTooLarge: false };
+      return {
+        text: [
+          `--- /dev/null`,
+          `+++ b/${newPath}`,
+          `@@ -0,0 +1,${this.countLines(after)} @@`,
+          ...after.split(/\r?\n/).map((line) => `+${line}`),
+        ].join("\n"),
+        diffTooLarge: false,
+      };
     }
     if (change.status === "deleted") {
-      return { text: [
-        `--- a/${oldPath}`,
-        `+++ /dev/null`,
-        `@@ -1,${this.countLines(before)} +0,0 @@`,
-        ...before.split(/\r?\n/).map((line) => `-${line}`),
-      ].join("\n"), diffTooLarge: false };
+      return {
+        text: [
+          `--- a/${oldPath}`,
+          `+++ /dev/null`,
+          `@@ -1,${this.countLines(before)} +0,0 @@`,
+          ...before.split(/\r?\n/).map((line) => `-${line}`),
+        ].join("\n"),
+        diffTooLarge: false,
+      };
     }
     if (change.status === "renamed" && before === after) {
       return {
@@ -592,7 +668,9 @@ class RunChangeTracker {
     }
     const result = this.computeLineDiff(before, after);
     return {
-      text: [`--- a/${oldPath}`, `+++ b/${newPath}`, ...result.lines].join("\n"),
+      text: [`--- a/${oldPath}`, `+++ b/${newPath}`, ...result.lines].join(
+        "\n",
+      ),
       diffTooLarge: result.diffTooLarge,
     };
   }
@@ -609,20 +687,25 @@ class RunChangeTracker {
       prefix < beforeLines.length &&
       prefix < afterLines.length &&
       beforeLines[prefix] === afterLines[prefix]
-    ) prefix += 1;
+    )
+      prefix += 1;
     let suffix = 0;
     while (
       suffix < beforeLines.length - prefix &&
       suffix < afterLines.length - prefix &&
       beforeLines[beforeLines.length - 1 - suffix] ===
         afterLines[afterLines.length - 1 - suffix]
-    ) suffix += 1;
+    )
+      suffix += 1;
     const oldMiddle = beforeLines.slice(prefix, beforeLines.length - suffix);
     const newMiddle = afterLines.slice(prefix, afterLines.length - suffix);
     const cells = oldMiddle.length * newMiddle.length;
     if (cells > 1_000_000) {
       return {
-        lines: [`@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`, "... [diff too large]"],
+        lines: [
+          `@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`,
+          "... [diff too large]",
+        ],
         diffTooLarge: true,
       };
     }
@@ -632,9 +715,10 @@ class RunChangeTracker {
     );
     for (let i = oldMiddle.length - 1; i >= 0; i -= 1) {
       for (let j = newMiddle.length - 1; j >= 0; j -= 1) {
-        table[i][j] = oldMiddle[i] === newMiddle[j]
-          ? table[i + 1][j + 1] + 1
-          : Math.max(table[i + 1][j], table[i][j + 1]);
+        table[i][j] =
+          oldMiddle[i] === newMiddle[j]
+            ? table[i + 1][j + 1] + 1
+            : Math.max(table[i + 1][j], table[i][j + 1]);
       }
     }
     const lines = [];
@@ -659,7 +743,10 @@ class RunChangeTracker {
     }
     return {
       lines: lines.length
-        ? [`@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`, ...lines]
+        ? [
+            `@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`,
+            ...lines,
+          ]
         : [`@@ -1,0 +1,0 @@`],
       diffTooLarge: false,
     };
@@ -788,7 +875,8 @@ class RunChangeTracker {
         toolName: failure.toolName || previous?.toolName || null,
         path: path || null,
         message: error.message || previous?.message || "Tool failure",
-        classification: failure.classification || error.retryStrategy || "unresolved",
+        classification:
+          failure.classification || error.retryStrategy || "unresolved",
         blocking: failure.blocking !== false,
         firstSeen: previous?.firstSeen || Date.now(),
         lastSeen: Date.now(),
@@ -815,7 +903,9 @@ class RunChangeTracker {
     for (const [identity, failure] of this.current.unresolvedFailures) {
       if (
         failure.toolName === toolName &&
-        (!normalizedPath || !failure.path || AgentPath.samePath(failure.path, normalizedPath))
+        (!normalizedPath ||
+          !failure.path ||
+          AgentPath.samePath(failure.path, normalizedPath))
       ) {
         failure.status = "resolved";
         failure.classification = classification;

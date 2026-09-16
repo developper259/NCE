@@ -228,10 +228,42 @@ class FileNode extends Tab {
   }
 
   save() {
-    this.saveQueue = this.saveQueue
-      .catch(() => false)
-      .then(() => this.performSave());
+    return this.enqueueSaveOperation(() => this.performSave());
+  }
+
+  enqueueSaveOperation(operation) {
+    this.saveQueue = this.saveQueue.catch(() => false).then(operation);
     return this.saveQueue;
+  }
+
+  enqueueSaveSnapshot(content, version, saveFile = this.editor.api.saveFile.bind(this.editor.api)) {
+    return this.enqueueSaveOperation(() =>
+      this.performSaveSnapshot(content, version, saveFile),
+    );
+  }
+
+  async performSaveSnapshot(content, version, saveFile) {
+    if (version !== this.editVersion) return { saved: false, stale: true };
+    if (!(await this.ensureSaveable())) {
+      return { saved: false, error: this.saveError || new Error("Save unavailable") };
+    }
+    if (version !== this.editVersion) return { saved: false, stale: true };
+    try {
+      const saved = await saveFile(this.path, content);
+      if (!saved) throw new Error("Failed to save file");
+      if (version !== this.editVersion) {
+        return { saved: false, stale: true, persisted: true };
+      }
+      this.deletedFromDisk = false;
+      this.saveError = null;
+      this.setIsSaved(true);
+      this.editor.historyController?.markSaved(this);
+      this.editor.tabManager.refresh();
+      return { saved: true, result: saved };
+    } catch (error) {
+      this.reportSaveError(error);
+      return { saved: false, error };
+    }
   }
 
   async performSave() {
