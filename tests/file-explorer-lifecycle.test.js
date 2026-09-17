@@ -218,9 +218,8 @@ test("invalid file and folder creation keeps the editor active without a popup",
   await explorer.startCreateEntry("/project", "file");
   const emptyPlaceholder = placeholders[0];
   await explorer.commitEdit("", emptyPlaceholder);
-  assert.equal(explorer.editingState.status, "editing");
-  assert.equal(explorer.editingState.invalid, true);
-  assert.deepEqual(placeholders, [emptyPlaceholder]);
+  assert.equal(explorer.editingState, null);
+  assert.deepEqual(placeholders, []);
   assert.deepEqual(alerts, []);
 });
 
@@ -249,6 +248,57 @@ test("invalid rename marks the input and valid input clears the mark", async () 
   input.classList.remove("invalid");
   await explorer.commitEdit("renamed.js", target);
   assert.equal(explorer.editingState, null);
+});
+
+test("creation errors keep the new entry editor active", async () => {
+  const alerts = [];
+  const FileExplorer = loadGlobal(
+    "src/js/sidebar/FileExplorer.Sidebar.js",
+    "FileExplorer",
+    {
+      Sidebar: class {},
+      FileOperations: class {},
+      NCEPath,
+      Events: { ON_OPEN_PROJECT: "open", ON_CLOSE_PROJECT: "close" },
+      window: { api: {} },
+      alert(message) {
+        alerts.push(message);
+      },
+      confirm: () => true,
+      requestAnimationFrame(callback) {
+        callback();
+      },
+      document: {
+        createElement() {
+          return {};
+        },
+      },
+      buildFileContextMenu() {},
+      buildFolderContextMenu() {},
+      buildBackgroundContextMenu() {},
+      buildProjectContextMenu() {},
+    },
+  );
+  const explorer = Object.create(FileExplorer.prototype);
+  const placeholders = [];
+  Object.assign(explorer, {
+    rootPath: "/project",
+    files: placeholders,
+    editingState: null,
+    fileOperations: {
+      async createFile() {
+        return { success: false, code: "PERMISSION_DENIED", error: "Denied" };
+      },
+    },
+    refresh() {},
+  });
+
+  await explorer.startCreateEntry("/project", "file");
+  const placeholder = placeholders[0];
+  await explorer.commitEdit("new.js", placeholder);
+  assert.equal(explorer.editingState.status, "editing");
+  assert.deepEqual(placeholders, [placeholder]);
+  assert.deepEqual(alerts, ["Denied"]);
 });
 
 test("Enter and blur share one committing guard", async () => {

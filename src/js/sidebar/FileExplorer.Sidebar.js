@@ -775,6 +775,10 @@ class FileExplorer extends Sidebar {
     const name = rawValue.trim();
 
     if (!name) {
+      if (target.isNew) {
+        this.cancelEdit();
+        return;
+      }
       this.markEditInvalid("Invalid file name");
       return;
     }
@@ -793,9 +797,7 @@ class FileExplorer extends Sidebar {
             this.markEditInvalid(message);
             return;
           }
-          this.cancelEdit({ refresh: false });
-          this.refresh();
-          alert(message);
+          this.recoverEdit(message);
           return;
         }
 
@@ -814,7 +816,7 @@ class FileExplorer extends Sidebar {
         }
       } catch (error) {
         console.error("Error creating entry:", error);
-        this.cancelEdit();
+        this.recoverEdit(error?.message || "Impossible de créer l'élément.");
       }
       return;
     }
