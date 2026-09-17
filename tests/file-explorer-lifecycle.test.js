@@ -154,6 +154,103 @@ test("inline rename recovers from invalid input and a later rename succeeds", as
   assert.equal(calls.updatePath, 1);
 });
 
+test("invalid file and folder creation keeps the editor active without a popup", async () => {
+  const alerts = [];
+  const FileExplorer = loadGlobal(
+    "src/js/sidebar/FileExplorer.Sidebar.js",
+    "FileExplorer",
+    {
+      Sidebar: class {},
+      FileOperations: class {},
+      NCEPath,
+      Events: { ON_OPEN_PROJECT: "open", ON_CLOSE_PROJECT: "close" },
+      window: { api: {} },
+      alert(message) {
+        alerts.push(message);
+      },
+      confirm: () => true,
+      requestAnimationFrame(callback) {
+        callback();
+      },
+      document: {
+        createElement() {
+          return {};
+        },
+      },
+      buildFileContextMenu() {},
+      buildFolderContextMenu() {},
+      buildBackgroundContextMenu() {},
+      buildProjectContextMenu() {},
+    },
+  );
+  const explorer = Object.create(FileExplorer.prototype);
+  const placeholders = [];
+  Object.assign(explorer, {
+    rootPath: "/project",
+    files: placeholders,
+    editingState: null,
+    fileOperations: {
+      async createFile() {
+        return { success: false, error: "Invalid file name" };
+      },
+      async createFolder() {
+        return { success: false, error: "Invalid folder name" };
+      },
+    },
+    refresh() {},
+  });
+
+  await explorer.startCreateEntry("/project", "file");
+  const filePlaceholder = placeholders[0];
+  await explorer.commitEdit("bad/name", filePlaceholder);
+  assert.equal(explorer.editingState.status, "editing");
+  assert.equal(explorer.editingState.invalid, true);
+  assert.deepEqual(placeholders, [filePlaceholder]);
+
+  await explorer.startCreateEntry("/project", "folder");
+  const folderPlaceholder = placeholders[0];
+  await explorer.commitEdit("bad\\name", folderPlaceholder);
+  assert.equal(explorer.editingState.status, "editing");
+  assert.equal(explorer.editingState.invalid, true);
+  assert.deepEqual(placeholders, [folderPlaceholder]);
+  assert.deepEqual(alerts, []);
+
+  await explorer.startCreateEntry("/project", "file");
+  const emptyPlaceholder = placeholders[0];
+  await explorer.commitEdit("", emptyPlaceholder);
+  assert.equal(explorer.editingState.status, "editing");
+  assert.equal(explorer.editingState.invalid, true);
+  assert.deepEqual(placeholders, [emptyPlaceholder]);
+  assert.deepEqual(alerts, []);
+});
+
+test("invalid rename marks the input and valid input clears the mark", async () => {
+  const { explorer } = explorerFixture(async () => ({ success: true }));
+  const target = { name: "a.js", path: "/project/a.js", type: "file" };
+  const classes = new Set();
+  const input = {
+    classList: {
+      add(value) {
+        classes.add(value);
+      },
+      remove(value) {
+        classes.delete(value);
+      },
+    },
+    focus() {},
+    select() {},
+  };
+  explorer.startRename(target);
+  explorer.editingState.input = input;
+  await explorer.commitEdit("../bad", target);
+  assert.equal(explorer.editingState.status, "editing");
+  assert.equal(classes.has("invalid"), true);
+  explorer.editingState.invalid = false;
+  input.classList.remove("invalid");
+  await explorer.commitEdit("renamed.js", target);
+  assert.equal(explorer.editingState, null);
+});
+
 test("Enter and blur share one committing guard", async () => {
   let resolveRename;
   let renameCalls = 0;

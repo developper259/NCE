@@ -485,6 +485,11 @@ class FileExplorer extends Sidebar {
       }
     });
     input.addEventListener("click", (e) => e.stopPropagation());
+    input.addEventListener("input", () => {
+      if (this.editingState?.target !== file) return;
+      this.editingState.invalid = false;
+      input.classList?.remove?.("invalid");
+    });
     input.addEventListener("blur", () => this.commitEdit(input.value, file));
 
     requestAnimationFrame(() => {
@@ -740,6 +745,28 @@ class FileExplorer extends Sidebar {
     session.input?.select();
   }
 
+  markEditInvalid(message) {
+    const session = this.editingState;
+    if (!session) return;
+    session.status = "editing";
+    session.invalid = true;
+    session.error = message || "Invalid file name";
+    session.input?.classList?.add?.("invalid");
+    session.input?.focus?.();
+    session.input?.select?.();
+  }
+
+  isInvalidNameError(result) {
+    const code = String(result?.code || "").toLowerCase();
+    const message = String(result?.error || "").toLowerCase();
+    return (
+      code.includes("name") ||
+      code.includes("path") ||
+      (message.includes("invalid") &&
+        (message.includes("name") || message.includes("path")))
+    );
+  }
+
   async commitEdit(rawValue, target) {
     const session = this.editingState;
     if (!session || session.target !== target || session.status !== "editing")
@@ -748,7 +775,7 @@ class FileExplorer extends Sidebar {
     const name = rawValue.trim();
 
     if (!name) {
-      this.recoverEdit("Invalid file name");
+      this.markEditInvalid("Invalid file name");
       return;
     }
 
@@ -761,7 +788,14 @@ class FileExplorer extends Sidebar {
             : await this.fileOperations.createFile(parentPath, name);
 
         if (!result?.success) {
-          this.recoverEdit(result?.error || "Impossible de créer l'élément.");
+          const message = result?.error || "Impossible de créer l’élément.";
+          if (this.isInvalidNameError(result)) {
+            this.markEditInvalid(message);
+            return;
+          }
+          this.cancelEdit({ refresh: false });
+          this.refresh();
+          alert(message);
           return;
         }
 
@@ -791,7 +825,7 @@ class FileExplorer extends Sidebar {
     }
 
     if (name === "." || name === ".." || /[\\/\0]/.test(name)) {
-      this.recoverEdit("Invalid file name");
+      this.markEditInvalid("Invalid file name");
       return;
     }
 
@@ -805,6 +839,10 @@ class FileExplorer extends Sidebar {
         if (result?.code === "SOURCE_NOT_FOUND") {
           this.cancelEdit({ refresh: false });
           await this.refreshFolder(parentDir);
+          return;
+        }
+        if (this.isInvalidNameError(result)) {
+          this.markEditInvalid(result?.error || "Invalid file name");
           return;
         }
         this.recoverEdit(result?.error || "Impossible de renommer l'élément.");

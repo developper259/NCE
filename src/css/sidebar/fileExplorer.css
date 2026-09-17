@@ -167,3 +167,7 @@
   padding: 1px 4px;
   outline: none;
 }
+
+.file-item .file-name-input.invalid {
+  border-color: #e05252;
+}
