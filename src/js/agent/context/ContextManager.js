@@ -74,6 +74,15 @@ class ContextManager {
         ? Math.max(0, Math.floor(source.outputReserveTokens))
         : null,
       charsPerToken: number(source.charsPerToken, 4, 1),
+      largeWrites: {
+        enabled: source.largeWrites?.enabled !== false,
+        retainRecentPayloads: Math.floor(
+          number(source.largeWrites?.retainRecentPayloads, 1, 0),
+        ),
+        minPayloadCharacters: Math.floor(
+          number(source.largeWrites?.minPayloadCharacters, 1000, 1),
+        ),
+      },
       logMetrics: source.logMetrics !== false,
       debugDecisions: source.debugDecisions === true,
     };
@@ -647,6 +656,105 @@ class ContextManager {
     };
   }
 
+  compactLargeWriteExchanges(messages = [], options = {}, state = null) {
+    const policy = options.largeWrites;
+    const empty = { messages, metrics: {} };
+    if (!options.enabled || !policy?.enabled) return empty;
+
+    const entries = this.groupModelContextEntries(messages);
+    const candidates = [];
+    for (const entry of entries) {
+      if (entry.kind !== "tool_exchange" || !entry.protocolValid) continue;
+      if (!entry.tools.length || entry.tools.some((tool) =>
+        !["create_file", "write_file_chunk"].includes(tool.name))) continue;
+      const writes = entry.tools.filter((tool) =>
+        ["create_file", "write_file_chunk"].includes(tool.name),
+      );
+      if (writes.length !== 1) continue;
+      const tool = writes[0];
+      const call = entry.calls.find((item) =>
+        item?.function?.name === tool.name,
+      );
+      const rawArguments = typeof call?.function?.arguments === "string"
+        ? call.function.arguments
+        : "";
+      const payload = typeof tool.args?.content === "string"
+        ? tool.args.content
+        : typeof tool.args?.text === "string" ? tool.args.text : "";
+      const malformed = tool.errorCode === "TOOL_ARGUMENTS_TRUNCATED";
+      const payloadCharacters = payload.length || (malformed ? rawArguments.length : 0);
+      if (!malformed && (!tool.success || payloadCharacters < policy.minPayloadCharacters)) {
+        continue;
+      }
+      candidates.push({ entry, tool, payloadCharacters, malformed });
+    }
+    if (!candidates.length) return empty;
+
+    const byPath = new Map();
+    for (const candidate of candidates) {
+      const path = candidate.tool.path || "<unknown>";
+      const list = byPath.get(path) || [];
+      list.push(candidate);
+      byPath.set(path, list);
+    }
+    const compacted = new Set();
+    for (const list of byPath.values()) {
+      const complete = state?.largeWrite?.state === "COMPLETE" || state?.largeWrite?.completed === true;
+      const retain = complete ? 0 : policy.retainRecentPayloads;
+      list.slice(0, Math.max(0, list.length - retain)).forEach((candidate) => compacted.add(candidate));
+    }
+    if (!compacted.size) return empty;
+
+    const metrics = {
+      compactedToolPairs: 0,
+      compactedWritePayloads: 0,
+      compactedWriteCharacters: 0,
+      estimatedTokensAvoided: 0,
+      malformedPayloadCharactersRemoved: 0,
+      largeWriteSummariesInjected: 0,
+    };
+    const result = [];
+    for (const entry of entries) {
+      const candidate = candidates.find((item) => item.entry === entry && compacted.has(item));
+      if (!candidate) {
+        result.push(...entry.messages);
+        continue;
+      }
+      const tool = candidate.tool;
+      const summary = candidate.malformed
+        ? {
+            tool: tool.name,
+            pathHint: tool.path || null,
+            error: tool.errorCode,
+            approxPayloadCharacters: candidate.payloadCharacters,
+            recovery: "active",
+          }
+        : {
+            tool: tool.name,
+            path: tool.path || null,
+            success: true,
+            operation: tool.result?.operation || tool.name,
+            revision: tool.revision || null,
+            expectedRevision: tool.args?.expectedRevision || null,
+            appendedCharacters: tool.result?.appendedChars ?? null,
+            contentOmitted: true,
+          };
+      result.push({
+        role: "system",
+        content: `[NCE COMPACTED LARGE WRITE]\n${JSON.stringify(summary)}`,
+      });
+      metrics.compactedToolPairs += 1;
+      metrics.compactedWritePayloads += 1;
+      metrics.compactedWriteCharacters += candidate.payloadCharacters;
+      metrics.estimatedTokensAvoided += Math.ceil(
+        candidate.payloadCharacters / Math.max(1, options.charsPerToken),
+      );
+      metrics.largeWriteSummariesInjected += 1;
+      if (candidate.malformed) metrics.malformedPayloadCharactersRemoved += candidate.payloadCharacters;
+    }
+    return { messages: result, metrics };
+  }
+
   buildModelContext(messages = this.agent.messages, config = {}) {
     const options = this.getContextCompactionConfig(config);
     const toolSchemas = Array.isArray(config.toolSchemas)
@@ -688,8 +796,14 @@ class ContextManager {
           },
         ]
       : stableSourceMessages;
-    const preCompactionMessageTokens = this.estimateTokens(
+    const largeWriteCompaction = this.compactLargeWriteExchanges(
       contextMessages,
+      options,
+      state,
+    );
+    const optimizedContextMessages = largeWriteCompaction.messages;
+    const preCompactionMessageTokens = this.estimateTokens(
+      optimizedContextMessages,
       options.charsPerToken,
     );
     const preCompactionTokens = preCompactionMessageTokens + toolSchemaTokens;
@@ -706,7 +820,7 @@ class ContextManager {
       this.shouldTriggerCompaction(pressureLevel, initialUsageRatio, options);
 
     if (!options.enabled || !compactionTriggered) {
-      const validated = this.getValidatedModelContext(contextMessages);
+      const validated = this.getValidatedModelContext(optimizedContextMessages);
       const modelMessages = validated.modelMessages;
       const estimatedModelMessageTokens = this.estimateTokens(
         modelMessages,
@@ -763,6 +877,7 @@ class ContextManager {
         postCompactionTokens: estimatedModelTokens,
         tokensRemoved: Math.max(0, preCompactionTokens - estimatedModelTokens),
         messagesRemoved,
+        ...largeWriteCompaction.metrics,
         invalidToolExchanges: validated.invalidToolExchanges,
         removedReasoningMessages: 0,
         removedOldReads: 0,
@@ -805,7 +920,7 @@ class ContextManager {
       return modelMessages;
     }
 
-    const entries = this.groupModelContextEntries(contextMessages);
+    const entries = this.groupModelContextEntries(optimizedContextMessages);
     const exchangeCount = entries.filter(
       (entry) => entry.kind === "tool_exchange",
     ).length;
@@ -1351,6 +1466,7 @@ class ContextManager {
       tokenBreakdown,
       toolTypes,
       ...counters,
+      ...largeWriteCompaction.metrics,
       contextWindow,
       maxOutputTokens: config.maxOutputTokens ?? null,
       outputReserve,
@@ -1373,7 +1489,7 @@ class ContextManager {
       tokensRemoved: Math.max(0, preCompactionTokens - estimatedModelTokens),
       messagesRemoved: Math.max(
         0,
-        contextMessages.length - modelMessages.length,
+        optimizedContextMessages.length - modelMessages.length,
       ),
       lastCompactionAtIteration: this.compactionState.lastCompactionAtIteration,
       lastCompactionUsageRatio: this.compactionState.lastCompactionUsageRatio,

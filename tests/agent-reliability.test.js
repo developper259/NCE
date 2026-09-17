@@ -1248,3 +1248,97 @@ test("a second context overflow falls back only to a larger tool-capable model",
   assert.equal(config.model, "large");
   assert.equal(attempts, 3);
 });
+
+test("large-write context compaction preserves canonical history and recent payloads", () => {
+  const agent = createAgent(editor());
+  const writeExchange = (index) => {
+    const id = `write-${index}`;
+    const content = String(index).repeat(2400);
+    return [
+      {
+        role: "assistant",
+        tool_calls: [call("write_file_chunk", {
+          path: "large.txt",
+          content,
+          expectedRevision: `r${index - 1}`,
+        }, id)],
+      },
+      {
+        role: "tool",
+        tool_call_id: id,
+        content: JSON.stringify({
+          success: true,
+          result: {
+            success: true,
+            operation: "append",
+            path: "large.txt",
+            revision: `r${index}`,
+            appendedChars: content.length,
+          },
+        }),
+      },
+    ];
+  };
+  const messages = [
+    { role: "system", content: "system" },
+    { role: "user", content: "create the file" },
+    ...writeExchange(1),
+    ...writeExchange(2),
+    ...writeExchange(3),
+  ];
+  const canonical = structuredClone(messages);
+  const modelMessages = agent.buildModelContext(messages, {
+    contextCompaction: {
+      logMetrics: false,
+      largeWrites: { retainRecentPayloads: 1, minPayloadCharacters: 1000 },
+    },
+    contextState: { largeWrite: { active: true, state: "APPENDING" } },
+  });
+
+  assert.deepEqual(messages, canonical);
+  assert.equal(modelMessages.filter((message) => message.role === "tool").length, 1);
+  assert.equal(
+    modelMessages.filter((message) => message.role === "assistant" && message.tool_calls).length,
+    1,
+  );
+  const summary = modelMessages.find((message) =>
+    String(message.content).startsWith("[NCE COMPACTED LARGE WRITE]"),
+  );
+  assert.ok(summary);
+  assert.match(summary.content, /"revision":"r1"/);
+  assert.ok(agent.lastContextMetrics.compactedWritePayloads >= 2);
+  assert.ok(agent.lastContextMetrics.compactedWriteCharacters >= 4800);
+  assert.ok(agent.estimateTokens(modelMessages) < agent.estimateTokens(messages));
+});
+
+test("complete large-write context compaction removes every eligible payload", () => {
+  const agent = createAgent(editor());
+  const id = "complete-write";
+  const content = "x".repeat(2400);
+  const messages = [
+    { role: "user", content: "finish" },
+    {
+      role: "assistant",
+      tool_calls: [call("create_file", { path: "done.txt", content }, id)],
+    },
+    {
+      role: "tool",
+      tool_call_id: id,
+      content: JSON.stringify({
+        success: true,
+        result: { success: true, path: "done.txt", revision: "final" },
+      }),
+    },
+  ];
+  const modelMessages = agent.buildModelContext(messages, {
+    contextCompaction: { logMetrics: false },
+    contextState: { largeWrite: { active: false, completed: true, state: "COMPLETE" } },
+  });
+  assert.equal(modelMessages.some((message) => message.role === "tool"), false);
+  assert.equal(modelMessages.some((message) => message.role === "assistant" && message.tool_calls), false);
+  const summary = modelMessages.find((message) =>
+    String(message.content).startsWith("[NCE COMPACTED LARGE WRITE]"),
+  );
+  assert.ok(summary);
+  assert.match(summary.content, /"revision":"final"/);
+});
