@@ -34,19 +34,21 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_OUTPUT_CHARACTERS = 12000;
 const MAX_TIMEOUT_MS = 300000;
 const MAX_OUTPUT_CHARACTERS = 50000;
-const STRATEGIES = new Set([
-  "npm-test",
-  "pnpm-test",
-  "yarn-test",
-  "bun-test",
-  "node-test",
-  "python-pytest",
-  "python-unittest",
-  "python-script",
-  "composer-test",
-  "phpunit",
-  "php-script",
-]);
+const STRATEGY_REGISTRY = {
+  "npm-test": { runtime: "npm", command: "package-test" },
+  "pnpm-test": { runtime: "pnpm", command: "package-test" },
+  "yarn-test": { runtime: "yarn", command: "package-test" },
+  "bun-test": { runtime: "bun", command: "package-test" },
+  "node-test": { runtime: "node", command: "node-test" },
+  "node-script": { runtime: "node", command: "script" },
+  "python-pytest": { runtime: "python", command: "python-pytest" },
+  "python-unittest": { runtime: "python", command: "python-unittest" },
+  "python-script": { runtime: "python", command: "script" },
+  "composer-test": { runtime: "composer", command: "composer-test" },
+  phpunit: { runtime: "php", command: "phpunit" },
+  "php-script": { runtime: "php", command: "script" },
+} as const;
+const STRATEGIES = new Set(Object.keys(STRATEGY_REGISTRY));
 
 export class AgentProcessRunner {
   private readonly active = new Map<string, ChildProcess>();
@@ -102,6 +104,36 @@ export class AgentProcessRunner {
     }
   }
 
+  private async runtimeAvailable(
+    executable: string,
+    prefix: string[],
+  ): Promise<boolean> {
+    return new Promise((resolve) => {
+      const probe = spawn(executable, [...prefix, "--version"], {
+        shell: false,
+        windowsHide: true,
+      });
+      let settled = false;
+      const finish = (available: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(available);
+      };
+      const timer = setTimeout(() => {
+        probe.kill();
+        finish(false);
+      }, 2000);
+      probe.once("error", () => {
+        clearTimeout(timer);
+        finish(false);
+      });
+      probe.once("close", (code) => {
+        clearTimeout(timer);
+        finish(code === 0);
+      });
+    });
+  }
+
   private executableName(name: string): string {
     return process.platform === "win32" &&
       ["npm", "pnpm", "yarn", "bun", "composer"].includes(name)
@@ -113,6 +145,9 @@ export class AgentProcessRunner {
     strategy: string,
     projectRoot: string,
   ): Promise<{ executable: string; prefix: string[] } | null> {
+    const definition =
+      STRATEGY_REGISTRY[strategy as keyof typeof STRATEGY_REGISTRY];
+    if (!definition) return null;
     const pythonCandidates =
       process.platform === "win32"
         ? [
@@ -123,30 +158,24 @@ export class AgentProcessRunner {
             path.join(projectRoot, ".venv", "bin", "python"),
             path.join(projectRoot, "venv", "bin", "python"),
           ];
-    if (strategy.startsWith("python-")) {
+    if (definition.runtime === "python") {
       for (const candidate of pythonCandidates)
-        if (await this.executableExists(candidate))
+        if (
+          (await this.executableExists(candidate)) &&
+          (await this.runtimeAvailable(candidate, []))
+        )
           return { executable: candidate, prefix: [] };
       for (const name of process.platform === "win32"
         ? ["python", "python3", "py"]
         : ["python3", "python"])
-        return { executable: name, prefix: name === "py" ? ["-3"] : [] };
+        if (await this.runtimeAvailable(name, name === "py" ? ["-3"] : []))
+          return { executable: name, prefix: name === "py" ? ["-3"] : [] };
       return null;
     }
-    const name = strategy.startsWith("npm")
-      ? "npm"
-      : strategy.startsWith("pnpm")
-        ? "pnpm"
-        : strategy.startsWith("yarn")
-          ? "yarn"
-          : strategy.startsWith("bun")
-            ? "bun"
-            : strategy.startsWith("composer")
-              ? "composer"
-              : strategy.startsWith("node")
-                ? "node"
-                : "php";
-    return { executable: this.executableName(name), prefix: [] };
+    const name = this.executableName(definition.runtime);
+    return (await this.runtimeAvailable(name, []))
+      ? { executable: name, prefix: [] }
+      : null;
   }
 
   private async resolveRuntime(request: unknown) {
@@ -215,26 +244,27 @@ export class AgentProcessRunner {
     target: string | null,
   ): string[] {
     const targetArg = target ? [target] : [];
-    if (
-      strategy.endsWith("-test") &&
-      ["npm-test", "pnpm-test", "yarn-test", "bun-test"].includes(strategy)
-    )
+    const definition =
+      STRATEGY_REGISTRY[strategy as keyof typeof STRATEGY_REGISTRY];
+    if (definition?.command === "package-test")
       return [...runtime.prefix, "test", ...targetArg];
-    if (strategy === "node-test") return ["--test", ...targetArg];
-    if (strategy === "python-pytest")
+    if (definition?.command === "node-test") return ["--test", ...targetArg];
+    if (definition?.command === "python-pytest")
       return [...runtime.prefix, "-m", "pytest", ...targetArg];
-    if (strategy === "python-unittest")
+    if (definition?.command === "python-unittest")
       return [
         ...runtime.prefix,
         "-m",
         "unittest",
         ...(target ? ["discover", "-s", path.dirname(target)] : []),
       ];
-    if (strategy === "python-script") return [...runtime.prefix, target || ""];
-    if (strategy === "php-script") return [target || ""];
-    if (strategy === "phpunit")
+    if (definition?.command === "script")
+      return [...runtime.prefix, target || ""];
+    if (definition?.command === "phpunit")
       return [path.join("vendor", "bin", "phpunit"), ...targetArg];
-    return ["test", ...targetArg];
+    if (definition?.command === "composer-test")
+      return ["run-script", "test", ...targetArg];
+    return [];
   }
 
   async run(request: unknown): Promise<AgentProcessResult> {

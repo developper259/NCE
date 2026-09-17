@@ -97,12 +97,16 @@ class AgentSidebar extends Sidebar {
       if (pending.length) this.deferredReadItems.set(key, pending);
       else this.deferredReadItems.delete(key);
       const failed = result?.success === false || payload?.success === false;
-      const restoredContent = payload?.restoredFromCache === true &&
+      const restoredContent =
+        payload?.restoredFromCache === true &&
         typeof payload?.content === "string";
-      const redundant = !failed && !restoredContent &&
+      const redundant =
+        !failed &&
+        !restoredContent &&
         (payload?.noNewInformation === true ||
           payload?.repeatedRedundantAction === true ||
-          (payload?.alreadyKnown === true && typeof payload?.content !== "string"));
+          (payload?.alreadyKnown === true &&
+            typeof payload?.content !== "string"));
       if (redundant) return;
       if (args) this.startActivityItem(toolName, args, context);
     }
@@ -587,7 +591,8 @@ class AgentSidebar extends Sidebar {
   handleToolStart(toolName, args = {}, context = {}) {
     if (toolName === "read_file") {
       const session = this.getSession(context.sessionId);
-      if (!session || !session.isGenerating || session.runId !== context.runId) return;
+      if (!session || !session.isGenerating || session.runId !== context.runId)
+        return;
       const key = this.getDeferredReadKey(context);
       const pending = this.deferredReadItems.get(key) || [];
       pending.push({ ...args });
@@ -990,6 +995,7 @@ class AgentSidebar extends Sidebar {
           "RUNTIME_UNAVAILABLE",
           "DEPENDENCIES_UNAVAILABLE",
           "NO_TEST_RUNNER",
+          "NO_TEST_ENVIRONMENT",
           "NO_TESTS",
           "MULTIPLE_PROJECTS",
           "UNSAVED_CHANGES",
@@ -1025,16 +1031,23 @@ class AgentSidebar extends Sidebar {
         ? item.args.endLine
         : null;
     const delivered = payload?.deliveredRange;
-    const readStart = Number.isInteger(delivered?.startLine) ? delivered.startLine :
-      Number.isInteger(payload?.contentStartLine) ? payload.contentStartLine : rangeStart;
-    const readEnd = Number.isInteger(delivered?.endLine) ? delivered.endLine :
-      Number.isInteger(payload?.contentEndLine) ? payload.contentEndLine : rangeEnd;
+    const readStart = Number.isInteger(delivered?.startLine)
+      ? delivered.startLine
+      : Number.isInteger(payload?.contentStartLine)
+        ? payload.contentStartLine
+        : rangeStart;
+    const readEnd = Number.isInteger(delivered?.endLine)
+      ? delivered.endLine
+      : Number.isInteger(payload?.contentEndLine)
+        ? payload.contentEndLine
+        : rangeEnd;
     let title = "";
     let detail = "";
 
     switch (item.toolName) {
       case "run_tests": {
-        const runner = payload?.runner?.name || payload?.strategy || "test runner";
+        const runner =
+          payload?.runner?.name || payload?.strategy || "test runner";
         const target = payload?.target || item.args?.path || "project";
         if (running) {
           title = "Running tests…";
@@ -1050,6 +1063,9 @@ class AgentSidebar extends Sidebar {
           title = "Test target not found";
         } else if (payload?.status === "NO_TEST_RUNNER") {
           title = "No test runner available";
+        } else if (payload?.status === "NO_TEST_ENVIRONMENT") {
+          title = "No test environment";
+          detail = "Create a standalone validation file";
         } else {
           title = warning ? "Unable to run tests" : "Tests unavailable";
           detail = payload?.status || "";
@@ -1061,18 +1077,26 @@ class AgentSidebar extends Sidebar {
         break;
       case "read_file":
         title = `${running ? "Reading" : "Read"} ${fileName}${running ? "…" : ""}`;
-        if (!running && !failed && Number.isInteger(readStart) &&
-            Number.isInteger(readEnd) &&
-            (payload?.lineTruncated === true ||
-              Number.isInteger(payload?.contentStartColumn) && payload.contentStartColumn > 0 ||
-              Number.isInteger(payload?.nextStartColumn))) {
+        if (
+          !running &&
+          !failed &&
+          Number.isInteger(readStart) &&
+          Number.isInteger(readEnd) &&
+          (payload?.lineTruncated === true ||
+            (Number.isInteger(payload?.contentStartColumn) &&
+              payload.contentStartColumn > 0) ||
+            Number.isInteger(payload?.nextStartColumn))
+        ) {
           const startColumn = Number.isInteger(payload?.contentStartColumn)
-            ? payload.contentStartColumn : 0;
+            ? payload.contentStartColumn
+            : 0;
           const endColumn = payload?.contentEndColumn;
-          detail = readStart === readEnd && Number.isInteger(endColumn)
-            ? `line ${readStart}, chars ${startColumn + 1}–${endColumn}`
-            : `lines ${readStart}–${readEnd}, ending at char ${endColumn ?? "?"}`;
-        } else if (readStart && readEnd) detail = `lines ${readStart}–${readEnd}`;
+          detail =
+            readStart === readEnd && Number.isInteger(endColumn)
+              ? `line ${readStart}, chars ${startColumn + 1}–${endColumn}`
+              : `lines ${readStart}–${readEnd}, ending at char ${endColumn ?? "?"}`;
+        } else if (readStart && readEnd)
+          detail = `lines ${readStart}–${readEnd}`;
         else if (readStart) detail = `line ${readStart}`;
         break;
       case "get_project_map":

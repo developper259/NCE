@@ -34,7 +34,9 @@ function createAgent(
   vm.createContext(context);
   const html = fs.readFileSync(path.join(root, "src/html/index.html"), "utf8");
   const files = [
-    ...html.matchAll(/src="\.\.\/(js\/(?:agent\/[^"\n]+|core\/Agent.js))"/g),
+    ...html.matchAll(
+      /src="\.\.\/(config\/[^"\n]+|js\/(?:agent\/[^"\n]+|core\/Agent\.js))"/g,
+    ),
   ].map((m) => m[1]);
   for (const file of files)
     vm.runInContext(

@@ -3,21 +3,16 @@ class TestDetector {
     this.agent = agent;
   }
 
+  config() {
+    return typeof AgentDebug !== "undefined" ? AgentDebug : { languages: {} };
+  }
+
   normalize(value) {
     return String(value || "")
       .replace(/\\/g, "/")
       .replace(/^\.\//, "")
       .replace(/\/+/g, "/")
       .replace(/\/$/, "");
-  }
-
-  async readWorkspaceFile(relativePath) {
-    const root = this.agent.editor?.fileExplorer?.rootPath;
-    const absolute = this.agent.resolveWorkspacePath(relativePath, root);
-    if (!absolute || typeof this.agent.api?.getFileContent !== "function")
-      return null;
-    const contents = await this.agent.api.getFileContent([absolute]);
-    return typeof contents?.[absolute] === "string" ? contents[absolute] : null;
   }
 
   getEntries(files) {
@@ -45,98 +40,52 @@ class TestDetector {
     )
       return null;
     const exact = entries.find((entry) => entry.relativePath === requested);
-    if (exact)
+    if (exact) {
       return {
         relativePath: requested,
         file: exact.type === "file" || exact.isDirectory !== true,
         explicit: true,
       };
+    }
     return entries.some((entry) => this.isInside(entry.relativePath, requested))
       ? { relativePath: requested, file: false, explicit: true }
       : null;
   }
 
-  getCandidates(requestedPath, entries) {
-    const requested = this.normalize(requestedPath).toLowerCase();
-    const requestedBase = requested.split("/").pop() || "";
-    const extension = requestedBase.includes(".")
-      ? requestedBase.slice(requestedBase.lastIndexOf("."))
-      : "";
-    const activePath = this.normalize(
-      this.agent.editor?.tabManager?.activeFile?.path || "",
-    ).toLowerCase();
-    const modified = new Set(
-      [...(this.agent.runChangeTracker?.current?.changes?.keys?.() || [])].map(
-        (path) => this.normalize(path).toLowerCase(),
-      ),
-    );
-    return entries
-      .filter((entry) => entry.type === "file" || entry.isDirectory !== true)
-      .map((entry) => {
-        const path = entry.relativePath;
-        const lower = path.toLowerCase();
-        const base = lower.split("/").pop() || "";
-        let score = 0;
-        if (lower === requested) score += 100;
-        if (modified.has(lower)) score += 80;
-        if (activePath.endsWith(`/${lower}`) || activePath === lower)
-          score += 70;
-        if (
-          /(^|\/)(test|tests|spec)[^/]*\./.test(lower) ||
-          /\.(test|spec)\./.test(lower)
-        )
-          score += 30;
-        if (extension && lower.endsWith(extension)) score += 20;
-        if (
-          requestedBase &&
-          (base.includes(requestedBase) || requestedBase.includes(base))
-        )
-          score += 25;
-        return { path, score };
-      })
-      .filter((candidate) => candidate.score > 0)
-      .sort(
-        (left, right) =>
-          right.score - left.score || left.path.localeCompare(right.path),
-      )
-      .slice(0, 5)
-      .map((candidate) => candidate.path);
-  }
-
-  marker(relativePath) {
-    return [
-      "package.json",
-      "pyproject.toml",
-      "pytest.ini",
-      "setup.cfg",
-      "tox.ini",
-      "composer.json",
-      "phpunit.xml",
-      "phpunit.xml.dist",
-    ].includes(relativePath);
-  }
-
-  findProjectRoots(entries) {
-    const roots = new Set();
-    for (const entry of entries) {
-      const parts = entry.relativePath.split("/");
-      for (let index = 0; index < parts.length; index += 1) {
-        if (this.marker(parts.slice(index).join("/")))
-          roots.add(parts.slice(0, index).join("/"));
-      }
-    }
-    return [...roots].sort((a, b) => a.split("/").length - b.split("/").length);
-  }
-
-  findNearestRoot(target, roots) {
-    const directory = target.file
-      ? target.relativePath.split("/").slice(0, -1).join("/")
-      : target.relativePath;
+  findLanguageForFile(filePath) {
+    const lower = this.normalize(filePath).toLowerCase();
     return (
-      roots
-        .filter((root) => this.isInside(directory, root))
-        .sort((a, b) => b.length - a.length)[0] || ""
+      Object.values(this.config().languages || {}).find((language) =>
+        (language.extensions || []).some((extension) =>
+          lower.endsWith(String(extension).toLowerCase()),
+        ),
+      ) || null
     );
+  }
+
+  patternMatches(filePath, pattern) {
+    const value = this.normalize(filePath).split("/").pop() || "";
+    const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`, "i").test(value);
+  }
+
+  relativeToRoot(filePath, projectRoot) {
+    const path = this.normalize(filePath);
+    if (!projectRoot) return path;
+    return path === projectRoot
+      ? ""
+      : path.startsWith(`${projectRoot}/`)
+        ? path.slice(projectRoot.length + 1)
+        : path;
+  }
+
+  async readWorkspaceFile(relativePath) {
+    const root = this.agent.editor?.fileExplorer?.rootPath;
+    const absolute = this.agent.resolveWorkspacePath(relativePath, root);
+    if (!absolute || typeof this.agent.api?.getFileContent !== "function")
+      return null;
+    const contents = await this.agent.api.getFileContent([absolute]);
+    return typeof contents?.[absolute] === "string" ? contents[absolute] : null;
   }
 
   async packageInfo(projectRoot) {
@@ -159,40 +108,275 @@ class TestDetector {
     );
   }
 
-  localLock(entries, projectRoot) {
-    const names = [
-      "pnpm-lock.yaml",
-      "yarn.lock",
-      "bun.lock",
-      "bun.lockb",
-      "package-lock.json",
-      "npm-shrinkwrap.json",
-    ];
-    return (
-      names.find((name) =>
-        entries.some(
-          (entry) =>
-            entry.relativePath ===
-            `${projectRoot ? `${projectRoot}/` : ""}${name}`,
-        ),
-      ) || null
+  localLock(entries, projectRoot, language) {
+    const scoped = entries.map((entry) =>
+      this.relativeToRoot(entry.relativePath, projectRoot),
+    );
+    return (language.testEnvironment?.packageManagers || []).find((manager) =>
+      (manager.lockfiles || []).some((lockfile) => scoped.includes(lockfile)),
     );
   }
 
-  ready(strategy, projectRoot, target, explicit) {
+  languageHasEnvironment(language, entries, projectRoot, packageJson) {
+    const environment = language.testEnvironment || {};
+    const scoped = entries
+      .map((entry) => this.relativeToRoot(entry.relativePath, projectRoot))
+      .filter(Boolean);
+    const hasLanguageFile = entries.some(
+      (entry) =>
+        this.findLanguageForFile(entry.relativePath)?.id === language.id,
+    );
+    if (scoped.some((entry) => (environment.markers || []).includes(entry)))
+      return true;
+    if (
+      hasLanguageFile &&
+      scoped.some((entry) =>
+        (environment.directories || []).some(
+          (directory) =>
+            entry === directory || entry.startsWith(`${directory}/`),
+        ),
+      )
+    )
+      return true;
+    if (
+      scoped.some((entry) =>
+        (environment.filePatterns || []).some((pattern) =>
+          this.patternMatches(entry, pattern),
+        ),
+      )
+    )
+      return true;
+    if (language.id === "javascript")
+      return Boolean(
+        packageJson?.scripts?.test &&
+        !this.isPlaceholder(packageJson.scripts.test),
+      );
+    if (language.id === "php")
+      return Boolean(
+        packageJson?.require?.phpunit ||
+        packageJson?.requireDev?.phpunit ||
+        (packageJson?.scripts?.test &&
+          (packageJson?.require?.php || packageJson?.requireDev?.php)),
+      );
+    return false;
+  }
+
+  findProjectRoots(entries) {
+    const roots = new Set();
+    for (const entry of entries) {
+      const parts = entry.relativePath.split("/");
+      const base = parts[parts.length - 1];
+      for (const language of Object.values(this.config().languages || {})) {
+        const environment = language.testEnvironment || {};
+        if ((environment.markers || []).includes(base))
+          roots.add(parts.slice(0, -1).join("/"));
+        const hasConfiguredDirectory = parts.some((part) =>
+          (environment.directories || []).includes(part),
+        );
+        if (
+          !hasConfiguredDirectory &&
+          (environment.filePatterns || []).some((pattern) =>
+            this.patternMatches(base, pattern),
+          )
+        )
+          roots.add(parts.slice(0, -1).join("/"));
+        for (let index = 0; index < parts.length; index += 1) {
+          if ((environment.directories || []).includes(parts[index]))
+            roots.add(parts.slice(0, index).join("/"));
+        }
+      }
+    }
+    return [...roots].sort((left, right) => left.length - right.length);
+  }
+
+  findNearestRoot(target, roots) {
+    const directory = target.file
+      ? target.relativePath.split("/").slice(0, -1).join("/")
+      : target.relativePath;
+    return (
+      roots
+        .filter((root) => this.isInside(directory, root))
+        .sort((left, right) => right.length - left.length)[0] || ""
+    );
+  }
+
+  getLanguagesInScope(entries, projectRoot) {
+    return Object.values(this.config().languages || {})
+      .filter((language) =>
+        entries.some(
+          (entry) =>
+            this.isInside(entry.relativePath, projectRoot) &&
+            this.findLanguageForFile(entry.relativePath)?.id === language.id,
+        ),
+      )
+      .map((language) => language.id);
+  }
+
+  standaloneInfo(entries, projectRoot) {
+    return Object.values(this.config().languages || {})
+      .filter((language) =>
+        entries.some(
+          (entry) =>
+            this.isInside(entry.relativePath, projectRoot) &&
+            this.findLanguageForFile(entry.relativePath)?.id === language.id,
+        ),
+      )
+      .map((language) => ({
+        language: language.id,
+        strategy: language.standalone.strategy,
+        available: true,
+        runtimes: (language.runtime?.candidates || []).map((candidate) => ({
+          id: candidate.id,
+          executable: candidate.executable,
+          source: candidate.source || "system",
+        })),
+        recommendation: language.standalone.recommendation,
+      }));
+  }
+
+  noEnvironment(
+    entries,
+    projectRoot,
+    reason = "No configured test environment was found.",
+  ) {
+    const standalone = this.standaloneInfo(entries, projectRoot);
+    return {
+      status: "NO_TEST_ENVIRONMENT",
+      projectRoot: projectRoot || ".",
+      target: null,
+      detectedLanguages: this.getLanguagesInScope(entries, projectRoot),
+      standalone,
+      suggestedAction: {
+        type: "CREATE_STANDALONE_TEST",
+        message: `${reason} Create a standalone validation file with an available runtime, then call run_tests with its path. Use create_file; do not install dependencies.`,
+        examples: standalone.map((entry) => ({
+          language: entry.language,
+          strategy: entry.strategy,
+        })),
+      },
+      reason,
+      tests: [],
+    };
+  }
+
+  ready(strategy, projectRoot, target, explicit, language, validationKind) {
     return {
       status: "READY",
       strategy,
       runner: strategy,
-      projectRoot,
-      cwd: projectRoot,
+      language: language?.id || null,
+      validationKind: validationKind || "project-test",
+      projectRoot: projectRoot || ".",
+      cwd: projectRoot || ".",
       target: target || null,
       scope: {
         mode: explicit ? "target" : "project",
-        projectRoot,
+        projectRoot: projectRoot || ".",
         target: target || null,
       },
     };
+  }
+
+  async projectDetection(entries, projectRoot) {
+    const scoped = entries.filter((entry) =>
+      this.isInside(entry.relativePath, projectRoot),
+    );
+    const packageJson = await this.packageInfo(projectRoot);
+    if (packageJson?.__invalid)
+      return { status: "INVALID_CONFIG", projectRoot: projectRoot || "." };
+    const javascript = this.config().languages?.javascript;
+    if (
+      javascript &&
+      this.languageHasEnvironment(javascript, entries, projectRoot, packageJson)
+    ) {
+      const script = packageJson?.scripts?.test;
+      const hasPackageMarker = scoped.some(
+        (entry) =>
+          this.relativeToRoot(entry.relativePath, projectRoot) ===
+          "package.json",
+      );
+      if (!packageJson && hasPackageMarker)
+        return this.ready(
+          "npm-test",
+          projectRoot,
+          null,
+          false,
+          javascript,
+          "project-test",
+        );
+      if (script && !this.isPlaceholder(script)) {
+        const manager = packageJson.packageManager?.split?.("@")[0];
+        const selected =
+          (javascript.testEnvironment.packageManagers || []).find(
+            (candidate) => candidate.id === manager,
+          ) || this.localLock(entries, projectRoot, javascript);
+        return this.ready(
+          selected?.strategy || "npm-test",
+          projectRoot,
+          null,
+          false,
+          javascript,
+          "project-test",
+        );
+      }
+      if (
+        scoped.some((entry) =>
+          (javascript.testEnvironment.filePatterns || []).some((pattern) =>
+            this.patternMatches(entry.relativePath, pattern),
+          ),
+        )
+      )
+        return this.ready(
+          "node-test",
+          projectRoot,
+          null,
+          false,
+          javascript,
+          "project-test",
+        );
+    }
+    const php = this.config().languages?.php;
+    if (
+      php &&
+      this.languageHasEnvironment(php, entries, projectRoot, packageJson)
+    ) {
+      const hasPhpUnit =
+        scoped.some((entry) =>
+          ["phpunit.xml", "phpunit.xml.dist"].includes(
+            this.relativeToRoot(entry.relativePath, projectRoot),
+          ),
+        ) ||
+        packageJson?.require?.phpunit ||
+        packageJson?.requireDev?.phpunit;
+      return this.ready(
+        hasPhpUnit ? "phpunit" : "composer-test",
+        projectRoot,
+        null,
+        false,
+        php,
+        "project-test",
+      );
+    }
+    const python = this.config().languages?.python;
+    if (
+      python &&
+      this.languageHasEnvironment(python, entries, projectRoot, null)
+    ) {
+      const hasMarker = scoped.some((entry) =>
+        (python.testEnvironment.markers || []).includes(
+          this.relativeToRoot(entry.relativePath, projectRoot),
+        ),
+      );
+      return this.ready(
+        hasMarker ? "python-pytest" : "python-unittest",
+        projectRoot,
+        null,
+        false,
+        python,
+        "project-test",
+      );
+    }
+    return this.noEnvironment(entries, projectRoot);
   }
 
   async detect(request = {}) {
@@ -202,129 +386,51 @@ class TestDetector {
       await this.agent.api?.listProjectFiles?.(root),
     );
     const target = this.getTarget(request.path, entries);
-    if (!target) {
-      const candidates = this.getCandidates(request.path, entries);
+    if (!target)
       return {
         status: "INVALID_TARGET",
         requestedTarget: this.normalize(request.path),
-        candidates,
-        suggestion: candidates[0]
-          ? { tool: "run_tests", path: candidates[0] }
-          : null,
+        candidates: [],
+        suggestion: null,
         reason: "Target does not exist in the workspace.",
         tests: [],
       };
-    }
     const roots = this.findProjectRoots(entries);
-    let projectRoot = target.explicit
-      ? this.findNearestRoot(target, roots)
-      : "";
-    if (!target.explicit) {
-      const rootPackage = await this.packageInfo("");
-      if (
-        rootPackage?.scripts?.test &&
-        !this.isPlaceholder(rootPackage.scripts.test)
-      )
-        projectRoot = "";
-      else if (roots.length === 1) projectRoot = roots[0];
-      else if (roots.length > 1)
-        return { status: "MULTIPLE_PROJECTS", projects: roots };
-    }
-    const prefix = projectRoot ? `${projectRoot}/` : "";
-    const scoped = entries.filter((entry) =>
-      this.isInside(entry.relativePath, projectRoot),
-    );
-    const packageJson = await this.packageInfo(projectRoot);
-    if (packageJson?.__invalid)
-      return { status: "INVALID_CONFIG", projectRoot };
-    const targetPath = target.relativePath;
-    const extension = targetPath.split(".").pop()?.toLowerCase();
-    const script = packageJson?.scripts?.test;
-    if (typeof script === "string" && !this.isPlaceholder(script)) {
-      const lock = this.localLock(entries, projectRoot);
-      const strategy =
-        lock === "pnpm-lock.yaml"
-          ? "pnpm-test"
-          : lock === "yarn.lock"
-            ? "yarn-test"
-            : lock?.startsWith("bun.")
-              ? "bun-test"
-              : "npm-test";
-      return this.ready(strategy, projectRoot, targetPath, target.explicit);
-    }
-    const nodeTests = scoped.some((entry) =>
-      /\.(test|spec)\.(js|cjs|mjs)$/.test(entry.relativePath),
-    );
-    if (
-      (target.explicit && /\.(test|spec)\.(js|cjs|mjs)$/.test(targetPath)) ||
-      (!target.explicit && nodeTests)
-    )
-      return this.ready("node-test", projectRoot, targetPath, target.explicit);
-    if (extension === "ts" || extension === "tsx")
-      return {
-        status: "NO_TEST_RUNNER",
-        projectRoot,
-        target: targetPath,
-        reason: "TYPESCRIPT_RUNNER_UNAVAILABLE",
-      };
-    const pythonTests = scoped.some((entry) =>
-      /(^|\/)(test[^/]*|tests?\/).+\.py$/.test(entry.relativePath),
-    );
-    if (
-      (target.explicit && extension === "py") ||
-      pythonTests ||
-      scoped.some((entry) =>
-        ["pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini"].includes(
-          entry.relativePath.slice(prefix.length),
-        ),
-      )
-    ) {
-      const text = targetPath ? await this.readWorkspaceFile(targetPath) : "";
-      const unittest = /(?:^|\n)\s*(?:import|from)\s+unittest\b/.test(
-        text || "",
-      );
-      const pytest = scoped.some((entry) =>
-        ["pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini"].includes(
-          entry.relativePath.slice(prefix.length),
-        ),
-      );
+    if (target.explicit && target.file) {
+      const language = this.findLanguageForFile(target.relativePath);
+      if (!language)
+        return {
+          status: "UNSUPPORTED_TARGET",
+          projectRoot: this.findNearestRoot(target, roots) || ".",
+          target: target.relativePath,
+          reason: "No configured language supports this file extension.",
+          tests: [],
+        };
       return this.ready(
-        unittest
-          ? "python-unittest"
-          : pytest
-            ? "python-pytest"
-            : target.explicit
-              ? "python-script"
-              : "python-unittest",
-        projectRoot,
-        targetPath,
-        target.explicit,
+        language.standalone.strategy,
+        this.findNearestRoot(target, roots),
+        target.relativePath,
+        true,
+        language,
+        language.standalone.validationKind,
       );
     }
-    const phpTests = scoped.some((entry) =>
-      /(?:phpunit\.xml(?:\.dist)?|Test\.php)$/.test(entry.relativePath),
-    );
-    if (
-      (target.explicit && extension === "php") ||
-      phpTests ||
-      packageJson?.require?.phpunit
-    ) {
-      const strategy =
-        target.explicit && extension === "php"
-          ? "php-script"
-          : scoped.some(
-                (entry) => entry.relativePath === `${prefix}vendor/bin/phpunit`,
-              )
-            ? "phpunit"
-            : "composer-test";
-      return this.ready(strategy, projectRoot, targetPath, target.explicit);
+    if (target.explicit && !target.file)
+      return this.projectDetection(entries, target.relativePath);
+    const candidates = [];
+    for (const projectRoot of roots) {
+      const detection = await this.projectDetection(entries, projectRoot);
+      if (detection.status === "READY") candidates.push(detection);
     }
-    return {
-      status: "NO_TEST_RUNNER",
-      projectRoot,
-      target: targetPath || null,
-      tests: [],
-    };
+    if (candidates.length === 1) return candidates[0];
+    if (candidates.length > 1)
+      return {
+        status: "MULTIPLE_PROJECTS",
+        projects: candidates.map((item) => item.projectRoot),
+      };
+    const rootDetection = await this.projectDetection(entries, "");
+    if (rootDetection.status !== "NO_TEST_ENVIRONMENT") return rootDetection;
+    return rootDetection;
   }
 }
 

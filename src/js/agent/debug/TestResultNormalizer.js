@@ -5,7 +5,9 @@ class TestResultNormalizer {
         ? detection.status
         : processResult?.timedOut
           ? "TIMEOUT"
-          : processResult?.error?.code === "ENOENT"
+          : ["ENOENT", "RUNTIME_UNAVAILABLE"].includes(
+                processResult?.error?.code,
+              )
             ? "RUNTIME_UNAVAILABLE"
             : processResult?.success === false
               ? "EXECUTION_ERROR"
@@ -32,6 +34,7 @@ class TestResultNormalizer {
         attempted:
           status !== "UNSAVED_CHANGES" &&
           status !== "NO_TEST_RUNNER" &&
+          status !== "NO_TEST_ENVIRONMENT" &&
           status !== "NO_TESTS" &&
           status !== "MULTIPLE_PROJECTS" &&
           status !== "RUNTIME_UNAVAILABLE" &&
@@ -84,6 +87,12 @@ class TestResultNormalizer {
     if (Array.isArray(detection.candidates))
       result.candidates = detection.candidates;
     if (detection.suggestion) result.suggestion = detection.suggestion;
+    if (Array.isArray(detection.detectedLanguages))
+      result.detectedLanguages = detection.detectedLanguages;
+    if (Array.isArray(detection.standalone))
+      result.standalone = detection.standalone;
+    if (detection.suggestedAction)
+      result.suggestedAction = detection.suggestedAction;
     if (processResult?.error) result.error = processResult.error;
     console.info("[NCE Agent run_tests]", {
       status,

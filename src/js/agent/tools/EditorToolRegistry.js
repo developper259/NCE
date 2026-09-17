@@ -45,7 +45,7 @@ class EditorToolRegistry {
 
   registerEditorTools() {
     this.agent.registerTool("run_tests", {
-      description: `Détecte et exécute le runner de tests déjà présent dans le workspace, sans installer de dépendance ni exécuter une commande arbitraire. Sortie <= ${this.getLimit("run_tests", "outputCharacters", 12000)} caractères ; timeout <= ${this.getLimit("run_tests", "timeoutMs", 120000)} ms. Un résultat FAILED est une validation exécutée et doit être corrigé avant task_complete.`,
+      description: `Détecte et exécute uniquement un environnement de test déjà présent dans le workspace, sans installer de dépendance ni exécuter de commande arbitraire. Sans path, valide le projet; avec un dossier, valide ce projet; avec un fichier JS/Python/PHP explicite, exécute un contrôle standalone avec le runtime disponible. Sans environnement, retourne NO_TEST_ENVIRONMENT et une guidance pour create_file puis run_tests(path). Sortie <= ${this.getLimit("run_tests", "outputCharacters", 12000)} caractères ; timeout <= ${this.getLimit("run_tests", "timeoutMs", 120000)} ms. Un résultat FAILED est une validation exécutée et doit être corrigé avant task_complete.`,
       readOnly: true,
       serializesWithMutations: true,
       executesCode: true,
@@ -59,7 +59,7 @@ class EditorToolRegistry {
             type: "string",
             maxLength: this.getPathLimit(),
             description:
-              "Sous-dossier du workspace dans lequel lancer les tests.",
+              "Fichier de validation explicite (standalone), dossier de projet, ou sous-dossier du workspace dans lequel lancer les tests.",
           },
         },
       },

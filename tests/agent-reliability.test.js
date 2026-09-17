@@ -202,7 +202,12 @@ test("FAILED run_tests resolves, reports progress, and releases its lane", async
       return {
         success: true,
         status: "FAILED",
-        validation: { attempted: true, available: true, passed: false, blocking: true },
+        validation: {
+          attempted: true,
+          available: true,
+          passed: false,
+          blocking: true,
+        },
         validationKind: "smoke",
         projectRoot: ".",
         target: "pythagore.py",
@@ -215,7 +220,10 @@ test("FAILED run_tests resolves, reports progress, and releases its lane", async
     setTimeout(() => reject(new Error("run_tests remained pending")), 250),
   );
   const result = await Promise.race([
-    agent.executeToolCall(call("run_tests", { path: "pythagore.py" }, "failed-tests"), { runId: 1 }),
+    agent.executeToolCall(
+      call("run_tests", { path: "pythagore.py" }, "failed-tests"),
+      { runId: 1 },
+    ),
     timeout,
   ]);
   assert.equal(result.success, true);
@@ -285,10 +293,16 @@ test("FAILED validation continues the Agent loop until a later PASSED result", a
     call("task_complete", {}, "loop-complete"),
   ];
   agent.api.aiChat = async () => ({
-    choices: [{
-      finish_reason: "tool_calls",
-      message: { role: "assistant", content: null, tool_calls: [plan[modelTurns++]] },
-    }],
+    choices: [
+      {
+        finish_reason: "tool_calls",
+        message: {
+          role: "assistant",
+          content: null,
+          tool_calls: [plan[modelTurns++]],
+        },
+      },
+    ],
   });
 
   const result = await Promise.race([

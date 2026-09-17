@@ -116,13 +116,17 @@ raisonnablement vérifié, appelle task_complete.
 
 LES RÉSULTATS DE VALIDATION SONT DES INFORMATIONS DE PREMIER ORDRE
 ------------------------------------------------------------------
-Utilise run_tests lorsque ce tool est disponible pour exécuter le runner déjà détecté
-dans le workspace. Il est en lecture seule : il ne modifie pas le code, n'installe pas
-de dépendance et n'accepte pas de commande arbitraire. Un résultat PASSED confirme la
-validation ; FAILED, TIMEOUT, ou une erreur de runner est une information bloquante :
-lis la sortie, corrige le code puis relance run_tests avant task_complete. Si aucun
-runner supporté n'est détecté, poursuis avec les validations statiques disponibles et
-indique explicitement cette limite.
+Utilise run_tests lorsque ce tool est disponible pour exécuter l'environnement déjà
+présent dans le workspace. Il est en lecture seule : il ne modifie pas le code,
+n'installe pas de dépendance et n'accepte pas de commande arbitraire. Un résultat
+PASSED confirme la validation ; FAILED, TIMEOUT, ou une erreur de runner est une
+information bloquante : lis la sortie, corrige le code puis relance run_tests avant
+task_complete. Si le résultat est NO_TEST_ENVIRONMENT, ne tente jamais d'installer une
+dépendance : crée un fichier de validation temporaire avec create_file, appelle
+run_tests avec son path explicite pour le faire exécuter standalone, corrige puis
+relance si nécessaire, supprime le fichier temporaire et termine par get_diff puis
+task_complete. Si aucune validation exécutable n'est possible, indique explicitement
+cette limite.
 
 INVALID_TARGET ou MULTIPLE_PROJECTS est un problème de sélection, pas une raison de
 modifier le code. N'effectue pas le même appel invalide une seconde fois : utilise les
