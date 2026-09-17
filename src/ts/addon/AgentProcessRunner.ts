@@ -1,8 +1,7 @@
 import { spawn, ChildProcess } from "child_process";
 import { promises as fs } from "fs";
 import path from "path";
-import { dialog, ipcMain } from "electron";
-import type { MessageBoxOptions } from "electron";
+import { ipcMain } from "electron";
 import { Window } from "../Window";
 
 export interface AgentProcessRequest {
@@ -13,6 +12,7 @@ export interface AgentProcessRequest {
   workspaceRoot: string;
   requestId?: string;
   runId?: number | null;
+  sessionId?: string | null;
   timeoutMs?: number;
   maxOutputCharacters?: number;
 }
@@ -52,7 +52,6 @@ const STRATEGIES = new Set(Object.keys(STRATEGY_REGISTRY));
 
 export class AgentProcessRunner {
   private readonly active = new Map<string, ChildProcess>();
-  private readonly trustedRoots = new Set<string>();
 
   constructor(private readonly window: Window) {}
 
@@ -194,25 +193,6 @@ export class AgentProcessRunner {
       : { available: false, code: "RUNTIME_UNAVAILABLE" };
   }
 
-  private async trust(root: string): Promise<boolean> {
-    if (this.trustedRoots.has(root)) return true;
-    const options: MessageBoxOptions = {
-      type: "warning",
-      buttons: ["Allow", "Cancel"],
-      defaultId: 1,
-      cancelId: 1,
-      title: "Run tests in this workspace?",
-      message: "Tests execute project code with your user permissions.",
-      detail: root,
-    };
-    const result = this.window.window
-      ? await dialog.showMessageBox(this.window.window, options)
-      : await dialog.showMessageBox(options);
-    if (result.response !== 0) return false;
-    this.trustedRoots.add(root);
-    return true;
-  }
-
   private killTree(child: ChildProcess) {
     if (!child.pid) return;
     if (process.platform === "win32") {
@@ -267,6 +247,17 @@ export class AgentProcessRunner {
     return [];
   }
 
+  private commandPreview(
+    runtime: { executable: string; prefix: string[] },
+    args: string[],
+  ): string {
+    return [runtime.executable, ...runtime.prefix, ...args]
+      .map((value) =>
+        /[\s"']/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value,
+      )
+      .join(" ");
+  }
+
   async run(request: unknown): Promise<AgentProcessResult> {
     if (!request || typeof request !== "object")
       return this.invalid("INVALID_REQUEST", "A process request is required.");
@@ -307,11 +298,6 @@ export class AgentProcessRunner {
         "The process target does not exist inside the workspace.",
       );
     }
-    if (!(await this.trust(root)))
-      return this.invalid(
-        "WORKSPACE_NOT_TRUSTED",
-        "The workspace was not trusted for test execution.",
-      );
     const runtime = await this.findRuntime(input.strategy, projectRoot);
     if (!runtime)
       return this.invalid(
@@ -336,6 +322,25 @@ export class AgentProcessRunner {
       runtime,
       target ? path.relative(cwd, target) : null,
     );
+    const approval = await this.window.agentApprovalManager?.request({
+      permissionType: "code_execution",
+      workspaceRoot: root,
+      requestId: input.requestId,
+      runId: input.runId,
+      sessionId: input.sessionId,
+      title: "Allow code execution?",
+      message: "The agent wants to run a validation.",
+      preview: {
+        type: "command",
+        value: this.commandPreview(runtime, args),
+      },
+      allowWorkspaceGrant: true,
+    });
+    if (!approval || approval.decision === "cancel")
+      return this.invalid(
+        "EXECUTION_CANCELLED",
+        "Code execution was cancelled by the user.",
+      );
     const started = Date.now();
     return new Promise((resolve) => {
       let stdout = "";
@@ -410,8 +415,10 @@ export class AgentProcessRunner {
   }
 
   cancel(requestId: string): boolean {
+    const approvalCancelled =
+      this.window.agentApprovalManager?.cancelByRequestId(requestId) || false;
     const child = this.active.get(requestId);
-    if (!child) return false;
+    if (!child) return approvalCancelled;
     this.killTree(child);
     return true;
   }

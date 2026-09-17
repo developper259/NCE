@@ -91,6 +91,7 @@ class TestRunner {
         workspaceRoot: root,
         requestId,
         runId: this.agent.runId || null,
+        sessionId: this.agent.currentSessionId || null,
         timeoutMs: limits.timeoutMs,
         maxOutputCharacters: limits.outputCharacters,
       });

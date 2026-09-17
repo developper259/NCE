@@ -13,6 +13,7 @@ import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
 import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
+import { AgentApprovalManager } from "./addon/AgentApprovalManager";
 import { AgentProcessRunner } from "./addon/AgentProcessRunner";
 import { App } from "./App";
 
@@ -44,6 +45,7 @@ export class Window {
   watcher: Watcher | undefined;
   contextMenu: ContextMenu | undefined;
   workspaceSearch: WorkspaceSearch | undefined;
+  agentApprovalManager: AgentApprovalManager | undefined;
   agentProcessRunner: AgentProcessRunner | undefined;
   app: App;
   forceQuit: boolean;
@@ -60,6 +62,7 @@ export class Window {
     this.quitState = "idle";
     this.quitTimer = null;
     this.ipcRegistered = false;
+    this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
   }
 
@@ -107,6 +110,8 @@ export class Window {
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
+    if (!this.agentApprovalManager)
+      this.agentApprovalManager = new AgentApprovalManager(this);
     if (!this.agentProcessRunner)
       this.agentProcessRunner = new AgentProcessRunner(this);
 
@@ -147,6 +152,7 @@ export class Window {
     this.window.webContents.on("render-process-gone", (_event, details) => {
       console.error("[Renderer] render-process-gone", details);
       this.rendererReady = false;
+      this.agentApprovalManager?.cancelAll();
       this.clearQuitTimer();
     });
     this.window.webContents.on(
@@ -160,7 +166,7 @@ export class Window {
       },
     );
 
-    this.window.webContents.toggleDevTools();
+    //this.window.webContents.toggleDevTools();
 
     this.window.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -181,6 +187,7 @@ export class Window {
     });
 
     this.window.on("closed", () => {
+      this.agentApprovalManager?.cancelAll();
       this.window = null;
     });
 
@@ -245,6 +252,7 @@ export class Window {
       this.watcher.handleIPC();
       this.contextMenu.handleIPC();
       this.workspaceSearch.handleIPC();
+      this.agentApprovalManager?.handleIPC();
       this.agentProcessRunner.handleIPC();
       this.ipcRegistered = true;
     }

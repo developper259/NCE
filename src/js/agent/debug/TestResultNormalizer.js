@@ -9,11 +9,13 @@ class TestResultNormalizer {
                 processResult?.error?.code,
               )
             ? "RUNTIME_UNAVAILABLE"
-            : processResult?.success === false
-              ? "EXECUTION_ERROR"
-              : processResult?.exitCode === 0
-                ? "PASSED"
-                : "FAILED";
+            : processResult?.error?.code === "EXECUTION_CANCELLED"
+              ? "EXECUTION_CANCELLED"
+              : processResult?.success === false
+                ? "EXECUTION_ERROR"
+                : processResult?.exitCode === 0
+                  ? "PASSED"
+                  : "FAILED";
     const raw = [processResult?.stdout, processResult?.stderr]
       .filter(Boolean)
       .join("\n");
@@ -38,6 +40,7 @@ class TestResultNormalizer {
           status !== "NO_TESTS" &&
           status !== "MULTIPLE_PROJECTS" &&
           status !== "RUNTIME_UNAVAILABLE" &&
+          status !== "EXECUTION_CANCELLED" &&
           status !== "DEPENDENCIES_UNAVAILABLE",
         available,
         passed: status === "PASSED",

@@ -61,6 +61,16 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("Agent:cancelProcess", requestId),
   resolveAgentRuntime: (request) =>
     ipcRenderer.invoke("Agent:resolveRuntime", request),
+  respondAgentApproval: (payload) =>
+    ipcRenderer.invoke("Agent:respondApproval", payload),
+  cancelAgentApproval: (approvalId) =>
+    ipcRenderer.invoke("Agent:cancelApproval", approvalId),
+  onAgentApprovalRequested: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on("Agent:approvalRequested", listener);
+    return () =>
+      ipcRenderer.removeListener("Agent:approvalRequested", listener);
+  },
 
   selectFile: () => ipcRenderer.invoke("FileManager:selectFile"),
 

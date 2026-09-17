@@ -21,6 +21,16 @@ class AgentSidebar extends Sidebar {
     this.pendingActivityItems = new Map();
     this.deferredReadItems = new Map();
     this._activityItemCounter = 0;
+    this.approvalUnsubscribe =
+      this.editor.api?.onAgentApprovalRequested?.((request) => {
+        this.handleApprovalRequested(request);
+      }) || null;
+    this.openApprovalMenu = null;
+    this.approvalMenuClickHandler = () => {
+      this.openApprovalMenu?.classList.add("hidden");
+      this.openApprovalMenu = null;
+    };
+    document.addEventListener("click", this.approvalMenuClickHandler);
 
     this.apiKeys = new Map();
 
@@ -82,6 +92,62 @@ class AgentSidebar extends Sidebar {
     this._sessionCounter = 0;
 
     this.createSession();
+  }
+
+  handleApprovalRequested(request = {}) {
+    if (!request.approvalId || typeof request.sessionId !== "string") return;
+    const session = this.getSession(request.sessionId);
+    if (!session) return;
+    const runId = Number.isInteger(request.runId)
+      ? request.runId
+      : session.runId;
+    if (!Number.isInteger(runId)) return;
+    const group = this.getActivityGroup(session, runId, true);
+    if (!group) return;
+    const item = {
+      id: `approval:${request.approvalId}`,
+      approvalId: request.approvalId,
+      type: "approval",
+      title: String(request.title || "Permission required"),
+      detail: String(request.message || ""),
+      status: "pending",
+      startedAt: Date.now(),
+      finishedAt: null,
+      preview: request.preview || null,
+      allowWorkspaceGrant: request.allowWorkspaceGrant === true,
+      decision: null,
+    };
+    group.items.push(item);
+    group.status = "running";
+    session.streamingMessage = null;
+    if (session.id === this.activeSessionId && this.messagesElement) {
+      this.removeEmptyState();
+      const refs = this.activityElements.get(group);
+      if (!refs?.row?.isConnected) {
+        this.messagesElement.appendChild(this.createActivityElement(group));
+      } else {
+        refs.list.appendChild(this.createActivityItemElement(item));
+      }
+      this.updateActivityHeader(group);
+      this.scrollMessagesToBottom();
+    }
+  }
+
+  respondToApproval(item, decision) {
+    if (!item || item.status !== "pending") return;
+    item.status = decision === "cancel" ? "cancelled" : "success";
+    item.decision = decision;
+    item.finishedAt = Date.now();
+    this.updateActivityItemElement(item);
+    Promise.resolve(
+      this.editor.api?.respondAgentApproval?.({
+        approvalId: item.approvalId,
+        decision,
+      }),
+    ).catch(() => {
+      item.status = "cancelled";
+      this.updateActivityItemElement(item);
+    });
   }
 
   handleToolEnd(toolName, result, context = {}, fullResult = result) {
@@ -853,6 +919,13 @@ class AgentSidebar extends Sidebar {
       );
       this.updateActivityItemElement(item);
     }
+    for (const item of group.items) {
+      if (item.type !== "approval" || item.status !== "pending") continue;
+      void this.editor.api?.cancelAgentApproval?.(item.approvalId);
+      item.status = "cancelled";
+      item.finishedAt = Date.now();
+      this.updateActivityItemElement(item);
+    }
     group.finishedAt = Date.now();
     group.status = status === "error" || group.hasErrors ? "error" : "success";
     const pendingPrefix = `${context.sessionId}:${context.runId}:`;
@@ -988,7 +1061,9 @@ class AgentSidebar extends Sidebar {
       if (["FAILED", "TIMEOUT", "EXECUTION_ERROR"].includes(status)) {
         return { status: "error" };
       }
-      if (status === "ABORTED") return { status: "cancelled" };
+      if (status === "ABORTED" || status === "EXECUTION_CANCELLED") {
+        return { status: "cancelled" };
+      }
       if (
         [
           "INVALID_TARGET",
@@ -1598,6 +1673,7 @@ class AgentSidebar extends Sidebar {
   }
 
   createActivityItemElement(item) {
+    if (item.type === "approval") return this.createApprovalElement(item);
     const element = document.createElement("div");
     element.className = "agent-activity-item";
     element.dataset.status = item.status;
@@ -1627,15 +1703,114 @@ class AgentSidebar extends Sidebar {
     return element;
   }
 
+  createApprovalElement(item) {
+    const element = document.createElement("div");
+    element.className = "agent-approval-card";
+    element.dataset.status = item.status;
+    const title = document.createElement("div");
+    title.className = "agent-approval-title";
+    title.textContent = item.title;
+    const message = document.createElement("div");
+    message.className = "agent-approval-message";
+    message.textContent = item.detail;
+    element.append(title, message);
+
+    if (item.preview?.value) {
+      const preview = document.createElement("pre");
+      preview.className = `agent-approval-preview agent-approval-preview-${item.preview.type}`;
+      preview.textContent = String(item.preview.value);
+      element.appendChild(preview);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "agent-approval-actions";
+    const allow = document.createElement("button");
+    allow.type = "button";
+    allow.className = "agent-approval-allow";
+    allow.textContent = "Allow";
+    allow.addEventListener("click", () => this.respondToApproval(item, "once"));
+    actions.appendChild(allow);
+
+    const menuWrap = document.createElement("div");
+    menuWrap.className = "agent-approval-menu-wrap";
+    const menuButton = document.createElement("button");
+    menuButton.type = "button";
+    menuButton.className = "agent-approval-menu-button";
+    menuButton.title = "More approval options";
+    menuButton.setAttribute("aria-label", menuButton.title);
+    menuButton.textContent = "▾";
+    const menu = document.createElement("div");
+    menu.className = "agent-approval-menu hidden";
+    const once = document.createElement("button");
+    once.type = "button";
+    once.textContent = "Allow once";
+    once.addEventListener("click", () => {
+      menu.classList.add("hidden");
+      this.respondToApproval(item, "once");
+    });
+    menu.appendChild(once);
+    if (item.allowWorkspaceGrant) {
+      const workspace = document.createElement("button");
+      workspace.type = "button";
+      workspace.textContent = "Allow for this workspace";
+      workspace.addEventListener("click", () => {
+        menu.classList.add("hidden");
+        this.respondToApproval(item, "workspace");
+      });
+      menu.appendChild(workspace);
+    }
+    menuButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (this.openApprovalMenu && this.openApprovalMenu !== menu) {
+        this.openApprovalMenu.classList.add("hidden");
+      }
+      menu.classList.toggle("hidden");
+      this.openApprovalMenu = menu.classList.contains("hidden") ? null : menu;
+    });
+    menuWrap.append(menuButton, menu);
+    actions.appendChild(menuWrap);
+
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "agent-approval-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () =>
+      this.respondToApproval(item, "cancel"),
+    );
+    actions.appendChild(cancel);
+    element.appendChild(actions);
+    const controls = [allow, menuButton, once, cancel, ...menu.children];
+    for (const control of controls) {
+      control.disabled = item.status !== "pending";
+    }
+    element.setAttribute("aria-disabled", String(item.status !== "pending"));
+    this.activityItemElements.set(item.id, {
+      element,
+      title,
+      detail: message,
+      controls,
+    });
+    return element;
+  }
+
   updateActivityItemElement(item) {
     const refs = this.activityItemElements.get(item.id);
     if (!refs?.element?.isConnected) return;
     refs.element.dataset.status = item.status;
     refs.element.dataset.type = item.type;
-    refs.icon.textContent = this.getActivityIcon(item);
-    refs.title.textContent = item.title;
-    refs.detail.textContent = item.detail || "";
-    refs.detail.hidden = !item.detail;
+    refs.element.setAttribute(
+      "aria-disabled",
+      String(item.status !== "pending"),
+    );
+    if (refs.icon) refs.icon.textContent = this.getActivityIcon(item);
+    if (refs.title) refs.title.textContent = item.title;
+    if (refs.detail) {
+      refs.detail.textContent = item.detail || "";
+      refs.detail.hidden = !item.detail;
+    }
+    for (const control of refs.controls || []) {
+      control.disabled = item.status !== "pending";
+    }
   }
 
   updateActivityHeader(group) {
@@ -2770,6 +2945,10 @@ class AgentSidebar extends Sidebar {
     for (const message of session.messages) {
       if (message?.role !== "activity") continue;
       for (const item of message.items || []) {
+        if (item.type === "approval" && item.status === "pending") {
+          void this.editor.api?.cancelAgentApproval?.(item.approvalId);
+          item.status = "cancelled";
+        }
         this.activityItems.delete(item.id);
         this.activityItemElements.delete(item.id);
       }
