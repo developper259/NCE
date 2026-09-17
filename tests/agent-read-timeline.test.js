@@ -32,6 +32,64 @@ function fixture() {
   return { sidebar, session, read, cards };
 }
 
+function testActivityFixture() {
+  const { sidebar, session, cards } = fixture();
+  const start = (toolName, args, id) => {
+    const context = { sessionId: session.id, runId: 1, toolCallId: id };
+    sidebar.handleToolStart(toolName, args, context);
+    return context;
+  };
+  const end = (toolName, result, context) =>
+    sidebar.handleToolEnd(toolName, result, context, result);
+  return { sidebar, session, cards, start, end };
+}
+
+test("run_tests FAILED is an error activity, not a successful check", () => {
+  const { sidebar, cards, start, end, session } = testActivityFixture();
+  const context = start("run_tests", { path: "pythagore.py" }, "tests-1");
+  end("run_tests", {
+    success: true,
+    result: {
+      status: "FAILED",
+      validation: { attempted: true, passed: false },
+      runner: { name: "python-script" },
+      target: "pythagore.py",
+      exitCode: 1,
+    },
+  }, context);
+  assert.equal(cards()[0].status, "error");
+  assert.notEqual(sidebar.getActivityIcon(cards()[0]), "✓");
+  assert.equal(session.segments[0].hasErrors, true);
+  assert.match(cards()[0].title, /Tests failed/i);
+});
+
+test("run_tests PASSED remains a successful check", () => {
+  const { sidebar, cards, start, end } = testActivityFixture();
+  const context = start("run_tests", { path: "pythagore.py" }, "tests-2");
+  end("run_tests", {
+    success: true,
+    result: {
+      status: "PASSED",
+      validation: { attempted: true, passed: true },
+      runner: { name: "python-script" },
+      target: "pythagore.py",
+    },
+  }, context);
+  assert.equal(cards()[0].status, "success");
+  assert.equal(sidebar.getActivityIcon(cards()[0]), "✓");
+});
+
+test("run_tests INVALID_TARGET never displays a success icon", () => {
+  const { sidebar, cards, start, end } = testActivityFixture();
+  const context = start("run_tests", { path: "missing.py" }, "tests-3");
+  end("run_tests", {
+    success: true,
+    result: { status: "INVALID_TARGET", target: "missing.py" },
+  }, context);
+  assert.notEqual(cards()[0].status, "success");
+  assert.notEqual(sidebar.getActivityIcon(cards()[0]), "✓");
+});
+
 test("read timeline shows delivered lines instead of requested lines", () => {
   const { sidebar, session, cards } = fixture();
   const args = { path: "snake-game.html", startLine: 1, endLine: 140 };

@@ -789,7 +789,8 @@ class AgentSidebar extends Sidebar {
     if (!item) return null;
 
     const payload = result?.result ?? result;
-    const failed = result?.success === false || payload?.success === false;
+    const outcome = this.getToolActivityOutcome(toolName, result);
+    const failed = outcome.status === "error";
     if (item.aggregate === "modifications") {
       item.completedModifications += 1;
       if (failed) {
@@ -818,11 +819,11 @@ class AgentSidebar extends Sidebar {
       item.finishedAt = allCompleted ? Date.now() : null;
       Object.assign(item, this.describeModificationAggregate(item));
     } else {
-      item.status = failed ? "error" : "success";
+      item.status = outcome.status;
       item.finishedAt = Date.now();
       Object.assign(item, this.describeActivityItem(item, result));
     }
-    if (failed) group.hasErrors = true;
+    if (outcome.status === "error") group.hasErrors = true;
 
     this.activityItems.delete(itemId);
     this.updateActivityItemElement(item);
@@ -974,9 +975,41 @@ class AgentSidebar extends Sidebar {
     return "The tool could not complete this action";
   }
 
+  getToolActivityOutcome(toolName, result) {
+    const payload = result?.result ?? result ?? {};
+    if (toolName === "run_tests") {
+      const status = payload?.status;
+      if (status === "PASSED") return { status: "success" };
+      if (["FAILED", "TIMEOUT", "EXECUTION_ERROR"].includes(status)) {
+        return { status: "error" };
+      }
+      if (status === "ABORTED") return { status: "cancelled" };
+      if (
+        [
+          "INVALID_TARGET",
+          "RUNTIME_UNAVAILABLE",
+          "DEPENDENCIES_UNAVAILABLE",
+          "NO_TEST_RUNNER",
+          "NO_TESTS",
+          "MULTIPLE_PROJECTS",
+          "UNSAVED_CHANGES",
+        ].includes(status)
+      ) {
+        return { status: "warning" };
+      }
+    }
+    return {
+      status:
+        result?.success === false || payload?.success === false
+          ? "error"
+          : "success",
+    };
+  }
+
   describeActivityItem(item, result = null) {
     const running = item.status === "running";
     const failed = item.status === "error";
+    const warning = item.status === "warning";
     const payload = result?.result ?? result ?? {};
     const query =
       typeof item.args?.query === "string" ? item.args.query.trim() : "";
@@ -1000,6 +1033,29 @@ class AgentSidebar extends Sidebar {
     let detail = "";
 
     switch (item.toolName) {
+      case "run_tests": {
+        const runner = payload?.runner?.name || payload?.strategy || "test runner";
+        const target = payload?.target || item.args?.path || "project";
+        if (running) {
+          title = "Running tests…";
+        } else if (payload?.status === "PASSED") {
+          title = "Tests passed";
+          detail = `${runner} · ${target}`;
+        } else if (payload?.status === "FAILED") {
+          title = "Tests failed";
+          detail = `${runner} · ${target}${Number.isInteger(payload?.exitCode) ? ` · exit code ${payload.exitCode}` : ""}`;
+        } else if (payload?.status === "TIMEOUT") {
+          title = "Tests timed out";
+        } else if (payload?.status === "INVALID_TARGET") {
+          title = "Test target not found";
+        } else if (payload?.status === "NO_TEST_RUNNER") {
+          title = "No test runner available";
+        } else {
+          title = warning ? "Unable to run tests" : "Tests unavailable";
+          detail = payload?.status || "";
+        }
+        break;
+      }
       case "search_code":
         title = `${running ? "Searching" : "Searched"} workspace${query ? ` for "${query}"` : ""}${running ? "…" : ""}`;
         break;
@@ -1076,7 +1132,7 @@ class AgentSidebar extends Sidebar {
       }
     }
 
-    if (failed) {
+    if (failed && item.toolName !== "run_tests") {
       const failedAction = {
         search_code: `search workspace${query ? ` for "${query}"` : ""}`,
         read_file: `read ${fileName}`,
@@ -1473,6 +1529,8 @@ class AgentSidebar extends Sidebar {
 
   getActivityIcon(item) {
     if (item.status === "error") return "⚠";
+    if (item.status === "warning") return "⚠";
+    if (item.status === "cancelled") return "×";
     if (item.status === "running") return "◌";
     if (item.type === "model") {
       return item.modelEventKind === "retry" ? "↻" : "↪";

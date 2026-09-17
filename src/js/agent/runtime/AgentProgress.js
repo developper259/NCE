@@ -328,7 +328,11 @@ class AgentProgress {
         informationStatus = "error_discovered";
       }
     }
-    if (category === "validation" && meta.informationSignature) {
+    if (
+      category === "validation" &&
+      meta.informationSignature &&
+      informationStatus !== "error_discovered"
+    ) {
       if (this.observedInformationSignatures.has(meta.informationSignature)) {
         informationStatus = "already_known";
         this.metrics.redundantValidationCalls += 1;

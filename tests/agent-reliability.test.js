@@ -188,6 +188,126 @@ test("pending calls are visible while executing and always cleared after success
   assert.equal(agent.runChangeTracker.current.pendingToolCalls.size, 0);
 });
 
+test("FAILED run_tests resolves, reports progress, and releases its lane", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  agent.runChangeTracker.beginRun(1, "/workspace");
+  let executions = 0;
+  agent.registerTool("run_tests", {
+    readOnly: false,
+    serializesWithMutations: true,
+    parameters: { type: "object", properties: { path: { type: "string" } } },
+    execute() {
+      executions += 1;
+      return {
+        success: true,
+        status: "FAILED",
+        validation: { attempted: true, available: true, passed: false, blocking: true },
+        validationKind: "smoke",
+        projectRoot: ".",
+        target: "pythagore.py",
+        runner: { name: "python-script", strategy: "python-script" },
+        exitCode: 1,
+      };
+    },
+  });
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("run_tests remained pending")), 250),
+  );
+  const result = await Promise.race([
+    agent.executeToolCall(call("run_tests", { path: "pythagore.py" }, "failed-tests"), { runId: 1 }),
+    timeout,
+  ]);
+  assert.equal(result.success, true);
+  assert.equal(result.result.status, "FAILED");
+  assert.equal(result.meta.informationStatus, "error_discovered");
+  assert.equal(agent.runChangeTracker.current.pendingToolCalls.size, 0);
+  agent.agentProgress.consumeTool("run_tests", result.meta, 1);
+  assert.equal(
+    agent.agentProgress.recentInformationEvents.at(-1).informationStatus,
+    "error_discovered",
+  );
+
+  const second = await agent.executeToolCall(
+    call("run_tests", { path: "pythagore.py" }, "failed-tests-2"),
+    { runId: 1 },
+  );
+  assert.equal(second.result.status, "FAILED");
+  assert.equal(executions, 2);
+});
+
+test("FAILED validation continues the Agent loop until a later PASSED result", async () => {
+  const agent = createAgent(editor());
+  agent.permissions = "code";
+  agent.setProvider({ id: "mock", baseURL: "https://mock.invalid" });
+  agent.setModel("mock");
+  let modelTurns = 0;
+  let validationRuns = 0;
+  agent.registerTool("run_tests", {
+    readOnly: false,
+    serializesWithMutations: true,
+    parameters: { type: "object", properties: { path: { type: "string" } } },
+    execute() {
+      validationRuns += 1;
+      return {
+        success: true,
+        status: validationRuns === 1 ? "FAILED" : "PASSED",
+        validation: {
+          attempted: true,
+          available: true,
+          passed: validationRuns > 1,
+          blocking: validationRuns === 1,
+        },
+        validationKind: "smoke",
+        projectRoot: ".",
+        target: "pythagore.py",
+        runner: { name: "python-script", strategy: "python-script" },
+        exitCode: validationRuns === 1 ? 1 : 0,
+      };
+    },
+  });
+  agent.registerTool("modify_file", {
+    readOnly: false,
+    parameters: { type: "object", properties: { path: { type: "string" } } },
+    execute(args) {
+      return {
+        success: true,
+        path: args.path,
+        beforeText: "bad",
+        afterText: "good",
+      };
+    },
+  });
+  const plan = [
+    call("run_tests", { path: "pythagore.py" }, "loop-tests-failed"),
+    call("modify_file", { path: "pythagore.py" }, "loop-fix"),
+    call("run_tests", { path: "pythagore.py" }, "loop-tests-passed"),
+    call("task_complete", {}, "loop-complete"),
+  ];
+  agent.api.aiChat = async () => ({
+    choices: [{
+      finish_reason: "tool_calls",
+      message: { role: "assistant", content: null, tool_calls: [plan[modelTurns++]] },
+    }],
+  });
+
+  const result = await Promise.race([
+    agent.execute("Fix pythagore.py and validate it"),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Agent loop remained pending")), 1000),
+    ),
+  ]);
+  assert.equal(result.taskComplete, true);
+  assert.equal(validationRuns, 2);
+  assert.ok(modelTurns >= 4);
+  assert.equal(
+    agent.agentProgress.recentInformationEvents.some(
+      (event) => event.informationStatus === "error_discovered",
+    ),
+    true,
+  );
+});
+
 test("callback exceptions are isolated from tool execution", async () => {
   const agent = createAgent(editor());
   agent.runId = 1;
