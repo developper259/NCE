@@ -230,6 +230,7 @@ class FileExplorer extends Sidebar {
 
   async invalidateWorkspace() {
     if (!this.rootPath) return;
+    this.editor.agent?.stop?.();
     const previousRootPath = this.rootPath;
     const previousProjectName = this.projectName;
     try {
@@ -266,6 +267,7 @@ class FileExplorer extends Sidebar {
   async closeProject() {
     if (!this.rootPath) return;
 
+    this.editor.agent?.stop?.();
     await window.api.stopWatching();
 
     const previousRootPath = this.rootPath;
