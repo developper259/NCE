@@ -67,6 +67,13 @@ class LargeFileWriter {
         ? source.chunksApplied
         : 0,
       validationPending: source?.validationPending === true,
+      validationAttempts: Number.isInteger(source?.validationAttempts)
+        ? source.validationAttempts
+        : 0,
+      lastValidationRevision: source?.lastValidationRevision || null,
+      maxValidationAttempts: Number.isInteger(source?.maxValidationAttempts)
+        ? Math.max(1, source.maxValidationAttempts)
+        : 2,
       completed: source?.completed === true,
       decision: source?.decision || "none",
     };
@@ -90,6 +97,9 @@ class LargeFileWriter {
       currentRevision: state.currentRevision,
       chunksApplied: state.chunksApplied,
       validationPending: state.validationPending,
+      validationAttempts: state.validationAttempts,
+      lastValidationRevision: state.lastValidationRevision,
+      maxValidationAttempts: state.maxValidationAttempts,
       completed: state.completed,
       decision: state.decision,
     };
@@ -114,49 +124,103 @@ class LargeFileWriter {
     });
   }
 
-  getToolCallStrategySignature(name, args = {}) {
-    const path = AgentPath.normalize(args?.path || args?.pathHint || args?.oldPath || "");
-    const size = Number.isFinite(args?.contentLengthApprox)
-      ? args.contentLengthApprox
-      : typeof args?.content === "string" ? args.content.length : 0;
-    const buckets = [1000, 2000, 4000, 6000, 8000, 10000];
-    const payloadSizeBucket = name === "create_file" && size > 4000 && size <= 8000
-      ? 8000 : buckets.find((limit) => size <= limit) || 10001;
-    return JSON.stringify({ tool: name || null, path,
-      strategyKind: name === "create_file" && size > 4000 ? "large_create" :
-        name === "create_file" ? "small_create" : name === "write_file_chunk" ? "chunk" : name,
-      payloadSizeBucket });
+  transitionLargeWriteState(state, nextState, decision, details = {}) {
+    if (!state) return;
+    const previousState = state.state;
+    state.state = nextState;
+    this.debugLargeWrite(state, decision, {
+      transition: `${previousState}->${nextState}`,
+      previousState,
+      ...details,
+    });
   }
 
-  extractMalformedToolCallMetadata(rawArguments, toolName, finishReason = null) {
+  getToolCallStrategySignature(name, args = {}) {
+    const path = AgentPath.normalize(
+      args?.path || args?.pathHint || args?.oldPath || "",
+    );
+    const size = Number.isFinite(args?.contentLengthApprox)
+      ? args.contentLengthApprox
+      : typeof args?.content === "string"
+        ? args.content.length
+        : 0;
+    const buckets = [1000, 2000, 4000, 6000, 8000, 10000];
+    const payloadSizeBucket =
+      name === "create_file" && size > 4000 && size <= 8000
+        ? 8000
+        : buckets.find((limit) => size <= limit) || 10001;
+    return JSON.stringify({
+      tool: name || null,
+      path,
+      strategyKind:
+        name === "create_file" && size > 4000
+          ? "large_create"
+          : name === "create_file"
+            ? "small_create"
+            : name === "write_file_chunk"
+              ? "chunk"
+              : name,
+      payloadSizeBucket,
+    });
+  }
+
+  extractMalformedToolCallMetadata(
+    rawArguments,
+    toolName,
+    finishReason = null,
+  ) {
     const raw = typeof rawArguments === "string" ? rawArguments : "";
     const pathMatch = raw.match(/"path"\s*:\s*"((?:\\.|[^"\\])*)"/);
     let pathHint = "";
     if (pathMatch) {
-      try { pathHint = AgentPath.normalize(JSON.parse(`"${pathMatch[1]}"`)); } catch { /* hint only */ }
+      try {
+        pathHint = AgentPath.normalize(JSON.parse(`"${pathMatch[1]}"`));
+      } catch {
+        /* hint only */
+      }
     }
     const contentMatch = /"content"\s*:\s*"/.exec(raw);
-    return { toolName, pathHint, rawArgumentsLength: raw.length,
-      contentLengthApprox: contentMatch ? Math.max(0, raw.length - contentMatch.index - contentMatch[0].length) : 0,
-      finishReason, parseStatus: "malformed", malformed: true };
+    return {
+      toolName,
+      pathHint,
+      rawArgumentsLength: raw.length,
+      contentLengthApprox: contentMatch
+        ? Math.max(0, raw.length - contentMatch.index - contentMatch[0].length)
+        : 0,
+      finishReason,
+      parseStatus: "malformed",
+      malformed: true,
+    };
   }
 
   getRecoveryContentTarget(state, metadata = null) {
     const recommended = state?.recommendedChunkChars || 8000;
     const failures = Math.min(3, state?.strategyFailures || 0);
-    const configured = Math.floor(recommended * [1, 0.75, 0.5, 0.375][failures]);
-    const observed = metadata?.rawArgumentsLength > 0
-      ? Math.floor(metadata.rawArgumentsLength * 0.5) : configured;
-    return Math.max(1000, Math.min(configured, observed, state?.maxChunkChars || 10000));
+    const configured = Math.floor(
+      recommended * [1, 0.75, 0.5, 0.375][failures],
+    );
+    const observed =
+      metadata?.rawArgumentsLength > 0
+        ? Math.floor(metadata.rawArgumentsLength * 0.5)
+        : configured;
+    return Math.max(
+      1000,
+      Math.min(configured, observed, state?.maxChunkChars || 10000),
+    );
   }
 
   isRepeatedFailedStrategy(state, name, args) {
-    if (!state?.strategyReplanRequired || !state.failedStrategySignature) return false;
+    if (!state?.strategyReplanRequired || !state.failedStrategySignature)
+      return false;
     const previous = JSON.parse(state.failedStrategySignature);
     const current = JSON.parse(this.getToolCallStrategySignature(name, args));
-    return previous.tool === current.tool && previous.path === current.path &&
+    return (
+      previous.tool === current.tool &&
+      previous.path === current.path &&
       previous.strategyKind === current.strategyKind &&
-      (previous.strategyKind === "large_create" || previous.payloadSizeBucket === current.payloadSizeBucket);
+      (previous.strategyKind === "large_create" ||
+        previous.payloadSizeBucket === current.payloadSizeBucket)
+    );
   }
 
   resetStrategyAfterProgress(state, name, args) {
@@ -194,8 +258,11 @@ class LargeFileWriter {
         toolCall.function.arguments,
       );
     } catch {
-      return this.extractMalformedToolCallMetadata(toolCall.function.arguments,
-        error?.toolName || toolCall.function.name, error?.finishReason);
+      return this.extractMalformedToolCallMetadata(
+        toolCall.function.arguments,
+        error?.toolName || toolCall.function.name,
+        error?.finishReason,
+      );
     }
   }
 
@@ -209,7 +276,8 @@ class LargeFileWriter {
       this.agent.largeFileWriting.recommendedChunkCharacters;
     const failure =
       error?.code || error?.category || "TOOL_ARGUMENTS_TRUNCATED";
-    const dynamicTarget = state?.temporaryRecoveryMax || this.getRecoveryContentTarget(state);
+    const dynamicTarget =
+      state?.temporaryRecoveryMax || this.getRecoveryContentTarget(state);
     const suggestion =
       tool === "write_file_chunk"
         ? "réduire la taille du chunk et respecter expectedRevision"
@@ -225,7 +293,8 @@ class LargeFileWriter {
         ? this.agent.largeFileWriting.maxStrategyReplans
         : 3;
     if (state.strategyReplanCount >= maxStrategyReplans) {
-      if (this.agent?.agentProgress?.metrics) this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
+      if (this.agent?.agentProgress?.metrics)
+        this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
       const exhausted = this.agent.createLargeWriteRecoveryError(
         error,
         state.recoveryAttempts,
@@ -245,8 +314,13 @@ class LargeFileWriter {
       error?.toolName || state.toolName || "create_file",
       this.extractToolCallArgsFromError(error, result) || {},
     );
-    state.temporaryRecoveryMax = Math.min(2500, this.getRecoveryContentTarget(state,
-      this.extractToolCallArgsFromError(error, result)));
+    state.temporaryRecoveryMax = Math.min(
+      2500,
+      this.getRecoveryContentTarget(
+        state,
+        this.extractToolCallArgsFromError(error, result),
+      ),
+    );
     return state;
   }
 
@@ -307,6 +381,12 @@ class LargeFileWriter {
       return {
         tools: new Set(["create_file"]),
         decision: "expect_first_chunk",
+      };
+    }
+    if (state.state === "FINAL_VALIDATION") {
+      return {
+        tools: new Set(["read_file"]),
+        decision: "revalidate",
       };
     }
     return {
@@ -406,7 +486,12 @@ class LargeFileWriter {
           !state.active &&
           state.chunksApplied === 0;
         state.active = true;
-        state.state = "ACTIVE_APPEND";
+        this.transitionLargeWriteState(
+          state,
+          "ACTIVE_APPEND",
+          "expect_next_chunk",
+          { tool: name },
+        );
         state.completed = false;
         state.firstChunkCreated = true;
         state.validationPending = true;
@@ -432,20 +517,48 @@ class LargeFileWriter {
           payload?.revision &&
           state.currentRevision !== payload.revision
         ) {
+          state.lastValidationRevision = payload.revision;
+          state.validationAttempts += 1;
+          if (state.validationAttempts > state.maxValidationAttempts) {
+            state.active = false;
+            state.state = "FAILED";
+            const error = new Error(
+              "La revision du gros fichier reste instable pendant sa validation.",
+            );
+            error.name = "AgentLargeWriteValidationError";
+            error.code = "LARGE_WRITE_VALIDATION_UNSTABLE";
+            error.category = "LARGE_WRITE_VALIDATION_UNSTABLE";
+            error.path = state.path || path || null;
+            error.revision = payload.revision;
+            error.validationAttempts = state.validationAttempts;
+            throw error;
+          }
           state.currentRevision = payload.revision;
-          state.validationPending = true;
-          this.debugLargeWrite(state, "validate", {
-            tool: name,
-            errorCode: "REVISION_CHANGED_DURING_VALIDATION",
-          });
+          state.validationPending = false;
+          this.transitionLargeWriteState(
+            state,
+            "FINAL_VALIDATION",
+            "revalidate",
+            {
+              tool: name,
+              errorCode: "REVISION_CHANGED_DURING_VALIDATION",
+              validationRevision: payload.revision,
+              validationAttempts: state.validationAttempts,
+            },
+          );
           return;
         }
         state.validationPending = false;
+        state.validationAttempts = 0;
+        state.lastValidationRevision =
+          payload?.revision || state.currentRevision;
         state.completed = true;
         state.active = false;
-        state.state = "COMPLETE";
+        this.transitionLargeWriteState(state, "COMPLETE", "complete", {
+          tool: name,
+          validatedRevision: payload?.revision || state.currentRevision,
+        });
         state.currentRevision = payload?.revision || state.currentRevision;
-        this.debugLargeWrite(state, "complete", { tool: name });
         return;
       }
     }

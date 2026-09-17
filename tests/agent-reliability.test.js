@@ -23,6 +23,100 @@ function call(name, args = {}, id = "call-1") {
   };
 }
 
+function successfulToolResult(path, revision, extra = {}) {
+  return {
+    success: true,
+    result: { path, revision, ...extra },
+  };
+}
+
+function startLargeWrite(agent, revision = "A") {
+  const state = agent.largeFileWriter.createLargeWriteRuntimeState();
+  const content = "x".repeat(9000);
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("create_file", { path: "large.txt", content }),
+    successfulToolResult("large.txt", revision),
+    { path: "large.txt", content },
+  );
+  return state;
+}
+
+test("large write completes after a changed validation revision stabilizes", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "A");
+
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("read_file", { path: "large.txt" }),
+    successfulToolResult("large.txt", "B"),
+    { path: "large.txt" },
+  );
+  assert.equal(state.state, "FINAL_VALIDATION");
+  const expectedValidation =
+    agent.largeFileWriter.getLargeWriteExpectedAction(state);
+  assert.equal(expectedValidation.tools.size, 1);
+  assert.equal(expectedValidation.tools.has("read_file"), true);
+
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("read_file", { path: "large.txt" }),
+    successfulToolResult("large.txt", "B"),
+    { path: "large.txt" },
+  );
+  assert.equal(state.state, "COMPLETE");
+  assert.equal(state.active, false);
+});
+
+test("large write completes immediately when validation keeps the write revision", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "A");
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("read_file", { path: "large.txt" }),
+    successfulToolResult("large.txt", "A"),
+    { path: "large.txt" },
+  );
+  assert.equal(state.state, "COMPLETE");
+});
+
+test("large write bounds unstable validation revisions", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "A");
+  for (const revision of ["B", "C"]) {
+    agent.largeFileWriter.updateLargeWriteStateAfterTool(
+      state,
+      call("read_file", { path: "large.txt" }),
+      successfulToolResult("large.txt", revision),
+      { path: "large.txt" },
+    );
+  }
+  assert.throws(
+    () =>
+      agent.largeFileWriter.updateLargeWriteStateAfterTool(
+        state,
+        call("read_file", { path: "large.txt" }),
+        successfulToolResult("large.txt", "D"),
+        { path: "large.txt" },
+      ),
+    { code: "LARGE_WRITE_VALIDATION_UNSTABLE" },
+  );
+  assert.equal(state.state, "FAILED");
+});
+
+test("active append still rejects a non-write model action", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "A");
+  const selection = agent.largeFileWriter.selectLargeWriteToolCall(
+    [call("task_complete")],
+    state,
+  );
+  assert.equal(selection.call, null);
+  const error = agent.createLargeWriteProtocolError(state);
+  assert.equal(error.code, "LARGE_WRITE_ACTION_REQUIRED");
+  assert.equal(error.name, "AgentLargeWriteProtocolError");
+});
+
 test("malformed write metadata classifies strategy without executable arguments", () => {
   const agent = createAgent(editor());
   const raw = '{"path":"snake-game.html","content":"' + "a".repeat(6500);
