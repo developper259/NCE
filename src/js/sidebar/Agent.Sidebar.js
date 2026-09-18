@@ -3064,8 +3064,10 @@ class AgentSidebar extends Sidebar {
       this.sessionInfoEscape = (event) => {
         if (event.key === "Escape") this.closeSessionInfo();
       };
+      this.sessionInfoResize = () => this.updateSessionInfoPopover();
       document.addEventListener("click", this.sessionInfoOutsideClick);
       document.addEventListener("keydown", this.sessionInfoEscape);
+      window.addEventListener("resize", this.sessionInfoResize);
     }
     this.sessionInfoOpen = true;
     this.sessionInfoPopover.classList.remove("hidden");
@@ -3109,15 +3111,30 @@ class AgentSidebar extends Sidebar {
       ?.addEventListener("click", () => this.closeSessionInfo());
     const rect = this.sessionInfoButton?.getBoundingClientRect();
     if (rect) {
-      this.sessionInfoPopover.style.left = `${Math.max(8, rect.left)}px`;
+      const viewportWidth = document.documentElement.clientWidth;
+      const viewportHeight = document.documentElement.clientHeight;
+      const margin = 8;
+      const initialLeft = Math.min(
+        Math.max(margin, rect.left),
+        Math.max(margin, viewportWidth - this.sessionInfoPopover.offsetWidth - margin),
+      );
+      this.sessionInfoPopover.style.left = `${initialLeft}px`;
       this.sessionInfoPopover.style.top = "auto";
       this.sessionInfoPopover.style.bottom = `${window.innerHeight - rect.top + 6}px`;
       requestAnimationFrame(() => {
         if (!this.sessionInfoOpen || !this.sessionInfoPopover) return;
         const popoverRect = this.sessionInfoPopover.getBoundingClientRect();
+        const left = Math.min(
+          Math.max(margin, rect.left),
+          Math.max(margin, viewportWidth - popoverRect.width - margin),
+        );
+        this.sessionInfoPopover.style.left = `${left}px`;
         if (popoverRect.top < 8) {
           this.sessionInfoPopover.style.bottom = "auto";
-          this.sessionInfoPopover.style.top = `${Math.min(window.innerHeight - popoverRect.height - 8, rect.bottom + 6)}px`;
+          this.sessionInfoPopover.style.top = `${Math.min(
+            Math.max(margin, viewportHeight - popoverRect.height - margin),
+            rect.bottom + 6,
+          )}px`;
         }
       });
     }
@@ -3368,6 +3385,8 @@ class AgentSidebar extends Sidebar {
       document.removeEventListener("click", this.sessionInfoOutsideClick);
     if (this.sessionInfoEscape)
       document.removeEventListener("keydown", this.sessionInfoEscape);
+    if (this.sessionInfoResize)
+      window.removeEventListener("resize", this.sessionInfoResize);
     this.sessionInfoPopover?.remove();
     this.sessionInfoPopover = null;
   }

@@ -1026,7 +1026,9 @@
 .agent-sidebar-session-info-popover {
   position: fixed;
   z-index: 200;
+  box-sizing: border-box;
   width: min(300px, calc(100vw - 16px));
+  max-width: calc(100vw - 16px);
   max-height: min(520px, calc(100vh - 16px));
   overflow: auto;
   padding: 10px;
