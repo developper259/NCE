@@ -389,7 +389,7 @@ test("run_tests executes a detected runner and keeps red tests as validation out
       entries: [{ relativePath: "package.json" }],
     });
     agent.api.runAgentProcess = async (request) => {
-      assert.equal(request.cwd, root);
+      assert.equal(agent.samePath(request.cwd, root), true);
       assert.equal(request.strategy, "npm-test");
       assert.equal(request.target, null);
       return {

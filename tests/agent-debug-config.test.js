@@ -11,6 +11,8 @@ const detectorSource = fs.readFileSync(
   "utf8",
 );
 
+const normalizeTestPath = (value) => String(value).replace(/\\/g, "/");
+
 function makeDetector(entries, contents = {}) {
   const workspace = "/workspace";
   const context = { window: {}, AgentDebug: config, console };
@@ -26,10 +28,19 @@ function makeDetector(entries, contents = {}) {
         return { success: true, entries };
       },
       async getFileContent(paths) {
+        const normalizedContents = new Map(
+          Object.entries(contents).map(([file, content]) => [
+            normalizeTestPath(file),
+            content,
+          ]),
+        );
         return Object.fromEntries(
           paths
-            .filter((file) => contents[file] !== undefined)
-            .map((file) => [file, contents[file]]),
+            .filter((file) => normalizedContents.has(normalizeTestPath(file)))
+            .map((file) => [
+              file,
+              normalizedContents.get(normalizeTestPath(file)),
+            ]),
         );
       },
     },
