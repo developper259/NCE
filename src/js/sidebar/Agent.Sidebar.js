@@ -9,6 +9,9 @@ class AgentSidebar extends Sidebar {
     this.inputElement = null;
     this.inputWrapperElement = null;
     this.sendButton = null;
+    this.sessionInfoButton = null;
+    this.sessionInfoPopover = null;
+    this.sessionInfoOpen = false;
     this.typingIndicatorElement = null;
     this.markdownRenderer = new MarkdownRenderer({
       throttleMs: 50,
@@ -59,6 +62,9 @@ class AgentSidebar extends Sidebar {
       },
       onError: (_error, context) => {
         this.finishActivityGroup(context, "error");
+      },
+      onSessionInfoUpdated: (event) => {
+        this.handleSessionInfoUpdated(event);
       },
     });
 
@@ -1561,6 +1567,16 @@ class AgentSidebar extends Sidebar {
     inputWrapper.appendChild(toolbar);
     inputArea.appendChild(inputWrapper);
 
+    const sessionInfoButton = document.createElement("button");
+    sessionInfoButton.type = "button";
+    sessionInfoButton.className = "agent-sidebar-session-info-button";
+    sessionInfoButton.title = "Session info";
+    sessionInfoButton.setAttribute("aria-label", "Session info");
+    sessionInfoButton.innerHTML = '<i class="fi fi-rr-info"></i><span>Session Info</span>';
+    sessionInfoButton.addEventListener("click", () => this.toggleSessionInfo());
+    this.sessionInfoButton = sessionInfoButton;
+    inputArea.appendChild(sessionInfoButton);
+
     const hint = document.createElement("div");
     hint.className = "agent-sidebar-hint";
     this.hintElement = hint;
@@ -2901,12 +2917,24 @@ class AgentSidebar extends Sidebar {
       currentSegment: null,
       changes: [],
       changesExpanded: true,
+      usage: {
+        runs: 0,
+        userMessages: 0,
+        modelRequests: 0,
+        actualPromptTokens: 0,
+        estimatedPromptTokens: 0,
+        completedRuns: 0,
+        cancelledRuns: 0,
+        failedRuns: 0,
+        requestKeys: new Set(),
+      },
     };
 
     this.sessions.push(session);
     this.activeSessionId = session.id;
 
     this.refresh();
+    this.updateSessionInfoPopover();
     this.focusInput();
 
     return session;
@@ -2927,6 +2955,7 @@ class AgentSidebar extends Sidebar {
     this.activeSessionId = sessionId;
 
     this.refresh();
+    this.updateSessionInfoPopover();
     this.focusInput();
   }
 
@@ -2990,6 +3019,94 @@ class AgentSidebar extends Sidebar {
     session.title = trimmed.length > 24 ? `${trimmed.slice(0, 24)}…` : trimmed;
   }
 
+  handleSessionInfoUpdated(event = {}) {
+    const session = this.getSession(event.sessionId);
+    if (!session || !event.requestId || session.usage.requestKeys.has(event.requestId)) return;
+    session.usage.requestKeys.add(event.requestId);
+    session.usage.modelRequests += 1;
+    if (Number.isFinite(event.actualPromptTokens)) session.usage.actualPromptTokens += event.actualPromptTokens;
+    if (Number.isFinite(event.estimatedPromptTokens)) session.usage.estimatedPromptTokens += event.estimatedPromptTokens;
+    this.updateSessionInfoPopover();
+  }
+
+  getSessionInfoSnapshot() {
+    return this.agent.getSessionInfoSnapshot(this.getActiveSession()?.usage);
+  }
+
+  toggleSessionInfo() {
+    if (this.sessionInfoOpen) {
+      this.closeSessionInfo();
+      return;
+    }
+    if (!this.sessionInfoPopover) {
+      const popover = document.createElement("div");
+      popover.className = "agent-sidebar-session-info-popover hidden";
+      popover.setAttribute("role", "dialog");
+      document.body.appendChild(popover);
+      this.sessionInfoPopover = popover;
+      this.sessionInfoOutsideClick = (event) => {
+        if (
+          this.sessionInfoOpen &&
+          !popover.contains(event.target) &&
+          !this.sessionInfoButton?.contains(event.target)
+        ) {
+          this.closeSessionInfo();
+        }
+      };
+      this.sessionInfoEscape = (event) => {
+        if (event.key === "Escape") this.closeSessionInfo();
+      };
+      document.addEventListener("click", this.sessionInfoOutsideClick);
+      document.addEventListener("keydown", this.sessionInfoEscape);
+    }
+    this.sessionInfoOpen = true;
+    this.sessionInfoPopover.classList.remove("hidden");
+    this.sessionInfoPopover.style.display = "block";
+    this.updateSessionInfoPopover();
+  }
+
+  closeSessionInfo() {
+    this.sessionInfoOpen = false;
+    this.sessionInfoPopover?.classList.add("hidden");
+    if (this.sessionInfoPopover) this.sessionInfoPopover.style.display = "none";
+  }
+
+  updateSessionInfoPopover() {
+    if (!this.sessionInfoOpen || !this.sessionInfoPopover) return;
+    const snapshot = this.getSessionInfoSnapshot();
+    const format = (value) => {
+      if (!Number.isFinite(value)) return "—";
+      if (value >= 1000000) return `${(value / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+      if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+      return String(Math.round(value));
+    };
+    const percent = (value) => Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, "")}%` : "—";
+    const row = (label, value) => `<div class="agent-session-info-row"><span>${label}</span><strong>${value}</strong></div>`;
+    const breakdown = Object.entries(snapshot.context.breakdown || {})
+      .filter(([, value]) => Number.isFinite(Number(value)) && Number(value) > 0)
+      .map(([label, value]) => row(label, format(Number(value))))
+      .join("");
+    this.sessionInfoPopover.innerHTML = `<div class="agent-session-info-header"><strong>Session Info</strong><button type="button" aria-label="Close session info">×</button></div>
+      <section><h4>CURRENT CONTEXT</h4><div class="agent-session-info-bar"><span style="width:${snapshot.context.usedPercent || 0}%"></span></div>${row("Used", `${format(snapshot.context.usedTokens)} / ${format(snapshot.context.contextWindow)} (${percent(snapshot.context.usedPercent)})`)}${row("Response reserve", format(snapshot.context.reservedForResponseTokens))}${breakdown}</section>
+      <section><h4>CURRENT RUN</h4>${row("Status", snapshot.run.status)}${row("Iterations", snapshot.run.iterations)}${row("Model requests", snapshot.run.modelRequests)}${row("Prompt tokens", format(snapshot.run.cumulativePromptTokens))}${row("Tool calls", snapshot.run.toolCalls)}</section>
+      <section><h4>CONVERSATION</h4>${row("Runs", snapshot.conversation.runs)}${row("User messages", snapshot.conversation.userMessages)}${row("Model requests", snapshot.conversation.modelRequests)}${row("Prompt tokens", format(snapshot.conversation.actualPromptTokens || snapshot.conversation.estimatedPromptTokens))}</section>`;
+    this.sessionInfoPopover.querySelector("button")?.addEventListener("click", () => this.closeSessionInfo());
+    const rect = this.sessionInfoButton?.getBoundingClientRect();
+    if (rect) {
+      this.sessionInfoPopover.style.left = `${Math.max(8, rect.left)}px`;
+      this.sessionInfoPopover.style.top = "auto";
+      this.sessionInfoPopover.style.bottom = `${window.innerHeight - rect.top + 6}px`;
+      requestAnimationFrame(() => {
+        if (!this.sessionInfoOpen || !this.sessionInfoPopover) return;
+        const popoverRect = this.sessionInfoPopover.getBoundingClientRect();
+        if (popoverRect.top < 8) {
+          this.sessionInfoPopover.style.bottom = "auto";
+          this.sessionInfoPopover.style.top = `${Math.min(window.innerHeight - popoverRect.height - 8, rect.bottom + 6)}px`;
+        }
+      });
+    }
+  }
+
   stopGeneration(sessionId) {
     const session = this.getSession(sessionId);
     if (!session) return;
@@ -3004,6 +3121,8 @@ class AgentSidebar extends Sidebar {
 
     const stoppedRunId = session.runId;
     this.agent.stop();
+    session.cancelledRunId = stoppedRunId;
+    session.usage.cancelledRuns += 1;
 
     if (session.abortController) {
       session.abortController.abort();
@@ -3031,6 +3150,7 @@ class AgentSidebar extends Sidebar {
     });
 
     this.refresh();
+    this.updateSessionInfoPopover();
   }
 
   cancelQueuedMessage(sessionId, index) {
@@ -3073,6 +3193,9 @@ class AgentSidebar extends Sidebar {
       content,
       timestamp: this.formatTime(),
     });
+    session.usage.userMessages += 1;
+    session.usage.runs += 1;
+    this.updateSessionInfoPopover();
 
     this.renameSessionFromContent(session, content);
 
@@ -3084,6 +3207,8 @@ class AgentSidebar extends Sidebar {
     this.refresh();
     this.focusInput();
 
+    let errorWasCancellation = false;
+    let runFailed = false;
     try {
       const execution = this.agent.execute(content, {
         history: messageHistory,
@@ -3134,8 +3259,10 @@ class AgentSidebar extends Sidebar {
       }
     } catch (error) {
       if (error.name === "AbortError") {
+        errorWasCancellation = true;
         console.log("Requête Agent annulée par l'utilisateur.");
       } else {
+        runFailed = true;
         console.error("Erreur avec Agent:", error);
         if (session.streamingMessage) {
           session.streamingMessage.streaming = false;
@@ -3171,6 +3298,10 @@ class AgentSidebar extends Sidebar {
       session.runId = null;
       session.isGenerating = false;
       session.streamingMessage = null;
+      if (errorWasCancellation && session.cancelledRunId !== completedRunId) session.usage.cancelledRuns += 1;
+      else if (runFailed) session.usage.failedRuns += 1;
+      else session.usage.completedRuns += 1;
+      session.cancelledRunId = null;
       if (session.currentSegment) {
         session.currentSegment.status = "complete";
       }
@@ -3214,5 +3345,11 @@ class AgentSidebar extends Sidebar {
     this.focusInput();
   }
 
-  onClose() {}
+  onClose() {
+    this.closeSessionInfo();
+    if (this.sessionInfoOutsideClick) document.removeEventListener("click", this.sessionInfoOutsideClick);
+    if (this.sessionInfoEscape) document.removeEventListener("keydown", this.sessionInfoEscape);
+    this.sessionInfoPopover?.remove();
+    this.sessionInfoPopover = null;
+  }
 }

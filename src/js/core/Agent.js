@@ -315,6 +315,7 @@ class Agent {
       "onAuthenticationRequired",
       "onError",
       "onFinish",
+      "onSessionInfoUpdated",
     ]) {
       if (name in callbacks) {
         if (callbacks[name] !== null && typeof callbacks[name] !== "function")
@@ -957,7 +958,91 @@ class Agent {
         });
       }
     }
+    this.safeInvokeCallback("onSessionInfoUpdated", [
+      {
+        sessionId: this.currentSessionId,
+        runId: this.runId,
+        requestId: `${this.runId}:main:${this.modelRequestCounter}`,
+        estimatedPromptTokens: Number(
+          this.lastContextMetrics?.estimatedModelTokens ??
+            this.lastContextMetrics?.estimatedInputTokens,
+        ),
+        actualPromptTokens: Number.isFinite(actualPromptTokens)
+          ? actualPromptTokens
+          : null,
+      },
+    ]);
     return result;
+  }
+  getSessionInfoSnapshot(sessionUsage = {}) {
+    const metrics = this.lastContextMetrics || {};
+    const contextWindow = Number.isFinite(metrics.contextWindow)
+      ? metrics.contextWindow
+      : Number.isFinite(this.contextWindow)
+        ? this.contextWindow
+        : null;
+    const usedTokens = Number(
+      metrics.actualPromptTokens ??
+        metrics.estimatedModelTokens ??
+        metrics.estimatedInputTokens,
+    );
+    const fullContextTokens = Number(
+      metrics.estimatedFullTokens ?? metrics.estimatedFullMessageTokens,
+    );
+    const modelContextTokens = Number(
+      metrics.estimatedModelTokens ?? metrics.estimatedModelMessageTokens,
+    );
+    const savedTokens = Number.isFinite(fullContextTokens) && Number.isFinite(modelContextTokens)
+      ? Math.max(0, fullContextTokens - modelContextTokens)
+      : null;
+    const runMetrics = this.agentProgress?.getMetrics?.() || {};
+    const conversation = sessionUsage || {};
+    const reserve = Number(
+      metrics.outputReserve ??
+        metrics.requestedOutputTokens ??
+        this.responseBudget?.reservedForResponseTokens,
+    );
+    return {
+      context: {
+        usedTokens: Number.isFinite(usedTokens) ? Math.max(0, usedTokens) : null,
+        usedPercent: Number.isFinite(usedTokens) && Number.isFinite(contextWindow) && contextWindow > 0
+          ? Math.max(0, Math.min(100, (usedTokens / contextWindow) * 100))
+          : null,
+        contextWindow,
+        reservedForResponseTokens: Number.isFinite(reserve) ? Math.max(0, reserve) : null,
+        breakdown: { ...(metrics.tokenBreakdown || {}) },
+      },
+      compaction: {
+        fullContextTokens: Number.isFinite(fullContextTokens) ? Math.max(0, fullContextTokens) : null,
+        modelContextTokens: Number.isFinite(modelContextTokens) ? Math.max(0, modelContextTokens) : null,
+        savedTokens,
+        savedPercent: Number.isFinite(savedTokens) && fullContextTokens > 0
+          ? Math.min(100, (savedTokens / fullContextTokens) * 100)
+          : null,
+      },
+      run: {
+        active: Boolean(this.isRunning),
+        runId: this.isRunning ? this.runId : null,
+        iterations: runMetrics.totalIterations || 0,
+        modelRequests: runMetrics.modelRequests || 0,
+        currentPromptTokens: Number.isFinite(usedTokens) ? Math.max(0, usedTokens) : null,
+        cumulativePromptTokens: Number.isFinite(this.cumulativeActualPromptTokens)
+          ? this.cumulativeActualPromptTokens
+          : this.cumulativeEstimatedPromptTokens,
+        toolCalls: runMetrics.toolCalls || 0,
+        status: this.isRunning ? "running" : (this.lastRunMetrics?.status || "idle"),
+      },
+      conversation: {
+        runs: conversation.runs || 0,
+        userMessages: conversation.userMessages || 0,
+        modelRequests: conversation.modelRequests || 0,
+        actualPromptTokens: conversation.actualPromptTokens || 0,
+        estimatedPromptTokens: conversation.estimatedPromptTokens || 0,
+        completedRuns: conversation.completedRuns || 0,
+        cancelledRuns: conversation.cancelledRuns || 0,
+        failedRuns: conversation.failedRuns || 0,
+      },
+    };
   }
   getModelRequestState(...args) {
     return this.modelClient.getModelRequestState(...args);

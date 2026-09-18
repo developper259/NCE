@@ -1004,6 +1004,52 @@
   padding: 8px 10px 10px;
 }
 
+.agent-sidebar-session-info-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 6px 2px 0;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.agent-sidebar-session-info-button:hover,
+.agent-sidebar-session-info-button:focus-visible {
+  color: var(--text-primary);
+}
+
+.agent-sidebar-session-info-popover {
+  position: fixed;
+  z-index: 200;
+  width: min(300px, calc(100vw - 16px));
+  max-height: min(520px, calc(100vh - 16px));
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--border-primary, #444);
+  border-radius: 7px;
+  background: var(--bg-secondary, #252526);
+  color: var(--text-primary);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  font-size: 11px;
+}
+
+.agent-sidebar-session-info-popover.hidden { display: none; }
+.agent-session-info-header,
+.agent-session-info-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.agent-session-info-header { margin-bottom: 8px; font-size: 12px; }
+.agent-session-info-header button { border: 0; background: transparent; color: var(--text-tertiary); cursor: pointer; font-size: 16px; line-height: 1; }
+.agent-sidebar-session-info-popover section { padding: 7px 0; border-top: 1px solid var(--border-primary, #444); }
+.agent-sidebar-session-info-popover h4 { margin: 0 0 6px; color: var(--text-secondary); font-size: 9px; font-weight: 600; letter-spacing: 0.05em; }
+.agent-session-info-row { min-height: 18px; color: var(--text-secondary); }
+.agent-session-info-row strong { color: var(--text-primary); font-weight: 500; text-align: right; }
+.agent-session-info-bar { height: 4px; margin: 5px 0 6px; overflow: hidden; border-radius: 2px; background: var(--bg-primary); }
+.agent-session-info-bar span { display: block; height: 100%; max-width: 100%; background: var(--accent-color); }
+
 /* Le grand conteneur qui englobe tout (textarea + boutons du bas) */
 .agent-sidebar-input-wrapper {
   --agent-input-border-radius: 8px;
