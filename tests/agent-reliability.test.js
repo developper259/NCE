@@ -42,6 +42,117 @@ function startLargeWrite(agent, revision = "A") {
   return state;
 }
 
+test("oversized recovery separates stable hard limit from model target", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "rev-a");
+
+  const first = agent.largeFileWriter.rejectOversizedChunk(
+    state,
+    call("write_file_chunk", {
+      path: "large.txt",
+      expectedRevision: "rev-a",
+      content: "x".repeat(13480),
+    }),
+    13480,
+  );
+
+  assert.equal(first.exhausted, false);
+  assert.equal(agent.largeFileWriter.getHardChunkLimit(state), 10000);
+  assert.equal(agent.largeFileWriter.getEffectiveChunkLimit(state), 10000);
+  assert.equal(agent.largeFileWriter.getModelChunkTarget(state), 8000);
+  assert.equal(state.temporaryRecoveryMax, null);
+  assert.match(first.directive, /Target approximately <= 8000 characters/);
+
+  const accepted = agent.largeFileWriter.selectLargeWriteToolCall(
+    [
+      call("write_file_chunk", {
+        path: "large.txt",
+        expectedRevision: "rev-a",
+        content: "x".repeat(7237),
+      }),
+    ],
+    state,
+  );
+  assert.ok(accepted.call);
+  assert.equal(accepted.oversizedCall, null);
+
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    accepted.call,
+    successfulToolResult("large.txt", "rev-b"),
+    {
+      path: "large.txt",
+      expectedRevision: "rev-a",
+      content: "x".repeat(7237),
+    },
+  );
+  assert.equal(state.currentRevision, "rev-b");
+  assert.equal(state.consecutiveRejectedStrategies, 0);
+});
+
+test("model target may be exceeded while hard limit still accepts the chunk", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "rev-a");
+  agent.largeFileWriter.rejectOversizedChunk(
+    state,
+    call("write_file_chunk", { content: "x".repeat(12000) }),
+    12000,
+  );
+
+  const selection = agent.largeFileWriter.selectLargeWriteToolCall(
+    [
+      call("write_file_chunk", {
+        path: "large.txt",
+        content: "x".repeat(9000),
+      }),
+    ],
+    state,
+  );
+  assert.ok(selection.call);
+  assert.equal(selection.oversizedCall, null);
+});
+
+test("oversized rejections keep the hard limit stable and reset after progress", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "rev-a");
+  for (const size of [14000, 12000]) {
+    const result = agent.largeFileWriter.rejectOversizedChunk(
+      state,
+      call("write_file_chunk", { content: "x".repeat(size) }),
+      size,
+    );
+    assert.equal(result.exhausted, false);
+    assert.equal(agent.largeFileWriter.getHardChunkLimit(state), 10000);
+  }
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("write_file_chunk", { path: "large.txt", content: "x".repeat(9000) }),
+    successfulToolResult("large.txt", "rev-b"),
+    { path: "large.txt", content: "x".repeat(9000) },
+  );
+  assert.equal(state.consecutiveRejectedStrategies, 0);
+  const next = agent.largeFileWriter.rejectOversizedChunk(
+    state,
+    call("write_file_chunk", { content: "x".repeat(12000) }),
+    12000,
+  );
+  assert.equal(next.exhausted, false);
+  assert.equal(state.consecutiveRejectedStrategies, 1);
+});
+
+test("oversized exhaustion counts actual hard-limit violations", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "rev-a");
+  for (const [index, size] of [12000, 11000, 10500, 10001].entries()) {
+    const result = agent.largeFileWriter.rejectOversizedChunk(
+      state,
+      call("write_file_chunk", { content: "x".repeat(size) }),
+      size,
+    );
+    assert.equal(result.exhausted, index === 3);
+  }
+});
+
 test("large write completes after a changed validation revision stabilizes", () => {
   const agent = createAgent(editor());
   const state = startLargeWrite(agent, "A");

@@ -992,9 +992,10 @@ class Agent {
     const modelContextTokens = Number(
       metrics.estimatedModelTokens ?? metrics.estimatedModelMessageTokens,
     );
-    const savedTokens = Number.isFinite(fullContextTokens) && Number.isFinite(modelContextTokens)
-      ? Math.max(0, fullContextTokens - modelContextTokens)
-      : null;
+    const savedTokens =
+      Number.isFinite(fullContextTokens) && Number.isFinite(modelContextTokens)
+        ? Math.max(0, fullContextTokens - modelContextTokens)
+        : null;
     const runMetrics = this.agentProgress?.getMetrics?.() || {};
     const conversation = sessionUsage || {};
     const reserve = Number(
@@ -1004,33 +1005,51 @@ class Agent {
     );
     return {
       context: {
-        usedTokens: Number.isFinite(usedTokens) ? Math.max(0, usedTokens) : null,
-        usedPercent: Number.isFinite(usedTokens) && Number.isFinite(contextWindow) && contextWindow > 0
-          ? Math.max(0, Math.min(100, (usedTokens / contextWindow) * 100))
+        usedTokens: Number.isFinite(usedTokens)
+          ? Math.max(0, usedTokens)
           : null,
+        usedPercent:
+          Number.isFinite(usedTokens) &&
+          Number.isFinite(contextWindow) &&
+          contextWindow > 0
+            ? Math.max(0, Math.min(100, (usedTokens / contextWindow) * 100))
+            : null,
         contextWindow,
-        reservedForResponseTokens: Number.isFinite(reserve) ? Math.max(0, reserve) : null,
+        reservedForResponseTokens: Number.isFinite(reserve)
+          ? Math.max(0, reserve)
+          : null,
         breakdown: { ...(metrics.tokenBreakdown || {}) },
       },
       compaction: {
-        fullContextTokens: Number.isFinite(fullContextTokens) ? Math.max(0, fullContextTokens) : null,
-        modelContextTokens: Number.isFinite(modelContextTokens) ? Math.max(0, modelContextTokens) : null,
-        savedTokens,
-        savedPercent: Number.isFinite(savedTokens) && fullContextTokens > 0
-          ? Math.min(100, (savedTokens / fullContextTokens) * 100)
+        fullContextTokens: Number.isFinite(fullContextTokens)
+          ? Math.max(0, fullContextTokens)
           : null,
+        modelContextTokens: Number.isFinite(modelContextTokens)
+          ? Math.max(0, modelContextTokens)
+          : null,
+        savedTokens,
+        savedPercent:
+          Number.isFinite(savedTokens) && fullContextTokens > 0
+            ? Math.min(100, (savedTokens / fullContextTokens) * 100)
+            : null,
       },
       run: {
         active: Boolean(this.isRunning),
         runId: this.isRunning ? this.runId : null,
         iterations: runMetrics.totalIterations || 0,
         modelRequests: runMetrics.modelRequests || 0,
-        currentPromptTokens: Number.isFinite(usedTokens) ? Math.max(0, usedTokens) : null,
-        cumulativePromptTokens: Number.isFinite(this.cumulativeActualPromptTokens)
+        currentPromptTokens: Number.isFinite(usedTokens)
+          ? Math.max(0, usedTokens)
+          : null,
+        cumulativePromptTokens: Number.isFinite(
+          this.cumulativeActualPromptTokens,
+        )
           ? this.cumulativeActualPromptTokens
           : this.cumulativeEstimatedPromptTokens,
         toolCalls: runMetrics.toolCalls || 0,
-        status: this.isRunning ? "running" : (this.lastRunMetrics?.status || "idle"),
+        status: this.isRunning
+          ? "running"
+          : this.lastRunMetrics?.status || "idle",
       },
       conversation: {
         runs: conversation.runs || 0,

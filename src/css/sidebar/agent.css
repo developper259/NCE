@@ -1038,17 +1038,61 @@
   font-size: 11px;
 }
 
-.agent-sidebar-session-info-popover.hidden { display: none; }
+.agent-sidebar-session-info-popover.hidden {
+  display: none;
+}
 .agent-session-info-header,
-.agent-session-info-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.agent-session-info-header { margin-bottom: 8px; font-size: 12px; }
-.agent-session-info-header button { border: 0; background: transparent; color: var(--text-tertiary); cursor: pointer; font-size: 16px; line-height: 1; }
-.agent-sidebar-session-info-popover section { padding: 7px 0; border-top: 1px solid var(--border-primary, #444); }
-.agent-sidebar-session-info-popover h4 { margin: 0 0 6px; color: var(--text-secondary); font-size: 9px; font-weight: 600; letter-spacing: 0.05em; }
-.agent-session-info-row { min-height: 18px; color: var(--text-secondary); }
-.agent-session-info-row strong { color: var(--text-primary); font-weight: 500; text-align: right; }
-.agent-session-info-bar { height: 4px; margin: 5px 0 6px; overflow: hidden; border-radius: 2px; background: var(--bg-primary); }
-.agent-session-info-bar span { display: block; height: 100%; max-width: 100%; background: var(--accent-color); }
+.agent-session-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.agent-session-info-header {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.agent-session-info-header button {
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.agent-sidebar-session-info-popover section {
+  padding: 7px 0;
+  border-top: 1px solid var(--border-primary, #444);
+}
+.agent-sidebar-session-info-popover h4 {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+.agent-session-info-row {
+  min-height: 18px;
+  color: var(--text-secondary);
+}
+.agent-session-info-row strong {
+  color: var(--text-primary);
+  font-weight: 500;
+  text-align: right;
+}
+.agent-session-info-bar {
+  height: 4px;
+  margin: 5px 0 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--bg-primary);
+}
+.agent-session-info-bar span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  background: var(--accent-color);
+}
 
 /* Le grand conteneur qui englobe tout (textarea + boutons du bas) */
 .agent-sidebar-input-wrapper {

@@ -14,7 +14,7 @@ class EditorToolRegistry {
   getCreateFileToolDescription() {
     const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
     const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
-    return `Crée un fichier petit ou moyen. Limite recommandée <= ${safeLimit} caractères ; limite runtime absolue ${hardLimit}. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. Si NCE indique temporaryRecoveryMax, cette valeur devient la limite active pour ce fichier pendant le recovery. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
+    return `Crée un fichier petit ou moyen. Cible recommandée <= ${safeLimit} caractères ; limite technique absolue ${hardLimit}. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. Une cible de recovery indiquée par NCE est une recommandation de taille, jamais une nouvelle limite technique. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
   }
 
   getWriteFileChunkToolDescription() {

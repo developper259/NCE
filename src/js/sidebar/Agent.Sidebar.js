@@ -1572,7 +1572,8 @@ class AgentSidebar extends Sidebar {
     sessionInfoButton.className = "agent-sidebar-session-info-button";
     sessionInfoButton.title = "Session info";
     sessionInfoButton.setAttribute("aria-label", "Session info");
-    sessionInfoButton.innerHTML = '<i class="fi fi-rr-info"></i><span>Session Info</span>';
+    sessionInfoButton.innerHTML =
+      '<i class="fi fi-rr-info"></i><span>Session Info</span>';
     sessionInfoButton.addEventListener("click", () => this.toggleSessionInfo());
     this.sessionInfoButton = sessionInfoButton;
     inputArea.appendChild(sessionInfoButton);
@@ -3021,11 +3022,18 @@ class AgentSidebar extends Sidebar {
 
   handleSessionInfoUpdated(event = {}) {
     const session = this.getSession(event.sessionId);
-    if (!session || !event.requestId || session.usage.requestKeys.has(event.requestId)) return;
+    if (
+      !session ||
+      !event.requestId ||
+      session.usage.requestKeys.has(event.requestId)
+    )
+      return;
     session.usage.requestKeys.add(event.requestId);
     session.usage.modelRequests += 1;
-    if (Number.isFinite(event.actualPromptTokens)) session.usage.actualPromptTokens += event.actualPromptTokens;
-    if (Number.isFinite(event.estimatedPromptTokens)) session.usage.estimatedPromptTokens += event.estimatedPromptTokens;
+    if (Number.isFinite(event.actualPromptTokens))
+      session.usage.actualPromptTokens += event.actualPromptTokens;
+    if (Number.isFinite(event.estimatedPromptTokens))
+      session.usage.estimatedPromptTokens += event.estimatedPromptTokens;
     this.updateSessionInfoPopover();
   }
 
@@ -3076,21 +3084,29 @@ class AgentSidebar extends Sidebar {
     const snapshot = this.getSessionInfoSnapshot();
     const format = (value) => {
       if (!Number.isFinite(value)) return "—";
-      if (value >= 1000000) return `${(value / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
-      if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}K`;
+      if (value >= 1000000)
+        return `${(value / 1000000).toFixed(1).replace(/\.0$/, "")}M`;
+      if (value >= 1000)
+        return `${(value / 1000).toFixed(1).replace(/\.0$/, "")}K`;
       return String(Math.round(value));
     };
-    const percent = (value) => Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, "")}%` : "—";
-    const row = (label, value) => `<div class="agent-session-info-row"><span>${label}</span><strong>${value}</strong></div>`;
+    const percent = (value) =>
+      Number.isFinite(value) ? `${value.toFixed(1).replace(/\.0$/, "")}%` : "—";
+    const row = (label, value) =>
+      `<div class="agent-session-info-row"><span>${label}</span><strong>${value}</strong></div>`;
     const breakdown = Object.entries(snapshot.context.breakdown || {})
-      .filter(([, value]) => Number.isFinite(Number(value)) && Number(value) > 0)
+      .filter(
+        ([, value]) => Number.isFinite(Number(value)) && Number(value) > 0,
+      )
       .map(([label, value]) => row(label, format(Number(value))))
       .join("");
     this.sessionInfoPopover.innerHTML = `<div class="agent-session-info-header"><strong>Session Info</strong><button type="button" aria-label="Close session info">×</button></div>
       <section><h4>CURRENT CONTEXT</h4><div class="agent-session-info-bar"><span style="width:${snapshot.context.usedPercent || 0}%"></span></div>${row("Used", `${format(snapshot.context.usedTokens)} / ${format(snapshot.context.contextWindow)} (${percent(snapshot.context.usedPercent)})`)}${row("Response reserve", format(snapshot.context.reservedForResponseTokens))}${breakdown}</section>
       <section><h4>CURRENT RUN</h4>${row("Status", snapshot.run.status)}${row("Iterations", snapshot.run.iterations)}${row("Model requests", snapshot.run.modelRequests)}${row("Prompt tokens", format(snapshot.run.cumulativePromptTokens))}${row("Tool calls", snapshot.run.toolCalls)}</section>
       <section><h4>CONVERSATION</h4>${row("Runs", snapshot.conversation.runs)}${row("User messages", snapshot.conversation.userMessages)}${row("Model requests", snapshot.conversation.modelRequests)}${row("Prompt tokens", format(snapshot.conversation.actualPromptTokens || snapshot.conversation.estimatedPromptTokens))}</section>`;
-    this.sessionInfoPopover.querySelector("button")?.addEventListener("click", () => this.closeSessionInfo());
+    this.sessionInfoPopover
+      .querySelector("button")
+      ?.addEventListener("click", () => this.closeSessionInfo());
     const rect = this.sessionInfoButton?.getBoundingClientRect();
     if (rect) {
       this.sessionInfoPopover.style.left = `${Math.max(8, rect.left)}px`;
@@ -3298,7 +3314,8 @@ class AgentSidebar extends Sidebar {
       session.runId = null;
       session.isGenerating = false;
       session.streamingMessage = null;
-      if (errorWasCancellation && session.cancelledRunId !== completedRunId) session.usage.cancelledRuns += 1;
+      if (errorWasCancellation && session.cancelledRunId !== completedRunId)
+        session.usage.cancelledRuns += 1;
       else if (runFailed) session.usage.failedRuns += 1;
       else session.usage.completedRuns += 1;
       session.cancelledRunId = null;
@@ -3347,8 +3364,10 @@ class AgentSidebar extends Sidebar {
 
   onClose() {
     this.closeSessionInfo();
-    if (this.sessionInfoOutsideClick) document.removeEventListener("click", this.sessionInfoOutsideClick);
-    if (this.sessionInfoEscape) document.removeEventListener("keydown", this.sessionInfoEscape);
+    if (this.sessionInfoOutsideClick)
+      document.removeEventListener("click", this.sessionInfoOutsideClick);
+    if (this.sessionInfoEscape)
+      document.removeEventListener("keydown", this.sessionInfoEscape);
     this.sessionInfoPopover?.remove();
     this.sessionInfoPopover = null;
   }

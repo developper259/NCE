@@ -27,6 +27,9 @@ class LargeFileWriter {
         1000,
         Math.min(configuredLimit, Math.floor(recommendedLimit)),
       ),
+      recoveryTargetChars: Number.isFinite(source?.recoveryTargetChars)
+        ? Math.max(1000, Math.floor(source.recoveryTargetChars))
+        : null,
       minRecoveryChunkChars: Math.max(
         1000,
         Math.floor(
@@ -125,6 +128,8 @@ class LargeFileWriter {
       recommendedChunkChars: state.recommendedChunkChars,
       temporaryRecoveryMax: state.temporaryRecoveryMax,
       effectiveChunkLimit: this.getEffectiveChunkLimit(state),
+      hardLimitChars: this.getHardChunkLimit(state),
+      modelTargetChars: this.getModelChunkTarget(state),
       nextAction: this.getNextAction(state),
       expectedRevision: state.currentRevision || null,
       lastFailure: state.lastFailure || null,
@@ -252,7 +257,7 @@ class LargeFileWriter {
     const current = JSON.parse(this.getToolCallStrategySignature(name, args));
     if (Number.isFinite(state?.temporaryRecoveryMax)) {
       const size = typeof args?.content === "string" ? args.content.length : 0;
-      if (size <= this.getEffectiveChunkLimit(state)) return false;
+      if (size <= state.temporaryRecoveryMax) return false;
     }
     return (
       previous.tool === current.tool &&
@@ -268,6 +273,7 @@ class LargeFileWriter {
     state.strategyFailures = 0;
     state.consecutiveRejectedStrategies = 0;
     state.temporaryRecoveryMax = null;
+    state.recoveryTargetChars = null;
     state.lastFailure = null;
     state.failedStrategySignature = null;
     state.strategySignature = this.getToolCallStrategySignature(name, args);
@@ -323,19 +329,30 @@ class LargeFileWriter {
       tool === "write_file_chunk"
         ? "réduire la taille du chunk et respecter expectedRevision"
         : "créer le fichier vide ou une très petite première portion puis continuer avec write_file_chunk";
-    return `[NCE WRITE STRATEGY ENFORCEMENT]\nPrevious large write strategy failed 3 times and is now forbidden. Do not retry a large create_file payload.\nCurrent objective: ${tool}${path ? ` @ ${path}` : ""}\nPrevious failure: ${failure}\nNormal hardLimit: ${limit}; recommendedLimit: ${recommended}; temporaryRecoveryMax: ${dynamicTarget} for this path.\nCreate a minimal scaffold <= 2000 characters, preferably empty, then append with write_file_chunk in chunks <= 2000-3000 characters. Use the revision returned by every successful chunk. ${suggestion}. Continue with the SAME model.`;
+    return `[NCE WRITE STRATEGY ENFORCEMENT]\nPrevious large write strategy failed 3 times and is now forbidden. Do not retry a large create_file payload.\nCurrent objective: ${tool}${path ? ` @ ${path}` : ""}\nPrevious failure: ${failure}\nHard limit: ${limit}; recommended model target: ${recommended}; recovery target: ${dynamicTarget}.\nCreate a minimal scaffold <= 2000 characters, preferably empty, then append with write_file_chunk in chunks <= 2000-3000 characters. Use the revision returned by every successful chunk. ${suggestion}. Continue with the SAME model.`;
   }
 
-  getEffectiveChunkLimit(state) {
+  getHardChunkLimit(state) {
     if (!state)
       return this.agent?.largeFileWriting?.maxChunkCharacters || 10000;
     return Math.max(
       state.minRecoveryChunkChars || 1000,
-      Math.min(
-        state.maxChunkChars || 10000,
-        state.temporaryRecoveryMax || Number.POSITIVE_INFINITY,
-      ),
+      state.maxChunkChars || 10000,
     );
+  }
+
+  getModelChunkTarget(state) {
+    const hardLimit = this.getHardChunkLimit(state);
+    const configuredTarget =
+      state?.recoveryTargetChars || state?.recommendedChunkChars;
+    return Math.max(
+      1000,
+      Math.min(hardLimit, configuredTarget || Math.floor(hardLimit * 0.8)),
+    );
+  }
+
+  getEffectiveChunkLimit(state) {
+    return this.getHardChunkLimit(state);
   }
 
   getNextAction(state) {
@@ -345,10 +362,11 @@ class LargeFileWriter {
   }
 
   buildOversizedChunkRecoveryInstruction(state, attemptedCharacters) {
-    const limit = this.getEffectiveChunkLimit(state);
+    const hardLimit = this.getHardChunkLimit(state);
+    const target = this.getModelChunkTarget(state);
     const path = state?.path || "<path>";
     const revision = state?.currentRevision || "<current revision>";
-    return `[NCE LARGE WRITE RECOVERY]\nFile: ${path}\nPrevious chunk rejected: payload too large (${attemptedCharacters} characters).\nCurrent revision: ${revision}\nMaximum next chunk: ${limit} characters.\n\nNext action:\n${this.getNextAction(state)} only.\n\nUse: path = ${path}; expectedRevision = ${revision}; content <= ${limit} characters. Do not retry the previous oversized payload.`;
+    return `[NCE LARGE WRITE RECOVERY]\nFile: ${path}\nPrevious write_file_chunk was too large (${attemptedCharacters} characters).\nCurrent revision: ${revision}\nHard payload limit: ${hardLimit} characters.\nTarget approximately <= ${target} characters.\n\nNext action:\n${this.getNextAction(state)} only.\n\nUse the current revision returned by the previous successful write. Do not retry the previous oversized payload.`;
   }
 
   rejectOversizedChunk(state, call, attemptedCharacters) {
@@ -358,22 +376,13 @@ class LargeFileWriter {
     } catch {
       args = {};
     }
-    const previousLimit = this.getEffectiveChunkLimit(state);
-    const minimum = state.minRecoveryChunkChars || 1000;
-    const nextLimit = Math.max(
-      minimum,
-      Math.min(
-        previousLimit,
-        Math.floor(previousLimit * 0.625),
-        Math.floor(attemptedCharacters * 0.5),
-      ),
-    );
+    const hardLimit = this.getHardChunkLimit(state);
     state.active = true;
     state.completed = false;
     state.validationPending = true;
     state.toolName = call?.function?.name || state.toolName;
     state.path = AgentPath.normalize(args.path || state.path || "");
-    state.temporaryRecoveryMax = nextLimit;
+    state.recoveryTargetChars = this.getModelChunkTarget(state);
     state.recoveryAttempts += 1;
     state.strategyFailures += 1;
     state.consecutiveRejectedStrategies += 1;
@@ -386,18 +395,14 @@ class LargeFileWriter {
       path: state.path || null,
       reason: "OVERSIZED_CHUNK",
       attemptedChars: attemptedCharacters,
-      previousEffectiveLimit: previousLimit,
-      newEffectiveLimit: nextLimit,
+      hardLimitChars: hardLimit,
+      modelTargetChars: state.recoveryTargetChars,
       consecutiveRejectedStrategies: state.consecutiveRejectedStrategies,
       currentRevision: state.currentRevision || null,
       action: "request_smaller_chunk",
     });
     return {
-      exhausted:
-        state.consecutiveRejectedStrategies >=
-        (state.maxConsecutiveRejectedStrategies ||
-          this.agent?.largeFileWriting?.maxConsecutiveRejectedStrategies ||
-          3),
+      exhausted: state.recoveryAttempts > state.maxRecoveryAttempts,
       directive: this.buildOversizedChunkRecoveryInstruction(
         state,
         attemptedCharacters,
@@ -622,6 +627,9 @@ class LargeFileWriter {
         state.validationPending = true;
         state.recoveryAttempts = 0;
         state.planningRetryCount = 0;
+        state.consecutiveRejectedStrategies = 0;
+        state.temporaryRecoveryMax = null;
+        state.recoveryTargetChars = null;
         state.chunksApplied += inferredExistingFirstChunk ? 2 : 1;
         state.currentRevision = payload?.revision || state.currentRevision;
         state.lastFailure = null;

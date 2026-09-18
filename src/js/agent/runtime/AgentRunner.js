@@ -1298,7 +1298,7 @@ class AgentRunner {
                 result: {
                   error: {
                     code: localCode,
-                    message: `The previous large create strategy failed repeatedly. This call was NOT executed. Current recovery max: ${largeWrite.temporaryRecoveryMax}. Create a minimal scaffold <= 1000-2000 chars, then append chunks <= 2000-3000 chars using each returned revision.`,
+                    message: `The previous large create strategy failed repeatedly. This call was NOT executed. Current recovery target: ${largeWrite.temporaryRecoveryMax}. Create a minimal scaffold <= 1000-2000 chars, then append chunks <= 2000-3000 chars using each returned revision.`,
                   },
                 },
               }
