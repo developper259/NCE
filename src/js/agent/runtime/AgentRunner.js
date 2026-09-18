@@ -697,6 +697,7 @@ class AgentRunner {
     let validationPending = false;
     let unresolvedWriteFailure = false;
     let unresolvedValidationFailure = false;
+    let runtimeDirective = null;
     const taskCompleteAvailable =
       runConfig?.permissions === "code" &&
       runConfig?.supportsTools !== false &&
@@ -735,7 +736,6 @@ class AgentRunner {
         this.agent.assertRunActive(runId, controller);
         runConfig.contextState = {
           writesSucceeded: successfulWriteCount,
-          successfulWrites: successfulWrites.map((write) => ({ ...write })),
           pendingValidation: validationPending,
           pendingValidationPaths: [...pendingValidationPaths],
           taskComplete: runState.taskComplete,
@@ -746,6 +746,7 @@ class AgentRunner {
           largeWrite: this.agent.getLargeWriteContextState(largeWrite),
           fileKnowledge: this.agent.fileKnowledge.getContextState(),
           progress: this.agent.agentProgress.getContextState(),
+          runtimeDirective,
         };
         const outputContext = this.agent.createModelOutputContext(
           runId,
@@ -756,6 +757,7 @@ class AgentRunner {
           controller,
           runConfig,
         );
+        runtimeDirective = null;
         this.agent.assertRunActive(runId, controller);
         let parsed;
         try {
@@ -792,13 +794,10 @@ class AgentRunner {
               consecutiveToolArgumentRecoveries++;
               globalToolArgumentRecoveries++;
               this.agent.agentProgress.metrics.toolArgumentRecoveryRequests++;
-              this.agent.messages.push({
-                role: "system",
-                content:
-                  "[NCE TOOL ARGUMENT RECOVERY] The previous response contained invalid JSON tool arguments. " +
-                  "None of that response's tool calls were executed. Resend the tool calls with valid JSON and new tool call IDs. " +
-                  "Escape newlines, tabs, quotes and backslashes correctly. Do not repeat already completed actions.",
-              });
+              runtimeDirective =
+                "[NCE TOOL ARGUMENT RECOVERY] The previous response contained invalid JSON tool arguments. " +
+                "None of that response's tool calls were executed. Resend the tool calls with valid JSON and new tool call IDs. " +
+                "Escape newlines, tabs, quotes and backslashes correctly. Do not repeat already completed actions.";
               continue;
             }
             throw error;
@@ -836,16 +835,13 @@ class AgentRunner {
               executed: false,
               path: largeWrite.path,
             });
-            this.agent.messages.push({
-              role: "system",
-              content:
-                largeWrite.consecutiveRejectedStrategies >= 2
-                  ? "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with the last returned revision. Repeated large calls are rejected before execution."
-                  : this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(
-                      largeWrite,
-                      error,
-                    ),
-            });
+            runtimeDirective =
+              largeWrite.consecutiveRejectedStrategies >= 2
+                ? "[NCE MANDATORY WRITE PLAN] Do not call create_file with generated file content on your next turn. Create an empty/minimal file <= 1000 chars, then use write_file_chunk with the last returned revision. Repeated large calls are rejected before execution."
+                : this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(
+                    largeWrite,
+                    error,
+                  );
             if (largeWrite.consecutiveRejectedStrategies >= 3) {
               this.agent.agentProgress.metrics.writeRecoveryExhausted += 1;
               throw this.agent.createLargeWriteRecoveryError(error, 3, 3);
@@ -904,14 +900,11 @@ class AgentRunner {
                 temporaryRecoveryMax: largeWrite.temporaryRecoveryMax,
                 sameModel: true,
               });
-              this.agent.messages.push({
-                role: "system",
-                content:
-                  this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(
-                    largeWrite,
-                    error,
-                  ),
-              });
+              runtimeDirective =
+                this.agent.largeFileWriter.buildWriteStrategyRecoveryInstruction(
+                  largeWrite,
+                  error,
+                );
               continue;
             } catch (strategyError) {
               largeWrite.active = false;
@@ -928,10 +921,7 @@ class AgentRunner {
             error,
             modelResponse,
           );
-          this.agent.messages.push({
-            role: "system",
-            content: `[NCE WRITE RECOVERY] Failure ${largeWrite.strategyFailures}/3. Hard limit ${largeWrite.maxChunkChars}, normal recommended ${largeWrite.recommendedChunkChars}, recoveryTarget ${this.agent.largeFileWriter.getRecoveryContentTarget(largeWrite, this.agent.largeFileWriter.extractToolCallArgsFromError(error, modelResponse))}. Send a smaller valid JSON write. Same model.`,
-          });
+          runtimeDirective = `[NCE WRITE RECOVERY] Failure ${largeWrite.strategyFailures}/3. Hard limit ${largeWrite.maxChunkChars}, normal recommended ${largeWrite.recommendedChunkChars}, recoveryTarget ${this.agent.largeFileWriter.getRecoveryContentTarget(largeWrite, this.agent.largeFileWriter.extractToolCallArgsFromError(error, modelResponse))}. Send a smaller valid JSON write. Same model.`;
           continue;
         }
         consecutiveToolArgumentRecoveries = 0;
@@ -944,10 +934,40 @@ class AgentRunner {
           );
           if (!selection.call) {
             if (selection.oversizedCall) {
-              this.agent.agentProgress.recordDuplicateOversizedRetry?.(
-                selection.oversizedCall.name,
-                { iteration },
+              const oversized = this.agent.largeFileWriter.rejectOversizedChunk(
+                largeWrite,
+                selection.oversizedCall.call,
+                selection.oversizedCall.contentChars,
               );
+              this.agent.agentProgress.recordOversizedChunkRejected?.(
+                selection.oversizedCall.name,
+                {
+                  iteration,
+                  attemptedChars: selection.oversizedCall.contentChars,
+                  effectiveChunkLimit:
+                    this.agent.largeFileWriter.getEffectiveChunkLimit(
+                      largeWrite,
+                    ),
+                },
+              );
+              if (oversized.exhausted) {
+                throw this.agent.createLargeWriteRecoveryError(
+                  {
+                    toolName: selection.oversizedCall.name,
+                    path: largeWrite.path,
+                    currentRevision: largeWrite.currentRevision,
+                    attemptedChars: selection.oversizedCall.contentChars,
+                    effectiveChunkLimit:
+                      this.agent.largeFileWriter.getEffectiveChunkLimit(
+                        largeWrite,
+                      ),
+                  },
+                  largeWrite.recoveryAttempts,
+                  largeWrite.maxRecoveryAttempts,
+                );
+              }
+              runtimeDirective = oversized.directive;
+              continue;
             }
             if (parsed.reasoning) {
               this.agent.emitModelOutput(
@@ -959,13 +979,10 @@ class AgentRunner {
             }
             if (largeWrite.planningRetryCount < 1) {
               largeWrite.planningRetryCount += 1;
-              this.agent.messages.push({
-                role: "system",
-                content: this.agent.buildLargeWriteActionInstruction(
-                  largeWrite,
-                  true,
-                ),
-              });
+              runtimeDirective = this.agent.buildLargeWriteActionInstruction(
+                largeWrite,
+                true,
+              );
               this.agent.debugLargeWrite(
                 largeWrite,
                 selection.expected.decision,

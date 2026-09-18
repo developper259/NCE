@@ -229,19 +229,30 @@ class ContextManager {
 
   deduplicateRedundantReadExchanges(messages = []) {
     const entries = this.groupModelContextEntries(messages);
-    const redundant = entries.filter((entry) =>
-      entry.kind === "tool_exchange" && entry.protocolValid &&
-      !String(entry.assistant?.content || "").trim() &&
-      !String(entry.assistant?.reasoning_content ||
-        entry.assistant?.reasoning || entry.assistant?.reasoningText || "").trim() &&
-      entry.calls.length > 0 &&
-      entry.calls.every((call) => call?.function?.name === "read_file") &&
-      entry.toolMessages.every((tool) => {
-        const root = this.parseContextJSON(tool.content);
-        const payload = root?.result ?? root;
-        return root?.success !== false && payload?.success !== false &&
-          payload?.noNewInformation === true && typeof payload.content !== "string";
-      }));
+    const redundant = entries.filter(
+      (entry) =>
+        entry.kind === "tool_exchange" &&
+        entry.protocolValid &&
+        !String(entry.assistant?.content || "").trim() &&
+        !String(
+          entry.assistant?.reasoning_content ||
+            entry.assistant?.reasoning ||
+            entry.assistant?.reasoningText ||
+            "",
+        ).trim() &&
+        entry.calls.length > 0 &&
+        entry.calls.every((call) => call?.function?.name === "read_file") &&
+        entry.toolMessages.every((tool) => {
+          const root = this.parseContextJSON(tool.content);
+          const payload = root?.result ?? root;
+          return (
+            root?.success !== false &&
+            payload?.success !== false &&
+            payload?.noNewInformation === true &&
+            typeof payload.content !== "string"
+          );
+        }),
+    );
     if (redundant.length <= 1) return messages;
     const remove = new Set(redundant.slice(0, -1));
     const omitted = redundant.slice(0, -1).flatMap((entry) => entry.messages);
@@ -250,7 +261,8 @@ class ContextManager {
       metrics.proactiveRedundantExchangesRemoved += remove.size;
       metrics.redundantContextTokensAvoided += this.estimateTokens(omitted);
     }
-    return entries.filter((entry) => !remove.has(entry))
+    return entries
+      .filter((entry) => !remove.has(entry))
       .flatMap((entry) => entry.messages);
   }
 
@@ -330,6 +342,7 @@ class ContextManager {
     const breakdown = {
       systemPrompt: 0,
       runtimeMessages: 0,
+      runtimeMessageSources: {},
       userMessages: 0,
       assistantMessages: 0,
       reasoning: 0,
@@ -382,6 +395,26 @@ class ContextManager {
       if (message?.role === "system") {
         const key = sawPrimarySystem ? "runtimeMessages" : "systemPrompt";
         breakdown[key] += tokens;
+        if (sawPrimarySystem) {
+          const content = String(message.content || "");
+          const source = content.startsWith("[NCE CURRENT TASK STATE]")
+            ? "currentTaskState"
+            : content.startsWith("[NCE CURRENT RUNTIME DIRECTIVE]")
+              ? "currentRuntimeDirective"
+              : content.startsWith("[NCE COMPACTED LARGE WRITE HISTORY]")
+                ? "compactedWriteHistory"
+                : content.startsWith("[NCE WRITE") ||
+                    content.startsWith("[NCE TOOL ARGUMENT RECOVERY]")
+                  ? "recoveryDirective"
+                  : "otherSystem";
+          const current = breakdown.runtimeMessageSources[source] || {
+            count: 0,
+            tokens: 0,
+          };
+          current.count += 1;
+          current.tokens += tokens;
+          breakdown.runtimeMessageSources[source] = current;
+        }
         sawPrimarySystem = true;
       } else if (message?.role === "user") {
         breakdown.userMessages += tokens;
@@ -492,20 +525,31 @@ class ContextManager {
           typeof payload.content !== "string" ||
           typeof payload.path !== "string" ||
           typeof payload.revision !== "string" ||
-          !Number.isInteger(payload.startLine) &&
-          !Number.isInteger(payload.contentStartLine)
+          (!Number.isInteger(payload.startLine) &&
+            !Number.isInteger(payload.contentStartLine))
         ) {
           continue;
         }
-        const complete = payload.completeLineRange ||
-          (payload.partialSegment || payload.lineTruncated || payload.truncated === true
-            ? null : Number.isInteger(payload.contentEndLine)
-              ? { startLine: payload.contentStartLine || payload.startLine,
-                  endLine: payload.contentEndLine } : null);
+        const complete =
+          payload.completeLineRange ||
+          (payload.partialSegment ||
+          payload.lineTruncated ||
+          payload.truncated === true
+            ? null
+            : Number.isInteger(payload.contentEndLine)
+              ? {
+                  startLine: payload.contentStartLine || payload.startLine,
+                  endLine: payload.contentEndLine,
+                }
+              : null);
         const partial = payload.partialSegment || null;
         if (!complete && !partial) continue;
-        ranges.push({ path: payload.path, revision: payload.revision,
-          completeLineRange: complete, partialSegment: partial });
+        ranges.push({
+          path: payload.path,
+          revision: payload.revision,
+          completeLineRange: complete,
+          partialSegment: partial,
+        });
       }
     }
     return ranges;
@@ -665,25 +709,38 @@ class ContextManager {
     const candidates = [];
     for (const entry of entries) {
       if (entry.kind !== "tool_exchange" || !entry.protocolValid) continue;
-      if (!entry.tools.length || entry.tools.some((tool) =>
-        !["create_file", "write_file_chunk"].includes(tool.name))) continue;
+      if (
+        !entry.tools.length ||
+        entry.tools.some(
+          (tool) => !["create_file", "write_file_chunk"].includes(tool.name),
+        )
+      )
+        continue;
       const writes = entry.tools.filter((tool) =>
         ["create_file", "write_file_chunk"].includes(tool.name),
       );
       if (writes.length !== 1) continue;
       const tool = writes[0];
-      const call = entry.calls.find((item) =>
-        item?.function?.name === tool.name,
+      const call = entry.calls.find(
+        (item) => item?.function?.name === tool.name,
       );
-      const rawArguments = typeof call?.function?.arguments === "string"
-        ? call.function.arguments
-        : "";
-      const payload = typeof tool.args?.content === "string"
-        ? tool.args.content
-        : typeof tool.args?.text === "string" ? tool.args.text : "";
+      const rawArguments =
+        typeof call?.function?.arguments === "string"
+          ? call.function.arguments
+          : "";
+      const payload =
+        typeof tool.args?.content === "string"
+          ? tool.args.content
+          : typeof tool.args?.text === "string"
+            ? tool.args.text
+            : "";
       const malformed = tool.errorCode === "TOOL_ARGUMENTS_TRUNCATED";
-      const payloadCharacters = payload.length || (malformed ? rawArguments.length : 0);
-      if (!malformed && (!tool.success || payloadCharacters < policy.minPayloadCharacters)) {
+      const payloadCharacters =
+        payload.length || (malformed ? rawArguments.length : 0);
+      if (
+        !malformed &&
+        (!tool.success || payloadCharacters < policy.minPayloadCharacters)
+      ) {
         continue;
       }
       candidates.push({ entry, tool, payloadCharacters, malformed });
@@ -699,9 +756,13 @@ class ContextManager {
     }
     const compacted = new Set();
     for (const list of byPath.values()) {
-      const complete = state?.largeWrite?.state === "COMPLETE" || state?.largeWrite?.completed === true;
+      const complete =
+        state?.largeWrite?.state === "COMPLETE" ||
+        state?.largeWrite?.completed === true;
       const retain = complete ? 0 : policy.retainRecentPayloads;
-      list.slice(0, Math.max(0, list.length - retain)).forEach((candidate) => compacted.add(candidate));
+      list
+        .slice(0, Math.max(0, list.length - retain))
+        .forEach((candidate) => compacted.add(candidate));
     }
     if (!compacted.size) return empty;
 
@@ -714,35 +775,39 @@ class ContextManager {
       largeWriteSummariesInjected: 0,
     };
     const result = [];
+    const summaryEntries = new Map();
     for (const entry of entries) {
-      const candidate = candidates.find((item) => item.entry === entry && compacted.has(item));
+      const candidate = candidates.find(
+        (item) => item.entry === entry && compacted.has(item),
+      );
       if (!candidate) {
         result.push(...entry.messages);
         continue;
       }
-      const tool = candidate.tool;
-      const summary = candidate.malformed
-        ? {
-            tool: tool.name,
-            pathHint: tool.path || null,
-            error: tool.errorCode,
-            approxPayloadCharacters: candidate.payloadCharacters,
-            recovery: "active",
-          }
-        : {
-            tool: tool.name,
-            path: tool.path || null,
-            success: true,
-            operation: tool.result?.operation || tool.name,
-            revision: tool.revision || null,
-            expectedRevision: tool.args?.expectedRevision || null,
-            appendedCharacters: tool.result?.appendedChars ?? null,
-            contentOmitted: true,
-          };
-      result.push({
-        role: "system",
-        content: `[NCE COMPACTED LARGE WRITE]\n${JSON.stringify(summary)}`,
-      });
+      const pathKey = candidate.tool.path || "<unknown>";
+      let summaryEntry = summaryEntries.get(pathKey);
+      if (!summaryEntry) {
+        summaryEntry = {
+          path: candidate.tool.path || null,
+          tool: candidate.tool.name,
+          chunks: 0,
+          characters: 0,
+          firstRevision: candidate.tool.revision || null,
+          finalRevision: candidate.tool.revision || null,
+          malformed: false,
+        };
+        summaryEntries.set(pathKey, summaryEntry);
+        result.push({
+          role: "assistant",
+          content: "",
+          _nceCompactedHistoryPath: pathKey,
+        });
+      }
+      summaryEntry.chunks += 1;
+      summaryEntry.characters += candidate.payloadCharacters;
+      summaryEntry.finalRevision =
+        candidate.tool.revision || summaryEntry.finalRevision;
+      summaryEntry.malformed ||= candidate.malformed;
       metrics.compactedToolPairs += 1;
       metrics.compactedWritePayloads += 1;
       metrics.compactedWriteCharacters += candidate.payloadCharacters;
@@ -750,7 +815,23 @@ class ContextManager {
         candidate.payloadCharacters / Math.max(1, options.charsPerToken),
       );
       metrics.largeWriteSummariesInjected += 1;
-      if (candidate.malformed) metrics.malformedPayloadCharactersRemoved += candidate.payloadCharacters;
+      if (candidate.malformed)
+        metrics.malformedPayloadCharactersRemoved +=
+          candidate.payloadCharacters;
+    }
+    for (const [pathKey, summaryEntry] of summaryEntries) {
+      const placeholder = result.find(
+        (message) => message?._nceCompactedHistoryPath === pathKey,
+      );
+      if (!placeholder) continue;
+      delete placeholder._nceCompactedHistory;
+      delete placeholder._nceCompactedHistoryPath;
+      placeholder.content = `[NCE COMPACTED LARGE WRITE HISTORY]\n${JSON.stringify(
+        {
+          ...summaryEntry,
+          contentOmitted: true,
+        },
+      )}`;
     }
     return { messages: result, metrics };
   }
@@ -771,10 +852,9 @@ class ContextManager {
       options.charsPerToken,
     );
     const estimatedFullTokens = estimatedFullMessageTokens + toolSchemaTokens;
-    const stableSourceMessages = this.deduplicateRedundantReadExchanges(this.getStableSourceMessages(
-      messages,
-      options.enabled,
-    ));
+    const stableSourceMessages = this.deduplicateRedundantReadExchanges(
+      this.getStableSourceMessages(messages, options.enabled),
+    );
     const state = config.contextState;
     const hasCurrentState =
       state &&
@@ -786,7 +866,8 @@ class ContextManager {
         state.fileKnowledge?.projectStructureRevision > 0 ||
         state.fileKnowledge?.workspaceContentRevision > 0 ||
         state.progress?.phase !== "discover" ||
-        state.progress?.awaitingProgress === true);
+        state.progress?.awaitingProgress === true ||
+        Boolean(state.runtimeDirective));
     const contextMessages = hasCurrentState
       ? [
           ...stableSourceMessages,

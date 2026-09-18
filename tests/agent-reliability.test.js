@@ -222,7 +222,7 @@ test("strategy replan hard cap is terminal", () => {
       agent.largeFileWriter.requestStrategyReplan(state, {
         toolName: "create_file",
       }),
-    { code: "WRITE_RECOVERY_EXHAUSTED" },
+    { code: "LARGE_WRITE_RECOVERY_EXHAUSTED" },
   );
 });
 
@@ -1257,11 +1257,17 @@ test("large-write context compaction preserves canonical history and recent payl
     return [
       {
         role: "assistant",
-        tool_calls: [call("write_file_chunk", {
-          path: "large.txt",
-          content,
-          expectedRevision: `r${index - 1}`,
-        }, id)],
+        tool_calls: [
+          call(
+            "write_file_chunk",
+            {
+              path: "large.txt",
+              content,
+              expectedRevision: `r${index - 1}`,
+            },
+            id,
+          ),
+        ],
       },
       {
         role: "tool",
@@ -1296,19 +1302,26 @@ test("large-write context compaction preserves canonical history and recent payl
   });
 
   assert.deepEqual(messages, canonical);
-  assert.equal(modelMessages.filter((message) => message.role === "tool").length, 1);
   assert.equal(
-    modelMessages.filter((message) => message.role === "assistant" && message.tool_calls).length,
+    modelMessages.filter((message) => message.role === "tool").length,
+    1,
+  );
+  assert.equal(
+    modelMessages.filter(
+      (message) => message.role === "assistant" && message.tool_calls,
+    ).length,
     1,
   );
   const summary = modelMessages.find((message) =>
-    String(message.content).startsWith("[NCE COMPACTED LARGE WRITE]"),
+    String(message.content).startsWith("[NCE COMPACTED LARGE WRITE HISTORY]"),
   );
   assert.ok(summary);
-  assert.match(summary.content, /"revision":"r1"/);
+  assert.match(summary.content, /"firstRevision":"r1"/);
   assert.ok(agent.lastContextMetrics.compactedWritePayloads >= 2);
   assert.ok(agent.lastContextMetrics.compactedWriteCharacters >= 4800);
-  assert.ok(agent.estimateTokens(modelMessages) < agent.estimateTokens(messages));
+  assert.ok(
+    agent.estimateTokens(modelMessages) < agent.estimateTokens(messages),
+  );
 });
 
 test("complete large-write context compaction removes every eligible payload", () => {
@@ -1332,13 +1345,23 @@ test("complete large-write context compaction removes every eligible payload", (
   ];
   const modelMessages = agent.buildModelContext(messages, {
     contextCompaction: { logMetrics: false },
-    contextState: { largeWrite: { active: false, completed: true, state: "COMPLETE" } },
+    contextState: {
+      largeWrite: { active: false, completed: true, state: "COMPLETE" },
+    },
   });
-  assert.equal(modelMessages.some((message) => message.role === "tool"), false);
-  assert.equal(modelMessages.some((message) => message.role === "assistant" && message.tool_calls), false);
+  assert.equal(
+    modelMessages.some((message) => message.role === "tool"),
+    false,
+  );
+  assert.equal(
+    modelMessages.some(
+      (message) => message.role === "assistant" && message.tool_calls,
+    ),
+    false,
+  );
   const summary = modelMessages.find((message) =>
-    String(message.content).startsWith("[NCE COMPACTED LARGE WRITE]"),
+    String(message.content).startsWith("[NCE COMPACTED LARGE WRITE HISTORY]"),
   );
   assert.ok(summary);
-  assert.match(summary.content, /"revision":"final"/);
+  assert.match(summary.content, /"firstRevision":"final"/);
 });

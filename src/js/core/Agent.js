@@ -41,8 +41,10 @@ class Agent {
     this.largeFileWriting = {
       recommendedChunkCharacters: 8000,
       maxChunkCharacters: 10000,
+      minRecoveryChunkCharacters: 1000,
       maxRecoveryAttempts: 3,
       maxStrategyReplans: 3,
+      maxConsecutiveRejectedStrategies: 3,
     };
     this.toolLimits =
       typeof AgentAI !== "undefined" && AgentAI.toolLimits
@@ -208,10 +210,22 @@ class Agent {
           Math.floor(largeFileWriting.maxRecoveryAttempts),
         );
       }
+      if (Number.isFinite(largeFileWriting.minRecoveryChunkCharacters)) {
+        this.largeFileWriting.minRecoveryChunkCharacters = Math.max(
+          1000,
+          Math.floor(largeFileWriting.minRecoveryChunkCharacters),
+        );
+      }
       if (Number.isFinite(largeFileWriting.maxStrategyReplans)) {
         this.largeFileWriting.maxStrategyReplans = Math.max(
           0,
           Math.floor(largeFileWriting.maxStrategyReplans),
+        );
+      }
+      if (Number.isFinite(largeFileWriting.maxConsecutiveRejectedStrategies)) {
+        this.largeFileWriting.maxConsecutiveRejectedStrategies = Math.max(
+          1,
+          Math.floor(largeFileWriting.maxConsecutiveRejectedStrategies),
         );
       }
       this.updateLargeFileToolDefinitions();
@@ -652,15 +666,23 @@ class Agent {
   }
 
   createLargeWriteRecoveryError(cause, attempts, limit) {
+    const path = cause?.path || null;
+    const effectiveChunkLimit = cause?.effectiveChunkLimit || null;
+    const currentRevision = cause?.currentRevision || null;
+    const lastFailure = cause?.lastFailure || cause?.code || null;
     const error = new Error(
-      `La création du gros fichier a été arrêtée après ${attempts} tentatives de récupération : le modèle continue à produire un appel ${cause?.toolName || "d'écriture"} tronqué.`,
+      `La récupération de l'écriture de ${path || "un gros fichier"} a été arrêtée après ${attempts} tentatives : ${lastFailure || "la stratégie reste invalide"}.`,
     );
     error.name = "AgentLargeWriteRecoveryError";
-    error.code = "WRITE_RECOVERY_EXHAUSTED";
-    error.category = "WRITE_RECOVERY_EXHAUSTED";
+    error.code = "LARGE_WRITE_RECOVERY_EXHAUSTED";
+    error.category = "LARGE_WRITE_RECOVERY_EXHAUSTED";
     error.toolName = cause?.toolName || null;
     error.attempts = attempts;
     error.maxRecoveryAttempts = limit;
+    error.path = path;
+    error.lastFailure = lastFailure;
+    error.effectiveChunkLimit = effectiveChunkLimit;
+    error.currentRevision = currentRevision;
     error.cause = cause;
     error.userMessage =
       "Le modèle n'a pas réussi à découper la création du gros fichier en appels valides.";

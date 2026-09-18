@@ -395,9 +395,9 @@ test("truncation retains bounded large-write recovery without partial execution"
     );
   });
   await assert.rejects(agent.execute("Create a.js"), {
-    code: "WRITE_RECOVERY_EXHAUSTED",
+    code: "LARGE_WRITE_RECOVERY_EXHAUSTED",
   });
-  assert.equal(requests, 6);
+  assert.equal(requests, 12);
   assert.equal(writes(), 0);
   assert.equal(agent.runChangeTracker.current.changeVersion, 0);
 });
@@ -405,12 +405,22 @@ test("truncation retains bounded large-write recovery without partial execution"
 test("truncation cause distinguishes output limit from incomplete model JSON", () => {
   const agent = bareAgent();
   const raw = '{"path":"a.js","content":"unfinished';
-  for (const [finish, cause] of [["length", "output_limit"], ["stop", "incomplete_model_json"]]) {
+  for (const [finish, cause] of [
+    ["length", "output_limit"],
+    ["stop", "incomplete_model_json"],
+  ]) {
     const result = response([call("create_file", raw)], finish);
     let error;
-    try { agent.parseResponse(result); } catch (caught) { error = caught; }
+    try {
+      agent.parseResponse(result);
+    } catch (caught) {
+      error = caught;
+    }
     assert.ok(error);
-    assert.equal(agent.isRecoverableLargeWriteToolCallError(error, result), true);
+    assert.equal(
+      agent.isRecoverableLargeWriteToolCallError(error, result),
+      true,
+    );
     assert.equal(error.truncationCause, cause);
   }
 });
@@ -422,32 +432,80 @@ test("three large malformed creates enforce a small create and a revisioned chun
     requests++;
     if (requests <= 3) {
       assert.equal(writes(), 0);
-      return response([call("create_file", '{"path":"snake-game.html","content":"' + "a".repeat([6500, 6300, 6100][requests - 1]), `bad-${requests}`)], "length");
+      return response(
+        [
+          call(
+            "create_file",
+            '{"path":"snake-game.html","content":"' +
+              "a".repeat([6500, 6300, 6100][requests - 1]),
+            `bad-${requests}`,
+          ),
+        ],
+        "length",
+      );
     }
     if (requests === 4) {
       assert.equal(agent.largeWriteState.strategyReplanRequired, true);
       assert.equal(agent.largeWriteState.strategyReplanCount, 1);
       assert.ok(agent.largeWriteState.temporaryRecoveryMax <= 2500);
       observedReplan = true;
-      return response([call("create_file", JSON.stringify({ path: "snake-game.html", content: "a".repeat(6000) }), "rejected")]);
+      return response([
+        call(
+          "create_file",
+          JSON.stringify({
+            path: "snake-game.html",
+            content: "a".repeat(6000),
+          }),
+          "rejected",
+        ),
+      ]);
     }
     if (requests === 5) {
       assert.equal(writes(), 0);
-      return response([call("create_file", JSON.stringify({ path: "snake-game.html", content: "a".repeat(1500) }), "small")]);
+      return response([
+        call(
+          "create_file",
+          JSON.stringify({
+            path: "snake-game.html",
+            content: "a".repeat(1500),
+          }),
+          "small",
+        ),
+      ]);
     }
     if (requests === 6) {
       assert.equal(agent.largeWriteState.strategyReplanRequired, false);
       assert.equal(agent.largeWriteState.strategyFailures, 0);
-      return response([call("write_file_chunk", JSON.stringify({ path: "snake-game.html", content: "b".repeat(2000), expectedRevision: agent.largeWriteState.currentRevision }), "chunk")]);
+      return response([
+        call(
+          "write_file_chunk",
+          JSON.stringify({
+            path: "snake-game.html",
+            content: "b".repeat(2000),
+            expectedRevision: agent.largeWriteState.currentRevision,
+          }),
+          "chunk",
+        ),
+      ]);
     }
-    if (requests === 7) return response([call("read_file", JSON.stringify({ path: "snake-game.html" }), "validate")]);
+    if (requests === 7)
+      return response([
+        call(
+          "read_file",
+          JSON.stringify({ path: "snake-game.html" }),
+          "validate",
+        ),
+      ]);
     if (requests === 8) return reviewCalls();
     return completeCall();
   });
   await agent.execute("Create snake-game.html");
   assert.equal(observedReplan, true);
   assert.equal(writes(), 2);
-  assert.equal(await fs.readFile(path.join(root, "snake-game.html"), "utf8"), "a".repeat(1500) + "b".repeat(2000));
+  assert.equal(
+    await fs.readFile(path.join(root, "snake-game.html"), "utf8"),
+    "a".repeat(1500) + "b".repeat(2000),
+  );
   assert.equal(agent.agentProgress.metrics.modelFallbacks, 0);
   assert.equal(agent.agentProgress.metrics.repeatedFailedStrategiesRejected, 1);
 });

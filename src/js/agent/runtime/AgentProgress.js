@@ -230,6 +230,22 @@ class AgentProgress {
     });
   }
 
+  recordOversizedChunkRejected(toolName, details = {}) {
+    this.metrics.largeWriteRecoveries += 1;
+    this.metrics.writeStrategyFailures += 1;
+    this.metrics.repeatedFailedStrategiesRejected += 1;
+    this.log({
+      event: "large_write_chunk_rejected",
+      iteration: details.iteration ?? null,
+      lastTool: toolName,
+      informationStatus: "recoverable_model_error",
+      category: "OVERSIZED_CHUNK",
+      reason: "payload_too_large",
+      attemptedChars: details.attemptedChars ?? null,
+      effectiveChunkLimit: details.effectiveChunkLimit ?? null,
+    });
+  }
+
   recordTaskCompletion(iteration, accepted, reason = null, diagnostics = {}) {
     this.log({
       event: accepted ? "task_complete" : "task_complete_rejected",

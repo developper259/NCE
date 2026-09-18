@@ -166,7 +166,7 @@ export class Window {
       },
     );
 
-    this.window.webContents.toggleDevTools();
+    //this.window.webContents.toggleDevTools();
 
     this.window.webContents.setWindowOpenHandler(({ url }) => {
       if (/^https?:\/\//i.test(url)) shell.openExternal(url);

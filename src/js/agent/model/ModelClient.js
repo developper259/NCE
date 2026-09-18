@@ -359,6 +359,12 @@ class ModelClient {
     });
     const providerMessages =
       this.agent.normalizeMessagesForProvider(modelContext);
+    if (config.contextState?.runtimeDirective) {
+      providerMessages.push({
+        role: "system",
+        content: `[NCE CURRENT RUNTIME DIRECTIVE]\n${config.contextState.runtimeDirective}`,
+      });
+    }
     const liveEditorContext = await this.agent.getContext();
     providerMessages.push({
       role: "system",
@@ -535,6 +541,10 @@ class ModelClient {
   ) {
     const config = runConfig || this.agent.createRunConfig();
     const state = this.getModelRequestState(config);
+    state.currentConfig = {
+      ...state.currentConfig,
+      contextState: config.contextState,
+    };
     let retryCount = 0;
 
     while (state.currentConfig) {
