@@ -132,6 +132,32 @@ test("no-workspace state and workspace state remain independent", async () => {
   assert.deepEqual(saved.get("/projects/A").tabManager.tabs.map((tab) => tab.path), ["src/a.js"]);
 });
 
+test("no-workspace files use normal file validation, not workspace confinement", async () => {
+  const { editor, manager } = fixture();
+  let workspaceResolutionCalled = false;
+  editor.api.resolveWorkspaceStatePath = async () => {
+    workspaceResolutionCalled = true;
+    return null;
+  };
+
+  await manager.restoreNoWorkspaceState({
+    tabManager: {
+      activeTab: { id: 1 },
+      tabs: [{
+        id: 1,
+        type: "file",
+        name: "a.js",
+        path: "/projects/A/src/a.js",
+      }],
+    },
+  });
+
+  assert.equal(workspaceResolutionCalled, false);
+  assert.deepEqual(Array.from(editor.tabManager.tabs, (tab) => tab.path), [
+    "/projects/A/src/a.js",
+  ]);
+});
+
 test("unknown workspace versions fall back without restoring tabs", async () => {
   const { editor, manager, saved } = fixture();
   saved.set("/projects/A", { version: 999, tabManager: { tabs: [{ id: 1 }] } });

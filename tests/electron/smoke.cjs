@@ -22,7 +22,10 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
   try {
     await launch('write');
     const state = JSON.parse(await fs.readFile(path.join(directory, 'profile', 'state.json'), 'utf8'));
-    assert.equal(state.tabManager.files.length, 1);
+    assert.equal(state.version, 2);
+    assert.equal(state.noWorkspaceState.tabManager.tabs.length, 1);
+    assert.equal(state.noWorkspaceState.tabManager.tabs[0].type, 'file');
+    assert.equal(state.noWorkspaceState.tabManager.tabs[0].path, path.join(directory, 'smoke.js'));
     await launch('restore');
     await launch('crash');
     await launch('no-nsh');

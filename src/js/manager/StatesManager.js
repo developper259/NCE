@@ -474,11 +474,14 @@ class StatesManager {
           if (root && !filePath) continue;
           const fileOperations = this.editor.fileExplorer?.fileOperations;
           if (filePath) {
-            const canonical = await this.editor.api?.resolveWorkspaceStatePath?.(
-              root,
-              data.path,
-            );
-            if (typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+            if (
+              root &&
+              typeof this.editor.api?.resolveWorkspaceStatePath === "function"
+            ) {
+              const canonical = await this.editor.api.resolveWorkspaceStatePath(
+                root,
+                data.path,
+              );
               if (!canonical || canonical.isDirectory || canonical.readable !== true) continue;
             } else if (fileOperations?.pathStatus) {
               const status = await fileOperations.pathStatus(filePath);
