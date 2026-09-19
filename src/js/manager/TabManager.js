@@ -505,6 +505,10 @@ class tabManager {
       img.src = "../assets/icons/close.svg";
       img.alt = "close";
       img.className = "file-el-btn-img";
+      // Images are draggable by default in Chromium. The tab may have drag
+      // behavior of its own, but its close affordance must never create an
+      // SVG drag preview or expose the asset URL as dragged content.
+      img.draggable = false;
 
       btnSpan.appendChild(img);
       li.appendChild(btnSpan);

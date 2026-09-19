@@ -75,7 +75,13 @@ test("asset and command availability contracts stay aligned", () => {
   const keybindings = read("src/config/Application.js");
   const menu = read("src/ts/addon/Menu.ts");
   assert.match(html, /assets\/flaticon\/all\.css/);
-  assert.match(read("src/js/manager/TabManager.js"), /assets\/icons\/close\.svg/);
+  const tabManager = read("src/js/manager/TabManager.js");
+  assert.match(tabManager, /assets\/icons\/close\.svg/);
+  assert.match(tabManager, /img\.draggable\s*=\s*false/);
+  assert.match(
+    read("src/css/tabManager.css"),
+    /\.file-el-btn img\s*\{[^}]*-webkit-user-drag:\s*none/s,
+  );
   assert.match(html, /js\/types\/QuickPanel\.js/);
   assert.match(keybindings, /action:\s*"open_command"/);
   assert.match(keybindings, /action:\s*"reload_window"/);

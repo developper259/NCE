@@ -18,6 +18,10 @@ import { AgentProcessRunner } from "./addon/AgentProcessRunner";
 import { App } from "./App";
 
 const TITLEBAR_CONTROLS_HEIGHT = 35;
+const MACOS_TRAFFIC_LIGHT_SIZE = 14;
+const MACOS_TRAFFIC_LIGHT_Y = Math.round(
+  (TITLEBAR_CONTROLS_HEIGHT - MACOS_TRAFFIC_LIGHT_SIZE) / 2,
+);
 
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
@@ -25,7 +29,7 @@ export function getWindowChromeConfig(
   if (platform === "darwin") {
     return {
       titleBarStyle: "hiddenInset" as const,
-      trafficLightPosition: { x: 14, y: 13 },
+      trafficLightPosition: { x: 14, y: MACOS_TRAFFIC_LIGHT_Y },
     };
   }
   return {

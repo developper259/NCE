@@ -48,6 +48,8 @@
 .file-manager .file-el .file-el-btn img {
 	width: 16px;
 	height: 16px;
+	-webkit-user-drag: none;
+	user-select: none;
 }
 
 .file-manager .file-el .file-el-btn:hover {

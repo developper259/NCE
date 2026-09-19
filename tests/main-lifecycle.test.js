@@ -20,6 +20,8 @@ test("window chrome is integrated without forced fullscreen on every platform", 
   const windows = getWindowChromeConfig("win32");
   const linux = getWindowChromeConfig("linux");
   assert.equal(mac.titleBarStyle, "hiddenInset");
+  assert.equal(mac.trafficLightPosition.x, 14);
+  assert.equal(mac.trafficLightPosition.y, 11);
   assert.equal(mac.titleBarOverlay, undefined);
   assert.equal(windows.titleBarStyle, "hidden");
   assert.equal(windows.titleBarOverlay.height, 35);
