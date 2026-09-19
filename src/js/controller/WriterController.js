@@ -155,7 +155,10 @@ class WriterController {
           const segmentEnd = offset + segmentText.length;
           while (tokenIndex < tokens.length) {
             const token = tokens[tokenIndex];
-            const end = (Number(token.column) || 1) - 1 + String(token.value ?? "").length;
+            const end =
+              (Number(token.column) || 1) -
+              1 +
+              String(token.value ?? "").length;
             if (end > offset) break;
             tokenIndex++;
           }
@@ -168,8 +171,11 @@ class WriterController {
             const from = Math.max(start, offset);
             const to = Math.min(end, segmentEnd);
             if (from < to)
-              segmentTokens.push({ ...token, column: from - offset + 1,
-                value: segmentText.slice(from - offset, to - offset) });
+              segmentTokens.push({
+                ...token,
+                column: from - offset + 1,
+                value: segmentText.slice(from - offset, to - offset),
+              });
           }
           span.appendChild(this.tokenToDOM(segmentText, segmentTokens));
         } else {
@@ -495,7 +501,17 @@ class WriterController {
         { row, column: 0 },
       );
     }
-    return this.deleteRange({ row, column: column - 1 }, { row, column });
+    const line = this.editor.lineController.lines[row - 1]?.getText() || "";
+    return this.deleteRange(
+      {
+        row,
+        column:
+          typeof previousGraphemeBoundary === "function"
+            ? previousGraphemeBoundary(line, column)
+            : column - 1,
+      },
+      { row, column },
+    );
   }
 
   deleteWord(column, row) {

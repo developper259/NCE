@@ -43,15 +43,31 @@ class KeyBindingManager {
   }
 
   bindEditor(key, e) {
-    if (CONFIG_KEYBINDING_CONTAINSKEY(key)) {
-      this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
-    } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-      if (this.editor.tabManager.activeFile && e.key.length == 1) {
+    // Special handling for space character - treat as normal character even if it's a keybinding
+    if (e.key === " " && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (this.editor.tabManager.activeFile) {
         const handled = this.editor.smartTypingController?.handleCharacter(
           e.key,
           e,
         );
-        if (!handled) this.editor.writerController.write(e.key);
+        if (!handled) {
+          this.editor.writerController.write(e.key);
+        }
+      }
+    } else if (CONFIG_KEYBINDING_CONTAINSKEY(key)) {
+      this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
+    } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (
+        this.editor.tabManager.activeFile &&
+        (e.key.length == 1 || e.key === " ")
+      ) {
+        const handled = this.editor.smartTypingController?.handleCharacter(
+          e.key,
+          e,
+        );
+        if (!handled) {
+          this.editor.writerController.write(e.key);
+        }
       }
     }
 
@@ -67,6 +83,13 @@ class KeyBindingManager {
         this.editor.keyBinding.exec(item, e);
       }
 
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key === " ") {
+      // Handle space when editor is not selected
+      if (this.editor.tabManager.activeFile) {
+        this.editor.writerController.write(e.key);
+      }
       e.preventDefault();
       e.stopPropagation();
     }
@@ -121,7 +144,9 @@ class KeyBindingManager {
   executeNativeInputAction(action, target) {
     const element =
       target instanceof Element
-        ? target.closest("input, textarea, select, [contenteditable='true'], [contenteditable='']")
+        ? target.closest(
+            "input, textarea, select, [contenteditable='true'], [contenteditable='']",
+          )
         : null;
     if (!element) return false;
 
@@ -156,20 +181,22 @@ class KeyBindingManager {
         throw browserError;
       }
     };
-    void readClipboard().then((text) => {
-      if (
-        element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement
-      ) {
-        const start = element.selectionStart ?? element.value.length;
-        const end = element.selectionEnd ?? start;
-        element.setRangeText(text, start, end, "end");
-        element.dispatchEvent(new Event("input", { bubbles: true }));
-      } else {
-        element.focus();
-        document.execCommand("insertText", false, text);
-      }
-    }).catch((error) => console.error("Native input paste error:", error));
+    void readClipboard()
+      .then((text) => {
+        if (
+          element instanceof HTMLInputElement ||
+          element instanceof HTMLTextAreaElement
+        ) {
+          const start = element.selectionStart ?? element.value.length;
+          const end = element.selectionEnd ?? start;
+          element.setRangeText(text, start, end, "end");
+          element.dispatchEvent(new Event("input", { bubbles: true }));
+        } else {
+          element.focus();
+          document.execCommand("insertText", false, text);
+        }
+      })
+      .catch((error) => console.error("Native input paste error:", error));
     return true;
   }
 
@@ -219,7 +246,12 @@ class KeyBindingManager {
     this.isComposing = true;
   }
 
-  onCompositionEnd() {
+  onCompositionEnd(event) {
     this.isComposing = false;
+    if (this.isNativeInputTarget(event?.target)) return;
+
+    const text = typeof event?.data === "string" ? event.data : "";
+    if (text && this.editor.tabManager.activeFile)
+      this.editor.writerController?.write(text);
   }
 }

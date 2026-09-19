@@ -96,14 +96,20 @@ class CursorController {
     const line = lc.lines[row - 1] ? lc.lines[row - 1].getText() : "";
     if (column < 0) column = 0;
     if (column > line.length) column = line.length;
+    if (typeof normalizeTextBoundary === "function")
+      column = normalizeTextBoundary(line, column, "nearest");
 
     return { row: row, column: column };
   }
 
   positionFromClientCoordinates(clientX, clientY, clampToViewport = false) {
     const rect = this.editor.domManager.getOutputRect();
-    const right = Number.isFinite(rect.right) ? rect.right : rect.left + rect.width;
-    const bottom = Number.isFinite(rect.bottom) ? rect.bottom : rect.top + rect.height;
+    const right = Number.isFinite(rect.right)
+      ? rect.right
+      : rect.left + rect.width;
+    const bottom = Number.isFinite(rect.bottom)
+      ? rect.bottom
+      : rect.top + rect.height;
     if (clampToViewport) {
       clientX = Math.max(rect.left, Math.min(clientX, right - 1));
       clientY = Math.max(rect.top, Math.min(clientY, bottom - 1));

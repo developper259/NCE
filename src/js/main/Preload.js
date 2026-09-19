@@ -178,6 +178,9 @@ contextBridge.exposeInMainWorld("api", {
   searchInFiles: (rootPath, query, options = {}) =>
     ipcRenderer.invoke("WorkspaceSearch:search", rootPath, query, options),
 
+  cancelSearch: (requestId) =>
+    ipcRenderer.invoke("WorkspaceSearch:cancel", requestId),
+
   getProjectMap: (rootPath, targetPath, options = {}) =>
     ipcRenderer.invoke(
       "WorkspaceSearch:projectMap",

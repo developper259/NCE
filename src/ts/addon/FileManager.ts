@@ -409,7 +409,13 @@ export class FileManager {
               };
             }
           }
-          return { exists: true, isDirectory, readable: true };
+          return {
+            exists: true,
+            isDirectory,
+            readable: true,
+            size: isDirectory ? undefined : stats.size,
+            mtimeMs: isDirectory ? undefined : stats.mtimeMs,
+          };
         } catch (error: any) {
           if (error?.code === "ENOENT")
             return { exists: false, code: "SOURCE_NOT_FOUND" };
@@ -1091,7 +1097,8 @@ export class FileManager {
     if (!validPath(workspaceRoot) || !state || typeof state !== "object")
       return false;
     const key = path.resolve(workspaceRoot);
-    const previous = this.workspaceStateSaveQueues.get(key) || Promise.resolve(true);
+    const previous =
+      this.workspaceStateSaveQueues.get(key) || Promise.resolve(true);
     const next = previous
       .catch(() => false)
       .then(() => this.writeWorkspaceState(workspaceRoot, state));
@@ -1133,17 +1140,22 @@ export class FileManager {
       path.isAbsolute(relativePath) ||
       /^(?:[A-Za-z]:|\\\\|\/|~|file:)/i.test(relativePath) ||
       relativePath.includes("\0")
-    ) return null;
+    )
+      return null;
     try {
       const root = await fs.realpath(workspaceRoot);
-      const candidate = path.resolve(root, relativePath.replace(/[\\/]/g, path.sep));
+      const candidate = path.resolve(
+        root,
+        relativePath.replace(/[\\/]/g, path.sep),
+      );
       const realCandidate = await fs.realpath(candidate);
       const relative = path.relative(root, realCandidate);
       if (
         relative === ".." ||
         relative.startsWith(`..${path.sep}`) ||
         path.isAbsolute(relative)
-      ) return null;
+      )
+        return null;
       const stats = await fs.stat(realCandidate);
       await fs.access(realCandidate, fsSync.constants.R_OK);
       return {

@@ -353,7 +353,13 @@ class KeyBinding {
       let start, end;
       if (x < l.length) {
         start = { row: y, column: x };
-        end = { row: y, column: x + 1 };
+        end = {
+          row: y,
+          column:
+            typeof nextGraphemeBoundary === "function"
+              ? nextGraphemeBoundary(l, x)
+              : x + 1,
+        };
       } else if (y < lc.lines.length) {
         start = { row: y, column: x };
         end = { row: y + 1, column: 0 };
@@ -407,7 +413,14 @@ class KeyBinding {
 
         let start, end;
         if (x > 0) {
-          start = { row: y, column: x - 1 };
+          const line = lc.lines[y - 1]?.getText() || "";
+          start = {
+            row: y,
+            column:
+              typeof previousGraphemeBoundary === "function"
+                ? previousGraphemeBoundary(line, x)
+                : x - 1,
+          };
           end = { row: y, column: x };
         } else {
           const prevLineNode = lc.lines[y - 2];
@@ -466,7 +479,10 @@ class KeyBinding {
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
-        this.editor.tabManager.activeFile.historyX = x;
+        this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
+          this.editor.lineController.lines[y - 1]?.getText() || "",
+          x,
+        );
 
       if (y == 1) {
         if (this.editor.tabManager.activeFile.historyX != 0)
@@ -479,7 +495,10 @@ class KeyBinding {
 
       this.editor.cursorController.setCursorPosition(
         y,
-        this.editor.tabManager.activeFile.historyX,
+        viewColumnToRealColumn(
+          this.editor.lineController.lines[y - 1]?.getText() || "",
+          this.editor.tabManager.activeFile.historyX,
+        ),
       );
 
       const lc = this.editor.lineController;
@@ -515,13 +534,19 @@ class KeyBinding {
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
-        this.editor.tabManager.activeFile.historyX = x;
+        this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
+          this.editor.lineController.lines[y - 1]?.getText() || "",
+          x,
+        );
 
       if (y == this.editor.lineController.lines.length) {
         const lineNode = this.editor.lineController.lines[y - 1];
         const lineLength = lineNode ? lineNode.getText().length : 0;
         if (this.editor.tabManager.activeFile.historyX != lineLength)
-          this.editor.tabManager.activeFile.historyX = lineLength;
+          this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
+            lineNode ? lineNode.getText() : "",
+            lineLength,
+          );
         else {
           this.editor.selectController.isMouseDown = false;
           return;
@@ -530,7 +555,10 @@ class KeyBinding {
 
       this.editor.cursorController.setCursorPosition(
         y,
-        this.editor.tabManager.activeFile.historyX,
+        viewColumnToRealColumn(
+          this.editor.lineController.lines[y - 1]?.getText() || "",
+          this.editor.tabManager.activeFile.historyX,
+        ),
       );
 
       const lc = this.editor.lineController;
@@ -592,7 +620,7 @@ class KeyBinding {
           const prevLineNode = lc.lines[y - 1];
           x = prevLineNode ? prevLineNode.getText().length : 0;
         } else {
-          x -= 1;
+          x = previousGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
         }
       }
 
@@ -658,7 +686,7 @@ class KeyBinding {
           y += 1;
           x = 0;
         } else {
-          x += 1;
+          x = nextGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
         }
       }
 

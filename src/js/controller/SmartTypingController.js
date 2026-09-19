@@ -74,17 +74,17 @@ class SmartTypingController {
   shouldIgnoreCommandEvent(event) {
     return Boolean(
       event &&
-        (this.isCompositionEvent(event) ||
-          event.ctrlKey ||
-          event.metaKey ||
-          event.altKey),
+      (this.isCompositionEvent(event) ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey),
     );
   }
 
   handleCharacter(character, event) {
     if (
       typeof character !== "string" ||
-      character.length !== 1 ||
+      (character.length !== 1 && character !== " ") ||
       this.shouldIgnoreCharacterEvent(event)
     ) {
       return false;
@@ -101,10 +101,7 @@ class SmartTypingController {
       return true;
     }
 
-    if (
-      this.isClosingCharacter(character) &&
-      context.after === character
-    ) {
+    if (this.isClosingCharacter(character) && context.after === character) {
       return this.skipClosingCharacter(context);
     }
 
@@ -174,7 +171,10 @@ class SmartTypingController {
     }
 
     const indentationBeforeCaret = context.line.slice(0, context.column);
-    if (!this.isWhitespaceOnly(indentationBeforeCaret) || context.column === 0) {
+    if (
+      !this.isWhitespaceOnly(indentationBeforeCaret) ||
+      context.column === 0
+    ) {
       return false;
     }
 
@@ -465,8 +465,7 @@ class SmartTypingController {
     let width = 0;
 
     for (const character of indentation) {
-      width +=
-        character === "\t" ? tabWidth - (width % tabWidth) : 1;
+      width += character === "\t" ? tabWidth - (width % tabWidth) : 1;
     }
     return width;
   }

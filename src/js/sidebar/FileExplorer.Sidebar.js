@@ -586,7 +586,8 @@ class FileExplorer extends Sidebar {
     if (previousRoot) {
       // Persist the current workspace while its tabs, explorer and sidebar are
       // still intact. A failed snapshot must not partially switch workspaces.
-      const saved = await this.editor.statesManager.saveWorkspaceState(previousRoot);
+      const saved =
+        await this.editor.statesManager.saveWorkspaceState(previousRoot);
       if (saved === false) return false;
     } else {
       this.editor.statesManager.noWorkspaceState =
@@ -987,7 +988,8 @@ class FileExplorer extends Sidebar {
       return;
     }
 
-    let destPath = `${targetFolderPath}/${this.clipboard.name}`;
+    const separator = String(targetFolderPath).includes("\\") ? "\\" : "/";
+    let destPath = `${targetFolderPath}${targetFolderPath.endsWith(separator) ? "" : separator}${this.clipboard.name}`;
 
     try {
       const exists = await this.fileOperations.pathExists(destPath);
@@ -999,25 +1001,63 @@ class FileExplorer extends Sidebar {
           dotIndex > 0
             ? this.clipboard.name.slice(0, dotIndex)
             : this.clipboard.name;
-        destPath = `${targetFolderPath}/${base} copy${ext}`;
+        destPath = `${targetFolderPath}${targetFolderPath.endsWith(separator) ? "" : separator}${base} copy${ext}`;
+      }
+
+      const sourcePath = this.clipboard.path;
+      const sourceFile =
+        this.clipboard.type === "file"
+          ? this.editor.tabManager.getFileByPath?.(sourcePath)
+          : null;
+      let workingCopy;
+      if (sourceFile?.isLoaded && !sourceFile.loadError) {
+        if (typeof sourceFile.serializeContent !== "function") {
+          alert("The open working copy cannot be copied safely.");
+          return;
+        }
+        workingCopy = sourceFile.serializeContent();
+      } else if (sourceFile?.isSaved === false) {
+        alert(
+          "The open working copy is not fully loaded and cannot be copied safely.",
+        );
+        return;
       }
 
       const result =
         this.clipboard.mode === "cut"
-          ? await this.fileOperations.move(this.clipboard.path, destPath)
-          : await this.fileOperations.copy(this.clipboard.path, destPath);
+          ? await this.fileOperations.move(sourcePath, destPath)
+          : await this.fileOperations.copy(sourcePath, destPath);
 
       if (!result?.success) {
         alert(result?.error || "Impossible de coller l'élément.");
         return;
       }
 
-      const sourceParent = this.clipboard.path.substring(
-        0,
-        this.clipboard.path.lastIndexOf("/"),
-      );
+      if (workingCopy !== undefined) {
+        const destination = await this.fileOperations.createFile(
+          NCEPath.dirname(destPath),
+          NCEPath.basename(destPath),
+          workingCopy,
+          true,
+        );
+        if (!destination?.success) {
+          alert(destination?.error || "Unable to persist the working copy.");
+          if (this.clipboard.mode === "cut")
+            await this.editor.tabManager.updateFilePath(sourcePath, destPath);
+          return;
+        }
+      }
+
+      const sourceParent = NCEPath.dirname(sourcePath);
 
       if (this.clipboard.mode === "cut") {
+        await this.editor.tabManager.updateFilePath(sourcePath, destPath);
+        if (NCEPath.isInside(this.activeFilePath, sourcePath))
+          this.activeFilePath = NCEPath.rebase(
+            this.activeFilePath,
+            sourcePath,
+            destPath,
+          );
         this.clipboard = null;
         await this.refreshFolder(sourceParent);
       }

@@ -41,10 +41,7 @@ class Editor {
       "tab",
       buildTabContextMenu(this.tabManager),
     );
-    this.contextMenuManager.setMenu(
-      "output",
-      buildOutputContextMenu(this),
-    );
+    this.contextMenuManager.setMenu("output", buildOutputContextMenu(this));
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);
@@ -92,6 +89,14 @@ class Editor {
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
     this.settingsView = new SettingsView(this);
+
+    window.addEventListener("focus", () =>
+      this.tabManager.scheduleFocusResync(),
+    );
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible")
+        this.tabManager.scheduleFocusResync();
+    });
 
     this.writerController.insertMode = true;
 

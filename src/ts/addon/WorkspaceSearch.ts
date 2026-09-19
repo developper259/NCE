@@ -12,6 +12,7 @@ interface SearchOptions {
   wholeWord?: boolean;
   offset?: number;
   limit?: number;
+  requestId?: string;
 }
 
 interface SearchResult {
@@ -74,6 +75,7 @@ interface ProjectFilesResponse {
 
 export class WorkspaceSearch {
   window: Window;
+  private readonly cancelledRequests = new Set<string>();
 
   private readonly ignoredDirectories = new Set([
     ".git",
@@ -145,7 +147,22 @@ export class WorkspaceSearch {
         options: SearchOptions = {},
       ) => {
         await this.ensureWorkspaceStorage(rootPath);
-        return await this.search(rootPath, query, options);
+        const requestId = options?.requestId;
+        if (requestId) this.cancelledRequests.delete(requestId);
+        try {
+          return await this.search(rootPath, query, options);
+        } finally {
+          if (requestId) this.cancelledRequests.delete(requestId);
+        }
+      },
+    );
+    ipcMain.handle(
+      "WorkspaceSearch:cancel",
+      async (_event, requestId: string) => {
+        if (typeof requestId === "string" && requestId) {
+          this.cancelledRequests.add(requestId);
+        }
+        return true;
       },
     );
     ipcMain.handle(
@@ -446,6 +463,9 @@ export class WorkspaceSearch {
 
     const includePatterns = this.splitPatterns(options.include);
     const excludePatterns = this.splitPatterns(options.exclude);
+    const useMultilineMatcher = Boolean(
+      options.useRegex && /(?:\\[nr]|[\r\n]|\[\^?[\\s\\S])/.test(query),
+    );
 
     const results: SearchResult[] = [];
     const offset = Math.max(0, Math.floor(options.offset || 0));
@@ -455,6 +475,8 @@ export class WorkspaceSearch {
     let filesSearched = 0;
 
     const walk = async (directory: string): Promise<void> => {
+      if (options.requestId && this.cancelledRequests.has(options.requestId))
+        return;
       if (totalMatches >= this.maxResults) {
         return;
       }
@@ -472,6 +494,8 @@ export class WorkspaceSearch {
       entries.sort((a, b) => a.name.localeCompare(b.name));
 
       for (const entry of entries) {
+        if (options.requestId && this.cancelledRequests.has(options.requestId))
+          return;
         if (totalMatches >= this.maxResults) {
           return;
         }
@@ -532,6 +556,51 @@ export class WorkspaceSearch {
 
           const lines = content.split(/\r?\n/);
 
+          if (useMultilineMatcher) {
+            const matches = matcher(content);
+            const lineStarts = [0];
+            for (let index = 0; index < content.length; index++) {
+              if (content[index] === "\n") lineStarts.push(index + 1);
+            }
+
+            for (const match of matches) {
+              if (
+                options.requestId &&
+                this.cancelledRequests.has(options.requestId)
+              )
+                return;
+              if (totalMatches >= this.maxResults) return;
+              totalMatches++;
+              if (totalMatches <= offset || results.length >= limit) continue;
+
+              let lineIndex = 0;
+              while (
+                lineIndex + 1 < lineStarts.length &&
+                lineStarts[lineIndex + 1] <= match.index
+              ) {
+                lineIndex++;
+              }
+              const line = lines[lineIndex] || "";
+              const column = match.index - lineStarts[lineIndex];
+              const previewLength = Math.min(
+                match.length,
+                Math.max(0, line.length - column),
+              );
+              const preview = this.createPreview(line, column, previewLength);
+              results.push({
+                path: fullPath,
+                relativePath,
+                name: entry.name,
+                line: lineIndex + 1,
+                column,
+                preview: preview.text,
+                matchStart: preview.matchStart,
+                matchLength: match.length,
+              });
+            }
+            continue;
+          }
+
           for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
             if (totalMatches >= this.maxResults) {
               return;
@@ -542,6 +611,11 @@ export class WorkspaceSearch {
             const matches = matcher(line);
 
             for (const match of matches) {
+              if (
+                options.requestId &&
+                this.cancelledRequests.has(options.requestId)
+              )
+                return;
               totalMatches++;
               if (totalMatches <= offset || results.length >= limit) continue;
 
@@ -597,12 +671,17 @@ export class WorkspaceSearch {
         length: number;
       }[])
     | null {
-    const flags = options.caseSensitive ? "g" : "gi";
+    const flags = `${options.caseSensitive ? "g" : "gi"}u`;
+    const wordCharacter = "[\\p{L}\\p{N}\\p{M}\\p{Pc}]";
+    const wordBoundaryPrefix = `(?<!${wordCharacter})`;
+    const wordBoundarySuffix = `(?!${wordCharacter})`;
 
     if (options.useRegex) {
       try {
         const regex = new RegExp(
-          options.wholeWord ? `\\b(?:${query})\\b` : query,
+          options.wholeWord
+            ? `${wordBoundaryPrefix}(?:${query})${wordBoundarySuffix}`
+            : query,
           flags,
         );
 
@@ -614,7 +693,9 @@ export class WorkspaceSearch {
 
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    const expression = options.wholeWord ? `\\b${escaped}\\b` : escaped;
+    const expression = options.wholeWord
+      ? `${wordBoundaryPrefix}${escaped}${wordBoundarySuffix}`
+      : escaped;
 
     const regex = new RegExp(expression, flags);
 
@@ -646,13 +727,32 @@ export class WorkspaceSearch {
       });
 
       if (value.length === 0) {
-        regex.lastIndex++;
+        regex.lastIndex = this.advanceRegexIndexSafely(line, match.index);
       }
     }
 
     regex.lastIndex = 0;
 
     return matches;
+  }
+
+  private advanceRegexIndexSafely(value: string, utf16Offset: number): number {
+    if (utf16Offset >= value.length) return value.length + 1;
+    if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
+      const segmenter = new Intl.Segmenter(undefined, {
+        granularity: "grapheme",
+      });
+      for (const segment of segmenter.segment(value)) {
+        if (segment.index >= utf16Offset)
+          return segment.index + segment.segment.length;
+        if (segment.index + segment.segment.length > utf16Offset)
+          return segment.index + segment.segment.length;
+      }
+    }
+    const codePoint = value.codePointAt(utf16Offset);
+    return (
+      utf16Offset + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1)
+    );
   }
 
   private splitPatterns(value?: string): string[] {

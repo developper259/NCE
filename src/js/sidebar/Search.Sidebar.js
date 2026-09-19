@@ -28,6 +28,7 @@ class SearchSidebar extends Sidebar {
     this.searchTimer = null;
     this.workspaceGeneration = 0;
     this.searchGeneration = 0;
+    this.activeRequestId = null;
   }
 
   render() {
@@ -222,6 +223,10 @@ class SearchSidebar extends Sidebar {
     const rootPath = this.editor.fileExplorer.rootPath;
     const workspaceGeneration = this.workspaceGeneration;
     const searchGeneration = ++this.searchGeneration;
+    const requestId = `workspace-search-${searchGeneration}`;
+    const previousRequestId = this.activeRequestId;
+    this.activeRequestId = requestId;
+    if (previousRequestId) this.editor.api.cancelSearch?.(previousRequestId);
 
     if (!rootPath) {
       this.clearResults();
@@ -242,6 +247,7 @@ class SearchSidebar extends Sidebar {
           caseSensitive: this.caseSensitive,
           wholeWord: this.wholeWord,
           useRegex: this.useRegex,
+          requestId,
         },
       );
 
@@ -262,6 +268,7 @@ class SearchSidebar extends Sidebar {
       this.clearResults();
     } finally {
       if (searchGeneration === this.searchGeneration) {
+        if (this.activeRequestId === requestId) this.activeRequestId = null;
         this.isSearching = false;
         this.refresh();
       }

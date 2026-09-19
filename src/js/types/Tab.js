@@ -27,6 +27,7 @@ class FileNode extends Tab {
     this.isSaved = true;
     this.deletedFromDisk = false;
     this.externalModified = false;
+    this.diskFingerprint = null;
     this.editVersion = 0;
     this.saveQueue = Promise.resolve(true);
 
@@ -102,6 +103,7 @@ class FileNode extends Tab {
     this.isSaved = file.isSaved;
     this.deletedFromDisk = file.deletedFromDisk === true;
     this.externalModified = file.externalModified === true;
+    this.diskFingerprint = file.diskFingerprint || null;
 
     this.historyX = file.historyX;
 
@@ -220,9 +222,9 @@ class FileNode extends Tab {
         ? "File loading failed. Reload the file before saving."
         : error.code === "FILE_CHANGED_ON_DISK"
           ? "File changed on disk. Use Save As to preserve your changes."
-        : error.code === "FILE_NOT_FULLY_LOADED"
-          ? "File is not fully loaded. Save was cancelled."
-          : "Failed to save file.";
+          : error.code === "FILE_NOT_FULLY_LOADED"
+            ? "File is not fully loaded. Save was cancelled."
+            : "Failed to save file.";
     if (typeof alert === "function") alert(message);
     else console.warn(message);
   }
@@ -236,7 +238,11 @@ class FileNode extends Tab {
     return this.saveQueue;
   }
 
-  enqueueSaveSnapshot(content, version, saveFile = this.editor.api.saveFile.bind(this.editor.api)) {
+  enqueueSaveSnapshot(
+    content,
+    version,
+    saveFile = this.editor.api.saveFile.bind(this.editor.api),
+  ) {
     return this.enqueueSaveOperation(() =>
       this.performSaveSnapshot(content, version, saveFile),
     );
@@ -245,7 +251,10 @@ class FileNode extends Tab {
   async performSaveSnapshot(content, version, saveFile) {
     if (version !== this.editVersion) return { saved: false, stale: true };
     if (!(await this.ensureSaveable())) {
-      return { saved: false, error: this.saveError || new Error("Save unavailable") };
+      return {
+        saved: false,
+        error: this.saveError || new Error("Save unavailable"),
+      };
     }
     if (version !== this.editVersion) return { saved: false, stale: true };
     try {

@@ -9,6 +9,7 @@ class tabManager {
 
     this.idCounter = 0;
     this.focusGeneration = 0;
+    this.focusResyncTimer = null;
 
     this.refresh();
   }
@@ -366,6 +367,7 @@ class tabManager {
     if (!file.isLoaded) {
       await file.loadLanguage();
       await file.loadContent();
+      await this.captureDiskFingerprint(file);
     }
 
     if (focusGeneration !== this.focusGeneration) return;
@@ -409,9 +411,60 @@ class tabManager {
       } else {
         file.isLoaded = false;
       }
+      await this.captureDiskFingerprint(file);
     } catch (error) {
       console.error("Error reloading file from disk:", error);
     }
+  }
+
+  async captureDiskFingerprint(file) {
+    const pathStatus = this.editor.fileExplorer?.fileOperations?.pathStatus;
+    if (!file?.path || !pathStatus) return;
+    const status = await pathStatus.call(
+      this.editor.fileExplorer.fileOperations,
+      file.path,
+    );
+    if (status?.exists && !status.isDirectory) {
+      file.diskFingerprint = `${status.size}:${status.mtimeMs}`;
+    }
+  }
+
+  async resyncOpenFiles() {
+    const pathStatus = this.editor.fileExplorer?.fileOperations?.pathStatus;
+    if (!pathStatus) return;
+
+    await Promise.all(
+      this.files.map(async (file) => {
+        if (!file.path || !file.isLoaded) return;
+        const status = await pathStatus.call(
+          this.editor.fileExplorer.fileOperations,
+          file.path,
+        );
+        if (!status?.exists || status.isDirectory) {
+          if (!file.isSaved) {
+            file.externalModified = true;
+            this.refresh();
+          } else {
+            this.markFileAsDeleted(file.path);
+          }
+          return;
+        }
+        const fingerprint = `${status.size}:${status.mtimeMs}`;
+        if (file.diskFingerprint === fingerprint) return;
+        file.diskFingerprint = fingerprint;
+        await this.reloadFileFromDisk(file.path);
+      }),
+    );
+  }
+
+  scheduleFocusResync() {
+    clearTimeout(this.focusResyncTimer);
+    this.focusResyncTimer = setTimeout(() => {
+      this.focusResyncTimer = null;
+      this.resyncOpenFiles().catch((error) =>
+        console.error("Error resyncing files after focus:", error),
+      );
+    }, 150);
   }
 
   async openFileWithPath(path) {
