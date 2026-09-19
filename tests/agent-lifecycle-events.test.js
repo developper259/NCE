@@ -580,6 +580,48 @@ test("lifecycle: context recovery keeps run completed without intermediate faile
   assert.equal(starts[0].payload.requestId, starts[1].payload.requestId);
 });
 
+test("lifecycle: local context rejection does not consume a provider attempt", async () => {
+  const { agent } = setupAgent();
+  const events = collectEvents(agent, [
+    "model:request:start",
+    "model:request:end",
+    "run:end",
+  ]);
+  const originalEstimate =
+    agent.responseBudgetEstimator.estimateResponseBudget.bind(
+      agent.responseBudgetEstimator,
+    );
+  let budgetChecks = 0;
+  agent.responseBudgetEstimator.estimateResponseBudget = (input) => {
+    budgetChecks += 1;
+    const estimate = originalEstimate(input);
+    if (budgetChecks === 1) {
+      return { ...estimate, contextWindow: 1 };
+    }
+    return { ...estimate, contextWindow: 100000 };
+  };
+  let providerCalls = 0;
+  mockChat(agent, async () => {
+    providerCalls += 1;
+    return okResponse("recovered locally");
+  });
+
+  const result = await agent.execute("recover before transport");
+  assert.equal(result.response, "recovered locally");
+  assert.equal(providerCalls, 1);
+  const starts = events.filter((event) => event.type === "model:request:start");
+  assert.equal(starts.length, 1);
+  assert.equal(starts[0].payload.attempt, 1);
+  assert.equal(
+    events.find((event) => event.type === "model:request:end").payload.attempt,
+    1,
+  );
+  assert.equal(
+    events.find((event) => event.type === "run:end").payload.status,
+    "completed",
+  );
+});
+
 test("lifecycle: secret safety across run/model/error payloads", async () => {
   const { agent } = setupAgent({
     apiKey: "SUPER_SECRET_API_KEY",
@@ -595,7 +637,9 @@ test("lifecycle: secret safety across run/model/error payloads", async () => {
   ]);
 
   mockChat(agent, async () => {
-    const err = new Error("unauthorized");
+    const err = new Error(
+      "Invalid API key SUPER_SECRET_API_KEY / Bearer SUPER_SECRET_TOKEN",
+    );
     err.status = 401;
     err.apiKey = "SUPER_SECRET_API_KEY";
     err.authorization = "Bearer SUPER_SECRET_TOKEN";
@@ -617,6 +661,7 @@ test("lifecycle: secret safety across run/model/error payloads", async () => {
   const serialized = JSON.stringify(events);
   assert.equal(serialized.includes("SUPER_SECRET_API_KEY"), false);
   assert.equal(serialized.includes("SUPER_SECRET_TOKEN"), false);
+  assert.equal(serialized.includes("[REDACTED]"), true);
 
   const normalized = agent.normalizeObservableError(
     Object.assign(new Error("x"), {
@@ -718,6 +763,92 @@ test("lifecycle: stop then new run has no stale abort state", async () => {
   assert.equal(agent.isRunning, false);
 });
 
+test("lifecycle: stopped run ends once while its replacement is already active", async () => {
+  const { agent } = setupAgent();
+  const events = collectEvents(agent, [
+    "run:start",
+    "run:end",
+    "model:request:start",
+    "tool:start",
+    "response:token",
+    "response:reasoning",
+  ]);
+  let releaseFirst;
+  let releaseSecond;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  const secondGate = new Promise((resolve) => {
+    releaseSecond = resolve;
+  });
+  let providerCalls = 0;
+  mockChat(agent, async () => {
+    providerCalls += 1;
+    if (providerCalls === 1) await firstGate;
+    if (providerCalls === 2) await secondGate;
+    return okResponse(providerCalls === 1 ? "late-first" : "second");
+  });
+
+  const run1 = agent.execute("slow");
+  while (events.filter((event) => event.type === "run:start").length < 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  agent.stop();
+  const run2 = agent.execute("second");
+  while (events.filter((event) => event.type === "run:start").length < 2) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  const [run1Id, run2Id] = events
+    .filter((event) => event.type === "run:start")
+    .map((event) => event.payload.runId);
+  assert.notEqual(run1Id, run2Id);
+
+  releaseFirst();
+  await assert.rejects(() => run1);
+  assert.equal(agent.activeRunState?.runId, run2Id);
+  releaseSecond();
+  const settled = await Promise.allSettled([run1, run2]);
+  assert.equal(settled[0].status, "rejected");
+  assert.equal(settled[1].status, "fulfilled");
+
+  for (const [runId, status] of [
+    [run1Id, "aborted"],
+    [run2Id, "completed"],
+  ]) {
+    assert.equal(
+      events.filter(
+        (event) => event.type === "run:start" && event.payload.runId === runId,
+      ).length,
+      1,
+    );
+    const ends = events.filter(
+      (event) => event.type === "run:end" && event.payload.runId === runId,
+    );
+    assert.equal(ends.length, 1);
+    assert.equal(ends[0].payload.status, status);
+  }
+
+  const run1EndIndex = events.findIndex(
+    (event) => event.type === "run:end" && event.payload.runId === run1Id,
+  );
+  const operational = new Set([
+    "tool:start",
+    "model:request:start",
+    "response:token",
+    "response:reasoning",
+  ]);
+  assert.equal(
+    events
+      .slice(run1EndIndex + 1)
+      .some(
+        (event) =>
+          operational.has(event.type) && event.payload.runId === run1Id,
+      ),
+    false,
+  );
+  assert.equal(agent.activeRunState, null);
+});
+
 test("lifecycle: legacy callbacks remain functional", async () => {
   const { agent } = setupAgent();
   const calls = {
@@ -768,6 +899,15 @@ test("lifecycle: usage normalization is the single source", () => {
   assert.equal(n({ prompt_tokens: 100, completion_tokens: 20 }).totalTokens, 120);
   assert.equal(n({ input_tokens: 11, output_tokens: 2 }).totalTokens, 13);
   assert.equal(n({ promptTokens: 5, completionTokens: 1 }).totalTokens, 6);
+  const snakeTotal = n({ total_tokens: 123 });
+  assert.equal(snakeTotal.inputTokens, null);
+  assert.equal(snakeTotal.outputTokens, null);
+  assert.equal(snakeTotal.totalTokens, 123);
+  const camelTotal = n({ totalTokens: 123 });
+  assert.equal(camelTotal.inputTokens, null);
+  assert.equal(camelTotal.outputTokens, null);
+  assert.equal(camelTotal.totalTokens, 123);
+  assert.equal(n({}), null);
   assert.equal(n(null), null);
   assert.equal(n(undefined), null);
   assert.equal(

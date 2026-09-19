@@ -19,13 +19,12 @@ class ModelClient {
       usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens,
     );
 
-    if (inputTokens == null && outputTokens == null) {
-      return null;
-    }
-
     const providedTotal = normalizeTokenCount(
       usage.total_tokens ?? usage.totalTokens,
     );
+    if (inputTokens == null && outputTokens == null && providedTotal == null) {
+      return null;
+    }
     const totalTokens =
       providedTotal != null
         ? providedTotal
@@ -414,13 +413,30 @@ class ModelClient {
       retryAfterMs: classified.retryAfterMs,
       retryCount: counters.retryCount || 0,
       fallbackCount: counters.fallbackCount || 0,
-      technicalMessage: classified.technicalMessage,
+      technicalMessage: this.agent.sanitizeObservableText(
+        classified.technicalMessage,
+      ),
     });
   }
 
   emitModelStatus(event, config) {
+    const classification = event?.classification
+      ? {
+          ...event.classification,
+          technicalMessage: this.agent.sanitizeObservableText(
+            event.classification.technicalMessage,
+          ),
+          userMessage: this.agent.sanitizeObservableText(
+            event.classification.userMessage,
+          ),
+          error: event.classification.error
+            ? this.agent.normalizeObservableError(event.classification.error)
+            : null,
+          response: undefined,
+        }
+      : event?.classification;
     this.agent.safeInvokeCallback("onModelStatus", [
-      event,
+      { ...event, classification },
       {
         sessionId: config.sessionId ?? this.agent.currentSessionId,
         runId: config.runId ?? this.agent.runId,
@@ -541,11 +557,9 @@ class ModelClient {
     const requestId =
       config._observabilityRequestId ||
       this.allocateLogicalRequestId(config, "main");
-    const currentAttempt =
-      Number.isFinite(config._observabilityAttempt) &&
-      config._observabilityAttempt > 0
-        ? config._observabilityAttempt
-        : this.nextAttempt(requestId);
+    // All local context/budget checks above have passed. Count the attempt only
+    // now, when a provider transport is genuinely about to start.
+    const currentAttempt = this.nextAttempt(requestId);
 
     const requestStartTime = Date.now();
 
@@ -710,14 +724,10 @@ class ModelClient {
     state.activeRequestId = requestId;
     this.agent.currentModelRequestId = requestId;
 
-    const withObservability = (activeConfig) => {
-      const attempt = this.nextAttempt(requestId);
-      return {
-        ...activeConfig,
-        _observabilityRequestId: requestId,
-        _observabilityAttempt: attempt,
-      };
-    };
+    const withObservability = (activeConfig) => ({
+      ...activeConfig,
+      _observabilityRequestId: requestId,
+    });
 
     try {
       while (state.currentConfig) {

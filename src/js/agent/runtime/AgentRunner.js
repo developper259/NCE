@@ -222,6 +222,9 @@ class AgentRunner {
       }
       throw error;
     } finally {
+      if (this.agent.activeRunState === runState) {
+        this.agent.activeRunState = null;
+      }
       if (runId === this.agent.runId) {
         this.agent.fileKnowledge.clearTransientContent();
         this.agent.largeWriteState = null;

@@ -335,8 +335,27 @@ class Agent {
   }
 
   emitEvent(eventName, payload = {}) {
+    // A terminal event belongs to its own run context and must not be hidden by
+    // a newer active run. Exactly-once remains guarded by runState.ended.
+    if (eventName === "run:end") {
+      this.eventBus.emit(eventName, payload);
+      return;
+    }
+
     const runState = this.activeRunState;
     const payloadRunId = payload?.runId;
+
+    // Once the latest run has been cleaned up, its tracker remains the
+    // lifecycle authority for rejecting late operational notifications.
+    const trackedRun = this.runChangeTracker?.current;
+    if (
+      !runState &&
+      payloadRunId != null &&
+      trackedRun?.runId === payloadRunId &&
+      ["completed", "aborted", "failed"].includes(trackedRun.status)
+    ) {
+      return;
+    }
 
     // After run:end, drop further observability events for that run.
     // run:end itself is allowed through (ended is set before emit).
@@ -399,13 +418,50 @@ class Agent {
     const name = error.name || "Error";
     const code = error.code || null;
     const category = error.category || null;
-    const message = String(error.message || String(error)).slice(0, 1000);
+    const message = this.sanitizeObservableText(
+      error.message || String(error),
+    ).slice(0, 1000);
     return {
       name,
       code,
       category,
       message,
     };
+  }
+  sanitizeObservableText(value) {
+    let text = String(value ?? "");
+    const secrets = new Set();
+    const collectProviderSecrets = (provider) => {
+      if (!provider || typeof provider !== "object") return;
+      if (typeof provider.apiKey === "string" && provider.apiKey) {
+        secrets.add(provider.apiKey);
+      }
+      for (const headers of [provider.headers, provider.requestHeaders]) {
+        if (!headers || typeof headers !== "object" || Array.isArray(headers))
+          continue;
+        for (const [name, rawValue] of Object.entries(headers)) {
+          if (!/authorization|api[-_]?key|token|secret|credential/i.test(name))
+            continue;
+          const headerValue = String(rawValue ?? "").trim();
+          if (!headerValue) continue;
+          secrets.add(headerValue);
+          const bearer = /^Bearer\s+(.+)$/i.exec(headerValue);
+          if (bearer?.[1]) secrets.add(bearer[1]);
+        }
+      }
+    };
+
+    collectProviderSecrets(this.provider);
+    collectProviderSecrets(this.runConfig?.provider);
+    collectProviderSecrets(this.modelRequestState?.currentConfig?.provider);
+    for (const candidate of this.fallbackChain || []) {
+      collectProviderSecrets(candidate?.provider);
+    }
+
+    for (const secret of secrets) {
+      if (secret.length >= 4) text = text.split(secret).join("[REDACTED]");
+    }
+    return text;
   }
   getMutationGuardError(runId = this.runConfig?.runId) {
     if (
