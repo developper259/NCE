@@ -10,6 +10,12 @@ const {
   atomicWriteFile,
 } = require("../dist/ts/addon/FileManager.js");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch.js");
+const {
+  AgentProcessRunner,
+} = require("../dist/ts/addon/AgentProcessRunner.js");
+const {
+  NceWorkspaceStorage,
+} = require("../dist/ts/addon/NceWorkspaceStorage.js");
 
 async function tempWorkspace() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-"));
@@ -22,8 +28,38 @@ async function tempWorkspace() {
     path.join(root, "node_modules", "ignored.js"),
     "target\n",
   );
+  await fsp.mkdir(path.join(root, ".nce", "temp"), { recursive: true });
+  await fsp.writeFile(path.join(root, ".nce", "internal.js"), "target\n");
   return root;
 }
+
+test("NceWorkspaceStorage creates only local cache/temp infrastructure", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-storage-"));
+  try {
+    const storage = new NceWorkspaceStorage(root);
+    assert.equal(await fsp.stat(storage.nceRoot).catch(() => null), null);
+    await storage.writeCacheJson("metadata/value.json", { value: 7 });
+    assert.deepEqual(await storage.readCacheJson("metadata/value.json"), {
+      value: 7,
+    });
+    await fsp.writeFile(storage.getCachePath("broken.json"), "{");
+    assert.equal(await storage.readCacheJson("broken.json"), null);
+    await assert.rejects(() => storage.writeCacheText("../outside", "no"));
+    await assert.rejects(() => storage.writeCacheText("/absolute", "no"));
+    assert.equal(
+      await fsp.readFile(path.join(storage.nceRoot, ".gitignore"), "utf8"),
+      "*\n!.gitignore\n",
+    );
+    assert.deepEqual((await fsp.readdir(root)).sort(), [".nce"]);
+    assert.deepEqual((await fsp.readdir(storage.nceRoot)).sort(), [
+      ".gitignore",
+      "cache",
+      "temp",
+    ]);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
 
 test("FileManager initializes, chunks, saves, and rejects binary/invalid UTF-8", async () => {
   const root = await tempWorkspace();
@@ -80,6 +116,10 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
       result.results.some((entry) => entry.relativePath === "sub/c.js"),
       true,
     );
+    assert.equal(
+      result.results.some((entry) => entry.relativePath.startsWith(".nce/")),
+      false,
+    );
 
     const onlyJs = await search.search(root, "target", { include: "*.js" });
     assert.equal(
@@ -92,6 +132,46 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
       project.entries.some((entry) => entry.name === "node_modules"),
       false,
     );
+    assert.equal(
+      project.entries.some((entry) => entry.name === ".nce"),
+      false,
+    );
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("AgentProcessRunner preserves the complete large validation stream", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-process-output-"));
+  const script = path.join(root, "emit-output.js");
+  await fsp.writeFile(
+    script,
+    [
+      'process.stdout.write("OUTPUT_BEGIN\\n");',
+      `process.stdout.write("${"x".repeat(13000)}\\n");`,
+      'process.stderr.write("OUTPUT_MIDDLE\\n");',
+      'process.stdout.write("OUTPUT_END\\n");',
+    ].join("\n"),
+  );
+  try {
+    const runner = new AgentProcessRunner({
+      agentApprovalManager: {
+        request: async () => ({ decision: "allow" }),
+      },
+    });
+    const result = await runner.run({
+      strategy: "node-script",
+      projectRoot: root,
+      cwd: root,
+      target: script,
+      workspaceRoot: root,
+      maxOutputCharacters: 12000,
+      timeoutMs: 10000,
+    });
+    assert.equal(result.success, true, JSON.stringify(result));
+    assert.match(result.stdout, /OUTPUT_BEGIN/);
+    assert.match(result.stderr, /OUTPUT_MIDDLE/);
+    assert.match(result.stdout, /OUTPUT_END/);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }

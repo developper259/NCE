@@ -92,6 +92,11 @@ class RunChangeTracker {
       : relative;
   }
 
+  isInternalPath(path) {
+    const normalized = this.normalizePath(path || "");
+    return normalized === ".nce" || normalized.startsWith(".nce/");
+  }
+
   changeKeyForPath(path) {
     const normalized = this.normalizePath(path);
     return normalized || path;
@@ -158,6 +163,12 @@ class RunChangeTracker {
 
   addChange(change) {
     if (!this.current) return null;
+    if (
+      this.isInternalPath(
+        change?.path || change?.oldPath || change?.currentPath,
+      )
+    )
+      return null;
     const key = this.changeKeyForPath(
       change?.path || change?.oldPath || change?.currentPath || "",
     );
@@ -263,6 +274,7 @@ class RunChangeTracker {
     if (!this.current || result?.success === false || !result?.path)
       return null;
     const relativePath = this.normalizePath(result.path);
+    if (this.isInternalPath(relativePath)) return null;
     const content =
       typeof result.verification?.content === "string"
         ? result.verification.content
@@ -300,6 +312,7 @@ class RunChangeTracker {
     if (!this.current || result?.success === false || !result?.path)
       return null;
     const relativePath = this.normalizePath(result.path);
+    if (this.isInternalPath(relativePath)) return null;
     const before =
       typeof result.beforeText === "string" ? result.beforeText : null;
     const after =
@@ -339,6 +352,8 @@ class RunChangeTracker {
       return null;
     const oldPath = this.normalizePath(result.oldPath);
     const newPath = this.normalizePath(result.newPath);
+    if (this.isInternalPath(oldPath) || this.isInternalPath(newPath))
+      return null;
     const existing =
       this.current.changes.get(oldPath) || this.current.changes.get(newPath);
     if (existing?.created === true) {
@@ -415,6 +430,7 @@ class RunChangeTracker {
     if (!this.current || result?.success === false || !result?.path)
       return null;
     const relativePath = this.normalizePath(result.path);
+    if (this.isInternalPath(relativePath)) return null;
     const existing = this.current.changes.get(relativePath);
     if (existing && existing.status === "created") {
       this.current.changes.delete(relativePath);
@@ -723,15 +739,17 @@ class RunChangeTracker {
 
   getChangedFiles(args = {}) {
     if (!this.current) return { success: true, files: [], runId: null };
-    const files = [...this.current.changes.values()].map((change) => ({
-      path: change.path,
-      status: change.status,
-      oldPath:
-        change.oldPath ||
-        (change.status === "renamed" ? change.originalPath : undefined),
-      additions: Number.isFinite(change.additions) ? change.additions : 0,
-      deletions: Number.isFinite(change.deletions) ? change.deletions : 0,
-    }));
+    const files = [...this.current.changes.values()]
+      .filter((change) => !this.isInternalPath(change.path))
+      .map((change) => ({
+        path: change.path,
+        status: change.status,
+        oldPath:
+          change.oldPath ||
+          (change.status === "renamed" ? change.originalPath : undefined),
+        additions: Number.isFinite(change.additions) ? change.additions : 0,
+        deletions: Number.isFinite(change.deletions) ? change.deletions : 0,
+      }));
     if (args?.path) {
       const path = this.normalizePath(args.path);
       return {
@@ -848,7 +866,9 @@ class RunChangeTracker {
     }
     const changes = effectivePath
       ? [wanted]
-      : [...this.current.changes.values()];
+      : [...this.current.changes.values()].filter(
+          (change) => !this.isInternalPath(change.path),
+        );
     const diff = [];
     let diffTooLarge = false;
     for (const entry of changes) {

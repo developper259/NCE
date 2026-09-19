@@ -1,8 +1,9 @@
 import { spawn, ChildProcess } from "child_process";
-import { promises as fs } from "fs";
+import { promises as fs, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import path from "path";
 import { ipcMain } from "electron";
 import { Window } from "../Window";
+import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 
 export interface AgentProcessRequest {
   strategy: string;
@@ -15,6 +16,7 @@ export interface AgentProcessRequest {
   sessionId?: string | null;
   timeoutMs?: number;
   maxOutputCharacters?: number;
+  maxStoredOutputCharacters?: number;
 }
 
 export interface AgentProcessResult {
@@ -26,6 +28,11 @@ export interface AgentProcessResult {
   stdout: string;
   stderr: string;
   truncated: boolean;
+  outputStored?: boolean;
+  outputPath?: string;
+  outputCharacters?: number;
+  storageTruncated?: boolean;
+  storageError?: string;
   runtime?: { executable: string; version?: string | null };
   error?: { code: string; message: string };
 }
@@ -34,6 +41,8 @@ const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_OUTPUT_CHARACTERS = 12000;
 const MAX_TIMEOUT_MS = 300000;
 const MAX_OUTPUT_CHARACTERS = 50000;
+const DEFAULT_STORED_OUTPUT_CHARACTERS = 5 * 1024 * 1024;
+const MAX_STORED_OUTPUT_CHARACTERS = 50 * 1024 * 1024;
 const STRATEGY_REGISTRY = {
   "npm-test": { runtime: "npm", command: "package-test" },
   "pnpm-test": { runtime: "pnpm", command: "package-test" },
@@ -82,6 +91,49 @@ export class AgentProcessRunner {
       stderr: "",
       truncated: false,
       error: { code, message },
+    };
+  }
+
+  private createOutputSpool(
+    workspaceRoot: string,
+    runId: string,
+    maxCharacters: number,
+  ) {
+    const storage = new NceWorkspaceStorage(workspaceRoot);
+    const safeRunId = String(runId || "").replace(/[^A-Za-z0-9._-]/g, "_");
+    const root = storage.getRunTempRoot(safeRunId);
+    const outputPath = path.join(root, "run-tests.log");
+    void storage.cleanupTemp(7 * 24 * 60 * 60 * 1000, safeRunId);
+    mkdirSync(root, { recursive: true });
+    writeFileSync(outputPath, "", "utf8");
+    return {
+      outputPath,
+      relativePath: path.posix.join(".nce", "temp", safeRunId, "run-tests.log"),
+      maxCharacters,
+      writtenCharacters: 0,
+      storageTruncated: false,
+      storageError: undefined as string | undefined,
+      append(kind: string, text: string) {
+        if (this.storageError || this.storageTruncated || !text) return;
+        const remaining = this.maxCharacters - this.writtenCharacters;
+        if (remaining <= 0) {
+          this.storageTruncated = true;
+          return;
+        }
+        const value = text.slice(0, remaining);
+        this.writtenCharacters += value.length;
+        if (value.length < text.length) this.storageTruncated = true;
+        const tagged = kind === "stderr" ? `[stderr]\n${value}` : value;
+        try {
+          appendFileSync(this.outputPath, tagged, "utf8");
+        } catch (error) {
+          this.storageError =
+            error instanceof Error ? error.message : String(error);
+        }
+      },
+      async finish() {
+        return this;
+      },
     };
   }
 
@@ -278,6 +330,9 @@ export class AgentProcessRunner {
     const cwd = path.resolve(input.cwd);
     const target = input.target ? path.resolve(input.target) : null;
     try {
+      await new NceWorkspaceStorage(root).ensureStructure();
+    } catch {}
+    try {
       if (
         !(await this.realInside(projectRoot, root)) ||
         !(await this.realInside(cwd, root)) ||
@@ -317,6 +372,16 @@ export class AgentProcessRunner {
         ),
       ),
     );
+    const maxStoredOutputCharacters = Math.min(
+      MAX_STORED_OUTPUT_CHARACTERS,
+      Math.max(
+        maxOutputCharacters,
+        Math.floor(
+          Number(input.maxStoredOutputCharacters) ||
+            DEFAULT_STORED_OUTPUT_CHARACTERS,
+        ),
+      ),
+    );
     const args = this.command(
       input.strategy,
       runtime,
@@ -345,26 +410,98 @@ export class AgentProcessRunner {
     return new Promise((resolve) => {
       let stdout = "";
       let stderr = "";
+      const previews = {
+        stdout: { text: "", head: "", tail: "", truncated: false },
+        stderr: { text: "", head: "", tail: "", truncated: false },
+      };
+      let outputCharacters = 0;
+      let spool: ReturnType<AgentProcessRunner["createOutputSpool"]> | null =
+        null;
+      let storageError: string | undefined;
+      const events: { kind: "stdout" | "stderr"; text: string }[] = [];
       let truncated = false;
       let timedOut = false;
       let settled = false;
-      const append = (kind: "stdout" | "stderr", chunk: Buffer | string) => {
-        const text = String(chunk);
-        const remaining = maxOutputCharacters - stdout.length - stderr.length;
-        if (remaining <= 0) {
-          truncated = true;
+      const appendPreview = (kind: "stdout" | "stderr", text: string) => {
+        const preview = previews[kind];
+        if (
+          !preview.truncated &&
+          preview.text.length + text.length <= maxOutputCharacters
+        ) {
+          preview.text += text;
           return;
         }
-        const value = text.slice(0, remaining);
-        truncated ||= value.length < text.length;
-        if (kind === "stdout") stdout += value;
-        else stderr += value;
+        truncated = true;
+        if (!preview.truncated) {
+          const combined = preview.text + text;
+          const headLimit = Math.floor(maxOutputCharacters * 0.4);
+          preview.head = combined.slice(0, headLimit);
+          preview.tail = combined.slice(-maxOutputCharacters + headLimit);
+          preview.truncated = true;
+          preview.text = "";
+          return;
+        }
+        preview.tail = (preview.tail + text).slice(
+          -Math.ceil(maxOutputCharacters * 0.6),
+        );
       };
-      const finish = (result: AgentProcessResult) => {
+      const append = (kind: "stdout" | "stderr", chunk: Buffer | string) => {
+        const text = String(chunk);
+        outputCharacters += text.length;
+        if (
+          !spool &&
+          stdout.length + stderr.length + text.length <= maxOutputCharacters
+        ) {
+          events.push({ kind, text });
+          appendPreview(kind, text);
+          return;
+        }
+        if (!spool) {
+          try {
+            spool = this.createOutputSpool(
+              root,
+              String(input.requestId || input.runId || `run-${started}`),
+              maxStoredOutputCharacters,
+            );
+            for (const event of events) spool.append(event.kind, event.text);
+            events.length = 0;
+          } catch (error) {
+            spool = null;
+            storageError =
+              error instanceof Error ? error.message : String(error);
+          }
+        }
+        if (spool) spool.append(kind, text);
+        appendPreview(kind, text);
+      };
+      const finish = async (
+        result: Omit<AgentProcessResult, "stdout" | "stderr">,
+      ) => {
         if (settled) return;
         settled = true;
+        if (spool) await spool.finish();
+        stdout = previews.stdout.truncated
+          ? `${previews.stdout.head}\n[output truncated]\n${previews.stdout.tail}`
+          : previews.stdout.text;
+        stderr = previews.stderr.truncated
+          ? `${previews.stderr.head}\n[output truncated]\n${previews.stderr.tail}`
+          : previews.stderr.text;
         if (input.requestId) this.active.delete(input.requestId);
-        resolve(result);
+        resolve({
+          ...result,
+          stdout,
+          stderr,
+          truncated: truncated || Boolean(spool?.storageTruncated),
+          outputStored: Boolean(spool && !spool.storageError),
+          ...(spool && !spool.storageError
+            ? { outputPath: spool.relativePath }
+            : {}),
+          outputCharacters,
+          storageTruncated: Boolean(spool?.storageTruncated),
+          ...(spool?.storageError || storageError
+            ? { storageError: spool?.storageError || storageError }
+            : {}),
+        });
       };
       const child = spawn(runtime.executable, args, {
         cwd,
@@ -381,14 +518,12 @@ export class AgentProcessRunner {
       }, timeoutMs);
       child.on("error", (error: NodeJS.ErrnoException) => {
         clearTimeout(timer);
-        finish({
+        void finish({
           success: false,
           exitCode: null,
           signal: null,
           timedOut,
           durationMs: Date.now() - started,
-          stdout,
-          stderr,
           truncated,
           runtime: { executable: runtime.executable },
           error: {
@@ -399,14 +534,12 @@ export class AgentProcessRunner {
       });
       child.on("close", (exitCode, signal) => {
         clearTimeout(timer);
-        finish({
+        void finish({
           success: true,
           exitCode,
           signal,
           timedOut,
           durationMs: Date.now() - started,
-          stdout,
-          stderr,
           truncated,
           runtime: { executable: runtime.executable },
         });

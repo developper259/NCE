@@ -1137,7 +1137,12 @@ class AgentSidebar extends Sidebar {
           detail = `${runner} · ${target}`;
         } else if (payload?.status === "FAILED") {
           title = "Tests failed";
-          detail = `${runner} · ${target}${Number.isInteger(payload?.exitCode) ? ` · exit code ${payload.exitCode}` : ""}`;
+          const failure = Array.isArray(payload?.failures)
+            ? payload.failures.find((entry) => entry?.message)
+            : null;
+          const failureText =
+            failure?.message || payload?.summary?.message || "";
+          detail = `${failureText || `${runner} · ${target}`}${payload?.outputPath ? ` · output: ${payload.outputPath}` : ""}`;
         } else if (payload?.status === "TIMEOUT") {
           title = "Tests timed out";
         } else if (payload?.status === "INVALID_TARGET") {

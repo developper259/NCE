@@ -2,6 +2,7 @@ import { ipcMain } from "electron";
 import { promises as fs } from "fs";
 import path from "path";
 import { Window } from "../Window";
+import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 
 interface SearchOptions {
   include?: string;
@@ -60,7 +61,11 @@ interface ProjectMapResponse {
   error?: { code: string; message: string };
 }
 
-interface ProjectFileEntry { name: string; path: string; relativePath: string; }
+interface ProjectFileEntry {
+  name: string;
+  path: string;
+  relativePath: string;
+}
 interface ProjectFilesResponse {
   success: boolean;
   entries: ProjectFileEntry[];
@@ -82,20 +87,52 @@ export class WorkspaceSearch {
     ".next",
     ".cache",
     ".turbo",
+    ".nce",
   ]);
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 10000;
   private readonly binaryExtensions = new Set([
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".bmp",
-    ".pdf", ".zip", ".gz", ".tar", ".7z", ".rar", ".exe", ".dll",
-    ".so", ".dylib", ".woff", ".woff2", ".ttf", ".otf", ".mp3",
-    ".wav", ".ogg", ".mp4", ".mov", ".avi", ".webm",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".bmp",
+    ".pdf",
+    ".zip",
+    ".gz",
+    ".tar",
+    ".7z",
+    ".rar",
+    ".exe",
+    ".dll",
+    ".so",
+    ".dylib",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".mp3",
+    ".wav",
+    ".ogg",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".webm",
     ".asar",
   ]);
 
   constructor(window: Window) {
     this.window = window;
+  }
+
+  private async ensureWorkspaceStorage(rootPath: string): Promise<void> {
+    if (typeof rootPath !== "string" || !rootPath.trim()) return;
+    try {
+      await new NceWorkspaceStorage(rootPath).ensureStructure();
+    } catch {}
   }
 
   handleIPC() {
@@ -107,6 +144,7 @@ export class WorkspaceSearch {
         query: string,
         options: SearchOptions = {},
       ) => {
+        await this.ensureWorkspaceStorage(rootPath);
         return await this.search(rootPath, query, options);
       },
     );
@@ -117,15 +155,26 @@ export class WorkspaceSearch {
         rootPath: string,
         targetPath: string,
         options: ProjectMapOptions = {},
-      ) => this.getProjectMap(rootPath, targetPath, options),
+      ) => {
+        await this.ensureWorkspaceStorage(rootPath);
+        return this.getProjectMap(rootPath, targetPath, options);
+      },
     );
-    ipcMain.handle("WorkspaceSearch:projectFiles", async (_event, rootPath: string) =>
-      this.listProjectFiles(rootPath));
+    ipcMain.handle(
+      "WorkspaceSearch:projectFiles",
+      async (_event, rootPath: string) => {
+        await this.ensureWorkspaceStorage(rootPath);
+        return this.listProjectFiles(rootPath);
+      },
+    );
   }
 
   async listProjectFiles(rootPath: string): Promise<ProjectFilesResponse> {
-    const failure = (code: string, message: string): ProjectFilesResponse =>
-      ({ success: false, entries: [], error: { code, message } });
+    const failure = (code: string, message: string): ProjectFilesResponse => ({
+      success: false,
+      entries: [],
+      error: { code, message },
+    });
     if (typeof rootPath !== "string" || !rootPath)
       return failure("INVALID_PATH", "A workspace is required.");
     const root = path.resolve(rootPath);
@@ -139,19 +188,32 @@ export class WorkspaceSearch {
     const entries: ProjectFileEntry[] = [];
     const walk = async (directory: string): Promise<void> => {
       let children;
-      try { children = await fs.readdir(directory, { withFileTypes: true }); }
-      catch { return; }
+      try {
+        children = await fs.readdir(directory, { withFileTypes: true });
+      } catch {
+        return;
+      }
       children.sort((left, right) => left.name.localeCompare(right.name));
       for (const child of children) {
         if (child.isSymbolicLink()) continue;
         const absolutePath = path.join(directory, child.name);
         if (child.isDirectory()) {
-          if (!this.ignoredDirectories.has(child.name)) await walk(absolutePath);
+          if (!this.ignoredDirectories.has(child.name))
+            await walk(absolutePath);
           continue;
         }
-        if (!child.isFile() || path.extname(child.name).toLowerCase() === ".asar") continue;
-        entries.push({ name: child.name, path: absolutePath,
-          relativePath: this.normalizeRelative(path.relative(root, absolutePath)) });
+        if (
+          !child.isFile() ||
+          path.extname(child.name).toLowerCase() === ".asar"
+        )
+          continue;
+        entries.push({
+          name: child.name,
+          path: absolutePath,
+          relativePath: this.normalizeRelative(
+            path.relative(root, absolutePath),
+          ),
+        });
       }
     };
     await walk(root);
@@ -196,13 +258,22 @@ export class WorkspaceSearch {
         fs.realpath(target),
       ]);
       if (!this.isPathInside(realRoot, realTarget)) {
-        return empty("INVALID_PATH", "Le chemin doit rester dans le workspace.");
+        return empty(
+          "INVALID_PATH",
+          "Le chemin doit rester dans le workspace.",
+        );
       }
       if (!(await fs.stat(realTarget)).isDirectory()) {
-        return empty("NOT_A_DIRECTORY", "Le chemin demandé n'est pas un dossier.");
+        return empty(
+          "NOT_A_DIRECTORY",
+          "Le chemin demandé n'est pas un dossier.",
+        );
       }
     } catch {
-      return empty("DIRECTORY_NOT_FOUND", "Le dossier demandé est introuvable.");
+      return empty(
+        "DIRECTORY_NOT_FOUND",
+        "Le dossier demandé est introuvable.",
+      );
     }
 
     const entries: ProjectMapEntry[] = [];
@@ -344,8 +415,14 @@ export class WorkspaceSearch {
       hasMore: false,
     };
 
-    if (typeof rootPath !== "string" || !rootPath || typeof query !== "string" || !query ||
-        !options || typeof options !== "object") {
+    if (
+      typeof rootPath !== "string" ||
+      !rootPath ||
+      typeof query !== "string" ||
+      !query ||
+      !options ||
+      typeof options !== "object"
+    ) {
       return empty;
     }
 
@@ -494,7 +571,7 @@ export class WorkspaceSearch {
             }
           }
         } catch {
-          console.error('fail to fetch file');
+          console.error("fail to fetch file");
         }
       }
     };

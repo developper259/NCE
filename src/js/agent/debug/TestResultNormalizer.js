@@ -77,6 +77,18 @@ class TestResultNormalizer {
       outputHead: bounded.head,
       outputTail: bounded.tail,
       truncated: Boolean(processResult?.truncated || bounded.truncated),
+      outputStored: processResult?.outputStored === true,
+      outputCharacters: processResult?.outputCharacters || raw.length,
+      hasMoreOutput: Boolean(
+        processResult?.outputStored || processResult?.storageTruncated,
+      ),
+      ...(processResult?.outputPath
+        ? { outputPath: processResult.outputPath }
+        : {}),
+      ...(processResult?.storageTruncated ? { storageTruncated: true } : {}),
+      ...(processResult?.storageError
+        ? { storageError: processResult.storageError }
+        : {}),
       reason:
         detection.reason ||
         (status === "UNSAVED_CHANGES"
@@ -108,6 +120,8 @@ class TestResultNormalizer {
       passed: result.summary.passed,
       failed: result.summary.failed,
       truncated: result.truncated,
+      outputStored: result.outputStored,
+      outputCharacters: result.outputCharacters,
     });
     return result;
   }

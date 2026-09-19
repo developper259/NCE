@@ -94,6 +94,7 @@ class TestRunner {
         sessionId: this.agent.currentSessionId || null,
         timeoutMs: limits.timeoutMs,
         maxOutputCharacters: limits.outputCharacters,
+        maxStoredOutputCharacters: limits.maxStoredOutputCharacters,
       });
       return TestResultNormalizer.normalize(
         processResult,

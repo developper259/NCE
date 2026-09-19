@@ -125,8 +125,10 @@ Utilise run_tests lorsque ce tool est disponible pour exécuter l'environnement 
 présent dans le workspace. Il est en lecture seule : il ne modifie pas le code,
 n'installe pas de dépendance et n'accepte pas de commande arbitraire. Un résultat
 PASSED confirme la validation ; FAILED, TIMEOUT, ou une erreur de runner est une
-information bloquante : lis la sortie, corrige le code puis relance run_tests avant
-task_complete. Si le résultat est NO_TEST_ENVIRONMENT, ne tente jamais d'installer une
+d'information bloquante : inspecte d'abord failures, output, outputHead et outputTail.
+Lis outputPath uniquement si ces informations inline sont insuffisantes, puis corrige
+le code et relance run_tests avant task_complete. Si le résultat est NO_TEST_ENVIRONMENT,
+ne tente jamais d'installer une
 dépendance : crée un fichier de validation temporaire avec create_file, appelle
 run_tests avec son path explicite pour le faire exécuter standalone, corrige puis
 relance si nécessaire, supprime le fichier temporaire et termine par get_diff puis

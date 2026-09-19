@@ -416,6 +416,46 @@ test("run_tests executes a detected runner and keeps red tests as validation out
   }
 });
 
+test("internal test logs are readable explicitly but invisible to project state", async () => {
+  const { root, agent } = await setup();
+  try {
+    await fs.mkdir(path.join(root, ".nce", "temp", "run-1"), {
+      recursive: true,
+    });
+    await fs.writeFile(
+      path.join(root, ".nce", "temp", "run-1", "run-tests.log"),
+      "AssertionError: expected 4 but received 5\n",
+    );
+    const read = await agent.readFile(".nce\\temp\\run-1\\run-tests.log");
+    assert.equal(read.success, true, JSON.stringify(read));
+    assert.match(read.content, /expected 4 but received 5/);
+
+    agent.runChangeTracker.beginRun(1, root);
+    assert.equal(
+      agent.runChangeTracker.recordModify({
+        success: true,
+        path: ".nce\\temp\\run-1\\run-tests.log",
+        beforeText: "",
+        afterText: "internal",
+      }),
+      null,
+    );
+    assert.equal(agent.getChangedFiles().files.length, 0);
+
+    const toolMessage = agent.createToolResultMessage("failed-tests", {
+      success: true,
+      result: {
+        status: "FAILED",
+        failures: [{ message: "AssertionError: expected 4 but received 5" }],
+      },
+    });
+    assert.equal(toolMessage.role, "tool");
+    assert.match(toolMessage.content, /expected 4 but received 5/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("delete_file removes only safe workspace files and refreshes project caches", async () => {
   const { root, agent, editor } = await setup();
   const outside = await fs.mkdtemp(
