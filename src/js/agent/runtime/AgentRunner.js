@@ -84,7 +84,7 @@ class AgentRunner {
   }
 
   async execute(userMessage, options = {}) {
-    if (this.agent.isRunning && !this.agent.stopRequested)
+    if (this.agent.isRunning)
       throw new Error("Un agent est déjà en cours d'exécution.");
     if (typeof userMessage !== "string" || !userMessage.trim())
       throw new TypeError("Le message utilisateur est obligatoire.");

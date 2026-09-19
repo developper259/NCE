@@ -598,7 +598,11 @@ class ModelClient {
           unwrapped,
           requestStartTime,
         );
-        return this.agent.recordModelPromptUsage(unwrapped);
+        return this.agent.recordModelPromptUsage(unwrapped, {
+          sessionId,
+          runId: config.runId,
+          requestId,
+        });
       }
       if (typeof this.agent.api?.requestAI === "function") {
         const result = await this.agent.api.requestAI({
@@ -616,7 +620,11 @@ class ModelClient {
           unwrapped,
           requestStartTime,
         );
-        return this.agent.recordModelPromptUsage(unwrapped);
+        return this.agent.recordModelPromptUsage(unwrapped, {
+          sessionId,
+          runId: config.runId,
+          requestId,
+        });
       }
 
       const headers = this.buildProviderHeaders({
@@ -663,7 +671,11 @@ class ModelClient {
         result,
         requestStartTime,
       );
-      return this.agent.recordModelPromptUsage(result);
+      return this.agent.recordModelPromptUsage(result, {
+        sessionId,
+        runId: config.runId,
+        requestId,
+      });
     } catch (error) {
       const isTimeoutAbort =
         error?.name === "AbortError" &&

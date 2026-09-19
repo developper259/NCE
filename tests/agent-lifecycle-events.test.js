@@ -763,89 +763,91 @@ test("lifecycle: stop then new run has no stale abort state", async () => {
   assert.equal(agent.isRunning, false);
 });
 
-test("lifecycle: stopped run ends once while its replacement is already active", async () => {
+test("lifecycle: stop keeps the execution slot until a late provider returns", async () => {
   const { agent } = setupAgent();
   const events = collectEvents(agent, [
     "run:start",
     "run:end",
     "model:request:start",
-    "tool:start",
-    "response:token",
-    "response:reasoning",
+    "model:request:end",
+    "session:info",
   ]);
   let releaseFirst;
-  let releaseSecond;
   const firstGate = new Promise((resolve) => {
     releaseFirst = resolve;
-  });
-  const secondGate = new Promise((resolve) => {
-    releaseSecond = resolve;
   });
   let providerCalls = 0;
   mockChat(agent, async () => {
     providerCalls += 1;
     if (providerCalls === 1) await firstGate;
-    if (providerCalls === 2) await secondGate;
-    return okResponse(providerCalls === 1 ? "late-first" : "second");
+    return providerCalls === 1
+      ? okResponse("late-first", {
+          prompt_tokens: 111,
+          completion_tokens: 11,
+        })
+      : okResponse("second", {
+          prompt_tokens: 222,
+          completion_tokens: 22,
+        });
   });
 
-  const run1 = agent.execute("slow");
-  while (events.filter((event) => event.type === "run:start").length < 1) {
+  const run1 = agent.execute("slow", { sessionId: "session-run-1" });
+  while (
+    events.filter((event) => event.type === "run:start").length < 1 ||
+    providerCalls < 1
+  ) {
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
+  const run1Id = events.find(
+    (event) => event.type === "run:start",
+  ).payload.runId;
   agent.stop();
-  const run2 = agent.execute("second");
-  while (events.filter((event) => event.type === "run:start").length < 2) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  const [run1Id, run2Id] = events
-    .filter((event) => event.type === "run:start")
-    .map((event) => event.payload.runId);
-  assert.notEqual(run1Id, run2Id);
+
+  await assert.rejects(
+    () => agent.execute("second", { sessionId: "session-run-2" }),
+    /Un agent est déjà en cours d'exécution\./,
+  );
+  assert.equal(agent.isRunning, true);
+  assert.equal(providerCalls, 1);
+  assert.equal(events.filter((event) => event.type === "run:start").length, 1);
 
   releaseFirst();
   await assert.rejects(() => run1);
-  assert.equal(agent.activeRunState?.runId, run2Id);
-  releaseSecond();
-  const settled = await Promise.allSettled([run1, run2]);
-  assert.equal(settled[0].status, "rejected");
-  assert.equal(settled[1].status, "fulfilled");
-
-  for (const [runId, status] of [
-    [run1Id, "aborted"],
-    [run2Id, "completed"],
-  ]) {
-    assert.equal(
-      events.filter(
-        (event) => event.type === "run:start" && event.payload.runId === runId,
-      ).length,
-      1,
-    );
-    const ends = events.filter(
-      (event) => event.type === "run:end" && event.payload.runId === runId,
-    );
-    assert.equal(ends.length, 1);
-    assert.equal(ends[0].payload.status, status);
-  }
-
-  const run1EndIndex = events.findIndex(
+  assert.equal(agent.isRunning, false);
+  const run1Ends = events.filter(
     (event) => event.type === "run:end" && event.payload.runId === run1Id,
   );
-  const operational = new Set([
-    "tool:start",
-    "model:request:start",
-    "response:token",
-    "response:reasoning",
-  ]);
-  assert.equal(
-    events
-      .slice(run1EndIndex + 1)
-      .some(
-        (event) =>
-          operational.has(event.type) && event.payload.runId === run1Id,
-      ),
-    false,
+  assert.equal(run1Ends.length, 1);
+  assert.equal(run1Ends[0].payload.status, "aborted");
+
+  const result = await agent.execute("second", {
+    sessionId: "session-run-2",
+  });
+  assert.equal(result.response, "second");
+  const starts = events.filter((event) => event.type === "run:start");
+  const run2Id = starts[1].payload.runId;
+  assert.notEqual(run1Id, run2Id);
+  assert.equal(starts.length, 2);
+  assert.equal(starts[0].payload.sessionId, "session-run-1");
+  assert.equal(starts[1].payload.sessionId, "session-run-2");
+  const run2Ends = events.filter(
+    (event) => event.type === "run:end" && event.payload.runId === run2Id,
   );
+  assert.equal(run2Ends.length, 1);
+  assert.equal(run2Ends[0].payload.status, "completed");
+
+  const run2SessionEvents = events.filter(
+    (event) =>
+      event.type === "session:info" && event.payload.runId === run2Id,
+  );
+  assert.ok(run2SessionEvents.length >= 1);
+  for (const event of run2SessionEvents) {
+    assert.equal(event.payload.sessionId, "session-run-2");
+    assert.equal(event.payload.actualPromptTokens, 222);
+    assert.notEqual(event.payload.actualPromptTokens, 111);
+  }
+  assert.equal(agent.cumulativeActualPromptTokens, 222);
+  assert.equal(providerCalls, 2);
   assert.equal(agent.activeRunState, null);
 });
 

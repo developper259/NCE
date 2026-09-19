@@ -1036,7 +1036,7 @@ class Agent {
     }
     return result;
   }
-  recordModelPromptUsage(result) {
+  recordModelPromptUsage(result, context = {}) {
     const usage = result?.usage || result?.data?.usage || null;
     const normalized = this.modelClient.normalizeModelUsage(usage);
     const actualPromptTokens = normalized?.inputTokens;
@@ -1064,11 +1064,12 @@ class Agent {
     }
 
     const sessionInfo = {
-      sessionId: this.currentSessionId,
-      runId: this.runId,
+      sessionId: context.sessionId ?? this.currentSessionId,
+      runId: context.runId ?? this.runId,
       requestId:
+        context.requestId ||
         this.currentModelRequestId ||
-        `${this.runId}:main:${this.modelRequestCounter}`,
+        `${context.runId ?? this.runId}:main:${this.modelRequestCounter}`,
       estimatedPromptTokens: Number(
         this.lastContextMetrics?.estimatedModelTokens ??
           this.lastContextMetrics?.estimatedInputTokens,
