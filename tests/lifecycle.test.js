@@ -59,7 +59,7 @@ for (const choices of [[], ['save'], ['dontSave'], ['cancel'], ['save', 'dontSav
     assert.equal(cancelled, choices.includes('cancel') ? 1 : 0);
     assert.equal(editor.tabManager.files, files);
     assert.equal(editor.tabManager.activeFile, files[0]);
-    if (approved) assert.equal(snapshot.tabManager.files.length, files.length);
+    if (approved) assert.equal(snapshot.noWorkspaceState.tabManager.files.length, files.length);
   });
 }
 for (const failure of ['save-false', 'save-throws', 'state-false', 'state-throws']) {
@@ -84,7 +84,7 @@ for (const failure of ['save-false', 'save-throws', 'state-false', 'state-throws
 test('serialization failure never overwrites the previous state with {}', async () => {
   let writes = 0;
   const manager = new StatesManager({ api: { saveEditorState: async () => writes++ } });
-  manager.getState = () => { throw Error('serialization failed'); };
+  manager.getGlobalState = () => { throw Error('serialization failed'); };
   const originalError = console.error; console.error = () => {};
   try { assert.equal(await manager.save(), false); assert.equal(writes, 0); }
   finally { console.error = originalError; }

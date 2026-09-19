@@ -61,6 +61,43 @@ test("NceWorkspaceStorage creates only local cache/temp infrastructure", async (
   }
 });
 
+test("workspace state is atomic, version-preserving, and corruption-safe", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-state-"));
+  try {
+    const storage = new NceWorkspaceStorage(root);
+    const original = { version: 1, tabManager: { tabs: [{ id: 1 }] } };
+    await storage.writeWorkspaceState(original);
+    assert.deepEqual(await storage.readWorkspaceState(), original);
+    assert.equal(
+      await fsp.readFile(path.join(root, ".nce", ".gitignore"), "utf8"),
+      "*\n!.gitignore\n",
+    );
+
+    const rename = fsp.rename;
+    fsp.rename = async () => { throw new Error("injected rename failure"); };
+    try {
+      await assert.rejects(() =>
+        storage.writeWorkspaceState({ version: 1, tabManager: { tabs: [] } }),
+      );
+    } finally {
+      fsp.rename = rename;
+    }
+    assert.deepEqual(await storage.readWorkspaceState(), original);
+    assert.equal(
+      (await fsp.readdir(path.join(root, ".nce"))).some((name) => name.endsWith(".tmp")),
+      false,
+    );
+
+    await fsp.writeFile(storage.workspaceStatePath, "{ invalid", "utf8");
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    try { assert.equal(await storage.readWorkspaceState(), null); }
+    finally { console.warn = originalWarn; }
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("FileManager initializes, chunks, saves, and rejects binary/invalid UTF-8", async () => {
   const root = await tempWorkspace();
   try {

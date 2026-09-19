@@ -264,8 +264,19 @@ class FileExplorer extends Sidebar {
     }
   }
 
-  async closeProject() {
+  async closeProject({ switching = false } = {}) {
     if (!this.rootPath) return;
+
+    if (!switching) {
+      if (!(await this.editor.tabManager.prepareForQuit())) return false;
+      await this.editor.statesManager.saveWorkspaceState(this.rootPath);
+      this.editor.statesManager.persistenceSuspended = true;
+      try {
+        await this.editor.tabManager.closeFiles({ skipPrepare: true });
+      } finally {
+        this.editor.statesManager.persistenceSuspended = false;
+      }
+    }
 
     this.editor.agent?.stop?.();
     await window.api.stopWatching();
@@ -283,6 +294,14 @@ class FileExplorer extends Sidebar {
         projectName: previousProjectName,
       });
     }
+    if (!switching) {
+      await this.editor.statesManager.restoreNoWorkspaceState(
+        this.editor.statesManager.noWorkspaceState,
+      );
+      this.editor.statesManager.lastWorkspace = null;
+      await this.editor.statesManager.saveGlobalState();
+    }
+    return true;
   }
 
   render() {
@@ -561,15 +580,30 @@ class FileExplorer extends Sidebar {
       return true;
     }
 
-    if (!(await this.editor.tabManager.closeFiles())) return false;
+    if (!(await this.editor.tabManager.prepareForQuit())) return false;
 
-    this.editor.searchSidebar?.resetWorkspace?.();
-    if (this.rootPath) await this.closeProject();
+    const previousRoot = this.rootPath;
+    if (previousRoot)
+      await this.editor.statesManager.saveWorkspaceState(previousRoot);
+    else {
+      this.editor.statesManager.noWorkspaceState =
+        this.editor.statesManager.getNoWorkspaceState();
+    }
+    this.editor.statesManager.persistenceSuspended = true;
+    try {
+      await this.editor.tabManager.closeFiles({ skipPrepare: true });
+      this.editor.searchSidebar?.resetWorkspace?.();
+      if (this.rootPath) await this.closeProject({ switching: true });
 
-    this.isLoaded = false;
-    if (!(await this.loadProject(folderPath))) return false;
+      this.isLoaded = false;
+      if (!(await this.loadProject(folderPath))) return false;
+    } finally {
+      this.editor.statesManager.persistenceSuspended = false;
+    }
 
-    const stateSaved = await this.editor.statesManager.save();
+    await this.editor.statesManager.loadWorkspaceState(folderPath);
+    this.editor.statesManager.lastWorkspace = folderPath;
+    const stateSaved = await this.editor.statesManager.saveGlobalState();
     await this.editor.api.addRecentFolder?.(folderPath);
     return stateSaved !== false;
   }

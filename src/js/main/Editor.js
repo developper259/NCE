@@ -311,7 +311,8 @@ class Editor {
   initLoadState() {
     let loaded = false;
     const apply = async (state) => {
-      if (!state || loaded) {
+      if (loaded) return;
+      if (!state) {
         if (this.isOnInit)
           this.events.callEvent(Events.ON_LOADED, {
             isStateLoaded: false,

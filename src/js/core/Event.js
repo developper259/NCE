@@ -115,11 +115,9 @@ class Events {
     this.editor.titleBar?.refresh();
   }
   onOpenProject(arg) {
-    this.editor.statesManager.save();
     this.editor.titleBar?.refresh();
   }
   onCloseProject(arg) {
-    this.editor.statesManager.save();
     this.editor.titleBar?.refresh();
   }
   onLoaded(arg) {

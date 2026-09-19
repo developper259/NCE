@@ -4,6 +4,7 @@ import path from "path";
 const NCE_DIRECTORY = ".nce";
 const CACHE_DIRECTORY = "cache";
 const TEMP_DIRECTORY = "temp";
+const WORKSPACE_STATE_FILE = "workspace.json";
 
 export class NceWorkspaceStorage {
   readonly workspaceRoot: string;
@@ -50,6 +51,37 @@ export class NceWorkspaceStorage {
       await fs.access(ignorePath);
     } catch {
       await fs.writeFile(ignorePath, "*\n!.gitignore\n", "utf8");
+    }
+  }
+
+  get workspaceStatePath(): string {
+    return path.join(this.nceRoot, WORKSPACE_STATE_FILE);
+  }
+
+  async writeWorkspaceState(value: unknown): Promise<string> {
+    await this.ensureStructure();
+    const target = this.workspaceStatePath;
+    const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await fs.writeFile(temporary, JSON.stringify(value), "utf8");
+      await fs.rename(temporary, target);
+      return target;
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async readWorkspaceState<T>(): Promise<T | null> {
+    try {
+      return JSON.parse(await fs.readFile(this.workspaceStatePath, "utf8")) as T;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT")
+        console.warn("[NCE Workspace State] Unable to load state", {
+          root: this.workspaceRoot,
+          error: error?.message || String(error),
+        });
+      return null;
     }
   }
 

@@ -380,7 +380,7 @@ test("deleted workspace is invalidated and a new workspace can open", async () =
   assert.equal(explorer.projectName, "new-project");
 });
 
-test("state restoration skips a workspace that no longer exists", async () => {
+test("workspace UI restoration never reopens the project", async () => {
   const StatesManager = loadGlobal(
     "src/js/manager/StatesManager.js",
     "StatesManager",
@@ -401,5 +401,5 @@ test("state restoration skips a workspace that no longer exists", async () => {
     rootPath: "/missing",
     expandedPaths: ["/missing/sub"],
   });
-  assert.equal(attempts, 1);
+  assert.equal(attempts, 0);
 });

@@ -74,9 +74,12 @@ function workspaceFixture({ closeResult = true, targetExists = true } = {}) {
     tabs,
     activeTab: tabs[1],
     activeFile: null,
-    async closeFiles() {
+    async prepareForQuit() {
       calls.push("dirty-flow");
-      if (!closeResult) return false;
+      return closeResult;
+    },
+    async closeFiles({ skipPrepare } = {}) {
+      assert.equal(skipPrepare, true);
       this.tabs.length = 0;
       this.activeTab = null;
       this.activeFile = null;
@@ -98,10 +101,14 @@ function workspaceFixture({ closeResult = true, targetExists = true } = {}) {
       tabManager,
       searchSidebar: { resetWorkspace: () => calls.push("reset-search") },
       statesManager: {
-        save: async () => {
-          calls.push(`save-state:${explorer.rootPath}:${tabManager.tabs.length}`);
+        noWorkspaceState: null,
+        getNoWorkspaceState: () => ({ tabs: [...tabManager.tabs] }),
+        saveWorkspaceState: async (root) => {
+          calls.push(`save-workspace:${root}:${tabManager.tabs.length}`);
           return true;
         },
+        loadWorkspaceState: async (root) => calls.push(`restore:${root}`),
+        saveGlobalState: async () => { calls.push("save-global"); return true; },
       },
       api: {
         addRecentFolder: async (folder) => calls.push(`add:${folder}`),
@@ -130,10 +137,12 @@ test("workspace switch clears every old tab and persists only the new workspace"
   assert.equal(tabManager.activeFile, null);
   assert.deepEqual(calls, [
     "dirty-flow",
+    "save-workspace:/projects/A:2",
     "reset-search",
     "close-workspace",
     "load:/projects/B",
-    "save-state:/projects/B:0",
+    "restore:/projects/B",
+    "save-global",
     "add:/projects/B",
   ]);
 });

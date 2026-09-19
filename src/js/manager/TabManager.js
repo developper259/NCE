@@ -175,8 +175,8 @@ class tabManager {
     return true;
   }
 
-  async closeFiles() {
-    if (!(await this.prepareForQuit())) return false;
+  async closeFiles({ skipPrepare = false } = {}) {
+    if (!skipPrepare && !(await this.prepareForQuit())) return false;
     for (const file of this.files)
       this.editor.fileLoader.cancelLoading(file.path);
     this.editor.highlightController.closeAllFiles();

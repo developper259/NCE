@@ -94,8 +94,9 @@ test("worker and client source contain timeout and reconnect cleanup paths", () 
 
 test("startup state restore awaits the File Explorer project", () => {
   const states = read("src/js/manager/StatesManager.js");
-  assert.match(states, /await this\.loadFileExplorerState\(state\.fileExplorer\)/);
-  assert.match(states, /await fileExplorer\.loadProject\(explorerState\.rootPath\)/);
+  assert.match(states, /await this\.editor\.fileExplorer\?\.loadProject/);
+  assert.match(states, /return this\.loadWorkspaceState\(this\.lastWorkspace\)/);
+  assert.doesNotMatch(states, /loadFileExplorerState[\s\S]*loadProject/);
 });
 
 test("Watcher batches events and can retarget a recreated BrowserWindow", () => {

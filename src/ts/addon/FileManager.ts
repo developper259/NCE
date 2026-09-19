@@ -7,6 +7,7 @@ import {
   safeStorage,
 } from "electron";
 import { Window } from "../Window";
+import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
@@ -146,6 +147,7 @@ export class FileManager {
   window: Window;
   private fileCache: Map<string, string[]> = new Map();
   private stateSaveQueue: Promise<boolean> = Promise.resolve(true);
+  private workspaceStateSaveQueues: Map<string, Promise<boolean>> = new Map();
 
   constructor(window: Window) {
     this.window = window;
@@ -283,6 +285,18 @@ export class FileManager {
     ipcMain.handle("FileManager:loadState", async () => {
       return (await this.loadState()) ?? null;
     });
+
+    ipcMain.handle(
+      "FileManager:saveWorkspaceState",
+      async (_event, workspaceRoot: string, state: object) =>
+        this.saveWorkspaceState(workspaceRoot, state),
+    );
+
+    ipcMain.handle(
+      "FileManager:loadWorkspaceState",
+      async (_event, workspaceRoot: string) =>
+        this.loadWorkspaceState(workspaceRoot),
+    );
 
     ipcMain.handle(
       "FileManager:getAgentApiKey",
@@ -1062,6 +1076,45 @@ export class FileManager {
       console.error("Error loading editor state:", error);
       return null;
     }
+  }
+
+  async saveWorkspaceState(
+    workspaceRoot: string,
+    state: object,
+  ): Promise<boolean> {
+    if (!validPath(workspaceRoot) || !state || typeof state !== "object")
+      return false;
+    const key = path.resolve(workspaceRoot);
+    const previous = this.workspaceStateSaveQueues.get(key) || Promise.resolve(true);
+    const next = previous
+      .catch(() => false)
+      .then(() => this.writeWorkspaceState(workspaceRoot, state));
+    this.workspaceStateSaveQueues.set(key, next);
+    return next.finally(() => {
+      if (this.workspaceStateSaveQueues.get(key) === next)
+        this.workspaceStateSaveQueues.delete(key);
+    });
+  }
+
+  private async writeWorkspaceState(
+    workspaceRoot: string,
+    state: object,
+  ): Promise<boolean> {
+    try {
+      await new NceWorkspaceStorage(workspaceRoot).writeWorkspaceState(state);
+      return true;
+    } catch (error) {
+      console.error("[NCE Workspace State] Unable to save state", {
+        root: workspaceRoot,
+        error,
+      });
+      return false;
+    }
+  }
+
+  async loadWorkspaceState(workspaceRoot: string): Promise<object | null> {
+    if (!validPath(workspaceRoot)) return null;
+    return new NceWorkspaceStorage(workspaceRoot).readWorkspaceState<object>();
   }
 
   private getSecretsPath(): string {

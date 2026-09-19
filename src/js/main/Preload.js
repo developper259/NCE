@@ -109,6 +109,12 @@ contextBridge.exposeInMainWorld("api", {
 
   loadEditorState: () => ipcRenderer.invoke("FileManager:loadState"),
 
+  saveWorkspaceState: (workspaceRoot, state) =>
+    ipcRenderer.invoke("FileManager:saveWorkspaceState", workspaceRoot, state),
+
+  loadWorkspaceState: (workspaceRoot) =>
+    ipcRenderer.invoke("FileManager:loadWorkspaceState", workspaceRoot),
+
   getAgentApiKey: (providerId) =>
     ipcRenderer.invoke("FileManager:getAgentApiKey", providerId),
 
