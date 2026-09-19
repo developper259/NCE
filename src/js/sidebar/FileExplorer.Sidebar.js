@@ -583,9 +583,12 @@ class FileExplorer extends Sidebar {
     if (!(await this.editor.tabManager.prepareForQuit())) return false;
 
     const previousRoot = this.rootPath;
-    if (previousRoot)
-      await this.editor.statesManager.saveWorkspaceState(previousRoot);
-    else {
+    if (previousRoot) {
+      // Persist the current workspace while its tabs, explorer and sidebar are
+      // still intact. A failed snapshot must not partially switch workspaces.
+      const saved = await this.editor.statesManager.saveWorkspaceState(previousRoot);
+      if (saved === false) return false;
+    } else {
       this.editor.statesManager.noWorkspaceState =
         this.editor.statesManager.getNoWorkspaceState();
     }

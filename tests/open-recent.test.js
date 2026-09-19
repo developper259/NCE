@@ -63,7 +63,11 @@ test("Windows recent paths compare case-insensitively across separators", async 
   }
 });
 
-function workspaceFixture({ closeResult = true, targetExists = true } = {}) {
+function workspaceFixture({
+  closeResult = true,
+  targetExists = true,
+  stateSaveResult = true,
+} = {}) {
   const FileExplorer = loadFileExplorer();
   const calls = [];
   const tabs = [
@@ -105,7 +109,7 @@ function workspaceFixture({ closeResult = true, targetExists = true } = {}) {
         getNoWorkspaceState: () => ({ tabs: [...tabManager.tabs] }),
         saveWorkspaceState: async (root) => {
           calls.push(`save-workspace:${root}:${tabManager.tabs.length}`);
-          return true;
+          return stateSaveResult;
         },
         loadWorkspaceState: async (root) => calls.push(`restore:${root}`),
         saveGlobalState: async () => { calls.push("save-global"); return true; },
@@ -154,6 +158,22 @@ test("Cancel keeps the current workspace, tabs and recent history unchanged", as
   assert.equal(explorer.rootPath, "/projects/A");
   assert.deepEqual(tabManager.tabs, originalTabs);
   assert.deepEqual(calls, ["dirty-flow"]);
+});
+
+test("a failed workspace snapshot aborts the switch before any state is cleared", async () => {
+  const { explorer, tabManager, calls } = workspaceFixture({
+    stateSaveResult: false,
+  });
+  const originalTabs = [...tabManager.tabs];
+
+  assert.equal(await explorer.requestWorkspaceSwitch("/projects/B"), false);
+  assert.equal(explorer.rootPath, "/projects/A");
+  assert.deepEqual(tabManager.tabs, originalTabs);
+  assert.equal(tabManager.activeTab, originalTabs[1]);
+  assert.deepEqual(calls, [
+    "dirty-flow",
+    "save-workspace:/projects/A:2",
+  ]);
 });
 
 test("the active workspace is promoted without resetting tabs or services", async () => {
