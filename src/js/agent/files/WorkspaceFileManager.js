@@ -1644,6 +1644,86 @@ class WorkspaceFileManager {
     return result;
   }
 
+  async resolveReadSource(absolutePath, openFile) {
+    const loader = this.agent.editor?.fileLoader;
+    let state = openFile
+      ? openFile.loadingState || loader?.getState?.(openFile.path)
+      : null;
+    let fallbackReason = null;
+    if (openFile && state?.status === "loading") {
+      try {
+        await loader?.waitForFileLoaded?.(openFile);
+      } catch (error) {
+        fallbackReason = error?.code || "FILE_NOT_FULLY_LOADED";
+      }
+      state = openFile.loadingState || loader?.getState?.(openFile.path);
+    }
+    const editorComplete =
+      openFile &&
+      (state
+        ? state.status === "loaded" &&
+          state.loadedLineCount === state.expectedTotalLines &&
+          Array.isArray(openFile.lines)
+        : typeof loader?.getState !== "function" &&
+          (openFile.isSaved === false || openFile.isLoaded !== false) &&
+          Array.isArray(openFile.lines));
+    if (editorComplete) {
+      const result = {
+        kind: "editor",
+        content: openFile.lines.map((line) => line.getText()).join("\n"),
+      };
+      this.logReadSource(absolutePath, openFile, true, result);
+      return result;
+    }
+
+    if (openFile) {
+      fallbackReason ||= state?.status === "failed"
+        ? state.error?.code || "FILE_LOAD_FAILED"
+        : "FILE_NOT_FULLY_LOADED";
+    }
+    let content;
+    let filesystemError = null;
+    try {
+      content = (await this.agent.api?.getFileContent?.([absolutePath]))?.[
+        absolutePath
+      ];
+    } catch (error) {
+      filesystemError = error;
+    }
+    const result = {
+      kind: "filesystem",
+      content,
+      ...(fallbackReason ? { fallbackReason } : {}),
+      ...(filesystemError ? { filesystemError } : {}),
+    };
+    this.logReadSource(absolutePath, openFile, false, result);
+    return result;
+  }
+
+  logReadSource(absolutePath, openFile, editorLoaded, source) {
+    console.info("[NCE Agent read source]", {
+      path: this.agent.toProjectRelativePath(
+        absolutePath,
+        this.agent.editor?.fileExplorer?.rootPath,
+      ),
+      editorOpen: Boolean(openFile),
+      editorLoaded,
+      selectedSource: source.kind,
+      ...(source.fallbackReason
+        ? { fallbackReason: source.fallbackReason }
+        : {}),
+    });
+  }
+
+  withReadSourceMetadata(result, source) {
+    if (!source.fallbackReason) return result;
+    return {
+      ...result,
+      editorFallback: true,
+      editorFallbackReason: source.fallbackReason,
+    };
+  }
+
   async readFile(filePath, options = {}) {
     const root = this.agent.editor?.fileExplorer?.rootPath;
     const absolute = this.agent.resolveWorkspacePath(filePath, root);
@@ -1661,12 +1741,23 @@ class WorkspaceFileManager {
         },
       };
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(absolute);
-    if (openFile) {
-      await this.agent.editor?.fileLoader?.waitForFileLoaded?.(openFile);
+    const source = await this.resolveReadSource(absolute, openFile);
+    const openFileContent = source.kind === "editor" ? source.content : null;
+    const currentContent = source.content;
+    if (typeof currentContent !== "string") {
+      return {
+        success: false,
+        error: {
+          code: "FILE_READ_FAILED",
+          message: source.fallbackReason
+            ? `Impossible de lire le fichier depuis l'éditeur (${source.fallbackReason}) ou le filesystem: ${filePath}`
+            : `Impossible de lire le fichier depuis le filesystem: ${filePath}`,
+        },
+        ...(source.fallbackReason
+          ? { editorFallback: true, editorFallbackReason: source.fallbackReason }
+          : {}),
+      };
     }
-    const openFileContent = openFile
-      ? openFile.lines.map((line) => line.getText()).join("\n")
-      : null;
     const requestedRange = this.agent.fileKnowledge.normalizeRange(
       options.startLine,
       options.endLine,
@@ -1680,10 +1771,7 @@ class WorkspaceFileManager {
         startColumn: Number.isInteger(options.startColumn)
           ? Math.max(0, options.startColumn)
           : 0,
-        currentRevision:
-          typeof openFileContent === "string"
-            ? this.agent.getContentRevision(openFileContent)
-            : null,
+        currentRevision: this.agent.getContentRevision(currentContent),
       },
     );
     if (readDecision.alreadyKnown) {
@@ -1717,14 +1805,9 @@ class WorkspaceFileManager {
             (range) => range.startLine <= nextLine && range.endLine >= nextLine,
           );
         if (!alreadyVisible) {
-          const source =
-            typeof openFileContent === "string"
-              ? openFileContent
-              : (await this.agent.api?.getFileContent?.([absolute]))?.[
-                  absolute
-                ];
-          if (typeof source === "string") {
-            const revision = this.agent.getContentRevision(source);
+          const continuationContent = currentContent;
+          if (typeof continuationContent === "string") {
+            const revision = this.agent.getContentRevision(continuationContent);
             if (revision !== restored.revision) {
               this.agent.fileKnowledge.invalidateFile(
                 absolute,
@@ -1733,7 +1816,7 @@ class WorkspaceFileManager {
               );
               return this.readFile(filePath, options);
             }
-            const lines = source.split(/\r?\n/);
+            const lines = continuationContent.split(/\r?\n/);
             const fresh = [];
             let chars = 0;
             for (
@@ -1770,48 +1853,44 @@ class WorkspaceFileManager {
                 content: added,
                 diskRead: typeof openFileContent !== "string",
               });
-              return {
-                ...restored,
-                readDecision: "RESTORED_AND_NEW",
-                informationGain: "PARTIAL_NEW_CONTENT",
-                content: `${restored.content}\n${added}`,
-                contentEndLine: end,
-                endLine: end,
-                completeLineRange: {
-                  startLine: restored.contentStartLine,
+              return this.withReadSourceMetadata(
+                {
+                  ...restored,
+                  readDecision: "RESTORED_AND_NEW",
+                  informationGain: "PARTIAL_NEW_CONTENT",
+                  content: `${restored.content}\n${added}`,
+                  contentEndLine: end,
                   endLine: end,
+                  completeLineRange: {
+                    startLine: restored.contentStartLine,
+                    endLine: end,
+                  },
+                  deliveredRange: {
+                    startLine: restored.contentStartLine,
+                    endLine: end,
+                  },
+                  nextStartLine:
+                    end < requestedRange.endLine && end < lines.length
+                      ? end + 1
+                      : null,
+                  hasMore: end < requestedRange.endLine,
+                  informationSource:
+                    typeof openFileContent === "string"
+                      ? "runtime_cache+editor"
+                      : "runtime_cache+filesystem",
                 },
-                deliveredRange: {
-                  startLine: restored.contentStartLine,
-                  endLine: end,
-                },
-                nextStartLine:
-                  end < requestedRange.endLine && end < lines.length
-                    ? end + 1
-                    : null,
-                hasMore: end < requestedRange.endLine,
-                informationSource:
-                  typeof openFileContent === "string"
-                    ? "runtime_cache+editor"
-                    : "runtime_cache+filesystem",
-              };
+                source,
+              );
             }
           }
         }
       }
-      return restored;
+      return this.withReadSourceMetadata(restored, source);
     }
 
-    const cachedSource = this.agent.fileKnowledge.getTransientSource(
-      absolute,
-      readDecision.entry?.revision,
-    );
-    const content =
-      typeof openFileContent === "string"
-        ? openFileContent
-        : cachedSource !== null
-          ? cachedSource
-          : (await this.agent.api?.getFileContent?.([absolute]))?.[absolute];
+    const informationSource =
+      source.kind === "editor" ? "editor" : "filesystem";
+    const content = currentContent;
     if (typeof content === "string") {
       this.agent.fileKnowledge.setTransientSource(
         absolute,
@@ -1860,8 +1939,13 @@ class WorkspaceFileManager {
           completeLineRange: null,
           totalLines,
           revision: this.agent.getContentRevision(content),
-          informationSource:
-            typeof openFileContent === "string" ? "editor" : "filesystem",
+          informationSource,
+          ...(source.fallbackReason
+            ? {
+                editorFallback: true,
+                editorFallbackReason: source.fallbackReason,
+              }
+            : {}),
           truncated: false,
           hasMore: false,
           nextStartLine: null,
@@ -1924,8 +2008,13 @@ class WorkspaceFileManager {
           lineTruncated: true,
           totalLines,
           revision,
-          informationSource:
-            typeof openFileContent === "string" ? "editor" : "filesystem",
+          informationSource,
+          ...(source.fallbackReason
+            ? {
+                editorFallback: true,
+                editorFallbackReason: source.fallbackReason,
+              }
+            : {}),
           truncated,
           hasMore: truncated || startLine < endLine,
           nextStartLine: truncated
@@ -1981,8 +2070,10 @@ class WorkspaceFileManager {
         totalLines,
         revision: readContext.revision,
         contentEndLine: readContext.knowledgeEndLine,
-        informationSource:
-          typeof openFileContent === "string" ? "editor" : "filesystem",
+        informationSource,
+        ...(source.fallbackReason
+          ? { editorFallback: true, editorFallbackReason: source.fallbackReason }
+          : {}),
         truncated:
           readContext.truncated ||
           (readContext.knowledgeEndLine ?? startLine) < totalLines,
@@ -1998,7 +2089,10 @@ class WorkspaceFileManager {
     }
     return {
       success: false,
-      error: `Impossible de lire le fichier: ${filePath}`,
+      error: {
+        code: "FILE_READ_FAILED",
+        message: `Impossible de lire le fichier: ${filePath}`,
+      },
     };
   }
 

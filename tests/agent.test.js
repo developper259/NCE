@@ -200,6 +200,207 @@ async function setupEditable(content, { open = true, saved = true } = {}) {
   return fixture;
 }
 
+test("read_file falls back to filesystem when an open tab is only partially loaded", async () => {
+  const { root, editor, agent } = await setup();
+  const filePath = path.join(root, "partial.js");
+  await fs.writeFile(filePath, "const first = 1;\nconst second = 2;\n", "utf8");
+  const openFile = {
+    path: filePath,
+    lines: [{ getText: () => "const first = 1;" }],
+    loadingState: {
+      status: "loading",
+      loadedLineCount: 1,
+      expectedTotalLines: 3,
+    },
+    isSaved: true,
+  };
+  editor.tabManager.getFileByPath = () => openFile;
+  editor.fileLoader = {
+    getState: () => openFile.loadingState,
+    async waitForFileLoaded() {
+      throw Object.assign(new Error("File is not fully loaded"), {
+        code: "FILE_NOT_FULLY_LOADED",
+      });
+    },
+  };
+
+  const result = await agent.readFile("partial.js", { startLine: 1, endLine: 3 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.informationSource, "filesystem");
+  assert.equal(result.editorFallback, true);
+  assert.equal(result.editorFallbackReason, "FILE_NOT_FULLY_LOADED");
+  assert.match(result.content, /const second = 2;/);
+});
+
+test("read_file keeps a complete dirty editor tab as the authoritative source", async () => {
+  const { root, editor, agent } = await setup();
+  const filePath = path.join(root, "dirty.js");
+  await fs.writeFile(filePath, "const value = 1;\n", "utf8");
+  const openFile = {
+    path: filePath,
+    lines: [
+      { getText: () => "const value = 2;" },
+      { getText: () => "const dirty = true;" },
+    ],
+    loadingState: {
+      status: "loaded",
+      loadedLineCount: 1,
+      expectedTotalLines: 1,
+    },
+    isSaved: false,
+  };
+  editor.tabManager.getFileByPath = () => openFile;
+  editor.fileLoader = {
+    getState: () => openFile.loadingState,
+    async waitForFileLoaded() {},
+  };
+
+  const result = await agent.readFile("dirty.js", { startLine: 1, endLine: 2 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.informationSource, "editor");
+  assert.equal(result.content, "const value = 2;\nconst dirty = true;");
+});
+
+test("read_file uses a complete saved editor tab", async () => {
+  const { root, editor, agent } = await setup();
+  const filePath = path.join(root, "loaded.js");
+  await fs.writeFile(filePath, "disk", "utf8");
+  const openFile = {
+    path: filePath,
+    lines: [{ getText: () => "editor" }],
+    loadingState: {
+      status: "loaded",
+      loadedLineCount: 1,
+      expectedTotalLines: 1,
+    },
+    isSaved: true,
+  };
+  editor.tabManager.getFileByPath = () => openFile;
+  editor.fileLoader = { getState: () => openFile.loadingState };
+
+  const result = await agent.readFile("loaded.js", { startLine: 1, endLine: 1 });
+
+  assert.equal(result.success, true);
+  assert.equal(result.informationSource, "editor");
+  assert.equal(result.content, "editor");
+});
+
+test("read_file treats any editor-loader failure as a filesystem fallback", async () => {
+  const { root, editor, agent } = await setup();
+  const filePath = path.join(root, "loader-failed.js");
+  await fs.writeFile(filePath, "complete disk content", "utf8");
+  const openFile = {
+    path: filePath,
+    lines: [{ getText: () => "partial" }],
+    loadingState: {
+      status: "loading",
+      loadedLineCount: 1,
+      expectedTotalLines: 2,
+    },
+    isSaved: true,
+  };
+  editor.tabManager.getFileByPath = () => openFile;
+  editor.fileLoader = {
+    getState: () => openFile.loadingState,
+    async waitForFileLoaded() {
+      openFile.loadingState.status = "failed";
+      openFile.loadingState.error = Object.assign(new Error("chunk failed"), {
+        code: "FILE_LOAD_FAILED",
+      });
+      throw openFile.loadingState.error;
+    },
+  };
+
+  const result = await agent.readFile("loader-failed.js");
+
+  assert.equal(result.success, true);
+  assert.equal(result.informationSource, "filesystem");
+  assert.equal(result.editorFallbackReason, "FILE_LOAD_FAILED");
+  assert.equal(result.content, "complete disk content");
+});
+
+test("read_file reports a source error when both an incomplete editor and filesystem fail", async () => {
+  const { root, editor, agent } = await setup();
+  const filePath = path.join(root, "missing.js");
+  const openFile = {
+    path: filePath,
+    lines: [{ getText: () => "partial" }],
+    loadingState: {
+      status: "loading",
+      loadedLineCount: 1,
+      expectedTotalLines: 2,
+    },
+    isSaved: true,
+  };
+  editor.tabManager.getFileByPath = () => openFile;
+  editor.fileLoader = {
+    getState: () => openFile.loadingState,
+    async waitForFileLoaded() {
+      throw Object.assign(new Error("not loaded"), {
+        code: "FILE_NOT_FULLY_LOADED",
+      });
+    },
+  };
+
+  const result = await agent.readFile("missing.js");
+
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, "FILE_READ_FAILED");
+  assert.match(result.error.message, /éditeur.*filesystem/);
+  assert.equal(result.editorFallbackReason, "FILE_NOT_FULLY_LOADED");
+});
+
+test("filesystem fallback invalidates stale knowledge and paginates without gaps", async () => {
+  const { root, editor, agent } = await setup();
+  const filePath = path.join(root, "fallback-pages.js");
+  await fs.writeFile(filePath, "old-1\nold-2\nold-3\nold-4", "utf8");
+  const first = await agent.readFile("fallback-pages.js", {
+    startLine: 1,
+    endLine: 2,
+  });
+  await fs.writeFile(filePath, "new-1\nnew-2\nnew-3\nnew-4", "utf8");
+  const openFile = {
+    path: filePath,
+    lines: [{ getText: () => "new-1" }],
+    loadingState: {
+      status: "loading",
+      loadedLineCount: 1,
+      expectedTotalLines: 4,
+    },
+    isSaved: true,
+  };
+  editor.tabManager.getFileByPath = () => openFile;
+  editor.fileLoader = {
+    getState: () => openFile.loadingState,
+    async waitForFileLoaded() {
+      throw Object.assign(new Error("not loaded"), {
+        code: "FILE_NOT_FULLY_LOADED",
+      });
+    },
+  };
+
+  const pageOne = await agent.readFile("fallback-pages.js", {
+    startLine: 1,
+    endLine: 2,
+  });
+  const pageTwo = await agent.readFile("fallback-pages.js", {
+    startLine: 3,
+    endLine: 4,
+  });
+
+  assert.notEqual(pageOne.revision, first.revision);
+  assert.equal(pageOne.informationSource, "filesystem");
+  assert.equal(pageOne.content, "new-1\nnew-2");
+  assert.equal(pageTwo.content, "new-3\nnew-4");
+  assert.equal(`${pageOne.content}\n${pageTwo.content}`, "new-1\nnew-2\nnew-3\nnew-4");
+  assert.equal(
+    agent.fileKnowledge.files.get(agent.fileKnowledge.normalizePath(filePath)).revision,
+    pageOne.revision,
+  );
+});
+
 const CODE_TOOLS = [
   "create_file",
   "create_folder",
