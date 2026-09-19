@@ -299,6 +299,12 @@ export class FileManager {
     );
 
     ipcMain.handle(
+      "FileManager:resolveWorkspaceStatePath",
+      async (_event, workspaceRoot: string, relativePath: string) =>
+        this.resolveWorkspaceStatePath(workspaceRoot, relativePath),
+    );
+
+    ipcMain.handle(
       "FileManager:getAgentApiKey",
       async (_event, providerId: string) => this.getAgentApiKey(providerId),
     );
@@ -1115,6 +1121,39 @@ export class FileManager {
   async loadWorkspaceState(workspaceRoot: string): Promise<object | null> {
     if (!validPath(workspaceRoot)) return null;
     return new NceWorkspaceStorage(workspaceRoot).readWorkspaceState<object>();
+  }
+
+  async resolveWorkspaceStatePath(
+    workspaceRoot: string,
+    relativePath: string,
+  ): Promise<{ path: string; isDirectory: boolean; readable: boolean } | null> {
+    if (
+      !validPath(workspaceRoot) ||
+      !validPath(relativePath) ||
+      path.isAbsolute(relativePath) ||
+      /^(?:[A-Za-z]:|\\\\|\/|~|file:)/i.test(relativePath) ||
+      relativePath.includes("\0")
+    ) return null;
+    try {
+      const root = await fs.realpath(workspaceRoot);
+      const candidate = path.resolve(root, relativePath.replace(/[\\/]/g, path.sep));
+      const realCandidate = await fs.realpath(candidate);
+      const relative = path.relative(root, realCandidate);
+      if (
+        relative === ".." ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative)
+      ) return null;
+      const stats = await fs.stat(realCandidate);
+      await fs.access(realCandidate, fsSync.constants.R_OK);
+      return {
+        path: candidate,
+        isDirectory: stats.isDirectory(),
+        readable: true,
+      };
+    } catch {
+      return null;
+    }
   }
 
   private getSecretsPath(): string {

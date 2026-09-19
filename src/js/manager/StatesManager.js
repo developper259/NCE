@@ -7,6 +7,15 @@ class StatesManager {
     this.noWorkspaceState = null;
     this.restoreGeneration = 0;
     this.persistenceSuspended = false;
+    this.workspaceLimits = Object.freeze({
+      tabs: 256,
+      expandedPaths: 2048,
+      selectedLines: 2048,
+      pathLength: 4096,
+      nameLength: 256,
+      menuIdLength: 128,
+      numeric: 10_000_000,
+    });
   }
 
   async save() {
@@ -65,7 +74,7 @@ class StatesManager {
   }
 
   async saveWorkspaceState(root = this.editor.fileExplorer?.rootPath) {
-    const state = this.getWorkspaceState(root);
+    const state = this.sanitizeWorkspaceState(this.getWorkspaceState(root));
     if (!state || typeof this.editor.api.saveWorkspaceState !== "function")
       return false;
     const success = await this.editor.api.saveWorkspaceState(root, state);
@@ -117,16 +126,11 @@ class StatesManager {
   getSidebarState() {
     const manager = this.editor.sidebarManager;
     if (!manager) return null;
-    const menu = (value) => value ? {
-      id: value.id, title: value.title, position: value.position,
-      isOpen: value.isOpen,
-    } : null;
     return {
       leftOpen: manager.leftSidebar?.classList.contains("open") || false,
       rightOpen: manager.rightSidebar?.classList.contains("open") || false,
-      leftActiveMenu: menu(manager.leftActiveMenu),
-      rightActiveMenu: menu(manager.rightActiveMenu),
-      activeMenu: menu(manager.activeMenu),
+      leftActiveMenuId: manager.leftActiveMenu?.id || null,
+      rightActiveMenuId: manager.rightActiveMenu?.id || null,
     };
   }
 
@@ -164,12 +168,167 @@ class StatesManager {
   }
 
   resolveWorkspacePath(relative, root) {
-    if (typeof relative !== "string" || !relative || /^(?:[A-Za-z]:|\/|\\)/.test(relative))
+    if (!this.isSafeRelativeWorkspacePath(relative))
       return null;
     const normalized = NCEPath.normalize(relative);
     if (normalized.split("/").some((part) => part === "..")) return null;
     const absolute = `${NCEPath.normalize(root)}/${normalized}`;
     return root.includes("\\") ? absolute.replace(/\//g, "\\") : absolute;
+  }
+
+  isRecord(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  safeInteger(value, fallback = 0, min = 0, max = this.workspaceLimits.numeric) {
+    return Number.isSafeInteger(value) && value >= min && value <= max
+      ? value : fallback;
+  }
+
+  safeString(value, maxLength) {
+    return typeof value === "string" && value.length <= maxLength && !value.includes("\0")
+      ? value : null;
+  }
+
+  isSafeRelativeWorkspacePath(value) {
+    const safe = this.safeString(value, this.workspaceLimits.pathLength);
+    if (!safe || /^(?:[A-Za-z]:|\/|\\|~|file:)/i.test(safe)) return false;
+    const normalized = safe.replace(/\\/g, "/");
+    return normalized.split("/").every((part) => part && part !== "." && part !== "..");
+  }
+
+  sanitizeWorkspacePath(value) {
+    return this.isSafeRelativeWorkspacePath(value)
+      ? value.replace(/\\/g, "/") : null;
+  }
+
+  sanitizeWorkspaceTab(value, seenIds, seenPaths) {
+    if (!this.isRecord(value)) return null;
+    const type = value.type;
+    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS) return null;
+    const id = this.safeInteger(value.id, -1, 1, 1_000_000);
+    if (id < 1 || seenIds.has(id)) return null;
+    if (type === TAB_TYPES.SETTINGS) {
+      seenIds.add(id);
+      return { id, type };
+    }
+    const path = value.path === null ? null : this.sanitizeWorkspacePath(value.path);
+    if (value.path !== null && !path) return null;
+    if (path) {
+      const key = NCEPath.comparisonKey(path);
+      if (seenPaths.has(key)) return null;
+      seenPaths.add(key);
+    }
+    // A persisted display name is never trusted. Named files derive it from the
+    // validated path; untitled buffers use a fixed application-owned label.
+    const name = path ? NCEPath.basename(path) : "New file";
+    const selectedLines = [];
+    if (Array.isArray(value.selectedLines)) {
+      for (const entry of value.selectedLines.slice(0, this.workspaceLimits.selectedLines)) {
+        if (!Array.isArray(entry) || entry.length !== 2 || !this.isRecord(entry[1])) continue;
+        const line = this.safeInteger(entry[0], -1);
+        const startCol = this.safeInteger(entry[1].startCol, -1);
+        const length = this.safeInteger(entry[1].length, -1);
+        const endCol = this.safeInteger(entry[1].endCol, -1);
+        if (line >= 0 && startCol >= 0 && (length >= 0 || endCol >= startCol)) {
+          selectedLines.push([
+            line,
+            length >= 0 ? { startCol, length } : { startCol, endCol },
+          ]);
+        }
+      }
+    }
+    seenIds.add(id);
+    return {
+      id, type, name, path,
+      row: this.safeInteger(value.row),
+      column: this.safeInteger(value.column),
+      offsetX: this.safeInteger(value.offsetX),
+      offsetY: this.safeInteger(value.offsetY),
+      startIndex: this.safeInteger(value.startIndex),
+      maxLineLength: this.safeInteger(value.maxLineLength),
+      totalLines: this.safeInteger(value.totalLines),
+      startSelect: this.sanitizePosition(value.startSelect),
+      endSelect: this.sanitizePosition(value.endSelect),
+      selectedLines,
+    };
+  }
+
+  sanitizeTabManager(value) {
+    if (!this.isRecord(value)) return null;
+    const seenIds = new Set(), seenPaths = new Set();
+    const rawTabs = Array.isArray(value.tabs)
+      ? value.tabs : Array.isArray(value.files) ? value.files : [];
+    const tabs = rawTabs.slice(0, this.workspaceLimits.tabs)
+      .map((tab) => this.sanitizeWorkspaceTab(tab, seenIds, seenPaths))
+      .filter(Boolean);
+    const activeId = (candidate) => {
+      const id = this.safeInteger(candidate?.id, -1, 1, 1_000_000);
+      return seenIds.has(id) ? { id } : null;
+    };
+    return {
+      activeTab: activeId(value.activeTab || value.activeFile),
+      activeFile: activeId(value.activeFile),
+      tabs,
+    };
+  }
+
+  sanitizePosition(value) {
+    if (!this.isRecord(value)) return null;
+    const row = this.safeInteger(value.row, -1);
+    const column = this.safeInteger(value.column, -1);
+    return row >= 0 && column >= 0 ? { row, column } : null;
+  }
+
+  sanitizeSidebarState(value) {
+    if (!this.isRecord(value)) return null;
+    const legacyId = (entry) => this.isRecord(entry) ? entry.id : null;
+    const menuId = (candidate, side) => {
+      const id = this.safeString(candidate, this.workspaceLimits.menuIdLength);
+      if (!id) return null;
+      const menus = this.editor.sidebarManager?.menus;
+      if (!menus) return null;
+      const menu = menus.get(id);
+      return menu && menu.position === side ? id : null;
+    };
+    return {
+      leftOpen: value.leftOpen === true,
+      rightOpen: value.rightOpen === true,
+      leftActiveMenuId: menuId(
+        value.leftActiveMenuId || legacyId(value.leftActiveMenu), "left",
+      ),
+      rightActiveMenuId: menuId(
+        value.rightActiveMenuId || legacyId(value.rightActiveMenu), "right",
+      ),
+    };
+  }
+
+  sanitizeExplorerState(value) {
+    if (!this.isRecord(value)) return null;
+    const expandedPaths = [];
+    if (Array.isArray(value.expandedPaths)) {
+      for (const candidate of value.expandedPaths.slice(0, this.workspaceLimits.expandedPaths)) {
+        const path = this.sanitizeWorkspacePath(candidate);
+        if (path && !expandedPaths.includes(path)) expandedPaths.push(path);
+      }
+    }
+    return {
+      activeFilePath: this.sanitizeWorkspacePath(value.activeFilePath),
+      projectExpanded: value.projectExpanded !== false,
+      expandedPaths,
+    };
+  }
+
+  // SECURITY BOUNDARY: workspace.json is editable, untrusted local input.
+  // Build a new allowlisted object; never merge parsed values into runtime objects.
+  sanitizeWorkspaceState(value) {
+    if (!this.isRecord(value) || value.version !== this.workspaceVersion) return null;
+    return {
+      version: this.workspaceVersion,
+      tabManager: this.sanitizeTabManager(value.tabManager),
+      sidebar: this.sanitizeSidebarState(value.sidebar),
+      fileExplorer: this.sanitizeExplorerState(value.fileExplorer),
+    };
   }
 
   async loadStates(state) {
@@ -201,7 +360,7 @@ class StatesManager {
       },
     };
     if (root && typeof this.editor.api.saveWorkspaceState === "function") {
-      await this.editor.api.saveWorkspaceState(root, {
+      const migratedWorkspace = this.sanitizeWorkspaceState({
         version: this.workspaceVersion,
         tabManager: this.relativizeLegacyTabs(legacy.tabManager, root),
         sidebar: legacy.sidebar || null,
@@ -214,6 +373,8 @@ class StatesManager {
           }),
         },
       });
+      if (migratedWorkspace)
+        await this.editor.api.saveWorkspaceState(root, migratedWorkspace);
     }
     await this.editor.api?.saveEditorState?.(JSON.stringify(globalState));
     return globalState;
@@ -222,9 +383,19 @@ class StatesManager {
   relativizeLegacyTabs(tabState, root) {
     if (!tabState) return null;
     const tabs = (tabState.tabs || tabState.files || []).flatMap((tab) => {
-      if (tab.type === TAB_TYPES.SETTINGS) return [{ ...tab }];
+      if (!this.isRecord(tab)) return [];
+      if (tab.type === TAB_TYPES.SETTINGS)
+        return [{ id: tab.id, type: TAB_TYPES.SETTINGS }];
       const relative = this.toWorkspaceRelative(tab.path, root);
-      return relative === null ? [] : [{ ...tab, path: relative }];
+      return relative === null ? [] : [{
+        id: tab.id, type: TAB_TYPES.FILE, path: relative,
+        row: tab.row, column: tab.column,
+        offsetX: tab.offsetX, offsetY: tab.offsetY,
+        startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
+        totalLines: tab.totalLines,
+        startSelect: tab.startSelect, endSelect: tab.endSelect,
+        selectedLines: tab.selectedLines,
+      }];
     });
     const ids = new Set(tabs.map((tab) => tab.id));
     const active = tabState.activeTab || tabState.activeFile;
@@ -246,17 +417,29 @@ class StatesManager {
         console.warn("[NCE Workspace State] Unsupported version", state.version);
       state = { version: this.workspaceVersion };
     }
-    return this.restoreWorkspaceState(state, root);
+    const safeState = this.sanitizeWorkspaceState(state) || {
+      version: this.workspaceVersion,
+      tabManager: null,
+      sidebar: null,
+      fileExplorer: null,
+    };
+    return this.restoreWorkspaceState(safeState, root);
   }
 
   async restoreWorkspaceState(state, root) {
-    await this.loadTabManagerState(state.tabManager, root);
-    this.loadSidebarState(state.sidebar);
-    await this.loadFileExplorerState(state.fileExplorer, root);
+    const safeState = this.sanitizeWorkspaceState(state) || {
+      version: this.workspaceVersion,
+      tabManager: null,
+      sidebar: null,
+      fileExplorer: null,
+    };
+    await this.loadTabManagerState(safeState.tabManager, root);
+    this.loadSidebarState(safeState.sidebar);
+    await this.loadFileExplorerState(safeState.fileExplorer, root);
     console.info("[NCE Workspace State]", {
       action: "restore", root,
       restoredTabs: this.editor.tabManager?.tabs?.length || 0,
-      sidebarRestored: Boolean(state.sidebar),
+      sidebarRestored: Boolean(safeState.sidebar),
     });
     return true;
   }
@@ -279,17 +462,30 @@ class StatesManager {
       if (!data) continue;
       try {
         let tab;
-        if (data.type === TAB_TYPES.SETTINGS) tab = new SettingsTab(data.id);
-        else {
+        const runtimeId = manager.getNextID?.() || manager.idCounter + 1;
+        manager.idCounter = Math.max(manager.idCounter, runtimeId);
+        if (data.type === TAB_TYPES.SETTINGS) tab = new SettingsTab(runtimeId);
+        else if (
+          data.type === TAB_TYPES.FILE ||
+          (root === undefined && data.type === undefined)
+        ) {
           const filePath = root === undefined ? data.path
             : root ? this.resolveWorkspacePath(data.path, root) : data.path || null;
           if (root && !filePath) continue;
           const fileOperations = this.editor.fileExplorer?.fileOperations;
-          if (filePath && fileOperations?.pathStatus) {
-            const status = await fileOperations.pathStatus(filePath);
-            if (!status?.exists || status.isDirectory) continue;
+          if (filePath) {
+            const canonical = await this.editor.api?.resolveWorkspaceStatePath?.(
+              root,
+              data.path,
+            );
+            if (typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+              if (!canonical || canonical.isDirectory || canonical.readable !== true) continue;
+            } else if (fileOperations?.pathStatus) {
+              const status = await fileOperations.pathStatus(filePath);
+              if (!status?.exists || status.isDirectory || status.readable === false) continue;
+            }
           }
-          tab = new FileNode(this.editor, data.id, data.name, filePath);
+          tab = new FileNode(this.editor, runtimeId, data.name, filePath);
           Object.assign(tab, {
             row: data.row, column: data.column,
             offsetX: data.offsetX || 0, offsetY: data.offsetY || 0,
@@ -299,9 +495,8 @@ class StatesManager {
             startSelect: data.startSelect, endSelect: data.endSelect,
             _selectedLines: new Map(Array.isArray(data.selectedLines) ? data.selectedLines : []),
           });
-        }
+        } else continue;
         manager.tabs.push(tab);
-        manager.idCounter = Math.max(manager.idCounter, Number(data.id) || 0);
         if (savedActive?.id === data.id) active = tab;
       } catch (error) {
         console.warn("Failed to restore tab:", data.path || data.name, error);
@@ -316,29 +511,44 @@ class StatesManager {
   loadSidebarState(state) {
     const manager = this.editor.sidebarManager;
     if (!manager || !state) return;
-    const restore = (side, menu, open) => {
+    const restore = (side, menuId, open) => {
       try {
         if (
           open &&
-          menu?.position === side &&
-          (!manager.menus || manager.menus.has(menu.id))
-        ) manager.openMenu(menu.id);
+          menuId &&
+          (!manager.menus || manager.menus.has(menuId))
+        ) manager.openMenu(menuId);
         else manager.closeSidebar(side);
       } catch { manager.closeSidebar(side); }
     };
-    restore("left", state.leftActiveMenu || state.activeMenu, state.leftOpen);
-    restore("right", state.rightActiveMenu, state.rightOpen);
+    restore("left", state.leftActiveMenuId, state.leftOpen);
+    restore("right", state.rightActiveMenuId, state.rightOpen);
   }
 
   async loadFileExplorerState(state, root = this.editor.fileExplorer?.rootPath) {
     const explorer = this.editor.fileExplorer;
     if (!explorer || !root || !state) return;
     explorer.projectExpanded = state.projectExpanded !== false;
-    explorer.activeFilePath = this.resolveWorkspacePath(state.activeFilePath, root);
-    const expanded = new Set((state.expandedPaths || []).flatMap((relative) => {
+    explorer.activeFilePath = null;
+    const activeAbsolute = this.resolveWorkspacePath(state.activeFilePath, root);
+    if (activeAbsolute) {
+      const canonical = await this.editor.api?.resolveWorkspaceStatePath?.(
+        root, state.activeFilePath,
+      );
+      if (typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+        if (canonical && !canonical.isDirectory && canonical.readable === true)
+          explorer.activeFilePath = activeAbsolute;
+      } else explorer.activeFilePath = activeAbsolute;
+    }
+    const expanded = new Set();
+    for (const relative of state.expandedPaths || []) {
       const absolute = this.resolveWorkspacePath(relative, root);
-      return absolute ? [absolute] : [];
-    }));
+      if (!absolute) continue;
+      const canonical = await this.editor.api?.resolveWorkspaceStatePath?.(root, relative);
+      if (typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+        if (canonical?.isDirectory && canonical.readable === true) expanded.add(absolute);
+      } else expanded.add(absolute);
+    }
     await explorer.restoreExpandedFolders?.(explorer.files, expanded);
     explorer.refresh?.();
   }

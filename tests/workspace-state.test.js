@@ -141,3 +141,128 @@ test("unknown workspace versions fall back without restoring tabs", async () => 
   finally { console.warn = originalWarn; }
   assert.equal(editor.tabManager.tabs.length, 0);
 });
+
+test("workspace sanitizer allowlists fields, types, paths, ids, and numbers", () => {
+  const { manager } = fixture();
+  const raw = JSON.parse(`{
+    "version":1,
+    "__proto__":{"polluted":true},
+    "constructor":{"prototype":{"polluted":true}},
+    "command":"rm -rf /",
+    "tabManager":{"activeTab":{"id":1},"tabs":[
+      {"id":1,"type":"file","path":"src/a.js","name":"<img onerror=run()>","row":2,"column":3,"secret":"TOKEN"},
+      {"id":1,"type":"settings"},
+      {"id":2,"type":"file","path":"src/a.js"},
+      {"id":3,"type":"shell","path":"src/b.js","command":"open"},
+      {"id":4,"type":"file","path":"../../secret"},
+      {"id":5,"type":"file","path":"/etc/passwd"},
+      {"id":6,"type":"file","path":"C:\\\\Windows\\\\win.ini"},
+      {"id":7,"type":"file","path":"\\\\\\\\server\\\\share"},
+      {"id":8,"type":"file","path":"src/../secret"},
+      {"id":9,"type":"file","path":"src/\\u0000bad"},
+      {"id":10,"type":"file","path":null,"name":"<script>run()</script>","row":-1,"column":1e30}
+    ]},
+    "fileExplorer":{"expandedPaths":["src","src","../outside","/tmp","C:\\\\tmp","src/../bad"],"activeFilePath":"../../outside"}
+  }`);
+  const safe = manager.sanitizeWorkspaceState(raw);
+
+  assert.equal(Object.prototype.polluted, undefined);
+  assert.deepEqual(safe.tabManager.tabs.map(({ id, type, path }) => ({ id, type, path })), [
+    { id: 1, type: "file", path: "src/a.js" },
+    { id: 10, type: "file", path: null },
+  ]);
+  assert.equal(safe.tabManager.tabs[0].name, "a.js");
+  assert.equal(safe.tabManager.tabs[1].name, "New file");
+  assert.equal(safe.tabManager.tabs[1].row, 0);
+  assert.equal(safe.tabManager.tabs[1].column, 0);
+  assert.deepEqual(Array.from(safe.fileExplorer.expandedPaths), ["src"]);
+  assert.equal(safe.fileExplorer.activeFilePath, null);
+  assert.equal("command" in safe, false);
+  assert.equal(JSON.stringify(safe).includes("TOKEN"), false);
+  assert.equal(JSON.stringify(safe).includes("<script>"), false);
+});
+
+test("workspace sanitizer caps huge collections and rejects huge strings", () => {
+  const { manager } = fixture();
+  const tabs = Array.from({ length: 100_000 }, (_, index) => ({
+    id: index + 1, type: "settings",
+  }));
+  const expandedPaths = Array.from({ length: 100_000 }, (_, index) => `d${index}`);
+  expandedPaths[0] = "x".repeat(5000);
+  const safe = manager.sanitizeWorkspaceState({
+    version: 1,
+    tabManager: { tabs },
+    fileExplorer: { expandedPaths },
+  });
+  assert.equal(safe.tabManager.tabs.length, 256);
+  assert.equal(safe.fileExplorer.expandedPaths.length, 2047);
+  assert.equal(safe.fileExplorer.expandedPaths.includes(expandedPaths[0]), false);
+});
+
+test("workspace restore accepts only canonical in-workspace readable files", async () => {
+  const { editor, manager } = fixture();
+  const resolved = [];
+  editor.api.resolveWorkspaceStatePath = async (_root, relative) => {
+    resolved.push(relative);
+    return relative === "src/a.js"
+      ? { path: "/projects/A/src/a.js", isDirectory: false, readable: true }
+      : null;
+  };
+  await manager.loadWorkspaceState("/projects/A");
+  editor.api.loadWorkspaceState = async () => ({
+    version: 1,
+    tabManager: { tabs: [
+      { id: 1, type: "file", path: "src/a.js" },
+      { id: 2, type: "file", path: "src/b.js" },
+      { id: 3, type: "shell", path: "src/a.js" },
+      { id: 4, type: "file", path: "../../outside" },
+    ] },
+    fileExplorer: { expandedPaths: ["src", "../outside"] },
+  });
+  await manager.loadWorkspaceState("/projects/A");
+  assert.deepEqual(Array.from(editor.tabManager.tabs, (tab) => tab.path), [
+    "/projects/A/src/a.js",
+  ]);
+  assert.deepEqual(resolved, ["src/a.js", "src/b.js", "src"]);
+});
+
+test("sidebar restoration only uses registered ids on the matching side", async () => {
+  const { editor, manager } = fixture();
+  const opened = [], closed = [];
+  editor.sidebarManager = {
+    menus: new Map([
+      ["files", { position: "left" }],
+      ["agent", { position: "right" }],
+    ]),
+    openMenu(id) { opened.push(id); },
+    closeSidebar(side) { closed.push(side); },
+  };
+  const safe = manager.sanitizeWorkspaceState({
+    version: 1,
+    sidebar: {
+      leftOpen: true,
+      rightOpen: true,
+      leftActiveMenuId: "<img src=x onerror=run()>",
+      rightActiveMenuId: "files",
+    },
+  });
+  manager.loadSidebarState(safe.sidebar);
+  assert.deepEqual(opened, []);
+  assert.deepEqual(closed, ["left", "right"]);
+});
+
+test("workspace serialization excludes roots, secrets, and runtime-only fields", async () => {
+  const { editor, manager, saved } = fixture();
+  editor.agentSidebar.getConfigState = () => ({ apiKey: "SUPER_SECRET", token: "T" });
+  const tab = new FileNode(editor, 1, "forged", "/projects/A/src/a.js");
+  tab.command = "execute-me";
+  tab.runtimeHandle = { secret: "hidden" };
+  editor.tabManager.tabs = [tab];
+  editor.tabManager.activeTab = tab;
+  await manager.saveWorkspaceState("/projects/A");
+  const json = JSON.stringify(saved.get("/projects/A"));
+  assert.equal(json.includes("/projects/A"), false);
+  assert.equal(json.includes("SUPER_SECRET"), false);
+  assert.equal(json.includes("execute-me"), false);
+  assert.equal(json.includes("runtimeHandle"), false);
+});

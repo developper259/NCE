@@ -15,6 +15,7 @@ const {
 } = require("../dist/ts/addon/AgentProcessRunner.js");
 const {
   NceWorkspaceStorage,
+  MAX_WORKSPACE_STATE_BYTES,
 } = require("../dist/ts/addon/NceWorkspaceStorage.js");
 
 async function tempWorkspace() {
@@ -95,6 +96,59 @@ test("workspace state is atomic, version-preserving, and corruption-safe", async
     finally { console.warn = originalWarn; }
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace state rejects oversized reads and writes without replacing valid state", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-state-limit-"));
+  const originalWarn = console.warn;
+  console.warn = () => {};
+  try {
+    const storage = new NceWorkspaceStorage(root);
+    const original = { version: 1, tabManager: { tabs: [] } };
+    await storage.writeWorkspaceState(original);
+    await assert.rejects(
+      () => storage.writeWorkspaceState({ padding: "x".repeat(MAX_WORKSPACE_STATE_BYTES) }),
+      /size limit/,
+    );
+    assert.deepEqual(await storage.readWorkspaceState(), original);
+
+    await fsp.writeFile(
+      storage.workspaceStatePath,
+      "x".repeat(MAX_WORKSPACE_STATE_BYTES + 1),
+      "utf8",
+    );
+    assert.equal(await storage.readWorkspaceState(), null);
+  } finally {
+    console.warn = originalWarn;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("workspace state path resolution confines canonical targets and symlinks", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-path-root-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-path-outside-"));
+  try {
+    await fsp.mkdir(path.join(root, "src"));
+    await fsp.writeFile(path.join(root, "src", "safe.js"), "safe\n");
+    await fsp.writeFile(path.join(outside, "secret.js"), "secret\n");
+    await fsp.symlink(path.join(outside, "secret.js"), path.join(root, "src", "escape.js"));
+    const manager = new FileManager({ window: null, watcher: null });
+
+    const safe = await manager.resolveWorkspaceStatePath(root, "src/safe.js");
+    assert.equal(safe?.isDirectory, false);
+    assert.equal(safe?.readable, true);
+    assert.equal((await manager.resolveWorkspaceStatePath(root, "src"))?.isDirectory, true);
+    for (const unsafe of [
+      "../outside", "/etc/passwd", "C:\\Windows\\win.ini",
+      "\\\\server\\share", "src/../../outside", "src/\0bad",
+    ]) {
+      assert.equal(await manager.resolveWorkspaceStatePath(root, unsafe), null);
+    }
+    assert.equal(await manager.resolveWorkspaceStatePath(root, "src/escape.js"), null);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(outside, { recursive: true, force: true });
   }
 });
 

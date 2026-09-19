@@ -5,6 +5,7 @@ const NCE_DIRECTORY = ".nce";
 const CACHE_DIRECTORY = "cache";
 const TEMP_DIRECTORY = "temp";
 const WORKSPACE_STATE_FILE = "workspace.json";
+export const MAX_WORKSPACE_STATE_BYTES = 256 * 1024;
 
 export class NceWorkspaceStorage {
   readonly workspaceRoot: string;
@@ -63,7 +64,10 @@ export class NceWorkspaceStorage {
     const target = this.workspaceStatePath;
     const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
     try {
-      await fs.writeFile(temporary, JSON.stringify(value), "utf8");
+      const serialized = JSON.stringify(value, null, 2);
+      if (Buffer.byteLength(serialized, "utf8") > MAX_WORKSPACE_STATE_BYTES)
+        throw new Error("Workspace state exceeds the size limit.");
+      await fs.writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600 });
       await fs.rename(temporary, target);
       return target;
     } catch (error) {
@@ -74,6 +78,15 @@ export class NceWorkspaceStorage {
 
   async readWorkspaceState<T>(): Promise<T | null> {
     try {
+      const stats = await fs.stat(this.workspaceStatePath);
+      if (stats.size > MAX_WORKSPACE_STATE_BYTES) {
+        console.warn("[NCE Workspace State] State exceeds size limit", {
+          root: this.workspaceRoot,
+          bytes: stats.size,
+          maxBytes: MAX_WORKSPACE_STATE_BYTES,
+        });
+        return null;
+      }
       return JSON.parse(await fs.readFile(this.workspaceStatePath, "utf8")) as T;
     } catch (error: any) {
       if (error?.code !== "ENOENT")
