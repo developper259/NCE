@@ -7,7 +7,13 @@ class WorkspaceFileManager {
     return this.agent.editor?.getAutoSaveState?.() === true;
   }
 
-  async persistAgentEdit({ openFile, absolutePath, relativePath, content, editVersion }) {
+  async persistAgentEdit({
+    openFile,
+    absolutePath,
+    relativePath,
+    content,
+    editVersion,
+  }) {
     const failed = (error) => {
       openFile.saveError = error;
       return { saved: false, error };
@@ -62,7 +68,9 @@ class WorkspaceFileManager {
     } catch (error) {
       return failed({
         code: "SAVE_FAILED",
-        message: error?.message || `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
+        message:
+          error?.message ||
+          `Le fichier n'a pas pu être sauvegardé : ${relativePath}`,
         path: relativePath,
       });
     }
@@ -1069,15 +1077,30 @@ class WorkspaceFileManager {
 
   async deleteWorkspaceFolder(args = {}) {
     const target = this.agent.getWorkspaceFolderTarget(args.path);
-    if (!target.valid) return { success: false, mutationOutcome: "NOT_APPLIED", error: target.error };
+    if (!target.valid)
+      return {
+        success: false,
+        mutationOutcome: "NOT_APPLIED",
+        error: target.error,
+      };
     let status;
     try {
       status = await this.agent.api?.pathStatus?.(target.absolutePath);
     } catch (error) {
-      console.warn("[NCE Agent delete_folder] path_status failed", { path: target.relativePath, error });
-      return { success: false, mutationOutcome: "NOT_APPLIED", error: {
-        code: "FOLDER_STATUS_FAILED", message: "Le statut du dossier n'a pas pu être vérifié.", path: target.relativePath, stage: "path_status",
-      } };
+      console.warn("[NCE Agent delete_folder] path_status failed", {
+        path: target.relativePath,
+        error,
+      });
+      return {
+        success: false,
+        mutationOutcome: "NOT_APPLIED",
+        error: {
+          code: "FOLDER_STATUS_FAILED",
+          message: "Le statut du dossier n'a pas pu être vérifié.",
+          path: target.relativePath,
+          stage: "path_status",
+        },
+      };
     }
     if (!status?.exists) {
       return {
@@ -1102,34 +1125,54 @@ class WorkspaceFileManager {
       };
     }
     const guard = this.agent.getMutationGuardError();
-    if (guard) return { success: false, mutationOutcome: "NOT_APPLIED", error: guard };
+    if (guard)
+      return { success: false, mutationOutcome: "NOT_APPLIED", error: guard };
     let operation;
     let deletionError = null;
     try {
-      operation = await this.agent.api?.deleteEntry?.(target.absolutePath, true);
+      operation = await this.agent.api?.deleteEntry?.(
+        target.absolutePath,
+        true,
+      );
     } catch (error) {
       deletionError = error;
-      console.warn("[NCE Agent delete_folder] filesystem_delete failed", { path: target.relativePath, error });
+      console.warn("[NCE Agent delete_folder] filesystem_delete failed", {
+        path: target.relativePath,
+        error,
+      });
     }
     let exists = null;
     try {
       const observed = await this.agent.api?.pathExists?.(target.absolutePath);
       if (typeof observed === "boolean") exists = observed;
     } catch (error) {
-      console.warn("[NCE Agent delete_folder] post_delete_verification failed", { path: target.relativePath, error });
+      console.warn(
+        "[NCE Agent delete_folder] post_delete_verification failed",
+        { path: target.relativePath, error },
+      );
     }
     if (exists === true || (!operation?.success && exists !== false)) {
       return {
         success: false,
-        mutationOutcome: exists === true ? "NOT_APPLIED" : "APPLIED_BUT_UNCERTAIN",
+        mutationOutcome:
+          exists === true ? "NOT_APPLIED" : "APPLIED_BUT_UNCERTAIN",
         error: {
-          ...this.agent.getFileOperationError(operation, "DELETE_FOLDER_FAILED", "La suppression du dossier a échoué.", target.relativePath),
-          stage: deletionError || !operation?.success ? "filesystem_delete" : "post_delete_verification",
+          ...this.agent.getFileOperationError(
+            operation,
+            "DELETE_FOLDER_FAILED",
+            "La suppression du dossier a échoué.",
+            target.relativePath,
+          ),
+          stage:
+            deletionError || !operation?.success
+              ? "filesystem_delete"
+              : "post_delete_verification",
         },
       };
     }
     const uiWarnings = [];
-    if (deletionError || !operation?.success) uiWarnings.push("filesystem_delete_reported_error_but_absence_verified");
+    if (deletionError || !operation?.success)
+      uiWarnings.push("filesystem_delete_reported_error_but_absence_verified");
     const tabManager = this.agent.editor?.tabManager;
     try {
       const openFiles = [...(tabManager?.files || [])].filter((file) =>
@@ -1141,12 +1184,18 @@ class WorkspaceFileManager {
           if (!closed) tabManager?.markFileAsDeleted?.(openFile.path);
         } catch (error) {
           uiWarnings.push("tab_close_failed");
-          console.warn("[NCE Agent delete_folder] tab_cleanup failed", { path: openFile.path, error });
+          console.warn("[NCE Agent delete_folder] tab_cleanup failed", {
+            path: openFile.path,
+            error,
+          });
         }
       }
     } catch (error) {
       uiWarnings.push("tab_cleanup_failed");
-      console.warn("[NCE Agent delete_folder] tab_cleanup failed", { path: target.relativePath, error });
+      console.warn("[NCE Agent delete_folder] tab_cleanup failed", {
+        path: target.relativePath,
+        error,
+      });
     }
     try {
       for (const contextPath of this.agent.readFileContexts.keys()) {
@@ -1156,19 +1205,28 @@ class WorkspaceFileManager {
       }
     } catch (error) {
       uiWarnings.push("context_cleanup_failed");
-      console.warn("[NCE Agent delete_folder] context_cleanup failed", { path: target.relativePath, error });
+      console.warn("[NCE Agent delete_folder] context_cleanup failed", {
+        path: target.relativePath,
+        error,
+      });
     }
     try {
       this.agent.editor?.quickOpen?.invalidate?.(target.root);
     } catch (error) {
       uiWarnings.push("quick_open_invalidation_failed");
-      console.warn("[NCE Agent delete_folder] quick_open_cleanup failed", { path: target.relativePath, error });
+      console.warn("[NCE Agent delete_folder] quick_open_cleanup failed", {
+        path: target.relativePath,
+        error,
+      });
     }
     try {
       await this.agent.refreshWorkspaceFolders([target.parentPath]);
     } catch (error) {
       uiWarnings.push("explorer_refresh_failed");
-      console.warn("[NCE Agent delete_folder] explorer_refresh failed", { path: target.relativePath, error });
+      console.warn("[NCE Agent delete_folder] explorer_refresh failed", {
+        path: target.relativePath,
+        error,
+      });
     }
     try {
       const tracker = this.agent.runChangeTracker;
@@ -1179,7 +1237,10 @@ class WorkspaceFileManager {
       }
     } catch (error) {
       uiWarnings.push("change_tracking_failed");
-      console.warn("[NCE Agent delete_folder] change_tracking failed", { path: target.relativePath, error });
+      console.warn("[NCE Agent delete_folder] change_tracking failed", {
+        path: target.relativePath,
+        error,
+      });
     }
     return {
       success: true,
@@ -1677,9 +1738,10 @@ class WorkspaceFileManager {
     }
 
     if (openFile) {
-      fallbackReason ||= state?.status === "failed"
-        ? state.error?.code || "FILE_LOAD_FAILED"
-        : "FILE_NOT_FULLY_LOADED";
+      fallbackReason ||=
+        state?.status === "failed"
+          ? state.error?.code || "FILE_LOAD_FAILED"
+          : "FILE_NOT_FULLY_LOADED";
     }
     let content;
     let filesystemError = null;
@@ -1754,7 +1816,10 @@ class WorkspaceFileManager {
             : `Impossible de lire le fichier depuis le filesystem: ${filePath}`,
         },
         ...(source.fallbackReason
-          ? { editorFallback: true, editorFallbackReason: source.fallbackReason }
+          ? {
+              editorFallback: true,
+              editorFallbackReason: source.fallbackReason,
+            }
           : {}),
       };
     }
@@ -2072,7 +2137,10 @@ class WorkspaceFileManager {
         contentEndLine: readContext.knowledgeEndLine,
         informationSource,
         ...(source.fallbackReason
-          ? { editorFallback: true, editorFallbackReason: source.fallbackReason }
+          ? {
+              editorFallback: true,
+              editorFallbackReason: source.fallbackReason,
+            }
           : {}),
         truncated:
           readContext.truncated ||

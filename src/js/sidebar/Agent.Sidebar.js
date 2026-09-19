@@ -4,7 +4,10 @@ class AgentSidebar extends Sidebar {
 
     this.container = null;
     this.tabsElement = null;
+    this.messagesViewport = null;
     this.messagesElement = null;
+    this.messagesScroller = null;
+    this.scrollBottomFrame = null;
     this.changesElement = null;
     this.inputElement = null;
     this.inputWrapperElement = null;
@@ -439,11 +442,24 @@ class AgentSidebar extends Sidebar {
     this.renderTabs(tabs);
     container.appendChild(tabs);
 
+    const messagesViewport = document.createElement("div");
+    messagesViewport.className = "agent-sidebar-messages-viewport";
+    this.messagesViewport = messagesViewport;
+
     const messages = document.createElement("div");
     messages.className = "agent-sidebar-messages";
     this.messagesElement = messages;
     this.renderMessages(messages);
-    container.appendChild(messages);
+    messagesViewport.appendChild(messages);
+    container.appendChild(messagesViewport);
+
+    this.messagesScroller = new SidebarScroller(
+      this.editor,
+      messagesViewport,
+      messages,
+    );
+    this.messagesScroller.init();
+    this.editor.sidebarManager.rightScroller = this.messagesScroller;
 
     const changes = document.createElement("div");
     changes.className = "agent-sidebar-changes";
@@ -2108,8 +2124,6 @@ class AgentSidebar extends Sidebar {
       true,
       context,
     );
-    const shouldScroll =
-      session.id === this.activeSessionId && this.shouldAutoScrollMessages();
     message.role = "agent";
     message.content =
       context.contentMode === "delta"
@@ -2123,7 +2137,7 @@ class AgentSidebar extends Sidebar {
       this.removeEmptyState();
       if (session.id === this.activeSessionId && this.messagesElement) {
         this.messagesElement.appendChild(this.createMessageElement(message));
-        if (shouldScroll) this.scrollMessagesToBottom();
+        this.scrollMessagesToBottom();
       }
       return;
     }
@@ -2792,7 +2806,22 @@ class AgentSidebar extends Sidebar {
 
   scrollMessagesToBottom() {
     if (!this.messagesElement) return;
-    this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
+    const apply = () => {
+      this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
+      this.messagesScroller?.updateMetrics();
+      this.messagesScroller?.vScroller?.setScrollRatio(1);
+      this.messagesScroller?.vScroller?.refreshMetrics();
+      this.messagesScroller?.vScroller?.refresh();
+    };
+
+    apply();
+    if (this.scrollBottomFrame !== null) {
+      cancelAnimationFrame(this.scrollBottomFrame);
+    }
+    this.scrollBottomFrame = requestAnimationFrame(() => {
+      this.scrollBottomFrame = null;
+      apply();
+    });
   }
 
   focusInput() {
@@ -3246,6 +3275,7 @@ class AgentSidebar extends Sidebar {
     session.isGenerating = true;
 
     this.refresh();
+    this.scrollMessagesToBottom();
     this.focusInput();
 
     let errorWasCancellation = false;
@@ -3295,6 +3325,7 @@ class AgentSidebar extends Sidebar {
             this.messagesElement.appendChild(
               this.createMessageElement(message),
             );
+            this.scrollMessagesToBottom();
           }
         }
       }
@@ -3326,7 +3357,6 @@ class AgentSidebar extends Sidebar {
         errorMessage.status = "error";
       }
     } finally {
-      const shouldScroll = this.shouldAutoScrollMessages();
       const completedRunId = session.runId;
       if (Number.isInteger(completedRunId)) {
         const activityContext = {
@@ -3350,7 +3380,7 @@ class AgentSidebar extends Sidebar {
 
       this.processQueue(session.id);
       this.refresh();
-      if (shouldScroll) this.scrollMessagesToBottom();
+      if (session.id === this.activeSessionId) this.scrollMessagesToBottom();
     }
   }
 

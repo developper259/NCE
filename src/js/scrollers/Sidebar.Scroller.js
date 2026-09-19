@@ -6,6 +6,7 @@ class SidebarScroller {
     this.vScroller = null;
     this._observer = null;
     this._resizeObserver = null;
+    this._onNativeScroll = () => this.refresh();
 
     this.scrollTop = 0;
     this.clientHeight = 0;
@@ -41,6 +42,7 @@ class SidebarScroller {
       this.editor.scrollerManager.VERTICAL_TYPE,
       false,
     );
+    this.vScroller.wheelTarget = this.menuOBJ;
     this.editor.scrollerManager.addScroller(this.vScroller);
 
     this.vScroller.onRefresh = () => {};
@@ -63,11 +65,15 @@ class SidebarScroller {
       this.menuOBJ.scrollTop = newScrollTop;
     };
 
-    this._observer = new MutationObserver(() => {
-      this.updateMetrics();
-      this.refresh();
+    this.menuOBJ.addEventListener("scroll", this._onNativeScroll, {
+      passive: true,
     });
-    this._observer.observe(this.menuOBJ, { childList: true, subtree: true });
+    this._observer = new MutationObserver(() => this.refresh());
+    this._observer.observe(this.menuOBJ, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
 
     this._resizeObserver = new ResizeObserver(() => {
       this.updateMetrics();
@@ -81,6 +87,7 @@ class SidebarScroller {
   refresh() {
     if (!this.vScroller) return;
 
+    this.updateMetrics();
     const maxScrollTop = this.scrollHeight - this.clientHeight;
     const ratio = maxScrollTop > 0 ? this.scrollTop / maxScrollTop : 0;
     this.vScroller.setScrollRatio(ratio);
@@ -90,6 +97,7 @@ class SidebarScroller {
   }
 
   destroy() {
+    this.menuOBJ?.removeEventListener("scroll", this._onNativeScroll);
     if (this._observer) this._observer.disconnect();
     if (this._resizeObserver) this._resizeObserver.disconnect();
   }

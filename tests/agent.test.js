@@ -224,7 +224,10 @@ test("read_file falls back to filesystem when an open tab is only partially load
     },
   };
 
-  const result = await agent.readFile("partial.js", { startLine: 1, endLine: 3 });
+  const result = await agent.readFile("partial.js", {
+    startLine: 1,
+    endLine: 3,
+  });
 
   assert.equal(result.success, true);
   assert.equal(result.informationSource, "filesystem");
@@ -280,7 +283,10 @@ test("read_file uses a complete saved editor tab", async () => {
   editor.tabManager.getFileByPath = () => openFile;
   editor.fileLoader = { getState: () => openFile.loadingState };
 
-  const result = await agent.readFile("loaded.js", { startLine: 1, endLine: 1 });
+  const result = await agent.readFile("loaded.js", {
+    startLine: 1,
+    endLine: 1,
+  });
 
   assert.equal(result.success, true);
   assert.equal(result.informationSource, "editor");
@@ -394,9 +400,13 @@ test("filesystem fallback invalidates stale knowledge and paginates without gaps
   assert.equal(pageOne.informationSource, "filesystem");
   assert.equal(pageOne.content, "new-1\nnew-2");
   assert.equal(pageTwo.content, "new-3\nnew-4");
-  assert.equal(`${pageOne.content}\n${pageTwo.content}`, "new-1\nnew-2\nnew-3\nnew-4");
   assert.equal(
-    agent.fileKnowledge.files.get(agent.fileKnowledge.normalizePath(filePath)).revision,
+    `${pageOne.content}\n${pageTwo.content}`,
+    "new-1\nnew-2\nnew-3\nnew-4",
+  );
+  assert.equal(
+    agent.fileKnowledge.files.get(agent.fileKnowledge.normalizePath(filePath))
+      .revision,
     pageOne.revision,
   );
 });

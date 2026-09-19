@@ -41,13 +41,7 @@ class SidebarManager {
       this.leftSidebar,
       this.leftMenuContainer,
     );
-    this.rightScroller = new SidebarScroller(
-      this.editor,
-      this.rightSidebar,
-      this.rightMenuContainer,
-    );
     this.leftScroller.init();
-    this.rightScroller.init();
   }
 
   registerMenu(menu) {
