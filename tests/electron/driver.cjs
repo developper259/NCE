@@ -51,6 +51,16 @@ app.whenReady().then(() => {
         ),
         true,
       );
+      // The main-process preload handshake can complete before asynchronous
+      // session restoration, especially on Windows CI. Do not snapshot
+      // activeFile or dispatch shortcuts while startup is still mutating it.
+      await waitForCondition(
+        async () => (await run("editor.isOnInit === false")) === true,
+        {
+          timeout: 10000,
+          description: "editor session restoration to finish",
+        },
+      );
       assert.equal(win.isVisible(), true);
       const prefs = win.webContents.getLastWebPreferences();
       assert.equal(prefs.sandbox, true);
