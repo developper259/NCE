@@ -27,6 +27,8 @@ class RunChangeTracker {
       reviewedDiff: false,
       reviewedDiffVersion: null,
       globalDiffTruncated: false,
+      reviewSessions: new Map(),
+      reviewCursorSequence: 0,
       changeVersion: 0,
       invalidated: false,
     };
@@ -114,7 +116,8 @@ class RunChangeTracker {
           ? Boolean(target) &&
             (normalizedPath === target ||
               AgentPath.isInside(normalizedPath, target))
-          : normalizedPath === projectRoot ||
+          : projectRoot === "." ||
+            normalizedPath === projectRoot ||
             AgentPath.isInside(normalizedPath, projectRoot);
       if (covered) validation.fresh = false;
     }
@@ -475,6 +478,151 @@ class RunChangeTracker {
       .map((change) => change.path);
   }
 
+  validationCoversPath(validation, path) {
+    if (!validation || validation.status !== "PASSED") return false;
+    const normalizedPath = this.normalizePath(path);
+    const scope = validation.scope || {};
+    const target = this.normalizePath(scope.target || validation.target || "");
+    if (scope.mode === "target") {
+      return Boolean(
+        target &&
+        (normalizedPath === target ||
+          AgentPath.isInside(normalizedPath, target)),
+      );
+    }
+    const projectRoot =
+      this.normalizePath(scope.projectRoot || validation.projectRoot || ".") ||
+      ".";
+    return (
+      projectRoot === "." ||
+      normalizedPath === projectRoot ||
+      AgentPath.isInside(normalizedPath, projectRoot)
+    );
+  }
+
+  getValidationState(changes = [...(this.current?.changes.values() || [])]) {
+    const validations = this.current?.validationRecords || [];
+    const freshPassed = validations.filter(
+      (validation) =>
+        validation.status === "PASSED" && validation.fresh !== false,
+    );
+    const stalePassed = validations.filter(
+      (validation) =>
+        validation.status === "PASSED" && validation.fresh === false,
+    );
+    const allCovered =
+      changes.length > 0 &&
+      changes.every((change) =>
+        freshPassed.some((validation) =>
+          this.validationCoversPath(validation, change.path),
+        ),
+      );
+    const staleRelevant = stalePassed.filter((validation) =>
+      changes.some((change) =>
+        this.validationCoversPath(validation, change.path),
+      ),
+    );
+    return {
+      freshPassed,
+      stalePassed,
+      staleRelevant,
+      allCovered,
+      statuses: validations.map((validation) => ({
+        id: validation.id,
+        status: validation.status,
+        target: validation.target,
+        projectRoot: validation.projectRoot,
+        fresh: validation.fresh !== false,
+        changeVersion: validation.changeVersion,
+      })),
+    };
+  }
+
+  evaluateCompletionReviewRequirement() {
+    const changes = [...(this.current?.changes.values() || [])];
+    const changedFiles = changes.map((change) => change.path);
+    if (!changes.length) {
+      return {
+        required: false,
+        reasons: [],
+        changedFiles,
+        riskLevel: "safe",
+        nextAction: { tool: "task_complete", arguments: {} },
+      };
+    }
+
+    const reasons = [];
+    const hasDeletion = changes.some((change) => change.deleted);
+    const hasRename = changes.some((change) => change.renamed);
+    const externalChangesDetected = this.detectAnyUserChangeAfterAgent();
+    const validation = this.getValidationState(changes);
+    if (hasDeletion) reasons.push("FILE_DELETED");
+    if (hasRename) reasons.push("FILE_RENAMED");
+    if (externalChangesDetected) reasons.push("EXTERNAL_CHANGE_DETECTED");
+    if (!validation.allCovered) reasons.push("VALIDATION_REQUIRED");
+
+    const required = reasons.length > 0;
+    const nextPath = changedFiles[0] || null;
+    return {
+      required,
+      reasons,
+      changedFiles,
+      riskLevel: required ? "review_required" : "safe",
+      externalChangesDetected,
+      validationFresh: validation.allCovered,
+      nextAction: required
+        ? {
+            tool: "get_diff",
+            arguments: nextPath ? { path: nextPath } : {},
+          }
+        : { tool: "task_complete", arguments: {} },
+    };
+  }
+
+  getCompletionState() {
+    const policy = this.evaluateCompletionReviewRequirement();
+    const diagnostics = {
+      policy,
+      validation: this.getValidationState(),
+    };
+    if (!this.current) return { status: "SAFE", ...diagnostics };
+    if (["aborted", "failed"].includes(this.current.status)) {
+      return {
+        status: "BLOCKED",
+        reason: `RUN_${this.current.status.toUpperCase()}`,
+        ...diagnostics,
+      };
+    }
+    if (
+      this.current.invalidated ||
+      !this.workspaceMatches(this.agent.editor?.fileExplorer?.rootPath)
+    ) {
+      return { status: "BLOCKED", reason: "WORKSPACE_CHANGED", ...diagnostics };
+    }
+    if (this.current.pendingToolCalls?.size) {
+      return { status: "BLOCKED", reason: "RUN_NOT_SETTLED", ...diagnostics };
+    }
+    if (this.getBlockingFailures().length) {
+      return {
+        status: "BLOCKED",
+        reason: "UNRESOLVED_FAILURES",
+        ...diagnostics,
+      };
+    }
+    if (
+      diagnostics.validation.staleRelevant.length &&
+      !diagnostics.validation.allCovered
+    ) {
+      return { status: "BLOCKED", reason: "VALIDATION_STALE", ...diagnostics };
+    }
+    const reviewPending =
+      policy.required && this.getUnreviewedPaths().length > 0;
+    return {
+      status: reviewPending ? "REVIEW_REQUIRED" : "SAFE",
+      ...diagnostics,
+    };
+  }
+
   getCompletionDiagnostics() {
     const changes = [...(this.current?.changes.values() || [])];
     const unreviewedFiles = this.getUnreviewedPaths();
@@ -490,6 +638,7 @@ class RunChangeTracker {
         validationKind: validation.validationKind,
         changeVersion: validation.changeVersion,
       }));
+    const completion = this.getCompletionState();
     return {
       changeVersion: this.current?.changeVersion ?? 0,
       changedFiles: changes.map((change) => change.path),
@@ -497,10 +646,27 @@ class RunChangeTracker {
         .filter((change) => change.reviewedVersion === change.version)
         .map((change) => change.path),
       unreviewedFiles,
+      reviewRequired: completion.policy.required,
+      reviewReasons: completion.policy.reasons,
+      completionState: completion.status,
+      nextAction: completion.policy.nextAction,
+      externalChangesDetected:
+        completion.policy.externalChangesDetected === true,
+      validationRecords: completion.validation.statuses,
       globalDiffReviewed:
         this.current?.reviewedDiff === true &&
         this.current?.reviewedDiffVersion === this.current?.changeVersion,
       globalDiffTruncated: this.current?.globalDiffTruncated === true,
+      activeReviewSessions: [...(this.current?.reviewSessions?.entries() || [])]
+        .filter(([, session]) => session.active === true)
+        .map(([cursor, session]) => ({
+          cursor,
+          path: session.path,
+          version: session.version,
+          page: session.page,
+          position: session.position,
+          hasMore: true,
+        })),
       pendingToolCalls: [...(this.current?.pendingToolCalls || [])],
       staleValidations,
       unresolvedFailures: [...(this.current?.unresolvedFailures.values() || [])]
@@ -534,7 +700,7 @@ class RunChangeTracker {
   markReviewDiff(path = null, result = null) {
     if (!this.current) return false;
     if (result?.success === false) return false;
-    if (result?.truncated === true || result?.diffTooLarge === true) {
+    if (result?.hasMore === true || result?.truncated === true) {
       if (!path) this.current.globalDiffTruncated = true;
       return false;
     }
@@ -579,6 +745,50 @@ class RunChangeTracker {
     return { success: true, runId: this.current.runId, files };
   }
 
+  createReviewCursor(path, version, position, page) {
+    if (!this.current) return null;
+    this.current.reviewCursorSequence += 1;
+    const randomPart =
+      globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+    const cursor = `nce-diff-${this.current.runId}-${this.current.reviewCursorSequence}-${randomPart}`;
+    this.current.reviewSessions.set(cursor, {
+      path,
+      version,
+      position,
+      page,
+      active: true,
+    });
+    return cursor;
+  }
+
+  getDiffPage(text, position, maxChars) {
+    const start = Math.max(0, Math.min(position, text.length));
+    if (start >= text.length) {
+      return { diff: "", position: start, hasMore: false };
+    }
+    let cursor = start;
+    let diff = "";
+    while (cursor < text.length) {
+      const newline = text.indexOf("\n", cursor);
+      const lineEnd = newline === -1 ? text.length : newline + 1;
+      const lineLength = lineEnd - cursor;
+      if (diff && diff.length + lineLength > maxChars) break;
+      if (!diff && lineLength > maxChars) {
+        cursor += maxChars;
+        diff = text.slice(start, cursor);
+        break;
+      }
+      diff += text.slice(cursor, lineEnd);
+      cursor = lineEnd;
+      if (diff.length >= maxChars) break;
+    }
+    return { diff, position: cursor, hasMore: cursor < text.length };
+  }
+
+  buildReviewError(code, message, details = {}) {
+    return { success: false, error: { code, message, ...details } };
+  }
+
   getDiff(args = {}) {
     if (!this.current)
       return {
@@ -587,10 +797,47 @@ class RunChangeTracker {
       };
     const requestedPath =
       typeof args?.path === "string" ? this.normalizePath(args.path) : null;
-    const wanted = requestedPath
-      ? this.current.changes.get(requestedPath)
+    const cursor = typeof args?.cursor === "string" ? args.cursor : null;
+    const cursorSession = cursor
+      ? this.current.reviewSessions.get(cursor)
       : null;
-    if (requestedPath && !wanted) {
+    if (cursor && !cursorSession) {
+      return this.buildReviewError(
+        "INVALID_DIFF_CURSOR",
+        "Le cursor de diff est inconnu ou a déjà été consommé.",
+      );
+    }
+    if (cursorSession && !cursorSession.active) {
+      return this.buildReviewError(
+        "INVALID_DIFF_CURSOR",
+        "Le cursor de diff a déjà été consommé.",
+      );
+    }
+    if (
+      cursorSession &&
+      requestedPath &&
+      requestedPath !== cursorSession.path
+    ) {
+      return this.buildReviewError(
+        "INVALID_DIFF_CURSOR",
+        "Le cursor ne correspond pas au chemin demandé.",
+      );
+    }
+    const effectivePath = requestedPath || cursorSession?.path || null;
+    const wanted = effectivePath
+      ? this.current.changes.get(effectivePath)
+      : null;
+    if (
+      cursorSession &&
+      (!wanted || wanted.version !== cursorSession.version)
+    ) {
+      return this.buildReviewError(
+        "STALE_DIFF_CURSOR",
+        "Le fichier a changé depuis la création de ce cursor. Recommence la review depuis le début.",
+        { path: cursorSession.path },
+      );
+    }
+    if (effectivePath && !wanted) {
       return {
         success: false,
         error: {
@@ -599,7 +846,7 @@ class RunChangeTracker {
         },
       };
     }
-    const changes = requestedPath
+    const changes = effectivePath
       ? [wanted]
       : [...this.current.changes.values()];
     const diff = [];
@@ -623,21 +870,59 @@ class RunChangeTracker {
       runId: this.current.runId,
       truncated: false,
       hasMore: false,
-      path: requestedPath || null,
+      nextCursor: null,
+      path: effectivePath,
       diff: text,
       diffTooLarge,
     };
-    if (text.length > maxChars || diffTooLarge) {
+    if (effectivePath) {
+      const page = this.getDiffPage(
+        text,
+        cursorSession?.position || 0,
+        maxChars,
+      );
+      patch.diff = page.diff;
+      patch.truncated = page.hasMore;
+      patch.hasMore = page.hasMore;
+      patch.reviewProgress = {
+        path: effectivePath,
+        page: (cursorSession?.page || 0) + 1,
+        complete: !page.hasMore,
+      };
+      if (cursorSession) this.current.reviewSessions.delete(cursor);
+      if (page.hasMore) {
+        patch.nextCursor = this.createReviewCursor(
+          effectivePath,
+          wanted.version,
+          page.position,
+          patch.reviewProgress.page,
+        );
+      }
+    } else if (text.length > maxChars || diffTooLarge) {
       patch.truncated = true;
       patch.hasMore = true;
-      patch.diff = `${text.slice(0, maxChars)}\n... [truncated]`;
+      patch.diff = text.slice(0, maxChars);
     }
     patch.reviewComplete = !patch.truncated && !patch.diffTooLarge;
     patch.unreviewedPaths = this.getUnreviewedPaths();
-    if (!requestedPath && patch.truncated) {
+    if (!effectivePath && patch.truncated) {
       patch.reviewInstruction =
         "The global diff was truncated. Review the remaining changed files with get_diff({ path }) before task_complete.";
+      const nextPath = patch.unreviewedPaths[0] || null;
+      patch.nextReview = nextPath
+        ? { tool: "get_diff", arguments: { path: nextPath } }
+        : null;
     }
+
+    console.info("[NCE Agent diff review]", {
+      path: effectivePath,
+      fileVersion: wanted?.version || null,
+      page: patch.reviewProgress?.page || 1,
+      returnedChars: patch.diff.length,
+      hasMore: patch.hasMore,
+      reviewComplete: patch.reviewComplete,
+      nextCursor: Boolean(patch.nextCursor),
+    });
 
     const fileChanged = requestedPath
       ? this.detectUserChangeAfterAgent(requestedPath)
@@ -763,9 +1048,10 @@ class RunChangeTracker {
       return {
         lines: [
           `@@ -${prefix + 1},${oldMiddle.length} +${prefix + 1},${newMiddle.length} @@`,
-          "... [diff too large]",
+          ...oldMiddle.map((line) => `-${line}`),
+          ...newMiddle.map((line) => `+${line}`),
         ],
-        diffTooLarge: true,
+        diffTooLarge: false,
       };
     }
     const table = Array.from(
@@ -814,6 +1100,22 @@ class RunChangeTracker {
   hasEffectiveChanges() {
     if (!this.current) return false;
     return this.current.changes.size > 0;
+  }
+
+  getNextReviewAction(unreviewedPaths = this.getUnreviewedPaths()) {
+    const path = unreviewedPaths[0] || null;
+    if (!path) return null;
+    const change = this.current?.changes.get(path);
+    for (const [cursor, session] of this.current?.reviewSessions || []) {
+      if (
+        session.active === true &&
+        session.path === path &&
+        session.version === change?.version
+      ) {
+        return { tool: "get_diff", arguments: { path, cursor } };
+      }
+    }
+    return { tool: "get_diff", arguments: { path } };
   }
 
   validateTaskComplete(args = {}) {
@@ -888,18 +1190,44 @@ class RunChangeTracker {
         },
       };
     }
-    if (this.hasEffectiveChanges()) {
+    const policy = this.evaluateCompletionReviewRequirement();
+    const validation = this.getValidationState();
+    if (validation.staleRelevant.length && !validation.allCovered) {
+      const diagnostics = this.getCompletionDiagnostics();
+      return {
+        success: false,
+        error: {
+          code: "VALIDATION_STALE",
+          message:
+            "Une validation PASSED est devenue obsolète après une mutation.",
+          completionState: "BLOCKED",
+          staleValidations: diagnostics.staleValidations,
+          nextAction: {
+            tool: "run_tests",
+            arguments: {},
+          },
+        },
+      };
+    }
+    if (this.hasEffectiveChanges() && policy.required) {
       const unreviewedPaths = this.getUnreviewedPaths();
       if (unreviewedPaths.length) {
+        const nextAction = this.getNextReviewAction(unreviewedPaths);
         return {
           success: false,
           error: {
             code: "CHANGES_NOT_REVIEWED",
-            message: this.current.globalDiffTruncated
-              ? "The global diff was truncated. Review the remaining changed files with get_diff({ path }) before task_complete."
+            completionState: "REVIEW_REQUIRED",
+            reviewRequired: true,
+            reviewReasons: policy.reasons,
+            message: nextAction?.arguments?.cursor
+              ? "Continue the current diff review with get_diff using the returned cursor before task_complete."
               : "Review the remaining changed files with get_diff({ path }) before task_complete.",
             unreviewedPaths,
             globalDiffTruncated: this.current.globalDiffTruncated,
+            nextAction,
+            nextReview: nextAction,
+            retryTaskComplete: false,
           },
         };
       }
@@ -909,6 +1237,9 @@ class RunChangeTracker {
       taskCompleteRequested: true,
       validation: "eligible",
       changedFiles: this.current.changes.size,
+      completionState: "SAFE",
+      reviewRequired: policy.required,
+      reviewReasons: policy.reasons,
     };
   }
 

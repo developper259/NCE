@@ -662,9 +662,21 @@ class AgentRunner {
       return !(
         content.startsWith("[NCE PROGRESS DIRECTIVE]") ||
         content.startsWith("[NCE CAPABILITY]") ||
-        content.startsWith("[NCE TASK COMPLETION]")
+        content.startsWith("[NCE TASK COMPLETION]") ||
+        content.startsWith("[NCE COMPLETION REVIEW REQUIRED]")
       );
     });
+  }
+
+  buildCompletionReviewDirective(error = {}) {
+    const paths = Array.isArray(error.unreviewedPaths)
+      ? error.unreviewedPaths.join(", ")
+      : "the remaining changed files";
+    const action = error.nextAction || {
+      tool: "get_diff",
+      arguments: {},
+    };
+    return `[NCE COMPLETION REVIEW REQUIRED] Task completion is blocked because these current changes are not fully reviewed: ${paths}. Call ${action.tool}(${JSON.stringify(action.arguments)}) next. If the result has hasMore=true, continue with its nextCursor until reviewComplete=true. Do not use read_file as a substitute and do not call task_complete again before reviewComplete=true.`;
   }
 
   toolResultConfirmsValidation(toolPayload) {
@@ -746,6 +758,17 @@ class AgentRunner {
           largeWrite: this.agent.getLargeWriteContextState(largeWrite),
           fileKnowledge: this.agent.fileKnowledge.getContextState(),
           progress: this.agent.agentProgress.getContextState(),
+          completion: (() => {
+            const diagnostics =
+              this.agent.runChangeTracker?.getCompletionDiagnostics?.() || {};
+            return {
+              state: diagnostics.completionState || "SAFE",
+              reviewRequired: diagnostics.reviewRequired === true,
+              reviewReasons: diagnostics.reviewReasons || [],
+              unreviewedPaths: diagnostics.unreviewedFiles || [],
+              nextAction: diagnostics.nextAction || null,
+            };
+          })(),
           runtimeDirective,
         };
         const outputContext = this.agent.createModelOutputContext(
@@ -1328,6 +1351,9 @@ class AgentRunner {
           }
 
           const toolPayload = toolResult?.result ?? toolResult;
+          if (callName === "get_diff" && toolPayload?.success !== false) {
+            this.clearProgressDirectives();
+          }
           const toolProgress = this.agent.agentProgress.consumeTool(
             call?.function?.name,
             toolResult?.meta,
@@ -1479,6 +1505,7 @@ class AgentRunner {
                       (normalized === target ||
                         AgentPath.isInside(normalized, target))
                     : !projectRoot ||
+                      projectRoot === "." ||
                       normalized === projectRoot ||
                       AgentPath.isInside(normalized, projectRoot);
                 if (covered) pendingValidationPaths.delete(pendingPath);
@@ -1565,9 +1592,13 @@ class AgentRunner {
                 },
               });
           }
+          this.clearProgressDirectives();
           this.agent.messages.push({
             role: "system",
-            content: `[NCE TASK COMPLETION] task_complete was not accepted: ${completion.message}${completion.error?.unreviewedPaths?.length ? ` Remaining paths: ${completion.error.unreviewedPaths.join(", ")}.` : ""} Continue the task and call task_complete again after resolving it.`,
+            content:
+              completion.reason === "CHANGES_NOT_REVIEWED"
+                ? this.buildCompletionReviewDirective(completion.error)
+                : `[NCE TASK COMPLETION] task_complete was not accepted: ${completion.message}${completion.error?.unreviewedPaths?.length ? ` Remaining paths: ${completion.error.unreviewedPaths.join(", ")}.` : ""} Continue the task and call task_complete again after resolving it.`,
           });
         }
         if (progressDecision.action === "directive") {

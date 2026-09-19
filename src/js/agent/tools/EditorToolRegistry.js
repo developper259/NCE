@@ -120,7 +120,7 @@ class EditorToolRegistry {
       },
     });
     this.agent.registerTool("get_diff", {
-      description: `Retourne le diff local, éventuellement filtré par path. Sortie <= ${this.getLimit("get_diff", "outputCharacters", 12000)} caractères ; si le diff global est tronqué, utilise get_diff(path).`,
+      description: `Review les changements nets du run courant, éventuellement filtrés par path. Utilise cet outil quand le runtime indique REVIEW_REQUIRED ou quand tu veux inspecter volontairement le résultat. Sortie <= ${this.getLimit("get_diff", "outputCharacters", 12000)} caractères ; si hasMore=true, rappelle get_diff avec nextCursor. Une review explicite n'est complète qu'avec reviewComplete=true.`,
       readOnly: true,
       codeOnly: true,
       parameters: {
@@ -131,18 +131,28 @@ class EditorToolRegistry {
             minLength: 1,
             maxLength: this.getPathLimit(),
           },
+          cursor: {
+            type: "string",
+            minLength: 1,
+            description:
+              "Cursor opaque retourné par get_diff pour demander la page suivante.",
+          },
         },
       },
       execute: (args = {}) => {
         const result = this.agent.getDiff(args);
         if (result?.success !== false) {
           const tracker = this.agent.runChangeTracker;
-          tracker?.markReviewDiff?.(args?.path, result);
+          tracker?.markReviewDiff?.(result?.path || args?.path, result);
           result.unreviewedPaths = tracker?.getUnreviewedPaths?.() || [];
           result.reviewComplete = result.unreviewedPaths.length === 0;
-          if (!args?.path && result.truncated) {
+          if (!args?.path && !args?.cursor && result.truncated) {
             result.reviewInstruction =
               "The global diff was truncated. Review the remaining changed files with get_diff({ path }) before task_complete.";
+            const nextPath = result.unreviewedPaths[0] || null;
+            result.nextReview = nextPath
+              ? { tool: "get_diff", arguments: { path: nextPath } }
+              : null;
           }
         }
         return result;

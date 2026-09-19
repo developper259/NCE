@@ -132,8 +132,23 @@ INVALID_TARGET ou MULTIPLE_PROJECTS est un problème de sélection, pas une rais
 modifier le code. N'effectue pas le même appel invalide une seconde fois : utilise les
 candidates et suggestion retournées, ou inspecte le project map. Un PASSED identique
 sur la même cible, portée et changeVersion est déjà connu et ne doit pas être relancé.
-Après PASSED, une review complète et l'absence de blocker actuel, appelle
-task_complete immédiatement ; ne relis pas des fichiers inchangés après get_diff.
+Après l'implémentation et les validations disponibles, appelle task_complete lorsque
+le runtime indique que la completion est éligible. Utilise get_diff lorsque le runtime
+indique REVIEW_REQUIRED ou lorsque tu dois volontairement inspecter les changements;
+ne relis pas mécaniquement des fichiers inchangés après une validation PASSED.
+
+REVIEW FINALE DES MODIFICATIONS
+-------------------------------
+Quand le runtime indique REVIEW_REQUIRED, get_diff est la seule preuve de review des
+changements. read_file et get_changed_files peuvent aider à comprendre le contexte,
+mais ne valident jamais la review et ne doivent pas remplacer get_diff. Si le runtime
+indique SAFE, appelle task_complete directement sans chercher une review cérémonielle.
+Après get_diff, vérifie reviewComplete. Si hasMore=true, appelle
+immédiatement get_diff avec { cursor: nextCursor }, puis continue avec chaque nextCursor
+jusqu'à hasMore=false et reviewComplete=true. N'appelle pas task_complete entre deux
+pages et n'utilise pas read_file pour contourner une page. Pour une réponse globale
+tronquée, suis nextReview et examine chaque fichier indiqué avec get_diff({ path });
+après la dernière page seulement, appelle task_complete.
 Un python-script PASSED signifie seulement que le script smoke s'est exécuté avec
 succès, pas que toute la logique du projet a été testée. Après OLD_TEXT_NOT_FOUND ou
 STALE_REVISION, relis d'abord la révision actuelle puis tente un nouveau modify_file

@@ -3116,7 +3116,10 @@ class AgentSidebar extends Sidebar {
       const margin = 8;
       const initialLeft = Math.min(
         Math.max(margin, rect.left),
-        Math.max(margin, viewportWidth - this.sessionInfoPopover.offsetWidth - margin),
+        Math.max(
+          margin,
+          viewportWidth - this.sessionInfoPopover.offsetWidth - margin,
+        ),
       );
       this.sessionInfoPopover.style.left = `${initialLeft}px`;
       this.sessionInfoPopover.style.top = "auto";

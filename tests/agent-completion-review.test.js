@@ -114,6 +114,70 @@ test("a write invalidates only its own file review", async () => {
   assert.equal(agent.validateTaskComplete().success, true);
 });
 
+test("a large path diff is fully reviewable through bounded cursors", async () => {
+  const { agent, tracker } = fixture();
+  const content = Array.from(
+    { length: 5000 },
+    (_, index) => `print(${index})`,
+  ).join("\n");
+  create(tracker, "big.py", content);
+
+  const pages = [];
+  let result = await diffTool(agent, { path: "big.py" }, "big-page-1");
+  while (true) {
+    assert.ok(result.diff.length <= 12000);
+    pages.push(result.diff);
+    if (!result.hasMore) break;
+    assert.equal(typeof result.nextCursor, "string");
+    result = await diffTool(
+      agent,
+      { cursor: result.nextCursor },
+      `big-page-${pages.length + 1}`,
+    );
+  }
+
+  const expected = tracker.renderDiff(
+    tracker.current.changes.get("big.py"),
+  ).text;
+  assert.equal(pages.join(""), expected);
+  assert.equal(result.truncated, false);
+  assert.equal(result.nextCursor, null);
+  assert.equal(result.reviewComplete, true);
+  assert.deepEqual(Array.from(tracker.getUnreviewedPaths()), []);
+  assert.equal(agent.validateTaskComplete().success, true);
+});
+
+test("invalid and stale diff cursors never complete review", async () => {
+  const { agent, tracker } = fixture();
+  const before = Array.from(
+    { length: 5000 },
+    (_, index) => `old(${index})`,
+  ).join("\n");
+  create(tracker, "big.py", before);
+  const first = await diffTool(agent, { path: "big.py" }, "cursor-start");
+  assert.equal(first.hasMore, true);
+
+  const invalid = await agent.executeToolCall(
+    call("get_diff", { cursor: "not-a-real-cursor" }, "invalid-cursor"),
+    { runId: 1 },
+  );
+  assert.equal(invalid.success, false);
+  assert.equal(invalid.error.code, "INVALID_DIFF_CURSOR");
+  assert.deepEqual(Array.from(tracker.getUnreviewedPaths()), ["big.py"]);
+
+  modify(tracker, "big.py", before, `${before}\nprint("new")`);
+  const stale = await agent.executeToolCall(
+    call("get_diff", { cursor: first.nextCursor }, "stale-cursor"),
+    { runId: 1 },
+  );
+  assert.equal(stale.success, false);
+  assert.equal(stale.error.code, "STALE_DIFF_CURSOR");
+  assert.notEqual(
+    tracker.current.changes.get("big.py").reviewedVersion,
+    tracker.current.changes.get("big.py").version,
+  );
+});
+
 test("a new write after full global review retains untouched file reviews", async () => {
   const { agent, tracker } = fixture();
   create(tracker, "a.js", "one");
@@ -169,6 +233,140 @@ test("a recovered write failure is removed before completion", async () => {
 test("no-change read-only completion has no diff review requirement", () => {
   const { agent } = fixture();
   assert.equal(agent.validateTaskComplete().success, true);
+});
+
+test("fresh validation allows safe completion without get_diff", () => {
+  const { agent, tracker } = fixture();
+  create(tracker, "feature.py", "print('ok')");
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    scope: { mode: "project", projectRoot: "." },
+    toolCallId: "validation-safe",
+  });
+
+  const completion = agent.validateTaskComplete();
+  assert.equal(completion.success, true);
+  assert.equal(completion.completionState, "SAFE");
+  assert.equal(completion.reviewRequired, false);
+  assert.equal(
+    tracker.getCompletionDiagnostics().nextAction.tool,
+    "task_complete",
+  );
+});
+
+test("a large validated file can complete safely without get_diff", () => {
+  const { agent, tracker } = fixture();
+  const content = Array.from(
+    { length: 5000 },
+    (_, index) => `line(${index})`,
+  ).join("\n");
+  create(tracker, "large.py", content);
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    scope: { mode: "project", projectRoot: "." },
+    toolCallId: "validation-large",
+  });
+
+  assert.equal(agent.validateTaskComplete().success, true);
+});
+
+test("deletions require explicit review even with fresh validation", async () => {
+  const { agent, tracker } = fixture();
+  modify(tracker, "important.js", "old", "new");
+  tracker.recordDelete({ success: true, path: "important.js" }, "new");
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    scope: { mode: "project", projectRoot: "." },
+    toolCallId: "validation-delete",
+  });
+
+  const blocked = agent.validateTaskComplete();
+  assert.equal(blocked.error.code, "CHANGES_NOT_REVIEWED");
+  assert.equal(blocked.error.reviewRequired, true);
+  assert.ok(blocked.error.reviewReasons.includes("FILE_DELETED"));
+
+  await diffTool(agent, { path: "important.js" }, "review-delete");
+  assert.equal(agent.validateTaskComplete().success, true);
+});
+
+test("stale validation blocks completion until a fresh validation exists", () => {
+  const { agent, tracker } = fixture();
+  create(tracker, "feature.py", "one");
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    scope: { mode: "project", projectRoot: "." },
+    toolCallId: "validation-before-change",
+  });
+  modify(tracker, "feature.py", "one", "two");
+
+  const blocked = agent.validateTaskComplete();
+  assert.equal(blocked.error.code, "VALIDATION_STALE");
+  assert.equal(blocked.error.completionState, "BLOCKED");
+});
+
+test("safe completion still permits voluntary diff review", async () => {
+  const { agent, tracker } = fixture();
+  create(tracker, "feature.py", "print('ok')");
+  tracker.recordValidation({
+    status: "PASSED",
+    projectRoot: ".",
+    scope: { mode: "project", projectRoot: "." },
+    toolCallId: "validation-voluntary-review",
+  });
+
+  const result = await diffTool(agent, { path: "feature.py" }, "voluntary");
+  assert.equal(result.reviewComplete, true);
+  assert.equal(agent.validateTaskComplete().success, true);
+});
+
+test("runner completes a validated safe run without injecting get_diff", async () => {
+  const { agent } = fixture();
+  let modelRequests = 0;
+  agent.api.aiChat = async () => {
+    modelRequests += 1;
+    create(agent.runChangeTracker, "feature.py", "print('ok')");
+    agent.runChangeTracker.recordValidation({
+      status: "PASSED",
+      projectRoot: ".",
+      scope: { mode: "project", projectRoot: "." },
+      toolCallId: "runner-validation-safe",
+    });
+    return {
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            role: "assistant",
+            content: null,
+            tool_calls: [
+              call(
+                "task_complete",
+                { summary: "done", validation: "PASSED" },
+                "runner-safe-complete",
+              ),
+            ],
+          },
+        },
+      ],
+    };
+  };
+  agent.setProvider({ id: "mock", baseURL: "https://mock.invalid" });
+  agent.setModel("mock");
+  agent.permissions = "code";
+
+  const result = await agent.execute("Confirm the validated run");
+  assert.equal(result.taskComplete, true);
+  assert.equal(modelRequests, 1);
+  assert.equal(
+    agent.messages.some(
+      (message) => message.role === "tool" && message.name === "get_diff",
+    ),
+    false,
+  );
 });
 
 test("runner sends structured remaining paths after rejected task_complete", async () => {
