@@ -47,15 +47,25 @@ class AgentEventBus {
     const eventListeners = this.listeners.get(eventName);
     if (!eventListeners || eventListeners.size === 0) return;
 
-    for (const [id, { fn }] of eventListeners) {
+    for (const { fn } of eventListeners.values()) {
       try {
-        fn(payload);
+        const result = fn(payload);
+
+        // Handle async listeners that return Promises
+        if (result && typeof result.then === "function") {
+          // Attach catch handler to prevent unhandled rejection
+          // Pass it through a no-op to ensure rejection is fully consumed
+          result
+            .catch((error) => {
+              this.agent.recordCallbackFailure(`eventbus:${eventName}`, error);
+            })
+            .catch(() => {
+              // No-op: catch the case where recordCallbackFailure itself fails
+            });
+        }
       } catch (error) {
         // Observer failure should not break the Agent runtime
-        this.agent.recordCallbackFailure(
-          `eventbus:${eventName}`,
-          error
-        );
+        this.agent.recordCallbackFailure(`eventbus:${eventName}`, error);
       }
     }
   }

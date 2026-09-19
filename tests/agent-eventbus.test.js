@@ -1,182 +1,145 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { createAgent } = require("./helpers/agent-runtime");
 
-// Simple EventBus test that doesn't require full Agent setup
-test("AgentEventBus: subscribe and emit basic events", () => {
-  class MockAgent {
-    constructor() {
-      this.agentProgress = { metrics: { callbackFailures: 0 } };
-    }
-    recordCallbackFailure(name, error) {
-      this.agentProgress.metrics.callbackFailures++;
-    }
-  }
-
-  class TestEventBus {
-    constructor(agent) {
-      this.agent = agent;
-      this.listeners = new Map();
-      this.listenerIdCounter = 0;
-    }
-
-    subscribe(eventName, listener) {
-      if (typeof eventName !== "string" || !eventName.trim()) {
-        throw new TypeError("eventName doit être une chaîne non vide.");
-      }
-      if (typeof listener !== "function") {
-        throw new TypeError("listener doit être une fonction.");
-      }
-
-      if (!this.listeners.has(eventName)) {
-        this.listeners.set(eventName, new Map());
-      }
-
-      const listenerId = ++this.listenerIdCounter;
-      this.listeners.get(eventName).set(listenerId, {
-        id: listenerId,
-        fn: listener,
-      });
-
-      return () => this.unsubscribe(eventName, listenerId);
-    }
-
-    unsubscribe(eventName, listenerId) {
-      if (typeof eventName !== "string" || !eventName.trim()) return false;
-      if (typeof listenerId !== "number") return false;
-
-      const eventListeners = this.listeners.get(eventName);
-      if (!eventListeners) return false;
-
-      const deleted = eventListeners.delete(listenerId);
-      if (eventListeners.size === 0) {
-        this.listeners.delete(eventName);
-      }
-      return deleted;
-    }
-
-    emit(eventName, payload) {
-      if (typeof eventName !== "string" || !eventName.trim()) return;
-
-      const eventListeners = this.listeners.get(eventName);
-      if (!eventListeners || eventListeners.size === 0) return;
-
-      for (const [id, { fn }] of eventListeners) {
-        try {
-          fn(payload);
-        } catch (error) {
-          this.agent.recordCallbackFailure(`eventbus:${eventName}`, error);
-        }
-      }
-    }
-  }
-
-  const agent = new MockAgent();
-  const bus = new TestEventBus(agent);
-
-  // Test 1: Multiple observers
-  let callCountA = 0;
-  let callCountB = 0;
-
-  bus.subscribe("test:event", () => callCountA++);
-  bus.subscribe("test:event", () => callCountB++);
-
-  bus.emit("test:event", {});
-
-  assert.equal(callCountA, 1);
-  assert.equal(callCountB, 1);
-
-  // Test 2: Unsubscribe
-  callCountA = 0;
-  callCountB = 0;
-  bus.listeners.clear(); // Clear previous listeners
-  const unsubscribe = bus.subscribe("test:event", () => callCountA++);
-  unsubscribe();
-  bus.emit("test:event", {});
-  assert.equal(callCountA, 0);
-
-  // Test 3: Double unsubscribe is safe
-  const unsubscribe2 = bus.subscribe("test:event", () => {});
-  assert.equal(unsubscribe2(), true);
-  assert.equal(unsubscribe2(), false);
-
-  // Test 4: Listener throw doesn't break other listeners
-  callCountA = 0;
-  callCountB = 0;
-  agent.agentProgress.metrics.callbackFailures = 0; // Reset counter
-  bus.subscribe("test:event", () => {
-    callCountA++;
-    throw new Error("Test error");
+function createBusAgent() {
+  const agent = createAgent({
+    api: {},
+    fileExplorer: { rootPath: "/workspace" },
+    tabManager: { activeFile: null, getFileByPath: () => null },
   });
-  bus.subscribe("test:event", () => callCountB++);
+  agent.agentProgress.reset();
+  return agent;
+}
 
-  bus.emit("test:event", {});
+test("AgentEventBus: multiple observers same event", () => {
+  const agent = createBusAgent();
+  let a = 0;
+  let b = 0;
+  agent.subscribe("test:event", () => {
+    a += 1;
+  });
+  agent.subscribe("test:event", () => {
+    b += 1;
+  });
+  agent.eventBus.emit("test:event", { ok: true });
+  assert.equal(a, 1);
+  assert.equal(b, 1);
+});
 
-  assert.equal(callCountA, 1);
-  assert.equal(callCountB, 1);
+test("AgentEventBus: unsubscribe and double unsubscribe", () => {
+  const agent = createBusAgent();
+  let calls = 0;
+  const unsubscribe = agent.subscribe("test:event", () => {
+    calls += 1;
+  });
+  agent.eventBus.emit("test:event", {});
+  assert.equal(calls, 1);
+  assert.equal(unsubscribe(), true);
+  assert.equal(unsubscribe(), false);
+  agent.eventBus.emit("test:event", {});
+  assert.equal(calls, 1);
+});
+
+test("AgentEventBus: sync listener throw isolation", () => {
+  const agent = createBusAgent();
+  agent.agentProgress.metrics.callbackFailures = 0;
+  let b = 0;
+  agent.subscribe("test:event", () => {
+    throw new Error("sync failure");
+  });
+  agent.subscribe("test:event", () => {
+    b += 1;
+  });
+  agent.eventBus.emit("test:event", {});
+  assert.equal(b, 1);
   assert.equal(agent.agentProgress.metrics.callbackFailures, 1);
 });
 
-test("AgentEventBus: unsubscribe idempotency", () => {
-  class MockAgent {
-    constructor() {
-      this.agentProgress = { metrics: { callbackFailures: 0 } };
-    }
-    recordCallbackFailure(name, error) {
-      this.agentProgress.metrics.callbackFailures++;
-    }
-  }
+test("AgentEventBus: async listener rejection isolation", async () => {
+  const agent = createBusAgent();
+  agent.agentProgress.metrics.callbackFailures = 0;
+  let b = 0;
+  const unhandled = [];
+  const onUnhandled = (reason) => {
+    unhandled.push(reason);
+  };
+  process.on("unhandledRejection", onUnhandled);
 
-  class TestEventBus {
-    constructor(agent) {
-      this.agent = agent;
-      this.listeners = new Map();
-      this.listenerIdCounter = 0;
-    }
+  agent.subscribe("test:event", async () => {
+    throw new Error("async failure");
+  });
+  agent.subscribe("test:event", () => {
+    b += 1;
+  });
 
-    subscribe(eventName, listener) {
-      if (!this.listeners.has(eventName)) {
-        this.listeners.set(eventName, new Map());
-      }
+  agent.eventBus.emit("test:event", {});
+  await new Promise((resolve) => setTimeout(resolve, 30));
 
-      const listenerId = ++this.listenerIdCounter;
-      this.listeners.get(eventName).set(listenerId, {
-        id: listenerId,
-        fn: listener,
-      });
+  process.off("unhandledRejection", onUnhandled);
+  assert.equal(b, 1);
+  assert.equal(agent.agentProgress.metrics.callbackFailures, 1);
+  assert.equal(unhandled.length, 0);
+});
 
-      return () => this.unsubscribe(eventName, listenerId);
-    }
+test("AgentEventBus: listener A fails but B still runs", () => {
+  const agent = createBusAgent();
+  const order = [];
+  agent.subscribe("test:event", () => {
+    order.push("A");
+    throw new Error("A failed");
+  });
+  agent.subscribe("test:event", () => {
+    order.push("B");
+  });
+  agent.eventBus.emit("test:event", {});
+  assert.deepEqual(order, ["A", "B"]);
+});
 
-    unsubscribe(eventName, listenerId) {
-      const eventListeners = this.listeners.get(eventName);
-      if (!eventListeners) return false;
+test("AgentEventBus: setCallbacks legacy + subscribe modern coexist", () => {
+  const agent = createBusAgent();
+  let modern = 0;
+  let legacy = 0;
+  agent.subscribe("run:start", () => {
+    modern += 1;
+  });
+  agent.setCallbacks({
+    onToken: () => {
+      legacy += 1;
+    },
+  });
+  agent.activeRunState = { runId: 1, ended: false };
+  agent.emitEvent("run:start", { runId: 1 });
+  assert.equal(modern, 1);
+  assert.equal(typeof agent.callbacks.onToken, "function");
+  agent.safeInvokeCallback("onToken", ["x"]);
+  assert.equal(legacy, 1);
+});
 
-      const deleted = eventListeners.delete(listenerId);
-      if (eventListeners.size === 0) {
-        this.listeners.delete(eventName);
-      }
-      return deleted;
-    }
+test("AgentEventBus: second setCallbacks does not remove modern subscription", () => {
+  const agent = createBusAgent();
+  let modern = 0;
+  agent.subscribe("run:start", () => {
+    modern += 1;
+  });
+  agent.setCallbacks({ onToken: () => {} });
+  agent.setCallbacks({ onError: () => {} });
+  agent.activeRunState = { runId: 2, ended: false };
+  agent.emitEvent("run:start", { runId: 2 });
+  assert.equal(modern, 1);
+});
 
-    emit(eventName, payload) {
-      const eventListeners = this.listeners.get(eventName);
-      if (!eventListeners || eventListeners.size === 0) return;
-
-      for (const [id, { fn }] of eventListeners) {
-        try {
-          fn(payload);
-        } catch (error) {
-          this.agent.recordCallbackFailure(`eventbus:${eventName}`, error);
-        }
-      }
-    }
-  }
-
-  const agent = new MockAgent();
-  const bus = new TestEventBus(agent);
-
-  const unsubscribe = bus.subscribe("test:event", () => {});
-  assert.equal(unsubscribe(), true);
-  assert.equal(unsubscribe(), false);
-  assert.equal(unsubscribe(), false);
+test("AgentEventBus: observer failure increments callbackFailures metric", () => {
+  const agent = createBusAgent();
+  agent.agentProgress.metrics.callbackFailures = 0;
+  agent.subscribe("boom", () => {
+    throw new Error("observer boom");
+  });
+  agent.eventBus.emit("boom", {});
+  assert.equal(agent.agentProgress.metrics.callbackFailures, 1);
+  assert.equal(
+    agent.agentProgress.getMetrics().callbackFailures,
+    1,
+    "callbackFailures covers both legacy callbacks and EventBus observers",
+  );
 });

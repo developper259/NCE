@@ -122,6 +122,9 @@ class Agent {
     this.responseBudgetEstimator = new ResponseBudgetEstimator(this);
     this.modelRequestState = null;
     this.modelRequestCounter = 0;
+    this.pendingModelRequestId = null;
+    this.currentModelRequestId = null;
+    this.activeRunState = null;
     this.modelOutputStates = new Map();
     this.largeWriteState = null;
     this.fileKnowledge = new FileKnowledge(this);
@@ -331,7 +334,30 @@ class Agent {
     return this.eventBus.subscribe(eventName, listener);
   }
 
-  emitEvent(eventName, payload) {
+  emitEvent(eventName, payload = {}) {
+    const runState = this.activeRunState;
+    const payloadRunId = payload?.runId;
+
+    // After run:end, drop further observability events for that run.
+    // run:end itself is allowed through (ended is set before emit).
+    if (
+      runState?.ended &&
+      eventName !== "run:end" &&
+      (payloadRunId == null || payloadRunId === runState.runId)
+    ) {
+      return;
+    }
+
+    // Drop stale events that belong to a previous run while another is active.
+    if (
+      runState &&
+      !runState.ended &&
+      payloadRunId != null &&
+      payloadRunId !== runState.runId
+    ) {
+      return;
+    }
+
     this.eventBus.emit(eventName, payload);
   }
   safeInvokeCallback(name, args = [], options = {}) {
@@ -956,9 +982,8 @@ class Agent {
   }
   recordModelPromptUsage(result) {
     const usage = result?.usage || result?.data?.usage || null;
-    const actualPromptTokens = Number(
-      usage?.prompt_tokens ?? usage?.input_tokens ?? usage?.promptTokens,
-    );
+    const normalized = this.modelClient.normalizeModelUsage(usage);
+    const actualPromptTokens = normalized?.inputTokens;
     if (Number.isFinite(actualPromptTokens) && actualPromptTokens >= 0) {
       this.cumulativeActualPromptTokens += actualPromptTokens;
     }
@@ -985,7 +1010,9 @@ class Agent {
     const sessionInfo = {
       sessionId: this.currentSessionId,
       runId: this.runId,
-      requestId: `${this.runId}:main:${this.modelRequestCounter}`,
+      requestId:
+        this.currentModelRequestId ||
+        `${this.runId}:main:${this.modelRequestCounter}`,
       estimatedPromptTokens: Number(
         this.lastContextMetrics?.estimatedModelTokens ??
           this.lastContextMetrics?.estimatedInputTokens,

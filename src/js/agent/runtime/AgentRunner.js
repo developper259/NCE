@@ -1,15 +1,12 @@
 class AgentRunner {
   constructor(agent) {
     this.agent = agent;
-    this.endedRuns = new Set();
   }
 
   emitRunEndOnce(runState, status, result, error) {
-    if (!runState || runState.ended) return;
-    if (this.endedRuns.has(runState.runId)) return;
+    if (!runState || runState.ended) return false;
 
     runState.ended = true;
-    this.endedRuns.add(runState.runId);
 
     const endedAt = Date.now();
     const durationMs = endedAt - runState.startedAt;
@@ -25,6 +22,7 @@ class AgentRunner {
       error: error ? this.agent.normalizeObservableError(error) : null,
       metrics: this.agent.agentProgress?.getMetrics() || null,
     });
+    return true;
   }
 
   createRunConfig(overrides = {}) {
@@ -121,13 +119,19 @@ class AgentRunner {
     this.agent.cumulativeEstimatedPromptTokens = 0;
     this.agent.cumulativeActualPromptTokens = 0;
 
-    // Track run for exactly-once finalization
+    // Exactly-once finalization lives on the run context itself (not a pruned Set).
     const runState = {
       sessionId: runContext.sessionId,
       runId,
       startedAt: Date.now(),
       ended: false,
     };
+    this.agent.activeRunState = runState;
+
+    // Reset metrics before run:start so observer failures during the run are retained.
+    this.agent.agentProgress.reset({
+      requiresModification: false,
+    });
 
     // Emit run:start event
     this.agent.emitEvent("run:start", {
@@ -156,7 +160,8 @@ class AgentRunner {
       const modificationHint = this.agent.detectModificationIntent(userMessage);
       const requiresModification =
         runConfig.permissions === "code" && modificationHint;
-      this.agent.agentProgress.reset({ requiresModification });
+      this.agent.agentProgress.requiresModification =
+        requiresModification === true;
       if (modificationHint) {
         this.agent.messages.push({
           role: "system",
@@ -173,7 +178,13 @@ class AgentRunner {
       });
       if (result?.error) {
         this.agent.runChangeTracker?.setRunStatus?.("failed", runId);
-      } else if (
+        result.metrics = this.agent.agentProgress.getMetrics();
+        this.agent.lastRunMetrics = result.metrics;
+        this.emitRunEndOnce(runState, "failed", result, result.error);
+        this.agent.safeInvokeCallback("onError", [result.error, runContext]);
+        return result;
+      }
+      if (
         this.agent.runChangeTracker?.current?.status === "running" &&
         !this.commitRunCompleted(runId)
       ) {
@@ -218,15 +229,9 @@ class AgentRunner {
         this.agent.abortController = null;
         this.agent.currentSessionId = null;
         this.agent.runConfig = null;
-      }
-      // Clean up ended runs tracking to avoid memory leaks
-      // Keep only the last 10 runs in the set
-      if (this.endedRuns.size > 10) {
-        const runsArray = Array.from(this.endedRuns);
-        runsArray.sort((a, b) => b - a);
-        for (let i = 10; i < runsArray.length; i++) {
-          this.endedRuns.delete(runsArray[i]);
-        }
+        this.agent.pendingModelRequestId = null;
+        this.agent.currentModelRequestId = null;
+        this.agent.modelClient?.requestAttempts?.clear?.();
       }
     }
   }
@@ -402,10 +407,14 @@ class AgentRunner {
 
   createModelOutputContext(runId, phase = "main") {
     this.agent.modelRequestCounter += 1;
+    const requestId = `${runId}:${phase}:${this.agent.modelRequestCounter}`;
+    // Share the logical requestId with the upcoming requestModel() call.
+    this.agent.pendingModelRequestId = requestId;
+    this.agent.currentModelRequestId = requestId;
     return {
       sessionId: this.agent.currentSessionId,
       runId,
-      requestId: `${runId}:${phase}:${this.agent.modelRequestCounter}`,
+      requestId,
     };
   }
 

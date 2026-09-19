@@ -7,26 +7,35 @@ class ModelClient {
   normalizeModelUsage(usage) {
     if (!usage || typeof usage !== "object") return null;
 
-    const inputTokens = Number(
+    const normalizeTokenCount = (value) => {
+      if (value == null || value === "") return null;
+      const count = Number(value);
+      return Number.isFinite(count) && count >= 0 ? count : null;
+    };
+    const inputTokens = normalizeTokenCount(
       usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokens,
     );
-    const outputTokens = Number(
+    const outputTokens = normalizeTokenCount(
       usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens,
     );
 
-    if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) {
+    if (inputTokens == null && outputTokens == null) {
       return null;
     }
 
-    const totalTokens = Number.isFinite(usage.total_tokens ?? usage.totalTokens)
-      ? Number(usage.total_tokens ?? usage.totalTokens)
-      : Number.isFinite(inputTokens) && Number.isFinite(outputTokens)
-        ? inputTokens + outputTokens
-        : null;
+    const providedTotal = normalizeTokenCount(
+      usage.total_tokens ?? usage.totalTokens,
+    );
+    const totalTokens =
+      providedTotal != null
+        ? providedTotal
+        : inputTokens != null && outputTokens != null
+          ? inputTokens + outputTokens
+          : null;
 
     return {
-      inputTokens: Number.isFinite(inputTokens) ? inputTokens : null,
-      outputTokens: Number.isFinite(outputTokens) ? outputTokens : null,
+      inputTokens,
+      outputTokens,
       totalTokens,
     };
   }
@@ -65,9 +74,26 @@ class ModelClient {
       durationMs,
       error: error ? this.agent.normalizeObservableError(error) : null,
     });
+  }
 
-    // Clean up request attempts for this requestId to avoid memory leaks
-    this.requestAttempts.delete(requestId);
+  allocateLogicalRequestId(config, phase = "main") {
+    if (this.agent.pendingModelRequestId) {
+      const requestId = this.agent.pendingModelRequestId;
+      this.agent.pendingModelRequestId = null;
+      return requestId;
+    }
+    this.agent.modelRequestCounter += 1;
+    return `${config.runId}:${phase}:${this.agent.modelRequestCounter}`;
+  }
+
+  nextAttempt(requestId) {
+    const attempt = (this.requestAttempts.get(requestId) || 0) + 1;
+    this.requestAttempts.set(requestId, attempt);
+    return attempt;
+  }
+
+  clearRequestAttempts(requestId) {
+    if (requestId) this.requestAttempts.delete(requestId);
   }
 
   getModelRequestState(config) {
@@ -511,14 +537,15 @@ class ModelClient {
     delete sanitizedProvider.apiKey;
     const sessionId = config.sessionId ?? this.agent.currentSessionId ?? null;
 
-    // Increment model request counter for this run
-    this.agent.modelRequestCounter++;
-    const requestId = `${config.runId}:main:${this.agent.modelRequestCounter}`;
-
-    // Track attempt number for this requestId
-    const attemptKey = requestId;
-    const currentAttempt = (this.requestAttempts.get(attemptKey) || 0) + 1;
-    this.requestAttempts.set(attemptKey, currentAttempt);
+    // Logical requestId is owned by requestModel(); attempt is global per requestId.
+    const requestId =
+      config._observabilityRequestId ||
+      this.allocateLogicalRequestId(config, "main");
+    const currentAttempt =
+      Number.isFinite(config._observabilityAttempt) &&
+      config._observabilityAttempt > 0
+        ? config._observabilityAttempt
+        : this.nextAttempt(requestId);
 
     const requestStartTime = Date.now();
 
@@ -537,53 +564,53 @@ class ModelClient {
       startedAt: requestStartTime,
     });
 
-    if (typeof this.agent.api?.aiChat === "function") {
-      const result = await this.agent.api.aiChat({
-        provider: sanitizedProvider,
-        payload,
-        sessionId,
-      });
-      const unwrapped = this.agent.unwrapModelTransportResult(result);
-      this.recordPreviousOutputUsage(unwrapped);
-      this.emitModelRequestEnd(
-        requestId,
-        currentAttempt,
-        config,
-        "success",
-        unwrapped,
-        requestStartTime,
-      );
-      return this.agent.recordModelPromptUsage(unwrapped);
-    }
-    if (typeof this.agent.api?.requestAI === "function") {
-      const result = await this.agent.api.requestAI({
-        provider: sanitizedProvider,
-        payload,
-        sessionId,
-      });
-      const unwrapped = this.agent.unwrapModelTransportResult(result);
-      this.recordPreviousOutputUsage(unwrapped);
-      this.emitModelRequestEnd(
-        requestId,
-        currentAttempt,
-        config,
-        "success",
-        unwrapped,
-        requestStartTime,
-      );
-      return this.agent.recordModelPromptUsage(unwrapped);
-    }
-
-    const headers = this.buildProviderHeaders({
-      provider,
-      apiKey: provider.apiKey,
-      sessionId,
-    });
-    const url = `${provider.baseURL.replace(/\/+$/, "")}`;
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(), 60000);
 
     try {
+      if (typeof this.agent.api?.aiChat === "function") {
+        const result = await this.agent.api.aiChat({
+          provider: sanitizedProvider,
+          payload,
+          sessionId,
+        });
+        const unwrapped = this.agent.unwrapModelTransportResult(result);
+        this.recordPreviousOutputUsage(unwrapped);
+        this.emitModelRequestEnd(
+          requestId,
+          currentAttempt,
+          config,
+          "success",
+          unwrapped,
+          requestStartTime,
+        );
+        return this.agent.recordModelPromptUsage(unwrapped);
+      }
+      if (typeof this.agent.api?.requestAI === "function") {
+        const result = await this.agent.api.requestAI({
+          provider: sanitizedProvider,
+          payload,
+          sessionId,
+        });
+        const unwrapped = this.agent.unwrapModelTransportResult(result);
+        this.recordPreviousOutputUsage(unwrapped);
+        this.emitModelRequestEnd(
+          requestId,
+          currentAttempt,
+          config,
+          "success",
+          unwrapped,
+          requestStartTime,
+        );
+        return this.agent.recordModelPromptUsage(unwrapped);
+      }
+
+      const headers = this.buildProviderHeaders({
+        provider,
+        apiKey: provider.apiKey,
+        sessionId,
+      });
+      const url = `${provider.baseURL.replace(/\/+$/, "")}`;
       const signal =
         controller?.signal && typeof AbortSignal?.any === "function"
           ? AbortSignal.any([controller.signal, timeoutController.signal])
@@ -624,12 +651,13 @@ class ModelClient {
       );
       return this.agent.recordModelPromptUsage(result);
     } catch (error) {
-      const isAborted =
+      const isTimeoutAbort =
         error?.name === "AbortError" &&
         !controller?.signal?.aborted &&
         timeoutController.signal.aborted;
       const isControllerAborted =
-        error?.name === "AbortError" && controller?.signal?.aborted;
+        this.agent.isAbortError?.(error) ||
+        (error?.name === "AbortError" && controller?.signal?.aborted);
 
       this.emitModelRequestEnd(
         requestId,
@@ -641,7 +669,7 @@ class ModelClient {
         error,
       );
 
-      if (isAborted) {
+      if (isTimeoutAbort) {
         throw Object.assign(new Error("Le provider ne répond pas."), {
           name: "TimeoutError",
           code: "ETIMEDOUT",
@@ -654,10 +682,10 @@ class ModelClient {
   }
 
   recordPreviousOutputUsage(result) {
-    const usage = result?.usage || result?.data?.usage || {};
-    const tokens = Number(
-      usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens,
+    const normalized = this.normalizeModelUsage(
+      result?.usage || result?.data?.usage,
     );
+    const tokens = normalized?.outputTokens;
     const history = this.agent.modelRequestState?.previousOutputUsage;
     if (Array.isArray(history) && Number.isFinite(tokens) && tokens >= 0) {
       history.push(tokens);
@@ -677,201 +705,259 @@ class ModelClient {
     };
     let retryCount = 0;
 
-    while (state.currentConfig) {
-      const activeConfig = state.currentConfig;
-      try {
-        const result = await this.requestSingleModel(controller, activeConfig);
-        this.agent.applyActiveModelConfig(config, activeConfig);
-        return result;
-      } catch (error) {
-        if (this.agent.isAbortError(error) && controller?.signal?.aborted)
-          throw error;
-        if (error?.code === "MESSAGE_SERIALIZATION_FAILED") throw error;
+    // One logical requestId for the whole retry/fallback chain.
+    const requestId = this.allocateLogicalRequestId(config, "main");
+    state.activeRequestId = requestId;
+    this.agent.currentModelRequestId = requestId;
 
-        const classified = this.classifyModelError(error, error?.response, {
-          provider: activeConfig.provider,
-          providerId: activeConfig.providerId,
-          model: activeConfig.model,
-          modelConfig: activeConfig.modelConfig,
-        });
+    const withObservability = (activeConfig) => {
+      const attempt = this.nextAttempt(requestId);
+      return {
+        ...activeConfig,
+        _observabilityRequestId: requestId,
+        _observabilityAttempt: attempt,
+      };
+    };
 
-        state.failures.push(classified);
-        if (classified.statusCode === 429) {
-          this.agent.agentProgress?.recordModel429?.();
-        }
-        if (classified.providerGlobal) {
-          state.blockedProviders.set(
-            activeConfig.providerId,
-            classified.category,
+    try {
+      while (state.currentConfig) {
+        const activeConfig = state.currentConfig;
+        try {
+          const result = await this.requestSingleModel(
+            controller,
+            withObservability(activeConfig),
           );
-        }
-        this.debugModelError(classified, {
-          retryCount,
-          fallbackCount: state.modelFallbackCount,
-        });
+          this.agent.applyActiveModelConfig(config, activeConfig);
+          return result;
+        } catch (error) {
+          if (this.agent.isAbortError(error) && controller?.signal?.aborted)
+            throw error;
+          if (error?.code === "MESSAGE_SERIALIZATION_FAILED") throw error;
 
-        if (
-          classified.category === "AUTH_ERROR" &&
-          !state.authenticationCancelledProviders.has(
-            activeConfig.providerId,
-          ) &&
-          typeof this.agent.callbacks.onAuthenticationRequired === "function"
-        ) {
-          let replacementKey = "";
-          try {
-            replacementKey = await this.agent.safeInvokeCallback(
-              "onAuthenticationRequired",
-              [
-                classified,
-                {
-                  sessionId: config.sessionId ?? this.agent.currentSessionId,
-                  runId: config.runId ?? this.agent.runId,
-                  providerId: activeConfig.providerId,
-                },
-              ],
-              { awaitResult: true, fallback: "" },
-            );
-          } catch (authenticationError) {
-            console.error(
-              "[NCE Agent model] impossible de remplacer la clé API",
-              authenticationError,
+          const classified = this.classifyModelError(error, error?.response, {
+            provider: activeConfig.provider,
+            providerId: activeConfig.providerId,
+            model: activeConfig.model,
+            modelConfig: activeConfig.modelConfig,
+          });
+
+          state.failures.push(classified);
+          if (classified.statusCode === 429) {
+            this.agent.agentProgress?.recordModel429?.();
+          }
+          if (classified.providerGlobal) {
+            state.blockedProviders.set(
+              activeConfig.providerId,
+              classified.category,
             );
           }
-          this.agent.assertRunActive(config.runId, controller);
-          if (typeof replacementKey === "string" && replacementKey.trim()) {
-            const apiKey = replacementKey.trim();
-            activeConfig.provider = { ...activeConfig.provider, apiKey };
-            if (config.providerId === activeConfig.providerId) {
-              config.provider = { ...config.provider, apiKey };
+          this.debugModelError(classified, {
+            retryCount,
+            fallbackCount: state.modelFallbackCount,
+          });
+
+          if (
+            classified.category === "AUTH_ERROR" &&
+            !state.authenticationCancelledProviders.has(
+              activeConfig.providerId,
+            ) &&
+            typeof this.agent.callbacks.onAuthenticationRequired === "function"
+          ) {
+            let replacementKey = "";
+            try {
+              replacementKey = await this.agent.safeInvokeCallback(
+                "onAuthenticationRequired",
+                [
+                  classified,
+                  {
+                    sessionId: config.sessionId ?? this.agent.currentSessionId,
+                    runId: config.runId ?? this.agent.runId,
+                    providerId: activeConfig.providerId,
+                  },
+                ],
+                { awaitResult: true, fallback: "" },
+              );
+            } catch (authenticationError) {
+              console.error(
+                "[NCE Agent model] impossible de remplacer la clé API",
+                authenticationError,
+              );
             }
-            state.currentConfig = activeConfig;
-            state.blockedProviders.delete(activeConfig.providerId);
-            retryCount = 0;
+            this.agent.assertRunActive(config.runId, controller);
+            if (typeof replacementKey === "string" && replacementKey.trim()) {
+              const apiKey = replacementKey.trim();
+              activeConfig.provider = { ...activeConfig.provider, apiKey };
+              if (config.providerId === activeConfig.providerId) {
+                config.provider = { ...config.provider, apiKey };
+              }
+              state.currentConfig = activeConfig;
+              state.blockedProviders.delete(activeConfig.providerId);
+              retryCount = 0;
+              continue;
+            }
+            state.authenticationCancelledProviders.add(activeConfig.providerId);
+          }
+
+          const candidateKey = `${activeConfig.providerId}:${activeConfig.model}`;
+          const candidateRetries =
+            state.retryCountsByCandidate.get(candidateKey) || 0;
+          if (
+            classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
+            (state.contextRecoveries.get(candidateKey) || 0) < 1
+          ) {
+            classified.failureOrigin = "context";
+            classified.contextRecoveryTried = true;
+            classified.fallbackRecommended = false;
+            state.contextRecoveries.set(candidateKey, 1);
+            this.agent.contextManager.compactionState.compactionArmed = true;
+            activeConfig.contextCompaction = {
+              ...(activeConfig.contextCompaction || {}),
+              enabled: true,
+              triggerRatio: 0,
+              hardRatio: 0,
+              criticalRatio: 0,
+              recentIterations: 1,
+            };
+            config.contextCompaction = { ...activeConfig.contextCompaction };
+            this.agent.agentProgress.metrics.contextRecoveries =
+              (this.agent.agentProgress.metrics.contextRecoveries || 0) + 1;
             continue;
           }
-          state.authenticationCancelledProviders.add(activeConfig.providerId);
-        }
+          if (
+            classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
+            (state.contextRecoveries.get(candidateKey) || 0) >= 1
+          ) {
+            classified.failureOrigin = "context";
+            classified.contextRecoveryTried = true;
+            classified.fallbackRecommended = true;
+          }
+          const retryDelay = this.agent.getModelRetryDelay(
+            classified,
+            candidateRetries,
+          );
+          const totalRetryCap = Math.max(
+            1,
+            (config.maxProviderRetries ?? this.agent.maxProviderRetries) *
+              ((config.maxModelFallbacks ?? this.agent.maxModelFallbacks) + 1),
+          );
+          const mayRetry =
+            classified.retryable &&
+            candidateRetries <
+              (config.maxProviderRetries ?? this.agent.maxProviderRetries) &&
+            state.totalRetryCount < totalRetryCap &&
+            retryDelay <=
+              (config.maxRetryDelayMs ?? this.agent.maxRetryDelayMs);
 
-        const candidateKey = `${activeConfig.providerId}:${activeConfig.model}`;
-        const candidateRetries =
-          state.retryCountsByCandidate.get(candidateKey) || 0;
-        if (
-          classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
-          (state.contextRecoveries.get(candidateKey) || 0) < 1
-        ) {
-          classified.failureOrigin = "context";
-          classified.contextRecoveryTried = true;
-          classified.fallbackRecommended = false;
-          state.contextRecoveries.set(candidateKey, 1);
-          this.agent.contextManager.compactionState.compactionArmed = true;
-          activeConfig.contextCompaction = {
-            ...(activeConfig.contextCompaction || {}),
-            enabled: true,
-            triggerRatio: 0,
-            hardRatio: 0,
-            criticalRatio: 0,
-            recentIterations: 1,
-          };
-          config.contextCompaction = { ...activeConfig.contextCompaction };
-          this.agent.agentProgress.metrics.contextRecoveries =
-            (this.agent.agentProgress.metrics.contextRecoveries || 0) + 1;
-          continue;
-        }
-        if (
-          classified.category === "CONTEXT_LENGTH_EXCEEDED" &&
-          (state.contextRecoveries.get(candidateKey) || 0) >= 1
-        ) {
-          classified.failureOrigin = "context";
-          classified.contextRecoveryTried = true;
-          classified.fallbackRecommended = true;
-        }
-        const retryDelay = this.agent.getModelRetryDelay(
-          classified,
-          candidateRetries,
-        );
-        const totalRetryCap = Math.max(
-          1,
-          (config.maxProviderRetries ?? this.agent.maxProviderRetries) *
-            ((config.maxModelFallbacks ?? this.agent.maxModelFallbacks) + 1),
-        );
-        const mayRetry =
-          classified.retryable &&
-          candidateRetries <
-            (config.maxProviderRetries ?? this.agent.maxProviderRetries) &&
-          state.totalRetryCount < totalRetryCap &&
-          retryDelay <= (config.maxRetryDelayMs ?? this.agent.maxRetryDelayMs);
+          if (mayRetry) {
+            retryCount += 1;
+            state.providerRetryCount += 1;
+            state.totalRetryCount += 1;
+            state.retryCountsByCandidate.set(candidateKey, candidateRetries + 1);
+            this.agent.agentProgress?.recordModelRetry?.();
 
-        if (mayRetry) {
-          retryCount += 1;
-          state.providerRetryCount += 1;
-          state.totalRetryCount += 1;
-          state.retryCountsByCandidate.set(candidateKey, candidateRetries + 1);
-          this.agent.agentProgress?.recordModelRetry?.();
-          this.emitModelStatus(
-            {
-              kind: "retry",
-              classification: classified,
+            const nextAttempt =
+              (this.requestAttempts.get(requestId) || 0) + 1;
+
+            // Emit model:retry only when the same provider/model will be retried.
+            this.agent.emitEvent("model:retry", {
+              sessionId: config.sessionId ?? this.agent.currentSessionId,
+              runId: config.runId,
+              requestId,
+              providerId: activeConfig.providerId,
+              model: activeConfig.model,
+              attempt: nextAttempt,
+              reason: classified.category,
+              errorCode: classified.code,
               delayMs: retryDelay,
-              attempt: retryCount,
-              userMessage: `${classified.userMessage} Nouvelle tentative dans ${this.agent.formatRetryDelay(retryDelay)}…`,
-            },
-            config,
-          );
-          await this.agent.waitForModelRetry(retryDelay, controller);
-          continue;
-        }
+            });
 
-        if (
-          classified.category === "MODEL_NOT_FOUND" ||
-          classified.category === "NO_CAPACITY" ||
-          classified.category === "NO_TOKENS_AVAILABLE" ||
-          classified.category === "MODEL_UNAVAILABLE"
-        ) {
-          state.unhealthyModels.add(
-            `${activeConfig.providerId}:${activeConfig.model}`,
-          );
-        }
+            this.emitModelStatus(
+              {
+                kind: "retry",
+                classification: classified,
+                delayMs: retryDelay,
+                attempt: nextAttempt,
+                userMessage: `${classified.userMessage} Nouvelle tentative dans ${this.agent.formatRetryDelay(retryDelay)}…`,
+              },
+              config,
+            );
+            await this.agent.waitForModelRetry(retryDelay, controller);
+            continue;
+          }
 
-        const fallback =
-          this.agent.shouldFallbackModelForFailure(classified) &&
-          classified.fallbackRecommended
-            ? this.agent.takeNextFallback(state, classified, config)
-            : null;
-        if (fallback) {
-          const previous = activeConfig;
-          state.currentConfig = fallback;
-          state.modelFallbackCount += 1;
-          this.agent.agentProgress?.recordModelFallback?.();
-          retryCount = 0;
-          this.agent.applyActiveModelConfig(config, fallback);
-          this.emitModelStatus(
-            {
-              kind: "fallback",
-              classification: classified,
+          if (
+            classified.category === "MODEL_NOT_FOUND" ||
+            classified.category === "NO_CAPACITY" ||
+            classified.category === "NO_TOKENS_AVAILABLE" ||
+            classified.category === "MODEL_UNAVAILABLE"
+          ) {
+            state.unhealthyModels.add(
+              `${activeConfig.providerId}:${activeConfig.model}`,
+            );
+          }
+
+          const fallback =
+            this.agent.shouldFallbackModelForFailure(classified) &&
+            classified.fallbackRecommended
+              ? this.agent.takeNextFallback(state, classified, config)
+              : null;
+          if (fallback) {
+            const previous = activeConfig;
+            state.currentConfig = fallback;
+            state.modelFallbackCount += 1;
+            this.agent.agentProgress?.recordModelFallback?.();
+            retryCount = 0;
+            this.agent.applyActiveModelConfig(config, fallback);
+
+            // Emit model:fallback only on a real provider/model switch.
+            this.agent.emitEvent("model:fallback", {
+              sessionId: config.sessionId ?? this.agent.currentSessionId,
+              runId: config.runId,
+              requestId,
               fromProvider: previous.providerId,
               fromModel: previous.model,
               toProvider: fallback.providerId,
               toModel: fallback.model,
-              userMessage: `${this.getModelDisplayName(previous)} est indisponible. Basculement vers ${this.getModelDisplayName(fallback)}…`,
-            },
-            config,
-          );
-          continue;
-        }
+              reason: classified.category,
+            });
 
-        throw this.agent.createFinalModelError(classified, state);
+            this.emitModelStatus(
+              {
+                kind: "fallback",
+                classification: classified,
+                fromProvider: previous.providerId,
+                fromModel: previous.model,
+                toProvider: fallback.providerId,
+                toModel: fallback.model,
+                userMessage: `${this.getModelDisplayName(previous)} est indisponible. Basculement vers ${this.getModelDisplayName(fallback)}…`,
+              },
+              config,
+            );
+            continue;
+          }
+
+          throw this.agent.createFinalModelError(classified, state);
+        }
+      }
+
+      throw this.agent.createFinalModelError(
+        this.classifyModelError(new Error("Aucun modèle IA configuré."), null, {
+          provider: config.provider,
+          providerId: config.providerId,
+          model: config.model,
+          modelConfig: config.modelConfig,
+        }),
+        this.agent.modelRequestState,
+      );
+    } finally {
+      this.clearRequestAttempts(requestId);
+      if (this.agent.currentModelRequestId === requestId) {
+        this.agent.currentModelRequestId = null;
+      }
+      if (state.activeRequestId === requestId) {
+        state.activeRequestId = null;
       }
     }
-
-    throw this.agent.createFinalModelError(
-      this.classifyModelError(new Error("Aucun modèle IA configuré."), null, {
-        provider: config.provider,
-        providerId: config.providerId,
-        model: config.model,
-        modelConfig: config.modelConfig,
-      }),
-      this.agent.modelRequestState,
-    );
   }
 }
 
