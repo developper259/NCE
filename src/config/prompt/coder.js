@@ -91,14 +91,19 @@ Applique réellement tous les changements nécessaires avec les outils d'écritu
 écritures dépendantes restent séquentielles. Après le premier fichier, vérifie quels
 autres fichiers doivent être adaptés pour que la demande soit réellement intégrée.
 Pour un gros fichier, utilise create_file puis write_file_chunk en plusieurs portions.
-Utilise delete_file uniquement lorsqu'un fichier doit réellement disparaître, jamais
+Utilise finalChunk=false pour les portions intermédiaires et finalChunk=true sur la
+dernière portion réussie. Après ce chunk final, passe directement à la validation ;
+n'appelle pas read_file uniquement pour fermer le protocole et ne renvoie pas le dernier
+payload pour le finaliser. Préserve expectedRevision sur chaque chunk. Utilise
+delete_file uniquement lorsqu'un fichier doit réellement disparaître, jamais
 comme substitut à modify_file ou rename_file.
 
 LARGE FILE WRITES
 -----------------
 Ne génère pas un fichier très volumineux dans un seul create_file. Crée-le vide ou
 avec une première portion sous la limite sûre indiquée par l'outil, continue avec
-write_file_chunk en portions sûres et valide le résultat final. Si un payload est
+write_file_chunk en portions sûres et marque la dernière avec finalChunk=true avant
+de valider le résultat final. Si un payload est
 tronqué ou rejeté, ne renvoie pas le même contenu monolithique : passe immédiatement
 à cette stratégie par chunks.
 

@@ -228,6 +228,111 @@ test("active append still rejects a non-write model action", () => {
   assert.equal(error.name, "AgentLargeWriteProtocolError");
 });
 
+test("empty create followed by a successful final append enables validation", () => {
+  const agent = createAgent(editor());
+  const state = agent.largeFileWriter.createLargeWriteRuntimeState();
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("create_file", { path: "validation.js", content: "" }),
+    successfulToolResult("validation.js", "A"),
+    { path: "validation.js", content: "" },
+  );
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("write_file_chunk", {
+      path: "validation.js",
+      content: "module.exports = true;\n",
+      expectedRevision: "A",
+      finalChunk: true,
+    }),
+    successfulToolResult("validation.js", "B"),
+    {
+      path: "validation.js",
+      content: "module.exports = true;\n",
+      expectedRevision: "A",
+      finalChunk: true,
+    },
+  );
+
+  const selection = agent.largeFileWriter.selectLargeWriteToolCall(
+    [call("run_tests", { path: "validation.js" })],
+    state,
+  );
+  assert.equal(state.state, "COMPLETE");
+  assert.equal(state.active, false);
+  assert.equal(state.currentRevision, "B");
+  assert.equal(selection.call, null);
+});
+
+test("a successful final create completes Large Write immediately", () => {
+  const agent = createAgent(editor());
+  const state = agent.largeFileWriter.createLargeWriteRuntimeState();
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("create_file", {
+      path: "small.js",
+      content: "module.exports = true;\n",
+      finalChunk: true,
+    }),
+    successfulToolResult("small.js", "A"),
+    { path: "small.js", content: "module.exports = true;\n", finalChunk: true },
+  );
+  assert.equal(state.state, "COMPLETE");
+  assert.equal(state.active, false);
+  assert.equal(state.currentRevision, "A");
+  assert.equal(state.validationPending, false);
+});
+
+test("a failed final chunk cannot complete Large Write", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "A");
+  agent.largeFileWriter.updateLargeWriteStateAfterTool(
+    state,
+    call("write_file_chunk", {
+      path: "large.txt",
+      content: "final",
+      expectedRevision: "A",
+      finalChunk: true,
+    }),
+    {
+      success: false,
+      result: {
+        error: { code: "FILE_REVISION_CONFLICT", actualRevision: "B" },
+      },
+    },
+    {
+      path: "large.txt",
+      content: "final",
+      expectedRevision: "A",
+      finalChunk: true,
+    },
+  );
+  assert.equal(state.state, "ACTIVE_APPEND");
+  assert.equal(state.active, true);
+  assert.equal(state.completed, false);
+  assert.equal(state.currentRevision, "B");
+});
+
+test("an oversized final chunk is rejected before Large Write completion", () => {
+  const agent = createAgent(editor());
+  const state = startLargeWrite(agent, "A");
+  const selection = agent.largeFileWriter.selectLargeWriteToolCall(
+    [
+      call("write_file_chunk", {
+        path: "large.txt",
+        content: "x".repeat(10001),
+        expectedRevision: "A",
+        finalChunk: true,
+      }),
+    ],
+    state,
+  );
+  assert.equal(selection.call, null);
+  assert.equal(selection.oversizedCall.contentChars, 10001);
+  assert.equal(state.state, "ACTIVE_APPEND");
+  assert.equal(state.completed, false);
+});
+
 test("malformed write metadata classifies strategy without executable arguments", () => {
   const agent = createAgent(editor());
   const raw = '{"path":"snake-game.html","content":"' + "a".repeat(6500);

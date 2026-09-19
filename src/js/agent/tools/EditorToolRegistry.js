@@ -14,13 +14,13 @@ class EditorToolRegistry {
   getCreateFileToolDescription() {
     const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
     const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
-    return `Crée un fichier petit ou moyen. Cible recommandée <= ${safeLimit} caractères ; limite technique absolue ${hardLimit}. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. Une cible de recovery indiquée par NCE est une recommandation de taille, jamais une nouvelle limite technique. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
+    return `Crée un fichier petit ou moyen. Cible recommandée <= ${safeLimit} caractères ; limite technique absolue ${hardLimit}. Pour un gros fichier, crée le fichier vide ou avec une première portion sûre, puis continue avec write_file_chunk. finalChunk=true indique que cette création est la dernière portion prévue ; sinon utilise finalChunk=false ou omets-le pour continuer. Une cible de recovery indiquée par NCE est une recommandation de taille, jamais une nouvelle limite technique. Ne réessaie jamais la même création monolithique si elle est tronquée ou rejetée. Utilise modify_file si le fichier existe déjà.`;
   }
 
   getWriteFileChunkToolDescription() {
     const safeLimit = this.agent.largeFileWriting.recommendedChunkCharacters;
     const hardLimit = this.agent.largeFileWriting.maxChunkCharacters;
-    return `Ajoute exactement la prochaine portion à la fin d'un gros fichier. Limite recommandée <= ${safeLimit} caractères ; limite runtime absolue ${hardLimit}. Le recoveryTarget indiqué par NCE peut être plus petit. expectedRevision est obligatoire : utilise la revision retournée par le chunk précédent. Après le dernier chunk, valide avec read_file.`;
+    return `Ajoute exactement la prochaine portion à la fin d'un gros fichier. Limite recommandée <= ${safeLimit} caractères ; limite runtime absolue ${hardLimit}. Le recoveryTarget indiqué par NCE peut être plus petit. expectedRevision est obligatoire : utilise la revision retournée par le chunk précédent. Utilise finalChunk=false pour une portion intermédiaire et finalChunk=true pour la dernière portion prévue ; après un chunk final réussi, passe directement à la validation sans appeler read_file uniquement pour fermer le protocole.`;
   }
 
   updateLargeFileToolDefinitions() {
@@ -174,6 +174,11 @@ class EditorToolRegistry {
             maxLength: this.agent.largeFileWriting.maxChunkCharacters,
             description: `Contenu complet d'un petit/moyen fichier, ou première portion d'un gros fichier. Cible sûre : <= ${this.agent.largeFileWriting.recommendedChunkCharacters} caractères. Vide par défaut.`,
           },
+          finalChunk: {
+            type: "boolean",
+            description:
+              "true uniquement si le contenu créé est la dernière portion prévue ; false ou absent si des chunks doivent suivre.",
+          },
           overwrite: {
             type: "boolean",
             description:
@@ -212,6 +217,11 @@ class EditorToolRegistry {
             minLength: 1,
             description:
               "Révision retournée par create_file ou par le write_file_chunk précédent.",
+          },
+          finalChunk: {
+            type: "boolean",
+            description:
+              "true uniquement pour la dernière portion prévue ; false ou absent si d'autres portions doivent suivre.",
           },
         },
         required: ["path", "content", "expectedRevision"],

@@ -608,7 +608,10 @@ class LargeFileWriter {
       toolArgs.content.length > state.recommendedChunkChars;
     if (
       success &&
-      (state.active || largeCreate || name === "write_file_chunk")
+      (state.active ||
+        largeCreate ||
+        name === "write_file_chunk" ||
+        toolArgs?.finalChunk === true)
     ) {
       if (name === "create_file" || name === "write_file_chunk") {
         const inferredExistingFirstChunk =
@@ -634,6 +637,18 @@ class LargeFileWriter {
         state.currentRevision = payload?.revision || state.currentRevision;
         state.lastFailure = null;
         if (path) state.path = path;
+        if (toolArgs?.finalChunk === true) {
+          state.validationPending = false;
+          state.completed = true;
+          state.active = false;
+          state.lastValidationRevision = state.currentRevision;
+          this.transitionLargeWriteState(state, "COMPLETE", "complete", {
+            tool: name,
+            finalChunk: true,
+            completedRevision: state.currentRevision,
+          });
+          return;
+        }
         this.debugLargeWrite(
           state,
           name === "create_file" ? "expect_next_chunk" : "expect_next_chunk",
