@@ -133,6 +133,7 @@ class Agent {
     this.agentProgress = new AgentProgress(this);
     this.agentRunner = new AgentRunner(this);
     this.runChangeTracker = new RunChangeTracker(this);
+    this.eventBus = new AgentEventBus(this);
     this.largeFileWriter = new LargeFileWriter(this);
     this.fileContextManager = new FileContextManager(this);
     this.workspaceFileManager = new WorkspaceFileManager(this);
@@ -325,6 +326,14 @@ class Agent {
     }
     return this;
   }
+
+  subscribe(eventName, listener) {
+    return this.eventBus.subscribe(eventName, listener);
+  }
+
+  emitEvent(eventName, payload) {
+    this.eventBus.emit(eventName, payload);
+  }
   safeInvokeCallback(name, args = [], options = {}) {
     const callback = this.callbacks?.[name];
     if (typeof callback !== "function") return options.fallback;
@@ -357,6 +366,20 @@ class Agent {
         240,
       ),
     });
+  }
+
+  normalizeObservableError(error) {
+    if (!error) return null;
+    const name = error.name || "Error";
+    const code = error.code || null;
+    const category = error.category || null;
+    const message = String(error.message || String(error)).slice(0, 1000);
+    return {
+      name,
+      code,
+      category,
+      message,
+    };
   }
   getMutationGuardError(runId = this.runConfig?.runId) {
     if (
@@ -958,20 +981,26 @@ class Agent {
         });
       }
     }
-    this.safeInvokeCallback("onSessionInfoUpdated", [
-      {
-        sessionId: this.currentSessionId,
-        runId: this.runId,
-        requestId: `${this.runId}:main:${this.modelRequestCounter}`,
-        estimatedPromptTokens: Number(
-          this.lastContextMetrics?.estimatedModelTokens ??
-            this.lastContextMetrics?.estimatedInputTokens,
-        ),
-        actualPromptTokens: Number.isFinite(actualPromptTokens)
-          ? actualPromptTokens
-          : null,
-      },
-    ]);
+
+    const sessionInfo = {
+      sessionId: this.currentSessionId,
+      runId: this.runId,
+      requestId: `${this.runId}:main:${this.modelRequestCounter}`,
+      estimatedPromptTokens: Number(
+        this.lastContextMetrics?.estimatedModelTokens ??
+          this.lastContextMetrics?.estimatedInputTokens,
+      ),
+      actualPromptTokens: Number.isFinite(actualPromptTokens)
+        ? actualPromptTokens
+        : null,
+    };
+
+    // Emit EventBus event
+    this.emitEvent("session:info", sessionInfo);
+
+    // Legacy callback for backward compatibility
+    this.safeInvokeCallback("onSessionInfoUpdated", [sessionInfo]);
+
     return result;
   }
   getSessionInfoSnapshot(sessionUsage = {}) {

@@ -834,6 +834,19 @@ class ToolExecutor {
       toolCallId: toolCallId || null,
     };
 
+    const toolStartTime = Date.now();
+
+    // Emit EventBus event
+    this.agent.emitEvent("tool:start", {
+      sessionId: callbackContext.sessionId,
+      runId: callbackContext.runId,
+      toolCallId: callbackContext.toolCallId,
+      toolName: name,
+      arguments: normalizedArgs,
+      startedAt: toolStartTime,
+    });
+
+    // Legacy callback for backward compatibility
     this.agent.safeInvokeCallback("onToolStart", [
       name,
       normalizedArgs,
@@ -882,6 +895,26 @@ class ToolExecutor {
         activeTabId: this.agent.editor?.tabManager?.activeFile?.id || null,
       });
 
+      const toolEndTime = Date.now();
+
+      // Emit EventBus event
+      this.agent.emitEvent("tool:end", {
+        sessionId: callbackContext.sessionId,
+        runId: callbackContext.runId,
+        toolCallId: callbackContext.toolCallId,
+        toolName: name,
+        status: result?.success === false ? "failed" : "success",
+        result: result?.success === false ? null : toolResult,
+        error:
+          result?.success === false
+            ? this.agent.normalizeObservableError(result.error)
+            : null,
+        startedAt: toolStartTime,
+        endedAt: toolEndTime,
+        durationMs: toolEndTime - toolStartTime,
+      });
+
+      // Legacy callback for backward compatibility
       this.agent.safeInvokeCallback("onToolEnd", [
         name,
         toolResult,
@@ -904,6 +937,24 @@ class ToolExecutor {
         activePath: this.agent.editor?.tabManager?.activeFile?.path || null,
         activeTabId: this.agent.editor?.tabManager?.activeFile?.id || null,
       });
+
+      const toolEndTime = Date.now();
+
+      // Emit EventBus event for error case
+      this.agent.emitEvent("tool:end", {
+        sessionId: callbackContext.sessionId,
+        runId: callbackContext.runId,
+        toolCallId: callbackContext.toolCallId,
+        toolName: name,
+        status: this.agent.isAbortError(error) ? "aborted" : "failed",
+        result: null,
+        error: this.agent.normalizeObservableError(result.error),
+        startedAt: toolStartTime,
+        endedAt: toolEndTime,
+        durationMs: toolEndTime - toolStartTime,
+      });
+
+      // Legacy callback for backward compatibility
       this.agent.safeInvokeCallback("onToolEnd", [
         name,
         result,

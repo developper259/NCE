@@ -1,6 +1,30 @@
 class AgentRunner {
   constructor(agent) {
     this.agent = agent;
+    this.endedRuns = new Set();
+  }
+
+  emitRunEndOnce(runState, status, result, error) {
+    if (!runState || runState.ended) return;
+    if (this.endedRuns.has(runState.runId)) return;
+
+    runState.ended = true;
+    this.endedRuns.add(runState.runId);
+
+    const endedAt = Date.now();
+    const durationMs = endedAt - runState.startedAt;
+
+    this.agent.emitEvent("run:end", {
+      sessionId: runState.sessionId,
+      runId: runState.runId,
+      status,
+      startedAt: runState.startedAt,
+      endedAt,
+      durationMs,
+      result: result ? { ...result } : null,
+      error: error ? this.agent.normalizeObservableError(error) : null,
+      metrics: this.agent.agentProgress?.getMetrics() || null,
+    });
   }
 
   createRunConfig(overrides = {}) {
@@ -96,6 +120,27 @@ class AgentRunner {
     this.agent.lastContextMetrics = null;
     this.agent.cumulativeEstimatedPromptTokens = 0;
     this.agent.cumulativeActualPromptTokens = 0;
+
+    // Track run for exactly-once finalization
+    const runState = {
+      sessionId: runContext.sessionId,
+      runId,
+      startedAt: Date.now(),
+      ended: false,
+    };
+
+    // Emit run:start event
+    this.agent.emitEvent("run:start", {
+      sessionId: runContext.sessionId,
+      runId,
+      workspaceRoot: runConfig.workspaceRoot,
+      agentId: runConfig.agentId,
+      providerId: runConfig.providerId,
+      model: runConfig.model,
+      permissions: runConfig.permissions,
+      startedAt: runState.startedAt,
+    });
+
     try {
       const editorContext = await this.agent.getContext();
       runConfig.editorContext = editorContext;
@@ -138,15 +183,30 @@ class AgentRunner {
       }
       result.metrics = this.agent.agentProgress.getMetrics();
       this.agent.lastRunMetrics = result.metrics;
+
+      // Emit run:end for successful completion
+      this.emitRunEndOnce(runState, "completed", result, null);
+
+      // Legacy callback for backward compatibility
       this.agent.safeInvokeCallback("onFinish", [result, runContext]);
       return result;
     } catch (error) {
       this.agent.lastRunMetrics = this.agent.agentProgress.getMetrics();
+      const isAborted = this.agent.isAbortError(error);
       this.agent.runChangeTracker?.setRunStatus?.(
-        this.agent.isAbortError(error) ? "aborted" : "failed",
+        isAborted ? "aborted" : "failed",
         runId,
       );
-      if (!this.agent.isAbortError(error) && runId === this.agent.runId) {
+
+      // Emit run:end for error/abort
+      this.emitRunEndOnce(
+        runState,
+        isAborted ? "aborted" : "failed",
+        null,
+        error,
+      );
+
+      if (!isAborted && runId === this.agent.runId) {
         this.agent.safeInvokeCallback("onError", [error, runContext]);
       }
       throw error;
@@ -158,6 +218,15 @@ class AgentRunner {
         this.agent.abortController = null;
         this.agent.currentSessionId = null;
         this.agent.runConfig = null;
+      }
+      // Clean up ended runs tracking to avoid memory leaks
+      // Keep only the last 10 runs in the set
+      if (this.endedRuns.size > 10) {
+        const runsArray = Array.from(this.endedRuns);
+        runsArray.sort((a, b) => b - a);
+        for (let i = 10; i < runsArray.length; i++) {
+          this.endedRuns.delete(runsArray[i]);
+        }
       }
     }
   }
@@ -395,6 +464,19 @@ class AgentRunner {
       mode,
     );
     if (!normalized.delta && !normalized.reset) return;
+
+    const eventName =
+      channel === "reasoning" ? "response:reasoning" : "response:token";
+
+    // Emit EventBus event
+    this.agent.emitEvent(eventName, {
+      sessionId: context.sessionId ?? this.agent.currentSessionId,
+      runId: context.runId ?? this.agent.runId,
+      requestId: context.requestId,
+      content: normalized.delta,
+    });
+
+    // Legacy callback for backward compatibility
     const callback =
       channel === "reasoning"
         ? this.agent.callbacks.onReasoning

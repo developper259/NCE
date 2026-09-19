@@ -1,6 +1,73 @@
 class ModelClient {
   constructor(agent) {
     this.agent = agent;
+    this.requestAttempts = new Map();
+  }
+
+  normalizeModelUsage(usage) {
+    if (!usage || typeof usage !== "object") return null;
+
+    const inputTokens = Number(
+      usage.prompt_tokens ?? usage.input_tokens ?? usage.promptTokens,
+    );
+    const outputTokens = Number(
+      usage.completion_tokens ?? usage.output_tokens ?? usage.completionTokens,
+    );
+
+    if (!Number.isFinite(inputTokens) && !Number.isFinite(outputTokens)) {
+      return null;
+    }
+
+    const totalTokens = Number.isFinite(usage.total_tokens ?? usage.totalTokens)
+      ? Number(usage.total_tokens ?? usage.totalTokens)
+      : Number.isFinite(inputTokens) && Number.isFinite(outputTokens)
+        ? inputTokens + outputTokens
+        : null;
+
+    return {
+      inputTokens: Number.isFinite(inputTokens) ? inputTokens : null,
+      outputTokens: Number.isFinite(outputTokens) ? outputTokens : null,
+      totalTokens,
+    };
+  }
+
+  emitModelRequestEnd(
+    requestId,
+    attempt,
+    config,
+    status,
+    result,
+    startedAt,
+    error = null,
+  ) {
+    const endedAt = Date.now();
+    const durationMs = endedAt - startedAt;
+
+    const normalizedUsage = this.normalizeModelUsage(
+      result?.usage || result?.data?.usage,
+    );
+
+    const finishReason =
+      this.agent.normalizeFinishReason?.(result, result?.message, []) || null;
+
+    this.agent.emitEvent("model:request:end", {
+      sessionId: config.sessionId ?? this.agent.currentSessionId,
+      runId: config.runId,
+      requestId,
+      attempt,
+      providerId: config.providerId,
+      model: config.model,
+      status,
+      finishReason,
+      usage: normalizedUsage,
+      startedAt,
+      endedAt,
+      durationMs,
+      error: error ? this.agent.normalizeObservableError(error) : null,
+    });
+
+    // Clean up request attempts for this requestId to avoid memory leaks
+    this.requestAttempts.delete(requestId);
   }
 
   getModelRequestState(config) {
@@ -444,6 +511,32 @@ class ModelClient {
     delete sanitizedProvider.apiKey;
     const sessionId = config.sessionId ?? this.agent.currentSessionId ?? null;
 
+    // Increment model request counter for this run
+    this.agent.modelRequestCounter++;
+    const requestId = `${config.runId}:main:${this.agent.modelRequestCounter}`;
+
+    // Track attempt number for this requestId
+    const attemptKey = requestId;
+    const currentAttempt = (this.requestAttempts.get(attemptKey) || 0) + 1;
+    this.requestAttempts.set(attemptKey, currentAttempt);
+
+    const requestStartTime = Date.now();
+
+    // Emit model:request:start event
+    this.agent.emitEvent("model:request:start", {
+      sessionId,
+      runId: config.runId,
+      requestId,
+      attempt: currentAttempt,
+      providerId: config.providerId,
+      model: config.model,
+      phase: "main",
+      estimatedPromptTokens: promptTokens,
+      contextWindow: responseBudget.contextWindow,
+      requestedOutputTokens: payload.max_tokens,
+      startedAt: requestStartTime,
+    });
+
     if (typeof this.agent.api?.aiChat === "function") {
       const result = await this.agent.api.aiChat({
         provider: sanitizedProvider,
@@ -452,6 +545,14 @@ class ModelClient {
       });
       const unwrapped = this.agent.unwrapModelTransportResult(result);
       this.recordPreviousOutputUsage(unwrapped);
+      this.emitModelRequestEnd(
+        requestId,
+        currentAttempt,
+        config,
+        "success",
+        unwrapped,
+        requestStartTime,
+      );
       return this.agent.recordModelPromptUsage(unwrapped);
     }
     if (typeof this.agent.api?.requestAI === "function") {
@@ -462,6 +563,14 @@ class ModelClient {
       });
       const unwrapped = this.agent.unwrapModelTransportResult(result);
       this.recordPreviousOutputUsage(unwrapped);
+      this.emitModelRequestEnd(
+        requestId,
+        currentAttempt,
+        config,
+        "success",
+        unwrapped,
+        requestStartTime,
+      );
       return this.agent.recordModelPromptUsage(unwrapped);
     }
 
@@ -505,13 +614,34 @@ class ModelClient {
 
       const result = await response.json();
       this.recordPreviousOutputUsage(result);
+      this.emitModelRequestEnd(
+        requestId,
+        currentAttempt,
+        config,
+        "success",
+        result,
+        requestStartTime,
+      );
       return this.agent.recordModelPromptUsage(result);
     } catch (error) {
-      if (
+      const isAborted =
         error?.name === "AbortError" &&
         !controller?.signal?.aborted &&
-        timeoutController.signal.aborted
-      ) {
+        timeoutController.signal.aborted;
+      const isControllerAborted =
+        error?.name === "AbortError" && controller?.signal?.aborted;
+
+      this.emitModelRequestEnd(
+        requestId,
+        currentAttempt,
+        config,
+        isControllerAborted ? "aborted" : "failed",
+        null,
+        requestStartTime,
+        error,
+      );
+
+      if (isAborted) {
         throw Object.assign(new Error("Le provider ne répond pas."), {
           name: "TimeoutError",
           code: "ETIMEDOUT",
