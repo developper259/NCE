@@ -24,7 +24,15 @@ async function main() {
         `Dataset provider configuration invalid: ${error.message}`,
       );
     }
-    if (Array.isArray(fileConfig)) {
+    if (fileConfig && fileConfig.schemaVersion === 2 && fileConfig.providers && fileConfig.routing?.primary) {
+      const targets = [fileConfig.routing.primary, ...(fileConfig.routing.fallbacks || [])];
+      providerList = targets.map((target) => {
+        const definition = fileConfig.providers[target.providerId] || {};
+        const canonicalId = target.providerId === "opencode-go" ? "opencode" : target.providerId;
+        return { ...definition, providerId: canonicalId, model: target.model, sessionHeader: definition.sessionHeader };
+      }).filter((item) => item.baseURL && item.model);
+      fileConfig = providerList[0] || {};
+    } else if (Array.isArray(fileConfig)) {
       providerList = fileConfig;
       const requestedProvider =
         config.provider || process.env.NCE_DATASET_PROVIDER;
@@ -110,7 +118,7 @@ async function main() {
         supportsTools: true,
         ...(fileConfig.sessionHeader
           ? { sessionHeader: fileConfig.sessionHeader }
-          : providerId === "opencode-go"
+          : ["opencode-go", "opencode"].includes(providerId)
             ? { sessionHeader: "x-opencode-session" }
             : {}),
       },
