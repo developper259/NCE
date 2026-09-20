@@ -84,68 +84,73 @@ class AgentRunner {
   }
 
   async execute(userMessage, options = {}) {
-    if (this.agent.isRunning)
-      throw new Error("Un agent est déjà en cours d'exécution.");
     if (typeof userMessage !== "string" || !userMessage.trim())
       throw new TypeError("Le message utilisateur est obligatoire.");
+    if (this.agent.isRunning)
+      throw new Error("Un agent est déjà en cours d'exécution.");
+
     this.agent.isRunning = true;
-    this.agent.stopRequested = false;
-    this.agent.abortController = new AbortController();
-    const runId = ++this.agent.runId;
-    const workspaceIdentity = this.agent.editor?.fileExplorer?.rootPath || null;
-    this.agent.runChangeTracker?.beginRun?.(runId, workspaceIdentity);
-    const controller = this.agent.abortController;
-    const runContext = { sessionId: options.sessionId || null, runId };
-    this.agent.currentSessionId = runContext.sessionId;
-    const runConfig = this.agent.createRunConfig({
-      sessionId: runContext.sessionId,
-      runId,
-      agentId: options.agentId || null,
-      providerId: options.providerId || this.agent.provider?.id || null,
-      model: this.agent.model,
-    });
-    this.agent.runConfig = runConfig;
-    this.agent.executedToolCalls = new Map();
-    this.agent.executedModificationRequests = new Map();
-    this.agent.readFileContexts = new Map();
-    this.agent.fileContextVersion = 0;
-    this.agent.fileKnowledge.reset();
-    this.agent.contextManager.resetCompactionState();
-    this.agent.modelRequestState = null;
-    this.agent.modelRequestCounter = 0;
-    this.agent.modelOutputStates = new Map();
-    this.agent.largeWriteState = null;
-    this.agent.lastContextMetrics = null;
-    this.agent.cumulativeEstimatedPromptTokens = 0;
-    this.agent.cumulativeActualPromptTokens = 0;
-
-    // Exactly-once finalization lives on the run context itself (not a pruned Set).
-    const runState = {
-      sessionId: runContext.sessionId,
-      runId,
-      startedAt: Date.now(),
-      ended: false,
-    };
-    this.agent.activeRunState = runState;
-
-    // Reset metrics before run:start so observer failures during the run are retained.
-    this.agent.agentProgress.reset({
-      requiresModification: false,
-    });
-
-    // Emit run:start event
-    this.agent.emitEvent("run:start", {
-      sessionId: runContext.sessionId,
-      runId,
-      workspaceRoot: runConfig.workspaceRoot,
-      agentId: runConfig.agentId,
-      providerId: runConfig.providerId,
-      model: runConfig.model,
-      permissions: runConfig.permissions,
-      startedAt: runState.startedAt,
-    });
+    let runId = null;
+    let controller = null;
+    let runContext = null;
+    let runConfig = null;
+    let runState = null;
+    let runStarted = false;
 
     try {
+      this.agent.stopRequested = false;
+      controller = new AbortController();
+      this.agent.abortController = controller;
+      runId = ++this.agent.runId;
+      const workspaceIdentity =
+        this.agent.editor?.fileExplorer?.rootPath || null;
+      this.agent.runChangeTracker?.beginRun?.(runId, workspaceIdentity);
+      runContext = { sessionId: options.sessionId || null, runId };
+      this.agent.currentSessionId = runContext.sessionId;
+      runConfig = this.agent.createRunConfig({
+        sessionId: runContext.sessionId,
+        runId,
+        agentId: options.agentId || null,
+        providerId: options.providerId || this.agent.provider?.id || null,
+        model: this.agent.model,
+      });
+      this.agent.runConfig = runConfig;
+      this.agent.executedToolCalls = new Map();
+      this.agent.executedModificationRequests = new Map();
+      this.agent.readFileContexts = new Map();
+      this.agent.fileContextVersion = 0;
+      this.agent.fileKnowledge.reset();
+      this.agent.contextManager.resetCompactionState();
+      this.agent.modelRequestState = null;
+      this.agent.modelRequestCounter = 0;
+      this.agent.modelOutputStates = new Map();
+      this.agent.largeWriteState = null;
+      this.agent.lastContextMetrics = null;
+      this.agent.cumulativeEstimatedPromptTokens = 0;
+      this.agent.cumulativeActualPromptTokens = 0;
+
+      // Exactly-once finalization lives on the run context itself.
+      runState = {
+        sessionId: runContext.sessionId,
+        runId,
+        startedAt: Date.now(),
+        ended: false,
+      };
+      this.agent.activeRunState = runState;
+      this.agent.agentProgress.reset({ requiresModification: false });
+
+      this.agent.emitEvent("run:start", {
+        sessionId: runContext.sessionId,
+        runId,
+        workspaceRoot: runConfig.workspaceRoot,
+        agentId: runConfig.agentId,
+        providerId: runConfig.providerId,
+        model: runConfig.model,
+        permissions: runConfig.permissions,
+        startedAt: runState.startedAt,
+      });
+      runStarted = true;
+
       const editorContext = await this.agent.getContext();
       runConfig.editorContext = editorContext;
       this.agent.messages = [
@@ -202,6 +207,8 @@ class AgentRunner {
       this.agent.safeInvokeCallback("onFinish", [result, runContext]);
       return result;
     } catch (error) {
+      if (!runStarted) throw error;
+
       this.agent.lastRunMetrics = this.agent.agentProgress.getMetrics();
       const isAborted = this.agent.isAbortError(error);
       this.agent.runChangeTracker?.setRunStatus?.(
@@ -222,19 +229,33 @@ class AgentRunner {
       }
       throw error;
     } finally {
-      if (this.agent.activeRunState === runState) {
-        this.agent.activeRunState = null;
-      }
-      if (runId === this.agent.runId) {
-        this.agent.fileKnowledge.clearTransientContent();
-        this.agent.largeWriteState = null;
+      try {
+        if (!runStarted && this.agent.runChangeTracker?.current?.runId === runId) {
+          const partialTracker = this.agent.runChangeTracker.current;
+          this.agent.runChangeTracker.current = null;
+          if (this.agent.currentRunState === partialTracker) {
+            this.agent.currentRunState = null;
+          }
+        }
+        if (this.agent.activeRunState === runState) {
+          this.agent.activeRunState = null;
+        }
+        if (runId === this.agent.runId) {
+          this.agent.fileKnowledge?.clearTransientContent?.();
+          this.agent.largeWriteState = null;
+          if (this.agent.abortController === controller) {
+            this.agent.abortController = null;
+          }
+          this.agent.currentSessionId = null;
+          if (this.agent.runConfig === runConfig) {
+            this.agent.runConfig = null;
+          }
+          this.agent.pendingModelRequestId = null;
+          this.agent.currentModelRequestId = null;
+          this.agent.modelClient?.requestAttempts?.clear?.();
+        }
+      } finally {
         this.agent.isRunning = false;
-        this.agent.abortController = null;
-        this.agent.currentSessionId = null;
-        this.agent.runConfig = null;
-        this.agent.pendingModelRequestId = null;
-        this.agent.currentModelRequestId = null;
-        this.agent.modelClient?.requestAttempts?.clear?.();
       }
     }
   }

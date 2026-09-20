@@ -138,6 +138,79 @@ test("lifecycle: provider failure emits run:end failed exactly once", async () =
   assert.equal(agent.runChangeTracker.current.status, "failed");
 });
 
+test("lifecycle: createRunConfig setup failure releases the execution slot", async () => {
+  const { agent } = setupAgent();
+  const events = collectEvents(agent, ["run:start", "run:end"]);
+  const originalCreateRunConfig = agent.createRunConfig;
+  const initialRunId = agent.runId;
+  agent.createRunConfig = () => {
+    throw new Error("SETUP_FAILURE");
+  };
+
+  await assert.rejects(() => agent.execute("setup failure"), /SETUP_FAILURE/);
+  assert.equal(agent.isRunning, false);
+  assert.equal(agent.activeRunState, null);
+  assert.equal(agent.abortController, null);
+  assert.equal(agent.runConfig, null);
+  assert.equal(agent.runChangeTracker.current, null);
+  assert.equal(agent.runId, initialRunId + 1);
+  assert.equal(events.filter((event) => event.type === "run:start").length, 0);
+  assert.equal(events.filter((event) => event.type === "run:end").length, 0);
+
+  agent.createRunConfig = originalCreateRunConfig;
+  mockChat(agent, async () => okResponse("after setup failure"));
+  const result = await agent.execute("valid run");
+  assert.equal(result.response, "after setup failure");
+  assert.equal(agent.runId, initialRunId + 2);
+  assert.equal(events.filter((event) => event.type === "run:start").length, 1);
+  assert.equal(events.filter((event) => event.type === "run:end").length, 1);
+  assert.equal(events.find((event) => event.type === "run:end").payload.status, "completed");
+});
+
+test("lifecycle: beginRun setup failure creates no observable lifecycle", async () => {
+  const { agent } = setupAgent();
+  const events = collectEvents(agent, ["run:start", "run:end"]);
+  const originalBeginRun = agent.runChangeTracker.beginRun;
+  agent.runChangeTracker.beginRun = () => {
+    throw new Error("BEGIN_RUN_FAILURE");
+  };
+
+  await assert.rejects(
+    () => agent.execute("begin failure"),
+    /BEGIN_RUN_FAILURE/,
+  );
+  assert.equal(agent.isRunning, false);
+  assert.equal(agent.activeRunState, null);
+  assert.equal(agent.abortController, null);
+  assert.equal(events.length, 0);
+
+  agent.runChangeTracker.beginRun = originalBeginRun;
+  mockChat(agent, async () => okResponse("after begin failure"));
+  const result = await agent.execute("valid after begin failure");
+  assert.equal(result.response, "after begin failure");
+  assert.equal(events.filter((event) => event.type === "run:start").length, 1);
+  assert.equal(events.filter((event) => event.type === "run:end").length, 1);
+});
+
+test("lifecycle: failure after run:start emits one failed terminal event", async () => {
+  const { agent } = setupAgent();
+  const events = collectEvents(agent, ["run:start", "run:end"]);
+  agent.getContext = async () => {
+    throw new Error("POST_START_FAILURE");
+  };
+
+  await assert.rejects(
+    () => agent.execute("post start failure"),
+    /POST_START_FAILURE/,
+  );
+  assert.equal(events.filter((event) => event.type === "run:start").length, 1);
+  const ends = events.filter((event) => event.type === "run:end");
+  assert.equal(ends.length, 1);
+  assert.equal(ends[0].payload.status, "failed");
+  assert.equal(agent.isRunning, false);
+  assert.equal(agent.activeRunState, null);
+});
+
 test("lifecycle: abort via stop emits run:end aborted exactly once", async () => {
   const { agent } = setupAgent();
   const events = collectEvents(agent, ["run:start", "run:end"]);
