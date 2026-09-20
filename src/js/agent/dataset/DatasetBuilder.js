@@ -30,7 +30,7 @@ class DatasetBuilder {
       }));
       if (result.infrastructureError) throw result.infrastructureError;
       let attempt = 1;
-      while (/(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(result.agentResult?.error?.message || "") && attempt < 13) {
+      while (/(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(result.agentResult?.error?.message || "")) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         attempt += 1;
         result = await this.runTask(task, attempt).catch((error) => ({ taskId: task.id, infrastructureError: error }));
