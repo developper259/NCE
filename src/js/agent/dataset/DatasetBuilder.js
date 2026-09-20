@@ -20,7 +20,7 @@ class DatasetBuilder {
   }
   async build(tasks, options = {}) {
     const results = [];
-    const taskDelayMs = Number.isFinite(Number(options.taskDelayMs)) ? Math.max(0, Number(options.taskDelayMs)) : 2000;
+    const taskDelayMs = Number.isFinite(Number(options.taskDelayMs)) ? Math.max(0, Number(options.taskDelayMs)) : 5000;
     for (const [index, task] of tasks.entries()) {
       if (index > 0 && taskDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, taskDelayMs));
       if (options.resume && this.writer.hasTask(task.id)) continue;
@@ -31,8 +31,6 @@ class DatasetBuilder {
       if (result.infrastructureError) throw result.infrastructureError;
       results.push(result);
       this.onResult(result);
-      const message = result.agentResult?.error?.message || "";
-      if (options.stopOnQuota !== false && /(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(message)) throw new Error(`Dataset build stopped after provider limit on task ${task.id}.`);
     }
     return results;
   }
