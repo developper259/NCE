@@ -1,0 +1,2 @@
+class ModelHealthRegistry { constructor(){this.candidates=new Map();this.providers=new Map();} cooldownCandidate(id,until,reason){this.candidates.set(id,{state:"cooldown",until,reason});} cooldownProvider(id,until,reason){this.providers.set(id,{state:"cooldown",until,reason});} isHealthy(c){const now=Date.now(),p=this.providers.get(c.providerId),x=this.candidates.get(c.id);return !((p&&p.until>now)||(x&&x.until>now));} reset(){this.candidates.clear();this.providers.clear();} }
+module.exports={ModelHealthRegistry};

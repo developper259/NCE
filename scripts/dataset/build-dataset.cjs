@@ -130,7 +130,7 @@ async function main() {
             ? { sessionHeader: "x-opencode-session" }
             : {}),
       },
-      fallbackProviders: providerList.slice(1).map((item) => ({ id: item.providerId, model: item.model, baseURL: item.baseURL, apiKey: item.apiKey, supportsTools: true, requiresApiKey: Boolean(item.apiKey), ...(item.sessionHeader ? { sessionHeader: item.sessionHeader } : {}) })),
+      fallbackChain: providerList.slice(1).map((item) => ({ providerId: item.providerId, model: item.model, provider: { id: item.providerId, baseURL: item.baseURL, apiKey: item.apiKey, supportsTools: true, requiresApiKey: Boolean(item.apiKey), ...(item.sessionHeader ? { sessionHeader: item.sessionHeader } : {}) } })),
     },
     onResult(sample) {
       completed++;
