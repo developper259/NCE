@@ -168,6 +168,10 @@ class DatasetBuilder {
       const safeSample = sanitizer.sanitize(sample),
         safeEvents = sanitizer.sanitize(recorder.events);
       const quotaFailure = /quota|rate.?limit|too many requests|credits? exhausted|usage limit|429/i.test(agentError?.message || "");
+      if (quotaFailure) {
+        written = true;
+        return safeSample;
+      }
       await this.writer.write(safeSample, quotaFailure ? {} : {
         events: safeEvents,
         validation: safeSample.validation,
