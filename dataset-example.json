@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "tasks": "./dataset/tasks/pilot-v1.jsonl",
+  "tasks": "./dataset-example/tasks/pilot.jsonl",
   "output": "./dataset/output/pilot",
   "providerConfig": "./dataset/private/provider.json",
   "artifacts": true,
