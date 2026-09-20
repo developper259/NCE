@@ -12,5 +12,4 @@ Perf.txt
 
 # Dataset Builder data, tasks, workspaces, credentials and generated output
 /dataset/
-/dataset-example/
 .nce/
