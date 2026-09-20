@@ -8,6 +8,7 @@
   "type": "commonjs",
   "scripts": {
     "dataset:build": "node scripts/dataset/build-dataset.cjs",
+    "dataset:clean": "node scripts/dataset/clean-dataset.cjs",
     "dataset:analyze": "node scripts/dataset/analyze-dataset.cjs",
     "dataset:export": "node scripts/dataset/export-dataset.cjs",
     "security:dataset": "node scripts/security/check-dataset-git.cjs",
