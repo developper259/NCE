@@ -124,13 +124,17 @@ async function main() {
         apiKey,
         requiresApiKey: Boolean(apiKey),
         supportsTools: true,
+        supportsToolChoice: fileConfig.supportsToolChoice !== false,
+        ...(fileConfig.toolChoice
+          ? { toolChoice: fileConfig.toolChoice }
+          : {}),
         ...(fileConfig.sessionHeader
           ? { sessionHeader: fileConfig.sessionHeader }
           : ["opencode-go", "opencode"].includes(providerId)
             ? { sessionHeader: "x-opencode-session" }
             : {}),
       },
-      fallbackChain: providerList.slice(1).map((item) => ({ providerId: item.providerId, model: item.model, provider: { id: item.providerId, baseURL: item.baseURL, apiKey: item.apiKey, supportsTools: true, requiresApiKey: Boolean(item.apiKey), ...(item.sessionHeader ? { sessionHeader: item.sessionHeader } : {}) } })),
+      fallbackChain: providerList.slice(1).map((item) => ({ providerId: item.providerId, model: item.model, provider: { id: item.providerId, baseURL: item.baseURL, apiKey: item.apiKey, supportsTools: true, supportsToolChoice: item.supportsToolChoice !== false, requiresApiKey: Boolean(item.apiKey), ...(item.toolChoice ? { toolChoice: item.toolChoice } : {}), ...(item.sessionHeader ? { sessionHeader: item.sessionHeader } : {}) } })),
     },
     onResult(sample) {
       completed++;
