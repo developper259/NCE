@@ -24,7 +24,12 @@ async function main() {
         `Dataset provider configuration invalid: ${error.message}`,
       );
     }
-    if (fileConfig && fileConfig.schemaVersion === 2 && fileConfig.providers && fileConfig.routing?.primary) {
+    if (fileConfig && !fileConfig.schemaVersion && !Array.isArray(fileConfig) && !fileConfig.providerId && Object.values(fileConfig).some((value) => value && value.baseURL && value.models)) {
+      const providers = fileConfig;
+      const targets = Object.entries(providers).flatMap(([providerId, definition]) => Object.keys(definition.models || {}).filter((model) => definition.models[model].enabled !== false).map((model) => ({ providerId, model })));
+      providerList = targets.map((target) => ({ ...providers[target.providerId], providerId: target.providerId, model: target.model }));
+      fileConfig = providerList[0] || {};
+    } else if (fileConfig && fileConfig.schemaVersion === 2 && fileConfig.providers && fileConfig.routing?.primary) {
       const targets = [fileConfig.routing.primary, ...(fileConfig.routing.fallbacks || [])];
       providerList = targets.map((target) => {
         const definition = fileConfig.providers[target.providerId] || {};

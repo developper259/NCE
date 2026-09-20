@@ -1,6 +1,27 @@
 {
-  "providerId": "openrouter",
-  "model": "your-model-id",
-  "baseURL": "https://openrouter.ai/api/v1/chat/completions",
-  "apiKey": "PUT_YOUR_API_KEY_HERE"
+  "schemaVersion": 2,
+  "providers": {
+    "openrouter1": {
+      "baseURL": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKey": "PUT_OPENROUTER_KEY_1_HERE",
+      "supportsTools": true,
+      "supportsToolChoice": true,
+      "models": {
+        "qwen/qwen3-coder:free": { "enabled": true },
+        "cohere/north-mini-code:free": { "enabled": true },
+        "nvidia/nemotron-3-ultra-550b-a55b:free": { "enabled": true }
+      }
+    },
+    "openrouter2": {
+      "baseURL": "https://openrouter.ai/api/v1/chat/completions",
+      "apiKey": "PUT_OPENROUTER_KEY_2_HERE",
+      "supportsTools": true,
+      "supportsToolChoice": true,
+      "models": { "qwen/qwen3-coder:free": { "enabled": true } }
+    }
+  },
+  "routing": {
+    "primary": { "providerId": "openrouter1", "model": "qwen/qwen3-coder:free" },
+    "fallbacks": [{ "providerId": "openrouter2", "model": "qwen/qwen3-coder:free" }]
+  }
 }
