@@ -9,3 +9,10 @@ release/
 .vscode
 .DS_Store
 Perf.txt
+
+# Dataset Builder data and local credentials (keep only the safe example file)
+/dataset/
+!/dataset/private/
+!/dataset/private/provider.example.json
+dataset-example/private/provider.json
+.nce/
