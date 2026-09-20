@@ -1468,6 +1468,14 @@ class AgentRunner {
           const toolPayload = toolResult?.result ?? toolResult;
           if (callName === "get_diff" && toolPayload?.success !== false) {
             this.clearProgressDirectives();
+            if (
+              toolPayload?.reviewComplete === true &&
+              Array.isArray(toolPayload?.unreviewedPaths) &&
+              toolPayload.unreviewedPaths.length === 0
+            ) {
+              pendingValidationPaths.clear();
+              validationPending = false;
+            }
           }
           const toolProgress = this.agent.agentProgress.consumeTool(
             call?.function?.name,

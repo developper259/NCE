@@ -66,6 +66,28 @@ const AgentAI = {
   readOnlyTools: ["read_file", "get_project_map", "search_code"],
 
   providers: {
+    modalQwen: {
+      id: "modalQwen",
+      name: "Qwen 2.5 Coder",
+      baseURL:
+        "https://trolleur-belvedere--nce-coder-serve.modal.run/v1/chat/completions",
+
+      requiresApiKey: false,
+      supportsTools: true,
+      supportsToolChoice: true,
+      toolChoice: "auto",
+
+      defaultModel: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+
+      models: {
+        "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": {
+          id: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+          name: "Qwen 2.5 Coder",
+          contextWindow: 32768,
+          maxOutputTokens: 8192,
+        },
+      },
+    },
     opencode: {
       id: "opencode",
       name: "OpenCode Go",
