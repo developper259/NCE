@@ -24,18 +24,25 @@ class DatasetBuilder {
     for (const [index, task] of tasks.entries()) {
       if (index > 0 && taskDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, taskDelayMs));
       if (options.resume && this.writer.hasTask(task.id)) continue;
-      const result = await this.runTask(task).catch((error) => ({
+      let result = await this.runTask(task, 1).catch((error) => ({
         taskId: task.id,
         infrastructureError: error,
       }));
       if (result.infrastructureError) throw result.infrastructureError;
+      let attempt = 1;
+      while (/(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(result.agentResult?.error?.message || "") && attempt < 13) {
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        attempt += 1;
+        result = await this.runTask(task, attempt).catch((error) => ({ taskId: task.id, infrastructureError: error }));
+        if (result.infrastructureError) throw result.infrastructureError;
+      }
       results.push(result);
       this.onResult(result);
     }
     return results;
   }
-  async runTask(task) {
-    const attempt = 1,
+  async runTask(task, attemptNumber = 1) {
+    const attempt = Number(attemptNumber),
       sampleId = `${task.id}:${attempt}`;
     const workspace = await this.workspaceFactory.create(task, attempt);
     let written = false;
