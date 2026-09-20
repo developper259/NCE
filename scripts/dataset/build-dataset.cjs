@@ -24,6 +24,9 @@ async function main() {
         `Dataset provider configuration invalid: ${error.message}`,
       );
     }
+    if (fileConfig?.schemaVersion === 2 && fileConfig.providers && !fileConfig.routing && fileConfig.providers.routing?.primary) {
+      fileConfig.routing = fileConfig.providers.routing;
+    }
     if (fileConfig && !fileConfig.schemaVersion && !Array.isArray(fileConfig) && !fileConfig.providerId && Object.values(fileConfig).some((value) => value && value.baseURL && value.models)) {
       const providers = fileConfig;
       const targets = Object.entries(providers).flatMap(([providerId, definition]) => Object.keys(definition.models || {}).filter((model) => definition.models[model].enabled !== false).map((model) => ({ providerId, model })));
