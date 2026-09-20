@@ -33,7 +33,7 @@ class DatasetBuilder {
       while (/(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(result.agentResult?.error?.message || "")) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         attempt += 1;
-        if (attempt > 10 && this.agentConfig.fallbackProviders?.length) providerIndex = Math.min(providerIndex + 1, this.agentConfig.fallbackProviders.length);
+        if (attempt > 5 && this.agentConfig.fallbackProviders?.length) providerIndex = Math.min(providerIndex + 1, this.agentConfig.fallbackProviders.length);
         const provider = this.agentConfig.fallbackProviders?.[providerIndex] || null;
         result = await this.runTask(task, attempt, provider).catch((error) => ({ taskId: task.id, infrastructureError: error }));
         if (result.infrastructureError) throw result.infrastructureError;
@@ -167,7 +167,8 @@ class DatasetBuilder {
       });
       const safeSample = sanitizer.sanitize(sample),
         safeEvents = sanitizer.sanitize(recorder.events);
-      await this.writer.write(safeSample, {
+      const quotaFailure = /quota|rate.?limit|too many requests|credits? exhausted|usage limit|429/i.test(agentError?.message || "");
+      await this.writer.write(safeSample, quotaFailure ? {} : {
         events: safeEvents,
         validation: safeSample.validation,
         changes: safeSample.changes,
