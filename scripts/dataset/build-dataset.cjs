@@ -43,7 +43,7 @@ async function main() {
     keepWorkspaces: config.keepWorkspaces,
     appRoot: path.resolve(__dirname, "../.."),
     secrets: [apiKey],
-    agentConfig: { providerId, model, baseURL, apiKey, provider: { id: providerId, baseURL, apiKey, requiresApiKey: Boolean(apiKey), supportsTools: true } },
+    agentConfig: { providerId, model, baseURL, apiKey, provider: { id: providerId, baseURL, apiKey, requiresApiKey: Boolean(apiKey), supportsTools: true, ...(fileConfig.sessionHeader ? { sessionHeader: fileConfig.sessionHeader } : providerId === "opencode-go" ? { sessionHeader: "x-opencode-session" } : {}) } },
     onResult(sample) {
       completed++; counts[sample.outcome] = (counts[sample.outcome] || 0) + 1; durations.push(sample.run.durationMs || 0); toolCounts.push(sample.metrics.toolCalls || sample.trajectory.filter((step) => step.kind === "tool").length); requestCounts.push(sample.metrics.modelRequests || 0);
       console.log(`[${completed}/${tasks.length}] ${sample.task.id}\n  Agent: ${sample.run.status}\n  Validator: ${sample.validation.passed ? "PASS" : "FAIL"}\n  Tools: ${toolCounts.at(-1)}\n  Model requests: ${requestCounts.at(-1)}\n  Duration: ${((sample.run.durationMs || 0) / 1000).toFixed(1)}s\n  Written: ${sample.sampleId}`);
