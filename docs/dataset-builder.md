@@ -4,6 +4,11 @@ Le Dataset Builder exécute séquentiellement de vraies instances de l’Agent N
 
 ## Tâches et lancement
 
+La configuration centrale versionnée est `dataset.json` à la racine. Après avoir
+créé `dataset/private/provider.json`, `npm run dataset:build` suffit. Les options
+CLI (`--tasks`, `--output`, `--model`, `--no-artifacts`, etc.) remplacent les
+valeurs du fichier. `--print-config` affiche une synthèse sans lancer de tâche.
+
 Une ligne JSON par tâche :
 
 ```json

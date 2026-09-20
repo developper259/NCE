@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "tasks": "./dataset/tasks/pilot.jsonl",
+  "output": "./dataset/output/pilot",
+  "providerConfig": "./dataset/private/provider.json",
+  "artifacts": true,
+  "resume": false,
+  "keepWorkspaces": false,
+  "attempts": 1
+}
