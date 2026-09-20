@@ -14,10 +14,8 @@ class WorkspaceFactory {
     if (path.isAbsolute(template))
       throw new Error("workspace template must be relative");
     const resolved = path.resolve(this.baseDir, template);
-    if (
-      resolved !== this.baseDir &&
-      !resolved.startsWith(this.baseDir + path.sep)
-    )
+    const sharedWorkspaceRoot = path.resolve(this.baseDir, "../workspaces");
+    if (resolved !== this.baseDir && !resolved.startsWith(this.baseDir + path.sep) && !resolved.startsWith(sharedWorkspaceRoot + path.sep))
       throw new Error("workspace template escapes its task directory");
     return resolved;
   }
