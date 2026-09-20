@@ -29,11 +29,13 @@ class DatasetBuilder {
         infrastructureError: error,
       }));
       if (result.infrastructureError) throw result.infrastructureError;
-      let attempt = 1;
+      let attempt = 1, providerIndex = 0;
       while (/(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(result.agentResult?.error?.message || "")) {
         await new Promise((resolve) => setTimeout(resolve, 5000));
         attempt += 1;
-        result = await this.runTask(task, attempt).catch((error) => ({ taskId: task.id, infrastructureError: error }));
+        if (attempt > 10 && this.agentConfig.fallbackProviders?.length) providerIndex = Math.min(providerIndex + 1, this.agentConfig.fallbackProviders.length);
+        const provider = this.agentConfig.fallbackProviders?.[providerIndex] || null;
+        result = await this.runTask(task, attempt, provider).catch((error) => ({ taskId: task.id, infrastructureError: error }));
         if (result.infrastructureError) throw result.infrastructureError;
       }
       results.push(result);
@@ -41,7 +43,7 @@ class DatasetBuilder {
     }
     return results;
   }
-  async runTask(task, attemptNumber = 1) {
+  async runTask(task, attemptNumber = 1, providerOverride = null) {
     const attempt = Number(attemptNumber),
       sampleId = `${task.id}:${attempt}`;
     const workspace = await this.workspaceFactory.create(task, attempt);
@@ -50,6 +52,7 @@ class DatasetBuilder {
       const initialSnapshot = await this.snapshot.capture(workspace.root);
       const agent = await this.harness.create(workspace.root, {
         ...this.agentConfig,
+        ...(providerOverride ? { provider: providerOverride, providerId: providerOverride.id, model: providerOverride.model } : {}),
         permissions: task.agent?.permissions || "code",
       });
       const recorder = new TrajectoryRecorder(this.agentConfig);

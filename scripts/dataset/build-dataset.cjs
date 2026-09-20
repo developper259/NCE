@@ -15,7 +15,7 @@ async function main() {
   const args = config;
   const configPath =
     config.providerConfig || path.resolve("dataset/private/provider.json");
-  let fileConfig = {};
+  let fileConfig = {}, providerList = [];
   if (fs.existsSync(configPath)) {
     try {
       fileConfig = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -25,6 +25,7 @@ async function main() {
       );
     }
     if (Array.isArray(fileConfig)) {
+      providerList = fileConfig;
       const requestedProvider =
         config.provider || process.env.NCE_DATASET_PROVIDER;
       fileConfig =
@@ -113,6 +114,7 @@ async function main() {
             ? { sessionHeader: "x-opencode-session" }
             : {}),
       },
+      fallbackProviders: providerList.slice(1).map((item) => ({ id: item.providerId, model: item.model, baseURL: item.baseURL, apiKey: item.apiKey, supportsTools: true, requiresApiKey: Boolean(item.apiKey), ...(item.sessionHeader ? { sessionHeader: item.sessionHeader } : {}) })),
     },
     onResult(sample) {
       completed++;
