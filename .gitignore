@@ -10,9 +10,7 @@ release/
 .DS_Store
 Perf.txt
 
-# Dataset Builder data and local credentials (keep only the safe example file)
+# Dataset Builder data, tasks, workspaces, credentials and generated output
 /dataset/
-!/dataset/private/
-!/dataset/private/provider.example.json
-dataset-example/private/provider.json
+/dataset-example/
 .nce/
