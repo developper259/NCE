@@ -276,11 +276,14 @@ class ModelClient {
       category = "CREDITS_EXHAUSTED";
     } else if (
       is429 &&
-      /(quota.{0,40}(exceeded|exhausted)|daily limit|free[._ -]?models?[._ -]?per[._ -]?day|usage limit|budget exceeded|available tokens?.{0,40}(exhausted|zero|none))/i.test(
-        text,
-      )
+      /(account|monthly|provider|organization).{0,60}(quota|allowance).{0,30}(exhausted|exceeded)|quota.{0,30}(account|provider).{0,30}(exhausted|exceeded)/i.test(text)
     ) {
-      category = "QUOTA_EXHAUSTED";
+      category = "PROVIDER_QUOTA_EXHAUSTED";
+    } else if (
+      is429 &&
+      /(quota.{0,40}(exceeded|exhausted)|daily limit|free[._ -]?models?[._ -]?per[._ -]?day|usage limit|budget exceeded|available tokens?.{0,40}(exhausted|zero|none))/i.test(text)
+    ) {
+      category = "TEMPORARY_QUOTA_LIMIT";
     } else if (
       is429 &&
       /(model.{0,100}(rate.?limit|too many requests)|rate.?limit.{0,100}model)/.test(
@@ -319,6 +322,7 @@ class ModelClient {
     const retryable =
       [
         "RATE_LIMITED",
+        "TEMPORARY_QUOTA_LIMIT",
         "UNKNOWN_429",
         "MODEL_UNAVAILABLE",
         "NETWORK_ERROR",
@@ -331,6 +335,7 @@ class ModelClient {
       "AUTH_ERROR",
       "PERMISSION_ERROR",
       "QUOTA_EXHAUSTED",
+      "PROVIDER_QUOTA_EXHAUSTED",
       "CREDITS_EXHAUSTED",
     ].includes(category);
     const scope = providerGlobal
@@ -347,7 +352,8 @@ class ModelClient {
       [
         "MODEL_NOT_FOUND",
         "MODEL_UNAVAILABLE",
-        "QUOTA_EXHAUSTED",
+      "QUOTA_EXHAUSTED",
+      "PROVIDER_QUOTA_EXHAUSTED",
         "CREDITS_EXHAUSTED",
         "MODEL_RATE_LIMITED",
         "UPSTREAM_RATE_LIMITED",
@@ -363,8 +369,10 @@ class ModelClient {
           ? `Le modèle ${modelName} n'est pas disponible sur ${providerLabel}.`
           : category === "CREDITS_EXHAUSTED"
             ? `Les crédits ${providerLabel} disponibles sont épuisés.`
-            : category === "QUOTA_EXHAUSTED"
+            : category === "PROVIDER_QUOTA_EXHAUSTED"
               ? "Le quota disponible pour ce provider est épuisé."
+              : category === "TEMPORARY_QUOTA_LIMIT"
+                ? "La limite de quota est temporaire. Réessaie dans quelques instants."
               : category === "MODEL_RATE_LIMITED"
                 ? `Le modèle ${modelName} est temporairement limité.`
                 : category === "UPSTREAM_RATE_LIMITED"
