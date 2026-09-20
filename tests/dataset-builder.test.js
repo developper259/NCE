@@ -79,7 +79,7 @@ test("DatasetBuilder records false Agent success as failed_validation and contin
 }));
 
 test("pilot: three deterministic real-Agent tasks produce two successes and one validation failure", async () => withTemp(async (root) => {
-  const source = await TaskSource.read(path.join(__dirname, "../dataset/tasks/pilot.jsonl")); const positions = new Map();
+  const source = await TaskSource.read(path.join(__dirname, "fixtures/dataset/tasks/pilot.jsonl")); const positions = new Map();
   const transport = async (request) => {
     const id = request.sessionId.split(":")[0], index = positions.get(id) || 0; positions.set(id, index + 1);
     if (id === "pilot-b") return complete("claimed success without filesystem change");

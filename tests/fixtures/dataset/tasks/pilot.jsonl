@@ -1,0 +1,3 @@
+{"id":"pilot-a","prompt":"Crée result.txt contenant alpha.","workspace":{"template":"workspaces/pilot-a"},"validation":{"assertions":[{"type":"file_contains","path":"result.txt","text":"alpha"}]}}
+{"id":"pilot-b","prompt":"Termine sans créer missing.txt.","workspace":{"template":"workspaces/pilot-b"},"validation":{"assertions":[{"type":"file_exists","path":"missing.txt"}]}}
+{"id":"pilot-c","prompt":"Crée result.txt contenant gamma.","workspace":{"template":"workspaces/pilot-c"},"validation":{"assertions":[{"type":"file_contains","path":"result.txt","text":"gamma"}]}}
