@@ -8,6 +8,7 @@
   "type": "commonjs",
   "scripts": {
     "dataset:build": "node scripts/dataset/build-dataset.cjs",
+    "dataset:analyze": "node scripts/dataset/analyze-dataset.cjs",
     "security:dataset": "node scripts/security/check-dataset-git.cjs",
     "hooks:install": "git config core.hooksPath .githooks",
     "test": "node --test --test-concurrency=1 tests/*.test.js",
