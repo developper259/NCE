@@ -15,6 +15,11 @@ async function main() {
   let fileConfig = {};
   if (fs.existsSync(configPath)) {
     try { fileConfig = JSON.parse(fs.readFileSync(configPath, "utf8")); } catch (error) { throw new Error(`Dataset provider configuration invalid: ${error.message}`); }
+    if (Array.isArray(fileConfig)) {
+      const requestedProvider = config.provider || process.env.NCE_DATASET_PROVIDER;
+      fileConfig = (requestedProvider && fileConfig.find((item) => item && item.providerId === requestedProvider)) || fileConfig[0];
+    }
+    if (!fileConfig || typeof fileConfig !== "object" || Array.isArray(fileConfig)) throw new Error("Dataset provider configuration invalid: expected an object or provider list");
     for (const field of ["providerId", "model"]) if (!fileConfig[field] || typeof fileConfig[field] !== "string") throw new Error(`Dataset provider configuration invalid: missing "${field}"`);
     if (fileConfig.apiKey && process.platform !== "win32") { const mode = fs.statSync(configPath).mode & 0o777; if (mode & 0o077) console.warn("provider.json contains credentials and is readable by other users. Recommended permissions: chmod 600 provider.json"); }
   } else if (args["provider-config"]) throw new Error(`Dataset provider configuration not found: ${configPath}`);
