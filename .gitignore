@@ -16,3 +16,4 @@ Perf.txt
 !/dataset/private/provider.example.json
 dataset-example/private/provider.json
 .nce/
+dataset.json
