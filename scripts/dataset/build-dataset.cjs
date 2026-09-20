@@ -128,7 +128,7 @@ async function main() {
       );
     },
   });
-  await builder.build(tasks, { resume: config.resume });
+  await builder.build(tasks, { resume: config.resume, taskDelayMs: config.taskDelayMs, stopOnQuota: config.stopOnQuota });
   const average = (values) =>
     values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
   console.log(
