@@ -9,3 +9,10 @@ release/
 .vscode
 .DS_Store
 Perf.txt
+
+# Dataset Builder generated data and local credentials
+/dataset/private/provider.json
+/dataset/output/
+/dataset/artifacts/
+/dataset/workspaces/
+/.nce/dataset-workspaces/

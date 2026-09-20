@@ -1,0 +1,4 @@
+#!/bin/sh
+node scripts/security/check-dataset-git.cjs || exit 1
+staged=$(git diff --cached --name-only)
+echo "$staged" | grep -E '(^|/)(provider\.json|dataset/(output|artifacts|workspaces)/|\.nce/dataset-workspaces/)' >/dev/null && { echo 'SECURITY ERROR: forbidden Dataset Builder file staged.'; exit 1; } || true
