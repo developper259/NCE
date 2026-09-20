@@ -20,30 +20,19 @@ class DatasetBuilder {
   }
   async build(tasks, options = {}) {
     const results = [];
-    const taskDelayMs = Number.isFinite(Number(options.taskDelayMs)) ? Math.max(0, Number(options.taskDelayMs)) : 5000;
-    for (const [index, task] of tasks.entries()) {
-      if (index > 0 && taskDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, taskDelayMs));
+    for (const task of tasks) {
       if (options.resume && this.writer.hasTask(task.id)) continue;
-      let result = await this.runTask(task, 1).catch((error) => ({
+      const result = await this.runTask(task).catch((error) => ({
         taskId: task.id,
         infrastructureError: error,
       }));
       if (result.infrastructureError) throw result.infrastructureError;
-      let attempt = 1, providerIndex = 0;
-      while (/(quota|rate.?limit|too many requests|credits? exhausted|usage limit|429)/i.test(result.agentResult?.error?.message || "")) {
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-        attempt += 1;
-        if (attempt > 5 && this.agentConfig.fallbackProviders?.length) providerIndex = Math.min(providerIndex + 1, this.agentConfig.fallbackProviders.length);
-        const provider = this.agentConfig.fallbackProviders?.[providerIndex] || null;
-        result = await this.runTask(task, attempt, provider).catch((error) => ({ taskId: task.id, infrastructureError: error }));
-        if (result.infrastructureError) throw result.infrastructureError;
-      }
       results.push(result);
       this.onResult(result);
     }
     return results;
   }
-  async runTask(task, attemptNumber = 1, providerOverride = null) {
+  async runTask(task, attemptNumber = 1) {
     const attempt = Number(attemptNumber),
       sampleId = `${task.id}:${attempt}`;
     const workspace = await this.workspaceFactory.create(task, attempt);
@@ -52,7 +41,6 @@ class DatasetBuilder {
       const initialSnapshot = await this.snapshot.capture(workspace.root);
       const agent = await this.harness.create(workspace.root, {
         ...this.agentConfig,
-        ...(providerOverride ? { provider: providerOverride, providerId: providerOverride.id, model: providerOverride.model } : {}),
         permissions: task.agent?.permissions || "code",
       });
       const recorder = new TrajectoryRecorder(this.agentConfig);
