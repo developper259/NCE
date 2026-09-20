@@ -1,0 +1,23 @@
+{
+  "id": "error_recovery_001",
+  "version": "0.1",
+  "category": "ERROR_RECOVERY",
+  "difficulty": "hard",
+  "language": "fr",
+  "project": "project_004",
+  "prompt": "Le fichier src/settings.ts contient le port, passe-le à 8080 (retrouve le vrai fichier si ce chemin est faux).",
+  "permissions": {
+    "workspace": "write"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "validation": {
+    "type": "hidden_tests",
+    "test": "error_recovery_001"
+  }
+}

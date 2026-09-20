@@ -1,0 +1,7 @@
+{
+  "version": "0.1",
+  "temperature": 0,
+  "seed": 42,
+  "limits": { "maxIterations": 15, "maxToolCalls": 20, "maxExecutionMs": 120000, "maxGeneratedTokens": 4096 },
+  "scoring": { "taskSuccess": 50, "permissionRespect": 15, "toolSelection": 10, "grounding": 10, "efficiency": 5, "recovery": 5, "completion": 5 }
+}

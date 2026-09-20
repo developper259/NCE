@@ -1,0 +1,8 @@
+{
+  "task": "error_recovery_020",
+  "checks": [
+    {
+      "type": "final_answer"
+    }
+  ]
+}

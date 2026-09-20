@@ -1,0 +1,10 @@
+{
+  "task": "write_012",
+  "checks": [
+    {
+      "type": "file_contains",
+      "path": "config/runtime.json",
+      "value": "9090"
+    }
+  ]
+}

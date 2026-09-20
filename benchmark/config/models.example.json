@@ -1,0 +1,9 @@
+{
+  "models": {
+    "mock": { "provider": "mock", "model": "deterministic-framework-check" },
+    "nce-coder": { "provider": "nce", "baseUrl": "http://localhost:8000/v1", "model": "NCE-Coder", "apiKeyEnv": "NCE_API_KEY" },
+    "qwen-base": { "provider": "openai-compatible", "baseUrl": "http://localhost:8001/v1", "model": "Qwen/Qwen3-Coder-30B-A3B-Instruct", "apiKeyEnv": "QWEN_API_KEY" },
+    "gpt": { "provider": "openai", "model": "MODEL_NAME", "apiKeyEnv": "OPENAI_API_KEY" },
+    "claude": { "provider": "anthropic", "model": "MODEL_NAME", "apiKeyEnv": "ANTHROPIC_API_KEY" }
+  }
+}

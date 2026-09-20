@@ -1,0 +1,5 @@
+const fs=require('node:fs'),fsp=require('node:fs/promises'),path=require('node:path'),crypto=require('node:crypto'),os=require('node:os');
+async function snapshot(root){const out={};async function walk(dir){for(const e of await fsp.readdir(dir,{withFileTypes:true})){const p=path.join(dir,e.name),rel=path.relative(root,p).split(path.sep).join('/');if(e.isDirectory())await walk(p);else out[rel]=crypto.createHash('sha256').update(await fsp.readFile(p)).digest('hex')}}await walk(root);return out}
+function diff(before,after){const created=Object.keys(after).filter(x=>!before[x]),deleted=Object.keys(before).filter(x=>!after[x]),modified=Object.keys(after).filter(x=>before[x]&&before[x]!==after[x]);return{created,deleted,modified,changed_count:created.length+deleted.length+modified.length}}
+async function isolate(projectDir){const base=await fsp.mkdtemp(path.join(os.tmpdir(),'nce-agent-bench-')),workspace=path.join(base,'workspace');await fsp.cp(projectDir,workspace,{recursive:true});return{base,workspace}}
+module.exports={snapshot,diff,isolate};

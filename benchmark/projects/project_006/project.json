@@ -1,0 +1,7 @@
+{
+  "name": "project_006",
+  "language": "go",
+  "entrypoint": "src/main.go",
+  "database": "SQLite",
+  "framework": "Hono"
+}

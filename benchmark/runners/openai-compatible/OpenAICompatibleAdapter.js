@@ -1,0 +1,5 @@
+const {BenchmarkModelAdapter}=require('../base/BenchmarkModelAdapter');
+class OpenAICompatibleAdapter extends BenchmarkModelAdapter{
+ async complete(request){const started=Date.now(),url=`${this.config.baseUrl.replace(/\/$/,'')}/chat/completions`;const headers={'content-type':'application/json'};const key=process.env[this.config.apiKeyEnv||'OPENAI_API_KEY'];if(key)headers.authorization=`Bearer ${key}`;let response;try{response=await fetch(url,{method:'POST',headers,body:JSON.stringify({...request,model:this.config.model,stream:false})})}catch(e){e.benchmarkStatus='NETWORK_ERROR';throw e}if(response.status===429){const e=new Error('Rate limited');e.benchmarkStatus='RATE_LIMIT';throw e}if(!response.ok){const e=new Error(`Provider HTTP ${response.status}: ${await response.text()}`);e.benchmarkStatus='PROVIDER_ERROR';throw e}const data=await response.json();return {...data,latency_ms:Date.now()-started,usage_normalized:this.normalizeUsage(data.usage)}}
+}
+module.exports={OpenAICompatibleAdapter};

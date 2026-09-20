@@ -1,0 +1,23 @@
+{
+  "id": "write_017",
+  "version": "0.1",
+  "category": "WRITE",
+  "difficulty": "medium",
+  "language": "fr",
+  "project": "project_006",
+  "prompt": "Create docs/testing.md with the validation command.",
+  "permissions": {
+    "workspace": "write"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "validation": {
+    "type": "hidden_tests",
+    "test": "write_017"
+  }
+}

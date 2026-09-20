@@ -1,0 +1,23 @@
+{
+  "id": "debug_test_006",
+  "version": "0.1",
+  "category": "DEBUG_TEST",
+  "difficulty": "medium",
+  "language": "fr",
+  "project": "project_002",
+  "prompt": "Le titre README doit inclure Inventory.",
+  "permissions": {
+    "workspace": "write"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "validation": {
+    "type": "hidden_tests",
+    "test": "debug_test_006"
+  }
+}

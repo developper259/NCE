@@ -1,0 +1,8 @@
+{
+  "task": "debug_test_019",
+  "checks": [
+    {
+      "type": "workspace_changed"
+    }
+  ]
+}

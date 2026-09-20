@@ -1,0 +1,1 @@
+CREATE TABLE inventory (id INTEGER PRIMARY KEY, quantity INTEGER NOT NULL);

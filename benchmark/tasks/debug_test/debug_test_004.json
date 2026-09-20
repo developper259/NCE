@@ -1,0 +1,23 @@
+{
+  "id": "debug_test_004",
+  "version": "0.1",
+  "category": "DEBUG_TEST",
+  "difficulty": "medium",
+  "language": "en",
+  "project": "project_025",
+  "prompt": "SQLite table rejects names: add a name column.",
+  "permissions": {
+    "workspace": "write"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "validation": {
+    "type": "hidden_tests",
+    "test": "debug_test_004"
+  }
+}

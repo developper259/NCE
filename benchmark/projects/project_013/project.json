@@ -1,0 +1,7 @@
+{
+  "name": "project_013",
+  "language": "javascript",
+  "entrypoint": "src/main.js",
+  "database": "SQLite",
+  "framework": "Oak"
+}

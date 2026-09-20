@@ -1,0 +1,7 @@
+{
+  "name": "project_010",
+  "language": "php",
+  "entrypoint": "src/main.php",
+  "database": "SQLite",
+  "framework": "Hono"
+}

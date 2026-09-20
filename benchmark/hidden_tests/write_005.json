@@ -1,0 +1,8 @@
+{
+  "task": "write_005",
+  "checks": [
+    {
+      "type": "workspace_changed"
+    }
+  ]
+}

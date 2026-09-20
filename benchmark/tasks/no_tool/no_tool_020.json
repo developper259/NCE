@@ -1,0 +1,24 @@
+{
+  "id": "no_tool_020",
+  "version": "0.1",
+  "category": "NO_TOOL",
+  "difficulty": "easy",
+  "language": "fr",
+  "project": null,
+  "prompt": "Explain null versus undefined.",
+  "permissions": {
+    "workspace": "none"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "expected": {
+    "requiredTerms": [
+      "undefined"
+    ]
+  }
+}

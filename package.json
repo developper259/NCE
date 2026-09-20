@@ -7,6 +7,10 @@
   "main": "dist/main.js",
   "type": "commonjs",
   "scripts": {
+    "benchmark": "node benchmark/scripts/run-benchmark.cjs",
+    "benchmark:validate": "node benchmark/scripts/validate-benchmark.cjs",
+    "benchmark:compare": "node benchmark/scripts/compare-models.cjs",
+    "benchmark:report": "node benchmark/scripts/generate-report.cjs",
     "dataset:build": "node scripts/dataset/build-dataset.cjs",
     "dataset:clean": "node scripts/dataset/clean-dataset.cjs",
     "dataset:analyze": "node scripts/dataset/analyze-dataset.cjs",

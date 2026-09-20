@@ -1,0 +1,2 @@
+function recovery(task,run){if(task.category!=='ERROR_RECOVERY')return{points:5,failed_calls:0,strategy_changes:0};const failed=(run.tool_results||[]).filter(x=>x.success===false);let changes=0;for(let i=1;i<(run.tool_calls||[]).length;i++)if(run.tool_calls[i].tool!==run.tool_calls[i-1].tool||JSON.stringify(run.tool_calls[i].arguments)!==JSON.stringify(run.tool_calls[i-1].arguments))changes++;return{points:failed.length?(changes?5:0):3,failed_calls:failed.length,strategy_changes:changes}}
+module.exports={recovery};

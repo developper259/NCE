@@ -1,0 +1,7 @@
+{
+  "name": "project_025",
+  "language": "python",
+  "entrypoint": "src/main.py",
+  "database": "SQLite",
+  "framework": "Oak"
+}

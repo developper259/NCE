@@ -1,0 +1,7 @@
+{
+  "name": "project_015",
+  "language": "typescript",
+  "entrypoint": "src/main.ts",
+  "database": "SQLite",
+  "framework": "Oak"
+}

@@ -1,0 +1,7 @@
+{
+  "name": "project_009",
+  "language": "csharp",
+  "entrypoint": "src/main.cs",
+  "database": "SQLite",
+  "framework": "Oak"
+}

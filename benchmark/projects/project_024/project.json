@@ -1,0 +1,7 @@
+{
+  "name": "project_024",
+  "language": "javascript",
+  "entrypoint": "src/main.js",
+  "database": "SQLite",
+  "framework": "Hono"
+}

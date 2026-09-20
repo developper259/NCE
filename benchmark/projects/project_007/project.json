@@ -1,0 +1,7 @@
+{
+  "name": "project_007",
+  "language": "rust",
+  "entrypoint": "src/main.rs",
+  "database": "SQLite",
+  "framework": "Oak"
+}

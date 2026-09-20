@@ -1,0 +1,7 @@
+{
+  "name": "project_012",
+  "language": "typescript",
+  "entrypoint": "src/main.ts",
+  "database": "SQLite",
+  "framework": "Hono"
+}

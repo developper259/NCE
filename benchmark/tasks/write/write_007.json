@@ -1,0 +1,23 @@
+{
+  "id": "write_007",
+  "version": "0.1",
+  "category": "WRITE",
+  "difficulty": "medium",
+  "language": "fr",
+  "project": "project_021",
+  "prompt": "Ajoute une colonne name au schéma inventory.",
+  "permissions": {
+    "workspace": "write"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "validation": {
+    "type": "hidden_tests",
+    "test": "write_007"
+  }
+}

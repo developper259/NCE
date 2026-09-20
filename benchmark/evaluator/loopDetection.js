@@ -1,0 +1,2 @@
+function loopDetection(task,run){const calls=run.tool_calls||[],counts={};for(const c of calls){const k=c.tool+JSON.stringify(c.arguments||{});counts[k]=(counts[k]||0)+1}const loop=Object.values(counts).some(n=>n>=3),max=(run.iterations||0)>=task.limits.max_iterations;return{points:loop||max?0:5,flags:[...(loop?['TOOL_LOOP']:[]),...(max?['MAX_ITERATIONS_REACHED']:[])]}}
+module.exports={loopDetection};

@@ -1,0 +1,7 @@
+{
+  "name": "project_008",
+  "language": "java",
+  "entrypoint": "src/main.java",
+  "database": "SQLite",
+  "framework": "Hono"
+}

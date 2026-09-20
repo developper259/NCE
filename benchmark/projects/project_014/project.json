@@ -1,0 +1,7 @@
+{
+  "name": "project_014",
+  "language": "python",
+  "entrypoint": "src/main.py",
+  "database": "SQLite",
+  "framework": "Hono"
+}

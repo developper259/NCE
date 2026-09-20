@@ -1,0 +1,23 @@
+{
+  "id": "error_recovery_009",
+  "version": "0.1",
+  "category": "ERROR_RECOVERY",
+  "difficulty": "hard",
+  "language": "en",
+  "project": "project_012",
+  "prompt": "Inspect src/index.ts, or find the actual entrypoint if renamed.",
+  "permissions": {
+    "workspace": "write"
+  },
+  "forbidden_actions": [],
+  "limits": {
+    "max_iterations": 15,
+    "max_tool_calls": 20,
+    "max_execution_ms": 120000,
+    "max_generated_tokens": 4096
+  },
+  "validation": {
+    "type": "hidden_tests",
+    "test": "error_recovery_009"
+  }
+}

@@ -1,0 +1,3 @@
+const {taskSuccess}=require('./taskSuccess'),{toolPolicy}=require('./toolPolicy'),{permissions}=require('./permissions'),{efficiency}=require('./efficiency'),{loopDetection}=require('./loopDetection'),{recovery}=require('./recovery'),{grounding}=require('./grounding'),{scoring}=require('./scoring');
+function evaluate(task,run,root){const parts={task_success:taskSuccess(task,run,root),permission_respect:permissions(task,run),tool_selection:toolPolicy(task,run),grounding:grounding(task,run),efficiency:efficiency(task,run),recovery:recovery(task,run),completion:loopDetection(task,run)};return{...scoring(parts),parts}}
+module.exports={evaluate};
