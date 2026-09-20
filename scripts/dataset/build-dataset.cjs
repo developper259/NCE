@@ -145,6 +145,13 @@ async function main() {
           sample.trajectory.filter((step) => step.kind === "tool").length,
       );
       requestCounts.push(sample.metrics.modelRequests || 0);
+      const agentError = sample.agentResult?.error;
+      if (agentError) {
+        const errorCode = agentError.code ? ` [${agentError.code}]` : "";
+        console.error(
+          `[${completed}/${tasks.length}] ${sample.task.id} - ${agentError.name || "Error"}${errorCode}: ${agentError.message || "Unknown agent error"}`,
+        );
+      }
       console.log(
         `[${completed}/${tasks.length}] ${sample.task.id}\n  Agent: ${sample.run.status}\n  Validator: ${sample.validation.passed ? "PASS" : "FAIL"}\n  Tools: ${toolCounts.at(-1)}\n  Model requests: ${requestCounts.at(-1)}\n  Duration: ${((sample.run.durationMs || 0) / 1000).toFixed(1)}s\n  Written: ${sample.sampleId}`,
       );

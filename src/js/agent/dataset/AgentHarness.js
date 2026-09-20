@@ -16,26 +16,6 @@ class AgentHarness {
       workspaceRoot,
       config.transport || this.transport,
     );
-    const editor = {
-      api,
-      fileExplorer: { rootPath: workspaceRoot, async refreshFolder() {} },
-      tabManager: {
-        activeFile: null,
-        files: [],
-        getFileByPath() {
-          return null;
-        },
-        async reloadFileFromDisk() {},
-      },
-      getAutoSaveState() {
-        return true;
-      },
-      highlightController: {
-        async detectLanguage() {
-          return "unknown";
-        },
-      },
-    };
     class LineNode {
       constructor(text = "") {
         this.text = text;
@@ -46,6 +26,65 @@ class AgentHarness {
         return this.text;
       }
     }
+    const tabManager = {
+      activeFile: null,
+      files: [],
+      getFileByPath(candidate) {
+        const target = path.resolve(candidate);
+        return this.files.find((file) => path.resolve(file.path) === target) || null;
+      },
+      async openFileWithPath(candidate) {
+        const target = path.resolve(candidate);
+        let file = this.getFileByPath(target);
+        if (!file) {
+          const content = await fsp.readFile(target, "utf8");
+          file = {
+            path: target,
+            name: path.basename(target),
+            lines: content.replace(/\r\n?/g, "\n").split("\n").map((line) => new LineNode(line)),
+            isLoaded: true,
+            isSaved: true,
+            editVersion: 0,
+            setIsSaved(value) {
+              this.isSaved = value;
+            },
+          };
+          this.files.push(file);
+        }
+        this.activeFile = file;
+        return file;
+      },
+      async setFocusFile(file) {
+        this.activeFile = file;
+        return file;
+      },
+      async reloadFileFromDisk(candidate) {
+        const file = this.getFileByPath(candidate);
+        if (!file) return null;
+        const content = await fsp.readFile(file.path, "utf8");
+        file.lines = content.replace(/\r\n?/g, "\n").split("\n").map((line) => new LineNode(line));
+        file.isLoaded = true;
+        return file;
+      },
+    };
+    const editor = {
+      api,
+      fileExplorer: { rootPath: workspaceRoot, async refreshFolder() {} },
+      tabManager,
+      lineController: {
+        loadContent() {},
+        refresh() {},
+        markDirtyAll() {},
+      },
+      getAutoSaveState() {
+        return true;
+      },
+      highlightController: {
+        async detectLanguage() {
+          return "unknown";
+        },
+      },
+    };
     const quietConsole = {
       ...console,
       debug() {},
@@ -204,7 +243,12 @@ class AgentHarness {
           await Promise.all(
             paths.map(async (candidate) => {
               const target = inside(candidate);
-              return [candidate, await fsp.readFile(target, "utf8")];
+              try {
+                return [candidate, await fsp.readFile(target, "utf8")];
+              } catch (error) {
+                if (error?.code === "ENOENT") return [candidate, null];
+                throw error;
+              }
             }),
           ),
         ),
@@ -228,6 +272,43 @@ class AgentHarness {
           truncated: false,
           maxDepth: options.maxDepth,
           maxFiles: options.maxFiles,
+        };
+      },
+      searchInFiles: async (_workspace, query, options = {}) => {
+        const entries = await list();
+        const offset = Math.max(0, Math.floor(options.offset || 0));
+        const limit = Math.min(100, Math.max(1, Math.floor(options.limit || 50)));
+        const needle = options.matchCase ? String(query) : String(query).toLowerCase();
+        const matches = [];
+        for (const entry of entries) {
+          let content;
+          try {
+            content = await fsp.readFile(entry.path, "utf8");
+          } catch {
+            continue;
+          }
+          const lines = content.replace(/\r\n?/g, "\n").split("\n");
+          lines.forEach((line, index) => {
+            const haystack = options.matchCase ? line : line.toLowerCase();
+            const column = haystack.indexOf(needle);
+            if (column >= 0) {
+              matches.push({
+                path: entry.relativePath,
+                line: index + 1,
+                column: column + 1,
+                preview: line,
+              });
+            }
+          });
+        }
+        return {
+          success: true,
+          results: matches.slice(offset, offset + limit),
+          totalMatches: matches.length,
+          filesSearched: entries.length,
+          offset,
+          limit,
+          hasMore: offset + limit < matches.length,
         };
       },
       runAgentProcess: (request) => this.runProcess(request),

@@ -1386,6 +1386,30 @@ class RunChangeTracker {
     return count;
   }
 
+  resolveWriteFailuresForPath(path, classification = "recovered") {
+    if (!this.current) return 0;
+    const normalizedPath = this.normalizePath(path || "");
+    if (!normalizedPath) return 0;
+    let count = 0;
+    for (const [identity, failure] of this.current.unresolvedFailures) {
+      if (
+        failure.category !== "validation" &&
+        failure.path &&
+        AgentPath.samePath(failure.path, normalizedPath)
+      ) {
+        failure.status = "resolved";
+        failure.classification = classification;
+        failure.resolvedBy = {
+          toolName: "successful-write",
+          changeVersion: this.current.changeVersion,
+        };
+        this.current.unresolvedFailures.delete(identity);
+        count += 1;
+      }
+    }
+    return count;
+  }
+
   markFailuresRecoveryReady(path, codes = null) {
     if (!this.current) return 0;
     const normalizedPath = this.normalizePath(path || "");

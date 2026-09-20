@@ -160,6 +160,12 @@ class ToolExecutor {
         });
       } else if (toolResult?.success !== false) {
         this.agent.runChangeTracker?.resolveFailuresForTool?.(name, path);
+        if (tool && tool.readOnly !== true && path) {
+          this.agent.runChangeTracker?.resolveWriteFailuresForPath?.(
+            path,
+            "recovered_by_successful_write",
+          );
+        }
         if (name === "read_file") {
           this.agent.runChangeTracker?.markFailuresRecoveryReady?.(path, [
             "STALE_REVISION",

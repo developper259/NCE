@@ -75,14 +75,14 @@ const AgentAI = {
       requiresApiKey: false,
       supportsTools: true,
       supportsToolChoice: true,
-      toolChoice: "required",
+      toolChoice: "auto",
 
       defaultModel: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
 
       models: {
         "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": {
           id: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
-          name: "Qwen 2.5 Coder 7B AWQ",
+          name: "Qwen 2.5 Coder",
           contextWindow: 32768,
           maxOutputTokens: 8192,
         },
