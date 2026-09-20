@@ -500,9 +500,11 @@ class ModelClient {
         config.supportsToolChoice !== false &&
         provider.supportsToolChoice !== false
       ) {
-        payload.tool_choice = this.agent.resolveToolChoice(
-          this.agent.messages[this.agent.messages.length - 1]?.content || "",
-        );
+        payload.tool_choice =
+          provider.toolChoice ||
+          this.agent.resolveToolChoice(
+            this.agent.messages[this.agent.messages.length - 1]?.content || "",
+          );
       }
     }
 

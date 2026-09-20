@@ -66,6 +66,28 @@ const AgentAI = {
   readOnlyTools: ["read_file", "get_project_map", "search_code"],
 
   providers: {
+    modalQwen: {
+      id: "modalQwen",
+      name: "Qwen 2.5 Coder",
+      baseURL:
+        "https://trolleur-belvedere--nce-coder-serve.modal.run/v1/chat/completions",
+
+      requiresApiKey: false,
+      supportsTools: true,
+      supportsToolChoice: true,
+      toolChoice: "required",
+
+      defaultModel: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+
+      models: {
+        "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8": {
+          id: "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8",
+          name: "Qwen 2.5 Coder 7B AWQ",
+          contextWindow: 32768,
+          maxOutputTokens: 8192,
+        },
+      },
+    },
     opencode: {
       id: "opencode",
       name: "OpenCode Go",
@@ -86,24 +108,10 @@ const AgentAI = {
       fallbackModels: ["glm-5.3-flash", "kimi-k3", "deepseek-v4.1-flash"],
 
       models: {
-        "kimi-k2.7-code": {
-          id: "kimi-k2.7-code",
-          name: "Kimi K2.7 Code",
-          contextWindow: 262144,
-          maxOutputTokens: 32768,
-        },
-
         "glm-5.3-flash": {
           id: "glm-5.3-flash",
           name: "GLM-5.3 Flash",
           contextWindow: 1000000,
-          maxOutputTokens: 131072,
-        },
-
-        "kimi-k3": {
-          id: "kimi-k3",
-          name: "Kimi K3",
-          contextWindow: 1048576,
           maxOutputTokens: 131072,
         },
 
