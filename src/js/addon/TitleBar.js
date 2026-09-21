@@ -12,12 +12,14 @@ class TitleBar {
     this.recentFolders = [];
     this.onDocumentPointerDown = this.handleDocumentPointerDown.bind(this);
     this.onDocumentKeyDown = this.handleDocumentKeyDown.bind(this);
+    this.onWindowResize = () => this.repositionOpenSubmenus();
 
     document.documentElement.dataset.platform = this.platform;
     if (!this.root || !this.menubar || !this.title) return;
     this.buildMenus();
     document.addEventListener("pointerdown", this.onDocumentPointerDown);
     document.addEventListener("keydown", this.onDocumentKeyDown, true);
+    window.addEventListener("resize", this.onWindowResize);
     this.refresh();
     this.loadRecentFolders();
   }
@@ -189,15 +191,16 @@ class TitleBar {
     submenu.hidden = true;
     this.populateRecentSubmenu(submenu);
 
-    const open = () => {
-      submenu.hidden = false;
-      trigger.setAttribute("aria-expanded", "true");
-    };
+    const open = () => this.openSubmenu(trigger, submenu);
+    const close = () => this.closeSubmenu(trigger, submenu);
     trigger.addEventListener("mouseenter", open);
     wrapper.addEventListener("mouseleave", () => {
-      submenu.hidden = true;
-      trigger.setAttribute("aria-expanded", "false");
+      window.clearTimeout(wrapper._submenuCloseTimer);
+      wrapper._submenuCloseTimer = window.setTimeout(() => {
+        if (!wrapper.matches(":hover") && !submenu.matches(":hover")) close();
+      }, 120);
     });
+    submenu.addEventListener("mouseenter", () => window.clearTimeout(wrapper._submenuCloseTimer));
     trigger.addEventListener("mousedown", (event) => event.preventDefault());
     trigger.addEventListener("click", () => {
       if (submenu.hidden) open();
@@ -208,6 +211,56 @@ class TitleBar {
     });
     wrapper.append(trigger, submenu);
     return wrapper;
+  }
+
+  openSubmenu(trigger, submenu) {
+    const wrapper = trigger.parentElement;
+    wrapper?.parentElement?.querySelectorAll(":scope > .nce-titlebar-submenu-item").forEach((item) => {
+      if (item !== wrapper) {
+        const otherTrigger = item.querySelector(":scope > .nce-titlebar-menu-item");
+        const otherSubmenu = item.querySelector(":scope > .nce-titlebar-submenu");
+        if (otherTrigger && otherSubmenu) this.closeSubmenu(otherTrigger, otherSubmenu);
+      }
+    });
+    submenu.hidden = false;
+    submenu.style.visibility = "hidden";
+    submenu.style.position = "fixed";
+    submenu.style.left = "0px";
+    submenu.style.top = "0px";
+    const triggerRect = trigger.getBoundingClientRect();
+    const parentMenu = wrapper?.parentElement;
+    const parentMenuRect = parentMenu?.getBoundingClientRect();
+    const submenuRect = submenu.getBoundingClientRect();
+    const parentRight = parentMenuRect?.right ?? triggerRect.right;
+    const parentLeft = parentMenuRect?.left ?? triggerRect.left;
+    let left = parentRight - 1;
+    if (parentRight + submenuRect.width > window.innerWidth) {
+      left = parentLeft - submenuRect.width;
+    }
+    left = Math.max(0, Math.min(left, window.innerWidth - submenuRect.width));
+    const top = Math.max(0, Math.min(triggerRect.top, window.innerHeight - submenuRect.height));
+    submenu.style.setProperty("left", `${left}px`);
+    submenu.style.setProperty("top", `${top}px`);
+    submenu.style.visibility = "";
+    trigger.setAttribute("aria-expanded", "true");
+  }
+
+  repositionOpenSubmenus() {
+    this.root?.querySelectorAll(".nce-titlebar-submenu-item").forEach((wrapper) => {
+      const trigger = wrapper.querySelector(":scope > .nce-titlebar-menu-item");
+      const submenu = wrapper.querySelector(":scope > .nce-titlebar-submenu");
+      if (trigger && submenu && !submenu.hidden) this.openSubmenu(trigger, submenu);
+    });
+  }
+
+  closeSubmenu(trigger, submenu) {
+    submenu.hidden = true;
+    submenu.style.visibility = "";
+    trigger.setAttribute("aria-expanded", "false");
+    submenu.querySelectorAll(":scope .nce-titlebar-submenu").forEach((child) => {
+      child.hidden = true;
+      child.style.visibility = "";
+    });
   }
 
   populateRecentSubmenu(submenu) {
@@ -310,6 +363,13 @@ class TitleBar {
       button.setAttribute("aria-expanded", "false");
       button.nextElementSibling.hidden = true;
     }
+    this.root?.querySelectorAll(".nce-titlebar-submenu").forEach((submenu) => {
+      submenu.hidden = true;
+      submenu.style.visibility = "";
+    });
+    this.root?.querySelectorAll(".nce-titlebar-submenu-item > .nce-titlebar-menu-item").forEach((trigger) => {
+      trigger.setAttribute("aria-expanded", "false");
+    });
     if (restoreFocus && this.previousFocus?.focus) {
       this.previousFocus.focus({ preventScroll: true });
     }
@@ -414,8 +474,7 @@ class TitleBar {
     ) {
       const trigger = document.activeElement;
       const submenu = trigger.nextElementSibling;
-      submenu.hidden = false;
-      trigger.setAttribute("aria-expanded", "true");
+      this.openSubmenu(trigger, submenu);
       const firstItem = submenu.querySelector(
         ".nce-titlebar-menu-item:not(:disabled)",
       );
@@ -426,9 +485,8 @@ class TitleBar {
       document.activeElement?.closest?.(".nce-titlebar-submenu")
     ) {
       const submenu = document.activeElement.closest(".nce-titlebar-submenu");
-      submenu.hidden = true;
       const trigger = submenu.previousElementSibling;
-      trigger?.setAttribute("aria-expanded", "false");
+      if (trigger) this.closeSubmenu(trigger, submenu);
       trigger?.focus();
       this.activeItemIndex = this.getOpenItems().indexOf(trigger);
     } else if (event.key === "ArrowRight") this.switchMenu(1);
@@ -457,5 +515,6 @@ class TitleBar {
     this.closeMenus({ restoreFocus: false });
     document.removeEventListener("pointerdown", this.onDocumentPointerDown);
     document.removeEventListener("keydown", this.onDocumentKeyDown, true);
+    window.removeEventListener("resize", this.onWindowResize);
   }
 }
