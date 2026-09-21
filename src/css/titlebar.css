@@ -57,8 +57,9 @@
 }
 
 .nce-titlebar-submenu {
-  top: -6px;
-  left: calc(100% - 2px);
+  position: fixed;
+  top: 0;
+  left: 0;
   min-width: 280px;
   max-width: min(480px, calc(100vw - 260px));
 }
