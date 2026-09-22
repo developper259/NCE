@@ -9,6 +9,10 @@ class SearchController {
     this.previousButton = null;
     this.nextButton = null;
     this.closeButton = null;
+    this.expandButton = null;
+    this.replaceInput = null;
+    this.replaceContainer = null;
+    this.replaceActions = null;
 
     this.results = [];
     this.currentIndex = -1;
@@ -29,6 +33,9 @@ class SearchController {
     addEvent("click", this.onNextClick.bind(this), this.nextButton);
 
     addEvent("click", this.onCloseClick.bind(this), this.closeButton);
+    addEvent("click", this.toggleReplace.bind(this), this.expandButton);
+    addEvent("click", this.replaceNext.bind(this), this.replaceNextButton);
+    addEvent("click", this.replaceAll.bind(this), this.replaceAllButton);
   }
 
   initSearchBar() {
@@ -58,6 +65,13 @@ class SearchController {
       ".search-bar-close",
       this.searchBar,
     );
+    this.expandButton = this.editor.domManager.getElement(".search-bar-expand", this.searchBar);
+    this.replaceInput = this.editor.domManager.getElement(".search-bar-replace-input", this.searchBar);
+    this.replaceContainer = this.editor.domManager.getElement(".search-bar-replace-container", this.searchBar);
+    this.replaceActions = this.editor.domManager.getElement(".search-bar-replace-actions", this.searchBar);
+    this.replaceButton = this.editor.domManager.getElement(".search-bar-replace", this.searchBar);
+    this.replaceNextButton = this.editor.domManager.getElement(".search-bar-replace-next", this.searchBar);
+    this.replaceAllButton = this.editor.domManager.getElement(".search-bar-replace-all", this.searchBar);
   }
 
   focusInput() {
@@ -184,6 +198,44 @@ class SearchController {
 
   onCloseClick() {
     this.close();
+  }
+
+  toggleReplace() {
+    const expanded = this.searchBar.classList.toggle("search-bar-expanded");
+    this.replaceContainer.hidden = !expanded;
+    this.replaceActions.hidden = !expanded;
+    this.expandButton.setAttribute("aria-expanded", String(expanded));
+    this.expandButton.querySelector("i")?.classList.toggle("fi-rr-angle-small-down", !expanded);
+    this.expandButton.querySelector("i")?.classList.toggle("fi-rr-angle-small-up", expanded);
+    if (expanded) this.replaceInput.focus({ preventScroll: true });
+  }
+
+  replaceCurrent() {
+    const result = this.results[this.currentIndex];
+    if (!result) return;
+    this.editor.writerController.replaceRange(
+      this.replaceInput.value, result.row, result.column,
+      result.row, result.column + result.length,
+    );
+    this.search(this.input.value);
+  }
+
+  replaceNext() {
+    this.replaceCurrent();
+    if (this.results.length) this.next();
+  }
+
+  replaceAll() {
+    const replacement = this.replaceInput.value;
+    for (const result of [...this.results].reverse()) {
+      this.editor.writerController.replaceRange(
+        replacement, result.row, result.column,
+        result.row, result.column + result.length,
+      );
+    }
+    this.search(this.input.value);
+    this.currentIndex = this.results.length ? 0 : -1;
+    this.refreshSelectionDOM();
   }
 
   search(query) {

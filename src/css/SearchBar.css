@@ -1,5 +1,6 @@
 .editor-search-bar {
   position: absolute;
+  box-sizing: border-box;
 
   top: 10px;
   right: 18px;
@@ -27,6 +28,102 @@
     opacity 0.12s ease,
     transform 0.12s ease,
     visibility 0.12s ease;
+}
+
+.editor-search-bar [hidden] {
+  display: none;
+}
+
+.editor-search-bar.search-bar-expanded {
+  display: grid;
+  height: 71px;
+  grid-template-columns: auto minmax(210px, 1fr) auto auto auto;
+  grid-template-rows: 30px 30px;
+  column-gap: 0;
+  row-gap: 3px;
+  align-items: start;
+  padding: 3px;
+}
+
+.search-bar-expanded .search-bar-expand {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  height: 100%;
+  margin-left: 0;
+  margin-right: 3px;
+  justify-self: start;
+}
+
+.search-bar-expanded .search-bar-button {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.search-bar-expanded .search-bar-input-container {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.search-bar-expanded .search-bar-previous {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.search-bar-expanded .search-bar-next {
+  grid-column: 4;
+  grid-row: 1;
+}
+
+.search-bar-expanded .search-bar-close {
+  grid-column: 5;
+  grid-row: 1;
+}
+
+.search-bar-expanded .search-bar-replace-container {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.search-bar-expanded .search-bar-replace-actions {
+  grid-column: 3 / span 3;
+  grid-row: 2;
+  justify-content: flex-end;
+}
+
+.search-bar-replace-actions span {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.search-bar-replace-container,
+.search-bar-replace-actions {
+  display: flex;
+  align-items: center;
+}
+
+.search-bar-replace-actions {
+  gap: 3px;
+}
+
+.search-bar-replace-input {
+  width: 210px;
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  outline: none;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.search-bar-replace-actions .search-bar-button {
+  width: 30px;
+  padding: 0;
+  font-size: 11px;
 }
 
 .search-bar-visible {
@@ -120,6 +217,10 @@
 
 .search-bar-button:active {
   transform: scale(0.94);
+}
+
+.search-bar-expand {
+  margin-right: 3px;
 }
 
 .search-bar-button i {

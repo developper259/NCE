@@ -56,6 +56,14 @@
         <div class="settings-view-host" hidden></div>
         <div class="empty-menu"></div>
         <div class="editor-search-bar">
+          <button
+            class="search-bar-button search-bar-expand"
+            type="button"
+            title="Afficher le remplacement"
+            aria-expanded="false"
+          >
+            <i class="fi fi-rr-angle-small-down"></i>
+          </button>
           <div class="search-bar-input-container">
             <input
               class="search-bar-input"
@@ -66,6 +74,23 @@
             />
 
             <span class="search-bar-counter"></span>
+          </div>
+          <div class="search-bar-replace-container" hidden>
+            <input
+              class="search-bar-replace-input"
+              type="text"
+              placeholder="Remplacer"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <div class="search-bar-replace-actions" hidden>
+            <button class="search-bar-button search-bar-replace-next" type="button" title="Remplacer puis suivant" aria-label="Remplacer puis suivant">
+              <span aria-hidden="true">→</span>
+            </button>
+            <button class="search-bar-button search-bar-replace-all" type="button" title="Tout remplacer" aria-label="Tout remplacer">
+              <span aria-hidden="true">⟳</span>
+            </button>
           </div>
           <button
             class="search-bar-button search-bar-previous"
