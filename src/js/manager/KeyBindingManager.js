@@ -230,6 +230,15 @@ class KeyBindingManager {
     if (!document.hasFocus()) return;
 
     const key = this.getShortcutKey(eventKey, e);
+    const binding = CONFIG_KEYBINDING_CONTAINSKEY(key)
+      ? CONFIG_KEYBINDING_GET_KEY(key)
+      : null;
+
+    // Global UI shortcuts (sidebar, quick panel, etc.) are edge-triggered:
+    // holding the key must not repeatedly toggle them. Editor shortcuts and
+    // normal editing keys remain repeatable.
+    if (e.repeat && binding?.in_editor === false) return;
+
     if (this.isNativeInputTarget(e.target) && eventKey !== "Escape") {
       this.bindNativeInput(key, e);
       return;

@@ -91,6 +91,20 @@ test("global shortcuts work from an input when no file is open", () => {
   assert.equal(event.propagationStopped, true);
 });
 
+test("repeated global shortcuts are ignored while editor shortcuts remain repeatable", () => {
+  const global = fixture({ action: "toggle_agent", in_editor: false });
+  const repeatedGlobal = keyboardEvent();
+  repeatedGlobal.repeat = true;
+  global.manager.onKey(repeatedGlobal);
+  assert.deepEqual(global.calls, []);
+
+  const editor = fixture({ action: "editor_action", in_editor: true });
+  const repeatedEditor = keyboardEvent();
+  repeatedEditor.repeat = true;
+  editor.manager.onKey(repeatedEditor);
+  assert.equal(repeatedEditor.defaultPrevented, true);
+});
+
 test("named shortcut keys retain modifiers and modifier-only keys stay sane", () => {
   const { manager } = fixture({ action: "unused", in_editor: false });
   assert.equal(manager.getShortcutKey("Enter", { ctrlKey: true }), "Ctrl+Enter");
