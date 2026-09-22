@@ -87,7 +87,7 @@
 .search-bar-expanded .search-bar-replace-actions {
   grid-column: 3 / span 3;
   grid-row: 2;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 .search-bar-replace-actions span {
@@ -118,6 +118,10 @@
   font-family: inherit;
   font-size: 13px;
   font-weight: 400;
+}
+
+.search-bar-replace-input::placeholder {
+  color: var(--text-tertiary);
 }
 
 .search-bar-replace-actions .search-bar-button {

@@ -127,6 +127,12 @@ class SearchController {
     this.isOpen = false;
 
     this.searchBar.classList.remove("search-bar-visible");
+    this.searchBar.classList.remove("search-bar-expanded");
+    this.replaceContainer.hidden = true;
+    this.replaceActions.hidden = true;
+    this.expandButton.setAttribute("aria-expanded", "false");
+    this.expandButton.querySelector("i")?.classList.add("fi-rr-angle-small-down");
+    this.expandButton.querySelector("i")?.classList.remove("fi-rr-angle-small-up");
 
     this.clearResults();
 
