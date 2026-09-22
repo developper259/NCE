@@ -149,12 +149,12 @@ class SelectController {
     this.selectedLines.forEach((info, row) => {
       const fileRow = row + 1;
 
-      if (cursor.isRowVisible(fileRow)) {
-        visibleSelections.push({
-          row,
-          info,
-        });
-      }
+      // Render every selected row. The editor viewport clips off-screen
+      // rectangles, while partially visible rows keep their visible portion.
+      visibleSelections.push({
+        row,
+        info,
+      });
     });
 
     const currentDOMNodes = this.editor.selectOutput.children;
