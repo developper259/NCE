@@ -597,8 +597,9 @@ class KeyBinding {
 
       if (y == 1 && x == 0) return;
 
+      const lineNode = lc.lines[y - 1];
+
       if (a) {
-        const lineNode = lc.lines[y - 1];
         const l = lineNode ? lineNode.getText() : "";
         const words = this.editor.writerController.splitWord(l);
         let count = 0;

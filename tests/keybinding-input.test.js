@@ -99,6 +99,7 @@ test("repeated global shortcuts are ignored while editor shortcuts remain repeat
   assert.deepEqual(global.calls, []);
 
   const editor = fixture({ action: "editor_action", in_editor: true });
+  editor.manager.editor.selected = true;
   const repeatedEditor = keyboardEvent();
   repeatedEditor.repeat = true;
   editor.manager.onKey(repeatedEditor);

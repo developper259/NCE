@@ -56,6 +56,15 @@ class KeyBindingManager {
       }
     } else if (CONFIG_KEYBINDING_CONTAINSKEY(key)) {
       this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(key), e);
+    } else if (
+      e.shiftKey &&
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) &&
+      CONFIG_KEYBINDING_CONTAINSKEY(e.key)
+    ) {
+      this.editor.keyBinding.exec(CONFIG_KEYBINDING_GET_KEY(e.key), e);
     } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
       if (
         this.editor.tabManager.activeFile &&
@@ -237,7 +246,10 @@ class KeyBindingManager {
     // Global UI shortcuts (sidebar, quick panel, etc.) are edge-triggered:
     // holding the key must not repeatedly toggle them. Editor shortcuts and
     // normal editing keys remain repeatable.
-    if (e.repeat && binding?.in_editor === false) return;
+    const isEditorNavigation =
+      typeof binding?.action === "string" &&
+      binding.action.startsWith("move_");
+    if (e.repeat && binding?.in_editor === false && !isEditorNavigation) return;
 
     if (this.isNativeInputTarget(e.target) && eventKey !== "Escape") {
       this.bindNativeInput(key, e);

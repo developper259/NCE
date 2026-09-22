@@ -620,7 +620,10 @@ class SelectController {
       topRealLen,
     ).column;
 
-    const startLineLen = Math.max(0, topVisualEnd - topVisualStart);
+    const startAtLineEnd = topRealCol >= topRealLen;
+    const startLineLen =
+      Math.max(0, topVisualEnd - topVisualStart) +
+      (startAtLineEnd ? 1 : 0);
 
     this.selectedLines.set(yStart, {
       startCol: topVisualStart + 1,
@@ -645,11 +648,17 @@ class SelectController {
       bottomRow,
       bottomRealCol,
     ).column;
+    const bottomLineLength = lc.lines[bottomRow - 1]
+      ? lc.lines[bottomRow - 1].getText().length
+      : 0;
+    const bottomAtLineEnd = bottomRealCol >= bottomLineLength;
 
     this.selectedLines.set(yEnd, {
       startCol: 1,
 
-      length: Math.max(0, bottomVisualLen),
+      // Keep the logical range unchanged, but show one trailing cell when
+      // the selection ends at EOL so a newline selection remains visible.
+      length: Math.max(0, bottomVisualLen) + (bottomAtLineEnd ? 1 : 0),
     });
 
     this.refreshSelectionDOM();
