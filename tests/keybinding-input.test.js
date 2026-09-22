@@ -100,10 +100,11 @@ test("repeated global shortcuts are ignored while editor shortcuts remain repeat
 
   const editor = fixture({ action: "editor_action", in_editor: true });
   editor.manager.editor.selected = true;
-  const repeatedEditor = keyboardEvent();
+  const repeatedEditor = keyboardEvent(new HTMLElement());
   repeatedEditor.repeat = true;
   editor.manager.onKey(repeatedEditor);
   assert.equal(repeatedEditor.defaultPrevented, true);
+  assert.deepEqual(editor.calls, ["editor_action"]);
 });
 
 test("named shortcut keys retain modifiers and modifier-only keys stay sane", () => {

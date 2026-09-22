@@ -179,6 +179,15 @@ contextBridge.exposeInMainWorld("api", {
   searchInFiles: (rootPath, query, options = {}) =>
     ipcRenderer.invoke("WorkspaceSearch:search", rootPath, query, options),
 
+  replaceInFiles: (rootPath, query, replacement, options = {}) =>
+    ipcRenderer.invoke(
+      "WorkspaceSearch:replace",
+      rootPath,
+      query,
+      replacement,
+      options,
+    ),
+
   cancelSearch: (requestId) =>
     ipcRenderer.invoke("WorkspaceSearch:cancel", requestId),
 

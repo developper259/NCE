@@ -13,6 +13,8 @@ interface SearchOptions {
   offset?: number;
   limit?: number;
   requestId?: string;
+  paths?: string[];
+  replaceFirst?: boolean;
 }
 
 interface SearchResult {
@@ -33,6 +35,13 @@ interface SearchResponse {
   offset: number;
   limit: number;
   hasMore: boolean;
+}
+
+interface ReplaceResponse {
+  success: boolean;
+  filesChanged: number;
+  replacements: number;
+  error?: string;
 }
 
 interface ProjectMapOptions {
@@ -164,6 +173,16 @@ export class WorkspaceSearch {
         }
         return true;
       },
+    );
+    ipcMain.handle(
+      "WorkspaceSearch:replace",
+      async (
+        _event,
+        rootPath: string,
+        query: string,
+        replacement: string,
+        options: SearchOptions = {},
+      ): Promise<ReplaceResponse> => this.replace(rootPath, query, replacement, options),
     );
     ipcMain.handle(
       "WorkspaceSearch:projectMap",
@@ -469,7 +488,7 @@ export class WorkspaceSearch {
 
     const results: SearchResult[] = [];
     const offset = Math.max(0, Math.floor(options.offset || 0));
-    const limit = Math.min(100, Math.max(1, Math.floor(options.limit || 50)));
+    const limit = Math.min(this.maxResults, Math.max(1, Math.floor(options.limit || 50)));
     let totalMatches = 0;
 
     let filesSearched = 0;
@@ -660,6 +679,55 @@ export class WorkspaceSearch {
       limit,
       hasMore: offset + results.length < totalMatches,
     };
+  }
+
+  async replace(
+    rootPath: string,
+    query: string,
+    replacement: string,
+    options: SearchOptions = {},
+  ): Promise<ReplaceResponse> {
+    if (!rootPath || !query || typeof replacement !== "string") {
+      return { success: false, filesChanged: 0, replacements: 0, error: "Invalid replacement request." };
+    }
+
+    const response = await this.search(rootPath, query, { ...options, limit: this.maxResults });
+    const resultPaths = [...new Set(response.results.map((result) => result.path))];
+    const paths = options.paths?.length
+      ? resultPaths.filter((filePath) => options.paths?.includes(filePath))
+      : resultPaths;
+    const regex = this.createReplacementRegex(query, options, Boolean(options.replaceFirst));
+    if (!regex) {
+      return { success: false, filesChanged: 0, replacements: 0, error: "Invalid regular expression." };
+    }
+
+    let filesChanged = 0;
+    let replacements = 0;
+    for (const filePath of paths) {
+      const content = await fs.readFile(filePath, "utf8");
+      const matches = content.match(regex);
+      if (!matches?.length) continue;
+      const updated = content.replace(regex, replacement);
+      const temporary = `${filePath}.nce-replace-${process.pid}-${Date.now()}`;
+      await fs.writeFile(temporary, updated, "utf8");
+      await fs.rename(temporary, filePath);
+      filesChanged++;
+      replacements += matches.length;
+    }
+    return { success: true, filesChanged, replacements };
+  }
+
+  private createReplacementRegex(query: string, options: SearchOptions, replaceFirst = false): RegExp | null {
+    const flags = `${replaceFirst ? "" : "g"}${options.caseSensitive ? "" : "i"}u`;
+    const character = "[\\p{L}\\p{N}\\p{M}\\p{Pc}]";
+    const prefix = `(?<!${character})`;
+    const suffix = `(?!${character})`;
+    const source = options.useRegex ? query : query.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
+    try {
+      return new RegExp(options.wholeWord ? `${prefix}(?:${source})${suffix}` : source, flags);
+    } catch {
+      return null;
+    }
   }
 
   private createMatcher(

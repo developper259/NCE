@@ -4,6 +4,7 @@ class SearchSidebar extends Sidebar {
 
     this.container = null;
     this.input = null;
+    this.replaceInput = null;
     this.includeInput = null;
     this.excludeInput = null;
     this.summaryElement = null;
@@ -29,6 +30,8 @@ class SearchSidebar extends Sidebar {
     this.workspaceGeneration = 0;
     this.searchGeneration = 0;
     this.activeRequestId = null;
+    this.isReplacing = false;
+    this.replaceExpanded = false;
   }
 
   render() {
@@ -101,6 +104,46 @@ class SearchSidebar extends Sidebar {
 
     inputWrapper.append(input, options);
 
+    const replaceRow = document.createElement("div");
+    replaceRow.className = "search-sidebar-replace-row";
+    replaceRow.hidden = true;
+    const replaceExpand = document.createElement("button");
+    replaceExpand.type = "button";
+    replaceExpand.className = "search-sidebar-expand";
+    replaceExpand.title = "Show replace input";
+    replaceExpand.setAttribute("aria-label", "Show replace input");
+    replaceExpand.setAttribute("aria-expanded", "false");
+    const replaceExpandIcon = document.createElement("i");
+    replaceExpandIcon.className = "fi fi-rr-angle-small-down";
+    replaceExpand.appendChild(replaceExpandIcon);
+
+    const replaceInput = document.createElement("input");
+    replaceInput.type = "text";
+    replaceInput.className = "search-sidebar-replace-input";
+    replaceInput.placeholder = "Replace";
+    replaceInput.autocomplete = "off";
+    replaceInput.spellcheck = false;
+    this.replaceInput = replaceInput;
+
+    const replaceAll = this.createActionButton("Replace All", "⟳", () => this.replaceAll());
+    replaceRow.append(replaceInput, replaceAll);
+    replaceInput.hidden = true;
+    replaceAll.hidden = true;
+
+    replaceExpand.addEventListener("click", () => {
+      this.replaceExpanded = !this.replaceExpanded;
+      searchBox.classList.toggle("search-sidebar-replace-expanded", this.replaceExpanded);
+      replaceRow.hidden = !this.replaceExpanded;
+      replaceInput.hidden = !this.replaceExpanded;
+      replaceAll.hidden = !this.replaceExpanded;
+      replaceExpand.setAttribute("aria-expanded", String(this.replaceExpanded));
+      replaceExpand.title = this.replaceExpanded ? "Hide replace input" : "Show replace input";
+      replaceExpand.setAttribute("aria-label", replaceExpand.title);
+      replaceExpandIcon.classList.toggle("fi-rr-angle-small-down", !this.replaceExpanded);
+      replaceExpandIcon.classList.toggle("fi-rr-angle-small-up", this.replaceExpanded);
+      if (this.replaceExpanded) replaceInput.focus();
+    });
+
     const include = document.createElement("input");
     include.type = "text";
     include.className = "search-sidebar-filter";
@@ -115,7 +158,7 @@ class SearchSidebar extends Sidebar {
     exclude.value = this.exclude;
     this.excludeInput = exclude;
 
-    searchBox.append(inputWrapper, include, exclude);
+    searchBox.append(replaceExpand, inputWrapper, replaceRow, include, exclude);
     container.appendChild(searchBox);
 
     const summary = document.createElement("div");
@@ -142,6 +185,10 @@ class SearchSidebar extends Sidebar {
     input.addEventListener("input", scheduleSearch);
     include.addEventListener("input", scheduleSearch);
     exclude.addEventListener("input", scheduleSearch);
+
+    replaceInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") this.replaceAll();
+    });
 
     input.addEventListener("keydown", (event) => {
       if (event.key !== "Escape") {
@@ -205,6 +252,39 @@ class SearchSidebar extends Sidebar {
     });
 
     return button;
+  }
+
+  createActionButton(title, label, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "search-sidebar-action";
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.textContent = label;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  async replaceAll() {
+    await this.replaceInFiles();
+  }
+
+  async replaceInFiles() {
+    if (this.isReplacing || !this.query || !this.replaceInput?.value || !this.editor.api.replaceInFiles) return;
+    this.isReplacing = true;
+    try {
+      const result = await this.editor.api.replaceInFiles(this.editor.fileExplorer.rootPath, this.query, this.replaceInput.value, {
+        include: this.include,
+        exclude: this.exclude,
+        caseSensitive: this.caseSensitive,
+        wholeWord: this.wholeWord,
+        useRegex: this.useRegex,
+      });
+      if (!result?.success) console.error("Workspace replacement failed:", result?.error);
+      await this.runSearch();
+    } finally {
+      this.isReplacing = false;
+    }
   }
 
   async runSearch() {
@@ -322,10 +402,6 @@ class SearchSidebar extends Sidebar {
     }
 
     if (!this.query) {
-      const placeholder = document.createElement("div");
-      placeholder.className = "search-sidebar-placeholder";
-      placeholder.textContent = "Search";
-      container.appendChild(placeholder);
       return;
     }
 

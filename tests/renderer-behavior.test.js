@@ -4,11 +4,28 @@ const { createEditor, loadGlobal } = require("./helpers/runtime");
 
 function searchEditor(text) {
   const { editor } = createEditor(text);
-  const classes = { add() {}, remove() {}, contains() { return false; } };
+  const classes = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const iconClasses = { add() {}, remove() {}, toggle() {} };
+  const expandButton = {
+    attributes: {},
+    classList: classes,
+    setAttribute(name, value) { this.attributes[name] = value; },
+    querySelector(selector) {
+      return selector === "i" ? { classList: iconClasses } : null;
+    },
+  };
   const input = { value: "", focus() {}, select() {}, blur() {} };
+  const replaceInput = { value: "", focus() {}, blur() {} };
+  const replaceContainer = { hidden: true };
+  const replaceActions = { hidden: true };
+  const searchBar = { classList: classes };
   editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
+    if (selector === ".editor-search-bar") return searchBar;
     if (selector === ".search-bar-input") return input;
+    if (selector === ".search-bar-expand") return expandButton;
+    if (selector === ".search-bar-replace-input") return replaceInput;
+    if (selector === ".search-bar-replace-container") return replaceContainer;
+    if (selector === ".search-bar-replace-actions") return replaceActions;
     return { classList: classes, textContent: "" };
   };
   editor.selectOutput = { replaceChildren() {}, children: [] };
@@ -50,12 +67,19 @@ test("search finds case-insensitive occurrences and cycles next/previous", () =>
 });
 
 test("search close clears results and closes the visible search bar", () => {
-  const { search } = searchEditor("abc");
+  const { search, editor } = searchEditor("abc");
   search.isOpen = true;
+  editor.domManager.getElement(".editor-search-bar").classList.add("search-bar-visible");
+  editor.domManager.getElement(".editor-search-bar").classList.add("search-bar-expanded");
   search.search("a");
   search.close();
   assert.equal(search.isOpen, false);
   assert.equal(search.results.length, 0);
+  assert.equal(editor.domManager.getElement(".editor-search-bar").classList.contains("search-bar-visible"), false);
+  assert.equal(editor.domManager.getElement(".editor-search-bar").classList.contains("search-bar-expanded"), false);
+  assert.equal(editor.domManager.getElement(".search-bar-replace-container").hidden, true);
+  assert.equal(editor.domManager.getElement(".search-bar-replace-actions").hidden, true);
+  assert.equal(editor.domManager.getElement(".search-bar-expand").attributes["aria-expanded"], "false");
 });
 
 test("file loading chooses complete incremental or chunked fallback mode", async () => {
