@@ -491,7 +491,11 @@ class TitleBar {
       this.activeItemIndex = this.getOpenItems().indexOf(trigger);
     } else if (event.key === "ArrowRight") this.switchMenu(1);
     else if (event.key === "ArrowLeft") this.switchMenu(-1);
-    else if (event.key === "Enter" && document.activeElement?.dataset.command)
+    else if (
+      event.key === "Enter" &&
+      document.activeElement?.classList?.contains("nce-titlebar-menu-item") &&
+      !document.activeElement.disabled
+    )
       document.activeElement.click();
     else return;
     event.preventDefault();
