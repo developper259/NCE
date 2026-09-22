@@ -170,7 +170,10 @@ class SelectController {
         const fileRow = row + 1;
 
         const x = cursor.columnToX(info.startCol);
-        const width = info.length * this.editor.letterSize;
+        // A zero-length logical selection can still represent the caret at
+        // EOL (notably when selecting a newline). Keep it visible as one
+        // character cell without changing the logical/copy range.
+        const width = Math.max(1, info.length) * this.editor.letterSize;
 
         const y = cursor.rowToY(fileRow) - difY;
         const height = cursor.mpY + difY;
@@ -194,7 +197,7 @@ class SelectController {
         div.style.height = `${height}px`;
 
         const currentLeft = info.startCol;
-        const currentRight = info.startCol + info.length;
+        const currentRight = info.startCol + Math.max(1, info.length);
 
         const previousInfo = this.selectedLines.get(row - 1);
 
@@ -210,7 +213,8 @@ class SelectController {
 
         if (previousInfo) {
           const previousLeft = previousInfo.startCol;
-          const previousRight = previousInfo.startCol + previousInfo.length;
+          const previousRight =
+            previousInfo.startCol + Math.max(1, previousInfo.length);
 
           topLeftConnected =
             previousLeft <= currentLeft && previousRight > currentLeft;
@@ -232,7 +236,7 @@ class SelectController {
 
         if (nextInfo) {
           const nextLeft = nextInfo.startCol;
-          const nextRight = nextInfo.startCol + nextInfo.length;
+          const nextRight = nextInfo.startCol + Math.max(1, nextInfo.length);
 
           bottomLeftConnected =
             nextLeft <= currentLeft && nextRight > currentLeft;
@@ -620,10 +624,7 @@ class SelectController {
       topRealLen,
     ).column;
 
-    const startAtLineEnd = topRealCol >= topRealLen;
-    const startLineLen =
-      Math.max(0, topVisualEnd - topVisualStart) +
-      (startAtLineEnd ? 1 : 0);
+    const startLineLen = Math.max(0, topVisualEnd - topVisualStart);
 
     this.selectedLines.set(yStart, {
       startCol: topVisualStart + 1,
@@ -648,17 +649,9 @@ class SelectController {
       bottomRow,
       bottomRealCol,
     ).column;
-    const bottomLineLength = lc.lines[bottomRow - 1]
-      ? lc.lines[bottomRow - 1].getText().length
-      : 0;
-    const bottomAtLineEnd = bottomRealCol >= bottomLineLength;
-
     this.selectedLines.set(yEnd, {
       startCol: 1,
-
-      // Keep the logical range unchanged, but show one trailing cell when
-      // the selection ends at EOL so a newline selection remains visible.
-      length: Math.max(0, bottomVisualLen) + (bottomAtLineEnd ? 1 : 0),
+      length: Math.max(0, bottomVisualLen),
     });
 
     this.refreshSelectionDOM();
