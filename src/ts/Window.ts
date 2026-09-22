@@ -201,6 +201,10 @@ export class Window {
         this.executeWindowCommand(command),
       );
       ipcMain.handle("Clipboard:readText", async () => clipboard.readText());
+      ipcMain.handle("Clipboard:writeText", async (_event, text) => {
+        clipboard.writeText(String(text ?? ""));
+        return true;
+      });
       ipcMain.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
         this.setMenuShortcutsIgnored(ignored),
       );

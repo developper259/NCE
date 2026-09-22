@@ -38,8 +38,34 @@ class KeyBindingManager {
   isAgentMessageTarget(target) {
     return (
       target instanceof Element &&
-      Boolean(target.closest(".agent-sidebar-messages"))
+      Boolean(
+        target.closest(
+          ".agent-sidebar-messages, .agent-sidebar, .sidebar, [data-sidebar]",
+        ),
+      )
     );
+  }
+
+  async copyNativeSelection() {
+    const selection = window.getSelection?.();
+    const text = selection?.toString?.() || "";
+    if (!text) return false;
+    try {
+      if (document.execCommand?.("copy")) return true;
+    } catch (error) {
+      // Fall through to the asynchronous clipboard API.
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (error) {
+      if (typeof window.api?.writeClipboardText === "function") {
+        await window.api.writeClipboardText(text);
+        return true;
+      }
+      console.error("Sidebar selection copy error:", error);
+      return false;
+    }
   }
 
   bindEditor(key, e) {
@@ -230,17 +256,23 @@ class KeyBindingManager {
     // Skip when a shortcut capture is active in settings
     if (document.querySelector(".setting-shortcut-btn.listening")) return;
 
-    if (this.isAgentMessageTarget(e.target)) {
-      const isModifier = e.metaKey || e.ctrlKey;
-      const key = eventKey.toLowerCase();
-      if (isModifier && (key === "c" || key === "a")) return;
+    const isModifier = e.metaKey || e.ctrlKey;
+    const key = eventKey.toLowerCase();
+    if (isModifier && key === "c") {
+      const selectedText = window.getSelection?.()?.toString?.() || "";
+      if (selectedText) {
+        void this.copyNativeSelection();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
     }
 
     if (!document.hasFocus()) return;
 
-    const key = this.getShortcutKey(eventKey, e);
-    const binding = CONFIG_KEYBINDING_CONTAINSKEY(key)
-      ? CONFIG_KEYBINDING_GET_KEY(key)
+    const shortcutKey = this.getShortcutKey(eventKey, e);
+    const binding = CONFIG_KEYBINDING_CONTAINSKEY(shortcutKey)
+      ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
       : null;
 
     // Global UI shortcuts (sidebar, quick panel, etc.) are edge-triggered:
@@ -252,14 +284,14 @@ class KeyBindingManager {
     if (e.repeat && binding?.in_editor === false && !isEditorNavigation) return;
 
     if (this.isNativeInputTarget(e.target) && eventKey !== "Escape") {
-      this.bindNativeInput(key, e);
+      this.bindNativeInput(shortcutKey, e);
       return;
     }
 
     if (this.editor.selected) {
-      this.bindEditor(key, e);
+      this.bindEditor(shortcutKey, e);
     } else {
-      this.bind(key, e);
+      this.bind(shortcutKey, e);
     }
   }
 

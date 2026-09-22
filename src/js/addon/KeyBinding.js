@@ -621,7 +621,11 @@ class KeyBinding {
           const prevLineNode = lc.lines[y - 1];
           x = prevLineNode ? prevLineNode.getText().length : 0;
         } else {
-          x = previousGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
+          const currentLine = lc.lines[y - 1];
+          x = previousGraphemeBoundary(
+            currentLine ? currentLine.getText() : "",
+            x,
+          );
         }
       }
 

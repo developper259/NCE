@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("api", {
   quit: () => ipcRenderer.invoke("App:quit"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
   readClipboardText: () => ipcRenderer.invoke("Clipboard:readText"),
+  writeClipboardText: (text) => ipcRenderer.invoke("Clipboard:writeText", text),
   setMenuShortcutsIgnored: (ignored) =>
     ipcRenderer.invoke("App:setIgnoreMenuShortcuts", ignored === true),
   setActiveFileContext: (hasActiveFile) =>
