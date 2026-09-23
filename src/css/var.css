@@ -48,6 +48,7 @@
   --menu-background: var(--bg-secondary);
   --menu-border: var(--border-secondary);
   --menu-hover: var(--bg-hover);
+  --menu-check: #b8b8b8;
 
   --scroller-size: 15px;
 
@@ -89,4 +90,5 @@
   --scroller-bg-hover: rgba(90, 102, 116, 0.5);
   --shadow-color: rgba(25, 35, 45, 0.22);
   --unsaved-indicator: #222b35;
+  --menu-check: #0067b8;
 }

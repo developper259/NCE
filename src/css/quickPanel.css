@@ -189,6 +189,15 @@
   padding-left: 12px;
 }
 
+.quick-panel-item-checkmark {
+  flex: 0 0 16px;
+  margin-left: 8px;
+  color: var(--menu-check);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
 .quick-panel-item-shortcut i {
   color: var(--text-secondary);
   font-size: 12px;

@@ -278,7 +278,7 @@ class QuickPanel {
     if (selectedIndex >= 0) this.scrollSelectedIntoView();
   }
 
-  setSelection(index) {
+  setSelection(index, { notify = false } = {}) {
     if (!this.session || this.session.visibleItems.length === 0) return;
     const count = this.session.visibleItems.length;
     const nextIndex = (index + count) % count;
@@ -290,6 +290,11 @@ class QuickPanel {
     this.session.selectedIndex = nextIndex;
     this.updateSelectionDOM(previousIndex, nextIndex);
     this.scrollSelectedIntoView();
+    if (notify) {
+      this.session.options.onSelectionChange?.(
+        this.session.visibleItems[nextIndex],
+      );
+    }
   }
 
   updateSelectionDOM(previousIndex, nextIndex) {
@@ -301,7 +306,7 @@ class QuickPanel {
 
   moveSelection(offset) {
     if (!this.session) return;
-    this.setSelection(this.session.selectedIndex + offset);
+    this.setSelection(this.session.selectedIndex + offset, { notify: true });
   }
 
   scrollSelectedIntoView() {
@@ -419,6 +424,17 @@ class QuickPanel {
         shortcut.className = "quick-panel-item-shortcut";
         this.appendShortcut(shortcut, item.shortcut);
         row.appendChild(shortcut);
+      }
+
+      if (
+        item.checked === true ||
+        String(item.id) === String(this.session.options.selectedId)
+      ) {
+        const checkmark = document.createElement("span");
+        checkmark.className = "quick-panel-item-checkmark";
+        checkmark.textContent = "✓";
+        checkmark.setAttribute("aria-label", "Selected");
+        row.appendChild(checkmark);
       }
 
       row.addEventListener("mouseenter", () => {

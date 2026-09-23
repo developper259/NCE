@@ -54,6 +54,7 @@ class ThemeManager {
       placeholder: "Select a theme...",
       items,
       selectedId: this.preference,
+      onSelectionChange: (item) => this.setTheme(item?.id),
       onAccept: (item) => this.setTheme(item.id),
     });
     return true;
