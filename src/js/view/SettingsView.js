@@ -41,12 +41,20 @@ const SETTINGS_UI = Object.freeze([
   },
 ]);
 
+const SETTINGS_CATEGORY_META = Object.freeze({
+  Editor: { description: "Configure editor appearance and behavior." },
+  Files: { description: "Configure file and save behavior." },
+  Shortcuts: { description: "Configure keyboard shortcuts." },
+  Agent: { description: "Configure AI models and providers." },
+});
+
 class SettingsView {
   constructor(editor) {
     this.editor = editor;
     this.host = editor.domManager.getElement(".settings-view-host");
     this.category = SETTINGS_UI[0].category;
     this.query = "";
+    this.agentSettingsTab = "models";
     this.scroller = null;
     this.build();
   }
@@ -54,14 +62,18 @@ class SettingsView {
   build() {
     if (!this.host) return;
     this.host.innerHTML = `
-      <div class="settings-search-wrap">
-        <i class="fi fi-rr-search" aria-hidden="true"></i>
-        <input class="settings-search" type="search" placeholder="Search settings..."
-          aria-label="Search settings" autocomplete="off" spellcheck="false">
-      </div>
       <div class="settings-layout">
-        <nav class="settings-nav" aria-label="Settings categories"></nav>
-        <main class="settings-content"></main>
+        <aside class="settings-sidebar">
+          <div class="settings-search-wrap">
+            <i class="fi fi-rr-search" aria-hidden="true"></i>
+            <input class="settings-search" type="search" placeholder="Search settings..."
+              aria-label="Search settings" autocomplete="off" spellcheck="false">
+          </div>
+          <nav class="settings-nav" aria-label="Settings categories"></nav>
+        </aside>
+        <main class="settings-main">
+          <div class="settings-content"></div>
+        </main>
       </div>`;
     this.search = this.host.querySelector(".settings-search");
     this.layout = this.host.querySelector(".settings-layout");
@@ -180,25 +192,48 @@ class SettingsView {
     const categories = [...new Set(settings.map((item) => item.category))];
     for (const category of categories) {
       const section = document.createElement("section");
-      section.className = "settings-section";
-      const title = document.createElement("h2");
-      title.textContent = category;
-      section.appendChild(title);
-      for (const setting of settings.filter(
+      section.className = "settings-page";
+      section.appendChild(this.createPageHeader(category));
+
+      const categorySettings = settings.filter(
         (item) => item.category === category,
-      )) {
-        section.appendChild(this.createRow(setting));
+      );
+      if (category === "Agent") {
+        section.appendChild(this.createAgentSettings());
+      } else {
+        const panel = document.createElement("div");
+        panel.className = "settings-panel";
+        for (const setting of categorySettings) {
+          panel.appendChild(this.createRow(setting));
+        }
+        section.appendChild(panel);
       }
       this.content.appendChild(section);
     }
     this.refreshScroller();
   }
 
+  createPageHeader(category) {
+    const header = document.createElement("header");
+    header.className = "settings-page-header";
+    const title = document.createElement("h1");
+    title.className = "settings-page-title";
+    title.textContent = category;
+    const description = document.createElement("p");
+    description.className = "settings-page-description";
+    description.textContent =
+      SETTINGS_CATEGORY_META[category]?.description ||
+      `Configure ${category.toLowerCase()} settings.`;
+    header.append(title, description);
+    return header;
+  }
+
   createRow(setting) {
     if (setting.control === "agent") return this.createAgentSettings();
     const row = document.createElement("div");
-    row.className = "setting-row";
+    row.className = "settings-panel-row setting-row";
     const text = document.createElement("div");
+    text.className = "settings-row-main";
     const label = document.createElement("label");
     const controlId = `setting-${setting.key.replace(/\./g, "-")}`;
     label.className = "setting-label";
@@ -216,30 +251,78 @@ class SettingsView {
           : setting.control === "shortcut"
             ? this.createShortcutInput(setting, controlId)
             : this.createTextInput(setting, controlId);
-    row.append(text, control);
+    const controlWrap = document.createElement("div");
+    controlWrap.className = "settings-row-control";
+    controlWrap.appendChild(control);
+    row.append(text, controlWrap);
     return row;
   }
 
   createAgentSettings() {
     const container = document.createElement("div");
     container.className = "agent-settings-content";
+    const tabs = document.createElement("div");
+    tabs.className = "agent-settings-tabs";
+    tabs.setAttribute("role", "tablist");
+    for (const [id, label] of [["models", "Models"], ["providers", "Providers"]]) {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "agent-settings-tab";
+      tab.textContent = label;
+      tab.id = `agent-settings-tab-${id}`;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(this.agentSettingsTab === id));
+      tab.tabIndex = this.agentSettingsTab === id ? 0 : -1;
+      tab.addEventListener("click", () => {
+        this.agentSettingsTab = id;
+        this.render();
+      });
+      tab.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        this.agentSettingsTab = id === "models" ? "providers" : "models";
+        this.render();
+        this.content?.querySelector(`#agent-settings-tab-${this.agentSettingsTab}`)?.focus();
+      });
+      tabs.appendChild(tab);
+    }
+    container.appendChild(tabs);
 
-    const modelHeading = document.createElement("h3");
-    modelHeading.textContent = "Models";
-    const modelDescription = document.createElement("p");
-    modelDescription.className = "setting-description";
-    modelDescription.textContent = "Choose which AI models are shown in Change AI Model.";
-    container.append(modelHeading, modelDescription);
+    const panel = document.createElement("div");
+    panel.className = "agent-settings-panel";
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", `agent-settings-tab-${this.agentSettingsTab}`);
+    panel.appendChild(
+      this.agentSettingsTab === "models"
+        ? this.createAgentModelsView()
+        : this.createAgentProvidersView(),
+    );
+    container.appendChild(panel);
+    return container;
+  }
+
+  createAgentModelsView() {
+    const container = document.createElement("div");
 
     const hiddenModels = new Set(SETTINGS_GET("agent.hiddenModels") || []);
     for (const provider of AgentAI.getProviders()) {
-      const providerHeading = document.createElement("h4");
-      providerHeading.textContent = provider.name;
-      container.appendChild(providerHeading);
-      for (const model of Object.values(provider.models || {})) {
+      const models = Object.values(provider.models || {});
+      if (!models.length) continue;
+      const group = document.createElement("section");
+      group.className = "agent-model-group";
+      const heading = document.createElement("h2");
+      heading.className = "agent-model-group-title";
+      heading.textContent = provider.name;
+      group.appendChild(heading);
+      const panel = document.createElement("div");
+      panel.className = "settings-panel";
+      for (const model of models) {
         const key = AgentAI.getModelKey(provider.id, model.id);
-        const label = document.createElement("label");
-        label.className = "agent-model-setting";
+        const row = document.createElement("label");
+        row.className = "settings-panel-row agent-model-setting";
+        const text = document.createElement("span");
+        text.className = "settings-row-label";
+        text.textContent = model.name;
         const input = document.createElement("input");
         input.type = "checkbox";
         input.checked = !hiddenModels.has(key);
@@ -250,52 +333,60 @@ class SettingsView {
           if (input.checked) next.delete(key);
           else next.add(key);
           const saved = await SETTINGS_SET("agent.hiddenModels", [...next]);
-          if (!saved) {
-            input.checked = !input.checked;
-            return;
-          }
-          this.editor.agentSidebar?.refreshModelSelector?.();
+          if (!saved) input.checked = !input.checked;
+          else this.editor.agentSidebar?.refreshModelSelector?.();
         });
-        const text = document.createElement("span");
-        text.textContent = model.name;
-        label.append(input, text);
-        container.appendChild(label);
+        row.append(text, input);
+        panel.appendChild(row);
       }
+      group.appendChild(panel);
+      container.appendChild(group);
     }
+    return container;
+  }
 
-    const providersHeading = document.createElement("h3");
-    providersHeading.textContent = "Providers";
-    const providersDescription = document.createElement("p");
-    providersDescription.className = "setting-description";
-    providersDescription.textContent =
-      "Manage API keys used by AI providers from the quick panel.";
-    container.append(providersHeading, providersDescription);
+  createAgentProvidersView() {
+    const container = document.createElement("div");
+
+    const panel = document.createElement("div");
+    panel.className = "settings-panel agent-providers-panel";
     for (const provider of AgentAI.getProviders()) {
-      container.appendChild(this.createAgentProviderControl(provider));
+      panel.appendChild(this.createAgentProviderControl(provider));
     }
+    container.appendChild(panel);
+
+    const security = document.createElement("p");
+    security.className = "agent-settings-security";
+    security.textContent = "API keys are stored securely using your system keychain and are never saved in settings.json.";
+    container.appendChild(security);
     return container;
   }
 
   createAgentProviderControl(provider) {
     const container = document.createElement("section");
-    container.className = "agent-provider-setting";
+    container.className = "settings-panel-row agent-provider-setting";
+    const details = document.createElement("div");
+    details.className = "settings-row-main";
     const title = document.createElement("h4");
     title.textContent = provider.name;
-    container.appendChild(title);
     const status = document.createElement("p");
     status.className = "agent-provider-status";
     const updateStatus = (configured, message = "") => {
       status.textContent = message || (configured ? "Configured" : "Not configured");
       status.dataset.configured = String(configured);
     };
-    container.appendChild(status);
+    details.appendChild(title);
+    container.appendChild(details);
     if (!provider.requiresApiKey) {
+      status.classList.add("agent-provider-inline-status");
+      container.appendChild(status);
       updateStatus(false, "No API key required.");
       return container;
     }
+    details.appendChild(status);
 
-    const form = document.createElement("div");
-    form.className = "agent-provider-key-actions";
+    const actions = document.createElement("div");
+    actions.className = "agent-provider-key-actions";
     const save = document.createElement("button");
     save.type = "button";
     save.textContent = "Set API key";
@@ -305,15 +396,17 @@ class SettingsView {
     remove.className = "agent-provider-remove";
     const error = document.createElement("p");
     error.className = "agent-provider-error";
+    error.hidden = true;
     const refreshStatus = async () => {
       const configured = await this.editor.api.hasAgentApiKey?.(provider.id);
       updateStatus(configured === true);
-      save.textContent = configured ? "Update API key" : "Set API key";
+      save.textContent = configured ? "Manage API key" : "Set API key";
       remove.hidden = !configured;
     };
     save.addEventListener("click", async () => {
       save.disabled = true;
       error.textContent = "";
+      error.hidden = true;
       const value = await this.editor.agentSidebar?.requestApiKey?.(provider);
       if (!value) {
         save.disabled = false;
@@ -323,15 +416,18 @@ class SettingsView {
       if (saved) {
         updateStatus(true);
         remove.hidden = false;
-        save.textContent = "Update API key";
+        save.textContent = "Manage API key";
         await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
       } else {
         error.textContent = "Could not save API key.";
+        error.hidden = false;
       }
       save.disabled = false;
     });
     remove.addEventListener("click", async () => {
       remove.disabled = true;
+      error.textContent = "";
+      error.hidden = true;
       const removed = await this.editor.api.setAgentApiKey?.(provider.id, "");
       if (removed) {
         updateStatus(false);
@@ -340,11 +436,12 @@ class SettingsView {
         await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
       } else {
         error.textContent = "Could not remove API key.";
+        error.hidden = false;
       }
       remove.disabled = false;
     });
-    form.append(save);
-    container.append(form, remove, error);
+    actions.append(save, remove);
+    container.append(actions, error);
     remove.hidden = true;
     refreshStatus().catch(() => updateStatus(false, "Not configured"));
     return container;

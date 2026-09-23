@@ -1,25 +1,27 @@
 :root {
   /* Background colors */
+  --bg-workbench: #141414;
   --bg-primary: #181818;
-  --bg-secondary: #202020;
-  --bg-tertiary: #2a2a2a;
-  --bg-hover: #303030;
-  --bg-hover-alt: #212121;
-  --bg-active: #444444;
+  --bg-secondary: #1e1e1e;
+  --bg-tertiary: #262626;
+  --bg-hover: #2c2c2c;
+  --bg-hover-alt: #242424;
+  --bg-active: #333333;
+  --tab-bar-background: #171717;
   
   /* Border colors */
-  --border-primary: #2b2b2b;
-  --border-secondary: #474747;
-  --border-accent: #0078d4;
-  --border-active: blue;
+  --border-primary: #343434;
+  --border-secondary: #454545;
+  --border-accent: var(--accent-primary);
+  --border-active: var(--accent-primary);
 
   
   /* Text colors */
-  --text-primary: #b8b8b8;
-  --text-secondary: #9e9e9e;
-  --text-tertiary: #636a75;
-  --text-selected: #ccc;
-  --text-white: white;
+  --text-primary: #d0d0d0;
+  --text-secondary: #a9a9a9;
+  --text-tertiary: #858b94;
+  --text-selected: #e0e0e0;
+  --text-white: #eeeeee;
   
   /* Accent colors */
   --accent-primary: #0078d4;
@@ -35,11 +37,11 @@
   
   /* Other colors */
   --shadow-color: black;
-  --unsaved-indicator: white;
+  --unsaved-indicator: #eeeeee;
 
   --titlebar-controls-height: 35px;
   --titlebar-height: 36px;
-  --titlebar-background: var(--bg-primary);
+  --titlebar-background: var(--bg-workbench);
   --titlebar-border: var(--border-primary);
   --titlebar-text: var(--text-primary);
   --titlebar-text-muted: var(--text-secondary);
@@ -48,7 +50,7 @@
   --menu-background: var(--bg-secondary);
   --menu-border: var(--border-secondary);
   --menu-hover: var(--bg-hover);
-  --menu-check: #b8b8b8;
+  --menu-check: #d0d0d0;
 
   --scroller-size: 15px;
 
@@ -63,17 +65,19 @@
 
 /* Dark remains the default palette above for a safe first paint. */
 :root[data-theme="light"] {
+  --bg-workbench: #e7e9ed;
   --bg-primary: #f5f6f8;
   --bg-secondary: #ffffff;
   --bg-tertiary: #e8ebef;
   --bg-hover: #e1e5ea;
   --bg-hover-alt: #eef1f4;
   --bg-active: #d5dbe2;
+  --tab-bar-background: #eef0f3;
 
   --border-primary: #d9dee5;
   --border-secondary: #c2c9d2;
-  --border-accent: #0067b8;
-  --border-active: #0067b8;
+  --border-accent: var(--accent-primary);
+  --border-active: var(--accent-primary);
 
   --text-primary: #252a31;
   --text-secondary: #59636f;
