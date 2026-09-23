@@ -262,7 +262,12 @@ class QuickPanel {
             .filter(Boolean).join(" ").toLowerCase().includes(query);
         });
     const limit = Math.max(1, this.session.options.renderLimit || filtered.length || 1);
-    this.session.visibleItems = filtered.slice(0, limit);
+    const emptyItem = filtered.length === 0 && typeof this.session.options.emptyItem === "function"
+      ? this.session.options.emptyItem(this.session.query)
+      : null;
+    this.session.visibleItems = emptyItem
+      ? [emptyItem]
+      : filtered.slice(0, limit);
 
     const selectedId = this.session.options.selectedId;
     const selectedIndex = this.session.visibleItems.findIndex(

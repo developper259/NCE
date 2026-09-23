@@ -244,6 +244,16 @@ class KeyBinding {
       deferAcceptUntilClose: true,
       transitionDuration: 100,
       items,
+      emptyItem: (query) => {
+        const value = String(query || "").trim();
+        return value
+          ? {
+              id: "ask-agent",
+              label: `Ask to Agent: "${value}"`,
+              data: { askAgent: value },
+            }
+          : null;
+      },
       onAccept: (item) => this.executeCommandItem(item),
     });
   }
@@ -264,6 +274,10 @@ class KeyBinding {
   }
 
   executeCommandItem(item) {
+    if (item?.data?.askAgent) {
+      this.editor.sidebarManager?.openMenu?.("agent");
+      return this.editor.agentSidebar?.sendMessage?.(item.data.askAgent);
+    }
     if (item?.data?.themePicker) {
       return this.editor.themeManager?.openThemePicker();
     }
