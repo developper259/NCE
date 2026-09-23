@@ -310,6 +310,11 @@ export class FileManager {
     );
 
     ipcMain.handle(
+      "FileManager:hasAgentApiKey",
+      async (_event, providerId: string) => Boolean(await this.getAgentApiKey(providerId)),
+    );
+
+    ipcMain.handle(
       "FileManager:setAgentApiKey",
       async (_event, providerId: string, apiKey: string) =>
         this.setAgentApiKey(providerId, apiKey),

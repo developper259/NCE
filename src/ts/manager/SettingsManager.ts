@@ -5,6 +5,7 @@ export interface Settings {
   editor: { tabWidth: number };
   files: { autoSave: boolean };
   appearance: { theme: ThemePreference };
+  agent: { hiddenModels: string[] };
   keybindings: Record<string, string | null>;
 }
 
@@ -53,6 +54,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
+  agent: { hiddenModels: [] as string[] },
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
@@ -60,6 +62,7 @@ const KNOWN_KEYS = new Set([
   "editor.tabWidth",
   "files.autoSave",
   "appearance.theme",
+  "agent.hiddenModels",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
 ]);
 
@@ -147,6 +150,7 @@ export class SettingsManager {
       editor: { tabWidth: this.settings.editor.tabWidth },
       files: { autoSave: this.settings.files.autoSave },
       appearance: { theme: this.settings.appearance.theme },
+      agent: { hiddenModels: [...this.settings.agent.hiddenModels] },
       keybindings: Object.fromEntries(
         Object.keys(DEFAULT_KEYBINDINGS).map((action) => [
           action,
@@ -209,7 +213,10 @@ export class SettingsManager {
         }
 
         const nextSettings = clone(this.settings);
-        (nextSettings as any)[section][property] = value;
+        (nextSettings as any)[section][property] =
+          key === "agent.hiddenModels"
+            ? [...new Set(value as string[])]
+            : value;
         const saved = await this.writeSnapshot(nextSettings);
         if (saved) this.settings = nextSettings;
         return saved;
@@ -231,6 +238,7 @@ export class SettingsManager {
     if (!isObject(merged.editor)) merged.editor = {};
     if (!isObject(merged.files)) merged.files = {};
     if (!isObject(merged.appearance)) merged.appearance = {};
+    if (!isObject(merged.agent)) merged.agent = {};
     if (!isObject(merged.keybindings)) merged.keybindings = {};
     merged.editor.tabWidth = this.isValid(
       "editor.tabWidth",
@@ -250,6 +258,14 @@ export class SettingsManager {
     )
       ? merged.appearance.theme
       : DEFAULT_SETTINGS.appearance.theme;
+    merged.agent.hiddenModels = this.isValid(
+      "agent.hiddenModels",
+      merged.agent.hiddenModels,
+    )
+      ? [...new Set(merged.agent.hiddenModels.filter((value: unknown) =>
+          typeof value === "string" && value.trim().length > 0 && value.length <= 512,
+        ))]
+      : [];
 
     const seenShortcuts = new Map<string, string>();
     for (const [action, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
@@ -295,6 +311,17 @@ export class SettingsManager {
     if (key === "files.autoSave") return typeof value === "boolean";
     if (key === "appearance.theme") {
       return value === "system" || value === "dark" || value === "light";
+    }
+    if (key === "agent.hiddenModels") {
+      return (
+        Array.isArray(value) &&
+        value.every(
+          (entry) =>
+            typeof entry === "string" &&
+            entry.trim().length > 0 &&
+            entry.length <= 512,
+        )
+      );
     }
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
       if (value === null) return true;

@@ -31,6 +31,14 @@ const SETTINGS_UI = Object.freeze([
     keywords: ["auto", "save", "files"],
     control: "checkbox",
   },
+  {
+    key: "agent.settings",
+    category: "Agent",
+    label: "Agent",
+    description: "Configure visible models and provider API keys.",
+    keywords: ["agent", "model", "AI", "provider", "API", "key"],
+    control: "agent",
+  },
 ]);
 
 class SettingsView {
@@ -187,6 +195,7 @@ class SettingsView {
   }
 
   createRow(setting) {
+    if (setting.control === "agent") return this.createAgentSettings();
     const row = document.createElement("div");
     row.className = "setting-row";
     const text = document.createElement("div");
@@ -209,6 +218,138 @@ class SettingsView {
             : this.createTextInput(setting, controlId);
     row.append(text, control);
     return row;
+  }
+
+  createAgentSettings() {
+    const container = document.createElement("div");
+    container.className = "agent-settings-content";
+
+    const modelHeading = document.createElement("h3");
+    modelHeading.textContent = "Models";
+    const modelDescription = document.createElement("p");
+    modelDescription.className = "setting-description";
+    modelDescription.textContent = "Choose which AI models are shown in Change AI Model.";
+    container.append(modelHeading, modelDescription);
+
+    const hiddenModels = new Set(SETTINGS_GET("agent.hiddenModels") || []);
+    for (const provider of AgentAI.getProviders()) {
+      const providerHeading = document.createElement("h4");
+      providerHeading.textContent = provider.name;
+      container.appendChild(providerHeading);
+      for (const model of Object.values(provider.models || {})) {
+        const key = AgentAI.getModelKey(provider.id, model.id);
+        const label = document.createElement("label");
+        label.className = "agent-model-setting";
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = !hiddenModels.has(key);
+        input.setAttribute("aria-label", `${model.name} (${provider.name})`);
+        input.addEventListener("change", async () => {
+          const previous = new Set(SETTINGS_GET("agent.hiddenModels") || []);
+          const next = new Set(previous);
+          if (input.checked) next.delete(key);
+          else next.add(key);
+          const saved = await SETTINGS_SET("agent.hiddenModels", [...next]);
+          if (!saved) {
+            input.checked = !input.checked;
+            return;
+          }
+          this.editor.agentSidebar?.refreshModelSelector?.();
+        });
+        const text = document.createElement("span");
+        text.textContent = model.name;
+        label.append(input, text);
+        container.appendChild(label);
+      }
+    }
+
+    const providersHeading = document.createElement("h3");
+    providersHeading.textContent = "Providers";
+    const providersDescription = document.createElement("p");
+    providersDescription.className = "setting-description";
+    providersDescription.textContent = "Manage API keys used by AI providers.";
+    container.append(providersHeading, providersDescription);
+    for (const provider of AgentAI.getProviders()) {
+      container.appendChild(this.createAgentProviderControl(provider));
+    }
+    return container;
+  }
+
+  createAgentProviderControl(provider) {
+    const container = document.createElement("section");
+    container.className = "agent-provider-setting";
+    const title = document.createElement("h4");
+    title.textContent = provider.name;
+    container.appendChild(title);
+    const status = document.createElement("p");
+    status.className = "agent-provider-status";
+    const updateStatus = (configured, message = "") => {
+      status.textContent = message || (configured ? "Configured" : "Not configured");
+      status.dataset.configured = String(configured);
+    };
+    container.appendChild(status);
+    if (!provider.requiresApiKey) {
+      updateStatus(false, "No API key required.");
+      return container;
+    }
+
+    const form = document.createElement("div");
+    form.className = "agent-provider-key-form";
+    const input = document.createElement("input");
+    input.type = "password";
+    input.placeholder = "Enter API key...";
+    input.setAttribute("aria-label", `${provider.name} API key`);
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Save";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove API key";
+    remove.className = "agent-provider-remove";
+    const error = document.createElement("p");
+    error.className = "agent-provider-error";
+    const refreshStatus = async () => {
+      const configured = await this.editor.api.hasAgentApiKey?.(provider.id);
+      updateStatus(configured === true);
+      save.textContent = configured ? "Update" : "Save";
+      remove.hidden = !configured;
+    };
+    save.addEventListener("click", async () => {
+      const value = input.value.trim();
+      if (!value) return;
+      save.disabled = true;
+      error.textContent = "";
+      const saved = await this.editor.api.setAgentApiKey?.(provider.id, value);
+      if (saved) {
+        input.value = "";
+        updateStatus(true);
+        remove.hidden = false;
+        save.textContent = "Update";
+        await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
+      } else {
+        error.textContent = "Could not save API key.";
+      }
+      save.disabled = false;
+    });
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      const removed = await this.editor.api.setAgentApiKey?.(provider.id, "");
+      if (removed) {
+        input.value = "";
+        updateStatus(false);
+        remove.hidden = true;
+        save.textContent = "Save";
+        await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
+      } else {
+        error.textContent = "Could not remove API key.";
+      }
+      remove.disabled = false;
+    });
+    form.append(input, save);
+    container.append(form, remove, error);
+    remove.hidden = true;
+    refreshStatus().catch(() => updateStatus(false, "Not configured"));
+    return container;
   }
 
   createSelect(setting, id) {

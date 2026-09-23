@@ -1217,6 +1217,7 @@
 
   padding: 10px 10px 4px 10px;
   resize: none;
+  overflow-y: hidden;
 
   color: var(--text-primary, var(--text-white));
   font-family: inherit;

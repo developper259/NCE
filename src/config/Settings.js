@@ -40,6 +40,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
   appearance: Object.freeze({ theme: "system" }),
+  agent: Object.freeze({ hiddenModels: [] }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
@@ -47,6 +48,7 @@ let RENDERER_SETTINGS = {
   editor: { ...DEFAULT_RENDERER_SETTINGS.editor },
   files: { ...DEFAULT_RENDERER_SETTINGS.files },
   appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
+  agent: { hiddenModels: [] },
   keybindings: { ...DEFAULT_RENDERER_SETTINGS.keybindings },
 };
 
@@ -73,6 +75,13 @@ function SETTINGS_INITIALIZE(settings) {
         settings?.appearance?.theme === "light"
           ? settings.appearance.theme
           : DEFAULT_RENDERER_SETTINGS.appearance.theme,
+    },
+    agent: {
+      hiddenModels: Array.isArray(settings?.agent?.hiddenModels)
+        ? [...new Set(settings.agent.hiddenModels.filter(
+            (value) => typeof value === "string" && value.trim() && value.length <= 512,
+          ))]
+        : [],
     },
     keybindings: Object.fromEntries(
       Object.entries(DEFAULT_KEYBINDINGS).map(([action, shortcut]) => [
@@ -169,6 +178,14 @@ async function SETTINGS_SET(key, value) {
     if (value !== "system" && value !== "dark" && value !== "light") {
       return false;
     }
+  }
+
+  if (section === "agent" && property === "hiddenModels") {
+    if (
+      !Array.isArray(value) ||
+      value.some((entry) => typeof entry !== "string" || !entry.trim() || entry.length > 512)
+    ) return false;
+    value = [...new Set(value)];
   }
 
   RENDERER_SETTINGS[section][property] = value;

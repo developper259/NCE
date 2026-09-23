@@ -178,6 +178,93 @@
   color: var(--text-tertiary);
 }
 
+.agent-settings-content {
+  max-width: 760px;
+}
+.agent-settings-content h3 {
+  margin: 0 0 6px;
+  color: var(--text-white);
+  font-size: 17px;
+  font-weight: 500;
+}
+.agent-settings-content h3:not(:first-child) {
+  margin-top: 28px;
+}
+.agent-settings-content h4 {
+  margin: 18px 0 7px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+.agent-model-setting {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.agent-model-setting input {
+  accent-color: var(--accent-primary);
+}
+.agent-provider-setting {
+  padding: 0 0 16px;
+  border-bottom: 1px solid var(--border-primary);
+}
+.agent-provider-setting + .agent-provider-setting {
+  margin-top: 18px;
+}
+.agent-provider-setting h4 {
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+.agent-provider-status {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.agent-provider-status[data-configured="true"] {
+  color: var(--accent-primary);
+}
+.agent-provider-key-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-provider-key-form input {
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border-secondary);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+.agent-provider-key-form button,
+.agent-provider-remove {
+  padding: 6px 10px;
+  border: 1px solid var(--border-secondary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+.agent-provider-key-form button:hover,
+.agent-provider-remove:hover {
+  border-color: var(--accent-primary);
+  background: var(--bg-hover-alt);
+}
+.agent-provider-remove {
+  margin-top: 8px;
+}
+.agent-provider-error {
+  margin: 6px 0 0;
+  color: var(--error, #d66);
+  font-size: 12px;
+}
+
 /* Shortcut capture button */
 .setting-shortcut-wrap {
   display: flex;

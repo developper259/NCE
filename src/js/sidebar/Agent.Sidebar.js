@@ -375,6 +375,18 @@ class AgentSidebar extends Sidebar {
     };
   }
 
+  async refreshProviderApiKey(providerId) {
+    const provider = AgentAI.getProvider(providerId);
+    if (!provider) return false;
+    const apiKey = await this.editor.api.getAgentApiKey?.(provider.id);
+    if (apiKey) this.apiKeys.set(provider.id, apiKey);
+    else this.apiKeys.delete(provider.id);
+    if (this.currentProviderId === provider.id) {
+      this.agent.setProvider({ ...provider, apiKey: apiKey || null });
+    }
+    return true;
+  }
+
   async loadConfigState(state) {
     if (!state || typeof state !== "object") return;
 
@@ -1419,22 +1431,28 @@ class AgentSidebar extends Sidebar {
     triggerBtn.className =
       "agent-sidebar-model-trigger agent-sidebar-model-trigger-button";
 
-    const availableModels = [];
-    Object.values(AgentAI.providers).forEach((provider) => {
-      Object.values(provider.models).forEach((model) => {
-        availableModels.push({
-          id: model.id,
-          name: model.name,
-          providerId: provider.id,
-          providerName: provider.name,
-          baseURL: provider.baseURL,
-          apiKey: provider.apiKey,
-        });
-      });
-    });
+    const hiddenModels = new Set(
+      typeof SETTINGS_GET === "function"
+        ? SETTINGS_GET("agent.hiddenModels") || []
+        : [],
+    );
+    const allModels = AgentAI.getModels().map((entry) => ({
+        id: entry.modelId,
+        name: entry.modelName,
+        providerId: entry.providerId,
+        providerName: entry.providerName,
+        baseURL: entry.provider.baseURL,
+        apiKey: entry.provider.apiKey,
+      }));
+    const availableModels = allModels.filter(
+      (model) => !hiddenModels.has(AgentAI.getModelKey(model.providerId, model.id)),
+    );
 
     const currentModelObj =
-      availableModels.find((m) => m.id === this.currentModel) ||
+      allModels.find(
+        (m) =>
+          m.id === this.currentModel && m.providerId === this.currentProviderId,
+      ) ||
       availableModels[0];
     const currentDisplayName = currentModelObj
       ? currentModelObj.name
@@ -1524,7 +1542,6 @@ class AgentSidebar extends Sidebar {
 
         listContainer.appendChild(item);
       });
-
       const separator = document.createElement("div");
       separator.className = "agent-sidebar-model-separator";
       listContainer.appendChild(separator);
@@ -1532,7 +1549,37 @@ class AgentSidebar extends Sidebar {
       const manageItem = document.createElement("div");
       manageItem.className = "agent-sidebar-model-manage";
       manageItem.textContent = "Manage Models...";
+      manageItem.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        dropdownMenu.classList.add("hidden");
+        await this.editor.openSettings?.("Agent");
+      });
       listContainer.appendChild(manageItem);
+    };
+
+    this.refreshModelSelector = () => {
+      const hidden = new Set(
+        typeof SETTINGS_GET === "function"
+          ? SETTINGS_GET("agent.hiddenModels") || []
+          : [],
+      );
+      const enabled = allModels.filter(
+        (model) => !hidden.has(AgentAI.getModelKey(model.providerId, model.id)),
+      );
+      availableModels.splice(0, availableModels.length, ...enabled);
+
+      const currentModelObj =
+        allModels.find(
+          (model) =>
+            model.id === this.currentModel &&
+            model.providerId === this.currentProviderId,
+        ) || availableModels[0];
+      const currentDisplayName = currentModelObj
+        ? currentModelObj.name
+        : this.currentModel;
+      triggerBtn.title = `Model: ${currentDisplayName}`;
+      triggerBtn.setAttribute("aria-label", triggerBtn.title);
+      renderModelsList(searchBox.value || "");
     };
 
     renderModelsList();
@@ -2800,8 +2847,12 @@ class AgentSidebar extends Sidebar {
 
   autoResizeInput() {
     if (!this.inputElement) return;
+    const maxHeight = 140;
     this.inputElement.style.height = "auto";
-    this.inputElement.style.height = `${this.inputElement.scrollHeight}px`;
+    const contentHeight = this.inputElement.scrollHeight;
+    this.inputElement.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+    this.inputElement.style.overflowY =
+      contentHeight > maxHeight ? "auto" : "hidden";
   }
 
   scrollMessagesToBottom() {
