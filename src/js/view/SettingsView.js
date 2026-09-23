@@ -1,5 +1,20 @@
 const SETTINGS_UI = Object.freeze([
   {
+    key: "appearance.theme",
+    category: "Appearance",
+    label: "Theme",
+    description: "Controls the color theme used by NCE.",
+    keywords: ["theme", "color", "appearance"],
+    control: "select",
+    valueType: "string",
+    options: [
+      { value: "system", label: "System" },
+      { value: "dark", label: "Dark" },
+      { value: "light", label: "Light" },
+    ],
+    apply: (editor, value) => editor.themeManager.setTheme(value),
+  },
+  {
     key: "editor.tabWidth",
     category: "Editor",
     label: "Tab Width",
@@ -189,16 +204,20 @@ class SettingsView {
     const select = document.createElement("select");
     select.id = id;
     select.className = "setting-select";
-    for (const value of setting.options) {
+    for (const optionValue of setting.options) {
       const option = document.createElement("option");
+      const value = typeof optionValue === "object" ? optionValue.value : optionValue;
       option.value = String(value);
-      option.textContent = String(value);
+      option.textContent = typeof optionValue === "object" ? optionValue.label : String(value);
       select.appendChild(option);
     }
     select.value = String(SETTINGS_GET(setting.key));
     select.addEventListener("change", async () => {
       const previous = SETTINGS_GET(setting.key);
-      const res = await SETTINGS_SET(setting.key, Number(select.value));
+      const value = setting.valueType === "string" ? select.value : Number(select.value);
+      const res = setting.apply
+        ? await setting.apply(this.editor, value)
+        : await SETTINGS_SET(setting.key, value);
       if (!res || (typeof res === "object" && !res.success))
         select.value = String(previous);
       this.editor.bottomBar?.refreshScrollers?.();

@@ -1,4 +1,4 @@
-import { app, nativeTheme } from 'electron';
+import { app } from 'electron';
 import { Window } from './Window';
 import { NSHServer } from 'nsh/server';
 import { SettingsManager } from './manager/SettingsManager';
@@ -17,7 +17,6 @@ export class App {
   version = app.getVersion();
 
   constructor() {
-    nativeTheme.themeSource = "dark";
     this.window = new Window(this);
     this.nsh = new NSHServer({ host: "127.0.0.1", port: 0 });
 

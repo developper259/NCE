@@ -4,8 +4,11 @@ import path from "node:path";
 export interface Settings {
   editor: { tabWidth: number };
   files: { autoSave: boolean };
+  appearance: { theme: ThemePreference };
   keybindings: Record<string, string | null>;
 }
+
+export type ThemePreference = "system" | "dark" | "light";
 
 export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   Object.freeze({
@@ -49,12 +52,14 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
+  appearance: Object.freeze({ theme: "system" as ThemePreference }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
 const KNOWN_KEYS = new Set([
   "editor.tabWidth",
   "files.autoSave",
+  "appearance.theme",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
 ]);
 
@@ -141,6 +146,7 @@ export class SettingsManager {
     return {
       editor: { tabWidth: this.settings.editor.tabWidth },
       files: { autoSave: this.settings.files.autoSave },
+      appearance: { theme: this.settings.appearance.theme },
       keybindings: Object.fromEntries(
         Object.keys(DEFAULT_KEYBINDINGS).map((action) => [
           action,
@@ -224,6 +230,7 @@ export class SettingsManager {
     const merged: any = clone(source);
     if (!isObject(merged.editor)) merged.editor = {};
     if (!isObject(merged.files)) merged.files = {};
+    if (!isObject(merged.appearance)) merged.appearance = {};
     if (!isObject(merged.keybindings)) merged.keybindings = {};
     merged.editor.tabWidth = this.isValid(
       "editor.tabWidth",
@@ -237,6 +244,12 @@ export class SettingsManager {
     )
       ? merged.files.autoSave
       : DEFAULT_SETTINGS.files.autoSave;
+    merged.appearance.theme = this.isValid(
+      "appearance.theme",
+      merged.appearance.theme,
+    )
+      ? merged.appearance.theme
+      : DEFAULT_SETTINGS.appearance.theme;
 
     const seenShortcuts = new Map<string, string>();
     for (const [action, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
@@ -280,6 +293,9 @@ export class SettingsManager {
       );
     }
     if (key === "files.autoSave") return typeof value === "boolean";
+    if (key === "appearance.theme") {
+      return value === "system" || value === "dark" || value === "light";
+    }
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
       if (value === null) return true;
       return (

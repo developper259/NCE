@@ -59,3 +59,34 @@
 
   --sidebar-selector-width: 49px;
 }
+
+/* Dark remains the default palette above for a safe first paint. */
+:root[data-theme="light"] {
+  --bg-primary: #f5f6f8;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #e8ebef;
+  --bg-hover: #e1e5ea;
+  --bg-hover-alt: #eef1f4;
+  --bg-active: #d5dbe2;
+
+  --border-primary: #d9dee5;
+  --border-secondary: #c2c9d2;
+  --border-accent: #0067b8;
+  --border-active: #0067b8;
+
+  --text-primary: #252a31;
+  --text-secondary: #59636f;
+  --text-tertiary: #7c8793;
+  --text-selected: #1d232a;
+  --text-white: #11161c;
+
+  --accent-primary: #0067b8;
+  --accent-caret: #b05a00;
+
+  --selection-bg: rgba(0, 103, 184, 0.16);
+  --selection-bg-search: rgba(0, 103, 184, 0.2);
+  --scroller-bg: rgba(90, 102, 116, 0.35);
+  --scroller-bg-hover: rgba(90, 102, 116, 0.5);
+  --shadow-color: rgba(25, 35, 45, 0.22);
+  --unsaved-indicator: #222b35;
+}

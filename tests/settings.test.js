@@ -47,8 +47,24 @@ test("valid settings persist across manager restarts and set writes JSON", async
     assert.deepEqual(await readSettings(root), {
       editor: { tabWidth: 8 },
       files: { autoSave: true },
+      appearance: { theme: "system" },
       keybindings: DEFAULT_KEYBINDINGS,
     });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("appearance theme accepts only system, dark and light", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    assert.equal(manager.get("appearance.theme"), "system");
+    assert.equal(await manager.set("appearance.theme", "light"), true);
+    assert.equal(manager.get("appearance.theme"), "light");
+    assert.equal(await manager.set("appearance.theme", "purple"), false);
+    assert.equal(manager.get("appearance.theme"), "light");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -95,6 +111,7 @@ test("missing known defaults are merged while unknown properties survive", async
     assert.deepEqual(await manager.initialize(), {
       editor: { tabWidth: 4 },
       files: { autoSave: false },
+      appearance: { theme: "system" },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     const disk = await readSettings(root);
@@ -118,6 +135,7 @@ test("queued concurrent writes leave a complete latest settings document", async
     assert.deepEqual(await readSettings(root), {
       editor: { tabWidth: 12 },
       files: { autoSave: true },
+      appearance: { theme: "system" },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);

@@ -135,6 +135,8 @@ contextBridge.exposeInMainWorld("api", {
   stopWatching: () => ipcRenderer.invoke("Watcher:stopWatching"),
 
   openContextMenu: (actions) => ipcRenderer.invoke("ContextMenu:show", actions),
+  setNativeThemeSource: (source, resolvedTheme) =>
+    ipcRenderer.invoke("Theme:setNativeSource", source, resolvedTheme),
 
   renameEntry: (oldPath, newPath) =>
     ipcRenderer.invoke("FileManager:rename", oldPath, newPath),

@@ -3,7 +3,7 @@
   flex-direction: column;
   min-height: 100%;
   width: 100%;
-  color: #cccccc;
+  color: var(--text-primary);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   user-select: none;
 }
@@ -14,7 +14,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #bbbbbb;
+  color: var(--text-secondary);
 }
 
 .file-tree {
@@ -37,13 +37,13 @@
 }
 
 .file-item:hover {
-  background-color: #2a2d2e;
+  background-color: var(--bg-hover-alt);
   border-radius: 0;
 }
 
 .file-item.active-file {
-  background-color: #37373d;
-  color: #ffffff;
+  background-color: var(--bg-active);
+  color: var(--text-white);
   border-radius: 0;
 }
 
@@ -55,7 +55,7 @@
   margin-right: 2px;
   flex-shrink: 0;
   font-size: 10px;
-  color: #cccccc;
+  color: var(--text-secondary);
 }
 
 .folder-arrow.expanded {
@@ -69,7 +69,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  color: #c79a56;
+  color: var(--accent-caret);
   flex-shrink: 0;
 }
 
@@ -90,7 +90,7 @@
   font-size: 11px;
   font-weight: 400;
   text-transform: uppercase;
-  color: #cccccc;
+  color: var(--text-primary);
 }
 
 .sidebar-menu-header {
@@ -98,7 +98,7 @@
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  color: #858585;
+  color: var(--text-tertiary);
   letter-spacing: 0.5px;
 }
 
@@ -109,20 +109,20 @@
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  color: #858585;
+  color: var(--text-tertiary);
   letter-spacing: 0.5px;
   cursor: pointer;
   user-select: none;
 }
 
 .sidebar-project-header:hover {
-  color: #cccccc;
+  color: var(--text-primary);
 }
 
 .empty-state-message {
   padding: 0 20px;
   margin-top: 5px;
-  color: #cccccc;
+  color: var(--text-primary);
   font-size: 13px;
   line-height: 1.4;
   text-align: left;
@@ -133,8 +133,8 @@
   width: 100%;
   margin-top: 15px;
   padding: 6px 12px;
-  background-color: #007acc;
-  color: #ffffff;
+  background-color: var(--accent-primary);
+  color: var(--text-white);
   border: none;
   border-radius: 2px;
   font-size: 13px;
@@ -144,11 +144,11 @@
 }
 
 .open-folder-btn:hover {
-  background-color: #0098ff;
+  background-color: var(--border-accent);
 }
 
 .open-folder-btn:active {
-  background-color: #005a9e;
+  background-color: var(--border-active);
 }
 
 .file-item.editing {
@@ -158,9 +158,9 @@
 .file-item .file-name-input {
   flex: 1;
   min-width: 0;
-  background: var(--input-bg, #1e1e1e);
-  color: var(--text-color, #ddd);
-  border: 1px solid var(--accent-color, #007acc);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-accent);
   border-radius: 2px;
   font: inherit;
   font-size: 12.5px;
@@ -169,5 +169,5 @@
 }
 
 .file-item .file-name-input.invalid {
-  border-color: #e05252;
+  border-color: var(--error-color, #e05252);
 }

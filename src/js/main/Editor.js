@@ -9,6 +9,8 @@ class Editor {
 
     this.mainSection = this.domManager.getElement(".main-section");
     this.editorOBJ = this.domManager.getElement(".editor");
+    this.themeManager = new ThemeManager(this);
+    this.themeManager.init();
     this.emptyMenuOBJ = this.domManager.getElement(".empty-menu");
     this.fileManagerOBJ = this.domManager.getElement(".file-manager");
     this.cD = this.domManager.getElement(".editor-caret");

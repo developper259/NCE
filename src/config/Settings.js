@@ -39,12 +39,14 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
+  appearance: Object.freeze({ theme: "system" }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
 let RENDERER_SETTINGS = {
   editor: { ...DEFAULT_RENDERER_SETTINGS.editor },
   files: { ...DEFAULT_RENDERER_SETTINGS.files },
+  appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
   keybindings: { ...DEFAULT_RENDERER_SETTINGS.keybindings },
 };
 
@@ -63,6 +65,14 @@ function SETTINGS_INITIALIZE(settings) {
         typeof settings?.files?.autoSave === "boolean"
           ? settings.files.autoSave
           : DEFAULT_RENDERER_SETTINGS.files.autoSave,
+    },
+    appearance: {
+      theme:
+        settings?.appearance?.theme === "system" ||
+        settings?.appearance?.theme === "dark" ||
+        settings?.appearance?.theme === "light"
+          ? settings.appearance.theme
+          : DEFAULT_RENDERER_SETTINGS.appearance.theme,
     },
     keybindings: Object.fromEntries(
       Object.entries(DEFAULT_KEYBINDINGS).map(([action, shortcut]) => [
@@ -152,6 +162,12 @@ async function SETTINGS_SET(key, value) {
     const validation = SETTINGS_VALIDATE_KEYBINDING(property, value);
     if (!validation.valid) {
       return { success: false, error: validation };
+    }
+  }
+
+  if (section === "appearance" && property === "theme") {
+    if (value !== "system" && value !== "dark" && value !== "light") {
+      return false;
     }
   }
 
