@@ -74,6 +74,47 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isValidKeybinding(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim() || value.length > 128) {
+    return false;
+  }
+
+  const parts = value.split("+").map((part) => part.trim());
+  const key = parts.pop()?.toLowerCase() || "";
+  const modifiers = new Set([
+    "mod",
+    "cmd",
+    "command",
+    "ctrl",
+    "control",
+    "shift",
+    "alt",
+    "option",
+  ]);
+  if (parts.some((part) => !modifiers.has(part.toLowerCase()))) return false;
+
+  return (
+    /^[a-z0-9]$/.test(key) ||
+    /^f(?:[1-9]|1[0-9]|2[0-4])$/.test(key) ||
+    [
+      "arrowup",
+      "arrowdown",
+      "arrowleft",
+      "arrowright",
+      "home",
+      "end",
+      "tab",
+      "delete",
+      "backspace",
+      "enter",
+      "escape",
+      "insert",
+      "pageup",
+      "pagedown",
+    ].includes(key)
+  );
+}
+
 export function normalizeKeybinding(
   key: string | null | undefined,
   platform: string = process.platform,
@@ -137,6 +178,21 @@ export class SettingsManager {
     this.settings = this.validateAndMerge(source);
     await this.save();
     return this.getAll();
+  }
+
+  async reload(): Promise<Settings | null> {
+    try {
+      const content = await fs.readFile(this.settingsPath, "utf8");
+      const parsed: unknown = JSON.parse(content);
+      if (!isObject(parsed)) {
+        throw new Error("settings.json must contain an object");
+      }
+      this.settings = this.validateAndMerge(parsed, this.settings);
+      return this.getAll();
+    } catch (error) {
+      console.error("[Settings] Failed to reload settings.json", error);
+      return null;
+    }
   }
 
   get(key: string): unknown {
@@ -233,6 +289,7 @@ export class SettingsManager {
 
   private validateAndMerge(
     source: Record<string, unknown>,
+    fallback: Settings = DEFAULT_SETTINGS,
   ): Settings & Record<string, unknown> {
     const merged: any = clone(source);
     if (!isObject(merged.editor)) merged.editor = {};
@@ -245,19 +302,19 @@ export class SettingsManager {
       merged.editor.tabWidth,
     )
       ? merged.editor.tabWidth
-      : DEFAULT_SETTINGS.editor.tabWidth;
+      : fallback.editor.tabWidth;
     merged.files.autoSave = this.isValid(
       "files.autoSave",
       merged.files.autoSave,
     )
       ? merged.files.autoSave
-      : DEFAULT_SETTINGS.files.autoSave;
+      : fallback.files.autoSave;
     merged.appearance.theme = this.isValid(
       "appearance.theme",
       merged.appearance.theme,
     )
       ? merged.appearance.theme
-      : DEFAULT_SETTINGS.appearance.theme;
+      : fallback.appearance.theme;
     merged.agent.hiddenModels = this.isValid(
       "agent.hiddenModels",
       merged.agent.hiddenModels,
@@ -265,10 +322,10 @@ export class SettingsManager {
       ? [...new Set(merged.agent.hiddenModels.filter((value: unknown) =>
           typeof value === "string" && value.trim().length > 0 && value.length <= 512,
         ))]
-      : [];
+      : [...fallback.agent.hiddenModels];
 
     const seenShortcuts = new Map<string, string>();
-    for (const [action, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
+    for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {
       const key = `keybindings.${action}`;
       const candidate = merged.keybindings[action];
       if (candidate === null) {
@@ -276,10 +333,13 @@ export class SettingsManager {
       } else if (this.isValid(key, candidate)) {
         const normalized = normalizeKeybinding(candidate);
         if (seenShortcuts.has(normalized)) {
-          const defaultNorm = shortcut ? normalizeKeybinding(shortcut) : "";
-          if (shortcut && !seenShortcuts.has(defaultNorm)) {
-            merged.keybindings[action] = shortcut;
-            seenShortcuts.set(defaultNorm, action);
+          const fallbackShortcut = fallback.keybindings[action];
+          const fallbackNorm = fallbackShortcut
+            ? normalizeKeybinding(fallbackShortcut)
+            : "";
+          if (fallbackShortcut && !seenShortcuts.has(fallbackNorm)) {
+            merged.keybindings[action] = fallbackShortcut;
+            seenShortcuts.set(fallbackNorm, action);
           } else {
             merged.keybindings[action] = null;
           }
@@ -288,10 +348,13 @@ export class SettingsManager {
           if (normalized) seenShortcuts.set(normalized, action);
         }
       } else {
-        const defaultNorm = shortcut ? normalizeKeybinding(shortcut) : "";
-        if (shortcut && !seenShortcuts.has(defaultNorm)) {
-          merged.keybindings[action] = shortcut;
-          if (defaultNorm) seenShortcuts.set(defaultNorm, action);
+        const fallbackShortcut = fallback.keybindings[action];
+        const fallbackNorm = fallbackShortcut
+          ? normalizeKeybinding(fallbackShortcut)
+          : "";
+        if (fallbackShortcut && !seenShortcuts.has(fallbackNorm)) {
+          merged.keybindings[action] = fallbackShortcut;
+          if (fallbackNorm) seenShortcuts.set(fallbackNorm, action);
         } else {
           merged.keybindings[action] = null;
         }
@@ -325,11 +388,7 @@ export class SettingsManager {
     }
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
       if (value === null) return true;
-      return (
-        typeof value === "string" &&
-        value.trim().length > 0 &&
-        value.length <= 128
-      );
+      return isValidKeybinding(value);
     }
     return false;
   }

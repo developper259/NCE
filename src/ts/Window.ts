@@ -224,6 +224,9 @@ export class Window {
       ipcMain.handle("Settings:get", async (_event, key) =>
         typeof key === "string" ? this.app.settings.get(key) : undefined,
       );
+      ipcMain.handle("Settings:getPath", async () =>
+        this.app.settings.settingsPath,
+      );
       ipcMain.handle("Settings:set", async (_event, key, value) => {
         return this.setSetting(key, value);
       });
@@ -276,6 +279,20 @@ export class Window {
     } else if (key.startsWith("keybindings.")) {
       this.appMenu?.refreshKeybindings();
     }
+    this.window?.webContents?.send(
+      "settings-changed",
+      this.app.settings.getAll(),
+    );
+    return true;
+  }
+
+  async reloadSettingsFromDisk(filePath: string) {
+    if (path.resolve(filePath) !== path.resolve(this.app.settings.settingsPath)) {
+      return false;
+    }
+    const settings = await this.app.settings.reload();
+    if (!settings) return false;
+    this.window?.webContents.send("settings-changed", settings);
     return true;
   }
 

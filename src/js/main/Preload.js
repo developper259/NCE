@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("App:setAutoSaveState", enabled === true),
   getSettings: () => ipcRenderer.invoke("Settings:getAll"),
   getSetting: (key) => ipcRenderer.invoke("Settings:get", key),
+  getSettingsPath: () => ipcRenderer.invoke("Settings:getPath"),
   setSetting: (key, value) => ipcRenderer.invoke("Settings:set", key, value),
   getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),
   addRecentFolder: (folderPath) =>
@@ -52,6 +53,11 @@ contextBridge.exposeInMainWorld("api", {
     const listener = (_event, folders) => callback(folders);
     ipcRenderer.on("recent-folders-changed", listener);
     return () => ipcRenderer.removeListener("recent-folders-changed", listener);
+  },
+  onSettingsChanged: (callback) => {
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on("settings-changed", listener);
+    return () => ipcRenderer.removeListener("settings-changed", listener);
   },
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),

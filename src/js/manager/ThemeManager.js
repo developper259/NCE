@@ -91,6 +91,11 @@ class ThemeManager {
     return true;
   }
 
+  syncFromSettings(preference) {
+    this.preference = this.normalizePreference(preference);
+    return this.applyTheme(this.resolveTheme());
+  }
+
   handleSystemThemeChange() {
     if (this.preference === "system") this.applyTheme(this.resolveTheme());
   }

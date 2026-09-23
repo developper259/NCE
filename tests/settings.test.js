@@ -56,6 +56,34 @@ test("valid settings persist across manager restarts and set writes JSON", async
   }
 });
 
+test("reload refreshes the in-memory settings from the saved JSON", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    await manager.set("editor.tabWidth", 8);
+    await manager.set("appearance.theme", "light");
+    await manager.set("keybindings.save", "Mod+Shift+S");
+    await fs.writeFile(
+      path.join(root, "settings.json"),
+      JSON.stringify({
+        editor: { tabWidth: "invalid" },
+        appearance: { theme: "purple" },
+        keybindings: { save: "Mod+NotAKey" },
+      }),
+    );
+
+    assert.equal(manager.get("appearance.theme"), "light");
+    const reloaded = await manager.reload();
+    assert.equal(reloaded?.editor.tabWidth, 8);
+    assert.equal(reloaded?.appearance.theme, "light");
+    assert.equal(reloaded?.keybindings.save, "Mod+Shift+S");
+    assert.equal(manager.get("appearance.theme"), "light");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("appearance theme accepts only system, dark and light", async () => {
   const root = await temporaryUserData();
   try {

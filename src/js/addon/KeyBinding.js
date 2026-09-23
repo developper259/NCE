@@ -208,10 +208,16 @@ class KeyBinding {
       ) || []),
     ].map((category) => ({
       id: `open-settings-${category.toLowerCase()}`,
-      label: `Open ${category} Settings`,
+      label: `Open ${category} Settings (UI)`,
       keywords: ["settings", category],
       data: { settingsCategory: category },
     }));
+    settingCategories.unshift({
+      id: "open-settings-json",
+      label: "Open Settings (JSON)",
+      keywords: ["settings", "json", "configuration"],
+      data: { settingsJson: true },
+    });
     settingCategories.unshift({
       id: "select-color-theme",
       label: "Select Color Theme",
@@ -281,6 +287,9 @@ class KeyBinding {
     if (item?.data?.themePicker) {
       return this.editor.themeManager?.openThemePicker();
     }
+    if (item?.data?.settingsJson) {
+      return this.editor.openSettingsJson?.();
+    }
     if (item?.data?.settingsCategory) {
       return this.editor.openSettings(item.data.settingsCategory);
     }
@@ -290,6 +299,7 @@ class KeyBinding {
   }
 
   getActionLabel(action) {
+    if (action === "open_settings") return "Open Settings (UI)";
     return action
       .split("_")
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

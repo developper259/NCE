@@ -515,6 +515,7 @@ export class FileManager {
       await atomicWriteFile(filePath, content);
       this.window.watcher?.commitOwnWrite(filePath, ownWriteToken);
       this.clearFileCache(filePath);
+      await this.window.reloadSettingsFromDisk?.(filePath);
 
       return filePath;
     } catch (error) {

@@ -119,6 +119,9 @@ class Editor {
     this.api.onRecentFoldersChanged?.((folders) =>
       this.titleBar?.setRecentFolders(folders),
     );
+    this.api.onSettingsChanged?.((settings) =>
+      this.applySettingsSnapshot(settings),
+    );
     this.initLoadState();
     this.api.rendererReady?.().catch?.((error) => {
       console.error("[Startup] rendererReady failed", error);
@@ -170,10 +173,31 @@ class Editor {
     return this.setAutoSaveState(!this.getAutoSaveState());
   }
 
+  applySettingsSnapshot(settings) {
+    SETTINGS_INITIALIZE(settings);
+    this.setAutoSaveState(SETTINGS_GET("files.autoSave"), { persist: false });
+    this.themeManager?.syncFromSettings?.(SETTINGS_GET("appearance.theme"));
+    this.agentSidebar?.refreshModelSelector?.();
+    this.settingsView?.sync?.("agent.hiddenModels");
+    void this.refreshSettingsJsonTab();
+  }
+
+  async refreshSettingsJsonTab() {
+    const settingsPath = await this.api.getSettingsPath?.();
+    if (!settingsPath) return;
+    await this.tabManager.reloadFileFromDisk(settingsPath);
+  }
+
   async openSettings(category) {
     const tab = await this.tabManager.openSettings();
     if (category) this.settingsView?.openCategory?.(category);
     return tab;
+  }
+
+  async openSettingsJson() {
+    const settingsPath = await this.api.getSettingsPath?.();
+    if (!settingsPath) return null;
+    return this.tabManager.openFileWithPath(settingsPath);
   }
 
   openRecentFolder(folderPath) {
