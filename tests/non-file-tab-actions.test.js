@@ -89,6 +89,36 @@ test("the command palette hides file commands outside a file tab", () => {
   );
 });
 
+test("the command palette exposes settings categories", () => {
+  let panelOptions;
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    USERCONFIG_KEYBINDING: [],
+    CONFIG_KEYBINDING_DISPLAY: (key) => key,
+  });
+  const editor = {
+    tabManager: { activeFile: null },
+    settingsView: {
+      getSettings: () => [
+        { category: "Editor" },
+        { category: "Files" },
+        { category: "Shortcuts" },
+      ],
+    },
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => { panelOptions = options; },
+    },
+  };
+  const keyBinding = new KeyBinding(editor);
+  keyBinding.control_open_command();
+
+  assert.deepEqual([...panelOptions.items].map((item) => item.label), [
+    "Open Editor Settings",
+    "Open Files Settings",
+    "Open Shortcuts Settings",
+  ]);
+});
+
 test("Reload Window saves the current state before reloading", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");

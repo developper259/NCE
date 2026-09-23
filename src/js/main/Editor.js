@@ -170,8 +170,10 @@ class Editor {
     return this.setAutoSaveState(!this.getAutoSaveState());
   }
 
-  openSettings() {
-    return this.tabManager.openSettings();
+  async openSettings(category) {
+    const tab = await this.tabManager.openSettings();
+    if (category) this.settingsView?.openCategory?.(category);
+    return tab;
   }
 
   openRecentFolder(folderPath) {

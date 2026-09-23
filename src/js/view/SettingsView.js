@@ -133,6 +133,17 @@ class SettingsView {
     );
   }
 
+  openCategory(category) {
+    const available = new Set(this.getSettings().map((setting) => setting.category));
+    if (!available.has(category)) return false;
+    this.category = category;
+    this.query = "";
+    if (this.search) this.search.value = "";
+    this.renderNavigation();
+    this.render();
+    return true;
+  }
+
   getVisibleSettings() {
     const settings = this.getSettings();
     if (!this.query)

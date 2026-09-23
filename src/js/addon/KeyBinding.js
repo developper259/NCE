@@ -202,7 +202,18 @@ class KeyBinding {
       return;
     }
 
-    const items = USERCONFIG_KEYBINDING.filter(
+    const settingCategories = [
+      ...new Set(this.editor.settingsView?.getSettings?.().map(
+        (setting) => setting.category,
+      ) || []),
+    ].map((category) => ({
+      id: `open-settings-${category.toLowerCase()}`,
+      label: `Open ${category} Settings`,
+      keywords: ["settings", category],
+      data: { settingsCategory: category },
+    }));
+
+    const shortcutItems = USERCONFIG_KEYBINDING.filter(
       (item) =>
         item.action !== "open_command" &&
         item.action !== "escape" &&
@@ -212,10 +223,12 @@ class KeyBinding {
     ).map((item) => ({
       id: item.action,
       label: this.getActionLabel(item.action),
-      description: item.description,
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
+    const items = settingCategories.length
+      ? settingCategories.concat(shortcutItems)
+      : shortcutItems;
 
     quickPanel.open({
       id: "command-palette",
@@ -243,6 +256,9 @@ class KeyBinding {
   }
 
   executeCommandItem(item) {
+    if (item?.data?.settingsCategory) {
+      return this.editor.openSettings(item.data.settingsCategory);
+    }
     const keybinding = item?.data || item;
     if (!keybinding?.action) return;
     this.editor.keyBinding.exec(keybinding);
