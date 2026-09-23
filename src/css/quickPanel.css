@@ -1,5 +1,5 @@
 .quick-panel-host {
-  display: none;
+  display: flex;
   position: fixed;
   inset: 0;
   z-index: 20;
@@ -7,11 +7,16 @@
   justify-content: center;
   padding: 12px 20px;
   pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 160ms ease, visibility 0s linear 160ms;
 }
 
 .quick-panel-host.is-open {
-  display: flex;
+  visibility: visible;
+  opacity: 1;
   pointer-events: auto;
+  transition: opacity 160ms ease, visibility 0s linear 0s;
 }
 
 .quick-panel {
@@ -28,6 +33,18 @@
   border: 1px solid var(--border-secondary);
   border-radius: 5px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.38);
+  transform: translateY(-6px) scale(0.98);
+  transform-origin: top center;
+  transition: transform 160ms ease;
+}
+
+.quick-panel-host.is-open .quick-panel {
+  transform: translateY(0) scale(1);
+}
+
+.quick-panel-host.is-switching,
+.quick-panel-host.is-switching .quick-panel {
+  transition-duration: 100ms;
 }
 
 .quick-panel-title {
@@ -202,5 +219,12 @@
   .quick-panel {
     width: calc(100vw - 20px);
     max-height: calc(100vh - 40px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quick-panel-host,
+  .quick-panel {
+    transition-duration: 0.01ms;
   }
 }

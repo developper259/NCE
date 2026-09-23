@@ -6,6 +6,7 @@ class QuickPanel {
     this.previousFocus = null;
     this.hoveredItem = null;
     this.requestGeneration = 0;
+    this.closeCleanupTimer = null;
 
     if (!this.host) return;
 
@@ -61,6 +62,11 @@ class QuickPanel {
 
   open(options = {}) {
     if (!this.host) return false;
+    if (this.closeCleanupTimer) {
+      clearTimeout(this.closeCleanupTimer);
+      this.closeCleanupTimer = null;
+    }
+    this.host.classList.remove("is-switching");
     if (this.isOpen()) {
       if (this.isOpen(options.id)) {
         this.input.focus();
@@ -121,14 +127,21 @@ class QuickPanel {
     this.hoveredItem = null;
 
     this.host.classList.remove("is-open");
+    const transitionDuration = options.transitionDuration || 160;
+    if (options.deferAcceptUntilClose) this.host.classList.add("is-switching");
     this.host.setAttribute("aria-hidden", "true");
     delete this.panel.dataset.panelId;
     this.input.blur();
     this.input.value = "";
     this.input.type = "text";
-    this.list.replaceChildren();
     this.empty.textContent = "";
     this.error.textContent = "";
+
+    // Keep the rendered rows until the fade-out has completed.
+    this.closeCleanupTimer = setTimeout(() => {
+      this.closeCleanupTimer = null;
+      if (!this.session) this.list.replaceChildren();
+    }, transitionDuration);
 
     if (restoreFocus) {
       if (
@@ -321,7 +334,13 @@ class QuickPanel {
     }
 
     this.close({ notifyCancel: false });
-    if (typeof options.onAccept === "function") options.onAccept(value);
+    if (typeof options.onAccept === "function") {
+      if (options.deferAcceptUntilClose) {
+        setTimeout(() => options.onAccept(value), options.transitionDuration || 160);
+      } else {
+        options.onAccept(value);
+      }
+    }
   }
 
   render() {

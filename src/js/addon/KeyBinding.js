@@ -241,6 +241,8 @@ class KeyBinding {
       mode: "pick",
       title: "Command Palette",
       placeholder: "Type a command",
+      deferAcceptUntilClose: true,
+      transitionDuration: 100,
       items,
       onAccept: (item) => this.executeCommandItem(item),
     });
