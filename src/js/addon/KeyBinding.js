@@ -212,6 +212,12 @@ class KeyBinding {
       keywords: ["settings", category],
       data: { settingsCategory: category },
     }));
+    settingCategories.unshift({
+      id: "select-color-theme",
+      label: "Select Color Theme",
+      keywords: ["theme", "appearance", "color"],
+      data: { themePicker: true },
+    });
 
     const shortcutItems = USERCONFIG_KEYBINDING.filter(
       (item) =>
@@ -256,6 +262,9 @@ class KeyBinding {
   }
 
   executeCommandItem(item) {
+    if (item?.data?.themePicker) {
+      return this.editor.themeManager?.openThemePicker();
+    }
     if (item?.data?.settingsCategory) {
       return this.editor.openSettings(item.data.settingsCategory);
     }

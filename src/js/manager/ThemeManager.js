@@ -34,6 +34,31 @@ class ThemeManager {
     return this.resolvedTheme;
   }
 
+  openThemePicker() {
+    const quickPanel = this.editor?.quickPanel;
+    if (!quickPanel) return false;
+    if (quickPanel.isOpen("theme-picker")) {
+      quickPanel.input?.focus();
+      return true;
+    }
+
+    const items = [
+      { id: "system", label: "System", keywords: ["automatic", "os"] },
+      { id: "dark", label: "Dark", keywords: ["night"] },
+      { id: "light", label: "Light", keywords: ["day"] },
+    ];
+    quickPanel.open({
+      id: "theme-picker",
+      mode: "pick",
+      title: "Color Theme",
+      placeholder: "Select a theme...",
+      items,
+      selectedId: this.preference,
+      onAccept: (item) => this.setTheme(item.id),
+    });
+    return true;
+  }
+
   resolveTheme(preference = this.getPreference()) {
     if (preference !== "system") return preference === "light" ? "light" : "dark";
     return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches

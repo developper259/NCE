@@ -1,7 +1,7 @@
 const SETTINGS_UI = Object.freeze([
   {
     key: "appearance.theme",
-    category: "Appearance",
+    category: "Editor",
     label: "Theme",
     description: "Controls the color theme used by NCE.",
     keywords: ["theme", "color", "appearance"],

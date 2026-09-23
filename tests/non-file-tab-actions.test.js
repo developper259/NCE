@@ -84,8 +84,8 @@ test("the command palette hides file commands outside a file tab", () => {
   keyBinding.control_open_command();
 
   assert.deepEqual(
-    panelOptions.items.map((item) => item.id),
-    ["quick_open", "toggle_search"],
+    [...panelOptions.items].map((item) => item.id),
+    ["select-color-theme", "quick_open", "toggle_search"],
   );
 });
 
@@ -113,6 +113,7 @@ test("the command palette exposes settings categories", () => {
   keyBinding.control_open_command();
 
   assert.deepEqual([...panelOptions.items].map((item) => item.label), [
+    "Select Color Theme",
     "Open Editor Settings",
     "Open Files Settings",
     "Open Shortcuts Settings",
