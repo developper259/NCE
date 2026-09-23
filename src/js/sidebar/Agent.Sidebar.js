@@ -2918,7 +2918,7 @@ class AgentSidebar extends Sidebar {
         title: options.invalid
           ? `Replace ${provider.name} API key`
           : `${provider.name} API key`,
-        placeholder: "API key",
+        placeholder: `${provider.name} API key`,
         inputType: "password",
         onAccept: (value) => finish(String(value || "").trim()),
         onCancel: () => finish(""),

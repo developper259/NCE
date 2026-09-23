@@ -2,7 +2,7 @@
   display: flex;
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 30;
   align-items: flex-start;
   justify-content: center;
   padding: 12px 20px;

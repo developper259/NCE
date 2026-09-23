@@ -267,7 +267,8 @@ class SettingsView {
     providersHeading.textContent = "Providers";
     const providersDescription = document.createElement("p");
     providersDescription.className = "setting-description";
-    providersDescription.textContent = "Manage API keys used by AI providers.";
+    providersDescription.textContent =
+      "Manage API keys used by AI providers from the quick panel.";
     container.append(providersHeading, providersDescription);
     for (const provider of AgentAI.getProviders()) {
       container.appendChild(this.createAgentProviderControl(provider));
@@ -294,14 +295,10 @@ class SettingsView {
     }
 
     const form = document.createElement("div");
-    form.className = "agent-provider-key-form";
-    const input = document.createElement("input");
-    input.type = "password";
-    input.placeholder = "Enter API key...";
-    input.setAttribute("aria-label", `${provider.name} API key`);
+    form.className = "agent-provider-key-actions";
     const save = document.createElement("button");
     save.type = "button";
-    save.textContent = "Save";
+    save.textContent = "Set API key";
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Remove API key";
@@ -311,20 +308,22 @@ class SettingsView {
     const refreshStatus = async () => {
       const configured = await this.editor.api.hasAgentApiKey?.(provider.id);
       updateStatus(configured === true);
-      save.textContent = configured ? "Update" : "Save";
+      save.textContent = configured ? "Update API key" : "Set API key";
       remove.hidden = !configured;
     };
     save.addEventListener("click", async () => {
-      const value = input.value.trim();
-      if (!value) return;
       save.disabled = true;
       error.textContent = "";
+      const value = await this.editor.agentSidebar?.requestApiKey?.(provider);
+      if (!value) {
+        save.disabled = false;
+        return;
+      }
       const saved = await this.editor.api.setAgentApiKey?.(provider.id, value);
       if (saved) {
-        input.value = "";
         updateStatus(true);
         remove.hidden = false;
-        save.textContent = "Update";
+        save.textContent = "Update API key";
         await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
       } else {
         error.textContent = "Could not save API key.";
@@ -335,17 +334,16 @@ class SettingsView {
       remove.disabled = true;
       const removed = await this.editor.api.setAgentApiKey?.(provider.id, "");
       if (removed) {
-        input.value = "";
         updateStatus(false);
         remove.hidden = true;
-        save.textContent = "Save";
+        save.textContent = "Set API key";
         await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
       } else {
         error.textContent = "Could not remove API key.";
       }
       remove.disabled = false;
     });
-    form.append(input, save);
+    form.append(save);
     container.append(form, remove, error);
     remove.hidden = true;
     refreshStatus().catch(() => updateStatus(false, "Not configured"));

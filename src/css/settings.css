@@ -227,22 +227,13 @@
 .agent-provider-status[data-configured="true"] {
   color: var(--accent-primary);
 }
-.agent-provider-key-form {
+.agent-provider-key-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
 }
-.agent-provider-key-form input {
-  flex: 1 1 220px;
-  min-width: 0;
-  padding: 6px 8px;
-  border: 1px solid var(--border-secondary);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font: inherit;
-}
-.agent-provider-key-form button,
+.agent-provider-key-actions button,
 .agent-provider-remove {
   padding: 6px 10px;
   border: 1px solid var(--border-secondary);
@@ -251,7 +242,7 @@
   font: inherit;
   cursor: pointer;
 }
-.agent-provider-key-form button:hover,
+.agent-provider-key-actions button:hover,
 .agent-provider-remove:hover {
   border-color: var(--accent-primary);
   background: var(--bg-hover-alt);
