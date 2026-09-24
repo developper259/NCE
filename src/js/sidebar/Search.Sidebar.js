@@ -5,6 +5,11 @@ class SearchSidebar extends Sidebar {
     this.container = null;
     this.input = null;
     this.replaceInput = null;
+    this.replaceRow = null;
+    this.replaceExpandButton = null;
+    this.replaceExpandIcon = null;
+    this.replaceAllButton = null;
+    this.searchBox = null;
     this.includeInput = null;
     this.excludeInput = null;
     this.summaryElement = null;
@@ -51,6 +56,7 @@ class SearchSidebar extends Sidebar {
 
     const searchBox = document.createElement("div");
     searchBox.className = "search-sidebar-box";
+    this.searchBox = searchBox;
 
     const inputWrapper = document.createElement("div");
     inputWrapper.className = "search-sidebar-input-wrapper";
@@ -106,15 +112,18 @@ class SearchSidebar extends Sidebar {
 
     const replaceRow = document.createElement("div");
     replaceRow.className = "search-sidebar-replace-row";
-    replaceRow.hidden = true;
+    this.replaceRow = replaceRow;
+    replaceRow.hidden = !this.replaceExpanded;
     const replaceExpand = document.createElement("button");
     replaceExpand.type = "button";
     replaceExpand.className = "search-sidebar-expand";
+    this.replaceExpandButton = replaceExpand;
     replaceExpand.title = "Show replace input";
     replaceExpand.setAttribute("aria-label", "Show replace input");
     replaceExpand.setAttribute("aria-expanded", "false");
     const replaceExpandIcon = document.createElement("i");
     replaceExpandIcon.className = "fi fi-rr-angle-small-down";
+    this.replaceExpandIcon = replaceExpandIcon;
     replaceExpand.appendChild(replaceExpandIcon);
 
     const replaceInput = document.createElement("input");
@@ -124,11 +133,20 @@ class SearchSidebar extends Sidebar {
     replaceInput.autocomplete = "off";
     replaceInput.spellcheck = false;
     this.replaceInput = replaceInput;
+    replaceRow.hidden = !this.replaceExpanded;
+    replaceInput.hidden = !this.replaceExpanded;
 
     const replaceAll = this.createActionButton("Replace All", "⟳", () => this.replaceAll());
     replaceRow.append(replaceInput, replaceAll);
-    replaceInput.hidden = true;
-    replaceAll.hidden = true;
+    replaceInput.hidden = !this.replaceExpanded;
+    replaceAll.hidden = !this.replaceExpanded;
+    this.replaceAllButton = replaceAll;
+    searchBox.classList.toggle("search-sidebar-replace-expanded", this.replaceExpanded);
+    replaceExpand.setAttribute("aria-expanded", String(this.replaceExpanded));
+    replaceExpand.title = this.replaceExpanded ? "Hide replace input" : "Show replace input";
+    replaceExpand.setAttribute("aria-label", replaceExpand.title);
+    replaceExpandIcon.classList.toggle("fi-rr-angle-small-down", !this.replaceExpanded);
+    replaceExpandIcon.classList.toggle("fi-rr-angle-small-up", this.replaceExpanded);
 
     replaceExpand.addEventListener("click", () => {
       this.replaceExpanded = !this.replaceExpanded;
@@ -205,6 +223,9 @@ class SearchSidebar extends Sidebar {
   }
 
   updateView() {
+    if (this.input && this.input.value !== this.query) {
+      this.input.value = this.query;
+    }
     if (this.summaryElement) {
       this.summaryElement.textContent = this.getSummaryText();
     }
@@ -231,6 +252,35 @@ class SearchSidebar extends Sidebar {
       return;
     }
     this.updateView();
+  }
+
+  restoreQueryState(state, { runSearch = false } = {}) {
+    this.query = typeof state?.query === "string" ? state.query : "";
+    this.replaceExpanded = state?.sidebarExpanded === true;
+    if (this.input) this.input.value = this.query;
+    this.applyReplaceExpandedState();
+    this.clearResults();
+    if (runSearch && this.isOpen && this.query.trim()) {
+      this.runSearch();
+    } else {
+      this.refresh();
+    }
+  }
+
+  applyReplaceExpandedState() {
+    const expanded = this.replaceExpanded;
+    this.searchBox?.classList.toggle("search-sidebar-replace-expanded", expanded);
+    if (this.replaceRow) this.replaceRow.hidden = !expanded;
+    if (this.replaceInput) this.replaceInput.hidden = !expanded;
+    if (this.replaceAllButton) this.replaceAllButton.hidden = !expanded;
+    this.replaceExpandButton?.setAttribute("aria-expanded", String(expanded));
+    const label = expanded ? "Hide replace input" : "Show replace input";
+    if (this.replaceExpandButton) {
+      this.replaceExpandButton.title = label;
+      this.replaceExpandButton.setAttribute("aria-label", label);
+    }
+    this.replaceExpandIcon?.classList.toggle("fi-rr-angle-small-down", !expanded);
+    this.replaceExpandIcon?.classList.toggle("fi-rr-angle-small-up", expanded);
   }
 
   createOptionButton(label, title, active, onClick) {
@@ -563,6 +613,9 @@ class SearchSidebar extends Sidebar {
   onOpen() {
     this.refresh();
     this.focusInput();
+    if (this.query.trim() && this.results.length === 0 && !this.isSearching) {
+      this.runSearch();
+    }
   }
 
   onClose() {

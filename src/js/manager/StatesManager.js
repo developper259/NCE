@@ -67,6 +67,7 @@ class StatesManager {
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(root),
       agent: this.getAgentScrollState(),
+      search: this.getSearchState(),
     };
   }
 
@@ -163,6 +164,15 @@ class StatesManager {
 
   getAgentScrollState() {
     return { scrollTop: this.getSidebarScrollTop("right") };
+  }
+
+  getSearchState() {
+    const searchSidebar = this.editor.searchSidebar;
+    const query = searchSidebar?.query;
+    return {
+      query: typeof query === "string" ? query : "",
+      sidebarExpanded: searchSidebar?.replaceExpanded === true,
+    };
   }
 
   getSidebarScrollTop(side) {
@@ -338,6 +348,14 @@ class StatesManager {
     return { scrollTop: this.safeInteger(value.scrollTop) };
   }
 
+  sanitizeSearchState(value) {
+    const query = this.safeString(value?.query, this.workspaceLimits.pathLength);
+    return {
+      query: query || "",
+      sidebarExpanded: value?.sidebarExpanded === true,
+    };
+  }
+
   // SECURITY BOUNDARY: workspace.json is editable, untrusted local input.
   // Build a new allowlisted object; never merge parsed values into runtime objects.
   sanitizeWorkspaceState(value) {
@@ -348,6 +366,7 @@ class StatesManager {
       sidebar: this.sanitizeSidebarState(value.sidebar),
       fileExplorer: this.sanitizeExplorerState(value.fileExplorer),
       agent: this.sanitizeAgentState(value.agent),
+      search: this.sanitizeSearchState(value.search),
     };
   }
 
@@ -457,6 +476,10 @@ class StatesManager {
     this.loadSidebarState(safeState.sidebar);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
     this.editor.agentSidebar?.restoreScrollState?.(safeState.agent);
+    this.editor.searchSidebar?.restoreQueryState?.(safeState.search, {
+      runSearch: safeState.sidebar?.leftOpen === true &&
+        safeState.sidebar?.leftActiveMenuId === "search",
+    });
     console.info("[NCE Workspace State]", {
       action: "restore", root,
       restoredTabs: this.editor.tabManager?.tabs?.length || 0,

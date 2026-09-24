@@ -42,6 +42,11 @@ function fixture(root = "/projects/A") {
       restoreScrollState(value) { this.restoredScrollState = value; },
       async loadConfigState(value) { this.loaded = value; },
     },
+    searchSidebar: {
+      query: "needle",
+      replaceExpanded: true,
+      restoreQueryState(value) { this.restoredQueryState = value; },
+    },
     fileExplorer: {
       rootPath: root, projectExpanded: true,
       activeFilePath: `${root}/src/b.js`,
@@ -75,6 +80,8 @@ test("workspace snapshots contain relative paths and no rootPath", () => {
   assert.equal(state.fileExplorer.activeFilePath, "src/b.js");
   assert.equal(state.fileExplorer.scrollTop, 123);
   assert.equal(state.agent.scrollTop, 456);
+  assert.equal(state.search.query, "needle");
+  assert.equal(state.search.sidebarExpanded, true);
   assert.equal("rootPath" in state.fileExplorer, false);
   assert.equal(JSON.stringify(state).includes("/projects/A"), false);
   assert.equal(manager.toWorkspaceRelative("C:\\Work\\A\\src\\a.js", "c:/work/a"), "src/a.js");
@@ -86,10 +93,13 @@ test("workspace restores File Explorer and Agent scroll positions", async () => 
     version: 1,
     fileExplorer: { scrollTop: 321, expandedPaths: [] },
     agent: { scrollTop: 654 },
+    search: { query: "restore me" },
   }, "/projects/A");
 
   assert.equal(editor.fileExplorer.restoredScrollState.scrollTop, 321);
   assert.equal(editor.agentSidebar.restoredScrollState.scrollTop, 654);
+  assert.equal(editor.searchSidebar.restoredQueryState.query, "restore me");
+  assert.equal(editor.searchSidebar.restoredQueryState.sidebarExpanded, false);
 });
 
 test("workspace restore skips missing and unsafe files and falls back active tab", async () => {
@@ -227,6 +237,8 @@ test("workspace sanitizer allowlists fields, types, paths, ids, and numbers", ()
   assert.equal(safe.fileExplorer.activeFilePath, null);
   assert.equal(safe.fileExplorer.scrollTop, 0);
   assert.equal(safe.agent.scrollTop, 0);
+  assert.equal(safe.search.query, "");
+  assert.equal(safe.search.sidebarExpanded, false);
   assert.equal("command" in safe, false);
   assert.equal(JSON.stringify(safe).includes("TOKEN"), false);
   assert.equal(JSON.stringify(safe).includes("<script>"), false);
@@ -238,17 +250,22 @@ test("workspace sanitizer retains bounded scroll positions and rejects invalid v
     version: 1,
     fileExplorer: { scrollTop: 987 },
     agent: { scrollTop: 654 },
+    search: { query: "needle", sidebarExpanded: true },
   });
   assert.equal(valid.fileExplorer.scrollTop, 987);
   assert.equal(valid.agent.scrollTop, 654);
+  assert.equal(valid.search.query, "needle");
+  assert.equal(valid.search.sidebarExpanded, true);
 
   const invalid = manager.sanitizeWorkspaceState({
     version: 1,
     fileExplorer: { scrollTop: -1 },
     agent: { scrollTop: 1e20 },
+    search: { query: 42 },
   });
   assert.equal(invalid.fileExplorer.scrollTop, 0);
   assert.equal(invalid.agent.scrollTop, 0);
+  assert.equal(invalid.search.query, "");
 });
 
 test("workspace sanitizer caps huge collections and rejects huge strings", () => {
