@@ -349,6 +349,10 @@ class tabManager {
   async setFocusTab(tab) {
     if (!tab) return;
     const focusGeneration = ++this.focusGeneration;
+    const previousFile = this.activeFile;
+    if (previousFile && previousFile !== tab) {
+      this.editor.searchController?.saveActiveTabState?.(previousFile);
+    }
     this.activeTab = tab;
     if (tab.type !== TAB_TYPES.FILE) {
       this.editor.fileExplorer?.setActiveFile?.(null);
@@ -375,6 +379,8 @@ class tabManager {
     await this.editor.highlightController.openFile(file);
 
     if (focusGeneration !== this.focusGeneration) return;
+
+    this.editor.searchController?.restoreTabState?.(file);
 
     this.editor.cursorController.setCursorPosition(file.row, file.column);
 

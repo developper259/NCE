@@ -112,6 +112,10 @@ class StatesManager {
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
         totalLines: tab.totalLines,
         startSelect: tab.startSelect, endSelect: tab.endSelect,
+        searchQuery: tab.searchQuery || "",
+        searchReplaceValue: tab.searchReplaceValue || "",
+        searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
+          ? tab.searchCurrentIndex : -1,
         selectedLines: tab._selectedLines
           ? Array.from(tab._selectedLines.entries()) : [],
       }];
@@ -274,6 +278,12 @@ class StatesManager {
       totalLines: this.safeInteger(value.totalLines),
       startSelect: this.sanitizePosition(value.startSelect),
       endSelect: this.sanitizePosition(value.endSelect),
+      searchQuery: this.safeString(value.searchQuery, this.workspaceLimits.pathLength) || "",
+      searchReplaceValue: this.safeString(
+        value.searchReplaceValue,
+        this.workspaceLimits.pathLength,
+      ) || "",
+      searchCurrentIndex: this.safeInteger(value.searchCurrentIndex, -1, -1),
       selectedLines,
     };
   }
@@ -352,24 +362,13 @@ class StatesManager {
   sanitizeSearchState(value) {
     const query = this.safeString(value?.query, this.workspaceLimits.pathLength);
     const controller = this.isRecord(value?.controller) ? value.controller : {};
-    const controllerQuery = this.safeString(
-      controller.query,
-      this.workspaceLimits.pathLength,
-    );
-    const replaceValue = this.safeString(
-      controller.replaceValue,
-      this.workspaceLimits.pathLength,
-    );
     return {
       query: query || "",
       sidebarExpanded: value?.sidebarExpanded === true,
       controller: {
-        query: controllerQuery || "",
-        replaceValue: replaceValue || "",
         isVisible: controller.isVisible === true,
         isExpanded: controller.isExpanded === true,
         expandButtonActivated: controller.expandButtonActivated === true,
-        currentIndex: this.safeInteger(controller.currentIndex, -1, -1),
       },
     };
   }
@@ -451,6 +450,10 @@ class StatesManager {
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
         totalLines: tab.totalLines,
         startSelect: tab.startSelect, endSelect: tab.endSelect,
+        searchQuery: tab.searchQuery || "",
+        searchReplaceValue: tab.searchReplaceValue || "",
+        searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
+          ? tab.searchCurrentIndex : -1,
         selectedLines: tab.selectedLines,
       }];
     });
@@ -561,6 +564,10 @@ class StatesManager {
             maxLineLength: data.maxLineLength || 0,
             totalLines: data.totalLines || 0,
             startSelect: data.startSelect, endSelect: data.endSelect,
+            searchQuery: data.searchQuery || "",
+            searchReplaceValue: data.searchReplaceValue || "",
+            searchCurrentIndex: Number.isInteger(data.searchCurrentIndex)
+              ? data.searchCurrentIndex : -1,
             _selectedLines: new Map(Array.isArray(data.selectedLines) ? data.selectedLines : []),
           });
         } else continue;

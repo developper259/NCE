@@ -23,6 +23,9 @@ class FileNode extends Tab {
     super(id, TAB_TYPES.FILE, name);
     this.editor = e;
     this.path = path;
+    this.searchQuery = "";
+    this.searchReplaceValue = "";
+    this.searchCurrentIndex = -1;
 
     this.isSaved = true;
     this.deletedFromDisk = false;
@@ -100,6 +103,9 @@ class FileNode extends Tab {
   replaceFile(file) {
     this.name = file.name;
     this.path = file.path;
+    this.searchQuery = "";
+    this.searchReplaceValue = "";
+    this.searchCurrentIndex = -1;
     this.isSaved = file.isSaved;
     this.deletedFromDisk = file.deletedFromDisk === true;
     this.externalModified = file.externalModified === true;

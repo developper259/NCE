@@ -28,6 +28,7 @@ class SearchController {
 
     addEvent("input", this.onInput.bind(this), this.input);
     addEvent("keydown", this.onInputKey.bind(this), this.input);
+    addEvent("input", this.saveActiveTabState.bind(this), this.replaceInput);
 
     addEvent("click", this.onPreviousClick.bind(this), this.previousButton);
 
@@ -118,14 +119,22 @@ class SearchController {
 
     this.focusInput();
 
+    const activeFile = this.editor.tabManager.activeFile;
+    const savedQuery = activeFile?.searchQuery;
+    const savedIndex = activeFile?.searchCurrentIndex;
     this.search(this.input.value);
 
     if (this.results.length > 0) {
+      this.currentIndex = savedQuery === this.input.value && Number.isInteger(savedIndex)
+        ? Math.min(Math.max(savedIndex, 0), this.results.length - 1)
+        : 0;
       this.goToResult(false, true);
     }
+    this.saveActiveTabState();
   }
 
   close() {
+    this.saveActiveTabState();
     this.isOpen = false;
 
     this.searchBar.classList.remove("search-bar-visible");
@@ -172,8 +181,9 @@ class SearchController {
   onInput() {
     this.search(this.input.value);
 
-    this.currentIndex = 0;
+    this.currentIndex = this.results.length > 0 ? 0 : -1;
     this.goToResult(true, true);
+    this.saveActiveTabState();
   }
 
   onInputKey(e) {
@@ -212,6 +222,32 @@ class SearchController {
     if (expanded) this.replaceInput.focus({ preventScroll: true });
   }
 
+  saveActiveTabState(tab = this.editor.tabManager.activeFile) {
+    if (!tab || tab.type !== TAB_TYPES.FILE) return;
+    tab.searchQuery = this.input?.value || "";
+    tab.searchReplaceValue = this.replaceInput?.value || "";
+    tab.searchCurrentIndex = Number.isInteger(this.currentIndex)
+      ? this.currentIndex
+      : -1;
+  }
+
+  restoreTabState(tab) {
+    if (!tab || tab.type !== TAB_TYPES.FILE) return;
+    this.input.value = typeof tab.searchQuery === "string" ? tab.searchQuery : "";
+    this.replaceInput.value = typeof tab.searchReplaceValue === "string"
+      ? tab.searchReplaceValue
+      : "";
+    this.search(this.input.value);
+    const savedIndex = Number.isInteger(tab.searchCurrentIndex)
+      ? tab.searchCurrentIndex
+      : -1;
+    this.currentIndex = this.results.length > 0
+      ? Math.min(Math.max(savedIndex, 0), this.results.length - 1)
+      : -1;
+    this.updateCounter();
+    this.refreshSelectionDOM();
+  }
+
   applyReplaceExpandedState() {
     const expanded = this.replaceExpanded;
     this.searchBar.classList.toggle("search-bar-expanded", expanded);
@@ -224,20 +260,14 @@ class SearchController {
 
   getWorkspaceState() {
     return {
-      query: this.input?.value || "",
-      replaceValue: this.replaceInput?.value || "",
       isVisible: this.isOpen === true,
       isExpanded: this.replaceExpanded === true,
       expandButtonActivated:
         this.expandButton?.getAttribute("aria-expanded") === "true",
-      currentIndex: Number.isInteger(this.currentIndex) ? this.currentIndex : -1,
     };
   }
 
   restoreWorkspaceState(state) {
-    this.input.value = typeof state?.query === "string" ? state.query : "";
-    this.replaceInput.value =
-      typeof state?.replaceValue === "string" ? state.replaceValue : "";
     this.isOpen = state?.isVisible === true &&
       Boolean(this.editor.tabManager.activeFile);
     this.replaceExpanded =
@@ -246,15 +276,7 @@ class SearchController {
     this.searchBar.classList.toggle("search-bar-visible", this.isOpen);
     this.searchBar.classList.remove("search-bar-expanded");
     this.applyReplaceExpandedState();
-    this.clearResults();
-    this.search(this.input.value);
-    const savedIndex = Number.isInteger(state?.currentIndex)
-      ? state.currentIndex
-      : -1;
-    this.currentIndex = this.results.length > 0
-      ? Math.min(Math.max(savedIndex, 0), this.results.length - 1)
-      : -1;
-    if (this.currentIndex >= 0) this.goToResult(false, true);
+    this.restoreTabState(this.editor.tabManager.activeFile);
   }
 
   replaceCurrent() {
@@ -265,6 +287,7 @@ class SearchController {
       result.row, result.column + result.length,
     );
     this.search(this.input.value);
+    this.saveActiveTabState();
   }
 
   replaceNext() {
@@ -282,6 +305,7 @@ class SearchController {
     }
     this.search(this.input.value);
     this.currentIndex = this.results.length ? 0 : -1;
+    this.saveActiveTabState();
     this.refreshSelectionDOM();
   }
 
@@ -345,6 +369,7 @@ class SearchController {
     this.editor.isButtonChangePosition = true;
 
     this.currentIndex = (this.currentIndex + 1) % this.results.length;
+    this.saveActiveTabState();
 
     this.goToResult(true, true);
 
@@ -358,6 +383,7 @@ class SearchController {
 
     this.currentIndex =
       (this.currentIndex - 1 + this.results.length) % this.results.length;
+    this.saveActiveTabState();
 
     this.goToResult(true, false);
 
