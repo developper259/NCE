@@ -273,6 +273,7 @@ class KeyBinding {
   }
 
   async control_reload_window() {
+    if (this.editor.isOnInit !== false) return false;
     if (!(await this.editor.tabManager.prepareForQuit())) return false;
     const saved = await this.editor.statesManager.save();
     if (saved === false) return false;

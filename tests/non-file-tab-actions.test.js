@@ -125,6 +125,7 @@ test("Reload Window saves the current state before reloading", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
   const keyBinding = new KeyBinding({
+    isOnInit: false,
     tabManager: { activeFile: null, prepareForQuit: async () => true },
     statesManager: {
       save: async () => {
@@ -148,6 +149,7 @@ test("Reload Window is cancelled when saving the state fails", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
   const keyBinding = new KeyBinding({
+    isOnInit: false,
     tabManager: { activeFile: null, prepareForQuit: async () => true },
     statesManager: { save: async () => false },
     api: { appCommand: (command) => calls.push(command) },
@@ -161,7 +163,22 @@ test("Reload Window stops when the dirty-file flow is cancelled", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
   const keyBinding = new KeyBinding({
+    isOnInit: false,
     tabManager: { activeFile: null, prepareForQuit: async () => false },
+    statesManager: { save: async () => calls.push("save-state") },
+    api: { appCommand: (command) => calls.push(command) },
+  });
+
+  assert.equal(await keyBinding.control_reload_window(), false);
+  assert.deepEqual(calls, []);
+});
+
+test("Reload Window is unavailable while the editor is initializing", async () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    isOnInit: true,
+    tabManager: { prepareForQuit: async () => calls.push("prepare-for-quit") },
     statesManager: { save: async () => calls.push("save-state") },
     api: { appCommand: (command) => calls.push(command) },
   });
