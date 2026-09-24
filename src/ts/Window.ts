@@ -258,6 +258,24 @@ export class Window {
         return true;
       });
       ipcMain.handle("NSH:getEndpoint", async () => this.app.nshEndpoint);
+      ipcMain.handle("AgentConversations:status", async () =>
+        this.app.agentConversations?.getStatus() || { available: false, reason: "STORE_ERROR" },
+      );
+      ipcMain.handle("AgentConversations:load", async () =>
+        this.app.agentConversations?.load() || { status: { available: false, reason: "STORE_ERROR" }, activeSessionId: null, sessionIds: [], sessions: [] },
+      );
+      ipcMain.handle("AgentConversations:save", async (_event, snapshot) =>
+        this.app.agentConversations?.save(snapshot) || false,
+      );
+      ipcMain.handle("AgentConversations:delete", async (_event, sessionId, activeId) =>
+        this.app.agentConversations?.delete(sessionId, activeId) || false,
+      );
+      ipcMain.handle("AgentConversations:setActive", async (_event, sessionId) =>
+        this.app.agentConversations?.setActive(sessionId) || false,
+      );
+      ipcMain.handle("AgentConversations:flush", async () =>
+        this.app.agentConversations?.flush() || false,
+      );
 
       this.fileManager.handleIPC();
       this.watcher.handleIPC();

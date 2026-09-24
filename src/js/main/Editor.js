@@ -331,6 +331,10 @@ class Editor {
           await this.api.cancelQuit?.();
           return;
         }
+        await Promise.race([
+          this.agentSidebar?.flushAllConversationSaves?.(),
+          new Promise((resolve) => setTimeout(resolve, 1800)),
+        ]);
         const saved = await this.statesManager.save();
         if (saved !== false) await this.api.approveQuit?.();
         else await this.api.cancelQuit?.();

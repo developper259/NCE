@@ -100,8 +100,145 @@ class AgentSidebar extends Sidebar {
     this.sessions = [];
     this.activeSessionId = null;
     this._sessionCounter = 0;
+    this.conversationPersistenceReady = false;
+    this.conversationSaveTimers = new Map();
+    this.conversationSaveQueues = new Map();
+    this.conversationPersistencePromise = null;
 
     this.createSession();
+    this.conversationPersistencePromise = this.initializeConversationPersistence();
+  }
+
+  async initializeConversationPersistence() {
+    try {
+      const loaded = await this.editor.api?.loadAgentConversations?.();
+      if (loaded?.status?.available && Array.isArray(loaded.sessions) && loaded.sessions.length) {
+        const restored = loaded.sessions
+          .map((snapshot) => this.rehydratePersistedSession(snapshot))
+          .filter(Boolean);
+        if (restored.length) {
+          this.sessions = restored;
+          this.activeSessionId = restored.some((session) => session.id === loaded.activeSessionId)
+            ? loaded.activeSessionId
+            : restored[0].id;
+          this.refresh();
+          this.updateSessionInfoPopover();
+        }
+      }
+    } catch (_error) {
+      console.warn("[NCE Agent Conversations] Restore failed", { code: "STORE_ERROR" });
+    } finally {
+      this.conversationPersistenceReady = true;
+      const session = this.getActiveSession();
+      if (session) {
+        this.scheduleConversationSave(session, true);
+        Promise.resolve(this.editor.api?.setActiveAgentConversation?.(session.id)).catch(() => {});
+      }
+    }
+  }
+
+  rehydratePersistedSession(snapshot) {
+    if (!snapshot || typeof snapshot.id !== "string" || !Array.isArray(snapshot.messages)) return null;
+    const messages = snapshot.messages.map((message) => ({ ...message, streaming: false }));
+    const segments = messages.filter((message) =>
+      message?.role === "activity" || message?.type === "activity" ||
+      message?.type === "reasoning" || message?.type === "assistant",
+    );
+    return {
+      id: snapshot.id,
+      title: typeof snapshot.title === "string" ? snapshot.title : "New chat",
+      createdAt: Number.isFinite(snapshot.createdAt) ? snapshot.createdAt : Date.now(),
+      updatedAt: Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : Date.now(),
+      messages,
+      draft: "",
+      isGenerating: false,
+      runId: null,
+      abortController: null,
+      pendingTimeout: null,
+      streamingMessage: null,
+      queue: [],
+      segments,
+      currentSegment: null,
+      changes: [],
+      changesExpanded: true,
+      usage: {
+        runs: 0, userMessages: 0, modelRequests: 0, actualPromptTokens: 0,
+        estimatedPromptTokens: 0, completedRuns: 0, cancelledRuns: 0,
+        failedRuns: 0, ...(snapshot.usage || {}), requestKeys: new Set(),
+      },
+    };
+  }
+
+  serializeSessionForPersistence(session) {
+    if (!session) return null;
+    session.updatedAt = Date.now();
+    return {
+      version: 1,
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: (session.messages || []).map((message) => {
+        if (!message || typeof message !== "object") return null;
+        const snapshot = {};
+        for (const key of ["id", "role", "type", "content", "timestamp", "runId", "status", "startedAt", "finishedAt", "collapsed", "streaming", "hasErrors"]) {
+          if (typeof message[key] === "string" || typeof message[key] === "number" || typeof message[key] === "boolean") snapshot[key] = message[key];
+        }
+        if (Array.isArray(message.items)) {
+          snapshot.items = message.items.map((item) => {
+            if (!item || typeof item !== "object" || item.type === "approval") return null;
+            const safe = {};
+            for (const key of ["id", "toolName", "type", "title", "detail", "status", "startedAt", "finishedAt", "aggregate", "modificationCount", "completedModifications", "failedModifications", "modelEventKind"]) {
+              if (["string", "number"].includes(typeof item[key])) safe[key] = item[key];
+            }
+            if (Array.isArray(item.files)) safe.files = item.files.filter((entry) => typeof entry === "string");
+            if (Array.isArray(item.errors)) safe.errors = item.errors.filter((entry) => typeof entry === "string");
+            if (item.diffStats && typeof item.diffStats === "object") safe.diffStats = { additions: item.diffStats.additions, deletions: item.diffStats.deletions };
+            return safe;
+          }).filter(Boolean);
+        }
+        return snapshot;
+      }).filter(Boolean),
+      usage: Object.fromEntries(["runs", "userMessages", "modelRequests", "actualPromptTokens", "estimatedPromptTokens", "completedRuns", "cancelledRuns", "failedRuns"].map((key) => [key, Number(session.usage?.[key]) || 0])),
+    };
+  }
+
+  scheduleConversationSave(session, immediate = false) {
+    if (!session || !this.conversationPersistenceReady) return;
+    const api = this.editor.api;
+    if (!api?.saveAgentConversation) return;
+    session.updatedAt = Date.now();
+    const oldTimer = this.conversationSaveTimers.get(session.id);
+    if (oldTimer && !immediate) return;
+    if (oldTimer) clearTimeout(oldTimer);
+    const persist = () => {
+      this.conversationSaveTimers.delete(session.id);
+      const snapshot = this.serializeSessionForPersistence(session);
+      const previous = this.conversationSaveQueues.get(session.id) || Promise.resolve();
+      const next = previous.catch(() => undefined).then(() => api.saveAgentConversation(snapshot));
+      this.conversationSaveQueues.set(session.id, next);
+      next.catch(() => console.warn("[NCE Agent Conversations] Save failed", { sessionId: session.id, code: "STORE_ERROR" }));
+    };
+    if (immediate) persist();
+    else this.conversationSaveTimers.set(session.id, setTimeout(persist, 1200));
+  }
+
+  async flushAllConversationSaves() {
+    await this.conversationPersistencePromise;
+    for (const timer of this.conversationSaveTimers.values()) clearTimeout(timer);
+    const ids = [...this.conversationSaveTimers.keys()];
+    this.conversationSaveTimers.clear();
+    for (const id of ids) {
+      const session = this.getSession(id);
+      if (session) {
+        const snapshot = this.serializeSessionForPersistence(session);
+        const previous = this.conversationSaveQueues.get(id) || Promise.resolve();
+        const next = previous.catch(() => undefined).then(() => this.editor.api?.saveAgentConversation?.(snapshot));
+        this.conversationSaveQueues.set(id, next);
+      }
+    }
+    await Promise.allSettled([...this.conversationSaveQueues.values()]);
+    await this.editor.api?.flushAgentConversations?.();
   }
 
   handleApprovalRequested(request = {}) {
@@ -130,6 +267,7 @@ class AgentSidebar extends Sidebar {
     group.items.push(item);
     group.status = "running";
     session.streamingMessage = null;
+    this.scheduleConversationSave(session);
     if (session.id === this.activeSessionId && this.messagesElement) {
       this.removeEmptyState();
       const refs = this.activityElements.get(group);
@@ -149,6 +287,7 @@ class AgentSidebar extends Sidebar {
     item.decision = decision;
     item.finishedAt = Date.now();
     this.updateActivityItemElement(item);
+    this.scheduleConversationSave(this.getSession(String(item.id || "").split(":")[0]));
     Promise.resolve(
       this.editor.api?.respondAgentApproval?.({
         approvalId: item.approvalId,
@@ -779,6 +918,7 @@ class AgentSidebar extends Sidebar {
       args: { ...args },
       activePath,
     });
+    this.scheduleConversationSave(session);
 
     if (!context.toolCallId) {
       const pendingKey = this.getActivityPendingKey(context, toolName);
@@ -839,6 +979,7 @@ class AgentSidebar extends Sidebar {
     };
     group.items.push(item);
     if (event.kind === "error") group.hasErrors = true;
+    this.scheduleConversationSave(session);
 
     if (session.id !== this.activeSessionId || !this.messagesElement) return;
     const shouldScroll = this.shouldAutoScrollMessages();
@@ -873,6 +1014,7 @@ class AgentSidebar extends Sidebar {
         ? reasoning
         : `${segment.content || ""}${reasoning}`;
     segment.status = "streaming";
+    this.scheduleConversationSave(session);
     if (session.id !== this.activeSessionId || !this.messagesElement) return;
 
     const refs = this.messageElements.get(segment);
@@ -946,6 +1088,7 @@ class AgentSidebar extends Sidebar {
     this.activityItems.delete(itemId);
     this.updateActivityItemElement(item);
     this.updateActivityHeader(group);
+    this.scheduleConversationSave(session);
     return item;
   }
 
@@ -983,6 +1126,7 @@ class AgentSidebar extends Sidebar {
       if (key.startsWith(pendingPrefix)) this.deferredReadItems.delete(key);
     }
     this.updateActivityHeader(group);
+    this.scheduleConversationSave(session);
   }
 
   setActivityGroupCollapsed(group, collapsed) {
@@ -2192,6 +2336,7 @@ class AgentSidebar extends Sidebar {
     message.timestamp ||= this.formatTime();
     message.streaming = true;
     session.streamingMessage = message;
+    this.scheduleConversationSave(session);
     const refs = this.messageElements.get(message);
     if (!refs?.row?.isConnected) {
       this.removeEmptyState();
@@ -2977,8 +3122,10 @@ class AgentSidebar extends Sidebar {
   }
 
   generateSessionId() {
-    this._sessionCounter += 1;
-    return `session-${Date.now()}-${this._sessionCounter}`;
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
   handleSendClick() {
@@ -3004,6 +3151,8 @@ class AgentSidebar extends Sidebar {
     const session = {
       id: this.generateSessionId(),
       title: "New chat",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
       messages: [],
       draft: "",
       isGenerating: false,
@@ -3035,6 +3184,10 @@ class AgentSidebar extends Sidebar {
     this.refresh();
     this.updateSessionInfoPopover();
     this.focusInput();
+    this.scheduleConversationSave(session, true);
+    if (this.conversationPersistenceReady) {
+      Promise.resolve(this.editor.api?.setActiveAgentConversation?.(session.id)).catch(() => {});
+    }
 
     return session;
   }
@@ -3052,6 +3205,7 @@ class AgentSidebar extends Sidebar {
     if (!this.getSession(sessionId)) return;
 
     this.activeSessionId = sessionId;
+    Promise.resolve(this.editor.api?.setActiveAgentConversation?.(sessionId)).catch(() => {});
 
     this.refresh();
     this.updateSessionInfoPopover();
@@ -3061,6 +3215,9 @@ class AgentSidebar extends Sidebar {
   closeSession(sessionId) {
     const index = this.sessions.findIndex((s) => s.id === sessionId);
     if (index === -1) return;
+    const pendingSave = this.conversationSaveTimers.get(sessionId);
+    if (pendingSave) clearTimeout(pendingSave);
+    this.conversationSaveTimers.delete(sessionId);
 
     const session = this.sessions[index];
 
@@ -3097,6 +3254,7 @@ class AgentSidebar extends Sidebar {
 
     if (this.sessions.length === 0) {
       this.createSession();
+      Promise.resolve(this.editor.api?.deleteAgentConversation?.(sessionId, this.activeSessionId)).catch(() => {});
       return;
     }
 
@@ -3104,6 +3262,11 @@ class AgentSidebar extends Sidebar {
       const fallback = this.sessions[Math.max(0, index - 1)];
       this.activeSessionId = fallback.id;
     }
+
+    Promise.resolve(this.editor.api?.deleteAgentConversation?.(sessionId, this.activeSessionId)).catch((error) =>
+      console.warn("[NCE Agent Conversations] Delete failed", { sessionId, message: error?.message || "STORE_ERROR" }),
+    );
+    Promise.resolve(this.editor.api?.setActiveAgentConversation?.(this.activeSessionId)).catch(() => {});
 
     this.refresh();
   }
@@ -3132,6 +3295,7 @@ class AgentSidebar extends Sidebar {
       session.usage.actualPromptTokens += event.actualPromptTokens;
     if (Number.isFinite(event.estimatedPromptTokens))
       session.usage.estimatedPromptTokens += event.estimatedPromptTokens;
+    this.scheduleConversationSave(session);
     this.updateSessionInfoPopover();
   }
 
@@ -3257,6 +3421,7 @@ class AgentSidebar extends Sidebar {
     this.agent.stop();
     session.cancelledRunId = stoppedRunId;
     session.usage.cancelledRuns += 1;
+    this.scheduleConversationSave(session, true);
 
     if (session.abortController) {
       session.abortController.abort();
@@ -3332,6 +3497,7 @@ class AgentSidebar extends Sidebar {
     this.updateSessionInfoPopover();
 
     this.renameSessionFromContent(session, content);
+    this.scheduleConversationSave(session, true);
 
     if (session.id === this.activeSessionId) {
       session.draft = "";
@@ -3441,6 +3607,7 @@ class AgentSidebar extends Sidebar {
       if (session.currentSegment) {
         session.currentSegment.status = "complete";
       }
+      this.scheduleConversationSave(session, true);
 
       this.processQueue(session.id);
       this.refresh();

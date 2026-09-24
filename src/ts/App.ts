@@ -3,6 +3,7 @@ import { Window } from './Window';
 import { NSHServer } from 'nsh/server';
 import { SettingsManager } from './manager/SettingsManager';
 import { RecentFoldersManager } from './manager/RecentFoldersManager';
+import { AgentConversationStore } from './manager/AgentConversationStore';
 
 export class App {
   window: Window;
@@ -12,6 +13,7 @@ export class App {
   nshStopping = false;
   settings!: SettingsManager;
   recentFolders!: RecentFoldersManager;
+  agentConversations!: AgentConversationStore;
   name = "NCE";
 
   version = app.getVersion();
@@ -33,6 +35,8 @@ export class App {
       await this.settings.initialize();
       this.recentFolders = new RecentFoldersManager(app.getPath("userData"));
       await this.recentFolders.initialize();
+      this.agentConversations = new AgentConversationStore(app.getPath("userData"));
+      await this.agentConversations.initialize();
       await this.startNsh();
       this.window.create();
     });

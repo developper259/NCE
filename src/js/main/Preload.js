@@ -63,6 +63,16 @@ contextBridge.exposeInMainWorld("api", {
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
   getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
+  getAgentConversationStorageStatus: () =>
+    ipcRenderer.invoke("AgentConversations:status"),
+  loadAgentConversations: () => ipcRenderer.invoke("AgentConversations:load"),
+  saveAgentConversation: (snapshot) =>
+    ipcRenderer.invoke("AgentConversations:save", snapshot),
+  deleteAgentConversation: (sessionId, nextActiveId) =>
+    ipcRenderer.invoke("AgentConversations:delete", sessionId, nextActiveId),
+  setActiveAgentConversation: (sessionId) =>
+    ipcRenderer.invoke("AgentConversations:setActive", sessionId),
+  flushAgentConversations: () => ipcRenderer.invoke("AgentConversations:flush"),
   runAgentProcess: (request) => ipcRenderer.invoke("Agent:runProcess", request),
   cancelAgentProcess: (requestId) =>
     ipcRenderer.invoke("Agent:cancelProcess", requestId),
