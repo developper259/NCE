@@ -42,6 +42,47 @@ class AgentSidebar extends Sidebar {
     this.apiKeys = new Map();
 
     this.agent = editor.agent;
+    this.manualContextManager = new ManualContextManager(this);
+    this.agent.setContextProvider(async () => {
+      const runSession = this.getSession(this.agent.currentSessionId);
+      if (!runSession) return {};
+      if (!runSession.manualContextSnapshot) {
+        const descriptors = this.manualContextManager.takeItems(runSession);
+        const message = runSession.pendingManualContextMessage;
+        runSession.pendingManualContextMessage = null;
+        if (message && descriptors.length) {
+          message.manualContextItems = descriptors.map((item) => ({
+            type: item.type,
+            absolutePath: item.absolutePath,
+            label: item.type === "folder" ? item.relativePath
+              : item.type === "selection" ? `${item.label}${item.range ? `:${item.range.startLine}–${item.range.endLine}` : ""}`
+                : item.label,
+            title: item.type === "file" ? item.relativePath || item.label
+              : item.type === "folder" ? item.relativePath
+                : `${item.relativePath || item.label}${item.range ? ` lines ${item.range.startLine}–${item.range.endLine}` : ""}`,
+          }));
+          if (runSession.id === this.activeSessionId) this.refresh();
+        }
+        if (runSession.id === this.activeSessionId) this.renderManualContext();
+        try {
+          let workspaceVersion;
+          let snapshot;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            workspaceVersion = this.manualContextManager.workspaceVersion;
+            snapshot = await this.manualContextManager.resolveSessionContext(runSession, descriptors);
+            if (workspaceVersion === this.manualContextManager.workspaceVersion) break;
+          }
+          runSession.manualContextSnapshot = workspaceVersion === this.manualContextManager.workspaceVersion
+            ? snapshot
+            : { source: "user-selected", budgetTokens: 0, items: [],
+              instruction: "Manual context unavailable because the workspace changed." };
+        } catch (_error) {
+          runSession.manualContextSnapshot = { source: "user-selected", budgetTokens: 0,
+            items: [], instruction: "Manual context could not be resolved; use project tools if needed." };
+        }
+      }
+      return { manualContext: runSession.manualContextSnapshot };
+    });
     this.agent.setCallbacks({
       onToken: (markdown, context) => {
         this.handleAgentToken(markdown, context);
@@ -151,6 +192,8 @@ class AgentSidebar extends Sidebar {
       updatedAt: Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : Date.now(),
       messages,
       draft: "",
+      manualContext: [],
+      manualContextSnapshot: null,
       isGenerating: false,
       runId: null,
       abortController: null,
@@ -1483,25 +1526,164 @@ class AgentSidebar extends Sidebar {
     const toolbar = document.createElement("div");
     toolbar.className = "agent-sidebar-input-toolbar";
 
-    const positionSelectorMenu = (menu, container) => {
-      const containerRect = container.getBoundingClientRect();
+    const contextList = document.createElement("div");
+    contextList.className = "agent-sidebar-context-list";
+    this.contextListElement = contextList;
+    inputWrapper.appendChild(contextList);
+
+    const positionSelectorMenu = (menu, anchor) => {
+      const anchorRect = anchor.getBoundingClientRect();
+      const edgePadding = 8;
       menu.style.position = "fixed";
-      menu.style.left = `${containerRect.left}px`;
+      menu.style.top = "0px";
+      menu.style.bottom = "auto";
+      menu.style.left = `${anchorRect.left}px`;
       menu.style.right = "auto";
-      menu.style.bottom = `${window.innerHeight - containerRect.top + 4}px`;
 
       requestAnimationFrame(() => {
         const menuRect = menu.getBoundingClientRect();
-        const edgePadding = 8;
-        let left = containerRect.left;
-
-        if (menuRect.right > window.innerWidth - edgePadding) {
-          left = window.innerWidth - menuRect.width - edgePadding;
-        }
-
+        const left = Math.max(edgePadding, Math.min(
+          anchorRect.left,
+          window.innerWidth - menuRect.width - edgePadding,
+        ));
         menu.style.left = `${Math.max(edgePadding, left)}px`;
+        const above = anchorRect.top - menuRect.height - 4;
+        const below = anchorRect.bottom + 4;
+        const preferredTop = above >= edgePadding ? above : below;
+        const top = Math.max(edgePadding, Math.min(
+          preferredTop,
+          window.innerHeight - menuRect.height - edgePadding,
+        ));
+        menu.style.top = `${top}px`;
       });
     };
+
+    const contextContainer = document.createElement("div");
+    contextContainer.className = "agent-sidebar-context-container";
+    const contextTrigger = document.createElement("button");
+    contextTrigger.type = "button";
+    contextTrigger.className = "agent-sidebar-context-trigger";
+    contextTrigger.title = "Add context";
+    contextTrigger.setAttribute("aria-label", "Add context");
+    contextTrigger.setAttribute("aria-haspopup", "menu");
+    contextTrigger.setAttribute("aria-expanded", "false");
+    this.contextTriggerElement = contextTrigger;
+    contextTrigger.innerHTML = '<i class="fi fi-rr-plus" aria-hidden="true"></i>';
+    const contextMenu = document.createElement("div");
+    contextMenu.className = "agent-sidebar-context-menu hidden";
+    contextMenu.setAttribute("role", "menu");
+    const rootNow = () => this.manualContextManager.workspaceRoot();
+    const getActiveFile = () => this.editor.tabManager?.activeFile;
+    const getSelectionText = () => {
+      const selection = this.editor.selectController;
+      return typeof selection?.getSelectedText === "function"
+        ? selection.getSelectedText() : selection?.containsSelected;
+    };
+    const createAction = (label, icon, disabled, callback, danger = false) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "agent-sidebar-context-menu-item";
+      if (danger) button.classList.add("danger");
+      button.setAttribute("role", "menuitem");
+      button.disabled = Boolean(disabled);
+      const glyph = document.createElement("i"); glyph.className = icon;
+      const text = document.createElement("span"); text.textContent = label;
+      button.append(glyph, text);
+      button.addEventListener("click", async () => {
+        if (button.disabled) return;
+        contextMenu.classList.add("hidden");
+        await callback();
+      });
+      contextMenu.appendChild(button);
+      return button;
+    };
+    const addFileAction = createAction("Add File...", "fi fi-rr-file", !rootNow(), async () => {
+      const root = rootNow(); if (!root) return;
+      const sessionId = this.activeSessionId;
+      this.editor.quickPanel?.open({
+        id: "agent-manual-context-file", mode: "pick", title: "Add File to Context",
+        placeholder: "Search files...", items: () => this.manualContextManager.getFileEntries(root),
+        reloadOnInput: false, renderLimit: 120, preserveLabelCase: true,
+        filterItems: (items, query) => items.filter((item) => item.label.toLowerCase().includes(query)),
+        emptyMessage: "No matching files.",
+        onAccept: async (item) => {
+          const session = this.getSession(sessionId);
+          if (!session || !NCEPath.equals(root, rootNow()) || session.isGenerating) return;
+          const language = await this.editor.highlightController?.detectLanguage?.(item.data.name);
+          this.manualContextManager.addFile(session, { workspaceRoot: root,
+            relativePath: item.data.path, name: item.data.name,
+            language: language?.id || language || "text" });
+          this.renderManualContext(); this.focusInput();
+        },
+      });
+    });
+    const addFolderAction = createAction("Add Folder...", "fi fi-rr-folder", !rootNow(), async () => {
+      const root = rootNow(); if (!root) return;
+      const sessionId = this.activeSessionId;
+      this.editor.quickPanel?.open({
+        id: "agent-manual-context-folder", mode: "pick", title: "Add Folder to Context",
+        placeholder: "Search folders...", items: () => this.manualContextManager.getFolderEntries(root),
+        reloadOnInput: false, renderLimit: 120, preserveLabelCase: true,
+        filterItems: (items, query) => items.filter((item) => item.label.toLowerCase().includes(query)),
+        emptyMessage: "No matching folders.",
+        onAccept: (item) => {
+          const session = this.getSession(sessionId);
+          if (!session || !NCEPath.equals(root, rootNow()) || session.isGenerating) return;
+          this.manualContextManager.addFolder(session, item.data.path);
+          this.renderManualContext(); this.focusInput();
+        },
+      });
+    });
+    contextMenu.appendChild(document.createElement("div")).className = "agent-sidebar-context-menu-separator";
+    const currentFileAction = createAction("Current File", "fi fi-rr-file-code", !getActiveFile()?.path, () => {
+      const file = getActiveFile(); if (!file) return;
+      const root = rootNow();
+      const relativePath = root && file.path && NCEPath.isInside(file.path, root)
+        ? NCEPath.normalize(file.path).slice(NCEPath.normalize(root).length).replace(/^\//, "") : null;
+      this.manualContextManager.addFile(this.getActiveSession(), { absolutePath: file.path,
+        relativePath, workspaceRoot: relativePath ? root : null, name: file.name,
+        language: file.language?.id || file.language || "text" });
+      this.renderManualContext(); this.focusInput();
+    });
+    const currentSelectionAction = createAction("Current Selection", "fi fi-rr-select",
+      !(typeof getSelectionText() === "string" && getSelectionText().trim()), () => {
+        this.manualContextManager.addSelection(this.getActiveSession());
+        this.renderManualContext(); this.focusInput();
+      });
+    contextMenu.appendChild(document.createElement("div")).className = "agent-sidebar-context-menu-separator";
+    const clearContextAction = createAction("Clear Context", "fi fi-rr-trash", true, () => {
+      this.manualContextManager.clear(this.getActiveSession()); this.renderManualContext(); this.focusInput();
+    }, true);
+    document.body.appendChild(contextMenu);
+    this.contextMenuElement = contextMenu;
+    this.contextActions = { addFileAction, addFolderAction, currentFileAction, currentSelectionAction, clearContextAction };
+    contextTrigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      dropdownMenu?.classList.add("hidden");
+      modeMenu?.classList.add("hidden");
+      addFileAction.disabled = !rootNow(); addFolderAction.disabled = !rootNow();
+      currentFileAction.disabled = !getActiveFile()?.path;
+      currentSelectionAction.disabled = !(typeof getSelectionText() === "string" && getSelectionText().trim());
+      clearContextAction.disabled = !this.getActiveSession()?.manualContext?.length || Boolean(this.getActiveSession()?.isGenerating);
+      const opening = contextMenu.classList.contains("hidden");
+      contextMenu.classList.toggle("hidden", !opening);
+      contextTrigger.setAttribute("aria-expanded", String(opening));
+      if (opening) positionSelectorMenu(contextMenu, contextTrigger);
+    });
+    contextContainer.appendChild(contextTrigger);
+    contextContainer.addEventListener("click", (event) => event.stopPropagation());
+    toolbar.appendChild(contextContainer);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !contextMenu.classList.contains("hidden")) {
+        contextMenu.classList.add("hidden"); contextTrigger.setAttribute("aria-expanded", "false"); this.focusInput();
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (!contextContainer.contains(event.target) && !contextMenu.contains(event.target)) {
+        contextMenu.classList.add("hidden");
+        contextTrigger.setAttribute("aria-expanded", "false");
+      }
+    });
 
     const modeDropdownContainer = document.createElement("div");
     modeDropdownContainer.className =
@@ -1568,6 +1750,8 @@ class AgentSidebar extends Sidebar {
     modeTrigger.addEventListener("click", (event) => {
       event.stopPropagation();
       dropdownMenu?.classList.add("hidden");
+      contextMenu.classList.add("hidden");
+      contextTrigger.setAttribute("aria-expanded", "false");
       modeMenu.classList.toggle("hidden");
       if (!modeMenu.classList.contains("hidden")) {
         positionSelectorMenu(modeMenu, modeDropdownContainer);
@@ -1748,6 +1932,8 @@ class AgentSidebar extends Sidebar {
     triggerBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       modeMenu.classList.add("hidden");
+      contextMenu.classList.add("hidden");
+      contextTrigger.setAttribute("aria-expanded", "false");
       dropdownMenu.classList.toggle("hidden");
       if (!dropdownMenu.classList.contains("hidden")) {
         positionSelectorMenu(dropdownMenu, modelDropdownContainer);
@@ -2204,6 +2390,37 @@ class AgentSidebar extends Sidebar {
       messageMeta = document.createElement("div");
       messageMeta.className = "agent-sidebar-message-meta";
       messageMeta.appendChild(copyButton);
+    }
+
+    if (role === "user" && Array.isArray(message?.manualContextItems) && message.manualContextItems.length) {
+      const attachments = document.createElement("div");
+      attachments.className = "agent-sidebar-message-attachments";
+      for (const item of message.manualContextItems) {
+        const chip = document.createElement("span");
+        chip.className = "agent-sidebar-message-attachment";
+        chip.title = item.title || item.label || "Manual context";
+        const openable = item.type !== "folder" && typeof item.absolutePath === "string";
+        if (openable) {
+          chip.classList.add("is-openable");
+          chip.setAttribute("role", "button");
+          chip.tabIndex = 0;
+          chip.setAttribute("aria-label", `Open ${item.title || item.label || "file"}`);
+          const open = () => this.openManualContextFile(item);
+          chip.addEventListener("click", open);
+          chip.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+          });
+        }
+        const icon = document.createElement("i");
+        icon.className = item.type === "folder" ? "fi fi-rr-folder"
+          : item.type === "selection" ? "fi fi-rr-select" : "fi fi-rr-file-code";
+        icon.setAttribute("aria-hidden", "true");
+        const label = document.createElement("span");
+        label.textContent = item.label || "Manual context";
+        chip.append(icon, label);
+        attachments.appendChild(chip);
+      }
+      bubble.appendChild(attachments);
     }
 
     bubble.style.userSelect = "text";
@@ -2937,6 +3154,7 @@ class AgentSidebar extends Sidebar {
     }
 
     const session = this.getActiveSession();
+    this.renderManualContext();
 
     this.inputWrapperElement?.classList.toggle(
       "agent-sidebar-input-running",
@@ -2994,6 +3212,77 @@ class AgentSidebar extends Sidebar {
         this.hintElement.textContent = "";
       }
     }
+  }
+
+  renderManualContext() {
+    const list = this.contextListElement;
+    if (!list) return;
+    const session = this.getActiveSession();
+    const items = session?.manualContext || [];
+    list.replaceChildren();
+    list.hidden = items.length === 0;
+    for (const item of items) {
+      const chip = document.createElement("div");
+      chip.className = "agent-sidebar-context-chip";
+      const openable = item.type !== "folder" && typeof item.absolutePath === "string";
+      if (openable) {
+        chip.classList.add("is-openable");
+        chip.setAttribute("role", "button");
+        chip.tabIndex = 0;
+        chip.setAttribute("aria-label", `Open ${item.relativePath || item.label || "file"}`);
+        const open = () => this.openManualContextFile(item);
+        chip.addEventListener("click", (event) => {
+          if (event.target.closest(".agent-sidebar-context-chip-remove")) return;
+          open();
+        });
+        chip.addEventListener("keydown", (event) => {
+          if ((event.key === "Enter" || event.key === " ") && event.target === chip) {
+            event.preventDefault(); open();
+          }
+        });
+      }
+      chip.title = item.type === "file" ? `File: ${item.relativePath || item.label}`
+        : item.type === "folder" ? `Folder: ${item.relativePath}`
+          : `Selection: ${item.relativePath || item.label}${item.range ? ` lines ${item.range.startLine}–${item.range.endLine}` : ""}`;
+      const icon = document.createElement("i");
+      icon.className = item.type === "folder" ? "fi fi-rr-folder"
+        : item.type === "selection" ? "fi fi-rr-select" : "fi fi-rr-file-code";
+      icon.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.textContent = item.type === "file" ? item.label
+        : item.type === "folder" ? item.relativePath
+          : `${item.label}${item.range ? `:${item.range.startLine}–${item.range.endLine}` : ""}`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "agent-sidebar-context-chip-remove";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Remove ${label.textContent} from context`);
+      remove.disabled = Boolean(session?.isGenerating);
+      remove.addEventListener("click", () => {
+        this.manualContextManager.remove(session, item.id);
+        this.renderManualContext();
+      });
+      chip.append(icon, label, remove);
+      list.appendChild(chip);
+    }
+    if (this.contextTriggerElement) this.contextTriggerElement.disabled = Boolean(session?.isGenerating);
+    if (this.contextActions) {
+      const running = Boolean(session?.isGenerating);
+      this.contextActions.addFileAction.disabled = running || !this.manualContextManager.workspaceRoot();
+      this.contextActions.addFolderAction.disabled = running || !this.manualContextManager.workspaceRoot();
+      this.contextActions.currentFileAction.disabled = running || !this.editor.tabManager?.activeFile?.path;
+      const selection = this.editor.selectController;
+      const selected = typeof selection?.getSelectedText === "function"
+        ? selection.getSelectedText() : selection?.containsSelected;
+      this.contextActions.currentSelectionAction.disabled = running || !(typeof selected === "string" && selected.trim());
+      this.contextActions.clearContextAction.disabled = running || !items.length;
+    }
+  }
+
+  openManualContextFile(item) {
+    const path = item?.absolutePath;
+    if (!path || typeof this.editor.tabManager?.openFileWithPath !== "function") return;
+    this.editor.tabManager.openFileWithPath(path);
   }
 
   refresh() {
@@ -3154,6 +3443,8 @@ class AgentSidebar extends Sidebar {
       createdAt: Date.now(),
       updatedAt: Date.now(),
       messages: [],
+      manualContext: [],
+      manualContextSnapshot: null,
       draft: "",
       isGenerating: false,
       runId: null,
@@ -3487,11 +3778,13 @@ class AgentSidebar extends Sidebar {
         content: typeof m.content === "string" ? m.content : "",
       }));
 
-    session.messages.push({
+    const userMessage = {
       role: "user",
       content,
       timestamp: this.formatTime(),
-    });
+    };
+    session.messages.push(userMessage);
+    session.pendingManualContextMessage = userMessage;
     session.usage.userMessages += 1;
     session.usage.runs += 1;
     this.updateSessionInfoPopover();
@@ -3598,6 +3891,8 @@ class AgentSidebar extends Sidebar {
       }
       session.runId = null;
       session.isGenerating = false;
+      session.manualContextSnapshot = null;
+      session.pendingManualContextMessage = null;
       session.streamingMessage = null;
       if (errorWasCancellation && session.cancelledRunId !== completedRunId)
         session.usage.cancelledRuns += 1;

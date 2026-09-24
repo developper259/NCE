@@ -211,6 +211,8 @@ class FileExplorer extends Sidebar {
     if (!(await this.loadFiles())) return false;
     this.refresh();
 
+    this.editor.agentSidebar?.manualContextManager?.handleWorkspaceChanged(this.rootPath);
+
     this.editor.events.callEvent(Events.ON_OPEN_PROJECT, {
       rootPath: this.rootPath,
       projectName: this.projectName,
@@ -286,6 +288,8 @@ class FileExplorer extends Sidebar {
     const previousProjectName = this.projectName;
 
     this.resetWorkspaceState();
+
+    this.editor.agentSidebar?.manualContextManager?.handleWorkspaceChanged(null);
 
     this.refresh();
 

@@ -261,7 +261,26 @@ test("AgentSidebar rehydrates persisted messages without restoring runtime or ac
   assert.equal(restored.changes.length, 0);
   assert.equal(restored.currentSegment, null);
   assert.equal(restored.messages[1].streaming, false);
+  assert.equal(restored.manualContext.length, 0);
+  assert.equal(restored.manualContextSnapshot, null);
   assert.equal(restored.segments[0], restored.messages[1]);
   assert.equal(restored.segments[1], restored.messages[2]);
   assert.equal(restored.usage.requestKeys instanceof Set, true);
+});
+
+test("AgentSidebar does not persist manual context descriptors or their contents", () => {
+  const sidebar = Object.create(AgentSidebar.prototype);
+  const session = {
+    id: "manual-context-session", title: "Private context", createdAt: 1,
+    messages: [{ role: "user", content: "hello", manualContextItems: [{ type: "file", label: "DISPLAY_ONLY_FILE" }] }],
+    manualContext: [{ type: "selection", content: "SECRET_CONTEXT_CONTENT", absolutePath: "/private/file.js" }],
+    manualContextSnapshot: { items: [{ content: "SECRET_CONTEXT_CONTENT" }] },
+    usage: {},
+  };
+  const persisted = sidebar.serializeSessionForPersistence(session);
+  const text = JSON.stringify(persisted);
+  assert.equal(text.includes("manualContext"), false);
+  assert.equal(text.includes("DISPLAY_ONLY_FILE"), false);
+  assert.equal(text.includes("SECRET_CONTEXT_CONTENT"), false);
+  assert.equal(text.includes("/private/file.js"), false);
 });

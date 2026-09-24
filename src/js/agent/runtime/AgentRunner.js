@@ -152,12 +152,17 @@ class AgentRunner {
       runStarted = true;
 
       const editorContext = await this.agent.getContext();
-      runConfig.editorContext = editorContext;
+      const initialEditorContext = { ...editorContext };
+      // Manual context is delivered once per provider request through the
+      // contextProvider snapshot; duplicating it in the base system message
+      // would double its cost on every model turn.
+      delete initialEditorContext.manualContext;
+      runConfig.editorContext = initialEditorContext;
       this.agent.messages = [
         {
           role: "system",
           content: this.agent.buildSystemMessage(
-            editorContext,
+            initialEditorContext,
             runConfig.systemPrompt,
           ),
         },
