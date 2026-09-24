@@ -7,6 +7,7 @@ class AgentSidebar extends Sidebar {
     this.messagesViewport = null;
     this.messagesElement = null;
     this.messagesScroller = null;
+    this.pendingScrollTop = 0;
     this.scrollBottomFrame = null;
     this.changesElement = null;
     this.inputElement = null;
@@ -375,6 +376,16 @@ class AgentSidebar extends Sidebar {
     };
   }
 
+  restoreScrollState(state) {
+    const scrollTop = Number.isFinite(state?.scrollTop)
+      ? Math.max(0, state.scrollTop) : 0;
+    this.pendingScrollTop = scrollTop;
+    if (this.messagesElement) {
+      this.messagesElement.scrollTop = scrollTop;
+      this.messagesScroller?.refresh();
+    }
+  }
+
   async refreshProviderApiKey(providerId) {
     const provider = AgentAI.getProvider(providerId);
     if (!provider) return false;
@@ -462,6 +473,7 @@ class AgentSidebar extends Sidebar {
     messages.className = "agent-sidebar-messages";
     this.messagesElement = messages;
     this.renderMessages(messages);
+    messages.scrollTop = this.pendingScrollTop;
     messagesViewport.appendChild(messages);
     container.appendChild(messagesViewport);
 
@@ -471,6 +483,7 @@ class AgentSidebar extends Sidebar {
       messages,
     );
     this.messagesScroller.init();
+    this.messagesScroller.refresh();
     this.editor.sidebarManager.rightScroller = this.messagesScroller;
 
     const changes = document.createElement("div");

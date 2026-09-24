@@ -66,6 +66,7 @@ class StatesManager {
       tabManager: this.getTabManagerState(root),
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(root),
+      agent: this.getAgentScrollState(),
     };
   }
 
@@ -151,12 +152,24 @@ class StatesManager {
     return {
       activeFilePath: this.toWorkspaceRelative(explorer.activeFilePath, root),
       projectExpanded: explorer.projectExpanded,
+      scrollTop: this.getSidebarScrollTop("left"),
       expandedPaths: Array.from(explorer.getExpandedPaths?.(explorer.files) || [])
         .flatMap((candidate) => {
           const relative = this.toWorkspaceRelative(candidate, root);
           return relative === null ? [] : [relative];
         }),
     };
+  }
+
+  getAgentScrollState() {
+    return { scrollTop: this.getSidebarScrollTop("right") };
+  }
+
+  getSidebarScrollTop(side) {
+    const scroller = side === "left"
+      ? this.editor.sidebarManager?.leftScroller
+      : this.editor.sidebarManager?.rightScroller;
+    return Number.isFinite(scroller?.scrollTop) ? Math.max(0, scroller.scrollTop) : 0;
   }
 
   toWorkspaceRelative(candidate, root) {
@@ -315,8 +328,14 @@ class StatesManager {
     return {
       activeFilePath: this.sanitizeWorkspacePath(value.activeFilePath),
       projectExpanded: value.projectExpanded !== false,
+      scrollTop: this.safeInteger(value.scrollTop),
       expandedPaths,
     };
+  }
+
+  sanitizeAgentState(value) {
+    if (!this.isRecord(value)) return { scrollTop: 0 };
+    return { scrollTop: this.safeInteger(value.scrollTop) };
   }
 
   // SECURITY BOUNDARY: workspace.json is editable, untrusted local input.
@@ -328,6 +347,7 @@ class StatesManager {
       tabManager: this.sanitizeTabManager(value.tabManager),
       sidebar: this.sanitizeSidebarState(value.sidebar),
       fileExplorer: this.sanitizeExplorerState(value.fileExplorer),
+      agent: this.sanitizeAgentState(value.agent),
     };
   }
 
@@ -436,6 +456,7 @@ class StatesManager {
     await this.loadTabManagerState(safeState.tabManager, root);
     this.loadSidebarState(safeState.sidebar);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
+    this.editor.agentSidebar?.restoreScrollState?.(safeState.agent);
     console.info("[NCE Workspace State]", {
       action: "restore", root,
       restoredTabs: this.editor.tabManager?.tabs?.length || 0,
@@ -554,5 +575,6 @@ class StatesManager {
     }
     await explorer.restoreExpandedFolders?.(explorer.files, expanded);
     explorer.refresh?.();
+    explorer.restoreScrollState?.(state);
   }
 }

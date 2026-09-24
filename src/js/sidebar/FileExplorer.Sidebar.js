@@ -10,6 +10,7 @@ class FileExplorer extends Sidebar {
     this.projectExpanded = true;
     this.isLoaded = false;
     this.workspaceSwitching = false;
+    this.pendingScrollTop = 0;
 
     this.clipboard = null;
 
@@ -313,6 +314,8 @@ class FileExplorer extends Sidebar {
 
     const container = document.createElement("div");
     container.className = "file-explorer-container";
+    this.editor.sidebarManager.leftScroller?.menuOBJ &&
+      (this.editor.sidebarManager.leftScroller.menuOBJ.scrollTop = this.pendingScrollTop);
 
     const mainTitle = document.createElement("div");
     mainTitle.className = "sidebar-main-title";
@@ -374,6 +377,16 @@ class FileExplorer extends Sidebar {
     }
 
     return container;
+  }
+
+  restoreScrollState(state) {
+    this.pendingScrollTop = Number.isFinite(state?.scrollTop)
+      ? Math.max(0, state.scrollTop) : 0;
+    const scroller = this.editor.sidebarManager?.leftScroller;
+    if (scroller?.menuOBJ) {
+      scroller.menuOBJ.scrollTop = this.pendingScrollTop;
+      scroller.refresh();
+    }
   }
 
   renderNoFolderState(container) {
