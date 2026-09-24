@@ -10,10 +10,13 @@ function searchEditor(text) {
     attributes: {},
     classList: classes,
     setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name] ?? null; },
     querySelector(selector) {
       return selector === "i" ? { classList: iconClasses } : null;
     },
   };
+  const expandButtonElement = expandButton;
+  const elements = new Map([[".search-bar-expand", expandButton]]);
   const input = { value: "", focus() {}, select() {}, blur() {} };
   const replaceInput = { value: "", focus() {}, blur() {} };
   const replaceContainer = { hidden: true };
@@ -22,16 +25,19 @@ function searchEditor(text) {
   editor.domManager.getElement = (selector) => {
     if (selector === ".editor-search-bar") return searchBar;
     if (selector === ".search-bar-input") return input;
-    if (selector === ".search-bar-expand") return expandButton;
+    if (selector === ".search-bar-expand") return elements.get(selector);
     if (selector === ".search-bar-replace-input") return replaceInput;
     if (selector === ".search-bar-replace-container") return replaceContainer;
     if (selector === ".search-bar-replace-actions") return replaceActions;
-    return { classList: classes, textContent: "" };
+    if (!elements.has(selector)) elements.set(selector, { classList: classes, textContent: "" });
+    return elements.get(selector);
   };
   editor.selectOutput = { replaceChildren() {}, children: [] };
+  const TAB_TYPES = loadGlobal("src/js/types/Tab.js", "TAB_TYPES");
   const SearchController = loadGlobal("src/js/controller/SearchController.js", "SearchController", {
     addEvent() {},
     HTMLInputElement: function HTMLInputElement() {},
+    TAB_TYPES,
   });
   return { editor, search: new SearchController(editor) };
 }

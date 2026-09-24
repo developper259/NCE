@@ -35,6 +35,7 @@ function createEditor(text = "") {
   const LineNode = loadGlobal("src/js/types/Line.js", "LineNode");
   const file = {
     id: 1,
+    type: "file",
     name: "test.js",
     path: "",
     lines: text.split("\n").map((line) => new LineNode(line)),

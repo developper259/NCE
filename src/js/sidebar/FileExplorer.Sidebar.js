@@ -314,8 +314,8 @@ class FileExplorer extends Sidebar {
 
     const container = document.createElement("div");
     container.className = "file-explorer-container";
-    this.editor.sidebarManager.leftScroller?.menuOBJ &&
-      (this.editor.sidebarManager.leftScroller.menuOBJ.scrollTop = this.pendingScrollTop);
+    const menu = this.editor.sidebarManager?.leftScroller?.menuOBJ;
+    if (menu) menu.scrollTop = this.pendingScrollTop;
 
     const mainTitle = document.createElement("div");
     mainTitle.className = "sidebar-main-title";

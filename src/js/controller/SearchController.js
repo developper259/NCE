@@ -113,6 +113,8 @@ class SearchController {
     this.searchBar.classList.add("search-bar-visible");
     this.applyReplaceExpandedState();
 
+    if (!options.useSelection) this.input.value = this.query;
+
     // Set the input value before focusing if we have a selection
     if (options.useSelection && initialQuery !== this.input.value) {
       this.input.value = initialQuery;
@@ -140,6 +142,8 @@ class SearchController {
 
     this.searchBar.classList.remove("search-bar-visible");
     this.searchBar.classList.remove("search-bar-expanded");
+    this.replaceExpanded = false;
+    this.applyReplaceExpandedState();
     this.replaceContainer.hidden = true;
     this.replaceActions.hidden = true;
 

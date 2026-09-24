@@ -2,36 +2,73 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createEditor, loadGlobal } = require("./helpers/runtime");
 
-test("Find prefills with single-line selection when useSelection is true", () => {
-  const { editor } = createEditor("const userName = getUserName();");
-  const classes = { add() {}, remove() {} };
-  const input = { value: "old", focus() {}, select() {}, blur() {} };
+function createClassList() {
+  const values = new Set();
+  return {
+    add(...names) { names.forEach((name) => values.add(name)); },
+    remove(...names) { names.forEach((name) => values.delete(name)); },
+    toggle(name, force) {
+      if (force === true) { values.add(name); return true; }
+      if (force === false) { values.delete(name); return false; }
+      if (values.has(name)) { values.delete(name); return false; }
+      values.add(name); return true;
+    },
+    contains(name) { return values.has(name); },
+  };
+}
 
-  editor.selectController = { containsSelected: "userName" };
+function createElementMock() {
+  const attributes = new Map();
+  return {
+    classList: createClassList(),
+    textContent: "",
+    hidden: false,
+    setAttribute(name, value) { attributes.set(name, String(value)); },
+    getAttribute(name) { return attributes.get(name) ?? null; },
+    querySelector() { return null; },
+  };
+}
+
+function createSearchFixture(text, inputValue, selectedText, searchOutput = { replaceChildren() {} }) {
+  const { editor } = createEditor(text);
+  const input = { ...createElementMock(), value: inputValue, focus() {}, select() {}, blur() {} };
+  const expandButton = createElementMock();
+  const icon = { classList: createClassList() };
+  expandButton.querySelector = (selector) => selector === "i" ? icon : null;
+  editor.selectController = { containsSelected: selectedText };
   editor.cursorController.disable = () => {};
   editor.cursorController.isRowVisible = () => true;
   editor.cursorController.columnToX = () => 0;
   editor.cursorController.rowToY = () => 0;
-  editor.cursorController.getViewPosition = (row, col) => ({
-    row,
-    column: col,
-  });
-  editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
-    if (selector === ".search-bar-input") return input;
-    return { classList: classes, textContent: "" };
+  editor.cursorController.getViewPosition = (row, col) => ({ row, column: col });
+  const elements = {
+    ".editor-search-bar": createElementMock(),
+    ".search-bar-input": input,
+    ".search-bar-counter": createElementMock(),
+    ".search-bar-previous": createElementMock(),
+    ".search-bar-next": createElementMock(),
+    ".search-bar-close": createElementMock(),
+    ".search-bar-expand": expandButton,
+    ".search-bar-replace-input": { ...createElementMock(), value: "", focus() {}, blur() {} },
+    ".search-bar-replace-container": createElementMock(),
+    ".search-bar-replace-actions": createElementMock(),
+    ".search-bar-replace": createElementMock(),
+    ".search-bar-replace-next": createElementMock(),
+    ".search-bar-replace-all": createElementMock(),
   };
-  editor.searchOutput = null; // Disable DOM updates in test
-
-  const SearchController = loadGlobal(
-    "src/js/controller/SearchController.js",
-    "SearchController",
-    {
-      addEvent() {},
-      HTMLInputElement: function () {},
-    },
-  );
+  editor.domManager.getElement = (selector) => elements[selector];
+  editor.searchOutput = searchOutput;
+  const TAB_TYPES = loadGlobal("src/js/types/Tab.js", "TAB_TYPES");
+  const SearchController = loadGlobal("src/js/controller/SearchController.js", "SearchController", {
+    addEvent() {}, HTMLInputElement: function () {}, TAB_TYPES,
+  });
   const search = new SearchController(editor);
+  search.query = input.value;
+  return { editor, input, search };
+}
+
+test("Find prefills with single-line selection when useSelection is true", () => {
+  const { search, input } = createSearchFixture("const userName = getUserName();", "old", "userName", null);
 
   search.open({ useSelection: true });
   assert.equal(
@@ -42,56 +79,14 @@ test("Find prefills with single-line selection when useSelection is true", () =>
 });
 
 test("Find ignores multi-line selection", () => {
-  const { editor } = createEditor("code");
-  const classes = { add() {}, remove() {} };
-  const input = { value: "existing", focus() {}, select() {}, blur() {} };
-
-  editor.selectController = { containsSelected: "line1\nline2" };
-  editor.cursorController.disable = () => {};
-  editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
-    if (selector === ".search-bar-input") return input;
-    return { classList: classes, textContent: "" };
-  };
-  editor.searchOutput = { replaceChildren() {} };
-
-  const SearchController = loadGlobal(
-    "src/js/controller/SearchController.js",
-    "SearchController",
-    {
-      addEvent() {},
-      HTMLInputElement: function () {},
-    },
-  );
-  const search = new SearchController(editor);
+  const { search, input } = createSearchFixture("code", "existing", "line1\nline2");
 
   search.open({ useSelection: true });
   assert.equal(input.value, "existing", "Should ignore multi-line selection");
 });
 
 test("Find ignores empty or whitespace selection", () => {
-  const { editor } = createEditor("text");
-  const classes = { add() {}, remove() {} };
-  const input = { value: "previous", focus() {}, select() {}, blur() {} };
-
-  editor.selectController = { containsSelected: "   " };
-  editor.cursorController.disable = () => {};
-  editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
-    if (selector === ".search-bar-input") return input;
-    return { classList: classes, textContent: "" };
-  };
-  editor.searchOutput = { replaceChildren() {} };
-
-  const SearchController = loadGlobal(
-    "src/js/controller/SearchController.js",
-    "SearchController",
-    {
-      addEvent() {},
-      HTMLInputElement: function () {},
-    },
-  );
-  const search = new SearchController(editor);
+  const { search, input } = createSearchFixture("text", "previous", "   ");
 
   search.open({ useSelection: true });
   assert.equal(
@@ -102,28 +97,7 @@ test("Find ignores empty or whitespace selection", () => {
 });
 
 test("Find without useSelection option keeps existing query", () => {
-  const { editor } = createEditor("test");
-  const classes = { add() {}, remove() {} };
-  const input = { value: "existing", focus() {}, select() {}, blur() {} };
-
-  editor.selectController = { containsSelected: "userName" };
-  editor.cursorController.disable = () => {};
-  editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
-    if (selector === ".search-bar-input") return input;
-    return { classList: classes, textContent: "" };
-  };
-  editor.searchOutput = { replaceChildren() {} };
-
-  const SearchController = loadGlobal(
-    "src/js/controller/SearchController.js",
-    "SearchController",
-    {
-      addEvent() {},
-      HTMLInputElement: function () {},
-    },
-  );
-  const search = new SearchController(editor);
+  const { search, input } = createSearchFixture("test", "existing", "userName");
 
   search.open({ useSelection: false });
   assert.equal(input.value, "existing", "Should keep existing query");
@@ -152,29 +126,9 @@ test("control_find passes useSelection: true", () => {
 });
 
 test("Find without active file does not crash", () => {
-  const { editor } = createEditor("text");
-  const classes = { add() {}, remove() {} };
-  const input = { value: "", focus() {}, select() {}, blur() {} };
+  const { editor, search } = createSearchFixture("text", "", "selection");
 
   editor.tabManager.activeFile = null;
-  editor.selectController = { containsSelected: "selection" };
-  editor.cursorController.disable = () => {};
-  editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
-    if (selector === ".search-bar-input") return input;
-    return { classList: classes, textContent: "" };
-  };
-  editor.searchOutput = { replaceChildren() {} };
-
-  const SearchController = loadGlobal(
-    "src/js/controller/SearchController.js",
-    "SearchController",
-    {
-      addEvent() {},
-      HTMLInputElement: function () {},
-    },
-  );
-  const search = new SearchController(editor);
 
   assert.doesNotThrow(
     () => search.open({ useSelection: true }),
