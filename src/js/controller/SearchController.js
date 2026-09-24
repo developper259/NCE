@@ -16,6 +16,7 @@ class SearchController {
 
     this.results = [];
     this.currentIndex = -1;
+    this.query = "";
 
     this.isOpen = false;
     this.replaceExpanded = false;
@@ -92,7 +93,7 @@ class SearchController {
     if (!this.editor.tabManager.activeFile) return;
 
     // Get selected text if requested and selection exists
-    let initialQuery = this.input.value;
+    let initialQuery = this.query;
     if (options.useSelection) {
       const selectedText = this.editor.selectController?.containsSelected;
       if (
@@ -115,17 +116,17 @@ class SearchController {
     // Set the input value before focusing if we have a selection
     if (options.useSelection && initialQuery !== this.input.value) {
       this.input.value = initialQuery;
+      this.query = initialQuery;
     }
 
     this.focusInput();
 
     const activeFile = this.editor.tabManager.activeFile;
-    const savedQuery = activeFile?.searchQuery;
     const savedIndex = activeFile?.searchCurrentIndex;
     this.search(this.input.value);
 
     if (this.results.length > 0) {
-      this.currentIndex = savedQuery === this.input.value && Number.isInteger(savedIndex)
+      this.currentIndex = Number.isInteger(savedIndex)
         ? Math.min(Math.max(savedIndex, 0), this.results.length - 1)
         : 0;
       this.goToResult(false, true);
@@ -163,6 +164,7 @@ class SearchController {
         ) {
           if (!selectedText.includes("\n")) {
             this.input.value = selectedText;
+            this.query = selectedText;
             this.search(selectedText);
             if (this.results.length > 0) {
               this.currentIndex = 0;
@@ -179,6 +181,7 @@ class SearchController {
   }
 
   onInput() {
+    this.query = this.input.value || "";
     this.search(this.input.value);
 
     this.currentIndex = this.results.length > 0 ? 0 : -1;
@@ -224,7 +227,6 @@ class SearchController {
 
   saveActiveTabState(tab = this.editor.tabManager.activeFile) {
     if (!tab || tab.type !== TAB_TYPES.FILE) return;
-    tab.searchQuery = this.input?.value || "";
     tab.searchReplaceValue = this.replaceInput?.value || "";
     tab.searchCurrentIndex = Number.isInteger(this.currentIndex)
       ? this.currentIndex
@@ -233,7 +235,7 @@ class SearchController {
 
   restoreTabState(tab) {
     if (!tab || tab.type !== TAB_TYPES.FILE) return;
-    this.input.value = typeof tab.searchQuery === "string" ? tab.searchQuery : "";
+    this.input.value = this.query;
     this.replaceInput.value = typeof tab.searchReplaceValue === "string"
       ? tab.searchReplaceValue
       : "";
@@ -260,6 +262,7 @@ class SearchController {
 
   getWorkspaceState() {
     return {
+      query: this.query,
       isVisible: this.isOpen === true,
       isExpanded: this.replaceExpanded === true,
       expandButtonActivated:
@@ -272,6 +275,7 @@ class SearchController {
       Boolean(this.editor.tabManager.activeFile);
     this.replaceExpanded =
       state?.isExpanded === true || state?.expandButtonActivated === true;
+    this.query = typeof state?.query === "string" ? state.query : this.query;
 
     this.searchBar.classList.toggle("search-bar-visible", this.isOpen);
     this.searchBar.classList.remove("search-bar-expanded");
@@ -313,6 +317,7 @@ class SearchController {
     this.clearResults();
 
     query = query || "";
+    this.query = query;
 
     if (!query) {
       this.updateCounter();

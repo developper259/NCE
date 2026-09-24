@@ -112,7 +112,6 @@ class StatesManager {
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
         totalLines: tab.totalLines,
         startSelect: tab.startSelect, endSelect: tab.endSelect,
-        searchQuery: tab.searchQuery || "",
         searchReplaceValue: tab.searchReplaceValue || "",
         searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
           ? tab.searchCurrentIndex : -1,
@@ -278,7 +277,6 @@ class StatesManager {
       totalLines: this.safeInteger(value.totalLines),
       startSelect: this.sanitizePosition(value.startSelect),
       endSelect: this.sanitizePosition(value.endSelect),
-      searchQuery: this.safeString(value.searchQuery, this.workspaceLimits.pathLength) || "",
       searchReplaceValue: this.safeString(
         value.searchReplaceValue,
         this.workspaceLimits.pathLength,
@@ -366,6 +364,7 @@ class StatesManager {
       query: query || "",
       sidebarExpanded: value?.sidebarExpanded === true,
       controller: {
+        query: this.safeString(controller.query, this.workspaceLimits.pathLength) || "",
         isVisible: controller.isVisible === true,
         isExpanded: controller.isExpanded === true,
         expandButtonActivated: controller.expandButtonActivated === true,
@@ -450,7 +449,6 @@ class StatesManager {
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
         totalLines: tab.totalLines,
         startSelect: tab.startSelect, endSelect: tab.endSelect,
-        searchQuery: tab.searchQuery || "",
         searchReplaceValue: tab.searchReplaceValue || "",
         searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
           ? tab.searchCurrentIndex : -1,
@@ -564,7 +562,6 @@ class StatesManager {
             maxLineLength: data.maxLineLength || 0,
             totalLines: data.totalLines || 0,
             startSelect: data.startSelect, endSelect: data.endSelect,
-            searchQuery: data.searchQuery || "",
             searchReplaceValue: data.searchReplaceValue || "",
             searchCurrentIndex: Number.isInteger(data.searchCurrentIndex)
               ? data.searchCurrentIndex : -1,

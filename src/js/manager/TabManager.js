@@ -382,7 +382,9 @@ class tabManager {
 
     this.editor.searchController?.restoreTabState?.(file);
 
-    this.editor.cursorController.setCursorPosition(file.row, file.column);
+    this.editor.cursorController.setCursorPosition(file.row, file.column, {
+      ensureVisible: !this.editor.searchController?.isOpen,
+    });
 
     if (!this.editor.isOnInit) this.editor.refreshAll();
     this.editor.refreshMainContent?.();
