@@ -18,6 +18,7 @@ class SearchController {
     this.currentIndex = -1;
 
     this.isOpen = false;
+    this.replaceExpanded = false;
 
     this.init();
   }
@@ -108,6 +109,7 @@ class SearchController {
     this.isOpen = true;
 
     this.searchBar.classList.add("search-bar-visible");
+    this.applyReplaceExpandedState();
 
     // Set the input value before focusing if we have a selection
     if (options.useSelection && initialQuery !== this.input.value) {
@@ -130,9 +132,6 @@ class SearchController {
     this.searchBar.classList.remove("search-bar-expanded");
     this.replaceContainer.hidden = true;
     this.replaceActions.hidden = true;
-    this.expandButton.setAttribute("aria-expanded", "false");
-    this.expandButton.querySelector("i")?.classList.add("fi-rr-angle-small-down");
-    this.expandButton.querySelector("i")?.classList.remove("fi-rr-angle-small-up");
 
     this.clearResults();
 
@@ -207,13 +206,55 @@ class SearchController {
   }
 
   toggleReplace() {
-    const expanded = this.searchBar.classList.toggle("search-bar-expanded");
+    this.replaceExpanded = !this.replaceExpanded;
+    const expanded = this.replaceExpanded;
+    this.applyReplaceExpandedState();
+    if (expanded) this.replaceInput.focus({ preventScroll: true });
+  }
+
+  applyReplaceExpandedState() {
+    const expanded = this.replaceExpanded;
+    this.searchBar.classList.toggle("search-bar-expanded", expanded);
     this.replaceContainer.hidden = !expanded;
     this.replaceActions.hidden = !expanded;
     this.expandButton.setAttribute("aria-expanded", String(expanded));
     this.expandButton.querySelector("i")?.classList.toggle("fi-rr-angle-small-down", !expanded);
     this.expandButton.querySelector("i")?.classList.toggle("fi-rr-angle-small-up", expanded);
-    if (expanded) this.replaceInput.focus({ preventScroll: true });
+  }
+
+  getWorkspaceState() {
+    return {
+      query: this.input?.value || "",
+      replaceValue: this.replaceInput?.value || "",
+      isVisible: this.isOpen === true,
+      isExpanded: this.replaceExpanded === true,
+      expandButtonActivated:
+        this.expandButton?.getAttribute("aria-expanded") === "true",
+      currentIndex: Number.isInteger(this.currentIndex) ? this.currentIndex : -1,
+    };
+  }
+
+  restoreWorkspaceState(state) {
+    this.input.value = typeof state?.query === "string" ? state.query : "";
+    this.replaceInput.value =
+      typeof state?.replaceValue === "string" ? state.replaceValue : "";
+    this.isOpen = state?.isVisible === true &&
+      Boolean(this.editor.tabManager.activeFile);
+    this.replaceExpanded =
+      state?.isExpanded === true || state?.expandButtonActivated === true;
+
+    this.searchBar.classList.toggle("search-bar-visible", this.isOpen);
+    this.searchBar.classList.remove("search-bar-expanded");
+    this.applyReplaceExpandedState();
+    this.clearResults();
+    this.search(this.input.value);
+    const savedIndex = Number.isInteger(state?.currentIndex)
+      ? state.currentIndex
+      : -1;
+    this.currentIndex = this.results.length > 0
+      ? Math.min(Math.max(savedIndex, 0), this.results.length - 1)
+      : -1;
+    if (this.currentIndex >= 0) this.goToResult(false, true);
   }
 
   replaceCurrent() {

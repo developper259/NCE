@@ -172,6 +172,7 @@ class StatesManager {
     return {
       query: typeof query === "string" ? query : "",
       sidebarExpanded: searchSidebar?.replaceExpanded === true,
+      controller: this.editor.searchController?.getWorkspaceState?.() || null,
     };
   }
 
@@ -350,9 +351,26 @@ class StatesManager {
 
   sanitizeSearchState(value) {
     const query = this.safeString(value?.query, this.workspaceLimits.pathLength);
+    const controller = this.isRecord(value?.controller) ? value.controller : {};
+    const controllerQuery = this.safeString(
+      controller.query,
+      this.workspaceLimits.pathLength,
+    );
+    const replaceValue = this.safeString(
+      controller.replaceValue,
+      this.workspaceLimits.pathLength,
+    );
     return {
       query: query || "",
       sidebarExpanded: value?.sidebarExpanded === true,
+      controller: {
+        query: controllerQuery || "",
+        replaceValue: replaceValue || "",
+        isVisible: controller.isVisible === true,
+        isExpanded: controller.isExpanded === true,
+        expandButtonActivated: controller.expandButtonActivated === true,
+        currentIndex: this.safeInteger(controller.currentIndex, -1, -1),
+      },
     };
   }
 
@@ -480,6 +498,9 @@ class StatesManager {
       runSearch: safeState.sidebar?.leftOpen === true &&
         safeState.sidebar?.leftActiveMenuId === "search",
     });
+    this.editor.searchController?.restoreWorkspaceState?.(
+      safeState.search.controller,
+    );
     console.info("[NCE Workspace State]", {
       action: "restore", root,
       restoredTabs: this.editor.tabManager?.tabs?.length || 0,

@@ -34,7 +34,7 @@
   display: none;
 }
 
-.editor-search-bar.search-bar-expanded {
+.editor-search-bar.search-bar-visible.search-bar-expanded {
   display: grid;
   height: 71px;
   grid-template-columns: auto minmax(210px, 1fr) auto auto auto;
