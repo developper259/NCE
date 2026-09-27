@@ -80,7 +80,6 @@ test("run_tests FAILED is an error activity, not a successful check", () => {
     context,
   );
   assert.equal(cards()[0].status, "error");
-  assert.notEqual(sidebar.getActivityIcon(cards()[0]), "✓");
   assert.equal(session.segments[0].hasErrors, true);
   assert.match(cards()[0].title, /Tests failed/i);
 });
@@ -102,11 +101,11 @@ test("run_tests PASSED remains a successful check", () => {
     context,
   );
   assert.equal(cards()[0].status, "success");
-  assert.equal(sidebar.getActivityIcon(cards()[0]), "✓");
+  assert.match(cards()[0].title, /Tests passed/i);
 });
 
-test("run_tests INVALID_TARGET never displays a success icon", () => {
-  const { sidebar, cards, start, end } = testActivityFixture();
+test("run_tests INVALID_TARGET never displays success", () => {
+  const { cards, start, end } = testActivityFixture();
   const context = start("run_tests", { path: "missing.py" }, "tests-3");
   end(
     "run_tests",
@@ -117,7 +116,6 @@ test("run_tests INVALID_TARGET never displays a success icon", () => {
     context,
   );
   assert.notEqual(cards()[0].status, "success");
-  assert.notEqual(sidebar.getActivityIcon(cards()[0]), "✓");
 });
 
 test("read timeline shows delivered lines instead of requested lines", () => {
@@ -128,7 +126,8 @@ test("read timeline shows delivered lines instead of requested lines", () => {
     runId: 1,
     toolCallId: "read-1",
   });
-  assert.equal(session.segments.length, 0);
+  assert.equal(session.segments.length, 1);
+  assert.equal(cards()[0].status, "running");
   const payload = {
     success: true,
     path: "snake-game.html",
@@ -185,6 +184,67 @@ test("hidden redundant reads keep useful reasoning without an empty activity gro
     session.segments[0].content,
     "I should inspect the missing range.",
   );
+});
+
+test("reasoning panel data counts non-empty entries and follows streaming updates", () => {
+  const { sidebar, session } = fixture();
+  sidebar.getActiveSession = () => session;
+  assert.equal(sidebar.getSessionReasoning(session).length, 0);
+
+  const first = { id: "reasoning-1", type: "reasoning", runId: 1, content: "first" };
+  session.messages.push(first);
+  session.segments.push(first);
+  assert.equal(sidebar.getSessionReasoning(session).length, 1);
+
+  first.content += " update";
+  const second = { id: "reasoning-2", type: "reasoning", runId: 1, content: "second" };
+  session.messages.push(second);
+  session.segments.push(second);
+  assert.equal(
+    JSON.stringify(sidebar.getSessionReasoning(session).map((entry) => entry.content)),
+    JSON.stringify(["first update", "second"]),
+  );
+});
+
+test("reasoning segments stay in session data but are omitted from the main timeline", () => {
+  const { sidebar, session } = fixture();
+  const reasoning = { id: "reasoning-1", type: "reasoning", runId: 1, content: "kept" };
+  session.messages.push(
+    { role: "user", content: "question" },
+    reasoning,
+    { role: "agent", content: "answer" },
+  );
+  session.segments.push(reasoning);
+  session.isGenerating = false;
+  sidebar.getActiveSession = () => session;
+  sidebar.stopAgentWorkTicker = () => {};
+  sidebar.syncAgentWorkTicker = () => {};
+  sidebar.createMessageElement = (message) => message;
+  sidebar.updateReasoningControl = () => {};
+  const rendered = [];
+  const container = {
+    querySelectorAll: () => [],
+    replaceChildren() { rendered.length = 0; },
+    appendChild(message) { rendered.push(message); },
+  };
+
+  sidebar.renderMessages(container);
+  assert.deepEqual(rendered.map((message) => message.role), ["user", "agent"]);
+  assert.equal(session.messages.includes(reasoning), true);
+  assert.equal(sidebar.getSessionReasoning(session).length, 1);
+});
+
+test("review timeline shows the real changed-file count with singular and plural labels", () => {
+  const { sidebar } = fixture();
+  for (const [detail, expected] of [["1 file", "1 file"], ["3 files", "3 files"]]) {
+    const children = sidebar.getActivityNodeChildren({
+      category: "review",
+      items: [{ toolName: "get_changed_files", detail, args: {} }],
+    });
+    assert.equal(children.length, 1);
+    assert.equal(children[0].label, expected);
+    assert.equal(children[0].action, "review");
+  }
 });
 
 test("restored cache content remains visible with its actual range", () => {

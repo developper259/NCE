@@ -66,7 +66,6 @@ class StatesManager {
       tabManager: this.getTabManagerState(root),
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(root),
-      agent: this.getAgentScrollState(),
       search: this.getSearchState(),
     };
   }
@@ -163,10 +162,6 @@ class StatesManager {
           return relative === null ? [] : [relative];
         }),
     };
-  }
-
-  getAgentScrollState() {
-    return { scrollTop: this.getSidebarScrollTop("right") };
   }
 
   getSearchState() {
@@ -352,11 +347,6 @@ class StatesManager {
     };
   }
 
-  sanitizeAgentState(value) {
-    if (!this.isRecord(value)) return { scrollTop: 0 };
-    return { scrollTop: this.safeInteger(value.scrollTop) };
-  }
-
   sanitizeSearchState(value) {
     const query = this.safeString(value?.query, this.workspaceLimits.pathLength);
     const controller = this.isRecord(value?.controller) ? value.controller : {};
@@ -381,7 +371,6 @@ class StatesManager {
       tabManager: this.sanitizeTabManager(value.tabManager),
       sidebar: this.sanitizeSidebarState(value.sidebar),
       fileExplorer: this.sanitizeExplorerState(value.fileExplorer),
-      agent: this.sanitizeAgentState(value.agent),
       search: this.sanitizeSearchState(value.search),
     };
   }
@@ -494,7 +483,6 @@ class StatesManager {
     await this.loadTabManagerState(safeState.tabManager, root);
     this.loadSidebarState(safeState.sidebar);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
-    this.editor.agentSidebar?.restoreScrollState?.(safeState.agent);
     this.editor.searchSidebar?.restoreQueryState?.(safeState.search, {
       runSearch: safeState.sidebar?.leftOpen === true &&
         safeState.sidebar?.leftActiveMenuId === "search",

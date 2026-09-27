@@ -32,7 +32,9 @@ function snapshot(id, content = "SUPER_PRIVATE_MESSAGE_123") {
     updatedAt: 2,
     apiKey: "sk-private-key-123456",
     messages: [
-      { role: "user", content, streaming: true },
+      { role: "user", content, streaming: true, manualContextItems: [
+        { type: "file", label: "PERSISTED_CONTEXT_LABEL", title: "src/Agent.js", relativePath: "src/Agent.js", workspaceRoot: "/private/workspace", absolutePath: "/private/workspace/src/Agent.js", content: "PRIVATE_FILE_CONTENT" },
+      ] },
       { type: "assistant", role: "agent", content: "Partial private response", streaming: true },
       { type: "activity", role: "activity", status: "running", items: [
         { type: "tool", title: "Running tests", status: "running", args: { code: "PRIVATE_ARGS" } },
@@ -72,7 +74,7 @@ test("AgentConversationStore encrypts global conversation snapshots and restores
     }
     await scan(store.root);
     const disk = Buffer.concat(files).toString();
-    for (const secret of ["SUPER_PRIVATE_MESSAGE_123", "PRIVATE_CONVERSATION_TITLE", "sk-private-key-123456", "PRIVATE_ARGS", "DO_NOT_PERSIST_DRAFT"]) {
+    for (const secret of ["SUPER_PRIVATE_MESSAGE_123", "PRIVATE_CONVERSATION_TITLE", "sk-private-key-123456", "PRIVATE_ARGS", "DO_NOT_PERSIST_DRAFT", "PERSISTED_CONTEXT_LABEL", "PRIVATE_FILE_CONTENT", "/private/workspace"]) {
       assert.equal(disk.includes(secret), false, `plaintext leaked: ${secret}`);
     }
     const keyEnvelope = await fsp.readFile(path.join(store.root, "master-key.json"), "utf8");
@@ -87,6 +89,9 @@ test("AgentConversationStore encrypts global conversation snapshots and restores
     assert.deepEqual(loaded.sessionIds, ["session-a"]);
     assert.equal(loaded.activeSessionId, "session-a");
     assert.equal(loaded.sessions[0].messages[0].content, "SUPER_PRIVATE_MESSAGE_123");
+    assert.deepEqual(JSON.parse(JSON.stringify(loaded.sessions[0].messages[0].manualContextItems)), [
+      { type: "file", label: "PERSISTED_CONTEXT_LABEL", title: "src/Agent.js", relativePath: "src/Agent.js", workspaceRoot: "/private/workspace" },
+    ]);
     assert.equal(loaded.sessions[0].messages[1].streaming, false);
     assert.equal(loaded.sessions[0].messages[2].status, "cancelled");
     assert.equal(loaded.sessions[0].messages[2].items.some((item) => item.type === "approval"), false);
@@ -245,7 +250,9 @@ test("AgentSidebar rehydrates persisted messages without restoring runtime or ac
     createdAt: 10,
     updatedAt: 20,
     messages: [
-      { role: "user", content: "hello" },
+      { role: "user", content: "hello", manualContextItems: [
+        { type: "file", label: "Agent.js", title: "src/Agent.js", relativePath: "src/Agent.js", absolutePath: "/private/workspace/src/Agent.js" },
+      ] },
       { role: "agent", type: "assistant", content: "partial", streaming: true },
       { role: "activity", type: "activity", status: "cancelled", items: [] },
     ],
@@ -261,6 +268,9 @@ test("AgentSidebar rehydrates persisted messages without restoring runtime or ac
   assert.equal(restored.changes.length, 0);
   assert.equal(restored.currentSegment, null);
   assert.equal(restored.messages[1].streaming, false);
+  assert.equal(JSON.stringify(restored.messages[0].manualContextItems), JSON.stringify([
+    { type: "file", label: "Agent.js", title: "src/Agent.js", relativePath: "src/Agent.js" },
+  ]));
   assert.equal(restored.manualContext.length, 0);
   assert.equal(restored.manualContextSnapshot, null);
   assert.equal(restored.segments[0], restored.messages[1]);
@@ -268,19 +278,26 @@ test("AgentSidebar rehydrates persisted messages without restoring runtime or ac
   assert.equal(restored.usage.requestKeys instanceof Set, true);
 });
 
-test("AgentSidebar does not persist manual context descriptors or their contents", () => {
+test("AgentSidebar persists safe sent context labels but not context contents or absolute paths", () => {
   const sidebar = Object.create(AgentSidebar.prototype);
   const session = {
     id: "manual-context-session", title: "Private context", createdAt: 1,
-    messages: [{ role: "user", content: "hello", manualContextItems: [{ type: "file", label: "DISPLAY_ONLY_FILE" }] }],
+    messages: [{ role: "user", content: "hello", manualContextItems: [{
+      type: "file", label: "DISPLAY_ONLY_FILE", title: "src/DISPLAY_ONLY_FILE", relativePath: "src/DISPLAY_ONLY_FILE", workspaceRoot: "/private/workspace",
+      absolutePath: "/private/file.js", content: "SECRET_CONTEXT_CONTENT",
+    }] }],
     manualContext: [{ type: "selection", content: "SECRET_CONTEXT_CONTENT", absolutePath: "/private/file.js" }],
     manualContextSnapshot: { items: [{ content: "SECRET_CONTEXT_CONTENT" }] },
+    agentStatus: { kind: "editing", runId: 12, activeOperations: new Map([["write", "editing"]]) },
+    activeAgentOperations: new Map([["write", "editing"]]),
     usage: {},
   };
   const persisted = sidebar.serializeSessionForPersistence(session);
   const text = JSON.stringify(persisted);
-  assert.equal(text.includes("manualContext"), false);
-  assert.equal(text.includes("DISPLAY_ONLY_FILE"), false);
+  assert.equal(text.includes('"manualContext":'), false);
+  assert.equal(text.includes("agentStatus"), false);
+  assert.equal(text.includes("activeAgentOperations"), false);
+  assert.equal(text.includes("DISPLAY_ONLY_FILE"), true);
   assert.equal(text.includes("SECRET_CONTEXT_CONTENT"), false);
   assert.equal(text.includes("/private/file.js"), false);
 });

@@ -383,6 +383,13 @@ class FileExplorer extends Sidebar {
     return container;
   }
 
+  refresh() {
+    const menu = this.editor.sidebarManager?.leftScroller?.menuOBJ;
+    if (menu) this.pendingScrollTop = menu.scrollTop || 0;
+    super.refresh();
+    if (menu) menu.scrollTop = this.pendingScrollTop;
+  }
+
   restoreScrollState(state) {
     this.pendingScrollTop = Number.isFinite(state?.scrollTop)
       ? Math.max(0, state.scrollTop) : 0;

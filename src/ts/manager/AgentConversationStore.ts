@@ -17,7 +17,7 @@ const USAGE_KEYS = [
 ] as const;
 const MESSAGE_KEYS = [
   "id", "role", "type", "content", "timestamp", "runId", "status",
-  "startedAt", "finishedAt", "collapsed", "streaming", "hasErrors", "items",
+  "startedAt", "finishedAt", "collapsed", "streaming", "hasErrors", "items", "manualContextItems",
 ] as const;
 const ACTIVITY_KEYS = [
   "id", "toolName", "type", "title", "detail", "status", "startedAt",
@@ -68,6 +68,8 @@ function copyAllowed(source: Record<string, any>, keys: readonly string[], itemL
     const value = source[key];
     if (key === "items" && Array.isArray(value)) {
       output.items = value.slice(0, itemLimit).map((item) => sanitizeActivityItem(item)).filter(Boolean);
+    } else if (key === "manualContextItems" && Array.isArray(value)) {
+      output.manualContextItems = value.slice(0, 300).map((item) => sanitizeManualContextItem(item)).filter(Boolean);
     } else if (key === "diffStats" && isRecord(value)) {
       output.diffStats = {
         additions: safeNumber(value.additions) || 0,
@@ -88,6 +90,29 @@ function copyAllowed(source: Record<string, any>, keys: readonly string[], itemL
     }
   }
   return output;
+}
+
+function sanitizeManualContextItem(value: unknown): Record<string, string> | null {
+  if (!isRecord(value) || !["file", "folder", "selection"].includes(value.type)) return null;
+  const item: Record<string, string> = { type: value.type };
+  for (const key of ["label", "title"]) {
+    const text = boundedText(value[key], 300);
+    if (text !== undefined) item[key] = text;
+  }
+  if (typeof value.workspaceRoot === "string" && value.workspaceRoot.length <= 4096 &&
+    (value.workspaceRoot.startsWith("/") || /^[a-z]:[\\/]/i.test(value.workspaceRoot) || value.workspaceRoot.startsWith("\\\\"))) {
+    item.workspaceRoot = value.workspaceRoot;
+  }
+  if (typeof value.relativePath === "string") {
+    const relativePath = value.relativePath.replace(/\\/g, "/");
+    const parts = relativePath.split("/");
+    if (relativePath.length <= 1000 && (
+      relativePath === "." ||
+      (!relativePath.startsWith("/") && !/^[a-z]:/i.test(relativePath) &&
+        parts.every((part) => part && part !== "." && part !== ".."))
+    )) item.relativePath = relativePath;
+  }
+  return item;
 }
 
 function sanitizeActivityItem(value: unknown): Record<string, any> | null {
