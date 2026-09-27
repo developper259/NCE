@@ -225,6 +225,16 @@ class KeyBinding {
       data: { themePicker: true },
     });
 
+    const activeTab = this.editor.tabManager.activeTab;
+    const imageViewActions = PictureView.isPreviewablePath(activeTab?.path || "")
+      ? [{
+          id: "change-image-view",
+          label: "Change View Type",
+          keywords: ["image", "preview", "text", "editor", "view"],
+          data: { imageViewPicker: true },
+        }]
+      : [];
+
     const shortcutItems = USERCONFIG_KEYBINDING.filter(
       (item) =>
         item.action !== "open_command" &&
@@ -238,9 +248,7 @@ class KeyBinding {
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
-    const items = settingCategories.length
-      ? settingCategories.concat(shortcutItems)
-      : shortcutItems;
+    const items = settingCategories.concat(imageViewActions, shortcutItems);
 
     quickPanel.open({
       id: "command-palette",
@@ -287,6 +295,9 @@ class KeyBinding {
     }
     if (item?.data?.themePicker) {
       return this.editor.themeManager?.openThemePicker();
+    }
+    if (item?.data?.imageViewPicker) {
+      return this.editor.bottomBar?.openImageViewPicker();
     }
     if (item?.data?.settingsJson) {
       return this.editor.openSettingsJson?.();

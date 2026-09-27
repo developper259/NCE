@@ -4,10 +4,16 @@ class PictureView {
   static supportedExtensions = new Set([
     ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".ico",
   ]);
+  static previewableExtensions = new Set([...PictureView.supportedExtensions, ".svg"]);
 
   static isSupportedPath(path) {
     return typeof path === "string" &&
       PictureView.supportedExtensions.has(NCEPath.basename(path).match(/\.[^.]+$/)?.[0]?.toLowerCase());
+  }
+
+  static isPreviewablePath(path) {
+    return typeof path === "string" &&
+      PictureView.previewableExtensions.has(NCEPath.basename(path).match(/\.[^.]+$/)?.[0]?.toLowerCase());
   }
 
   constructor(editor) {
@@ -67,7 +73,7 @@ class PictureView {
     this.path = path || null;
     this.releaseObjectUrl();
     if (this.image) this.image.removeAttribute("src");
-    if (!path || !PictureView.isSupportedPath(path)) {
+    if (!path || !PictureView.isPreviewablePath(path)) {
       this.setStatus("Unable to open image.", "error");
       return false;
     }

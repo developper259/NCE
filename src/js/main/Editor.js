@@ -250,7 +250,7 @@ class Editor {
     } else if (pictureActive) {
       this.settingsView?.hide();
       this.pictureView?.show(this.tabManager.activeTab);
-      this.bottomBar?.hide();
+      this.bottomBar?.showImagePreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else {

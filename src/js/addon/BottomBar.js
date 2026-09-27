@@ -7,10 +7,42 @@ class BottomBar {
     this.fileStatusElement = getElement(".bottomBar-file-status");
     this.languageElement = getElement("#language");
     this.configSpaceElement = getElement("#config-space");
+    this.imageViewPicker = getElement("#image-view");
+    this.bottomBarElement = getElement(".bottomBar");
 
     this.refreshLanguage();
     this.refreshScrollers();
     this.refreshFileStatus();
+    this.refreshImageViewPicker();
+  }
+
+  openImageViewPicker() {
+    const tab = this.editor.tabManager.activeTab;
+    if (!tab?.path || !PictureView.isPreviewablePath(tab.path)) return;
+    const selectedId = tab.type === TAB_TYPES.PICTURE ? "picture" : "text";
+    this.editor.quickPanel.open({
+      id: "image-view",
+      mode: "pick",
+      title: "Select Image View",
+      placeholder: "Select Image View",
+      selectedId,
+      items: [
+        { id: "picture", label: "Image Preview", data: "picture" },
+        { id: "text", label: "Text Editor", data: "text" },
+      ],
+      onAccept: (item) => this.editor.tabManager.switchActiveTabView(item.data),
+    });
+  }
+
+  refreshImageViewPicker() {
+    if (!this.imageViewPicker) return;
+    const tab = this.editor.tabManager.activeTab;
+    const isImage = tab?.type === TAB_TYPES.PICTURE ||
+      PictureView.isPreviewablePath(tab?.path || "");
+    this.imageViewPicker.hidden = !isImage;
+    const title = this.imageViewPicker.querySelector(".scroller-title");
+    if (title) title.textContent = tab?.type === TAB_TYPES.PICTURE
+      ? "Image Preview" : "Text Editor";
   }
 
   async openLanguage() {
@@ -91,17 +123,20 @@ class BottomBar {
   }
 
   refresh() {
+    this.refreshImageViewPicker();
+    this.refreshFileStatus();
     if (!this.editor.tabManager.activeFile) return;
 
     this.refreshCursorOBJ();
     this.refreshLanguage();
     this.refreshScrollers();
-    this.refreshFileStatus();
   }
 
   refreshFileStatus() {
     if (!this.fileStatusElement) return;
-    const file = this.editor.tabManager.activeFile;
+    const file = this.editor.tabManager.activeTab?.type === TAB_TYPES.FILE
+      ? this.editor.tabManager.activeFile
+      : null;
     const status = file?.loadingState?.status;
     const text = this.fileStatusElement.querySelector(".bottomBar-text");
     let message = "";
@@ -170,5 +205,13 @@ class BottomBar {
     leftBottomBar.style.display = "flex";
     middleBottomBar.style.display = "flex";
     rightBottomBar.style.display = "flex";
+    this.bottomBarElement?.classList.remove("bottomBar-image-preview-mode");
+    this.refreshImageViewPicker();
+    this.refreshFileStatus();
+  }
+
+  showImagePreview() {
+    this.show();
+    this.bottomBarElement?.classList.add("bottomBar-image-preview-mode");
   }
 }

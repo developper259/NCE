@@ -43,7 +43,7 @@ export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
 const IMAGE_MIME_TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
-  ".ico": "image/x-icon",
+  ".ico": "image/x-icon", ".svg": "image/svg+xml",
 };
 const BINARY_SAMPLE_SIZE = 8192;
 function validPath(value: unknown): value is string {

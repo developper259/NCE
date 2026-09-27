@@ -123,9 +123,9 @@ class tabManager {
     if (changed) this.refresh();
   }
 
-  async openFile(file) {
+  async openFile(file, { forceText = false } = {}) {
     if (!file) return;
-    return this.openFiles([file]);
+    return this.openFiles([file], true, forceText);
   }
 
   async openSettings() {
@@ -140,12 +140,12 @@ class tabManager {
     return tab;
   }
 
-  async openFiles(files, isSetFocusFile = true) {
+  async openFiles(files, isSetFocusFile = true, forceText = false) {
     if (files.length === 0) return;
     let lastAddedFile = null;
 
     for (let file of files) {
-      if (file?.path && PictureView.isSupportedPath(file.path)) {
+      if (!forceText && file?.path && PictureView.isSupportedPath(file.path)) {
         const existing = this.tabs.find((candidate) =>
           candidate.type === TAB_TYPES.PICTURE && NCEPath.equals(candidate.path, file.path));
         lastAddedFile = existing || file;
@@ -543,7 +543,7 @@ class tabManager {
   }
 
   async openPicture(path) {
-    if (!PictureView.isSupportedPath(path)) return null;
+    if (!PictureView.isPreviewablePath(path)) return null;
     let tab = this.tabs.find((candidate) => candidate.type === TAB_TYPES.PICTURE && NCEPath.equals(candidate.path, path));
     if (!tab) {
       tab = new PictureTab(this.getNextID(), path);
@@ -551,6 +551,31 @@ class tabManager {
     }
     await this.setFocusTab(tab);
     return tab;
+  }
+
+  async switchActiveTabView(view) {
+    const current = this.activeTab;
+    const index = this.tabs.indexOf(current);
+    if (index < 0 || !current?.path) return null;
+
+    let replacement;
+    if (view === "picture" && current.type === TAB_TYPES.FILE &&
+        PictureView.isPreviewablePath(current.path)) {
+      replacement = new PictureTab(current.id, current.path);
+      replacement.textTab = current;
+    } else if (view === "text" && current.type === TAB_TYPES.PICTURE) {
+      replacement = current.textTab || this.getFileByPath(current.path) ||
+        new FileNode(this.editor, current.id, NCEPath.basename(current.path), current.path);
+    } else {
+      return current;
+    }
+
+    if (current.type === TAB_TYPES.FILE)
+      this.editor.searchController?.saveActiveTabState?.(current);
+    this.tabs[index] = replacement;
+    await this.setFocusTab(replacement);
+    this.refresh();
+    return replacement;
   }
 
   createEmptyFile() {

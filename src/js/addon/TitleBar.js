@@ -520,9 +520,11 @@ class TitleBar {
   refresh() {
     if (!this.title) return;
     const file = this.editor.tabManager.activeFile;
+    const activeTab = this.editor.tabManager.activeTab;
+    const tabName = file?.name || (activeTab?.type === TAB_TYPES.PICTURE ? activeTab.name : "");
     const project = this.editor.fileExplorer?.projectName;
-    const context = file?.name
-      ? `${file.name}${project ? ` · ${project}` : ""}`
+    const context = tabName
+      ? `${tabName}${project ? ` · ${project}` : ""}`
       : project || "NCE";
     const showDirtyIndicator = file?.isVisuallyDirty() === true;
     this.title.textContent = `${showDirtyIndicator ? "● " : ""}${context}`;
