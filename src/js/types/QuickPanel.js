@@ -54,6 +54,13 @@ class QuickPanel {
       (event) => this.acceptListItem(event),
       true,
     );
+    this.list.addEventListener("contextmenu", (event) => {
+      const row = event.target.closest?.(".quick-panel-item");
+      if (!row) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      this.acceptRow(row);
+    }, true);
 
     this.host.addEventListener("click", (event) => {
       if (event.target === this.host) this.close();
@@ -322,6 +329,11 @@ class QuickPanel {
 
     event.preventDefault();
     event.stopPropagation();
+    this.acceptRow(row);
+  }
+
+  acceptRow(row) {
+    if (!this.session || !row) return;
     const item = this.session.visibleItems.find(
       (candidate) => String(candidate.id) === row.dataset.itemId,
     );

@@ -44,10 +44,20 @@ class Editor {
       buildTabContextMenu(this.tabManager),
     );
     this.contextMenuManager.setMenu("output", buildOutputContextMenu(this));
+    this.contextMenuManager.setMenu("input", buildInputContextMenu(this));
     this.contextMenuManager.setMenu(
       "empty-menu",
       buildEmptyMenuContextMenu(this),
     );
+    document.addEventListener("contextmenu", (event) => {
+      const input = event.target.closest?.(
+        "input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']), textarea, select, [contenteditable='true'], [contenteditable='']",
+      );
+      if (!input) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.contextMenuManager.openContextMenu("input", input);
+    }, true);
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);
