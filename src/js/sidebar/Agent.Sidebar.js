@@ -261,7 +261,7 @@ class AgentSidebar extends Sidebar {
       messages: (session.messages || []).map((message) => {
         if (!message || typeof message !== "object") return null;
         const snapshot = {};
-        for (const key of ["id", "role", "type", "content", "timestamp", "runId", "status", "startedAt", "finishedAt", "collapsed", "streaming", "hasErrors"]) {
+        for (const key of ["id", "role", "type", "content", "timestamp", "runId", "status", "startedAt", "finishedAt", "durationMs", "collapsed", "streaming", "hasErrors"]) {
           if (typeof message[key] === "string" || typeof message[key] === "number" || typeof message[key] === "boolean") snapshot[key] = message[key];
         }
         if (Array.isArray(message.manualContextItems)) {
@@ -1283,6 +1283,7 @@ class AgentSidebar extends Sidebar {
     if (group) {
       group.startedAt = Number.isFinite(group.startedAt) ? group.startedAt : state.startedAt;
       group.finishedAt = state.finishedAt;
+      group.durationMs = Math.max(0, group.finishedAt - group.startedAt);
     }
     if (session.id === this.activeSessionId) {
       this.stopAgentWorkTicker();
@@ -1379,9 +1380,11 @@ class AgentSidebar extends Sidebar {
       ? state.finishedAt
       : groupEnd || undefined;
     const end = running ? now : finishedAt;
-    refs.duration.textContent = Number.isFinite(startedAt) && Number.isFinite(end)
-      ? formatAgentWorkDuration(end - startedAt)
-      : "";
+    refs.duration.textContent = !running && Number.isFinite(group?.durationMs)
+      ? formatAgentWorkDuration(group.durationMs)
+      : Number.isFinite(startedAt) && Number.isFinite(end)
+        ? formatAgentWorkDuration(end - startedAt)
+        : "";
     if (running && !refs.word) {
       refs.word = this.createWorkingWord();
       refs.header.replaceChildren(refs.word, refs.duration);

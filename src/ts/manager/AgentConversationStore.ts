@@ -17,7 +17,7 @@ const USAGE_KEYS = [
 ] as const;
 const MESSAGE_KEYS = [
   "id", "role", "type", "content", "timestamp", "runId", "status",
-  "startedAt", "finishedAt", "collapsed", "streaming", "hasErrors", "items", "manualContextItems",
+  "startedAt", "finishedAt", "durationMs", "collapsed", "streaming", "hasErrors", "items", "manualContextItems",
 ] as const;
 const ACTIVITY_KEYS = [
   "id", "toolName", "type", "title", "detail", "status", "startedAt",
@@ -82,7 +82,7 @@ function copyAllowed(source: Record<string, any>, keys: readonly string[], itemL
     } else if (["content", "title", "detail", "timestamp", "toolName", "type", "role", "status", "id", "aggregate", "modelEventKind"].includes(key)) {
       const text = boundedText(value, key === "content" ? MAX_TEXT : 4096);
       if (text !== undefined) output[key] = text;
-    } else if (["startedAt", "finishedAt", "runId", "modificationCount", "completedModifications", "failedModifications"].includes(key)) {
+    } else if (["startedAt", "finishedAt", "durationMs", "runId", "modificationCount", "completedModifications", "failedModifications"].includes(key)) {
       const number = safeNumber(value);
       if (number !== undefined) output[key] = number;
     } else if (["collapsed", "streaming", "hasErrors"].includes(key) && typeof value === "boolean") {
