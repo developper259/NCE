@@ -2,7 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export interface Settings {
-  ui: { settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent" };
+  ui: {
+    settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent";
+    settingsScrollTop: number;
+  };
   editor: { tabWidth: number };
   files: { autoSave: boolean };
   appearance: { theme: ThemePreference };
@@ -52,7 +55,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   });
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
-  ui: Object.freeze({ settingsCategory: "Editor" as const }),
+  ui: Object.freeze({ settingsCategory: "Editor" as const, settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
@@ -62,6 +65,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 
 const KNOWN_KEYS = new Set([
   "ui.settingsCategory",
+  "ui.settingsScrollTop",
   "editor.tabWidth",
   "files.autoSave",
   "appearance.theme",
@@ -206,7 +210,10 @@ export class SettingsManager {
 
   getAll(): Settings {
     return {
-      ui: { settingsCategory: this.settings.ui.settingsCategory },
+      ui: {
+        settingsCategory: this.settings.ui.settingsCategory,
+        settingsScrollTop: this.settings.ui.settingsScrollTop,
+      },
       editor: { tabWidth: this.settings.editor.tabWidth },
       files: { autoSave: this.settings.files.autoSave },
       appearance: { theme: this.settings.appearance.theme },
@@ -310,6 +317,12 @@ export class SettingsManager {
     )
       ? merged.ui.settingsCategory
       : fallback.ui.settingsCategory;
+    merged.ui.settingsScrollTop = this.isValid(
+      "ui.settingsScrollTop",
+      merged.ui.settingsScrollTop,
+    )
+      ? merged.ui.settingsScrollTop
+      : fallback.ui.settingsScrollTop;
     merged.editor.tabWidth = this.isValid(
       "editor.tabWidth",
       merged.editor.tabWidth,
@@ -380,6 +393,9 @@ export class SettingsManager {
   private isValid(key: string, value: unknown): boolean {
     if (key === "ui.settingsCategory") {
       return ["Editor", "Files", "Shortcuts", "Agent"].includes(String(value));
+    }
+    if (key === "ui.settingsScrollTop") {
+      return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
     }
     if (key === "editor.tabWidth") {
       return (

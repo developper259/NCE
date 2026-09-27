@@ -56,6 +56,8 @@ class SettingsView {
     this.query = "";
     this.agentSettingsTab = "models";
     this.scroller = null;
+    this.scrollSaveTimer = null;
+    this.scrollRestored = false;
     this.build();
   }
 
@@ -86,6 +88,9 @@ class SettingsView {
     this.renderNavigation();
     this.render();
     this.initScroller();
+    this.content.addEventListener("scroll", () => this.scheduleScrollSave(), {
+      passive: true,
+    });
   }
 
   initScroller() {
@@ -110,6 +115,47 @@ class SettingsView {
     if (!this.scroller) return;
     this.scroller.updateMetrics();
     this.scroller.refresh();
+  }
+
+  restoreScrollTop() {
+    const scrollTop = SETTINGS_GET("ui.settingsScrollTop") || 0;
+    const category = this.category;
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (callback) => setTimeout(callback, 0);
+    schedule(() => {
+      if (!this.content || this.category !== category) return;
+      const maxScrollTop = Math.max(
+        0,
+        this.content.scrollHeight - this.content.clientHeight,
+      );
+      this.content.scrollTop = Math.min(scrollTop, maxScrollTop);
+      this.refreshScroller();
+    });
+  }
+
+  scheduleScrollSave() {
+    clearTimeout(this.scrollSaveTimer);
+    this.scrollSaveTimer = setTimeout(() => {
+      this.scrollSaveTimer = null;
+      this.saveScrollTop();
+    }, 200);
+  }
+
+  saveScrollTop() {
+    clearTimeout(this.scrollSaveTimer);
+    this.scrollSaveTimer = null;
+    if (this.content) {
+      const scrollTop = Math.max(
+        0,
+        Math.min(Math.round(this.content.scrollTop), 1_000_000),
+      );
+      SETTINGS_SET(
+        "ui.settingsScrollTop",
+        scrollTop,
+      );
+    }
   }
 
   getSettings() {
@@ -158,6 +204,7 @@ class SettingsView {
     if (this.search) this.search.value = "";
     this.renderNavigation();
     this.render();
+    this.saveScrollTop();
     return true;
   }
 
@@ -173,8 +220,9 @@ class SettingsView {
     );
   }
 
-  render() {
+  render({ preserveScroll = false } = {}) {
     if (!this.content) return;
+    const previousScrollTop = preserveScroll ? this.content.scrollTop : 0;
     this.content.scrollTop = 0;
     const settings = this.getVisibleSettings();
     this.content.replaceChildren();
@@ -183,6 +231,7 @@ class SettingsView {
       empty.className = "settings-empty";
       empty.textContent = "No settings found.";
       this.content.appendChild(empty);
+      if (preserveScroll) this.content.scrollTop = previousScrollTop;
       this.refreshScroller();
       return;
     }
@@ -207,6 +256,7 @@ class SettingsView {
       }
       this.content.appendChild(section);
     }
+    if (preserveScroll) this.content.scrollTop = previousScrollTop;
     this.refreshScroller();
   }
 
@@ -759,10 +809,15 @@ class SettingsView {
 
   show() {
     if (this.host) this.host.hidden = false;
-    this.render();
+    this.render({ preserveScroll: true });
     this.refreshScroller();
+    if (!this.scrollRestored) {
+      this.scrollRestored = true;
+      this.restoreScrollTop();
+    }
   }
   hide() {
+    this.saveScrollTop();
     if (this.host) this.host.hidden = true;
   }
 }

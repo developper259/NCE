@@ -37,7 +37,7 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 });
 
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
-  ui: Object.freeze({ settingsCategory: "Editor" }),
+  ui: Object.freeze({ settingsCategory: "Editor", settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
   appearance: Object.freeze({ theme: "system" }),
@@ -61,6 +61,12 @@ function SETTINGS_INITIALIZE(settings) {
         ["Editor", "Files", "Shortcuts", "Agent"].includes(settings?.ui?.settingsCategory)
           ? settings.ui.settingsCategory
           : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,
+      settingsScrollTop:
+        Number.isSafeInteger(settings?.ui?.settingsScrollTop) &&
+        settings.ui.settingsScrollTop >= 0 &&
+        settings.ui.settingsScrollTop <= 1_000_000
+          ? settings.ui.settingsScrollTop
+          : DEFAULT_RENDERER_SETTINGS.ui.settingsScrollTop,
     },
     editor: {
       tabWidth:

@@ -45,6 +45,7 @@ test("valid settings persist across manager restarts and set writes JSON", async
     assert.equal(second.get("editor.tabWidth"), 8);
     assert.equal(second.get("files.autoSave"), true);
     assert.deepEqual(await readSettings(root), {
+      ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
       files: { autoSave: true },
       appearance: { theme: "system" },
@@ -156,6 +157,7 @@ test("missing known defaults are merged while unknown properties survive", async
     );
     const manager = new SettingsManager(root);
     assert.deepEqual(await manager.initialize(), {
+      ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 4 },
       files: { autoSave: false },
       appearance: { theme: "system" },
@@ -181,6 +183,7 @@ test("queued concurrent writes leave a complete latest settings document", async
       manager.set("editor.tabWidth", 12),
     ]);
     assert.deepEqual(await readSettings(root), {
+      ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 12 },
       files: { autoSave: true },
       appearance: { theme: "system" },
