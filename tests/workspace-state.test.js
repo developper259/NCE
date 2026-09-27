@@ -39,7 +39,7 @@ function fixture(root = "/projects/A") {
     sidebarManager: { leftScroller, rightScroller },
     agentSidebar: {
       getConfigState: () => ({ currentProviderId: "global", currentModel: "x" }),
-      restoreScrollState(value) { this.restoredScrollState = value; },
+      restoreScrollState() { this.restoredToBottom = true; },
       async loadConfigState(value) { this.loaded = value; },
     },
     searchSidebar: {
@@ -67,7 +67,7 @@ function fixture(root = "/projects/A") {
   return { editor, manager: new StatesManager(editor), saved, files, leftScroller, rightScroller };
 }
 
-test("workspace snapshots contain relative paths and no rootPath", () => {
+test("workspace snapshots contain relative paths and no Agent scroll position", () => {
   const { editor, manager } = fixture();
   const a = new FileNode(editor, 1, "a.js", "/projects/A/src/a.js");
   const settings = new SettingsTab(2);
@@ -79,7 +79,7 @@ test("workspace snapshots contain relative paths and no rootPath", () => {
   assert.deepEqual(Array.from(state.fileExplorer.expandedPaths), ["src", "src/components"]);
   assert.equal(state.fileExplorer.activeFilePath, "src/b.js");
   assert.equal(state.fileExplorer.scrollTop, 123);
-  assert.equal(state.agent.scrollTop, 456);
+  assert.equal("agent" in state, false);
   assert.equal(state.search.query, "needle");
   assert.equal(state.search.sidebarExpanded, true);
   assert.equal("rootPath" in state.fileExplorer, false);
@@ -87,7 +87,7 @@ test("workspace snapshots contain relative paths and no rootPath", () => {
   assert.equal(manager.toWorkspaceRelative("C:\\Work\\A\\src\\a.js", "c:/work/a"), "src/a.js");
 });
 
-test("workspace restores File Explorer and Agent scroll positions", async () => {
+test("workspace restores File Explorer scroll and sends Agent to the bottom", async () => {
   const { editor, manager } = fixture();
   await manager.restoreWorkspaceState({
     version: 1,
@@ -97,7 +97,7 @@ test("workspace restores File Explorer and Agent scroll positions", async () => 
   }, "/projects/A");
 
   assert.equal(editor.fileExplorer.restoredScrollState.scrollTop, 321);
-  assert.equal(editor.agentSidebar.restoredScrollState.scrollTop, 654);
+  assert.equal(editor.agentSidebar.restoredToBottom, true);
   assert.equal(editor.searchSidebar.restoredQueryState.query, "restore me");
   assert.equal(editor.searchSidebar.restoredQueryState.sidebarExpanded, false);
 });
@@ -236,7 +236,7 @@ test("workspace sanitizer allowlists fields, types, paths, ids, and numbers", ()
   assert.deepEqual(Array.from(safe.fileExplorer.expandedPaths), ["src"]);
   assert.equal(safe.fileExplorer.activeFilePath, null);
   assert.equal(safe.fileExplorer.scrollTop, 0);
-  assert.equal(safe.agent.scrollTop, 0);
+  assert.equal("agent" in safe, false);
   assert.equal(safe.search.query, "");
   assert.equal(safe.search.sidebarExpanded, false);
   assert.equal("command" in safe, false);
@@ -244,27 +244,24 @@ test("workspace sanitizer allowlists fields, types, paths, ids, and numbers", ()
   assert.equal(JSON.stringify(safe).includes("<script>"), false);
 });
 
-test("workspace sanitizer retains bounded scroll positions and rejects invalid values", () => {
+test("workspace sanitizer retains bounded File Explorer scroll positions", () => {
   const { manager } = fixture();
   const valid = manager.sanitizeWorkspaceState({
     version: 1,
     fileExplorer: { scrollTop: 987 },
-    agent: { scrollTop: 654 },
     search: { query: "needle", sidebarExpanded: true },
   });
   assert.equal(valid.fileExplorer.scrollTop, 987);
-  assert.equal(valid.agent.scrollTop, 654);
+  assert.equal("agent" in valid, false);
   assert.equal(valid.search.query, "needle");
   assert.equal(valid.search.sidebarExpanded, true);
 
   const invalid = manager.sanitizeWorkspaceState({
     version: 1,
     fileExplorer: { scrollTop: -1 },
-    agent: { scrollTop: 1e20 },
     search: { query: 42 },
   });
   assert.equal(invalid.fileExplorer.scrollTop, 0);
-  assert.equal(invalid.agent.scrollTop, 0);
   assert.equal(invalid.search.query, "");
 });
 

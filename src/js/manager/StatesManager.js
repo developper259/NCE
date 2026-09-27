@@ -485,6 +485,7 @@ class StatesManager {
     await this.loadTabManagerState(safeState.tabManager, root);
     this.loadSidebarState(safeState.sidebar);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
+    this.editor.agentSidebar?.restoreScrollState?.();
     this.editor.searchSidebar?.restoreQueryState?.(safeState.search, {
       runSearch: safeState.sidebar?.leftOpen === true &&
         safeState.sidebar?.leftActiveMenuId === "search",

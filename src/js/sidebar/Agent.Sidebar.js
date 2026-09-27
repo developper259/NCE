@@ -626,14 +626,10 @@ class AgentSidebar extends Sidebar {
     };
   }
 
-  restoreScrollState(state) {
-    const scrollTop = Number.isFinite(state?.scrollTop)
-      ? Math.max(0, state.scrollTop) : 0;
-    this.pendingScrollTop = scrollTop;
-    if (this.messagesElement) {
-      this.messagesElement.scrollTop = scrollTop;
-      this.messagesScroller?.refresh();
-    }
+  restoreScrollState() {
+    this.pendingScrollTop = 0;
+    this.scrollToBottomAfterRestore = true;
+    this.scheduleRestoredBottomScroll();
   }
 
   async refreshProviderApiKey(providerId) {
