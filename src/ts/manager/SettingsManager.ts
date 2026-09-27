@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export interface Settings {
+  ui: { settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent" };
   editor: { tabWidth: number };
   files: { autoSave: boolean };
   appearance: { theme: ThemePreference };
@@ -51,6 +52,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   });
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
+  ui: Object.freeze({ settingsCategory: "Editor" as const }),
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
 });
 
 const KNOWN_KEYS = new Set([
+  "ui.settingsCategory",
   "editor.tabWidth",
   "files.autoSave",
   "appearance.theme",
@@ -203,10 +206,13 @@ export class SettingsManager {
 
   getAll(): Settings {
     return {
+      ui: { settingsCategory: this.settings.ui.settingsCategory },
       editor: { tabWidth: this.settings.editor.tabWidth },
       files: { autoSave: this.settings.files.autoSave },
       appearance: { theme: this.settings.appearance.theme },
-      agent: { hiddenModels: [...this.settings.agent.hiddenModels] },
+      agent: {
+        hiddenModels: [...this.settings.agent.hiddenModels],
+      },
       keybindings: Object.fromEntries(
         Object.keys(DEFAULT_KEYBINDINGS).map((action) => [
           action,
@@ -292,11 +298,18 @@ export class SettingsManager {
     fallback: Settings = DEFAULT_SETTINGS,
   ): Settings & Record<string, unknown> {
     const merged: any = clone(source);
+    if (!isObject(merged.ui)) merged.ui = {};
     if (!isObject(merged.editor)) merged.editor = {};
     if (!isObject(merged.files)) merged.files = {};
     if (!isObject(merged.appearance)) merged.appearance = {};
     if (!isObject(merged.agent)) merged.agent = {};
     if (!isObject(merged.keybindings)) merged.keybindings = {};
+    merged.ui.settingsCategory = this.isValid(
+      "ui.settingsCategory",
+      merged.ui.settingsCategory,
+    )
+      ? merged.ui.settingsCategory
+      : fallback.ui.settingsCategory;
     merged.editor.tabWidth = this.isValid(
       "editor.tabWidth",
       merged.editor.tabWidth,
@@ -323,6 +336,7 @@ export class SettingsManager {
           typeof value === "string" && value.trim().length > 0 && value.length <= 512,
         ))]
       : [...fallback.agent.hiddenModels];
+    delete merged.agent.hiddenProviders;
 
     const seenShortcuts = new Map<string, string>();
     for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {
@@ -364,6 +378,9 @@ export class SettingsManager {
   }
 
   private isValid(key: string, value: unknown): boolean {
+    if (key === "ui.settingsCategory") {
+      return ["Editor", "Files", "Shortcuts", "Agent"].includes(String(value));
+    }
     if (key === "editor.tabWidth") {
       return (
         Number.isInteger(value) &&

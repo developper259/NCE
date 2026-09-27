@@ -52,7 +52,7 @@ class SettingsView {
   constructor(editor) {
     this.editor = editor;
     this.host = editor.domManager.getElement(".settings-view-host");
-    this.category = SETTINGS_UI[0].category;
+    this.category = SETTINGS_GET("ui.settingsCategory") || SETTINGS_UI[0].category;
     this.query = "";
     this.agentSettingsTab = "models";
     this.scroller = null;
@@ -141,11 +141,7 @@ class SettingsView {
         button.textContent = category;
         button.dataset.category = category;
         button.addEventListener("click", () => {
-          this.category = category;
-          this.query = "";
-          if (this.search) this.search.value = "";
-          this.renderNavigation();
-          this.render();
+          this.openCategory(category);
         });
         if (category === this.category) button.classList.add("active");
         return button;
@@ -157,6 +153,7 @@ class SettingsView {
     const available = new Set(this.getSettings().map((setting) => setting.category));
     if (!available.has(category)) return false;
     this.category = category;
+    SETTINGS_SET("ui.settingsCategory", category);
     this.query = "";
     if (this.search) this.search.value = "";
     this.renderNavigation();
@@ -310,15 +307,18 @@ class SettingsView {
       if (!models.length) continue;
       const group = document.createElement("section");
       group.className = "agent-model-group";
+      const groupHeader = document.createElement("div");
+      groupHeader.className = "agent-model-group-header";
       const heading = document.createElement("h2");
       heading.className = "agent-model-group-title";
       heading.textContent = provider.name;
-      group.appendChild(heading);
+      groupHeader.appendChild(heading);
+      group.appendChild(groupHeader);
       const panel = document.createElement("div");
       panel.className = "settings-panel";
       for (const model of models) {
         const key = AgentAI.getModelKey(provider.id, model.id);
-        const row = document.createElement("label");
+        const row = document.createElement("div");
         row.className = "settings-panel-row agent-model-setting";
         const text = document.createElement("span");
         text.className = "settings-row-label";
@@ -327,6 +327,11 @@ class SettingsView {
         input.type = "checkbox";
         input.checked = !hiddenModels.has(key);
         input.setAttribute("aria-label", `${model.name} (${provider.name})`);
+        const toggle = document.createElement("label");
+        toggle.className = "setting-toggle";
+        const track = document.createElement("span");
+        track.setAttribute("aria-hidden", "true");
+        toggle.append(input, track);
         input.addEventListener("change", async () => {
           const previous = new Set(SETTINGS_GET("agent.hiddenModels") || []);
           const next = new Set(previous);
@@ -336,7 +341,7 @@ class SettingsView {
           if (!saved) input.checked = !input.checked;
           else this.editor.agentSidebar?.refreshModelSelector?.();
         });
-        row.append(text, input);
+        row.append(text, toggle);
         panel.appendChild(row);
       }
       group.appendChild(panel);
@@ -369,20 +374,21 @@ class SettingsView {
     details.className = "settings-row-main";
     const title = document.createElement("h4");
     title.textContent = provider.name;
+    details.appendChild(title);
+    container.appendChild(details);
+    if (!provider.requiresApiKey) {
+      const status = document.createElement("p");
+      status.className = "agent-provider-status agent-provider-inline-status";
+      status.textContent = "No API key required.";
+      container.appendChild(status);
+      return container;
+    }
     const status = document.createElement("p");
     status.className = "agent-provider-status";
     const updateStatus = (configured, message = "") => {
       status.textContent = message || (configured ? "Configured" : "Not configured");
       status.dataset.configured = String(configured);
     };
-    details.appendChild(title);
-    container.appendChild(details);
-    if (!provider.requiresApiKey) {
-      status.classList.add("agent-provider-inline-status");
-      container.appendChild(status);
-      updateStatus(false, "No API key required.");
-      return container;
-    }
     details.appendChild(status);
 
     const actions = document.createElement("div");

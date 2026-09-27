@@ -37,6 +37,7 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 });
 
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
+  ui: Object.freeze({ settingsCategory: "Editor" }),
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
   appearance: Object.freeze({ theme: "system" }),
@@ -45,6 +46,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
 });
 
 let RENDERER_SETTINGS = {
+  ui: { ...DEFAULT_RENDERER_SETTINGS.ui },
   editor: { ...DEFAULT_RENDERER_SETTINGS.editor },
   files: { ...DEFAULT_RENDERER_SETTINGS.files },
   appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
@@ -54,6 +56,12 @@ let RENDERER_SETTINGS = {
 
 function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
+    ui: {
+      settingsCategory:
+        ["Editor", "Files", "Shortcuts", "Agent"].includes(settings?.ui?.settingsCategory)
+          ? settings.ui.settingsCategory
+          : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,
+    },
     editor: {
       tabWidth:
         Number.isInteger(settings?.editor?.tabWidth) &&
@@ -80,7 +88,7 @@ function SETTINGS_INITIALIZE(settings) {
       hiddenModels: Array.isArray(settings?.agent?.hiddenModels)
         ? [...new Set(settings.agent.hiddenModels.filter(
             (value) => typeof value === "string" && value.trim() && value.length <= 512,
-          ))]
+        ))]
         : [],
     },
     keybindings: Object.fromEntries(
@@ -187,7 +195,6 @@ async function SETTINGS_SET(key, value) {
     ) return false;
     value = [...new Set(value)];
   }
-
   RENDERER_SETTINGS[section][property] = value;
   const saved = await window.api.setSetting(key, value);
   if (!saved) RENDERER_SETTINGS[section][property] = previous;

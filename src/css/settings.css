@@ -108,9 +108,10 @@
 .agent-settings-panel { min-width: 0; }
 .agent-model-group { margin-top: 20px; }
 .agent-model-group:first-of-type { margin-top: 0; }
+.agent-model-group-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .agent-model-group-title { margin: 0 0 8px; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
 .agent-model-setting { min-height: 42px; padding-top: 8px; padding-bottom: 8px; cursor: pointer; }
-.agent-model-setting input { flex: 0 0 auto; width: 15px; height: 15px; accent-color: var(--accent-primary); }
+.agent-model-setting .setting-toggle { flex: 0 0 auto; }
 .agent-model-setting .settings-row-label { margin: 0; }
 .agent-provider-setting {
   display: grid;
