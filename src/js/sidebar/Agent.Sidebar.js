@@ -68,6 +68,8 @@ class AgentSidebar extends Sidebar {
     this.apiKeys = new Map();
 
     this.agent = editor.agent;
+    this.editor.contextMenuManager?.setMenu("agent-message", buildAgentMessageContextMenu(this));
+    this.editor.contextMenuManager?.setMenu("agent-conversation-tab", buildAgentConversationContextMenu(this));
     this.manualContextManager = new ManualContextManager(this);
     this.agent.setContextProvider(async () => {
       const runSession = this.getSession(this.agent.currentSessionId);
@@ -826,6 +828,14 @@ class AgentSidebar extends Sidebar {
 
     tab.addEventListener("click", () => {
       this.switchToSession(session.id);
+    });
+    tab.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu(
+        "agent-conversation-tab",
+        session,
+      );
     });
 
     return tab;
@@ -2849,6 +2859,11 @@ class AgentSidebar extends Sidebar {
     const row = document.createElement("div");
     const role = message?.role || "agent";
     row.className = `agent-sidebar-message agent-sidebar-message-${role}`;
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu("agent-message", message);
+    });
     if (options.queued) {
       row.classList.add("agent-sidebar-message-queued");
     }
@@ -3045,6 +3060,16 @@ class AgentSidebar extends Sidebar {
     textarea.select();
     document.execCommand("copy");
     textarea.remove();
+  }
+
+  async copyMessageContent(message) {
+    const value = typeof message?.content === "string" ? message.content : "";
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(value);
+    } catch {
+      this.copyTextFallback(value);
+    }
   }
 
   shouldAutoScrollMessages() {
@@ -4041,6 +4066,55 @@ class AgentSidebar extends Sidebar {
     this.refresh();
     this.updateSessionInfoPopover();
     this.focusInput();
+  }
+
+  startRenameSession(sessionId) {
+    const session = this.getSession(sessionId);
+    if (!session || !this.tabsElement) return;
+    const tab = [...this.tabsElement.querySelectorAll(".agent-sidebar-tab")]
+      .find((element) => element.dataset.sessionId === sessionId);
+    const title = tab?.querySelector(".agent-sidebar-tab-title");
+    if (!tab || !title) return;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "agent-sidebar-tab-rename-input";
+    input.value = session.title;
+    input.setAttribute("aria-label", "Rename conversation");
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    title.replaceWith(input);
+
+    let finished = false;
+    const finish = (commit) => {
+      if (finished) return;
+      finished = true;
+      const nextTitle = input.value.trim();
+      if (commit && nextTitle) {
+        session.title = nextTitle;
+        this.scheduleConversationSave(session, true);
+      }
+      const next = document.createElement("span");
+      next.className = "agent-sidebar-tab-title";
+      next.textContent = session.title;
+      if (input.isConnected) input.replaceWith(next);
+    };
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
   }
 
   closeSession(sessionId) {

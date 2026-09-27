@@ -11,6 +11,20 @@ class FileExplorer extends Sidebar {
     this.isLoaded = false;
     this.workspaceSwitching = false;
     this.pendingScrollTop = 0;
+    this.scrollMenuElement = null;
+    this.scrollSaveTimer = null;
+    this.onExplorerScroll = () => {
+      const menu = this.scrollMenuElement;
+      this.pendingScrollTop = menu?.scrollTop || 0;
+      clearTimeout(this.scrollSaveTimer);
+      const root = this.rootPath;
+      if (!root) return;
+      this.scrollSaveTimer = setTimeout(() => {
+        this.scrollSaveTimer = null;
+        if (root !== this.rootPath) return;
+        Promise.resolve(this.editor.statesManager?.saveWorkspaceState?.(root)).catch(() => {});
+      }, 250);
+    };
 
     this.clipboard = null;
 
@@ -319,6 +333,11 @@ class FileExplorer extends Sidebar {
     const container = document.createElement("div");
     container.className = "file-explorer-container";
     const menu = this.editor.sidebarManager?.leftScroller?.menuOBJ;
+    if (menu && this.scrollMenuElement !== menu) {
+      this.scrollMenuElement?.removeEventListener("scroll", this.onExplorerScroll);
+      this.scrollMenuElement = menu;
+      menu.addEventListener("scroll", this.onExplorerScroll, { passive: true });
+    }
     if (menu) menu.scrollTop = this.pendingScrollTop;
 
     const mainTitle = document.createElement("div");

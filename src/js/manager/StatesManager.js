@@ -178,6 +178,8 @@ class StatesManager {
     const scroller = side === "left"
       ? this.editor.sidebarManager?.leftScroller
       : this.editor.sidebarManager?.rightScroller;
+    const elementScrollTop = scroller?.menuOBJ?.scrollTop;
+    if (Number.isFinite(elementScrollTop)) return Math.max(0, elementScrollTop);
     return Number.isFinite(scroller?.scrollTop) ? Math.max(0, scroller.scrollTop) : 0;
   }
 

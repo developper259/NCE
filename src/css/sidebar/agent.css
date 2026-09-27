@@ -199,6 +199,20 @@
   font-size: 11px;
 }
 
+.agent-sidebar-tab-rename-input {
+  box-sizing: border-box;
+  width: 100px;
+  min-width: 48px;
+  padding: 1px 3px;
+  border: 1px solid var(--border-active, #007acc);
+  border-radius: 4px;
+  outline: none;
+  color: var(--text-primary, var(--text-white));
+  background: var(--bg-primary);
+  font: inherit;
+  font-size: 11px;
+}
+
 .agent-sidebar-tab-close {
   width: 14px;
   height: 14px;
