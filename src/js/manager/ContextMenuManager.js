@@ -20,7 +20,10 @@ class ContextMenuManager {
   }
 
   async openContextMenu(name, context = null) {
-    const menuConfig = this.registeredMenus.get(name);
+    const registeredMenu = this.registeredMenus.get(name);
+    const menuConfig = typeof registeredMenu === "function"
+      ? registeredMenu(context)
+      : registeredMenu;
     if (!menuConfig) return;
 
     this.activeCallbacks.clear();
@@ -32,7 +35,9 @@ class ContextMenuManager {
         continue;
       }
 
-      const actionName = action.name || key;
+      const actionName = typeof action.name === "function"
+        ? action.name(context)
+        : action.name || key;
       const enabled =
         typeof action.enabled === "function"
           ? action.enabled(context)
@@ -43,6 +48,10 @@ class ContextMenuManager {
 
       payload.push({
         name: actionName,
+        type: action.type,
+        checked: typeof action.checked === "function"
+          ? action.checked(context)
+          : action.checked === true,
         keys:
           typeof action.keys === "function"
             ? action.keys(context)

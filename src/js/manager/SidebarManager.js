@@ -13,6 +13,16 @@ class SidebarManager {
     this.settingsMenuOpen = false;
     this.settingsOutsideClickHandler = null;
     this.settingsKeydownHandler = null;
+    this.hiddenMenuIds = new Set();
+    try {
+      const stored = JSON.parse(
+        localStorage.getItem("nce.sidebar.hiddenMenuIds") || "[]",
+      );
+      const knownIds = new Set(USERCONFIG_SIDEBAR_MENUS.map(({ id }) => id));
+      if (Array.isArray(stored)) {
+        this.hiddenMenuIds = new Set(stored.filter((id) => knownIds.has(id)));
+      }
+    } catch {}
 
     this.width = 350;
     this.selectorWidth = 48;
@@ -56,6 +66,41 @@ class SidebarManager {
     );
   }
 
+  isMenuVisible(menuId) {
+    return !this.hiddenMenuIds.has(menuId);
+  }
+
+  setMenuVisible(menuId, visible) {
+    if (!USERCONFIG_SIDEBAR_MENUS.some((menu) => menu.id === menuId)) return;
+    const wasVisible = this.isMenuVisible(menuId);
+    if (visible) this.hiddenMenuIds.delete(menuId);
+    else this.hiddenMenuIds.add(menuId);
+    try {
+      localStorage.setItem(
+        "nce.sidebar.hiddenMenuIds",
+        JSON.stringify([...this.hiddenMenuIds]),
+      );
+    } catch {}
+    if (visible && !wasVisible) {
+      this.openMenu(menuId);
+      return;
+    }
+    const hiddenMenu = this.menus.get(menuId);
+    if (!visible && hiddenMenu?.isOpen) {
+      const fallback = USERCONFIG_SIDEBAR_MENUS
+        .map((config) => this.menus.get(config.id))
+        .find((menu) =>
+          menu && menu.id !== menuId &&
+          menu.position === hiddenMenu.position &&
+          this.isMenuVisible(menu.id)
+        );
+      if (fallback) this.openMenu(fallback.id);
+      else this.closeMenu(menuId);
+      return;
+    }
+    this.renderTabSelector();
+  }
+
   renderTabSelector() {
     if (!this.tabSelector) return;
 
@@ -66,6 +111,7 @@ class SidebarManager {
     const fragment = document.createDocumentFragment();
 
     for (const menuConfig of USERCONFIG_SIDEBAR_MENUS) {
+      if (!this.isMenuVisible(menuConfig.id)) continue;
       const menu = this.menus.get(menuConfig.id);
       const iconDiv = document.createElement("div");
       iconDiv.className = "sidebar-tab-icon";
@@ -134,6 +180,17 @@ class SidebarManager {
           const menuId = icon.dataset.menuId;
           this.toggleMenu(menuId);
         }
+      });
+      this.tabSelector.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const icon = event.target.closest(
+          ".sidebar-tab-icon[data-menu-id]",
+        );
+        this.editor.contextMenuManager?.openContextMenu(
+          icon ? "sidebar-selector-icon" : "sidebar-selector-empty",
+          icon ? { menuId: icon.dataset.menuId } : null,
+        );
       });
       this.settingsOutsideClickHandler = (e) => {
         if (

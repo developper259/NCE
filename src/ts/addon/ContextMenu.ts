@@ -33,7 +33,13 @@ export class ContextMenu {
       "ContextMenu:show",
       async (
         event,
-        actions: Array<{ name: string; keys?: string; enabled?: boolean }>,
+        actions: Array<{
+          name: string;
+          keys?: string;
+          enabled?: boolean;
+          type?: string;
+          checked?: boolean;
+        }>,
       ) => {
         return this.openContext(actions);
       },
@@ -44,6 +50,7 @@ export class ContextMenu {
     actions: Array<{
       name: string;
       type?: string;
+      checked?: boolean;
       keys?: string;
       enabled?: boolean;
     }>,
@@ -53,6 +60,9 @@ export class ContextMenu {
         return { type: "separator" };
       }
       return {
+        ...(action.type === "checkbox"
+          ? { type: "checkbox" as const, checked: action.checked === true }
+          : {}),
         label: action.name,
         accelerator: action.keys,
         enabled: action.enabled !== false,

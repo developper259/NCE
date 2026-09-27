@@ -61,6 +61,14 @@ class Editor {
     this.sidebarManager.registerMenu(this.fileExplorer);
     this.sidebarManager.registerMenu(this.searchSidebar);
     this.sidebarManager.registerMenu(this.agentSidebar);
+    this.contextMenuManager.setMenu(
+      "sidebar-selector-empty",
+      buildSidebarSelectorEmptyContextMenu(this.sidebarManager),
+    );
+    this.contextMenuManager.setMenu(
+      "sidebar-selector-icon",
+      buildSidebarSelectorIconContextMenu(this.sidebarManager),
+    );
 
     this.writerController = new WriterController(this);
     this.historyController = new HistoryController(this);
