@@ -13,8 +13,12 @@ class MarkdownView {
   constructor(editor) {
     this.editor = editor;
     this.host = editor.domManager.getElement(".markdown-view-host");
-    this.content = this.host?.querySelector(".markdown-view-content");
+    this.viewport = this.host?.querySelector(".markdown-view-viewport");
+    this.content = this.viewport?.querySelector(".markdown-preview-content");
     this.status = this.host?.querySelector(".markdown-view-status");
+    this.scroller = this.host && this.viewport
+      ? new MarkdownViewScroller(editor, this.viewport, this.host, this.content)
+      : null;
     this.renderer = new MarkdownRenderer({
       getHighlightController: () => this.editor.highlightController,
       readImageFile: (reference, context) =>
@@ -30,6 +34,7 @@ class MarkdownView {
   show(tab) {
     if (!this.host || !tab?.path || !this.isSupportedPath(tab.path)) return;
     this.host.hidden = false;
+    this.scroller?.refresh();
     const generation = ++this.generation;
     this.path = tab.path;
     void this.renderTab(tab, generation);
@@ -77,6 +82,7 @@ class MarkdownView {
       this.renderedPath = tab.path;
       this.renderedWorkspaceRoot = workspaceRoot;
     }
+    this.scroller?.refresh();
   }
 
   setStatus(message, error = false) {
@@ -114,6 +120,7 @@ class MarkdownView {
     }
     this.setStatus("");
     if (this.host) this.host.hidden = true;
+    this.scroller?.refresh();
   }
 
   close(tab) {
@@ -122,5 +129,6 @@ class MarkdownView {
 
   destroy() {
     this.clear();
+    this.scroller?.destroy();
   }
 }

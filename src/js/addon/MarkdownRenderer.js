@@ -356,8 +356,11 @@ class MarkdownRenderer {
         }
         state.objectUrls.add(objectUrl);
         image.removeAttribute("data-nce-image-source");
-        image.classList.remove("markdown-image-loading");
-        image.classList.add("markdown-image-loaded");
+        image.addEventListener("load", () => {
+          if (!this.isCurrentImageRequest(container, image, state, revision)) return;
+          image.classList.remove("markdown-image-loading");
+          image.classList.add("markdown-image-loaded");
+        }, { once: true });
         image.addEventListener("error", () => {
           if (this.isCurrentImageRequest(container, image, state, revision))
             this.markImageError(image);

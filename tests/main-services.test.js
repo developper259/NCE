@@ -219,24 +219,36 @@ test("FileManager reads allowlisted raster images with verified MIME and bounded
 });
 
 test("Markdown image paths stay relative to the Markdown source and workspace", async () => {
+  const projectRoot = path.join(path.parse(process.cwd()).root, "project");
+  const sourcePath = path.join(projectRoot, "docs", "guide", "README.md");
+  const workspaceRoot = projectRoot;
+  const imagePath = path.join(projectRoot, "docs", "images", "demo.png");
   assert.deepEqual(
     resolveMarkdownImagePath(
-      "/project/docs/guide/README.md",
-      "../images/demo.png",
-      "/project",
+      sourcePath,
+      path.join("..", "images", "demo.png"),
+      workspaceRoot,
     ),
     {
-      sourcePath: "/project/docs/guide/README.md",
-      workspaceRoot: "/project",
-      imagePath: "/project/docs/images/demo.png",
+      sourcePath,
+      workspaceRoot,
+      imagePath,
     },
   );
   assert.equal(
-    resolveMarkdownImagePath("/project/README.md", "../../etc/passwd.png", "/project"),
+    resolveMarkdownImagePath(
+      path.join(projectRoot, "README.md"),
+      path.join("..", "..", "etc", "passwd.png"),
+      projectRoot,
+    ),
     null,
   );
   assert.equal(
-    resolveMarkdownImagePath("/project/README.md", "https://example.com/a.png", "/project"),
+    resolveMarkdownImagePath(
+      path.join(projectRoot, "README.md"),
+      "https://example.com/a.png",
+      projectRoot,
+    ),
     null,
   );
   assert.deepEqual(

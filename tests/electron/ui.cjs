@@ -146,6 +146,7 @@ module.exports = async function exerciseUI() {
   };
   try {
     const previewContainer = document.createElement('div');
+    previewContainer.className = 'markdown-preview-content';
     document.body.append(previewContainer);
     const preview = new MarkdownRenderer({
       readImageFile: async (reference, context) => {
@@ -171,6 +172,11 @@ module.exports = async function exerciseUI() {
 - Simple
 
 ![Markdown Logo](./assets/logo/NCE/dark-logo.png)
+
+Run \`npm install\`.
+
+<pre><code class="language-js">const value = 1;</code></pre>
+
 <script>window.__nceXss = true</script><iframe src="https://evil.example"></iframe>
 <a href="javascript:alert(1)">bad</a><a href="https://github.com/">good</a>
 <img src="https://tracking.example/pixel.png" alt="remote" width="calc(100%)">`;
@@ -189,6 +195,9 @@ module.exports = async function exerciseUI() {
     check(previewContainer.querySelector('h1[align="center"]')?.textContent === 'NCE', 'README HTML heading is rendered');
     check(previewContainer.querySelector('strong')?.textContent === 'A lightweight editor', 'README inline HTML formatting is rendered');
     check(previewContainer.querySelector('h2')?.textContent === 'About' && previewContainer.querySelectorAll('li').length === 2, 'Markdown headings and lists still render');
+    check(!getComputedStyle(previewContainer).fontFamily.includes('JetBrains Mono'), 'Markdown document uses a sans-serif font');
+    check(getComputedStyle(previewContainer.querySelector('h1')).borderBottomStyle === 'solid', 'README title has its document divider');
+    check(getComputedStyle(previewContainer.querySelector('code')).fontFamily.includes('monospace'), 'Code remains monospace inside the document');
     check(!previewContainer.querySelector('script,iframe,[onerror],[style],[data-random]') && !window.__nceXss, 'Unsafe HTML and attributes are removed');
     check(!previewContainer.querySelector('a[href^="javascript:"]'), 'Workspace preview blocks unsafe links');
     check(previewContainer.querySelector('a[href="https://github.com/"][target="_blank"][rel="noopener noreferrer"]'), 'Workspace preview keeps safe external links isolated');
