@@ -44,6 +44,10 @@ class Editor {
       buildTabContextMenu(this.tabManager),
     );
     this.contextMenuManager.setMenu("output", buildOutputContextMenu(this));
+    this.contextMenuManager.setMenu(
+      "empty-menu",
+      buildEmptyMenuContextMenu(this),
+    );
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);

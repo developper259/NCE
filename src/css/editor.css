@@ -23,6 +23,7 @@
 
 .editor-empty {
   background-color: var(--bg-primary);
+  overflow: visible;
 }
 
 .editor-output {
