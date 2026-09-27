@@ -1,0 +1,56 @@
+.markdown-view-host {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  overflow: auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.markdown-view-host[hidden] { display: none; }
+.editor-markdown-active > :not(.markdown-view-host) { display: none !important; }
+.markdown-view-content {
+  width: min(100%, 960px);
+  min-height: 100%;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 30px 40px 56px;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.markdown-view-status {
+  position: sticky;
+  top: 0;
+  padding: 8px 14px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  z-index: 1;
+}
+.markdown-view-status[data-state="error"] { color: var(--error, var(--text-secondary)); }
+.markdown-view-content img {
+  max-width: 100%;
+  vertical-align: middle;
+}
+.markdown-view-content .markdown-image-loading { opacity: 0.55; }
+.markdown-view-content .markdown-image-error {
+  color: var(--text-secondary);
+  font-size: 0.9em;
+  font-style: italic;
+}
+.markdown-table-wrapper {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.markdown-view-content .markdown-table-wrapper > table {
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  table-layout: auto;
+}
+.markdown-view-content details { margin: 8px 0; }
+.markdown-view-content summary { cursor: pointer; }
+@media (max-width: 700px) {
+  .markdown-view-content { padding: 22px 20px 40px; }
+}

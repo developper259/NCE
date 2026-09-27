@@ -7,45 +7,58 @@ class BottomBar {
     this.fileStatusElement = getElement(".bottomBar-file-status");
     this.languageElement = getElement("#language");
     this.configSpaceElement = getElement("#config-space");
-    this.imageViewPicker = getElement("#image-view");
+    this.viewTypePicker = getElement("#view-type");
     this.bottomBarElement = getElement(".bottomBar");
 
     this.refreshLanguage();
     this.refreshScrollers();
     this.refreshFileStatus();
-    this.refreshImageViewPicker();
+    this.refreshViewTypePicker();
   }
 
-  openImageViewPicker() {
+  openViewTypePicker() {
     const tab = this.editor.tabManager.activeTab;
-    if (!tab?.path || !this.isImagePath(tab.path)) return;
-    const selectedId = tab.type === "picture" ? "picture" : "text";
+    if (!tab?.path) return;
+    const isImage = this.isImagePath(tab.path);
+    const isMarkdown = this.isMarkdownPath(tab.path);
+    if (!isImage && !isMarkdown) return;
+    const previewId = isImage ? "picture" : "markdown";
+    const selectedId = tab.type === previewId ? previewId : "text";
     this.editor.quickPanel.open({
-      id: "image-view",
+      id: "view-type",
       mode: "pick",
-      title: "Select Image View",
-      placeholder: "Select Image View",
+      title: "Change View Type",
+      placeholder: "Change View Type",
       selectedId,
-      items: [
+      items: isImage ? [
         { id: "picture", label: "Image Preview", data: "picture" },
+        { id: "text", label: "Text Editor", data: "text" },
+      ] : [
+        { id: "markdown", label: "Markdown Preview", data: "markdown" },
         { id: "text", label: "Text Editor", data: "text" },
       ],
       onAccept: (item) => this.editor.tabManager.switchActiveTabView(item.data),
     });
   }
 
-  refreshImageViewPicker() {
-    if (!this.imageViewPicker) return;
+  refreshViewTypePicker() {
+    if (!this.viewTypePicker) return;
     const tab = this.editor.tabManager.activeTab;
-    const isImage = tab?.type === "picture" || this.isImagePath(tab?.path || "");
-    this.imageViewPicker.hidden = !isImage;
-    const title = this.imageViewPicker.querySelector(".scroller-title");
-    if (title) title.textContent = tab?.type === "picture"
-      ? "Image Preview" : "Text Editor";
+    const isImage = this.isImagePath(tab?.path || "");
+    const isMarkdown = this.isMarkdownPath(tab?.path || "");
+    this.viewTypePicker.hidden = !isImage && !isMarkdown;
+    const title = this.viewTypePicker.querySelector(".scroller-title");
+    if (!title) return;
+    title.textContent = tab?.type === "picture" ? "Image Preview"
+      : tab?.type === "markdown" ? "Markdown Preview" : "Text Editor";
   }
 
   isImagePath(path) {
     return Boolean(this.editor.pictureView?.isPreviewablePath?.(path));
+  }
+
+  isMarkdownPath(path) {
+    return Boolean(this.editor.markdownView?.isSupportedPath?.(path));
   }
 
   async openLanguage() {
@@ -126,7 +139,7 @@ class BottomBar {
   }
 
   refresh() {
-    this.refreshImageViewPicker();
+    this.refreshViewTypePicker();
     this.refreshFileStatus();
     if (!this.editor.tabManager.activeFile) return;
 
@@ -206,13 +219,18 @@ class BottomBar {
     leftBottomBar.style.display = "flex";
     middleBottomBar.style.display = "flex";
     rightBottomBar.style.display = "flex";
-    this.bottomBarElement?.classList.remove("bottomBar-image-preview-mode");
-    this.refreshImageViewPicker();
+    this.bottomBarElement?.classList.remove("bottomBar-image-preview-mode", "bottomBar-preview-mode");
+    this.refreshViewTypePicker();
     this.refreshFileStatus();
   }
 
   showImagePreview() {
     this.show();
-    this.bottomBarElement?.classList.add("bottomBar-image-preview-mode");
+    this.bottomBarElement?.classList.add("bottomBar-image-preview-mode", "bottomBar-preview-mode");
+  }
+
+  showMarkdownPreview() {
+    this.show();
+    this.bottomBarElement?.classList.add("bottomBar-preview-mode");
   }
 }

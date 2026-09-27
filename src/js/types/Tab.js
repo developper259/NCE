@@ -2,6 +2,7 @@ const TAB_TYPES = Object.freeze({
   FILE: "file",
   SETTINGS: "settings",
   PICTURE: "picture",
+  MARKDOWN: "markdown",
 });
 
 class Tab {
@@ -24,6 +25,15 @@ class PictureTab extends Tab {
     super(id, TAB_TYPES.PICTURE, NCEPath.basename(path));
     this.path = path;
     this.diskFingerprint = null;
+  }
+}
+
+class MarkdownTab extends Tab {
+  constructor(id, path) {
+    super(id, TAB_TYPES.MARKDOWN, NCEPath.basename(path));
+    this.path = path;
+    this.diskFingerprint = null;
+    this.textTab = null;
   }
 }
 

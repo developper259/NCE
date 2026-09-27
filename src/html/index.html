@@ -27,6 +27,7 @@
     <link rel="stylesheet" href="../css/SearchBar.css" />
     <link rel="stylesheet" href="../css/settings.css" />
     <link rel="stylesheet" href="../css/pictureView.css" />
+    <link rel="stylesheet" href="../css/markdownView.css" />
 
     <link rel="stylesheet" href="../css/sidebar/fileExplorer.css" />
     <link rel="stylesheet" href="../css/sidebar/search.css" />
@@ -63,6 +64,10 @@
               <img class="picture-view-image" alt="" draggable="false">
             </div>
           </div>
+        </div>
+        <div class="markdown-view-host box-bottom" hidden>
+          <div class="markdown-view-status" hidden></div>
+          <article class="markdown-view-content agent-sidebar-markdown"></article>
         </div>
         <div class="empty-menu"></div>
         <div class="editor-search-bar">
@@ -141,7 +146,7 @@
           </div>
         </section>
         <section class="right">
-          <div class="bottomBar-el scroller-open" id="image-view" hidden>
+          <div class="bottomBar-el scroller-open" id="view-type" hidden>
             <span class="scroller-title"></span>
           </div>
           <div class="bottomBar-el scroller-open" id="language">
@@ -226,6 +231,7 @@
     <script src="../js/types/Tab.js"></script>
     <script src="../js/view/SettingsView.js"></script>
     <script src="../js/view/PictureView.js"></script>
+    <script src="../js/view/MarkdownView.js"></script>
     <script src="../js/types/Line.js"></script>
     <script src="../js/types/Scroller.js"></script>
     <script src="../js/types/Sidebar.js"></script>

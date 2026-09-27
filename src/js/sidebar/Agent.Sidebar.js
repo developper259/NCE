@@ -2879,6 +2879,7 @@ class AgentSidebar extends Sidebar {
       if (role === "agent") {
         contentEl.classList.add("agent-sidebar-markdown");
         this.markdownRenderer.render(contentValue, contentEl, {
+          mode: MarkdownRenderer.MODES.STRICT,
           highlightImmediately: message?.streaming !== true,
         });
       } else {
@@ -3122,6 +3123,7 @@ class AgentSidebar extends Sidebar {
 
     const shouldFollowScroll = this.shouldAutoScrollMessages();
     this.markdownRenderer.update(message.content, element, {
+      mode: MarkdownRenderer.MODES.STRICT,
       onRendered: () => {
         if (shouldFollowScroll && session.id === this.activeSessionId) {
           this.scrollMessagesToBottom();

@@ -6,13 +6,20 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 
-test("Markdown renderer disables unsafe HTML/images and validates links", () => {
+test("Markdown renderer keeps strict default and isolates sanitized workspace preview", () => {
   const source = read("src/js/addon/MarkdownRenderer.js");
-  assert.match(source, /html:\s*false/);
-  assert.match(source, /markdown\.disable\("image"\)/);
+  assert.match(source, /STRICT:\s*"strict"/);
+  assert.match(source, /WORKSPACE_PREVIEW:\s*"workspace-preview"/);
+  assert.match(source, /createMarkdownEngine\(\{ html: false, images: false \}\)/);
+  assert.match(source, /createMarkdownEngine\(\{ html: true, images: true \}\)/);
+  assert.match(source, /if \(!images\) markdown\.disable\("image"\)/);
+  assert.match(source, /sanitizePreviewFragment/);
+  assert.match(source, /loadPreviewImages/);
   assert.match(source, /\["http:", "https:", "mailto:"\]/);
   assert.match(source, /token\.className/);
   assert.match(source, /\^nsh-\[a-z0-9-\]\+\$/i);
+  assert.match(read("src/js/sidebar/Agent.Sidebar.js"), /new MarkdownRenderer\(/);
+  assert.doesNotMatch(read("src/js/sidebar/Agent.Sidebar.js"), /WORKSPACE_PREVIEW/);
 });
 
 test("Preload exposes the core IPC contract without node integration", () => {

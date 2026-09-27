@@ -162,7 +162,7 @@ class Events {
       const id = scroller.id || scroller.parentElement?.id;
       if (id === "config-space") this.editor.bottomBar.openConfigSpace();
       if (id === "language") this.editor.bottomBar.openLanguage();
-      if (id === "image-view") this.editor.bottomBar.openImageViewPicker();
+      if (id === "view-type") this.editor.bottomBar.openViewTypePicker();
       return;
     }
   }

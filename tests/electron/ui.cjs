@@ -117,8 +117,9 @@ module.exports = async function exerciseUI() {
 
   const container = document.createElement('div'); document.body.append(container);
   const markdown = new MarkdownRenderer({ getHighlightController: () => editor.highlightController });
-  markdown.render('# Title\n**bold**\n- item\n\n<script>window.__nceXss = true</script>\n[jump](javascript:alert(1))\n[web](https://example.com)\n[mail](mailto:test@example.com)\n![image](https://example.com/x.png)\n```javascript\nconst value = 1;\n```', container);
+  markdown.render('# Title\n**bold**\n- item\n\n<h1>Agent HTML stays text</h1>\n<script>window.__nceXss = true</script>\n[jump](javascript:alert(1))\n[web](https://example.com)\n[mail](mailto:test@example.com)\n![image](https://example.com/x.png)\n```javascript\nconst value = 1;\n```', container);
   check(container.querySelector('h1')?.textContent === 'Title', 'Markdown heading');
+  check(!Array.from(container.querySelectorAll('h1')).some(node => node.textContent === 'Agent HTML stays text'), 'Agent raw HTML remains strict');
   check(container.querySelector('strong')?.textContent === 'bold', 'Markdown bold');
   check(Boolean(container.querySelector('li')), 'Markdown list');
   check(!container.querySelector('script,img') && !window.__nceXss, 'Markdown XSS and images');
@@ -128,6 +129,137 @@ module.exports = async function exerciseUI() {
   while (!container.querySelector('[class*="nsh-"]') && Date.now() < deadline) await new Promise(r => setTimeout(r, 20));
   check(Boolean(container.querySelector('[class*="nsh-"]')), 'Markdown JS highlighting');
   container.remove();
+
+  const originalCreateObjectURL = URL.createObjectURL;
+  const originalRevokeObjectURL = URL.revokeObjectURL;
+  const createdMarkdownUrls = [];
+  const revokedMarkdownUrls = [];
+  const markdownImageReferences = [];
+  URL.createObjectURL = function (blob) {
+    const url = originalCreateObjectURL.call(URL, blob);
+    createdMarkdownUrls.push(url);
+    return url;
+  };
+  URL.revokeObjectURL = function (url) {
+    revokedMarkdownUrls.push(url);
+    return originalRevokeObjectURL.call(URL, url);
+  };
+  try {
+    const previewContainer = document.createElement('div');
+    document.body.append(previewContainer);
+    const preview = new MarkdownRenderer({
+      readImageFile: async (reference, context) => {
+        markdownImageReferences.push({ reference, context });
+        return {
+          success: true,
+          mimeType: 'image/png',
+          data: Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='), value => value.charCodeAt(0)),
+        };
+      },
+    });
+    const readme = `<p align="center"><img src="./assets/logo/NCE/dark-logo.png" alt="NCE" width="96" onerror="alert(1)" style="position:fixed" data-random="bad"></p>
+
+<h1 align="center">NCE</h1>
+
+<p align="center"><strong>A lightweight editor</strong></p>
+
+## About
+
+**NCE** is a code editor.
+
+- Fast
+- Simple
+
+![Markdown Logo](./assets/logo/NCE/dark-logo.png)
+<script>window.__nceXss = true</script><iframe src="https://evil.example"></iframe>
+<a href="javascript:alert(1)">bad</a><a href="https://github.com/">good</a>
+<img src="https://tracking.example/pixel.png" alt="remote" width="calc(100%)">`;
+    preview.render(readme, previewContainer, {
+      mode: MarkdownRenderer.MODES.WORKSPACE_PREVIEW,
+      sourcePath: '/project/README.md',
+      workspaceRoot: '/project',
+    });
+    const waitFor = async (condition, message) => {
+      const expires = Date.now() + 2000;
+      while (!condition() && Date.now() < expires) await new Promise(resolve => setTimeout(resolve, 10));
+      check(condition(), message);
+    };
+    await waitFor(() => previewContainer.querySelectorAll('img[src^="blob:"]').length === 2, 'Markdown local images load through blob URLs');
+    check(previewContainer.querySelector('p[align="center"] img[width="96"]'), 'README HTML image and alignment survive sanitization');
+    check(previewContainer.querySelector('h1[align="center"]')?.textContent === 'NCE', 'README HTML heading is rendered');
+    check(previewContainer.querySelector('strong')?.textContent === 'A lightweight editor', 'README inline HTML formatting is rendered');
+    check(previewContainer.querySelector('h2')?.textContent === 'About' && previewContainer.querySelectorAll('li').length === 2, 'Markdown headings and lists still render');
+    check(!previewContainer.querySelector('script,iframe,[onerror],[style],[data-random]') && !window.__nceXss, 'Unsafe HTML and attributes are removed');
+    check(!previewContainer.querySelector('a[href^="javascript:"]'), 'Workspace preview blocks unsafe links');
+    check(previewContainer.querySelector('a[href="https://github.com/"][target="_blank"][rel="noopener noreferrer"]'), 'Workspace preview keeps safe external links isolated');
+    check(!previewContainer.querySelector('img[src^="https://"],img[src^="data:"],img[src^="file:"]'), 'Remote and dangerous image sources never reach the DOM');
+    check(markdownImageReferences.length === 2 && markdownImageReferences.every(({ reference, context }) => reference === './assets/logo/NCE/dark-logo.png' && context.sourcePath === '/project/README.md' && context.workspaceRoot === '/project'), 'Both Markdown and HTML images use the source-aware local image API');
+
+    preview.render('![second](./second.png)', previewContainer, {
+      mode: MarkdownRenderer.MODES.WORKSPACE_PREVIEW,
+      sourcePath: '/project/README.md',
+      workspaceRoot: '/project',
+    });
+    await waitFor(() => previewContainer.querySelector('img[src^="blob:"]')?.alt === 'second', 'Markdown preview rerenders the latest image');
+    check(createdMarkdownUrls.length === 3 && revokedMarkdownUrls.includes(createdMarkdownUrls[0]) && revokedMarkdownUrls.includes(createdMarkdownUrls[1]), 'Rerender releases the previous image Blob URLs');
+    preview.destroy(previewContainer);
+    check(revokedMarkdownUrls.includes(createdMarkdownUrls[2]), 'Destroy releases the active image Blob URL');
+    previewContainer.remove();
+  } finally {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalRevokeObjectURL;
+  }
+
+  const updateContainer = document.createElement('div');
+  document.body.append(updateContainer);
+  const updateContexts = [];
+  const updateRenderer = new MarkdownRenderer({
+    readImageFile: async (_reference, context) => {
+      updateContexts.push(context);
+      return {
+        success: true,
+        mimeType: 'image/png',
+        data: Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='), value => value.charCodeAt(0)),
+      };
+    },
+  });
+  const unchangedMarkdown = '![context](./asset.png)';
+  updateRenderer.render(unchangedMarkdown, updateContainer, {
+    mode: MarkdownRenderer.MODES.WORKSPACE_PREVIEW,
+    sourcePath: '/project/README.md',
+    workspaceRoot: '/project',
+  });
+  const waitForUpdate = async () => {
+    const expires = Date.now() + 2000;
+    while (updateContexts.length < 1 && Date.now() < expires) await new Promise(resolve => setTimeout(resolve, 10));
+    check(updateContexts.length === 1, 'Initial workspace image request completes');
+  };
+  await waitForUpdate();
+  updateRenderer.update(unchangedMarkdown, updateContainer, {
+    sourcePath: '/project/docs/README.md',
+  });
+  const updatedExpires = Date.now() + 2000;
+  while (updateContexts.length < 2 && Date.now() < updatedExpires) await new Promise(resolve => setTimeout(resolve, 10));
+  check(updateContexts.length === 2 && updateContexts[1].sourcePath === '/project/docs/README.md', 'Update rerenders identical Markdown when its source path changes');
+  updateRenderer.destroy(updateContainer);
+  updateContainer.remove();
+
+  const raceContainer = document.createElement('div');
+  document.body.append(raceContainer);
+  const pendingImages = new Map();
+  const raceRenderer = new MarkdownRenderer({
+    readImageFile: (reference) => new Promise(resolve => pendingImages.set(reference, resolve)),
+  });
+  raceRenderer.render('![old](./old.png)', raceContainer, { mode: MarkdownRenderer.MODES.WORKSPACE_PREVIEW, sourcePath: '/project/README.md', workspaceRoot: '/project' });
+  raceRenderer.render('![new](./new.png)', raceContainer, { mode: MarkdownRenderer.MODES.WORKSPACE_PREVIEW, sourcePath: '/project/README.md', workspaceRoot: '/project' });
+  const imageData = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII='), value => value.charCodeAt(0));
+  pendingImages.get('./new.png')({ success: true, mimeType: 'image/png', data: imageData });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  pendingImages.get('./old.png')({ success: true, mimeType: 'image/png', data: imageData });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  check(raceContainer.querySelector('img')?.alt === 'new' && raceContainer.querySelector('img')?.getAttribute('src')?.startsWith('blob:'), 'Late image response cannot replace the current preview');
+  raceRenderer.destroy(raceContainer);
+  raceContainer.remove();
   file.isSaved = true;
   await editor.tabManager.closeFile(file.id);
   return true;

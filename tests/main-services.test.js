@@ -7,6 +7,7 @@ const test = require("node:test");
 const {
   FileManager,
   MAX_IMAGE_FILE_SIZE,
+  resolveMarkdownImagePath,
   validateEntryName,
   atomicWriteFile,
 } = require("../dist/ts/addon/FileManager.js");
@@ -214,6 +215,73 @@ test("FileManager reads allowlisted raster images with verified MIME and bounded
     assert.equal((await manager.readImageFile(large)).code, "IMAGE_TOO_LARGE");
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Markdown image paths stay relative to the Markdown source and workspace", async () => {
+  assert.deepEqual(
+    resolveMarkdownImagePath(
+      "/project/docs/guide/README.md",
+      "../images/demo.png",
+      "/project",
+    ),
+    {
+      sourcePath: "/project/docs/guide/README.md",
+      workspaceRoot: "/project",
+      imagePath: "/project/docs/images/demo.png",
+    },
+  );
+  assert.equal(
+    resolveMarkdownImagePath("/project/README.md", "../../etc/passwd.png", "/project"),
+    null,
+  );
+  assert.equal(
+    resolveMarkdownImagePath("/project/README.md", "https://example.com/a.png", "/project"),
+    null,
+  );
+  assert.deepEqual(
+    resolveMarkdownImagePath(
+      "C:\\project\\docs\\README.md",
+      "..\\images\\demo.png",
+      "C:\\project",
+    ),
+    {
+      sourcePath: "C:\\project\\docs\\README.md",
+      workspaceRoot: "C:\\project",
+      imagePath: "C:\\project\\images\\demo.png",
+    },
+  );
+
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-markdown-assets-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-markdown-outside-"));
+  try {
+    await fsp.mkdir(path.join(root, "docs"), { recursive: true });
+    const markdownPath = path.join(root, "docs", "README.md");
+    const imagePath = path.join(root, "logo.png");
+    await fsp.writeFile(markdownPath, "# Test");
+    await fsp.writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const manager = new FileManager({});
+    const allowed = await manager.readImageFile("../logo.png", {
+      sourcePath: markdownPath,
+      workspaceRoot: root,
+    });
+    assert.equal(allowed.success, true);
+    assert.deepEqual(Array.from(allowed.data), [0x89, 0x50, 0x4e, 0x47]);
+    assert.equal((await manager.readImageFile("../../outside.png", {
+      sourcePath: markdownPath,
+      workspaceRoot: root,
+    })).code, "OUTSIDE_WORKSPACE");
+
+    const outsideImage = path.join(outside, "secret.png");
+    await fsp.writeFile(outsideImage, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await fsp.symlink(outsideImage, path.join(root, "linked.png"));
+    assert.equal((await manager.readImageFile("../linked.png", {
+      sourcePath: markdownPath,
+      workspaceRoot: root,
+    })).code, "OUTSIDE_WORKSPACE");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(outside, { recursive: true, force: true });
   }
 });
 

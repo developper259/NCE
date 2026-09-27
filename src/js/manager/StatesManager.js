@@ -104,6 +104,12 @@ class StatesManager {
         if (!serializedPath || (root && !this.toWorkspaceRelative(tab.path, root))) return [];
         return [{ id: tab.id, type: TAB_TYPES.PICTURE, path: serializedPath }];
       }
+      if (tab.type === TAB_TYPES.MARKDOWN) {
+        const serializedPath = root === undefined ? tab.path
+          : root ? this.toWorkspaceRelative(tab.path, root) : tab.path || null;
+        if (!serializedPath || (root && !this.toWorkspaceRelative(tab.path, root))) return [];
+        return [{ id: tab.id, type: TAB_TYPES.MARKDOWN, path: serializedPath }];
+      }
       const serializedPath = root === undefined
         ? tab.path
         : root
@@ -235,7 +241,7 @@ class StatesManager {
   sanitizeWorkspaceTab(value, seenIds, seenPaths) {
     if (!this.isRecord(value)) return null;
     const type = value.type;
-    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS && type !== TAB_TYPES.PICTURE) return null;
+    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS && type !== TAB_TYPES.PICTURE && type !== TAB_TYPES.MARKDOWN) return null;
     const id = this.safeInteger(value.id, -1, 1, 1_000_000);
     if (id < 1 || seenIds.has(id)) return null;
     if (type === TAB_TYPES.SETTINGS) {
@@ -246,6 +252,14 @@ class StatesManager {
     if (value.path !== null && !path) return null;
     if (type === TAB_TYPES.PICTURE) {
       if (!path || !PictureView.isSupportedPath(path)) return null;
+      const key = NCEPath.comparisonKey(path);
+      if (seenPaths.has(key)) return null;
+      seenPaths.add(key);
+      seenIds.add(id);
+      return { id, type, name: NCEPath.basename(path), path };
+    }
+    if (type === TAB_TYPES.MARKDOWN) {
+      if (!path || !/\.md$/i.test(path)) return null;
       const key = NCEPath.comparisonKey(path);
       if (seenPaths.has(key)) return null;
       seenPaths.add(key);
@@ -453,6 +467,12 @@ class StatesManager {
           ? [{ id: tab.id, type: TAB_TYPES.PICTURE, path: relative }]
           : [];
       }
+      if (tab.type === TAB_TYPES.MARKDOWN) {
+        const relative = this.toWorkspaceRelative(tab.path, root);
+        return relative && /\.md$/i.test(relative)
+          ? [{ id: tab.id, type: TAB_TYPES.MARKDOWN, path: relative }]
+          : [];
+      }
       const relative = this.toWorkspaceRelative(tab.path, root);
       return relative === null ? [] : [{
         id: tab.id, type: TAB_TYPES.FILE, path: relative,
@@ -556,6 +576,20 @@ class StatesManager {
             if (!status?.exists || status.isDirectory || status.readable === false) continue;
           }
           tab = new PictureTab(runtimeId, filePath);
+        }
+        else if (data.type === TAB_TYPES.MARKDOWN) {
+          const filePath = root === undefined ? data.path
+            : root ? this.resolveWorkspacePath(data.path, root) : data.path || null;
+          if (!filePath || !/\.md$/i.test(filePath)) continue;
+          const fileOperations = this.editor.fileExplorer?.fileOperations;
+          if (root && typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+            const canonical = await this.editor.api.resolveWorkspaceStatePath(root, data.path);
+            if (!canonical || canonical.isDirectory || canonical.readable !== true) continue;
+          } else if (fileOperations?.pathStatus) {
+            const status = await fileOperations.pathStatus(filePath);
+            if (!status?.exists || status.isDirectory || status.readable === false) continue;
+          }
+          tab = new MarkdownTab(runtimeId, filePath);
         }
         else if (
           data.type === TAB_TYPES.FILE ||

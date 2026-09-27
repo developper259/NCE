@@ -118,6 +118,7 @@ class Editor {
     this.sidebarResizer = new SidebarResizer(this);
     this.settingsView = new SettingsView(this);
     this.pictureView = new PictureView(this);
+    this.markdownView = new MarkdownView(this);
 
     window.addEventListener("focus", () =>
       this.tabManager.scheduleFocusResync(),
@@ -239,23 +240,35 @@ class Editor {
     const type = this.tabManager.activeTab?.type;
     const settingsActive = type === TAB_TYPES.SETTINGS;
     const pictureActive = type === TAB_TYPES.PICTURE;
+    const markdownActive = type === TAB_TYPES.MARKDOWN;
     this.editorOBJ.classList.toggle("editor-settings-active", settingsActive);
     this.editorOBJ.classList.toggle("editor-picture-active", pictureActive);
+    this.editorOBJ.classList.toggle("editor-markdown-active", markdownActive);
     if (settingsActive) {
       this.settingsView?.show();
       this.pictureView?.hide();
+      this.markdownView?.hide();
       this.bottomBar?.hide();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (pictureActive) {
       this.settingsView?.hide();
+      this.markdownView?.hide();
       this.pictureView?.show(this.tabManager.activeTab);
       this.bottomBar?.showImagePreview();
+      this.cursorController?.disable();
+      this.setSelected(false);
+    } else if (markdownActive) {
+      this.settingsView?.hide();
+      this.pictureView?.hide();
+      this.markdownView?.show(this.tabManager.activeTab);
+      this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else {
       this.settingsView?.hide();
       this.pictureView?.hide();
+      this.markdownView?.hide();
       if (this.tabManager.activeFile) this.bottomBar?.show();
     }
   }

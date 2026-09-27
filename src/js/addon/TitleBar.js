@@ -521,7 +521,7 @@ class TitleBar {
     if (!this.title) return;
     const file = this.editor.tabManager.activeFile;
     const activeTab = this.editor.tabManager.activeTab;
-    const tabName = file?.name || (activeTab?.type === TAB_TYPES.PICTURE ? activeTab.name : "");
+    const tabName = file?.name || ([TAB_TYPES.PICTURE, TAB_TYPES.MARKDOWN].includes(activeTab?.type) ? activeTab.name : "");
     const project = this.editor.fileExplorer?.projectName;
     const context = tabName
       ? `${tabName}${project ? ` · ${project}` : ""}`

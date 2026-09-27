@@ -36,9 +36,9 @@
 }
 
 .bottomBar-el[hidden] { display: none; }
-.bottomBar-image-preview-mode #language,
-.bottomBar-image-preview-mode #config-space,
-.bottomBar-image-preview-mode .bottomBar-cursor-status { display: none !important; }
+.bottomBar-preview-mode #language,
+.bottomBar-preview-mode #config-space,
+.bottomBar-preview-mode .bottomBar-cursor-status { display: none !important; }
 
 .scroller-open:active {
   background-color: var(--bg-active);

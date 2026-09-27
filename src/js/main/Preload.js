@@ -113,8 +113,8 @@ contextBridge.exposeInMainWorld("api", {
   initializeFile: (filePath) =>
     ipcRenderer.invoke("FileManager:initializeFile", filePath),
 
-  readImageFile: (filePath) =>
-    ipcRenderer.invoke("FileManager:readImageFile", filePath),
+  readImageFile: (filePath, context) =>
+    ipcRenderer.invoke("FileManager:readImageFile", filePath, context),
 
   getFileChunk: (filePath, startLine, lineCount) =>
     ipcRenderer.invoke(

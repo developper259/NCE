@@ -1,4 +1,24 @@
 class MarkdownRenderer {
+  static MODES = Object.freeze({
+    STRICT: "strict",
+    WORKSPACE_PREVIEW: "workspace-preview",
+  });
+
+  static PREVIEW_TAGS = new Set([
+    "p", "div", "span", "h1", "h2", "h3", "h4", "h5", "h6",
+    "strong", "b", "em", "i", "s", "del", "u", "pre", "code", "kbd",
+    "ul", "ol", "li", "blockquote", "br", "hr", "a", "img", "table",
+    "thead", "tbody", "tr", "th", "td", "details", "summary", "sub", "sup",
+  ]);
+
+  static DROP_CONTENT_TAGS = new Set([
+    "script", "style", "iframe", "object", "embed", "video", "audio", "source",
+    "canvas", "form", "input", "button", "textarea", "select", "link", "meta",
+    "base", "svg", "math",
+  ]);
+
+  static MAX_IMAGE_DIMENSION = 8192;
+
   constructor(options = {}) {
     this.throttleMs = Math.max(16, Number(options.throttleMs) || 50);
     this.highlightDelayMs = Math.max(
@@ -6,15 +26,19 @@ class MarkdownRenderer {
       Number(options.highlightDelayMs) || 180,
     );
     this.getHighlightController = options.getHighlightController || null;
+    this.readImageFile = options.readImageFile || null;
     this.supportedLanguagesPromise = null;
     this.detectedLanguages = new Map();
     this.highlightCache = new Map();
     this.maxHighlightCacheEntries = 32;
     this.states = new WeakMap();
-    this.markdown = this.createMarkdownEngine();
+    this.strictMarkdown = this.createMarkdownEngine({ html: false, images: false });
+    this.previewMarkdown = this.createMarkdownEngine({ html: true, images: true });
+    // Keep this alias for integrations that inspect the historical strict engine.
+    this.markdown = this.strictMarkdown;
   }
 
-  createMarkdownEngine() {
+  createMarkdownEngine({ html, images }) {
     const markdownItFactory = window.markdownit;
 
     if (typeof markdownItFactory !== "function") {
@@ -25,14 +49,15 @@ class MarkdownRenderer {
     }
 
     const markdown = markdownItFactory({
-      html: false,
+      html,
       breaks: true,
       linkify: false,
       typographer: false,
     });
 
-    markdown.disable("image");
-    markdown.validateLink = (url) => this.isSafeLink(url);
+    if (!images) markdown.disable("image");
+    markdown.validateLink = (url) =>
+      this.isSafeLink(url) || (images && this.isSafeLocalImageReference(url));
     const defaultLinkOpen =
       markdown.renderer.rules.link_open ||
       ((tokens, index, renderOptions, environment, renderer) =>
@@ -70,6 +95,21 @@ class MarkdownRenderer {
     }
   }
 
+  isSafeLocalImageReference(value) {
+    if (typeof value !== "string") return false;
+    const reference = value.trim();
+    if (!reference || /[\u0000-\u001f\u007f]/.test(reference)) return false;
+    if (/^(?:[a-z][a-z\d+.-]*:|\/|\\|[a-z]:[\\/])/i.test(reference)) return false;
+    if (reference.startsWith("//") || /[?#]/.test(reference)) return false;
+    return true;
+  }
+
+  normalizeMode(value) {
+    return value === MarkdownRenderer.MODES.WORKSPACE_PREVIEW
+      ? MarkdownRenderer.MODES.WORKSPACE_PREVIEW
+      : MarkdownRenderer.MODES.STRICT;
+  }
+
   normalize(markdown) {
     return typeof markdown === "string" ? markdown : "";
   }
@@ -80,6 +120,14 @@ class MarkdownRenderer {
       state = {
         markdown: "",
         renderedMarkdown: null,
+        mode: MarkdownRenderer.MODES.STRICT,
+        sourcePath: null,
+        workspaceRoot: null,
+        renderedMode: null,
+        renderedSourcePath: null,
+        renderedWorkspaceRoot: null,
+        objectUrls: new Set(),
+        forceRender: false,
         lastRenderAt: 0,
         timer: null,
         frame: null,
@@ -98,8 +146,12 @@ class MarkdownRenderer {
 
     const state = this.getState(container);
     state.markdown = this.normalize(markdown);
+    state.mode = this.normalizeMode(options.mode);
+    state.sourcePath = typeof options.sourcePath === "string" ? options.sourcePath : null;
+    state.workspaceRoot = typeof options.workspaceRoot === "string" ? options.workspaceRoot : null;
     state.onRendered = options.onRendered || null;
     state.highlightImmediately = options.highlightImmediately !== false;
+    state.forceRender = true;
     state.revision += 1;
     this.cancelScheduled(state);
     this.commit(container, state);
@@ -110,7 +162,14 @@ class MarkdownRenderer {
 
     const state = this.getState(container);
     const nextMarkdown = this.normalize(markdown);
-    if (nextMarkdown !== state.markdown) {
+    const nextMode = options.mode === undefined ? state.mode : this.normalizeMode(options.mode);
+    const nextSourcePath = options.sourcePath === undefined
+      ? state.sourcePath : typeof options.sourcePath === "string" ? options.sourcePath : null;
+    const nextWorkspaceRoot = options.workspaceRoot === undefined
+      ? state.workspaceRoot : typeof options.workspaceRoot === "string" ? options.workspaceRoot : null;
+    const renderContextChanged = nextMode !== state.mode ||
+      nextSourcePath !== state.sourcePath || nextWorkspaceRoot !== state.workspaceRoot;
+    if (nextMarkdown !== state.markdown || renderContextChanged) {
       state.revision += 1;
       if (state.highlightTimer !== null) {
         clearTimeout(state.highlightTimer);
@@ -118,11 +177,15 @@ class MarkdownRenderer {
       }
     }
     state.markdown = nextMarkdown;
+    state.mode = nextMode;
+    state.sourcePath = nextSourcePath;
+    state.workspaceRoot = nextWorkspaceRoot;
     state.onRendered = options.onRendered || state.onRendered;
     state.highlightImmediately = false;
+    state.forceRender = false;
 
     if (
-      state.markdown === state.renderedMarkdown ||
+      this.isCurrentRender(state) ||
       state.timer !== null ||
       state.frame !== null
     ) {
@@ -147,8 +210,15 @@ class MarkdownRenderer {
     }, delay);
   }
 
+  isCurrentRender(state) {
+    return state.markdown === state.renderedMarkdown &&
+      state.mode === state.renderedMode &&
+      state.sourcePath === state.renderedSourcePath &&
+      state.workspaceRoot === state.renderedWorkspaceRoot;
+  }
+
   commit(container, state) {
-    if (state.markdown === state.renderedMarkdown) {
+    if (this.isCurrentRender(state) && !state.forceRender) {
       if (state.highlightImmediately) {
         state.revision += 1;
         this.scheduleCodeHighlight(container, state, true);
@@ -159,22 +229,163 @@ class MarkdownRenderer {
       return;
     }
 
-    if (!this.markdown) {
+    this.releaseObjectUrls(state);
+    if (state.mode === MarkdownRenderer.MODES.WORKSPACE_PREVIEW && this.previewMarkdown) {
+      const template = document.createElement("template");
+      template.innerHTML = this.previewMarkdown.render(state.markdown);
+      const safeFragment = this.sanitizePreviewFragment(template.content);
+      container.replaceChildren(safeFragment);
+    } else if (!this.strictMarkdown) {
       container.textContent = state.markdown;
     } else {
       const template = document.createElement("template");
-      template.innerHTML = this.markdown.render(state.markdown);
+      template.innerHTML = this.strictMarkdown.render(state.markdown);
       container.replaceChildren(template.content.cloneNode(true));
     }
 
     state.renderedMarkdown = state.markdown;
+    state.renderedMode = state.mode;
+    state.renderedSourcePath = state.sourcePath;
+    state.renderedWorkspaceRoot = state.workspaceRoot;
+    state.forceRender = false;
     state.lastRenderAt = performance.now();
     state.revision += 1;
+    const revision = state.revision;
     this.scheduleCodeHighlight(container, state, state.highlightImmediately);
+    if (state.mode === MarkdownRenderer.MODES.WORKSPACE_PREVIEW)
+      void this.loadPreviewImages(container, state, revision);
 
     const onRendered = state.onRendered;
     state.onRendered = null;
     onRendered?.();
+  }
+
+  sanitizePreviewFragment(sourceFragment) {
+    const fragment = document.createDocumentFragment();
+    this.sanitizePreviewChildren(sourceFragment, fragment);
+    return fragment;
+  }
+
+  sanitizePreviewChildren(sourceParent, safeParent) {
+    for (const sourceNode of Array.from(sourceParent.childNodes || [])) {
+      if (sourceNode.nodeType === Node.TEXT_NODE) {
+        safeParent.appendChild(document.createTextNode(sourceNode.nodeValue || ""));
+        continue;
+      }
+      if (sourceNode.nodeType !== Node.ELEMENT_NODE) continue;
+
+      const tag = sourceNode.localName?.toLowerCase();
+      if (sourceNode.namespaceURI !== "http://www.w3.org/1999/xhtml") continue;
+      if (MarkdownRenderer.DROP_CONTENT_TAGS.has(tag)) continue;
+      if (!MarkdownRenderer.PREVIEW_TAGS.has(tag)) {
+        this.sanitizePreviewChildren(sourceNode, safeParent);
+        continue;
+      }
+
+      const safeElement = document.createElement(tag);
+      this.sanitizePreviewAttributes(sourceNode, safeElement, tag);
+      if (tag === "table") {
+        const wrapper = document.createElement("div");
+        wrapper.className = "markdown-table-wrapper";
+        wrapper.appendChild(safeElement);
+        safeParent.appendChild(wrapper);
+      } else {
+        safeParent.appendChild(safeElement);
+      }
+      if (tag !== "img" && tag !== "br" && tag !== "hr")
+        this.sanitizePreviewChildren(sourceNode, safeElement);
+    }
+  }
+
+  sanitizePreviewAttributes(sourceElement, safeElement, tag) {
+    for (const attribute of Array.from(sourceElement.attributes || [])) {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value;
+      if (name.startsWith("on") || name === "style" || name === "id" || name.startsWith("data-")) continue;
+      if (name === "title" && value.length <= 512) {
+        safeElement.setAttribute("title", value);
+      } else if (name === "align" && /^(left|center|right|justify)$/i.test(value.trim()) &&
+          /^(p|div|h[1-6]|td|th|table)$/.test(tag)) {
+        safeElement.setAttribute("align", value.trim().toLowerCase());
+      } else if (tag === "img" && name === "src" && this.isSafeLocalImageReference(value)) {
+        safeElement.setAttribute("data-nce-image-source", value.trim());
+      } else if (tag === "img" && name === "alt" && value.length <= 2048) {
+        safeElement.setAttribute("alt", value);
+      } else if (tag === "img" && (name === "width" || name === "height")) {
+        const dimension = Number(value);
+        if (Number.isInteger(dimension) && dimension >= 1 &&
+            dimension <= MarkdownRenderer.MAX_IMAGE_DIMENSION)
+          safeElement.setAttribute(name, String(dimension));
+      } else if (tag === "a" && name === "href" && this.isSafeLink(value)) {
+        safeElement.setAttribute("href", value.trim());
+        safeElement.setAttribute("target", "_blank");
+        safeElement.setAttribute("rel", "noopener noreferrer");
+      } else if ((tag === "th" || tag === "td") && (name === "colspan" || name === "rowspan")) {
+        const span = Number(value);
+        if (Number.isInteger(span) && span >= 1 && span <= 1000)
+          safeElement.setAttribute(name, String(span));
+      } else if (tag === "details" && name === "open") {
+        safeElement.setAttribute("open", "");
+      } else if (tag === "code" && name === "class" &&
+          /^language-[a-z0-9_+-]{1,40}$/i.test(value.trim())) {
+        // markdown-it uses this one class form for fenced-code language hints.
+        safeElement.className = value.trim();
+      }
+    }
+  }
+
+  async loadPreviewImages(container, state, revision) {
+    const images = Array.from(container.querySelectorAll("img[data-nce-image-source]"));
+    await Promise.all(images.map(async (image) => {
+      const reference = image.getAttribute("data-nce-image-source");
+      image.classList.add("markdown-image-loading");
+      try {
+        if (!this.readImageFile || !state.sourcePath || !reference) throw new Error("Image unavailable");
+        const result = await this.readImageFile(reference, {
+          sourcePath: state.sourcePath,
+          workspaceRoot: state.workspaceRoot,
+        });
+        if (!this.isCurrentImageRequest(container, image, state, revision)) return;
+        if (!result?.success || !result.data || !/^image\/(?:png|jpeg|webp|gif|bmp|x-icon|svg\+xml)$/.test(result.mimeType || ""))
+          throw new Error("Image unavailable");
+
+        const objectUrl = URL.createObjectURL(new Blob([result.data], { type: result.mimeType }));
+        if (!this.isCurrentImageRequest(container, image, state, revision)) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        state.objectUrls.add(objectUrl);
+        image.removeAttribute("data-nce-image-source");
+        image.classList.remove("markdown-image-loading");
+        image.classList.add("markdown-image-loaded");
+        image.addEventListener("error", () => {
+          if (this.isCurrentImageRequest(container, image, state, revision))
+            this.markImageError(image);
+        }, { once: true });
+        image.src = objectUrl;
+      } catch {
+        if (this.isCurrentImageRequest(container, image, state, revision))
+          this.markImageError(image);
+      }
+    }));
+  }
+
+  isCurrentImageRequest(container, image, state, revision) {
+    return state.mode === MarkdownRenderer.MODES.WORKSPACE_PREVIEW &&
+      state.revision === revision && image.isConnected && container.contains(image);
+  }
+
+  markImageError(image) {
+    const placeholder = document.createElement("span");
+    placeholder.className = "markdown-image-error";
+    placeholder.textContent = image.alt || "Image unavailable";
+    image.replaceWith(placeholder);
+  }
+
+  releaseObjectUrls(state) {
+    for (const objectUrl of state.objectUrls)
+      URL.revokeObjectURL(objectUrl);
+    state.objectUrls.clear();
   }
 
   cancelScheduled(state) {
@@ -408,6 +619,7 @@ class MarkdownRenderer {
     if (!state) return;
     state.revision += 1;
     this.cancelScheduled(state);
+    this.releaseObjectUrls(state);
     this.states.delete(container);
   }
 }

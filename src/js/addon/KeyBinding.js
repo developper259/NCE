@@ -227,12 +227,15 @@ class KeyBinding {
     });
 
     const activeTab = this.editor.tabManager.activeTab;
-    const imageViewActions = Boolean(this.editor.pictureView?.isPreviewablePath?.(activeTab?.path || ""))
+    const viewTypeActions = Boolean(
+      this.editor.pictureView?.isPreviewablePath?.(activeTab?.path || "") ||
+      this.editor.markdownView?.isSupportedPath?.(activeTab?.path || ""),
+    )
       ? [{
-          id: "change-image-view",
+          id: "change-view-type",
           label: "Change View Type",
-          keywords: ["image", "preview", "text", "editor", "view"],
-          data: { imageViewPicker: true },
+          keywords: ["image", "markdown", "preview", "text", "editor", "view"],
+          data: { viewTypePicker: true },
         }]
       : [];
 
@@ -249,7 +252,7 @@ class KeyBinding {
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
-    const allActions = settingCategories.concat(imageViewActions, shortcutItems);
+    const allActions = settingCategories.concat(viewTypeActions, shortcutItems);
     const recentlyUsedItems = this.recentCommandIds
       .map((id) => allActions.find((item) => item.id === id))
       .filter(Boolean)
@@ -314,8 +317,8 @@ class KeyBinding {
     if (item?.data?.themePicker) {
       return this.editor.themeManager?.openThemePicker();
     }
-    if (item?.data?.imageViewPicker) {
-      return this.editor.bottomBar?.openImageViewPicker();
+    if (item?.data?.viewTypePicker) {
+      return this.editor.bottomBar?.openViewTypePicker();
     }
     if (item?.data?.settingsJson) {
       return this.editor.openSettingsJson?.();
