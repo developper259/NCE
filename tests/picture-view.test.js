@@ -9,7 +9,17 @@ const objectURLApi = {
   createObjectURL: () => `blob:test-${++nextUrl}`,
   revokeObjectURL: (url) => revokedUrls.push(url),
 };
-const PictureView = loadGlobal("src/js/view/PictureView.js", "PictureView", { NCEPath, URL: objectURLApi, Blob, TAB_TYPES: { PICTURE: "picture" } });
+const PictureViewScroller = loadGlobal(
+  "src/js/scrollers/PictureView.Scroller.js",
+  "PictureViewScroller",
+);
+const PictureView = loadGlobal("src/js/view/PictureView.js", "PictureView", {
+  NCEPath,
+  URL: objectURLApi,
+  Blob,
+  TAB_TYPES: { PICTURE: "picture" },
+  PictureViewScroller,
+});
 
 test("raster routing is case insensitive and leaves SVG as text", () => {
   for (const file of ["foo.png", "IMAGE.PNG", "photo.JpEg", "icon.ico", "photo.webp", "photo.gif", "photo.bmp"])
