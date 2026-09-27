@@ -195,8 +195,10 @@ test("FileManager reads allowlisted raster images with verified MIME and bounded
     const manager = new FileManager({});
     const png = path.join(root, "IMAGE.PNG");
     const directory = path.join(root, "directory.png");
+    const unsupported = path.join(root, "unsupported.txt");
     await fsp.mkdir(directory);
     await fsp.writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    await fsp.writeFile(unsupported, "not an image");
     const result = await manager.readImageFile(png);
     assert.equal(result.success, true);
     assert.equal(result.mimeType, "image/png");
@@ -205,7 +207,7 @@ test("FileManager reads allowlisted raster images with verified MIME and bounded
     assert.equal((await manager.readImageFile(path.join(root, "missing.png"))).code, "SOURCE_NOT_FOUND");
     assert.equal((await manager.readImageFile(directory)).code, "NOT_A_FILE");
     assert.equal((await manager.readImageFile(`${png}\0bad`)).code, "INVALID_PATH");
-    assert.equal((await manager.readImageFile(path.join(root, "no.svg"))).code, "UNSUPPORTED_IMAGE");
+    assert.equal((await manager.readImageFile(unsupported)).code, "UNSUPPORTED_IMAGE");
     const large = path.join(root, "large.png");
     await fsp.writeFile(large, "");
     await fsp.truncate(large, MAX_IMAGE_FILE_SIZE + 1);

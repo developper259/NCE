@@ -305,8 +305,9 @@ class QuickPanel {
   }
 
   updateSelectionDOM(previousIndex, nextIndex) {
-    const previousRow = this.list.children[previousIndex];
-    const nextRow = this.list.children[nextIndex];
+    const rows = this.list.querySelectorAll(".quick-panel-item");
+    const previousRow = rows[previousIndex];
+    const nextRow = rows[nextIndex];
     previousRow?.setAttribute("aria-selected", "false");
     nextRow?.setAttribute("aria-selected", "true");
   }
@@ -317,7 +318,7 @@ class QuickPanel {
   }
 
   scrollSelectedIntoView() {
-    const row = this.list.children[this.session?.selectedIndex];
+    const row = this.list.querySelectorAll(".quick-panel-item")[this.session?.selectedIndex];
     row?.scrollIntoView?.({ block: "nearest" });
   }
 
@@ -395,7 +396,25 @@ class QuickPanel {
       return;
     }
 
+    let previousSection = null;
+    let renderedRows = 0;
     this.session.visibleItems.forEach((item, index) => {
+      if (item.separatorBefore && renderedRows > 0) {
+        const separator = document.createElement("div");
+        separator.className = "quick-panel-separator";
+        separator.setAttribute("role", "separator");
+        this.list.appendChild(separator);
+      }
+      const section = item.section || null;
+      if (section && section !== previousSection) {
+        const heading = document.createElement("div");
+        heading.className = "quick-panel-group-label";
+        heading.textContent = section;
+        heading.setAttribute("role", "presentation");
+        this.list.appendChild(heading);
+      }
+      previousSection = section;
+
       const row = document.createElement("button");
       row.type = "button";
       row.className = "quick-panel-item";
@@ -458,6 +477,7 @@ class QuickPanel {
       });
 
       this.list.appendChild(row);
+      renderedRows++;
     });
   }
 

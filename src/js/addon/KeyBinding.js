@@ -1,6 +1,7 @@
 class KeyBinding {
   constructor(e) {
     this.editor = e;
+    this.recentCommandIds = this.loadRecentCommandIds();
     this.fileActions = new Set([
       "save",
       "go_to_line",
@@ -226,7 +227,7 @@ class KeyBinding {
     });
 
     const activeTab = this.editor.tabManager.activeTab;
-    const imageViewActions = PictureView.isPreviewablePath(activeTab?.path || "")
+    const imageViewActions = Boolean(this.editor.pictureView?.isPreviewablePath?.(activeTab?.path || ""))
       ? [{
           id: "change-image-view",
           label: "Change View Type",
@@ -248,7 +249,22 @@ class KeyBinding {
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
-    const items = settingCategories.concat(imageViewActions, shortcutItems);
+    const allActions = settingCategories.concat(imageViewActions, shortcutItems);
+    const recentlyUsedItems = this.recentCommandIds
+      .map((id) => allActions.find((item) => item.id === id))
+      .filter(Boolean)
+      .map((item) => ({
+        ...item,
+        id: `recent:${item.id}`,
+        recentCommandId: item.id,
+        section: "Recently Used",
+      }));
+    const items = recentlyUsedItems.concat(
+      allActions.map((item, index) => ({
+        ...item,
+        separatorBefore: index === 0 && recentlyUsedItems.length > 0,
+      })),
+    );
 
     quickPanel.open({
       id: "command-palette",
@@ -289,6 +305,8 @@ class KeyBinding {
   }
 
   executeCommandItem(item) {
+    if (item?.id && !item?.data?.askAgent)
+      this.rememberCommand(item.recentCommandId || item.id);
     if (item?.data?.askAgent) {
       this.editor.sidebarManager?.openMenu?.("agent");
       return this.editor.agentSidebar?.sendMessage?.(item.data.askAgent);
@@ -308,6 +326,22 @@ class KeyBinding {
     const keybinding = item?.data || item;
     if (!keybinding?.action) return;
     this.editor.keyBinding.exec(keybinding);
+  }
+
+  loadRecentCommandIds() {
+    try {
+      const stored = JSON.parse(localStorage.getItem("nce.quickPanel.recentCommands") || "[]");
+      return Array.isArray(stored) ? stored.filter((id) => typeof id === "string").slice(0, 3) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  rememberCommand(id) {
+    this.recentCommandIds = [id, ...this.recentCommandIds.filter((recentId) => recentId !== id)].slice(0, 3);
+    try {
+      localStorage.setItem("nce.quickPanel.recentCommands", JSON.stringify(this.recentCommandIds));
+    } catch {}
   }
 
   getActionLabel(action) {

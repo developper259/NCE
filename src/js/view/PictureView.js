@@ -16,6 +16,10 @@ class PictureView {
       PictureView.previewableExtensions.has(NCEPath.basename(path).match(/\.[^.]+$/)?.[0]?.toLowerCase());
   }
 
+  isPreviewablePath(path) {
+    return PictureView.isPreviewablePath(path);
+  }
+
   constructor(editor) {
     this.editor = editor;
     this.host = editor.domManager.getElement(".picture-view-host");

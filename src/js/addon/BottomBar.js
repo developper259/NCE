@@ -18,8 +18,8 @@ class BottomBar {
 
   openImageViewPicker() {
     const tab = this.editor.tabManager.activeTab;
-    if (!tab?.path || !PictureView.isPreviewablePath(tab.path)) return;
-    const selectedId = tab.type === TAB_TYPES.PICTURE ? "picture" : "text";
+    if (!tab?.path || !this.isImagePath(tab.path)) return;
+    const selectedId = tab.type === "picture" ? "picture" : "text";
     this.editor.quickPanel.open({
       id: "image-view",
       mode: "pick",
@@ -37,12 +37,15 @@ class BottomBar {
   refreshImageViewPicker() {
     if (!this.imageViewPicker) return;
     const tab = this.editor.tabManager.activeTab;
-    const isImage = tab?.type === TAB_TYPES.PICTURE ||
-      PictureView.isPreviewablePath(tab?.path || "");
+    const isImage = tab?.type === "picture" || this.isImagePath(tab?.path || "");
     this.imageViewPicker.hidden = !isImage;
     const title = this.imageViewPicker.querySelector(".scroller-title");
-    if (title) title.textContent = tab?.type === TAB_TYPES.PICTURE
+    if (title) title.textContent = tab?.type === "picture"
       ? "Image Preview" : "Text Editor";
+  }
+
+  isImagePath(path) {
+    return Boolean(this.editor.pictureView?.isPreviewablePath?.(path));
   }
 
   async openLanguage() {
@@ -134,9 +137,7 @@ class BottomBar {
 
   refreshFileStatus() {
     if (!this.fileStatusElement) return;
-    const file = this.editor.tabManager.activeTab?.type === TAB_TYPES.FILE
-      ? this.editor.tabManager.activeFile
-      : null;
+    const file = this.editor.tabManager.activeFile;
     const status = file?.loadingState?.status;
     const text = this.fileStatusElement.querySelector(".bottomBar-text");
     let message = "";

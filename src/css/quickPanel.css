@@ -103,6 +103,21 @@
   background-clip: padding-box;
 }
 
+.quick-panel-group-label {
+  padding: 7px 8px 3px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.quick-panel-separator {
+  height: 1px;
+  min-height: 1px;
+  flex: 0 0 1px;
+  margin: 6px 3px;
+  background: var(--border-secondary);
+}
+
 .quick-panel-item {
   display: flex;
   align-items: center;
