@@ -26,18 +26,25 @@ The editor core was designed and implemented from scratch, without relying on pr
 
 Text rendering, cursor handling, selections, history, scrolling, file management and editing behaviour are handled by NCE's own architecture.
 
-**Current version**: **0.0.1-beta.2**
+**Current version**: **0.0.1-beta.3**
 
-## Beta 2 highlights
+## Beta 3 highlights
 
-- **Open Recent** with a persistent
-- Searchable **Settings tab** with category navigation and dedicated scrolling
-- Fully configurable keyboard shortcuts, including shortcut removal and special-key capture
-- Shortcuts synchronized across the editor, Command Palette and native macOS menu
-- Context menus for the editor output, tabs and File Explorer
-- Find in File prefill from a single-line selection
-- Safe workspace switching with dirty-file confirmation and watcher/search/cache cleanup
-- Session-safe Reload Window and protected handling of concurrent or external file changes
+- Major AI Agent reliability and architecture improvements
+- Safer and more reliable multi-file editing
+- Improved file revision tracking and stale edit recovery
+- Better large-file writing and automatic recovery
+- Manual context support for files, folders and selections
+- Integrated project test detection and test execution
+- Improved tool calling, JSON recovery and model error handling
+- Persistent Agent conversations and workspace state
+- Improved Agent activity timeline and change review
+- Compact reasoning viewer with reasoning history and copy support
+- Improved Agent permissions and approval flows
+- Better context management and response budgeting
+- New light theme and system theme support
+- Improved Settings, Search, Sidebars and context menus
+- Numerous editor, keybinding, rendering and workspace-state fixes
 
 ## Features
 
@@ -123,7 +130,7 @@ Build artifacts are generated in `release/`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.2**
+Current version: **0.0.1-beta.3**
 
 ## License
 
