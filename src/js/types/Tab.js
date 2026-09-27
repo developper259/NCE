@@ -1,6 +1,7 @@
 const TAB_TYPES = Object.freeze({
   FILE: "file",
   SETTINGS: "settings",
+  PICTURE: "picture",
 });
 
 class Tab {
@@ -15,6 +16,14 @@ class Tab {
 class SettingsTab extends Tab {
   constructor(id) {
     super(id, TAB_TYPES.SETTINGS, "Settings");
+  }
+}
+
+class PictureTab extends Tab {
+  constructor(id, path) {
+    super(id, TAB_TYPES.PICTURE, NCEPath.basename(path));
+    this.path = path;
+    this.diskFingerprint = null;
   }
 }
 

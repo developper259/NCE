@@ -117,6 +117,7 @@ class Editor {
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
     this.settingsView = new SettingsView(this);
+    this.pictureView = new PictureView(this);
 
     window.addEventListener("focus", () =>
       this.tabManager.scheduleFocusResync(),
@@ -235,16 +236,26 @@ class Editor {
   }
 
   refreshMainContent() {
-    const settingsActive =
-      this.tabManager.activeTab?.type === TAB_TYPES.SETTINGS;
+    const type = this.tabManager.activeTab?.type;
+    const settingsActive = type === TAB_TYPES.SETTINGS;
+    const pictureActive = type === TAB_TYPES.PICTURE;
     this.editorOBJ.classList.toggle("editor-settings-active", settingsActive);
+    this.editorOBJ.classList.toggle("editor-picture-active", pictureActive);
     if (settingsActive) {
       this.settingsView?.show();
+      this.pictureView?.hide();
+      this.bottomBar?.hide();
+      this.cursorController?.disable();
+      this.setSelected(false);
+    } else if (pictureActive) {
+      this.settingsView?.hide();
+      this.pictureView?.show(this.tabManager.activeTab);
       this.bottomBar?.hide();
       this.cursorController?.disable();
       this.setSelected(false);
     } else {
       this.settingsView?.hide();
+      this.pictureView?.hide();
       if (this.tabManager.activeFile) this.bottomBar?.show();
     }
   }

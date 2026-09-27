@@ -3,10 +3,14 @@ const assert = require("node:assert/strict");
 const { loadGlobal } = require("./helpers/runtime");
 
 const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
-const TAB_TYPES = { FILE: "file", SETTINGS: "settings" };
+const TAB_TYPES = { FILE: "file", SETTINGS: "settings", PICTURE: "picture" };
 class SettingsTab {
   constructor(id) { this.id = id; this.type = TAB_TYPES.SETTINGS; }
 }
+class PictureTab {
+  constructor(id, path) { Object.assign(this, { id, type: TAB_TYPES.PICTURE, path, name: NCEPath.basename(path) }); }
+}
+const PictureView = { isSupportedPath: (path) => /\.(png|jpe?g|webp|gif|bmp|ico)$/i.test(path || "") };
 class FileNode {
   constructor(editor, id, name, path) {
     Object.assign(this, {
@@ -19,7 +23,7 @@ class FileNode {
 const StatesManager = loadGlobal(
   "src/js/manager/StatesManager.js",
   "StatesManager",
-  { NCEPath, TAB_TYPES, SettingsTab, FileNode },
+  { NCEPath, TAB_TYPES, SettingsTab, PictureTab, PictureView, FileNode },
 );
 
 function fixture(root = "/projects/A") {
@@ -85,6 +89,47 @@ test("workspace snapshots contain relative paths and no Agent scroll position", 
   assert.equal("rootPath" in state.fileExplorer, false);
   assert.equal(JSON.stringify(state).includes("/projects/A"), false);
   assert.equal(manager.toWorkspaceRelative("C:\\Work\\A\\src\\a.js", "c:/work/a"), "src/a.js");
+});
+
+test("picture tabs serialize minimally and sanitize relative paths and identity", () => {
+  const { editor, manager } = fixture();
+  const picture = new PictureTab(9, "/projects/A/assets/logo.PNG");
+  picture.name = "untrusted name";
+  editor.tabManager.tabs = [picture];
+  editor.tabManager.activeTab = picture;
+  const snapshot = manager.getTabManagerState("/projects/A");
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.tabs)), [{ id: 9, type: "picture", path: "assets/logo.PNG" }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.activeTab)), { id: 9 });
+  assert.equal(snapshot.activeFile, null);
+  assert.equal("files" in snapshot && snapshot.files.length, 0);
+  const clean = manager.sanitizeTabManager({
+    activeTab: { id: 1 }, activeFile: { id: 1 },
+    tabs: [
+      { id: 1, type: "picture", name: "spoof.png", path: "assets/logo.PNG", row: 44 },
+      { id: 2, type: "picture", path: "../escape.png" },
+      { id: 3, type: "picture", path: "assets/vector.svg" },
+      { id: 4, type: "picture", path: "/absolute/p.png" },
+    ],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.tabs)), [{ id: 1, type: "picture", name: "logo.PNG", path: "assets/logo.PNG" }]);
+  assert.equal(clean.activeFile, null);
+});
+
+test("workspace restore recreates an active picture without assigning activeFile", async () => {
+  const { editor, manager, files } = fixture();
+  files.add("/projects/A/assets/logo.png");
+  await manager.restoreWorkspaceState({
+    version: 1,
+    tabManager: {
+      activeTab: { id: 8 }, activeFile: { id: 8 },
+      tabs: [{ id: 8, type: "picture", name: "untrusted", path: "assets/logo.png", row: 123 }],
+    },
+  }, "/projects/A");
+  const active = editor.tabManager.activeTab;
+  assert.equal(active.type, "picture");
+  assert.equal(active.name, "logo.png");
+  assert.equal(active.path, "/projects/A/assets/logo.png");
+  assert.equal(editor.tabManager.activeFile, null);
 });
 
 test("workspace restores File Explorer scroll and sends Agent to the bottom", async () => {

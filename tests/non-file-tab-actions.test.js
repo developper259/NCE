@@ -58,6 +58,21 @@ test("file editing commands do nothing when the active tab is not a file", async
   assert.deepEqual(calls, ["quit"]);
 });
 
+test("active non-file tabs can be closed without enabling text commands", async () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    tabManager: {
+      activeTab: { type: "picture" }, activeFile: null,
+      closeActiveFile: () => calls.push("close-tab"),
+      closeFiles: () => calls.push("close-tabs"),
+    },
+  });
+  await keyBinding.control_close_file();
+  await keyBinding.control_close_all_file();
+  assert.deepEqual(calls, ["close-tab", "close-tabs"]);
+});
+
 test("the command palette hides file commands outside a file tab", () => {
   let panelOptions;
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {

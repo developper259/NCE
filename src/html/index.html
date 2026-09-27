@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>NCE</title>
     <link
@@ -26,6 +26,7 @@
     <link rel="stylesheet" href="../css/sidebar.css" />
     <link rel="stylesheet" href="../css/SearchBar.css" />
     <link rel="stylesheet" href="../css/settings.css" />
+    <link rel="stylesheet" href="../css/pictureView.css" />
 
     <link rel="stylesheet" href="../css/sidebar/fileExplorer.css" />
     <link rel="stylesheet" href="../css/sidebar/search.css" />
@@ -55,6 +56,14 @@
       </div>
       <div class="editor editor-empty">
         <div class="settings-view-host box-bottom" hidden></div>
+        <div class="picture-view-host box-bottom" hidden>
+          <div class="picture-view-viewport">
+            <div class="picture-view-content">
+              <p class="picture-view-status" hidden></p>
+              <img class="picture-view-image" alt="" draggable="false">
+            </div>
+          </div>
+        </div>
         <div class="empty-menu"></div>
         <div class="editor-search-bar">
           <button
@@ -213,6 +222,7 @@
 
     <script src="../js/types/Tab.js"></script>
     <script src="../js/view/SettingsView.js"></script>
+    <script src="../js/view/PictureView.js"></script>
     <script src="../js/types/Line.js"></script>
     <script src="../js/types/Scroller.js"></script>
     <script src="../js/types/Sidebar.js"></script>

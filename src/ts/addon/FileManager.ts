@@ -39,6 +39,12 @@ export interface FileOperationResult {
 }
 
 export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
+export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+  ".ico": "image/x-icon",
+};
 const BINARY_SAMPLE_SIZE = 8192;
 function validPath(value: unknown): value is string {
   return (
@@ -262,6 +268,10 @@ export class FileManager {
       async (event, filePath: string) => {
         return await this.initializeFile(filePath);
       },
+    );
+
+    ipcMain.handle("FileManager:readImageFile", async (_event, filePath: string) =>
+      this.readImageFile(filePath),
     );
 
     ipcMain.handle(
@@ -974,6 +984,30 @@ export class FileManager {
         success: false,
         totalLines: 0,
         errorCode: error?.code || "UNKNOWN",
+      };
+    }
+  }
+
+  async readImageFile(filePath: unknown): Promise<{
+    success: boolean; code?: string; mimeType?: string; data?: Uint8Array; size?: number;
+  }> {
+    if (!validPath(filePath)) return { success: false, code: "INVALID_PATH" };
+    const mimeType = IMAGE_MIME_TYPES[path.extname(filePath).toLowerCase()];
+    if (!mimeType) return { success: false, code: "UNSUPPORTED_IMAGE" };
+    try {
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile()) return { success: false, code: "NOT_A_FILE" };
+      if (stats.size > MAX_IMAGE_FILE_SIZE)
+        return { success: false, code: "IMAGE_TOO_LARGE" };
+      const buffer = await fs.readFile(filePath);
+      if (buffer.length > MAX_IMAGE_FILE_SIZE)
+        return { success: false, code: "IMAGE_TOO_LARGE" };
+      return { success: true, mimeType, data: Uint8Array.from(buffer), size: buffer.length };
+    } catch (error: any) {
+      return {
+        success: false,
+        code: error?.code === "ENOENT" || error?.code === "ENOTDIR"
+          ? "SOURCE_NOT_FOUND" : "IMAGE_READ_FAILED",
       };
     }
   }

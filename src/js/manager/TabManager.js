@@ -31,7 +31,7 @@ class tabManager {
       : null;
   }
   set activeFile(file) {
-    this.activeTab = file || null;
+    this.activeTab = file?.type === TAB_TYPES.FILE ? file : null;
   }
 
   getNextID() {
@@ -61,8 +61,19 @@ class tabManager {
   async updateFilePath(oldPath, newPath) {
     if (!oldPath || !newPath) return;
     let changed = false;
-    for (const file of this.files) {
+    const pathTabs = Array.isArray(this.tabs) ? this.tabs : [this.activeFile].filter(Boolean);
+    for (const file of pathTabs.filter((tab) =>
+      tab.type === "file" || tab.type === "picture")) {
       if (!file.path || !NCEPath.isInside(file.path, oldPath)) continue;
+      if (file.type === "picture") {
+        const previousPath = file.path;
+        file.path = NCEPath.rebase(file.path, oldPath, newPath);
+        file.name = NCEPath.basename(file.path);
+        file.diskFingerprint = null;
+        if (file === this.activeTab) this.editor.pictureView?.invalidate(previousPath);
+        changed = true;
+        continue;
+      }
       // Complete the old-path load before moving its identity.
       if (file.loadingState?.status === "loading") {
         this.editor.fileLoader.cancelLoading(file.path);
@@ -81,7 +92,9 @@ class tabManager {
     }
 
     if (changed) {
-      this.editor.fileExplorer.setActiveFile(this.activeFile?.path);
+      this.editor.fileExplorer.setActiveFile(
+        this.activeFile?.path || (this.activeTab?.type === TAB_TYPES.PICTURE ? this.activeTab.path : null),
+      );
       this.refresh();
     }
   }
@@ -89,6 +102,13 @@ class tabManager {
   markFileAsDeleted(path) {
     if (!path) return;
     let changed = false;
+
+    for (const tab of this.tabs.filter((candidate) => candidate.type === TAB_TYPES.PICTURE)) {
+      if (tab.path && NCEPath.isInside(tab.path, path)) {
+        tab.diskFingerprint = null;
+        this.editor.pictureView?.invalidate(tab.path);
+      }
+    }
 
     for (const file of this.files) {
       if (!file.path) continue;
@@ -125,6 +145,15 @@ class tabManager {
     let lastAddedFile = null;
 
     for (let file of files) {
+      if (file?.path && PictureView.isSupportedPath(file.path)) {
+        const existing = this.tabs.find((candidate) =>
+          candidate.type === TAB_TYPES.PICTURE && NCEPath.equals(candidate.path, file.path));
+        lastAddedFile = existing || file;
+        if (!existing) this.tabs.push(file.type === TAB_TYPES.PICTURE
+          ? file : new PictureTab(file.id || this.getNextID(), file.path));
+        lastAddedFile = existing || this.tabs[this.tabs.length - 1];
+        continue;
+      }
       if (file.path) {
         const f = this.getFileByPath(file.path);
         if (f) {
@@ -149,14 +178,14 @@ class tabManager {
       }
     }
     if (lastAddedFile) {
-      if (isSetFocusFile) await this.setFocusFile(lastAddedFile);
+      if (isSetFocusFile) await this.setFocusTab(lastAddedFile);
 
       // Focusing an already-open tab must not mark unsaved edits as saved.
     }
 
     this.editor.events.callEvent(Events.ON_OPEN_FILE, {
       files: files,
-      activeFile: lastAddedFile,
+      activeFile: this.activeFile,
     });
     if (!isSetFocusFile) this.editor.refreshAll();
   }
@@ -181,6 +210,8 @@ class tabManager {
     for (const file of this.files)
       this.editor.fileLoader.cancelLoading(file.path);
     this.editor.highlightController.closeAllFiles();
+    this.editor.pictureView?.clear?.();
+    this.editor.pictureView?.hide?.();
     this.tabs = [];
     this.activeTab = null;
     this.editor.fileExplorer.activeFilePath = null;
@@ -272,7 +303,12 @@ class tabManager {
       await this.setFocusTab(this.tabs[index === 0 ? 1 : index - 1]);
     }
     this.removeFileByID(tab.id);
-    if (!this.tabs.length) this.activeTab = null;
+    if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.close?.(tab);
+    if (!this.tabs.length) {
+      this.activeTab = null;
+      this.editor.fileExplorer.activeFilePath = null;
+      this.editor.searchController?.close?.();
+    }
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
       file: null,
       activeFile: this.activeFile,
@@ -286,8 +322,8 @@ class tabManager {
     const snapshot = [...fileIds];
     const restorePreservedFile = async () => {
       const preservedFile = this.getFileByID(preservedFileId);
-      if (preservedFile && this.activeFile?.id !== preservedFileId) {
-        await this.setFocusFile(preservedFile);
+      if (preservedFile && this.activeTab?.id !== preservedFileId) {
+        await this.setFocusTab(preservedFile);
       }
     };
 
@@ -355,9 +391,12 @@ class tabManager {
     }
     this.activeTab = tab;
     if (tab.type !== TAB_TYPES.FILE) {
-      this.editor.fileExplorer?.setActiveFile?.(null);
+      this.editor.fileExplorer?.setActiveFile?.(
+        tab.type === TAB_TYPES.PICTURE ? tab.path : null,
+      );
       this.editor.searchController?.close?.();
       this.editor.refreshMainContent?.();
+      if (tab.type === TAB_TYPES.PICTURE) await this.capturePictureFingerprint(tab);
       this.refresh();
       return;
     }
@@ -463,6 +502,27 @@ class tabManager {
         await this.reloadFileFromDisk(file.path);
       }),
     );
+    await Promise.all(this.tabs.filter((tab) => tab.type === TAB_TYPES.PICTURE).map(async (tab) => {
+      if (!tab.path) return;
+      const status = await pathStatus.call(this.editor.fileExplorer.fileOperations, tab.path);
+      if (!status?.exists || status.isDirectory) {
+        tab.diskFingerprint = null;
+        this.editor.pictureView?.invalidate(tab.path);
+        return;
+      }
+      const fingerprint = `${status.size}:${status.mtimeMs}`;
+      if (tab.diskFingerprint === fingerprint) return;
+      tab.diskFingerprint = fingerprint;
+      this.editor.pictureView?.invalidate(tab.path);
+    }));
+  }
+
+  async capturePictureFingerprint(tab) {
+    const pathStatus = this.editor.fileExplorer?.fileOperations?.pathStatus;
+    if (!tab?.path || !pathStatus) return;
+    const status = await pathStatus.call(this.editor.fileExplorer.fileOperations, tab.path);
+    if (status?.exists && !status.isDirectory)
+      tab.diskFingerprint = `${status.size}:${status.mtimeMs}`;
   }
 
   scheduleFocusResync() {
@@ -476,9 +536,21 @@ class tabManager {
   }
 
   async openFileWithPath(path) {
+    if (PictureView.isSupportedPath(path)) return this.openPicture(path);
     let name = NCEPath.basename(path);
     let node = new FileNode(this.editor, this.getNextID(), name, path);
     return this.openFile(node);
+  }
+
+  async openPicture(path) {
+    if (!PictureView.isSupportedPath(path)) return null;
+    let tab = this.tabs.find((candidate) => candidate.type === TAB_TYPES.PICTURE && NCEPath.equals(candidate.path, path));
+    if (!tab) {
+      tab = new PictureTab(this.getNextID(), path);
+      this.tabs.push(tab);
+    }
+    await this.setFocusTab(tab);
+    return tab;
   }
 
   createEmptyFile() {
@@ -508,7 +580,9 @@ class tabManager {
     const file = await this.editor.api.selectFile();
     if (file) {
       let name = NCEPath.basename(file);
-      let node = new FileNode(this.editor, this.getNextID(), name, file);
+      let node = PictureView.isSupportedPath(file)
+        ? new PictureTab(this.getNextID(), file)
+        : new FileNode(this.editor, this.getNextID(), name, file);
       return node;
     }
 
@@ -522,7 +596,9 @@ class tabManager {
     if (files) {
       for (let file of files) {
         let name = NCEPath.basename(file);
-        let node = new FileNode(this.editor, this.getNextID(), name, file);
+        let node = PictureView.isSupportedPath(file)
+          ? new PictureTab(this.getNextID(), file)
+          : new FileNode(this.editor, this.getNextID(), name, file);
         result.push(node);
       }
     }

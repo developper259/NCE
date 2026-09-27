@@ -98,6 +98,12 @@ class StatesManager {
     const tabs = manager.tabs.flatMap((tab) => {
       if (tab.type === TAB_TYPES.SETTINGS)
         return [{ id: tab.id, type: TAB_TYPES.SETTINGS }];
+      if (tab.type === TAB_TYPES.PICTURE) {
+        const serializedPath = root === undefined ? tab.path
+          : root ? this.toWorkspaceRelative(tab.path, root) : tab.path || null;
+        if (!serializedPath || (root && !this.toWorkspaceRelative(tab.path, root))) return [];
+        return [{ id: tab.id, type: TAB_TYPES.PICTURE, path: serializedPath }];
+      }
       const serializedPath = root === undefined
         ? tab.path
         : root
@@ -229,7 +235,7 @@ class StatesManager {
   sanitizeWorkspaceTab(value, seenIds, seenPaths) {
     if (!this.isRecord(value)) return null;
     const type = value.type;
-    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS) return null;
+    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS && type !== TAB_TYPES.PICTURE) return null;
     const id = this.safeInteger(value.id, -1, 1, 1_000_000);
     if (id < 1 || seenIds.has(id)) return null;
     if (type === TAB_TYPES.SETTINGS) {
@@ -238,6 +244,14 @@ class StatesManager {
     }
     const path = value.path === null ? null : this.sanitizeWorkspacePath(value.path);
     if (value.path !== null && !path) return null;
+    if (type === TAB_TYPES.PICTURE) {
+      if (!path || !PictureView.isSupportedPath(path)) return null;
+      const key = NCEPath.comparisonKey(path);
+      if (seenPaths.has(key)) return null;
+      seenPaths.add(key);
+      seenIds.add(id);
+      return { id, type, name: NCEPath.basename(path), path };
+    }
     if (path) {
       const key = NCEPath.comparisonKey(path);
       if (seenPaths.has(key)) return null;
@@ -295,9 +309,10 @@ class StatesManager {
       const id = this.safeInteger(candidate?.id, -1, 1, 1_000_000);
       return seenIds.has(id) ? { id } : null;
     };
+    const fileIds = new Set(tabs.filter((tab) => tab.type === TAB_TYPES.FILE).map((tab) => tab.id));
     return {
       activeTab: activeId(value.activeTab || value.activeFile),
-      activeFile: activeId(value.activeFile),
+      activeFile: fileIds.has(value.activeFile?.id) ? activeId(value.activeFile) : null,
       tabs,
     };
   }
@@ -432,6 +447,12 @@ class StatesManager {
       if (!this.isRecord(tab)) return [];
       if (tab.type === TAB_TYPES.SETTINGS)
         return [{ id: tab.id, type: TAB_TYPES.SETTINGS }];
+      if (tab.type === TAB_TYPES.PICTURE) {
+        const relative = this.toWorkspaceRelative(tab.path, root);
+        return relative && PictureView.isSupportedPath(relative)
+          ? [{ id: tab.id, type: TAB_TYPES.PICTURE, path: relative }]
+          : [];
+      }
       const relative = this.toWorkspaceRelative(tab.path, root);
       return relative === null ? [] : [{
         id: tab.id, type: TAB_TYPES.FILE, path: relative,
@@ -522,6 +543,20 @@ class StatesManager {
         const runtimeId = manager.getNextID?.() || manager.idCounter + 1;
         manager.idCounter = Math.max(manager.idCounter, runtimeId);
         if (data.type === TAB_TYPES.SETTINGS) tab = new SettingsTab(runtimeId);
+        else if (data.type === TAB_TYPES.PICTURE) {
+          const filePath = root === undefined ? data.path
+            : root ? this.resolveWorkspacePath(data.path, root) : data.path || null;
+          if (!filePath || !PictureView.isSupportedPath(filePath)) continue;
+          const fileOperations = this.editor.fileExplorer?.fileOperations;
+          if (root && typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+            const canonical = await this.editor.api.resolveWorkspaceStatePath(root, data.path);
+            if (!canonical || canonical.isDirectory || canonical.readable !== true) continue;
+          } else if (fileOperations?.pathStatus) {
+            const status = await fileOperations.pathStatus(filePath);
+            if (!status?.exists || status.isDirectory || status.readable === false) continue;
+          }
+          tab = new PictureTab(runtimeId, filePath);
+        }
         else if (
           data.type === TAB_TYPES.FILE ||
           (root === undefined && data.type === undefined)

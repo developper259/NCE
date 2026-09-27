@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const {
   FileManager,
+  MAX_IMAGE_FILE_SIZE,
   validateEntryName,
   atomicWriteFile,
 } = require("../dist/ts/addon/FileManager.js");
@@ -183,6 +184,32 @@ test("FileManager initializes, chunks, saves, and rejects binary/invalid UTF-8",
     } finally {
       console.error = originalError;
     }
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("FileManager reads allowlisted raster images with verified MIME and bounded paths", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-picture-"));
+  try {
+    const manager = new FileManager({});
+    const png = path.join(root, "IMAGE.PNG");
+    const directory = path.join(root, "directory.png");
+    await fsp.mkdir(directory);
+    await fsp.writeFile(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const result = await manager.readImageFile(png);
+    assert.equal(result.success, true);
+    assert.equal(result.mimeType, "image/png");
+    assert.deepEqual(Array.from(result.data), [0x89, 0x50, 0x4e, 0x47]);
+    assert.equal(result.size, 4);
+    assert.equal((await manager.readImageFile(path.join(root, "missing.png"))).code, "SOURCE_NOT_FOUND");
+    assert.equal((await manager.readImageFile(directory)).code, "NOT_A_FILE");
+    assert.equal((await manager.readImageFile(`${png}\0bad`)).code, "INVALID_PATH");
+    assert.equal((await manager.readImageFile(path.join(root, "no.svg"))).code, "UNSUPPORTED_IMAGE");
+    const large = path.join(root, "large.png");
+    await fsp.writeFile(large, "");
+    await fsp.truncate(large, MAX_IMAGE_FILE_SIZE + 1);
+    assert.equal((await manager.readImageFile(large)).code, "IMAGE_TOO_LARGE");
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }

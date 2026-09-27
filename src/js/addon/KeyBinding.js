@@ -118,12 +118,12 @@ class KeyBinding {
   }
 
   async control_close_file(s, c, m, a) {
-    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeTab && !this.editor.tabManager.activeFile) return;
     await this.editor.tabManager.closeActiveFile();
   }
 
   async control_close_all_file(s, c, m, a) {
-    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeTab && !this.editor.tabManager.activeFile) return;
     await this.editor.tabManager.closeFiles();
   }
 
