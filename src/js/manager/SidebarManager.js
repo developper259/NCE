@@ -192,6 +192,23 @@ class SidebarManager {
           icon ? { menuId: icon.dataset.menuId } : null,
         );
       });
+      for (const [container, position] of [
+        [this.leftMenuContainer, "left"],
+        [this.rightMenuContainer, "right"],
+      ]) {
+        container?.addEventListener("contextmenu", (event) => {
+          const title = event.target.closest?.(".sidebar-main-title");
+          if (!title || !container.contains(title)) return;
+          const menu = this.getActiveMenuForPosition(position);
+          if (!menu) return;
+          event.preventDefault();
+          event.stopPropagation();
+          this.editor.contextMenuManager?.openContextMenu(
+            "sidebar-title",
+            { menuId: menu.id },
+          );
+        });
+      }
       this.settingsOutsideClickHandler = (e) => {
         if (
           this.settingsMenuOpen &&

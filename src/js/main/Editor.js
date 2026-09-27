@@ -79,6 +79,10 @@ class Editor {
       "sidebar-selector-icon",
       buildSidebarSelectorIconContextMenu(this.sidebarManager),
     );
+    this.contextMenuManager.setMenu(
+      "sidebar-title",
+      buildSidebarTitleContextMenu(this.sidebarManager),
+    );
 
     this.writerController = new WriterController(this);
     this.historyController = new HistoryController(this);
