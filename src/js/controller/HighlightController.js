@@ -690,13 +690,13 @@ class HighlightController {
           continue;
         }
 
-        if (lineText.trim() === "") {
-          this.propagateState(lineNumber, initialState);
+        if (lineText.length >= this.maxLength) {
+          this.propagateState(lineNumber, lineNode.getState() || initialState);
           continue;
         }
 
-        if (lineText.length >= this.maxLength) {
-          this.propagateState(lineNumber, lineNode.getState() || initialState);
+        if (lineText.trim() === "") {
+          this.propagateState(lineNumber, initialState);
           continue;
         }
 
@@ -769,8 +769,8 @@ class HighlightController {
     const lineNode = this.getLineNode(lineNumber);
 
     if (!lineNode) return;
-    if (expectedNode && lineNode !== expectedNode) return;
     if (
+      (!expectedNode || lineNode === expectedNode) &&
       expectedGeneration !== null &&
       lineNode.dataset?.renderGeneration !== expectedGeneration
     )
@@ -789,7 +789,7 @@ class HighlightController {
 
     // Highlighting is asynchronous, so it must use the same horizontal
     // projection as the line renderer at the time the response is applied.
-    const slicedLine = this.editor.lineController.getSlicedLine(text);
+    const slicedLine = this.editor.lineController.getSlicedLine(text, documentLine);
     const visibleTokens = this.editor.lineController.getVisibleTokens(
       tokens,
       slicedLine,
@@ -799,7 +799,7 @@ class HighlightController {
       slicedLine,
     );
     const fragment = this.editor.writerController.textToOBJ(
-      slicedLine.text,
+      slicedLine.displayText ?? slicedLine.text,
       visibleTokens,
       visibleDiffSegments,
     );

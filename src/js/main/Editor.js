@@ -105,7 +105,7 @@ class Editor {
         filePath: file?.hasPath?.() ? file.path : "",
         rootPath: this.fileExplorer?.rootPath || "",
         selectedText: hasSelection
-          ? String(this.selectController.containsSelected || "")
+          ? String(this.selectController.getSelectedText?.() || this.selectController.containsSelected || "")
           : "",
       });
     });

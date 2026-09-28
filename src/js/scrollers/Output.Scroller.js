@@ -7,6 +7,8 @@ class OutputScroller {
     this.marginChars = 10;
 
     this.marginLines = 3;
+    this.pendingHorizontalColumns = 0;
+    this.horizontalWheelFrame = null;
   }
 
   setLineController(lineController) {
@@ -38,10 +40,8 @@ class OutputScroller {
   }
 
   getVisibleHorizontalWidth() {
-    const outputWidth = this.editor.output
-      ? this.editor.output.clientWidth ||
-        this.editor.output.getBoundingClientRect().width
-      : this.lineController.outputWidth || 0;
+    const outputWidth = this.editor.domManager?.getOutputWidth?.() ||
+      this.lineController.outputWidth || 0;
 
     return Math.max(0, outputWidth);
   }
@@ -86,6 +86,8 @@ class OutputScroller {
       false,
     );
     this.hScroller.wheelTarget = this.editor.output;
+    this.hScroller.wheelDeltaHandler = (delta, event) =>
+      this.queueHorizontalWheel(delta, event);
     this.editor.scrollerManager.addScroller(this.hScroller);
     this.hScroller.onRefresh = () => {
       this.lineController.refresh();
@@ -118,8 +120,28 @@ class OutputScroller {
 
     this.hScroller.onScroll = (scrollRatio) => {
       this.applyHorizontalScrollFromRatio(scrollRatio);
-      this.lineController.refresh(true);
     };
+  }
+
+  queueHorizontalWheel(delta, event) {
+    const letterWidth = Math.max(1, this.editor.letterSize || 1);
+    const mode = event?.deltaMode || 0;
+    const deltaPixels = mode === 1
+      ? delta * (this.lineController.getLineHeight?.() || 23)
+      : mode === 2
+        ? delta * this.getVisibleHorizontalWidth()
+        : delta;
+    this.pendingHorizontalColumns += deltaPixels / letterWidth;
+    if (this.horizontalWheelFrame !== null) return;
+    const requestFrame = typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (callback) => setTimeout(callback, 0);
+    this.horizontalWheelFrame = requestFrame(() => {
+      this.horizontalWheelFrame = null;
+      const wholeColumns = Math.trunc(this.pendingHorizontalColumns);
+      this.pendingHorizontalColumns -= wholeColumns;
+      if (wholeColumns) this.setHorizontalOffset(this.lineController.offsetX + wholeColumns);
+    });
   }
 
   getHorizontalScrollRatioFromState() {
@@ -140,11 +162,8 @@ class OutputScroller {
     if (!this.hScroller.calcIsActive()) {
       if (this.lineController.offsetX !== 0) {
         this.lineController.offsetX = 0;
-        this.applyScrollTransform();
-        this.lineController.markDirtyAll();
-        this.lineController.refreshOutput();
-        this.editor.cursorController.updateCaretPosition();
-        this.editor.selectController.refreshSelectPositions();
+        this.hScroller.setScrollRatio(0);
+        this.lineController.refreshHorizontalViewport?.();
       }
       return;
     }
@@ -163,7 +182,7 @@ class OutputScroller {
 
     if (this.lineController.offsetX !== newOffsetX) {
       this.lineController.offsetX = newOffsetX;
-      this.applyScrollTransform();
+      this.lineController.refreshHorizontalViewport?.();
     }
   }
 
@@ -286,14 +305,18 @@ class OutputScroller {
 
     this.lineController.offsetX = nextOffset;
     this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
-    this.applyScrollTransform();
-    this.lineController.markDirtyAll();
-    this.lineController.refreshOutput();
     this.hScroller.refresh();
-    this.editor.cursorController.updateCaretPosition();
-    this.editor.selectController.refreshSelectPositions();
-    this.editor.searchController.refreshSelectionDOM();
-    this.editor.highlightController.refresh();
+    if (typeof this.lineController.refreshHorizontalViewport === "function") {
+      this.lineController.refreshHorizontalViewport();
+    } else {
+      this.lineController.markDirtyAll?.();
+      this.lineController.refreshOutput?.();
+      this.lineController.refreshNumberLines?.();
+      this.editor.cursorController.updateCaretPosition();
+      this.editor.selectController.refreshSelectPositions();
+      this.editor.searchController.refreshSelectionDOM();
+      this.editor.highlightController.refresh();
+    }
     return true;
   }
 
@@ -400,7 +423,10 @@ class OutputScroller {
       const line = lineNode ? lineNode.getText() : "";
       column = Math.max(0, Math.min(column, line.length));
 
-      const visualPos = realColumnToViewColumn(line, column);
+      const positionIndex = lineNode?.getPositionIndex?.();
+      const visualPos = positionIndex
+        ? positionIndex.realToVisual(column)
+        : realColumnToViewColumn(line, column);
 
       const visibleWidthChars = Math.floor(
         this.getVisibleHorizontalWidth() / this.editor.letterSize,
@@ -425,6 +451,21 @@ class OutputScroller {
     }
 
     if (verticalChanged || horizontalChanged) {
+      if (!verticalChanged && horizontalChanged) {
+        this.hScroller.refresh();
+        if (typeof this.lineController.refreshHorizontalViewport === "function")
+          this.lineController.refreshHorizontalViewport();
+        else {
+          this.lineController.markDirtyAll?.();
+          this.lineController.refreshOutput?.();
+          this.lineController.refreshNumberLines?.();
+          this.editor.cursorController.updateCaretPosition();
+          this.editor.selectController.refreshSelectPositions();
+          this.editor.searchController.refreshSelectionDOM();
+          this.editor.highlightController.refresh();
+        }
+        return;
+      }
       this.editor.highlightController.lineNodes.clear();
       this.lineController.markDirtyAll();
       this.lineController.refreshOutput();

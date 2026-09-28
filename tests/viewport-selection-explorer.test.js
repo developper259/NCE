@@ -265,6 +265,46 @@ test("async highlighting preserves the partial renderer horizontal slice", () =>
   assert.equal(renderedText, fullText);
 });
 
+test("late highlighting paints the current horizontal slice after its slot was remapped", () => {
+  const HighlightController = loadGlobal(
+    "src/js/controller/HighlightController.js",
+    "HighlightController",
+    { NSHClient: class {} },
+  );
+  const fullText = "abcdefghijABCDEFGHIJ";
+  const oldNode = element();
+  oldNode.dataset = { line: "0", renderGeneration: "1" };
+  const currentNode = element();
+  currentNode.dataset = { line: "0", renderGeneration: "1" };
+  const lineNode = new LineNode(fullText);
+  const controller = Object.create(HighlightController.prototype);
+  controller.lineNodes = new Map([[0, currentNode]]);
+  controller.editor = {
+    lineController: {
+      lines: [lineNode],
+      getSlicedLine(text) {
+        return { text: text.slice(10), displayText: text.slice(10), startChar: 10, endChar: text.length };
+      },
+      getVisibleTokens(tokens, slice) {
+        return tokens.map((token) => ({ ...token, value: token.value.slice(slice.startChar), column: 1 }));
+      },
+    },
+    writerController: {
+      textToOBJ: (text) => ({ text }),
+    },
+  };
+  currentNode.replaceChildren = (...children) => { currentNode.children = children; };
+  oldNode.replaceChildren = () => { throw new Error("stale slot must not be written"); };
+
+  assert.equal(controller.applyHighlightToLine(
+    0,
+    [{ column: 1, value: fullText, className: "identifier" }],
+    oldNode,
+    "1",
+  ), true);
+  assert.equal(currentNode.children[0].text, fullText.slice(10));
+});
+
 test("cursor follows visual columns right and returns left without jitter", () => {
   const { editor, file } = createEditor("\tabcdefghijklmnopqrstuvwxyz");
   let offsetX = 0;
@@ -476,6 +516,104 @@ test("programmatic vertical and horizontal viewport rebuilds refresh highlightin
   assert.equal(scroller.setHorizontalOffset(20), true);
   assert.ok(calls.indexOf("dirty") < calls.indexOf("output"));
   assert.equal(calls.at(-1), "highlight");
+});
+
+test("Select All stores one logical range and renders only viewport-clipped rectangles", () => {
+  const SelectController = loadGlobal(
+    "src/js/controller/SelectController.js",
+    "SelectController",
+    { document: { createElement: element }, Events: { ON_SELECT: "select" } },
+  );
+  const lineText = "x".repeat(1_000_000);
+  const file = {
+    lines: [{ getText: () => lineText }],
+    _selectedLines: new Map(),
+    _selectionRange: null,
+    _selectionTextCache: null,
+    containsSelected: "",
+  };
+  const selectOutput = element();
+  const editor = {
+    tabManager: { activeFile: file },
+    selectOutput,
+    events: { callEvent() {} },
+    lineController: {
+      lines: file.lines,
+      startIndex: 0,
+      offsetX: 900_000,
+      renderedLineCount: 5,
+      maxViewLines: 5,
+      maxCharactersPerLine: 20,
+      getDisplayLineCount: () => 1,
+      getDisplayRow: (index) => ({ documentIndex: index }),
+    },
+    cursorController: {
+      getViewPosition: (_row, column) => ({ column }),
+      columnToX: (column) => 50 + (column - 1 - 900_000) * 10,
+      rowToY: () => 23,
+      mpY: 20,
+      setCursorPosition() {},
+      getPosition: (_row, column) => ({ column }),
+    },
+    letterSize: 10,
+  };
+  const select = Object.create(SelectController.prototype);
+  select.editor = editor;
+  select.selectionFastNodes = new WeakMap();
+
+  select.selectAll(false);
+  assert.equal(file._selectedLines.size, 0);
+  assert.equal(JSON.stringify(file._selectionRange), JSON.stringify({
+    start: { row: 1, column: 0 },
+    end: { row: 1, column: 1_000_000 },
+  }));
+  assert.equal(file._selectionTextCache, null);
+  assert.equal(selectOutput.children.length, 1);
+  assert.ok(parseFloat(selectOutput.children[0].style.width) <= 200);
+  assert.equal(select.getSelectedText().length, 1_000_000);
+});
+
+test("drag selections keep one logical range and materialize text only on demand", () => {
+  const SelectController = loadGlobal(
+    "src/js/controller/SelectController.js",
+    "SelectController",
+    { Events: { ON_SELECT: "select" } },
+  );
+  const lines = ["first", "middle", "last"].map((text) => ({ getText: () => text }));
+  const file = {
+    lines,
+    _selectedLines: new Map(),
+    _selectionRange: null,
+    _selectionTextCache: null,
+    containsSelected: "",
+  };
+  let payload;
+  const editor = {
+    tabManager: { activeFile: file },
+    events: { callEvent: (_event, value) => { payload = value; } },
+    lineController: { lines },
+    cursorController: {
+      normalizePosition: (row, column) => ({ row, column }),
+      setCursorPosition() {},
+    },
+  };
+  const select = Object.create(SelectController.prototype);
+  select.editor = editor;
+  select.startSelect = null;
+  select.endSelect = null;
+  select.refreshSelectionDOM = () => {};
+
+  select.setSelection({ row: 1, column: 2 }, { row: 3, column: 2 });
+  assert.equal(file._selectedLines.size, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(file._selectionRange)), {
+    start: { row: 1, column: 2 },
+    end: { row: 3, column: 2 },
+  });
+  assert.equal(file._selectionTextCache, null);
+  assert.equal(select.getSelectedText(), "rst\nmiddle\nla");
+  assert.equal(select.getSelectionLength(), 13);
+  assert.equal(payload.contains, "rst\nmiddle\nla");
+  assert.equal(file._selectionTextCache, "rst\nmiddle\nla");
 });
 
 test("File Explorer distinguishes no workspace, empty workspace and files", () => {

@@ -42,6 +42,7 @@ class Scroller {
     this.onRefresh = () => {};
     this.onScroll = () => {};
     this.onScrollEnd = () => {};
+    this.wheelDeltaHandler = null;
 
     this._onMouseMove = this.handleMouseMove.bind(this);
     this._onMouseUp = this.handleMouseUp.bind(this);
@@ -330,6 +331,10 @@ class Scroller {
 
     e.preventDefault();
     if (!isVertical && delta !== 0) e.stopPropagation();
+    if (!isVertical && typeof this.wheelDeltaHandler === "function") {
+      this.wheelDeltaHandler(delta, e);
+      return;
+    }
     const dimension = isVertical
       ? this.scrollerOBJHeight
       : this.scrollerOBJWidth;

@@ -180,7 +180,7 @@ class BottomBar {
     } else {
       if (countLine > 1) r += countLine + " lines, ";
       r +=
-        this.editor.selectController.containsSelected.length +
+        (this.editor.selectController.getSelectionLength?.() ?? this.editor.selectController.containsSelected.length) +
         " characters selected";
     }
 

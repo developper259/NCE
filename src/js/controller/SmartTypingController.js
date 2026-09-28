@@ -51,7 +51,7 @@ class SmartTypingController {
       line,
       before: column > 0 ? line[column - 1] : "",
       after: column < line.length ? line[column] : "",
-      selection: select.containsSelected || "",
+      hasSelection: select.hasActiveSelection?.() === true,
       selectionRange: select.getLogicalSelection(),
     };
   }
@@ -93,7 +93,7 @@ class SmartTypingController {
     const context = this.getTypingContext();
     if (!context) return false;
 
-    if (context.selection && this.isOpeningCharacter(character)) {
+    if (context.hasSelection && this.isOpeningCharacter(character)) {
       return this.wrapSelection(character, context);
     }
 
@@ -141,7 +141,7 @@ class SmartTypingController {
     if (!close || !range) return false;
 
     const result = this.editor.writerController.replaceRange(
-      open + context.selection + close,
+      open + this.editor.selectController.getSelectedText() + close,
       range.startRow,
       range.startColumn,
       range.endRow,
@@ -158,7 +158,7 @@ class SmartTypingController {
     if (this.shouldIgnoreCommandEvent(event)) return false;
 
     const context = this.getTypingContext();
-    if (!context || context.selection) return false;
+    if (!context || context.hasSelection) return false;
 
     if (
       this.isOpeningCharacter(context.before) &&
@@ -190,7 +190,7 @@ class SmartTypingController {
 
     const context = this.getTypingContext();
     if (!context) return false;
-    if (context.selection && context.selectionRange) {
+    if (context.hasSelection && context.selectionRange) {
       return this.replaceSelectionWithLineBreak(context.selectionRange);
     }
 
@@ -269,7 +269,7 @@ class SmartTypingController {
     const select = this.editor.selectController;
 
     if (shiftKey && typeof select.setSelection === "function") {
-      const anchor = select.containsSelected
+      const anchor = select.hasActiveSelection?.()
         ? select.startSelect
         : { row: context.row, column: context.column };
       if (!anchor) return false;
@@ -277,7 +277,7 @@ class SmartTypingController {
       return true;
     }
 
-    if (select.containsSelected) select.unSelectAll();
+    if (select.hasActiveSelection?.()) select.unSelectAll();
     this.placeCursor(context.row, targetColumn);
     return true;
   }
@@ -505,7 +505,7 @@ class SmartTypingController {
   }
 
   handleClosingIndent(character, context) {
-    if (character !== "}" || context.selection) return false;
+    if (character !== "}" || context.hasSelection) return false;
 
     const beforeCaret = context.line.slice(0, context.column);
     if (!this.isWhitespaceOnly(beforeCaret) || context.column === 0) {

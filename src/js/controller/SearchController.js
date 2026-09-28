@@ -15,6 +15,8 @@ class SearchController {
     this.replaceActions = null;
 
     this.results = [];
+    this.resultsByRow = new Map();
+    this.searchFastNodes = new WeakMap();
     this.currentIndex = -1;
     this.query = "";
 
@@ -39,6 +41,16 @@ class SearchController {
     addEvent("click", this.toggleReplace.bind(this), this.expandButton);
     addEvent("click", this.replaceNext.bind(this), this.replaceNextButton);
     addEvent("click", this.replaceAll.bind(this), this.replaceAllButton);
+  }
+
+  getSearchFastNode(node) {
+    if (!node) return null;
+    let fastNode = this.searchFastNodes.get(node);
+    if (!fastNode) {
+      fastNode = this.editor.domManager?.wrapFastNode?.(node) || null;
+      if (fastNode) this.searchFastNodes.set(node, fastNode);
+    }
+    return fastNode;
   }
 
   initSearchBar() {
@@ -305,7 +317,8 @@ class SearchController {
 
   replaceAll() {
     const replacement = this.replaceInput.value;
-    for (const result of [...this.results].reverse()) {
+    for (let index = this.results.length - 1; index >= 0; index--) {
+      const result = this.results[index];
       this.editor.writerController.replaceRange(
         replacement, result.row, result.column,
         result.row, result.column + result.length,
@@ -365,6 +378,14 @@ class SearchController {
 
         start = index + Math.max(query.length, 1);
       }
+    }
+
+    this.resultsByRow.clear();
+    for (let index = 0; index < this.results.length; index++) {
+      const row = this.results[index].row;
+      const range = this.resultsByRow.get(row);
+      if (range) range.end = index + 1;
+      else this.resultsByRow.set(row, { start: index, end: index + 1 });
     }
 
     this.refreshSelectionDOM();
@@ -450,11 +471,16 @@ class SearchController {
 
   clearResults() {
     this.results = [];
+    this.resultsByRow.clear();
 
     this.currentIndex = -1;
 
     if (this.editor.searchOutput) {
-      this.editor.searchOutput.replaceChildren();
+      for (const node of this.editor.searchOutput.children || []) {
+        const fastNode = this.getSearchFastNode(node);
+        if (fastNode) fastNode.setDisplay("none");
+        else node.style.display = "none";
+      }
     }
 
     this.updateCounter();
@@ -464,15 +490,52 @@ class SearchController {
     if (!this.editor.searchOutput) return;
 
     if (!this.isOpen || this.results.length === 0) {
-      this.editor.searchOutput.replaceChildren();
+      for (const node of this.editor.searchOutput.children || []) {
+        const fastNode = this.getSearchFastNode(node);
+        if (fastNode) fastNode.setDisplay("none");
+        else node.style.display = "none";
+      }
       return;
     }
 
     const cursor = this.editor.cursorController;
+    const lc = this.editor.lineController;
+    const visibleResults = [];
+    const visibleLineCount = Math.max(0, Math.min(
+      lc.renderedLineCount || lc.maxViewLines || 1,
+      lc.getDisplayLineCount() - lc.startIndex,
+    ));
+    const viewportStart = lc.offsetX || 0;
+    const viewportEnd = viewportStart + lc.maxCharactersPerLine;
 
-    const visibleResults = this.results.filter((result) =>
-      cursor.isRowVisible(result.row),
-    );
+    for (let screenIndex = 0; screenIndex < visibleLineCount; screenIndex++) {
+      const displayRow = lc.getDisplayRow(lc.startIndex + screenIndex);
+      if (!displayRow || displayRow.documentIndex === null) continue;
+      const row = displayRow.documentIndex + 1;
+      const lineNode = lc.lines[displayRow.documentIndex];
+      const positionIndex = lineNode?.getPositionIndex?.();
+      if (!positionIndex) continue;
+      const rowRange = this.resultsByRow.get(row);
+      if (!rowRange) continue;
+      const { start: rowStart, end: rowEnd } = rowRange;
+      const visibleRealStart = positionIndex.visualToReal(viewportStart, "previous");
+      let matchLow = rowStart;
+      let matchHigh = rowEnd;
+      while (matchLow < matchHigh) {
+        const mid = (matchLow + matchHigh) >>> 1;
+        if (this.results[mid].column < visibleRealStart) matchLow = mid + 1;
+        else matchHigh = mid;
+      }
+      const firstMatch = Math.max(rowStart, matchLow - 1);
+      for (let index = firstMatch; index < rowEnd; index++) {
+        const result = this.results[index];
+        const viewStart = positionIndex.realToVisual(result.column);
+        if (viewStart >= viewportEnd) break;
+        const viewEnd = positionIndex.realToVisual(result.column + result.length);
+        if (viewEnd <= viewportStart) continue;
+        visibleResults.push({ result, resultIndex: index, viewStart, viewEnd, screenIndex });
+      }
+    }
 
     const currentDOMNodes = this.editor.searchOutput.children;
 
@@ -481,29 +544,20 @@ class SearchController {
     for (let i = 0; i < totalLength; i++) {
       if (i >= visibleResults.length) {
         if (currentDOMNodes[i]) {
-          currentDOMNodes[i].style.display = "none";
+          const fastNode = this.getSearchFastNode(currentDOMNodes[i]);
+          if (fastNode) fastNode.setDisplay("none");
+          else currentDOMNodes[i].style.display = "none";
         }
 
         continue;
       }
 
-      const result = visibleResults[i];
-
-      const viewStart = cursor.getViewPosition(
-        result.row,
-        result.column,
-      ).column;
-
-      const viewEnd = cursor.getViewPosition(
-        result.row,
-        result.column + result.length,
-      ).column;
-
-      const x = cursor.columnToX(viewStart + 1);
-
-      const width = Math.max(1, viewEnd - viewStart) * this.editor.letterSize;
-
-      const y = cursor.rowToY(result.row) - 4;
+      const { result, resultIndex, viewStart, viewEnd, screenIndex } = visibleResults[i];
+      const clippedStart = Math.max(viewStart, viewportStart);
+      const clippedEnd = Math.min(viewEnd, viewportEnd);
+      const x = cursor.columnToX(clippedStart + 1);
+      const width = Math.max(1, clippedEnd - clippedStart) * this.editor.letterSize;
+      const y = lc.getLineTop(screenIndex);
 
       const height = cursor.mpY + 4;
 
@@ -511,30 +565,37 @@ class SearchController {
 
       if (!div) {
         div = document.createElement("div");
-
-        div.style.position = "absolute";
+        const fastNode = this.getSearchFastNode(div);
+        if (fastNode) fastNode.setStyle("position", "absolute");
+        else div.style.position = "absolute";
 
         this.editor.searchOutput.appendChild(div);
       }
 
-      const resultIndex = this.results.indexOf(result);
-
-      div.className =
-        resultIndex === this.currentIndex
-          ? "search-match search-match-active"
-          : "search-match";
-
-      div.dataset.resultIndex = resultIndex;
-
-      div.style.display = "";
-
-      div.style.left = `${x}px`;
-
-      div.style.top = `${y}px`;
-
-      div.style.width = `${width}px`;
-
-      div.style.height = `${height}px`;
+      const fastNode = this.getSearchFastNode(div);
+      const className = resultIndex === this.currentIndex
+        ? "search-match search-match-active"
+        : "search-match";
+      const meta = { x, y, width, height, resultIndex, className };
+      const oldMeta = div.__nceSearchMeta;
+      if (fastNode) {
+        fastNode.setClassName(className);
+        fastNode.setDataset("resultIndex", resultIndex);
+        fastNode.setDisplay("");
+        if (!oldMeta || oldMeta.x !== x) fastNode.setLeft(x);
+        if (!oldMeta || oldMeta.y !== y) fastNode.setTop(y);
+        if (!oldMeta || oldMeta.width !== width) fastNode.setWidth(width);
+        if (!oldMeta || oldMeta.height !== height) fastNode.setHeight(height);
+      } else {
+        div.className = className;
+        div.dataset.resultIndex = resultIndex;
+        div.style.display = "";
+        if (!oldMeta || oldMeta.x !== x) div.style.left = `${x}px`;
+        if (!oldMeta || oldMeta.y !== y) div.style.top = `${y}px`;
+        if (!oldMeta || oldMeta.width !== width) div.style.width = `${width}px`;
+        if (!oldMeta || oldMeta.height !== height) div.style.height = `${height}px`;
+      }
+      div.__nceSearchMeta = meta;
     }
   }
 

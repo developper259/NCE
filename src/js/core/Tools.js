@@ -108,14 +108,29 @@ getGraphemeBoundaries = (text) => {
   return boundaries;
 };
 
+isSimpleAsciiGraphemeBoundary = (text, offset) => {
+  const previous = offset > 0 ? text.charCodeAt(offset - 1) : 0;
+  const next = offset < text.length ? text.charCodeAt(offset) : 0;
+  return previous <= 0x7f && next <= 0x7f && !(previous === 13 && next === 10);
+};
+
 normalizeTextBoundary = (text, utf16Offset, bias = "nearest") => {
   const value = typeof text === "string" ? text : "";
   const offset = Math.max(0, Math.min(Number(utf16Offset) || 0, value.length));
+  if (isSimpleAsciiGraphemeBoundary(value, offset)) return offset;
+  if (typeof TextPositionIndex === "function")
+    return new TextPositionIndex(value).normalize(offset, bias);
   const boundaries = getGraphemeBoundaries(value);
-  if (boundaries.includes(offset)) return offset;
-  let right = boundaries.find((boundary) => boundary > offset);
-  let left =
-    boundaries[boundaries.findIndex((boundary) => boundary > offset) - 1];
+  let low = 0;
+  let high = boundaries.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (boundaries[mid] < offset) low = mid + 1;
+    else high = mid;
+  }
+  if (boundaries[low] === offset) return offset;
+  const right = boundaries[low];
+  const left = boundaries[Math.max(0, low - 1)];
   if (bias === "previous") return left ?? 0;
   if (bias === "next") return right ?? value.length;
   return offset - left <= right - offset ? left : right;
@@ -123,20 +138,44 @@ normalizeTextBoundary = (text, utf16Offset, bias = "nearest") => {
 
 previousGraphemeBoundary = (text, utf16Offset) => {
   const value = typeof text === "string" ? text : "";
-  const boundaries = getGraphemeBoundaries(value);
   const offset = Math.max(0, Math.min(Number(utf16Offset) || 0, value.length));
-  let index = 0;
-  while (index < boundaries.length && boundaries[index] < offset) index++;
-  return boundaries[Math.max(0, index - 1)];
+  if (offset === 0) return 0;
+  if (isSimpleAsciiGraphemeBoundary(value, offset) && value.charCodeAt(offset - 1) <= 0x7f)
+    return offset - 1;
+  if (typeof TextPositionIndex === "function")
+    return new TextPositionIndex(value).previous(offset);
+  const boundaries = getGraphemeBoundaries(value);
+  let low = 0;
+  let high = boundaries.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (boundaries[mid] < offset) low = mid + 1;
+    else high = mid;
+  }
+  return boundaries[Math.max(0, low - 1)];
 };
 
 nextGraphemeBoundary = (text, utf16Offset) => {
   const value = typeof text === "string" ? text : "";
-  const boundaries = getGraphemeBoundaries(value);
   const offset = Math.max(0, Math.min(Number(utf16Offset) || 0, value.length));
-  let index = 0;
-  while (index < boundaries.length && boundaries[index] <= offset) index++;
-  return boundaries[Math.min(boundaries.length - 1, index)];
+  if (offset >= value.length) return value.length;
+  const nextOffset = offset + 1;
+  if (
+    isSimpleAsciiGraphemeBoundary(value, offset) &&
+    isSimpleAsciiGraphemeBoundary(value, nextOffset) &&
+    value.charCodeAt(offset) <= 0x7f
+  ) return nextOffset;
+  if (typeof TextPositionIndex === "function")
+    return new TextPositionIndex(value).next(offset);
+  const boundaries = getGraphemeBoundaries(value);
+  let low = 0;
+  let high = boundaries.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (boundaries[mid] <= offset) low = mid + 1;
+    else high = mid;
+  }
+  return boundaries[Math.min(boundaries.length - 1, low)];
 };
 
 expandTabsForDisplay = (text, tabWidth = SETTINGS_GET("editor.tabWidth")) => {
@@ -148,17 +187,21 @@ realColumnToViewColumn = (
   text,
   realColumn,
   tabWidth = SETTINGS_GET("editor.tabWidth"),
+  positionIndex = null,
 ) => {
   const value = typeof text === "string" ? text : "";
+  const index = positionIndex || (typeof TextPositionIndex === "function"
+    ? new TextPositionIndex(value, tabWidth)
+    : null);
+  if (index) return index.realToVisual(realColumn);
   const safeColumn = normalizeTextBoundary(value, realColumn, "previous");
   const width = normalizeTabWidth(tabWidth);
   let viewColumn = 0;
-  for (const boundary of getGraphemeBoundaries(value)) {
+  const boundaries = getGraphemeBoundaries(value);
+  for (let index = 0; index < boundaries.length - 1; index++) {
+    const boundary = boundaries[index];
     if (boundary >= safeColumn) break;
-    const grapheme = value.slice(
-      boundary,
-      nextGraphemeBoundary(value, boundary),
-    );
+    const grapheme = value.slice(boundary, boundaries[index + 1]);
     viewColumn += grapheme === "\t" ? width : 1;
   }
   return viewColumn;
@@ -168,10 +211,15 @@ viewColumnToRealColumn = (
   text,
   viewColumn,
   tabWidth = SETTINGS_GET("editor.tabWidth"),
+  positionIndex = null,
 ) => {
   const value = typeof text === "string" ? text : "";
   const target = Number(viewColumn) || 0;
   const width = normalizeTabWidth(tabWidth);
+  const index = positionIndex || (typeof TextPositionIndex === "function"
+    ? new TextPositionIndex(value, width)
+    : null);
+  if (index) return index.visualToReal(target);
 
   if (target <= 0) return 0;
 
@@ -202,6 +250,13 @@ viewColumnToRealColumn = (
 
 getVisualTextLength = (text, tabWidth = SETTINGS_GET("editor.tabWidth")) => {
   const value = typeof text === "string" ? text : "";
+  if (typeof TextPositionIndex === "function")
+    return new TextPositionIndex(value, tabWidth).visualLength;
+  if (/^[\x00-\x7f]*$/.test(value)) {
+    let tabs = 0;
+    for (let index = value.indexOf("\t"); index !== -1; index = value.indexOf("\t", index + 1)) tabs++;
+    return value.length + tabs * (normalizeTabWidth(tabWidth) - 1);
+  }
   return realColumnToViewColumn(value, value.length, tabWidth);
 };
 

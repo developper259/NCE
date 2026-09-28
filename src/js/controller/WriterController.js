@@ -70,6 +70,56 @@ class WriterController {
     return tableSplit.filter((chaine) => chaine.length !== 0);
   }
 
+  getWordRangeAt(lineOrText, column) {
+    const text = typeof lineOrText === "string" ? lineOrText : lineOrText?.getText?.() || "";
+    const lineNode = typeof lineOrText === "string" ? null : lineOrText;
+    const index = lineNode?.getPositionIndex?.() ||
+      (typeof TextPositionIndex === "function"
+        ? new TextPositionIndex(text, SETTINGS_GET("editor.tabWidth"))
+        : null);
+    if (index) return index.getWordRangeAt(column, this.separator);
+    if (!text) return { start: 0, end: 0, separator: false };
+    const offset = Math.max(0, Math.min(Number(column) || 0, text.length));
+    let start = offset;
+    let end = offset;
+    const isSeparator = (char) => this.separator.includes(char);
+    while (start > 0 && !isSeparator(text[start - 1])) start--;
+    while (end < text.length && !isSeparator(text[end])) end++;
+    if (start === end && end < text.length) end++;
+    return { start, end, separator: isSeparator(text[start]) };
+  }
+
+  getPreviousWordBoundary(lineOrText, column) {
+    const lineNode = typeof lineOrText === "string" ? null : lineOrText;
+    const text = lineNode?.getText?.() ?? (typeof lineOrText === "string" ? lineOrText : "");
+    const index = lineNode?.getPositionIndex?.() ||
+      (typeof TextPositionIndex === "function"
+        ? new TextPositionIndex(text, SETTINGS_GET("editor.tabWidth"))
+        : null);
+    if (index) return index.previousWordBoundary(column, this.separator);
+    let position = Math.max(0, Math.min(Number(column) || 0, text.length));
+    while (position > 0 && this.separator.includes(text[position - 1])) position--;
+    while (position > 0 && !this.separator.includes(text[position - 1])) position--;
+    return position;
+  }
+
+  getNextWordBoundary(lineOrText, column) {
+    const lineNode = typeof lineOrText === "string" ? null : lineOrText;
+    const text = lineNode?.getText?.() ?? (typeof lineOrText === "string" ? lineOrText : "");
+    const index = lineNode?.getPositionIndex?.() ||
+      (typeof TextPositionIndex === "function"
+        ? new TextPositionIndex(text, SETTINGS_GET("editor.tabWidth"))
+        : null);
+    if (index) return index.nextWordBoundary(column, this.separator);
+    let position = Math.max(0, Math.min(Number(column) || 0, text.length));
+    if (position >= text.length) return text.length;
+    const separator = this.separator.includes(text[position]);
+    position++;
+    while (position < text.length && separator === this.separator.includes(text[position]))
+      position++;
+    return position;
+  }
+
   splitWordView(txt) {
     if (txt === undefined) return [];
     let oldChar = "";
@@ -259,28 +309,22 @@ class WriterController {
         };
   }
 
-  projectTokens(tokens, oldText, newText, lineNumber) {
+  projectTokens(tokens, oldText, newText, lineNumber, edit = null) {
     if (!Array.isArray(tokens) || tokens.length === 0) return tokens;
     if (oldText === newText) return tokens;
 
-    let editStart = 0;
-    const sharedLimit = Math.min(oldText.length, newText.length);
-    while (
-      editStart < sharedLimit &&
-      oldText[editStart] === newText[editStart]
-    ) {
-      editStart++;
-    }
-
-    let oldEnd = oldText.length;
-    let newEnd = newText.length;
-    while (
-      oldEnd > editStart &&
-      newEnd > editStart &&
-      oldText[oldEnd - 1] === newText[newEnd - 1]
-    ) {
-      oldEnd--;
-      newEnd--;
+    let editStart = edit?.start ?? 0;
+    let oldEnd = edit?.end ?? oldText.length;
+    let newEnd = edit ? editStart + edit.text.length : newText.length;
+    if (!edit) {
+      const sharedLimit = Math.min(oldText.length, newText.length);
+      while (editStart < sharedLimit && oldText[editStart] === newText[editStart]) editStart++;
+      oldEnd = oldText.length;
+      newEnd = newText.length;
+      while (oldEnd > editStart && newEnd > editStart && oldText[oldEnd - 1] === newText[newEnd - 1]) {
+        oldEnd--;
+        newEnd--;
+      }
     }
 
     const delta = newEnd - editStart - (oldEnd - editStart);
@@ -312,7 +356,7 @@ class WriterController {
     return projected;
   }
 
-  mutateLineRange(startIndex, oldCount, replacementTexts) {
+  mutateLineRange(startIndex, oldCount, replacementTexts, edit = null) {
     const lines = this.editor.lineController.lines;
     const existing = lines.slice(startIndex, startIndex + oldCount);
     const reuseCount = Math.min(existing.length, replacementTexts.length);
@@ -328,9 +372,10 @@ class WriterController {
           oldText,
           newText,
           startIndex + index + 1,
+          reuseCount === 1 && replacementTexts.length === 1 ? edit : null,
         ),
       );
-      line.setText(newText);
+      line.setText(newText, reuseCount === 1 && replacementTexts.length === 1 ? edit : null);
       replacementNodes.push(line);
     }
 
@@ -364,8 +409,9 @@ class WriterController {
     };
     const selectionBefore = this.getSelectionRange();
     const lines = lineController.lines;
-    const replacement = text.replace(/\r\n/g, "\n").split("\n");
-    text = replacement.join("\n");
+    const normalizedText = text.replace(/\r\n/g, "\n");
+    const replacement = normalizedText.split("\n");
+    text = normalizedText;
     const prefix = lines[start.row - 1].getText().slice(0, start.column);
     const suffix = lines[end.row - 1].getText().slice(end.column);
     replacement[0] = prefix + replacement[0];
@@ -394,27 +440,17 @@ class WriterController {
         if (line.length > 1000) file.syntaxMetrics.longLineCount++;
       }
     }
-    this.mutateLineRange(start.row - 1, end.row - start.row + 1, replacement);
+    const lineEdit = start.row === end.row && replacement.length === 1
+      ? { start: start.column, end: end.column, text: normalizedText }
+      : null;
+    const replacementNodes = this.mutateLineRange(
+      start.row - 1,
+      end.row - start.row + 1,
+      replacement,
+      lineEdit,
+    );
     file.totalLines = file.lines.length;
-    if (typeof lineController.getViewTextLength === "function") {
-      const removedMax = removed.reduce(
-        (max, line) =>
-          Math.max(max, lineController.getViewTextLength(line.getText())),
-        0,
-      );
-      const replacementMax = replacement.reduce(
-        (max, line) => Math.max(max, lineController.getViewTextLength(line)),
-        0,
-      );
-      if (replacementMax >= lineController.maxLineLength) {
-        lineController.maxLineLength = replacementMax;
-      } else if (
-        removedMax >= lineController.maxLineLength &&
-        typeof lineController.recalculateMaxLineLength === "function"
-      ) {
-        lineController.recalculateMaxLineLength();
-      }
-    }
+    lineController.syncLineLengthsForEdit?.(start.row - 1, removed, replacementNodes);
     if (options.preserveViewport === false) {
       file.startIndex = 0;
       file.offsetY = 0;
@@ -501,13 +537,14 @@ class WriterController {
         { row, column: 0 },
       );
     }
-    const line = this.editor.lineController.lines[row - 1]?.getText() || "";
+    const lineNode = this.editor.lineController.lines[row - 1];
+    const line = lineNode?.getText() || "";
     return this.deleteRange(
       {
         row,
         column:
           typeof previousGraphemeBoundary === "function"
-            ? previousGraphemeBoundary(line, column)
+            ? (lineNode?.getPositionIndex?.()?.previous(column) ?? previousGraphemeBoundary(line, column))
             : column - 1,
       },
       { row, column },
@@ -523,48 +560,8 @@ class WriterController {
 
     let cursor = { column, row };
     const lineNode = this.editor.lineController.lines[row - 1];
-    const line = lineNode.getText();
-    let newLine = "";
-    let deletedText = "";
-
-    if (cursor.column === 0) {
-      return this.delete(column, row);
-    } else {
-      const words = this.splitWord(line);
-      let charCount = 0;
-      let remainingDist = 0;
-      let lastWord = "";
-
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-        remainingDist = cursor.column - (charCount + word.length);
-
-        if (remainingDist <= 0) {
-          lastWord = word;
-          break;
-        } else {
-          newLine += word;
-        }
-        charCount += word.length;
-      }
-
-      if (remainingDist !== 0) {
-        const sliceIndex = lastWord.length + remainingDist;
-        deletedText = lastWord.slice(0, sliceIndex);
-        newLine +=
-          lastWord.slice(sliceIndex) +
-          line.slice(newLine.length + lastWord.length);
-        cursor.column -= deletedText.length;
-      } else {
-        deletedText = lastWord;
-        newLine += line.slice(newLine.length + lastWord.length);
-        cursor.column -= lastWord.length;
-      }
-    }
-
-    const deleteStart = { row, column: cursor.column };
-    const deleteEnd = { row, column };
-    return this.deleteRange(deleteStart, deleteEnd);
+    const startColumn = this.getPreviousWordBoundary(lineNode, cursor.column);
+    return this.deleteRange({ row, column: startColumn }, { row, column });
   }
 
   deleteSelection() {

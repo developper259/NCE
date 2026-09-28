@@ -132,7 +132,7 @@ class KeyBinding {
     if (!document.hasFocus()) return;
     if (!this.editor.tabManager.activeFile) return;
 
-    let txt = this.editor.selectController.containsSelected;
+    let txt = this.editor.selectController.getSelectedText?.() || "";
 
     if (!txt) {
       const lineNode =
@@ -433,6 +433,18 @@ class KeyBinding {
     );
   }
 
+  realToView(lineNode, column) {
+    const text = lineNode?.getText?.() || "";
+    const index = lineNode?.getPositionIndex?.();
+    return index ? index.realToVisual(column) : realColumnToViewColumn(text, column);
+  }
+
+  viewToReal(lineNode, column) {
+    const text = lineNode?.getText?.() || "";
+    const index = lineNode?.getPositionIndex?.();
+    return index ? index.visualToReal(column) : viewColumnToRealColumn(text, column);
+  }
+
   key_delete(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
@@ -457,7 +469,7 @@ class KeyBinding {
           row: y,
           column:
             typeof nextGraphemeBoundary === "function"
-              ? nextGraphemeBoundary(l, x)
+              ? (lineNode?.getPositionIndex?.()?.next(x) ?? nextGraphemeBoundary(l, x))
               : x + 1,
         };
       } else if (y < lc.lines.length) {
@@ -518,7 +530,7 @@ class KeyBinding {
             row: y,
             column:
               typeof previousGraphemeBoundary === "function"
-                ? previousGraphemeBoundary(line, x)
+                ? (lc.lines[y - 1]?.getPositionIndex?.()?.previous(x) ?? previousGraphemeBoundary(line, x))
                 : x - 1,
           };
           end = { row: y, column: x };
@@ -567,21 +579,20 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
-        this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          x,
+        this.editor.tabManager.activeFile.historyX = this.realToView(
+          this.editor.lineController.lines[y - 1], x,
         );
 
       if (y == 1) {
@@ -595,10 +606,7 @@ class KeyBinding {
 
       this.editor.cursorController.setCursorPosition(
         y,
-        viewColumnToRealColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          this.editor.tabManager.activeFile.historyX,
-        ),
+        this.viewToReal(this.editor.lineController.lines[y - 1], this.editor.tabManager.activeFile.historyX),
       );
 
       const lc = this.editor.lineController;
@@ -622,31 +630,28 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
-        this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          x,
+        this.editor.tabManager.activeFile.historyX = this.realToView(
+          this.editor.lineController.lines[y - 1], x,
         );
 
       if (y == this.editor.lineController.lines.length) {
         const lineNode = this.editor.lineController.lines[y - 1];
         const lineLength = lineNode ? lineNode.getText().length : 0;
-        if (this.editor.tabManager.activeFile.historyX != lineLength)
-          this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
-            lineNode ? lineNode.getText() : "",
-            lineLength,
-          );
+        const visualLength = this.realToView(lineNode, lineLength);
+        if (this.editor.tabManager.activeFile.historyX != visualLength)
+          this.editor.tabManager.activeFile.historyX = visualLength;
         else {
           this.editor.selectController.isMouseDown = false;
           return;
@@ -655,10 +660,7 @@ class KeyBinding {
 
       this.editor.cursorController.setCursorPosition(
         y,
-        viewColumnToRealColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          this.editor.tabManager.activeFile.historyX,
-        ),
+        this.viewToReal(this.editor.lineController.lines[y - 1], this.editor.tabManager.activeFile.historyX),
       );
 
       const lc = this.editor.lineController;
@@ -684,14 +686,14 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
@@ -701,17 +703,7 @@ class KeyBinding {
 
       if (a) {
         const l = lineNode ? lineNode.getText() : "";
-        const words = this.editor.writerController.splitWord(l);
-        let count = 0;
-
-        for (let i = 0; i < words.length; i++) {
-          const word = words[i];
-          if (x - (count + word.length) <= 0) {
-            x = count;
-            break;
-          }
-          count += word.length;
-        }
+        x = this.editor.writerController.getPreviousWordBoundary(lineNode || l, x);
       } else if (m) {
         this.key_home(s, c, m, a);
         return;
@@ -722,20 +714,11 @@ class KeyBinding {
           x = prevLineNode ? prevLineNode.getText().length : 0;
         } else {
           const currentLine = lc.lines[y - 1];
-          x = previousGraphemeBoundary(
-            currentLine ? currentLine.getText() : "",
-            x,
-          );
+          x = currentLine?.getPositionIndex?.()?.previous(x) ?? previousGraphemeBoundary(currentLine ? currentLine.getText() : "", x);
         }
       }
 
       this.editor.cursorController.setCursorPosition(y, x);
-
-      const screenCol = x - lc.offsetX;
-      if (screenCol < lc.marginChars) {
-        const targetCol = Math.max(0, lc.offsetX - 1);
-        lc.scrollTo(undefined, targetCol);
-      }
 
       if (s) {
         this.editor.selectController.move();
@@ -753,14 +736,14 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
@@ -770,18 +753,7 @@ class KeyBinding {
       if (y == lc.lines.length && x == lineLength) return;
 
       if (c || a) {
-        const l = lineNode ? lineNode.getText() : "";
-        const words = this.editor.writerController.splitWord(l);
-        let count = 0;
-
-        for (let i = 0; i < words.length; i++) {
-          const word = words[i];
-          count += word.length;
-          if (x - count < 0) {
-            x = count;
-            break;
-          }
-        }
+        x = this.editor.writerController.getNextWordBoundary(lineNode || "", x);
         if (x === lineLength && y < lc.lines.length) {
           y += 1;
           x = 0;
@@ -791,17 +763,11 @@ class KeyBinding {
           y += 1;
           x = 0;
         } else {
-          x = nextGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
+          x = lineNode?.getPositionIndex?.()?.next(x) ?? nextGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
         }
       }
 
       this.editor.cursorController.setCursorPosition(y, x);
-
-      const screenCol = x - lc.offsetX;
-      if (screenCol >= lc.maxCharacters - lc.marginChars) {
-        const targetCol = lc.offsetX + 1;
-        lc.scrollTo(undefined, targetCol);
-      }
 
       if (s) {
         this.editor.selectController.move();
