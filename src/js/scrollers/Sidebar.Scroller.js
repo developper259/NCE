@@ -6,6 +6,7 @@ class SidebarScroller {
     this.vScroller = null;
     this._observer = null;
     this._resizeObserver = null;
+    this.suspended = false;
     this._onNativeScroll = () => this.refresh();
 
     this.scrollTop = 0;
@@ -85,7 +86,7 @@ class SidebarScroller {
   }
 
   refresh() {
-    if (!this.vScroller) return;
+    if (!this.vScroller || this.suspended) return;
 
     this.updateMetrics();
     const maxScrollTop = this.scrollHeight - this.clientHeight;
@@ -94,6 +95,21 @@ class SidebarScroller {
 
     this.vScroller.refreshMetrics();
     this.vScroller.refresh();
+  }
+
+  suspend() {
+    this.suspended = true;
+    this._observer?.disconnect();
+    this.vScroller?.setActive(false);
+  }
+
+  resume() {
+    if (!this.suspended) return;
+    this.suspended = false;
+    this._observer?.observe(this.menuOBJ, {
+      childList: true, subtree: true, characterData: true,
+    });
+    this.refresh();
   }
 
   destroy() {

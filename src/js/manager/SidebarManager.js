@@ -435,6 +435,7 @@ class SidebarManager {
 
   closeSidebar(position) {
     if (position === "left" && this.leftSidebar) {
+      this.editor.fileExplorer?.virtualScroller?.suspend();
       this.leftSidebar.classList.remove("open");
       this.editor.domManager
         .getElement(".main-section")
@@ -462,12 +463,30 @@ class SidebarManager {
         ? this.leftMenuContainer
         : this.rightMenuContainer;
     if (container) {
+      if (menu.position === "left") {
+        const explorerActive = menu.id === "file-explorer";
+        container.classList.toggle("file-explorer-mode", explorerActive);
+        if (explorerActive) {
+          container.scrollTop = 0;
+          this.leftScroller?.suspend();
+        } else {
+          this.editor.fileExplorer?.virtualScroller?.suspend();
+          this.leftScroller?.resume();
+        }
+      }
       const content = menu.render();
 
       if (content instanceof Node) {
         container.replaceChildren(content);
       } else {
         container.innerHTML = content;
+      }
+      if (menu.position === "left" && menu.id === "file-explorer") {
+        this.editor.fileExplorer?.virtualScroller?.attach(
+          this.editor.fileExplorer.treeViewport,
+          this.editor.fileExplorer.treeLayer,
+        );
+        this.editor.fileExplorer?.virtualScroller?.resume();
       }
     }
   }

@@ -11,11 +11,13 @@ class FileExplorer extends Sidebar {
     this.isLoaded = false;
     this.workspaceSwitching = false;
     this.pendingScrollTop = 0;
-    this.scrollMenuElement = null;
+    this.visibleRows = [];
+    this.visibleRowByPath = new Map();
+    this.virtualScroller = typeof FileExplorerScroller === "function"
+      ? new FileExplorerScroller(editor, this) : null;
     this.scrollSaveTimer = null;
-    this.onExplorerScroll = () => {
-      const menu = this.scrollMenuElement;
-      this.pendingScrollTop = menu?.scrollTop || 0;
+    this.onVirtualScroll = () => {
+      this.pendingScrollTop = this.virtualScroller?.scrollTop || 0;
       clearTimeout(this.scrollSaveTimer);
       const root = this.rootPath;
       if (!root) return;
@@ -116,31 +118,29 @@ class FileExplorer extends Sidebar {
       return;
     }
 
-    for (const dirPath of dirPaths) {
-      this.refreshFolderIfLoaded(dirPath);
-    }
+    const refreshed = await Promise.all([...dirPaths].map((dirPath) =>
+      this.refreshFolderIfLoaded(dirPath),
+    ));
+    if (refreshed.some(Boolean)) this.refresh();
   }
 
   refreshFolderIfLoaded(dirPath) {
-    const refreshRecursive = (files) => {
+    const refreshRecursive = async (files) => {
       for (const file of files) {
         if (file.type === "folder" && file.path === dirPath) {
           if (file.expanded) {
-            this.loadFolderContent(dirPath).then((newChildren) => {
-              file.children = newChildren;
-              this.refresh();
-            });
+            file.children = await this.loadFolderContent(dirPath);
             return true;
           }
         }
-        if (file.children && refreshRecursive(file.children)) {
+        if (file.children && await refreshRecursive(file.children)) {
           return true;
         }
       }
       return false;
     };
 
-    refreshRecursive(this.files);
+    return refreshRecursive(this.files);
   }
 
   async loadFiles(expandedPaths = new Set()) {
@@ -243,6 +243,8 @@ class FileExplorer extends Sidebar {
     this.activeFilePath = null;
     this.isLoaded = false;
     this.clipboard = null;
+    this.pendingScrollTop = 0;
+    if (this.virtualScroller) this.virtualScroller.scrollTop = 0;
   }
 
   async invalidateWorkspace() {
@@ -324,6 +326,8 @@ class FileExplorer extends Sidebar {
   }
 
   render() {
+    this.treeViewport = null;
+    this.treeLayer = null;
     if (this.activeFilePath) {
       if (!this.editor.tabManager.getFileByPath(this.activeFilePath)) {
         this.activeFilePath = null;
@@ -332,13 +336,6 @@ class FileExplorer extends Sidebar {
 
     const container = document.createElement("div");
     container.className = "file-explorer-container";
-    const menu = this.editor.sidebarManager?.leftScroller?.menuOBJ;
-    if (menu && this.scrollMenuElement !== menu) {
-      this.scrollMenuElement?.removeEventListener("scroll", this.onExplorerScroll);
-      this.scrollMenuElement = menu;
-      menu.addEventListener("scroll", this.onExplorerScroll, { passive: true });
-    }
-    if (menu) menu.scrollTop = this.pendingScrollTop;
 
     const mainTitle = document.createElement("div");
     mainTitle.className = "sidebar-main-title";
@@ -377,10 +374,10 @@ class FileExplorer extends Sidebar {
 
     if (this.projectExpanded) {
       const treeContainer = document.createElement("div");
-      treeContainer.className = "file-tree";
+      treeContainer.className = "file-tree file-tree-viewport";
 
       treeContainer.addEventListener("contextmenu", (e) => {
-        if (e.target === treeContainer && this.rootPath) {
+        if (!e.target.closest?.(".file-item") && this.rootPath) {
           e.preventDefault();
           this.editor.contextMenuManager.openContextMenu(
             "file-explorer-background",
@@ -394,7 +391,31 @@ class FileExplorer extends Sidebar {
       } else if (this.files.length === 0) {
         this.renderEmptyFolderState(treeContainer);
       } else {
-        this.renderFiles(this.files, 0, treeContainer);
+        const layer = document.createElement("div");
+        layer.className = "file-tree-render-layer";
+        treeContainer.appendChild(layer);
+        treeContainer.addEventListener("click", (event) => {
+          const item = event.target.closest?.(".file-item");
+          if (!item || item.classList.contains("editing")) return;
+          const file = this.visibleRowByPath?.get(item.dataset.path);
+          if (!file) return;
+          event.stopPropagation();
+          if (file.type === "folder") this.toggleFolder(file.path);
+          else this.openFile(file.path);
+        });
+        treeContainer.addEventListener("contextmenu", (event) => {
+          const item = event.target.closest?.(".file-item");
+          if (!item) return;
+          const file = this.visibleRowByPath?.get(item.dataset.path);
+          if (!file) return;
+          event.preventDefault();
+          event.stopPropagation();
+          this.editor.contextMenuManager.openContextMenu(
+            file.type === "folder" ? "file-explorer-folder" : "file-explorer-file", file,
+          );
+        });
+        this.treeViewport = treeContainer;
+        this.treeLayer = layer;
       }
       container.appendChild(treeContainer);
     }
@@ -403,20 +424,59 @@ class FileExplorer extends Sidebar {
   }
 
   refresh() {
-    const menu = this.editor.sidebarManager?.leftScroller?.menuOBJ;
-    if (menu) this.pendingScrollTop = menu.scrollTop || 0;
+    this.rebuildVisibleRows();
+    this.pendingScrollTop = this.virtualScroller?.scrollTop ?? this.pendingScrollTop;
     super.refresh();
-    if (menu) menu.scrollTop = this.pendingScrollTop;
+    if (this.isOpen && this.virtualScroller) {
+      this.virtualScroller.attach(this.treeViewport, this.treeLayer);
+      this.virtualScroller.scrollTop = this.pendingScrollTop;
+      this.virtualScroller.invalidateRows();
+    }
   }
 
   restoreScrollState(state) {
     this.pendingScrollTop = Number.isFinite(state?.scrollTop)
       ? Math.max(0, state.scrollTop) : 0;
-    const scroller = this.editor.sidebarManager?.leftScroller;
-    if (scroller?.menuOBJ) {
-      scroller.menuOBJ.scrollTop = this.pendingScrollTop;
-      scroller.refresh();
+    if (this.virtualScroller) {
+      this.virtualScroller.scrollTop = this.pendingScrollTop;
+      this.virtualScroller.refresh();
     }
+  }
+
+  rebuildVisibleRows() {
+    const rows = [];
+    const byPath = new Map();
+    if (this.projectExpanded && this.rootPath) {
+      const visit = (files, depth) => {
+        for (const file of files) {
+          rows.push({ file, depth });
+          if (file.path) byPath.set(file.path, file);
+          if (file.type === "folder" && file.expanded && file.children) {
+            visit(file.children, depth + 1);
+          }
+        }
+      };
+      visit(this.files || [], 0);
+    }
+    this.visibleRows = rows;
+    this.visibleRowByPath = byPath;
+    return rows;
+  }
+
+  renderVirtualRows(startIndex, count) {
+    if (!this.treeLayer) return;
+    const domManager = this.editor.domManager;
+    const fragment = domManager.createFragment();
+    for (let index = startIndex; index < startIndex + count; index++) {
+      const row = this.visibleRows[index];
+      if (!row) break;
+      if (this.editingState?.target === row.file) {
+        this.renderEditableRow(row.file, row.depth, fragment);
+      } else {
+        fragment.appendChild(this.createFileRow(row.file, row.depth));
+      }
+    }
+    domManager.replaceChildren(this.treeLayer, fragment);
   }
 
   renderNoFolderState(container) {
@@ -439,17 +499,9 @@ class FileExplorer extends Sidebar {
     container.appendChild(emptyState);
   }
 
-  renderFiles(files, depth, container) {
-    for (const file of files) {
-      if (this.editingState && this.editingState.target === file) {
-        this.renderEditableRow(file, depth, container);
-        if (file.type === "folder" && file.expanded && file.children) {
-          this.renderFiles(file.children, depth + 1, container);
-        }
-        continue;
-      }
-
-      const fileItem = document.createElement("div");
+  createFileRow(file, depth) {
+      const createElement = (tagName) => this.editor.domManager.createElement(tagName);
+      const fileItem = createElement("div");
       fileItem.className = `file-item ${file.type}`;
       fileItem.dataset.path = file.path;
 
@@ -460,55 +512,29 @@ class FileExplorer extends Sidebar {
       }
 
       if (file.type === "folder") {
-        const arrowElement = document.createElement("i");
+        const arrowElement = createElement("i");
         arrowElement.className = `folder-arrow fi fi-rr-angle-small-right ${file.expanded ? "expanded" : ""}`;
         fileItem.appendChild(arrowElement);
 
-        const iconElement = document.createElement("i");
+        const iconElement = createElement("i");
         iconElement.className = "fi fi-rr-folder file-icon";
         fileItem.appendChild(iconElement);
       } else {
-        const spacer = document.createElement("span");
+        const spacer = createElement("span");
         spacer.className = "file-spacer";
         fileItem.appendChild(spacer);
 
-        const iconElement = document.createElement("i");
+        const iconElement = createElement("i");
         iconElement.className = `${this.getFileIcon(file.name)} file-icon`;
         fileItem.appendChild(iconElement);
       }
 
-      const nameElement = document.createElement("span");
+      const nameElement = createElement("span");
       nameElement.className = "file-name";
       nameElement.textContent = file.name;
       fileItem.appendChild(nameElement);
 
-      fileItem.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (file.type === "folder") {
-          this.toggleFolder(file.path);
-        } else {
-          this.openFile(file.path);
-        }
-      });
-
-      fileItem.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-
-        const menuName =
-          file.type === "folder"
-            ? "file-explorer-folder"
-            : "file-explorer-file";
-
-        this.editor.contextMenuManager.openContextMenu(menuName, file);
-      });
-
-      container.appendChild(fileItem);
-
-      if (file.type === "folder" && file.expanded && file.children) {
-        this.renderFiles(file.children, depth + 1, container);
-      }
-    }
+      return fileItem;
   }
 
   renderEditableRow(file, depth, container) {
@@ -574,8 +600,27 @@ class FileExplorer extends Sidebar {
 
   setActiveFile(path) {
     if (!this.rootPath) return;
+    const previous = this.activeFilePath;
     this.activeFilePath = path;
-    this.refresh();
+    const mounted = this.treeLayer
+      ? this.editor.domManager?.getElements?.(".file-item", this.treeLayer) || [] : [];
+    for (const item of mounted) {
+      if (item.dataset.path === previous) item.classList.remove("active-file");
+      if (item.dataset.path === path) item.classList.add("active-file");
+    }
+  }
+
+  revealRow(file) {
+    const scroller = this.virtualScroller;
+    if (!scroller || !scroller.maxViewRows) return;
+    const index = this.visibleRows.findIndex((row) => row.file === file);
+    if (index < 0) return;
+    scroller.totalVisibleRows = this.visibleRows.length;
+    const last = scroller.startIndex + scroller.maxViewRows - 1;
+    if (index < scroller.startIndex) scroller.setScrollTop(index * scroller.rowHeight);
+    else if (index > last) {
+      scroller.setScrollTop((index - scroller.maxViewRows + 1) * scroller.rowHeight);
+    }
   }
 
   async onOpen() {
@@ -797,6 +842,7 @@ class FileExplorer extends Sidebar {
       input: null,
     };
     this.refresh();
+    this.revealRow(placeholder);
   }
 
   startRename(file) {
@@ -808,6 +854,7 @@ class FileExplorer extends Sidebar {
       input: null,
     };
     this.refresh();
+    this.revealRow(file);
   }
 
   cancelEdit({ refresh = true } = {}) {
@@ -1125,3 +1172,4 @@ class FileExplorer extends Sidebar {
     }
   }
 }
+FileExplorer.ROW_HEIGHT = 22;

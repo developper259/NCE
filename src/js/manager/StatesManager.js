@@ -167,7 +167,8 @@ class StatesManager {
     return {
       activeFilePath: this.toWorkspaceRelative(explorer.activeFilePath, root),
       projectExpanded: explorer.projectExpanded,
-      scrollTop: this.getSidebarScrollTop("left"),
+      scrollTop: Number.isFinite(explorer.virtualScroller?.scrollTop)
+        ? explorer.virtualScroller.scrollTop : this.getSidebarScrollTop("left"),
       expandedPaths: Array.from(explorer.getExpandedPaths?.(explorer.files) || [])
         .flatMap((candidate) => {
           const relative = this.toWorkspaceRelative(candidate, root);

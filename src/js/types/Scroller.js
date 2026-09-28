@@ -44,6 +44,9 @@ class Scroller {
     this._onMouseMove = this.handleMouseMove.bind(this);
     this._onMouseUp = this.handleMouseUp.bind(this);
     this._onWheel = this.handleWheel.bind(this);
+    this._onThumbDown = null;
+    this._onMouseEnter = null;
+    this._onMouseLeave = null;
   }
 
   hide() {
@@ -211,7 +214,7 @@ class Scroller {
 
   addScrollListeners() {
     this.isDragging = false;
-    this.itemOBJ.addEventListener("mousedown", (e) => {
+    this._onThumbDown = (e) => {
       this.isDragging = true;
 
       if (this.editor && this.editor.sidebarResizer) {
@@ -228,22 +231,39 @@ class Scroller {
 
       this.updateVisibility();
       e.preventDefault();
-    });
+    };
+    this.itemOBJ.addEventListener("mousedown", this._onThumbDown);
 
-    this.parentOBJ.addEventListener("mouseenter", () => {
+    this._onMouseEnter = () => {
       this.isHovered = true;
       this.updateVisibility();
-    });
+    };
 
-    this.parentOBJ.addEventListener("mouseleave", () => {
+    this._onMouseLeave = () => {
       this.isHovered = false;
       this.updateVisibility();
-    });
+    };
+    this.parentOBJ.addEventListener("mouseenter", this._onMouseEnter);
+    this.parentOBJ.addEventListener("mouseleave", this._onMouseLeave);
 
     document.addEventListener("mousemove", this._onMouseMove);
     document.addEventListener("mouseup", this._onMouseUp);
     const wheelTarget = this.wheelTarget || this.parentOBJ;
     wheelTarget.addEventListener("wheel", this._onWheel, { passive: false });
+  }
+
+  destroy() {
+    if (this._rafId !== null) cancelAnimationFrame(this._rafId);
+    if (this._scrollEndTimer) clearTimeout(this._scrollEndTimer);
+    this.itemOBJ?.removeEventListener("mousedown", this._onThumbDown);
+    this.parentOBJ?.removeEventListener("mouseenter", this._onMouseEnter);
+    this.parentOBJ?.removeEventListener("mouseleave", this._onMouseLeave);
+    document.removeEventListener("mousemove", this._onMouseMove);
+    document.removeEventListener("mouseup", this._onMouseUp);
+    (this.wheelTarget || this.parentOBJ)?.removeEventListener("wheel", this._onWheel);
+    this.scrollerOBJ?.remove();
+    this.scrollerOBJ = null;
+    this.itemOBJ = null;
   }
 
   handleMouseMove(e) {

@@ -214,6 +214,26 @@ class DOMManager {
     return this.measureElement(el);
   }
 
+  createElement(tagName) {
+    return document.createElement(tagName);
+  }
+
+  createFragment() {
+    return document.createDocumentFragment();
+  }
+
+  replaceChildren(parent, ...children) {
+    parent.replaceChildren(...children);
+  }
+
+  requestFrame(callback) {
+    return requestAnimationFrame(callback);
+  }
+
+  cancelFrame(id) {
+    cancelAnimationFrame(id);
+  }
+
   measureElements() {
     const editor = this.editor;
 
