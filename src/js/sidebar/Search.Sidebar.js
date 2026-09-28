@@ -14,6 +14,14 @@ class SearchSidebar extends Sidebar {
     this.excludeInput = null;
     this.summaryElement = null;
     this.resultsElement = null;
+    this.resultsLayer = null;
+    this.resultsViewState = null;
+    this.resetResultsScroll = true;
+    this.resultsScroller = new SearchResultsScroller(
+      editor,
+      (item) => this.createResultNode(item),
+      () => this.loadMoreResults(),
+    );
     this.caseButton = null;
     this.wordButton = null;
     this.regexButton = null;
@@ -29,6 +37,10 @@ class SearchSidebar extends Sidebar {
     this.results = [];
     this.totalMatches = 0;
     this.filesSearched = 0;
+    this.resultsPageSize = 10000;
+    this.nextResultsOffset = 0;
+    this.hasMoreResults = false;
+    this.isLoadingMore = false;
 
     this.isSearching = false;
     this.searchTimer = null;
@@ -188,8 +200,13 @@ class SearchSidebar extends Sidebar {
     const results = document.createElement("div");
     results.className = "search-sidebar-results";
     this.resultsElement = results;
-    this.renderResults(results);
+    const resultsLayer = this.editor.domManager.createFastElement("div");
+    resultsLayer.setClassName("search-sidebar-results-layer");
+    this.resultsLayer = resultsLayer.domNode;
+    this.editor.domManager.wrapFastNode(results)?.appendChild(resultsLayer);
+    this.renderResults();
     container.appendChild(results);
+    this.resultsScroller.attach(results, this.resultsLayer);
 
     const scheduleSearch = () => {
       this.query = input.value;
@@ -230,8 +247,7 @@ class SearchSidebar extends Sidebar {
       this.summaryElement.textContent = this.getSummaryText();
     }
     if (this.resultsElement) {
-      this.resultsElement.innerHTML = "";
-      this.renderResults(this.resultsElement);
+      this.renderResults();
     }
     if (this.caseButton) {
       this.caseButton.classList.toggle(
@@ -357,6 +373,10 @@ class SearchSidebar extends Sidebar {
     const previousRequestId = this.activeRequestId;
     this.activeRequestId = requestId;
     if (previousRequestId) this.editor.api.cancelSearch?.(previousRequestId);
+    this.isLoadingMore = false;
+    this.hasMoreResults = false;
+    this.nextResultsOffset = 0;
+    this.resetResultsScroll = true;
 
     if (!rootPath) {
       this.clearResults();
@@ -377,6 +397,8 @@ class SearchSidebar extends Sidebar {
           caseSensitive: this.caseSensitive,
           wholeWord: this.wholeWord,
           useRegex: this.useRegex,
+          offset: 0,
+          limit: this.resultsPageSize,
           requestId,
         },
       );
@@ -390,9 +412,12 @@ class SearchSidebar extends Sidebar {
         return;
       }
 
-      this.results = response?.results || [];
+      this.results = Array.isArray(response?.results) ? response.results : [];
       this.totalMatches = response?.totalMatches || 0;
       this.filesSearched = response?.filesSearched || 0;
+      this.nextResultsOffset = (response?.offset ?? 0) + this.results.length;
+      this.hasMoreResults = this.results.length > 0 &&
+        (response?.hasMore ?? this.nextResultsOffset < this.totalMatches);
     } catch (error) {
       console.error("Error searching workspace:", error);
       this.clearResults();
@@ -409,7 +434,76 @@ class SearchSidebar extends Sidebar {
     this.results = [];
     this.totalMatches = 0;
     this.filesSearched = 0;
+    this.nextResultsOffset = 0;
+    this.hasMoreResults = false;
+    this.isLoadingMore = false;
+    this.resetResultsScroll = true;
     this.isSearching = false;
+  }
+
+  async loadMoreResults() {
+    if (
+      !this.isOpen ||
+      this.isSearching ||
+      this.isLoadingMore ||
+      !this.hasMoreResults ||
+      !this.query
+    ) {
+      return;
+    }
+
+    const rootPath = this.editor.fileExplorer.rootPath;
+    const workspaceGeneration = this.workspaceGeneration;
+    const searchGeneration = this.searchGeneration;
+    const offset = this.nextResultsOffset;
+    const requestId = `workspace-search-${searchGeneration}-page-${offset}`;
+    this.activeRequestId = requestId;
+    this.isLoadingMore = true;
+
+    try {
+      const response = await this.editor.api.searchInFiles(
+        rootPath,
+        this.query,
+        {
+          include: this.include,
+          exclude: this.exclude,
+          caseSensitive: this.caseSensitive,
+          wholeWord: this.wholeWord,
+          useRegex: this.useRegex,
+          offset,
+          limit: this.resultsPageSize,
+          requestId,
+        },
+      );
+
+      if (
+        !this.isOpen ||
+        searchGeneration !== this.searchGeneration ||
+        workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(rootPath, this.editor.fileExplorer.rootPath)
+      ) {
+        return;
+      }
+
+      const pageResults = Array.isArray(response?.results) ? response.results : [];
+      this.results = this.results.concat(pageResults);
+      this.totalMatches = response?.totalMatches ?? this.totalMatches;
+      this.filesSearched = response?.filesSearched ?? this.filesSearched;
+      this.nextResultsOffset = (response?.offset ?? offset) + pageResults.length;
+      this.hasMoreResults = pageResults.length > 0 &&
+        (response?.hasMore ?? this.nextResultsOffset < this.totalMatches);
+
+      this.resetResultsScroll = false;
+      this.refresh();
+    } catch (error) {
+      console.error("Error loading more workspace search results:", error);
+    } finally {
+      if (searchGeneration === this.searchGeneration) {
+        if (this.activeRequestId === requestId) this.activeRequestId = null;
+        this.isLoadingMore = false;
+        this.refresh();
+      }
+    }
   }
 
   resetWorkspace() {
@@ -442,91 +536,121 @@ class SearchSidebar extends Sidebar {
     } in ${this.filesSearched} file${this.filesSearched > 1 ? "s" : ""}`;
   }
 
-  renderResults(container) {
+  renderResults() {
+    const sameView = this.resultsViewState &&
+      this.resultsViewState.isSearching === this.isSearching &&
+      this.resultsViewState.query === this.query &&
+      this.resultsViewState.results === this.results;
+    if (sameView) return;
+
+    this.resultsViewState = {
+      isSearching: this.isSearching,
+      query: this.query,
+      results: this.results,
+    };
+
+    const items = [];
     if (this.isSearching) {
-      const loading = document.createElement("div");
-      loading.className = "search-sidebar-placeholder";
-      loading.textContent = "Searching…";
-      container.appendChild(loading);
-      return;
-    }
+      items.push({
+        type: "placeholder",
+        text: "Searching…",
+        height: 58,
+        rowHeight: 58,
+      });
+    } else if (this.query && this.results.length === 0) {
+      items.push({
+        type: "placeholder",
+        text: "No results found.",
+        height: 58,
+        rowHeight: 58,
+      });
+    } else if (this.query) {
+      const groups = new Map();
 
-    if (!this.query) {
-      return;
-    }
-
-    if (this.results.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "search-sidebar-placeholder";
-      empty.textContent = "No results found.";
-      container.appendChild(empty);
-      return;
-    }
-
-    const groups = new Map();
-
-    for (const result of this.results) {
-      if (!groups.has(result.path)) {
-        groups.set(result.path, []);
+      for (const result of this.results) {
+        if (!groups.has(result.path)) groups.set(result.path, []);
+        groups.get(result.path).push(result);
       }
 
-      groups.get(result.path).push(result);
-    }
-
-    for (const [filePath, matches] of groups) {
-      const group = document.createElement("div");
-      group.className = "search-sidebar-file-group";
-
-      const header = document.createElement("div");
-      header.className = "search-sidebar-file-header";
-
-      const icon = document.createElement("i");
-      icon.className = `${this.getFileIcon(
-        matches[0].name,
-      )} search-sidebar-file-icon`;
-
-      const fileName = document.createElement("span");
-      fileName.className = "search-sidebar-file-name";
-      fileName.textContent = matches[0].name;
-      fileName.title = filePath;
-
-      const count = document.createElement("span");
-      count.className = "search-sidebar-file-count";
-      count.textContent = matches.length;
-
-      header.append(icon, fileName, count);
-      group.appendChild(header);
-
-      for (const match of matches) {
-        const row = document.createElement("div");
-        row.className = "search-sidebar-match";
-        row.title = `${match.relativePath}:${match.line}`;
-
-        const line = document.createElement("span");
-        line.className = "search-sidebar-line-number";
-        line.textContent = match.line;
-
-        const content = document.createElement("span");
-        content.className = "search-sidebar-line-content";
-
-        this.renderHighlightedText(
-          content,
-          match.preview,
-          match.matchStart,
-          match.matchLength,
-        );
-
-        row.append(line, content);
-
-        row.addEventListener("click", () => {
-          this.openResult(match);
+      for (const [filePath, matches] of groups) {
+        items.push({
+          type: "header",
+          filePath,
+          name: matches[0].name,
+          icon: this.getFileIcon(matches[0].name),
+          count: matches.length,
+          height: 26,
+          rowHeight: 26,
         });
 
-        group.appendChild(row);
+        for (let index = 0; index < matches.length; index++) {
+          const match = matches[index];
+          const isLastInFile = index === matches.length - 1;
+          items.push({
+            type: "match",
+            match,
+            height: 22 + (isLastInFile ? 7 : 0),
+            rowHeight: 22,
+          });
+        }
       }
-
-      container.appendChild(group);
     }
+
+    this.resultsScroller.setItems(items, {
+      resetScroll: this.resetResultsScroll,
+    });
+    this.resetResultsScroll = true;
+  }
+
+  createResultNode(item) {
+    const dom = this.editor.domManager;
+    const row = dom.createFastElement("div");
+
+    if (item.type === "placeholder") {
+      row.setClassName("search-sidebar-placeholder");
+      row.setTextContent(item.text);
+      return row;
+    }
+
+    if (item.type === "header") {
+      row.setClassName("search-sidebar-file-header");
+
+      const icon = dom.createFastElement("i");
+      icon.setClassName(`${item.icon} search-sidebar-file-icon`);
+
+      const fileName = dom.createFastElement("span");
+      fileName.setClassName("search-sidebar-file-name");
+      fileName.setTextContent(item.name);
+      fileName.setTitle(item.filePath);
+
+      const count = dom.createFastElement("span");
+      count.setClassName("search-sidebar-file-count");
+      count.setTextContent(item.count);
+
+      row.append(icon, fileName, count);
+      return row;
+    }
+
+    const { match } = item;
+    row.setClassName("search-sidebar-match");
+    row.setTitle(`${match.relativePath}:${match.line}`);
+
+    const line = dom.createFastElement("span");
+    line.setClassName("search-sidebar-line-number");
+    line.setTextContent(match.line);
+
+    const content = dom.createFastElement("span");
+    content.setClassName("search-sidebar-line-content");
+    this.renderHighlightedText(
+      content,
+      match.preview,
+      match.matchStart,
+      match.matchLength,
+    );
+
+    row.append(line, content);
+    row.addEventListener("click", () => this.openResult(match));
+    return row;
   }
 
   renderHighlightedText(container, text, start, length) {
@@ -538,14 +662,12 @@ class SearchSidebar extends Sidebar {
     );
 
     if (safeStart > 0) {
-      container.appendChild(
-        document.createTextNode(safeText.slice(0, safeStart)),
-      );
+      container.appendChild(document.createTextNode(safeText.slice(0, safeStart)));
     }
 
     if (safeEnd > safeStart) {
-      const highlight = document.createElement("mark");
-      highlight.textContent = safeText.slice(safeStart, safeEnd);
+      const highlight = this.editor.domManager.createFastElement("mark");
+      highlight.setTextContent(safeText.slice(safeStart, safeEnd));
       container.appendChild(highlight);
     }
 
@@ -611,6 +733,7 @@ class SearchSidebar extends Sidebar {
   }
 
   onOpen() {
+    this.resultsScroller.resume();
     this.refresh();
     this.focusInput();
     if (this.query.trim() && this.results.length === 0 && !this.isSearching) {
@@ -620,5 +743,6 @@ class SearchSidebar extends Sidebar {
 
   onClose() {
     clearTimeout(this.searchTimer);
+    this.resultsScroller.suspend();
   }
 }

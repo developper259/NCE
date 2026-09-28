@@ -12,6 +12,7 @@ interface SearchOptions {
   wholeWord?: boolean;
   offset?: number;
   limit?: number;
+  maxMatches?: number;
   requestId?: string;
   paths?: string[];
   replaceFirst?: boolean;
@@ -102,7 +103,8 @@ export class WorkspaceSearch {
   ]);
 
   private readonly maxFileSize = 5 * 1024 * 1024;
-  private readonly maxResults = 10000;
+  private readonly maxResults = 50000;
+  private readonly maxReplaceResults = 10000;
   private readonly binaryExtensions = new Set([
     ".png",
     ".jpg",
@@ -488,7 +490,11 @@ export class WorkspaceSearch {
 
     const results: SearchResult[] = [];
     const offset = Math.max(0, Math.floor(options.offset || 0));
-    const limit = Math.min(this.maxResults, Math.max(1, Math.floor(options.limit || 50)));
+    const maxMatches = Math.min(
+      this.maxResults,
+      Math.max(1, Math.floor(options.maxMatches || this.maxResults)),
+    );
+    const limit = Math.min(maxMatches, Math.max(1, Math.floor(options.limit || 50)));
     let totalMatches = 0;
 
     let filesSearched = 0;
@@ -496,7 +502,7 @@ export class WorkspaceSearch {
     const walk = async (directory: string): Promise<void> => {
       if (options.requestId && this.cancelledRequests.has(options.requestId))
         return;
-      if (totalMatches >= this.maxResults) {
+      if (totalMatches >= maxMatches) {
         return;
       }
 
@@ -515,7 +521,7 @@ export class WorkspaceSearch {
       for (const entry of entries) {
         if (options.requestId && this.cancelledRequests.has(options.requestId))
           return;
-        if (totalMatches >= this.maxResults) {
+        if (totalMatches >= maxMatches) {
           return;
         }
 
@@ -588,7 +594,7 @@ export class WorkspaceSearch {
                 this.cancelledRequests.has(options.requestId)
               )
                 return;
-              if (totalMatches >= this.maxResults) return;
+              if (totalMatches >= maxMatches) return;
               totalMatches++;
               if (totalMatches <= offset || results.length >= limit) continue;
 
@@ -621,7 +627,7 @@ export class WorkspaceSearch {
           }
 
           for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            if (totalMatches >= this.maxResults) {
+            if (totalMatches >= maxMatches) {
               return;
             }
 
@@ -691,7 +697,11 @@ export class WorkspaceSearch {
       return { success: false, filesChanged: 0, replacements: 0, error: "Invalid replacement request." };
     }
 
-    const response = await this.search(rootPath, query, { ...options, limit: this.maxResults });
+    const response = await this.search(rootPath, query, {
+      ...options,
+      limit: this.maxReplaceResults,
+      maxMatches: this.maxReplaceResults,
+    });
     const resultPaths = [...new Set(response.results.map((result) => result.path))];
     const paths = options.paths?.length
       ? resultPaths.filter((filePath) => options.paths?.includes(filePath))
