@@ -13,6 +13,8 @@ class Scroller {
     this.wheelTarget = null;
     this.scrollerOBJ = null;
     this.itemOBJ = null;
+    this.scrollerFast = null;
+    this.itemFast = null;
 
     this.scrollerOBJHeight = 0;
     this.scrollerOBJWidth = 0;
@@ -50,13 +52,11 @@ class Scroller {
   }
 
   hide() {
-    if (!this.scrollerOBJ.classList.contains("page-scroller-inactive"))
-      this.scrollerOBJ.classList.add("page-scroller-inactive");
+    this.scrollerFast?.toggleClass("page-scroller-inactive", true);
   }
 
   show() {
-    if (this.scrollerOBJ.classList.contains("page-scroller-inactive"))
-      this.scrollerOBJ.classList.remove("page-scroller-inactive");
+    this.scrollerFast?.toggleClass("page-scroller-inactive", false);
   }
 
   calcul(diff) {
@@ -134,9 +134,9 @@ class Scroller {
 
     const pos = this.scrollRatio * metrics.maxScroll;
     if (metrics.isVertical) {
-      this.itemOBJ.style.top = `${pos}px`;
+      this.itemFast?.setTop(pos);
     } else {
-      this.itemOBJ.style.left = `${pos}px`;
+      this.itemFast?.setLeft(pos);
     }
   }
 
@@ -145,25 +145,27 @@ class Scroller {
 
     this.scrollerOBJ = document.createElement("div");
     this.itemOBJ = document.createElement("div");
+    this.scrollerFast = this.editor.domManager.wrapFastNode(this.scrollerOBJ);
+    this.itemFast = this.editor.domManager.wrapFastNode(this.itemOBJ);
 
-    this.scrollerOBJ.classList.add("page-scroller");
-    this.itemOBJ.classList.add("page-scroller-item");
+    this.scrollerFast.setClassName("page-scroller");
+    this.itemFast.setClassName("page-scroller-item");
 
-    this.scrollerOBJ.style.transition = "opacity 0.2s ease-in-out";
-    this.scrollerOBJ.style.opacity = "0";
+    this.scrollerFast.setStyle("transition", "opacity 0.2s ease-in-out");
+    this.scrollerFast.setOpacity(0);
 
-    if (this.isBody) this.scrollerOBJ.classList.add("page-scroller-body");
-    if (!this.active) this.scrollerOBJ.classList.add("page-scroller-inactive");
+    this.scrollerFast.toggleClass("page-scroller-body", this.isBody);
+    this.scrollerFast.toggleClass("page-scroller-inactive", !this.active);
 
     if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
-      this.scrollerOBJ.classList.add("page-scroller-vertical");
+      this.scrollerFast.addClass("page-scroller-vertical");
     } else {
-      this.scrollerOBJ.classList.add("page-scroller-horizontal");
+      this.scrollerFast.addClass("page-scroller-horizontal");
     }
 
-    this.scrollerOBJ.id = this.id;
-    this.scrollerOBJ.appendChild(this.itemOBJ);
-    this.parentOBJ.appendChild(this.scrollerOBJ);
+    this.scrollerFast.setProperty("id", String(this.id));
+    this.scrollerFast.appendChild(this.itemFast);
+    this.editor.domManager.wrapFastNode(this.parentOBJ)?.appendChild(this.scrollerFast);
 
     this.addScrollListeners();
     this.refresh();
@@ -172,9 +174,9 @@ class Scroller {
   updateVisibility() {
     if (!this.scrollerOBJ) return;
     if (this.active && (this.isHovered || this.isDragging)) {
-      this.scrollerOBJ.style.opacity = "1";
+      this.scrollerFast?.setOpacity(1);
     } else {
-      this.scrollerOBJ.style.opacity = "0";
+      this.scrollerFast?.setOpacity(0);
     }
   }
 
@@ -192,10 +194,10 @@ class Scroller {
     const size = Math.max((proportion / 100) * track, 20);
 
     if (isVertical) {
-      this.itemOBJ.style.height = `${size}px`;
+      this.itemFast?.setHeight(size);
       this.itemOBJHeight = size;
     } else {
-      this.itemOBJ.style.width = `${size}px`;
+      this.itemFast?.setWidth(size);
       this.itemOBJWidth = size;
     }
 
@@ -206,8 +208,7 @@ class Scroller {
   setActive(mode) {
     this.active = mode;
     if (!this.scrollerOBJ) return;
-    if (mode) this.scrollerOBJ.classList.remove("page-scroller-inactive");
-    else this.scrollerOBJ.classList.add("page-scroller-inactive");
+    this.scrollerFast?.toggleClass("page-scroller-inactive", !mode);
 
     this.updateVisibility();
   }
@@ -218,8 +219,8 @@ class Scroller {
       this.isDragging = true;
 
       if (this.editor && this.editor.sidebarResizer) {
-        this.editor.sidebarResizer.leftResizer.style.display = "none";
-        this.editor.sidebarResizer.rightResizer.style.display = "none";
+        this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.leftResizer)?.setDisplay("none");
+        this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.rightResizer)?.setDisplay("none");
       }
 
       const itemRect = this.editor.domManager.getElementMetrics(this.itemOBJ);
@@ -261,9 +262,11 @@ class Scroller {
     document.removeEventListener("mousemove", this._onMouseMove);
     document.removeEventListener("mouseup", this._onMouseUp);
     (this.wheelTarget || this.parentOBJ)?.removeEventListener("wheel", this._onWheel);
-    this.scrollerOBJ?.remove();
+    this.scrollerFast?.remove();
     this.scrollerOBJ = null;
     this.itemOBJ = null;
+    this.scrollerFast = null;
+    this.itemFast = null;
   }
 
   handleMouseMove(e) {

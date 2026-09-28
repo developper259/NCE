@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { createEditor, loadGlobal } = require("./helpers/runtime");
+const { createEditor, FastDOMNode, loadGlobal } = require("./helpers/runtime");
 
 const LineNode = loadGlobal("src/js/types/Line.js", "LineNode");
 
@@ -49,9 +49,19 @@ test("virtual viewport remaps every visible slot after delete and scrollTo", () 
   });
   const file = { lines, totalLines: lines.length, startIndex: 25, offsetY: 0, offsetX: 0, maxLineLength: 8 };
   const lineNodes = new Map();
+  const fastNodes = new WeakMap();
   const editor = {
     tabManager: { activeFile: file },
     output: { children: slots },
+    domManager: {
+      getLineHeight: () => 20,
+      getLetterWidth: () => 10,
+      wrapFastNode(node) {
+        let fast = fastNodes.get(node);
+        if (!fast) { fast = new FastDOMNode(node); fastNodes.set(node, fast); }
+        return fast;
+      },
+    },
     highlightController: {
       lineNodes,
       setLineNode(line, node) { lineNodes.set(line - file.startIndex, node); },
@@ -126,6 +136,10 @@ test("fractional vertical scroll keeps the rendered layers covering the viewport
     offsetY: 0,
   };
   const controller = Object.create(LineController.prototype);
+  controller.outputFast = new FastDOMNode(layers.output);
+  controller.lineNumberFast = new FastDOMNode(layers.lineNumberOutput);
+  controller.selectOutputFast = new FastDOMNode(layers.selectOutput);
+  controller.searchOutputFast = new FastDOMNode(layers.searchOutput);
   controller.editor = {
     ...layers,
     posY: 20,
@@ -474,9 +488,20 @@ test("File Explorer distinguishes no workspace, empty workspace and files", () =
     buildBackgroundContextMenu() {}, buildProjectContextMenu() {},
   });
   const explorer = Object.create(FileExplorer.prototype);
+  const fastNodes = new WeakMap();
   Object.assign(explorer, {
     activeFilePath: null, projectName: "", projectExpanded: true, files: [], rootPath: "",
-    editor: { tabManager: { getFileByPath: () => null }, contextMenuManager: { openContextMenu() {} } },
+    editor: {
+      tabManager: { getFileByPath: () => null },
+      contextMenuManager: { openContextMenu() {} },
+      domManager: {
+        wrapFastNode(node) {
+          let fast = fastNodes.get(node);
+          if (!fast) { fast = new FastDOMNode(node); fastNodes.set(node, fast); }
+          return fast;
+        },
+      },
+    },
     refresh() {}, selectFolder() {},
   });
 

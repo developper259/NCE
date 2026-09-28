@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const fs = require("node:fs");
-const { loadGlobal } = require("./helpers/runtime");
+const { FastDOMNode, loadGlobal } = require("./helpers/runtime");
 
 const FileExplorerScroller = loadGlobal(
   "src/js/scrollers/FileExplorer.Scroller.js", "FileExplorerScroller",
@@ -10,8 +10,14 @@ const FileExplorerScroller = loadGlobal(
 
 function fixture(height, total = 10000) {
   const frames = [];
-  const layer = { style: {} };
-  const viewport = {};
+  let transformWrites = 0;
+  const layerStyle = { value: "" };
+  Object.defineProperty(layerStyle, "transform", {
+    get() { return this.value; },
+    set(value) { transformWrites++; this.value = value; },
+  });
+  const layer = { style: layerStyle };
+  const viewport = { addEventListener() {}, removeEventListener() {} };
   const rendered = [];
   const explorer = {
     constructor: { ROW_HEIGHT: 22 },
@@ -21,17 +27,26 @@ function fixture(height, total = 10000) {
   const editor = {
     sidebarManager: {},
     domManager: {
+      fastNodes: new WeakMap(),
+      wrapFastNode(node) {
+        if (!node?.style) return null;
+        let fast = this.fastNodes.get(node);
+        if (!fast) {
+          fast = new FastDOMNode(node);
+          this.fastNodes.set(node, fast);
+        }
+        return fast;
+      },
       getElementMetrics() { return { clientHeight: height }; },
       requestFrame(callback) { frames.push(callback); return frames.length; },
     },
   };
   const scroller = new FileExplorerScroller(editor, explorer);
-  scroller.viewport = viewport;
-  scroller.layer = layer;
+  scroller.attach(viewport, layer);
   scroller.needsMeasure = true;
   const flush = () => { while (frames.length) frames.shift()(); };
   scroller.update();
-  return { scroller, explorer, layer, rendered, flush, setHeight(value) { height = value; } };
+  return { scroller, explorer, layer, rendered, flush, transformWrites: () => transformWrites, setHeight(value) { height = value; } };
 }
 
 test("render window follows viewport height, including a fractional row", () => {
@@ -50,6 +65,9 @@ test("scroll ratio, pixel fraction, collapse clamp and resize preserve a valid w
   assert.equal(item.scroller.startIndex, 1);
   assert.equal(item.scroller.offsetY, 11);
   assert.equal(item.layer.style.transform, "translate3d(0, -11px, 0)");
+  const writesAfterScroll = item.transformWrites();
+  item.scroller.update();
+  assert.equal(item.transformWrites(), writesAfterScroll);
   item.scroller.setScrollRatio(0.5);
   item.flush();
   assert.ok(item.scroller.startIndex > 1 && item.scroller.startIndex < 9980);
@@ -109,36 +127,82 @@ test("row height remains synchronized with CSS", () => {
 });
 
 test("twenty thousand visible files mount only viewport rows", () => {
-  const element = () => ({
-    children: [], dataset: {}, style: { setProperty() {} },
-    classList: { add() {} },
-    appendChild(child) { this.children.push(child); },
-    replaceChildren(fragment) { this.children = [...fragment.children]; },
-  });
+  const element = () => {
+    const node = {
+      nodeType: 1,
+      children: [],
+      dataset: {},
+      style: { setProperty(name, value) { this[name] = String(value); }, removeProperty(name) { delete this[name]; } },
+      classList: {
+        values: new Set(),
+        add(name) { this.values.add(name); },
+        remove(name) { this.values.delete(name); },
+        [Symbol.iterator]() { return this.values[Symbol.iterator](); },
+      },
+      _className: "",
+      appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
+      replaceChildren(...children) {
+        this.children = children.flatMap((child) => child?.nodeType === 11 ? child.children : [child]);
+      },
+      setAttribute(name, value) { this.attributes.set(name, value); },
+      removeAttribute(name) { this.attributes.delete(name); },
+      attributes: new Map(),
+      firstChild: null,
+    };
+    Object.defineProperty(node, "className", {
+      get() { return this._className; },
+      set(value) {
+        this._className = value;
+        this.classList.values = new Set(String(value).split(/\s+/).filter(Boolean));
+      },
+    });
+    Object.defineProperty(node, "firstChild", { get() { return this.children[0] || null; } });
+    return node;
+  };
+  const fastNodeCache = new WeakMap();
+  const wrapFastNode = (node) => {
+    let fast = fastNodeCache.get(node);
+    if (!fast) { fast = new FastDOMNode(node); fastNodeCache.set(node, fast); }
+    return fast;
+  };
   const FileExplorer = loadGlobal("src/js/sidebar/FileExplorer.Sidebar.js", "FileExplorer", {
     Sidebar: class {}, FileOperations: class {}, window: { api: {} },
-    document: { createElement: element, createDocumentFragment: element },
+    document: { createElement: element, createDocumentFragment() { const fragment = element(); fragment.nodeType = 11; return fragment; } },
+    FastDOMNode,
     USERCONFIG_FILE_ICONS: { default: "icon" },
   });
   const explorer = Object.create(FileExplorer.prototype);
   explorer.activeFilePath = null;
   explorer.treeLayer = element();
+  explorer.treeLayerFast = wrapFastNode(explorer.treeLayer);
   explorer.editor = { domManager: {
+    createFastElement(tagName) { return new FastDOMNode(element(tagName)); },
+    wrapFastNode,
     createElement: element,
-    createFragment: element,
+    createFragment() { const fragment = element(); fragment.nodeType = 11; return fragment; },
     replaceChildren(parent, fragment) { parent.replaceChildren(fragment); },
   } };
   explorer.visibleRows = Array.from({ length: 20000 }, (_, i) => ({
     file: { name: `${i}.txt`, type: "file", path: `/root/${i}.txt` }, depth: 0,
   }));
-  const viewport = {};
+  const viewport = { addEventListener() {}, removeEventListener() {} };
   let height = 440;
+  const frames = [];
+  const fastNodes = new WeakMap();
+  const domManager = {
+    getElementMetrics: () => ({ clientHeight: height }),
+    requestFrame(callback) { frames.push(callback); return frames.length; },
+    wrapFastNode(node) {
+      let fast = fastNodes.get(node);
+      if (!fast) { fast = new FastDOMNode(node); fastNodes.set(node, fast); }
+      return fast;
+    },
+  };
   const scroller = new FileExplorerScroller({
     sidebarManager: {},
-    domManager: { getElementMetrics: () => ({ clientHeight: height }) },
+    domManager,
   }, explorer);
-  scroller.viewport = viewport;
-  scroller.layer = explorer.treeLayer;
+  scroller.attach(viewport, explorer.treeLayer);
   scroller.needsMeasure = true;
   scroller.update();
   assert.equal(explorer.treeLayer.children.length, 21);
@@ -182,15 +246,20 @@ test("active file updates mounted rows without rebuilding the sidebar", () => {
   });
   const classes = () => ({ values: new Set(), add(value) { this.values.add(value); }, remove(value) { this.values.delete(value); } });
   const rows = [
-    { dataset: { path: "/root/old" }, classList: classes() },
-    { dataset: { path: "/root/new" }, classList: classes() },
+    { dataset: { path: "/root/old" }, classList: classes(), style: {} },
+    { dataset: { path: "/root/new" }, classList: classes(), style: {} },
   ];
   rows[0].classList.add("active-file");
   const explorer = Object.create(FileExplorer.prototype);
   explorer.rootPath = "/root";
   explorer.activeFilePath = "/root/old";
   explorer.treeLayer = {};
-  explorer.editor = { domManager: { getElements: () => rows } };
+  explorer.editor = { domManager: {
+    getElements: () => rows,
+    wrapFastNode(item) {
+      return { toggleClass(name, enabled) { enabled ? item.classList.add(name) : item.classList.remove(name); } };
+    },
+  } };
   explorer.refresh = () => assert.fail("full refresh called");
   explorer.setActiveFile("/root/new");
   assert.equal(rows[0].classList.values.has("active-file"), false);

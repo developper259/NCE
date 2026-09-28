@@ -1,6 +1,11 @@
 class LineController {
   constructor(editor) {
     this.editor = editor;
+    const wrapFastNode = (node) => editor.domManager?.wrapFastNode?.(node) || null;
+    this.outputFast = wrapFastNode(editor.output);
+    this.lineNumberFast = wrapFastNode(editor.lineNumberOutput);
+    this.selectOutputFast = wrapFastNode(editor.selectOutput);
+    this.searchOutputFast = wrapFastNode(editor.searchOutput);
 
     this.outputWidth = 0;
     this.outputHeight = 0;
@@ -224,6 +229,10 @@ class LineController {
       : 23;
   }
 
+  getFastNode(node) {
+    return this.editor.domManager?.wrapFastNode?.(node) || null;
+  }
+
   getViewportHeight() {
     const horizontalScroller = this.outputScroller?.hScroller;
     const horizontalHeight = horizontalScroller?.calcIsActive()
@@ -284,15 +293,15 @@ class LineController {
 
     const height = `${this.getRenderedLayerHeight()}px`;
 
-    this.editor.output.style.height = height;
-    this.editor.lineNumberOutput.style.height = height;
-    this.editor.selectOutput.style.height = height;
-    this.editor.searchOutput.style.height = height;
+    this.outputFast?.setHeight(height);
+    this.lineNumberFast?.setHeight(height);
+    this.selectOutputFast?.setHeight(height);
+    this.searchOutputFast?.setHeight(height);
 
-    this.editor.output.style.transform = transform;
-    this.editor.lineNumberOutput.style.transform = transform;
-    this.editor.selectOutput.style.transform = transform;
-    this.editor.searchOutput.style.transform = transform;
+    this.outputFast?.setTransform(transform);
+    this.lineNumberFast?.setTransform(transform);
+    this.selectOutputFast?.setTransform(transform);
+    this.searchOutputFast?.setTransform(transform);
   }
 
   isSized() {
@@ -462,7 +471,7 @@ class LineController {
     const selectedLines =
       this.editor.lineNumberOutput?.querySelectorAll(".line-selected");
     if (selectedLines) {
-      selectedLines.forEach((line) => line.classList.remove("line-selected"));
+      selectedLines.forEach((line) => this.getFastNode(line)?.toggleClass("line-selected", false));
     }
 
     const newLine = this.getLineNumberOBJ(index - 1);
@@ -471,7 +480,7 @@ class LineController {
       return;
     }
 
-    newLine.classList.add("line-selected");
+    this.getFastNode(newLine)?.toggleClass("line-selected", true);
   }
 
   clearDiffRows() {
@@ -642,9 +651,9 @@ class LineController {
         continue;
       }
 
-      child.replaceChildren();
-
-      child.removeAttribute("data-line");
+      const childFast = this.getFastNode(child);
+      childFast?.removeChildren();
+      childFast?.removeAttribute("data-line");
     }
 
     this.dirtyLines.clear();
@@ -664,10 +673,11 @@ class LineController {
       return;
     }
 
-    if (!displayRow) {
-      child.replaceChildren();
+    const childFast = this.getFastNode(child);
 
-      child.removeAttribute("data-line");
+    if (!displayRow) {
+      childFast?.removeChildren();
+      childFast?.removeAttribute("data-line");
 
       return;
     }
@@ -697,11 +707,12 @@ class LineController {
         return;
       }
 
-      lineOBJ.dataset.line = documentIndex === null ? "" : documentIndex;
-      lineOBJ.dataset.displayLine = displayIndex;
-      lineOBJ.dataset.renderGeneration = String(this.renderGeneration);
+      const lineFast = this.getFastNode(lineOBJ);
+      lineFast?.setDataset("line", documentIndex === null ? "" : documentIndex);
+      lineFast?.setDataset("displayLine", displayIndex);
+      lineFast?.setDataset("renderGeneration", this.renderGeneration);
 
-      child.replaceWith(lineOBJ);
+      childFast?.replaceWith(lineOBJ);
 
       if (documentIndex !== null) {
         this.editor.highlightController.setLineNode(documentIndex, lineOBJ);
@@ -738,7 +749,8 @@ class LineController {
             ? "File is too large to be opened"
             : "File can't be opened";
       fragment.appendChild(message);
-      this.editor.output.replaceChildren(fragment);
+      if (this.outputFast) this.outputFast.replaceChildren(fragment);
+      else this.editor.output.replaceChildren(fragment);
       this.editor.highlightController.lineNodes.clear();
       return;
     }
@@ -764,9 +776,10 @@ class LineController {
 
         lineOBJ = this.createLineOBJ(line, i);
 
-        lineOBJ.dataset.line = documentIndex === null ? "" : documentIndex;
-        lineOBJ.dataset.displayLine = displayIndex;
-        lineOBJ.dataset.renderGeneration = String(this.renderGeneration);
+        const lineFast = this.getFastNode(lineOBJ);
+        lineFast?.setDataset("line", documentIndex === null ? "" : documentIndex);
+        lineFast?.setDataset("displayLine", displayIndex);
+        lineFast?.setDataset("renderGeneration", this.renderGeneration);
 
         if (documentIndex !== null) {
           this.editor.highlightController.setLineNode(documentIndex, lineOBJ);
@@ -778,7 +791,8 @@ class LineController {
 
     this.editor.highlightController.markDirtyAll(true);
 
-    this.editor.output.replaceChildren(fragment);
+    if (this.outputFast) this.outputFast.replaceChildren(fragment);
+    else this.editor.output.replaceChildren(fragment);
   }
 
   refreshNumberLines() {
@@ -794,7 +808,7 @@ class LineController {
 
     if (diff > 0) {
       for (let i = 0; i < diff; i++) {
-        this.editor.lineNumberOutput.lastElementChild.remove();
+        this.getFastNode(this.editor.lineNumberOutput.lastElementChild)?.remove();
       }
     } else if (diff < 0) {
       const fragment = document.createDocumentFragment();
@@ -812,7 +826,8 @@ class LineController {
         fragment.appendChild(lNode);
       }
 
-      this.editor.lineNumberOutput.appendChild(fragment);
+      if (this.lineNumberFast) this.lineNumberFast.appendChild(fragment);
+      else this.editor.lineNumberOutput.appendChild(fragment);
     }
 
     for (let i = 0; i < children.length; i++) {
@@ -821,26 +836,22 @@ class LineController {
       const displayIndex = this.startIndex + i;
       const displayRow = this.getDisplayRow(displayIndex);
 
-      span.textContent =
+      const spanFast = this.getFastNode(span);
+      spanFast?.setTextContent(
         displayRow?.documentIndex === null
           ? ""
           : displayRow
             ? displayRow.documentIndex + 1
-            : "";
+            : "",
+      );
 
-      span.dataset.line =
-        displayRow?.documentIndex === null
-          ? ""
-          : (displayRow?.documentIndex ?? "");
-      span.dataset.displayLine = displayIndex;
-
-      span.style.top = `${this.getLineTop(i)}px`;
-
-      if (displayRow?.documentIndex === this.index - 1) {
-        span.classList.add("line-selected");
-      } else {
-        span.classList.remove("line-selected");
-      }
+      const lineNumber = displayRow?.documentIndex === null
+        ? ""
+        : (displayRow?.documentIndex ?? "");
+      spanFast?.setDataset("line", lineNumber);
+      spanFast?.setDataset("displayLine", displayIndex);
+      spanFast?.setTop(this.getLineTop(i));
+      spanFast?.toggleClass("line-selected", displayRow?.documentIndex === this.index - 1);
     }
 
     this.updateLineNumberWidth();
@@ -861,36 +872,39 @@ class LineController {
       fragment.appendChild(lNode);
     }
 
-    this.editor.lineNumberOutput.replaceChildren(fragment);
+    if (this.lineNumberFast) this.lineNumberFast.replaceChildren(fragment);
+    else this.editor.lineNumberOutput.replaceChildren(fragment);
 
     this.updateLineNumberWidth();
   }
 
   createNumberLineOBJ(screenIndex, dataIndex) {
-    const span = document.createElement("span");
-
-    span.classList.add("line-el", "editor-el");
+    const spanFast = this.editor.domManager.createFastElement("span");
+    const span = spanFast.domNode;
+    spanFast.addClass("line-el");
+    spanFast.addClass("editor-el");
 
     const displayRow = this.getDisplayRow(dataIndex);
 
     if (displayRow?.documentIndex === this.index - 1) {
-      span.classList.add("line-selected");
+      spanFast.addClass("line-selected");
     }
 
-    span.style.top = `${this.getLineTop(screenIndex)}px`;
+    spanFast.setTop(this.getLineTop(screenIndex));
 
-    span.textContent =
+    spanFast.setTextContent(
       displayRow?.documentIndex === null
         ? ""
         : displayRow
           ? displayRow.documentIndex + 1
-          : "";
+          : "",
+    );
 
-    span.dataset.line =
-      displayRow?.documentIndex === null
-        ? ""
-        : (displayRow?.documentIndex ?? "");
-    span.dataset.displayLine = dataIndex;
+    const lineNumber = displayRow?.documentIndex === null
+      ? ""
+      : (displayRow?.documentIndex ?? "");
+    spanFast.setDataset("line", lineNumber);
+    spanFast.setDataset("displayLine", dataIndex);
 
     return span;
   }
@@ -910,7 +924,7 @@ class LineController {
   updateLineNumberWidth() {
     const width = this.calculateLineNumberWidth();
 
-    this.editor.lineNumberOutput.style.width = `${width}px`;
+    this.lineNumberFast?.setWidth(width);
 
     this.editor.updateBaseX(width);
   }
@@ -965,12 +979,13 @@ class LineController {
     );
 
     if (diffState) {
-      lineOBJ.classList.add(`line-${diffState}`);
+      this.getFastNode(lineOBJ)?.addClass(`line-${diffState}`);
     }
 
-    lineOBJ.style.position = "absolute";
-    lineOBJ.style.top = `${this.getLineTop(screenIndex)}px`;
-    lineOBJ.style.left = "0px";
+    const lineFast = this.getFastNode(lineOBJ);
+    lineFast?.setStyle("position", "absolute");
+    lineFast?.setTop(this.getLineTop(screenIndex));
+    lineFast?.setLeft(0);
 
     return lineOBJ;
   }
@@ -1047,11 +1062,11 @@ class LineController {
       this.renderLoadError();
       return;
     }
-    this.editor.lineNumberOutput.style.display = "block";
-    this.editor.output.style.display = "block";
-    this.editor.output.classList.remove("editor-load-error-output");
-    this.editor.selectOutput?.style.setProperty("display", "block");
-    this.editor.searchOutput?.style.setProperty("display", "block");
+    this.lineNumberFast?.setDisplay("block");
+    this.outputFast?.setDisplay("block");
+    this.outputFast?.removeClass("editor-load-error-output");
+    this.selectOutputFast?.setDisplay("block");
+    this.searchOutputFast?.setDisplay("block");
 
     if (this.lines.length === 0) {
       this.lines = [new LineNode("")];
@@ -1113,25 +1128,12 @@ class LineController {
   }
 
   hide() {
-    this.editor.lineNumberOutput.replaceChildren();
-
-    this.editor.output.replaceChildren();
-
-    this.editor.lineNumberOutput.style.display = "none";
-
-    this.editor.output.style.display = "none";
-
-    const cursor = getElement(".editor-caret");
-
-    if (cursor) {
-      cursor.style.display = "none";
-    }
-
-    const selectOutput = getElement(".editor-select-highlight");
-
-    if (selectOutput) {
-      selectOutput.replaceChildren();
-    }
+    this.lineNumberFast?.removeChildren();
+    this.outputFast?.removeChildren();
+    this.lineNumberFast?.setDisplay("none");
+    this.outputFast?.setDisplay("none");
+    this.editor.cursorController?.caretFast?.setDisplay("none");
+    this.selectOutputFast?.removeChildren();
 
     this.outputScroller.hide();
   }
@@ -1140,27 +1142,28 @@ class LineController {
     const file = this.editor.tabManager.activeFile;
     if (!file?.loadError) return;
 
-    this.editor.lineNumberOutput.replaceChildren();
-    this.editor.lineNumberOutput.style.display = "none";
-    this.editor.output.style.display = "block";
-    this.editor.output.classList.add("editor-load-error-output");
-    this.editor.output.replaceChildren();
+    this.lineNumberFast?.removeChildren();
+    this.lineNumberFast?.setDisplay("none");
+    this.outputFast?.setDisplay("block");
+    this.outputFast?.addClass("editor-load-error-output");
+    this.outputFast?.removeChildren();
 
-    const message = document.createElement("div");
-    message.className = "editor-load-error";
-    message.textContent =
+    const message = this.editor.domManager.createFastElement("div");
+    message.setClassName("editor-load-error");
+    message.setTextContent(
       file.loadError.code === "BINARY_FILE"
         ? "Binary file can't be opened"
         : file.loadError.code === "FILE_TOO_LARGE"
           ? "File is too large to be opened"
-          : "File can't be opened";
-    this.editor.output.appendChild(message);
+          : "File can't be opened",
+    );
+    this.outputFast?.appendChild(message);
 
-    this.editor.selectOutput?.replaceChildren();
-    this.editor.selectOutput?.style.setProperty("display", "none");
-    this.editor.searchOutput?.replaceChildren();
-    this.editor.searchOutput?.style.setProperty("display", "none");
-    this.editor.cD.style.display = "none";
+    this.selectOutputFast?.removeChildren();
+    this.selectOutputFast?.setDisplay("none");
+    this.searchOutputFast?.removeChildren();
+    this.searchOutputFast?.setDisplay("none");
+    this.editor.cursorController?.caretFast?.setDisplay("none");
     this.outputScroller.hide();
   }
 
@@ -1169,18 +1172,13 @@ class LineController {
       this.renderLoadError();
       return;
     }
-    this.editor.lineNumberOutput.style.display = "block";
+    this.lineNumberFast?.setDisplay("block");
+    this.outputFast?.setDisplay("block");
+    this.selectOutputFast?.setDisplay("block");
+    this.searchOutputFast?.setDisplay("block");
+    this.outputFast?.removeClass("editor-load-error-output");
 
-    this.editor.output.style.display = "block";
-    this.editor.selectOutput?.style.setProperty("display", "block");
-    this.editor.searchOutput?.style.setProperty("display", "block");
-    this.editor.output.classList.remove("editor-load-error-output");
-
-    const cursor = getElement(".editor-caret");
-
-    if (cursor) {
-      cursor.style.display = "block";
-    }
+    this.editor.cursorController?.caretFast?.setDisplay("block");
 
     this.outputScroller.show();
 

@@ -4,6 +4,7 @@ class FileExplorerScroller {
     this.explorer = explorer;
     this.viewport = null;
     this.layer = null;
+    this.layerFast = null;
     this.host = editor.sidebarManager?.leftSidebar || null;
     this.vScroller = null;
     this.rowHeight = explorer.constructor.ROW_HEIGHT;
@@ -49,11 +50,12 @@ class FileExplorerScroller {
   }
 
   attach(viewport, layer) {
-    if (this.viewport !== viewport) {
+    if (this.viewport !== viewport || this.layer !== layer) {
       this.viewport?.removeEventListener("wheel", this._onWheel);
       if (this.viewport) this._resizeObserver?.unobserve(this.viewport);
-    this.viewport = viewport;
-    this.layer = layer;
+      this.viewport = viewport;
+      this.layer = layer;
+      this.layerFast = this.editor.domManager?.wrapFastNode?.(layer) || null;
       this.renderedStart = -1;
       this.renderedCount = -1;
       viewport?.addEventListener("wheel", this._onWheel, { passive: false });
@@ -116,7 +118,7 @@ class FileExplorerScroller {
   }
 
   update() {
-    if (!this.viewport || !this.layer) return;
+    if (!this.viewport || !this.layerFast) return;
     // Read before writing to the render layer or scrollbar.
     const needsMeasure = this.needsMeasure;
     const previousTotal = this.totalVisibleRows;
@@ -141,7 +143,7 @@ class FileExplorerScroller {
       this.renderedCount = count;
       this.forceRows = false;
     }
-    this.layer.style.transform = `translate3d(0, -${this.offsetY}px, 0)`;
+    this.layerFast.setTransform(`translate3d(0, -${this.offsetY}px, 0)`);
     if (this.vScroller) {
       this.vScroller.nbItem = this.totalVisibleRows;
       this.vScroller.heightByItem = this.rowHeight;
@@ -170,5 +172,6 @@ class FileExplorerScroller {
     this.vScroller = null;
     this.viewport = null;
     this.layer = null;
+    this.layerFast = null;
   }
 }

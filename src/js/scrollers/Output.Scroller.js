@@ -216,7 +216,6 @@ class OutputScroller {
   }
 
   applyScrollTransform() {
-    this.editor.lineNumberOutput.style.transform = "";
     this.lineController.applyOutputTransform();
   }
 

@@ -1,6 +1,7 @@
 class CursorController {
   constructor(e) {
     this.editor = e;
+    this.caretFast = e.domManager?.wrapFastNode?.(e.cD) || null;
     this._row = 0;
     this._column = 0;
     this.mX = 10; // diff X axis
@@ -8,8 +9,8 @@ class CursorController {
     this.mpY = 19; // diff on calcul Y axis
     this.mpX = 10; // diff on calcul X axis
 
-    this.editor.cD.style.height = this.editor.posY + "px";
-    this.editor.cD.style.marginLeft = this.mpX + "px";
+    this.caretFast?.setHeight(this.editor.posY);
+    this.caretFast?.setStyle("marginLeft", `${this.mpX}px`);
   }
 
   get row() {
@@ -34,13 +35,13 @@ class CursorController {
 
   enable() {
     if (this.editor.cD) {
-      this.editor.cD.style.display = "block";
+      this.caretFast?.setDisplay("block");
     }
   }
 
   disable() {
     if (this.editor.cD) {
-      this.editor.cD.style.display = "none";
+      this.caretFast?.setDisplay("none");
     }
   }
 
@@ -241,8 +242,8 @@ class CursorController {
     const placeX = this.columnToX(viewPos.column);
 
     this.enable();
-    this.editor.cD.style.left = `${placeX}px`;
-    this.editor.cD.style.top = `${placeY}px`;
+    this.caretFast?.setLeft(placeX);
+    this.caretFast?.setTop(placeY);
   }
 
   getViewPosition(row, realColumn) {

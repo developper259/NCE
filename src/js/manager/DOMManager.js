@@ -2,6 +2,8 @@ class DOMManager {
   constructor(editor) {
     this.editor = editor;
     this.elementCache = new Map();
+    this.fastNodeCache = new WeakMap();
+    this.documentRootFast = this.wrapFastNode(document.documentElement);
     window.__domManager = this;
 
     // =====================================================
@@ -218,6 +220,33 @@ class DOMManager {
     return document.createElement(tagName);
   }
 
+  createFastElement(tagName) {
+    if (typeof FastDOMNode === "undefined") {
+      throw new Error("FastDOMNode must be loaded before createFastElement");
+    }
+    const element = document.createElement(tagName);
+    const fastNode = new FastDOMNode(element);
+    this.fastNodeCache.set(element, fastNode);
+    return fastNode;
+  }
+
+  wrapFastNode(node) {
+    if (!node) return null;
+    if (typeof FastDOMNode === "undefined") return null;
+    if (node instanceof FastDOMNode) return node;
+    if (typeof node !== "object" || !node.style) return null;
+    let fastNode = this.fastNodeCache.get(node);
+    if (!fastNode) {
+      fastNode = new FastDOMNode(node);
+      this.fastNodeCache.set(node, fastNode);
+    }
+    return fastNode;
+  }
+
+  createTextNode(text) {
+    return document.createTextNode(text === null || text === undefined ? "" : String(text));
+  }
+
   createFragment() {
     return document.createDocumentFragment();
   }
@@ -422,42 +451,22 @@ class DOMManager {
   // =========================================================
 
   apply() {
-    const root = document.documentElement;
+    const root = this.documentRootFast;
+    if (!root) return;
 
-    root.style.setProperty("--nce-window-width", `${this.window.width}px`);
-
-    root.style.setProperty("--nce-window-height", `${this.window.height}px`);
-
-    root.style.setProperty("--nce-editor-x", `${this.editorDimensions.x}px`);
-
-    root.style.setProperty("--nce-editor-y", `${this.editorDimensions.y}px`);
-
-    root.style.setProperty(
-      "--nce-editor-width",
-      `${this.editorDimensions.width}px`,
-    );
-
-    root.style.setProperty(
-      "--nce-editor-height",
-      `${this.editorDimensions.height}px`,
-    );
-
-    root.style.setProperty("--nce-output-x", `${this.output.x}px`);
-
-    root.style.setProperty("--nce-output-y", `${this.output.y}px`);
-
-    root.style.setProperty("--nce-output-width", `${this.output.width}px`);
-
-    root.style.setProperty("--nce-output-height", `${this.output.height}px`);
-
-    root.style.setProperty(
-      "--nce-line-number-width",
-      `${this.lineNumbers.width}px`,
-    );
-
-    root.style.setProperty("--nce-line-height", `${this.text.lineHeight}px`);
-
-    root.style.setProperty("--nce-letter-width", `${this.text.letterWidth}px`);
+    root.setCSSVariable("--nce-window-width", `${this.window.width}px`);
+    root.setCSSVariable("--nce-window-height", `${this.window.height}px`);
+    root.setCSSVariable("--nce-editor-x", `${this.editorDimensions.x}px`);
+    root.setCSSVariable("--nce-editor-y", `${this.editorDimensions.y}px`);
+    root.setCSSVariable("--nce-editor-width", `${this.editorDimensions.width}px`);
+    root.setCSSVariable("--nce-editor-height", `${this.editorDimensions.height}px`);
+    root.setCSSVariable("--nce-output-x", `${this.output.x}px`);
+    root.setCSSVariable("--nce-output-y", `${this.output.y}px`);
+    root.setCSSVariable("--nce-output-width", `${this.output.width}px`);
+    root.setCSSVariable("--nce-output-height", `${this.output.height}px`);
+    root.setCSSVariable("--nce-line-number-width", `${this.lineNumbers.width}px`);
+    root.setCSSVariable("--nce-line-height", `${this.text.lineHeight}px`);
+    root.setCSSVariable("--nce-letter-width", `${this.text.letterWidth}px`);
   }
 
   // =========================================================

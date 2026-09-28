@@ -328,6 +328,7 @@ class FileExplorer extends Sidebar {
   render() {
     this.treeViewport = null;
     this.treeLayer = null;
+    this.treeLayerFast = null;
     if (this.activeFilePath) {
       if (!this.editor.tabManager.getFileByPath(this.activeFilePath)) {
         this.activeFilePath = null;
@@ -416,6 +417,7 @@ class FileExplorer extends Sidebar {
         });
         this.treeViewport = treeContainer;
         this.treeLayer = layer;
+        this.treeLayerFast = this.editor.domManager.wrapFastNode(layer);
       }
       container.appendChild(treeContainer);
     }
@@ -476,7 +478,8 @@ class FileExplorer extends Sidebar {
         fragment.appendChild(this.createFileRow(row.file, row.depth));
       }
     }
-    domManager.replaceChildren(this.treeLayer, fragment);
+    if (this.treeLayerFast) this.treeLayerFast.replaceChildren(fragment);
+    else domManager.replaceChildren(this.treeLayer, fragment);
   }
 
   renderNoFolderState(container) {
@@ -500,66 +503,65 @@ class FileExplorer extends Sidebar {
   }
 
   createFileRow(file, depth) {
-      const createElement = (tagName) => this.editor.domManager.createElement(tagName);
-      const fileItem = createElement("div");
-      fileItem.className = `file-item ${file.type}`;
-      fileItem.dataset.path = file.path;
+    const createElement = (tagName) => this.editor.domManager.createFastElement(tagName);
+    const fileItem = createElement("div");
+    fileItem.setClassName(`file-item ${file.type}`);
+    fileItem.setDataset("path", file.path);
+    fileItem.setCSSVariable("--depth", depth);
+    fileItem.toggleClass("active-file", file.path === this.activeFilePath);
 
-      fileItem.style.setProperty("--depth", depth);
+    if (file.type === "folder") {
+      const arrowElement = createElement("i");
+      arrowElement.setClassName(`folder-arrow fi fi-rr-angle-small-right ${file.expanded ? "expanded" : ""}`);
+      fileItem.appendChild(arrowElement);
 
-      if (file.path === this.activeFilePath) {
-        fileItem.classList.add("active-file");
-      }
+      const iconElement = createElement("i");
+      iconElement.setClassName("fi fi-rr-folder file-icon");
+      fileItem.appendChild(iconElement);
+    } else {
+      const spacer = createElement("span");
+      spacer.setClassName("file-spacer");
+      fileItem.appendChild(spacer);
 
-      if (file.type === "folder") {
-        const arrowElement = createElement("i");
-        arrowElement.className = `folder-arrow fi fi-rr-angle-small-right ${file.expanded ? "expanded" : ""}`;
-        fileItem.appendChild(arrowElement);
+      const iconElement = createElement("i");
+      iconElement.setClassName(`${this.getFileIcon(file.name)} file-icon`);
+      fileItem.appendChild(iconElement);
+    }
 
-        const iconElement = createElement("i");
-        iconElement.className = "fi fi-rr-folder file-icon";
-        fileItem.appendChild(iconElement);
-      } else {
-        const spacer = createElement("span");
-        spacer.className = "file-spacer";
-        fileItem.appendChild(spacer);
+    const nameElement = createElement("span");
+    nameElement.setClassName("file-name");
+    nameElement.setTextContent(file.name);
+    fileItem.appendChild(nameElement);
 
-        const iconElement = createElement("i");
-        iconElement.className = `${this.getFileIcon(file.name)} file-icon`;
-        fileItem.appendChild(iconElement);
-      }
-
-      const nameElement = createElement("span");
-      nameElement.className = "file-name";
-      nameElement.textContent = file.name;
-      fileItem.appendChild(nameElement);
-
-      return fileItem;
+    return fileItem.domNode;
   }
 
   renderEditableRow(file, depth, container) {
-    const fileItem = document.createElement("div");
-    fileItem.className = `file-item ${file.type} editing`;
-    fileItem.style.setProperty("--depth", depth);
+    const domManager = this.editor.domManager;
+    const fileItemFast = domManager.createFastElement("div");
+    fileItemFast.setClassName(`file-item ${file.type} editing`);
+    fileItemFast.setCSSVariable("--depth", depth);
+    const fileItem = fileItemFast.domNode;
 
-    const spacer = document.createElement("span");
-    spacer.className = "file-spacer";
-    fileItem.appendChild(spacer);
+    const spacerFast = domManager.createFastElement("span");
+    spacerFast.setClassName("file-spacer");
+    fileItemFast.appendChild(spacerFast);
 
-    const iconElement = document.createElement("i");
-    iconElement.className =
+    const iconElement = domManager.createFastElement("i");
+    iconElement.setClassName(
       file.type === "folder"
         ? "fi fi-rr-folder file-icon"
-        : `${this.getFileIcon(file.name || "")} file-icon`;
-    fileItem.appendChild(iconElement);
+        : `${this.getFileIcon(file.name || "")} file-icon`,
+    );
+    fileItemFast.appendChild(iconElement);
 
     const input = document.createElement("input");
     input.type = "text";
     input.className = "file-name-input";
     input.value = file.name || "";
     input.spellcheck = false;
-    fileItem.appendChild(input);
-    container.appendChild(fileItem);
+    fileItemFast.appendChild(input);
+    container.appendChild(fileItemFast.domNode);
 
     if (this.editingState?.target === file) this.editingState.input = input;
 
@@ -605,8 +607,9 @@ class FileExplorer extends Sidebar {
     const mounted = this.treeLayer
       ? this.editor.domManager?.getElements?.(".file-item", this.treeLayer) || [] : [];
     for (const item of mounted) {
-      if (item.dataset.path === previous) item.classList.remove("active-file");
-      if (item.dataset.path === path) item.classList.add("active-file");
+      const fastItem = this.editor.domManager.wrapFastNode(item);
+      if (item.dataset.path === previous) fastItem?.toggleClass("active-file", false);
+      if (item.dataset.path === path) fastItem?.toggleClass("active-file", true);
     }
   }
 
