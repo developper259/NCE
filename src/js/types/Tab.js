@@ -265,14 +265,20 @@ class FileNode extends Tab {
 
   reportSaveError(error) {
     this.saveError = error;
-    const message =
-      error.code === "FILE_LOAD_FAILED"
-        ? "File loading failed. Reload the file before saving."
-        : error.code === "FILE_CHANGED_ON_DISK"
-          ? "File changed on disk. Use Save As to preserve your changes."
-          : error.code === "FILE_NOT_FULLY_LOADED"
-            ? "File is not fully loaded. Save was cancelled."
-            : "Failed to save file.";
+    let message = "Failed to save file.";
+    // Electron IPC forwards the Error message but may drop custom properties
+    // such as `code`, so also recognize the stable, user-facing message prefix.
+    if (
+      error?.code === "SAVE_REPLACEMENT_FAILED" ||
+      /Atomic rename failed \(/.test(error?.message || "")
+    )
+      message = error.message || "NCE could not safely replace this file.";
+    else if (error.code === "FILE_LOAD_FAILED")
+      message = "File loading failed. Reload the file before saving.";
+    else if (error.code === "FILE_CHANGED_ON_DISK")
+      message = "File changed on disk. Use Save As to preserve your changes.";
+    else if (error.code === "FILE_NOT_FULLY_LOADED")
+      message = "File is not fully loaded. Save was cancelled.";
     if (typeof alert === "function") alert(message);
     else console.warn(message);
   }

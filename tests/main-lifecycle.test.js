@@ -280,11 +280,13 @@ test("watcher batches events, matches one committed own save and cleans up timer
   assert.ok(cancelled);
 });
 
-test("watcher ignore rules are shared, explicit, and preserve workspace dotfiles", () => {
+test("watcher ignore rules exclude NCE state and save temps while preserving workspace dotfiles", () => {
   const { isWatcherPathIgnored } = require("../dist/ts/addon/WatcherIgnore.js");
   for (const directory of ["node_modules", "dist", "build", "out", "coverage", ".next", ".cache", ".turbo", "release", ".git", ".svn", ".hg"])
     assert.equal(isWatcherPathIgnored(path.join("workspace", directory, "file.js")), true, directory);
   assert.equal(isWatcherPathIgnored(path.join("workspace", "broken.asar")), true);
+  assert.equal(isWatcherPathIgnored(path.join("workspace", ".nce", "workspace.json.123.456.tmp")), true);
+  assert.equal(isWatcherPathIgnored(path.join("workspace", ".main.py.nce-123-a1b2c3d4e5f60708.tmp")), true);
   assert.equal(isWatcherPathIgnored(path.join("workspace", ".env")), false);
   assert.equal(isWatcherPathIgnored(path.join("workspace", ".vscode", "settings.json")), false);
   assert.equal(isWatcherPathIgnored(path.join("workspace", "normal.js")), false);

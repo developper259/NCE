@@ -485,37 +485,180 @@ test("atomic save preserves bytes, cleans its sibling temp, and brackets watcher
   }
 });
 
-test("atomic write failures keep the original and clean temporary files", async () => {
-  for (const failure of ["write", "rename"]) {
-    const original = new Map([["/workspace/file", "original"]]);
-    const temporary = new Map();
-    const operations = {
-      stat: async () => ({ mode: 0o640 }),
-      open: async (name) => ({
-        writeFile: async (content) => {
-          if (failure === "write")
-            throw Object.assign(new Error("denied"), { code: "EACCES" });
-          temporary.set(name, content);
-        },
-        sync: async () => {},
-        close: async () => {},
-      }),
-      rename: async (from, to) => {
-        if (failure === "rename")
-          throw Object.assign(new Error("denied"), { code: "EACCES" });
-        original.set(to, temporary.get(from));
-        temporary.delete(from);
-      },
-      unlink: async (name) => {
-        temporary.delete(name);
-      },
-    };
-    await assert.rejects(
-      atomicWriteFile("/workspace/file", "replacement", operations),
-      { code: "EACCES" },
-    );
-    assert.equal(original.get("/workspace/file"), "original");
-    assert.equal(temporary.size, 0);
+test("FileManager propagates filesystem save errors to the renderer", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-save-error-"));
+  const watcherCalls = [];
+  const manager = new FileManager({
+    watcher: {
+      beginOwnWrite() { return Symbol("save"); },
+      cancelOwnWrite(_filePath, token) { watcherCalls.push(token); },
+    },
+  });
+  const previousConsoleError = console.error;
+  console.error = () => {};
+  try {
+    await assert.rejects(manager.saveFile(root, "cannot replace a directory"));
+    assert.equal(watcherCalls.length, 1);
+    assert.equal((await fsp.readdir(root)).some((name) => name.endsWith(".tmp")), false);
+  } finally {
+    console.error = previousConsoleError;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("atomic save retries transient rename errors before using a copy fallback", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-atomic-retry-"));
+  const target = path.join(root, "file.txt");
+  let renameAttempts = 0;
+  const operations = new Proxy(fsp, {
+    get(targetOperations, property) {
+      if (property === "rename") return async (from, to) => {
+        renameAttempts++;
+        if (renameAttempts < 3) throw Object.assign(new Error("temporarily locked"), { code: "EBUSY" });
+        return fsp.rename(from, to);
+      };
+      if (property === "copyFile") return async () => { throw new Error("copy fallback should not run"); };
+      const value = Reflect.get(targetOperations, property, targetOperations);
+      return typeof value === "function" ? value.bind(targetOperations) : value;
+    },
+  });
+  try {
+    await fsp.writeFile(target, "original");
+    await atomicWriteFile(target, "replacement", operations);
+    assert.equal(renameAttempts, 3);
+    assert.equal(await fsp.readFile(target, "utf8"), "replacement");
+    assert.equal((await fsp.readdir(root)).some((name) => name.endsWith(".tmp")), false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("atomic save uses a verified copy fallback when replacement rename stays denied", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-atomic-fallback-"));
+  const target = path.join(root, "file.txt");
+  let copyCalls = 0;
+  const operations = new Proxy(fsp, {
+    get(targetOperations, property) {
+      if (property === "rename") return async () => {
+        throw Object.assign(new Error("replacement denied"), { code: "EPERM" });
+      };
+      if (property === "copyFile") return async (from, to, mode) => {
+        copyCalls++;
+        return fsp.copyFile(from, to, mode);
+      };
+      const value = Reflect.get(targetOperations, property, targetOperations);
+      return typeof value === "function" ? value.bind(targetOperations) : value;
+    },
+  });
+  try {
+    await fsp.writeFile(target, "original");
+    await atomicWriteFile(target, "replacement", operations);
+    assert.equal(await fsp.readFile(target, "utf8"), "replacement");
+    assert.equal(copyCalls, 1, "one replacement copy; the backup is created with the target's permissions");
+    assert.equal((await fsp.readdir(root)).some((name) => name.endsWith(".tmp")), false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("failed copy fallback restores the original and preserves the complete recovery temp", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-atomic-recovery-"));
+  const target = path.join(root, "file.txt");
+  let backupPath = "";
+  let siblingOpenCount = 0;
+  const operations = new Proxy(fsp, {
+    get(targetOperations, property) {
+      if (property === "rename") return async () => {
+        throw Object.assign(new Error("replacement denied"), { code: "EPERM" });
+      };
+      if (property === "open") return async (filePath, ...args) => {
+        if (args[0] === "wx") {
+          siblingOpenCount++;
+          if (siblingOpenCount === 2) backupPath = filePath;
+        }
+        return fsp.open(filePath, ...args);
+      };
+      if (property === "copyFile") return async (from, to, mode) => {
+        if (to === target && from !== backupPath) {
+          await fsp.copyFile(from, to, mode);
+          throw Object.assign(new Error("destination copy interrupted"), { code: "EIO" });
+        }
+        return fsp.copyFile(from, to, mode);
+      };
+      const value = Reflect.get(targetOperations, property, targetOperations);
+      return typeof value === "function" ? value.bind(targetOperations) : value;
+    },
+  });
+  try {
+    await fsp.writeFile(target, "original");
+    let failure;
+    try {
+      await atomicWriteFile(target, "replacement", operations);
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.code, "SAVE_REPLACEMENT_FAILED");
+    assert.equal(await fsp.readFile(target, "utf8"), "original");
+    assert.ok(failure?.temporaryPath);
+    assert.equal(await fsp.readFile(failure.temporaryPath, "utf8"), "replacement");
+    assert.equal(await fsp.stat(backupPath).catch(() => null), null, "verified restoration allows backup cleanup");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("non-retryable atomic rename failures preserve the original and clean incomplete temps", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-atomic-hard-failure-"));
+  const target = path.join(root, "file.txt");
+  const operations = new Proxy(fsp, {
+    get(targetOperations, property) {
+      if (property === "rename") return async () => {
+        throw Object.assign(new Error("disk full"), { code: "ENOSPC" });
+      };
+      const value = Reflect.get(targetOperations, property, targetOperations);
+      return typeof value === "function" ? value.bind(targetOperations) : value;
+    },
+  });
+  try {
+    await fsp.writeFile(target, "original");
+    await assert.rejects(atomicWriteFile(target, "replacement", operations), { code: "ENOSPC" });
+    assert.equal(await fsp.readFile(target, "utf8"), "original");
+    assert.equal((await fsp.readdir(root)).some((name) => name.endsWith(".tmp")), false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("copy fallback does not follow a symbolic-link destination", { skip: process.platform === "win32" }, async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-atomic-symlink-"));
+  const target = path.join(root, "original.txt");
+  const link = path.join(root, "linked.txt");
+  const operations = new Proxy(fsp, {
+    get(targetOperations, property) {
+      if (property === "rename") return async () => {
+        throw Object.assign(new Error("replacement denied"), { code: "EPERM" });
+      };
+      const value = Reflect.get(targetOperations, property, targetOperations);
+      return typeof value === "function" ? value.bind(targetOperations) : value;
+    },
+  });
+  try {
+    await fsp.writeFile(target, "original");
+    await fsp.symlink(target, link);
+    let failure;
+    try {
+      await atomicWriteFile(link, "replacement", operations);
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.code, "SAVE_REPLACEMENT_FAILED");
+    assert.match(failure?.message || "", /symbolic link/);
+    assert.equal(await fsp.readFile(target, "utf8"), "original");
+    assert.equal(await fsp.readlink(link), target);
+    assert.ok(failure?.temporaryPath);
+    assert.equal(await fsp.readFile(failure.temporaryPath, "utf8"), "replacement");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });
 

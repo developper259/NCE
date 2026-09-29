@@ -13,6 +13,7 @@ export const WATCHER_IGNORED_DIRECTORIES = new Set([
   ".git",
   ".svn",
   ".hg",
+  ".nce",
 ]);
 
 export function isWatcherPathIgnored(filePath: string): boolean {
