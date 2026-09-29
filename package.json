@@ -44,7 +44,8 @@
     "dist": "npm run sync-assets && npm run build:main && electron-builder --dir --publish never",
     "check": "npm run typecheck && npm run security:dataset && npm test",
     "test:electron": "npm run sync-assets && npm run build:main && node --test tests/electron/smoke.cjs",
-    "test:packaged": "node scripts/check-package.js"
+    "test:packaged": "node scripts/check-package.js",
+    "benchmark:highlight-scroll": "npm run build:main && node benchmark/ide/highlight-scroll/run.cjs"
   },
   "author": {
     "name": "Andrea Belvedere",
