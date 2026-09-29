@@ -2,6 +2,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const { ensureDirectory, isInside, writeJsonAtomic } = require("../utils/files.cjs");
+const { FIXTURE_VERSION } = require("./version.cjs");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const FIXTURE_ROOT = path.join(ROOT, ".benchmark-data", "ide", "fixtures");
@@ -201,7 +202,7 @@ function generate(options) {
 
   const manifest = {
     schemaVersion: 2,
-    fixtureVersion: "1.1.1",
+    fixtureVersion: FIXTURE_VERSION,
     profile: options.profile,
     extreme: options.extreme,
     deterministic: true,
@@ -229,4 +230,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { generate, parseOptions, writeBytes, writeLines, writeLongLine, writeBinary, maximumLineLength };
+module.exports = { FIXTURE_VERSION, generate, parseOptions, writeBytes, writeLines, writeLongLine, writeBinary, maximumLineLength };

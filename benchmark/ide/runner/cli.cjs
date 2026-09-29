@@ -3,7 +3,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
-const { generate } = require("../fixtures/generate-fixtures.cjs");
+const { generate, FIXTURE_VERSION } = require("../fixtures/generate-fixtures.cjs");
 const { hashJson, ensureDirectory, writeJsonAtomic } = require("../utils/files.cjs");
 const { summarizeSamples } = require("../utils/statistics.cjs");
 const scenarioManifest = require("../scenarios/manifest.cjs");
@@ -20,6 +20,7 @@ const {
 const { renderMarkdown } = require("../reporters/markdown.cjs");
 const { printRun } = require("../reporters/console.cjs");
 const { resolveWorkspacePath, validateFixtureManifest, resetWorkspaceStateDirectories } = require("./measurement-helpers.cjs");
+const { REPORT_VERSION, assertReportFixtureVersion, setReportFixtureVersionFromManifest } = require("./report-metadata.cjs");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const CONFIG_PATH = path.join(__dirname, "../config/benchmark.config.json");
@@ -82,7 +83,7 @@ function fixtureCacheMatches(options, names) {
   if (!fs.existsSync(manifestPath)) return false;
   try {
     const existing = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    if (existing.schemaVersion !== 2 || existing.fixtureVersion !== config.fixtureVersion ||
+    if (existing.schemaVersion !== 2 || existing.fixtureVersion !== FIXTURE_VERSION ||
         existing.profile !== options.mode || Boolean(existing.extreme) !== options.extreme) return false;
     for (const name of names) {
       if (name.startsWith("file.open.")) {
@@ -147,12 +148,6 @@ async function main() {
   }
   const startedAt = new Date().toISOString();
   const configHash = hashJson(config);
-  const environment = collectEnvironment({ machine: options.machine, mode: options.mode, configHash });
-  const runId = makeRunId(startedAt, environment, options.mode);
-  const jsonPath = options.output ? path.resolve(ROOT, options.output) : path.join(RESULT_ROOT, `${runId}.json`);
-  const markdownPath = `${jsonPath.replace(/\.json$/i, "")}.md`;
-  ensureDirectory(path.dirname(jsonPath));
-
   const fixtureStart = performance.now();
   const fixturesReused = fixtureCacheMatches(options, names);
   const fixtures = fixturesReused ? loadFixtureManifest(FIXTURE_ROOT) : generate({ profile: options.mode, extreme: options.extreme });
@@ -164,10 +159,15 @@ async function main() {
     files: fixtures.files,
     workspaces: fixtures.workspaces.map(({ name, files, folders, entries }) => ({ name, files, folders, entries })),
   });
+  const environment = collectEnvironment({ machine: options.machine, mode: options.mode, configHash });
+  const runId = makeRunId(startedAt, environment, options.mode);
+  const jsonPath = options.output ? path.resolve(ROOT, options.output) : path.join(RESULT_ROOT, `${runId}.json`);
+  const markdownPath = `${jsonPath.replace(/\.json$/i, "")}.md`;
+  ensureDirectory(path.dirname(jsonPath));
 
   const result = {
     schemaVersion: 1,
-    reportVersion: 1,
+    reportVersion: REPORT_VERSION,
     runId,
     timestamp: startedAt,
     status: "running",
@@ -183,7 +183,6 @@ async function main() {
       warmupSamples: config.modes[options.mode].warmupSamples,
       configHash,
       fixtureHash,
-      fixtureVersion: fixtures.fixtureVersion,
       fixtureGenerationMs,
       fixtureValidation,
       workspaceStateReset,
@@ -195,8 +194,10 @@ async function main() {
     output: { json: jsonPath, markdown: markdownPath },
     shutdown: null,
   };
+  setReportFixtureVersionFromManifest(result, fixtures);
 
   const savePartial = () => {
+    assertReportFixtureVersion(result);
     if (!result.finishedAt) result.status = result.scenarios.some((scenario) => scenario.status === "failed") ? "failed" : "running";
     writeJsonAtomic(jsonPath, result);
     fs.writeFileSync(markdownPath, renderMarkdown(result), "utf8");

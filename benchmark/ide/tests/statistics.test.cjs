@@ -27,3 +27,12 @@ test("sample aggregation ignores missing and nonnumeric metrics", () => {
   assert.equal(result.domNodeCount.p50, 35);
   assert.equal(result.ignored, undefined);
 });
+
+test("statistics discard non-finite inputs and never emit non-finite summary values", () => {
+  const result = summarize([1, 3, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]);
+  assert.equal(result.count, 2);
+  for (const value of Object.values(result)) {
+    if (typeof value === "number") assert.equal(Number.isFinite(value), true);
+  }
+  assert.equal(summarizeSamples([{ metrics: { durationMs: Number.POSITIVE_INFINITY } }]).durationMs, undefined);
+});

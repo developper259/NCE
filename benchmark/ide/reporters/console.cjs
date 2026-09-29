@@ -9,16 +9,17 @@ function printRun(result, { quiet = false } = {}) {
   console.log("NCE IDE Benchmark");
   console.log("=".repeat(68));
   console.log(`Mode: ${result.configuration.mode} | Machine: ${result.environment.machine || "not labeled"} | Commit: ${(result.environment.gitCommit || "unknown").slice(0, 12)}`);
+  console.log(`Report v${result.reportVersion ?? 1} | Fixtures ${result.environment.fixtureVersion || result.configuration.fixtureVersion || "unknown"}`);
   console.log(`${result.environment.platform} ${result.environment.architecture} | ${result.environment.cpuModel || "CPU unknown"} | ${fmt(result.environment.totalMemoryMB / 1024, 1)} GB RAM | Node ${result.environment.nodeVersion} | Electron ${result.environment.electronVersion || "unknown"}`);
   console.log("");
   const nameWidth = Math.min(34, Math.max(17, ...result.scenarios.map((item) => item.name.length)));
-  console.log(`${"Scenario".padEnd(nameWidth)}  ${"Status".padEnd(9)} ${"N".padStart(3)} ${"p50 ms".padStart(10)} ${"p95 ms".padStart(10)} ${"input→frame".padStart(12)} ${"file ready".padStart(11)} ${"frame p50".padStart(10)} ${">16.7 ms".padStart(9)}`);
+  console.log(`${"Scenario".padEnd(nameWidth)}  ${"Status".padEnd(9)} ${"N".padStart(3)} ${"p50 ms".padStart(10)} ${"p95 ms".padStart(10)} ${"input→frame".padStart(12)} ${"file ready".padStart(11)} ${"RAF N".padStart(7)} ${"bad RAF".padStart(8)} ${"frame p50".padStart(10)} ${">16.7 ms".padStart(9)} ${"CPU ms".padStart(9)} ${"core %".padStart(8)} ${"norm %".padStart(8)}`);
   for (const scenario of result.scenarios) {
     const measured = scenario.samples.filter((sample) => sample.status === "passed" && !sample.warmup).length;
     const stats = scenario.statistics || {};
     const status = scenario.status === "passed" ? paint("green", scenario.status) : paint("red", scenario.status);
     const p95 = (stats.durationMs?.count || 0) >= 20 ? stats.durationMs.p95 : null;
-    console.log(`${scenario.name.padEnd(nameWidth)}  ${status.padEnd(9)} ${String(measured).padStart(3)} ${fmt(stats.durationMs?.p50).padStart(10)} ${fmt(p95).padStart(10)} ${fmt(stats.inputToStableFrameMs?.p50).padStart(12)} ${fmt(stats.fileFullyReadyMs?.p50).padStart(11)} ${fmt(stats.frameIntervalP50Ms?.p50).padStart(10)} ${fmt(stats.framesOver16_7Ms?.p50).padStart(9)}`);
+    console.log(`${scenario.name.padEnd(nameWidth)}  ${status.padEnd(9)} ${String(measured).padStart(3)} ${fmt(stats.durationMs?.p50).padStart(10)} ${fmt(p95).padStart(10)} ${fmt(stats.inputToStableFrameMs?.p50).padStart(12)} ${fmt(stats.fileFullyReadyMs?.p50).padStart(11)} ${fmt(stats.frameIntervals?.p50).padStart(7)} ${fmt(stats.invalidFrameIntervalCount?.p50).padStart(8)} ${fmt(stats.frameIntervalP50Ms?.p50).padStart(10)} ${fmt(stats.framesOver16_7Ms?.p50).padStart(9)} ${fmt(stats.mainCpuTotalMs?.p50).padStart(9)} ${fmt(stats.mainCpuCoreEquivalentPercent?.p50).padStart(8)} ${fmt(stats.mainCpuNormalizedPercent?.p50).padStart(8)}`);
     if (scenario.failure) console.log(`  ${paint("red", scenario.failure.split("\n")[0])}`);
   }
   const startup = result.scenarios.find((scenario) => scenario.name === "startup.cold-ish");

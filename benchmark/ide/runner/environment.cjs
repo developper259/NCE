@@ -42,7 +42,6 @@ function collectEnvironment({ machine, mode, configHash }) {
     gitDirty: Boolean(dirty),
     benchmarkMode: mode,
     configHash,
-    fixtureVersion: "1.0.0",
   };
 }
 

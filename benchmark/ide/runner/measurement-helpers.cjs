@@ -210,16 +210,52 @@ async function performLogicalSelectAll({ selectController, sendSelectAll }) {
   };
 }
 
-function summarizeFrameIntervals(frameIntervals) {
-  const values = frameIntervals.filter(Number.isFinite).slice().sort((a, b) => a - b);
+function isValidFrameInterval(value) {
+  return Number.isFinite(value) && value >= 0;
+}
+
+function frameIntervalsFromTimestamps(timestamps) {
+  const values = Array.isArray(timestamps) ? timestamps : [];
+  const frameIntervalsMs = [];
+  let invalidFrameIntervalCount = 0;
+  for (let index = 1; index < values.length; index += 1) {
+    const previous = values[index - 1];
+    const current = values[index];
+    const interval = Number.isFinite(previous) && Number.isFinite(current)
+      ? current - previous
+      : Number.NaN;
+    if (isValidFrameInterval(interval)) frameIntervalsMs.push(interval);
+    else invalidFrameIntervalCount += 1;
+  }
+  return {
+    frameIntervalsMs,
+    invalidFrameIntervalCount,
+    frameCallbackCount: values.length,
+  };
+}
+
+function summarizeFrameIntervals(frameIntervals, {
+  invalidFrameIntervalCount: initialInvalidCount = 0,
+  frameCallbackCount = null,
+} = {}) {
+  const values = [];
+  let invalidFrameIntervalCount = Number.isSafeInteger(initialInvalidCount) && initialInvalidCount >= 0
+    ? initialInvalidCount
+    : 0;
+  for (const interval of Array.isArray(frameIntervals) ? frameIntervals : []) {
+    if (isValidFrameInterval(interval)) values.push(interval);
+    else invalidFrameIntervalCount += 1;
+  }
+  values.sort((a, b) => a - b);
   const percentile = (q) => {
     if (!values.length) return null;
     const index = Math.min(values.length - 1, Math.floor((values.length - 1) * q));
     return values[index];
   };
   const countOver = (limit) => values.filter((value) => value > limit).length;
-  return {
-    frames: values.length,
+  const summary = {
+    frameIntervals: values.length,
+    invalidFrameIntervalCount,
     frameIntervalP50Ms: percentile(0.5),
     frameIntervalP95Ms: values.length >= 20 ? percentile(0.95) : null,
     frameIntervalP99Ms: values.length >= 100 ? percentile(0.99) : null,
@@ -228,6 +264,64 @@ function summarizeFrameIntervals(frameIntervals) {
     framesOver33_3Ms: countOver(33.3),
     framesOver50Ms: countOver(50),
     framesOver100Ms: countOver(100),
+  };
+  if (Number.isSafeInteger(frameCallbackCount) && frameCallbackCount >= 0) {
+    summary.frameCallbacks = frameCallbackCount;
+  }
+  return summary;
+}
+
+function invalidMainCpuMetrics(diagnostic) {
+  return {
+    mainCpuWindowMs: null,
+    mainCpuUserMs: null,
+    mainCpuSystemMs: null,
+    mainCpuTotalMs: null,
+    mainCpuCoreEquivalentPercent: null,
+    mainCpuNormalizedPercent: null,
+    mainCpuMetricsValid: false,
+    mainCpuMetricDiagnostic: diagnostic,
+  };
+}
+
+function calculateMainCpuMetrics(before, after, logicalCpuCores, { maxCoreUtilizationRatio = 1.05 } = {}) {
+  const cpuFields = ["user", "system", "sampledAtMonotonicMs"];
+  if (!before || !after || cpuFields.some((field) => !Number.isFinite(before[field]) || !Number.isFinite(after[field]))) {
+    return invalidMainCpuMetrics("CPU snapshots are missing a finite user/system counter or monotonic timestamp");
+  }
+  if (!Number.isSafeInteger(logicalCpuCores) || logicalCpuCores < 1) {
+    return invalidMainCpuMetrics(`logical CPU core count is invalid: ${logicalCpuCores}`);
+  }
+
+  const userDeltaUs = after.user - before.user;
+  const systemDeltaUs = after.system - before.system;
+  if (userDeltaUs < 0 || systemDeltaUs < 0) {
+    return invalidMainCpuMetrics(`cumulative CPU counter moved backwards (user delta=${userDeltaUs} µs, system delta=${systemDeltaUs} µs)`);
+  }
+
+  const wallTimeMs = after.sampledAtMonotonicMs - before.sampledAtMonotonicMs;
+  if (!Number.isFinite(wallTimeMs) || wallTimeMs <= 0) {
+    return invalidMainCpuMetrics(`CPU snapshot wall interval must be positive; received ${wallTimeMs} ms`);
+  }
+
+  const userMs = userDeltaUs / 1000;
+  const systemMs = systemDeltaUs / 1000;
+  const totalMs = userMs + systemMs;
+  const maximumCpuMs = wallTimeMs * logicalCpuCores * maxCoreUtilizationRatio;
+  if (!Number.isFinite(totalMs) || totalMs > maximumCpuMs) {
+    return invalidMainCpuMetrics(`CPU delta ${totalMs} ms exceeds the ${maximumCpuMs} ms bound for ${logicalCpuCores} logical CPUs over ${wallTimeMs} ms`);
+  }
+
+  const coreEquivalentPercent = totalMs / wallTimeMs * 100;
+  return {
+    mainCpuWindowMs: wallTimeMs,
+    mainCpuUserMs: userMs,
+    mainCpuSystemMs: systemMs,
+    mainCpuTotalMs: totalMs,
+    mainCpuCoreEquivalentPercent: coreEquivalentPercent,
+    mainCpuNormalizedPercent: coreEquivalentPercent / logicalCpuCores,
+    mainCpuMetricsValid: true,
+    mainCpuMetricDiagnostic: null,
   };
 }
 
@@ -247,7 +341,10 @@ module.exports = {
   logicalDocumentLength,
   validateLogicalSelectAll,
   performLogicalSelectAll,
+  isValidFrameInterval,
+  frameIntervalsFromTimestamps,
   summarizeFrameIntervals,
+  calculateMainCpuMetrics,
   classifyWorkspaceFailure,
   horizontalScrollFixture,
   workspaceRootEntryCount,

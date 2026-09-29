@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 const fs = require("node:fs");
 const path = require("node:path");
+const { getReportFixtureVersion } = require("../runner/report-metadata.cjs");
 
 const LOWER_IS_BETTER = /(?:Ms|MB|Bytes|Percent|domNodeCount|DomNodes|Count)$/i;
 const LATENCY_METRICS = new Set([
@@ -10,7 +11,8 @@ const LATENCY_METRICS = new Set([
   "fileStableRenderMs", "fileFullyReadyMs", "workspaceOpenRequestMs", "openCloseCycleDurationMs",
   "totalScenarioDurationMs", "totalInteractionDurationMs", "observationDurationMs",
   "frameIntervalP50Ms", "frameIntervalP95Ms", "frameIntervalP99Ms", "frameIntervalMaxMs",
-  "mainCpuUserMs", "mainCpuSystemMs", "rendererScriptDurationDeltaMs", "rendererTaskDurationDeltaMs",
+  "mainCpuUserMs", "mainCpuSystemMs", "mainCpuTotalMs",
+  "rendererScriptDurationDeltaMs", "rendererTaskDurationDeltaMs",
   "scriptDurationMs",
 ]);
 const ENVIRONMENT_FIELDS = ["os", "platform", "architecture", "cpuModel", "logicalCpuCores", "totalMemoryBytes", "nodeVersion", "electronVersion", "nceVersion"];
@@ -48,7 +50,7 @@ function metricEntries(scenario) {
   const entries = [];
   for (const [metric, stats] of Object.entries(scenario.statistics || {})) {
     if (!stats || !Number.isFinite(stats.p50)) continue;
-    if (/^(?:fileBytes|fileReadBytes|lineCount|maxLineLength|openTabs|workspaceEntries|explorerRootEntries|searchResults|searchResultRows|frames|cycles|metricProcessCount|rendererDomNodes|scrollZones|selectedCharacters|expectedSelectedCharacters|copyCharacters)$/i.test(metric)) continue;
+    if (/^(?:fileBytes|fileReadBytes|lineCount|maxLineLength|openTabs|workspaceEntries|explorerRootEntries|searchResults|searchResultRows|frames|frameIntervals|frameCallbacks|cycles|metricProcessCount|rendererDomNodes|scrollZones|selectedCharacters|expectedSelectedCharacters|copyCharacters)$/i.test(metric)) continue;
     if (LATENCY_METRICS.has(metric)) {
       entries.push({ metric: `${metric}.p50`, name: metric, percentile: "p50", value: stats.p50 });
       if (Number.isFinite(stats.p95)) entries.push({ metric: `${metric}.p95`, name: metric, percentile: "p95", value: stats.p95 });
@@ -61,6 +63,20 @@ function metricEntries(scenario) {
 
 function compare(before, after, options) {
   const warnings = [];
+  const beforeReportVersion = before.reportVersion ?? 1;
+  const afterReportVersion = after.reportVersion ?? 1;
+  if (beforeReportVersion !== afterReportVersion) {
+    warnings.push(`reportVersion differs: ${beforeReportVersion} → ${afterReportVersion}`);
+  }
+  const beforeFixture = getReportFixtureVersion(before);
+  const afterFixture = getReportFixtureVersion(after);
+  if (beforeFixture.warning) warnings.push(`before report ${beforeFixture.warning}`);
+  if (afterFixture.warning) warnings.push(`after report ${afterFixture.warning}`);
+  if (!beforeFixture.version && !beforeFixture.warning) warnings.push("before report fixture version is unavailable");
+  if (!afterFixture.version && !afterFixture.warning) warnings.push("after report fixture version is unavailable");
+  if (beforeFixture.version && afterFixture.version && beforeFixture.version !== afterFixture.version) {
+    warnings.push(`fixture version differs: ${beforeFixture.version} → ${afterFixture.version}`);
+  }
   for (const field of ENVIRONMENT_FIELDS) {
     if (before.environment[field] !== after.environment[field]) warnings.push(`${field} differs: ${before.environment[field] ?? "unknown"} → ${after.environment[field] ?? "unknown"}`);
   }

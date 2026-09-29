@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { performance } = require("node:perf_hooks");
 const {
@@ -7,7 +8,9 @@ const {
   logicalDocumentLength,
   validateLogicalSelectAll,
   performLogicalSelectAll,
+  frameIntervalsFromTimestamps,
   summarizeFrameIntervals,
+  calculateMainCpuMetrics,
   classifyWorkspaceFailure,
   horizontalScrollFixture,
   workspaceRootEntryCount,
@@ -23,6 +26,14 @@ function markName(name, sampleIndex, phase) {
 }
 function hrElapsed(start) { return Number(process.hrtime.bigint() - start) / 1e6; }
 function rafTwo() { return "new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))"; }
+
+function collectMainCpuMetrics(before, after, scenarioName) {
+  const metrics = calculateMainCpuMetrics(before, after, os.cpus().length);
+  if (!metrics.mainCpuMetricsValid) {
+    console.warn(`[NCE benchmark] Invalid main-process CPU sample in ${scenarioName}: ${metrics.mainCpuMetricDiagnostic}`);
+  }
+  return metrics;
+}
 
 function loadFixtureManifest(fixtureRoot) {
   const manifestPath = path.join(fixtureRoot, "manifest.json");
@@ -217,7 +228,7 @@ async function stableMeasured(run, name, index, action) {
   const mainBefore = await diagnostics(run);
   const mainEventCount = mainBefore?.events?.length || 0;
   const performanceBefore = await run.cdp.send("Performance.getMetrics");
-  const mainCpuBefore = mainBefore?.mainProcess?.cpu || {};
+  const mainCpuBefore = mainBefore?.mainProcess?.cpu;
   const start = process.hrtime.bigint();
   const result = await run.cdp.evaluate(`(async () => {
     performance.mark(${js(startName)});
@@ -238,7 +249,7 @@ async function stableMeasured(run, name, index, action) {
   const durationMs = hrElapsed(start);
   const mainAfter = await diagnostics(run);
   const readMetrics = fileReadMetrics(mainAfter, mainEventCount);
-  const mainCpuAfter = mainAfter?.mainProcess?.cpu || {};
+  const mainCpuAfter = mainAfter?.mainProcess?.cpu;
   const tasks = await run.cdp.evaluate(`(() => {
     const values = window.__nceBenchmarkState?.longTasks || [];
     const result = { count: values.length, totalMs: values.reduce((sum, item) => sum + item, 0), maxMs: values.length ? Math.max(...values) : 0 };
@@ -248,10 +259,7 @@ async function stableMeasured(run, name, index, action) {
   const rendererPerf = await run.cdp.send("Performance.getMetrics");
   const beforePerfByName = Object.fromEntries((performanceBefore.metrics || []).map((metric) => [metric.name, metric.value]));
   const afterPerfByName = Object.fromEntries((rendererPerf.metrics || []).map((metric) => [metric.name, metric.value]));
-  const mainCpuUserMs = Number.isFinite(mainCpuAfter.user) && Number.isFinite(mainCpuBefore.user)
-    ? (mainCpuAfter.user - mainCpuBefore.user) / 1000 : null;
-  const mainCpuSystemMs = Number.isFinite(mainCpuAfter.system) && Number.isFinite(mainCpuBefore.system)
-    ? (mainCpuAfter.system - mainCpuBefore.system) / 1000 : null;
+  const mainCpuMetrics = collectMainCpuMetrics(mainCpuBefore, mainCpuAfter, name);
   return {
     metrics: {
       durationMs,
@@ -261,10 +269,7 @@ async function stableMeasured(run, name, index, action) {
       // Compatibility metric: renderer wall duration includes the two RAFs.
       rendererDurationMs: result?.inputToStableFrameMs,
       ...readMetrics,
-      mainCpuUserMs,
-      mainCpuSystemMs,
-      mainCpuSharePercent: Number.isFinite(mainCpuUserMs) && Number.isFinite(mainCpuSystemMs) && durationMs > 0
-        ? ((mainCpuUserMs + mainCpuSystemMs) / durationMs) * 100 : null,
+      ...mainCpuMetrics,
       longTaskCount: tasks?.count || 0,
       longTaskTotalMs: tasks?.totalMs || 0,
       longTaskMaxMs: tasks?.maxMs || 0,
@@ -321,12 +326,11 @@ async function startFrameWindow(run) {
     const state = window.__nceBenchmarkState;
     if (!state) throw new Error("NCE benchmark instrumentation is unavailable");
     state.longTasks.length = 0;
-    const windowState = { active: true, previous: performance.now(), intervals: [] };
+    const windowState = { active: true, timestamps: [] };
     state.frameWindow = windowState;
     const tick = (now) => {
       if (!windowState.active) return;
-      windowState.intervals.push(now - windowState.previous);
-      windowState.previous = now;
+      windowState.timestamps.push(now);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -338,11 +342,11 @@ async function stopFrameWindow(run) {
   return run.cdp.evaluate(`(async () => {
     const state = window.__nceBenchmarkState;
     const frameWindow = state?.frameWindow;
-    if (!frameWindow) return { frameIntervalsMs: [], longTasks: [] };
+    if (!frameWindow) return { frameTimestamps: [], longTasks: [] };
     frameWindow.active = false;
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const result = {
-      frameIntervalsMs: frameWindow.intervals.slice(),
+      frameTimestamps: frameWindow.timestamps.slice(),
       longTasks: state.longTasks.slice(),
     };
     state.longTasks.length = 0;
@@ -371,8 +375,13 @@ async function sampleWheel(run, point, { horizontal, count = 7, delta = 240, cad
     if (index + 1 < count) await new Promise((resolve) => setTimeout(resolve, cadenceMs));
   }
   await waitRendererStable(run);
-  const frames = await stopFrameWindow(run);
-  return { ...frames, totalInteractionDurationMs: hrElapsed(start) };
+  const observed = await stopFrameWindow(run);
+  const intervals = frameIntervalsFromTimestamps(observed.frameTimestamps);
+  return {
+    ...observed,
+    ...intervals,
+    totalInteractionDurationMs: hrElapsed(start),
+  };
 }
 
 async function openNamed(run, fixtures, name, fixtureRoot) {
@@ -845,8 +854,10 @@ async function runScenario(name, context, sampleIndex) {
       zoneResults.push({ zone, before, after, deltaX: Number(after?.x) - Number(before?.x), deltaY: Number(after?.y) - Number(before?.y), ...frameSample });
     }
     const intervals = zoneResults.flatMap((zone) => zone.frameIntervalsMs);
+    const invalidFrameIntervalCount = zoneResults.reduce((total, zone) => total + zone.invalidFrameIntervalCount, 0);
+    const frameCallbackCount = zoneResults.reduce((total, zone) => total + zone.frameCallbackCount, 0);
     const longTasks = zoneResults.flatMap((zone) => zone.longTasks);
-    const frameSummary = summarizeFrameIntervals(intervals);
+    const frameSummary = summarizeFrameIntervals(intervals, { invalidFrameIntervalCount, frameCallbackCount });
     const interactionDurationMs = zoneResults.reduce((sum, zone) => sum + zone.totalInteractionDurationMs, 0);
     return {
       metrics: {
@@ -860,7 +871,7 @@ async function runScenario(name, context, sampleIndex) {
         fileBytes: fixtures.files[fixtureName].bytes,
         lineCount: fixtures.files[fixtureName].lines,
       },
-      value: { fixtureName, zones: zoneResults.map(({ frameIntervalsMs, longTasks, ...zone }) => zone) },
+      value: { fixtureName, zones: zoneResults.map(({ frameIntervalsMs, frameTimestamps, longTasks, ...zone }) => zone) },
     };
   }
 
@@ -896,7 +907,8 @@ async function runScenario(name, context, sampleIndex) {
     await new Promise((resolve) => setTimeout(resolve, durationMs));
     const observed = await stopFrameWindow(run);
     const actualDurationMs = hrElapsed(start);
-    const summary = summarizeFrameIntervals(observed.frameIntervalsMs);
+    const intervals = frameIntervalsFromTimestamps(observed.frameTimestamps);
+    const summary = summarizeFrameIntervals(intervals.frameIntervalsMs, intervals);
     return {
       metrics: {
         durationMs: actualDurationMs,
@@ -904,7 +916,7 @@ async function runScenario(name, context, sampleIndex) {
         ...summary,
         ...summarizeLongTasks(observed.longTasks),
       },
-      value: { frameIntervalsMs: observed.frameIntervalsMs },
+      value: { ...intervals },
     };
   }
 
@@ -926,17 +938,14 @@ async function runScenario(name, context, sampleIndex) {
     const perfMap = (response) => Object.fromEntries((response?.metrics || []).map((metric) => [metric.name, metric.value]));
     const beforeMetrics = perfMap(beforePerf);
     const afterMetrics = perfMap(afterPerf);
-    const cpuBefore = beforeDiag?.mainProcess?.cpu || {};
-    const cpuAfter = afterDiag?.mainProcess?.cpu || {};
-    const mainCpuUserMs = Number.isFinite(cpuAfter.user) && Number.isFinite(cpuBefore.user) ? (cpuAfter.user - cpuBefore.user) / 1000 : null;
-    const mainCpuSystemMs = Number.isFinite(cpuAfter.system) && Number.isFinite(cpuBefore.system) ? (cpuAfter.system - cpuBefore.system) / 1000 : null;
+    const cpuBefore = beforeDiag?.mainProcess?.cpu;
+    const cpuAfter = afterDiag?.mainProcess?.cpu;
+    const mainCpuMetrics = collectMainCpuMetrics(cpuBefore, cpuAfter, name);
     return {
       metrics: {
         durationMs: elapsedMs,
         observationDurationMs: elapsedMs,
-        mainCpuUserMs,
-        mainCpuSystemMs,
-        mainCpuSharePercent: Number.isFinite(mainCpuUserMs) && Number.isFinite(mainCpuSystemMs) ? ((mainCpuUserMs + mainCpuSystemMs) / elapsedMs) * 100 : null,
+        ...mainCpuMetrics,
         rendererScriptDurationDeltaMs: Number.isFinite(afterMetrics.ScriptDuration) && Number.isFinite(beforeMetrics.ScriptDuration) ? (afterMetrics.ScriptDuration - beforeMetrics.ScriptDuration) * 1000 : null,
         rendererTaskDurationDeltaMs: Number.isFinite(afterMetrics.TaskDuration) && Number.isFinite(beforeMetrics.TaskDuration) ? (afterMetrics.TaskDuration - beforeMetrics.TaskDuration) * 1000 : null,
         rendererHeapBeforeMB: before.rendererJsHeapMB,

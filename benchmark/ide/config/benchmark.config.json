@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "fixtureVersion": "1.1.1",
   "defaultMode": "quick",
   "defaultTimeoutMs": 30000,
   "applicationCloseTimeoutMs": 10000,

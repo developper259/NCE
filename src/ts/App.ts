@@ -108,12 +108,21 @@ export class App {
 
   getBenchmarkDiagnostics() {
     if (!this.benchmarkEnabled) return null;
+    const cpuSampleStartedAtMs = performance.now();
+    const cpuUsage = process.cpuUsage();
+    const cpuSampleFinishedAtMs = performance.now();
     return {
       enabled: true,
       events: this.benchmarkEvents.slice(),
       mainProcess: {
         memory: process.memoryUsage(),
-        cpu: process.cpuUsage(),
+        // Node reports cumulative process CPU time in microseconds. Bracket it
+        // with the same monotonic clock so the runner can pair matching windows.
+        cpu: {
+          user: cpuUsage.user,
+          system: cpuUsage.system,
+          sampledAtMonotonicMs: (cpuSampleStartedAtMs + cpuSampleFinishedAtMs) / 2,
+        },
       },
       electronProcesses: app.getAppMetrics().map((metric) => ({
         type: metric.type,

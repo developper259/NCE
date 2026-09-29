@@ -5,8 +5,9 @@ const { compare, parseArgs, metricEntries } = require("../scripts/compare-runs.c
 function result({ cpu = "CPU A", duration = 20, memory = 100 } = {}) {
   return {
     schemaVersion: 1,
-    environment: { os: "Windows 10", platform: "win32", architecture: "x64", cpuModel: cpu, logicalCpuCores: 8, totalMemoryBytes: 8000, nodeVersion: "v22", electronVersion: "42", nceVersion: "1" },
-    configuration: { mode: "quick", configHash: "same", fixtureHash: "same" },
+    reportVersion: 2,
+    environment: { os: "Windows 10", platform: "win32", architecture: "x64", cpuModel: cpu, logicalCpuCores: 8, totalMemoryBytes: 8000, nodeVersion: "v22", electronVersion: "42", nceVersion: "1", fixtureVersion: "1.1.1" },
+    configuration: { mode: "quick", configHash: "same", fixtureHash: "same", fixtureVersion: "1.1.1" },
     scenarios: [{ name: "editor.typing", statistics: { durationMs: { p50: duration, p95: duration + 2 }, rendererJsHeapMB: { p50: memory } } }],
   };
 }
@@ -49,4 +50,30 @@ test("comparator includes stable-frame latency and lower-is-better slow-frame co
   const comparison = compare(baseline, next, { thresholdPercent: 5, absoluteThresholdMs: 1 });
   assert.equal(comparison.rows.find((row) => row.metric === "framesOver16_7Ms.p50").status, "improved");
   assert.equal(comparison.rows.find((row) => row.metric === "editorOutputNodeCount.p50").status, "improved");
+});
+
+test("comparison warns on fixture and report version changes", () => {
+  const baseline = result();
+  baseline.environment.fixtureVersion = "1.0.0";
+  baseline.configuration.fixtureVersion = "1.0.0";
+  baseline.reportVersion = 1;
+  const output = compare(baseline, result(), { thresholdPercent: 5, absoluteThresholdMs: 1 });
+  assert.ok(output.warnings.some((warning) => warning.includes("fixture version differs: 1.0.0 → 1.1.1")));
+  assert.ok(output.warnings.some((warning) => warning.includes("reportVersion differs: 1 → 2")));
+});
+
+test("comparison falls back to a single legacy fixture version field", () => {
+  const baseline = result();
+  delete baseline.configuration.fixtureVersion;
+  const output = compare(baseline, result(), { thresholdPercent: 5, absoluteThresholdMs: 1 });
+  assert.equal(output.warnings.some((warning) => warning.includes("fixture version")), false);
+});
+
+test("comparison warns about contradictory legacy fixture fields without selecting one", () => {
+  const baseline = result();
+  baseline.environment.fixtureVersion = "1.0.0";
+  baseline.configuration.fixtureVersion = "1.1.1";
+  const output = compare(baseline, result(), { thresholdPercent: 5, absoluteThresholdMs: 1 });
+  assert.ok(output.warnings.some((warning) => warning.includes("before report contradictory fixture versions")));
+  assert.equal(output.warnings.some((warning) => warning.includes("fixture version differs")), false);
 });

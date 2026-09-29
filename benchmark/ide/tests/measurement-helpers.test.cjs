@@ -11,7 +11,10 @@ const {
   waitForFileFullyLoaded,
   logicalDocumentLength,
   validateLogicalSelectAll,
+  isValidFrameInterval,
+  frameIntervalsFromTimestamps,
   summarizeFrameIntervals,
+  calculateMainCpuMetrics,
   classifyWorkspaceFailure,
   horizontalScrollFixture,
   workspaceRootEntryCount,
@@ -173,4 +176,91 @@ test("frame statistics keep undersampled percentiles null and full profile uses 
   assert.equal(horizontalScrollFixture("quick"), "long-line-100k");
   assert.equal(horizontalScrollFixture("standard"), "long-line-1m");
   assert.equal(horizontalScrollFixture("full"), "long-line-1m");
+});
+
+test("RAF intervals use adjacent callback timestamps and ignore an external start clock", () => {
+  const result = frameIntervalsFromTimestamps([100, 116.7, 133.4, 150.1]);
+  assert.equal(result.frameCallbackCount, 4);
+  assert.equal(result.invalidFrameIntervalCount, 0);
+  assert.equal(result.frameIntervalsMs.length, 3);
+  for (const interval of result.frameIntervalsMs) assert.ok(Math.abs(interval - 16.7) < 1e-9);
+
+  // An old performance.now() value of 200 would make the first delta negative;
+  // it is deliberately not an input to this timestamp-pair calculation.
+  const afterExternalClock = frameIntervalsFromTimestamps([100, 116.7]);
+  assert.equal(afterExternalClock.frameIntervalsMs.length, 1);
+  assert.ok(afterExternalClock.frameIntervalsMs[0] >= 0);
+});
+
+test("RAF interval validation diagnoses non-finite and out-of-order timestamps", () => {
+  assert.equal(isValidFrameInterval(0), true);
+  assert.equal(isValidFrameInterval(16.7), true);
+  assert.equal(isValidFrameInterval(-0.1), false);
+  assert.equal(isValidFrameInterval(Number.NaN), false);
+  assert.equal(isValidFrameInterval(Number.POSITIVE_INFINITY), false);
+
+  const invalidTimes = frameIntervalsFromTimestamps([100, 116.7, Number.NaN, Number.POSITIVE_INFINITY, 150]);
+  assert.equal(invalidTimes.frameIntervalsMs.length, 1);
+  assert.equal(invalidTimes.invalidFrameIntervalCount, 3);
+  const ordered = frameIntervalsFromTimestamps([100, 90]);
+  assert.deepEqual(ordered.frameIntervalsMs, []);
+  assert.equal(ordered.invalidFrameIntervalCount, 1);
+
+  const summary = summarizeFrameIntervals([16.7, -2, Number.POSITIVE_INFINITY]);
+  assert.equal(summary.frameIntervals, 1);
+  assert.equal(summary.invalidFrameIntervalCount, 2);
+  assert.equal(summary.frameIntervalP50Ms, 16.7);
+});
+
+test("CPU metrics use matching monotonic snapshots and normalize core-equivalent time", () => {
+  const before = { user: 0, system: 0, sampledAtMonotonicMs: 25 };
+  const oneCore = calculateMainCpuMetrics(before, {
+    user: 500_000, system: 0, sampledAtMonotonicMs: 1025,
+  }, 1);
+  assert.equal(oneCore.mainCpuUserMs, 500);
+  assert.equal(oneCore.mainCpuSystemMs, 0);
+  assert.equal(oneCore.mainCpuTotalMs, 500);
+  assert.equal(oneCore.mainCpuCoreEquivalentPercent, 50);
+  assert.equal(oneCore.mainCpuNormalizedPercent, 50);
+  assert.equal(oneCore.mainCpuMetricsValid, true);
+
+  const fourCoresHalf = calculateMainCpuMetrics(before, {
+    user: 2_000_000, system: 0, sampledAtMonotonicMs: 1025,
+  }, 4);
+  assert.equal(fourCoresHalf.mainCpuCoreEquivalentPercent, 200);
+  assert.equal(fourCoresHalf.mainCpuNormalizedPercent, 50);
+
+  const fourCoresFull = calculateMainCpuMetrics(before, {
+    user: 3_000_000, system: 1_000_000, sampledAtMonotonicMs: 1025,
+  }, 4);
+  assert.equal(fourCoresFull.mainCpuCoreEquivalentPercent, 400);
+  assert.equal(fourCoresFull.mainCpuNormalizedPercent, 100);
+});
+
+test("invalid CPU snapshots are reported instead of clamped", () => {
+  const before = { user: 1000, system: 2000, sampledAtMonotonicMs: 10 };
+  const impossible = calculateMainCpuMetrics(before, {
+    user: 9_001_000, system: 2000, sampledAtMonotonicMs: 1010,
+  }, 4);
+  assert.equal(impossible.mainCpuMetricsValid, false);
+  assert.equal(impossible.mainCpuTotalMs, null);
+  assert.equal(impossible.mainCpuCoreEquivalentPercent, null);
+  assert.match(impossible.mainCpuMetricDiagnostic, /exceeds the 4200 ms bound/);
+
+  const missing = calculateMainCpuMetrics(before, { system: 2000, sampledAtMonotonicMs: 1010 }, 4);
+  assert.equal(missing.mainCpuMetricsValid, false);
+  assert.equal(missing.mainCpuUserMs, null);
+  assert.match(missing.mainCpuMetricDiagnostic, /snapshots are missing/);
+
+  const backwards = calculateMainCpuMetrics(before, {
+    user: 999, system: 2000, sampledAtMonotonicMs: 1010,
+  }, 4);
+  assert.equal(backwards.mainCpuMetricsValid, false);
+  assert.match(backwards.mainCpuMetricDiagnostic, /moved backwards/);
+
+  const zeroWallTime = calculateMainCpuMetrics(before, {
+    user: 1000, system: 2000, sampledAtMonotonicMs: 10,
+  }, 4);
+  assert.equal(zeroWallTime.mainCpuMetricsValid, false);
+  assert.match(zeroWallTime.mainCpuMetricDiagnostic, /must be positive/);
 });
