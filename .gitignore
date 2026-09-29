@@ -18,8 +18,5 @@ Perf.txt
 dataset-example/private/provider.json
 .nce/
 dataset.json
-<<<<<<< HEAD
-=======
 /.benchmark-data/
 .benchmark-data
->>>>>>> main
