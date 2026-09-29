@@ -9,6 +9,7 @@ const { summarizeSamples } = require("../utils/statistics.cjs");
 const scenarioManifest = require("../scenarios/manifest.cjs");
 const { collectEnvironment } = require("./environment.cjs");
 const { launchNce } = require("./application.cjs");
+const { recoverInteractiveApp } = require("./application.cjs");
 const {
   runScenario,
   runStartupIteration,
@@ -18,6 +19,7 @@ const {
 } = require("./scenarios.cjs");
 const { renderMarkdown } = require("../reporters/markdown.cjs");
 const { printRun } = require("../reporters/console.cjs");
+const { resolveWorkspacePath, validateFixtureManifest, resetWorkspaceStateDirectories } = require("./measurement-helpers.cjs");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const CONFIG_PATH = path.join(__dirname, "../config/benchmark.config.json");
@@ -27,7 +29,7 @@ const config = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
 const definitions = new Map(scenarioManifest.map((scenario) => [scenario.name, scenario]));
 
 function parseArgs(argv) {
-  const options = { mode: config.defaultMode, groups: [], scenarios: [], timeoutMs: config.defaultTimeoutMs, quiet: false, verbose: false, debug: false, extreme: false };
+  const options = { mode: config.defaultMode, groups: [], scenarios: [], timeoutMs: null, quiet: false, verbose: false, debug: false, extreme: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const read = (name) => {
@@ -49,7 +51,7 @@ function parseArgs(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
   if (!config.modes[options.mode]) throw new Error("--mode must be quick, standard or full");
-  if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 600000) throw new Error("--timeout must be between 1000 and 600000 milliseconds");
+  if (options.timeoutMs !== null && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 600000)) throw new Error("--timeout must be between 1000 and 600000 milliseconds");
   if (options.machine && (options.machine.length > 80 || /[\r\n\0]/.test(options.machine))) throw new Error("--machine must be a label of at most 80 characters");
   if (options.extreme && options.mode !== "full") throw new Error("--extreme is available only with --mode full");
   return options;
@@ -80,7 +82,8 @@ function fixtureCacheMatches(options, names) {
   if (!fs.existsSync(manifestPath)) return false;
   try {
     const existing = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-    if (existing.profile !== options.mode || Boolean(existing.extreme) !== options.extreme) return false;
+    if (existing.schemaVersion !== 2 || existing.fixtureVersion !== config.fixtureVersion ||
+        existing.profile !== options.mode || Boolean(existing.extreme) !== options.extreme) return false;
     for (const name of names) {
       if (name.startsWith("file.open.")) {
         const rawKey = name.slice("file.open.".length);
@@ -90,11 +93,15 @@ function fixtureCacheMatches(options, names) {
       }
       if (name.startsWith("workspace.open.")) {
         const workspace = existing.workspaces?.find((item) => item.name === name.slice("workspace.open.".length));
-        if (!workspace || !fs.existsSync(workspace.path)) return false;
+        if (!workspace || !fs.existsSync(resolveWorkspacePath(existing, name.slice("workspace.open.".length), FIXTURE_ROOT))) return false;
       }
     }
     return true;
   } catch { return false; }
+}
+
+function scenarioTimeoutMs(options, name) {
+  return options.timeoutMs ?? config.scenarioTimeoutsMs?.[name] ?? config.defaultTimeoutMs;
 }
 
 function iterationCount(options, name) {
@@ -115,7 +122,7 @@ function errorText(error) {
 
 async function ensureInteractiveApp(state, options) {
   if (state.appRun && !state.appRun.exited) return state.appRun;
-  state.appRun = await launchNce({ timeoutMs: options.timeoutMs, profileLabel: "interactive" });
+  state.appRun = await launchNce({ timeoutMs: options.timeoutMs ?? config.defaultTimeoutMs, profileLabel: "interactive" });
   await state.appRun.connect();
   await state.appRun.waitFor("window.editor && editor.isOnInit === false", "NCE editor initialization");
   await prepareRenderer(state.appRun.cdp);
@@ -149,6 +156,8 @@ async function main() {
   const fixtureStart = performance.now();
   const fixturesReused = fixtureCacheMatches(options, names);
   const fixtures = fixturesReused ? loadFixtureManifest(FIXTURE_ROOT) : generate({ profile: options.mode, extreme: options.extreme });
+  const workspaceStateReset = resetWorkspaceStateDirectories(FIXTURE_ROOT, fixtures);
+  const fixtureValidation = validateFixtureManifest(FIXTURE_ROOT, fixtures);
   const fixtureGenerationMs = performance.now() - fixtureStart;
   const fixtureHash = hashJson({
     fixtureVersion: fixtures.fixtureVersion,
@@ -167,7 +176,8 @@ async function main() {
       mode: options.mode,
       selectedGroups: options.groups,
       selectedScenarios: names,
-      timeoutMs: options.timeoutMs,
+      timeoutMs: options.timeoutMs ?? config.defaultTimeoutMs,
+      scenarioTimeoutsMs: Object.fromEntries(names.map((name) => [name, scenarioTimeoutMs(options, name)])),
       startupProfile: "fresh user-data/session profile per iteration; operating-system cache is not cleared",
       interactionWarmup: "one tiny fixture open/close before interactive scenarios; excluded from scenario samples",
       warmupSamples: config.modes[options.mode].warmupSamples,
@@ -175,6 +185,8 @@ async function main() {
       fixtureHash,
       fixtureVersion: fixtures.fixtureVersion,
       fixtureGenerationMs,
+      fixtureValidation,
+      workspaceStateReset,
       fixturesReused,
       extremeWorkspaceIncluded: options.extreme,
       output: { json: jsonPath, markdown: markdownPath },
@@ -216,11 +228,12 @@ async function main() {
         scenario.samples.push(sample);
         try {
           if (scenario.name === "startup.cold-ish" || scenario.name === "window.open") {
-            const startup = await runStartupIteration({ timeoutMs: options.timeoutMs, profileLabel: scenario.name.replaceAll(".", "-") });
+            const startup = await runStartupIteration({ timeoutMs: scenarioTimeoutMs(options, scenario.name), profileLabel: scenario.name.replaceAll(".", "-") });
             sample.metrics = startup.metrics;
             sample.value = startup.value;
           } else {
             const appRun = await ensureInteractiveApp(state, options);
+            appRun.scenarioTimeoutMs = scenarioTimeoutMs(options, scenario.name);
             result.configuration.interactionWarmupMs = state.interactionWarmupMs;
             sample.value = await runScenario(scenario.name, { ...state, run: appRun, fixtures, fixtureRoot: FIXTURE_ROOT, mode: options.mode }, warmup ? sampleIndex : measuredIndex);
             sample.metrics = sample.value.metrics || {};
@@ -234,8 +247,11 @@ async function main() {
           anyFailures = true;
           if (options.verbose || options.debug) console.error(sample.error);
           if (state.appRun) {
-            await state.appRun.close().catch(() => {});
-            state.appRun = null;
+            const recovered = await recoverInteractiveApp(state.appRun);
+            if (!recovered) {
+              await state.appRun.close().catch(() => {});
+              state.appRun = null;
+            }
           }
         } finally {
           sample.finishedAt = new Date().toISOString();
@@ -281,4 +297,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, selectedScenarios, iterationCount };
+module.exports = { parseArgs, selectedScenarios, iterationCount, scenarioTimeoutMs, fixtureCacheMatches };

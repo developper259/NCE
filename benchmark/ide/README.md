@@ -12,6 +12,9 @@ npm run benchmark:memory
 npm run benchmark:full -- --machine hp-2gb
 npm run benchmark:ide -- --mode standard --group files,tabs
 npm run benchmark:ide -- --scenario file.open.large --verbose
+npm run benchmark:ide -- --mode quick --scenario file.open.small --output .benchmark-data/ide/results/small.json
+npm run benchmark:quick -- --output .benchmark-data/ide/results/quick.json
+npm run benchmark:full -- --output .benchmark-data/ide/results/full.json
 npm run benchmark:compare -- .benchmark-data/ide/results/before.json .benchmark-data/ide/results/after.json
 ```
 
@@ -37,17 +40,18 @@ npm run benchmark:ide:fixtures -- --profile full --extreme
 npm run benchmark:ide:clean
 ```
 
-Le workspace de 100 000 fichiers n'est créé que si `--extreme` est fourni. Pour le mesurer, lancer `npm run benchmark:ide -- --mode full --extreme --scenario workspace.open.extreme`. Le nettoyage ne supprime que les fixtures et profils temporaires sous `.benchmark-data/ide`; il conserve les rapports.
+Le scénario `file.open.small` peut être exécuté seul dans un profil quick et écrit séparément du run quick complet. Le workspace de 100 000 fichiers n'est créé que si `--extreme` est fourni. Pour le mesurer, lancer `npm run benchmark:ide -- --mode full --extreme --scenario workspace.open.extreme`. Le nettoyage ne supprime que les fixtures et profils temporaires sous `.benchmark-data/ide`; il conserve les rapports.
 
 ## Mesures
 
 - **Démarrage** : chaque échantillon démarre un nouveau processus Electron avec un profil utilisateur et une session isolés. Le runner mesure le lancement jusqu'à la fenêtre DevTools, l'initialisation de l'éditeur et deux frames stables. Les phases `app-ready`, création de BrowserWindow, `ready-to-show`, DOM prêt et `rendererReady` sont mesurées avec l'horloge monotone du processus principal.
 - **Fenêtre** : NCE n'a qu'une fenêtre ; le scénario utilise son vrai chemin de création pendant le démarrage. Aucun comportement multi-fenêtre artificiel n'est ajouté.
-- **Ouverture de fichier** : appelle `TabManager.openFileWithPath` dans le renderer réel, puis attend deux `requestAnimationFrame`. Le temps total runner, les Performance marks renderer, le read filesystem IPC, le nombre de lignes, la longueur maximale, les nœuds DOM et les tâches longues sont enregistrés séparément.
-- **Interactions** : la frappe, Backspace, Enter, les flèches, Select All et la molette passent par des événements CDP envoyés à la vraie fenêtre. Le temps inclut l'action et l'attente du frame observé ; le champ renderer est mesuré avec `performance.mark/measure`.
+- **Ouverture de fichier** : sépare la résolution de `TabManager.openFileWithPath`, le chargement complet attendu via `FileLoader.waitForFileLoaded`, puis deux RAF après la fin du modèle. `fileOpenRequestMs`, `fileModelReadyMs` et `fileStableRenderMs` distinguent ces étapes. Les validations vérifient les lignes du modèle, les octets lus et les lignes signalées par les chunks.
+- **Interactions** : la frappe, Backspace, Enter, les flèches, Select All et la molette passent par des événements CDP envoyés à la vraie fenêtre. `actionDurationMs`, `rendererLogicalMs` et `inputToStableFrameMs` sont séparés. Select All valide sa plage et sa longueur logiques sans construire le texte ; les scénarios copy mesurent volontairement le chemin réel de copie.
+- **Scroll et activité idle** : les scénarios de scroll envoient huit événements wheel à 100 ms d'intervalle pendant qu'un observateur RAF actif relève les intervalles et les long tasks. `idle.activity` attend sans créer de boucle RAF et compare les diagnostics renderer/main avant et après. Une attente idle n'implique pas que les propres tâches de NCE ou de Chromium soient inactives.
 - **Onglets, recherche et workspace** : les méthodes de `TabManager`, `SearchController` et `FileExplorer` sont utilisées dans l'application Electron. Les workspaces sont chargés par le véritable explorer et son watcher.
 - **Mémoire et CPU** : le rapport distingue le heap JS du renderer, le RSS du main process et, si Electron l'expose, la mémoire privée des processus Electron. Il enregistre aussi le CPU user/system du main process entre les diagnostics. Le scénario de fermeture demande un GC via DevTools ; ce chiffre est une observation après GC, pas une preuve de fuite. Les working sets partagés ne sont pas additionnés.
-- **DOM et frames** : le nombre de nœuds est relevé dans le vrai DOM. Le scénario idle échantillonne les intervalles RAF ; un `PerformanceObserver` long-task est installé uniquement par le runner benchmark.
+- **DOM et frames** : les scénarios DOM reportent le compte observé sans imposer un nombre exact fragile ; le cas 100k lignes vérifie seulement un seuil large de virtualisation. Les intervalles RAF sont des métriques de frame, pas du temps CPU.
 - **Statistiques** : JSON conserve les samples bruts. Les agrégats contiennent minimum, médiane/p50, moyenne, p95, p99 à partir de 100 samples, maximum et écart-type. Aucun outlier n'est supprimé.
 
 Les durées cross-process ne soustraient pas les `performance.now()` de deux time origins. Les phases main restent dans leur domaine monotone ; le délai observable depuis le spawn est mesuré par `process.hrtime.bigint()` dans le runner. Les profils startup sont « cold-ish » : le profil Electron est neuf, mais les caches du système d'exploitation ne sont pas vidés.
@@ -59,9 +63,9 @@ npm run benchmark:compare -- before.json after.json
 npm run benchmark:compare -- --threshold-percent 8 before.json after.json
 ```
 
-Le comparateur met les latences, la mémoire, les tâches longues et les tailles DOM en contexte, et avertit si machine, OS, RAM, Electron, configuration ou fixtures diffèrent. Le seuil de 5 % (et 1 ms absolue pour les latences) ne fait qu'étiqueter les petites variations ; il ne bloque ni CI ni développement. Il n'existe pas encore de baseline ni de budget strict : mesurer `main` et garder le JSON avant toute optimisation.
+Le comparateur met les latences, intervalles/retards de frames, mémoire, tâches longues et tailles DOM en contexte, et avertit si machine, OS, RAM, Electron, configuration ou fixtures diffèrent. Le seuil de 5 % (et 1 ms absolue pour les latences) ne fait qu'étiqueter les petites variations ; il ne bloque ni CI ni développement. Les p95 des rapports Markdown ne sont montrés qu'à partir de 20 échantillons ; le p99 reste nul sous 100 mesures. Il n'existe pas encore de baseline ni de budget strict : mesurer `main` et garder le JSON avant toute optimisation.
 
-Le JSON contient la version de schéma, l'environnement, le commit/branche/état Git, la configuration et son hash, la version/hash des fixtures, les samples bruts, les statistiques, les événements de démarrage, les erreurs et les chemins des rapports. Le label `--machine` est fourni par l'utilisateur ; aucun identifiant matériel privé n'est collecté.
+Le JSON contient la version de schéma, l'environnement, le commit/branche/état Git, la configuration et son hash, la validation et le hash des fixtures, les samples bruts, les statistiques, les événements de démarrage, les erreurs et les chemins des rapports. Le label `--machine` est fourni par l'utilisateur ; aucun identifiant matériel privé n'est collecté.
 
 ## Instrumentation et sécurité
 

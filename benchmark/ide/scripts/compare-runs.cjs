@@ -2,8 +2,17 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const LOWER_IS_BETTER = /(?:Ms|MB|Bytes|domNodeCount|DomNodes|Count)$/i;
-const LATENCY_METRICS = new Set(["durationMs", "rendererDurationMs", "fileSystemReadMs", "scriptDurationMs"]);
+const LOWER_IS_BETTER = /(?:Ms|MB|Bytes|Percent|domNodeCount|DomNodes|Count)$/i;
+const LATENCY_METRICS = new Set([
+  "durationMs", "rendererDurationMs", "actionDurationMs", "rendererLogicalMs",
+  "inputToStableFrameMs", "stableFrameWaitMs", "fileSystemReadMs", "fileInitializeMs",
+  "fileChunkMs", "fileOpenRequestMs", "fileInitialViewportStableMs", "fileModelReadyMs",
+  "fileStableRenderMs", "fileFullyReadyMs", "workspaceOpenRequestMs", "openCloseCycleDurationMs",
+  "totalScenarioDurationMs", "totalInteractionDurationMs", "observationDurationMs",
+  "frameIntervalP50Ms", "frameIntervalP95Ms", "frameIntervalP99Ms", "frameIntervalMaxMs",
+  "mainCpuUserMs", "mainCpuSystemMs", "rendererScriptDurationDeltaMs", "rendererTaskDurationDeltaMs",
+  "scriptDurationMs",
+]);
 const ENVIRONMENT_FIELDS = ["os", "platform", "architecture", "cpuModel", "logicalCpuCores", "totalMemoryBytes", "nodeVersion", "electronVersion", "nceVersion"];
 
 function readResult(filePath) {
@@ -39,7 +48,7 @@ function metricEntries(scenario) {
   const entries = [];
   for (const [metric, stats] of Object.entries(scenario.statistics || {})) {
     if (!stats || !Number.isFinite(stats.p50)) continue;
-    if (/^(?:fileBytes|fileReadBytes|lineCount|maxLineLength|openTabs|workspaceEntries|explorerRootEntries|searchResults|frames|cycles|metricProcessCount|rendererDomNodes)$/i.test(metric)) continue;
+    if (/^(?:fileBytes|fileReadBytes|lineCount|maxLineLength|openTabs|workspaceEntries|explorerRootEntries|searchResults|searchResultRows|frames|cycles|metricProcessCount|rendererDomNodes|scrollZones|selectedCharacters|expectedSelectedCharacters|copyCharacters)$/i.test(metric)) continue;
     if (LATENCY_METRICS.has(metric)) {
       entries.push({ metric: `${metric}.p50`, name: metric, percentile: "p50", value: stats.p50 });
       if (Number.isFinite(stats.p95)) entries.push({ metric: `${metric}.p95`, name: metric, percentile: "p95", value: stats.p95 });
@@ -70,7 +79,7 @@ function compare(before, after, options) {
       if (!oldMetric) { warnings.push(`metric '${scenarioName}.${newMetric.metric}' is absent from the before run`); continue; }
       const delta = newMetric.value - oldMetric.value;
       const deltaPercent = oldMetric.value === 0 ? null : delta / Math.abs(oldMetric.value) * 100;
-      const isLatency = LATENCY_METRICS.has(newMetric.name) || /(?:Ms|MB|Bytes|domNodeCount|DomNodes)$/i.test(newMetric.name);
+      const isLatency = LATENCY_METRICS.has(newMetric.name) || LOWER_IS_BETTER.test(newMetric.name);
       let status = "unclassified";
       if (isLatency) {
         const absoluteSmall = LATENCY_METRICS.has(newMetric.name) && Math.abs(delta) < options.absoluteThresholdMs;

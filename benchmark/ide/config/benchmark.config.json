@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "fixtureVersion": "1.0.0",
+  "fixtureVersion": "1.1.1",
   "defaultMode": "quick",
   "defaultTimeoutMs": 30000,
   "applicationCloseTimeoutMs": 10000,
@@ -14,7 +14,7 @@
       "scenarios": [
         "startup.cold-ish", "file.open.small", "file.open.medium",
         "file.open.long-line-100k", "tabs.switch", "editor.typing",
-        "scroll.vertical", "editor.search"
+        "scroll.vertical", "scroll.horizontal", "editor.search", "idle.activity"
       ]
     },
     "standard": {
@@ -26,9 +26,9 @@
         "file.open.10kb", "file.open.100kb", "file.open.1mb",
         "file.open.long-line-100k", "tabs.open", "tabs.switch", "tabs.close",
         "editor.typing", "editor.backspace", "editor.enter", "editor.cursor",
-        "editor.select-all", "editor.search", "editor.search-many-results",
+        "editor.select-all", "editor.copy-selection", "editor.search", "editor.search-many-results",
         "scroll.vertical", "scroll.horizontal", "editor.syntax-highlight",
-        "memory.open-close-small", "idle.renderer", "dom.count"
+        "memory.open-close-small", "renderer.raf-cadence", "idle.activity", "dom.count"
       ]
     },
     "full": {
@@ -44,10 +44,13 @@
         "file.open.long-line-tabs-1m", "file.open.long-unicode",
         "tabs.open", "tabs.switch", "tabs.close", "tabs.close-all",
         "editor.typing", "editor.backspace", "editor.enter", "editor.cursor",
-        "editor.select-all", "editor.search", "editor.search-many-results",
-        "scroll.vertical", "scroll.horizontal", "editor.syntax-highlight",
-        "memory.open-close-large", "memory.repeated-open-close", "idle.renderer",
-        "dom.count"
+        "editor.select-all", "editor.select-all-large", "editor.select-all-long-line",
+        "editor.copy-selection", "editor.copy-large-selection", "editor.search",
+        "editor.search-many-results", "editor.search-long-line",
+        "scroll.vertical", "scroll.horizontal", "scroll.horizontal.tabs-1m",
+        "scroll.horizontal.unicode", "editor.syntax-highlight",
+        "memory.open-close-large", "memory.open-close-long-line", "memory.repeated-open-close",
+        "renderer.raf-cadence", "idle.activity", "dom.count", "dom.count-large", "dom.count-long-line"
       ]
     }
   },
@@ -55,6 +58,31 @@
     "quick": { "interaction": 3, "open": 2, "memory": 2 },
     "standard": { "interaction": 10, "open": 5, "memory": 5 },
     "full": { "interaction": 30, "open": 10, "memory": 10 }
+  },
+  "scenarioTimeoutsMs": {
+    "workspace.open.large": 90000,
+    "file.open.large": 60000,
+    "file.open.very-large": 90000,
+    "file.open.extreme": 120000,
+    "file.open.long-line-1m": 90000,
+    "file.open.long-line-tabs-1m": 90000,
+    "file.open.long-unicode": 90000,
+    "file.open.5mb": 60000,
+    "file.open.10mb": 90000,
+    "file.open.50mb": 120000,
+    "workspace.open.medium": 60000,
+    "editor.select-all-large": 60000,
+    "editor.select-all-long-line": 90000,
+    "editor.copy-large-selection": 120000,
+    "editor.search-long-line": 120000,
+    "scroll.horizontal": 60000,
+    "scroll.horizontal.tabs-1m": 90000,
+    "scroll.horizontal.unicode": 60000,
+    "dom.count-large": 60000,
+    "dom.count-long-line": 60000,
+    "memory.open-close-large": 90000,
+    "memory.open-close-long-line": 90000,
+    "memory.repeated-open-close": 90000
   },
   "safety": {
     "extremeWorkspaceRequiresFlag": true,

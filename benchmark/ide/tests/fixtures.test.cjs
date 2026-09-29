@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { isInside } = require("../utils/files.cjs");
-const { parseOptions, writeBytes, writeLines, writeLongLine, writeBinary } = require("../fixtures/generate-fixtures.cjs");
+const { parseOptions, writeBytes, writeLines, writeLongLine, writeBinary, maximumLineLength } = require("../fixtures/generate-fixtures.cjs");
 
 test("fixture profiles are explicit and reject unknown or unsafe profiles", () => {
   assert.equal(parseOptions(["--profile", "full", "--extreme"]).extreme, true);
@@ -28,6 +28,18 @@ test("generators write deterministic line, byte-size, and Unicode fixtures", () 
     assert.match(fs.readFileSync(unicode, "utf8"), /🙂/);
     assert.equal(fs.statSync(binary).size, 128);
     assert.notEqual(fs.readFileSync(binary)[0], 0x78);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("JavaScript fixture metadata covers the longest generated source line", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nce-js-fixture-"));
+  try {
+    const file = path.join(directory, "sample.js");
+    writeLines(file, 1000, "javascript");
+    const actual = fs.readFileSync(file, "utf8").split(/\r?\n/).reduce((max, line) => Math.max(max, line.length), 0);
+    assert.equal(maximumLineLength("javascript"), actual);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

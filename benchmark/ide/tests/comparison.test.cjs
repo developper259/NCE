@@ -29,3 +29,24 @@ test("comparator excludes fixture dimensions and parses threshold options", () =
   assert.deepEqual(entries.map((entry) => entry.metric), ["durationMs.p50", "durationMs.p95"]);
   assert.deepEqual(parseArgs(["--threshold-percent", "8", "before.json", "after.json"]).files, ["before.json", "after.json"]);
 });
+
+test("comparator includes stable-frame latency and lower-is-better slow-frame counts", () => {
+  const entries = metricEntries({ statistics: {
+    inputToStableFrameMs: { p50: 20, p95: 25 },
+    frameIntervalP95Ms: { p50: 18, p95: 22 },
+    framesOver16_7Ms: { p50: 4 },
+    editorOutputNodeCount: { p50: 100 },
+  } });
+  assert.deepEqual(entries.map((entry) => entry.metric), [
+    "inputToStableFrameMs.p50", "inputToStableFrameMs.p95",
+    "frameIntervalP95Ms.p50", "frameIntervalP95Ms.p95",
+    "framesOver16_7Ms.p50", "editorOutputNodeCount.p50",
+  ]);
+  const baseline = result();
+  baseline.scenarios[0].statistics = { framesOver16_7Ms: { p50: 8 }, editorOutputNodeCount: { p50: 200 } };
+  const next = result();
+  next.scenarios[0].statistics = { framesOver16_7Ms: { p50: 2 }, editorOutputNodeCount: { p50: 100 } };
+  const comparison = compare(baseline, next, { thresholdPercent: 5, absoluteThresholdMs: 1 });
+  assert.equal(comparison.rows.find((row) => row.metric === "framesOver16_7Ms.p50").status, "improved");
+  assert.equal(comparison.rows.find((row) => row.metric === "editorOutputNodeCount.p50").status, "improved");
+});

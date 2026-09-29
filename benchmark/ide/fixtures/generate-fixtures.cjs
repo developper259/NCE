@@ -53,7 +53,7 @@ function writeLines(filePath, lineCount, kind = "plain") {
 
 function maximumLineLength(kind) {
   return kind === "javascript"
-    ? `const record000000 = { id: 0, label: "benchmark deterministic payload", active: false };`.length
+    ? `const record${String(999).padStart(6, "0")} = { id: 999, label: "benchmark deterministic payload", active: ${999 % 2 === 0} };`.length
     : `benchmark fixture row 0000000 deterministic payload for editor rendering and search`.length;
 }
 
@@ -115,7 +115,14 @@ function makeWorkspace(name, fileCount, folderCount) {
     const filePath = path.join(workspacePath, folder, `file-${String(index + 1).padStart(6, "0")}.txt`);
     fs.writeFileSync(filePath, `workspace ${name} file ${index + 1}\nbenchmark data\n`, "utf8");
   }
-  return { name, path: workspacePath, files: fileCount, folders: folderCount, entries: fileCount + folderCount };
+  return {
+    name,
+    path: path.relative(FIXTURE_ROOT, workspacePath),
+    files: fileCount,
+    folders: folderCount,
+    rootEntries: groupCount || folderCount,
+    entries: fileCount + folderCount,
+  };
 }
 
 function addFile(files, name, relativePath, bytes, lines, maxLineLength) {
@@ -145,7 +152,7 @@ function generate(options) {
 
   const longLineLengths = options.profile === "quick"
     ? [10000, 100000]
-    : options.profile === "standard" ? [10000, 100000] : [10000, 100000, 1000000];
+    : [10000, 100000, 1000000];
   for (const length of longLineLengths) {
     const name = `long-line-${length >= 1000000 ? "1m" : `${length / 1000}k`}`;
     const relative = `files/${name}.txt`;
@@ -169,7 +176,7 @@ function generate(options) {
   addFile(files, "sample-js", "files/sample.js", fs.statSync(jsPath).size, 1000, maximumLineLength("javascript"));
   const searchPath = path.join(FIXTURE_ROOT, "files/search-many.txt");
   writeLines(searchPath, 10000);
-  addFile(files, "search-many", "files/search-many.txt", fs.statSync(searchPath).size, 10000, 106);
+  addFile(files, "search-many", "files/search-many.txt", fs.statSync(searchPath).size, 10000, maximumLineLength("plain"));
   const binaryPath = path.join(FIXTURE_ROOT, "files/sample.bin");
   writeBinary(binaryPath);
   addFile(files, "binary", "files/sample.bin", fs.statSync(binaryPath).size, 0, 0);
@@ -193,8 +200,8 @@ function generate(options) {
   if (options.extreme) workspaces.push(makeWorkspace("extreme", 100000, 1000));
 
   const manifest = {
-    schemaVersion: 1,
-    fixtureVersion: "1.0.0",
+    schemaVersion: 2,
+    fixtureVersion: "1.1.1",
     profile: options.profile,
     extreme: options.extreme,
     deterministic: true,

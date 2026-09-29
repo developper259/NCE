@@ -145,9 +145,17 @@ class FileExplorer extends Sidebar {
 
   async loadFiles(expandedPaths = new Set()) {
     const rootPath = this.rootPath;
-    if (!rootPath) return false;
+    const benchmarkDiagnostic = this.__benchmarkWorkspaceDiagnostic;
+    if (!rootPath) {
+      if (benchmarkDiagnostic) {
+        benchmarkDiagnostic.initialFolderLoadCompleted = false;
+        benchmarkDiagnostic.initialFolderLoadError = "workspace root is empty";
+      }
+      return false;
+    }
     try {
       const status = await this.fileOperations.pathStatus(rootPath);
+      if (benchmarkDiagnostic) benchmarkDiagnostic.loadFilesPathStatus = status;
       if (!status?.exists) {
         if (status?.code !== "SOURCE_NOT_FOUND") {
           console.error("Unable to inspect workspace:", status);
@@ -161,6 +169,7 @@ class FileExplorer extends Sidebar {
         return false;
       }
       const items = await window.api.getFolderContent(rootPath);
+      if (benchmarkDiagnostic) benchmarkDiagnostic.initialFolderEntryCount = Array.isArray(items) ? items.length : null;
       if (rootPath !== this.rootPath) return false;
       const finalStatus =
         items.length === 0
@@ -191,8 +200,13 @@ class FileExplorer extends Sidebar {
 
       this.files = newFiles;
       this.isLoaded = true;
+      if (benchmarkDiagnostic) benchmarkDiagnostic.initialFolderLoadCompleted = true;
       return true;
     } catch (error) {
+      if (benchmarkDiagnostic) {
+        benchmarkDiagnostic.initialFolderLoadCompleted = false;
+        benchmarkDiagnostic.initialFolderLoadError = String(error?.message || error);
+      }
       console.error("Error loading files:", error);
       const status = await this.fileOperations.pathStatus(rootPath);
       if (!status?.exists && status?.code === "SOURCE_NOT_FOUND") {
@@ -204,8 +218,21 @@ class FileExplorer extends Sidebar {
 
   async loadProject(projectPath) {
     if (!projectPath) return false;
+    const benchmarkDiagnostic = typeof window.api?.getBenchmarkDiagnostics === "function"
+      ? {
+        pathStatus: null,
+        watcherStarted: false,
+        watcherError: null,
+        initialFolderLoadCompleted: false,
+        initialFolderEntryCount: null,
+        initialFolderLoadError: null,
+      }
+      : null;
+    if (benchmarkDiagnostic) this.__benchmarkWorkspaceDiagnostic = benchmarkDiagnostic;
     const status = await this.fileOperations.pathStatus(projectPath);
+    if (benchmarkDiagnostic) benchmarkDiagnostic.pathStatus = status;
     if (!status?.exists || !status.isDirectory) {
+      if (benchmarkDiagnostic) benchmarkDiagnostic.failureCode = "WORKSPACE_PATH_INVALID";
       if (status?.code && status.code !== "SOURCE_NOT_FOUND")
         console.error("Unable to open workspace:", status);
       return false;
@@ -213,16 +240,26 @@ class FileExplorer extends Sidebar {
 
     this.rootPath = projectPath;
     this.projectName = NCEPath.basename(projectPath) || "Project";
+    if (benchmarkDiagnostic) benchmarkDiagnostic.rootPathMatches = this.rootPath === projectPath;
 
     try {
       await window.api.startWatching(projectPath);
+      if (benchmarkDiagnostic) benchmarkDiagnostic.watcherStarted = true;
     } catch (error) {
+      if (benchmarkDiagnostic) {
+        benchmarkDiagnostic.failureCode = "WATCHER_START_FAILED";
+        benchmarkDiagnostic.watcherError = String(error?.message || error);
+      }
       console.error("Unable to watch workspace:", error);
       await this.invalidateWorkspace();
       return false;
     }
 
-    if (!(await this.loadFiles())) return false;
+    if (!(await this.loadFiles())) {
+      if (benchmarkDiagnostic) benchmarkDiagnostic.failureCode = "INITIAL_FOLDER_LOAD_FAILED";
+      return false;
+    }
+    if (benchmarkDiagnostic) benchmarkDiagnostic.loaded = true;
     this.refresh();
 
     this.editor.agentSidebar?.manualContextManager?.handleWorkspaceChanged(this.rootPath);

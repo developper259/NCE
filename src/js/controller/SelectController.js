@@ -141,6 +141,7 @@ class SelectController {
         startColumn: range.start.column,
         endRow: range.end.row,
         endColumn: range.end.column,
+        includesFinalNewline: range.includeFinalNewline === true,
       };
     }
     if (!this.selectedLines || this.selectedLines.size === 0) return null;
@@ -436,7 +437,7 @@ class SelectController {
         const end = row === range.end.row ? range.end.column : text.length;
         parts.push(text.slice(start, end));
       }
-      file._selectionTextCache = parts.join("\n");
+      file._selectionTextCache = parts.join("\n") + (range.includeFinalNewline ? "\n" : "");
       return file._selectionTextCache;
     }
     if (!this.selectedLines.size) return file.containsSelected || "";
@@ -459,7 +460,7 @@ class SelectController {
     if (!range) return 0;
     const lines = this.editor.lineController.lines;
     if (range.startRow === range.endRow)
-      return Math.max(0, range.endColumn - range.startColumn);
+      return Math.max(0, range.endColumn - range.startColumn) + (range.includesFinalNewline ? 1 : 0);
     const firstIndex = range.startRow - 1;
     const lastIndex = range.endRow - 1;
     const firstLength = lines[firstIndex]?.getText().length || 0;
@@ -469,7 +470,8 @@ class SelectController {
     ) ?? lines.slice(firstIndex + 1, lastIndex)
       .reduce((sum, line) => sum + (line?.getText?.().length || 0), 0);
     return Math.max(0, firstLength - range.startColumn) + middleLength +
-      Math.max(0, range.endColumn) + (range.endRow - range.startRow);
+      Math.max(0, range.endColumn) + (range.endRow - range.startRow) +
+      (range.includesFinalNewline ? 1 : 0);
   }
 
   unSelectAll() {
@@ -585,6 +587,15 @@ class SelectController {
       column: lastLineLengthReal,
     };
     this.setLogicalSelectionFromEndpoints();
+    if (this.editor.tabManager.activeFile.hasFinalNewline) {
+      if (!this.editor.tabManager.activeFile._selectionRange) {
+        this.editor.tabManager.activeFile._selectionRange = {
+          start: { row: 1, column: 0 },
+          end: { row: 1, column: 0 },
+        };
+      }
+      this.editor.tabManager.activeFile._selectionRange.includeFinalNewline = true;
+    }
     this.editor.tabManager.activeFile.containsSelected = "";
 
     this.refreshSelectionDOM();

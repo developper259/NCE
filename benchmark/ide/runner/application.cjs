@@ -159,4 +159,27 @@ async function launchNce({ timeoutMs = 30000, profileLabel = "run" } = {}) {
   return new ElectronRun(child, profilePath, port, timeoutMs, startedAt);
 }
 
-module.exports = { launchNce };
+async function recoverInteractiveApp(run) {
+  if (!run || run.exited || !run.cdp || run.cdp.closed) return false;
+  try {
+    const state = await run.cdp.evaluate(`(async () => {
+      try { await editor.fileExplorer?.invalidateWorkspace?.(); } catch {}
+      try { await window.api.stopWatching(); } catch {}
+      try { await editor.tabManager?.closeFiles?.({ skipPrepare: true }); } catch {}
+      try { editor.searchController?.close?.(); } catch {}
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return {
+        editorReady: !!window.editor && editor.isOnInit === false,
+        tabs: editor.tabManager?.tabs?.length ?? -1,
+        workspaceRoot: editor.fileExplorer?.rootPath || "",
+        workspaceLoaded: editor.fileExplorer?.isLoaded === true
+      };
+    })()`, 5000);
+    return state?.editorReady === true && state.tabs === 0 &&
+      state.workspaceRoot === "" && state.workspaceLoaded === false;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = { launchNce, recoverInteractiveApp };

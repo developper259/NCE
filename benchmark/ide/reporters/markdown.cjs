@@ -23,15 +23,20 @@ function renderMarkdown(result) {
     "",
     "## Scenarios",
     "",
-    "| Scenario | Status | Samples | Duration p50 | Duration p95 | Renderer p50 | File read p50 | Memory after close | DOM nodes |",
-    "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+    "| Scenario | Status | Samples | Duration p50 | Duration p95 | Input → stable p50 | File ready p50 | Frame p50 | Frame p95 | Frames >16.7 ms | Heap after close | DOM nodes |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ];
   for (const scenario of result.scenarios) {
     const metrics = scenario.statistics || {};
-    const cell = (name, key = "p50") => formatNumber(metrics[name]?.[key]);
-    lines.push(`| ${escapeCell(scenario.name)} | ${escapeCell(scenario.status)} | ${scenario.samples.filter((sample) => sample.status === "passed" && !sample.warmup).length} | ${cell("durationMs")} ms | ${cell("durationMs", "p95")} ms | ${cell("rendererDurationMs")} ms | ${cell("fileSystemReadMs")} ms | ${cell("memoryAfterCloseJsHeapMB")} MB | ${cell("domNodeCount")} |`);
+    const cell = (name, key = "p50") => {
+      const stats = metrics[name];
+      if (key === "p95" && (stats?.count || 0) < 20) return "—";
+      return formatNumber(stats?.[key]);
+    };
+    const sampleCount = scenario.samples.filter((sample) => sample.status === "passed" && !sample.warmup).length;
+    lines.push(`| ${escapeCell(scenario.name)} | ${escapeCell(scenario.status)} | ${sampleCount} | ${cell("durationMs")} ms | ${cell("durationMs", "p95")} ms | ${cell("inputToStableFrameMs")} ms | ${cell("fileFullyReadyMs")} ms | ${cell("frameIntervalP50Ms")} ms | ${cell("frameIntervalP95Ms")} ms | ${cell("framesOver16_7Ms")} | ${cell("memoryAfterCloseJsHeapMB")} MB | ${cell("domNodeCount")} |`);
   }
-  lines.push("", "## Measurement notes", "", "- `durationMs` is measured by the runner with a monotonic clock and ends after the scenario's required two animation frames. `rendererDurationMs` is measured inside Chromium with Performance marks.", "- Startup is a fresh NCE process and isolated profile for each sample. OS file caches are not cleared, so this is cold-profile startup, not a cold OS cache.", "- Electron process private memory is used when Electron reports it. Renderer JavaScript heap and main-process RSS are reported separately to avoid adding shared working sets together.", "- Raw per-sample data, phase events and failures are preserved in the JSON result.", "");
+  lines.push("", "## Measurement notes", "", "- File-open `durationMs` ends at the stable initial viewport; `fileFullyReadyMs` covers the progressive model load and its final two-RAF render stabilization. `fileOpenRequestMs`, `fileModelReadyMs` and `fileStableRenderMs` retain the sub-phases.", "- For interaction scenarios, `actionDurationMs`, `rendererLogicalMs` and `inputToStableFrameMs` have separate meanings. The two-RAF input-to-stable value is an end-to-end rendering proxy, not CPU time; `scriptDurationMs` is reported separately when available.", "- Scroll frame intervals and slow-frame counts come from an active RAF observer during paced wheel input. `idle.activity` uses no benchmark RAF loop; its observation window can still include normal NCE/Chromium background activity.", "- Startup is a fresh NCE process and isolated profile for each sample. OS file caches are not cleared, so this is cold-profile startup, not a cold OS cache.", "- Electron process private memory is used when Electron reports it. Renderer JavaScript heap and main-process RSS are reported separately to avoid adding shared working sets together.", "- Raw per-sample data, phase events and failures are preserved in the JSON result. Markdown p95 values require at least 20 passing samples; p99 remains null below 100 samples.", "");
   for (const scenario of result.scenarios.filter((item) => item.failure)) {
     lines.push(`### ${scenario.name} failure`, "", "```text", scenario.failure, "```", "");
   }
@@ -42,11 +47,13 @@ function renderMarkdown(result) {
       ["Spawn → renderer target", "spawnToRendererWindowMs"],
       ["Spawn → interactive and stable frame", "durationMs"],
       ["Main process start → app ready", "mainProcessStartToAppReadyMs"],
-      ["App ready → BrowserWindow creation", "appReadyToWindowCreateMs"],
+      ["App ready → window creation request", "appReadyToWindowCreateRequestMs"],
+      ["Window request → BrowserWindow created", "windowCreateRequestToBrowserWindowCreatedMs"],
+      ["App ready → BrowserWindow created (compatibility phase)", "appReadyToWindowCreateMs"],
       ["BrowserWindow creation → ready-to-show", "browserWindowCreateToReadyToShowMs"],
       ["DOM ready → renderer-ready", "domReadyToRendererReadyMs"],
       ["Application shutdown", "applicationShutdownMs"],
-    ]) lines.push(`| ${label} | ${formatNumber(startup.statistics[metric]?.p50)} | ${formatNumber(startup.statistics[metric]?.p95)} |`);
+    ]) lines.push(`| ${label} | ${formatNumber(startup.statistics[metric]?.p50)} | ${startup.statistics[metric]?.count >= 20 ? formatNumber(startup.statistics[metric]?.p95) : "—"} |`);
     lines.push("");
   }
   return `${lines.join("\n")}\n`;
