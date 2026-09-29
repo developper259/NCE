@@ -26,18 +26,29 @@ The editor core was designed and implemented from scratch, without relying on pr
 
 Text rendering, cursor handling, selections, history, scrolling, file management and editing behaviour are handled by NCE's own architecture.
 
-**Current version**: **0.0.1-beta.2**
+NCE also includes a deeply integrated AI coding agent designed to work directly with the editor, workspace, files and project tooling.
 
-## Beta 2 highlights
+**Current version**: **0.0.1-beta.3**
 
-- **Open Recent** with a persistent
-- Searchable **Settings tab** with category navigation and dedicated scrolling
-- Fully configurable keyboard shortcuts, including shortcut removal and special-key capture
-- Shortcuts synchronized across the editor, Command Palette and native macOS menu
-- Context menus for the editor output, tabs and File Explorer
-- Find in File prefill from a single-line selection
-- Safe workspace switching with dirty-file confirmation and watcher/search/cache cleanup
-- Session-safe Reload Window and protected handling of concurrent or external file changes
+## Beta 3 highlights
+
+- Major AI Agent reliability and architecture improvements
+- Safer and more reliable multi-file editing
+- Manual context support for files, folders and selections
+- Integrated project test detection and test execution
+- Improved file revision tracking and stale edit recovery
+- Better large-file writing and automatic recovery
+- Improved tool calling, JSON recovery and model error handling
+- Improved Agent permissions and approval flows
+- Better context management and response budgeting
+- Persistent Agent conversations and workspace state
+- Improved Agent activity timeline and change review
+- Compact reasoning viewer with reasoning history and copy support
+- Per-model visibility controls and provider API key management
+- Customizable sidebars with context menus for panels and Agent conversations
+- New light theme and system theme support
+- Improved Settings, Search, Sidebars and context menus
+- Numerous editor, keybinding, rendering and workspace-state fixes
 
 ## Features
 
@@ -52,18 +63,20 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 - Quick Open (Mod+P)
 - Go to Line (Mod+G)
 - Command Palette (Mod+Shift+P)
-- Searchable settings and configurable keyboard shortcuts
+- Searchable settings with persistent category and scroll position
+- Per-model visibility controls and provider API key management
+- Configurable keyboard shortcuts
 - Undo & Redo
 - Smart typing and automatic pairs
 - Smart indentation
-- Context menus for the editor, tabs and File Explorer
+- Customizable sidebar panels
 - Native macOS menu and integrated Windows/Linux title bar menu
 - Auto Save
 - Cut, copy and paste
 - Session restoration for workspaces, tabs, cursor, selection and scroll position
 - Safe dirty-file flows for close, quit, reload and workspace switching
 - Atomic file saves with large, binary and invalid UTF-8 file protection
-- Integrated AI assistant
+- Integrated AI coding agent with project-aware tools, testing and multi-file editing
 - Local NSH failure fallback so the editor remains usable without highlighting
 - Cross-platform desktop support
 
@@ -123,7 +136,7 @@ Build artifacts are generated in `release/`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.2**
+Current version: **0.0.1-beta.3**
 
 ## License
 

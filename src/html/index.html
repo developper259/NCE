@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:11434 ws://127.0.0.1:*; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>NCE</title>
     <link
@@ -26,12 +26,15 @@
     <link rel="stylesheet" href="../css/sidebar.css" />
     <link rel="stylesheet" href="../css/SearchBar.css" />
     <link rel="stylesheet" href="../css/settings.css" />
+    <link rel="stylesheet" href="../css/pictureView.css" />
+    <link rel="stylesheet" href="../css/markdownView.css" />
 
     <link rel="stylesheet" href="../css/sidebar/fileExplorer.css" />
     <link rel="stylesheet" href="../css/sidebar/search.css" />
     <link rel="stylesheet" href="../css/sidebar/agent.css">
 
     <link rel="stylesheet" href="../css/nsh/dark.css" />
+    <link rel="stylesheet" href="../css/nsh/light.css" />
   </head>
   <body>
     <header class="nce-titlebar">
@@ -45,27 +48,66 @@
     </header>
     <section class="main-section">
       <div class="quick-panel-host"></div>
-      <div class="sidebar-tab-selector box"></div>
+      <div class="sidebar-tab-selector box box-bottom"></div>
       <div class="sidebar-left box">
         <div class="sidebar-menu"></div>
       </div>
       <div class="file-manager box-top box-bottom">
         <ul class="files-ul"></ul>
       </div>
-      <div class="editor editor-empty nsh-theme-dark">
-        <div class="settings-view-host" hidden></div>
+      <div class="editor editor-empty">
+        <div class="settings-view-host box-bottom" hidden></div>
+        <div class="picture-view-host box-bottom" hidden>
+          <div class="picture-view-viewport">
+            <div class="picture-view-content">
+              <p class="picture-view-status" hidden></p>
+              <img class="picture-view-image" alt="" draggable="false">
+            </div>
+          </div>
+        </div>
+        <div class="markdown-view-host box-bottom" hidden>
+          <div class="markdown-view-viewport">
+            <div class="markdown-view-status" hidden></div>
+            <article class="markdown-preview-content"></article>
+          </div>
+        </div>
         <div class="empty-menu"></div>
         <div class="editor-search-bar">
+          <button
+            class="search-bar-button search-bar-expand"
+            type="button"
+            title="Afficher le remplacement"
+            aria-expanded="false"
+          >
+            <i class="fi fi-rr-angle-small-down"></i>
+          </button>
           <div class="search-bar-input-container">
             <input
               class="search-bar-input"
               type="text"
-              placeholder="Rechercher"
+              placeholder="Search"
               autocomplete="off"
               spellcheck="false"
             />
 
             <span class="search-bar-counter"></span>
+          </div>
+          <div class="search-bar-replace-container" hidden>
+            <input
+              class="search-bar-replace-input"
+              type="text"
+              placeholder="Replace"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+          <div class="search-bar-replace-actions" hidden>
+            <button class="search-bar-button search-bar-replace-next" type="button" title="Remplacer puis suivant" aria-label="Remplacer puis suivant">
+              <span aria-hidden="true">→</span>
+            </button>
+            <button class="search-bar-button search-bar-replace-all" type="button" title="Tout remplacer" aria-label="Tout remplacer">
+              <span aria-hidden="true">⟳</span>
+            </button>
           </div>
           <button
             class="search-bar-button search-bar-previous"
@@ -89,7 +131,7 @@
             <i class="fi fi-rr-cross-small"></i>
           </button>
         </div>
-        <div class="line-numbers"></div>
+        <div class="line-numbers box-bottom"></div>
         <div class="editor-output editor-select"></div>
         <div class="editor-caret editor-select"></div>
         <div class="editor-select-highlight editor-select"></div>
@@ -106,6 +148,9 @@
           </div>
         </section>
         <section class="right">
+          <div class="bottomBar-el scroller-open" id="view-type" hidden>
+            <span class="scroller-title"></span>
+          </div>
           <div class="bottomBar-el scroller-open" id="language">
             <span class="scroller-title"></span>
           </div>
@@ -120,8 +165,10 @@
     </section>
 
     <script src="../config/Settings.js"></script>
+    <script src="../js/manager/ThemeManager.js"></script>
     <script src="../js/core/Path.js"></script>
     <script src="../js/core/Tools.js"></script>
+    <script src="../js/types/TextPositionIndex.js"></script>
     <script src="../js/core/Event.js"></script>
     <script src="../js/core/FileOperation.js"></script>
 
@@ -165,12 +212,14 @@
     <script src="../js/controller/HistoryController.js"></script>
     <script src="../js/types/QuickPanel.js"></script>
     <script src="../js/quickPanel/QuickOpen.js"></script>
+    <script src="../js/agent/context/ManualContextManager.js"></script>
     <script src="../js/quickPanel/GoToLine.js"></script>
     <script src="../js/manager/KeyBindingManager.js"></script>
     <script src="../js/manager/SidebarManager.js"></script>
     <script src="../js/manager/ScrollerManager.js"></script>
     <script src="../js/manager/StatesManager.js"></script>
     <script src="../js/manager/ContextMenuManager.js"></script>
+    <script src="../js/types/FastDOMNode.js"></script>
     <script src="../js/manager/DOMManager.js"></script>
 
     <script src="../js/addon/BottomBar.js"></script>
@@ -185,13 +234,19 @@
 
     <script src="../js/types/Tab.js"></script>
     <script src="../js/view/SettingsView.js"></script>
+    <script src="../js/view/PictureView.js"></script>
+    <script src="../js/view/MarkdownView.js"></script>
     <script src="../js/types/Line.js"></script>
     <script src="../js/types/Scroller.js"></script>
     <script src="../js/types/Sidebar.js"></script>
     <script src="../js/types/ContextMenu.js"></script>
 
+    <script src="../js/scrollers/MarkdownView.Scroller.js"></script>
+    <script src="../js/scrollers/PictureView.Scroller.js"></script>
     <script src="../js/scrollers/Output.Scroller.js"></script>
     <script src="../js/scrollers/Sidebar.Scroller.js"></script>
+    <script src="../js/scrollers/FileExplorer.Scroller.js"></script>
+    <script src="../js/scrollers/SearchResults.Scroller.js"></script>
     <script src="../js/scrollers/Settings.Scroller.js"></script>
 
     <script src="../js/sidebar/FileExplorer.Sidebar.js"></script>
@@ -201,6 +256,12 @@
     <script src="../js/contextMenu/FileExplorer.ContextMenu.js"></script>
     <script src="../js/contextMenu/Tab.ContextMenu.js"></script>
     <script src="../js/contextMenu/Output.ContextMenu.js"></script>
+    <script src="../js/contextMenu/AgentMessage.ContextMenu.js"></script>
+    <script src="../js/contextMenu/AgentConversation.ContextMenu.js"></script>
+    <script src="../js/contextMenu/EmptyMenu.ContextMenu.js"></script>
+    <script src="../js/contextMenu/SidebarSelector.ContextMenu.js"></script>
+    <script src="../js/contextMenu/SidebarTitle.ContextMenu.js"></script>
+    <script src="../js/contextMenu/Input.ContextMenu.js"></script>
 
     <script src="../config/Application.js"></script>
 

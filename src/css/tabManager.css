@@ -6,6 +6,7 @@
 	height: var(--file-manager-height);
 	bottom: calc(2px + 90%);
 	box-sizing: border-box;
+	background-color: var(--tab-bar-background);
 }
 
 .file-manager .files-ul {
@@ -75,7 +76,7 @@
 
 .file-manager .files-ul .file-active {
 	background-color: var(--bg-secondary);
-	border-top: 1.5px solid var(--border-active);
-	color: var(--text-white);
+	border-top: 1px solid var(--border-active);
+	color: var(--text-primary);
 	z-index: 2;
 }

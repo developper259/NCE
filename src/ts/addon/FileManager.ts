@@ -39,6 +39,59 @@ export interface FileOperationResult {
 }
 
 export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
+export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
+const IMAGE_MIME_TYPES: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
+  ".ico": "image/x-icon", ".svg": "image/svg+xml",
+};
+export interface MarkdownImageReadContext {
+  sourcePath: string;
+  workspaceRoot?: string | null;
+}
+
+function pathImplementation(value: string): typeof path {
+  return /^[a-z]:[\\/]/i.test(value) || value.startsWith("\\\\")
+    ? path.win32
+    : path;
+}
+
+function isPathInside(basePath: string, targetPath: string, pathApi: typeof path): boolean {
+  const relative = pathApi.relative(basePath, targetPath);
+  return relative === "" || (
+    relative !== ".." &&
+    !relative.startsWith(`..${pathApi.sep}`) &&
+    !pathApi.isAbsolute(relative)
+  );
+}
+
+/** Resolve a README image without allowing absolute paths or leaving its root. */
+export function resolveMarkdownImagePath(
+  sourcePathValue: unknown,
+  imageReferenceValue: unknown,
+  workspaceRootValue?: unknown,
+): { sourcePath: string; workspaceRoot: string; imagePath: string } | null {
+  if (!validPath(sourcePathValue) || !validPath(imageReferenceValue)) return null;
+  const sourcePath = sourcePathValue.trim();
+  const imageReference = imageReferenceValue.trim();
+  if (/^[a-z][a-z\d+.-]*:/i.test(imageReference) ||
+      /^(?:[\\/]|[a-z]:[\\/]|~)/i.test(imageReference) ||
+      /[\u0000-\u001f\u007f?#]/.test(imageReference)) return null;
+
+  const pathApi = pathImplementation(sourcePath);
+  if (!pathApi.isAbsolute(sourcePath)) return null;
+  const resolvedSourcePath = pathApi.resolve(sourcePath);
+  const workspaceRoot = validPath(workspaceRootValue)
+    ? pathApi.resolve(workspaceRootValue.trim())
+    : pathApi.dirname(resolvedSourcePath);
+  if (!pathApi.isAbsolute(workspaceRoot) ||
+      !isPathInside(workspaceRoot, resolvedSourcePath, pathApi)) return null;
+
+  const imagePath = pathApi.resolve(pathApi.dirname(resolvedSourcePath), imageReference);
+  if (!isPathInside(workspaceRoot, imagePath, pathApi)) return null;
+  return { sourcePath: resolvedSourcePath, workspaceRoot, imagePath };
+}
+
 const BINARY_SAMPLE_SIZE = 8192;
 function validPath(value: unknown): value is string {
   return (
@@ -264,6 +317,10 @@ export class FileManager {
       },
     );
 
+    ipcMain.handle("FileManager:readImageFile", async (_event, filePath: string, context?: MarkdownImageReadContext) =>
+      this.readImageFile(filePath, context),
+    );
+
     ipcMain.handle(
       "FileManager:getFileChunk",
       async (event, filePath: string, startLine: number, lineCount: number) => {
@@ -307,6 +364,11 @@ export class FileManager {
     ipcMain.handle(
       "FileManager:getAgentApiKey",
       async (_event, providerId: string) => this.getAgentApiKey(providerId),
+    );
+
+    ipcMain.handle(
+      "FileManager:hasAgentApiKey",
+      async (_event, providerId: string) => Boolean(await this.getAgentApiKey(providerId)),
     );
 
     ipcMain.handle(
@@ -510,6 +572,7 @@ export class FileManager {
       await atomicWriteFile(filePath, content);
       this.window.watcher?.commitOwnWrite(filePath, ownWriteToken);
       this.clearFileCache(filePath);
+      await this.window.reloadSettingsFromDisk?.(filePath);
 
       return filePath;
     } catch (error) {
@@ -968,6 +1031,57 @@ export class FileManager {
         success: false,
         totalLines: 0,
         errorCode: error?.code || "UNKNOWN",
+      };
+    }
+  }
+
+  async readImageFile(filePath: unknown, context?: MarkdownImageReadContext): Promise<{
+    success: boolean; code?: string; mimeType?: string; data?: Uint8Array; size?: number;
+  }> {
+    if (!validPath(filePath)) return { success: false, code: "INVALID_PATH" };
+    let imagePath = filePath;
+    if (context !== undefined) {
+      const resolved = resolveMarkdownImagePath(
+        context?.sourcePath,
+        filePath,
+        context?.workspaceRoot,
+      );
+      if (!resolved) return { success: false, code: "OUTSIDE_WORKSPACE" };
+      const pathApi = pathImplementation(resolved.sourcePath);
+      try {
+        const [realRoot, realSource, realImage] = await Promise.all([
+          fs.realpath(resolved.workspaceRoot),
+          fs.realpath(resolved.sourcePath),
+          fs.realpath(resolved.imagePath),
+        ]);
+        if (!isPathInside(realRoot, realSource, pathApi) ||
+            !isPathInside(realRoot, realImage, pathApi))
+          return { success: false, code: "OUTSIDE_WORKSPACE" };
+        imagePath = realImage;
+      } catch (error: any) {
+        return {
+          success: false,
+          code: error?.code === "ENOENT" || error?.code === "ENOTDIR"
+            ? "SOURCE_NOT_FOUND" : "IMAGE_READ_FAILED",
+        };
+      }
+    }
+    const mimeType = IMAGE_MIME_TYPES[path.extname(imagePath).toLowerCase()];
+    if (!mimeType) return { success: false, code: "UNSUPPORTED_IMAGE" };
+    try {
+      const stats = await fs.stat(imagePath);
+      if (!stats.isFile()) return { success: false, code: "NOT_A_FILE" };
+      if (stats.size > MAX_IMAGE_FILE_SIZE)
+        return { success: false, code: "IMAGE_TOO_LARGE" };
+      const buffer = await fs.readFile(imagePath);
+      if (buffer.length > MAX_IMAGE_FILE_SIZE)
+        return { success: false, code: "IMAGE_TOO_LARGE" };
+      return { success: true, mimeType, data: Uint8Array.from(buffer), size: buffer.length };
+    } catch (error: any) {
+      return {
+        success: false,
+        code: error?.code === "ENOENT" || error?.code === "ENOTDIR"
+          ? "SOURCE_NOT_FOUND" : "IMAGE_READ_FAILED",
       };
     }
   }

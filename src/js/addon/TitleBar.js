@@ -8,10 +8,12 @@ class TitleBar {
     this.openMenuId = null;
     this.activeItemIndex = -1;
     this.previousFocus = null;
+    this.altKeyUsed = false;
     this.menuButtons = [];
     this.recentFolders = [];
     this.onDocumentPointerDown = this.handleDocumentPointerDown.bind(this);
     this.onDocumentKeyDown = this.handleDocumentKeyDown.bind(this);
+    this.onDocumentKeyUp = this.handleDocumentKeyUp.bind(this);
     this.onWindowResize = () => this.repositionOpenSubmenus();
 
     document.documentElement.dataset.platform = this.platform;
@@ -19,6 +21,7 @@ class TitleBar {
     this.buildMenus();
     document.addEventListener("pointerdown", this.onDocumentPointerDown);
     document.addEventListener("keydown", this.onDocumentKeyDown, true);
+    document.addEventListener("keyup", this.onDocumentKeyUp, true);
     window.addEventListener("resize", this.onWindowResize);
     this.refresh();
     this.loadRecentFolders();
@@ -455,8 +458,11 @@ class TitleBar {
   }
 
   handleDocumentKeyDown(event) {
+    if (event.key === "Alt") this.altKeyUsed = false;
+    else if (event.altKey) this.altKeyUsed = true;
+
     if (
-      (event.key === "Alt" || event.key === "F10") &&
+      event.key === "F10" &&
       !this.openMenuId &&
       this.platform !== "darwin"
     ) {
@@ -491,19 +497,34 @@ class TitleBar {
       this.activeItemIndex = this.getOpenItems().indexOf(trigger);
     } else if (event.key === "ArrowRight") this.switchMenu(1);
     else if (event.key === "ArrowLeft") this.switchMenu(-1);
-    else if (event.key === "Enter" && document.activeElement?.dataset.command)
+    else if (
+      event.key === "Enter" &&
+      document.activeElement?.classList?.contains("nce-titlebar-menu-item") &&
+      !document.activeElement.disabled
+    )
       document.activeElement.click();
     else return;
     event.preventDefault();
     event.stopPropagation();
   }
 
+  handleDocumentKeyUp(event) {
+    if (event.key !== "Alt") return;
+    if (!this.openMenuId && !this.altKeyUsed && this.platform !== "darwin") {
+      event.preventDefault();
+      this.openMenu(this.menuButtons[0].dataset.menu, true);
+    }
+    this.altKeyUsed = false;
+  }
+
   refresh() {
     if (!this.title) return;
     const file = this.editor.tabManager.activeFile;
+    const activeTab = this.editor.tabManager.activeTab;
+    const tabName = file?.name || ([TAB_TYPES.PICTURE, TAB_TYPES.MARKDOWN].includes(activeTab?.type) ? activeTab.name : "");
     const project = this.editor.fileExplorer?.projectName;
-    const context = file?.name
-      ? `${file.name}${project ? ` · ${project}` : ""}`
+    const context = tabName
+      ? `${tabName}${project ? ` · ${project}` : ""}`
       : project || "NCE";
     const showDirtyIndicator = file?.isVisuallyDirty() === true;
     this.title.textContent = `${showDirtyIndicator ? "● " : ""}${context}`;
@@ -515,6 +536,7 @@ class TitleBar {
     this.closeMenus({ restoreFocus: false });
     document.removeEventListener("pointerdown", this.onDocumentPointerDown);
     document.removeEventListener("keydown", this.onDocumentKeyDown, true);
+    document.removeEventListener("keyup", this.onDocumentKeyUp, true);
     window.removeEventListener("resize", this.onWindowResize);
   }
 }

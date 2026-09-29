@@ -31,7 +31,7 @@ class tabManager {
       : null;
   }
   set activeFile(file) {
-    this.activeTab = file || null;
+    this.activeTab = file?.type === TAB_TYPES.FILE ? file : null;
   }
 
   getNextID() {
@@ -61,8 +61,26 @@ class tabManager {
   async updateFilePath(oldPath, newPath) {
     if (!oldPath || !newPath) return;
     let changed = false;
-    for (const file of this.files) {
+    const pathTabs = Array.isArray(this.tabs) ? this.tabs : [this.activeFile].filter(Boolean);
+    for (const file of pathTabs.filter((tab) =>
+      tab.type === "file" || tab.type === "picture" || tab.type === "markdown")) {
       if (!file.path || !NCEPath.isInside(file.path, oldPath)) continue;
+      if (file.type === "picture" || file.type === "markdown") {
+        const previousPath = file.path;
+        file.path = NCEPath.rebase(file.path, oldPath, newPath);
+        file.name = NCEPath.basename(file.path);
+        file.diskFingerprint = null;
+        if (file.textTab) {
+          file.textTab.path = file.path;
+          file.textTab.name = file.name;
+        }
+        if (file === this.activeTab) {
+          if (file.type === "picture") this.editor.pictureView?.invalidate(previousPath);
+          else this.editor.markdownView?.invalidate(previousPath);
+        }
+        changed = true;
+        continue;
+      }
       // Complete the old-path load before moving its identity.
       if (file.loadingState?.status === "loading") {
         this.editor.fileLoader.cancelLoading(file.path);
@@ -81,7 +99,9 @@ class tabManager {
     }
 
     if (changed) {
-      this.editor.fileExplorer.setActiveFile(this.activeFile?.path);
+      this.editor.fileExplorer.setActiveFile(
+        this.activeFile?.path || (["picture", "markdown"].includes(this.activeTab?.type) ? this.activeTab.path : null),
+      );
       this.refresh();
     }
   }
@@ -89,6 +109,14 @@ class tabManager {
   markFileAsDeleted(path) {
     if (!path) return;
     let changed = false;
+
+    for (const tab of this.tabs.filter((candidate) => ["picture", "markdown"].includes(candidate.type))) {
+      if (tab.path && NCEPath.isInside(tab.path, path)) {
+        tab.diskFingerprint = null;
+        if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.invalidate(tab.path);
+        else this.editor.markdownView?.invalidate(tab.path);
+      }
+    }
 
     for (const file of this.files) {
       if (!file.path) continue;
@@ -103,9 +131,9 @@ class tabManager {
     if (changed) this.refresh();
   }
 
-  async openFile(file) {
+  async openFile(file, { forceText = false } = {}) {
     if (!file) return;
-    return this.openFiles([file]);
+    return this.openFiles([file], true, forceText);
   }
 
   async openSettings() {
@@ -120,11 +148,20 @@ class tabManager {
     return tab;
   }
 
-  async openFiles(files, isSetFocusFile = true) {
+  async openFiles(files, isSetFocusFile = true, forceText = false) {
     if (files.length === 0) return;
     let lastAddedFile = null;
 
     for (let file of files) {
+      if (!forceText && file?.path && PictureView.isSupportedPath(file.path)) {
+        const existing = this.tabs.find((candidate) =>
+          candidate.type === TAB_TYPES.PICTURE && NCEPath.equals(candidate.path, file.path));
+        lastAddedFile = existing || file;
+        if (!existing) this.tabs.push(file.type === TAB_TYPES.PICTURE
+          ? file : new PictureTab(file.id || this.getNextID(), file.path));
+        lastAddedFile = existing || this.tabs[this.tabs.length - 1];
+        continue;
+      }
       if (file.path) {
         const f = this.getFileByPath(file.path);
         if (f) {
@@ -149,20 +186,23 @@ class tabManager {
       }
     }
     if (lastAddedFile) {
-      if (isSetFocusFile) await this.setFocusFile(lastAddedFile);
+      if (isSetFocusFile) await this.setFocusTab(lastAddedFile);
 
       // Focusing an already-open tab must not mark unsaved edits as saved.
     }
 
     this.editor.events.callEvent(Events.ON_OPEN_FILE, {
       files: files,
-      activeFile: lastAddedFile,
+      activeFile: this.activeFile,
     });
     if (!isSetFocusFile) this.editor.refreshAll();
   }
 
   async prepareForQuit() {
-    const dirtyFiles = this.files.filter(
+    const dirtyFiles = this.tabs.map((tab) => tab.type === "file" ? tab : tab.textTab)
+      .filter(Boolean)
+      .filter((file, index, files) => files.indexOf(file) === index)
+      .filter(
       (file) => !file.isSaved && !(file.isEmpty() && !file.hasPath()),
     );
 
@@ -181,6 +221,9 @@ class tabManager {
     for (const file of this.files)
       this.editor.fileLoader.cancelLoading(file.path);
     this.editor.highlightController.closeAllFiles();
+    this.editor.pictureView?.clear?.();
+    this.editor.pictureView?.hide?.();
+    this.editor.markdownView?.clear?.();
     this.tabs = [];
     this.activeTab = null;
     this.editor.fileExplorer.activeFilePath = null;
@@ -267,12 +310,24 @@ class tabManager {
   async closeTab(tab) {
     if (!tab || !this.getFileByID(tab.id)) return false;
     if (tab.type === TAB_TYPES.FILE) return this.closeFile(tab.id);
+    if (tab.type === "markdown" && tab.textTab && !tab.textTab.isSaved) {
+      const choice = await this.editor.savePopupManager.confirmClose(tab.textTab.id);
+      if (choice === "cancel") return false;
+      if (choice === "save" && (!(await tab.textTab.save()) || !tab.textTab.isSaved))
+        return false;
+    }
     if (tab.id === this.activeTab?.id && this.tabs.length > 1) {
       const index = this.getFileIndexByID(tab.id);
       await this.setFocusTab(this.tabs[index === 0 ? 1 : index - 1]);
     }
     this.removeFileByID(tab.id);
-    if (!this.tabs.length) this.activeTab = null;
+    if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.close?.(tab);
+    if (tab.type === "markdown") this.editor.markdownView?.close?.(tab);
+    if (!this.tabs.length) {
+      this.activeTab = null;
+      this.editor.fileExplorer.activeFilePath = null;
+      this.editor.searchController?.close?.();
+    }
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
       file: null,
       activeFile: this.activeFile,
@@ -286,8 +341,8 @@ class tabManager {
     const snapshot = [...fileIds];
     const restorePreservedFile = async () => {
       const preservedFile = this.getFileByID(preservedFileId);
-      if (preservedFile && this.activeFile?.id !== preservedFileId) {
-        await this.setFocusFile(preservedFile);
+      if (preservedFile && this.activeTab?.id !== preservedFileId) {
+        await this.setFocusTab(preservedFile);
       }
     };
 
@@ -349,11 +404,19 @@ class tabManager {
   async setFocusTab(tab) {
     if (!tab) return;
     const focusGeneration = ++this.focusGeneration;
+    const previousFile = this.activeFile;
+    if (previousFile && previousFile !== tab) {
+      this.editor.searchController?.saveActiveTabState?.(previousFile);
+    }
     this.activeTab = tab;
     if (tab.type !== TAB_TYPES.FILE) {
-      this.editor.fileExplorer?.setActiveFile?.(null);
+      this.editor.fileExplorer?.setActiveFile?.(
+        ["picture", "markdown"].includes(tab.type) ? tab.path : null,
+      );
       this.editor.searchController?.close?.();
       this.editor.refreshMainContent?.();
+      if (tab.type === TAB_TYPES.PICTURE || tab.type === "markdown")
+        await this.capturePictureFingerprint(tab);
       this.refresh();
       return;
     }
@@ -376,7 +439,11 @@ class tabManager {
 
     if (focusGeneration !== this.focusGeneration) return;
 
-    this.editor.cursorController.setCursorPosition(file.row, file.column);
+    this.editor.searchController?.restoreTabState?.(file);
+
+    this.editor.cursorController.setCursorPosition(file.row, file.column, {
+      ensureVisible: !this.editor.searchController?.isOpen,
+    });
 
     if (!this.editor.isOnInit) this.editor.refreshAll();
     this.editor.refreshMainContent?.();
@@ -455,6 +522,41 @@ class tabManager {
         await this.reloadFileFromDisk(file.path);
       }),
     );
+    await Promise.all(this.tabs.filter((tab) => [TAB_TYPES.PICTURE, "markdown"].includes(tab.type)).map(async (tab) => {
+      if (!tab.path) return;
+      const status = await pathStatus.call(this.editor.fileExplorer.fileOperations, tab.path);
+      if (!status?.exists || status.isDirectory) {
+        tab.diskFingerprint = null;
+        if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.invalidate(tab.path);
+        else this.editor.markdownView?.invalidate(tab.path);
+        return;
+      }
+      const fingerprint = `${status.size}:${status.mtimeMs}`;
+      if (tab.diskFingerprint === fingerprint) return;
+      tab.diskFingerprint = fingerprint;
+      if (tab.type === TAB_TYPES.PICTURE) {
+        this.editor.pictureView?.invalidate(tab.path);
+      } else {
+        const textTab = tab.textTab;
+        if (textTab?.isLoaded && textTab.isSaved) {
+          this.editor.fileLoader.cancelLoading(textTab.path);
+          textTab.contentGeneration++;
+          await this.editor.highlightController.invalidateFile(textTab);
+          textTab.isLoaded = false;
+          await textTab.loadLanguage();
+          await textTab.loadContent();
+        }
+        this.editor.markdownView?.invalidate(tab.path);
+      }
+    }));
+  }
+
+  async capturePictureFingerprint(tab) {
+    const pathStatus = this.editor.fileExplorer?.fileOperations?.pathStatus;
+    if (!tab?.path || !pathStatus) return;
+    const status = await pathStatus.call(this.editor.fileExplorer.fileOperations, tab.path);
+    if (status?.exists && !status.isDirectory)
+      tab.diskFingerprint = `${status.size}:${status.mtimeMs}`;
   }
 
   scheduleFocusResync() {
@@ -468,9 +570,50 @@ class tabManager {
   }
 
   async openFileWithPath(path) {
+    if (PictureView.isSupportedPath(path)) return this.openPicture(path);
     let name = NCEPath.basename(path);
     let node = new FileNode(this.editor, this.getNextID(), name, path);
     return this.openFile(node);
+  }
+
+  async openPicture(path) {
+    if (!PictureView.isPreviewablePath(path)) return null;
+    let tab = this.tabs.find((candidate) => candidate.type === TAB_TYPES.PICTURE && NCEPath.equals(candidate.path, path));
+    if (!tab) {
+      tab = new PictureTab(this.getNextID(), path);
+      this.tabs.push(tab);
+    }
+    await this.setFocusTab(tab);
+    return tab;
+  }
+
+  async switchActiveTabView(view) {
+    const current = this.activeTab;
+    const index = this.tabs.indexOf(current);
+    if (index < 0 || !current?.path) return null;
+
+    let replacement;
+    if (view === "picture" && current.type === TAB_TYPES.FILE &&
+        PictureView.isPreviewablePath(current.path)) {
+      replacement = new PictureTab(current.id, current.path);
+      replacement.textTab = current;
+    } else if (view === "markdown" && current.type === TAB_TYPES.FILE &&
+        this.editor.markdownView?.isSupportedPath?.(current.path)) {
+      replacement = new MarkdownTab(current.id, current.path);
+      replacement.textTab = current;
+    } else if (view === "text" && [TAB_TYPES.PICTURE, TAB_TYPES.MARKDOWN].includes(current.type)) {
+      replacement = current.textTab || this.getFileByPath(current.path) ||
+        new FileNode(this.editor, current.id, NCEPath.basename(current.path), current.path);
+    } else {
+      return current;
+    }
+
+    if (current.type === TAB_TYPES.FILE)
+      this.editor.searchController?.saveActiveTabState?.(current);
+    this.tabs[index] = replacement;
+    await this.setFocusTab(replacement);
+    this.refresh();
+    return replacement;
   }
 
   createEmptyFile() {
@@ -500,7 +643,9 @@ class tabManager {
     const file = await this.editor.api.selectFile();
     if (file) {
       let name = NCEPath.basename(file);
-      let node = new FileNode(this.editor, this.getNextID(), name, file);
+      let node = PictureView.isSupportedPath(file)
+        ? new PictureTab(this.getNextID(), file)
+        : new FileNode(this.editor, this.getNextID(), name, file);
       return node;
     }
 
@@ -514,7 +659,9 @@ class tabManager {
     if (files) {
       for (let file of files) {
         let name = NCEPath.basename(file);
-        let node = new FileNode(this.editor, this.getNextID(), name, file);
+        let node = PictureView.isSupportedPath(file)
+          ? new PictureTab(this.getNextID(), file)
+          : new FileNode(this.editor, this.getNextID(), name, file);
         result.push(node);
       }
     }

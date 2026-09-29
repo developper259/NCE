@@ -66,6 +66,7 @@ class StatesManager {
       tabManager: this.getTabManagerState(root),
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(root),
+      search: this.getSearchState(),
     };
   }
 
@@ -97,6 +98,18 @@ class StatesManager {
     const tabs = manager.tabs.flatMap((tab) => {
       if (tab.type === TAB_TYPES.SETTINGS)
         return [{ id: tab.id, type: TAB_TYPES.SETTINGS }];
+      if (tab.type === TAB_TYPES.PICTURE) {
+        const serializedPath = root === undefined ? tab.path
+          : root ? this.toWorkspaceRelative(tab.path, root) : tab.path || null;
+        if (!serializedPath || (root && !this.toWorkspaceRelative(tab.path, root))) return [];
+        return [{ id: tab.id, type: TAB_TYPES.PICTURE, path: serializedPath }];
+      }
+      if (tab.type === TAB_TYPES.MARKDOWN) {
+        const serializedPath = root === undefined ? tab.path
+          : root ? this.toWorkspaceRelative(tab.path, root) : tab.path || null;
+        if (!serializedPath || (root && !this.toWorkspaceRelative(tab.path, root))) return [];
+        return [{ id: tab.id, type: TAB_TYPES.MARKDOWN, path: serializedPath }];
+      }
       const serializedPath = root === undefined
         ? tab.path
         : root
@@ -110,6 +123,9 @@ class StatesManager {
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
         totalLines: tab.totalLines,
         startSelect: tab.startSelect, endSelect: tab.endSelect,
+        searchReplaceValue: tab.searchReplaceValue || "",
+        searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
+          ? tab.searchCurrentIndex : -1,
         selectedLines: tab._selectedLines
           ? Array.from(tab._selectedLines.entries()) : [],
       }];
@@ -151,12 +167,33 @@ class StatesManager {
     return {
       activeFilePath: this.toWorkspaceRelative(explorer.activeFilePath, root),
       projectExpanded: explorer.projectExpanded,
+      scrollTop: Number.isFinite(explorer.virtualScroller?.scrollTop)
+        ? explorer.virtualScroller.scrollTop : this.getSidebarScrollTop("left"),
       expandedPaths: Array.from(explorer.getExpandedPaths?.(explorer.files) || [])
         .flatMap((candidate) => {
           const relative = this.toWorkspaceRelative(candidate, root);
           return relative === null ? [] : [relative];
         }),
     };
+  }
+
+  getSearchState() {
+    const searchSidebar = this.editor.searchSidebar;
+    const query = searchSidebar?.query;
+    return {
+      query: typeof query === "string" ? query : "",
+      sidebarExpanded: searchSidebar?.replaceExpanded === true,
+      controller: this.editor.searchController?.getWorkspaceState?.() || null,
+    };
+  }
+
+  getSidebarScrollTop(side) {
+    const scroller = side === "left"
+      ? this.editor.sidebarManager?.leftScroller
+      : this.editor.sidebarManager?.rightScroller;
+    const elementScrollTop = scroller?.menuOBJ?.scrollTop;
+    if (Number.isFinite(elementScrollTop)) return Math.max(0, elementScrollTop);
+    return Number.isFinite(scroller?.scrollTop) ? Math.max(0, scroller.scrollTop) : 0;
   }
 
   toWorkspaceRelative(candidate, root) {
@@ -205,7 +242,7 @@ class StatesManager {
   sanitizeWorkspaceTab(value, seenIds, seenPaths) {
     if (!this.isRecord(value)) return null;
     const type = value.type;
-    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS) return null;
+    if (type !== TAB_TYPES.FILE && type !== TAB_TYPES.SETTINGS && type !== TAB_TYPES.PICTURE && type !== TAB_TYPES.MARKDOWN) return null;
     const id = this.safeInteger(value.id, -1, 1, 1_000_000);
     if (id < 1 || seenIds.has(id)) return null;
     if (type === TAB_TYPES.SETTINGS) {
@@ -214,6 +251,22 @@ class StatesManager {
     }
     const path = value.path === null ? null : this.sanitizeWorkspacePath(value.path);
     if (value.path !== null && !path) return null;
+    if (type === TAB_TYPES.PICTURE) {
+      if (!path || !PictureView.isSupportedPath(path)) return null;
+      const key = NCEPath.comparisonKey(path);
+      if (seenPaths.has(key)) return null;
+      seenPaths.add(key);
+      seenIds.add(id);
+      return { id, type, name: NCEPath.basename(path), path };
+    }
+    if (type === TAB_TYPES.MARKDOWN) {
+      if (!path || !/\.md$/i.test(path)) return null;
+      const key = NCEPath.comparisonKey(path);
+      if (seenPaths.has(key)) return null;
+      seenPaths.add(key);
+      seenIds.add(id);
+      return { id, type, name: NCEPath.basename(path), path };
+    }
     if (path) {
       const key = NCEPath.comparisonKey(path);
       if (seenPaths.has(key)) return null;
@@ -250,6 +303,11 @@ class StatesManager {
       totalLines: this.safeInteger(value.totalLines),
       startSelect: this.sanitizePosition(value.startSelect),
       endSelect: this.sanitizePosition(value.endSelect),
+      searchReplaceValue: this.safeString(
+        value.searchReplaceValue,
+        this.workspaceLimits.pathLength,
+      ) || "",
+      searchCurrentIndex: this.safeInteger(value.searchCurrentIndex, -1, -1),
       selectedLines,
     };
   }
@@ -266,9 +324,10 @@ class StatesManager {
       const id = this.safeInteger(candidate?.id, -1, 1, 1_000_000);
       return seenIds.has(id) ? { id } : null;
     };
+    const fileIds = new Set(tabs.filter((tab) => tab.type === TAB_TYPES.FILE).map((tab) => tab.id));
     return {
       activeTab: activeId(value.activeTab || value.activeFile),
-      activeFile: activeId(value.activeFile),
+      activeFile: fileIds.has(value.activeFile?.id) ? activeId(value.activeFile) : null,
       tabs,
     };
   }
@@ -315,7 +374,23 @@ class StatesManager {
     return {
       activeFilePath: this.sanitizeWorkspacePath(value.activeFilePath),
       projectExpanded: value.projectExpanded !== false,
+      scrollTop: this.safeInteger(value.scrollTop),
       expandedPaths,
+    };
+  }
+
+  sanitizeSearchState(value) {
+    const query = this.safeString(value?.query, this.workspaceLimits.pathLength);
+    const controller = this.isRecord(value?.controller) ? value.controller : {};
+    return {
+      query: query || "",
+      sidebarExpanded: value?.sidebarExpanded === true,
+      controller: {
+        query: this.safeString(controller.query, this.workspaceLimits.pathLength) || "",
+        isVisible: controller.isVisible === true,
+        isExpanded: controller.isExpanded === true,
+        expandButtonActivated: controller.expandButtonActivated === true,
+      },
     };
   }
 
@@ -328,6 +403,7 @@ class StatesManager {
       tabManager: this.sanitizeTabManager(value.tabManager),
       sidebar: this.sanitizeSidebarState(value.sidebar),
       fileExplorer: this.sanitizeExplorerState(value.fileExplorer),
+      search: this.sanitizeSearchState(value.search),
     };
   }
 
@@ -386,6 +462,18 @@ class StatesManager {
       if (!this.isRecord(tab)) return [];
       if (tab.type === TAB_TYPES.SETTINGS)
         return [{ id: tab.id, type: TAB_TYPES.SETTINGS }];
+      if (tab.type === TAB_TYPES.PICTURE) {
+        const relative = this.toWorkspaceRelative(tab.path, root);
+        return relative && PictureView.isSupportedPath(relative)
+          ? [{ id: tab.id, type: TAB_TYPES.PICTURE, path: relative }]
+          : [];
+      }
+      if (tab.type === TAB_TYPES.MARKDOWN) {
+        const relative = this.toWorkspaceRelative(tab.path, root);
+        return relative && /\.md$/i.test(relative)
+          ? [{ id: tab.id, type: TAB_TYPES.MARKDOWN, path: relative }]
+          : [];
+      }
       const relative = this.toWorkspaceRelative(tab.path, root);
       return relative === null ? [] : [{
         id: tab.id, type: TAB_TYPES.FILE, path: relative,
@@ -394,6 +482,9 @@ class StatesManager {
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
         totalLines: tab.totalLines,
         startSelect: tab.startSelect, endSelect: tab.endSelect,
+        searchReplaceValue: tab.searchReplaceValue || "",
+        searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
+          ? tab.searchCurrentIndex : -1,
         selectedLines: tab.selectedLines,
       }];
     });
@@ -436,6 +527,14 @@ class StatesManager {
     await this.loadTabManagerState(safeState.tabManager, root);
     this.loadSidebarState(safeState.sidebar);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
+    this.editor.agentSidebar?.restoreScrollState?.();
+    this.editor.searchSidebar?.restoreQueryState?.(safeState.search, {
+      runSearch: safeState.sidebar?.leftOpen === true &&
+        safeState.sidebar?.leftActiveMenuId === "search",
+    });
+    this.editor.searchController?.restoreWorkspaceState?.(
+      safeState.search.controller,
+    );
     console.info("[NCE Workspace State]", {
       action: "restore", root,
       restoredTabs: this.editor.tabManager?.tabs?.length || 0,
@@ -465,6 +564,34 @@ class StatesManager {
         const runtimeId = manager.getNextID?.() || manager.idCounter + 1;
         manager.idCounter = Math.max(manager.idCounter, runtimeId);
         if (data.type === TAB_TYPES.SETTINGS) tab = new SettingsTab(runtimeId);
+        else if (data.type === TAB_TYPES.PICTURE) {
+          const filePath = root === undefined ? data.path
+            : root ? this.resolveWorkspacePath(data.path, root) : data.path || null;
+          if (!filePath || !PictureView.isSupportedPath(filePath)) continue;
+          const fileOperations = this.editor.fileExplorer?.fileOperations;
+          if (root && typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+            const canonical = await this.editor.api.resolveWorkspaceStatePath(root, data.path);
+            if (!canonical || canonical.isDirectory || canonical.readable !== true) continue;
+          } else if (fileOperations?.pathStatus) {
+            const status = await fileOperations.pathStatus(filePath);
+            if (!status?.exists || status.isDirectory || status.readable === false) continue;
+          }
+          tab = new PictureTab(runtimeId, filePath);
+        }
+        else if (data.type === TAB_TYPES.MARKDOWN) {
+          const filePath = root === undefined ? data.path
+            : root ? this.resolveWorkspacePath(data.path, root) : data.path || null;
+          if (!filePath || !/\.md$/i.test(filePath)) continue;
+          const fileOperations = this.editor.fileExplorer?.fileOperations;
+          if (root && typeof this.editor.api?.resolveWorkspaceStatePath === "function") {
+            const canonical = await this.editor.api.resolveWorkspaceStatePath(root, data.path);
+            if (!canonical || canonical.isDirectory || canonical.readable !== true) continue;
+          } else if (fileOperations?.pathStatus) {
+            const status = await fileOperations.pathStatus(filePath);
+            if (!status?.exists || status.isDirectory || status.readable === false) continue;
+          }
+          tab = new MarkdownTab(runtimeId, filePath);
+        }
         else if (
           data.type === TAB_TYPES.FILE ||
           (root === undefined && data.type === undefined)
@@ -496,6 +623,9 @@ class StatesManager {
             maxLineLength: data.maxLineLength || 0,
             totalLines: data.totalLines || 0,
             startSelect: data.startSelect, endSelect: data.endSelect,
+            searchReplaceValue: data.searchReplaceValue || "",
+            searchCurrentIndex: Number.isInteger(data.searchCurrentIndex)
+              ? data.searchCurrentIndex : -1,
             _selectedLines: new Map(Array.isArray(data.selectedLines) ? data.selectedLines : []),
           });
         } else continue;
@@ -554,5 +684,6 @@ class StatesManager {
     }
     await explorer.restoreExpandedFolders?.(explorer.files, expanded);
     explorer.refresh?.();
+    explorer.restoreScrollState?.(state);
   }
 }

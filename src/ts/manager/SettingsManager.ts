@@ -2,10 +2,18 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 export interface Settings {
+  ui: {
+    settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent";
+    settingsScrollTop: number;
+  };
   editor: { tabWidth: number };
   files: { autoSave: boolean };
+  appearance: { theme: ThemePreference };
+  agent: { hiddenModels: string[] };
   keybindings: Record<string, string | null>;
 }
+
+export type ThemePreference = "system" | "dark" | "light";
 
 export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   Object.freeze({
@@ -47,14 +55,21 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   });
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
+  ui: Object.freeze({ settingsCategory: "Editor" as const, settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
+  appearance: Object.freeze({ theme: "system" as ThemePreference }),
+  agent: { hiddenModels: [] as string[] },
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
 const KNOWN_KEYS = new Set([
+  "ui.settingsCategory",
+  "ui.settingsScrollTop",
   "editor.tabWidth",
   "files.autoSave",
+  "appearance.theme",
+  "agent.hiddenModels",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
 ]);
 
@@ -64,6 +79,47 @@ function clone<T>(value: T): T {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isValidKeybinding(value: unknown): value is string {
+  if (typeof value !== "string" || !value.trim() || value.length > 128) {
+    return false;
+  }
+
+  const parts = value.split("+").map((part) => part.trim());
+  const key = parts.pop()?.toLowerCase() || "";
+  const modifiers = new Set([
+    "mod",
+    "cmd",
+    "command",
+    "ctrl",
+    "control",
+    "shift",
+    "alt",
+    "option",
+  ]);
+  if (parts.some((part) => !modifiers.has(part.toLowerCase()))) return false;
+
+  return (
+    /^[a-z0-9]$/.test(key) ||
+    /^f(?:[1-9]|1[0-9]|2[0-4])$/.test(key) ||
+    [
+      "arrowup",
+      "arrowdown",
+      "arrowleft",
+      "arrowright",
+      "home",
+      "end",
+      "tab",
+      "delete",
+      "backspace",
+      "enter",
+      "escape",
+      "insert",
+      "pageup",
+      "pagedown",
+    ].includes(key)
+  );
 }
 
 export function normalizeKeybinding(
@@ -131,6 +187,21 @@ export class SettingsManager {
     return this.getAll();
   }
 
+  async reload(): Promise<Settings | null> {
+    try {
+      const content = await fs.readFile(this.settingsPath, "utf8");
+      const parsed: unknown = JSON.parse(content);
+      if (!isObject(parsed)) {
+        throw new Error("settings.json must contain an object");
+      }
+      this.settings = this.validateAndMerge(parsed, this.settings);
+      return this.getAll();
+    } catch (error) {
+      console.error("[Settings] Failed to reload settings.json", error);
+      return null;
+    }
+  }
+
   get(key: string): unknown {
     if (!KNOWN_KEYS.has(key)) return undefined;
     const [section, property] = key.split(".");
@@ -139,8 +210,16 @@ export class SettingsManager {
 
   getAll(): Settings {
     return {
+      ui: {
+        settingsCategory: this.settings.ui.settingsCategory,
+        settingsScrollTop: this.settings.ui.settingsScrollTop,
+      },
       editor: { tabWidth: this.settings.editor.tabWidth },
       files: { autoSave: this.settings.files.autoSave },
+      appearance: { theme: this.settings.appearance.theme },
+      agent: {
+        hiddenModels: [...this.settings.agent.hiddenModels],
+      },
       keybindings: Object.fromEntries(
         Object.keys(DEFAULT_KEYBINDINGS).map((action) => [
           action,
@@ -203,7 +282,10 @@ export class SettingsManager {
         }
 
         const nextSettings = clone(this.settings);
-        (nextSettings as any)[section][property] = value;
+        (nextSettings as any)[section][property] =
+          key === "agent.hiddenModels"
+            ? [...new Set(value as string[])]
+            : value;
         const saved = await this.writeSnapshot(nextSettings);
         if (saved) this.settings = nextSettings;
         return saved;
@@ -220,26 +302,57 @@ export class SettingsManager {
 
   private validateAndMerge(
     source: Record<string, unknown>,
+    fallback: Settings = DEFAULT_SETTINGS,
   ): Settings & Record<string, unknown> {
     const merged: any = clone(source);
+    if (!isObject(merged.ui)) merged.ui = {};
     if (!isObject(merged.editor)) merged.editor = {};
     if (!isObject(merged.files)) merged.files = {};
+    if (!isObject(merged.appearance)) merged.appearance = {};
+    if (!isObject(merged.agent)) merged.agent = {};
     if (!isObject(merged.keybindings)) merged.keybindings = {};
+    merged.ui.settingsCategory = this.isValid(
+      "ui.settingsCategory",
+      merged.ui.settingsCategory,
+    )
+      ? merged.ui.settingsCategory
+      : fallback.ui.settingsCategory;
+    merged.ui.settingsScrollTop = this.isValid(
+      "ui.settingsScrollTop",
+      merged.ui.settingsScrollTop,
+    )
+      ? merged.ui.settingsScrollTop
+      : fallback.ui.settingsScrollTop;
     merged.editor.tabWidth = this.isValid(
       "editor.tabWidth",
       merged.editor.tabWidth,
     )
       ? merged.editor.tabWidth
-      : DEFAULT_SETTINGS.editor.tabWidth;
+      : fallback.editor.tabWidth;
     merged.files.autoSave = this.isValid(
       "files.autoSave",
       merged.files.autoSave,
     )
       ? merged.files.autoSave
-      : DEFAULT_SETTINGS.files.autoSave;
+      : fallback.files.autoSave;
+    merged.appearance.theme = this.isValid(
+      "appearance.theme",
+      merged.appearance.theme,
+    )
+      ? merged.appearance.theme
+      : fallback.appearance.theme;
+    merged.agent.hiddenModels = this.isValid(
+      "agent.hiddenModels",
+      merged.agent.hiddenModels,
+    )
+      ? [...new Set(merged.agent.hiddenModels.filter((value: unknown) =>
+          typeof value === "string" && value.trim().length > 0 && value.length <= 512,
+        ))]
+      : [...fallback.agent.hiddenModels];
+    delete merged.agent.hiddenProviders;
 
     const seenShortcuts = new Map<string, string>();
-    for (const [action, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
+    for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {
       const key = `keybindings.${action}`;
       const candidate = merged.keybindings[action];
       if (candidate === null) {
@@ -247,10 +360,13 @@ export class SettingsManager {
       } else if (this.isValid(key, candidate)) {
         const normalized = normalizeKeybinding(candidate);
         if (seenShortcuts.has(normalized)) {
-          const defaultNorm = shortcut ? normalizeKeybinding(shortcut) : "";
-          if (shortcut && !seenShortcuts.has(defaultNorm)) {
-            merged.keybindings[action] = shortcut;
-            seenShortcuts.set(defaultNorm, action);
+          const fallbackShortcut = fallback.keybindings[action];
+          const fallbackNorm = fallbackShortcut
+            ? normalizeKeybinding(fallbackShortcut)
+            : "";
+          if (fallbackShortcut && !seenShortcuts.has(fallbackNorm)) {
+            merged.keybindings[action] = fallbackShortcut;
+            seenShortcuts.set(fallbackNorm, action);
           } else {
             merged.keybindings[action] = null;
           }
@@ -259,10 +375,13 @@ export class SettingsManager {
           if (normalized) seenShortcuts.set(normalized, action);
         }
       } else {
-        const defaultNorm = shortcut ? normalizeKeybinding(shortcut) : "";
-        if (shortcut && !seenShortcuts.has(defaultNorm)) {
-          merged.keybindings[action] = shortcut;
-          if (defaultNorm) seenShortcuts.set(defaultNorm, action);
+        const fallbackShortcut = fallback.keybindings[action];
+        const fallbackNorm = fallbackShortcut
+          ? normalizeKeybinding(fallbackShortcut)
+          : "";
+        if (fallbackShortcut && !seenShortcuts.has(fallbackNorm)) {
+          merged.keybindings[action] = fallbackShortcut;
+          if (fallbackNorm) seenShortcuts.set(fallbackNorm, action);
         } else {
           merged.keybindings[action] = null;
         }
@@ -272,6 +391,12 @@ export class SettingsManager {
   }
 
   private isValid(key: string, value: unknown): boolean {
+    if (key === "ui.settingsCategory") {
+      return ["Editor", "Files", "Shortcuts", "Agent"].includes(String(value));
+    }
+    if (key === "ui.settingsScrollTop") {
+      return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
+    }
     if (key === "editor.tabWidth") {
       return (
         Number.isInteger(value) &&
@@ -280,13 +405,23 @@ export class SettingsManager {
       );
     }
     if (key === "files.autoSave") return typeof value === "boolean";
+    if (key === "appearance.theme") {
+      return value === "system" || value === "dark" || value === "light";
+    }
+    if (key === "agent.hiddenModels") {
+      return (
+        Array.isArray(value) &&
+        value.every(
+          (entry) =>
+            typeof entry === "string" &&
+            entry.trim().length > 0 &&
+            entry.length <= 512,
+        )
+      );
+    }
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
       if (value === null) return true;
-      return (
-        typeof value === "string" &&
-        value.trim().length > 0 &&
-        value.length <= 128
-      );
+      return isValidKeybinding(value);
     }
     return false;
   }

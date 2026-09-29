@@ -3,10 +3,16 @@ class EmptyMenu {
     this.editor = e;
     this.actions = ["new_file", "open_file", "open_folder", "toggle_agent"];
 
-    addEvent("dblclick", this.onDoubleClick.bind(this), [
-      this.editor.editorOBJ,
-      this.editor.fileManagerOBJ,
-    ]);
+    this.editor.emptyMenuOBJ?.addEventListener(
+      "dblclick",
+      this.onDoubleClick.bind(this),
+    );
+
+    this.editor.emptyMenuOBJ?.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu("empty-menu");
+    });
   }
 
   onDoubleClick(event) {

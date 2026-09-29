@@ -1,3 +1,13 @@
+function formatAgentWorkDuration(milliseconds) {
+  const seconds = Math.max(0, Math.floor((Number(milliseconds) || 0) / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  if (minutes > 0) return `${minutes}m ${String(remainder).padStart(2, "0")}s`;
+  return `${remainder}s`;
+}
+
 class AgentSidebar extends Sidebar {
   constructor(editor) {
     super("agent", "Agent", "fi fi-rr-sparkles", "right", editor);
@@ -7,6 +17,8 @@ class AgentSidebar extends Sidebar {
     this.messagesViewport = null;
     this.messagesElement = null;
     this.messagesScroller = null;
+    this.pendingScrollTop = 0;
+    this.scrollToBottomAfterRestore = false;
     this.scrollBottomFrame = null;
     this.changesElement = null;
     this.inputElement = null;
@@ -15,7 +27,13 @@ class AgentSidebar extends Sidebar {
     this.sessionInfoButton = null;
     this.sessionInfoPopover = null;
     this.sessionInfoOpen = false;
-    this.typingIndicatorElement = null;
+    this.reasoningControl = null;
+    this.reasoningCountButton = null;
+    this.reasoningPopover = null;
+    this.reasoningList = null;
+    this.reasoningCopyButton = null;
+    this.reasoningPanelOpen = false;
+    this.reasoningCopyTimer = null;
     this.markdownRenderer = new MarkdownRenderer({
       throttleMs: 50,
       getHighlightController: () => this.editor.highlightController,
@@ -26,6 +44,9 @@ class AgentSidebar extends Sidebar {
     this.activityItemElements = new Map();
     this.pendingActivityItems = new Map();
     this.deferredReadItems = new Map();
+    this.workLogElements = new WeakMap();
+    this.agentWorkTicker = null;
+    this.agentWorkTickerSessionId = null;
     this._activityItemCounter = 0;
     this.approvalUnsubscribe =
       this.editor.api?.onAgentApprovalRequested?.((request) => {
@@ -37,10 +58,62 @@ class AgentSidebar extends Sidebar {
       this.openApprovalMenu = null;
     };
     document.addEventListener("click", this.approvalMenuClickHandler);
+    this.reasoningOutsideClickHandler = (event) => {
+      if (!this.reasoningPanelOpen || this.reasoningControl?.contains(event.target)) return;
+      this.reasoningPanelOpen = false;
+      this.updateReasoningControl();
+    };
+    document.addEventListener("click", this.reasoningOutsideClickHandler);
 
     this.apiKeys = new Map();
 
     this.agent = editor.agent;
+    this.editor.contextMenuManager?.setMenu("agent-message", buildAgentMessageContextMenu(this));
+    this.editor.contextMenuManager?.setMenu("agent-conversation-tab", buildAgentConversationContextMenu(this));
+    this.manualContextManager = new ManualContextManager(this);
+    this.agent.setContextProvider(async () => {
+      const runSession = this.getSession(this.agent.currentSessionId);
+      if (!runSession) return {};
+      if (!runSession.manualContextSnapshot) {
+        const descriptors = this.manualContextManager.takeItems(runSession);
+        const message = runSession.pendingManualContextMessage;
+        runSession.pendingManualContextMessage = null;
+        if (message && descriptors.length) {
+          message.manualContextItems = descriptors.map((item) => ({
+            type: item.type,
+            absolutePath: item.absolutePath,
+            relativePath: item.relativePath || null,
+            workspaceRoot: item.workspaceRoot || null,
+            label: item.type === "folder" ? item.relativePath
+              : item.type === "selection" ? `${item.label}${item.range ? `:${item.range.startLine}–${item.range.endLine}` : ""}`
+                : item.label,
+            title: item.type === "file" ? item.relativePath || item.label
+              : item.type === "folder" ? item.relativePath
+                : `${item.relativePath || item.label}${item.range ? ` lines ${item.range.startLine}–${item.range.endLine}` : ""}`,
+          }));
+          this.scheduleConversationSave(runSession);
+          if (runSession.id === this.activeSessionId) this.refresh();
+        }
+        if (runSession.id === this.activeSessionId) this.renderManualContext();
+        try {
+          let workspaceVersion;
+          let snapshot;
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            workspaceVersion = this.manualContextManager.workspaceVersion;
+            snapshot = await this.manualContextManager.resolveSessionContext(runSession, descriptors);
+            if (workspaceVersion === this.manualContextManager.workspaceVersion) break;
+          }
+          runSession.manualContextSnapshot = workspaceVersion === this.manualContextManager.workspaceVersion
+            ? snapshot
+            : { source: "user-selected", budgetTokens: 0, items: [],
+              instruction: "Manual context unavailable because the workspace changed." };
+        } catch (_error) {
+          runSession.manualContextSnapshot = { source: "user-selected", budgetTokens: 0,
+            items: [], instruction: "Manual context could not be resolved; use project tools if needed." };
+        }
+      }
+      return { manualContext: runSession.manualContextSnapshot };
+    });
     this.agent.setCallbacks({
       onToken: (markdown, context) => {
         this.handleAgentToken(markdown, context);
@@ -99,8 +172,183 @@ class AgentSidebar extends Sidebar {
     this.sessions = [];
     this.activeSessionId = null;
     this._sessionCounter = 0;
+    this.conversationPersistenceReady = false;
+    this.conversationSaveTimers = new Map();
+    this.conversationSaveQueues = new Map();
+    this.conversationPersistencePromise = null;
 
     this.createSession();
+    this.conversationPersistencePromise = this.initializeConversationPersistence();
+  }
+
+  async initializeConversationPersistence() {
+    try {
+      const loaded = await this.editor.api?.loadAgentConversations?.();
+      if (loaded?.status?.available && Array.isArray(loaded.sessions) && loaded.sessions.length) {
+        const restored = loaded.sessions
+          .map((snapshot) => this.rehydratePersistedSession(snapshot))
+          .filter(Boolean);
+        if (restored.length) {
+          this.sessions = restored;
+          this.activeSessionId = restored.some((session) => session.id === loaded.activeSessionId)
+            ? loaded.activeSessionId
+            : restored[0].id;
+          this.refresh();
+          this.scrollToBottomAfterRestore = true;
+          this.scheduleRestoredBottomScroll();
+          this.updateSessionInfoPopover();
+        }
+      }
+    } catch (_error) {
+      console.warn("[NCE Agent Conversations] Restore failed", { code: "STORE_ERROR" });
+    } finally {
+      this.conversationPersistenceReady = true;
+      const session = this.getActiveSession();
+      if (session) {
+        this.scheduleConversationSave(session, true);
+        Promise.resolve(this.editor.api?.setActiveAgentConversation?.(session.id)).catch(() => {});
+      }
+    }
+  }
+
+  rehydratePersistedSession(snapshot) {
+    if (!snapshot || typeof snapshot.id !== "string" || !Array.isArray(snapshot.messages)) return null;
+    const messages = snapshot.messages.map((message) => ({
+      ...message,
+      streaming: false,
+      ...(Array.isArray(message?.manualContextItems)
+        ? { manualContextItems: this.sanitizeManualContextItems(message.manualContextItems) }
+        : {}),
+    }));
+    const segments = messages.filter((message) =>
+      message?.role === "activity" || message?.type === "activity" ||
+      message?.type === "reasoning" || message?.type === "assistant",
+    );
+    return {
+      id: snapshot.id,
+      title: typeof snapshot.title === "string" ? snapshot.title : "New chat",
+      createdAt: Number.isFinite(snapshot.createdAt) ? snapshot.createdAt : Date.now(),
+      updatedAt: Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : Date.now(),
+      messages,
+      draft: "",
+      manualContext: [],
+      manualContextSnapshot: null,
+      isGenerating: false,
+      runId: null,
+      abortController: null,
+      pendingTimeout: null,
+      streamingMessage: null,
+      queue: [],
+      segments,
+      currentSegment: null,
+      changes: [],
+      changesExpanded: true,
+      usage: {
+        runs: 0, userMessages: 0, modelRequests: 0, actualPromptTokens: 0,
+        estimatedPromptTokens: 0, completedRuns: 0, cancelledRuns: 0,
+        failedRuns: 0, ...(snapshot.usage || {}), requestKeys: new Set(),
+      },
+    };
+  }
+
+  serializeSessionForPersistence(session) {
+    if (!session) return null;
+    session.updatedAt = Date.now();
+    return {
+      version: 1,
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: (session.messages || []).map((message) => {
+        if (!message || typeof message !== "object") return null;
+        const snapshot = {};
+        for (const key of ["id", "role", "type", "content", "timestamp", "runId", "status", "startedAt", "finishedAt", "durationMs", "collapsed", "streaming", "hasErrors"]) {
+          if (typeof message[key] === "string" || typeof message[key] === "number" || typeof message[key] === "boolean") snapshot[key] = message[key];
+        }
+        if (Array.isArray(message.manualContextItems)) {
+          snapshot.manualContextItems = this.sanitizeManualContextItems(message.manualContextItems);
+        }
+        if (Array.isArray(message.items)) {
+          snapshot.items = message.items.map((item) => {
+            if (!item || typeof item !== "object" || item.type === "approval") return null;
+            const safe = {};
+            for (const key of ["id", "toolName", "type", "title", "detail", "status", "startedAt", "finishedAt", "aggregate", "modificationCount", "completedModifications", "failedModifications", "modelEventKind"]) {
+              if (["string", "number"].includes(typeof item[key])) safe[key] = item[key];
+            }
+            if (Array.isArray(item.files)) safe.files = item.files.filter((entry) => typeof entry === "string");
+            if (Array.isArray(item.errors)) safe.errors = item.errors.filter((entry) => typeof entry === "string");
+            if (item.diffStats && typeof item.diffStats === "object") safe.diffStats = { additions: item.diffStats.additions, deletions: item.diffStats.deletions };
+            return safe;
+          }).filter(Boolean);
+        }
+        return snapshot;
+      }).filter(Boolean),
+      usage: Object.fromEntries(["runs", "userMessages", "modelRequests", "actualPromptTokens", "estimatedPromptTokens", "completedRuns", "cancelledRuns", "failedRuns"].map((key) => [key, Number(session.usage?.[key]) || 0])),
+    };
+  }
+
+  sanitizeManualContextItems(items) {
+    if (!Array.isArray(items)) return [];
+    const safe = [];
+    for (const item of items.slice(0, 300)) {
+      if (!item || !["file", "folder", "selection"].includes(item.type)) continue;
+      const clean = { type: item.type };
+      for (const key of ["label", "title"]) {
+        if (typeof item[key] === "string" && item[key].length <= 300) clean[key] = item[key];
+      }
+      if (typeof item.workspaceRoot === "string" && item.workspaceRoot.length <= 4096 &&
+        (item.workspaceRoot.startsWith("/") || /^[a-z]:[\\/]/i.test(item.workspaceRoot) || item.workspaceRoot.startsWith("\\\\"))) {
+        clean.workspaceRoot = item.workspaceRoot;
+      }
+      if (typeof item.relativePath === "string" && item.relativePath.length <= 1000) {
+        const relativePath = item.relativePath.replace(/\\/g, "/");
+        const parts = relativePath.split("/");
+        if (relativePath === "." || (!relativePath.startsWith("/") && !/^[a-z]:/i.test(relativePath) && parts.every((part) => part && part !== "." && part !== ".."))) {
+          clean.relativePath = relativePath;
+        }
+      }
+      safe.push(clean);
+    }
+    return safe;
+  }
+
+  scheduleConversationSave(session, immediate = false) {
+    if (!session || !this.conversationPersistenceReady) return;
+    const api = this.editor.api;
+    if (!api?.saveAgentConversation) return;
+    session.updatedAt = Date.now();
+    const oldTimer = this.conversationSaveTimers.get(session.id);
+    if (oldTimer && !immediate) return;
+    if (oldTimer) clearTimeout(oldTimer);
+    const persist = () => {
+      this.conversationSaveTimers.delete(session.id);
+      const snapshot = this.serializeSessionForPersistence(session);
+      const previous = this.conversationSaveQueues.get(session.id) || Promise.resolve();
+      const next = previous.catch(() => undefined).then(() => api.saveAgentConversation(snapshot));
+      this.conversationSaveQueues.set(session.id, next);
+      next.catch(() => console.warn("[NCE Agent Conversations] Save failed", { sessionId: session.id, code: "STORE_ERROR" }));
+    };
+    if (immediate) persist();
+    else this.conversationSaveTimers.set(session.id, setTimeout(persist, 1200));
+  }
+
+  async flushAllConversationSaves() {
+    await this.conversationPersistencePromise;
+    for (const timer of this.conversationSaveTimers.values()) clearTimeout(timer);
+    const ids = [...this.conversationSaveTimers.keys()];
+    this.conversationSaveTimers.clear();
+    for (const id of ids) {
+      const session = this.getSession(id);
+      if (session) {
+        const snapshot = this.serializeSessionForPersistence(session);
+        const previous = this.conversationSaveQueues.get(id) || Promise.resolve();
+        const next = previous.catch(() => undefined).then(() => this.editor.api?.saveAgentConversation?.(snapshot));
+        this.conversationSaveQueues.set(id, next);
+      }
+    }
+    await Promise.allSettled([...this.conversationSaveQueues.values()]);
+    await this.editor.api?.flushAgentConversations?.();
   }
 
   handleApprovalRequested(request = {}) {
@@ -129,13 +377,13 @@ class AgentSidebar extends Sidebar {
     group.items.push(item);
     group.status = "running";
     session.streamingMessage = null;
+    this.scheduleConversationSave(session);
     if (session.id === this.activeSessionId && this.messagesElement) {
       this.removeEmptyState();
       const refs = this.activityElements.get(group);
       if (!refs?.row?.isConnected) {
-        this.messagesElement.appendChild(this.createActivityElement(group));
-      } else {
-        refs.list.appendChild(this.createActivityItemElement(item));
+        const row = this.createActivityElement(group);
+        if (!row.isConnected) this.messagesElement.appendChild(row);
       }
       this.updateActivityHeader(group);
       this.scrollMessagesToBottom();
@@ -148,6 +396,7 @@ class AgentSidebar extends Sidebar {
     item.decision = decision;
     item.finishedAt = Date.now();
     this.updateActivityItemElement(item);
+    this.scheduleConversationSave(this.getSession(String(item.id || "").split(":")[0]));
     Promise.resolve(
       this.editor.api?.respondAgentApproval?.({
         approvalId: item.approvalId,
@@ -168,7 +417,7 @@ class AgentSidebar extends Sidebar {
     if (toolName === "read_file") {
       const key = this.getDeferredReadKey(context);
       const pending = this.deferredReadItems.get(key) || [];
-      const args = pending.shift();
+      const pendingRead = pending.shift();
       if (pending.length) this.deferredReadItems.set(key, pending);
       else this.deferredReadItems.delete(key);
       const failed = result?.success === false || payload?.success === false;
@@ -182,8 +431,10 @@ class AgentSidebar extends Sidebar {
           payload?.repeatedRedundantAction === true ||
           (payload?.alreadyKnown === true &&
             typeof payload?.content !== "string"));
-      if (redundant) return;
-      if (args) this.startActivityItem(toolName, args, context);
+      if (redundant) {
+        this.removeActivityItem(pendingRead?.itemId, session);
+        return;
+      }
     }
     const activityItem = this.completeActivityItem(toolName, result, context);
 
@@ -375,6 +626,24 @@ class AgentSidebar extends Sidebar {
     };
   }
 
+  restoreScrollState() {
+    this.pendingScrollTop = 0;
+    this.scrollToBottomAfterRestore = true;
+    this.scheduleRestoredBottomScroll();
+  }
+
+  async refreshProviderApiKey(providerId) {
+    const provider = AgentAI.getProvider(providerId);
+    if (!provider) return false;
+    const apiKey = await this.editor.api.getAgentApiKey?.(provider.id);
+    if (apiKey) this.apiKeys.set(provider.id, apiKey);
+    else this.apiKeys.delete(provider.id);
+    if (this.currentProviderId === provider.id) {
+      this.agent.setProvider({ ...provider, apiKey: apiKey || null });
+    }
+    return true;
+  }
+
   async loadConfigState(state) {
     if (!state || typeof state !== "object") return;
 
@@ -450,7 +719,9 @@ class AgentSidebar extends Sidebar {
     messages.className = "agent-sidebar-messages";
     this.messagesElement = messages;
     this.renderMessages(messages);
+    messages.scrollTop = this.pendingScrollTop;
     messagesViewport.appendChild(messages);
+    this.renderReasoningControl(messagesViewport);
     container.appendChild(messagesViewport);
 
     this.messagesScroller = new SidebarScroller(
@@ -459,7 +730,9 @@ class AgentSidebar extends Sidebar {
       messages,
     );
     this.messagesScroller.init();
+    this.messagesScroller.refresh();
     this.editor.sidebarManager.rightScroller = this.messagesScroller;
+    this.scheduleRestoredBottomScroll();
 
     const changes = document.createElement("div");
     changes.className = "agent-sidebar-changes";
@@ -552,6 +825,14 @@ class AgentSidebar extends Sidebar {
     tab.addEventListener("click", () => {
       this.switchToSession(session.id);
     });
+    tab.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu(
+        "agent-conversation-tab",
+        session,
+      );
+    });
 
     return tab;
   }
@@ -559,20 +840,13 @@ class AgentSidebar extends Sidebar {
   getActivityGroup(session, runId, create = false) {
     if (!session || !Number.isInteger(runId)) return null;
     if (!Array.isArray(session.segments)) session.segments = [];
-    if (
-      session.currentSegment?.runId === runId &&
-      session.currentSegment?.type === "activity"
-    ) {
-      return session.currentSegment;
-    }
-    if (create) return this.getRunSegment(session, runId, "activity", true);
-    let group = [...session.messages]
+    const group = [...session.messages]
       .reverse()
       .find(
         (message) => message?.role === "activity" && message.runId === runId,
       );
     if (group || !create) return group || null;
-    return null;
+    return this.getRunSegment(session, runId, "activity", true);
   }
 
   getRunSegment(session, runId, type, create = false, context = {}) {
@@ -588,14 +862,9 @@ class AgentSidebar extends Sidebar {
       return current;
     }
     if (!create) return null;
-    if (current) {
+    if (current && current.type !== "activity") {
       current.finishedAt = Date.now();
-      current.status =
-        current.type === "activity"
-          ? current.hasErrors
-            ? "error"
-            : "success"
-          : "complete";
+      current.status = "complete";
     }
     const segment = {
       id: `${session.id}:${runId}:segment-${session.segments.length}`,
@@ -605,7 +874,9 @@ class AgentSidebar extends Sidebar {
       segmentKey,
       content: type === "reasoning" || type === "assistant" ? "" : undefined,
       status: "streaming",
-      startedAt: Date.now(),
+      startedAt: type === "activity" && session.workState?.runId === runId
+        ? session.workState.startedAt
+        : Date.now(),
       finishedAt: null,
       hasErrors: false,
       items: type === "activity" ? [] : undefined,
@@ -677,13 +948,14 @@ class AgentSidebar extends Sidebar {
   }
 
   handleToolStart(toolName, args = {}, context = {}) {
+    const session = this.getSession(context.sessionId);
     if (toolName === "read_file") {
-      const session = this.getSession(context.sessionId);
       if (!session || !session.isGenerating || session.runId !== context.runId)
         return;
       const key = this.getDeferredReadKey(context);
       const pending = this.deferredReadItems.get(key) || [];
-      pending.push({ ...args });
+      const item = this.startActivityItem(toolName, args, context);
+      pending.push({ args: { ...args }, itemId: item?.id || null });
       this.deferredReadItems.set(key, pending);
       return;
     }
@@ -691,6 +963,7 @@ class AgentSidebar extends Sidebar {
   }
 
   startActivityItem(toolName, args = {}, context = {}) {
+    if (toolName === "task_complete") return null;
     const session = this.getSession(context.sessionId);
     if (!session || !session.isGenerating || session.runId !== context.runId) {
       return;
@@ -699,54 +972,27 @@ class AgentSidebar extends Sidebar {
     if (!group) return;
     group.role = "activity";
     group.status = "running";
+    group.finishedAt = null;
     session.streamingMessage = null;
 
     const itemId = this.getActivityItemId(context);
     const activePath = this.editor?.tabManager?.activeFile?.path;
     const type = this.getActivityType(toolName);
-    const previousItem = group.items[group.items.length - 1] || null;
-    let item =
-      type === "edit" && previousItem?.aggregate === "modifications"
-        ? previousItem
-        : null;
-    const isNewItem = !item;
-
-    if (!item) {
-      item = {
-        id: itemId,
-        toolCallId: context.toolCallId || null,
-        toolName,
-        type,
-        title: "",
-        detail: "",
-        status: "running",
-        startedAt: Date.now(),
-        finishedAt: null,
-        args: { ...args },
-      };
-      if (activePath) item.activePath = activePath;
-      if (type === "edit") {
-        item.aggregate = "modifications";
-        item.modificationCount = 0;
-        item.completedModifications = 0;
-        item.failedModifications = 0;
-        item.files = [];
-        item.diffStats = { additions: 0, deletions: 0 };
-        item.errors = [];
-      }
-      group.items.push(item);
-    }
-
-    if (item.aggregate === "modifications") {
-      item.modificationCount += 1;
-      item.status = "running";
-      item.finishedAt = null;
-      const fileName = this.getActivityFileName({ args, activePath }, {});
-      if (!item.files.includes(fileName)) item.files.push(fileName);
-      Object.assign(item, this.describeModificationAggregate(item));
-    } else {
-      Object.assign(item, this.describeActivityItem(item));
-    }
+    const item = {
+      id: itemId,
+      toolCallId: context.toolCallId || null,
+      toolName,
+      type,
+      title: "",
+      detail: "",
+      status: "running",
+      startedAt: Date.now(),
+      finishedAt: null,
+      args: { ...args },
+    };
+    if (activePath) item.activePath = activePath;
+    group.items.push(item);
+    Object.assign(item, this.describeActivityItem(item));
     this.activityItems.set(itemId, {
       group,
       item,
@@ -754,6 +1000,7 @@ class AgentSidebar extends Sidebar {
       args: { ...args },
       activePath,
     });
+    this.scheduleConversationSave(session);
 
     if (!context.toolCallId) {
       const pendingKey = this.getActivityPendingKey(context, toolName);
@@ -762,27 +1009,20 @@ class AgentSidebar extends Sidebar {
       this.pendingActivityItems.set(pendingKey, pending);
     }
 
-    if (session.id !== this.activeSessionId || !this.messagesElement) return;
+    if (session.id !== this.activeSessionId || !this.messagesElement) return item;
     const shouldScroll = this.shouldAutoScrollMessages();
     this.removeEmptyState();
-    if (this.typingIndicatorElement?.isConnected) {
-      this.typingIndicatorElement.remove();
-      this.typingIndicatorElement = null;
-    }
-
     let groupRefs = this.activityElements.get(group);
     if (!groupRefs?.row?.isConnected) {
       const groupElement = this.createActivityElement(group);
-      this.messagesElement.appendChild(groupElement);
+      if (!groupElement.isConnected) this.messagesElement.appendChild(groupElement);
       groupRefs = this.activityElements.get(group);
-    } else if (isNewItem) {
-      groupRefs.list.appendChild(this.createActivityItemElement(item));
-      this.updateActivityHeader(group);
     } else {
-      this.updateActivityItemElement(item);
+      this.updateActivityHeader(group);
     }
 
     if (shouldScroll) this.scrollMessagesToBottom();
+    return item;
   }
 
   handleModelStatus(event = {}, context = {}) {
@@ -794,6 +1034,7 @@ class AgentSidebar extends Sidebar {
     if (!group || !event.userMessage) return;
     group.role = "activity";
     group.status = "running";
+    group.finishedAt = null;
     session.streamingMessage = null;
     const classification = event.classification || {};
     const item = {
@@ -801,29 +1042,30 @@ class AgentSidebar extends Sidebar {
       toolName: "model_status",
       type: "model",
       modelEventKind: event.kind || "error",
-      title: event.userMessage,
-      detail:
-        event.kind === "retry"
-          ? `${classification.category || "Erreur temporaire"} · tentative ${event.attempt || 1}`
-          : event.kind === "fallback"
-            ? `${event.fromProvider || "provider"} → ${event.toProvider || "provider"}`
-            : classification.category || "Erreur modèle",
+      title: event.kind === "retry" ? "Retried model request"
+        : event.kind === "fallback" ? "Switched model" : "Model request failed",
+      detail: event.kind === "retry"
+        ? `${classification.category || event.userMessage || "Temporary issue"}${event.attempt ? ` · attempt ${event.attempt}` : ""}`
+        : event.kind === "fallback"
+          ? `${event.fromModel || event.fromProvider || "Current model"} → ${event.toModel || event.toProvider || "Fallback model"}`
+          : event.userMessage || classification.category || "Model request failed",
       status: event.kind === "error" ? "error" : "success",
       startedAt: Date.now(),
       finishedAt: Date.now(),
     };
     group.items.push(item);
     if (event.kind === "error") group.hasErrors = true;
+    this.scheduleConversationSave(session);
 
     if (session.id !== this.activeSessionId || !this.messagesElement) return;
     const shouldScroll = this.shouldAutoScrollMessages();
     this.removeEmptyState();
     let groupRefs = this.activityElements.get(group);
     if (!groupRefs?.row?.isConnected) {
-      this.messagesElement.appendChild(this.createActivityElement(group));
+      const row = this.createActivityElement(group);
+      if (!row.isConnected) this.messagesElement.appendChild(row);
       groupRefs = this.activityElements.get(group);
     } else {
-      groupRefs.list.appendChild(this.createActivityItemElement(item));
       this.updateActivityHeader(group);
     }
     if (shouldScroll) this.scrollMessagesToBottom();
@@ -848,17 +1090,8 @@ class AgentSidebar extends Sidebar {
         ? reasoning
         : `${segment.content || ""}${reasoning}`;
     segment.status = "streaming";
-    if (session.id !== this.activeSessionId || !this.messagesElement) return;
-
-    const refs = this.messageElements.get(segment);
-    const shouldScroll = this.shouldAutoScrollMessages();
-    if (!refs?.row?.isConnected) {
-      this.removeEmptyState();
-      this.messagesElement.appendChild(this.createReasoningElement(segment));
-    } else {
-      refs.reasoning.textContent = segment.content;
-    }
-    if (shouldScroll) this.scrollMessagesToBottom();
+    this.scheduleConversationSave(session);
+    if (session.id === this.activeSessionId) this.updateReasoningControl(session);
   }
 
   completeActivityItem(toolName, result, context = {}) {
@@ -884,6 +1117,22 @@ class AgentSidebar extends Sidebar {
     const payload = result?.result ?? result;
     const outcome = this.getToolActivityOutcome(toolName, result);
     const failed = outcome.status === "error";
+    if (Number.isFinite(payload?.additions) || Number.isFinite(payload?.deletions)) {
+      item.diffStats = { additions: Number(payload.additions) || 0, deletions: Number(payload.deletions) || 0 };
+    } else if (toolName === "get_changed_files" && Array.isArray(payload?.files)) {
+      item.diffStats = payload.files.reduce((stats, file) => ({
+        additions: stats.additions + (Number(file?.additions) || 0),
+        deletions: stats.deletions + (Number(file?.deletions) || 0),
+      }), { additions: 0, deletions: 0 });
+    } else if (toolName === "create_file" && payload?.created === true && Number.isInteger(payload.lineCount)) {
+      item.diffStats = { additions: payload.lineCount, deletions: 0 };
+    }
+    if (toolName === "run_tests") {
+      item.testTarget = String(payload?.target || item.args?.path || "project");
+      item.testRunner = String(payload?.runner?.name || payload?.strategy || "test runner");
+      const summary = payload?.summary || {};
+      if (Number.isFinite(summary.passed)) item.testSummary = `${summary.passed} passed${Number.isFinite(summary.failed) && summary.failed ? ` · ${summary.failed} failed` : ""}${Number.isFinite(summary.skipped) && summary.skipped ? ` · ${summary.skipped} skipped` : ""}`;
+    }
     if (item.aggregate === "modifications") {
       item.completedModifications += 1;
       if (failed) {
@@ -921,23 +1170,55 @@ class AgentSidebar extends Sidebar {
     this.activityItems.delete(itemId);
     this.updateActivityItemElement(item);
     this.updateActivityHeader(group);
+    this.scheduleConversationSave(session);
     return item;
+  }
+
+  removeActivityItem(itemId, session) {
+    if (!itemId || !session) return;
+    const record = this.activityItems.get(itemId);
+    if (!record) return;
+    this.activityItems.delete(itemId);
+    for (const [key, pending] of this.pendingActivityItems) {
+      const remaining = pending.filter((entry) => entry !== itemId);
+      if (remaining.length) this.pendingActivityItems.set(key, remaining);
+      else this.pendingActivityItems.delete(key);
+    }
+    const { group, item } = record;
+    group.items = (group.items || []).filter((entry) => entry !== item);
+    this.activityItemElements.get(itemId)?.element?.remove();
+    this.activityItemElements.delete(itemId);
+    if (!group.items.length) {
+      session.messages = (session.messages || []).filter((entry) => entry !== group);
+      session.segments = (session.segments || []).filter((entry) => entry !== group);
+      if (session.currentSegment === group) {
+        session.currentSegment = session.segments.at(-1) || null;
+      }
+      this.activityElements.get(group)?.row?.remove();
+      this.activityElements.delete(group);
+      if (session.isGenerating && session.id === this.activeSessionId) {
+        this.renderTemporaryWorkHeader(session);
+      }
+    } else {
+      this.updateActivityHeader(group);
+    }
+    this.scheduleConversationSave(session);
   }
 
   finishActivityGroup(context = {}, status = "success") {
     const session = this.getSession(context.sessionId);
     const group = this.getActivityGroup(session, context.runId);
+    if (!session) return;
+    this.finishAgentWork(session, context.runId, status);
     if (!group || group.status !== "running") return;
 
     for (const item of group.items) {
       if (item.status !== "running") continue;
-      item.status = status === "error" ? "error" : "success";
+      item.status = status === "error" ? "error" : status === "cancelled" ? "cancelled" : "success";
       item.finishedAt = Date.now();
       Object.assign(
         item,
-        item.aggregate === "modifications"
-          ? this.describeModificationAggregate(item)
-          : this.describeActivityItem(item),
+        this.describeActivityItem(item),
       );
       this.updateActivityItemElement(item);
     }
@@ -948,55 +1229,17 @@ class AgentSidebar extends Sidebar {
       item.finishedAt = Date.now();
       this.updateActivityItemElement(item);
     }
-    group.finishedAt = Date.now();
-    group.status = status === "error" || group.hasErrors ? "error" : "success";
+    group.finishedAt = session.workState?.runId === context.runId
+      ? session.workState.finishedAt
+      : Date.now();
+    group.status = status === "error" || group.hasErrors ? "error" : status === "cancelled" ? "cancelled" : "success";
     const pendingPrefix = `${context.sessionId}:${context.runId}:`;
     for (const key of this.pendingActivityItems.keys()) {
       if (key.startsWith(pendingPrefix)) this.pendingActivityItems.delete(key);
     }
-    for (const key of this.deferredReadItems.keys()) {
-      if (key.startsWith(pendingPrefix)) this.deferredReadItems.delete(key);
-    }
+    for (const key of this.deferredReadItems.keys()) if (key.startsWith(pendingPrefix)) this.deferredReadItems.delete(key);
     this.updateActivityHeader(group);
-  }
-
-  setActivityGroupCollapsed(group, collapsed) {
-    if (!group) return;
-    group.collapsed = !!collapsed;
-  }
-
-  collapseActivityGroup(context = {}) {
-    const session = this.getSession(context.sessionId);
-    const group = this.getActivityGroup(session, context.runId);
-    this.setActivityGroupCollapsed(group, true);
-  }
-
-  setReasoningSegmentCollapsed(segment, collapsed) {
-    if (!segment) return;
-    segment.collapsed = !!collapsed;
-    const refs = this.messageElements.get(segment);
-    if (!refs?.row?.isConnected) return;
-    refs.reasoningToggle?.setAttribute(
-      "aria-expanded",
-      String(!segment.collapsed),
-    );
-    if (refs.reasoning) refs.reasoning.hidden = segment.collapsed;
-  }
-
-  collapseRunDetails(session, runId) {
-    if (!session || !Number.isInteger(runId)) return;
-    const segments = new Set([
-      ...(Array.isArray(session.segments) ? session.segments : []),
-      ...(Array.isArray(session.messages) ? session.messages : []),
-    ]);
-    for (const segment of segments) {
-      if (segment?.runId !== runId) continue;
-      if (segment.type === "reasoning") {
-        this.setReasoningSegmentCollapsed(segment, true);
-      } else if (segment.type === "activity" || segment.role === "activity") {
-        this.setActivityGroupCollapsed(segment, true);
-      }
-    }
+    this.scheduleConversationSave(session);
   }
 
   getActivityType(toolName = "") {
@@ -1013,6 +1256,185 @@ class AgentSidebar extends Sidebar {
     if (toolName.includes("list")) return "list";
     if (/verify|check|test|build/.test(toolName)) return "verify";
     return "other";
+  }
+
+  startAgentWork(session, runId) {
+    if (!session || !Number.isInteger(runId)) return;
+    this.stopAgentWorkTicker();
+    session.workState = { runId, startedAt: Date.now(), finishedAt: null, status: "running" };
+    // Give every user prompt its own work row, even when the run produces no
+    // tool activity. Creating it now keeps it directly after the prompt in
+    // the message timeline; later tool events fill this same row.
+    const group = this.getRunSegment(session, runId, "activity", true);
+    group.role = "activity";
+    group.status = "running";
+    group.startedAt = session.workState.startedAt;
+    group.items ||= [];
+    if (session.id === this.activeSessionId) {
+      if (this.messagesElement) {
+        const row = this.createActivityElement(group);
+        if (!row.isConnected) this.messagesElement.appendChild(row);
+      }
+      this.syncAgentWorkTicker();
+    }
+    this.scheduleConversationSave(session);
+  }
+
+  finishAgentWork(session, runId, status = "success") {
+    const state = session?.workState;
+    if (!state || state.runId !== runId || state.finishedAt) return;
+    state.finishedAt = Date.now();
+    state.status = status;
+    const group = this.getActivityGroup(session, runId);
+    if (group) {
+      group.startedAt = Number.isFinite(group.startedAt) ? group.startedAt : state.startedAt;
+      group.finishedAt = state.finishedAt;
+      group.durationMs = Math.max(0, group.finishedAt - group.startedAt);
+    }
+    if (session.id === this.activeSessionId) {
+      this.stopAgentWorkTicker();
+      const refs = this.workLogElements.get(session);
+      if (group) this.updateWorkHeader(session, group);
+      else refs?.row?.remove();
+    }
+  }
+
+  createWorkingWord() {
+    const word = document.createElement("span");
+    word.className = "agent-working-word";
+    word.setAttribute("aria-label", "Working");
+    for (const [index, character] of [..."Working…"].entries()) {
+      const span = document.createElement("span");
+      span.className = "agent-working-char";
+      span.style.setProperty("--char-index", String(index));
+      span.setAttribute("aria-hidden", "true");
+      span.textContent = character;
+      word.appendChild(span);
+    }
+    return word;
+  }
+
+  createWorkHeader(session, group = null) {
+    const header = document.createElement("div");
+    header.className = "agent-work-header";
+    header.setAttribute("aria-live", "off");
+    const state = session?.workState;
+    const running = !!session?.isGenerating && !!state &&
+      state.runId === (group?.runId ?? state.runId) && !state.finishedAt;
+    let word = null;
+    if (running) {
+      word = this.createWorkingWord();
+      header.classList.add("agent-work-header-running");
+      header.appendChild(word);
+    } else {
+      header.classList.add("agent-work-header-complete");
+      const label = document.createElement("span");
+      label.className = "agent-work-header-label";
+      label.textContent = group?.status === "cancelled" && !Number.isFinite(group.finishedAt) &&
+        !(group.items || []).some((item) => Number.isFinite(item.finishedAt))
+        ? "Interrupted" : "Worked for";
+      header.appendChild(label);
+    }
+    const duration = document.createElement("span");
+    duration.className = "agent-work-duration";
+    header.appendChild(duration);
+    if (session && (typeof session === "object" || typeof session === "function")) {
+      this.workLogElements.set(session, { row: null, header, duration, word, group });
+      this.updateWorkHeader(session, group);
+    }
+    return header;
+  }
+
+  renderTemporaryWorkHeader(session) {
+    if (!this.messagesElement || !session || session.id !== this.activeSessionId || !session.isGenerating) return;
+    const existingGroup = this.getActivityGroup(session, session.runId);
+    if (existingGroup) return;
+    const existing = this.workLogElements.get(session);
+    if (existing?.row?.isConnected) return;
+    const row = document.createElement("div");
+    row.className = "agent-work-log agent-work-log-pending";
+    const header = this.createWorkHeader(session);
+    row.appendChild(header);
+    const refs = this.workLogElements.get(session);
+    refs.row = row;
+    this.messagesElement.appendChild(row);
+    this.syncAgentWorkTicker();
+  }
+
+  updateWorkHeader(session, group = null, now = Date.now()) {
+    if (!session || (typeof session !== "object" && typeof session !== "function")) return;
+    const refs = (group && this.activityElements.get(group)?.workRefs) ||
+      this.workLogElements.get(session);
+    if (!refs?.header) return;
+    const state = session.workState;
+    const running = !!session.isGenerating && state?.runId === (group?.runId ?? state.runId) && !state.finishedAt;
+    const sameRunState = !group || state?.runId === group.runId;
+    const relatedGroups = group
+      ? (session.messages || []).filter((entry) =>
+        (entry?.role === "activity" || entry?.type === "activity") && entry.runId === group.runId)
+      : [];
+    if (group && !relatedGroups.length) relatedGroups.push(group);
+    const groupStart = Math.min(...relatedGroups.map((entry) => Number(entry.startedAt) || Infinity));
+    const groupEnd = Math.max(0, ...relatedGroups.flatMap((entry) => [
+      Number(entry.finishedAt) || 0,
+      ...(entry.items || []).map((item) => Number(item.finishedAt) || 0),
+    ]));
+    const startedAt = sameRunState && Number.isFinite(state.startedAt)
+      ? state.startedAt
+      : Number.isFinite(groupStart) ? groupStart : group?.startedAt;
+    const finishedAt = sameRunState && Number.isFinite(state.finishedAt)
+      ? state.finishedAt
+      : groupEnd || undefined;
+    const end = running ? now : finishedAt;
+    refs.duration.textContent = !running && Number.isFinite(group?.durationMs)
+      ? formatAgentWorkDuration(group.durationMs)
+      : Number.isFinite(startedAt) && Number.isFinite(end)
+        ? formatAgentWorkDuration(end - startedAt)
+        : "";
+    if (running && !refs.word) {
+      refs.word = this.createWorkingWord();
+      refs.header.replaceChildren(refs.word, refs.duration);
+      refs.header.classList.remove("agent-work-header-complete");
+      refs.header.classList.add("agent-work-header-running");
+    } else if (!running && refs.word) {
+      refs.word.remove();
+      refs.word = null;
+      refs.header.classList.remove("agent-work-header-running");
+      refs.header.classList.add("agent-work-header-complete");
+      const label = document.createElement("span");
+      label.className = "agent-work-header-label";
+      label.textContent = "Worked for";
+      refs.header.insertBefore(label, refs.duration);
+    }
+  }
+
+  syncAgentWorkTicker() {
+    const session = this.getActiveSession();
+    if (!this.isOpen || !session?.isGenerating || !session.workState || session.workState.finishedAt || session.workState.runId !== session.runId) {
+      this.stopAgentWorkTicker();
+      return;
+    }
+    if (this.agentWorkTicker && this.agentWorkTickerSessionId === session.id) {
+      this.updateWorkHeader(session, this.getActivityGroup(session, session.runId));
+      return;
+    }
+    this.stopAgentWorkTicker();
+    this.agentWorkTickerSessionId = session.id;
+    this.updateWorkHeader(session, this.getActivityGroup(session, session.runId));
+    this.agentWorkTicker = setInterval(() => {
+      const active = this.getActiveSession();
+      if (active?.id !== this.agentWorkTickerSessionId || !active.isGenerating) {
+        this.stopAgentWorkTicker();
+        return;
+      }
+      this.updateWorkHeader(active, this.getActivityGroup(active, active.runId));
+    }, 1000);
+  }
+
+  stopAgentWorkTicker() {
+    if (this.agentWorkTicker) clearInterval(this.agentWorkTicker);
+    this.agentWorkTicker = null;
+    this.agentWorkTickerSessionId = null;
   }
 
   describeModificationAggregate(item) {
@@ -1114,8 +1536,9 @@ class AgentSidebar extends Sidebar {
     const failed = item.status === "error";
     const warning = item.status === "warning";
     const payload = result?.result ?? result ?? {};
-    const query =
-      typeof item.args?.query === "string" ? item.args.query.trim() : "";
+    const query = typeof item.query === "string"
+      ? item.query.trim()
+      : typeof item.args?.query === "string" ? item.args.query.trim() : "";
     const fileName = this.getActivityFileName(item, payload);
     const rangeStart = Number.isInteger(payload?.startLine)
       ? payload.startLine
@@ -1149,10 +1572,10 @@ class AgentSidebar extends Sidebar {
         if (running) {
           title = "Running tests…";
         } else if (payload?.status === "PASSED") {
-          title = "Tests passed";
-          detail = `${runner} · ${target}`;
+          title = `Tests passed · ${target}`;
+          detail = item.testSummary || `${runner} · ${target}`;
         } else if (payload?.status === "FAILED") {
-          title = "Tests failed";
+          title = `Tests failed · ${target}`;
           const failure = Array.isArray(payload?.failures)
             ? payload.failures.find((entry) => entry?.message)
             : null;
@@ -1163,14 +1586,20 @@ class AgentSidebar extends Sidebar {
           title = "Tests timed out";
         } else if (payload?.status === "INVALID_TARGET") {
           title = "Test target not found";
+          detail = "Choose an existing file or project.";
         } else if (payload?.status === "NO_TEST_RUNNER") {
           title = "No test runner available";
         } else if (payload?.status === "NO_TEST_ENVIRONMENT") {
           title = "No test environment";
           detail = "Create a standalone validation file";
+        } else if (payload?.status === "NO_TESTS") {
+          title = "No tests found";
+        } else if (payload?.status === "RUNTIME_UNAVAILABLE") {
+          title = "Test runtime unavailable";
+        } else if (payload?.status === "DEPENDENCIES_UNAVAILABLE") {
+          title = "Test dependencies unavailable";
         } else {
           title = warning ? "Unable to run tests" : "Tests unavailable";
-          detail = payload?.status || "";
         }
         break;
       }
@@ -1202,8 +1631,26 @@ class AgentSidebar extends Sidebar {
         else if (readStart) detail = `line ${readStart}`;
         break;
       case "get_project_map":
-        title = `${running ? "Mapping" : "Mapped"} project structure${running ? "…" : ""}`;
+        title = `${running ? "Mapping" : "Mapped"} ${item.args?.path ? item.args.path : "project structure"}${running ? "…" : ""}`;
+        if (!running) {
+          const count = this.getActivityResultCount(payload);
+          if (count !== null) detail = `${count}${payload?.truncated ? "+" : ""} ${count === 1 ? "file" : "files"}${payload?.truncated ? " · truncated" : ""}`;
+        }
         break;
+      case "get_changed_files": {
+        title = "Reviewed changes";
+        const count = this.getActivityResultCount(payload);
+        if (count !== null) detail = `${count} ${count === 1 ? "file" : "files"}`;
+        break;
+      }
+      case "get_diff": {
+        title = "Reviewed diff";
+        const additions = Number(payload?.additions ?? payload?.stats?.additions);
+        const deletions = Number(payload?.deletions ?? payload?.stats?.deletions);
+        if (Number.isFinite(additions) || Number.isFinite(deletions)) detail = `+${Number.isFinite(additions) ? additions : 0} −${Number.isFinite(deletions) ? deletions : 0}`;
+        else if (payload?.reviewComplete === false || payload?.hasMore === true || payload?.truncated === true) detail = "More changes to review";
+        break;
+      }
       case "create_file":
         title = `${running ? "Creating" : "Created"} ${fileName}${running ? "…" : ""}`;
         break;
@@ -1233,6 +1680,12 @@ class AgentSidebar extends Sidebar {
       case "delete_file":
         title = `${running ? "Deleting" : "Deleted"} ${fileName}${running ? "…" : ""}`;
         break;
+      case "create_folder":
+        title = `${running ? "Creating" : "Created"} folder ${item.args?.path || fileName}${running ? "…" : ""}`;
+        break;
+      case "delete_folder":
+        title = `${running ? "Deleting" : "Deleted"} folder ${item.args?.path || fileName}${running ? "…" : ""}`;
+        break;
       default: {
         const readableName = item.toolName.replace(/_/g, " ");
         title = `${running ? "Running" : "Ran"} ${readableName}${running ? "…" : ""}`;
@@ -1242,7 +1695,7 @@ class AgentSidebar extends Sidebar {
     if (!running && !failed && item.type === "search") {
       const count = this.getActivityResultCount(payload);
       if (count !== null) detail = this.formatActivityCount(count, "result");
-    } else if (!running && !failed && item.type === "list") {
+    } else if (!running && !failed && item.type === "list" && item.toolName !== "get_project_map") {
       const count = this.getActivityResultCount(payload);
       if (count !== null) detail = this.formatActivityCount(count, "file");
     } else if (!running && !failed && item.type === "edit") {
@@ -1314,25 +1767,164 @@ class AgentSidebar extends Sidebar {
     const toolbar = document.createElement("div");
     toolbar.className = "agent-sidebar-input-toolbar";
 
-    const positionSelectorMenu = (menu, container) => {
-      const containerRect = container.getBoundingClientRect();
+    const contextList = document.createElement("div");
+    contextList.className = "agent-sidebar-context-list";
+    this.contextListElement = contextList;
+    inputWrapper.appendChild(contextList);
+
+    const positionSelectorMenu = (menu, anchor) => {
+      const anchorRect = anchor.getBoundingClientRect();
+      const edgePadding = 8;
       menu.style.position = "fixed";
-      menu.style.left = `${containerRect.left}px`;
+      menu.style.top = "0px";
+      menu.style.bottom = "auto";
+      menu.style.left = `${anchorRect.left}px`;
       menu.style.right = "auto";
-      menu.style.bottom = `${window.innerHeight - containerRect.top + 4}px`;
 
       requestAnimationFrame(() => {
         const menuRect = menu.getBoundingClientRect();
-        const edgePadding = 8;
-        let left = containerRect.left;
-
-        if (menuRect.right > window.innerWidth - edgePadding) {
-          left = window.innerWidth - menuRect.width - edgePadding;
-        }
-
+        const left = Math.max(edgePadding, Math.min(
+          anchorRect.left,
+          window.innerWidth - menuRect.width - edgePadding,
+        ));
         menu.style.left = `${Math.max(edgePadding, left)}px`;
+        const above = anchorRect.top - menuRect.height - 4;
+        const below = anchorRect.bottom + 4;
+        const preferredTop = above >= edgePadding ? above : below;
+        const top = Math.max(edgePadding, Math.min(
+          preferredTop,
+          window.innerHeight - menuRect.height - edgePadding,
+        ));
+        menu.style.top = `${top}px`;
       });
     };
+
+    const contextContainer = document.createElement("div");
+    contextContainer.className = "agent-sidebar-context-container";
+    const contextTrigger = document.createElement("button");
+    contextTrigger.type = "button";
+    contextTrigger.className = "agent-sidebar-context-trigger";
+    contextTrigger.title = "Add context";
+    contextTrigger.setAttribute("aria-label", "Add context");
+    contextTrigger.setAttribute("aria-haspopup", "menu");
+    contextTrigger.setAttribute("aria-expanded", "false");
+    this.contextTriggerElement = contextTrigger;
+    contextTrigger.innerHTML = '<i class="fi fi-rr-plus" aria-hidden="true"></i>';
+    const contextMenu = document.createElement("div");
+    contextMenu.className = "agent-sidebar-context-menu hidden";
+    contextMenu.setAttribute("role", "menu");
+    const rootNow = () => this.manualContextManager.workspaceRoot();
+    const getActiveFile = () => this.editor.tabManager?.activeFile;
+    const getSelectionText = () => {
+      const selection = this.editor.selectController;
+      return typeof selection?.getSelectedText === "function"
+        ? selection.getSelectedText() : selection?.containsSelected;
+    };
+    const createAction = (label, icon, disabled, callback, danger = false) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "agent-sidebar-context-menu-item";
+      if (danger) button.classList.add("danger");
+      button.setAttribute("role", "menuitem");
+      button.disabled = Boolean(disabled);
+      const glyph = document.createElement("i"); glyph.className = icon;
+      const text = document.createElement("span"); text.textContent = label;
+      button.append(glyph, text);
+      button.addEventListener("click", async () => {
+        if (button.disabled) return;
+        contextMenu.classList.add("hidden");
+        await callback();
+      });
+      contextMenu.appendChild(button);
+      return button;
+    };
+    const addFileAction = createAction("Add File...", "fi fi-rr-file", !rootNow(), async () => {
+      const root = rootNow(); if (!root) return;
+      const sessionId = this.activeSessionId;
+      this.editor.quickPanel?.open({
+        id: "agent-manual-context-file", mode: "pick", title: "Add File to Context",
+        placeholder: "Search files...", items: () => this.manualContextManager.getFileEntries(root),
+        reloadOnInput: false, renderLimit: 120, preserveLabelCase: true,
+        filterItems: (items, query) => items.filter((item) => item.label.toLowerCase().includes(query)),
+        emptyMessage: "No matching files.",
+        onAccept: async (item) => {
+          const session = this.getSession(sessionId);
+          if (!session || !NCEPath.equals(root, rootNow()) || session.isGenerating) return;
+          const language = await this.editor.highlightController?.detectLanguage?.(item.data.name);
+          this.manualContextManager.addFile(session, { workspaceRoot: root,
+            relativePath: item.data.path, name: item.data.name,
+            language: language?.id || language || "text" });
+          this.renderManualContext(); this.focusInput();
+        },
+      });
+    });
+    const addFolderAction = createAction("Add Folder...", "fi fi-rr-folder", !rootNow(), async () => {
+      const root = rootNow(); if (!root) return;
+      const sessionId = this.activeSessionId;
+      this.editor.quickPanel?.open({
+        id: "agent-manual-context-folder", mode: "pick", title: "Add Folder to Context",
+        placeholder: "Search folders...", items: () => this.manualContextManager.getFolderEntries(root),
+        reloadOnInput: false, renderLimit: 120, preserveLabelCase: true,
+        filterItems: (items, query) => items.filter((item) => item.label.toLowerCase().includes(query)),
+        emptyMessage: "No matching folders.",
+        onAccept: (item) => {
+          const session = this.getSession(sessionId);
+          if (!session || !NCEPath.equals(root, rootNow()) || session.isGenerating) return;
+          this.manualContextManager.addFolder(session, item.data.path);
+          this.renderManualContext(); this.focusInput();
+        },
+      });
+    });
+    contextMenu.appendChild(document.createElement("div")).className = "agent-sidebar-context-menu-separator";
+    const currentFileAction = createAction("Current File", "fi fi-rr-file-code", !getActiveFile()?.path, () => {
+      const file = getActiveFile(); if (!file) return;
+      const root = rootNow();
+      const relativePath = root && file.path && NCEPath.isInside(file.path, root)
+        ? NCEPath.normalize(file.path).slice(NCEPath.normalize(root).length).replace(/^\//, "") : null;
+      this.manualContextManager.addFile(this.getActiveSession(), { absolutePath: file.path,
+        relativePath, workspaceRoot: relativePath ? root : null, name: file.name,
+        language: file.language?.id || file.language || "text" });
+      this.renderManualContext(); this.focusInput();
+    });
+    const currentSelectionAction = createAction("Current Selection", "fi fi-rr-select",
+      !(typeof getSelectionText() === "string" && getSelectionText().trim()), () => {
+        this.manualContextManager.addSelection(this.getActiveSession());
+        this.renderManualContext(); this.focusInput();
+      });
+    contextMenu.appendChild(document.createElement("div")).className = "agent-sidebar-context-menu-separator";
+    const clearContextAction = createAction("Clear Context", "fi fi-rr-trash", true, () => {
+      this.manualContextManager.clear(this.getActiveSession()); this.renderManualContext(); this.focusInput();
+    }, true);
+    document.body.appendChild(contextMenu);
+    this.contextMenuElement = contextMenu;
+    this.contextActions = { addFileAction, addFolderAction, currentFileAction, currentSelectionAction, clearContextAction };
+    contextTrigger.addEventListener("click", (event) => {
+      event.stopPropagation();
+      dropdownMenu?.classList.add("hidden");
+      modeMenu?.classList.add("hidden");
+      addFileAction.disabled = !rootNow(); addFolderAction.disabled = !rootNow();
+      currentFileAction.disabled = !getActiveFile()?.path;
+      currentSelectionAction.disabled = !(typeof getSelectionText() === "string" && getSelectionText().trim());
+      clearContextAction.disabled = !this.getActiveSession()?.manualContext?.length || Boolean(this.getActiveSession()?.isGenerating);
+      const opening = contextMenu.classList.contains("hidden");
+      contextMenu.classList.toggle("hidden", !opening);
+      contextTrigger.setAttribute("aria-expanded", String(opening));
+      if (opening) positionSelectorMenu(contextMenu, contextTrigger);
+    });
+    contextContainer.appendChild(contextTrigger);
+    contextContainer.addEventListener("click", (event) => event.stopPropagation());
+    toolbar.appendChild(contextContainer);
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !contextMenu.classList.contains("hidden")) {
+        contextMenu.classList.add("hidden"); contextTrigger.setAttribute("aria-expanded", "false"); this.focusInput();
+      }
+    });
+    document.addEventListener("click", (event) => {
+      if (!contextContainer.contains(event.target) && !contextMenu.contains(event.target)) {
+        contextMenu.classList.add("hidden");
+        contextTrigger.setAttribute("aria-expanded", "false");
+      }
+    });
 
     const modeDropdownContainer = document.createElement("div");
     modeDropdownContainer.className =
@@ -1399,6 +1991,8 @@ class AgentSidebar extends Sidebar {
     modeTrigger.addEventListener("click", (event) => {
       event.stopPropagation();
       dropdownMenu?.classList.add("hidden");
+      contextMenu.classList.add("hidden");
+      contextTrigger.setAttribute("aria-expanded", "false");
       modeMenu.classList.toggle("hidden");
       if (!modeMenu.classList.contains("hidden")) {
         positionSelectorMenu(modeMenu, modeDropdownContainer);
@@ -1419,22 +2013,28 @@ class AgentSidebar extends Sidebar {
     triggerBtn.className =
       "agent-sidebar-model-trigger agent-sidebar-model-trigger-button";
 
-    const availableModels = [];
-    Object.values(AgentAI.providers).forEach((provider) => {
-      Object.values(provider.models).forEach((model) => {
-        availableModels.push({
-          id: model.id,
-          name: model.name,
-          providerId: provider.id,
-          providerName: provider.name,
-          baseURL: provider.baseURL,
-          apiKey: provider.apiKey,
-        });
-      });
-    });
+    const hiddenModels = new Set(
+      typeof SETTINGS_GET === "function"
+        ? SETTINGS_GET("agent.hiddenModels") || []
+        : [],
+    );
+    const allModels = AgentAI.getModels().map((entry) => ({
+        id: entry.modelId,
+        name: entry.modelName,
+        providerId: entry.providerId,
+        providerName: entry.providerName,
+        baseURL: entry.provider.baseURL,
+        apiKey: entry.provider.apiKey,
+      }));
+    const availableModels = allModels.filter(
+      (model) => !hiddenModels.has(AgentAI.getModelKey(model.providerId, model.id)),
+    );
 
     const currentModelObj =
-      availableModels.find((m) => m.id === this.currentModel) ||
+      allModels.find(
+        (m) =>
+          m.id === this.currentModel && m.providerId === this.currentProviderId,
+      ) ||
       availableModels[0];
     const currentDisplayName = currentModelObj
       ? currentModelObj.name
@@ -1524,7 +2124,6 @@ class AgentSidebar extends Sidebar {
 
         listContainer.appendChild(item);
       });
-
       const separator = document.createElement("div");
       separator.className = "agent-sidebar-model-separator";
       listContainer.appendChild(separator);
@@ -1532,7 +2131,37 @@ class AgentSidebar extends Sidebar {
       const manageItem = document.createElement("div");
       manageItem.className = "agent-sidebar-model-manage";
       manageItem.textContent = "Manage Models...";
+      manageItem.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        dropdownMenu.classList.add("hidden");
+        await this.editor.openSettings?.("Agent");
+      });
       listContainer.appendChild(manageItem);
+    };
+
+    this.refreshModelSelector = () => {
+      const hidden = new Set(
+        typeof SETTINGS_GET === "function"
+          ? SETTINGS_GET("agent.hiddenModels") || []
+          : [],
+      );
+      const enabled = allModels.filter(
+        (model) => !hidden.has(AgentAI.getModelKey(model.providerId, model.id)),
+      );
+      availableModels.splice(0, availableModels.length, ...enabled);
+
+      const currentModelObj =
+        allModels.find(
+          (model) =>
+            model.id === this.currentModel &&
+            model.providerId === this.currentProviderId,
+        ) || availableModels[0];
+      const currentDisplayName = currentModelObj
+        ? currentModelObj.name
+        : this.currentModel;
+      triggerBtn.title = `Model: ${currentDisplayName}`;
+      triggerBtn.setAttribute("aria-label", triggerBtn.title);
+      renderModelsList(searchBox.value || "");
     };
 
     renderModelsList();
@@ -1544,6 +2173,8 @@ class AgentSidebar extends Sidebar {
     triggerBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       modeMenu.classList.add("hidden");
+      contextMenu.classList.add("hidden");
+      contextTrigger.setAttribute("aria-expanded", "false");
       dropdownMenu.classList.toggle("hidden");
       if (!dropdownMenu.classList.contains("hidden")) {
         positionSelectorMenu(dropdownMenu, modelDropdownContainer);
@@ -1608,39 +2239,35 @@ class AgentSidebar extends Sidebar {
   }
 
   renderMessages(container) {
+    this.stopAgentWorkTicker();
     container
       .querySelectorAll(".agent-sidebar-markdown")
       .forEach((element) => this.markdownRenderer.destroy(element));
     container.replaceChildren();
-    this.typingIndicatorElement = null;
 
     const session = this.getActiveSession();
 
     if (!session || (session.messages.length === 0 && !session.isGenerating)) {
       container.appendChild(this.createEmptyState());
+      this.updateReasoningControl(session);
       return;
     }
     this.ensureSessionSegments(session);
 
+    let currentRunHasActivity = false;
     for (const message of session.messages) {
-      container.appendChild(
-        message?.type === "reasoning"
-          ? this.createReasoningElement(message)
-          : message?.role === "activity" || message?.type === "activity"
-            ? this.createActivityElement(message)
-            : this.createMessageElement(message),
-      );
+      if ((message?.role === "activity" || message?.type === "activity") && message.runId === session.runId) {
+        currentRunHasActivity = true;
+      }
+      if (message?.role === "activity" || message?.type === "activity") {
+        container.appendChild(this.createActivityElement(message));
+      } else if (message?.type !== "reasoning" && message?.role !== "reasoning") {
+        container.appendChild(this.createMessageElement(message));
+      }
     }
 
-    const hasRunningActivity = session.messages.some(
-      (message) => message?.role === "activity" && message.status === "running",
-    );
-    if (
-      session.isGenerating &&
-      !session.streamingMessage &&
-      !hasRunningActivity
-    ) {
-      container.appendChild(this.createTypingIndicator());
+    if (session.isGenerating && session.workState?.runId === session.runId && !currentRunHasActivity) {
+      this.renderTemporaryWorkHeader(session);
     }
 
     if (session.queue && session.queue.length > 0) {
@@ -1656,6 +2283,8 @@ class AgentSidebar extends Sidebar {
         );
       });
     }
+    this.syncAgentWorkTicker();
+    this.updateReasoningControl(session);
   }
 
   removeEmptyState() {
@@ -1664,81 +2293,265 @@ class AgentSidebar extends Sidebar {
       ?.remove();
   }
 
-  getActivityIcon(item) {
-    if (item.status === "error") return "⚠";
-    if (item.status === "warning") return "⚠";
-    if (item.status === "cancelled") return "×";
-    if (item.status === "running") return "◌";
-    if (item.type === "model") {
-      return item.modelEventKind === "retry" ? "↻" : "↪";
-    }
-    return {
-      search: "⌕",
-      read: "▣",
-      edit: "✎",
-      context: "◇",
-      list: "≡",
-      create: "＋",
-      rename: "↪",
-      verify: "✓",
-      model: "↪",
-      other: "•",
-    }[item.type];
-  }
-
-  createActivityElement(group) {
+  createActivityElement(group, options = {}) {
+    const session = this.getSession(group.sessionId) ||
+      (this.sessions || []).find((entry) => (entry.messages || []).includes(group)) || null;
+    if (session && !group.sessionId) group.sessionId = session.id;
+    const workLog = session && this.workLogElements.get(session);
+    // The work log is stored per session for the live duration ticker, but its
+    // DOM row belongs to one specific run. Never let a later run replace the
+    // previous run's row while the session-level reference is being updated.
+    const pending = workLog &&
+      (!workLog.group || workLog.group.runId === group.runId)
+      ? workLog
+      : null;
+    const pendingRow = pending?.row;
     const row = document.createElement("div");
-    row.className =
-      "agent-sidebar-message agent-sidebar-activity-message agent-sidebar-timeline-segment";
+    row.className = "agent-work-log agent-sidebar-timeline-segment";
     row.dataset.runId = String(group.runId);
-
-    const activity = document.createElement("div");
-    activity.className = "agent-activity";
-    activity.dataset.status = group.status;
-
-    const list = document.createElement("div");
-    list.className = "agent-activity-list";
-    const fragment = document.createDocumentFragment();
-    for (const item of group.items || []) {
-      fragment.appendChild(this.createActivityItemElement(item));
+    const includeHeader = options.includeHeader !== false;
+    const header = includeHeader
+      ? pending?.row?.isConnected && pending.header
+        ? pending.header
+        : this.createWorkHeader(session, group)
+      : null;
+    if (header) row.appendChild(header);
+    const list = document.createElement("ul");
+    list.className = "agent-work-tree";
+    list.setAttribute("aria-label", "Agent activity");
+    row.appendChild(list);
+    this.activityElements.set(group, {
+      row,
+      list,
+      header,
+      workRefs: header && session ? this.workLogElements.get(session) : null,
+    });
+    if (pendingRow?.isConnected && pendingRow !== row) pendingRow.replaceWith(row);
+    const refs = session && this.workLogElements.get(session);
+    if (
+      refs && includeHeader &&
+      (!refs.group || refs.group.runId === group.runId)
+    ) {
+      refs.row = row;
+      refs.group = group;
     }
-    list.appendChild(fragment);
-
-    activity.appendChild(list);
-    row.appendChild(activity);
-    this.activityElements.set(group, { row, activity, list });
+    this.updateActivityHeader(group);
     return row;
   }
 
-  createActivityItemElement(item) {
-    if (item.type === "approval") return this.createApprovalElement(item);
-    const element = document.createElement("div");
-    element.className = "agent-activity-item";
-    element.dataset.status = item.status;
-    element.dataset.type = item.type;
+  getActivityNodeGroups(group) {
+    const categoryFor = (item) => {
+      if (item.type === "approval") return "approval";
+      if (item.type === "model") return "model";
+      if (item.toolName === "search_code") return "search";
+      if (item.toolName === "read_file") return "read";
+      if (item.toolName === "get_project_map") return "map";
+      if (item.toolName === "run_tests") return "tests";
+      if (["get_changed_files", "get_diff"].includes(item.toolName)) return "review";
+      if (["create_file", "write_file_chunk", "rename_file", "delete_file", "modify_file", "create_folder", "delete_folder"].includes(item.toolName)) return "mutation";
+      return "action";
+    };
+    const result = [];
+    for (const item of (group?.items || []).filter((entry) => entry.toolName !== "task_complete")) {
+      const category = categoryFor(item);
+      const previous = result.at(-1);
+      if (previous?.category === category && ["search", "read", "map", "tests", "review", "mutation"].includes(category)) previous.items.push(item);
+      else result.push({ category, items: [item] });
+    }
+    return result;
+  }
 
-    const icon = document.createElement("span");
-    icon.className = "agent-activity-icon";
-    icon.setAttribute("aria-hidden", "true");
-    icon.textContent = this.getActivityIcon(item);
+  getActivityNodeChildren(node) {
+    const items = node.items || [];
+    if (node.category === "search") return items.map((item) => {
+      const query = item.query || item.args?.query || item.title?.match(/\sfor\s+"([^"]+)"/)?.[1];
+      return { item, label: query ? `"${String(query).trim()}"` : "Search", detail: item.detail };
+    });
+    if (node.category === "read") {
+      if (items.length === 1) {
+        const item = items[0];
+        if (item.status === "error" || item.status === "warning") return [{ item, label: item.title, detail: item.detail }];
+        return item.detail ? [{ item, label: item.detail }] : [];
+      }
+      return items.map((item) => ({ item, label: item.title.replace(/^(?:Failed to read|Read|Reading)\s+/i, ""), detail: item.detail }));
+    }
+    if (node.category === "map") return items[0]?.detail ? [{ item: items[0], label: items[0].detail }] : [];
+    if (node.category === "mutation") {
+      const byFile = new Map();
+      for (const item of items) {
+        if (item.aggregate === "modifications" && Array.isArray(item.files) && item.files.length) {
+          for (const name of item.files) byFile.set(String(name), { item, label: `Edited ${name}`, count: 1, stats: null, statsCount: 0 });
+          continue;
+        }
+        const key = String(item.args?.path || item.path || this.mutationChildLabel(item)).replace(/\\/g, "/");
+        const entry = byFile.get(key) || { item, label: this.mutationChildLabel(item), count: 0, stats: null, statsCount: 0 };
+        entry.count += 1;
+        const stats = this.activityItemDiffStats(item);
+        if (stats) {
+          entry.statsCount += 1;
+          entry.stats = { additions: (entry.stats?.additions || 0) + stats.additions, deletions: (entry.stats?.deletions || 0) + stats.deletions };
+        }
+        byFile.set(key, entry);
+      }
+      return [...byFile.values()].map((entry) => ({ ...entry, stats: entry.count === entry.statsCount ? entry.stats : null }));
+    }
+    if (node.category === "tests") return items.map((item) => ({ item, label: item.testTarget || item.args?.path || item.title?.match(/\s·\s(.+)$/)?.[1] || "project", detail: item.testSummary || item.detail }));
+    if (node.category === "review") {
+      const item = items.find((entry) => entry.toolName === "get_changed_files") || items[0];
+      const countFromDetail = Number(item?.detail?.match(/\b(\d+)\s+(?:changed\s+)?files?\b/i)?.[1]);
+      const session = this.getSession(item?.sessionId) || this.getActiveSession();
+      const paths = new Set(items.map((entry) => entry.args?.path).filter(Boolean));
+      const count = Number.isFinite(countFromDetail) && item?.detail
+        ? countFromDetail
+        : paths.size || session?.changes?.length || 0;
+      return [{ item, label: `${count} ${count === 1 ? "file" : "files"}`, action: "review" }];
+    }
+    if (node.category === "model") return items.map((item) => ({ item, label: item.detail || "" }));
+    if (node.category === "action") return items.map((item) => ({ item, label: item.detail || item.title }));
+    return [];
+  }
 
-    const content = document.createElement("div");
-    content.className = "agent-activity-content";
+  mutationChildLabel(item) {
+    const title = String(item.title || "");
+    const persisted = title.match(/^(?:Created|Creating|Edited|Editing|Modified|Modifying|Deleted|Deleting|Appended to|Appending to)\s+(.+?)(?:…)?$/)?.[1];
+    const name = item.args?.path || item.path || persisted || this.getActivityFileName(item);
+    const running = item.status === "running";
+    if (item.toolName === "create_folder") return `${running ? "Creating" : "Created"} folder ${item.args?.path || name}${running ? "…" : ""}`;
+    if (item.toolName === "delete_folder") return `${running ? "Deleting" : "Deleted"} folder ${item.args?.path || name}${running ? "…" : ""}`;
+    if (item.toolName === "create_file") return `${running ? "Creating" : "Created"} ${name}${running ? "…" : ""}`;
+    if (item.toolName === "rename_file") return running ? `${title.replace(/^Renamed/, "Renaming")}${title.endsWith("…") ? "" : "…"}` : title;
+    if (item.toolName === "delete_file") return `${running ? "Deleting" : "Deleted"} ${name}${running ? "…" : ""}`;
+    return running ? `Editing ${name}…` : `Edited ${name}`;
+  }
 
-    const title = document.createElement("div");
-    title.className = "agent-activity-item-title";
-    title.textContent = item.title;
-    content.appendChild(title);
+  activityItemDiffStats(item) {
+    const stats = item?.diffStats;
+    if (!stats || ![stats.additions, stats.deletions].some((value) => Number.isFinite(value) && value > 0)) return null;
+    return { additions: Number(stats.additions) || 0, deletions: Number(stats.deletions) || 0 };
+  }
 
-    const detail = document.createElement("div");
-    detail.className = "agent-activity-item-detail";
-    detail.textContent = item.detail || "";
-    detail.hidden = !item.detail;
-    content.appendChild(detail);
+  appendDiffStats(element, stats) {
+    if (stats.additions > 0) {
+      const add = document.createElement("span");
+      add.className = "agent-work-diff-add change-stat-add";
+      add.textContent = `+${stats.additions}`;
+      element.appendChild(add);
+    }
+    if (stats.deletions > 0) {
+      const del = document.createElement("span");
+      del.className = "agent-work-diff-del change-stat-del";
+      del.textContent = `−${stats.deletions}`;
+      element.appendChild(del);
+    }
+  }
 
-    element.append(icon, content);
-    this.activityItemElements.set(item.id, { element, icon, title, detail });
-    return element;
+  createActivityChild(child, isLast) {
+    const li = document.createElement("li");
+    li.className = "agent-work-child";
+    if (child.item?.status === "error") li.classList.add("agent-work-error");
+    if (child.item?.status === "warning") li.classList.add("agent-work-warning");
+    const branch = document.createElement("span");
+    branch.className = "agent-work-child-branch";
+    branch.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "agent-work-child-label";
+    label.textContent = child.label;
+    li.append(branch, label);
+    if (child.action === "review") {
+      li.classList.add("agent-work-child-action");
+      li.setAttribute("role", "button");
+      li.tabIndex = 0;
+      const open = (event) => {
+        event.stopPropagation();
+        this.openReviewedChanges(child.item);
+      };
+      li.addEventListener("click", open);
+      li.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          open(event);
+        }
+      });
+    }
+    if (["get_diff", "get_changed_files"].includes(child.item?.toolName) && this.activityItemDiffStats(child.item)) {
+      const meta = document.createElement("span");
+      meta.className = "agent-work-node-meta";
+      this.appendDiffStats(meta, this.activityItemDiffStats(child.item));
+      li.appendChild(meta);
+    } else if (child.detail) {
+      const detail = document.createElement("span");
+      detail.className = "agent-work-child-detail";
+      detail.textContent = child.detail;
+      li.appendChild(detail);
+    }
+    if (child.stats) {
+      const meta = document.createElement("span");
+      meta.className = "agent-work-node-meta";
+      this.appendDiffStats(meta, child.stats);
+      li.appendChild(meta);
+    }
+    if (child.item?.status === "running") {
+      const active = document.createElement("span");
+      active.className = "agent-work-active-indicator";
+      active.setAttribute("aria-hidden", "true");
+      li.appendChild(active);
+    }
+    return li;
+  }
+
+  createActivityNode(group, node, isLast) {
+    const li = document.createElement("li");
+    li.className = "agent-work-node";
+    const directError = ["model", "action"].includes(node.category) && node.items.length === 1 && node.items[0].status === "error";
+    li.dataset.status = node.items.some((item) => item.status === "running") ? "running"
+      : (directError || node.category === "mutation" && node.items.length === 1 && node.items[0].status === "error") ? "error" : "complete";
+    const row = document.createElement("div");
+    row.className = "agent-work-node-row";
+    const branch = document.createElement("span");
+    branch.className = "agent-work-node-branch";
+    branch.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "agent-work-node-label";
+    const meta = document.createElement("span");
+    meta.className = "agent-work-node-meta";
+    row.append(branch, label, meta);
+    const isSingleMutation = node.category === "mutation" && node.items.length === 1 && !node.items[0].aggregate;
+    const children = isSingleMutation ? [] : this.getActivityNodeChildren(node);
+    if (node.category === "approval") label.textContent = "Requested permission";
+    else if (node.category === "search") label.textContent = node.items.some((item) => item.status === "running") ? "Searching workspace…" : "Searched workspace";
+    else if (node.category === "read") label.textContent = node.items.length > 1 ? `Read ${node.items.length} files` : node.items[0].title;
+    else if (node.category === "map") label.textContent = node.items[0].title;
+    else if (node.category === "mutation") label.textContent = isSingleMutation ? this.mutationChildLabel(node.items[0]) : `Changed ${children.length} ${children.length === 1 ? "file" : "files"}`;
+    else if (node.category === "tests") label.textContent = node.items.some((item) => item.status === "running") ? "Running tests…" : "Ran tests";
+    else if (node.category === "review") label.textContent = "Reviewed changes";
+    else if (node.category === "model") { label.textContent = node.items[0].title || "Model request"; li.classList.add("agent-work-node-model"); }
+    else label.textContent = node.items[0].title || "Agent activity";
+    if (node.category === "review") {
+      row.classList.add("agent-work-node-row-action");
+      row.setAttribute("role", "button");
+      row.tabIndex = 0;
+      const reviewItem = node.items.find((item) => item.toolName === "get_changed_files") || node.items[0];
+      row.addEventListener("click", () => this.openReviewedChanges(reviewItem));
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          this.openReviewedChanges(reviewItem);
+        }
+      });
+    }
+    if (isSingleMutation) {
+      const stats = this.activityItemDiffStats(node.items[0]);
+      if (stats) this.appendDiffStats(meta, stats);
+    }
+    li.appendChild(row);
+    if (children.length || node.category === "approval") {
+      const childList = document.createElement("ul");
+      childList.className = "agent-work-children";
+      children.forEach((child, index) => childList.appendChild(this.createActivityChild(child, index === children.length - 1)));
+      if (node.category === "approval") childList.appendChild(this.createApprovalElement(node.items[0]));
+      li.appendChild(childList);
+    }
+    return li;
   }
 
   createApprovalElement(item) {
@@ -1853,8 +2666,21 @@ class AgentSidebar extends Sidebar {
 
   updateActivityHeader(group) {
     const refs = this.activityElements.get(group);
-    if (!refs?.row?.isConnected) return;
-    refs.activity.dataset.status = group.status;
+    if (!refs) return;
+    refs.row.dataset.status = group.status;
+    refs.list.replaceChildren();
+    const nodes = this.getActivityNodeGroups(group);
+    for (const [index, node] of nodes.entries()) {
+      refs.list.appendChild(this.createActivityNode(group, node, index === nodes.length - 1));
+    }
+    const session = this.getSession(group.sessionId) ||
+      (this.sessions || []).find((entry) => (entry.messages || []).includes(group)) || null;
+    if (session && !group.sessionId) group.sessionId = session.id;
+    if (session) {
+      const workRefs = this.workLogElements.get(session);
+      if (workRefs) workRefs.group = group;
+      this.updateWorkHeader(session, group);
+    }
   }
 
   createEmptyState() {
@@ -1905,10 +2731,135 @@ class AgentSidebar extends Sidebar {
     return String(value).trim();
   }
 
+  getSessionReasoning(session = this.getActiveSession()) {
+    if (!session) return [];
+    this.ensureSessionSegments(session);
+    const entries = [];
+    const seen = new Set();
+    const add = (entry) => {
+      if (!entry || seen.has(entry)) return;
+      const content = this.normalizeReasoningValue(entry.content);
+      if (!content) return;
+      seen.add(entry);
+      entries.push({ entry, content });
+    };
+    for (const message of session.messages || []) {
+      if (message?.type === "reasoning" || message?.role === "reasoning") add(message);
+    }
+    for (const segment of session.segments || []) {
+      if (segment?.type === "reasoning" || segment?.role === "reasoning") add(segment);
+    }
+    // Older persisted assistant messages can carry reasoning as a field.
+    for (const message of session.messages || []) {
+      if (message?.role !== "agent") continue;
+      const content = this.normalizeReasoningValue(
+        message.reasoning ?? message.reasoning_content ?? message.reasoningText,
+      );
+      if (!content || entries.some((entry) =>
+        entry.entry.runId === message.runId && entry.content === content)) continue;
+      entries.push({ entry: message, content });
+    }
+    return entries;
+  }
+
+  renderReasoningControl(container) {
+    const control = document.createElement("div");
+    control.className = "agent-sidebar-reasoning-control";
+    this.reasoningControl = control;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "agent-sidebar-reasoning-count";
+    button.setAttribute("aria-label", "Open reasoning");
+    button.setAttribute("aria-expanded", "false");
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.reasoningPanelOpen = !this.reasoningPanelOpen;
+      this.updateReasoningControl();
+    });
+    this.reasoningCountButton = button;
+
+    const popover = document.createElement("section");
+    popover.className = "agent-sidebar-reasoning-popover";
+    popover.hidden = true;
+    popover.setAttribute("aria-label", "Reasoning");
+    this.reasoningPopover = popover;
+    const header = document.createElement("header");
+    header.className = "agent-sidebar-reasoning-popover-header";
+    const title = document.createElement("span");
+    title.textContent = "Reasoning";
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "agent-sidebar-reasoning-copy";
+    copy.textContent = "Copy";
+    copy.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void this.copySessionReasoning();
+    });
+    this.reasoningCopyButton = copy;
+    header.append(title, copy);
+    const list = document.createElement("div");
+    list.className = "agent-sidebar-reasoning-list agent-sidebar-selectable-content";
+    this.reasoningList = list;
+    popover.append(header, list);
+    control.append(button, popover);
+    container.appendChild(control);
+    this.updateReasoningControl();
+  }
+
+  updateReasoningControl(session = this.getActiveSession()) {
+    if (!this.reasoningControl) return;
+    const entries = this.getSessionReasoning(session);
+    const count = entries.length;
+    this.reasoningControl.hidden = count === 0;
+    this.messagesElement?.classList.toggle("agent-sidebar-messages-has-reasoning", count > 0);
+    this.reasoningCountButton.textContent = String(count);
+    this.reasoningCountButton.setAttribute("aria-label", `Open ${count} reasoning entries`);
+    this.reasoningCountButton.setAttribute("aria-expanded", String(this.reasoningPanelOpen));
+    this.reasoningPopover.hidden = !this.reasoningPanelOpen || count === 0;
+    if (!this.reasoningPanelOpen || !this.reasoningList) return;
+    this.reasoningList.replaceChildren();
+    entries.forEach(({ content }, index) => {
+      const entry = document.createElement("article");
+      entry.className = "agent-sidebar-reasoning-entry";
+      const label = document.createElement("div");
+      label.className = "agent-sidebar-reasoning-entry-label";
+      label.textContent = String(index + 1);
+      const text = document.createElement("div");
+      text.className = "agent-sidebar-reasoning-entry-content";
+      text.textContent = content;
+      entry.append(label, text);
+      this.reasoningList.appendChild(entry);
+    });
+  }
+
+  async copySessionReasoning() {
+    const entries = this.getSessionReasoning();
+    const value = entries.map(({ content }, index) =>
+      `Reasoning ${index + 1}\n${content}`,
+    ).join("\n\n");
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      this.copyTextFallback(value);
+    }
+    if (!this.reasoningCopyButton) return;
+    this.reasoningCopyButton.textContent = "Copied";
+    clearTimeout(this.reasoningCopyTimer);
+    this.reasoningCopyTimer = setTimeout(() => {
+      if (this.reasoningCopyButton) this.reasoningCopyButton.textContent = "Copy";
+    }, 1400);
+  }
+
   createMessageElement(message, options = {}) {
     const row = document.createElement("div");
     const role = message?.role || "agent";
     row.className = `agent-sidebar-message agent-sidebar-message-${role}`;
+    row.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu("agent-message", message);
+    });
     if (options.queued) {
       row.classList.add("agent-sidebar-message-queued");
     }
@@ -1916,51 +2867,19 @@ class AgentSidebar extends Sidebar {
     const bubble = document.createElement("div");
     bubble.className = "agent-sidebar-bubble";
 
-    const reasoning = this.normalizeReasoningValue(
-      message?.reasoning ??
-        message?.reasoning_content ??
-        message?.reasoningText,
-    );
-
-    if (reasoning) {
-      const reasoningToggle = document.createElement("button");
-      reasoningToggle.type = "button";
-      reasoningToggle.className = "agent-sidebar-reasoning-toggle";
-      reasoningToggle.setAttribute("aria-expanded", "false");
-
-      const reasoningIcon = document.createElement("i");
-      reasoningIcon.className = "fi fi-rr-angle-small-right";
-      reasoningToggle.appendChild(reasoningIcon);
-
-      const reasoningLabel = document.createElement("span");
-      reasoningLabel.textContent = "Reasoning";
-      reasoningToggle.appendChild(reasoningLabel);
-
-      const reasoningEl = document.createElement("div");
-      reasoningEl.className = "agent-sidebar-reasoning";
-      reasoningEl.textContent = reasoning;
-      reasoningEl.hidden = true;
-
-      reasoningToggle.addEventListener("click", () => {
-        const expanded =
-          reasoningToggle.getAttribute("aria-expanded") === "true";
-        reasoningToggle.setAttribute("aria-expanded", String(!expanded));
-        reasoningEl.hidden = expanded;
-      });
-
-      bubble.appendChild(reasoningToggle);
-      bubble.appendChild(reasoningEl);
-    }
-
     const contentValue =
       typeof message?.content === "string" ? message.content : "";
     let messageMeta = null;
     if (contentValue) {
       const contentEl = document.createElement("div");
       contentEl.className = "agent-sidebar-content";
+      if (role === "user" || role === "agent") {
+        contentEl.classList.add("agent-sidebar-selectable-content");
+      }
       if (role === "agent") {
         contentEl.classList.add("agent-sidebar-markdown");
         this.markdownRenderer.render(contentValue, contentEl, {
+          mode: MarkdownRenderer.MODES.STRICT,
           highlightImmediately: message?.streaming !== true,
         });
       } else {
@@ -2002,9 +2921,41 @@ class AgentSidebar extends Sidebar {
       messageMeta.appendChild(copyButton);
     }
 
-    bubble.style.userSelect = "text";
-    bubble.style.WebkitUserSelect = "text";
-    bubble.style.cursor = "text";
+    if (role === "user" && Array.isArray(message?.manualContextItems) && message.manualContextItems.length) {
+      const attachments = document.createElement("div");
+      attachments.className = "agent-sidebar-message-attachments";
+      for (const item of message.manualContextItems) {
+        const chip = document.createElement("span");
+        chip.className = "agent-sidebar-message-attachment";
+        chip.title = item.title || item.label || "Manual context";
+        const currentWorkspace = this.manualContextManager?.workspaceRoot?.();
+        const openable = item.type !== "folder" && (
+          typeof item.absolutePath === "string" ||
+          (typeof item.relativePath === "string" && typeof item.workspaceRoot === "string" &&
+            currentWorkspace && NCEPath.equals(currentWorkspace, item.workspaceRoot))
+        );
+        if (openable) {
+          chip.classList.add("is-openable");
+          chip.setAttribute("role", "button");
+          chip.tabIndex = 0;
+          chip.setAttribute("aria-label", `Open ${item.title || item.label || "file"}`);
+          const open = () => this.openManualContextFile(item);
+          chip.addEventListener("click", open);
+          chip.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(); }
+          });
+        }
+        const icon = document.createElement("i");
+        icon.className = item.type === "folder" ? "fi fi-rr-folder"
+          : item.type === "selection" ? "fi fi-rr-select" : "fi fi-rr-file-code";
+        icon.setAttribute("aria-hidden", "true");
+        const label = document.createElement("span");
+        label.textContent = item.label || "Manual context";
+        chip.append(icon, label);
+        attachments.appendChild(chip);
+      }
+      bubble.appendChild(attachments);
+    }
 
     row.appendChild(bubble);
     if (messageMeta) {
@@ -2053,38 +3004,46 @@ class AgentSidebar extends Sidebar {
 
   createReasoningElement(segment) {
     const row = document.createElement("div");
-    row.className =
-      "agent-sidebar-message agent-sidebar-message-reasoning agent-sidebar-timeline-segment";
+    row.className = "agent-sidebar-message agent-sidebar-message-reasoning";
     row.dataset.segmentId = segment.id;
     row.dataset.runId = String(segment.runId);
-    const bubble = document.createElement("div");
-    bubble.className = "agent-sidebar-bubble";
+    const disclosure = this.createReasoningDisclosure(segment.content, !!segment.collapsed, () => {
+      segment.collapsed = !segment.collapsed;
+    });
+    row.appendChild(disclosure.element);
+    this.messageElements.set(segment, {
+      row,
+      reasoning: disclosure.content,
+      reasoningToggle: disclosure.toggle,
+    });
+    return row;
+  }
+
+  createReasoningDisclosure(content, collapsed = true, onToggle = null) {
+    const element = document.createElement("div");
+    element.className = "agent-sidebar-reasoning-disclosure";
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "agent-sidebar-reasoning-toggle";
-    toggle.setAttribute("aria-expanded", String(!segment.collapsed));
-    const icon = document.createElement("i");
-    icon.className = "fi fi-rr-angle-small-right";
+    toggle.setAttribute("aria-expanded", String(!collapsed));
     const label = document.createElement("span");
     label.textContent = "Reasoning";
-    toggle.append(icon, label);
-    const content = document.createElement("div");
-    content.className = "agent-sidebar-reasoning";
-    content.textContent = segment.content;
-    content.hidden = !!segment.collapsed;
+    const icon = document.createElement("i");
+    icon.className = "fi fi-rr-angle-small-right";
+    icon.setAttribute("aria-hidden", "true");
+    toggle.append(label, icon);
+    const tree = document.createElement("div");
+    tree.className = "agent-sidebar-reasoning-tree";
+    tree.textContent = typeof content === "string" ? content : "";
+    tree.hidden = collapsed;
     toggle.addEventListener("click", () => {
-      segment.collapsed = !segment.collapsed;
-      toggle.setAttribute("aria-expanded", String(!segment.collapsed));
-      content.hidden = segment.collapsed;
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!expanded));
+      tree.hidden = expanded;
+      onToggle?.();
     });
-    bubble.append(toggle, content);
-    row.appendChild(bubble);
-    this.messageElements.set(segment, {
-      row,
-      reasoning: content,
-      reasoningToggle: toggle,
-    });
-    return row;
+    element.append(toggle, tree);
+    return { element, toggle, content: tree };
   }
 
   copyTextFallback(value) {
@@ -2098,6 +3057,16 @@ class AgentSidebar extends Sidebar {
     textarea.select();
     document.execCommand("copy");
     textarea.remove();
+  }
+
+  async copyMessageContent(message) {
+    const value = typeof message?.content === "string" ? message.content : "";
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
+      await navigator.clipboard.writeText(value);
+    } catch {
+      this.copyTextFallback(value);
+    }
   }
 
   shouldAutoScrollMessages() {
@@ -2132,6 +3101,7 @@ class AgentSidebar extends Sidebar {
     message.timestamp ||= this.formatTime();
     message.streaming = true;
     session.streamingMessage = message;
+    this.scheduleConversationSave(session);
     const refs = this.messageElements.get(message);
     if (!refs?.row?.isConnected) {
       this.removeEmptyState();
@@ -2153,30 +3123,13 @@ class AgentSidebar extends Sidebar {
 
     const shouldFollowScroll = this.shouldAutoScrollMessages();
     this.markdownRenderer.update(message.content, element, {
+      mode: MarkdownRenderer.MODES.STRICT,
       onRendered: () => {
         if (shouldFollowScroll && session.id === this.activeSessionId) {
           this.scrollMessagesToBottom();
         }
       },
     });
-  }
-
-  createTypingIndicator() {
-    const row = document.createElement("div");
-    row.className = "agent-sidebar-message agent-sidebar-message-agent";
-
-    const bubble = document.createElement("div");
-    bubble.className = "agent-sidebar-bubble agent-sidebar-typing";
-
-    for (let i = 0; i < 3; i++) {
-      const dot = document.createElement("span");
-      dot.className = "agent-sidebar-typing-dot";
-      bubble.appendChild(dot);
-    }
-
-    row.appendChild(bubble);
-    this.typingIndicatorElement = row;
-    return row;
   }
 
   renderChangesPanel(container) {
@@ -2641,6 +3594,20 @@ class AgentSidebar extends Sidebar {
     this.refresh();
   }
 
+  openReviewedChanges(item) {
+    const session = this.getActiveSession();
+    if (!session) return;
+    const requestedPath = item?.args?.path;
+    const change = requestedPath
+      ? session.changes.find((entry) => entry.path === requestedPath || entry.absolutePath === requestedPath)
+      : session.changes.length === 1 ? session.changes[0] : null;
+    if (session.changes.length) {
+      session.changesExpanded = true;
+      this.refresh({ renderMessages: false });
+    }
+    if (change) this.openChange(change);
+  }
+
   openChange(change) {
     if (
       this.editor &&
@@ -2724,7 +3691,11 @@ class AgentSidebar extends Sidebar {
       const previousScrollTop = this.messagesElement.scrollTop;
       this.renderMessages(this.messagesElement);
       if (shouldScroll) this.scrollMessagesToBottom();
-      else this.messagesElement.scrollTop = previousScrollTop;
+      else {
+        this.messagesElement.scrollTop = previousScrollTop;
+        this.messagesScroller?.updateMetrics();
+        this.messagesScroller?.refresh();
+      }
     }
 
     if (renderChanges && this.changesElement) {
@@ -2732,6 +3703,7 @@ class AgentSidebar extends Sidebar {
     }
 
     const session = this.getActiveSession();
+    this.renderManualContext();
 
     this.inputWrapperElement?.classList.toggle(
       "agent-sidebar-input-running",
@@ -2791,17 +3763,97 @@ class AgentSidebar extends Sidebar {
     }
   }
 
-  refresh() {
+  renderManualContext() {
+    const list = this.contextListElement;
+    if (!list) return;
+    const session = this.getActiveSession();
+    const items = session?.manualContext || [];
+    list.replaceChildren();
+    list.hidden = items.length === 0;
+    for (const item of items) {
+      const chip = document.createElement("div");
+      chip.className = "agent-sidebar-context-chip";
+      const openable = item.type !== "folder" && typeof item.absolutePath === "string";
+      if (openable) {
+        chip.classList.add("is-openable");
+        chip.setAttribute("role", "button");
+        chip.tabIndex = 0;
+        chip.setAttribute("aria-label", `Open ${item.relativePath || item.label || "file"}`);
+        const open = () => this.openManualContextFile(item);
+        chip.addEventListener("click", (event) => {
+          if (event.target.closest(".agent-sidebar-context-chip-remove")) return;
+          open();
+        });
+        chip.addEventListener("keydown", (event) => {
+          if ((event.key === "Enter" || event.key === " ") && event.target === chip) {
+            event.preventDefault(); open();
+          }
+        });
+      }
+      chip.title = item.type === "file" ? `File: ${item.relativePath || item.label}`
+        : item.type === "folder" ? `Folder: ${item.relativePath}`
+          : `Selection: ${item.relativePath || item.label}${item.range ? ` lines ${item.range.startLine}–${item.range.endLine}` : ""}`;
+      const icon = document.createElement("i");
+      icon.className = item.type === "folder" ? "fi fi-rr-folder"
+        : item.type === "selection" ? "fi fi-rr-select" : "fi fi-rr-file-code";
+      icon.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.textContent = item.type === "file" ? item.label
+        : item.type === "folder" ? item.relativePath
+          : `${item.label}${item.range ? `:${item.range.startLine}–${item.range.endLine}` : ""}`;
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "agent-sidebar-context-chip-remove";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", `Remove ${label.textContent} from context`);
+      remove.disabled = Boolean(session?.isGenerating);
+      remove.addEventListener("click", () => {
+        this.manualContextManager.remove(session, item.id);
+        this.renderManualContext();
+      });
+      chip.append(icon, label, remove);
+      list.appendChild(chip);
+    }
+    if (this.contextTriggerElement) this.contextTriggerElement.disabled = Boolean(session?.isGenerating);
+    if (this.contextActions) {
+      const running = Boolean(session?.isGenerating);
+      this.contextActions.addFileAction.disabled = running || !this.manualContextManager.workspaceRoot();
+      this.contextActions.addFolderAction.disabled = running || !this.manualContextManager.workspaceRoot();
+      this.contextActions.currentFileAction.disabled = running || !this.editor.tabManager?.activeFile?.path;
+      const selection = this.editor.selectController;
+      const selected = typeof selection?.getSelectedText === "function"
+        ? selection.getSelectedText() : selection?.containsSelected;
+      this.contextActions.currentSelectionAction.disabled = running || !(typeof selected === "string" && selected.trim());
+      this.contextActions.clearContextAction.disabled = running || !items.length;
+    }
+  }
+
+  openManualContextFile(item) {
+    let path = item?.absolutePath;
+    if (!path && item?.workspaceRoot && item?.relativePath) {
+      const root = this.manualContextManager.workspaceRoot();
+      if (!root || !NCEPath.equals(root, item.workspaceRoot)) return;
+      path = this.manualContextManager.absolutePath(root, item.relativePath);
+    }
+    if (!path || typeof this.editor.tabManager?.openFileWithPath !== "function") return;
+    this.editor.tabManager.openFileWithPath(path);
+  }
+
+  refresh(options = {}) {
     if (!this.container) {
       return;
     }
-    this.updateView();
+    this.updateView(options);
   }
 
   autoResizeInput() {
     if (!this.inputElement) return;
+    const maxHeight = 140;
     this.inputElement.style.height = "auto";
-    this.inputElement.style.height = `${this.inputElement.scrollHeight}px`;
+    const contentHeight = this.inputElement.scrollHeight;
+    this.inputElement.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+    this.inputElement.style.overflowY =
+      contentHeight > maxHeight ? "auto" : "hidden";
   }
 
   scrollMessagesToBottom() {
@@ -2821,6 +3873,15 @@ class AgentSidebar extends Sidebar {
     this.scrollBottomFrame = requestAnimationFrame(() => {
       this.scrollBottomFrame = null;
       apply();
+    });
+  }
+
+  scheduleRestoredBottomScroll() {
+    if (!this.scrollToBottomAfterRestore || !this.isOpen || !this.messagesElement) return;
+    requestAnimationFrame(() => {
+      if (!this.scrollToBottomAfterRestore || !this.isOpen || !this.messagesElement) return;
+      this.scrollMessagesToBottom();
+      this.scrollToBottomAfterRestore = false;
     });
   }
 
@@ -2867,7 +3928,7 @@ class AgentSidebar extends Sidebar {
         title: options.invalid
           ? `Replace ${provider.name} API key`
           : `${provider.name} API key`,
-        placeholder: "API key",
+        placeholder: `${provider.name} API key`,
         inputType: "password",
         onAccept: (value) => finish(String(value || "").trim()),
         onCancel: () => finish(""),
@@ -2913,8 +3974,10 @@ class AgentSidebar extends Sidebar {
   }
 
   generateSessionId() {
-    this._sessionCounter += 1;
-    return `session-${Date.now()}-${this._sessionCounter}`;
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
   handleSendClick() {
@@ -2940,7 +4003,11 @@ class AgentSidebar extends Sidebar {
     const session = {
       id: this.generateSessionId(),
       title: "New chat",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
       messages: [],
+      manualContext: [],
+      manualContextSnapshot: null,
       draft: "",
       isGenerating: false,
       runId: null,
@@ -2971,6 +4038,10 @@ class AgentSidebar extends Sidebar {
     this.refresh();
     this.updateSessionInfoPopover();
     this.focusInput();
+    this.scheduleConversationSave(session, true);
+    if (this.conversationPersistenceReady) {
+      Promise.resolve(this.editor.api?.setActiveAgentConversation?.(session.id)).catch(() => {});
+    }
 
     return session;
   }
@@ -2988,15 +4059,68 @@ class AgentSidebar extends Sidebar {
     if (!this.getSession(sessionId)) return;
 
     this.activeSessionId = sessionId;
+    Promise.resolve(this.editor.api?.setActiveAgentConversation?.(sessionId)).catch(() => {});
 
     this.refresh();
     this.updateSessionInfoPopover();
     this.focusInput();
   }
 
+  startRenameSession(sessionId) {
+    const session = this.getSession(sessionId);
+    if (!session || !this.tabsElement) return;
+    const tab = [...this.tabsElement.querySelectorAll(".agent-sidebar-tab")]
+      .find((element) => element.dataset.sessionId === sessionId);
+    const title = tab?.querySelector(".agent-sidebar-tab-title");
+    if (!tab || !title) return;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "agent-sidebar-tab-rename-input";
+    input.value = session.title;
+    input.setAttribute("aria-label", "Rename conversation");
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    });
+    title.replaceWith(input);
+
+    let finished = false;
+    const finish = (commit) => {
+      if (finished) return;
+      finished = true;
+      const nextTitle = input.value.trim();
+      if (commit && nextTitle) {
+        session.title = nextTitle;
+        this.scheduleConversationSave(session, true);
+      }
+      const next = document.createElement("span");
+      next.className = "agent-sidebar-tab-title";
+      next.textContent = session.title;
+      if (input.isConnected) input.replaceWith(next);
+    };
+    input.addEventListener("keydown", (event) => {
+      event.stopPropagation();
+      if (event.key === "Enter") {
+        event.preventDefault();
+        finish(true);
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        finish(false);
+      }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
+  }
+
   closeSession(sessionId) {
     const index = this.sessions.findIndex((s) => s.id === sessionId);
     if (index === -1) return;
+    const pendingSave = this.conversationSaveTimers.get(sessionId);
+    if (pendingSave) clearTimeout(pendingSave);
+    this.conversationSaveTimers.delete(sessionId);
 
     const session = this.sessions[index];
 
@@ -3033,6 +4157,7 @@ class AgentSidebar extends Sidebar {
 
     if (this.sessions.length === 0) {
       this.createSession();
+      Promise.resolve(this.editor.api?.deleteAgentConversation?.(sessionId, this.activeSessionId)).catch(() => {});
       return;
     }
 
@@ -3040,6 +4165,11 @@ class AgentSidebar extends Sidebar {
       const fallback = this.sessions[Math.max(0, index - 1)];
       this.activeSessionId = fallback.id;
     }
+
+    Promise.resolve(this.editor.api?.deleteAgentConversation?.(sessionId, this.activeSessionId)).catch((error) =>
+      console.warn("[NCE Agent Conversations] Delete failed", { sessionId, message: error?.message || "STORE_ERROR" }),
+    );
+    Promise.resolve(this.editor.api?.setActiveAgentConversation?.(this.activeSessionId)).catch(() => {});
 
     this.refresh();
   }
@@ -3068,6 +4198,7 @@ class AgentSidebar extends Sidebar {
       session.usage.actualPromptTokens += event.actualPromptTokens;
     if (Number.isFinite(event.estimatedPromptTokens))
       session.usage.estimatedPromptTokens += event.estimatedPromptTokens;
+    this.scheduleConversationSave(session);
     this.updateSessionInfoPopover();
   }
 
@@ -3191,8 +4322,10 @@ class AgentSidebar extends Sidebar {
 
     const stoppedRunId = session.runId;
     this.agent.stop();
+    this.finishActivityGroup({ sessionId: session.id, runId: stoppedRunId }, "cancelled");
     session.cancelledRunId = stoppedRunId;
     session.usage.cancelledRuns += 1;
+    this.scheduleConversationSave(session, true);
 
     if (session.abortController) {
       session.abortController.abort();
@@ -3210,8 +4343,6 @@ class AgentSidebar extends Sidebar {
       session.streamingMessage.streaming = false;
       session.streamingMessage = null;
     }
-
-    this.collapseRunDetails(session, stoppedRunId);
 
     session.messages.push({
       role: "agent",
@@ -3258,16 +4389,19 @@ class AgentSidebar extends Sidebar {
         content: typeof m.content === "string" ? m.content : "",
       }));
 
-    session.messages.push({
+    const userMessage = {
       role: "user",
       content,
       timestamp: this.formatTime(),
-    });
+    };
+    session.messages.push(userMessage);
+    session.pendingManualContextMessage = userMessage;
     session.usage.userMessages += 1;
     session.usage.runs += 1;
     this.updateSessionInfoPopover();
 
     this.renameSessionFromContent(session, content);
+    this.scheduleConversationSave(session, true);
 
     if (session.id === this.activeSessionId) {
       session.draft = "";
@@ -3286,6 +4420,7 @@ class AgentSidebar extends Sidebar {
         sessionId: session.id,
       });
       session.runId = this.agent.runId;
+      this.startAgentWork(session, session.runId);
       const result = await execution;
 
       const agentReply =
@@ -3363,12 +4498,20 @@ class AgentSidebar extends Sidebar {
           sessionId: session.id,
           runId: completedRunId,
         };
-        this.finishActivityGroup(activityContext);
-        this.collapseRunDetails(session, completedRunId);
+        this.finishActivityGroup(activityContext, errorWasCancellation ? "cancelled" : runFailed ? "error" : "success");
       }
       session.runId = null;
       session.isGenerating = false;
+      session.manualContextSnapshot = null;
+      session.pendingManualContextMessage = null;
       session.streamingMessage = null;
+      for (const segment of session.segments || []) {
+        if (segment?.runId !== completedRunId) continue;
+        segment.status = "complete";
+        if (segment.type === "assistant" || segment.type === "reasoning") {
+          segment.streaming = false;
+        }
+      }
       if (errorWasCancellation && session.cancelledRunId !== completedRunId)
         session.usage.cancelledRuns += 1;
       else if (runFailed) session.usage.failedRuns += 1;
@@ -3377,11 +4520,21 @@ class AgentSidebar extends Sidebar {
       if (session.currentSegment) {
         session.currentSegment.status = "complete";
       }
+      this.scheduleConversationSave(session, true);
 
       this.processQueue(session.id);
       this.refresh();
       if (session.id === this.activeSessionId) this.scrollMessagesToBottom();
     }
+  }
+
+  destroy() {
+    this.stopAgentWorkTicker();
+    document.removeEventListener("click", this.approvalMenuClickHandler);
+    document.removeEventListener("click", this.reasoningOutsideClickHandler);
+    if (this.reasoningCopyTimer) clearTimeout(this.reasoningCopyTimer);
+    this.approvalUnsubscribe?.();
+    this.markdownRenderer?.destroyAll?.();
   }
 
   queueMessage(sessionId, content) {
@@ -3414,10 +4567,12 @@ class AgentSidebar extends Sidebar {
 
   onOpen() {
     this.refresh();
+    this.scheduleRestoredBottomScroll();
     this.focusInput();
   }
 
   onClose() {
+    this.stopAgentWorkTicker();
     this.closeSessionInfo();
     if (this.sessionInfoOutsideClick)
       document.removeEventListener("click", this.sessionInfoOutsideClick);

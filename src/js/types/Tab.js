@@ -1,6 +1,8 @@
 const TAB_TYPES = Object.freeze({
   FILE: "file",
   SETTINGS: "settings",
+  PICTURE: "picture",
+  MARKDOWN: "markdown",
 });
 
 class Tab {
@@ -18,11 +20,39 @@ class SettingsTab extends Tab {
   }
 }
 
+class PictureTab extends Tab {
+  constructor(id, path) {
+    super(id, TAB_TYPES.PICTURE, NCEPath.basename(path));
+    this.path = path;
+    this.diskFingerprint = null;
+  }
+}
+
+class MarkdownTab extends Tab {
+  constructor(id, path) {
+    super(id, TAB_TYPES.MARKDOWN, NCEPath.basename(path));
+    this.path = path;
+    this.diskFingerprint = null;
+    this.textTab = null;
+  }
+}
+
 class FileNode extends Tab {
   constructor(e, id, name, path) {
     super(id, TAB_TYPES.FILE, name);
+    Object.defineProperties(this, {
+      _lineLengthRecords: { value: null, writable: true, configurable: true },
+      _lineLengthHeap: { value: null, writable: true, configurable: true },
+      _lineLengthCount: { value: -1, writable: true, configurable: true },
+      _lineMetricsTabWidth: { value: null, writable: true, configurable: true },
+      _logicalLineLengths: { value: null, writable: true, configurable: true },
+      _logicalLengthTree: { value: null, writable: true, configurable: true },
+      _logicalLengthCount: { value: -1, writable: true, configurable: true },
+    });
     this.editor = e;
     this.path = path;
+    this.searchReplaceValue = "";
+    this.searchCurrentIndex = -1;
 
     this.isSaved = true;
     this.deletedFromDisk = false;
@@ -43,6 +73,7 @@ class FileNode extends Tab {
     this.index = 1;
     this.totalLines = 0;
     this.maxLineLength = 0;
+    this.maxLineLengthDirty = false;
     this.startIndex = 0;
     this.offsetY = 0;
     this.offsetX = 0;
@@ -55,6 +86,8 @@ class FileNode extends Tab {
     this.isMouseDown = false;
     this.containsSelected = "";
     this._selectedLines = new Map();
+    this._selectionRange = null;
+    this._selectionTextCache = null;
 
     this.lastClick = 0;
     this.clickCount = 0;
@@ -100,6 +133,8 @@ class FileNode extends Tab {
   replaceFile(file) {
     this.name = file.name;
     this.path = file.path;
+    this.searchReplaceValue = "";
+    this.searchCurrentIndex = -1;
     this.isSaved = file.isSaved;
     this.deletedFromDisk = file.deletedFromDisk === true;
     this.externalModified = file.externalModified === true;
@@ -114,6 +149,14 @@ class FileNode extends Tab {
     this.index = file.index;
     this.totalLines = file.totalLines;
     this.maxLineLength = file.maxLineLength;
+    this.maxLineLengthDirty = file.maxLineLengthDirty === true;
+    this._lineLengthRecords = null;
+    this._lineLengthHeap = null;
+    this._lineLengthCount = -1;
+    this._lineMetricsTabWidth = null;
+    this._logicalLineLengths = null;
+    this._logicalLengthTree = null;
+    this._logicalLengthCount = -1;
     this.startIndex = file.startIndex;
     this.offsetY = file.offsetY;
     this.offsetX = file.offsetX;
@@ -122,6 +165,8 @@ class FileNode extends Tab {
     this.isMouseDown = file.isMouseDown;
     this.containsSelected = file.containsSelected;
     this._selectedLines = file._selectedLines;
+    this._selectionRange = file._selectionRange || null;
+    this._selectionTextCache = null;
 
     this.lastClick = file.lastClick;
     this.clickCount = file.clickCount;
@@ -161,6 +206,9 @@ class FileNode extends Tab {
       this.incrementalEligible = result.incrementalEligible;
       this.lines = result.initialLines.map((text) => new LineNode(text));
       if (!this.lines.length) this.lines = [new LineNode("")];
+      this._logicalLineLengths = null;
+      this._logicalLengthTree = null;
+      this._logicalLengthCount = -1;
       this.totalLines = this.lines.length;
       this.syntaxMetrics = null;
       this.loadError = null;

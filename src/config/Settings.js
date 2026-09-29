@@ -37,19 +37,37 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 });
 
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
+  ui: Object.freeze({ settingsCategory: "Editor", settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({ autoSave: false }),
+  appearance: Object.freeze({ theme: "system" }),
+  agent: Object.freeze({ hiddenModels: [] }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
 let RENDERER_SETTINGS = {
+  ui: { ...DEFAULT_RENDERER_SETTINGS.ui },
   editor: { ...DEFAULT_RENDERER_SETTINGS.editor },
   files: { ...DEFAULT_RENDERER_SETTINGS.files },
+  appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
+  agent: { hiddenModels: [] },
   keybindings: { ...DEFAULT_RENDERER_SETTINGS.keybindings },
 };
 
 function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
+    ui: {
+      settingsCategory:
+        ["Editor", "Files", "Shortcuts", "Agent"].includes(settings?.ui?.settingsCategory)
+          ? settings.ui.settingsCategory
+          : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,
+      settingsScrollTop:
+        Number.isSafeInteger(settings?.ui?.settingsScrollTop) &&
+        settings.ui.settingsScrollTop >= 0 &&
+        settings.ui.settingsScrollTop <= 1_000_000
+          ? settings.ui.settingsScrollTop
+          : DEFAULT_RENDERER_SETTINGS.ui.settingsScrollTop,
+    },
     editor: {
       tabWidth:
         Number.isInteger(settings?.editor?.tabWidth) &&
@@ -63,6 +81,21 @@ function SETTINGS_INITIALIZE(settings) {
         typeof settings?.files?.autoSave === "boolean"
           ? settings.files.autoSave
           : DEFAULT_RENDERER_SETTINGS.files.autoSave,
+    },
+    appearance: {
+      theme:
+        settings?.appearance?.theme === "system" ||
+        settings?.appearance?.theme === "dark" ||
+        settings?.appearance?.theme === "light"
+          ? settings.appearance.theme
+          : DEFAULT_RENDERER_SETTINGS.appearance.theme,
+    },
+    agent: {
+      hiddenModels: Array.isArray(settings?.agent?.hiddenModels)
+        ? [...new Set(settings.agent.hiddenModels.filter(
+            (value) => typeof value === "string" && value.trim() && value.length <= 512,
+        ))]
+        : [],
     },
     keybindings: Object.fromEntries(
       Object.entries(DEFAULT_KEYBINDINGS).map(([action, shortcut]) => [
@@ -155,6 +188,19 @@ async function SETTINGS_SET(key, value) {
     }
   }
 
+  if (section === "appearance" && property === "theme") {
+    if (value !== "system" && value !== "dark" && value !== "light") {
+      return false;
+    }
+  }
+
+  if (section === "agent" && property === "hiddenModels") {
+    if (
+      !Array.isArray(value) ||
+      value.some((entry) => typeof entry !== "string" || !entry.trim() || entry.length > 512)
+    ) return false;
+    value = [...new Set(value)];
+  }
   RENDERER_SETTINGS[section][property] = value;
   const saved = await window.api.setSetting(key, value);
   if (!saved) RENDERER_SETTINGS[section][property] = previous;

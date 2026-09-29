@@ -3,10 +3,14 @@ const assert = require("node:assert/strict");
 const { loadGlobal } = require("./helpers/runtime");
 
 const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
-const TAB_TYPES = { FILE: "file", SETTINGS: "settings" };
+const TAB_TYPES = { FILE: "file", SETTINGS: "settings", PICTURE: "picture" };
 class SettingsTab {
   constructor(id) { this.id = id; this.type = TAB_TYPES.SETTINGS; }
 }
+class PictureTab {
+  constructor(id, path) { Object.assign(this, { id, type: TAB_TYPES.PICTURE, path, name: NCEPath.basename(path) }); }
+}
+const PictureView = { isSupportedPath: (path) => /\.(png|jpe?g|webp|gif|bmp|ico)$/i.test(path || "") };
 class FileNode {
   constructor(editor, id, name, path) {
     Object.assign(this, {
@@ -19,7 +23,7 @@ class FileNode {
 const StatesManager = loadGlobal(
   "src/js/manager/StatesManager.js",
   "StatesManager",
-  { NCEPath, TAB_TYPES, SettingsTab, FileNode },
+  { NCEPath, TAB_TYPES, SettingsTab, PictureTab, PictureView, FileNode },
 );
 
 function fixture(root = "/projects/A") {
@@ -32,12 +36,20 @@ function fixture(root = "/projects/A") {
     refresh() {},
   };
   const saved = new Map();
+  const leftScroller = { scrollTop: 123, menuOBJ: null, refresh() {} };
+  const rightScroller = { scrollTop: 456, menuOBJ: null, refresh() {} };
   const editor = {
     tabManager,
-    sidebarManager: null,
+    sidebarManager: { leftScroller, rightScroller },
     agentSidebar: {
       getConfigState: () => ({ currentProviderId: "global", currentModel: "x" }),
+      restoreScrollState() { this.restoredToBottom = true; },
       async loadConfigState(value) { this.loaded = value; },
+    },
+    searchSidebar: {
+      query: "needle",
+      replaceExpanded: true,
+      restoreQueryState(value) { this.restoredQueryState = value; },
     },
     fileExplorer: {
       rootPath: root, projectExpanded: true,
@@ -47,6 +59,7 @@ function fixture(root = "/projects/A") {
       },
       getExpandedPaths: () => new Set([`${root}/src`, `${root}/src/components`]),
       async restoreExpandedFolders(_files, expanded) { this.restoredExpanded = expanded; },
+      restoreScrollState(value) { this.restoredScrollState = value; },
       refresh() {},
     },
     api: {
@@ -55,10 +68,10 @@ function fixture(root = "/projects/A") {
       async loadWorkspaceState(target) { return structuredClone(saved.get(target) || null); },
     },
   };
-  return { editor, manager: new StatesManager(editor), saved, files };
+  return { editor, manager: new StatesManager(editor), saved, files, leftScroller, rightScroller };
 }
 
-test("workspace snapshots contain relative paths and no rootPath", () => {
+test("workspace snapshots contain relative paths and no Agent scroll position", () => {
   const { editor, manager } = fixture();
   const a = new FileNode(editor, 1, "a.js", "/projects/A/src/a.js");
   const settings = new SettingsTab(2);
@@ -69,9 +82,69 @@ test("workspace snapshots contain relative paths and no rootPath", () => {
   assert.equal(state.tabManager.tabs[0].path, "src/a.js");
   assert.deepEqual(Array.from(state.fileExplorer.expandedPaths), ["src", "src/components"]);
   assert.equal(state.fileExplorer.activeFilePath, "src/b.js");
+  assert.equal(state.fileExplorer.scrollTop, 123);
+  assert.equal("agent" in state, false);
+  assert.equal(state.search.query, "needle");
+  assert.equal(state.search.sidebarExpanded, true);
   assert.equal("rootPath" in state.fileExplorer, false);
   assert.equal(JSON.stringify(state).includes("/projects/A"), false);
   assert.equal(manager.toWorkspaceRelative("C:\\Work\\A\\src\\a.js", "c:/work/a"), "src/a.js");
+});
+
+test("picture tabs serialize minimally and sanitize relative paths and identity", () => {
+  const { editor, manager } = fixture();
+  const picture = new PictureTab(9, "/projects/A/assets/logo.PNG");
+  picture.name = "untrusted name";
+  editor.tabManager.tabs = [picture];
+  editor.tabManager.activeTab = picture;
+  const snapshot = manager.getTabManagerState("/projects/A");
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.tabs)), [{ id: 9, type: "picture", path: "assets/logo.PNG" }]);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshot.activeTab)), { id: 9 });
+  assert.equal(snapshot.activeFile, null);
+  assert.equal("files" in snapshot && snapshot.files.length, 0);
+  const clean = manager.sanitizeTabManager({
+    activeTab: { id: 1 }, activeFile: { id: 1 },
+    tabs: [
+      { id: 1, type: "picture", name: "spoof.png", path: "assets/logo.PNG", row: 44 },
+      { id: 2, type: "picture", path: "../escape.png" },
+      { id: 3, type: "picture", path: "assets/vector.svg" },
+      { id: 4, type: "picture", path: "/absolute/p.png" },
+    ],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(clean.tabs)), [{ id: 1, type: "picture", name: "logo.PNG", path: "assets/logo.PNG" }]);
+  assert.equal(clean.activeFile, null);
+});
+
+test("workspace restore recreates an active picture without assigning activeFile", async () => {
+  const { editor, manager, files } = fixture();
+  files.add("/projects/A/assets/logo.png");
+  await manager.restoreWorkspaceState({
+    version: 1,
+    tabManager: {
+      activeTab: { id: 8 }, activeFile: { id: 8 },
+      tabs: [{ id: 8, type: "picture", name: "untrusted", path: "assets/logo.png", row: 123 }],
+    },
+  }, "/projects/A");
+  const active = editor.tabManager.activeTab;
+  assert.equal(active.type, "picture");
+  assert.equal(active.name, "logo.png");
+  assert.equal(active.path, "/projects/A/assets/logo.png");
+  assert.equal(editor.tabManager.activeFile, null);
+});
+
+test("workspace restores File Explorer scroll and sends Agent to the bottom", async () => {
+  const { editor, manager } = fixture();
+  await manager.restoreWorkspaceState({
+    version: 1,
+    fileExplorer: { scrollTop: 321, expandedPaths: [] },
+    agent: { scrollTop: 654 },
+    search: { query: "restore me" },
+  }, "/projects/A");
+
+  assert.equal(editor.fileExplorer.restoredScrollState.scrollTop, 321);
+  assert.equal(editor.agentSidebar.restoredToBottom, true);
+  assert.equal(editor.searchSidebar.restoredQueryState.query, "restore me");
+  assert.equal(editor.searchSidebar.restoredQueryState.sidebarExpanded, false);
 });
 
 test("workspace restore skips missing and unsafe files and falls back active tab", async () => {
@@ -118,6 +191,10 @@ test("legacy migration separates global config and relative workspace UI once", 
 
 test("no-workspace state and workspace state remain independent", async () => {
   const { editor, manager, saved } = fixture();
+  editor.sidebarManager = {
+    menus: new Map(),
+    closeSidebar() {},
+  };
   editor.fileExplorer.rootPath = "";
   editor.tabManager.tabs = [new SettingsTab(7)];
   editor.tabManager.activeTab = editor.tabManager.tabs[0];
@@ -203,9 +280,34 @@ test("workspace sanitizer allowlists fields, types, paths, ids, and numbers", ()
   assert.equal(safe.tabManager.tabs[1].column, 0);
   assert.deepEqual(Array.from(safe.fileExplorer.expandedPaths), ["src"]);
   assert.equal(safe.fileExplorer.activeFilePath, null);
+  assert.equal(safe.fileExplorer.scrollTop, 0);
+  assert.equal("agent" in safe, false);
+  assert.equal(safe.search.query, "");
+  assert.equal(safe.search.sidebarExpanded, false);
   assert.equal("command" in safe, false);
   assert.equal(JSON.stringify(safe).includes("TOKEN"), false);
   assert.equal(JSON.stringify(safe).includes("<script>"), false);
+});
+
+test("workspace sanitizer retains bounded File Explorer scroll positions", () => {
+  const { manager } = fixture();
+  const valid = manager.sanitizeWorkspaceState({
+    version: 1,
+    fileExplorer: { scrollTop: 987 },
+    search: { query: "needle", sidebarExpanded: true },
+  });
+  assert.equal(valid.fileExplorer.scrollTop, 987);
+  assert.equal("agent" in valid, false);
+  assert.equal(valid.search.query, "needle");
+  assert.equal(valid.search.sidebarExpanded, true);
+
+  const invalid = manager.sanitizeWorkspaceState({
+    version: 1,
+    fileExplorer: { scrollTop: -1 },
+    search: { query: 42 },
+  });
+  assert.equal(invalid.fileExplorer.scrollTop, 0);
+  assert.equal(invalid.search.query, "");
 });
 
 test("workspace sanitizer caps huge collections and rejects huge strings", () => {

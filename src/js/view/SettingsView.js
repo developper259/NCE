@@ -1,5 +1,20 @@
 const SETTINGS_UI = Object.freeze([
   {
+    key: "appearance.theme",
+    category: "Editor",
+    label: "Theme",
+    description: "Controls the color theme used by NCE.",
+    keywords: ["theme", "color", "appearance"],
+    control: "select",
+    valueType: "string",
+    options: [
+      { value: "system", label: "System" },
+      { value: "dark", label: "Dark" },
+      { value: "light", label: "Light" },
+    ],
+    apply: (editor, value) => editor.themeManager.setTheme(value),
+  },
+  {
     key: "editor.tabWidth",
     category: "Editor",
     label: "Tab Width",
@@ -16,29 +31,51 @@ const SETTINGS_UI = Object.freeze([
     keywords: ["auto", "save", "files"],
     control: "checkbox",
   },
+  {
+    key: "agent.settings",
+    category: "Agent",
+    label: "Agent",
+    description: "Configure visible models and provider API keys.",
+    keywords: ["agent", "model", "AI", "provider", "API", "key"],
+    control: "agent",
+  },
 ]);
+
+const SETTINGS_CATEGORY_META = Object.freeze({
+  Editor: { description: "Configure editor appearance and behavior." },
+  Files: { description: "Configure file and save behavior." },
+  Shortcuts: { description: "Configure keyboard shortcuts." },
+  Agent: { description: "Configure AI models and providers." },
+});
 
 class SettingsView {
   constructor(editor) {
     this.editor = editor;
     this.host = editor.domManager.getElement(".settings-view-host");
-    this.category = SETTINGS_UI[0].category;
+    this.category = SETTINGS_GET("ui.settingsCategory") || SETTINGS_UI[0].category;
     this.query = "";
+    this.agentSettingsTab = "models";
     this.scroller = null;
+    this.scrollSaveTimer = null;
+    this.scrollRestored = false;
     this.build();
   }
 
   build() {
     if (!this.host) return;
     this.host.innerHTML = `
-      <div class="settings-search-wrap">
-        <i class="fi fi-rr-search" aria-hidden="true"></i>
-        <input class="settings-search" type="search" placeholder="Search settings..."
-          aria-label="Search settings" autocomplete="off" spellcheck="false">
-      </div>
       <div class="settings-layout">
-        <nav class="settings-nav" aria-label="Settings categories"></nav>
-        <main class="settings-content"></main>
+        <aside class="settings-sidebar">
+          <div class="settings-search-wrap">
+            <i class="fi fi-rr-search" aria-hidden="true"></i>
+            <input class="settings-search" type="search" placeholder="Search settings..."
+              aria-label="Search settings" autocomplete="off" spellcheck="false">
+          </div>
+          <nav class="settings-nav" aria-label="Settings categories"></nav>
+        </aside>
+        <main class="settings-main">
+          <div class="settings-content"></div>
+        </main>
       </div>`;
     this.search = this.host.querySelector(".settings-search");
     this.layout = this.host.querySelector(".settings-layout");
@@ -51,6 +88,9 @@ class SettingsView {
     this.renderNavigation();
     this.render();
     this.initScroller();
+    this.content.addEventListener("scroll", () => this.scheduleScrollSave(), {
+      passive: true,
+    });
   }
 
   initScroller() {
@@ -75,6 +115,47 @@ class SettingsView {
     if (!this.scroller) return;
     this.scroller.updateMetrics();
     this.scroller.refresh();
+  }
+
+  restoreScrollTop() {
+    const scrollTop = SETTINGS_GET("ui.settingsScrollTop") || 0;
+    const category = this.category;
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (callback) => setTimeout(callback, 0);
+    schedule(() => {
+      if (!this.content || this.category !== category) return;
+      const maxScrollTop = Math.max(
+        0,
+        this.content.scrollHeight - this.content.clientHeight,
+      );
+      this.content.scrollTop = Math.min(scrollTop, maxScrollTop);
+      this.refreshScroller();
+    });
+  }
+
+  scheduleScrollSave() {
+    clearTimeout(this.scrollSaveTimer);
+    this.scrollSaveTimer = setTimeout(() => {
+      this.scrollSaveTimer = null;
+      this.saveScrollTop();
+    }, 200);
+  }
+
+  saveScrollTop() {
+    clearTimeout(this.scrollSaveTimer);
+    this.scrollSaveTimer = null;
+    if (this.content) {
+      const scrollTop = Math.max(
+        0,
+        Math.min(Math.round(this.content.scrollTop), 1_000_000),
+      );
+      SETTINGS_SET(
+        "ui.settingsScrollTop",
+        scrollTop,
+      );
+    }
   }
 
   getSettings() {
@@ -106,16 +187,25 @@ class SettingsView {
         button.textContent = category;
         button.dataset.category = category;
         button.addEventListener("click", () => {
-          this.category = category;
-          this.query = "";
-          if (this.search) this.search.value = "";
-          this.renderNavigation();
-          this.render();
+          this.openCategory(category);
         });
         if (category === this.category) button.classList.add("active");
         return button;
       }),
     );
+  }
+
+  openCategory(category) {
+    const available = new Set(this.getSettings().map((setting) => setting.category));
+    if (!available.has(category)) return false;
+    this.category = category;
+    SETTINGS_SET("ui.settingsCategory", category);
+    this.query = "";
+    if (this.search) this.search.value = "";
+    this.renderNavigation();
+    this.render();
+    this.saveScrollTop();
+    return true;
   }
 
   getVisibleSettings() {
@@ -130,8 +220,9 @@ class SettingsView {
     );
   }
 
-  render() {
+  render({ preserveScroll = false } = {}) {
     if (!this.content) return;
+    const previousScrollTop = preserveScroll ? this.content.scrollTop : 0;
     this.content.scrollTop = 0;
     const settings = this.getVisibleSettings();
     this.content.replaceChildren();
@@ -140,30 +231,56 @@ class SettingsView {
       empty.className = "settings-empty";
       empty.textContent = "No settings found.";
       this.content.appendChild(empty);
+      if (preserveScroll) this.content.scrollTop = previousScrollTop;
       this.refreshScroller();
       return;
     }
     const categories = [...new Set(settings.map((item) => item.category))];
     for (const category of categories) {
       const section = document.createElement("section");
-      section.className = "settings-section";
-      const title = document.createElement("h2");
-      title.textContent = category;
-      section.appendChild(title);
-      for (const setting of settings.filter(
+      section.className = "settings-page";
+      section.appendChild(this.createPageHeader(category));
+
+      const categorySettings = settings.filter(
         (item) => item.category === category,
-      )) {
-        section.appendChild(this.createRow(setting));
+      );
+      if (category === "Agent") {
+        section.appendChild(this.createAgentSettings());
+      } else {
+        const panel = document.createElement("div");
+        panel.className = "settings-panel";
+        for (const setting of categorySettings) {
+          panel.appendChild(this.createRow(setting));
+        }
+        section.appendChild(panel);
       }
       this.content.appendChild(section);
     }
+    if (preserveScroll) this.content.scrollTop = previousScrollTop;
     this.refreshScroller();
   }
 
+  createPageHeader(category) {
+    const header = document.createElement("header");
+    header.className = "settings-page-header";
+    const title = document.createElement("h1");
+    title.className = "settings-page-title";
+    title.textContent = category;
+    const description = document.createElement("p");
+    description.className = "settings-page-description";
+    description.textContent =
+      SETTINGS_CATEGORY_META[category]?.description ||
+      `Configure ${category.toLowerCase()} settings.`;
+    header.append(title, description);
+    return header;
+  }
+
   createRow(setting) {
+    if (setting.control === "agent") return this.createAgentSettings();
     const row = document.createElement("div");
-    row.className = "setting-row";
+    row.className = "settings-panel-row setting-row";
     const text = document.createElement("div");
+    text.className = "settings-row-main";
     const label = document.createElement("label");
     const controlId = `setting-${setting.key.replace(/\./g, "-")}`;
     label.className = "setting-label";
@@ -181,24 +298,229 @@ class SettingsView {
           : setting.control === "shortcut"
             ? this.createShortcutInput(setting, controlId)
             : this.createTextInput(setting, controlId);
-    row.append(text, control);
+    const controlWrap = document.createElement("div");
+    controlWrap.className = "settings-row-control";
+    controlWrap.appendChild(control);
+    row.append(text, controlWrap);
     return row;
+  }
+
+  createAgentSettings() {
+    const container = document.createElement("div");
+    container.className = "agent-settings-content";
+    const tabs = document.createElement("div");
+    tabs.className = "agent-settings-tabs";
+    tabs.setAttribute("role", "tablist");
+    for (const [id, label] of [["models", "Models"], ["providers", "Providers"]]) {
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.className = "agent-settings-tab";
+      tab.textContent = label;
+      tab.id = `agent-settings-tab-${id}`;
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(this.agentSettingsTab === id));
+      tab.tabIndex = this.agentSettingsTab === id ? 0 : -1;
+      tab.addEventListener("click", () => {
+        this.agentSettingsTab = id;
+        this.render();
+      });
+      tab.addEventListener("keydown", (event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+        event.preventDefault();
+        this.agentSettingsTab = id === "models" ? "providers" : "models";
+        this.render();
+        this.content?.querySelector(`#agent-settings-tab-${this.agentSettingsTab}`)?.focus();
+      });
+      tabs.appendChild(tab);
+    }
+    container.appendChild(tabs);
+
+    const panel = document.createElement("div");
+    panel.className = "agent-settings-panel";
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", `agent-settings-tab-${this.agentSettingsTab}`);
+    panel.appendChild(
+      this.agentSettingsTab === "models"
+        ? this.createAgentModelsView()
+        : this.createAgentProvidersView(),
+    );
+    container.appendChild(panel);
+    return container;
+  }
+
+  createAgentModelsView() {
+    const container = document.createElement("div");
+
+    const hiddenModels = new Set(SETTINGS_GET("agent.hiddenModels") || []);
+    for (const provider of AgentAI.getProviders()) {
+      const models = Object.values(provider.models || {});
+      if (!models.length) continue;
+      const group = document.createElement("section");
+      group.className = "agent-model-group";
+      const groupHeader = document.createElement("div");
+      groupHeader.className = "agent-model-group-header";
+      const heading = document.createElement("h2");
+      heading.className = "agent-model-group-title";
+      heading.textContent = provider.name;
+      groupHeader.appendChild(heading);
+      group.appendChild(groupHeader);
+      const panel = document.createElement("div");
+      panel.className = "settings-panel";
+      for (const model of models) {
+        const key = AgentAI.getModelKey(provider.id, model.id);
+        const row = document.createElement("div");
+        row.className = "settings-panel-row agent-model-setting";
+        const text = document.createElement("span");
+        text.className = "settings-row-label";
+        text.textContent = model.name;
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.checked = !hiddenModels.has(key);
+        input.setAttribute("aria-label", `${model.name} (${provider.name})`);
+        const toggle = document.createElement("label");
+        toggle.className = "setting-toggle";
+        const track = document.createElement("span");
+        track.setAttribute("aria-hidden", "true");
+        toggle.append(input, track);
+        input.addEventListener("change", async () => {
+          const previous = new Set(SETTINGS_GET("agent.hiddenModels") || []);
+          const next = new Set(previous);
+          if (input.checked) next.delete(key);
+          else next.add(key);
+          const saved = await SETTINGS_SET("agent.hiddenModels", [...next]);
+          if (!saved) input.checked = !input.checked;
+          else this.editor.agentSidebar?.refreshModelSelector?.();
+        });
+        row.append(text, toggle);
+        panel.appendChild(row);
+      }
+      group.appendChild(panel);
+      container.appendChild(group);
+    }
+    return container;
+  }
+
+  createAgentProvidersView() {
+    const container = document.createElement("div");
+
+    const panel = document.createElement("div");
+    panel.className = "settings-panel agent-providers-panel";
+    for (const provider of AgentAI.getProviders()) {
+      panel.appendChild(this.createAgentProviderControl(provider));
+    }
+    container.appendChild(panel);
+
+    const security = document.createElement("p");
+    security.className = "agent-settings-security";
+    security.textContent = "API keys are stored securely using your system keychain and are never saved in settings.json.";
+    container.appendChild(security);
+    return container;
+  }
+
+  createAgentProviderControl(provider) {
+    const container = document.createElement("section");
+    container.className = "settings-panel-row agent-provider-setting";
+    const details = document.createElement("div");
+    details.className = "settings-row-main";
+    const title = document.createElement("h4");
+    title.textContent = provider.name;
+    details.appendChild(title);
+    container.appendChild(details);
+    if (!provider.requiresApiKey) {
+      const status = document.createElement("p");
+      status.className = "agent-provider-status agent-provider-inline-status";
+      status.textContent = "No API key required.";
+      container.appendChild(status);
+      return container;
+    }
+    const status = document.createElement("p");
+    status.className = "agent-provider-status";
+    const updateStatus = (configured, message = "") => {
+      status.textContent = message || (configured ? "Configured" : "Not configured");
+      status.dataset.configured = String(configured);
+    };
+    details.appendChild(status);
+
+    const actions = document.createElement("div");
+    actions.className = "agent-provider-key-actions";
+    const save = document.createElement("button");
+    save.type = "button";
+    save.textContent = "Set API key";
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Remove API key";
+    remove.className = "agent-provider-remove";
+    const error = document.createElement("p");
+    error.className = "agent-provider-error";
+    error.hidden = true;
+    const refreshStatus = async () => {
+      const configured = await this.editor.api.hasAgentApiKey?.(provider.id);
+      updateStatus(configured === true);
+      save.textContent = configured ? "Manage API key" : "Set API key";
+      remove.hidden = !configured;
+    };
+    save.addEventListener("click", async () => {
+      save.disabled = true;
+      error.textContent = "";
+      error.hidden = true;
+      const value = await this.editor.agentSidebar?.requestApiKey?.(provider);
+      if (!value) {
+        save.disabled = false;
+        return;
+      }
+      const saved = await this.editor.api.setAgentApiKey?.(provider.id, value);
+      if (saved) {
+        updateStatus(true);
+        remove.hidden = false;
+        save.textContent = "Manage API key";
+        await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
+      } else {
+        error.textContent = "Could not save API key.";
+        error.hidden = false;
+      }
+      save.disabled = false;
+    });
+    remove.addEventListener("click", async () => {
+      remove.disabled = true;
+      error.textContent = "";
+      error.hidden = true;
+      const removed = await this.editor.api.setAgentApiKey?.(provider.id, "");
+      if (removed) {
+        updateStatus(false);
+        remove.hidden = true;
+        save.textContent = "Set API key";
+        await this.editor.agentSidebar?.refreshProviderApiKey?.(provider.id);
+      } else {
+        error.textContent = "Could not remove API key.";
+        error.hidden = false;
+      }
+      remove.disabled = false;
+    });
+    actions.append(save, remove);
+    container.append(actions, error);
+    remove.hidden = true;
+    refreshStatus().catch(() => updateStatus(false, "Not configured"));
+    return container;
   }
 
   createSelect(setting, id) {
     const select = document.createElement("select");
     select.id = id;
     select.className = "setting-select";
-    for (const value of setting.options) {
+    for (const optionValue of setting.options) {
       const option = document.createElement("option");
+      const value = typeof optionValue === "object" ? optionValue.value : optionValue;
       option.value = String(value);
-      option.textContent = String(value);
+      option.textContent = typeof optionValue === "object" ? optionValue.label : String(value);
       select.appendChild(option);
     }
     select.value = String(SETTINGS_GET(setting.key));
     select.addEventListener("change", async () => {
       const previous = SETTINGS_GET(setting.key);
-      const res = await SETTINGS_SET(setting.key, Number(select.value));
+      const value = setting.valueType === "string" ? select.value : Number(select.value);
+      const res = setting.apply
+        ? await setting.apply(this.editor, value)
+        : await SETTINGS_SET(setting.key, value);
       if (!res || (typeof res === "object" && !res.success))
         select.value = String(previous);
       this.editor.bottomBar?.refreshScrollers?.();
@@ -487,10 +809,15 @@ class SettingsView {
 
   show() {
     if (this.host) this.host.hidden = false;
-    this.render();
+    this.render({ preserveScroll: true });
     this.refreshScroller();
+    if (!this.scrollRestored) {
+      this.scrollRestored = true;
+      this.restoreScrollTop();
+    }
   }
   hide() {
+    this.saveScrollTop();
     if (this.host) this.host.hidden = true;
   }
 }

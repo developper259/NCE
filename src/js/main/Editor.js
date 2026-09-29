@@ -9,6 +9,8 @@ class Editor {
 
     this.mainSection = this.domManager.getElement(".main-section");
     this.editorOBJ = this.domManager.getElement(".editor");
+    this.themeManager = new ThemeManager(this);
+    this.themeManager.init();
     this.emptyMenuOBJ = this.domManager.getElement(".empty-menu");
     this.fileManagerOBJ = this.domManager.getElement(".file-manager");
     this.cD = this.domManager.getElement(".editor-caret");
@@ -42,6 +44,20 @@ class Editor {
       buildTabContextMenu(this.tabManager),
     );
     this.contextMenuManager.setMenu("output", buildOutputContextMenu(this));
+    this.contextMenuManager.setMenu("input", buildInputContextMenu(this));
+    this.contextMenuManager.setMenu(
+      "empty-menu",
+      buildEmptyMenuContextMenu(this),
+    );
+    document.addEventListener("contextmenu", (event) => {
+      const input = event.target.closest?.(
+        "input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']), textarea, select, [contenteditable='true'], [contenteditable='']",
+      );
+      if (!input) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.contextMenuManager.openContextMenu("input", input);
+    }, true);
     this.quickPanel = new QuickPanel(this);
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);
@@ -55,6 +71,18 @@ class Editor {
     this.sidebarManager.registerMenu(this.fileExplorer);
     this.sidebarManager.registerMenu(this.searchSidebar);
     this.sidebarManager.registerMenu(this.agentSidebar);
+    this.contextMenuManager.setMenu(
+      "sidebar-selector-empty",
+      buildSidebarSelectorEmptyContextMenu(this.sidebarManager),
+    );
+    this.contextMenuManager.setMenu(
+      "sidebar-selector-icon",
+      buildSidebarSelectorIconContextMenu(this.sidebarManager),
+    );
+    this.contextMenuManager.setMenu(
+      "sidebar-title",
+      buildSidebarTitleContextMenu(this.sidebarManager),
+    );
 
     this.writerController = new WriterController(this);
     this.historyController = new HistoryController(this);
@@ -77,7 +105,7 @@ class Editor {
         filePath: file?.hasPath?.() ? file.path : "",
         rootPath: this.fileExplorer?.rootPath || "",
         selectedText: hasSelection
-          ? String(this.selectController.containsSelected || "")
+          ? String(this.selectController.getSelectedText?.() || this.selectController.containsSelected || "")
           : "",
       });
     });
@@ -89,6 +117,8 @@ class Editor {
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
     this.settingsView = new SettingsView(this);
+    this.pictureView = new PictureView(this);
+    this.markdownView = new MarkdownView(this);
 
     window.addEventListener("focus", () =>
       this.tabManager.scheduleFocusResync(),
@@ -116,6 +146,9 @@ class Editor {
     );
     this.api.onRecentFoldersChanged?.((folders) =>
       this.titleBar?.setRecentFolders(folders),
+    );
+    this.api.onSettingsChanged?.((settings) =>
+      this.applySettingsSnapshot(settings),
     );
     this.initLoadState();
     this.api.rendererReady?.().catch?.((error) => {
@@ -168,8 +201,31 @@ class Editor {
     return this.setAutoSaveState(!this.getAutoSaveState());
   }
 
-  openSettings() {
-    return this.tabManager.openSettings();
+  applySettingsSnapshot(settings) {
+    SETTINGS_INITIALIZE(settings);
+    this.setAutoSaveState(SETTINGS_GET("files.autoSave"), { persist: false });
+    this.themeManager?.syncFromSettings?.(SETTINGS_GET("appearance.theme"));
+    this.agentSidebar?.refreshModelSelector?.();
+    this.settingsView?.sync?.("agent.hiddenModels");
+    void this.refreshSettingsJsonTab();
+  }
+
+  async refreshSettingsJsonTab() {
+    const settingsPath = await this.api.getSettingsPath?.();
+    if (!settingsPath) return;
+    await this.tabManager.reloadFileFromDisk(settingsPath);
+  }
+
+  async openSettings(category) {
+    const tab = await this.tabManager.openSettings();
+    if (category) this.settingsView?.openCategory?.(category);
+    return tab;
+  }
+
+  async openSettingsJson() {
+    const settingsPath = await this.api.getSettingsPath?.();
+    if (!settingsPath) return null;
+    return this.tabManager.openFileWithPath(settingsPath);
   }
 
   openRecentFolder(folderPath) {
@@ -181,16 +237,38 @@ class Editor {
   }
 
   refreshMainContent() {
-    const settingsActive =
-      this.tabManager.activeTab?.type === TAB_TYPES.SETTINGS;
+    const type = this.tabManager.activeTab?.type;
+    const settingsActive = type === TAB_TYPES.SETTINGS;
+    const pictureActive = type === TAB_TYPES.PICTURE;
+    const markdownActive = type === TAB_TYPES.MARKDOWN;
     this.editorOBJ.classList.toggle("editor-settings-active", settingsActive);
+    this.editorOBJ.classList.toggle("editor-picture-active", pictureActive);
+    this.editorOBJ.classList.toggle("editor-markdown-active", markdownActive);
     if (settingsActive) {
       this.settingsView?.show();
+      this.pictureView?.hide();
+      this.markdownView?.hide();
       this.bottomBar?.hide();
+      this.cursorController?.disable();
+      this.setSelected(false);
+    } else if (pictureActive) {
+      this.settingsView?.hide();
+      this.markdownView?.hide();
+      this.pictureView?.show(this.tabManager.activeTab);
+      this.bottomBar?.showImagePreview();
+      this.cursorController?.disable();
+      this.setSelected(false);
+    } else if (markdownActive) {
+      this.settingsView?.hide();
+      this.pictureView?.hide();
+      this.markdownView?.show(this.tabManager.activeTab);
+      this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else {
       this.settingsView?.hide();
+      this.pictureView?.hide();
+      this.markdownView?.hide();
       if (this.tabManager.activeFile) this.bottomBar?.show();
     }
   }
@@ -303,6 +381,10 @@ class Editor {
           await this.api.cancelQuit?.();
           return;
         }
+        await Promise.race([
+          this.agentSidebar?.flushAllConversationSaves?.(),
+          new Promise((resolve) => setTimeout(resolve, 1800)),
+        ]);
         const saved = await this.statesManager.save();
         if (saved !== false) await this.api.approveQuit?.();
         else await this.api.cancelQuit?.();

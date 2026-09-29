@@ -4,17 +4,40 @@ const { createEditor, loadGlobal } = require("./helpers/runtime");
 
 function searchEditor(text) {
   const { editor } = createEditor(text);
-  const classes = { add() {}, remove() {}, contains() { return false; } };
+  const classes = { add() {}, remove() {}, toggle() {}, contains() { return false; } };
+  const iconClasses = { add() {}, remove() {}, toggle() {} };
+  const expandButton = {
+    attributes: {},
+    classList: classes,
+    setAttribute(name, value) { this.attributes[name] = value; },
+    getAttribute(name) { return this.attributes[name] ?? null; },
+    querySelector(selector) {
+      return selector === "i" ? { classList: iconClasses } : null;
+    },
+  };
+  const expandButtonElement = expandButton;
+  const elements = new Map([[".search-bar-expand", expandButton]]);
   const input = { value: "", focus() {}, select() {}, blur() {} };
+  const replaceInput = { value: "", focus() {}, blur() {} };
+  const replaceContainer = { hidden: true };
+  const replaceActions = { hidden: true };
+  const searchBar = { classList: classes };
   editor.domManager.getElement = (selector) => {
-    if (selector === ".editor-search-bar") return { classList: classes };
+    if (selector === ".editor-search-bar") return searchBar;
     if (selector === ".search-bar-input") return input;
-    return { classList: classes, textContent: "" };
+    if (selector === ".search-bar-expand") return elements.get(selector);
+    if (selector === ".search-bar-replace-input") return replaceInput;
+    if (selector === ".search-bar-replace-container") return replaceContainer;
+    if (selector === ".search-bar-replace-actions") return replaceActions;
+    if (!elements.has(selector)) elements.set(selector, { classList: classes, textContent: "" });
+    return elements.get(selector);
   };
   editor.selectOutput = { replaceChildren() {}, children: [] };
+  const TAB_TYPES = loadGlobal("src/js/types/Tab.js", "TAB_TYPES");
   const SearchController = loadGlobal("src/js/controller/SearchController.js", "SearchController", {
     addEvent() {},
     HTMLInputElement: function HTMLInputElement() {},
+    TAB_TYPES,
   });
   return { editor, search: new SearchController(editor) };
 }
@@ -50,12 +73,73 @@ test("search finds case-insensitive occurrences and cycles next/previous", () =>
 });
 
 test("search close clears results and closes the visible search bar", () => {
-  const { search } = searchEditor("abc");
+  const { search, editor } = searchEditor("abc");
   search.isOpen = true;
+  editor.domManager.getElement(".editor-search-bar").classList.add("search-bar-visible");
+  editor.domManager.getElement(".editor-search-bar").classList.add("search-bar-expanded");
   search.search("a");
   search.close();
   assert.equal(search.isOpen, false);
   assert.equal(search.results.length, 0);
+  assert.equal(editor.domManager.getElement(".editor-search-bar").classList.contains("search-bar-visible"), false);
+  assert.equal(editor.domManager.getElement(".editor-search-bar").classList.contains("search-bar-expanded"), false);
+  assert.equal(editor.domManager.getElement(".search-bar-replace-container").hidden, true);
+  assert.equal(editor.domManager.getElement(".search-bar-replace-actions").hidden, true);
+  assert.equal(editor.domManager.getElement(".search-bar-expand").attributes["aria-expanded"], "false");
+});
+
+test("search overlay virtualizes 100000 matches in the horizontal viewport", () => {
+  const { editor } = createEditor("x".repeat(1_000_000));
+  const SearchController = loadGlobal("src/js/controller/SearchController.js", "SearchController", {
+    document: { createElement: () => ({
+      style: {}, dataset: {}, className: "",
+    }) },
+  });
+  const lineText = editor.tabManager.activeFile.lines[0];
+  const positionIndex = {
+    visualToReal: (column) => Math.floor(column),
+    realToVisual: (column) => column,
+  };
+  lineText.getPositionIndex = () => positionIndex;
+  editor.lineController = {
+    lines: [lineText],
+    startIndex: 0,
+    offsetX: 900_000,
+    offsetY: 0,
+    renderedLineCount: 5,
+    maxViewLines: 5,
+    maxCharactersPerLine: 20,
+    getDisplayLineCount: () => 1,
+    getDisplayRow: () => ({ documentIndex: 0 }),
+    getLineTop: () => 0,
+  };
+  editor.cursorController = {
+    columnToX: (column) => 50 + (column - 1 - 900_000) * 10,
+    rowToY: () => 4,
+    mpY: 19,
+    isRowVisible: () => true,
+  };
+  editor.searchOutput = {
+    children: [],
+    appendChild(node) { this.children.push(node); },
+    replaceChildren() { this.children = []; },
+  };
+  const search = Object.create(SearchController.prototype);
+  search.editor = editor;
+  search.isOpen = true;
+  search.currentIndex = -1;
+  search.searchFastNodes = new WeakMap();
+  search.results = Array.from({ length: 100_000 }, (_, index) => ({
+    row: 1,
+    column: 899_000 + index * 2,
+    length: 1,
+  }));
+  search.resultsByRow = new Map([[1, { start: 0, end: search.results.length }]]);
+
+  search.refreshSelectionDOM();
+  assert.equal(editor.searchOutput.children.length, 10);
+  assert.ok(editor.searchOutput.children.length < search.results.length);
+  assert.ok(editor.searchOutput.children.every((node) => Number(node.dataset.resultIndex) >= 500));
 });
 
 test("file loading chooses complete incremental or chunked fallback mode", async () => {

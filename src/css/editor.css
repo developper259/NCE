@@ -23,6 +23,7 @@
 
 .editor-empty {
   background-color: var(--bg-primary);
+  overflow: visible;
 }
 
 .editor-output {
@@ -78,6 +79,7 @@
   min-width: 50px;
   width: auto;
   height: 100%;
+  box-sizing: border-box;
   background-color: var(--bg-secondary);
   color: var(--text-tertiary);
   z-index: 6;

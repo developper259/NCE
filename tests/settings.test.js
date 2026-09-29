@@ -45,10 +45,74 @@ test("valid settings persist across manager restarts and set writes JSON", async
     assert.equal(second.get("editor.tabWidth"), 8);
     assert.equal(second.get("files.autoSave"), true);
     assert.deepEqual(await readSettings(root), {
+      ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
       files: { autoSave: true },
+      appearance: { theme: "system" },
+      agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("reload refreshes the in-memory settings from the saved JSON", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    await manager.set("editor.tabWidth", 8);
+    await manager.set("appearance.theme", "light");
+    await manager.set("keybindings.save", "Mod+Shift+S");
+    await fs.writeFile(
+      path.join(root, "settings.json"),
+      JSON.stringify({
+        editor: { tabWidth: "invalid" },
+        appearance: { theme: "purple" },
+        keybindings: { save: "Mod+NotAKey" },
+      }),
+    );
+
+    assert.equal(manager.get("appearance.theme"), "light");
+    const reloaded = await manager.reload();
+    assert.equal(reloaded?.editor.tabWidth, 8);
+    assert.equal(reloaded?.appearance.theme, "light");
+    assert.equal(reloaded?.keybindings.save, "Mod+Shift+S");
+    assert.equal(manager.get("appearance.theme"), "light");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("appearance theme accepts only system, dark and light", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    assert.equal(manager.get("appearance.theme"), "system");
+    assert.equal(await manager.set("appearance.theme", "light"), true);
+    assert.equal(manager.get("appearance.theme"), "light");
+    assert.equal(await manager.set("appearance.theme", "purple"), false);
+    assert.equal(manager.get("appearance.theme"), "light");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("agent hidden models are deduplicated and persisted without provider coupling", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    assert.deepEqual(manager.get("agent.hiddenModels"), []);
+    const hidden = ["openrouter:model-a", "openrouter:model-a", "old:model"];
+    assert.equal(await manager.set("agent.hiddenModels", hidden), true);
+    assert.deepEqual(manager.get("agent.hiddenModels"), ["openrouter:model-a", "old:model"]);
+    const restarted = new SettingsManager(root);
+    await restarted.initialize();
+    assert.deepEqual(restarted.get("agent.hiddenModels"), ["openrouter:model-a", "old:model"]);
+    assert.equal(await restarted.set("agent.hiddenModels", ["", 42]), false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -93,8 +157,11 @@ test("missing known defaults are merged while unknown properties survive", async
     );
     const manager = new SettingsManager(root);
     assert.deepEqual(await manager.initialize(), {
+      ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 4 },
       files: { autoSave: false },
+      appearance: { theme: "system" },
+      agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     const disk = await readSettings(root);
@@ -116,8 +183,11 @@ test("queued concurrent writes leave a complete latest settings document", async
       manager.set("editor.tabWidth", 12),
     ]);
     assert.deepEqual(await readSettings(root), {
+      ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 12 },
       files: { autoSave: true },
+      appearance: { theme: "system" },
+      agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);

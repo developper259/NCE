@@ -58,6 +58,21 @@ test("file editing commands do nothing when the active tab is not a file", async
   assert.deepEqual(calls, ["quit"]);
 });
 
+test("active non-file tabs can be closed without enabling text commands", async () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    tabManager: {
+      activeTab: { type: "picture" }, activeFile: null,
+      closeActiveFile: () => calls.push("close-tab"),
+      closeFiles: () => calls.push("close-tabs"),
+    },
+  });
+  await keyBinding.control_close_file();
+  await keyBinding.control_close_all_file();
+  assert.deepEqual(calls, ["close-tab", "close-tabs"]);
+});
+
 test("the command palette hides file commands outside a file tab", () => {
   let panelOptions;
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
@@ -84,15 +99,48 @@ test("the command palette hides file commands outside a file tab", () => {
   keyBinding.control_open_command();
 
   assert.deepEqual(
-    panelOptions.items.map((item) => item.id),
-    ["quick_open", "toggle_search"],
+    [...panelOptions.items].map((item) => item.id),
+    ["select-color-theme", "open-settings-json", "quick_open", "toggle_search"],
   );
+});
+
+test("the command palette exposes settings categories", () => {
+  let panelOptions;
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    USERCONFIG_KEYBINDING: [],
+    CONFIG_KEYBINDING_DISPLAY: (key) => key,
+  });
+  const editor = {
+    tabManager: { activeFile: null },
+    settingsView: {
+      getSettings: () => [
+        { category: "Editor" },
+        { category: "Files" },
+        { category: "Shortcuts" },
+      ],
+    },
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => { panelOptions = options; },
+    },
+  };
+  const keyBinding = new KeyBinding(editor);
+  keyBinding.control_open_command();
+
+  assert.deepEqual([...panelOptions.items].map((item) => item.label), [
+    "Select Color Theme",
+    "Open Settings (JSON)",
+    "Open Editor Settings (UI)",
+    "Open Files Settings (UI)",
+    "Open Shortcuts Settings (UI)",
+  ]);
 });
 
 test("Reload Window saves the current state before reloading", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
   const keyBinding = new KeyBinding({
+    isOnInit: false,
     tabManager: { activeFile: null, prepareForQuit: async () => true },
     statesManager: {
       save: async () => {
@@ -116,6 +164,7 @@ test("Reload Window is cancelled when saving the state fails", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
   const keyBinding = new KeyBinding({
+    isOnInit: false,
     tabManager: { activeFile: null, prepareForQuit: async () => true },
     statesManager: { save: async () => false },
     api: { appCommand: (command) => calls.push(command) },
@@ -129,7 +178,22 @@ test("Reload Window stops when the dirty-file flow is cancelled", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
   const keyBinding = new KeyBinding({
+    isOnInit: false,
     tabManager: { activeFile: null, prepareForQuit: async () => false },
+    statesManager: { save: async () => calls.push("save-state") },
+    api: { appCommand: (command) => calls.push(command) },
+  });
+
+  assert.equal(await keyBinding.control_reload_window(), false);
+  assert.deepEqual(calls, []);
+});
+
+test("Reload Window is unavailable while the editor is initializing", async () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    isOnInit: true,
+    tabManager: { prepareForQuit: async () => calls.push("prepare-for-quit") },
     statesManager: { save: async () => calls.push("save-state") },
     api: { appCommand: (command) => calls.push(command) },
   });

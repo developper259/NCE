@@ -3,6 +3,12 @@ const path = require("node:path");
 const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "../..");
+const FastDOMNode = (() => {
+  const source = fs.readFileSync(path.join(root, "src/js/types/FastDOMNode.js"), "utf8");
+  const context = vm.createContext({ Map, Set, Symbol, TypeError, String, Boolean, Number, Array });
+  vm.runInContext(`${source}\nthis.__exported = FastDOMNode;`, context);
+  return context.__exported;
+})();
 
 function loadGlobal(relativePath, exportName, globals = {}) {
   const source = fs.readFileSync(path.join(root, relativePath), "utf8");
@@ -35,6 +41,7 @@ function createEditor(text = "") {
   const LineNode = loadGlobal("src/js/types/Line.js", "LineNode");
   const file = {
     id: 1,
+    type: "file",
     name: "test.js",
     path: "",
     lines: text.split("\n").map((line) => new LineNode(line)),
@@ -58,11 +65,21 @@ function createEditor(text = "") {
     letterSize: 10,
     isOnInit: false,
     cD: { classList: { add() {}, remove() {} }, style: {} },
-    output: { focus() {} },
+    output: { focus() {}, style: {} },
     focusOutput() {},
     keyBinding: { historyX: undefined },
     setSelected() {},
     domManager: {
+      fastNodes: new WeakMap(),
+      wrapFastNode(node) {
+        if (!node?.style) return null;
+        let fast = this.fastNodes.get(node);
+        if (!fast) {
+          fast = new FastDOMNode(node);
+          this.fastNodes.set(node, fast);
+        }
+        return fast;
+      },
       getOutputWidth: () => 800,
       getOutputHeight: () => 500,
       getLetterWidth: () => 10,
@@ -118,4 +135,4 @@ function createEditor(text = "") {
   return { editor, file };
 }
 
-module.exports = { root, loadGlobal, createLine, createEditor };
+module.exports = { root, loadGlobal, createLine, createEditor, FastDOMNode };

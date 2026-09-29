@@ -1,8 +1,22 @@
 import { app } from 'electron';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Window } from './Window';
 import { NSHServer } from 'nsh/server';
 import { SettingsManager } from './manager/SettingsManager';
 import { RecentFoldersManager } from './manager/RecentFoldersManager';
+import { AgentConversationStore } from './manager/AgentConversationStore';
+
+function getPackageVersion() {
+  try {
+    const packagePath = path.join(app.getAppPath(), 'package.json');
+    const packageVersion = JSON.parse(fs.readFileSync(packagePath, 'utf8')).version;
+    if (typeof packageVersion === 'string' && packageVersion.trim()) {
+      return packageVersion;
+    }
+  } catch {}
+  return app.getVersion();
+}
 
 export class App {
   window: Window;
@@ -12,9 +26,10 @@ export class App {
   nshStopping = false;
   settings!: SettingsManager;
   recentFolders!: RecentFoldersManager;
+  agentConversations!: AgentConversationStore;
   name = "NCE";
 
-  version = app.getVersion();
+  version = getPackageVersion();
 
   constructor() {
     this.window = new Window(this);
@@ -33,6 +48,8 @@ export class App {
       await this.settings.initialize();
       this.recentFolders = new RecentFoldersManager(app.getPath("userData"));
       await this.recentFolders.initialize();
+      this.agentConversations = new AgentConversationStore(app.getPath("userData"));
+      await this.agentConversations.initialize();
       await this.startNsh();
       this.window.create();
     });

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("api", {
   quit: () => ipcRenderer.invoke("App:quit"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
   readClipboardText: () => ipcRenderer.invoke("Clipboard:readText"),
+  writeClipboardText: (text) => ipcRenderer.invoke("Clipboard:writeText", text),
   setMenuShortcutsIgnored: (ignored) =>
     ipcRenderer.invoke("App:setIgnoreMenuShortcuts", ignored === true),
   setActiveFileContext: (hasActiveFile) =>
@@ -15,6 +16,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("App:setAutoSaveState", enabled === true),
   getSettings: () => ipcRenderer.invoke("Settings:getAll"),
   getSetting: (key) => ipcRenderer.invoke("Settings:get", key),
+  getSettingsPath: () => ipcRenderer.invoke("Settings:getPath"),
   setSetting: (key, value) => ipcRenderer.invoke("Settings:set", key, value),
   getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),
   addRecentFolder: (folderPath) =>
@@ -52,10 +54,25 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("recent-folders-changed", listener);
     return () => ipcRenderer.removeListener("recent-folders-changed", listener);
   },
+  onSettingsChanged: (callback) => {
+    const listener = (_event, settings) => callback(settings);
+    ipcRenderer.on("settings-changed", listener);
+    return () => ipcRenderer.removeListener("settings-changed", listener);
+  },
   approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
   getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
+  getAgentConversationStorageStatus: () =>
+    ipcRenderer.invoke("AgentConversations:status"),
+  loadAgentConversations: () => ipcRenderer.invoke("AgentConversations:load"),
+  saveAgentConversation: (snapshot) =>
+    ipcRenderer.invoke("AgentConversations:save", snapshot),
+  deleteAgentConversation: (sessionId, nextActiveId) =>
+    ipcRenderer.invoke("AgentConversations:delete", sessionId, nextActiveId),
+  setActiveAgentConversation: (sessionId) =>
+    ipcRenderer.invoke("AgentConversations:setActive", sessionId),
+  flushAgentConversations: () => ipcRenderer.invoke("AgentConversations:flush"),
   runAgentProcess: (request) => ipcRenderer.invoke("Agent:runProcess", request),
   cancelAgentProcess: (requestId) =>
     ipcRenderer.invoke("Agent:cancelProcess", requestId),
@@ -96,6 +113,9 @@ contextBridge.exposeInMainWorld("api", {
   initializeFile: (filePath) =>
     ipcRenderer.invoke("FileManager:initializeFile", filePath),
 
+  readImageFile: (filePath, context) =>
+    ipcRenderer.invoke("FileManager:readImageFile", filePath, context),
+
   getFileChunk: (filePath, startLine, lineCount) =>
     ipcRenderer.invoke(
       "FileManager:getFileChunk",
@@ -124,6 +144,8 @@ contextBridge.exposeInMainWorld("api", {
 
   getAgentApiKey: (providerId) =>
     ipcRenderer.invoke("FileManager:getAgentApiKey", providerId),
+  hasAgentApiKey: (providerId) =>
+    ipcRenderer.invoke("FileManager:hasAgentApiKey", providerId),
 
   setAgentApiKey: (providerId, apiKey) =>
     ipcRenderer.invoke("FileManager:setAgentApiKey", providerId, apiKey),
@@ -134,6 +156,8 @@ contextBridge.exposeInMainWorld("api", {
   stopWatching: () => ipcRenderer.invoke("Watcher:stopWatching"),
 
   openContextMenu: (actions) => ipcRenderer.invoke("ContextMenu:show", actions),
+  setNativeThemeSource: (source, resolvedTheme) =>
+    ipcRenderer.invoke("Theme:setNativeSource", source, resolvedTheme),
 
   renameEntry: (oldPath, newPath) =>
     ipcRenderer.invoke("FileManager:rename", oldPath, newPath),
@@ -177,6 +201,15 @@ contextBridge.exposeInMainWorld("api", {
 
   searchInFiles: (rootPath, query, options = {}) =>
     ipcRenderer.invoke("WorkspaceSearch:search", rootPath, query, options),
+
+  replaceInFiles: (rootPath, query, replacement, options = {}) =>
+    ipcRenderer.invoke(
+      "WorkspaceSearch:replace",
+      rootPath,
+      query,
+      replacement,
+      options,
+    ),
 
   cancelSearch: (requestId) =>
     ipcRenderer.invoke("WorkspaceSearch:cancel", requestId),

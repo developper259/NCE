@@ -253,8 +253,8 @@ const AgentAI = {
         (candidate) =>
           typeof candidate.model === "string" &&
           candidate.model &&
-          `${candidate.provider}:${candidate.model}` !==
-            `${provider.id}:${modelId}`,
+          this.getModelKey(candidate.provider, candidate.model) !==
+            this.getModelKey(provider.id, modelId),
       );
   },
 
@@ -340,5 +340,22 @@ const AgentAI = {
 
   getProviders() {
     return Object.values(this.providers);
+  },
+
+  getModelKey(providerId, modelId) {
+    return `${providerId}:${modelId}`;
+  },
+
+  getModels() {
+    return this.getProviders().flatMap((provider) =>
+      Object.values(provider.models || {}).map((model) => ({
+        providerId: provider.id,
+        providerName: provider.name,
+        modelId: model.id,
+        modelName: model.name,
+        provider,
+        model,
+      })),
+    );
   },
 };

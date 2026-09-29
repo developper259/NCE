@@ -1,15 +1,17 @@
 class CursorController {
   constructor(e) {
     this.editor = e;
+    this.caretFast = e.domManager?.wrapFastNode?.(e.cD) || null;
     this._row = 0;
     this._column = 0;
     this.mX = 10; // diff X axis
     this.mY = 7; // diff Y axis
     this.mpY = 19; // diff on calcul Y axis
     this.mpX = 10; // diff on calcul X axis
+    this.viewPositionCache = null;
 
-    this.editor.cD.style.height = this.editor.posY + "px";
-    this.editor.cD.style.marginLeft = this.mpX + "px";
+    this.caretFast?.setHeight(this.editor.posY);
+    this.caretFast?.setStyle("marginLeft", `${this.mpX}px`);
   }
 
   get row() {
@@ -34,13 +36,13 @@ class CursorController {
 
   enable() {
     if (this.editor.cD) {
-      this.editor.cD.style.display = "block";
+      this.caretFast?.setDisplay("block");
     }
   }
 
   disable() {
     if (this.editor.cD) {
-      this.editor.cD.style.display = "none";
+      this.caretFast?.setDisplay("none");
     }
   }
 
@@ -96,7 +98,10 @@ class CursorController {
     const line = lc.lines[row - 1] ? lc.lines[row - 1].getText() : "";
     if (column < 0) column = 0;
     if (column > line.length) column = line.length;
-    if (typeof normalizeTextBoundary === "function")
+    const lineNode = lc.lines[row - 1];
+    const positionIndex = lineNode?.getPositionIndex?.();
+    if (positionIndex) column = positionIndex.normalize(column, "nearest");
+    else if (typeof normalizeTextBoundary === "function")
       column = normalizeTextBoundary(line, column, "nearest");
 
     return { row: row, column: column };
@@ -241,8 +246,8 @@ class CursorController {
     const placeX = this.columnToX(viewPos.column);
 
     this.enable();
-    this.editor.cD.style.left = `${placeX}px`;
-    this.editor.cD.style.top = `${placeY}px`;
+    this.caretFast?.setLeft(placeX);
+    this.caretFast?.setTop(placeY);
   }
 
   getViewPosition(row, realColumn) {
@@ -256,8 +261,27 @@ class CursorController {
 
     const line = lineNode.getText();
     const safeRealCol = Math.max(0, Math.min(realColumn, line.length));
-
-    const viewColumn = realColumnToViewColumn(line, safeRealCol);
+    const tabWidth = typeof SETTINGS_GET === "function"
+      ? SETTINGS_GET("editor.tabWidth")
+      : 4;
+    const cached = this.viewPositionCache;
+    if (
+      cached && cached.lineNode === lineNode && cached.row === row &&
+      cached.column === safeRealCol && cached.textVersion === lineNode.textVersion &&
+      cached.tabWidth === tabWidth
+    ) return { row, column: cached.viewColumn };
+    const positionIndex = lineNode.getPositionIndex?.();
+    const viewColumn = positionIndex
+      ? positionIndex.realToVisual(safeRealCol)
+      : realColumnToViewColumn(line, safeRealCol);
+    this.viewPositionCache = {
+      lineNode,
+      row,
+      column: safeRealCol,
+      textVersion: lineNode.textVersion,
+      tabWidth,
+      viewColumn,
+    };
 
     return { row: row, column: viewColumn };
   }
@@ -272,9 +296,12 @@ class CursorController {
     if (!lineNode) return { row, column: 0 };
 
     const line = lineNode.getText();
+    const positionIndex = lineNode.getPositionIndex?.();
     return {
       row: row,
-      column: viewColumnToRealColumn(line, viewColumn),
+      column: positionIndex
+        ? positionIndex.visualToReal(viewColumn)
+        : viewColumnToRealColumn(line, viewColumn),
     };
   }
 
@@ -323,52 +350,51 @@ class CursorController {
   getIndexWord() {
     const line = this.getLine();
     if (!line) return -1;
-
-    const words = this.editor.writerController.splitWord(line);
-    if (!words || words.length === 0) return -1;
-
-    const pos = this.getCursorPosition();
-    let count = 0;
-
-    for (let i = 0; i < words.length; i++) {
-      count += words[i].length;
-      if (pos.column <= count) {
-        return i;
-      }
+    const lineNode = this.editor.lineController.lines[this.row - 1];
+    const runs = this.editor.writerController.getWordRuns(lineNode || line);
+    if (!runs.length) return -1;
+    let low = 0;
+    let high = runs.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (runs[mid].end <= this.column) low = mid + 1;
+      else high = mid;
     }
-
-    return words.length - 1;
+    return Math.min(runs.length - 1, low);
   }
 
   getWord() {
     const line = this.getLine();
     if (!line) return undefined;
 
-    const words = this.editor.writerController.splitWord(line);
     const index = this.getIndexWord();
-
-    return index !== -1 ? words[index] : undefined;
+    const run = this.editor.writerController.getWordRuns(
+      this.editor.lineController.lines[this.row - 1] || line,
+    )[index];
+    return run ? line.slice(run.start, run.end) : undefined;
   }
 
   getBeforeWord() {
     const line = this.getLine();
     if (!line) return undefined;
 
-    const words = this.editor.writerController.splitWord(line);
     const index = this.getIndexWord();
-
-    return index > 0 ? words[index - 1] : undefined;
+    const runs = this.editor.writerController.getWordRuns(
+      this.editor.lineController.lines[this.row - 1] || line,
+    );
+    const run = index > 0 ? runs[index - 1] : null;
+    return run ? line.slice(run.start, run.end) : undefined;
   }
 
   getAfterWord() {
     const line = this.getLine();
     if (!line) return undefined;
 
-    const words = this.editor.writerController.splitWord(line);
     const index = this.getIndexWord();
-
-    return index !== -1 && index < words.length - 1
-      ? words[index + 1]
-      : undefined;
+    const runs = this.editor.writerController.getWordRuns(
+      this.editor.lineController.lines[this.row - 1] || line,
+    );
+    const run = index !== -1 && index < runs.length - 1 ? runs[index + 1] : null;
+    return run ? line.slice(run.start, run.end) : undefined;
   }
 }

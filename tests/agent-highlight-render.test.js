@@ -1,12 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { loadGlobal, createEditor } = require('./helpers/runtime');
+const { loadGlobal, createEditor, FastDOMNode } = require('./helpers/runtime');
 
 const LineNode = loadGlobal('src/js/types/Line.js', 'LineNode');
 function node(tag = '') {
   return {
     tag, children: [], className: '', dataset: {}, style: {}, textContent: '',
-    classList: { add(...classes) { this.owner.className += ` ${classes.join(' ')}`; } },
+    classList: {
+      add(...classes) { this.owner.className += ` ${classes.join(' ')}`; },
+      [Symbol.iterator]() { return this.owner.className.split(/\s+/).filter(Boolean)[Symbol.iterator](); },
+    },
     appendChild(child) { this.children.push(child); return child; },
     replaceChildren(...children) { this.children = children; },
   };
@@ -20,8 +23,16 @@ const Writer = loadGlobal('src/js/controller/WriterController.js', 'WriterContro
   document, expandTabsForDisplay: (text) => text, LineNode, Events: { ON_CHANGE: 'change' },
 });
 const LineController = loadGlobal('src/js/controller/LineController.js', 'LineController', {
-  OutputScroller: class {}, SETTINGS_GET: () => 4,
+  OutputScroller: class {}, FastDOMNode, SETTINGS_GET: () => 4,
 });
+const fastNodes = new WeakMap();
+const domManager = {
+  wrapFastNode(node) {
+    let fast = fastNodes.get(node);
+    if (!fast) { fast = new FastDOMNode(node); fastNodes.set(node, fast); }
+    return fast;
+  },
+};
 function walk(root) { return [root, ...root.children.flatMap(walk)]; }
 function classes(root) { return walk(root).map((item) => item.className).join(' '); }
 function text(root) { return root.textContent + root.children.map(text).join(''); }
@@ -63,7 +74,7 @@ test('removed history row uses its own text and never current document tokens', 
     { type: 'added', text: '<div id="new"></div>', documentIndex: 0 },
   ] };
   file.lines[0].setTokens(htmlTokens(file.lines[0].getText()));
-  const editor = { tabManager: { activeFile: file }, writerController: new Writer({}) };
+  const editor = { tabManager: { activeFile: file }, writerController: new Writer({}), domManager };
   const lines = Object.create(LineController.prototype);
   lines.editor = editor;
   lines.startIndex = 0;
@@ -82,7 +93,7 @@ test('visible inline diff projection keeps token and diff alignment during horiz
   line.setTokens(htmlTokens(value));
   line.diffSegments = [{ type: 'added', text: '<div id="' }, { type: 'modified', text: 'game-board"></div>' }];
   const file = { lines: [line] };
-  const editor = { tabManager: { activeFile: file }, writerController: new Writer({}) };
+  const editor = { tabManager: { activeFile: file }, writerController: new Writer({}), domManager };
   const lines = Object.create(LineController.prototype);
   lines.editor = editor;
   lines.startIndex = 0;

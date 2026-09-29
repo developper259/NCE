@@ -201,6 +201,10 @@ export class Window {
         this.executeWindowCommand(command),
       );
       ipcMain.handle("Clipboard:readText", async () => clipboard.readText());
+      ipcMain.handle("Clipboard:writeText", async (_event, text) => {
+        clipboard.writeText(String(text ?? ""));
+        return true;
+      });
       ipcMain.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
         this.setMenuShortcutsIgnored(ignored),
       );
@@ -219,6 +223,9 @@ export class Window {
       ipcMain.handle("Settings:getAll", async () => this.app.settings.getAll());
       ipcMain.handle("Settings:get", async (_event, key) =>
         typeof key === "string" ? this.app.settings.get(key) : undefined,
+      );
+      ipcMain.handle("Settings:getPath", async () =>
+        this.app.settings.settingsPath,
       );
       ipcMain.handle("Settings:set", async (_event, key, value) => {
         return this.setSetting(key, value);
@@ -251,6 +258,24 @@ export class Window {
         return true;
       });
       ipcMain.handle("NSH:getEndpoint", async () => this.app.nshEndpoint);
+      ipcMain.handle("AgentConversations:status", async () =>
+        this.app.agentConversations?.getStatus() || { available: false, reason: "STORE_ERROR" },
+      );
+      ipcMain.handle("AgentConversations:load", async () =>
+        this.app.agentConversations?.load() || { status: { available: false, reason: "STORE_ERROR" }, activeSessionId: null, sessionIds: [], sessions: [] },
+      );
+      ipcMain.handle("AgentConversations:save", async (_event, snapshot) =>
+        this.app.agentConversations?.save(snapshot) || false,
+      );
+      ipcMain.handle("AgentConversations:delete", async (_event, sessionId, activeId) =>
+        this.app.agentConversations?.delete(sessionId, activeId) || false,
+      );
+      ipcMain.handle("AgentConversations:setActive", async (_event, sessionId) =>
+        this.app.agentConversations?.setActive(sessionId) || false,
+      );
+      ipcMain.handle("AgentConversations:flush", async () =>
+        this.app.agentConversations?.flush() || false,
+      );
 
       this.fileManager.handleIPC();
       this.watcher.handleIPC();
@@ -272,6 +297,20 @@ export class Window {
     } else if (key.startsWith("keybindings.")) {
       this.appMenu?.refreshKeybindings();
     }
+    this.window?.webContents?.send(
+      "settings-changed",
+      this.app.settings.getAll(),
+    );
+    return true;
+  }
+
+  async reloadSettingsFromDisk(filePath: string) {
+    if (path.resolve(filePath) !== path.resolve(this.app.settings.settingsPath)) {
+      return false;
+    }
+    const settings = await this.app.settings.reload();
+    if (!settings) return false;
+    this.window?.webContents.send("settings-changed", settings);
     return true;
   }
 

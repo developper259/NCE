@@ -6,13 +6,20 @@ const test = require("node:test");
 const root = path.resolve(__dirname, "..");
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
 
-test("Markdown renderer disables unsafe HTML/images and validates links", () => {
+test("Markdown renderer keeps strict default and isolates sanitized workspace preview", () => {
   const source = read("src/js/addon/MarkdownRenderer.js");
-  assert.match(source, /html:\s*false/);
-  assert.match(source, /markdown\.disable\("image"\)/);
+  assert.match(source, /STRICT:\s*"strict"/);
+  assert.match(source, /WORKSPACE_PREVIEW:\s*"workspace-preview"/);
+  assert.match(source, /createMarkdownEngine\(\{ html: false, images: false \}\)/);
+  assert.match(source, /createMarkdownEngine\(\{ html: true, images: true \}\)/);
+  assert.match(source, /if \(!images\) markdown\.disable\("image"\)/);
+  assert.match(source, /sanitizePreviewFragment/);
+  assert.match(source, /loadPreviewImages/);
   assert.match(source, /\["http:", "https:", "mailto:"\]/);
   assert.match(source, /token\.className/);
   assert.match(source, /\^nsh-\[a-z0-9-\]\+\$/i);
+  assert.match(read("src/js/sidebar/Agent.Sidebar.js"), /new MarkdownRenderer\(/);
+  assert.doesNotMatch(read("src/js/sidebar/Agent.Sidebar.js"), /WORKSPACE_PREVIEW/);
 });
 
 test("Preload exposes the core IPC contract without node integration", () => {
@@ -94,7 +101,7 @@ test("Quick Panel keeps Command Palette and Quick Open compact and scrollable", 
   const css = read("src/css/quickPanel.css");
   assert.match(css, /\.quick-panel-input\s*\{[\s\S]*?height:\s*30px/);
   assert.match(css, /\.quick-panel-item\s*\{[\s\S]*?min-height:\s*30px/);
-  assert.match(css, /data-panel-id="command-palette"[\s\S]*?min-height:\s*40px/);
+  assert.match(css, /data-panel-id="command-palette"[\s\S]*?min-height:\s*30px/);
   assert.doesNotMatch(css, /data-panel-id="quick-open"/);
   assert.match(css, /\.quick-panel-list\s*\{[\s\S]*?overflow-y:\s*auto/);
   assert.match(css, /max-height:\s*min\(420px, calc\(100vh - 60px\)\)/);

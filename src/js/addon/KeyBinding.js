@@ -1,6 +1,7 @@
 class KeyBinding {
   constructor(e) {
     this.editor = e;
+    this.recentCommandIds = this.loadRecentCommandIds();
     this.fileActions = new Set([
       "save",
       "go_to_line",
@@ -118,12 +119,12 @@ class KeyBinding {
   }
 
   async control_close_file(s, c, m, a) {
-    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeTab && !this.editor.tabManager.activeFile) return;
     await this.editor.tabManager.closeActiveFile();
   }
 
   async control_close_all_file(s, c, m, a) {
-    if (!this.editor.tabManager.activeFile) return;
+    if (!this.editor.tabManager.activeTab && !this.editor.tabManager.activeFile) return;
     await this.editor.tabManager.closeFiles();
   }
 
@@ -131,7 +132,7 @@ class KeyBinding {
     if (!document.hasFocus()) return;
     if (!this.editor.tabManager.activeFile) return;
 
-    let txt = this.editor.selectController.containsSelected;
+    let txt = this.editor.selectController.getSelectedText?.() || "";
 
     if (!txt) {
       const lineNode =
@@ -202,7 +203,43 @@ class KeyBinding {
       return;
     }
 
-    const items = USERCONFIG_KEYBINDING.filter(
+    const settingCategories = [
+      ...new Set(this.editor.settingsView?.getSettings?.().map(
+        (setting) => setting.category,
+      ) || []),
+    ].map((category) => ({
+      id: `open-settings-${category.toLowerCase()}`,
+      label: `Open ${category} Settings (UI)`,
+      keywords: ["settings", category],
+      data: { settingsCategory: category },
+    }));
+    settingCategories.unshift({
+      id: "open-settings-json",
+      label: "Open Settings (JSON)",
+      keywords: ["settings", "json", "configuration"],
+      data: { settingsJson: true },
+    });
+    settingCategories.unshift({
+      id: "select-color-theme",
+      label: "Select Color Theme",
+      keywords: ["theme", "appearance", "color"],
+      data: { themePicker: true },
+    });
+
+    const activeTab = this.editor.tabManager.activeTab;
+    const viewTypeActions = Boolean(
+      this.editor.pictureView?.isPreviewablePath?.(activeTab?.path || "") ||
+      this.editor.markdownView?.isSupportedPath?.(activeTab?.path || ""),
+    )
+      ? [{
+          id: "change-view-type",
+          label: "Change View Type",
+          keywords: ["image", "markdown", "preview", "text", "editor", "view"],
+          data: { viewTypePicker: true },
+        }]
+      : [];
+
+    const shortcutItems = USERCONFIG_KEYBINDING.filter(
       (item) =>
         item.action !== "open_command" &&
         item.action !== "escape" &&
@@ -212,17 +249,44 @@ class KeyBinding {
     ).map((item) => ({
       id: item.action,
       label: this.getActionLabel(item.action),
-      description: item.description,
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
+    const allActions = settingCategories.concat(viewTypeActions, shortcutItems);
+    const recentlyUsedItems = this.recentCommandIds
+      .map((id) => allActions.find((item) => item.id === id))
+      .filter(Boolean)
+      .map((item) => ({
+        ...item,
+        id: `recent:${item.id}`,
+        recentCommandId: item.id,
+        section: "Recently Used",
+      }));
+    const items = recentlyUsedItems.concat(
+      allActions.map((item, index) => ({
+        ...item,
+        separatorBefore: index === 0 && recentlyUsedItems.length > 0,
+      })),
+    );
 
     quickPanel.open({
       id: "command-palette",
       mode: "pick",
       title: "Command Palette",
       placeholder: "Type a command",
+      deferAcceptUntilClose: true,
+      transitionDuration: 100,
       items,
+      emptyItem: (query) => {
+        const value = String(query || "").trim();
+        return value
+          ? {
+              id: "ask-agent",
+              label: `Ask to Agent: "${value}"`,
+              data: { askAgent: value },
+            }
+          : null;
+      },
       onAccept: (item) => this.executeCommandItem(item),
     });
   }
@@ -236,6 +300,7 @@ class KeyBinding {
   }
 
   async control_reload_window() {
+    if (this.editor.isOnInit !== false) return false;
     if (!(await this.editor.tabManager.prepareForQuit())) return false;
     const saved = await this.editor.statesManager.save();
     if (saved === false) return false;
@@ -243,12 +308,47 @@ class KeyBinding {
   }
 
   executeCommandItem(item) {
+    if (item?.id && !item?.data?.askAgent)
+      this.rememberCommand(item.recentCommandId || item.id);
+    if (item?.data?.askAgent) {
+      this.editor.sidebarManager?.openMenu?.("agent");
+      return this.editor.agentSidebar?.sendMessage?.(item.data.askAgent);
+    }
+    if (item?.data?.themePicker) {
+      return this.editor.themeManager?.openThemePicker();
+    }
+    if (item?.data?.viewTypePicker) {
+      return this.editor.bottomBar?.openViewTypePicker();
+    }
+    if (item?.data?.settingsJson) {
+      return this.editor.openSettingsJson?.();
+    }
+    if (item?.data?.settingsCategory) {
+      return this.editor.openSettings(item.data.settingsCategory);
+    }
     const keybinding = item?.data || item;
     if (!keybinding?.action) return;
     this.editor.keyBinding.exec(keybinding);
   }
 
+  loadRecentCommandIds() {
+    try {
+      const stored = JSON.parse(localStorage.getItem("nce.quickPanel.recentCommands") || "[]");
+      return Array.isArray(stored) ? stored.filter((id) => typeof id === "string").slice(0, 3) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  rememberCommand(id) {
+    this.recentCommandIds = [id, ...this.recentCommandIds.filter((recentId) => recentId !== id)].slice(0, 3);
+    try {
+      localStorage.setItem("nce.quickPanel.recentCommands", JSON.stringify(this.recentCommandIds));
+    } catch {}
+  }
+
   getActionLabel(action) {
+    if (action === "open_settings") return "Open Settings (UI)";
     return action
       .split("_")
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
@@ -333,6 +433,18 @@ class KeyBinding {
     );
   }
 
+  realToView(lineNode, column) {
+    const text = lineNode?.getText?.() || "";
+    const index = lineNode?.getPositionIndex?.();
+    return index ? index.realToVisual(column) : realColumnToViewColumn(text, column);
+  }
+
+  viewToReal(lineNode, column) {
+    const text = lineNode?.getText?.() || "";
+    const index = lineNode?.getPositionIndex?.();
+    return index ? index.visualToReal(column) : viewColumnToRealColumn(text, column);
+  }
+
   key_delete(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
@@ -357,7 +469,7 @@ class KeyBinding {
           row: y,
           column:
             typeof nextGraphemeBoundary === "function"
-              ? nextGraphemeBoundary(l, x)
+              ? (lineNode?.getPositionIndex?.()?.next(x) ?? nextGraphemeBoundary(l, x))
               : x + 1,
         };
       } else if (y < lc.lines.length) {
@@ -418,7 +530,7 @@ class KeyBinding {
             row: y,
             column:
               typeof previousGraphemeBoundary === "function"
-                ? previousGraphemeBoundary(line, x)
+                ? (lc.lines[y - 1]?.getPositionIndex?.()?.previous(x) ?? previousGraphemeBoundary(line, x))
                 : x - 1,
           };
           end = { row: y, column: x };
@@ -467,21 +579,20 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
-        this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          x,
+        this.editor.tabManager.activeFile.historyX = this.realToView(
+          this.editor.lineController.lines[y - 1], x,
         );
 
       if (y == 1) {
@@ -495,10 +606,7 @@ class KeyBinding {
 
       this.editor.cursorController.setCursorPosition(
         y,
-        viewColumnToRealColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          this.editor.tabManager.activeFile.historyX,
-        ),
+        this.viewToReal(this.editor.lineController.lines[y - 1], this.editor.tabManager.activeFile.historyX),
       );
 
       const lc = this.editor.lineController;
@@ -522,31 +630,28 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
       if (this.editor.tabManager.activeFile.historyX == undefined)
-        this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          x,
+        this.editor.tabManager.activeFile.historyX = this.realToView(
+          this.editor.lineController.lines[y - 1], x,
         );
 
       if (y == this.editor.lineController.lines.length) {
         const lineNode = this.editor.lineController.lines[y - 1];
         const lineLength = lineNode ? lineNode.getText().length : 0;
-        if (this.editor.tabManager.activeFile.historyX != lineLength)
-          this.editor.tabManager.activeFile.historyX = realColumnToViewColumn(
-            lineNode ? lineNode.getText() : "",
-            lineLength,
-          );
+        const visualLength = this.realToView(lineNode, lineLength);
+        if (this.editor.tabManager.activeFile.historyX != visualLength)
+          this.editor.tabManager.activeFile.historyX = visualLength;
         else {
           this.editor.selectController.isMouseDown = false;
           return;
@@ -555,10 +660,7 @@ class KeyBinding {
 
       this.editor.cursorController.setCursorPosition(
         y,
-        viewColumnToRealColumn(
-          this.editor.lineController.lines[y - 1]?.getText() || "",
-          this.editor.tabManager.activeFile.historyX,
-        ),
+        this.viewToReal(this.editor.lineController.lines[y - 1], this.editor.tabManager.activeFile.historyX),
       );
 
       const lc = this.editor.lineController;
@@ -584,33 +686,24 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
       if (y == 1 && x == 0) return;
 
-      if (a) {
-        const lineNode = lc.lines[y - 1];
-        const l = lineNode ? lineNode.getText() : "";
-        const words = this.editor.writerController.splitWord(l);
-        let count = 0;
+      const lineNode = lc.lines[y - 1];
 
-        for (let i = 0; i < words.length; i++) {
-          const word = words[i];
-          if (x - (count + word.length) <= 0) {
-            x = count;
-            break;
-          }
-          count += word.length;
-        }
+      if (a) {
+        const l = lineNode ? lineNode.getText() : "";
+        x = this.editor.writerController.getPreviousWordBoundary(lineNode || l, x);
       } else if (m) {
         this.key_home(s, c, m, a);
         return;
@@ -620,17 +713,12 @@ class KeyBinding {
           const prevLineNode = lc.lines[y - 1];
           x = prevLineNode ? prevLineNode.getText().length : 0;
         } else {
-          x = previousGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
+          const currentLine = lc.lines[y - 1];
+          x = currentLine?.getPositionIndex?.()?.previous(x) ?? previousGraphemeBoundary(currentLine ? currentLine.getText() : "", x);
         }
       }
 
       this.editor.cursorController.setCursorPosition(y, x);
-
-      const screenCol = x - lc.offsetX;
-      if (screenCol < lc.marginChars) {
-        const targetCol = Math.max(0, lc.offsetX - 1);
-        lc.scrollTo(undefined, targetCol);
-      }
 
       if (s) {
         this.editor.selectController.move();
@@ -648,14 +736,14 @@ class KeyBinding {
       let y = this.editor.cursorController.row;
 
       if (s) {
-        if (!this.editor.selectController.containsSelected) {
+        if (!this.editor.selectController.hasActiveSelection?.()) {
           this.editor.selectController.startSelect = {
             column: x,
             row: y,
           };
         }
         this.editor.selectController.isMouseDown = true;
-      } else if (this.editor.selectController.containsSelected) {
+      } else if (this.editor.selectController.hasActiveSelection?.()) {
         this.editor.selectController.unSelectAll();
       }
 
@@ -665,18 +753,7 @@ class KeyBinding {
       if (y == lc.lines.length && x == lineLength) return;
 
       if (c || a) {
-        const l = lineNode ? lineNode.getText() : "";
-        const words = this.editor.writerController.splitWord(l);
-        let count = 0;
-
-        for (let i = 0; i < words.length; i++) {
-          const word = words[i];
-          count += word.length;
-          if (x - count < 0) {
-            x = count;
-            break;
-          }
-        }
+        x = this.editor.writerController.getNextWordBoundary(lineNode || "", x);
         if (x === lineLength && y < lc.lines.length) {
           y += 1;
           x = 0;
@@ -686,17 +763,11 @@ class KeyBinding {
           y += 1;
           x = 0;
         } else {
-          x = nextGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
+          x = lineNode?.getPositionIndex?.()?.next(x) ?? nextGraphemeBoundary(lineNode ? lineNode.getText() : "", x);
         }
       }
 
       this.editor.cursorController.setCursorPosition(y, x);
-
-      const screenCol = x - lc.offsetX;
-      if (screenCol >= lc.maxCharacters - lc.marginChars) {
-        const targetCol = lc.offsetX + 1;
-        lc.scrollTo(undefined, targetCol);
-      }
 
       if (s) {
         this.editor.selectController.move();
