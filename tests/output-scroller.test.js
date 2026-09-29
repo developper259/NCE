@@ -69,3 +69,58 @@ test("thumb ratio maps to the full horizontal range and refreshes only visible r
   assert.equal(calls.filter((call) => call === "horizontal viewport").length, 1);
   assert.ok(!calls.some((call) => ["highlight", "selection", "search", "caret"].includes(call)));
 });
+
+test("vertical thumb scroll uses the focused row refresh path", () => {
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller");
+  const calls = [];
+  const vertical = {
+    setScrollRatio() {},
+    calcIsActive: () => true,
+    refresh() {},
+    hide() {},
+    show() {},
+  };
+  const horizontal = {
+    setScrollRatio() {},
+    calcIsActive: () => false,
+    refresh() {},
+    hide() {},
+    show() {},
+  };
+  const scroller = new OutputScroller({
+    editorOBJ: {},
+    output: {},
+    posY: 20,
+    letterSize: 10,
+    domManager: { getOutputWidth: () => 100 },
+    scrollerManager: {
+      VERTICAL_TYPE: "vertical",
+      HORIZONTAL_TYPE: "horizontal",
+      createScroller: (_target, type) => type === "vertical" ? vertical : horizontal,
+      addScroller() {},
+    },
+  });
+  const lineController = {
+    startIndex: 7,
+    offsetY: 0,
+    offsetX: 0,
+    outputWidth: 100,
+    maxLineLength: 100,
+    maxLines: 10,
+    getDisplayLineCount: () => 100,
+    getBottomScrollMargin: () => 3,
+    getLineHeight: () => 20,
+    getOutputWidth: () => 100,
+    applyOutputTransform() {},
+    refreshForVerticalScroll(previousStartIndex) {
+      calls.push(["focused refresh", previousStartIndex]);
+    },
+    refresh() { calls.push("full refresh"); },
+  };
+  scroller.setLineController(lineController);
+
+  vertical.onScroll(0.5);
+
+  assert.deepEqual(calls, [["focused refresh", 7]]);
+  assert.notEqual(lineController.startIndex, 7);
+});

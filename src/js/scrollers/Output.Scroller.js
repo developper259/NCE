@@ -75,8 +75,9 @@ class OutputScroller {
     };
 
     this.vScroller.onScroll = (scrollRatio) => {
+      const previousStartIndex = this.lineController.startIndex;
       this.applyVerticalScrollFromRatio(scrollRatio);
-      this.lineController.refresh(true);
+      this.lineController.refreshForVerticalScroll(previousStartIndex);
     };
 
     // Horizontal scroller
@@ -382,6 +383,18 @@ class OutputScroller {
     if (this.hScroller.calcIsActive()) {
       this.hScroller.setActive(true);
     }
+  }
+
+  refreshLoadProgress() {
+    if (!this.vScroller || !this.hScroller) return;
+
+    this.vScroller.nbItem = this.getTotalScrollLines();
+    this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
+    this.vScroller.refresh();
+
+    this.hScroller.nbItem = this.lineController.maxLineLength + 2;
+    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
+    this.hScroller.refresh();
   }
 
   updateNbItem() {

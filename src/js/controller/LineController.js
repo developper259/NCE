@@ -99,15 +99,14 @@ class LineController {
   }
 
   get maxLineLength() {
-    if (!this.editor.tabManager.activeFile) {
-      return 0;
-    }
-    this.ensureLineLengthIndex();
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return 0;
+    this.ensureLineLengthIndex(file);
     this.syncDiffRowCache();
-    const maxLength = this.peekMaxLineLength();
+    const maxLength = this.peekMaxLineLength(file);
     const diffMax = this.diffRows?.length ? this.diffMaxLineLength : 0;
-    this.editor.tabManager.activeFile.maxLineLength = Math.max(maxLength, diffMax);
-    return this.editor.tabManager.activeFile.maxLineLength;
+    file.maxLineLength = Math.max(maxLength, diffMax);
+    return file.maxLineLength;
   }
 
   set maxLineLength(value) {
@@ -335,34 +334,31 @@ class LineController {
     return this.peekMaxLineLength();
   }
 
-  ensureLineLengthIndex() {
-    const file = this.editor.tabManager.activeFile;
+  ensureLineLengthIndex(file = this.editor.tabManager.activeFile) {
     const tabWidth = SETTINGS_GET("editor.tabWidth");
     if (!file) return;
     if (
       !file._lineLengthRecords ||
       file.maxLineLengthDirty === true ||
       file._lineMetricsTabWidth !== tabWidth ||
-      file._lineLengthCount !== this.lines.length
-    ) this.rebuildLineLengthIndex();
+      file._lineLengthCount !== file.lines.length
+    ) this.rebuildLineLengthIndex(file);
   }
 
-  rebuildLineLengthIndex() {
-    const file = this.editor.tabManager.activeFile;
+  rebuildLineLengthIndex(file = this.editor.tabManager.activeFile) {
     if (!file) return 0;
     const tabWidth = SETTINGS_GET("editor.tabWidth");
     file._lineLengthRecords = new Map();
     file._lineLengthHeap = [];
     file._lineMetricsTabWidth = tabWidth;
-    for (const line of this.lines) this.updateLineLengthRecord(line);
-    file._lineLengthCount = this.lines.length;
+    for (const line of file.lines || []) this.updateLineLengthRecord(line, file);
+    file._lineLengthCount = file.lines?.length || 0;
     file.maxLineLengthDirty = false;
-    file.maxLineLength = this.peekMaxLineLength();
+    file.maxLineLength = this.peekMaxLineLength(file);
     return file.maxLineLength;
   }
 
-  updateLineLengthRecord(line) {
-    const file = this.editor.tabManager.activeFile;
+  updateLineLengthRecord(line, file = this.editor.tabManager.activeFile) {
     if (!file || !line) return;
     if (!file._lineLengthRecords) file._lineLengthRecords = new Map();
     if (!file._lineLengthHeap) file._lineLengthHeap = [];
@@ -399,19 +395,36 @@ class LineController {
     file.maxLineLength = this.peekMaxLineLength();
   }
 
-  ensureLogicalLineLengthIndex() {
-    const file = this.editor.tabManager.activeFile;
+  syncLineLengthsForAppend(file, startIndex, appendedLines) {
+    if (!file) return;
+    if (
+      !file._lineLengthRecords || !file._lineLengthHeap ||
+      file.maxLineLengthDirty === true ||
+      file._lineMetricsTabWidth !== SETTINGS_GET("editor.tabWidth") ||
+      file._lineLengthCount !== startIndex
+    ) {
+      file.maxLineLengthDirty = true;
+      return;
+    }
+
+    for (const line of appendedLines) this.updateLineLengthRecord(line, file);
+    file._lineLengthCount = file.lines.length;
+    file.maxLineLengthDirty = false;
+    file.maxLineLength = this.peekMaxLineLength(file);
+  }
+
+  ensureLogicalLineLengthIndex(file = this.editor.tabManager.activeFile) {
     if (!file) return;
     if (
       file._logicalLineLengths && file._logicalLengthTree &&
-      file._logicalLengthCount === this.lines.length
+      file._logicalLengthCount === file.lines.length
     ) return;
 
-    const count = this.lines.length;
+    const count = file.lines.length;
     const values = new Array(count);
     const tree = new Array(count + 1).fill(0);
     for (let index = 0; index < count; index++) {
-      const length = this.lines[index]?.getText?.().length || 0;
+      const length = file.lines[index]?.getText?.().length || 0;
       values[index] = length;
       const treeIndex = index + 1;
       tree[treeIndex] += length;
@@ -421,6 +434,40 @@ class LineController {
     file._logicalLineLengths = values;
     file._logicalLengthTree = tree;
     file._logicalLengthCount = count;
+  }
+
+  fenwickPrefixSum(tree, count) {
+    let sum = 0;
+    for (let index = Math.max(0, Math.min(count, tree.length - 1)); index > 0; index -= index & -index)
+      sum += tree[index];
+    return sum;
+  }
+
+  syncLogicalLineLengthsForAppend(file, startIndex, appendedLines) {
+    if (!file?._logicalLineLengths || !file._logicalLengthTree) return;
+    if (
+      file._logicalLengthCount !== startIndex ||
+      file._logicalLineLengths.length !== startIndex ||
+      file._logicalLengthTree.length !== startIndex + 1
+    ) {
+      file._logicalLineLengths = null;
+      file._logicalLengthTree = null;
+      file._logicalLengthCount = -1;
+      return;
+    }
+
+    const values = file._logicalLineLengths;
+    const tree = file._logicalLengthTree;
+    for (const line of appendedLines) {
+      const length = line?.getText?.().length || 0;
+      const treeIndex = values.length + 1;
+      const rangeStart = treeIndex - (treeIndex & -treeIndex);
+      const previousRangeLength = this.fenwickPrefixSum(tree, treeIndex - 1) -
+        this.fenwickPrefixSum(tree, rangeStart);
+      values.push(length);
+      tree.push(previousRangeLength + length);
+      file._logicalLengthCount = treeIndex;
+    }
   }
 
   syncLogicalLineLengthsForEdit(startIndex, replacementLines) {
@@ -456,13 +503,7 @@ class LineController {
     this.ensureLogicalLineLengthIndex();
     const tree = this.editor.tabManager.activeFile?._logicalLengthTree;
     if (!tree) return 0;
-    const prefix = (count) => {
-      let sum = 0;
-      for (let index = Math.max(0, Math.min(count, tree.length - 1)); index > 0; index -= index & -index)
-        sum += tree[index];
-      return sum;
-    };
-    return prefix(endIndex) - prefix(startIndex);
+    return this.fenwickPrefixSum(tree, endIndex) - this.fenwickPrefixSum(tree, startIndex);
   }
 
   heapPush(heap, entry) {
@@ -506,8 +547,7 @@ class LineController {
     entry.index = index;
   }
 
-  removeLineLengthRecord(line) {
-    const file = this.editor.tabManager.activeFile;
+  removeLineLengthRecord(line, file = this.editor.tabManager.activeFile) {
     const record = file?._lineLengthRecords?.get(line);
     if (!record) return;
     file._lineLengthRecords.delete(line);
@@ -523,8 +563,7 @@ class LineController {
     }
   }
 
-  peekMaxLineLength() {
-    const file = this.editor.tabManager.activeFile;
+  peekMaxLineLength(file = this.editor.tabManager.activeFile) {
     const heap = file?._lineLengthHeap || [];
     return heap[0]?.length || 0;
   }
@@ -612,16 +651,28 @@ class LineController {
 
   appendLines(newLines) {
     const lineNodes = newLines.map((text) => new LineNode(text));
-    const startIndex = this.lines.length;
-
-    this.lines = this.lines.concat(lineNodes);
-    this.syncLineLengthsForEdit(startIndex, [], lineNodes);
-
-    this.setTotalLines(this.lines.length);
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return;
+    this.appendLoadedLineNodes(file, lineNodes);
 
     if (this.outputScroller) {
       this.outputScroller.updateNbItem();
     }
+  }
+
+  appendLoadedLines(file, texts) {
+    const lineNodes = texts.map((text) => new LineNode(text));
+    this.appendLoadedLineNodes(file, lineNodes);
+  }
+
+  appendLoadedLineNodes(file, lineNodes) {
+    if (!file || !lineNodes.length) return;
+    const startIndex = file.lines.length;
+    file.lines.push(...lineNodes);
+    this.syncLineLengthsForAppend(file, startIndex, lineNodes);
+    this.syncLogicalLineLengthsForAppend(file, startIndex, lineNodes);
+    file.totalLines = file.lines.length;
+    file.syntaxMetrics = null;
   }
 
   getContent() {
@@ -913,6 +964,111 @@ class LineController {
     this.dirtyLines.clear();
   }
 
+  isLineOutputCurrent(child, displayRow) {
+    if (!child || !displayRow) return false;
+
+    const documentIndex = displayRow.documentIndex;
+    const lineNode = documentIndex === null ? null : this.lines[documentIndex];
+    const mappedDocumentIndex = documentIndex === null
+      ? ""
+      : String(documentIndex);
+    const renderMeta = child.__nceRenderMeta;
+    const tabWidth = typeof SETTINGS_GET === "function"
+      ? SETTINGS_GET("editor.tabWidth")
+      : 4;
+
+    return child.dataset.line === mappedDocumentIndex &&
+      renderMeta?.documentIndex === documentIndex &&
+      renderMeta.lineNode === lineNode &&
+      renderMeta.displayText === displayRow.text &&
+      renderMeta.textVersion === (lineNode?.textVersion || 0) &&
+      renderMeta.tokenVersion === (lineNode?.tokensVersion || 0) &&
+      renderMeta.diffVersion === (lineNode?.diffVersion || 0) &&
+      renderMeta.diffState === (displayRow.type || null) &&
+      renderMeta.horizontalOffset === this.offsetX &&
+      renderMeta.maxCharactersPerLine === this.maxCharactersPerLine &&
+      renderMeta.tabWidth === tabWidth;
+  }
+
+  refreshForVerticalScroll(previousStartIndex) {
+    if (!this.editor.tabManager.activeFile) return;
+    if (this.editor.tabManager.activeFile.loadError) {
+      this.refresh();
+      return;
+    }
+
+    this.applyOutputTransform();
+    const delta = this.startIndex - previousStartIndex;
+    const children = this.editor.output.children;
+    const rowCount = this.renderedLineCount;
+    const newlyVisibleDocumentIndexes = [];
+
+    if (delta !== 0 && (children.length !== rowCount || Math.abs(delta) >= rowCount)) {
+      this.initLineOutput();
+      for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
+        const displayRow = this.getDisplayRow(this.startIndex + screenIndex);
+        if (Number.isInteger(displayRow?.documentIndex))
+          newlyVisibleDocumentIndexes.push(displayRow.documentIndex);
+      }
+    } else if (delta !== 0) {
+      if (delta > 0) {
+        for (let index = 0; index < delta; index++) {
+          const first = this.editor.output.firstElementChild;
+          if (!first) break;
+          this.editor.output.appendChild(first);
+        }
+      } else {
+        for (let index = 0; index < -delta; index++) {
+          const last = this.editor.output.lastElementChild;
+          const first = this.editor.output.firstElementChild;
+          if (!last || !first) break;
+          this.editor.output.insertBefore(last, first);
+        }
+      }
+
+      this.editor.highlightController.lineNodes.clear();
+      for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
+        const displayIndex = this.startIndex + screenIndex;
+        const displayRow = this.getDisplayRow(displayIndex);
+        const child = this.editor.output.children[screenIndex];
+        if (!child) continue;
+
+        const childFast = this.getFastNode(child);
+        childFast?.setTop(this.getLineTop(screenIndex));
+        childFast?.setDataset("displayLine", displayIndex);
+
+        if (!displayRow || !this.isLineOutputCurrent(child, displayRow)) {
+          this.refreshLineOutput(screenIndex);
+        } else if (Number.isInteger(displayRow.documentIndex)) {
+          this.editor.highlightController.setLineNode(
+            displayRow.documentIndex,
+            child,
+          );
+        }
+
+        if (Number.isInteger(displayRow?.documentIndex)) {
+          const lineNode = this.lines[displayRow.documentIndex];
+          if (lineNode && lineNode.getTokens() === null &&
+              lineNode.getText().trim() !== "")
+            newlyVisibleDocumentIndexes.push(displayRow.documentIndex);
+        }
+      }
+    }
+
+    if (delta !== 0) {
+      this.refreshNumberLines(false);
+    }
+
+    this.editor.cursorController.updateCaretPosition();
+    this.editor.selectController.refreshSelectionDOM();
+    this.editor.searchController.refreshSelectionDOM();
+
+    if (newlyVisibleDocumentIndexes.length > 0)
+      this.editor.highlightController.refreshForVerticalScroll(
+        newlyVisibleDocumentIndexes,
+      );
+  }
+
   refreshHorizontalViewport() {
     const visibleCount = Math.min(
       this.renderedLineCount,
@@ -953,21 +1109,33 @@ class LineController {
     const lineNode = documentIndex === null ? null : this.lines[documentIndex];
     const fullText = displayRow.text;
 
+    if (this.isLineOutputCurrent(child, displayRow)) {
+      if (documentIndex !== null)
+        this.editor.highlightController.setLineNode(documentIndex, child);
+      return;
+    }
+
     let line = this.getSlicedLine(fullText, lineNode, displayRow);
     const mappedDocumentIndex =
       documentIndex === null ? "" : String(documentIndex);
-    const mappingChanged =
-      child.dataset.line !== mappedDocumentIndex ||
-      child.dataset.displayLine !== String(displayIndex);
+    const mappingChanged = child.dataset.line !== mappedDocumentIndex;
 
     const tokenVersion = lineNode?.tokensVersion || 0;
     const diffVersion = lineNode?.diffVersion || 0;
     const renderMeta = child.__nceRenderMeta;
     const needsRender = mappingChanged || !renderMeta ||
+      renderMeta.documentIndex !== documentIndex ||
+      renderMeta.lineNode !== lineNode ||
+      renderMeta.displayText !== fullText ||
       renderMeta.startChar !== line.startChar ||
       renderMeta.endChar !== line.endChar ||
       renderMeta.startVisual !== line.startVisual ||
       renderMeta.endVisual !== line.endVisual ||
+      renderMeta.horizontalOffset !== this.offsetX ||
+      renderMeta.maxCharactersPerLine !== this.maxCharactersPerLine ||
+      renderMeta.tabWidth !== (typeof SETTINGS_GET === "function"
+        ? SETTINGS_GET("editor.tabWidth")
+        : 4) ||
       renderMeta.textVersion !== (lineNode?.textVersion || 0) ||
       renderMeta.tokenVersion !== tokenVersion ||
       renderMeta.diffVersion !== diffVersion ||
@@ -985,10 +1153,18 @@ class LineController {
       lineFast?.setDataset("displayLine", displayIndex);
       lineFast?.setDataset("renderGeneration", this.renderGeneration);
       lineOBJ.__nceRenderMeta = {
+        documentIndex,
+        lineNode,
+        displayText: fullText,
         startChar: line.startChar,
         endChar: line.endChar,
         startVisual: line.startVisual,
         endVisual: line.endVisual,
+        horizontalOffset: this.offsetX,
+        maxCharactersPerLine: this.maxCharactersPerLine,
+        tabWidth: typeof SETTINGS_GET === "function"
+          ? SETTINGS_GET("editor.tabWidth")
+          : 4,
         textVersion: lineNode?.textVersion || 0,
         tokenVersion,
         diffVersion,
@@ -1057,10 +1233,18 @@ class LineController {
         lineFast?.setDataset("displayLine", displayIndex);
         lineFast?.setDataset("renderGeneration", this.renderGeneration);
         lineOBJ.__nceRenderMeta = {
+          documentIndex,
+          lineNode,
+          displayText: fullText,
           startChar: line.startChar,
           endChar: line.endChar,
           startVisual: line.startVisual,
           endVisual: line.endVisual,
+          horizontalOffset: this.offsetX,
+          maxCharactersPerLine: this.maxCharactersPerLine,
+          tabWidth: typeof SETTINGS_GET === "function"
+            ? SETTINGS_GET("editor.tabWidth")
+            : 4,
           textVersion: lineNode?.textVersion || 0,
           tokenVersion: lineNode?.tokensVersion || 0,
           diffVersion: lineNode?.diffVersion || 0,
@@ -1081,7 +1265,7 @@ class LineController {
     else this.editor.output.replaceChildren(fragment);
   }
 
-  refreshNumberLines() {
+  refreshNumberLines(updateWidth = true) {
     if (!this.editor.tabManager.activeFile) {
       return;
     }
@@ -1140,7 +1324,7 @@ class LineController {
       spanFast?.toggleClass("line-selected", displayRow?.documentIndex === this.index - 1);
     }
 
-    this.updateLineNumberWidth();
+    if (updateWidth) this.updateLineNumberWidth();
   }
 
   initNumberLines() {

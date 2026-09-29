@@ -657,6 +657,32 @@ class HighlightController {
     this.refresh();
   }
 
+  refreshForVerticalScroll(documentIndexes = []) {
+    const file = this.editor.tabManager.activeFile;
+    const language = file?.language || "plaintext";
+    if (!file || language === "plaintext") return;
+
+    let hasUncachedVisibleLine = false;
+    for (const documentIndex of new Set(documentIndexes)) {
+      const line = file.lines[documentIndex];
+      if (!line || line.getTokens() !== null || line.getText().trim() === "")
+        continue;
+      hasUncachedVisibleLine = true;
+      if (this.documentModes.get(file.id) !== "incremental")
+        this.markDirty(documentIndex);
+    }
+
+    if (this.documentModes.get(file.id) === "incremental") {
+      if (hasUncachedVisibleLine)
+        this.loadVisibleDocumentLines(file).catch((error) =>
+          console.error("[NSH] Visible document range failed", error),
+        );
+      return;
+    }
+
+    if (this.dirtyLines.size > 0) this.refresh();
+  }
+
   async refresh() {
     if (this.isProcessingDirty) return;
 
