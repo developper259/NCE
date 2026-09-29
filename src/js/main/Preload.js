@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-contextBridge.exposeInMainWorld("api", {
+const api = {
   platform: process.platform,
   agentFileOperation: (root, operation, args) =>
     ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
@@ -238,4 +238,12 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("ContextMenu:triggered", (_event, actionName) =>
       callback(actionName),
     ),
-});
+};
+
+// Benchmark diagnostics are available only in an explicitly isolated run.
+if (process.env.NCE_BENCHMARK === "1" || process.argv.includes("--nce-benchmark=1")) {
+  api.getBenchmarkDiagnostics = () =>
+    ipcRenderer.invoke("Benchmark:getDiagnostics");
+}
+
+contextBridge.exposeInMainWorld("api", api);

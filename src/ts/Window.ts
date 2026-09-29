@@ -71,6 +71,7 @@ export class Window {
   }
 
   create() {
+    this.app.recordBenchmarkEvent("window-create-request");
     this.forceQuit = false;
     this.rendererReady = false;
     this.quitState = "idle";
@@ -81,8 +82,8 @@ export class Window {
     const assetRoot = app.isPackaged ? appRoot : path.join(appRoot, "src");
 
     this.window = new BrowserWindow({
-      width: 800,
-      height: 600,
+      width: this.app.benchmarkEnabled ? 1280 : 800,
+      height: this.app.benchmarkEnabled ? 800 : 600,
       minWidth: 800,
       minHeight: 600,
       title: this.app.name,
@@ -94,6 +95,8 @@ export class Window {
       webPreferences: {
         sandbox: true,
 
+        additionalArguments: this.app.benchmarkEnabled ? ["--nce-benchmark=1"] : [],
+
         preload: path.join(assetRoot, "js/main/Preload.js"),
 
         contextIsolation: true,
@@ -101,10 +104,28 @@ export class Window {
         backgroundThrottling: false,
       },
     });
+    this.app.recordBenchmarkEvent("browser-window-created");
 
     // Let renderer KeyBindingManager own keyboard shortcuts regardless of
     // whether the custom editor output or a native input currently has focus.
     this.window.webContents.setIgnoreMenuShortcuts(true);
+
+    if (this.app.benchmarkEnabled) {
+      this.window.webContents.session.webRequest.onBeforeRequest(
+        (details, callback) => {
+          let cancel = false;
+          try {
+            const requestUrl = new URL(details.url);
+            if (["http:", "https:", "ws:", "wss:"].includes(requestUrl.protocol)) {
+              cancel = !["127.0.0.1", "localhost", "::1", "[::1]"].includes(requestUrl.hostname);
+            }
+          } catch {
+            cancel = true;
+          }
+          callback({ cancel });
+        },
+      );
+    }
 
     if (!this.fileManager) this.fileManager = new FileManager(this);
     if (!this.watcher) this.watcher = new Watcher(this.window);
@@ -123,8 +144,15 @@ export class Window {
 
     this.window.loadFile(path.join(assetRoot, "html/index.html"));
     this.window.once("ready-to-show", () => {
-      this.window?.maximize();
+      this.app.recordBenchmarkEvent("window-ready-to-show");
+      if (!this.app.benchmarkEnabled) this.window?.maximize();
       this.window?.show();
+    });
+    this.window.webContents.once("dom-ready", () => {
+      this.app.recordBenchmarkEvent("renderer-dom-ready");
+    });
+    this.window.webContents.once("did-finish-load", () => {
+      this.app.recordBenchmarkEvent("renderer-did-finish-load");
     });
 
     this.window.webContents.on("console-message", (...args: any[]) => {
@@ -182,6 +210,7 @@ export class Window {
     });
 
     this.window.on("close", (event) => {
+      this.app.recordBenchmarkEvent("window-close-request");
       if (this.forceQuit) {
         return;
       }
@@ -191,6 +220,7 @@ export class Window {
     });
 
     this.window.on("closed", () => {
+      this.app.recordBenchmarkEvent("window-closed");
       this.agentApprovalManager?.cancelAll();
       this.window = null;
     });
@@ -243,9 +273,15 @@ export class Window {
         this.clearRecentFolders(),
       );
       ipcMain.handle("App:rendererReady", async () => {
+        this.app.recordBenchmarkEvent("renderer-ready");
         this.rendererReady = true;
         return true;
       });
+      if (this.app.benchmarkEnabled) {
+        ipcMain.handle("Benchmark:getDiagnostics", async () =>
+          this.app.getBenchmarkDiagnostics(),
+        );
+      }
       ipcMain.handle("App:approveQuit", async () => {
         this.clearQuitTimer();
         this.quitState = "approved";

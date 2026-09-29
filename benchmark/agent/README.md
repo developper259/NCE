@@ -26,14 +26,14 @@ All providers receive the same task, production NCE tool schemas and loop, works
 
 ```bash
 npm run benchmark:validate
-npm run benchmark -- --model nce-coder
-npm run benchmark -- --model qwen-base --runs 3
-npm run benchmark -- --model mock --task no_tool_001
-npm run benchmark -- --model nce-coder --category read_only
-npm run benchmark -- --model nce-coder --difficulty hard --resume
-npm run benchmark -- --model gpt --dry-run
-npm run benchmark:compare -- nce-coder qwen-base
-npm run benchmark:report
+npm run benchmark:agent -- --model nce-coder
+npm run benchmark:agent -- --model qwen-base --runs 3
+npm run benchmark:agent -- --model mock --task no_tool_001
+npm run benchmark:agent -- --model nce-coder --category read_only
+npm run benchmark:agent -- --model nce-coder --difficulty hard --resume
+npm run benchmark:agent -- --model gpt --dry-run
+npm run benchmark:agent:compare -- nce-coder qwen-base
+npm run benchmark:agent:report
 ```
 
 `--keep-workspaces` retains temporary workspaces for debugging. Without it they are removed after the trace is saved. Each result is stored under `results/<run-id>/<model>/<task-id>.json`; it includes prompt, model, messages where applicable, normalized calls/results, timestamps, usage, iterations, latency, final answer, filesystem diff, score, and failure flags.

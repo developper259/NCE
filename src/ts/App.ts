@@ -6,6 +6,7 @@ import { NSHServer } from 'nsh/server';
 import { SettingsManager } from './manager/SettingsManager';
 import { RecentFoldersManager } from './manager/RecentFoldersManager';
 import { AgentConversationStore } from './manager/AgentConversationStore';
+import { performance } from 'node:perf_hooks';
 
 function getPackageVersion() {
   try {
@@ -29,9 +30,15 @@ export class App {
   agentConversations!: AgentConversationStore;
   name = "NCE";
 
+  readonly benchmarkEnabled = typeof process !== "undefined" && process.env.NCE_BENCHMARK === "1";
+  private readonly benchmarkOrigin = performance.now();
+  private readonly benchmarkEvents: Array<{ name: string; offsetMs: number }> = [];
+
   version = getPackageVersion();
 
   constructor() {
+    this.configureBenchmarkProfile();
+    this.recordBenchmarkEvent("process-start");
     this.window = new Window(this);
     this.nsh = new NSHServer({ host: "127.0.0.1", port: 0 });
 
@@ -44,6 +51,7 @@ export class App {
   }
   setupAppEvents() {
     app.on("ready", async () => {
+      this.recordBenchmarkEvent("app-ready");
       this.settings = new SettingsManager(app.getPath("userData"));
       await this.settings.initialize();
       this.recentFolders = new RecentFoldersManager(app.getPath("userData"));
@@ -73,6 +81,46 @@ export class App {
         this.window.create();
       }
     });
+  }
+
+  private configureBenchmarkProfile() {
+    if (!this.benchmarkEnabled) return;
+    const userDataPath = process.env.NCE_BENCHMARK_USER_DATA;
+    const sessionDataPath = process.env.NCE_BENCHMARK_SESSION_DATA;
+    if (userDataPath && path.isAbsolute(userDataPath)) {
+      fs.mkdirSync(userDataPath, { recursive: true });
+      app.setPath("userData", userDataPath);
+    }
+    if (sessionDataPath && path.isAbsolute(sessionDataPath)) {
+      fs.mkdirSync(sessionDataPath, { recursive: true });
+      app.setPath("sessionData", sessionDataPath);
+    }
+  }
+
+  recordBenchmarkEvent(name: string, details?: Record<string, number>) {
+    if (!this.benchmarkEnabled) return;
+    this.benchmarkEvents.push({
+      name,
+      offsetMs: performance.now() - this.benchmarkOrigin,
+      ...(details || {}),
+    });
+  }
+
+  getBenchmarkDiagnostics() {
+    if (!this.benchmarkEnabled) return null;
+    return {
+      enabled: true,
+      events: this.benchmarkEvents.slice(),
+      mainProcess: {
+        memory: process.memoryUsage(),
+        cpu: process.cpuUsage(),
+      },
+      electronProcesses: app.getAppMetrics().map((metric) => ({
+        type: metric.type,
+        memory: metric.memory,
+        cpu: metric.cpu,
+      })),
+    };
   }
 
   async startNsh() {

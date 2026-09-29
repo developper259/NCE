@@ -1,0 +1,35 @@
+name: IDE benchmark
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 2 * * *'
+permissions:
+  contents: read
+jobs:
+  quick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Configure Electron Chromium sandbox
+        run: |
+          test -f node_modules/electron/dist/chrome-sandbox
+          sudo chown root:root node_modules/electron/dist/chrome-sandbox
+          sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Run benchmark utility checks
+        run: npm run benchmark:ide:test
+      - name: Run quick IDE benchmark
+        run: xvfb-run -a npm run benchmark:quick -- --quiet --machine github-ubuntu
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nce-ide-benchmark-${{ github.run_id }}
+          if-no-files-found: warn
+          path: |
+            .benchmark-data/ide/results/*.json
+            .benchmark-data/ide/results/*.md

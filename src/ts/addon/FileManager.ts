@@ -8,6 +8,7 @@ import {
 } from "electron";
 import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
+import { performance } from "node:perf_hooks";
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
@@ -313,7 +314,18 @@ export class FileManager {
     ipcMain.handle(
       "FileManager:initializeFile",
       async (event, filePath: string) => {
-        return await this.initializeFile(filePath);
+        const benchmarkApp = this.window?.app;
+        const benchmarkEnabled = benchmarkApp?.benchmarkEnabled === true;
+        const benchmarkStart = benchmarkEnabled ? performance.now() : 0;
+        const result = await this.initializeFile(filePath);
+        if (benchmarkEnabled) {
+          benchmarkApp.recordBenchmarkEvent("file-initialize-complete", {
+            durationMs: performance.now() - benchmarkStart,
+            bytes: Number(result?.size) || 0,
+            lines: Number(result?.totalLines) || 0,
+          });
+        }
+        return result;
       },
     );
 
@@ -324,7 +336,17 @@ export class FileManager {
     ipcMain.handle(
       "FileManager:getFileChunk",
       async (event, filePath: string, startLine: number, lineCount: number) => {
-        return await this.getFileChunk(filePath, startLine, lineCount);
+        const benchmarkApp = this.window?.app;
+        const benchmarkEnabled = benchmarkApp?.benchmarkEnabled === true;
+        const benchmarkStart = benchmarkEnabled ? performance.now() : 0;
+        const result = await this.getFileChunk(filePath, startLine, lineCount);
+        if (benchmarkEnabled) {
+          benchmarkApp.recordBenchmarkEvent("file-chunk-complete", {
+            durationMs: performance.now() - benchmarkStart,
+            lines: Number(result?.lines?.length) || 0,
+          });
+        }
+        return result;
       },
     );
 
@@ -538,6 +560,9 @@ export class FileManager {
     if (!Array.isArray(file) || !file.every(validPath)) {
       return Promise.resolve(undefined);
     }
+    const benchmarkApp = this.window?.app;
+    const benchmarkEnabled = benchmarkApp?.benchmarkEnabled === true;
+    const benchmarkStart = benchmarkEnabled ? performance.now() : 0;
     const fileContents: { [key: string]: string } = {};
 
     for (const filePath of file) {
@@ -548,6 +573,18 @@ export class FileManager {
       } catch (error) {
         console.error(`Error reading file ${filePath}:`, error);
       }
+    }
+
+    if (benchmarkEnabled) {
+      const byteCount = Object.values(fileContents).reduce(
+        (total, content) => total + Buffer.byteLength(content, "utf8"),
+        0,
+      );
+      benchmarkApp.recordBenchmarkEvent("file-read-complete", {
+        durationMs: performance.now() - benchmarkStart,
+        fileCount: Object.keys(fileContents).length,
+        bytes: byteCount,
+      });
     }
 
     return fileContents;

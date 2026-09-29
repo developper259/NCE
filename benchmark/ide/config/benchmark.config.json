@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "1.0.0",
+  "defaultMode": "quick",
+  "defaultTimeoutMs": 30000,
+  "applicationCloseTimeoutMs": 10000,
+  "profileRoot": ".benchmark-data/ide/profiles",
+  "resultsRoot": ".benchmark-data/ide/results",
+  "fixtureRoot": ".benchmark-data/ide/fixtures",
+  "modes": {
+    "quick": {
+      "startupSamples": 3,
+      "warmupSamples": 0,
+      "scenarios": [
+        "startup.cold-ish", "file.open.small", "file.open.medium",
+        "file.open.long-line-100k", "tabs.switch", "editor.typing",
+        "scroll.vertical", "editor.search"
+      ]
+    },
+    "standard": {
+      "startupSamples": 5,
+      "warmupSamples": 1,
+      "scenarios": [
+        "startup.cold-ish", "workspace.open.small", "file.open.tiny",
+        "file.open.small", "file.open.medium", "file.open.large", "file.open.binary",
+        "file.open.10kb", "file.open.100kb", "file.open.1mb",
+        "file.open.long-line-100k", "tabs.open", "tabs.switch", "tabs.close",
+        "editor.typing", "editor.backspace", "editor.enter", "editor.cursor",
+        "editor.select-all", "editor.search", "editor.search-many-results",
+        "scroll.vertical", "scroll.horizontal", "editor.syntax-highlight",
+        "memory.open-close-small", "idle.renderer", "dom.count"
+      ]
+    },
+    "full": {
+      "startupSamples": 10,
+      "warmupSamples": 2,
+      "scenarios": [
+        "startup.cold-ish", "workspace.open.small", "workspace.open.medium",
+        "workspace.open.large", "file.open.tiny", "file.open.small",
+        "file.open.medium", "file.open.large", "file.open.very-large", "file.open.binary",
+        "file.open.extreme", "file.open.10kb", "file.open.100kb",
+        "file.open.1mb", "file.open.5mb", "file.open.10mb", "file.open.50mb", "file.open.long-line-10k",
+        "file.open.long-line-100k", "file.open.long-line-1m",
+        "file.open.long-line-tabs-1m", "file.open.long-unicode",
+        "tabs.open", "tabs.switch", "tabs.close", "tabs.close-all",
+        "editor.typing", "editor.backspace", "editor.enter", "editor.cursor",
+        "editor.select-all", "editor.search", "editor.search-many-results",
+        "scroll.vertical", "scroll.horizontal", "editor.syntax-highlight",
+        "memory.open-close-large", "memory.repeated-open-close", "idle.renderer",
+        "dom.count"
+      ]
+    }
+  },
+  "iterations": {
+    "quick": { "interaction": 3, "open": 2, "memory": 2 },
+    "standard": { "interaction": 10, "open": 5, "memory": 5 },
+    "full": { "interaction": 30, "open": 10, "memory": 10 }
+  },
+  "safety": {
+    "extremeWorkspaceRequiresFlag": true,
+    "maxWorkspaceEntriesByDefault": 20000,
+    "maxFixtureFileBytes": 52428800,
+    "maxOpenTabs": 100,
+    "requireExplicitExtremeFor100kWorkspace": true
+  }
+}

@@ -9,6 +9,7 @@ release/
 .vscode
 .DS_Store
 Perf.txt
+.benchmark-data/
 
 # Dataset Builder data and local credentials (keep only the safe example file)
 /dataset/
