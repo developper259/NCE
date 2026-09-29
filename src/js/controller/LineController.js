@@ -99,15 +99,14 @@ class LineController {
   }
 
   get maxLineLength() {
-    if (!this.editor.tabManager.activeFile) {
-      return 0;
-    }
-    this.ensureLineLengthIndex();
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return 0;
+    this.ensureLineLengthIndex(file);
     this.syncDiffRowCache();
-    const maxLength = this.peekMaxLineLength();
+    const maxLength = this.peekMaxLineLength(file);
     const diffMax = this.diffRows?.length ? this.diffMaxLineLength : 0;
-    this.editor.tabManager.activeFile.maxLineLength = Math.max(maxLength, diffMax);
-    return this.editor.tabManager.activeFile.maxLineLength;
+    file.maxLineLength = Math.max(maxLength, diffMax);
+    return file.maxLineLength;
   }
 
   set maxLineLength(value) {
@@ -335,34 +334,31 @@ class LineController {
     return this.peekMaxLineLength();
   }
 
-  ensureLineLengthIndex() {
-    const file = this.editor.tabManager.activeFile;
+  ensureLineLengthIndex(file = this.editor.tabManager.activeFile) {
     const tabWidth = SETTINGS_GET("editor.tabWidth");
     if (!file) return;
     if (
       !file._lineLengthRecords ||
       file.maxLineLengthDirty === true ||
       file._lineMetricsTabWidth !== tabWidth ||
-      file._lineLengthCount !== this.lines.length
-    ) this.rebuildLineLengthIndex();
+      file._lineLengthCount !== file.lines.length
+    ) this.rebuildLineLengthIndex(file);
   }
 
-  rebuildLineLengthIndex() {
-    const file = this.editor.tabManager.activeFile;
+  rebuildLineLengthIndex(file = this.editor.tabManager.activeFile) {
     if (!file) return 0;
     const tabWidth = SETTINGS_GET("editor.tabWidth");
     file._lineLengthRecords = new Map();
     file._lineLengthHeap = [];
     file._lineMetricsTabWidth = tabWidth;
-    for (const line of this.lines) this.updateLineLengthRecord(line);
-    file._lineLengthCount = this.lines.length;
+    for (const line of file.lines || []) this.updateLineLengthRecord(line, file);
+    file._lineLengthCount = file.lines?.length || 0;
     file.maxLineLengthDirty = false;
-    file.maxLineLength = this.peekMaxLineLength();
+    file.maxLineLength = this.peekMaxLineLength(file);
     return file.maxLineLength;
   }
 
-  updateLineLengthRecord(line) {
-    const file = this.editor.tabManager.activeFile;
+  updateLineLengthRecord(line, file = this.editor.tabManager.activeFile) {
     if (!file || !line) return;
     if (!file._lineLengthRecords) file._lineLengthRecords = new Map();
     if (!file._lineLengthHeap) file._lineLengthHeap = [];
@@ -399,19 +395,36 @@ class LineController {
     file.maxLineLength = this.peekMaxLineLength();
   }
 
-  ensureLogicalLineLengthIndex() {
-    const file = this.editor.tabManager.activeFile;
+  syncLineLengthsForAppend(file, startIndex, appendedLines) {
+    if (!file) return;
+    if (
+      !file._lineLengthRecords || !file._lineLengthHeap ||
+      file.maxLineLengthDirty === true ||
+      file._lineMetricsTabWidth !== SETTINGS_GET("editor.tabWidth") ||
+      file._lineLengthCount !== startIndex
+    ) {
+      file.maxLineLengthDirty = true;
+      return;
+    }
+
+    for (const line of appendedLines) this.updateLineLengthRecord(line, file);
+    file._lineLengthCount = file.lines.length;
+    file.maxLineLengthDirty = false;
+    file.maxLineLength = this.peekMaxLineLength(file);
+  }
+
+  ensureLogicalLineLengthIndex(file = this.editor.tabManager.activeFile) {
     if (!file) return;
     if (
       file._logicalLineLengths && file._logicalLengthTree &&
-      file._logicalLengthCount === this.lines.length
+      file._logicalLengthCount === file.lines.length
     ) return;
 
-    const count = this.lines.length;
+    const count = file.lines.length;
     const values = new Array(count);
     const tree = new Array(count + 1).fill(0);
     for (let index = 0; index < count; index++) {
-      const length = this.lines[index]?.getText?.().length || 0;
+      const length = file.lines[index]?.getText?.().length || 0;
       values[index] = length;
       const treeIndex = index + 1;
       tree[treeIndex] += length;
@@ -421,6 +434,40 @@ class LineController {
     file._logicalLineLengths = values;
     file._logicalLengthTree = tree;
     file._logicalLengthCount = count;
+  }
+
+  fenwickPrefixSum(tree, count) {
+    let sum = 0;
+    for (let index = Math.max(0, Math.min(count, tree.length - 1)); index > 0; index -= index & -index)
+      sum += tree[index];
+    return sum;
+  }
+
+  syncLogicalLineLengthsForAppend(file, startIndex, appendedLines) {
+    if (!file?._logicalLineLengths || !file._logicalLengthTree) return;
+    if (
+      file._logicalLengthCount !== startIndex ||
+      file._logicalLineLengths.length !== startIndex ||
+      file._logicalLengthTree.length !== startIndex + 1
+    ) {
+      file._logicalLineLengths = null;
+      file._logicalLengthTree = null;
+      file._logicalLengthCount = -1;
+      return;
+    }
+
+    const values = file._logicalLineLengths;
+    const tree = file._logicalLengthTree;
+    for (const line of appendedLines) {
+      const length = line?.getText?.().length || 0;
+      const treeIndex = values.length + 1;
+      const rangeStart = treeIndex - (treeIndex & -treeIndex);
+      const previousRangeLength = this.fenwickPrefixSum(tree, treeIndex - 1) -
+        this.fenwickPrefixSum(tree, rangeStart);
+      values.push(length);
+      tree.push(previousRangeLength + length);
+      file._logicalLengthCount = treeIndex;
+    }
   }
 
   syncLogicalLineLengthsForEdit(startIndex, replacementLines) {
@@ -456,13 +503,7 @@ class LineController {
     this.ensureLogicalLineLengthIndex();
     const tree = this.editor.tabManager.activeFile?._logicalLengthTree;
     if (!tree) return 0;
-    const prefix = (count) => {
-      let sum = 0;
-      for (let index = Math.max(0, Math.min(count, tree.length - 1)); index > 0; index -= index & -index)
-        sum += tree[index];
-      return sum;
-    };
-    return prefix(endIndex) - prefix(startIndex);
+    return this.fenwickPrefixSum(tree, endIndex) - this.fenwickPrefixSum(tree, startIndex);
   }
 
   heapPush(heap, entry) {
@@ -506,8 +547,7 @@ class LineController {
     entry.index = index;
   }
 
-  removeLineLengthRecord(line) {
-    const file = this.editor.tabManager.activeFile;
+  removeLineLengthRecord(line, file = this.editor.tabManager.activeFile) {
     const record = file?._lineLengthRecords?.get(line);
     if (!record) return;
     file._lineLengthRecords.delete(line);
@@ -523,8 +563,7 @@ class LineController {
     }
   }
 
-  peekMaxLineLength() {
-    const file = this.editor.tabManager.activeFile;
+  peekMaxLineLength(file = this.editor.tabManager.activeFile) {
     const heap = file?._lineLengthHeap || [];
     return heap[0]?.length || 0;
   }
@@ -612,16 +651,28 @@ class LineController {
 
   appendLines(newLines) {
     const lineNodes = newLines.map((text) => new LineNode(text));
-    const startIndex = this.lines.length;
-
-    this.lines = this.lines.concat(lineNodes);
-    this.syncLineLengthsForEdit(startIndex, [], lineNodes);
-
-    this.setTotalLines(this.lines.length);
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return;
+    this.appendLoadedLineNodes(file, lineNodes);
 
     if (this.outputScroller) {
       this.outputScroller.updateNbItem();
     }
+  }
+
+  appendLoadedLines(file, texts) {
+    const lineNodes = texts.map((text) => new LineNode(text));
+    this.appendLoadedLineNodes(file, lineNodes);
+  }
+
+  appendLoadedLineNodes(file, lineNodes) {
+    if (!file || !lineNodes.length) return;
+    const startIndex = file.lines.length;
+    file.lines.push(...lineNodes);
+    this.syncLineLengthsForAppend(file, startIndex, lineNodes);
+    this.syncLogicalLineLengthsForAppend(file, startIndex, lineNodes);
+    file.totalLines = file.lines.length;
+    file.syntaxMetrics = null;
   }
 
   getContent() {

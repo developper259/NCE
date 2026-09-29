@@ -14,6 +14,7 @@ class FileLoader {
       this.loadingStates.set(filePath, {
         status: "idle", isLoading: false, isFullyLoaded: false,
         expectedTotalLines: 0, loadedLineCount: 0, timer: null,
+        progressRefreshFrame: null,
       });
     }
     return this.loadingStates.get(filePath);
@@ -22,6 +23,11 @@ class FileLoader {
   finish(state, status, error = null) {
     state.timer?.close();
     state.timer = null;
+    if (status === "cancelled" || status === "failed") {
+      if (state.progressRefreshFrame !== null && typeof window.cancelAnimationFrame === "function")
+        window.cancelAnimationFrame(state.progressRefreshFrame);
+      state.progressRefreshFrame = null;
+    }
     state.status = status;
     state.isLoading = status === "loading";
     state.isFullyLoaded = status === "loaded";
@@ -94,6 +100,21 @@ class FileLoader {
     next(currentLineCount);
   }
 
+  scheduleLoadProgressRefresh(file, state) {
+    if (file !== this.editor.tabManager.activeFile || state.progressRefreshFrame !== null) return;
+    const refresh = () => {
+      state.progressRefreshFrame = null;
+      if (file.loadingState !== state || file !== this.editor.tabManager.activeFile ||
+          (state.status !== "loading" && state.status !== "loaded")) return;
+      this.editor.lineController?.outputScroller?.refreshLoadProgress?.();
+    };
+    if (typeof window.requestAnimationFrame === "function") {
+      state.progressRefreshFrame = window.requestAnimationFrame(refresh);
+    } else {
+      refresh();
+    }
+  }
+
   async waitForFileLoaded(file) {
     if (!file?.path) return;
     const state = file.loadingState || this.loadingStates.get(file.path);
@@ -115,11 +136,15 @@ class FileLoader {
           state.loadedLineCount !== start || file.lines.length !== start) {
         throw new Error("Failed to load complete file chunk");
       }
-      file.lines.push(...response.lines.map((text) => new LineNode(text)));
-      file.totalLines = file.lines.length;
-      file.syntaxMetrics = null;
+      if (typeof this.editor.lineController.appendLoadedLines === "function") {
+        this.editor.lineController.appendLoadedLines(file, response.lines);
+      } else {
+        file.lines.push(...response.lines.map((text) => new LineNode(text)));
+        file.totalLines = file.lines.length;
+        file.syntaxMetrics = null;
+      }
       state.loadedLineCount = end;
-      if (file === this.editor.tabManager.activeFile) this.editor.scrollerManager.refreshAll();
+      this.scheduleLoadProgressRefresh(file, state);
       next(end);
     } catch (error) {
       if (state.status === "loading") this.finish(state, "failed", error);

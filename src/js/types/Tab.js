@@ -209,6 +209,11 @@ class FileNode extends Tab {
       this._logicalLineLengths = null;
       this._logicalLengthTree = null;
       this._logicalLengthCount = -1;
+      this._lineLengthRecords = null;
+      this._lineLengthHeap = null;
+      this._lineLengthCount = -1;
+      this._lineMetricsTabWidth = null;
+      this.maxLineLengthDirty = true;
       this.totalLines = this.lines.length;
       this.syntaxMetrics = null;
       this.loadError = null;

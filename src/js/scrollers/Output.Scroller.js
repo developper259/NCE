@@ -384,6 +384,18 @@ class OutputScroller {
     }
   }
 
+  refreshLoadProgress() {
+    if (!this.vScroller || !this.hScroller) return;
+
+    this.vScroller.nbItem = this.getTotalScrollLines();
+    this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
+    this.vScroller.refresh();
+
+    this.hScroller.nbItem = this.lineController.maxLineLength + 2;
+    this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
+    this.hScroller.refresh();
+  }
+
   updateNbItem() {
     if (this.getTotalScrollLines() === 0) return;
 
