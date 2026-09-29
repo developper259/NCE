@@ -75,8 +75,9 @@ class OutputScroller {
     };
 
     this.vScroller.onScroll = (scrollRatio) => {
+      const previousStartIndex = this.lineController.startIndex;
       this.applyVerticalScrollFromRatio(scrollRatio);
-      this.lineController.refresh(true);
+      this.lineController.refreshForVerticalScroll(previousStartIndex);
     };
 
     // Horizontal scroller

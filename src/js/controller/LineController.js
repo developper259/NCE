@@ -964,6 +964,111 @@ class LineController {
     this.dirtyLines.clear();
   }
 
+  isLineOutputCurrent(child, displayRow) {
+    if (!child || !displayRow) return false;
+
+    const documentIndex = displayRow.documentIndex;
+    const lineNode = documentIndex === null ? null : this.lines[documentIndex];
+    const mappedDocumentIndex = documentIndex === null
+      ? ""
+      : String(documentIndex);
+    const renderMeta = child.__nceRenderMeta;
+    const tabWidth = typeof SETTINGS_GET === "function"
+      ? SETTINGS_GET("editor.tabWidth")
+      : 4;
+
+    return child.dataset.line === mappedDocumentIndex &&
+      renderMeta?.documentIndex === documentIndex &&
+      renderMeta.lineNode === lineNode &&
+      renderMeta.displayText === displayRow.text &&
+      renderMeta.textVersion === (lineNode?.textVersion || 0) &&
+      renderMeta.tokenVersion === (lineNode?.tokensVersion || 0) &&
+      renderMeta.diffVersion === (lineNode?.diffVersion || 0) &&
+      renderMeta.diffState === (displayRow.type || null) &&
+      renderMeta.horizontalOffset === this.offsetX &&
+      renderMeta.maxCharactersPerLine === this.maxCharactersPerLine &&
+      renderMeta.tabWidth === tabWidth;
+  }
+
+  refreshForVerticalScroll(previousStartIndex) {
+    if (!this.editor.tabManager.activeFile) return;
+    if (this.editor.tabManager.activeFile.loadError) {
+      this.refresh();
+      return;
+    }
+
+    this.applyOutputTransform();
+    const delta = this.startIndex - previousStartIndex;
+    const children = this.editor.output.children;
+    const rowCount = this.renderedLineCount;
+    const newlyVisibleDocumentIndexes = [];
+
+    if (delta !== 0 && (children.length !== rowCount || Math.abs(delta) >= rowCount)) {
+      this.initLineOutput();
+      for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
+        const displayRow = this.getDisplayRow(this.startIndex + screenIndex);
+        if (Number.isInteger(displayRow?.documentIndex))
+          newlyVisibleDocumentIndexes.push(displayRow.documentIndex);
+      }
+    } else if (delta !== 0) {
+      if (delta > 0) {
+        for (let index = 0; index < delta; index++) {
+          const first = this.editor.output.firstElementChild;
+          if (!first) break;
+          this.editor.output.appendChild(first);
+        }
+      } else {
+        for (let index = 0; index < -delta; index++) {
+          const last = this.editor.output.lastElementChild;
+          const first = this.editor.output.firstElementChild;
+          if (!last || !first) break;
+          this.editor.output.insertBefore(last, first);
+        }
+      }
+
+      this.editor.highlightController.lineNodes.clear();
+      for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
+        const displayIndex = this.startIndex + screenIndex;
+        const displayRow = this.getDisplayRow(displayIndex);
+        const child = this.editor.output.children[screenIndex];
+        if (!child) continue;
+
+        const childFast = this.getFastNode(child);
+        childFast?.setTop(this.getLineTop(screenIndex));
+        childFast?.setDataset("displayLine", displayIndex);
+
+        if (!displayRow || !this.isLineOutputCurrent(child, displayRow)) {
+          this.refreshLineOutput(screenIndex);
+        } else if (Number.isInteger(displayRow.documentIndex)) {
+          this.editor.highlightController.setLineNode(
+            displayRow.documentIndex,
+            child,
+          );
+        }
+
+        if (Number.isInteger(displayRow?.documentIndex)) {
+          const lineNode = this.lines[displayRow.documentIndex];
+          if (lineNode && lineNode.getTokens() === null &&
+              lineNode.getText().trim() !== "")
+            newlyVisibleDocumentIndexes.push(displayRow.documentIndex);
+        }
+      }
+    }
+
+    if (delta !== 0) {
+      this.refreshNumberLines(false);
+    }
+
+    this.editor.cursorController.updateCaretPosition();
+    this.editor.selectController.refreshSelectionDOM();
+    this.editor.searchController.refreshSelectionDOM();
+
+    if (newlyVisibleDocumentIndexes.length > 0)
+      this.editor.highlightController.refreshForVerticalScroll(
+        newlyVisibleDocumentIndexes,
+      );
+  }
+
   refreshHorizontalViewport() {
     const visibleCount = Math.min(
       this.renderedLineCount,
@@ -1004,21 +1109,33 @@ class LineController {
     const lineNode = documentIndex === null ? null : this.lines[documentIndex];
     const fullText = displayRow.text;
 
+    if (this.isLineOutputCurrent(child, displayRow)) {
+      if (documentIndex !== null)
+        this.editor.highlightController.setLineNode(documentIndex, child);
+      return;
+    }
+
     let line = this.getSlicedLine(fullText, lineNode, displayRow);
     const mappedDocumentIndex =
       documentIndex === null ? "" : String(documentIndex);
-    const mappingChanged =
-      child.dataset.line !== mappedDocumentIndex ||
-      child.dataset.displayLine !== String(displayIndex);
+    const mappingChanged = child.dataset.line !== mappedDocumentIndex;
 
     const tokenVersion = lineNode?.tokensVersion || 0;
     const diffVersion = lineNode?.diffVersion || 0;
     const renderMeta = child.__nceRenderMeta;
     const needsRender = mappingChanged || !renderMeta ||
+      renderMeta.documentIndex !== documentIndex ||
+      renderMeta.lineNode !== lineNode ||
+      renderMeta.displayText !== fullText ||
       renderMeta.startChar !== line.startChar ||
       renderMeta.endChar !== line.endChar ||
       renderMeta.startVisual !== line.startVisual ||
       renderMeta.endVisual !== line.endVisual ||
+      renderMeta.horizontalOffset !== this.offsetX ||
+      renderMeta.maxCharactersPerLine !== this.maxCharactersPerLine ||
+      renderMeta.tabWidth !== (typeof SETTINGS_GET === "function"
+        ? SETTINGS_GET("editor.tabWidth")
+        : 4) ||
       renderMeta.textVersion !== (lineNode?.textVersion || 0) ||
       renderMeta.tokenVersion !== tokenVersion ||
       renderMeta.diffVersion !== diffVersion ||
@@ -1036,10 +1153,18 @@ class LineController {
       lineFast?.setDataset("displayLine", displayIndex);
       lineFast?.setDataset("renderGeneration", this.renderGeneration);
       lineOBJ.__nceRenderMeta = {
+        documentIndex,
+        lineNode,
+        displayText: fullText,
         startChar: line.startChar,
         endChar: line.endChar,
         startVisual: line.startVisual,
         endVisual: line.endVisual,
+        horizontalOffset: this.offsetX,
+        maxCharactersPerLine: this.maxCharactersPerLine,
+        tabWidth: typeof SETTINGS_GET === "function"
+          ? SETTINGS_GET("editor.tabWidth")
+          : 4,
         textVersion: lineNode?.textVersion || 0,
         tokenVersion,
         diffVersion,
@@ -1108,10 +1233,18 @@ class LineController {
         lineFast?.setDataset("displayLine", displayIndex);
         lineFast?.setDataset("renderGeneration", this.renderGeneration);
         lineOBJ.__nceRenderMeta = {
+          documentIndex,
+          lineNode,
+          displayText: fullText,
           startChar: line.startChar,
           endChar: line.endChar,
           startVisual: line.startVisual,
           endVisual: line.endVisual,
+          horizontalOffset: this.offsetX,
+          maxCharactersPerLine: this.maxCharactersPerLine,
+          tabWidth: typeof SETTINGS_GET === "function"
+            ? SETTINGS_GET("editor.tabWidth")
+            : 4,
           textVersion: lineNode?.textVersion || 0,
           tokenVersion: lineNode?.tokensVersion || 0,
           diffVersion: lineNode?.diffVersion || 0,
@@ -1132,7 +1265,7 @@ class LineController {
     else this.editor.output.replaceChildren(fragment);
   }
 
-  refreshNumberLines() {
+  refreshNumberLines(updateWidth = true) {
     if (!this.editor.tabManager.activeFile) {
       return;
     }
@@ -1191,7 +1324,7 @@ class LineController {
       spanFast?.toggleClass("line-selected", displayRow?.documentIndex === this.index - 1);
     }
 
-    this.updateLineNumberWidth();
+    if (updateWidth) this.updateLineNumberWidth();
   }
 
   initNumberLines() {
