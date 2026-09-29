@@ -32,6 +32,22 @@ test("FileNode preserves empty files and final-newline policy", () => {
   assert.equal(file.serializeContent(), "value\n");
 });
 
+test("FileNode shows the recovery path when an atomic save fallback fails", () => {
+  let shownMessage = "";
+  const AlertFileNode = loadGlobal("src/js/types/Tab.js", "FileNode", {
+    LineNode,
+    alert(message) { shownMessage = message; },
+  });
+  const file = new AlertFileNode({}, 1, "main.py", "/workspace/main.py");
+  const error = Object.assign(
+    new Error("Atomic rename failed (EPERM); copy fallback failed. Complete recovery file: /workspace/.main.py.nce-1-a1b2c3d4e5f60708.tmp."),
+    { code: "SAVE_REPLACEMENT_FAILED" },
+  );
+  file.reportSaveError(error);
+  assert.equal(file.saveError, error);
+  assert.equal(shownMessage, error.message);
+});
+
 test("LineNode clone and JSON roundtrip preserve editing metadata", () => {
   const line = new LineNode("const x = 1;");
   line.setTokens([{ type: "keyword", value: "const" }]);

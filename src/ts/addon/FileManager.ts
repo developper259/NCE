@@ -41,6 +41,8 @@ export interface FileOperationResult {
 
 export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
 export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
+const RETRYABLE_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_RETRY_DELAYS_MS = [0, 20, 50, 100];
 const IMAGE_MIME_TYPES: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
   ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
@@ -159,24 +161,142 @@ export async function atomicWriteFile(
 ): Promise<void> {
   const dir = path.dirname(filePath);
   const basename = path.basename(filePath);
-  let temporaryPath = path.join(
+  const makeSiblingTempPath = () => path.join(
     dir,
     `.${basename}.nce-${process.pid}-${crypto.randomBytes(8).toString("hex")}.tmp`,
   );
+  let temporaryPath = makeSiblingTempPath();
+  let backupPath = "";
+  let preserveTemporary = false;
+  let preserveBackup = false;
+  let targetExisted = false;
+  let targetIsSymbolicLink = false;
+  let originalMode: number | undefined;
   try {
-    let mode: number | undefined;
     try {
-      mode = (await operations.stat(filePath)).mode;
-    } catch {}
-    const handle = await operations.open(temporaryPath, "wx", mode);
+      targetIsSymbolicLink = (await operations.lstat(filePath)).isSymbolicLink();
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    try {
+      const stats = await operations.stat(filePath);
+      targetExisted = true;
+      originalMode = stats.mode;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+
+    const handle = await operations.open(temporaryPath, "wx", originalMode);
     try {
       await handle.writeFile(content, "utf8");
       await handle.sync();
     } finally {
       await handle.close();
     }
-    await operations.rename(temporaryPath, filePath);
-    temporaryPath = "";
+
+    let renameError: any = null;
+    for (const delayMs of RENAME_RETRY_DELAYS_MS) {
+      if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+      try {
+        await operations.rename(temporaryPath, filePath);
+        temporaryPath = "";
+        renameError = null;
+        break;
+      } catch (error: any) {
+        renameError = error;
+        if (!RETRYABLE_RENAME_ERRORS.has(error?.code)) throw error;
+      }
+    }
+
+    if (temporaryPath && renameError) {
+      if (targetIsSymbolicLink) {
+        preserveTemporary = true;
+        throw Object.assign(
+          new Error(`Atomic rename failed (${renameError.code}); copy fallback was skipped because the destination is a symbolic link. Complete recovery file: ${temporaryPath}`),
+          { code: "SAVE_REPLACEMENT_FAILED", cause: renameError, renameError, temporaryPath },
+        );
+      }
+
+      let originalBytes: Buffer | null = null;
+      if (targetExisted) {
+        backupPath = makeSiblingTempPath();
+        try {
+          originalBytes = Buffer.from(await operations.readFile(filePath));
+          const backupHandle = await operations.open(backupPath, "wx", originalMode);
+          try {
+            await backupHandle.writeFile(originalBytes);
+            await backupHandle.sync();
+          } finally {
+            await backupHandle.close();
+          }
+          const backupBytes = Buffer.from(await operations.readFile(backupPath));
+          if (!backupBytes.equals(originalBytes)) {
+            throw Object.assign(new Error("Backup verification failed"), { code: "SAVE_BACKUP_VERIFY_FAILED" });
+          }
+        } catch (error: any) {
+          try { await operations.unlink(backupPath); } catch {}
+          backupPath = "";
+          preserveTemporary = true;
+          throw Object.assign(
+            new Error(`Atomic rename failed (${renameError.code}); could not preserve the original file before copy fallback. Complete recovery file: ${temporaryPath}`),
+            { code: "SAVE_REPLACEMENT_FAILED", cause: error, renameError, temporaryPath },
+          );
+        }
+      }
+
+      try {
+        await operations.copyFile(temporaryPath, filePath);
+        const written = await operations.readFile(filePath, "utf8");
+        if (written !== content) {
+          throw Object.assign(new Error("Destination verification failed after copy fallback"), { code: "SAVE_VERIFY_FAILED" });
+        }
+      } catch (fallbackError: any) {
+        let restoreError: any = null;
+        if (backupPath && originalBytes) {
+          try {
+            await operations.copyFile(backupPath, filePath);
+            const restored = Buffer.from(await operations.readFile(filePath));
+            if (!restored.equals(originalBytes)) {
+              throw Object.assign(new Error("Original file verification failed after restore"), { code: "SAVE_RESTORE_VERIFY_FAILED" });
+            }
+          } catch (error: any) {
+            restoreError = error;
+            preserveBackup = true;
+          }
+        }
+
+        preserveTemporary = true;
+        const recovery = restoreError
+          ? ` Original restore also failed; preserve backup: ${backupPath}.`
+          : backupPath
+            ? " The original file was restored."
+            : " The destination may be incomplete; the complete recovery file is preserved.";
+        throw Object.assign(
+          new Error(`Atomic rename failed (${renameError.code}); copy fallback failed (${fallbackError?.code || "UNKNOWN"}). Complete recovery file: ${temporaryPath}.${recovery}`),
+          {
+            code: "SAVE_REPLACEMENT_FAILED",
+            cause: fallbackError,
+            renameError,
+            fallbackError,
+            restoreError,
+            temporaryPath,
+            ...(preserveBackup ? { backupPath } : {}),
+          },
+        );
+      }
+
+      console.warn("[NCE Save] Atomic rename failed; verified copy fallback succeeded", {
+        path: filePath,
+        code: renameError.code,
+      });
+      try { await operations.unlink(temporaryPath); } catch {}
+      temporaryPath = "";
+      if (backupPath) {
+        try { await operations.unlink(backupPath); } catch {}
+        backupPath = "";
+      }
+    }
+
     // Persisting the directory entry is supported on POSIX. Some platforms,
     // notably Windows, reject directory handles; that best-effort flush must
     // not turn an otherwise successful replacement into a failed save.
@@ -189,9 +309,14 @@ export async function atomicWriteFile(
       }
     } catch {}
   } finally {
-    if (temporaryPath) {
+    if (temporaryPath && !preserveTemporary) {
       try {
         await operations.unlink(temporaryPath);
+      } catch {}
+    }
+    if (backupPath && !preserveBackup) {
+      try {
+        await operations.unlink(backupPath);
       } catch {}
     }
   }
@@ -615,9 +740,8 @@ export class FileManager {
     } catch (error) {
       this.window.watcher?.cancelOwnWrite(filePath, ownWriteToken);
       console.error("Error saving file:", error);
+      throw error;
     }
-
-    return undefined;
   }
 
   async confirmUnsavedChanges(fileName: string): Promise<UnsavedCloseChoice> {
