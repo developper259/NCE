@@ -123,6 +123,8 @@ contextBridge.exposeInMainWorld("api", {
       startLine,
       lineCount,
     ),
+  releaseFile: (filePath) =>
+    ipcRenderer.invoke("FileManager:releaseFile", filePath),
 
   saveEditorState: (stateString) =>
     ipcRenderer.invoke("FileManager:saveState", stateString),

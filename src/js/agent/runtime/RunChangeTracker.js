@@ -971,7 +971,8 @@ class RunChangeTracker {
     if (!absolute) return false;
 
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(absolute);
-    if (!openFile || !Array.isArray(openFile.lines)) return false;
+    if (!openFile || openFile.largeFileMode === true ||
+        !Array.isArray(openFile.lines)) return false;
 
     const liveText = openFile.lines.map((line) => line.getText()).join("\n");
     return (

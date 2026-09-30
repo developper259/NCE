@@ -32,6 +32,73 @@ test("FileNode preserves empty files and final-newline policy", () => {
   assert.equal(file.serializeContent(), "value\n");
 });
 
+test("Large File Mode is copied per FileNode and suppresses only that file's Auto Save", async () => {
+  let autoSave = true;
+  const state = { status: "loading", expectedTotalLines: 2000, loadedLineCount: 1000 };
+  const editor = {
+    getAutoSaveState: () => autoSave,
+    historyController: { clear() {} },
+    fileLoader: {
+      getState: () => state,
+      loadFile: async () => ({
+        initialLines: ["first"], totalLines: 2000, largeFileMode: true,
+        size: 84_000_000, eol: "\n", hasFinalNewline: false,
+        lineEndings: [], incrementalEligible: false, state,
+      }),
+      loadRemainingLines() {},
+    },
+  };
+  const large = new FileNode(editor, 1, "huge.js", "/huge.js");
+  await large.loadContent();
+  assert.equal(large.largeFileMode, true);
+  assert.equal(large.largeFileSize, 84_000_000);
+  assert.equal(large.shouldPersistChanges(), false);
+  large.setIsSaved(false);
+  assert.equal(large.isVisuallyDirty(), true);
+  const normal = new FileNode(editor, 2, "small.js", "/small.js");
+  normal.loadingState = { status: "loaded", loadedLineCount: 1, expectedTotalLines: 1 };
+  assert.equal(normal.largeFileMode, false);
+  assert.equal(normal.shouldPersistChanges(), true);
+  normal.setIsSaved(false);
+  assert.equal(normal.isVisuallyDirty(), false);
+  normal.replaceFile(large);
+  assert.equal(normal.largeFileMode, true);
+  assert.equal(normal.largeFileSize, 84_000_000);
+  normal.largeFileMode = false;
+  assert.equal(normal.shouldPersistChanges(), true);
+  autoSave = false;
+  assert.equal(large.shouldPersistChanges(), false);
+});
+
+test("Large File Mode allows explicit saves only after every line is loaded", async () => {
+  const writes = [];
+  const editor = {
+    getAutoSaveState: () => true,
+    api: { async saveFile(filePath, content) { writes.push({ filePath, content }); return filePath; } },
+    fileLoader: {
+      async waitForFileLoaded(file) {
+        if (file.loadingState?.status !== "loaded" ||
+            file.loadingState.loadedLineCount !== file.loadingState.expectedTotalLines)
+          throw Object.assign(new Error("File is not fully loaded"), { code: "FILE_NOT_FULLY_LOADED" });
+      },
+    },
+    tabManager: { refresh() {} },
+  };
+  const complete = new FileNode(editor, 1, "huge.log", "/huge.log");
+  complete.largeFileMode = true;
+  complete.lines = [new LineNode("one"), new LineNode("two")];
+  complete.loadingState = { status: "loaded", loadedLineCount: 2, expectedTotalLines: 2 };
+  assert.equal(await complete.save(), true);
+  assert.deepEqual(writes, [{ filePath: "/huge.log", content: "one\ntwo" }]);
+
+  const partial = new FileNode(editor, 2, "huge-partial.log", "/huge-partial.log");
+  partial.largeFileMode = true;
+  partial.lines = [new LineNode("one")];
+  partial.loadingState = { status: "loading", loadedLineCount: 1, expectedTotalLines: 2 };
+  assert.equal(await partial.save(), false);
+  assert.equal(writes.length, 1);
+});
+
 test("FileNode shows the recovery path when an atomic save fallback fails", () => {
   let shownMessage = "";
   const AlertFileNode = loadGlobal("src/js/types/Tab.js", "FileNode", {

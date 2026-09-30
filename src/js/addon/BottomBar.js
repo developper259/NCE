@@ -19,6 +19,7 @@ class BottomBar {
   openViewTypePicker() {
     const tab = this.editor.tabManager.activeTab;
     if (!tab?.path) return;
+    if (tab.largeFileMode === true || tab.textTab?.largeFileMode === true) return;
     const isImage = this.isImagePath(tab.path);
     const isMarkdown = this.isMarkdownPath(tab.path);
     if (!isImage && !isMarkdown) return;
@@ -46,7 +47,9 @@ class BottomBar {
     const tab = this.editor.tabManager.activeTab;
     const isImage = this.isImagePath(tab?.path || "");
     const isMarkdown = this.isMarkdownPath(tab?.path || "");
-    this.viewTypePicker.hidden = !isImage && !isMarkdown;
+    const largeFileMode = tab?.largeFileMode === true ||
+      tab?.textTab?.largeFileMode === true;
+    this.viewTypePicker.hidden = largeFileMode || (!isImage && !isMarkdown);
     const title = this.viewTypePicker.querySelector(".scroller-title");
     if (!title) return;
     title.textContent = tab?.type === "picture" ? "Image Preview"
@@ -153,10 +156,14 @@ class BottomBar {
     const file = this.editor.tabManager.activeFile;
     const status = file?.loadingState?.status;
     const text = this.fileStatusElement.querySelector(".bottomBar-text");
-    let message = "";
-    if (status === "loading") message = "Loading file… Editing is temporarily disabled.";
+    const largeFileMode = file?.largeFileMode === true;
+    let message = largeFileMode
+      ? "Large File Mode · Syntax highlighting and Auto Save are disabled for this file."
+      : "";
+    if (status === "loading")
+      message = `${largeFileMode ? "Large File Mode · " : ""}Loading file… Editing is temporarily disabled.`;
     else if (status === "failed" || file?.loadError)
-      message = "File loading failed. Reload the file to try again.";
+      message = `${largeFileMode ? "Large File Mode · " : ""}File loading failed. Reload the file to try again.`;
     if (text) text.innerText = message;
     this.fileStatusElement.style.display = message ? "" : "none";
   }

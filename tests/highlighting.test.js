@@ -390,3 +390,37 @@ test("genuine NSH range failures remain observable", async () => {
   h.nshClient.request = async () => { throw new Error("NSH unavailable"); };
   await assert.rejects(h.loadVisibleDocumentLines(file), /NSH unavailable/);
 });
+
+test("Large File Mode skips NSH per file and leaves normal-file highlighting active", async () => {
+  const { editor, file, h, calls } = setup();
+  file.largeFileMode = true;
+  file.largeFileSize = 84_000_000;
+  await h.openFile(file);
+  h.refreshForVerticalScroll([0]);
+  await h.refresh();
+  assert.equal(h.documentModes.get(file.id), "large-file");
+  assert.equal(calls.some((call) => [
+    "openDocument", "highlightLine", "getDocumentLines",
+  ].includes(call.type)), false);
+
+  const small = new FileNode(editor, 2, "small.js", "/small.js");
+  small.lines = [new LineNode("const small = 1;")];
+  small.language = "javascript";
+  small.incrementalEligible = true;
+  small.isLoaded = true;
+  editor.tabManager.files.push(small);
+  editor.tabManager.activeFile = small;
+  editor.lineController.lines = small.lines;
+  await h.openFile(small);
+  assert.ok(calls.some((call) => call.type === "openDocument"));
+
+  editor.tabManager.activeFile = file;
+  editor.lineController.lines = file.lines;
+  await h.openFile(file);
+  assert.equal(calls.filter((call) => [
+    "openDocument", "highlightLine", "getDocumentLines",
+  ].includes(call.type)).length, 2);
+  editor.tabManager.activeFile = small;
+  await h.openFile(small);
+  assert.equal(calls.some((call) => call.type === "openDocument" && call.language === "javascript"), true);
+});

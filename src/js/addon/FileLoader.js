@@ -14,7 +14,7 @@ class FileLoader {
       this.loadingStates.set(filePath, {
         status: "idle", isLoading: false, isFullyLoaded: false,
         expectedTotalLines: 0, loadedLineCount: 0, timer: null,
-        progressRefreshFrame: null,
+        progressRefreshFrame: null, largeFileMode: false, size: 0, filePath,
       });
     }
     return this.loadingStates.get(filePath);
@@ -27,6 +27,7 @@ class FileLoader {
       if (state.progressRefreshFrame !== null && typeof window.cancelAnimationFrame === "function")
         window.cancelAnimationFrame(state.progressRefreshFrame);
       state.progressRefreshFrame = null;
+      void this.editor.api?.releaseFile?.(state.filePath);
     }
     state.status = status;
     state.isLoading = status === "loading";
@@ -46,10 +47,11 @@ class FileLoader {
   }
 
   async loadFile(filePath) {
-    this.cancelLoading(filePath);
+    await this.cancelLoading(filePath);
     this.loadingStates.delete(filePath);
     const state = this.getState(filePath);
     state.completion = new Promise((resolve) => { state.resolve = resolve; });
+    state.filePath = filePath;
     this.finish(state, "loading");
     try {
       const init = await this.request(this.editor.api.initializeFile(filePath));
@@ -60,19 +62,25 @@ class FileLoader {
         throw Object.assign(new Error(message), { code });
       }
       state.expectedTotalLines = init.totalLines;
+      state.largeFileMode = init.largeFileMode === true;
+      state.size = Number.isFinite(init.size) ? init.size : 0;
       const incrementalEligible = init.incrementalEligible === true &&
         init.size <= this.incrementalMaxFileSize && init.maxLineLength <= this.incrementalMaxLineLength;
       const count = Math.min(init.totalLines, incrementalEligible ? init.totalLines : this.initialChunkSize);
       const chunk = await this.request(this.editor.api.getFileChunk(filePath, 0, count));
       if (state.status !== "loading") throw new Error("File loading cancelled");
       if (!chunk?.success || !Array.isArray(chunk.lines) || chunk.lines.length !== count) {
-        throw new Error("Failed to load initial chunk");
+        throw Object.assign(new Error("Failed to load initial chunk"), {
+          code: chunk?.errorCode || "FILE_LOAD_FAILED",
+        });
       }
       state.loadedLineCount = count;
       if (count === init.totalLines) this.finish(state, "loaded");
       return { initialLines: chunk.lines, totalLines: init.totalLines,
         eol: init.eol || "\n", hasFinalNewline: init.hasFinalNewline === true,
-        lineEndings: init.lineEndings || [], incrementalEligible, state };
+        lineEndings: init.lineEndings || chunk.lineEndings || [],
+        largeFileMode: state.largeFileMode, size: state.size,
+        incrementalEligible, state };
     } catch (error) {
       if (state.status !== "cancelled") this.finish(state, "failed", error);
       throw error;
@@ -143,6 +151,10 @@ class FileLoader {
         file.totalLines = file.lines.length;
         file.syntaxMetrics = null;
       }
+      if (file.largeFileMode && Array.isArray(response.lineEndings)) {
+        for (let index = 0; index < response.lineEndings.length; index += 1)
+          file.lineEndings[start + index] = response.lineEndings[index];
+      }
       state.loadedLineCount = end;
       this.scheduleLoadProgressRefresh(file, state);
       next(end);
@@ -156,5 +168,6 @@ class FileLoader {
     for (const state of states) {
       if (state && state.status !== "loaded") this.finish(state, "cancelled");
     }
+    if (filePath) return this.editor.api?.releaseFile?.(filePath);
   }
 }

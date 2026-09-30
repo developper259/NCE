@@ -43,6 +43,8 @@ class ActiveFileManager {
     const file = this.agent.editor?.tabManager?.activeFile;
     if (!file || !controller)
       return { success: false, error: "Aucun fichier actif." };
+    if (file.largeFileMode === true)
+      return this.readLargeFile(file, args, "internal_active_read");
     await this.agent.editor?.fileLoader?.waitForFileLoaded?.(file);
     const lines = controller.getContent().split("\n");
     const requestedStartLine =
@@ -240,6 +242,212 @@ class ActiveFileManager {
     };
   }
 
+  getLargeFileRevision(file) {
+    return `large:${file.largeFileSize || 0}:${file.diskFingerprint || "unknown"}:${file.editVersion || 0}`;
+  }
+
+  async readLargeFile(file, args = {}, toolName = "read_file") {
+    const defaultLines = this.agent.toolLimits?.read_file?.defaultLines || 200;
+    const totalLines = Number.isInteger(file.loadingState?.expectedTotalLines)
+      ? file.loadingState.expectedTotalLines
+      : Number.isInteger(file.totalLines) ? file.totalLines : file.lines.length;
+    const requestedStartLine = Number.isInteger(args.startLine) && args.startLine > 0
+      ? args.startLine : 1;
+    const requestedEndLine = Math.min(
+      Number.isInteger(args.endLine) && args.endLine >= requestedStartLine
+        ? args.endLine
+        : requestedStartLine + defaultLines - 1,
+      requestedStartLine + defaultLines - 1,
+      totalLines,
+    );
+    const absolutePath = AgentPath.normalize(file.path);
+    if (!Number.isInteger(requestedEndLine) || requestedStartLine > totalLines) {
+      return {
+        success: false,
+        error: { code: "INVALID_RANGE", message: "The requested line range is outside the file." },
+      };
+    }
+
+    const startColumn = Number.isInteger(args.startColumn)
+      ? Math.max(0, args.startColumn) : 0;
+    const revision = this.getLargeFileRevision(file);
+    const readDecision = this.agent.fileKnowledge?.checkRead?.(
+      absolutePath,
+      requestedStartLine,
+      requestedEndLine,
+      { toolName, startColumn, currentRevision: revision },
+    ) || { range: { startLine: requestedStartLine, endLine: requestedEndLine } };
+    if (readDecision.alreadyKnown) {
+      if (readDecision.cachedContext)
+        this.agent.restoreFileReadContext?.(
+          absolutePath,
+          readDecision.cachedContext,
+          readDecision.entry?.revision || revision,
+          "runtime-cache",
+        );
+      return readDecision.result;
+    }
+
+    const range = readDecision.range || {
+      startLine: requestedStartLine,
+      endLine: requestedEndLine,
+    };
+    const startLine = Math.max(1, range.startLine);
+    const endLine = Math.min(
+      totalLines,
+      range.endLine,
+      startLine + defaultLines - 1,
+    );
+    const effectiveStartColumn = Number.isInteger(args.startColumn)
+      ? Math.max(0, readDecision.range?.startColumn ?? startColumn) : 0;
+    let lines;
+    const state = file.loadingState;
+    const fullyLoaded = state?.status === "loaded" ||
+      (!state && file.isLoaded === true && file.lines.length === totalLines);
+    if (fullyLoaded && file.lines.length >= endLine) {
+      lines = file.lines.slice(startLine - 1, endLine).map((line) => line.getText());
+    } else {
+      const response = await this.agent.api?.getFileChunk?.(
+        file.path,
+        startLine - 1,
+        endLine - startLine + 1,
+      );
+      if (!response?.success || !Array.isArray(response.lines)) {
+        return {
+          success: false,
+          error: {
+            code: response?.errorCode || "FILE_READ_FAILED",
+            message: response?.errorCode === "STALE_FILE_INDEX"
+              ? "The file changed on disk. Reload it before reading more lines."
+              : "Unable to read the requested lines from the file.",
+          },
+        };
+      }
+      lines = response.lines;
+    }
+
+    const firstLine = lines[0] || "";
+    if (effectiveStartColumn > firstLine.length) {
+      return {
+        success: false,
+        error: { code: "INVALID_RANGE", message: "startColumn exceeds the line." },
+      };
+    }
+    const path = this.agent.toProjectRelativePath(
+      file.path,
+      this.agent.editor?.fileExplorer?.rootPath,
+    );
+    const requestedRange = {
+      startLine: requestedStartLine,
+      endLine: requestedEndLine,
+      ...(args.startColumn !== undefined ? { startColumn } : {}),
+    };
+    const readLimit = this.agent.toolLimits?.read_file?.outputCharacters || 4000;
+    if (effectiveStartColumn > 0 || firstLine.length > readLimit) {
+      const content = firstLine.slice(effectiveStartColumn, effectiveStartColumn + readLimit);
+      const endColumn = effectiveStartColumn + content.length;
+      this.agent.fileKnowledge?.recordPartialSegment?.(absolutePath, {
+        revision,
+        toolName,
+        line: startLine,
+        startColumn: effectiveStartColumn,
+        endColumn,
+        lineLength: firstLine.length,
+        content,
+        totalLines,
+        diskRead: false,
+      });
+      return {
+        success: true,
+        readDecision: "NEW",
+        path,
+        revision,
+        requestedRange,
+        deliveredRange: {
+          startLine,
+          endLine: startLine,
+          startColumn: effectiveStartColumn,
+          endColumn,
+        },
+        completeLineRange: null,
+        partialSegment: {
+          line: startLine,
+          startColumn: effectiveStartColumn,
+          endColumn,
+          lineLength: firstLine.length,
+        },
+        lineTruncated: true,
+        contentStartLine: startLine,
+        contentEndLine: startLine,
+        contentStartColumn: effectiveStartColumn,
+        contentEndColumn: endColumn,
+        hasMore: endColumn < firstLine.length || startLine < endLine,
+        nextStartLine: endColumn < firstLine.length ? startLine :
+          startLine < endLine ? startLine + 1 : null,
+        nextStartColumn: endColumn < firstLine.length ? endColumn : 0,
+        content,
+      };
+    }
+
+    const deliveredLines = [];
+    let deliveredCharacters = 0;
+    for (const line of lines) {
+      const required = line.length + (deliveredLines.length ? 1 : 0);
+      if (deliveredCharacters + required > readLimit) break;
+      deliveredLines.push(line);
+      deliveredCharacters += required;
+    }
+    const content = deliveredLines.join("\n");
+    const contentEndLine = deliveredLines.length
+      ? startLine + deliveredLines.length - 1 : null;
+    const readContext = {
+      path: absolutePath,
+      startLine,
+      endLine,
+      requestedEndLine: endLine,
+      content,
+      revision,
+      timestamp: Date.now(),
+      version: ++this.agent.fileContextVersion,
+      source: toolName,
+      truncated: contentEndLine !== endLine,
+      cacheContent: content,
+      knowledgeEndLine: contentEndLine,
+    };
+    this.agent.readFileContexts?.set(absolutePath, readContext);
+    this.agent.fileKnowledge?.recordRead?.(absolutePath, {
+      revision,
+      toolName,
+      startLine,
+      endLine: contentEndLine || startLine - 1,
+      requestedStartLine,
+      requestedEndLine,
+      totalLines,
+      diskRead: false,
+      truncated: readContext.truncated,
+      knowledgeEndLine: contentEndLine,
+      content,
+    });
+    return {
+      success: true,
+      readDecision: "NEW",
+      path,
+      startLine,
+      endLine: contentEndLine,
+      requestedRange,
+      deliveredRange: contentEndLine
+        ? { startLine, endLine: contentEndLine } : null,
+      completeLineRange: contentEndLine
+        ? { startLine, endLine: contentEndLine } : null,
+      totalLines,
+      truncated: contentEndLine !== endLine,
+      revision,
+      contentEndLine,
+      informationSource: "editor",
+      content,
+    };
+  }
+
   async searchActiveFile(args = {}) {
     const controller = this.agent.editor?.searchController;
     const query = typeof args.query === "string" ? args.query.trim() : "";
@@ -264,6 +472,12 @@ class ActiveFileManager {
 
   markFileDiffHighlights(beforeText, afterText, file) {
     if (!file || !Array.isArray(file.lines)) return;
+    if (file.largeFileMode === true) {
+      file.diffSnapshot = null;
+      file.diffActive = false;
+      file.diffRows = null;
+      return;
+    }
 
     const originalText =
       file.diffSnapshot === null ? beforeText : file.diffSnapshot;
@@ -438,6 +652,8 @@ class ActiveFileManager {
       const editor = this.agent.editor;
       const lineController = editor?.lineController;
       const file = editor?.tabManager?.activeFile;
+      if (file?.largeFileMode === true)
+        return { valid: true, error: null, skipped: true, fileName: file.path || file.name };
       const source =
         typeof lineController?.getContent === "function"
           ? lineController.getContent()
@@ -543,6 +759,16 @@ class ActiveFileManager {
           code: "EDITOR_NOT_READY",
           message:
             "L'éditeur n'est pas prêt pour une modification. Réessayez lorsque le fichier actif est chargé.",
+        },
+      };
+    }
+
+    if (file.largeFileMode === true) {
+      return {
+        success: false,
+        error: {
+          code: "LARGE_FILE_MODE_EDIT_UNSUPPORTED",
+          message: "Agent edits are disabled for files in Large File Mode.",
         },
       };
     }

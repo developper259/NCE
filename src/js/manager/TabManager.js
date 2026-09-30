@@ -83,7 +83,7 @@ class tabManager {
       }
       // Complete the old-path load before moving its identity.
       if (file.loadingState?.status === "loading") {
-        this.editor.fileLoader.cancelLoading(file.path);
+        await this.editor.fileLoader.cancelLoading(file.path);
         file.isLoaded = false;
         file.contentGeneration++;
       }
@@ -218,8 +218,9 @@ class tabManager {
 
   async closeFiles({ skipPrepare = false } = {}) {
     if (!skipPrepare && !(await this.prepareForQuit())) return false;
-    for (const file of this.files)
-      this.editor.fileLoader.cancelLoading(file.path);
+    await Promise.all(this.files.map((file) =>
+      this.editor.fileLoader.cancelLoading(file.path),
+    ));
     this.editor.highlightController.closeAllFiles();
     this.editor.pictureView?.clear?.();
     this.editor.pictureView?.hide?.();
@@ -289,7 +290,7 @@ class tabManager {
       }
     }
 
-    this.editor.fileLoader.cancelLoading(file.path);
+    await this.editor.fileLoader.cancelLoading(file.path);
     file.contentGeneration++;
     await this.editor.highlightController.closeFile(file);
     this.removeFileByID(id);
@@ -462,7 +463,7 @@ class tabManager {
     }
 
     try {
-      this.editor.fileLoader.cancelLoading(file.path);
+      await this.editor.fileLoader.cancelLoading(file.path);
       file.contentGeneration++;
       await this.editor.highlightController.invalidateFile(file);
       if (file === this.activeFile) {
@@ -539,7 +540,7 @@ class tabManager {
       } else {
         const textTab = tab.textTab;
         if (textTab?.isLoaded && textTab.isSaved) {
-          this.editor.fileLoader.cancelLoading(textTab.path);
+          await this.editor.fileLoader.cancelLoading(textTab.path);
           textTab.contentGeneration++;
           await this.editor.highlightController.invalidateFile(textTab);
           textTab.isLoaded = false;
@@ -598,6 +599,7 @@ class tabManager {
       replacement = new PictureTab(current.id, current.path);
       replacement.textTab = current;
     } else if (view === "markdown" && current.type === TAB_TYPES.FILE &&
+        current.largeFileMode !== true &&
         this.editor.markdownView?.isSupportedPath?.(current.path)) {
       replacement = new MarkdownTab(current.id, current.path);
       replacement.textTab = current;

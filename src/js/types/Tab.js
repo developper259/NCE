@@ -106,6 +106,9 @@ class FileNode extends Tab {
     this.lineEndings = [];
     this.loadError = null;
     this.incrementalEligible = false;
+    // This capability follows the file across tabs; it is never editor-global.
+    this.largeFileMode = false;
+    this.largeFileSize = 0;
 
     // Diff State
     this.diffSnapshot = null;
@@ -185,10 +188,16 @@ class FileNode extends Tab {
       : [];
     this.loadError = file.loadError || null;
     this.incrementalEligible = file.incrementalEligible === true;
+    this.largeFileMode = file.largeFileMode === true;
+    this.largeFileSize = Number.isFinite(file.largeFileSize)
+      ? file.largeFileSize
+      : 0;
   }
 
   async loadContent() {
     const generation = ++this.contentGeneration;
+    this.largeFileMode = false;
+    this.largeFileSize = 0;
     if (!this.path) {
       this.isLoaded = true;
       return;
@@ -204,6 +213,14 @@ class FileNode extends Tab {
       this.hasFinalNewline = result.hasFinalNewline;
       this.lineEndings = result.lineEndings;
       this.incrementalEligible = result.incrementalEligible;
+      this.largeFileMode = result.largeFileMode === true;
+      this.largeFileSize = Number.isFinite(result.size) ? result.size : 0;
+      this.editor.bottomBar?.refreshFileStatus?.();
+      if (this.largeFileMode) {
+        this.diffSnapshot = null;
+        this.diffActive = false;
+        this.diffRows = null;
+      }
       this.lines = result.initialLines.map((text) => new LineNode(text));
       if (!this.lines.length) this.lines = [new LineNode("")];
       this._logicalLineLengths = null;
@@ -442,12 +459,14 @@ class FileNode extends Tab {
       this.deletedFromDisk === true ||
       this.externalModified === true ||
       Boolean(this.saveError) ||
-      (this.isSaved !== true && this.autoSave !== true)
+      (this.isSaved !== true &&
+        (this.largeFileMode === true || this.autoSave !== true))
     );
   }
 
   shouldPersistChanges() {
     return (
+      !this.largeFileMode &&
       this.autoSave === true &&
       Boolean(this.path) &&
       !this.deletedFromDisk &&
@@ -468,6 +487,7 @@ class FileNode extends Tab {
   }
 
   keepDiff() {
+    if (this.largeFileMode) return;
     this.diffSnapshot = null;
     this.diffActive = false;
     this.diffRows = null;
@@ -476,6 +496,7 @@ class FileNode extends Tab {
   }
 
   undoDiff() {
+    if (this.largeFileMode) return;
     if (this.diffSnapshot === null) return;
     const lineController = this.editor.lineController;
     lineController.loadContent(this.diffSnapshot);

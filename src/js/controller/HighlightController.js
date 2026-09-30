@@ -107,6 +107,7 @@ class HighlightController {
   canUseIncremental(file) {
     if (
       !file ||
+      file.largeFileMode === true ||
       file.incrementalEligible !== true ||
       !file.language ||
       file.language === "plaintext"
@@ -122,6 +123,19 @@ class HighlightController {
   }
 
   async openFile(file) {
+    if (!file) return;
+    if (file.largeFileMode === true) {
+      if (this.documentModes.get(file.id) !== "large-file") {
+        if (this.documentModes.has(file.id)) await this.closeFile(file);
+        this.documentModes.set(file.id, "large-file");
+      }
+      this.dirtyLines.clear();
+      return;
+    }
+    if (this.documentModes.get(file.id) === "large-file") {
+      this.documentModes.delete(file.id);
+      this.documentEpochs.set(file.id, (this.documentEpochs.get(file.id) || 0) + 1);
+    }
     if (this.documentModes.has(file.id)) return;
     if (!this.canUseIncremental(file)) {
       this.documentModes.set(file.id, "line");
@@ -153,6 +167,17 @@ class HighlightController {
   }
 
   async changeLanguage(file, language) {
+    if (file?.largeFileMode === true) {
+      file.language = String(language || "plaintext").toLowerCase();
+      if (this.documentModes.get(file.id) !== "large-file") {
+        if (this.documentModes.has(file.id)) await this.closeFile(file);
+        this.documentModes.set(file.id, "large-file");
+      }
+      this.dirtyLines.clear();
+      if (file === this.editor.tabManager.activeFile)
+        this.editor.bottomBar?.refresh?.();
+      return;
+    }
     await this.invalidateFile(file);
     file.language = String(language || "plaintext").toLowerCase();
     if (file === this.editor.tabManager.activeFile) {
@@ -189,6 +214,7 @@ class HighlightController {
 
   invalidateFile(file) {
     const closing = this.closeFile(file);
+    if (file?.largeFileMode === true) return closing;
     for (const line of file.lines) {
       line.clearTokens();
       line.setState(null);
@@ -203,6 +229,7 @@ class HighlightController {
         (this.documentEpochs.get(file.id) || 0) + 1,
       );
       this.bumpDocumentRevision(file);
+      if (file.largeFileMode === true) continue;
       for (const line of file.lines) {
         line.clearTokens();
         line.setState(null);
@@ -219,6 +246,7 @@ class HighlightController {
   }
 
   async loadDocumentLines(file, startLine, endLine) {
+    if (file?.largeFileMode === true) return false;
     if (startLine < 0 || endLine <= startLine || endLine > file.lines.length)
       return;
     const epoch = this.documentEpochs.get(file.id);
@@ -298,6 +326,7 @@ class HighlightController {
   }
 
   loadVisibleDocumentLines(file) {
+    if (file?.largeFileMode === true) return Promise.resolve();
     const range = this.getVisibleDocumentRange(file);
     if (!range) return Promise.resolve();
     const requestEpoch = this.documentEpochs.get(file.id);
@@ -416,6 +445,7 @@ class HighlightController {
   }
 
   applyCachedLines(file, cachedLines, startLine = 0) {
+    if (file?.largeFileMode === true) return;
     for (const [offset, cached] of cachedLines.entries()) {
       const lineIndex = Number.isInteger(cached.tokens?.[0]?.line)
         ? cached.tokens[0].line - 1
@@ -449,7 +479,8 @@ class HighlightController {
   handleChange(change) {
     const file = this.editor.tabManager.activeFile;
     const update = change?.nshUpdate;
-    if (!file || this.documentModes.get(file.id) !== "incremental" || !update)
+    if (!file || file.largeFileMode === true ||
+        this.documentModes.get(file.id) !== "incremental" || !update)
       return;
 
     if (!this.canUseIncremental(file)) {
@@ -553,6 +584,7 @@ class HighlightController {
   }
 
   markDirtyAll(onlyUnHighlight = false) {
+    if (this.editor.tabManager.activeFile?.largeFileMode === true) return;
     if (
       !this.editor.lineController.lines ||
       this.editor.lineController.lines.length === 0
@@ -646,6 +678,7 @@ class HighlightController {
   reset() {
     const lines = this.editor.lineController.lines;
     this.dirtyLines.clear();
+    if (this.editor.tabManager.activeFile?.largeFileMode === true) return;
 
     for (const line of lines) {
       line.clearTokens();
@@ -660,7 +693,7 @@ class HighlightController {
   refreshForVerticalScroll(documentIndexes = []) {
     const file = this.editor.tabManager.activeFile;
     const language = file?.language || "plaintext";
-    if (!file || language === "plaintext") return;
+    if (!file || file.largeFileMode === true || language === "plaintext") return;
 
     let hasUncachedVisibleLine = false;
     for (const documentIndex of new Set(documentIndexes)) {
@@ -686,12 +719,14 @@ class HighlightController {
   async refresh() {
     if (this.isProcessingDirty) return;
 
-    const language = this.editor.tabManager.activeFile?.language || "plaintext";
+    const activeFile = this.editor.tabManager.activeFile;
+    if (activeFile?.largeFileMode === true) return;
+
+    const language = activeFile?.language || "plaintext";
     if (language === "plaintext") {
       return;
     }
 
-    const activeFile = this.editor.tabManager.activeFile;
     if (activeFile && this.documentModes.get(activeFile.id) === "incremental") {
       this.loadVisibleDocumentLines(activeFile).catch((error) =>
         console.error("[NSH] Visible document range failed", error),
@@ -708,6 +743,7 @@ class HighlightController {
       this.dirtyLines.clear();
 
       for (const lineNumber of linesToProcess) {
+        if (activeFile.largeFileMode === true) break;
         const lineNode = this.editor.lineController.lines[lineNumber];
         const lineText = lineNode ? lineNode.getText() : "";
         const initialState = this.getInitialState(lineNumber);
@@ -746,6 +782,7 @@ class HighlightController {
 
           if (
             activeFile !== this.editor.tabManager.activeFile ||
+            activeFile.largeFileMode === true ||
             activeFile.language !== language ||
             activeFile.lines[lineNumber] !== lineNode ||
             lineNode.getText() !== lineText

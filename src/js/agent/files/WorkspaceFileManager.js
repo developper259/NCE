@@ -255,6 +255,16 @@ class WorkspaceFileManager {
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(
       target.absolutePath,
     );
+    if (openFile?.largeFileMode === true) {
+      return {
+        success: false,
+        error: {
+          code: "LARGE_FILE_MODE_EDIT_UNSUPPORTED",
+          message: "Agent edits are disabled for files in Large File Mode.",
+          path: target.relativePath,
+        },
+      };
+    }
     if (exists && overwrite && openFile && !openFile.isSaved) {
       return {
         success: false,
@@ -502,6 +512,16 @@ class WorkspaceFileManager {
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(
       target.absolutePath,
     );
+    if (openFile?.largeFileMode === true) {
+      return {
+        success: false,
+        error: {
+          code: "LARGE_FILE_MODE_EDIT_UNSUPPORTED",
+          message: "Agent edits are disabled for files in Large File Mode.",
+          path: target.relativePath,
+        },
+      };
+    }
     if (openFile && !openFile.isSaved) {
       return {
         success: false,
@@ -719,6 +739,19 @@ class WorkspaceFileManager {
         },
       };
     }
+    const openSource = this.agent.editor?.tabManager?.getFileByPath?.(
+      source.absolutePath,
+    );
+    if (openSource?.largeFileMode === true) {
+      return {
+        success: false,
+        error: {
+          code: "LARGE_FILE_MODE_EDIT_UNSUPPORTED",
+          message: "Agent file operations are disabled for files in Large File Mode.",
+          path: source.relativePath,
+        },
+      };
+    }
     if (!(await this.agent.api?.pathExists?.(source.absolutePath))) {
       return {
         success: false,
@@ -910,6 +943,16 @@ class WorkspaceFileManager {
 
     const tabManager = this.agent.editor?.tabManager;
     const openFile = tabManager?.getFileByPath?.(target.absolutePath);
+    if (openFile?.largeFileMode === true) {
+      return {
+        success: false,
+        error: {
+          code: "LARGE_FILE_MODE_EDIT_UNSUPPORTED",
+          message: "Agent file operations are disabled for files in Large File Mode.",
+          path: target.relativePath,
+        },
+      };
+    }
     if (openFile && !openFile.isSaved) {
       return {
         success: false,
@@ -1320,6 +1363,16 @@ class WorkspaceFileManager {
 
     const tabManager = this.agent.editor?.tabManager;
     const alreadyOpen = tabManager?.getFileByPath?.(absolutePath);
+    if (alreadyOpen?.largeFileMode === true) {
+      return {
+        success: false,
+        error: {
+          code: "LARGE_FILE_MODE_EDIT_UNSUPPORTED",
+          message: "Agent edits are disabled for files in Large File Mode.",
+          path: relativePath,
+        },
+      };
+    }
     if (alreadyOpen) {
       await this.agent.editor?.fileLoader?.waitForFileLoaded?.(alreadyOpen);
     }
@@ -1706,6 +1759,13 @@ class WorkspaceFileManager {
   }
 
   async resolveReadSource(absolutePath, openFile) {
+    if (openFile?.largeFileMode === true) {
+      return {
+        kind: "large-file",
+        content: null,
+        fallbackReason: "LARGE_FILE_MODE_RANGE_READ_REQUIRED",
+      };
+    }
     const loader = this.agent.editor?.fileLoader;
     let state = openFile
       ? openFile.loadingState || loader?.getState?.(openFile.path)
@@ -1803,6 +1863,12 @@ class WorkspaceFileManager {
         },
       };
     const openFile = this.agent.editor?.tabManager?.getFileByPath?.(absolute);
+    if (openFile?.largeFileMode === true)
+      return this.agent.activeFileManager.readLargeFile(
+        openFile,
+        options,
+        "read_file",
+      );
     const source = await this.resolveReadSource(absolute, openFile);
     const openFileContent = source.kind === "editor" ? source.content : null;
     const currentContent = source.content;

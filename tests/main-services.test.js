@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const {
   FileManager,
+  LARGE_FILE_MODE_THRESHOLD,
   MAX_IMAGE_FILE_SIZE,
   resolveMarkdownImagePath,
   validateEntryName,
@@ -831,25 +832,138 @@ test("rename basename validation is platform-aware", () => {
   }
 });
 
-test("FileManager rejects a sparse file above 20 MiB and handles empty files", async () => {
+test("FileManager selects normal and large-file paths by the 20 MiB threshold", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-size-"));
   const manager = new FileManager({});
+  const writeTextSize = async (filePath, size) => {
+    const handle = await fsp.open(filePath, "w");
+    const block = Buffer.alloc(1024 * 1024, 0x61);
+    try {
+      for (let offset = 0; offset < size; offset += block.length) {
+        const count = Math.min(block.length, size - offset);
+        await handle.write(block, 0, count, offset);
+      }
+    } finally {
+      await handle.close();
+    }
+  };
   try {
-    const large = path.join(root, "large");
-    const handle = await fsp.open(large, "w");
-    await handle.truncate(20 * 1024 * 1024 + 1);
-    await handle.close();
-    assert.equal(
-      (await manager.initializeFile(large)).errorCode,
-      "FILE_TOO_LARGE",
-    );
+    assert.equal(LARGE_FILE_MODE_THRESHOLD, 20 * 1024 * 1024);
+    for (const size of [19 * 1024 * 1024, LARGE_FILE_MODE_THRESHOLD]) {
+      const normal = path.join(root, `normal-${size}.txt`);
+      await writeTextSize(normal, size);
+      const initialized = await manager.initializeFile(normal);
+      assert.equal(initialized.success, true);
+      assert.equal(initialized.largeFileMode, false);
+      assert.equal(initialized.size, size);
+      assert.equal((manager).fileCache.has(normal), true);
+      manager.clearFileCache(normal);
+    }
+
+    const large = path.join(root, "large.txt");
+    await writeTextSize(large, LARGE_FILE_MODE_THRESHOLD + 1);
+    const initializedLarge = await manager.initializeFile(large);
+    assert.equal(initializedLarge.success, true);
+    assert.equal(initializedLarge.largeFileMode, true);
+    assert.equal(initializedLarge.size, LARGE_FILE_MODE_THRESHOLD + 1);
+    assert.equal(initializedLarge.errorCode, undefined);
+    assert.equal((manager).fileCache.has(large), false);
+    assert.equal((manager).largeFileStore.has(large), true);
+    manager.clearFileCache(large);
+    assert.equal((manager).largeFileStore.has(large), false);
+
+    const binary = path.join(root, "binary.bin");
+    const binaryHandle = await fsp.open(binary, "w");
+    try {
+      await binaryHandle.truncate(LARGE_FILE_MODE_THRESHOLD + 1);
+      await binaryHandle.write(Buffer.from([0]), 0, 1, 0);
+    } finally {
+      await binaryHandle.close();
+    }
+    assert.equal((await manager.initializeFile(binary)).errorCode, "BINARY_FILE");
+
     const empty = path.join(root, "empty");
     await fsp.writeFile(empty, "");
     const initialized = await manager.initializeFile(empty);
     assert.equal(initialized.totalLines, 1);
     assert.equal(initialized.size, 0);
+    assert.equal(initialized.largeFileMode, false);
     assert.deepEqual((await manager.getFileChunk(empty, 0, 1)).lines, [""]);
   } finally {
+    manager.clearFileCache();
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Large File Mode indexes and reads the 42, 50, and 84 MB text fixtures progressively", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-large-fixtures-"));
+  const manager = new FileManager({});
+  const filePath = path.join(root, "fixture.txt");
+  const writeRepeatedLines = async (lineCount, lineBytes) => {
+    const linesPerBlock = Math.floor((1024 * 1024) / lineBytes);
+    const block = Buffer.alloc(linesPerBlock * lineBytes, 0x78);
+    for (let offset = lineBytes - 1; offset < block.length; offset += lineBytes)
+      block[offset] = 0x0a;
+    const handle = await fsp.open(filePath, "w");
+    try {
+      let remaining = lineCount;
+      let position = 0;
+      while (remaining > 0) {
+        const count = Math.min(remaining, linesPerBlock);
+        const bytes = count * lineBytes;
+        await handle.write(block, 0, bytes, position);
+        position += bytes;
+        remaining -= count;
+      }
+    } finally {
+      await handle.close();
+    }
+    const sentinels = new Map([
+      [0, "FIRST-SENTINEL"],
+      [Math.floor(lineCount / 2), "MIDDLE-SENTINEL"],
+      [lineCount - 1, "LAST-SENTINEL"],
+    ]);
+    const patchHandle = await fsp.open(filePath, "r+");
+    try {
+      for (const [line, label] of sentinels) {
+        const value = Buffer.from(`${label.padEnd(lineBytes - 1, "x")}\n`);
+        await patchHandle.write(value, 0, value.length, line * lineBytes);
+      }
+    } finally {
+      await patchHandle.close();
+    }
+    return sentinels;
+  };
+
+  try {
+    for (const scenario of [
+      { size: 42_000_000, lines: 500_000, lineBytes: 84 },
+      { size: 50_000_000, lines: 500_000, lineBytes: 100 },
+      { size: 84_000_000, lines: 1_000_000, lineBytes: 84 },
+    ]) {
+      const sentinels = await writeRepeatedLines(scenario.lines, scenario.lineBytes);
+      assert.equal((await fsp.stat(filePath)).size, scenario.size);
+      const initialized = await manager.initializeFile(filePath);
+      assert.equal(initialized.success, true);
+      assert.equal(initialized.largeFileMode, true);
+      assert.equal(initialized.totalLines, scenario.lines);
+      assert.equal((manager).fileCache.has(filePath), false);
+      for (const line of [0, Math.floor(scenario.lines / 2), scenario.lines - 2]) {
+        const chunk = await manager.getFileChunk(filePath, line, 2);
+        assert.equal(chunk.success, true);
+        assert.equal(chunk.lines.length, 2);
+        assert.equal(chunk.lines[0].length, scenario.lineBytes - 1);
+        assert.equal(chunk.lines[1].length, scenario.lineBytes - 1);
+        if (sentinels.has(line))
+          assert.equal(chunk.lines[0].startsWith(sentinels.get(line)), true);
+        if (sentinels.has(line + 1))
+          assert.equal(chunk.lines[1].startsWith(sentinels.get(line + 1)), true);
+      }
+      manager.clearFileCache(filePath);
+      assert.equal((manager).largeFileStore.has(filePath), false);
+    }
+  } finally {
+    manager.clearFileCache();
     await fsp.rm(root, { recursive: true, force: true });
   }
 });

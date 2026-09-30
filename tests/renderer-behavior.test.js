@@ -175,6 +175,18 @@ test("file loading chooses complete incremental or chunked fallback mode", async
   const fallback = await loader.loadFile("large.js");
   assert.equal(fallback.initialLines.length, 1000);
   assert.deepEqual(calls, [{ start: 0, count: 1000 }]);
+
+  editor.api.initializeFile = async () => ({
+    success: true, totalLines: 1200, size: 84_000_000,
+    largeFileMode: true, incrementalEligible: false, eol: "\n",
+  });
+  calls.length = 0;
+  const largeMode = await loader.loadFile("huge.js");
+  assert.equal(largeMode.largeFileMode, true);
+  assert.equal(largeMode.size, 84_000_000);
+  assert.equal(largeMode.state.largeFileMode, true);
+  assert.equal(largeMode.state.size, 84_000_000);
+  assert.deepEqual(calls, [{ start: 0, count: 1000 }]);
 });
 
 test("bottom bar exposes loading and failure only for the active file", () => {
@@ -198,6 +210,11 @@ test("bottom bar exposes loading and failure only for the active file", () => {
   activeFile.loadingState.status = "failed";
   bar.refreshFileStatus();
   assert.match(statusText.innerText, /failed/);
+  activeFile.loadingState.status = "loaded";
+  activeFile.largeFileMode = true;
+  bar.refreshFileStatus();
+  assert.match(statusText.innerText, /Large File Mode/);
+  assert.match(statusText.innerText, /Auto Save/);
   editor.tabManager.activeFile = { loadingState: { status: "cancelled" } };
   bar.refreshFileStatus();
   assert.equal(status.style.display, "none");

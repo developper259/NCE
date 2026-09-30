@@ -198,6 +198,7 @@ class ManualContextManager {
     }
     const open = this.editor.tabManager?.getFileByPath?.(item.absolutePath);
     if (open) {
+      if (open.largeFileMode === true) return null;
       const state = open.loadingState;
       if (state?.status === "loading" && state.completion) {
         try { await state.completion; } catch { return null; }

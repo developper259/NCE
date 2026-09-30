@@ -8,6 +8,7 @@ import {
 } from "electron";
 import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
+import { LargeFileStore } from "./LargeFileStore";
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
@@ -38,7 +39,9 @@ export interface FileOperationResult {
   error?: string;
 }
 
-export const MAX_TEXT_FILE_SIZE = 20 * 1024 * 1024;
+export const LARGE_FILE_MODE_THRESHOLD = 20 * 1024 * 1024;
+// Kept as an alias for older imports. This is a mode threshold, not an open limit.
+export const MAX_TEXT_FILE_SIZE = LARGE_FILE_MODE_THRESHOLD;
 export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
 const RETRYABLE_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
 const RENAME_RETRY_DELAYS_MS = [0, 20, 50, 100];
@@ -324,6 +327,7 @@ export async function atomicWriteFile(
 export class FileManager {
   window: Window;
   private fileCache: Map<string, string[]> = new Map();
+  private largeFileStore = new LargeFileStore();
   private stateSaveQueue: Promise<boolean> = Promise.resolve(true);
   private workspaceStateSaveQueues: Map<string, Promise<boolean>> = new Map();
 
@@ -452,6 +456,10 @@ export class FileManager {
         return await this.getFileChunk(filePath, startLine, lineCount);
       },
     );
+
+    ipcMain.handle("FileManager:releaseFile", async (_event, filePath: string) => {
+      return this.releaseFile(filePath);
+    });
 
     ipcMain.handle(
       "FileManager:saveState",
@@ -1085,7 +1093,7 @@ export class FileManager {
     totalLines: number;
     errorCode?: string;
     size?: number;
-    maxSize?: number;
+    largeFileMode?: boolean;
     eol?: string;
     hasFinalNewline?: boolean;
     maxLineLength?: number;
@@ -1097,29 +1105,38 @@ export class FileManager {
         return { success: false, totalLines: 0, errorCode: "INVALID_PATH" };
       if (isAsarPath(filePath))
         return { success: false, totalLines: 0, errorCode: "BINARY_FILE" };
+      // Reloads replace the old snapshot and cancel any index still being built.
+      this.clearFileCache(filePath);
       const stats = await fs.stat(filePath);
-      if (stats.size > MAX_TEXT_FILE_SIZE) {
-        return {
-          success: false,
-          totalLines: 0,
-          errorCode: "FILE_TOO_LARGE",
-          size: stats.size,
-          maxSize: MAX_TEXT_FILE_SIZE,
-        };
-      }
-
       const sample = await fs.open(filePath, "r");
-      const sampleBuffer = Buffer.alloc(
-        Math.min(BINARY_SAMPLE_SIZE, stats.size),
-      );
-      await sample.read(sampleBuffer, 0, sampleBuffer.length, 0);
-      await sample.close();
+      let sampleBuffer = Buffer.alloc(0);
+      try {
+        const buffer = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, stats.size));
+        const { bytesRead } = await sample.read(buffer, 0, buffer.length, 0);
+        sampleBuffer = buffer.subarray(0, bytesRead);
+      } finally {
+        await sample.close();
+      }
       if (looksBinary(sampleBuffer)) {
         return {
           success: false,
           totalLines: 0,
           errorCode: "BINARY_FILE",
           size: stats.size,
+        };
+      }
+
+      if (stats.size > LARGE_FILE_MODE_THRESHOLD) {
+        // Large files keep only offsets and EOL codes in main; text is read on demand.
+        const entry = await this.largeFileStore.index(filePath, stats);
+        return {
+          success: true,
+          largeFileMode: true,
+          totalLines: entry.totalLines,
+          size: entry.size,
+          eol: entry.eol,
+          hasFinalNewline: entry.hasFinalNewline,
+          incrementalEligible: false,
         };
       }
 
@@ -1141,6 +1158,7 @@ export class FileManager {
 
       return {
         success: true,
+        largeFileMode: false,
         totalLines: lines.length,
         size: stats.size,
         eol,
@@ -1214,7 +1232,12 @@ export class FileManager {
     filePath: string,
     startLine: number,
     lineCount: number,
-  ): Promise<{ success: boolean; lines: string[] }> {
+  ): Promise<{
+    success: boolean;
+    lines: string[];
+    lineEndings?: string[];
+    errorCode?: string;
+  }> {
     try {
       if (
         !validPath(filePath) ||
@@ -1226,6 +1249,12 @@ export class FileManager {
         return { success: false, lines: [] };
       const safeStartLine = startLine;
       const safeLineCount = lineCount;
+      if (this.largeFileStore.has(filePath))
+        return await this.largeFileStore.getChunk(
+          filePath,
+          safeStartLine,
+          safeLineCount,
+        );
       const cachedLines = this.fileCache.get(filePath);
       // Never splice a new disk version into an existing partial load.
       if (!cachedLines) return { success: false, lines: [] };
@@ -1252,6 +1281,7 @@ export class FileManager {
   clearFileCache(filePath?: string) {
     if (filePath) {
       const normalized = path.normalize(filePath);
+      this.largeFileStore.release(normalized, true);
       for (const cachedPath of this.fileCache.keys()) {
         const normalizedCached = path.normalize(cachedPath);
         if (
@@ -1263,7 +1293,14 @@ export class FileManager {
       }
     } else {
       this.fileCache.clear();
+      this.largeFileStore.clear();
     }
+  }
+
+  releaseFile(filePath: string): boolean {
+    if (!validPath(filePath)) return false;
+    this.clearFileCache(filePath);
+    return true;
   }
 
   saveState(stateString: string): Promise<boolean> {

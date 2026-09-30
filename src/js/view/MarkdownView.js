@@ -53,6 +53,11 @@ class MarkdownView {
       await textTab.loadContent();
     }
     if (generation !== this.generation || tab !== this.editor.tabManager.activeTab) return;
+    if (textTab.largeFileMode === true) {
+      this.setStatus("Markdown Preview is unavailable in Large File Mode.", true);
+      await this.editor.tabManager.switchActiveTabView("text");
+      return;
+    }
     if (textTab.loadingState?.status === "loading") {
       try {
         await this.editor.fileLoader.waitForFileLoaded(textTab);
