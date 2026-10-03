@@ -72,7 +72,10 @@ export class Watcher {
 
     this.watchedPath = projectPath;
 
-    this.usePolling = false;
+    // Chokidar's native watcher can exhaust macOS kqueue descriptors on large
+    // workspaces, and EMFILE is not reliably emitted there. Poll in a child
+    // process on macOS so workspace operations in the main process keep working.
+    this.usePolling = process.platform === "darwin";
 
     this.createWatcher(projectPath, generation);
   }
@@ -147,7 +150,12 @@ export class Watcher {
       this.restartWithPolling(projectPath, generation, watcher);
       return;
     }
-    const recoverable = code === "UNKNOWN" || code === "EPERM" || code === "EBUSY";
+    const recoverable =
+      code === "UNKNOWN" ||
+      code === "EPERM" ||
+      code === "EBUSY" ||
+      code === "EMFILE" ||
+      code === "ENFILE";
 
     if (!recoverable) {
       console.error("[Watcher] error:", err);
