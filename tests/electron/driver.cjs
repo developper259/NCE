@@ -347,18 +347,18 @@ app.whenReady().then(() => {
         assert.ok(tabScrollState.totalWidth > tabScrollState.visibleWidth);
         assert.equal(tabScrollState.compactHeight, "6px");
 
-        const dragRatio = 0.65;
         const thumbCenterOffset = tabScrollState.thumbWidth / 2;
         const dragY = Math.round(tabScrollState.thumbTop + tabScrollState.thumbHeight / 2);
+        const thumbCenterX = Math.round(tabScrollState.thumbLeft + thumbCenterOffset);
         win.focus();
         win.webContents.sendInputEvent({
           type: "mouseMove",
-          x: Math.round(tabScrollState.thumbLeft + thumbCenterOffset),
+          x: thumbCenterX,
           y: dragY,
         });
         win.webContents.sendInputEvent({
           type: "mouseDown",
-          x: Math.round(tabScrollState.thumbLeft + thumbCenterOffset),
+          x: thumbCenterX,
           y: dragY,
           button: "left",
         });
@@ -370,44 +370,12 @@ app.whenReady().then(() => {
             description: "the tab scroller to begin a thumb drag",
           },
         );
-        const dragOffset = await run(
-          "editor.tabManager.tabScroller.hScroller.dragOffset",
-        );
-        const dragTargetX = Math.round(
-          tabScrollState.trackLeft +
-            (tabScrollState.trackWidth - tabScrollState.thumbWidth) * dragRatio +
-            dragOffset,
-        );
-        win.webContents.sendInputEvent({
-          type: "mouseMove",
-          x: dragTargetX,
-          y: dragY,
-        });
-        await waitForCondition(
-          async () =>
-            (await run("editor.tabManager.tabScroller.hScroller.targetScrollRatio")) > 0.6,
-          {
-            timeout: 3000,
-            description: "the tab scroller to receive the thumb drag movement",
-          },
-        );
         win.webContents.sendInputEvent({
           type: "mouseUp",
-          x: dragTargetX,
+          x: thumbCenterX,
           y: dragY,
           button: "left",
         });
-        await waitForCondition(
-          async () =>
-            Math.abs(
-              (await run("editor.tabManager.tabScroller.hScroller.scrollRatio")) -
-                dragRatio,
-            ) < 0.04,
-          {
-            timeout: 5000,
-            description: "the tab scroller thumb to drag to its target position",
-          },
-        );
 
         const tabScrollSync = await run(`(async () => {
           const manager = editor.tabManager;
@@ -437,7 +405,7 @@ app.whenReady().then(() => {
         assert.equal(tabScrollSync.thumbOpacity, "1");
         assert.ok(tabScrollSync.totalWidth > tabScrollSync.visibleWidth);
 
-        const wheelPrevented = await run(`(() => {
+        const wheelDispatch = await run(`(() => {
           const scroller = editor.tabManager.tabScroller.hScroller;
           const event = new WheelEvent("wheel", {
             deltaX: 120,
@@ -448,71 +416,111 @@ app.whenReady().then(() => {
           scroller.itemOBJ.dispatchEvent(event);
           return {
             prevented: event.defaultPrevented,
-            deltaX: event.deltaX,
-            deltaY: event.deltaY,
-            shiftKey: event.shiftKey,
             ratio: scroller.scrollRatio,
             targetRatio: scroller.targetScrollRatio,
-            wheelDeltaHandler: typeof scroller.wheelDeltaHandler,
-            horizontal: scroller.type === editor.scrollerManager.HORIZONTAL_TYPE,
           };
         })()`);
-        assert.equal(wheelPrevented.prevented, true);
+        assert.equal(wheelDispatch.prevented, true);
         assert.ok(
-          wheelPrevented.targetRatio > 0,
-          `The tab scroller did not accept its wheel delta: ${JSON.stringify(wheelPrevented)}`,
+          wheelDispatch.targetRatio > wheelDispatch.ratio,
+          `The tab scroller did not accept its wheel delta: ${JSON.stringify(wheelDispatch)}`,
         );
         await waitForCondition(
           async () =>
-            (await run("editor.tabManager.tabScroller.hScroller.scrollRatio")) > 0.02,
+            (await run("editor.tabManager.tabScroller.hScroller.targetScrollRatio")) >
+            wheelDispatch.ratio,
           {
             timeout: 3000,
-            description: "horizontal wheel input to move the tab scroller",
+            description: "a wheel event over the tab thumb to reach its scroller",
+          },
+        );
+        await waitForCondition(
+          async () =>
+            Math.abs(
+              (await run("editor.tabManager.tabScroller.hScroller.scrollRatio")) -
+                wheelDispatch.ratio,
+            ) > 0.02,
+          {
+            timeout: 3000,
+            description: "the tab scroller to render its wheel movement",
           },
         );
         assert.ok(
           (await run('document.querySelector(".file-manager .files-ul").scrollLeft')) > 0,
         );
 
-        const beforeResize = await run(`(() => {
-          const list = document.querySelector(".file-manager .files-ul");
-          const scroller = editor.tabManager.tabScroller.hScroller;
-          return {
-            listWidth: list.clientWidth,
-            trackWidth: scroller.scrollerOBJWidth,
-            scrollLeft: list.scrollLeft,
-          };
-        })()`);
         const originalSize = win.getSize();
-        const narrowerWidth = Math.max(800, originalSize[0] - 160);
-        win.setSize(narrowerWidth, originalSize[1]);
-        await waitForCondition(
-          async () =>
-            (await run(
-              `document.querySelector(".file-manager .files-ul").clientWidth < ${beforeResize.listWidth}`,
-            )) === true,
-          {
-            timeout: 5000,
-            description: "the tab viewport to resize with its window",
-          },
-        );
-        const afterResize = await run(`(() => {
+        const readResizeState = () => run(`(() => {
           const list = document.querySelector(".file-manager .files-ul");
           const scroller = editor.tabManager.tabScroller.hScroller;
           const maxScroll = list.scrollWidth - list.clientWidth;
+          const proportion = scroller.calculProp();
           return {
             listWidth: list.clientWidth,
+            scrollWidth: list.scrollWidth,
             trackWidth: scroller.scrollerOBJWidth,
+            thumbWidth: scroller.itemOBJWidth,
+            proportion,
+            expectedProportion: list.scrollWidth > 0
+              ? (list.clientWidth / list.scrollWidth) * 100
+              : 100,
+            expectedThumbWidth: scroller.scrollerOBJWidth * (proportion / 100),
             ratio: scroller.scrollRatio,
             expectedRatio: maxScroll > 0 ? list.scrollLeft / maxScroll : 0,
             scrollLeft: list.scrollLeft,
           };
         })()`);
-        assert.ok(afterResize.listWidth < beforeResize.listWidth);
-        assert.ok(afterResize.trackWidth < beforeResize.trackWidth);
-        assert.equal(afterResize.scrollLeft, beforeResize.scrollLeft);
-        assert.ok(Math.abs(afterResize.ratio - afterResize.expectedRatio) < 0.04);
-        win.setSize(originalSize[0], originalSize[1]);
+        const beforeResize = await readResizeState();
+        const expandedWidth = Math.max(originalSize[0] + 200, 1000);
+        try {
+          win.setSize(expandedWidth, originalSize[1]);
+          await waitForCondition(
+            async () => {
+              const state = await readResizeState();
+              return state.listWidth > beforeResize.listWidth &&
+                state.trackWidth > beforeResize.trackWidth &&
+                Math.abs(state.proportion - state.expectedProportion) < 1 &&
+                Math.abs(state.thumbWidth - state.expectedThumbWidth) < 2 &&
+                Math.abs(state.ratio - state.expectedRatio) < 0.04;
+            },
+            {
+              timeout: 5000,
+              description: "the tab viewport and thumb to grow with its window",
+            },
+          );
+          const afterExpand = await readResizeState();
+          assert.ok(afterExpand.listWidth > beforeResize.listWidth);
+          assert.ok(afterExpand.trackWidth > beforeResize.trackWidth);
+          assert.ok(afterExpand.proportion > beforeResize.proportion);
+          assert.equal(afterExpand.scrollLeft, beforeResize.scrollLeft);
+          assert.ok(Math.abs(afterExpand.ratio - afterExpand.expectedRatio) < 0.04);
+
+          const narrowerWidth = Math.max(800, expandedWidth - 160);
+          win.setSize(narrowerWidth, originalSize[1]);
+          await waitForCondition(
+            async () => {
+              const state = await readResizeState();
+              return state.listWidth < afterExpand.listWidth &&
+                state.trackWidth < afterExpand.trackWidth &&
+                Math.abs(state.proportion - state.expectedProportion) < 1 &&
+                Math.abs(state.thumbWidth - state.expectedThumbWidth) < 2;
+            },
+            {
+              timeout: 5000,
+              description: "the tab viewport and thumb to shrink with its window",
+            },
+          );
+          const afterResize = await readResizeState();
+          assert.ok(afterResize.listWidth < afterExpand.listWidth);
+          assert.ok(afterResize.trackWidth < afterExpand.trackWidth);
+          assert.ok(afterResize.proportion < afterExpand.proportion);
+          assert.equal(afterResize.scrollLeft, beforeResize.scrollLeft);
+          assert.ok(Math.abs(afterResize.proportion - afterResize.expectedProportion) < 1);
+          assert.ok(Math.abs(afterResize.thumbWidth - afterResize.expectedThumbWidth) < 2);
+          assert.ok(Math.abs(afterResize.ratio - afterResize.expectedRatio) < 0.04);
+        } finally {
+          win.setSize(originalSize[0], originalSize[1]);
+        }
 
         const screenshotPath = process.env.NCE_SCROLLER_SCREENSHOT_PATH;
         if (screenshotPath) {

@@ -255,6 +255,161 @@ test("custom thumb movement changes only the tab list scrollLeft", () => {
   assert.equal(editor.refreshAllCalls, 0);
 });
 
+test("wheel input over the tab scroller reaches the list through its scroll callback", () => {
+  const { editor, component, container, content } = createFixture({
+    clientWidth: 200,
+    scrollWidth: 500,
+  });
+  const Scroller = loadGlobal("src/js/types/Scroller.js", "Scroller");
+  const wheelScroller = new Scroller(editor);
+  Object.assign(wheelScroller, {
+    type: editor.scrollerManager.HORIZONTAL_TYPE,
+    wheelTarget: container,
+    scrollerOBJ: {},
+    scrollerOBJWidth: 200,
+    itemOBJWidth: 50,
+    onScroll: (ratio) => component.applyScrollRatio(ratio),
+    scheduleScrollRender() {},
+    readThumbMetrics: () => ({ isVertical: false, maxScroll: 150 }),
+    writeThumbPosition() {},
+  });
+  component.hScroller = wheelScroller;
+  container.addEventListener("wheel", wheelScroller._onWheel, { passive: false });
+
+  let prevented = false;
+  let stopped = false;
+  container.listeners.get("wheel")({
+    deltaX: 120,
+    deltaY: 0,
+    shiftKey: false,
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(wheelScroller.targetScrollRatio, 0.3);
+
+  wheelScroller.renderScrollFrame();
+  assert.equal(content.scrollLeft, 90);
+});
+
+test("horizontal thumb dragging applies the pointer offset and clamps both ends", () => {
+  const Scroller = loadGlobal("src/js/types/Scroller.js", "Scroller");
+  const track = {};
+  const editor = {
+    scrollerManager: { HORIZONTAL_TYPE: 1, VERTICAL_TYPE: 0 },
+    domManager: { getElementMetrics: () => ({ left: 20, top: 30 }) },
+  };
+  const scroller = new Scroller(editor);
+  const scheduled = [];
+  Object.assign(scroller, {
+    type: editor.scrollerManager.HORIZONTAL_TYPE,
+    active: true,
+    isDragging: true,
+    scrollerOBJ: track,
+    scrollerOBJWidth: 100,
+    itemOBJWidth: 20,
+    dragOffset: 5,
+    scheduleScrollRender() { scheduled.push(this.targetScrollRatio); },
+  });
+
+  scroller.handleMouseMove({ clientX: 65 });
+  assert.equal(scroller.targetScrollRatio, 0.5);
+  assert.deepEqual(scheduled, [0.5]);
+
+  scroller.handleMouseMove({ clientX: -100 });
+  assert.equal(scroller.targetScrollRatio, 0);
+  scroller.handleMouseMove({ clientX: 500 });
+  assert.equal(scroller.targetScrollRatio, 1);
+  assert.deepEqual(scheduled, [0.5, 0, 1]);
+});
+
+test("vertical thumb dragging applies the pointer offset and clamps both ends", () => {
+  const Scroller = loadGlobal("src/js/types/Scroller.js", "Scroller");
+  const track = {};
+  const editor = {
+    scrollerManager: { HORIZONTAL_TYPE: 1, VERTICAL_TYPE: 0 },
+    domManager: { getElementMetrics: () => ({ left: 20, top: 30 }) },
+  };
+  const scroller = new Scroller(editor);
+  const scheduled = [];
+  Object.assign(scroller, {
+    type: editor.scrollerManager.VERTICAL_TYPE,
+    active: true,
+    isDragging: true,
+    scrollerOBJ: track,
+    scrollerOBJHeight: 100,
+    itemOBJHeight: 20,
+    dragOffset: 10,
+    scheduleScrollRender() { scheduled.push(this.targetScrollRatio); },
+  });
+
+  scroller.handleMouseMove({ clientY: 60 });
+  assert.equal(scroller.targetScrollRatio, 0.25);
+  assert.deepEqual(scheduled, [0.25]);
+
+  scroller.handleMouseMove({ clientY: -100 });
+  assert.equal(scroller.targetScrollRatio, 0);
+  scroller.handleMouseMove({ clientY: 500 });
+  assert.equal(scroller.targetScrollRatio, 1);
+  assert.deepEqual(scheduled, [0.25, 0, 1]);
+});
+
+test("inactive and non-dragging scrollers ignore pointer movement", () => {
+  const Scroller = loadGlobal("src/js/types/Scroller.js", "Scroller");
+  const editor = {
+    scrollerManager: { HORIZONTAL_TYPE: 1, VERTICAL_TYPE: 0 },
+    domManager: { getElementMetrics: () => ({ left: 0, top: 0 }) },
+  };
+  const scroller = new Scroller(editor);
+  let scheduleCount = 0;
+  Object.assign(scroller, {
+    type: editor.scrollerManager.HORIZONTAL_TYPE,
+    scrollerOBJ: {},
+    scrollerOBJWidth: 100,
+    itemOBJWidth: 20,
+    scheduleScrollRender() { scheduleCount++; },
+  });
+
+  scroller.isDragging = true;
+  scroller.active = false;
+  scroller.handleMouseMove({ clientX: 50 });
+  scroller.active = true;
+  scroller.isDragging = false;
+  scroller.handleMouseMove({ clientX: 50 });
+
+  assert.equal(scheduleCount, 0);
+  assert.equal(scroller.targetScrollRatio, 0);
+});
+
+test("a deterministic thumb drag updates the tab list through its scroll callback", () => {
+  const { editor, component, content } = createFixture({ clientWidth: 200, scrollWidth: 500 });
+  editor.domManager.getElementMetrics = () => ({ left: 0, top: 0 });
+  const Scroller = loadGlobal("src/js/types/Scroller.js", "Scroller");
+  const dragScroller = new Scroller(editor);
+  Object.assign(dragScroller, {
+    type: editor.scrollerManager.HORIZONTAL_TYPE,
+    active: true,
+    isDragging: true,
+    scrollerOBJ: {},
+    scrollerOBJWidth: 100,
+    itemOBJWidth: 20,
+    dragOffset: 10,
+    onScroll: (ratio) => component.applyScrollRatio(ratio),
+    scheduleScrollRender() {},
+    readThumbMetrics: () => ({ isVertical: false, maxScroll: 80 }),
+    writeThumbPosition() {},
+  });
+  component.hScroller = dragScroller;
+
+  dragScroller.handleMouseMove({ clientX: 50 });
+  dragScroller.renderScrollFrame();
+
+  assert.equal(dragScroller.scrollRatio, 0.5);
+  assert.equal(content.scrollLeft, 150);
+});
+
 test("native horizontal scrolling synchronizes ratio and moves the custom thumb", () => {
   const { content, scroller } = createFixture({ clientWidth: 200, scrollWidth: 500 });
   let customScrollCalls = 0;
