@@ -28,8 +28,21 @@ class Events {
   constructor(editor) {
     this.editor = editor;
 
-    addEvent("click", this.onClick.bind(this));
-    addEvent("resize", this.onResize.bind(this), window);
+    this.isInitialized = false;
+    this.onClick = this.onClick.bind(this);
+    this.onResize = this.onResize.bind(this);
+    this.onWindowFocus = this.onWindowFocus.bind(this);
+    this.onVisibilityChange = this.onVisibilityChange.bind(this);
+  }
+
+  init() {
+    if (this.isInitialized) return;
+
+    addEvent("click", this.onClick);
+    addEvent("resize", this.onResize, window);
+    addEvent("focus", this.onWindowFocus, window);
+    addEvent("visibilitychange", this.onVisibilityChange);
+    this.isInitialized = true;
   }
 
   callEvent(e, arg) {
@@ -180,5 +193,14 @@ class Events {
         this.editor.scrollerManager.refreshAll();
       }
     });
+  }
+
+  onWindowFocus() {
+    this.editor.tabManager.scheduleFocusResync();
+  }
+
+  onVisibilityChange() {
+    if (document.visibilityState === "visible")
+      this.editor.tabManager.scheduleFocusResync();
   }
 }

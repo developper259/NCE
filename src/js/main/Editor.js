@@ -111,6 +111,7 @@ class Editor {
     });
 
     this.events = new Events(this);
+    this.events.init();
     this.keyBinding = new KeyBinding(this);
     this.savePopupManager = new SavePopup(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
@@ -119,14 +120,6 @@ class Editor {
     this.settingsView = new SettingsView(this);
     this.pictureView = new PictureView(this);
     this.markdownView = new MarkdownView(this);
-
-    window.addEventListener("focus", () =>
-      this.tabManager.scheduleFocusResync(),
-    );
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible")
-        this.tabManager.scheduleFocusResync();
-    });
 
     this.writerController.insertMode = true;
 
