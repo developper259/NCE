@@ -41,9 +41,10 @@ test("empty startup applies one reset when state is absent from both load channe
   });
   let onLoadState;
   let resetCount = 0;
-  let refreshCount = 0;
-  let refreshOptions = null;
-  const editor = {
+  let startupCommitCount = 0;
+  let refreshAllCount = 0;
+  let bottomBarRefreshCount = 0;
+  const editor = Object.assign(Object.create(Editor.prototype), {
     isOnInit: true,
     tabManager: {
       files: [],
@@ -52,28 +53,61 @@ test("empty startup applies one reset when state is absent from both load channe
         if (this.files.length === 0 && !editor.isOnInit) editor.reset();
       },
     },
-    bottomBar: { refresh() {} },
+    bottomBar: { refresh() { bottomBarRefreshCount++; } },
     reset() { resetCount++; },
-    refreshAll(options) {
-      refreshCount++;
-      refreshOptions = options;
-      this.tabManager.refresh();
+    refreshMainContent() {},
+    commitStartupState() {
+      startupCommitCount++;
+      Editor.prototype.commitStartupState.call(this);
     },
+    refreshAll() { refreshAllCount++; },
     api: {
       onLoadState(callback) { onLoadState = callback; },
       loadEditorState() { return Promise.resolve(null); },
     },
-  };
+  });
   editor.events = new Events(editor);
 
   Editor.prototype.initLoadState.call(editor);
   await new Promise((resolve) => setImmediate(resolve));
   await onLoadState(null);
 
-  assert.equal(refreshCount, 1);
-  assert.equal(refreshOptions.renderSidebarContent, false);
+  assert.equal(startupCommitCount, 1);
+  assert.equal(refreshAllCount, 0);
   assert.equal(resetCount, 1);
+  assert.equal(bottomBarRefreshCount, 1);
   assert.equal(editor.isOnInit, false);
+});
+
+test("startup commit updates only components needed for the active editor", () => {
+  const Editor = loadGlobal("src/js/main/Editor.js", "Editor", {
+    document: { addEventListener() {} },
+    window: {},
+  });
+  const calls = [];
+  const editor = Object.assign(Object.create(Editor.prototype), {
+    isOnRefresh: false,
+    tabManager: {
+      activeFile: {},
+      refresh() { calls.push("tabs"); },
+    },
+    refreshMainContent() { calls.push("main-content"); },
+    cursorController: { updateCaretPosition() { calls.push("caret"); } },
+    lineController: {
+      refresh(force) { calls.push(`lines:${force}`); },
+      restoreScroll() { calls.push("line-scroll"); },
+    },
+    scrollerManager: { refreshAll() { calls.push("scrollers"); } },
+    refreshAll() { calls.push("global-refresh"); },
+  });
+
+  editor.commitStartupState();
+
+  assert.deepEqual(calls, [
+    "tabs", "main-content", "caret", "lines:true", "line-scroll",
+    "scrollers",
+  ]);
+  assert.equal(editor.isOnRefresh, false);
 });
 
 test("startup sidebar refresh keeps selector state without repainting active content", () => {

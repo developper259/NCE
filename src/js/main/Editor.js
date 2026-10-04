@@ -146,6 +146,23 @@ class Editor {
     this.isOnRefresh = false;
   }
 
+  commitStartupState() {
+    this.isOnRefresh = true;
+    this.tabManager.refresh();
+    this.refreshMainContent();
+
+    if (!this.tabManager.activeFile) {
+      this.isOnRefresh = false;
+      return;
+    }
+
+    this.cursorController.updateCaretPosition();
+    this.lineController.refresh(true);
+    this.lineController.restoreScroll();
+    this.scrollerManager.refreshAll();
+    this.isOnRefresh = false;
+  }
+
   getAutoSaveState() {
     return this.autoSaveEnabled === true;
   }

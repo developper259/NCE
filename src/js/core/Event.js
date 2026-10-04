@@ -138,12 +138,7 @@ class Events {
   }
   onLoaded(arg) {
     this.editor.isOnInit = false;
-
-    const activeFile = this.editor.tabManager.activeFile;
-    if (activeFile) this.editor.highlightController?.openFile(activeFile);
-
-    this.editor.refreshAll({ renderSidebarContent: false });
-    this.editor.titleBar?.refresh();
+    this.editor.commitStartupState();
   }
 
   // DOM Event
