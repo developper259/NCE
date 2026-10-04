@@ -46,6 +46,16 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "next_tab",
+    description: "Activate the next tab",
+    in_editor: false,
+  },
+  {
+    action: "previous_tab",
+    description: "Activate the previous tab",
+    in_editor: false,
+  },
+  {
     action: "copy",
     description: "Copy the selection",
     in_editor: true,

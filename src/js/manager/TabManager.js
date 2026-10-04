@@ -11,6 +11,7 @@ class tabManager {
     this.focusGeneration = 0;
     this.focusResyncTimer = null;
     this.tabElements = new Map();
+    this.lastVisibleTab = null;
   }
 
   get files() {
@@ -419,6 +420,42 @@ class tabManager {
     return this.setFocusTab(file);
   }
 
+  async cycleTab(direction) {
+    const count = this.tabs.length;
+    if (count < 2 || !Number.isFinite(direction) || direction === 0) return false;
+
+    const step = direction > 0 ? 1 : -1;
+    const currentIndex = this.tabs.indexOf(this.activeTab);
+    const startIndex = currentIndex < 0
+      ? (step > 0 ? -1 : 0)
+      : currentIndex;
+    const nextIndex = (startIndex + step + count) % count;
+    await this.setFocusTab(this.tabs[nextIndex]);
+    return true;
+  }
+
+  ensureActiveTabVisible() {
+    const tab = this.activeTab;
+    const element = tab && this.tabElements?.get(String(tab.id))?.element;
+    const list = getElement(".file-manager .files-ul");
+    if (!element || !list) return false;
+
+    const viewportWidth = list.clientWidth;
+    if (viewportWidth <= 0) return false;
+
+    const visibleLeft = list.scrollLeft;
+    const visibleRight = visibleLeft + viewportWidth;
+    const tabLeft = element.offsetLeft;
+    const tabRight = tabLeft + element.offsetWidth;
+
+    if (tabRight - tabLeft >= viewportWidth) list.scrollLeft = tabLeft;
+    else if (tabLeft < visibleLeft) list.scrollLeft = tabLeft;
+    else if (tabRight > visibleRight) {
+      list.scrollLeft = Math.max(0, tabRight - viewportWidth);
+    }
+    return true;
+  }
+
   async setFocusTab(tab) {
     if (!tab) return;
     const focusGeneration = ++this.focusGeneration;
@@ -735,13 +772,17 @@ class tabManager {
     const id = String(file.id);
     const name = String(file.name || "");
     const isActive = this.activeTab?.id === file.id;
+    let layoutChanged = false;
     // Auto Save owns persistence while enabled, so its in-flight write should
     // not briefly replace the close affordance with a dirty indicator.
     const dirty = file.type === TAB_TYPES.FILE &&
       typeof file.isVisuallyDirty === "function" && file.isVisuallyDirty();
 
     if (element.id !== id) element.id = id;
-    if (title.textContent !== name) title.textContent = name;
+    if (title.textContent !== name) {
+      title.textContent = name;
+      layoutChanged = true;
+    }
     element.classList.toggle("file-active", isActive);
 
     if (entry.dirty !== dirty || !entry.closeControl?.parentElement) {
@@ -753,7 +794,10 @@ class tabManager {
       }
       entry.closeControl = closeControl;
       entry.dirty = dirty;
+      layoutChanged = true;
     }
+
+    return layoutChanged;
   }
 
   onContextMenu(tabElement) {
@@ -769,6 +813,8 @@ class tabManager {
 
     this.tabElements ||= new Map();
     const activeKeys = new Set();
+    let layoutChanged = false;
+    const activeIndex = this.tabs.indexOf(this.activeTab);
     for (let index = 0; index < this.tabs.length; index++) {
       const tab = this.tabs[index];
       if (!tab) continue;
@@ -778,17 +824,28 @@ class tabManager {
       if (!entry) {
         this.createFileOBJ(tab);
         entry = this.tabElements.get(key);
+        if (index <= activeIndex) layoutChanged = true;
       }
-      this.updateFileOBJ(tab, entry);
+      const tabLayoutChanged = this.updateFileOBJ(tab, entry);
+      if (tabLayoutChanged && index <= activeIndex) layoutChanged = true;
 
       const current = ul.children[index] || null;
-      if (current !== entry.element) ul.insertBefore(entry.element, current);
+      if (current !== entry.element) {
+        ul.insertBefore(entry.element, current);
+        if (index <= activeIndex) layoutChanged = true;
+      }
     }
 
     for (const [key, entry] of this.tabElements) {
       if (activeKeys.has(key)) continue;
       entry.element.remove();
       this.tabElements.delete(key);
+      layoutChanged = true;
+    }
+
+    if (this.activeTab !== this.lastVisibleTab || layoutChanged) {
+      this.ensureActiveTabVisible();
+      this.lastVisibleTab = this.activeTab;
     }
 
     this.editor.api?.setActiveFileContext?.(Boolean(this.activeFile));

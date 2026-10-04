@@ -407,6 +407,22 @@ export class AppMenu {
           },
 
           {
+            label: "Next Tab",
+
+            accelerator: this.getAccelerator("next_tab"),
+
+            click: () => this.executeKeybinding("next_tab"),
+          },
+
+          {
+            label: "Previous Tab",
+
+            accelerator: this.getAccelerator("previous_tab"),
+
+            click: () => this.executeKeybinding("previous_tab"),
+          },
+
+          {
             label: "Command Palette",
 
             accelerator: this.getAccelerator("open_command"),

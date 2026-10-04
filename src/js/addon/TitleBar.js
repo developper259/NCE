@@ -78,6 +78,8 @@ class TitleBar {
           ["Search", "toggle_search"],
           ["Agent", "toggle_agent"],
           ["Quick Open...", "quick_open"],
+          ["Next Tab", "next_tab"],
+          ["Previous Tab", "previous_tab"],
           null,
           ["Command Palette", "open_command"],
           null,

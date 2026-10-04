@@ -8,6 +8,8 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
   new_file: "Mod+N",
   close_file: "Mod+W",
   close_all_file: "Mod+Shift+W",
+  next_tab: "Ctrl+Tab",
+  previous_tab: "Ctrl+Shift+Tab",
   copy: "Mod+C",
   paste: "Mod+V",
   cut: "Mod+X",

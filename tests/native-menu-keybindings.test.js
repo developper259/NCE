@@ -54,6 +54,8 @@ function createMenuHarness(overrides = {}) {
     ["keybindings.save_as", "Mod+Shift+S"],
     ["keybindings.close_file", "Mod+W"],
     ["keybindings.close_all_file", "Mod+Shift+W"],
+    ["keybindings.next_tab", "Ctrl+Tab"],
+    ["keybindings.previous_tab", "Ctrl+Shift+Tab"],
     ["keybindings.undo", "Mod+Z"],
     ["keybindings.redo", "Mod+Y"],
     ["keybindings.cut", "Mod+X"],
@@ -135,15 +137,29 @@ test("NCE shortcuts convert to Electron accelerators through one normalizer", ()
   assert.equal(toElectronAccelerator(null), undefined);
 });
 
+test("Ctrl+Tab tab cycling accelerators stay explicit across platforms", () => {
+  for (const platform of ["darwin", "win32", "linux"]) {
+    assert.equal(toElectronAccelerator("Ctrl+Tab", platform), "Control+Tab");
+    assert.equal(
+      toElectronAccelerator("Ctrl+Shift+Tab", platform),
+      "Control+Shift+Tab",
+    );
+  }
+});
+
 test("native menu actions are routed back through the renderer keybinding manager", () => {
   const fixture = createMenuHarness();
 
   fixture.item("Quick Open...").click();
+  fixture.item("Next Tab").click();
+  fixture.item("Previous Tab").click();
   fixture.item("Save As...").click();
   fixture.item("Settings...").click();
 
   assert.deepEqual(JSON.parse(JSON.stringify(fixture.rendererMessages)), [
     ["keybinding-action-requested", "quick_open", {}],
+    ["keybinding-action-requested", "next_tab", {}],
+    ["keybinding-action-requested", "previous_tab", {}],
     ["keybinding-action-requested", "save_as", {}],
     ["keybinding-action-requested", "open_settings", {}],
   ]);
@@ -163,6 +179,8 @@ test("native menu rebuilds from current keybindings and preserves static items",
   assert.equal(item("Quick Open...").accelerator, "CommandOrControl+P");
   assert.equal(item("Go to Line...").accelerator, "CommandOrControl+G");
   assert.equal(item("Agent").accelerator, "CommandOrControl+L");
+  assert.equal(item("Next Tab").accelerator, "Control+Tab");
+  assert.equal(item("Previous Tab").accelerator, "Control+Shift+Tab");
   assert.equal(item("Settings...").accelerator, undefined);
   assert.equal(item("Quit NCE").accelerator, "CommandOrControl+Q");
   assert.equal(item("Reload Window").accelerator, "CommandOrControl+R");

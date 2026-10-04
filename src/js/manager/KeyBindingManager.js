@@ -271,13 +271,19 @@ class KeyBindingManager {
       ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
       : null;
 
-    // Global UI shortcuts (sidebar, quick panel, etc.) are edge-triggered:
-    // holding the key must not repeatedly toggle them. Editor shortcuts and
-    // normal editing keys remain repeatable.
+    // Global UI shortcuts are edge-triggered so holding a key cannot repeatedly
+    // toggle them. Tab cycling and editor navigation remain repeatable.
     const isEditorNavigation =
       typeof binding?.action === "string" &&
       binding.action.startsWith("move_");
-    if (e.repeat && binding?.in_editor === false && !isEditorNavigation) return;
+    const isTabNavigation =
+      binding?.action === "next_tab" || binding?.action === "previous_tab";
+    if (
+      e.repeat &&
+      binding?.in_editor === false &&
+      !isEditorNavigation &&
+      !isTabNavigation
+    ) return;
 
     if (this.isNativeInputTarget(e.target) && eventKey !== "Escape") {
       this.bindNativeInput(shortcutKey, e);

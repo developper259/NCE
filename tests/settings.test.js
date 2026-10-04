@@ -321,6 +321,9 @@ test("every configurable renderer shortcut has a persisted default", async () =>
       `${binding.action} must have a persisted default`,
     );
   }
+
+  assert.equal(DEFAULT_KEYBINDINGS.next_tab, "Ctrl+Tab");
+  assert.equal(DEFAULT_KEYBINDINGS.previous_tab, "Ctrl+Shift+Tab");
 });
 
 test("settings remain IPC-scoped and session state contains no preferences", async () => {

@@ -118,6 +118,32 @@ test("Save As shortcut dispatches from native inputs with each platform modifier
   }
 });
 
+test("Ctrl+Tab shortcuts dispatch next and previous tab actions from native inputs", () => {
+  for (const shortcut of [
+    { key: "Ctrl+Tab", action: "next_tab", shiftKey: false },
+    { key: "Ctrl+Shift+Tab", action: "previous_tab", shiftKey: true },
+  ]) {
+    const { manager, calls } = fixture(
+      { action: shortcut.action, in_editor: false },
+      {},
+      shortcut.key,
+    );
+    const event = keyboardEvent(new HTMLInputElement(), {
+      key: "Tab",
+      keyCode: 9,
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: shortcut.shiftKey,
+    });
+
+    manager.onKey(event);
+
+    assert.deepEqual(calls, [shortcut.action]);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(event.propagationStopped, true);
+  }
+});
+
 test("repeated global shortcuts are ignored while editor shortcuts remain repeatable", () => {
   const global = fixture({ action: "toggle_agent", in_editor: false });
   const repeatedGlobal = keyboardEvent();
@@ -132,6 +158,16 @@ test("repeated global shortcuts are ignored while editor shortcuts remain repeat
   editor.manager.onKey(repeatedEditor);
   assert.equal(repeatedEditor.defaultPrevented, true);
   assert.deepEqual(editor.calls, ["editor_action"]);
+});
+
+test("repeated tab navigation shortcuts remain repeatable", () => {
+  const navigation = fixture({ action: "next_tab", in_editor: false });
+  const repeatedNavigation = keyboardEvent();
+  repeatedNavigation.repeat = true;
+  navigation.manager.onKey(repeatedNavigation);
+
+  assert.equal(repeatedNavigation.defaultPrevented, true);
+  assert.deepEqual(navigation.calls, ["next_tab"]);
 });
 
 test("named shortcut keys retain modifiers and modifier-only keys stay sane", () => {

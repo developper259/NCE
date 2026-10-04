@@ -27,6 +27,8 @@ class KeyBinding {
       new_file: this.control_new_file,
       close_file: this.control_close_file,
       close_all_file: this.control_close_all_file,
+      next_tab: this.control_next_tab,
+      previous_tab: this.control_previous_tab,
       copy: this.control_copy,
       paste: this.control_paste,
       cut: this.control_cut,
@@ -69,6 +71,8 @@ class KeyBinding {
       );
     }
     if (action === "close_all_file") return tabs.length > 0;
+    if (action === "next_tab" || action === "previous_tab")
+      return tabs.length > 1;
     if (this.fileActions.has(action)) return Boolean(tabManager.activeFile);
     return true;
   }
@@ -137,6 +141,14 @@ class KeyBinding {
   async control_close_all_file(s, c, m, a) {
     if (!this.isActionEnabled("close_all_file")) return false;
     return this.editor.tabManager.closeFiles();
+  }
+
+  control_next_tab() {
+    return this.editor.tabManager.cycleTab(1);
+  }
+
+  control_previous_tab() {
+    return this.editor.tabManager.cycleTab(-1);
   }
 
   async control_copy(s, c, m, a) {

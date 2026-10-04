@@ -135,6 +135,104 @@ test("TabManager refresh preserves tab DOM identity and updates only changed sta
   assert.equal(manager.tabElements.get("1").element, aEntry.element);
 });
 
+test("active tabs scroll into view only when the active tab changes", () => {
+  const ul = new FakeElement("ul");
+  ul.scrollLeft = 0;
+  let geometryReads = 0;
+  Object.defineProperty(ul, "clientWidth", {
+    configurable: true,
+    get() { geometryReads++; return 200; },
+  });
+  const TabManager = loadGlobal(
+    "src/js/manager/TabManager.js",
+    "tabManager",
+    {
+      TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+      getElement: (selector) => selector === ".file-manager .files-ul" ? ul : null,
+      document: { createElement: (tagName) => new FakeElement(tagName) },
+    },
+  );
+  const tabs = [0, 1, 2].map((id) => ({ id, type: "settings", name: `tab-${id}` }));
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    editor: {
+      api: { setActiveFileContext() {} },
+      titleBar: { refresh() {} },
+      isOnInit: false,
+      isActive: true,
+      reset() {},
+      reactive() {},
+    },
+    tabs,
+    activeTab: tabs[0],
+    tabElements: new Map(),
+  });
+
+  manager.refresh();
+  tabs.forEach((tab, index) => {
+    const element = manager.tabElements.get(String(tab.id)).element;
+    Object.defineProperties(element, {
+      offsetLeft: { configurable: true, get() { geometryReads++; return index * 100; } },
+      offsetWidth: { configurable: true, get() { geometryReads++; return 100; } },
+    });
+  });
+  const readsAfterInitialFocus = geometryReads;
+
+  tabs[2].name = "renamed tab";
+  manager.refresh();
+  assert.equal(geometryReads, readsAfterInitialFocus);
+
+  manager.activeTab = tabs[2];
+  manager.refresh();
+  assert.equal(ul.scrollLeft, 100);
+
+  manager.activeTab = tabs[0];
+  manager.refresh();
+  assert.equal(ul.scrollLeft, 0);
+});
+
+test("active tab visibility is recalculated after preceding tabs are removed", () => {
+  const ul = new FakeElement("ul");
+  ul.scrollLeft = 150;
+  Object.defineProperty(ul, "clientWidth", { configurable: true, value: 200 });
+  const TabManager = loadGlobal(
+    "src/js/manager/TabManager.js",
+    "tabManager",
+    {
+      TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+      getElement: (selector) => selector === ".file-manager .files-ul" ? ul : null,
+      document: { createElement: (tagName) => new FakeElement(tagName) },
+    },
+  );
+  const tabs = [0, 1, 2].map((id) => ({ id, type: "settings", name: `tab-${id}` }));
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    editor: {
+      api: { setActiveFileContext() {} },
+      titleBar: { refresh() {} },
+      isOnInit: false,
+      isActive: true,
+      reset() {},
+      reactive() {},
+    },
+    tabs,
+    activeTab: tabs[2],
+    tabElements: new Map(),
+    lastVisibleTab: tabs[2],
+  });
+
+  manager.refresh();
+  const activeElement = manager.tabElements.get("2").element;
+  Object.defineProperties(activeElement, {
+    offsetLeft: { configurable: true, value: 100 },
+    offsetWidth: { configurable: true, value: 100 },
+  });
+  const activeTab = manager.activeTab;
+  manager.tabs.shift();
+  manager.refresh();
+
+  assert.equal(manager.activeTab, activeTab);
+  assert.equal(ul.scrollLeft, 100);
+});
+
 test("closing the last file tab resets the editor without a global refresh", async () => {
   const ul = new FakeElement("ul");
   const calls = { contexts: [], titles: 0, resets: 0, mainContent: 0, refreshAll: 0, closed: 0 };
