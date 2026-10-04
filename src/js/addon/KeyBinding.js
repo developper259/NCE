@@ -6,8 +6,6 @@ class KeyBinding {
       "save",
       "save_as",
       "go_to_line",
-      "close_file",
-      "close_all_file",
       "copy",
       "paste",
       "cut",
@@ -16,6 +14,7 @@ class KeyBinding {
       "find",
       "delete_line",
       "select_all",
+      "unselect_all",
     ]);
 
     this.func = {
@@ -60,13 +59,22 @@ class KeyBinding {
     };
   }
 
-  exec(key, e) {
-    if (
-      this.fileActions.has(key?.action) &&
-      !this.editor.tabManager.activeFile
-    ) {
-      return;
+  isActionEnabled(action) {
+    const tabManager = this.editor.tabManager || {};
+    const tabs = Array.isArray(tabManager.tabs) ? tabManager.tabs : [];
+
+    if (action === "close_file") {
+      return Boolean(
+        tabManager.activeTab && tabs.includes(tabManager.activeTab),
+      );
     }
+    if (action === "close_all_file") return tabs.length > 0;
+    if (this.fileActions.has(action)) return Boolean(tabManager.activeFile);
+    return true;
+  }
+
+  exec(key, e) {
+    if (!this.isActionEnabled(key?.action)) return;
 
     let s = false;
     let c = false;
@@ -122,13 +130,13 @@ class KeyBinding {
   }
 
   async control_close_file(s, c, m, a) {
-    if (!this.editor.tabManager.activeTab && !this.editor.tabManager.activeFile) return;
-    await this.editor.tabManager.closeActiveFile();
+    if (!this.isActionEnabled("close_file")) return false;
+    return this.editor.tabManager.closeActiveFile();
   }
 
   async control_close_all_file(s, c, m, a) {
-    if (!this.editor.tabManager.activeTab && !this.editor.tabManager.activeFile) return;
-    await this.editor.tabManager.closeFiles();
+    if (!this.isActionEnabled("close_all_file")) return false;
+    return this.editor.tabManager.closeFiles();
   }
 
   async control_copy(s, c, m, a) {
@@ -252,8 +260,7 @@ class KeyBinding {
         item.action !== "open_command" &&
         item.action !== "escape" &&
         item.in_editor === false &&
-        (this.editor.tabManager.activeFile ||
-          !this.fileActions.has(item.action)),
+        this.isActionEnabled(item.action),
     ).map((item) => ({
       id: item.action,
       label: this.getActionLabel(item.action),

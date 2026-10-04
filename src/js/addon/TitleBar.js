@@ -379,8 +379,12 @@ class TitleBar {
     const hasFile = Boolean(this.editor.tabManager.activeFile);
     this.root.querySelectorAll(".nce-titlebar-menu-item").forEach((item) => {
       if (item.dataset.staticDisabled === "true") item.disabled = true;
-      else if (item.dataset.needsFile !== undefined) {
-        item.disabled = item.dataset.needsFile === "true" && !hasFile;
+      else {
+        const enabled = this.editor.keyBinding?.isActionEnabled?.(
+          item.dataset.command,
+        );
+        if (typeof enabled === "boolean") item.disabled = !enabled;
+        else if (item.dataset.needsFile === "true") item.disabled = !hasFile;
       }
     });
     this.refreshAutoSaveState();

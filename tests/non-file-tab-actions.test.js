@@ -5,6 +5,43 @@ const path = require("node:path");
 
 const { loadGlobal } = require("./helpers/runtime");
 
+function createTabActionFixture(types) {
+  const tabs = types.map((type, id) => ({ id: id + 1, type }));
+  const activeTab = tabs.at(-1) || null;
+  const calls = [];
+  const tabManager = {
+    tabs,
+    activeTab,
+    activeFile: activeTab?.type === "file" ? activeTab : null,
+    closeActiveFile: () => calls.push(["close_file", activeTab]),
+    closeFiles: () => calls.push(["close_all_file"]),
+  };
+  tabManager.keyBinding = new (loadGlobal(
+    "src/js/addon/KeyBinding.js",
+    "KeyBinding",
+  ))({ tabManager });
+  return { tabs, activeTab, calls, tabManager, keyBinding: tabManager.keyBinding };
+}
+
+function getTitleBarCloseItems(fixture) {
+  const TitleBar = loadGlobal("src/js/addon/TitleBar.js", "TitleBar");
+  const items = ["close_file", "close_all_file", "save", "unselect_all"].map((command) => ({
+    dataset: { command, staticDisabled: "false" },
+    disabled: false,
+  }));
+  const titleBar = Object.create(TitleBar.prototype);
+  titleBar.editor = {
+    tabManager: fixture.tabManager,
+    keyBinding: fixture.keyBinding,
+  };
+  titleBar.root = {
+    querySelectorAll: () => items,
+    querySelector: () => null,
+  };
+  titleBar.refreshDisabledItems();
+  return new Map(items.map((item) => [item.dataset.command, item.disabled]));
+}
+
 test("file editing commands do nothing when the active tab is not a file", async () => {
   const calls = [];
   const editor = {
@@ -61,9 +98,10 @@ test("file editing commands do nothing when the active tab is not a file", async
 test("active non-file tabs can be closed without enabling text commands", async () => {
   const calls = [];
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const tab = { id: 1, type: "picture" };
   const keyBinding = new KeyBinding({
     tabManager: {
-      activeTab: { type: "picture" }, activeFile: null,
+      tabs: [tab], activeTab: tab, activeFile: null,
       closeActiveFile: () => calls.push("close-tab"),
       closeFiles: () => calls.push("close-tabs"),
     },
@@ -71,6 +109,53 @@ test("active non-file tabs can be closed without enabling text commands", async 
   await keyBinding.control_close_file();
   await keyBinding.control_close_all_file();
   assert.deepEqual(calls, ["close-tab", "close-tabs"]);
+});
+
+for (const [label, types] of [
+  ["code", ["file"]],
+  ["Markdown", ["markdown"]],
+  ["image", ["picture"]],
+  ["Settings", ["settings"]],
+  ["mixed", ["file", "markdown"]],
+  ["multiple non-code", ["settings", "picture"]],
+]) {
+  test(`close shortcuts and TitleBar actions are enabled for ${label} tabs`, () => {
+    const fixture = createTabActionFixture(types);
+    const titleBarDisabled = getTitleBarCloseItems(fixture);
+
+    assert.equal(fixture.keyBinding.isActionEnabled("close_file"), true);
+    assert.equal(fixture.keyBinding.isActionEnabled("close_all_file"), true);
+    assert.equal(titleBarDisabled.get("close_file"), false);
+    assert.equal(titleBarDisabled.get("close_all_file"), false);
+    assert.equal(titleBarDisabled.get("save"), types.at(-1) !== "file");
+    assert.equal(titleBarDisabled.get("unselect_all"), types.at(-1) !== "file");
+  });
+}
+
+test("close shortcuts dispatch to the same active-tab and open-tabs actions", () => {
+  const fixture = createTabActionFixture(["file", "settings", "picture"]);
+
+  fixture.keyBinding.exec({ action: "close_file" }, {});
+  fixture.keyBinding.exec({ action: "close_all_file" }, {});
+
+  assert.deepEqual(fixture.calls, [
+    ["close_file", fixture.activeTab],
+    ["close_all_file"],
+  ]);
+});
+
+test("close actions and TitleBar controls are disabled when no tabs are open", () => {
+  const fixture = createTabActionFixture([]);
+  const titleBarDisabled = getTitleBarCloseItems(fixture);
+
+  fixture.keyBinding.exec({ action: "close_file" }, {});
+  fixture.keyBinding.exec({ action: "close_all_file" }, {});
+
+  assert.deepEqual(fixture.calls, []);
+  assert.equal(titleBarDisabled.get("close_file"), true);
+  assert.equal(titleBarDisabled.get("close_all_file"), true);
+  assert.equal(titleBarDisabled.get("save"), true);
+  assert.equal(titleBarDisabled.get("unselect_all"), true);
 });
 
 test("the command palette hides file commands outside a file tab", () => {
