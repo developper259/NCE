@@ -202,7 +202,7 @@ class FileExplorer extends Sidebar {
     }
   }
 
-  async loadProject(projectPath) {
+  async loadProject(projectPath, { deferRefresh = false } = {}) {
     if (!projectPath) return false;
     const status = await this.fileOperations.pathStatus(projectPath);
     if (!status?.exists || !status.isDirectory) {
@@ -223,7 +223,7 @@ class FileExplorer extends Sidebar {
     }
 
     if (!(await this.loadFiles())) return false;
-    this.refresh();
+    if (!deferRefresh) this.refresh();
 
     this.editor.agentSidebar?.manualContextManager?.handleWorkspaceChanged(this.rootPath);
 
@@ -326,6 +326,7 @@ class FileExplorer extends Sidebar {
   }
 
   render() {
+    this.rebuildVisibleRows();
     this.treeViewport = null;
     this.treeLayer = null;
     this.treeLayerFast = null;
@@ -426,7 +427,6 @@ class FileExplorer extends Sidebar {
   }
 
   refresh() {
-    this.rebuildVisibleRows();
     this.pendingScrollTop = this.virtualScroller?.scrollTop ?? this.pendingScrollTop;
     super.refresh();
     if (this.isOpen && this.virtualScroller) {
@@ -436,12 +436,12 @@ class FileExplorer extends Sidebar {
     }
   }
 
-  restoreScrollState(state) {
+  restoreScrollState(state, { deferRefresh = false } = {}) {
     this.pendingScrollTop = Number.isFinite(state?.scrollTop)
       ? Math.max(0, state.scrollTop) : 0;
     if (this.virtualScroller) {
       this.virtualScroller.scrollTop = this.pendingScrollTop;
-      this.virtualScroller.refresh();
+      if (!deferRefresh) this.virtualScroller.refresh();
     }
   }
 
@@ -626,7 +626,8 @@ class FileExplorer extends Sidebar {
     }
   }
 
-  async onOpen() {
+  async onOpen({ restoring = false } = {}) {
+    if (restoring) return;
     const expandedSet = this.getExpandedPaths(this.files);
     await this.loadFiles(expandedSet);
     this.refresh();
@@ -691,7 +692,7 @@ class FileExplorer extends Sidebar {
       if (this.rootPath) await this.closeProject({ switching: true });
 
       this.isLoaded = false;
-      if (!(await this.loadProject(folderPath))) return false;
+      if (!(await this.loadProject(folderPath, { deferRefresh: true }))) return false;
     } finally {
       this.editor.statesManager.persistenceSuspended = false;
     }

@@ -418,7 +418,10 @@ class StatesManager {
         .catch((error) => console.error("Failed to restore Agent state:", error));
     }
     if (this.lastWorkspace) {
-      const opened = await this.editor.fileExplorer?.loadProject?.(this.lastWorkspace);
+      const opened = await this.editor.fileExplorer?.loadProject?.(
+        this.lastWorkspace,
+        { deferRefresh: true },
+      );
       if (opened) return this.loadWorkspaceState(this.lastWorkspace);
       this.lastWorkspace = null;
       await this.saveGlobalState();
@@ -525,8 +528,8 @@ class StatesManager {
       fileExplorer: null,
     };
     await this.loadTabManagerState(safeState.tabManager, root);
-    this.loadSidebarState(safeState.sidebar);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
+    this.loadSidebarState(safeState.sidebar);
     this.editor.agentSidebar?.restoreScrollState?.();
     this.editor.searchSidebar?.restoreQueryState?.(safeState.search, {
       runSearch: safeState.sidebar?.leftOpen === true &&
@@ -651,7 +654,7 @@ class StatesManager {
         (manager.menus && !manager.menus.has(menuId))
       ) return;
       try {
-        manager.openMenu(menuId);
+        manager.openMenu(menuId, { restoring: true });
       } catch { manager.closeSidebar(side); }
     };
     restore("left", state.leftActiveMenuId, state.leftOpen);
@@ -683,7 +686,6 @@ class StatesManager {
       } else expanded.add(absolute);
     }
     await explorer.restoreExpandedFolders?.(explorer.files, expanded);
-    explorer.refresh?.();
-    explorer.restoreScrollState?.(state);
+    explorer.restoreScrollState?.(state, { deferRefresh: true });
   }
 }

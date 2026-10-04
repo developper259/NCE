@@ -346,7 +346,7 @@ class SidebarManager {
     this.renderTabSelector();
   }
 
-  openMenu(menuId) {
+  openMenu(menuId, { restoring = false } = {}) {
     const menu = this.menus.get(menuId);
     if (!menu) return;
 
@@ -355,7 +355,7 @@ class SidebarManager {
       currentActive.close();
     }
 
-    menu.open();
+    menu.open({ restoring });
     this.setActiveMenuForPosition(menu.position, menu);
     this.openSidebar(menu.position);
     this.renderMenuContent(menu);

@@ -380,6 +380,51 @@ test("deleted workspace is invalidated and a new workspace can open", async () =
   assert.equal(explorer.projectName, "new-project");
 });
 
+test("workspace restoration can defer the initial File Explorer refresh", async () => {
+  const FileExplorer = loadFileExplorer({
+    async startWatching() {},
+  });
+  const explorer = Object.create(FileExplorer.prototype);
+  let refreshes = 0;
+  Object.assign(explorer, {
+    rootPath: "",
+    files: [],
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
+    async loadFiles() { this.isLoaded = true; return true; },
+    refresh() { refreshes++; },
+    editor: { events: { callEvent() {} } },
+  });
+
+  assert.equal(await explorer.loadProject("/project", { deferRefresh: true }), true);
+  assert.equal(explorer.isLoaded, true);
+  assert.equal(refreshes, 0);
+
+  assert.equal(await explorer.loadProject("/project"), true);
+  assert.equal(refreshes, 1);
+});
+
+test("restoring the File Explorer sidebar skips its normal reload hook", async () => {
+  const FileExplorer = loadFileExplorer();
+  const explorer = Object.create(FileExplorer.prototype);
+  let loads = 0;
+  let refreshes = 0;
+  Object.assign(explorer, {
+    files: [],
+    async loadFiles() { loads++; },
+    refresh() { refreshes++; },
+  });
+
+  await explorer.onOpen({ restoring: true });
+  assert.equal(loads, 0);
+  assert.equal(refreshes, 0);
+
+  await explorer.onOpen();
+  assert.equal(loads, 1);
+  assert.equal(refreshes, 1);
+});
+
 test("workspace UI restoration never reopens the project", async () => {
   const StatesManager = loadGlobal(
     "src/js/manager/StatesManager.js",

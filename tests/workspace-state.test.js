@@ -147,6 +147,28 @@ test("workspace restores File Explorer scroll and sends Agent to the bottom", as
   assert.equal(editor.searchSidebar.restoredQueryState.sidebarExpanded, false);
 });
 
+test("workspace applies File Explorer state before rendering its restored sidebar", async () => {
+  const { editor, manager } = fixture();
+  const order = [];
+  editor.fileExplorer.restoreExpandedFolders = async () => order.push("expand");
+  editor.fileExplorer.restoreScrollState = (_state, options) => {
+    order.push(`scroll:${options.deferRefresh}`);
+  };
+  editor.fileExplorer.refresh = () => order.push("refresh");
+  editor.sidebarManager = {
+    menus: new Map([["file-explorer", { position: "left" }]]),
+    openMenu(id, options) { order.push(`open:${id}:${options.restoring}`); },
+  };
+
+  await manager.restoreWorkspaceState({
+    version: 1,
+    fileExplorer: { expandedPaths: [], scrollTop: 321 },
+    sidebar: { leftOpen: true, leftActiveMenuId: "file-explorer" },
+  }, "/projects/A");
+
+  assert.deepEqual(order, ["expand", "scroll:true", "open:file-explorer:true"]);
+});
+
 test("workspace restore skips missing and unsafe files and falls back active tab", async () => {
   const { editor, manager } = fixture();
   await manager.restoreWorkspaceState({
@@ -362,7 +384,7 @@ test("sidebar restoration opens only registered ids and leaves closed sides unto
       ["files", { position: "left" }],
       ["agent", { position: "right" }],
     ]),
-    openMenu(id) { opened.push(id); },
+    openMenu(id, options) { opened.push([id, options.restoring]); },
     closeSidebar(side) { closed.push(side); },
   };
   const safe = manager.sanitizeWorkspaceState({
@@ -384,7 +406,7 @@ test("sidebar restoration opens only registered ids and leaves closed sides unto
     rightOpen: false,
     rightActiveMenuId: "agent",
   });
-  assert.deepEqual(opened, ["files"]);
+  assert.deepEqual(opened, [["files", true]]);
   assert.deepEqual(closed, []);
 });
 

@@ -9,9 +9,9 @@ class Sidebar {
     this.editor = editor;
   }
 
-  open() {
+  open(options) {
     this.isOpen = true;
-    this.onOpen();
+    this.onOpen(options);
   }
 
   close() {
