@@ -2,10 +2,6 @@ class KeyBindingManager {
   constructor(e) {
     this.editor = e;
     this.isComposing = false;
-
-    addEvent("keydown", this.onKey.bind(this));
-    addEvent("compositionstart", this.onCompositionStart.bind(this));
-    addEvent("compositionend", this.onCompositionEnd.bind(this));
   }
 
   isNativeInputTarget(target) {

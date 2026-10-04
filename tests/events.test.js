@@ -49,6 +49,9 @@ test("Events init binds native handlers once and resyncs focus safely", () => {
 
   assert.equal(document.count("click"), 1);
   assert.equal(document.count("input"), 1);
+  assert.equal(document.count("keydown"), 1);
+  assert.equal(document.count("compositionstart"), 1);
+  assert.equal(document.count("compositionend"), 1);
   assert.equal(document.count("contextmenu"), 1);
   assert.equal(document.listeners.get("contextmenu")[0].options, true);
   assert.equal(document.count("visibilitychange"), 1);
@@ -178,6 +181,93 @@ test("Events delegates search actions before the editor click handler", () => {
   events.onInput({ target: replaceInput });
   events.onInput({ target: {} });
   assert.deepEqual(calls.slice(2), ["search-input", "save-search-state"]);
+});
+
+test("Events routes lazy Quick Panel input, keyboard, click, and context actions", () => {
+  const document = createEventTarget();
+  const window = createEventTarget();
+  const calls = [];
+  const input = {};
+  const quickPanel = {
+    input,
+    handleItemClick(event) {
+      if (!event.panelItem) return false;
+      calls.push("panel-item");
+      return true;
+    },
+    handleBackdropClick() { calls.push("panel-backdrop"); },
+    handleInputEvent(event) {
+      if (event.target !== input) return false;
+      calls.push("panel-input");
+      return true;
+    },
+    handleKeyDownEvent() { calls.push("panel-keydown"); },
+    handleContextMenu() { calls.push("panel-contextmenu"); return true; },
+  };
+  const editor = {
+    quickPanel,
+    onClick() { calls.push("editor-click"); },
+  };
+  const Events = loadGlobal("src/js/core/Event.js", "Events", {
+    document,
+    window,
+    requestAnimationFrame(callback) { callback(); },
+  });
+  const events = new Events(editor);
+  events.init();
+
+  const clickEvent = {
+    panelItem: true,
+    target: {
+      classList: { contains() { return false; } },
+      closest() { return null; },
+    },
+  };
+  events.onClick(clickEvent);
+  assert.deepEqual(calls, ["panel-item"]);
+
+  events.onInput({ target: input });
+  document.dispatch("keydown", { target: input });
+  document.dispatch("contextmenu", { target: {} });
+  assert.deepEqual(calls, [
+    "panel-item", "panel-input", "panel-keydown", "panel-contextmenu",
+  ]);
+
+  events.onClick({
+    panelItem: false,
+    target: {
+      classList: { contains() { return false; } },
+      closest() { return null; },
+    },
+  });
+  assert.equal(calls.at(-2), "editor-click");
+  assert.equal(calls.at(-1), "panel-backdrop");
+});
+
+test("Events sends unhandled keyboard and composition input to KeyBindingManager", () => {
+  const document = createEventTarget();
+  const calls = [];
+  const editor = {
+    quickPanel: { handleKeyDownEvent() { return false; } },
+    keyBindingManager: {
+      onKey(event) { calls.push(["keydown", event.key]); },
+      onCompositionStart() { calls.push(["compositionstart"]); },
+      onCompositionEnd(event) { calls.push(["compositionend", event.data]); },
+    },
+  };
+  const Events = loadGlobal("src/js/core/Event.js", "Events", {
+    document,
+    window: createEventTarget(),
+  });
+  new Events(editor).init();
+
+  document.dispatch("keydown", { key: "a" });
+  document.dispatch("compositionstart", {});
+  document.dispatch("compositionend", { data: "é" });
+
+  assert.deepEqual(calls, [
+    ["keydown", "a"], ["compositionstart"], ["compositionend", "é"],
+  ]);
 });
 
 test("TabManager resolves delegated context menus from current tab identity", () => {

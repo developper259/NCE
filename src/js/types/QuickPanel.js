@@ -1,14 +1,26 @@
 class QuickPanel {
   constructor(editor) {
     this.editor = editor;
-    this.host = document.querySelector(".quick-panel-host");
+    this.host = null;
+    this.panel = null;
+    this.title = null;
+    this.input = null;
+    this.list = null;
+    this.empty = null;
+    this.error = null;
+    this.initialized = false;
     this.session = null;
     this.previousFocus = null;
     this.hoveredItem = null;
     this.requestGeneration = 0;
     this.closeCleanupTimer = null;
+  }
 
-    if (!this.host) return;
+  init() {
+    if (this.initialized) return true;
+    const host = document.querySelector(".quick-panel-host");
+    if (!host) return false;
+    this.host = host;
 
     this.panel = document.createElement("section");
     this.panel.className = "quick-panel";
@@ -44,31 +56,12 @@ class QuickPanel {
     this.host.appendChild(this.panel);
     this.host.setAttribute("aria-hidden", "true");
 
-    this.input.addEventListener("input", () => this.handleInput());
-    this.input.addEventListener("keydown", (event) =>
-      this.handleKeyDown(event),
-    );
-
-    this.list.addEventListener(
-      "click",
-      (event) => this.acceptListItem(event),
-      true,
-    );
-    this.list.addEventListener("contextmenu", (event) => {
-      const row = event.target.closest?.(".quick-panel-item");
-      if (!row) return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      this.acceptRow(row);
-    }, true);
-
-    this.host.addEventListener("click", (event) => {
-      if (event.target === this.host) this.close();
-    });
+    this.initialized = true;
+    return true;
   }
 
   open(options = {}) {
-    if (!this.host) return false;
+    if (!this.init()) return false;
     if (this.closeCleanupTimer) {
       clearTimeout(this.closeCleanupTimer);
       this.closeCleanupTimer = null;
@@ -182,14 +175,52 @@ class QuickPanel {
     }
   }
 
+  handleInputEvent(event) {
+    if (!this.session || event.target !== this.input) return false;
+    this.handleInput();
+    return true;
+  }
+
+  handleKeyDownEvent(event) {
+    if (!this.session || event.target !== this.input) return false;
+    return this.handleKeyDown(event);
+  }
+
+  handleItemClick(event) {
+    if (!this.session) return false;
+    const row = event.target.closest?.(".quick-panel-list .quick-panel-item");
+    if (!row) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    this.acceptRow(row);
+    return true;
+  }
+
+  handleBackdropClick(event) {
+    if (!this.session || event.target !== this.host) return false;
+    this.close();
+    return true;
+  }
+
+  handleContextMenu(event) {
+    if (!this.session) return false;
+    const row = event.target.closest?.(".quick-panel-list .quick-panel-item");
+    if (!row) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    this.acceptRow(row);
+    return true;
+  }
+
   handleKeyDown(event) {
-    if (!this.session) return;
+    if (!this.session) return false;
 
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
       this.close();
-      return;
+      return true;
     }
 
     if (this.session.mode === "input") {
@@ -197,15 +228,16 @@ class QuickPanel {
         event.preventDefault();
         event.stopPropagation();
         this.accept(this.input.value);
+        return true;
       }
-      return;
+      return false;
     }
 
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       event.stopPropagation();
       this.moveSelection(event.key === "ArrowDown" ? 1 : -1);
-      return;
+      return true;
     }
 
     if (event.key === "Home" || event.key === "End") {
@@ -214,7 +246,7 @@ class QuickPanel {
       this.setSelection(
         event.key === "Home" ? 0 : this.session.visibleItems.length - 1,
       );
-      return;
+      return true;
     }
 
     if (event.key === "Enter") {
@@ -222,7 +254,9 @@ class QuickPanel {
       event.stopPropagation();
       const item = this.session.visibleItems[this.session.selectedIndex];
       if (item) this.accept(item);
+      return true;
     }
+    return false;
   }
 
   async loadItems(query) {
@@ -320,17 +354,6 @@ class QuickPanel {
   scrollSelectedIntoView() {
     const row = this.list.querySelectorAll(".quick-panel-item")[this.session?.selectedIndex];
     row?.scrollIntoView?.({ block: "nearest" });
-  }
-
-  acceptListItem(event) {
-    if (!this.session) return;
-
-    const row = event.target.closest?.(".quick-panel-item");
-    if (!row) return;
-
-    event.preventDefault();
-    event.stopPropagation();
-    this.acceptRow(row);
   }
 
   acceptRow(row) {

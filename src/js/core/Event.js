@@ -34,6 +34,10 @@ class Events {
     this.onWindowFocus = this.onWindowFocus.bind(this);
     this.onVisibilityChange = this.onVisibilityChange.bind(this);
     this.onInput = this.onInput.bind(this);
+    this.onKeyDown = this.onKeyDown.bind(this);
+    this.onCompositionStart = this.onCompositionStart.bind(this);
+    this.onCompositionEnd = this.onCompositionEnd.bind(this);
+    this.onContextMenu = this.onContextMenu.bind(this);
   }
 
   init() {
@@ -41,6 +45,9 @@ class Events {
 
     addEvent("click", this.onClick);
     addEvent("input", this.onInput);
+    document.addEventListener("keydown", this.onKeyDown, true);
+    addEvent("compositionstart", this.onCompositionStart);
+    addEvent("compositionend", this.onCompositionEnd);
     document.addEventListener("contextmenu", this.onContextMenu, true);
     addEvent("resize", this.onResize, window);
     addEvent("focus", this.onWindowFocus, window);
@@ -143,6 +150,8 @@ class Events {
 
   // DOM Event
   onClick(e) {
+    if (this.editor.quickPanel?.handleItemClick?.(e)) return;
+
     const el = e.target;
     const cl = e.target.classList;
 
@@ -162,6 +171,7 @@ class Events {
 
     // ------- Editor.js ------
     this.editor.onClick(e);
+    this.editor.quickPanel?.handleBackdropClick?.(e);
 
     // ------- LineController.js ------
     if (cl.contains("line-el")) {
@@ -192,6 +202,8 @@ class Events {
   }
 
   onInput(event) {
+    if (this.editor.quickPanel?.handleInputEvent?.(event)) return;
+
     const search = this.editor.searchController;
     if (event.target === search.input) {
       search.onInput();
@@ -202,6 +214,8 @@ class Events {
 
   onContextMenu(event) {
     const target = event.target;
+    if (this.editor.quickPanel?.handleContextMenu?.(event)) return;
+
     const input = target.closest?.(
       "input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']), textarea, select, [contenteditable='true'], [contenteditable='']",
     );
@@ -261,6 +275,19 @@ class Events {
 
   onWindowFocus() {
     this.editor.tabManager.scheduleFocusResync();
+  }
+
+  onKeyDown(event) {
+    if (this.editor.quickPanel?.handleKeyDownEvent?.(event)) return;
+    this.editor.keyBindingManager?.onKey(event);
+  }
+
+  onCompositionStart(event) {
+    this.editor.keyBindingManager?.onCompositionStart(event);
+  }
+
+  onCompositionEnd(event) {
+    this.editor.keyBindingManager?.onCompositionEnd(event);
   }
 
   onVisibilityChange() {
