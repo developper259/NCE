@@ -125,7 +125,16 @@ class CursorController {
     const scrollOffsetXChars = this.editor.lineController.offsetX || 0;
     const displayIndex = this.yToRow(localY + scrollOffsetY) - 1;
     const displayRow = this.editor.lineController.getDisplayRow(displayIndex);
-    if (!displayRow || displayRow.documentIndex === null) return;
+    if (!displayRow) {
+      const displayLineCount = this.editor.lineController.getDisplayLineCount();
+      const lastDocumentRow = this.editor.lineController.lines.length;
+      if (displayIndex < displayLineCount || lastDocumentRow === 0) return;
+
+      const lastLine = this.editor.lineController.lines[lastDocumentRow - 1];
+      const lastLineText = lastLine?.getText?.();
+      return this.normalizePosition(lastDocumentRow, lastLineText?.length || 0);
+    }
+    if (displayRow.documentIndex === null) return;
     const targetRow = displayRow.documentIndex + 1;
     const targetViewColumn = this.xToColumn(localX) + scrollOffsetXChars;
     return this.getPosition(targetRow, targetViewColumn);
