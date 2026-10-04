@@ -645,13 +645,13 @@ class StatesManager {
     const manager = this.editor.sidebarManager;
     if (!manager || !state) return;
     const restore = (side, menuId, open) => {
+      if (
+        !open ||
+        !menuId ||
+        (manager.menus && !manager.menus.has(menuId))
+      ) return;
       try {
-        if (
-          open &&
-          menuId &&
-          (!manager.menus || manager.menus.has(menuId))
-        ) manager.openMenu(menuId);
-        else manager.closeSidebar(side);
+        manager.openMenu(menuId);
       } catch { manager.closeSidebar(side); }
     };
     restore("left", state.leftActiveMenuId, state.leftOpen);

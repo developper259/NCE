@@ -354,7 +354,7 @@ test("workspace restore accepts only canonical in-workspace readable files", asy
   assert.deepEqual(resolved, ["src/a.js", "src/b.js", "src"]);
 });
 
-test("sidebar restoration only uses registered ids on the matching side", async () => {
+test("sidebar restoration opens only registered ids and leaves closed sides untouched", async () => {
   const { editor, manager } = fixture();
   const opened = [], closed = [];
   editor.sidebarManager = {
@@ -376,7 +376,16 @@ test("sidebar restoration only uses registered ids on the matching side", async 
   });
   manager.loadSidebarState(safe.sidebar);
   assert.deepEqual(opened, []);
-  assert.deepEqual(closed, ["left", "right"]);
+  assert.deepEqual(closed, []);
+
+  manager.loadSidebarState({
+    leftOpen: true,
+    leftActiveMenuId: "files",
+    rightOpen: false,
+    rightActiveMenuId: "agent",
+  });
+  assert.deepEqual(opened, ["files"]);
+  assert.deepEqual(closed, []);
 });
 
 test("workspace serialization excludes roots, secrets, and runtime-only fields", async () => {
