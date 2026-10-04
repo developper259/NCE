@@ -686,11 +686,6 @@ class tabManager {
       li.classList.add("file-active");
     }
     li.id = file.id;
-    li.addEventListener("contextmenu", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      this.editor.contextMenuManager?.openContextMenu("tab", file);
-    });
 
     const titleSpan = document.createElement("span");
     titleSpan.className = "file-el-title";
@@ -721,6 +716,13 @@ class tabManager {
     }
 
     return li;
+  }
+
+  onContextMenu(tabElement) {
+    const file = this.getFileByID(tabElement?.id);
+    if (!file) return false;
+    this.editor.contextMenuManager?.openContextMenu("tab", file);
+    return true;
   }
 
   refresh() {

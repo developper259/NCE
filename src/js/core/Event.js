@@ -39,6 +39,7 @@ class Events {
     if (this.isInitialized) return;
 
     addEvent("click", this.onClick);
+    document.addEventListener("contextmenu", this.onContextMenu, true);
     addEvent("resize", this.onResize, window);
     addEvent("focus", this.onWindowFocus, window);
     addEvent("visibilitychange", this.onVisibilityChange);
@@ -179,6 +180,50 @@ class Events {
       return;
     }
   }
+
+  onContextMenu(event) {
+    const target = event.target;
+    const input = target.closest?.(
+      "input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']), textarea, select, [contenteditable='true'], [contenteditable='']",
+    );
+    if (input) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager?.openContextMenu("input", input);
+      return;
+    }
+
+    const tabElement = target.closest?.(".file-manager .file-el");
+    if (tabElement) {
+      if (this.editor.tabManager.onContextMenu(tabElement)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    if (!target.closest?.(".editor-output")) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const file = this.editor.tabManager.activeFile;
+    const hasSelection =
+      this.editor.selectController.hasActiveSelection?.() === true;
+    this.editor.contextMenuManager?.openContextMenu("output", {
+      isFile: Boolean(file),
+      file,
+      filePath: file?.hasPath?.() ? file.path : "",
+      rootPath: this.editor.fileExplorer?.rootPath || "",
+      selectedText: hasSelection
+        ? String(
+            this.editor.selectController.getSelectedText?.() ||
+              this.editor.selectController.containsSelected ||
+              "",
+          )
+        : "",
+    });
+  }
+
   onResize(e) {
     requestAnimationFrame(() => {
       if (this.editor.domManager) {

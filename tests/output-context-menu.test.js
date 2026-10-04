@@ -217,11 +217,11 @@ test("ContextMenuManager resolves current configurable accelerators", async () =
   assert.equal(payload[0].keys, "CommandOrControl+C");
 });
 
-test("Editor right click snapshots the active file context", () => {
-  const source = fs.readFileSync(path.join(root, "src/js/main/Editor.js"), "utf8");
+test("renderer contextmenu routing snapshots the active file context", () => {
+  const source = fs.readFileSync(path.join(root, "src/js/core/Event.js"), "utf8");
   const css = fs.readFileSync(path.join(root, "src/css/editor.css"), "utf8");
-  assert.match(source, /this\.output\.addEventListener\("contextmenu"/);
   assert.match(source, /openContextMenu\("output", \{/);
+  assert.match(source, /document\.addEventListener\("contextmenu", this\.onContextMenu, true\)/);
   assert.match(
     css,
     /\.editor-caret\s*\{[^}]*pointer-events:\s*none/s,
