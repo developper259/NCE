@@ -410,6 +410,16 @@ class SidebarManager {
     }
   }
 
+  scheduleSidebarRefresh(position) {
+    requestAnimationFrame(() => {
+      this.editor.lineController.resizeWidth();
+      const scroller = position === "left"
+        ? this.leftScroller
+        : this.rightScroller;
+      scroller?.refresh();
+    });
+  }
+
   openSidebar(position) {
     if (position === "left" && this.leftSidebar) {
       this.leftSidebar.classList.add("open");
@@ -427,11 +437,7 @@ class SidebarManager {
       this.editor.sidebarResizer.updateResizerVisibility();
     }
 
-    requestAnimationFrame(() => {
-      this.editor.lineController.resizeWidth();
-      if (this.leftScroller) this.leftScroller.refresh();
-      if (this.rightScroller) this.rightScroller.refresh();
-    });
+    this.scheduleSidebarRefresh(position);
   }
 
   closeSidebar(position) {
@@ -452,11 +458,7 @@ class SidebarManager {
       this.editor.sidebarResizer.updateResizerVisibility();
     }
 
-    requestAnimationFrame(() => {
-      this.editor.lineController.resizeWidth();
-      if (this.leftScroller) this.leftScroller.refresh();
-      if (this.rightScroller) this.rightScroller.refresh();
-    });
+    this.scheduleSidebarRefresh(position);
   }
 
   renderMenuContent(menu) {
