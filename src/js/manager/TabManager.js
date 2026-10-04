@@ -10,6 +10,7 @@ class tabManager {
     this.idCounter = 0;
     this.focusGeneration = 0;
     this.focusResyncTimer = null;
+    this.tabElements = new Map();
   }
 
   get files() {
@@ -682,40 +683,59 @@ class tabManager {
 
     const li = document.createElement("li");
     li.className = "file-el";
-    if (this.activeTab && this.activeTab.id === file.id) {
-      li.classList.add("file-active");
-    }
-    li.id = file.id;
-
     const titleSpan = document.createElement("span");
     titleSpan.className = "file-el-title";
-    titleSpan.textContent = file.name;
     li.appendChild(titleSpan);
 
-    // Auto Save owns persistence while enabled. Keep the close affordance
-    // stable instead of flashing the transient unsaved dot during its write.
-    if (file.type !== TAB_TYPES.FILE || !file.isVisuallyDirty()) {
-      const btnSpan = document.createElement("span");
-      btnSpan.className = "file-el-btn file-saved";
+    const entry = { element: li, title: titleSpan, closeControl: null, dirty: null };
+    this.tabElements ||= new Map();
+    this.tabElements.set(String(file.id), entry);
+    this.updateFileOBJ(file, entry);
+    return li;
+  }
 
-      const img = document.createElement("img");
-      img.src = "../assets/icons/close.svg";
-      img.alt = "close";
-      img.className = "file-el-btn-img";
-      // Images are draggable by default in Chromium. The tab may have drag
-      // behavior of its own, but its close affordance must never create an
-      // SVG drag preview or expose the asset URL as dragged content.
-      img.draggable = false;
-
-      btnSpan.appendChild(img);
-      li.appendChild(btnSpan);
-    } else {
-      const btnDiv = document.createElement("div");
-      btnDiv.className = "file-el-btn file-unsaved";
-      li.appendChild(btnDiv);
+  createCloseControl(dirty) {
+    if (dirty) {
+      const indicator = document.createElement("div");
+      indicator.className = "file-el-btn file-unsaved";
+      return indicator;
     }
 
-    return li;
+    const button = document.createElement("span");
+    button.className = "file-el-btn file-saved";
+    const img = document.createElement("img");
+    img.src = "../assets/icons/close.svg";
+    img.alt = "close";
+    img.className = "file-el-btn-img";
+    img.draggable = false;
+    button.appendChild(img);
+    return button;
+  }
+
+  updateFileOBJ(file, entry) {
+    const { element, title } = entry;
+    const id = String(file.id);
+    const name = String(file.name || "");
+    const isActive = this.activeTab?.id === file.id;
+    // Auto Save owns persistence while enabled, so its in-flight write should
+    // not briefly replace the close affordance with a dirty indicator.
+    const dirty = file.type === TAB_TYPES.FILE &&
+      typeof file.isVisuallyDirty === "function" && file.isVisuallyDirty();
+
+    if (element.id !== id) element.id = id;
+    if (title.textContent !== name) title.textContent = name;
+    element.classList.toggle("file-active", isActive);
+
+    if (entry.dirty !== dirty || !entry.closeControl?.parentElement) {
+      const closeControl = this.createCloseControl(dirty);
+      if (entry.closeControl?.parentElement === element) {
+        element.replaceChild(closeControl, entry.closeControl);
+      } else {
+        element.appendChild(closeControl);
+      }
+      entry.closeControl = closeControl;
+      entry.dirty = dirty;
+    }
   }
 
   onContextMenu(tabElement) {
@@ -729,17 +749,30 @@ class tabManager {
     const ul = getElement(".file-manager .files-ul");
     if (!ul) return;
 
-    const fragment = document.createDocumentFragment();
-
-    for (let i = 0; i < this.tabs.length; i++) {
-      const file = this.tabs[i];
-      const fileEl = this.createFileOBJ(file);
-      if (fileEl) {
-        fragment.appendChild(fileEl);
+    this.tabElements ||= new Map();
+    const activeKeys = new Set();
+    for (let index = 0; index < this.tabs.length; index++) {
+      const tab = this.tabs[index];
+      if (!tab) continue;
+      const key = String(tab.id);
+      activeKeys.add(key);
+      let entry = this.tabElements.get(key);
+      if (!entry) {
+        this.createFileOBJ(tab);
+        entry = this.tabElements.get(key);
       }
+      this.updateFileOBJ(tab, entry);
+
+      const current = ul.children[index] || null;
+      if (current !== entry.element) ul.insertBefore(entry.element, current);
     }
 
-    ul.replaceChildren(fragment);
+    for (const [key, entry] of this.tabElements) {
+      if (activeKeys.has(key)) continue;
+      entry.element.remove();
+      this.tabElements.delete(key);
+    }
+
     this.editor.api?.setActiveFileContext?.(Boolean(this.activeFile));
     this.editor.titleBar?.refresh();
 
@@ -771,7 +804,8 @@ class tabManager {
   }
 
   getTab(id) {
-    return getElement(`.file-manager .file-el[id="${id}"]`);
+    return this.tabElements?.get(String(id))?.element ||
+      getElement(`.file-manager .file-el[id="${id}"]`);
   }
 
   hide() {
