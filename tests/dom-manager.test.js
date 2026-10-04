@@ -39,6 +39,26 @@ test("DOMManager caches sidebar widths until the affected side is invalidated", 
   assert.deepEqual(reads, { left: 2, right: 1 });
 });
 
+test("DOMManager element metrics include both horizontal and vertical scroll offsets", () => {
+  const DOMManager = loadGlobal("src/js/manager/DOMManager.js", "DOMManager");
+  const manager = Object.create(DOMManager.prototype);
+  const metrics = manager.measureElement({
+    clientWidth: 120,
+    clientHeight: 80,
+    scrollWidth: 300,
+    scrollHeight: 160,
+    scrollLeft: 45,
+    scrollTop: 20,
+    getBoundingClientRect() {
+      return { left: 5, top: 8, width: 120, height: 80, right: 125, bottom: 88 };
+    },
+  });
+
+  assert.equal(metrics.scrollLeft, 45);
+  assert.equal(metrics.scrollTop, 20);
+  assert.equal(manager.measureElement(null).scrollLeft, 0);
+});
+
 test("SidebarManager uses DOMManager metrics for an open sidebar", () => {
   const SidebarManager = loadGlobal(
     "src/js/manager/SidebarManager.js",

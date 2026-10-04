@@ -193,6 +193,7 @@ class DOMManager {
         clientHeight: 0,
         scrollWidth: 0,
         scrollHeight: 0,
+        scrollLeft: 0,
         scrollTop: 0,
       };
     }
@@ -209,6 +210,7 @@ class DOMManager {
       clientHeight: el.clientHeight || rect.height || 0,
       scrollWidth: el.scrollWidth || 0,
       scrollHeight: el.scrollHeight || 0,
+      scrollLeft: el.scrollLeft || 0,
       scrollTop: el.scrollTop || 0,
     };
   }

@@ -98,6 +98,7 @@ class Editor {
     this.writerController.insertMode = true;
 
     this.domManager.init();
+    this.tabManager.initScroller();
     if (this.lineController) {
       this.lineController.syncDimensions();
     }

@@ -128,6 +128,7 @@ class SidebarResizer {
 
     this.editor.sidebarManager.width = width;
     this.editor.lineController.resizeWidth();
+    this.editor.tabManager?.tabScroller?.refresh();
   }
 
   updateResizerPositions() {

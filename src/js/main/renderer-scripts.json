@@ -68,6 +68,7 @@
   "js/view/MarkdownView.js",
   "js/types/Line.js",
   "js/types/Scroller.js",
+  "js/scrollers/TabManager.Scroller.js",
   "js/types/Sidebar.js",
   "js/types/ContextMenu.js",
   "js/scrollers/MarkdownView.Scroller.js",

@@ -71,7 +71,10 @@ test("next and previous tab actions share the configured availability and dispat
 test("tab bar uses a horizontal overflow scroller with non-shrinking tabs", async () => {
   const fs = require("node:fs/promises");
   const css = await fs.readFile("src/css/tabManager.css", "utf8");
+  const scrollerCSS = await fs.readFile("src/css/scroller.css", "utf8");
 
   assert.match(css, /\.files-ul\s*\{[^}]*overflow-x:\s*auto/s);
   assert.match(css, /\.files-ul\s+\.file-el\s*\{[^}]*flex:\s*0\s+0\s+auto/s);
+  assert.match(css, /\.files-ul::-webkit-scrollbar\s*\{\s*display:\s*none/s);
+  assert.match(scrollerCSS, /\.page-scroller-horizontal\s*\{[^}]*left:\s*0;[^}]*width:\s*100%/s);
 });

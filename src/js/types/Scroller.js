@@ -1,6 +1,7 @@
 class Scroller {
-  constructor(e) {
+  constructor(e, options = {}) {
     this.editor = e;
+    this.compact = options.compact === true;
     this.id = 0;
     this.scrollX = 0;
     this.scrollY = 0;
@@ -39,6 +40,7 @@ class Scroller {
 
     this.calculProp = () => 0;
     this.calcIsActive = () => false;
+    this.onBeforeRefresh = () => {};
     this.onRefresh = () => {};
     this.onScroll = () => {};
     this.onScrollEnd = () => {};
@@ -112,6 +114,11 @@ class Scroller {
     this.parentOBJWidth = parentMetrics.clientWidth;
   }
 
+  syncThumbPosition() {
+    const metrics = this.readThumbMetrics();
+    if (metrics) this.writeThumbPosition(metrics);
+  }
+
   readThumbMetrics() {
     if (!this.scrollerOBJ || !this.itemOBJ) return null;
 
@@ -157,6 +164,7 @@ class Scroller {
 
     this.scrollerFast.toggleClass("page-scroller-body", this.isBody);
     this.scrollerFast.toggleClass("page-scroller-inactive", !this.active);
+    this.scrollerFast.toggleClass("page-scroller-compact", this.compact);
 
     if (this.type === this.editor.scrollerManager.VERTICAL_TYPE) {
       this.scrollerFast.addClass("page-scroller-vertical");
@@ -182,6 +190,7 @@ class Scroller {
   }
 
   refresh() {
+    this.onBeforeRefresh();
     if (!this.calcIsActive()) {
       this.setActive(false);
       return;

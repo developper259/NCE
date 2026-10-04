@@ -17,7 +17,11 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
       child.once('error', err => { clearTimeout(timer); reject(err); });
       child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${code}/${signal}: ${log}`)); });
     });
-    assert.equal(await fs.readFile(path.join(directory, `${phase}.ok`), 'utf8'), 'ok');
+    try {
+      assert.equal(await fs.readFile(path.join(directory, `${phase}.ok`), 'utf8'), 'ok');
+    } catch (error) {
+      throw Error(`Electron ${phase} exited without its completion marker: ${log}`, { cause: error });
+    }
   }
   try {
     await launch('write');
@@ -29,5 +33,6 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     await launch('restore');
     await launch('crash');
     await launch('no-nsh');
+    await launch('tabs');
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

@@ -156,14 +156,10 @@ test("TabManager hide and show do not toggle the tab-bar bottom divider", () => 
   assert.deepEqual(calls, []);
 });
 
-test("active tabs scroll into view only when the active tab changes", () => {
+test("TabManager delegates active-tab visibility to its tab scroller", () => {
   const ul = new FakeElement("ul");
-  ul.scrollLeft = 0;
-  let geometryReads = 0;
-  Object.defineProperty(ul, "clientWidth", {
-    configurable: true,
-    get() { geometryReads++; return 200; },
-  });
+  const visibilityRequests = [];
+  let refreshes = 0;
   const TabManager = loadGlobal(
     "src/js/manager/TabManager.js",
     "tabManager",
@@ -186,35 +182,35 @@ test("active tabs scroll into view only when the active tab changes", () => {
     tabs,
     activeTab: tabs[0],
     tabElements: new Map(),
+    tabScroller: {
+      ensureElementVisible(element) { visibilityRequests.push(element); },
+      refresh() { refreshes++; },
+    },
   });
 
   manager.refresh();
-  tabs.forEach((tab, index) => {
-    const element = manager.tabElements.get(String(tab.id)).element;
-    Object.defineProperties(element, {
-      offsetLeft: { configurable: true, get() { geometryReads++; return index * 100; } },
-      offsetWidth: { configurable: true, get() { geometryReads++; return 100; } },
-    });
-  });
-  const readsAfterInitialFocus = geometryReads;
+  const firstElement = manager.tabElements.get("0").element;
+  assert.deepEqual(visibilityRequests, [firstElement]);
 
   tabs[2].name = "renamed tab";
   manager.refresh();
-  assert.equal(geometryReads, readsAfterInitialFocus);
+  assert.equal(visibilityRequests.length, 1);
+  assert.equal(refreshes, 1);
 
   manager.activeTab = tabs[2];
   manager.refresh();
-  assert.equal(ul.scrollLeft, 100);
+  assert.equal(visibilityRequests.length, 2);
+  assert.equal(visibilityRequests[1], manager.tabElements.get("2").element);
 
   manager.activeTab = tabs[0];
   manager.refresh();
-  assert.equal(ul.scrollLeft, 0);
+  assert.equal(visibilityRequests.length, 3);
+  assert.equal(visibilityRequests[2], firstElement);
 });
 
-test("active tab visibility is recalculated after preceding tabs are removed", () => {
+test("TabManager rechecks active-tab visibility after preceding tabs are removed", () => {
   const ul = new FakeElement("ul");
-  ul.scrollLeft = 150;
-  Object.defineProperty(ul, "clientWidth", { configurable: true, value: 200 });
+  const visibilityRequests = [];
   const TabManager = loadGlobal(
     "src/js/manager/TabManager.js",
     "tabManager",
@@ -238,20 +234,21 @@ test("active tab visibility is recalculated after preceding tabs are removed", (
     activeTab: tabs[2],
     tabElements: new Map(),
     lastVisibleTab: tabs[2],
+    tabScroller: {
+      ensureElementVisible(element) { visibilityRequests.push(element); },
+      refresh() {},
+    },
   });
 
   manager.refresh();
   const activeElement = manager.tabElements.get("2").element;
-  Object.defineProperties(activeElement, {
-    offsetLeft: { configurable: true, value: 100 },
-    offsetWidth: { configurable: true, value: 100 },
-  });
+  assert.deepEqual(visibilityRequests, [activeElement]);
   const activeTab = manager.activeTab;
   manager.tabs.shift();
   manager.refresh();
 
   assert.equal(manager.activeTab, activeTab);
-  assert.equal(ul.scrollLeft, 100);
+  assert.deepEqual(visibilityRequests, [activeElement, activeElement]);
 });
 
 test("closing the last file tab resets the editor without a global refresh", async () => {

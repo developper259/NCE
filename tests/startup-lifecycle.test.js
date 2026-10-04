@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadGlobal } = require("./helpers/runtime");
 
-test("TabManager construction keeps state without rendering an empty tab list", () => {
+test("TabManager construction keeps state without touching the DOM", () => {
   const queriedElements = [];
   let activeFileContextUpdates = 0;
   const TabManager = loadGlobal("src/js/manager/TabManager.js", "tabManager", {
@@ -23,7 +23,8 @@ test("TabManager construction keeps state without rendering an empty tab list", 
 
   assert.equal(manager.tabs.length, 0);
   assert.equal(manager.activeTab, null);
-  assert.deepEqual(queriedElements, [".file-manager"]);
+  assert.equal(manager.tabScroller, null);
+  assert.deepEqual(queriedElements, []);
   assert.equal(activeFileContextUpdates, 0);
 });
 

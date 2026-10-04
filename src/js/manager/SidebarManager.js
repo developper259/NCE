@@ -413,6 +413,7 @@ class SidebarManager {
   scheduleSidebarRefresh(position) {
     requestAnimationFrame(() => {
       this.editor.lineController.resizeWidth();
+      this.editor.tabManager?.tabScroller?.refresh();
       const scroller = position === "left"
         ? this.leftScroller
         : this.rightScroller;

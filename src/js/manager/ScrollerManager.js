@@ -26,8 +26,8 @@ class ScrollerManager {
     this.refreshAll();
   }
 
-  createScroller(parent, type, isBody) {
-    const s = new Scroller(this.editor);
+  createScroller(parent, type, isBody, options = {}) {
+    const s = new Scroller(this.editor, options);
     s.parentOBJ = parent;
     s.type = type;
     s.isBody = isBody;

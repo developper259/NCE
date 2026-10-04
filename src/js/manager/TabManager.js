@@ -5,13 +5,20 @@ class tabManager {
     this.activeTab = null;
     this.emptyName = "New file";
 
-    this.tabsOBJ = getElement(".file-manager");
-
     this.idCounter = 0;
     this.focusGeneration = 0;
     this.focusResyncTimer = null;
     this.tabElements = new Map();
     this.lastVisibleTab = null;
+    this.tabScroller = null;
+  }
+
+  initScroller() {
+    if (!this.tabScroller) {
+      this.tabScroller = new TabManagerScroller(this.editor, this);
+    }
+    this.tabScroller.init();
+    return this.tabScroller;
   }
 
   get files() {
@@ -437,23 +444,7 @@ class tabManager {
   ensureActiveTabVisible() {
     const tab = this.activeTab;
     const element = tab && this.tabElements?.get(String(tab.id))?.element;
-    const list = getElement(".file-manager .files-ul");
-    if (!element || !list) return false;
-
-    const viewportWidth = list.clientWidth;
-    if (viewportWidth <= 0) return false;
-
-    const visibleLeft = list.scrollLeft;
-    const visibleRight = visibleLeft + viewportWidth;
-    const tabLeft = element.offsetLeft;
-    const tabRight = tabLeft + element.offsetWidth;
-
-    if (tabRight - tabLeft >= viewportWidth) list.scrollLeft = tabLeft;
-    else if (tabLeft < visibleLeft) list.scrollLeft = tabLeft;
-    else if (tabRight > visibleRight) {
-      list.scrollLeft = Math.max(0, tabRight - viewportWidth);
-    }
-    return true;
+    return this.tabScroller?.ensureElementVisible(element) || false;
   }
 
   async setFocusTab(tab) {
@@ -814,6 +805,7 @@ class tabManager {
     this.tabElements ||= new Map();
     const activeKeys = new Set();
     let layoutChanged = false;
+    let tabsLayoutChanged = false;
     const activeIndex = this.tabs.indexOf(this.activeTab);
     for (let index = 0; index < this.tabs.length; index++) {
       const tab = this.tabs[index];
@@ -824,14 +816,17 @@ class tabManager {
       if (!entry) {
         this.createFileOBJ(tab);
         entry = this.tabElements.get(key);
+        tabsLayoutChanged = true;
         if (index <= activeIndex) layoutChanged = true;
       }
       const tabLayoutChanged = this.updateFileOBJ(tab, entry);
+      if (tabLayoutChanged) tabsLayoutChanged = true;
       if (tabLayoutChanged && index <= activeIndex) layoutChanged = true;
 
       const current = ul.children[index] || null;
       if (current !== entry.element) {
         ul.insertBefore(entry.element, current);
+        tabsLayoutChanged = true;
         if (index <= activeIndex) layoutChanged = true;
       }
     }
@@ -841,11 +836,16 @@ class tabManager {
       entry.element.remove();
       this.tabElements.delete(key);
       layoutChanged = true;
+      tabsLayoutChanged = true;
     }
 
-    if (this.activeTab !== this.lastVisibleTab || layoutChanged) {
+    const shouldEnsureActiveTab =
+      this.activeTab !== this.lastVisibleTab || layoutChanged;
+    if (shouldEnsureActiveTab) {
       this.ensureActiveTabVisible();
       this.lastVisibleTab = this.activeTab;
+    } else if (tabsLayoutChanged) {
+      this.tabScroller?.refresh();
     }
 
     this.editor.api?.setActiveFileContext?.(Boolean(this.activeFile));
