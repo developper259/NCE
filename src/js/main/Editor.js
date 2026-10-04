@@ -123,7 +123,7 @@ class Editor {
     });
   }
 
-  refreshAll() {
+  refreshAll({ renderSidebarContent = true } = {}) {
     this.isOnRefresh = true;
 
     this.emptyMenu.refresh();
@@ -139,7 +139,9 @@ class Editor {
     this.lineController.restoreScroll();
     this.scrollerManager.refreshAll();
     this.bottomBar.refresh();
-    this.sidebarManager.refreshAll();
+    this.sidebarManager.refreshAll({
+      renderActiveMenu: renderSidebarContent,
+    });
 
     this.isOnRefresh = false;
   }

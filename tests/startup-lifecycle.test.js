@@ -42,6 +42,7 @@ test("empty startup applies one reset when state is absent from both load channe
   let onLoadState;
   let resetCount = 0;
   let refreshCount = 0;
+  let refreshOptions = null;
   const editor = {
     isOnInit: true,
     tabManager: {
@@ -53,8 +54,9 @@ test("empty startup applies one reset when state is absent from both load channe
     },
     bottomBar: { refresh() {} },
     reset() { resetCount++; },
-    refreshAll() {
+    refreshAll(options) {
       refreshCount++;
+      refreshOptions = options;
       this.tabManager.refresh();
     },
     api: {
@@ -69,6 +71,29 @@ test("empty startup applies one reset when state is absent from both load channe
   await onLoadState(null);
 
   assert.equal(refreshCount, 1);
+  assert.equal(refreshOptions.renderSidebarContent, false);
   assert.equal(resetCount, 1);
   assert.equal(editor.isOnInit, false);
+});
+
+test("startup sidebar refresh keeps selector state without repainting active content", () => {
+  const SidebarManager = loadGlobal(
+    "src/js/manager/SidebarManager.js",
+    "SidebarManager",
+  );
+  let selectorRenders = 0;
+  let menuRenders = 0;
+  const manager = Object.assign(Object.create(SidebarManager.prototype), {
+    activeMenu: { id: "search" },
+    renderTabSelector() { selectorRenders++; },
+    renderMenuContent() { menuRenders++; },
+  });
+
+  manager.refreshAll({ renderActiveMenu: false });
+  assert.equal(selectorRenders, 1);
+  assert.equal(menuRenders, 0);
+
+  manager.refreshAll();
+  assert.equal(selectorRenders, 2);
+  assert.equal(menuRenders, 1);
 });

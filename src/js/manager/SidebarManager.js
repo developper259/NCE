@@ -491,10 +491,11 @@ class SidebarManager {
     }
   }
 
-  refreshAll() {
+  refreshAll({ renderActiveMenu = true } = {}) {
     this.renderTabSelector();
 
-    if (this.activeMenu) this.renderMenuContent(this.activeMenu);
+    if (renderActiveMenu && this.activeMenu)
+      this.renderMenuContent(this.activeMenu);
   }
 
   handleKeybinding(keybinding) {
