@@ -134,3 +134,116 @@ test("TabManager refresh preserves tab DOM identity and updates only changed sta
   assert.equal(bEntry.element.parentElement, null);
   assert.equal(manager.tabElements.get("1").element, aEntry.element);
 });
+
+test("closing the last file tab resets the editor without a global refresh", async () => {
+  const ul = new FakeElement("ul");
+  const calls = { contexts: [], titles: 0, resets: 0, mainContent: 0, refreshAll: 0, closed: 0 };
+  const getElement = (selector) => selector === ".file-manager .files-ul" ? ul : null;
+  const document = { createElement: (tagName) => new FakeElement(tagName), addEventListener() {} };
+  const Events = loadGlobal("src/js/core/Event.js", "Events", { document, window: {} });
+  const TabManager = loadGlobal("src/js/manager/TabManager.js", "tabManager", {
+    TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+    Events,
+    getElement,
+    document,
+  });
+  const editor = {
+    isOnInit: false,
+    isActive: true,
+    api: { setActiveFileContext(active) { calls.contexts.push(active); } },
+    titleBar: { refresh() { calls.titles++; } },
+    bottomBar: { refresh() {} },
+    statesManager: { save() {} },
+    fileLoader: { async cancelLoading() {} },
+    highlightController: { async closeFile() { calls.closed++; }, closeAllFiles() {} },
+    fileExplorer: { activeFilePath: "/project/last.js" },
+    searchController: { close() {} },
+    emptyMenu: { refresh() {}, show() {} },
+    lineController: { hide() {} },
+    reset() { calls.resets++; },
+    refreshMainContent() { calls.mainContent++; },
+    refreshAll() { calls.refreshAll++; },
+    setSelected() {},
+  };
+  editor.events = new Events(editor);
+  const manager = new TabManager(editor);
+  editor.tabManager = manager;
+  const file = {
+    id: 1,
+    type: "file",
+    name: "last.js",
+    path: "/project/last.js",
+    isSaved: true,
+    contentGeneration: 0,
+    isVisuallyDirty: () => false,
+  };
+  manager.tabs = [file];
+  manager.activeTab = file;
+  manager.refresh();
+  calls.contexts.length = 0;
+  calls.titles = 0;
+
+  assert.equal(await manager.closeFile(file.id), true);
+
+  assert.deepEqual(manager.tabs, []);
+  assert.equal(manager.activeTab, null);
+  assert.equal(manager.tabElements.size, 0);
+  assert.equal(editor.fileExplorer.activeFilePath, null);
+  assert.equal(calls.resets, 1);
+  assert.equal(calls.mainContent, 1);
+  assert.equal(calls.refreshAll, 0);
+  assert.equal(calls.contexts.at(-1), false);
+  assert.equal(calls.titles, 1);
+  assert.equal(calls.closed, 2);
+});
+
+test("closing the last non-file tab clears active tab state through the fast path", async () => {
+  const ul = new FakeElement("ul");
+  const calls = { contexts: [], titles: 0, resets: 0, mainContent: 0, refreshAll: 0 };
+  const getElement = (selector) => selector === ".file-manager .files-ul" ? ul : null;
+  const document = { createElement: (tagName) => new FakeElement(tagName), addEventListener() {} };
+  const Events = loadGlobal("src/js/core/Event.js", "Events", { document, window: {} });
+  const TabManager = loadGlobal("src/js/manager/TabManager.js", "tabManager", {
+    TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+    Events,
+    getElement,
+    document,
+  });
+  const editor = {
+    isOnInit: false,
+    isActive: true,
+    api: { setActiveFileContext(active) { calls.contexts.push(active); } },
+    titleBar: { refresh() { calls.titles++; } },
+    bottomBar: { refresh() {} },
+    statesManager: { save() {} },
+    highlightController: { closeAllFiles() {} },
+    fileExplorer: { activeFilePath: null },
+    searchController: { close() {} },
+    emptyMenu: { refresh() {}, show() {} },
+    lineController: { hide() {} },
+    reset() { calls.resets++; },
+    refreshMainContent() { calls.mainContent++; },
+    refreshAll() { calls.refreshAll++; },
+    setSelected() {},
+  };
+  editor.events = new Events(editor);
+  const manager = new TabManager(editor);
+  editor.tabManager = manager;
+  const settingsTab = { id: 1, type: "settings", name: "Settings" };
+  manager.tabs = [settingsTab];
+  manager.activeTab = settingsTab;
+  manager.refresh();
+  calls.contexts.length = 0;
+  calls.titles = 0;
+
+  assert.equal(await manager.closeTab(settingsTab), true);
+
+  assert.deepEqual(manager.tabs, []);
+  assert.equal(manager.activeTab, null);
+  assert.equal(manager.tabElements.size, 0);
+  assert.equal(calls.resets, 1);
+  assert.equal(calls.mainContent, 1);
+  assert.equal(calls.refreshAll, 0);
+  assert.equal(calls.contexts.at(-1), false);
+  assert.equal(calls.titles, 1);
+});

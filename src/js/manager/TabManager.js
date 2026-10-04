@@ -57,6 +57,14 @@ class tabManager {
     }
   }
 
+  finishLastTabClose() {
+    if (!this.editor.isOnInit) {
+      this.editor.reset?.();
+      this.editor.refreshMainContent?.();
+    }
+    this.refresh({ resetWhenEmpty: false, refreshTitle: this.editor.isOnInit });
+  }
+
   async updateFilePath(oldPath, newPath) {
     if (!oldPath || !newPath) return;
     let changed = false;
@@ -293,7 +301,8 @@ class tabManager {
     file.contentGeneration++;
     await this.editor.highlightController.closeFile(file);
     this.removeFileByID(id);
-    if (!this.tabs.length) {
+    const closedLastTab = this.tabs.length === 0;
+    if (closedLastTab) {
       this.activeTab = null;
       this.editor.fileExplorer.activeFilePath = null;
       this.editor.searchController.close();
@@ -303,7 +312,11 @@ class tabManager {
       file: file,
       activeFile: this.activeFile,
     });
-    if (!this.editor.isOnInit) this.editor.refreshAll();
+    if (closedLastTab) {
+      this.finishLastTabClose();
+    } else if (!this.editor.isOnInit) {
+      this.editor.refreshAll();
+    }
     return true;
   }
 
@@ -321,9 +334,10 @@ class tabManager {
       await this.setFocusTab(this.tabs[index === 0 ? 1 : index - 1]);
     }
     this.removeFileByID(tab.id);
+    const closedLastTab = this.tabs.length === 0;
     if (tab.type === TAB_TYPES.PICTURE) this.editor._pictureView?.close?.(tab);
     if (tab.type === "markdown") this.editor._markdownView?.close?.(tab);
-    if (!this.tabs.length) {
+    if (closedLastTab) {
       this.activeTab = null;
       this.editor.fileExplorer.activeFilePath = null;
       this.editor.searchController?.close?.();
@@ -332,8 +346,12 @@ class tabManager {
       file: null,
       activeFile: this.activeFile,
     });
-    this.refresh();
-    this.editor.refreshMainContent?.();
+    if (closedLastTab) {
+      this.finishLastTabClose();
+    } else {
+      this.refresh();
+      this.editor.refreshMainContent?.();
+    }
     return true;
   }
 
@@ -745,7 +763,7 @@ class tabManager {
     return true;
   }
 
-  refresh() {
+  refresh({ resetWhenEmpty = true, refreshTitle = true } = {}) {
     const ul = getElement(".file-manager .files-ul");
     if (!ul) return;
 
@@ -774,10 +792,10 @@ class tabManager {
     }
 
     this.editor.api?.setActiveFileContext?.(Boolean(this.activeFile));
-    this.editor.titleBar?.refresh();
+    if (refreshTitle) this.editor.titleBar?.refresh();
 
     if (this.tabs.length === 0) {
-      if (!this.editor.isOnInit) this.editor.reset();
+      if (resetWhenEmpty && !this.editor.isOnInit) this.editor.reset();
     } else {
       if (!this.editor.isActive) this.editor.reactive();
     }
