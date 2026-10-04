@@ -10,8 +10,6 @@ class tabManager {
     this.idCounter = 0;
     this.focusGeneration = 0;
     this.focusResyncTimer = null;
-
-    this.refresh();
   }
 
   get files() {
