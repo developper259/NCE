@@ -18,6 +18,7 @@ export type ThemePreference = "system" | "dark" | "light";
 export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
   Object.freeze({
     save: "Mod+S",
+    save_as: "Mod+Shift+S",
     open_file: "Mod+O",
     quick_open: "Mod+P",
     go_to_line: "Mod+G",
@@ -92,6 +93,7 @@ function isValidKeybinding(value: unknown): value is string {
     "mod",
     "cmd",
     "command",
+    "meta",
     "ctrl",
     "control",
     "shift",
@@ -304,6 +306,9 @@ export class SettingsManager {
     source: Record<string, unknown>,
     fallback: Settings = DEFAULT_SETTINGS,
   ): Settings & Record<string, unknown> {
+    const hasExplicitSaveAs =
+      isObject(source.keybindings) &&
+      Object.hasOwn(source.keybindings, "save_as");
     const merged: any = clone(source);
     if (!isObject(merged.ui)) merged.ui = {};
     if (!isObject(merged.editor)) merged.editor = {};
@@ -350,6 +355,25 @@ export class SettingsManager {
         ))]
       : [...fallback.agent.hiddenModels];
     delete merged.agent.hiddenProviders;
+
+    const legacySaveShortcut = merged.keybindings.save;
+    const legacySaveAsShortcuts = [
+      "Mod+Shift+S",
+      "Ctrl+Shift+S",
+      "Meta+Shift+S",
+    ];
+    if (
+      !hasExplicitSaveAs &&
+      typeof legacySaveShortcut === "string" &&
+      legacySaveAsShortcuts.some(
+        (shortcut) =>
+          normalizeKeybinding(shortcut) ===
+          normalizeKeybinding(legacySaveShortcut),
+      )
+    ) {
+      merged.keybindings.save_as = legacySaveShortcut;
+      merged.keybindings.save = fallback.keybindings.save;
+    }
 
     const seenShortcuts = new Map<string, string>();
     for (const action of Object.keys(DEFAULT_KEYBINDINGS)) {

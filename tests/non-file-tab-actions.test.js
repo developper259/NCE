@@ -78,6 +78,7 @@ test("the command palette hides file commands outside a file tab", () => {
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
     USERCONFIG_KEYBINDING: [
       { action: "open_command", key: "Meta+Shift+P", in_editor: false },
+      { action: "save_as", key: "Meta+Shift+S", in_editor: false },
       { action: "quick_open", key: "Meta+P", in_editor: false },
       { action: "find", key: "Meta+F", in_editor: false },
       { action: "go_to_line", key: "Meta+G", in_editor: false },
@@ -102,6 +103,48 @@ test("the command palette hides file commands outside a file tab", () => {
     [...panelOptions.items].map((item) => item.id),
     ["select-color-theme", "open-settings-json", "quick_open", "toggle_search"],
   );
+});
+
+test("the command palette exposes Save As when a file is active", () => {
+  let panelOptions;
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    USERCONFIG_KEYBINDING: [
+      { action: "open_command", key: "Meta+Shift+P", in_editor: false },
+      { action: "save_as", key: "Mod+Shift+S", in_editor: false },
+    ],
+    CONFIG_KEYBINDING_DISPLAY: (key) => key,
+  });
+  const keyBinding = new KeyBinding({
+    tabManager: { activeFile: { path: "/workspace/file.js" } },
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => { panelOptions = options; },
+    },
+  });
+
+  keyBinding.control_open_command();
+
+  const saveAs = panelOptions.items.find((item) => item.id === "save_as");
+  assert.equal(saveAs.label, "Save As");
+  assert.equal(saveAs.shortcut, "Mod+Shift+S");
+});
+
+test("Save and Save As dispatch to separate file operations", () => {
+  const calls = [];
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding");
+  const keyBinding = new KeyBinding({
+    tabManager: {
+      activeFile: {
+        async save() { calls.push("save"); },
+        async saveAs() { calls.push("save-as"); },
+      },
+    },
+  });
+
+  keyBinding.exec({ action: "save" }, { shiftKey: true });
+  keyBinding.exec({ action: "save_as" }, {});
+
+  assert.deepEqual(calls, ["save", "save-as"]);
 });
 
 test("the command palette exposes settings categories", () => {

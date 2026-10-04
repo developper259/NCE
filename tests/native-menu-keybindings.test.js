@@ -51,6 +51,7 @@ function createMenuHarness(overrides = {}) {
     ["keybindings.go_to_line", "Mod+G"],
     ["keybindings.open_folder", "Mod+Shift+O"],
     ["keybindings.save", "Mod+S"],
+    ["keybindings.save_as", "Mod+Shift+S"],
     ["keybindings.close_file", "Mod+W"],
     ["keybindings.close_all_file", "Mod+Shift+W"],
     ["keybindings.undo", "Mod+Z"],
@@ -143,7 +144,7 @@ test("native menu actions are routed back through the renderer keybinding manage
 
   assert.deepEqual(JSON.parse(JSON.stringify(fixture.rendererMessages)), [
     ["keybinding-action-requested", "quick_open", {}],
-    ["keybinding-action-requested", "save", { shiftKey: true }],
+    ["keybinding-action-requested", "save_as", {}],
     ["keybinding-action-requested", "open_settings", {}],
   ]);
 });
@@ -166,6 +167,7 @@ test("native menu rebuilds from current keybindings and preserves static items",
   assert.equal(item("Quit NCE").accelerator, "CommandOrControl+Q");
   assert.equal(item("Reload Window").accelerator, "CommandOrControl+R");
   assert.equal(item("Save As...").accelerator, "CommandOrControl+Shift+S");
+  assert.equal(item("Save").accelerator, "CommandOrControl+S");
   assert.equal(appMenu.autoSaveItem.checked, true);
   assert.equal(item("Find").enabled, false);
   assert.equal(item("Go to Line...").enabled, false);
@@ -179,6 +181,7 @@ test("native menu rebuilds from current keybindings and preserves static items",
   values.set("keybindings.find", "Mod+L");
   values.set("keybindings.open_command", "Mod+Alt+P");
   values.set("keybindings.save", "Mod+Alt+S");
+  values.set("keybindings.save_as", "Mod+Alt+Shift+S");
   appMenu.refreshKeybindings();
 
   assert.equal(item("Find").accelerator, "CommandOrControl+L");
@@ -188,6 +191,7 @@ test("native menu rebuilds from current keybindings and preserves static items",
     "CommandOrControl+Alt+P",
   );
   assert.equal(item("Save").accelerator, "CommandOrControl+Alt+S");
+  assert.equal(item("Save As...").accelerator, "CommandOrControl+Alt+Shift+S");
   assert.equal(appMenu.autoSaveItem.checked, true);
   assert.equal(item("Find").enabled, true);
 

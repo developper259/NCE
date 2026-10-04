@@ -64,7 +64,7 @@ test("reload refreshes the in-memory settings from the saved JSON", async () => 
     await manager.initialize();
     await manager.set("editor.tabWidth", 8);
     await manager.set("appearance.theme", "light");
-    await manager.set("keybindings.save", "Mod+Shift+S");
+    await manager.set("keybindings.save", "Mod+Alt+S");
     await fs.writeFile(
       path.join(root, "settings.json"),
       JSON.stringify({
@@ -78,7 +78,7 @@ test("reload refreshes the in-memory settings from the saved JSON", async () => 
     const reloaded = await manager.reload();
     assert.equal(reloaded?.editor.tabWidth, 8);
     assert.equal(reloaded?.appearance.theme, "light");
-    assert.equal(reloaded?.keybindings.save, "Mod+Shift+S");
+    assert.equal(reloaded?.keybindings.save, "Mod+Alt+S");
     assert.equal(manager.get("appearance.theme"), "light");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -260,9 +260,37 @@ test("keybindings are validated, merged and persisted as settings", async () => 
 });
 
 test("native settings defaults stay aligned with the renderer defaults", async () => {
+  assert.equal(DEFAULT_KEYBINDINGS.save_as, "Mod+Shift+S");
   assert.equal(DEFAULT_KEYBINDINGS.open_settings, "Mod+,");
   assert.equal(DEFAULT_KEYBINDINGS.open_folder, "Mod+Shift+O");
   assert.equal(DEFAULT_KEYBINDINGS.quit_app, "Mod+Q");
+});
+
+test("legacy Save As shortcuts migrate from save to the save_as action", async () => {
+  for (const legacyShortcut of [
+    "Mod+Shift+S",
+    "Ctrl+Shift+S",
+    "Meta+Shift+S",
+  ]) {
+    const root = await temporaryUserData();
+    try {
+      await fs.writeFile(
+        path.join(root, "settings.json"),
+        JSON.stringify({ keybindings: { save: legacyShortcut } }),
+      );
+      const manager = new SettingsManager(root);
+      await manager.initialize();
+
+      assert.equal(manager.get("keybindings.save"), "Mod+S");
+      assert.equal(manager.get("keybindings.save_as"), legacyShortcut);
+      assert.equal(
+        (await readSettings(root)).keybindings.save_as,
+        legacyShortcut,
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }
 });
 
 test("every configurable renderer shortcut has a persisted default", async () => {

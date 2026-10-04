@@ -1,5 +1,6 @@
 const DEFAULT_KEYBINDINGS = Object.freeze({
   save: "Mod+S",
+  save_as: "Mod+Shift+S",
   open_file: "Mod+O",
   quick_open: "Mod+P",
   go_to_line: "Mod+G",

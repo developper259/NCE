@@ -28,7 +28,7 @@ class HTMLTextAreaElement extends HTMLElement {
 }
 class HTMLSelectElement extends HTMLElement {}
 
-function fixture(binding, options = {}) {
+function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
   const calls = [];
   const KeyBindingManager = loadGlobal(
     "src/js/manager/KeyBindingManager.js",
@@ -51,8 +51,8 @@ function fixture(binding, options = {}) {
       } } },
       window: { api: { readClipboardText: options.readClipboardText } },
       Event: class {},
-      CONFIG_KEYBINDING_EVENT_KEY: () => "p",
-      CONFIG_KEYBINDING_CONTAINSKEY: (key) => key === "Meta+p",
+      CONFIG_KEYBINDING_EVENT_KEY: (event) => event.key,
+      CONFIG_KEYBINDING_CONTAINSKEY: (key) => key === mappedShortcut,
       CONFIG_KEYBINDING_GET_KEY: () => binding,
       CONFIG_KEYBINDING_GET_ACTION: (action) => ({ action }),
     },
@@ -65,7 +65,7 @@ function fixture(binding, options = {}) {
   return { manager: new KeyBindingManager(editor), calls };
 }
 
-function keyboardEvent(target = new HTMLInputElement()) {
+function keyboardEvent(target = new HTMLInputElement(), overrides = {}) {
   return {
     target,
     key: "p",
@@ -79,6 +79,7 @@ function keyboardEvent(target = new HTMLInputElement()) {
     propagationStopped: false,
     preventDefault() { this.defaultPrevented = true; },
     stopPropagation() { this.propagationStopped = true; },
+    ...overrides,
   };
 }
 
@@ -89,6 +90,32 @@ test("global shortcuts work from an input when no file is open", () => {
   assert.deepEqual(calls, ["quick_open"]);
   assert.equal(event.defaultPrevented, true);
   assert.equal(event.propagationStopped, true);
+});
+
+test("Save As shortcut dispatches from native inputs with each platform modifier", () => {
+  for (const shortcut of [
+    { key: "Meta+Shift+S", modifiers: { metaKey: true, shiftKey: true } },
+    {
+      key: "Ctrl+Shift+S",
+      modifiers: { metaKey: false, ctrlKey: true, shiftKey: true },
+    },
+  ]) {
+    const { manager, calls } = fixture(
+      { action: "save_as", in_editor: false },
+      {},
+      shortcut.key,
+    );
+    const event = keyboardEvent(new HTMLInputElement(), {
+      key: "S",
+      ...shortcut.modifiers,
+    });
+
+    manager.onKey(event);
+
+    assert.deepEqual(calls, ["save_as"]);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(event.propagationStopped, true);
+  }
 });
 
 test("repeated global shortcuts are ignored while editor shortcuts remain repeatable", () => {

@@ -257,14 +257,14 @@ describe("Keyboard Shortcut Conflict Detection", () => {
   test("5. Conflict with different modifier order", async () => {
     const ctx = createTestContext();
 
-    ctx.SETTINGS_INITIALIZE({ keybindings: { save: "Mod+Shift+S" } });
+    ctx.SETTINGS_INITIALIZE({ keybindings: { save_as: "Mod+Shift+S" } });
     const result = await ctx.SETTINGS_SET(
       "keybindings.quick_open",
       "Shift+Mod+S",
     );
 
     assert.equal(result.success, false);
-    assert.equal(result.error.conflictAction, "save");
+    assert.equal(result.error.conflictAction, "save_as");
   });
 
   test("6. Conflict with different casing", async () => {

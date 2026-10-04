@@ -6,6 +6,11 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "save_as",
+    description: "Save the current file as",
+    in_editor: false,
+  },
+  {
     action: "open_file",
     description: "Open a file",
     in_editor: false,

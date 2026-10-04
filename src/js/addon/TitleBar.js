@@ -39,7 +39,7 @@ class TitleBar {
           ["Open Recent", "open_recent_menu", { recentSubmenu: true }],
           null,
           ["Save", "save", { needsFile: true }],
-          ["Save As...", "saveAs", { needsFile: true }],
+          ["Save As...", "save_as", { needsFile: true }],
           null,
           ["Auto Save", "auto_save", { checkbox: true }],
           null,
@@ -326,10 +326,6 @@ class TitleBar {
   }
 
   getShortcut(command) {
-    if (command === "saveAs") {
-      const save = this.getShortcut("save");
-      return save ? save.replace("S", "Shift+S") : "";
-    }
     if (command === "view.fullscreen") return "F11";
     const binding = USERCONFIG_KEYBINDING.find(
       (item) => item.action === command,
@@ -403,10 +399,10 @@ class TitleBar {
     this.closeMenus({ restoreFocus: false });
     if (command === "auto_save") return this.editor.toggleAutoSave?.();
     if (command.includes(".")) return this.editor.api.appCommand(command);
-    const method = command === "saveAs" ? "control_save" : `control_${command}`;
+    const method = `control_${command}`;
     const action = this.editor.keyBinding?.[method];
     if (typeof action === "function") {
-      return action.call(this.editor.keyBinding, command === "saveAs");
+      return action.call(this.editor.keyBinding);
     }
   }
 

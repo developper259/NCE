@@ -170,7 +170,7 @@ export class AppMenu {
             id: "save-as",
             label: "Save As...",
 
-            accelerator: "CommandOrControl+Shift+S",
+            accelerator: this.getAccelerator("save_as"),
 
             click: () => this.saveFileAs(),
           },
@@ -611,7 +611,7 @@ export class AppMenu {
   }
 
   saveFileAs() {
-    this.executeKeybinding("save", { shiftKey: true });
+    this.executeKeybinding("save_as");
   }
 
   closeFile() {

@@ -4,6 +4,7 @@ class KeyBinding {
     this.recentCommandIds = this.loadRecentCommandIds();
     this.fileActions = new Set([
       "save",
+      "save_as",
       "go_to_line",
       "close_file",
       "close_all_file",
@@ -19,6 +20,7 @@ class KeyBinding {
 
     this.func = {
       save: this.control_save,
+      save_as: this.control_save_as,
       open_file: this.control_open_file,
       quick_open: this.control_quick_open,
       go_to_line: this.control_go_to_line,
@@ -88,11 +90,12 @@ class KeyBinding {
 
   async control_save(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
-    if (s) {
-      await this.editor.tabManager.activeFile.saveAs();
-    } else {
-      await this.editor.tabManager.activeFile.save();
-    }
+    await this.editor.tabManager.activeFile.save();
+  }
+
+  async control_save_as() {
+    if (!this.editor.tabManager.activeFile) return;
+    await this.editor.tabManager.activeFile.saveAs();
   }
 
   async control_open_file(s, c, m, a) {
