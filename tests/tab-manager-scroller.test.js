@@ -144,7 +144,7 @@ test("TabManagerScroller creates one compact horizontal NCE Scroller on the fixe
   assert.equal(created[0].options.compact, true);
   assert.equal(component.container, container);
   assert.equal(component.content, content);
-  assert.equal(component.hScroller.wheelTarget, content);
+  assert.equal(component.hScroller.wheelTarget, container);
 });
 
 test("Scroller compact mode defaults off and its active thumb appears on hover", () => {

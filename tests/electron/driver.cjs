@@ -438,7 +438,6 @@ app.whenReady().then(() => {
         assert.ok(tabScrollSync.totalWidth > tabScrollSync.visibleWidth);
 
         const wheelPrevented = await run(`(() => {
-          const list = document.querySelector(".file-manager .files-ul");
           const scroller = editor.tabManager.tabScroller.hScroller;
           const event = new WheelEvent("wheel", {
             deltaX: 120,
@@ -446,7 +445,7 @@ app.whenReady().then(() => {
             bubbles: true,
             cancelable: true,
           });
-          list.dispatchEvent(event);
+          scroller.itemOBJ.dispatchEvent(event);
           return {
             prevented: event.defaultPrevented,
             deltaX: event.deltaX,

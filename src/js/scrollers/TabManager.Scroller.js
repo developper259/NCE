@@ -25,7 +25,9 @@ class TabManagerScroller {
       false,
       { compact: true },
     );
-    this.hScroller.wheelTarget = this.content;
+    // The custom track overlays the list, so listen on the shared container.
+    // Wheel events then reach the same scroller over either the tabs or thumb.
+    this.hScroller.wheelTarget = this.container;
     this.hScroller.onBeforeRefresh = () => {
       this.measureContent();
       this.hScroller.setScrollRatio(this.getScrollRatio());
