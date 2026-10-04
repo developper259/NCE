@@ -135,6 +135,27 @@ test("TabManager refresh preserves tab DOM identity and updates only changed sta
   assert.equal(manager.tabElements.get("1").element, aEntry.element);
 });
 
+test("TabManager hide and show do not toggle the tab-bar bottom divider", () => {
+  const calls = [];
+  const TabManager = loadGlobal(
+    "src/js/manager/TabManager.js",
+    "tabManager",
+  );
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    tabsOBJ: {
+      classList: {
+        add: (name) => calls.push(["add", name]),
+        remove: (name) => calls.push(["remove", name]),
+      },
+    },
+  });
+
+  manager.hide();
+  manager.show();
+
+  assert.deepEqual(calls, []);
+});
+
 test("active tabs scroll into view only when the active tab changes", () => {
   const ul = new FakeElement("ul");
   ul.scrollLeft = 0;

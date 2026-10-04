@@ -883,15 +883,7 @@ class tabManager {
       getElement(`.file-manager .file-el[id="${id}"]`);
   }
 
-  hide() {
-    if (this.tabsOBJ) {
-      this.tabsOBJ.classList.remove("box-bottom");
-    }
-  }
+  hide() {}
 
-  show() {
-    if (this.tabsOBJ) {
-      this.tabsOBJ.classList.add("box-bottom");
-    }
-  }
+  show() {}
 }
