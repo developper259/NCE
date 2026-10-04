@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
@@ -30,6 +31,21 @@ test("package metadata pins the expected runtime and build entrypoints", () => {
     require.resolve("nsh/server", { paths: [root] }).endsWith("server.js"),
     true,
   );
+});
+
+test("asset sync copies CSS source maps beside both Flaticon stylesheets", () => {
+  execFileSync(process.execPath, [path.join(root, "scripts/sync-assets.js")], {
+    cwd: root,
+    stdio: "ignore",
+  });
+
+  for (const directory of ["assets/flaticon", "src/assets/flaticon"]) {
+    const cssPath = path.join(root, directory, "all.css");
+    const mapPath = path.join(root, directory, "all.css.map");
+    const css = fs.readFileSync(cssPath, "utf8");
+    assert.match(css, /sourceMappingURL=all\.css\.map/);
+    assert.equal(fs.statSync(mapPath).isFile(), true, mapPath);
+  }
 });
 
 test("index references resolve in development and packaged layouts", async () => {

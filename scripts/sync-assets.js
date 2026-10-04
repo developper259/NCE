@@ -17,26 +17,52 @@ const flaticonFontSource = path.resolve(
   "../node_modules/@flaticon/flaticon-uicons/css",
 );
 
+function writeCssAsset(sourceFile, destinationFile, contents) {
+  const css = contents ?? fs.readFileSync(sourceFile, "utf8");
+  fs.mkdirSync(path.dirname(destinationFile), { recursive: true });
+  fs.writeFileSync(destinationFile, css);
+
+  const sourceMapReference = css.match(
+    /\/\*[#@]\s*sourceMappingURL=([^*\s]+)\s*\*\//,
+  )?.[1];
+  if (!sourceMapReference || /^(?:data:|[a-z]+:|\/\/)/i.test(sourceMapReference))
+    return;
+
+  const referencePath = decodeURIComponent(sourceMapReference.split(/[?#]/, 1)[0]);
+  const sourceMapSource = path.resolve(path.dirname(sourceFile), referencePath);
+  const sourceMapDestination = path.resolve(
+    path.dirname(destinationFile),
+    referencePath,
+  );
+  if (!fs.existsSync(sourceMapSource)) {
+    throw new Error(
+      `CSS source map referenced by ${sourceFile} is missing: ${sourceMapSource}`,
+    );
+  }
+  fs.mkdirSync(path.dirname(sourceMapDestination), { recursive: true });
+  fs.copyFileSync(sourceMapSource, sourceMapDestination);
+}
+
 fs.mkdirSync(destination, { recursive: true });
 if (fs.existsSync(source)) {
   for (const file of fs.readdirSync(source)) {
     if (file.endsWith(".css")) {
-      fs.copyFileSync(path.join(source, file), path.join(destination, file));
+      writeCssAsset(path.join(source, file), path.join(destination, file));
     }
   }
 } else {
   console.warn(`[NSH] Theme source is unavailable: ${source}`);
 }
 
-fs.mkdirSync(path.dirname(flaticonDestination), { recursive: true });
 const flaticonCss = fs
   .readFileSync(flaticonSource, "utf8")
   .replaceAll("../uicons-", "./uicons-");
-fs.writeFileSync(flaticonDestination, flaticonCss);
-fs.mkdirSync(path.dirname(path.join(devAssetRoot, "flaticon/all.css")), {
-  recursive: true,
-});
-fs.writeFileSync(path.join(devAssetRoot, "flaticon/all.css"), flaticonCss);
+writeCssAsset(flaticonSource, flaticonDestination, flaticonCss);
+writeCssAsset(
+  flaticonSource,
+  path.join(devAssetRoot, "flaticon/all.css"),
+  flaticonCss,
+);
 for (const file of fs.readdirSync(flaticonFontSource)) {
   if (!file.startsWith("uicons-")) continue;
   fs.copyFileSync(
