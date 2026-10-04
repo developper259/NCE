@@ -6,6 +6,55 @@ const os = require("node:os");
 const { EventEmitter } = require("node:events");
 const { loadMain } = require("./helpers/main-runtime");
 
+function createWatcherHarness(platformOverride) {
+  const nativeSources = [];
+  const nativeOptions = [];
+  const pollingWatchers = [];
+  const warnings = [];
+  const errors = [];
+
+  class FakePollingWatcher extends EventEmitter {
+    constructor(projectPath) {
+      super();
+      this.projectPath = projectPath;
+      pollingWatchers.push(this);
+    }
+    async close() {}
+  }
+
+  const globals = {
+    console: {
+      warn: (...args) => warnings.push(args),
+      error: (...args) => errors.push(args),
+    },
+  };
+  if (platformOverride) globals.process = { platform: platformOverride };
+
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {},
+    chokidar: {
+      watch: (projectPath, options) => {
+        const source = new EventEmitter();
+        source.close = async () => {};
+        nativeSources.push(source);
+        nativeOptions.push({ projectPath, ...options });
+        return source;
+      },
+    },
+    "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
+    "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+  }, globals);
+
+  return {
+    watcher: new Watcher({ webContents: { send() {} } }),
+    nativeSources,
+    nativeOptions,
+    pollingWatchers,
+    warnings,
+    errors,
+  };
+}
+
 test("window chrome is integrated without forced fullscreen on every platform", () => {
   const { getWindowChromeConfig } = loadMain("dist/ts/Window.js", {
     electron: {},
@@ -230,6 +279,61 @@ test("before-quit does not stop NSH until renderer approves; shutdown runs once"
   assert.equal(stopped, 1);
   assert.equal(quits, 1);
 });
+
+test("main runtime exposes the host process to watcher platform selection", async () => {
+  const runtime = createWatcherHarness();
+  await runtime.watcher.startWatching("/temporary");
+
+  if (process.platform === "darwin") {
+    assert.equal(runtime.pollingWatchers.length, 1);
+    assert.equal(runtime.nativeSources.length, 0);
+  } else {
+    assert.equal(runtime.pollingWatchers.length, 0);
+    assert.equal(runtime.nativeSources.length, 1);
+    assert.equal(runtime.nativeOptions[0].usePolling, false);
+  }
+
+  await runtime.watcher.stopWatching();
+});
+
+for (const [platform, expectedMode] of [
+  ["darwin", "polling"],
+  ["linux", "native"],
+  ["win32", "native"],
+]) {
+  test(`watcher selects ${expectedMode} mode on ${platform}`, async () => {
+    const runtime = createWatcherHarness(platform);
+    await runtime.watcher.startWatching("/temporary");
+
+    if (expectedMode === "polling") {
+      assert.equal(runtime.pollingWatchers.length, 1);
+      assert.equal(runtime.nativeSources.length, 0);
+    } else {
+      assert.equal(runtime.pollingWatchers.length, 0);
+      assert.equal(runtime.nativeSources.length, 1);
+      assert.equal(runtime.nativeOptions[0].usePolling, false);
+    }
+
+    await runtime.watcher.stopWatching();
+  });
+}
+
+for (const code of ["UNKNOWN", "EPERM", "EBUSY", "EMFILE", "ENFILE"]) {
+  test(`watcher falls back to polling for recoverable native error ${code}`, async () => {
+    const runtime = createWatcherHarness("linux");
+    await runtime.watcher.startWatching("/temporary");
+    runtime.nativeSources[0].emit("error", { code });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(runtime.nativeSources.length, 1);
+    assert.equal(runtime.pollingWatchers.length, 1);
+    assert.equal(runtime.watcher.usePolling, true);
+    assert.equal(runtime.warnings.length, 1);
+    assert.deepEqual(runtime.errors, []);
+
+    await runtime.watcher.stopWatching();
+  });
+}
 
 test("watcher batches events, matches one committed own save and cleans up timers", async () => {
   const source = new EventEmitter();

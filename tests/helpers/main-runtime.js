@@ -6,7 +6,7 @@ function loadMain(relative, mocks = {}, globals = {}) {
   const filename = path.resolve(__dirname, '../..', relative);
   const localRequire = createRequire(filename);
   const module = { exports: {} };
-  const context = { module, exports: module.exports, require: name => Object.hasOwn(mocks, name) ? mocks[name] : localRequire(name), __dirname: path.dirname(filename), Buffer, TextDecoder, console, setTimeout, clearTimeout, ...globals };
+  const context = { module, exports: module.exports, require: name => Object.hasOwn(mocks, name) ? mocks[name] : localRequire(name), __dirname: path.dirname(filename), process, Buffer, TextDecoder, console, setTimeout, clearTimeout, ...globals };
   vm.runInNewContext(fs.readFileSync(filename, 'utf8'), context, { filename });
   return module.exports;
 }
