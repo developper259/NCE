@@ -469,6 +469,50 @@ test("Quick Open project listing is recursive, relative, and uses workspace igno
   }
 });
 
+test("Quick Open prunes hidden directories and lists only NCE-openable files", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-quick-open-filter-"));
+  const write = async (relativePath, content) => {
+    const filePath = path.join(root, relativePath);
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.writeFile(filePath, content);
+  };
+
+  try {
+    await write(".env", "ROOT_SECRET=value\n");
+    await write(".benchmark/a.js", "benchmark\n");
+    await write(".nce/cache/index.json", "{}\n");
+    await write(".git/config", "[core]\n");
+    await write("src/.cache/foo.js", "cached\n");
+    await write("src/components/.hidden/bar.js", "hidden\n");
+    await write("src/normal/foo.js", "export const value = 1;\n");
+    await write("src/notes.custom", "plain text fallback\n");
+    await write("normal/.env-like-file", "LOCAL=value\n");
+    await write("src/README.md", "# Notes\n");
+    await write("src/diagram.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    await write("src/unknown-extension.mystery", Buffer.from([0, 1, 2, 3]));
+    await write("src/archive.pdf", Buffer.from("%PDF-1.7\0binary"));
+    await write("src/archive.asar", "opaque\n");
+
+    const search = new WorkspaceSearch({ window: null });
+    const result = await search.listProjectFiles(root, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(result.entries.map((entry) => entry.relativePath).sort(), [
+      ".env",
+      "normal/.env-like-file",
+      "src/README.md",
+      "src/diagram.png",
+      "src/normal/foo.js",
+      "src/notes.custom",
+    ]);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("invalid ASAR stays opaque in explorer, search, and project map", async () => {
   const root = await tempWorkspace();
   const archive = path.join(root, "broken.asar");

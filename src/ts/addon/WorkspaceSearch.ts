@@ -3,6 +3,11 @@ import { promises as fs } from "fs";
 import path from "path";
 import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
+import {
+  BINARY_SAMPLE_SIZE,
+  isOpenableImagePath,
+  isOpenableFileSample,
+} from "./OpenableFile";
 
 interface SearchOptions {
   include?: string;
@@ -81,6 +86,10 @@ interface ProjectFilesResponse {
   success: boolean;
   entries: ProjectFileEntry[];
   error?: { code: string; message: string };
+}
+interface ProjectFilesOptions {
+  openableOnly?: boolean;
+  ignoreHiddenDirectories?: boolean;
 }
 
 export class WorkspaceSearch {
@@ -200,14 +209,17 @@ export class WorkspaceSearch {
     );
     ipcMain.handle(
       "WorkspaceSearch:projectFiles",
-      async (_event, rootPath: string) => {
+      async (_event, rootPath: string, options: ProjectFilesOptions = {}) => {
         await this.ensureWorkspaceStorage(rootPath);
-        return this.listProjectFiles(rootPath);
+        return this.listProjectFiles(rootPath, options);
       },
     );
   }
 
-  async listProjectFiles(rootPath: string): Promise<ProjectFilesResponse> {
+  async listProjectFiles(
+    rootPath: string,
+    options: ProjectFilesOptions = {},
+  ): Promise<ProjectFilesResponse> {
     const failure = (code: string, message: string): ProjectFilesResponse => ({
       success: false,
       entries: [],
@@ -224,6 +236,8 @@ export class WorkspaceSearch {
     }
 
     const entries: ProjectFileEntry[] = [];
+    const openableOnly = options?.openableOnly === true;
+    const ignoreHiddenDirectories = options?.ignoreHiddenDirectories === true;
     const walk = async (directory: string): Promise<void> => {
       let children;
       try {
@@ -236,8 +250,11 @@ export class WorkspaceSearch {
         if (child.isSymbolicLink()) continue;
         const absolutePath = path.join(directory, child.name);
         if (child.isDirectory()) {
-          if (!this.ignoredDirectories.has(child.name))
-            await walk(absolutePath);
+          if (
+            this.ignoredDirectories.has(child.name) ||
+            (ignoreHiddenDirectories && child.name.startsWith("."))
+          ) continue;
+          await walk(absolutePath);
           continue;
         }
         if (
@@ -245,6 +262,7 @@ export class WorkspaceSearch {
           path.extname(child.name).toLowerCase() === ".asar"
         )
           continue;
+        if (openableOnly && !(await this.isOpenableFile(absolutePath))) continue;
         entries.push({
           name: child.name,
           path: absolutePath,
@@ -256,6 +274,23 @@ export class WorkspaceSearch {
     };
     await walk(root);
     return { success: true, entries };
+  }
+
+  private async isOpenableFile(filePath: string): Promise<boolean> {
+    let handle;
+    try {
+      const stats = await fs.stat(filePath);
+      if (!stats.isFile()) return false;
+      if (isOpenableImagePath(filePath, stats.size)) return true;
+      const sample = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, stats.size));
+      handle = await fs.open(filePath, "r");
+      const { bytesRead } = await handle.read(sample, 0, sample.length, 0);
+      return isOpenableFileSample(filePath, stats.size, sample.subarray(0, bytesRead));
+    } catch {
+      return false;
+    } finally {
+      await handle?.close().catch(() => {});
+    }
   }
 
   async getProjectMap(

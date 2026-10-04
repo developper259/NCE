@@ -18,7 +18,10 @@ class QuickOpen {
     if (this.cachedFiles && NCEPath.equals(rootPath, this.cachedRoot))
       return this.cachedFiles;
     const generation = ++this.cacheGeneration;
-    const response = await this.editor.api.listProjectFiles(rootPath);
+    const response = await this.editor.api.listProjectFiles(rootPath, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
     if (generation !== this.cacheGeneration ||
         !NCEPath.equals(rootPath, this.editor.fileExplorer?.rootPath)) return [];
     if (!response?.success) return [];

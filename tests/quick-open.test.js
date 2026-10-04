@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadGlobal } = require("./helpers/runtime");
+const { IMAGE_MIME_TYPES } = require("../dist/ts/addon/OpenableFile.js");
 
 const NCEPath = {
   equals(left, right) { return String(left).replaceAll("\\", "/") === String(right).replaceAll("\\", "/"); },
@@ -9,6 +10,7 @@ const NCEPath = {
 function createQuickOpen({ rootPath = "/project", entries = [] } = {}) {
   const openCalls = [];
   const panelCalls = [];
+  const listCalls = [];
   const panel = {
     session: null,
     input: { focusCalls: 0, focus() { this.focusCalls++; } },
@@ -25,11 +27,14 @@ function createQuickOpen({ rootPath = "/project", entries = [] } = {}) {
           : "fi fi-rr-file";
       },
     },
-    api: { async listProjectFiles() { return { success: true, entries }; } },
+    api: { async listProjectFiles(root, options) {
+      listCalls.push([root, options]);
+      return { success: true, entries };
+    } },
     tabManager: { openFileWithPath(filePath) { openCalls.push(filePath); } },
   };
   const QuickOpen = loadGlobal("src/js/quickPanel/QuickOpen.js", "QuickOpen", { NCEPath });
-  return { manager: new QuickOpen(editor), editor, panel, panelCalls, openCalls };
+  return { manager: new QuickOpen(editor), editor, panel, panelCalls, openCalls, listCalls };
 }
 
 test("Quick Open stays open without a project and shows an explicit message", () => {
@@ -75,6 +80,24 @@ test("Quick Open caches one scan, invalidates on changes, and uses TabManager op
   fixture.manager.open();
   assert.equal(fixture.panelCalls.length, 1);
   assert.equal(fixture.panel.input.focusCalls, 1);
+});
+
+test("Quick Open requests openable files and prunes hidden directories in the workspace traversal", async () => {
+  const fixture = createQuickOpen();
+  await fixture.manager.getFiles("/project");
+
+  assert.deepEqual(JSON.parse(JSON.stringify(fixture.listCalls)), [["/project", {
+    openableOnly: true,
+    ignoreHiddenDirectories: true,
+  }]]);
+});
+
+test("Quick Open image support stays aligned with PictureView preview support", () => {
+  const PictureView = loadGlobal("src/js/view/PictureView.js", "PictureView", { NCEPath });
+  const mainImageExtensions = Object.keys(IMAGE_MIME_TYPES).sort();
+  const previewExtensions = [...PictureView.previewableExtensions].sort();
+
+  assert.deepEqual(previewExtensions, mainImageExtensions);
 });
 
 test("Quick Open shortcut is registered through the central keybinding registry", () => {

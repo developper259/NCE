@@ -9,6 +9,13 @@ import {
 import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 import { LargeFileStore } from "./LargeFileStore";
+import {
+  BINARY_SAMPLE_SIZE,
+  IMAGE_MIME_TYPES,
+  looksBinary,
+  MAX_IMAGE_FILE_SIZE,
+} from "./OpenableFile";
+export { MAX_IMAGE_FILE_SIZE } from "./OpenableFile";
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
@@ -42,14 +49,8 @@ export interface FileOperationResult {
 export const LARGE_FILE_MODE_THRESHOLD = 20 * 1024 * 1024;
 // Kept as an alias for older imports. This is a mode threshold, not an open limit.
 export const MAX_TEXT_FILE_SIZE = LARGE_FILE_MODE_THRESHOLD;
-export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
 const RETRYABLE_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
 const RENAME_RETRY_DELAYS_MS = [0, 20, 50, 100];
-const IMAGE_MIME_TYPES: Record<string, string> = {
-  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-  ".webp": "image/webp", ".gif": "image/gif", ".bmp": "image/bmp",
-  ".ico": "image/x-icon", ".svg": "image/svg+xml",
-};
 export interface MarkdownImageReadContext {
   sourcePath: string;
   workspaceRoot?: string | null;
@@ -97,7 +98,6 @@ export function resolveMarkdownImagePath(
   return { sourcePath: resolvedSourcePath, workspaceRoot, imagePath };
 }
 
-const BINARY_SAMPLE_SIZE = 8192;
 function validPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
@@ -145,15 +145,6 @@ const invalidPath = (): FileOperationResult => ({
 
 function decodeUtf8(buffer: Buffer): string {
   return new TextDecoder("utf-8", { fatal: true }).decode(buffer);
-}
-
-function looksBinary(buffer: Buffer): boolean {
-  if (buffer.includes(0)) return true;
-  let controlBytes = 0;
-  for (const byte of buffer) {
-    if (byte < 32 && byte !== 9 && byte !== 10 && byte !== 13) controlBytes++;
-  }
-  return buffer.length > 0 && controlBytes / buffer.length > 0.05;
 }
 
 export async function atomicWriteFile(
