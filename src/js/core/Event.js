@@ -142,7 +142,6 @@ class Events {
     const activeFile = this.editor.tabManager.activeFile;
     if (activeFile) this.editor.highlightController?.openFile(activeFile);
 
-    if (this.editor.tabManager.files.length === 0) this.editor.reset();
     this.editor.refreshAll();
     this.editor.titleBar?.refresh();
   }

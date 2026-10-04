@@ -371,7 +371,6 @@ class Editor {
           this.events.callEvent(Events.ON_LOADED, {
             isStateLoaded: false,
           });
-        this.reset();
         return;
       }
       loaded = true;
@@ -391,7 +390,6 @@ class Editor {
         if (this.isOnInit) {
           this.events.callEvent(Events.ON_LOADED, { isStateLoaded: false });
         }
-        this.reset();
       });
   }
 }
