@@ -358,9 +358,7 @@ class SearchSidebar extends Sidebar {
       return;
     }
 
-    this.query = this.query.trim();
-
-    if (!this.query) {
+    if (!this.query.trim()) {
       this.clearResults();
       this.refresh();
       return;

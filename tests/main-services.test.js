@@ -342,6 +342,65 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
   }
 });
 
+test("WorkspaceSearch include patterns match directories, globs, files, and multiple paths", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-includes-"));
+  const files = [
+    "src/index.js",
+    "src/js/App.js",
+    "src/js/nested/helper.js",
+    "folder/readme.txt",
+    "other.js",
+  ];
+
+  try {
+    for (const relativePath of files) {
+      const filePath = path.join(root, ...relativePath.split("/"));
+      await fsp.mkdir(path.dirname(filePath), { recursive: true });
+      await fsp.writeFile(filePath, "needle\n");
+    }
+
+    const search = new WorkspaceSearch({ window: null });
+    const matchingPaths = async (include) => {
+      const result = await search.search(root, "needle", { include });
+      return result.results.map((entry) => entry.relativePath).sort();
+    };
+
+    const srcFiles = ["src/index.js", "src/js/App.js", "src/js/nested/helper.js"];
+    assert.deepEqual(await matchingPaths("src"), srcFiles);
+    assert.deepEqual(await matchingPaths("src/"), srcFiles);
+    assert.deepEqual(await matchingPaths("src/**"), srcFiles);
+    assert.deepEqual(await matchingPaths("src/js/"), [
+      "src/js/App.js",
+      "src/js/nested/helper.js",
+    ]);
+    assert.deepEqual(await matchingPaths("src/js/**"), [
+      "src/js/App.js",
+      "src/js/nested/helper.js",
+    ]);
+    assert.deepEqual(await matchingPaths("folder/"), ["folder/readme.txt"]);
+    assert.deepEqual(await matchingPaths("folder/**"), ["folder/readme.txt"]);
+    assert.deepEqual(await matchingPaths("src/js/App.js"), ["src/js/App.js"]);
+    assert.deepEqual(await matchingPaths("*.js"), [
+      "other.js",
+      "src/index.js",
+      "src/js/App.js",
+      "src/js/nested/helper.js",
+    ]);
+    assert.deepEqual(await matchingPaths("src/**/*.js"), [
+      "src/index.js",
+      "src/js/App.js",
+      "src/js/nested/helper.js",
+    ]);
+    assert.deepEqual(await matchingPaths("src\\js\\**\\*.js, other.js"), [
+      "other.js",
+      "src/js/App.js",
+      "src/js/nested/helper.js",
+    ]);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("AgentProcessRunner preserves the complete large validation stream", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-process-output-"));
   const script = path.join(root, "emit-output.js");

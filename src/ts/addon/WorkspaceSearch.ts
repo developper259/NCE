@@ -857,14 +857,26 @@ export class WorkspaceSearch {
       normalizedPattern = normalizedPattern.slice(2);
     }
 
+    const hasWildcard = /[*?]/.test(normalizedPattern);
+    const directoryPattern =
+      normalizedPattern.endsWith("/") ||
+      (!hasWildcard && !path.posix.extname(normalizedPattern));
+
+    if (directoryPattern) {
+      normalizedPattern = normalizedPattern.replace(/\/+$/, "");
+    }
+
     const regexSource = normalizedPattern
       .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*\*\//g, "§§GLOBSTAR_DIR§§")
       .replace(/\*\*/g, "§§DOUBLESTAR§§")
       .replace(/\*/g, "[^/]*")
+      .replace(/\?/g, "[^/]")
       .replace(/§§DOUBLESTAR§§/g, ".*")
-      .replace(/\?/g, "[^/]");
+      .replace(/§§GLOBSTAR_DIR§§/g, "(?:.*/)?");
 
-    const regex = new RegExp(`^${regexSource}$`, "i");
+    const recursiveSuffix = directoryPattern ? "(?:/.*)?" : "";
+    const regex = new RegExp(`^${regexSource}${recursiveSuffix}$`, "i");
 
     if (regex.test(normalizedValue)) {
       return true;
