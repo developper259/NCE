@@ -53,7 +53,7 @@ class Editor {
     this.quickOpen = new QuickOpen(this);
     this.goToLine = new GoToLine(this);
 
-    this.agent = new Agent(this);
+    this.agent = null;
 
     this.fileExplorer = new FileExplorer(this);
     this.searchSidebar = new SearchSidebar(this);
@@ -221,6 +221,11 @@ class Editor {
   getMarkdownView() {
     if (!this._markdownView) this._markdownView = new MarkdownView(this);
     return this._markdownView;
+  }
+
+  ensureAgent() {
+    if (!this.agent) this.agent = new Agent(this);
+    return this.agent;
   }
 
   async openSettingsJson() {

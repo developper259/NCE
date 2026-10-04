@@ -34,10 +34,7 @@ class AgentSidebar extends Sidebar {
     this.reasoningCopyButton = null;
     this.reasoningPanelOpen = false;
     this.reasoningCopyTimer = null;
-    this.markdownRenderer = new MarkdownRenderer({
-      throttleMs: 50,
-      getHighlightController: () => this.editor.highlightController,
-    });
+    this.markdownRenderer = null;
     this.messageElements = new WeakMap();
     this.activityElements = new WeakMap();
     this.activityItems = new Map();
@@ -48,11 +45,40 @@ class AgentSidebar extends Sidebar {
     this.agentWorkTicker = null;
     this.agentWorkTickerSessionId = null;
     this._activityItemCounter = 0;
+    this.approvalUnsubscribe = null;
+    this.openApprovalMenu = null;
+    this.approvalMenuClickHandler = null;
+    this.reasoningOutsideClickHandler = null;
+    this.apiKeys = new Map();
+    this.agent = null;
+    this._agentInitialized = false;
+    this.currentAgentId = AgentAI.defaultAgent || "coder";
+    const resolvedConfig = AgentAI.resolve(this.currentAgentId);
+    this.currentProviderId = resolvedConfig.provider.id;
+    this.currentModel = resolvedConfig.model;
+
+    this.sessions = [];
+    this.activeSessionId = null;
+    this._sessionCounter = 0;
+    this.conversationPersistenceReady = false;
+    this.conversationSaveTimers = new Map();
+    this.conversationSaveQueues = new Map();
+    this.conversationPersistencePromise = Promise.resolve();
+    this.apiKeyLoadPromise = Promise.resolve();
+  }
+
+  ensureInitialized() {
+    if (this._agentInitialized) return this.agent;
+    this._agentInitialized = true;
+
+    this.markdownRenderer = new MarkdownRenderer({
+      throttleMs: 50,
+      getHighlightController: () => this.editor.highlightController,
+    });
     this.approvalUnsubscribe =
       this.editor.api?.onAgentApprovalRequested?.((request) => {
         this.handleApprovalRequested(request);
       }) || null;
-    this.openApprovalMenu = null;
     this.approvalMenuClickHandler = () => {
       this.openApprovalMenu?.classList.add("hidden");
       this.openApprovalMenu = null;
@@ -65,12 +91,13 @@ class AgentSidebar extends Sidebar {
     };
     document.addEventListener("click", this.reasoningOutsideClickHandler);
 
-    this.apiKeys = new Map();
-
-    this.agent = editor.agent;
+    this.agent = this.editor.ensureAgent();
     this.editor.contextMenuManager?.setMenu("agent-message", buildAgentMessageContextMenu(this));
     this.editor.contextMenuManager?.setMenu("agent-conversation-tab", buildAgentConversationContextMenu(this));
     this.manualContextManager = new ManualContextManager(this);
+    this.manualContextManager.handleWorkspaceChanged(
+      this.editor.fileExplorer?.rootPath || null,
+    );
     this.agent.setContextProvider(async () => {
       const runSession = this.getSession(this.agent.currentSessionId);
       if (!runSession) return {};
@@ -144,12 +171,6 @@ class AgentSidebar extends Sidebar {
       },
     });
 
-    this.currentAgentId = AgentAI.defaultAgent || "coder";
-    const resolvedConfig = AgentAI.resolve(this.currentAgentId);
-
-    this.currentProviderId = resolvedConfig.provider.id;
-    this.currentModel = resolvedConfig.model;
-
     this.agent.setModelConfigResolver((agentId, providerId, modelId) => {
       const resolved = AgentAI.resolve(agentId, providerId, modelId);
       return {
@@ -161,24 +182,43 @@ class AgentSidebar extends Sidebar {
       };
     });
 
-    this.agent.setProvider({
-      ...resolvedConfig.provider,
-      apiKey: this.apiKeys.get(resolvedConfig.provider.id) || null,
-    });
-    this.agent.setModel(this.currentModel);
-    this.agent.setSystemPrompt(resolvedConfig.systemPrompt);
-    this.agent.setConfig(resolvedConfig);
-
-    this.sessions = [];
-    this.activeSessionId = null;
-    this._sessionCounter = 0;
-    this.conversationPersistenceReady = false;
-    this.conversationSaveTimers = new Map();
-    this.conversationSaveQueues = new Map();
-    this.conversationPersistencePromise = null;
-
+    this.applyAgentConfiguration();
     this.createSession();
     this.conversationPersistencePromise = this.initializeConversationPersistence();
+    this.apiKeyLoadPromise = this.loadStoredApiKeys().catch((error) => {
+      console.error("Failed to restore Agent API keys:", error);
+    });
+    return this.agent;
+  }
+
+  applyAgentConfiguration() {
+    if (!this.agent) return false;
+    const provider = AgentAI.getProvider(this.currentProviderId);
+    if (!provider) return false;
+    const resolved = AgentAI.resolve(
+      this.currentAgentId,
+      this.currentProviderId,
+      this.currentModel || provider.defaultModel,
+    );
+    this.agent.setProvider({
+      ...resolved.provider,
+      apiKey: this.apiKeys.get(resolved.provider.id) || null,
+    });
+    this.agent.setModel(resolved.model || this.currentModel || provider.defaultModel);
+    this.agent.setConfig(resolved);
+    this.agent.setSystemPrompt(resolved.systemPrompt);
+    return true;
+  }
+
+  async loadStoredApiKeys() {
+    if (typeof this.editor.api?.getAgentApiKey !== "function") return;
+    for (const provider of AgentAI.getProviders()) {
+      const apiKey = await this.editor.api.getAgentApiKey(provider.id);
+      if (apiKey) this.apiKeys.set(provider.id, apiKey);
+      else this.apiKeys.delete(provider.id);
+    }
+    this.applyAgentConfiguration();
+    this.refreshModelSelector?.();
   }
 
   async initializeConversationPersistence() {
@@ -334,6 +374,7 @@ class AgentSidebar extends Sidebar {
   }
 
   async flushAllConversationSaves() {
+    if (!this._agentInitialized) return;
     await this.conversationPersistencePromise;
     for (const timer of this.conversationSaveTimers.values()) clearTimeout(timer);
     const ids = [...this.conversationSaveTimers.keys()];
@@ -629,6 +670,7 @@ class AgentSidebar extends Sidebar {
   restoreScrollState() {
     this.pendingScrollTop = 0;
     this.scrollToBottomAfterRestore = true;
+    if (!this._agentInitialized) return;
     this.scheduleRestoredBottomScroll();
   }
 
@@ -638,7 +680,7 @@ class AgentSidebar extends Sidebar {
     const apiKey = await this.editor.api.getAgentApiKey?.(provider.id);
     if (apiKey) this.apiKeys.set(provider.id, apiKey);
     else this.apiKeys.delete(provider.id);
-    if (this.currentProviderId === provider.id) {
+    if (this.currentProviderId === provider.id && this.agent) {
       this.agent.setProvider({ ...provider, apiKey: apiKey || null });
     }
     return true;
@@ -669,31 +711,14 @@ class AgentSidebar extends Sidebar {
       }
     }
 
-    if (this.editor.api.getAgentApiKey) {
-      for (const provider of AgentAI.getProviders()) {
-        const apiKey = await this.editor.api.getAgentApiKey(provider.id);
-        if (apiKey) this.apiKeys.set(provider.id, apiKey);
-      }
-    }
-
-    const provider = AgentAI.getProvider(this.currentProviderId);
-    if (!provider) return;
-
-    this.agent.setProvider({
-      ...provider,
-      apiKey: this.apiKeys.get(provider.id) || null,
-    });
-    this.agent.setModel(this.currentModel || provider.defaultModel);
-    const resolved = AgentAI.resolve(
-      this.currentAgentId,
-      this.currentProviderId,
-      this.currentModel || provider.defaultModel,
-    );
-    this.agent.setConfig(resolved);
-    this.agent.setSystemPrompt(resolved.systemPrompt);
+    if (!this._agentInitialized) return;
+    this.apiKeyLoadPromise = this.loadStoredApiKeys();
+    await this.apiKeyLoadPromise;
+    this.applyAgentConfiguration();
   }
 
   render() {
+    this.ensureInitialized();
     if (this.container) {
       this.updateView();
       return this.container;
@@ -4363,6 +4388,12 @@ class AgentSidebar extends Sidebar {
   }
 
   async sendMessage(content, sessionId = this.activeSessionId) {
+    this.ensureInitialized();
+    await Promise.all([
+      this.conversationPersistencePromise,
+      this.apiKeyLoadPromise,
+    ]);
+    sessionId = sessionId || this.activeSessionId;
     const session = this.getSession(sessionId);
     if (!session) return;
 
@@ -4530,8 +4561,10 @@ class AgentSidebar extends Sidebar {
 
   destroy() {
     this.stopAgentWorkTicker();
-    document.removeEventListener("click", this.approvalMenuClickHandler);
-    document.removeEventListener("click", this.reasoningOutsideClickHandler);
+    if (this.approvalMenuClickHandler)
+      document.removeEventListener("click", this.approvalMenuClickHandler);
+    if (this.reasoningOutsideClickHandler)
+      document.removeEventListener("click", this.reasoningOutsideClickHandler);
     if (this.reasoningCopyTimer) clearTimeout(this.reasoningCopyTimer);
     this.approvalUnsubscribe?.();
     this.markdownRenderer?.destroyAll?.();
@@ -4566,6 +4599,7 @@ class AgentSidebar extends Sidebar {
   }
 
   onOpen() {
+    this.ensureInitialized();
     this.refresh();
     this.scheduleRestoredBottomScroll();
     this.focusInput();

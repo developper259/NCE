@@ -380,6 +380,41 @@ test("deleted workspace is invalidated and a new workspace can open", async () =
   assert.equal(explorer.projectName, "new-project");
 });
 
+test("filesystem changes are handled without initializing the Agent runtime", async () => {
+  const FileExplorer = loadFileExplorer();
+  const calls = { reload: [], deleted: [], loads: 0, refreshes: 0 };
+  const editor = {
+    agent: null,
+    ensureAgent() { assert.fail("filesystem updates must not initialize Agent"); },
+    quickOpen: { invalidate() {} },
+    tabManager: {
+      reloadFileFromDisk(path) { calls.reload.push(path); },
+      markFileAsDeleted(path) { calls.deleted.push(path); },
+    },
+  };
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/workspace",
+    files: [],
+    editingState: null,
+    editor,
+    getExpandedPaths() { return new Set(); },
+    async loadFiles() { calls.loads++; },
+    refresh() { calls.refreshes++; },
+  });
+
+  await explorer.handleFileSystemChanges([
+    { event: "change", filePath: "/workspace/edited.js", dirPath: "/workspace" },
+    { event: "add", filePath: "/workspace/new.js", dirPath: "/workspace" },
+    { event: "unlink", filePath: "/workspace/deleted.js", dirPath: "/workspace" },
+  ]);
+
+  assert.equal(editor.agent, null);
+  assert.deepEqual(calls.reload, ["/workspace/edited.js"]);
+  assert.deepEqual(calls.deleted, ["/workspace/deleted.js"]);
+  assert.equal(calls.loads, 1);
+  assert.equal(calls.refreshes, 1);
+});
+
 test("workspace restoration can defer the initial File Explorer refresh", async () => {
   const FileExplorer = loadFileExplorer({
     async startWatching() {},

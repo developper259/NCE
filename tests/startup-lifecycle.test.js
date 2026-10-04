@@ -217,6 +217,119 @@ test("Markdown and picture preview views initialize only when first activated", 
   ]);
 });
 
+test("Editor creates Agent only through its idempotent lazy factory", () => {
+  let constructions = 0;
+  class FakeAgent {
+    constructor(editor) {
+      constructions++;
+      this.editor = editor;
+    }
+  }
+  const Editor = loadGlobal("src/js/main/Editor.js", "Editor", {
+    document: { addEventListener() {} },
+    window: {},
+    Agent: FakeAgent,
+  });
+  const editor = Object.assign(Object.create(Editor.prototype), { agent: null });
+
+  assert.equal(editor.agent, null);
+  assert.equal(constructions, 0);
+  assert.equal(editor.ensureAgent(), editor.ensureAgent());
+  assert.equal(constructions, 1);
+});
+
+test("AgentSidebar defers runtime setup and uses the current workspace when opened", async () => {
+  let constructions = 0;
+  let contextRoot = null;
+  let flushed = 0;
+  class FakeSidebar {
+    constructor(id, title, icon, position, editor) {
+      Object.assign(this, { id, title, icon, position, editor, isOpen: false });
+    }
+  }
+  class FakeAgent {
+    setContextProvider() {}
+    setCallbacks() {}
+    setModelConfigResolver() {}
+    setProvider(provider) { this.provider = provider; }
+    setModel(model) { this.model = model; }
+    setConfig(config) { this.config = config; }
+    setSystemPrompt(prompt) { this.systemPrompt = prompt; }
+  }
+  const AgentAI = {
+    defaultAgent: "coder",
+    getProvider(id) { return { id, defaultModel: `${id}-model`, requiresApiKey: false }; },
+    getProviders() { return []; },
+    resolve(agentId, providerId, modelId) {
+      const id = providerId || `provider-${agentId}`;
+      return {
+        agent: { id: agentId },
+        provider: this.getProvider(id),
+        model: modelId || `${id}-model`,
+        systemPrompt: `prompt:${agentId}`,
+      };
+    },
+  };
+  class FakeManualContextManager {
+    constructor(sidebar) { this.sidebar = sidebar; }
+    handleWorkspaceChanged(root) { contextRoot = root; }
+  }
+  const AgentSidebar = loadGlobal(
+    "src/js/sidebar/Agent.Sidebar.js",
+    "AgentSidebar",
+    {
+      Sidebar: FakeSidebar,
+      AgentAI,
+      MarkdownRenderer: class {},
+      ManualContextManager: FakeManualContextManager,
+      buildAgentMessageContextMenu: () => ({}),
+      buildAgentConversationContextMenu: () => ({}),
+      document: { addEventListener() {}, removeEventListener() {} },
+      requestAnimationFrame(callback) { callback(); return 1; },
+      crypto: { randomUUID: () => "session-1" },
+    },
+  );
+  const agent = new FakeAgent();
+  const editor = {
+    api: {
+      async loadAgentConversations() { return { status: { available: false } }; },
+      async flushAgentConversations() { flushed++; },
+    },
+    contextMenuManager: { setMenu() {} },
+    fileExplorer: { rootPath: null },
+    ensureAgent() { constructions++; this.agent = agent; return agent; },
+    highlightController: {},
+    quickPanel: {},
+  };
+  const sidebar = new AgentSidebar(editor);
+
+  await sidebar.flushAllConversationSaves();
+  assert.equal(constructions, 0);
+  assert.equal(flushed, 0);
+  assert.equal(sidebar.agent, null);
+
+  await sidebar.loadConfigState({
+    currentAgentId: "ask",
+    currentProviderId: "provider-custom",
+    currentModel: "custom-model",
+  });
+  editor.fileExplorer.rootPath = "/workspace/after-edits";
+  editor.tabManager = { activeFile: { path: "/workspace/after-edits/updated.js" } };
+  sidebar.onOpen();
+  await Promise.all([
+    sidebar.conversationPersistencePromise,
+    sidebar.apiKeyLoadPromise,
+  ]);
+  sidebar.onOpen();
+
+  assert.equal(constructions, 1);
+  assert.equal(sidebar.agent, agent);
+  assert.equal(contextRoot, "/workspace/after-edits");
+  assert.equal(agent.provider.id, "provider-custom");
+  assert.equal(agent.model, "custom-model");
+  assert.equal(editor.tabManager.activeFile.path, "/workspace/after-edits/updated.js");
+});
+
 test("startup sidebar refresh keeps selector state without repainting active content", () => {
   const SidebarManager = loadGlobal(
     "src/js/manager/SidebarManager.js",
