@@ -248,6 +248,7 @@ test("watcher batches events, matches one committed own save and cleans up timer
       "node:fs": { statSync: () => ({ dev: 1, ino: 2, size: 3, mtimeMs: 4 }) },
     },
     {
+      process: { platform: "linux" },
       setTimeout: (fn, delay) => {
         assert.ok(delay === 150 || delay === 5000);
         if (delay === 150) timer = fn;
@@ -328,7 +329,7 @@ test("watcher stops and reports a deleted workspace root exactly once", async ()
     electron: {},
     chokidar: { watch: () => source },
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
-  });
+  }, { process: { platform: "linux" } });
   const watcher = new Watcher({
     webContents: { send: (...args) => sent.push(args) },
   });
@@ -366,7 +367,7 @@ test("watcher falls back once for recoverable native errors and stays native for
     } },
     "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
-  }, { console: { warn: (...args) => warnings.push(args), error: (...args) => errors.push(args) } });
+  }, { process: { platform: "linux" }, console: { warn: (...args) => warnings.push(args), error: (...args) => errors.push(args) } });
   const watcher = new Watcher({ webContents: { send() {} } });
   const changed = [];
   watcher.onChange = (filePath) => changed.push(filePath);
@@ -457,7 +458,7 @@ test("malformed ASAR watcher errors are warned once per normalized path", async 
     electron: {}, chokidar: { watch: () => native },
     "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
-  }, { console: { warn: (...args) => warnings.push(args), error() {} } });
+  }, { process: { platform: "linux" }, console: { warn: (...args) => warnings.push(args), error() {} } });
   const watcher = new Watcher({ webContents: { send() {} } });
   await watcher.startWatching("C:\\workspace");
   for (let index = 0; index < 3; index++) {
@@ -484,7 +485,7 @@ test("stopping or deleting the root while fallback is pending cannot resurrect t
       return source;
     } },
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
-  }, { console: { warn() {}, error() {} } });
+  }, { process: { platform: "linux" }, console: { warn() {}, error() {} } });
   const watcher = new Watcher({ webContents: { send() {} } });
 
   await watcher.startWatching("/temporary");
@@ -520,7 +521,7 @@ test("a pending fallback from workspace A cannot replace workspace B", async () 
     } },
     "./WatcherPolling": { PollingWatcher: FakePollingWatcher },
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
-  }, { console: { warn() {}, error() {} } });
+  }, { process: { platform: "linux" }, console: { warn() {}, error() {} } });
   const watcher = new Watcher({ webContents: { send() {} } });
   await watcher.startWatching("/workspace-a");
   nativeSources[0].emit("error", { code: "UNKNOWN" });
