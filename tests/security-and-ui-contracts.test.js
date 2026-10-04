@@ -40,7 +40,7 @@ test("TabManager protects asynchronous focus changes and dirty close flows", () 
 });
 
 test("Agent tool surface is present and remains local-testable", () => {
-  const html = read("src/html/index.html");
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
   for (const script of [
     "agent/runtime/AgentRunner.js",
     "agent/tools/ToolRegistry.js",
@@ -49,7 +49,7 @@ test("Agent tool surface is present and remains local-testable", () => {
     "agent/files/FileContextManager.js",
     "agent/files/LargeFileWriter.js",
   ]) {
-    assert.match(html, new RegExp(`js/${script.replaceAll("/", "\\/")}`));
+    assert.ok(rendererScripts.includes(`js/${script}`), script);
     assert.equal(fs.existsSync(path.join(root, "src/js", script)), true, script);
   }
   assert.doesNotMatch(read("src/js/agent/model/ModelClient.js"), /fetch\([^)]*openai\.com/);
@@ -79,6 +79,7 @@ test("titlebar full wrapper and internal safe content area stay structurally sep
 
 test("asset and command availability contracts stay aligned", () => {
   const html = read("src/html/index.html");
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
   const keybindings = read("src/config/Application.js");
   const menu = read("src/ts/addon/Menu.ts");
   assert.match(html, /assets\/flaticon\/all\.css/);
@@ -89,7 +90,7 @@ test("asset and command availability contracts stay aligned", () => {
     read("src/css/tabManager.css"),
     /\.file-el-btn img\s*\{[^}]*-webkit-user-drag:\s*none/s,
   );
-  assert.match(html, /js\/types\/QuickPanel\.js/);
+  assert.ok(rendererScripts.includes("js/types/QuickPanel.js"));
   assert.match(keybindings, /action:\s*"open_command"/);
   assert.match(keybindings, /action:\s*"reload_window"/);
   assert.match(keybindings, /action:\s*"quit_app"/);

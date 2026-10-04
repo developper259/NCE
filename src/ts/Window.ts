@@ -22,6 +22,7 @@ const MACOS_TRAFFIC_LIGHT_SIZE = 14;
 const MACOS_TRAFFIC_LIGHT_Y = Math.round(
   (TITLEBAR_CONTROLS_HEIGHT - MACOS_TRAFFIC_LIGHT_SIZE) / 2,
 );
+const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
 
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
@@ -121,7 +122,16 @@ export class Window {
 
     this.appMenu = new AppMenu(this.window, this);
 
-    this.window.loadFile(path.join(assetRoot, "html/index.html"));
+    if (
+      !app.isPackaged &&
+      process.env.NCE_RENDERER_URL === RENDERER_DEV_URL
+    ) {
+      this.window.loadURL(RENDERER_DEV_URL);
+    } else {
+      this.window.loadFile(
+        path.join(appRoot, "dist/renderer/html/index.html"),
+      );
+    }
     this.window.once("ready-to-show", () => {
       this.window?.maximize();
       this.window?.show();

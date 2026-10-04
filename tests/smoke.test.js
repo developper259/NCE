@@ -19,6 +19,8 @@ test("package metadata pins the expected runtime and build entrypoints", () => {
 
   assert.equal(packageJson.main, "dist/main.js");
   assert.equal(packageJson.scripts["build:main"], "tsc");
+  assert.equal(packageJson.scripts["build:renderer"], "vite build --config vite.config.mjs");
+  assert.match(packageJson.devDependencies.vite, /^\^8\./);
   assert.match(packageJson.dependencies.nsh, /#[0-9a-f]{40}$/);
   assert.equal(
     lockJson.packages[""].dependencies.nsh,
@@ -30,8 +32,15 @@ test("package metadata pins the expected runtime and build entrypoints", () => {
   );
 });
 
-test("index references resolve in development and packaged layouts", () => {
+test("index references resolve in development and packaged layouts", async () => {
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
+  const { buildRendererScript } = await import("../scripts/renderer-entrypoint.mjs");
+  const rendererBundle = await buildRendererScript();
+  assert.ok(rendererScripts.length > 0);
+  assert.match(rendererBundle, /class Editor\s*\{/);
+
   for (const reference of htmlReferences()) {
+    if (reference === "./renderer.js") continue;
     assert.equal(
       fs.existsSync(path.resolve(root, "src/html", reference)),
       true,
@@ -53,6 +62,38 @@ test("index references resolve in development and packaged layouts", () => {
       true,
       reference,
     );
+  }
+});
+
+test("Vite development serves the classic renderer entrypoint and Worker", async () => {
+  const { createServer } = await import("vite");
+  const server = await createServer({
+    configFile: path.join(root, "vite.config.mjs"),
+    server: { host: "127.0.0.1", port: 0, strictPort: false },
+  });
+
+  try {
+    await server.listen();
+    const address = server.httpServer.address();
+    const origin = `http://127.0.0.1:${address.port}`;
+    const htmlResponse = await fetch(`${origin}/html/index.html`);
+    const html = await htmlResponse.text();
+    assert.equal(htmlResponse.status, 200);
+    assert.match(html, /\/@vite\/client/);
+    assert.match(html, /<script\b(?=[^>]*src="\.\/renderer\.js")[^>]*><\/script>/);
+    assert.doesNotMatch(html, /vite-ignore/);
+
+    const rendererResponse = await fetch(`${origin}/html/renderer.js`);
+    const renderer = await rendererResponse.text();
+    assert.equal(rendererResponse.status, 200);
+    assert.match(renderer, /class Editor\s*\{/);
+    assert.ok(renderer.indexOf("class Editor") > renderer.indexOf("class Agent"));
+
+    const workerResponse = await fetch(`${origin}/js/worker/highlight.worker.js`);
+    assert.equal(workerResponse.status, 200);
+    assert.match(await workerResponse.text(), /requestTimeoutMs/);
+  } finally {
+    await server.close();
   }
 });
 

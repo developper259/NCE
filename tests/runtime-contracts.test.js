@@ -109,6 +109,7 @@ test("Watcher batches events and can retarget a recreated BrowserWindow", () => 
 
 test("critical renderer components and build assets are registered", () => {
   const html = read("src/html/index.html");
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
   const requiredScripts = [
     "controller/WriterController.js",
     "controller/HistoryController.js",
@@ -123,8 +124,14 @@ test("critical renderer components and build assets are registered", () => {
     "sidebar/Search.Sidebar.js",
     "sidebar/Agent.Sidebar.js",
   ];
+  assert.deepEqual(
+    [...html.matchAll(/<script\b(?=[^>]*\bsrc="([^"]+)")[^>]*>\s*<\/script>/g)].map(
+      (match) => match[1],
+    ),
+    ["./renderer.js"],
+  );
   for (const script of requiredScripts) {
-    assert.match(html, new RegExp(`js/${script.replaceAll("/", "\\/")}`));
+    assert.ok(rendererScripts.includes(`js/${script}`), script);
     assert.equal(fs.existsSync(path.join(root, "src/js", script)), true, script);
   }
   const packageJson = JSON.parse(read("package.json"));
@@ -133,10 +140,10 @@ test("critical renderer components and build assets are registered", () => {
 });
 
 test("Editor instantiates the loaded SavePopup addon", () => {
-  const html = read("src/html/index.html");
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
   const editor = read("src/js/main/Editor.js");
   const savePopup = read("src/js/addon/SavePopup.js");
-  assert.match(html, /js\/addon\/SavePopup\.js/);
+  assert.ok(rendererScripts.includes("js/addon/SavePopup.js"));
   assert.match(savePopup, /class SavePopup/);
   assert.match(editor, /new SavePopup\(this, this\.tabManager\)/);
 });

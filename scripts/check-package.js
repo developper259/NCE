@@ -13,12 +13,13 @@ const archives = find(path.resolve(__dirname, '../release'));
 assert.ok(archives.length, 'No packaged app.asar found; run npm run dist first');
 for (const archive of archives) {
   const files = new Set(asar.listPackage(archive).map(p => p.replace(/\\/g, '/').replace(/^\//, '')));
-  for (const file of ['dist/main.js', 'html/index.html', 'js/main/Preload.js', 'js/worker/highlight.worker.js', 'css/nsh/dark.css', 'css/nsh/light.css', 'package.json', 'node_modules/nsh/package.json', 'assets/icons/close.svg']) assert.ok(files.has(file), `${archive}: missing ${file}`);
+  for (const file of ['dist/main.js', 'dist/renderer/html/index.html', 'dist/renderer/html/renderer.js', 'dist/renderer/js/worker/highlight.worker.js', 'dist/renderer/assets/icons/close.svg', 'dist/renderer/assets/logo/NCE/dark-logo.png', 'js/main/Preload.js', 'css/nsh/dark.css', 'css/nsh/light.css', 'package.json', 'node_modules/nsh/package.json', 'assets/icons/close.svg']) assert.ok(files.has(file), `${archive}: missing ${file}`);
   for (const directory of ['assets/fonts/', 'assets/flaticon/', 'assets/logo/']) assert.ok([...files].some(p => p.startsWith(directory)), `Missing ${directory}`);
-  const html = asar.extractFile(archive, 'html/index.html').toString();
+  const htmlPath = 'dist/renderer/html/index.html';
+  const html = asar.extractFile(archive, htmlPath).toString();
   for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
     if (/^(https?:|data:)/.test(match[1])) continue;
-    const target = path.posix.normalize(path.posix.join('html', match[1]));
+    const target = path.posix.normalize(path.posix.join(path.posix.dirname(htmlPath), match[1]));
     assert.ok(files.has(target), `Unresolved packaged reference ${target}`);
   }
   console.log(`Packaged assets verified: ${path.relative(process.cwd(), archive)}`);

@@ -141,18 +141,18 @@ test("Agent sidebar bounds SidebarScroller to the messages viewport", () => {
     path.join(root, "src/js/sidebar/Agent.Sidebar.js"),
     "utf8",
   );
-  const html = fs.readFileSync(
-    path.join(root, "src/html/index.html"),
+  const rendererScripts = JSON.parse(fs.readFileSync(
+    path.join(root, "src/js/main/renderer-scripts.json"),
     "utf8",
-  );
+  ));
   assert.match(source, /new SidebarScroller\(/);
   assert.match(source, /new SidebarScroller\(\s*this\.editor,\s*messagesViewport,\s*messages,/);
   assert.match(source, /sidebarManager\.rightScroller\s*=\s*this\.messagesScroller/);
   assert.match(source, /messagesElement\.scrollTop\s*=\s*this\.messagesElement\.scrollHeight/);
   assert.match(source, /vScroller\?\.setScrollRatio\(1\)/);
   assert.match(source, /this\.refresh\(\);\s*this\.scrollMessagesToBottom\(\);\s*this\.focusInput\(\);/s);
-  assert.match(html, /js\/scrollers\/Sidebar\.Scroller\.js/);
-  assert.doesNotMatch(html, /RightSidebar\.Scroller/);
+  assert.ok(rendererScripts.includes("js/scrollers/Sidebar.Scroller.js"));
+  assert.ok(!rendererScripts.some((file) => file.includes("RightSidebar.Scroller")));
 
   const css = fs.readFileSync(
     path.join(root, "src/css/sidebar/agent.css"),

@@ -287,9 +287,14 @@ test("DOMManager caches wrapper identity and creates explicitly wrapped elements
   assert.equal(manager.createElement("div").nodeType, 1);
 });
 
-test("renderer loads FastDOMNode before DOMManager", () => {
-  const html = fs.readFileSync(path.join(root, "src/html/index.html"), "utf8");
-  assert.ok(html.indexOf("js/types/FastDOMNode.js") < html.indexOf("js/manager/DOMManager.js"));
+test("renderer manifest loads FastDOMNode before DOMManager", () => {
+  const scripts = JSON.parse(
+    fs.readFileSync(path.join(root, "src/js/main/renderer-scripts.json"), "utf8"),
+  );
+  assert.ok(
+    scripts.indexOf("js/types/FastDOMNode.js") <
+      scripts.indexOf("js/manager/DOMManager.js"),
+  );
 });
 
 test("Output transform layers skip repeated height and transform mutations", () => {

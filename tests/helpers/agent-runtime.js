@@ -32,12 +32,15 @@ function createAgent(
     fetch: fetchMock,
   };
   vm.createContext(context);
-  const html = fs.readFileSync(path.join(root, "src/html/index.html"), "utf8");
-  const files = [
-    ...html.matchAll(
-      /src="\.\.\/(config\/[^"\n]+|js\/(?:agent\/[^"\n]+|core\/Agent\.js))"/g,
+  const rendererScripts = JSON.parse(
+    fs.readFileSync(
+      path.join(root, "src/js/main/renderer-scripts.json"),
+      "utf8",
     ),
-  ].map((m) => m[1]);
+  );
+  const files = rendererScripts.filter(
+    (file) => file.startsWith("config/") || /^js\/(?:agent\/|core\/Agent\.js$)/.test(file),
+  );
   for (const file of files)
     vm.runInContext(
       fs.readFileSync(path.join(root, "src", file), "utf8"),

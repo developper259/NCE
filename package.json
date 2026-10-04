@@ -9,17 +9,18 @@
   "scripts": {
     "test": "node --test --test-concurrency=1 tests/*.test.js",
     "typecheck": "tsc --noEmit",
-    "pretest": "npm run sync-assets && npm run build:main",
+    "pretest": "npm run sync-assets && npm run build:main && npm run build:renderer",
     "sync-assets": "node scripts/sync-assets.js",
     "sync-nsh-themes": "npm run sync-assets",
     "prestart": "npm run sync-assets",
     "prebuild": "npm run sync-assets",
     "build:main": "tsc",
-    "start": "npm run build:main && electron dist/main.js",
-    "build": "npm run build:main && electron-builder --publish never",
-    "dist": "npm run sync-assets && npm run build:main && electron-builder --dir --publish never",
+    "build:renderer": "vite build --config vite.config.mjs",
+    "start": "npm run build:main && node scripts/start-dev.js",
+    "build": "npm run build:main && npm run build:renderer && electron-builder --publish never",
+    "dist": "npm run sync-assets && npm run build:main && npm run build:renderer && electron-builder --dir --publish never",
     "check": "npm run typecheck && npm test",
-    "test:electron": "npm run sync-assets && npm run build:main && node --test tests/electron/smoke.cjs",
+    "test:electron": "npm run sync-assets && npm run build:main && npm run build:renderer && node --test tests/electron/smoke.cjs",
     "test:packaged": "node scripts/check-package.js"
   },
   "author": {
@@ -57,13 +58,6 @@
         ]
       },
       {
-        "from": "src/html/",
-        "to": "html/",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
         "from": "src/css/",
         "to": "css/",
         "filter": [
@@ -76,11 +70,17 @@
       "icon": "assets/logo/NCE/dark-logo.ico"
     },
     "mac": {
-      "target": ["dmg", "zip"],
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "icon": "assets/logo/NCE/dark-logo.icns"
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": [
+        "AppImage",
+        "deb"
+      ],
       "icon": "assets/logo/NCE/dark-logo.png",
       "category": "Development",
       "syncDesktopName": true
@@ -90,6 +90,7 @@
     "@flaticon/flaticon-uicons": "^3.3.1",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
-    "typescript": "^5.2.2"
+    "typescript": "^5.2.2",
+    "vite": "^8.3.2"
   }
 }
