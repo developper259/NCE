@@ -48,6 +48,7 @@ test("Events init binds native handlers once and resyncs focus safely", () => {
   events.init();
 
   assert.equal(document.count("click"), 1);
+  assert.equal(document.count("input"), 1);
   assert.equal(document.count("contextmenu"), 1);
   assert.equal(document.listeners.get("contextmenu")[0].options, true);
   assert.equal(document.count("visibilitychange"), 1);
@@ -136,6 +137,47 @@ test("Events routes input, tab, and editor context menus from one root listener"
   assert.equal(calls[2][1].selectedText, "selected");
   assert.equal(outputEvent.prevented, true);
   assert.equal(outputEvent.stopped, true);
+});
+
+test("Events delegates search actions before the editor click handler", () => {
+  const calls = [];
+  const closeButton = {
+    classList: { contains: (name) => name === "search-bar-close" },
+  };
+  const input = {};
+  const replaceInput = {};
+  const editor = {
+    onClick() { calls.push("editor-click"); },
+    searchController: {
+      input,
+      replaceInput,
+      onCloseClick() { calls.push("search-close"); },
+      onInput() { calls.push("search-input"); },
+      saveActiveTabState() { calls.push("save-search-state"); },
+    },
+  };
+  const Events = loadGlobal("src/js/core/Event.js", "Events", {
+    document: createEventTarget(),
+    window: createEventTarget(),
+    requestAnimationFrame(callback) { callback(); },
+  });
+  const events = new Events(editor);
+  const clickEvent = {
+    target: {
+      classList: { contains() { return false; } },
+      closest(selector) {
+        return selector.includes(".search-bar-close") ? closeButton : null;
+      },
+    },
+  };
+
+  events.onClick(clickEvent);
+  assert.deepEqual(calls, ["search-close", "editor-click"]);
+
+  events.onInput({ target: input });
+  events.onInput({ target: replaceInput });
+  events.onInput({ target: {} });
+  assert.deepEqual(calls.slice(2), ["search-input", "save-search-state"]);
 });
 
 test("TabManager resolves delegated context menus from current tab identity", () => {

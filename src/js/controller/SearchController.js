@@ -29,18 +29,7 @@ class SearchController {
   init() {
     this.initSearchBar();
 
-    addEvent("input", this.onInput.bind(this), this.input);
     addEvent("keydown", this.onInputKey.bind(this), this.input);
-    addEvent("input", this.saveActiveTabState.bind(this), this.replaceInput);
-
-    addEvent("click", this.onPreviousClick.bind(this), this.previousButton);
-
-    addEvent("click", this.onNextClick.bind(this), this.nextButton);
-
-    addEvent("click", this.onCloseClick.bind(this), this.closeButton);
-    addEvent("click", this.toggleReplace.bind(this), this.expandButton);
-    addEvent("click", this.replaceNext.bind(this), this.replaceNextButton);
-    addEvent("click", this.replaceAll.bind(this), this.replaceAllButton);
   }
 
   getSearchFastNode(node) {

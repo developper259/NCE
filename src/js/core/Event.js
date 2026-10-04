@@ -33,12 +33,14 @@ class Events {
     this.onResize = this.onResize.bind(this);
     this.onWindowFocus = this.onWindowFocus.bind(this);
     this.onVisibilityChange = this.onVisibilityChange.bind(this);
+    this.onInput = this.onInput.bind(this);
   }
 
   init() {
     if (this.isInitialized) return;
 
     addEvent("click", this.onClick);
+    addEvent("input", this.onInput);
     document.addEventListener("contextmenu", this.onContextMenu, true);
     addEvent("resize", this.onResize, window);
     addEvent("focus", this.onWindowFocus, window);
@@ -150,6 +152,20 @@ class Events {
     const el = e.target;
     const cl = e.target.classList;
 
+    const searchControl = el.closest?.(
+      ".search-bar-previous, .search-bar-next, .search-bar-close, .search-bar-expand, .search-bar-replace-next, .search-bar-replace-all",
+    );
+    if (searchControl) {
+      const search = this.editor.searchController;
+      const searchClasses = searchControl.classList;
+      if (searchClasses.contains("search-bar-previous")) search.onPreviousClick();
+      else if (searchClasses.contains("search-bar-next")) search.onNextClick();
+      else if (searchClasses.contains("search-bar-close")) search.onCloseClick();
+      else if (searchClasses.contains("search-bar-expand")) search.toggleReplace();
+      else if (searchClasses.contains("search-bar-replace-next")) search.replaceNext();
+      else if (searchClasses.contains("search-bar-replace-all")) search.replaceAll();
+    }
+
     // ------- Editor.js ------
     this.editor.onClick(e);
 
@@ -178,6 +194,15 @@ class Events {
       if (id === "language") this.editor.bottomBar.openLanguage();
       if (id === "view-type") this.editor.bottomBar.openViewTypePicker();
       return;
+    }
+  }
+
+  onInput(event) {
+    const search = this.editor.searchController;
+    if (event.target === search.input) {
+      search.onInput();
+    } else if (event.target === search.replaceInput) {
+      search.saveActiveTabState();
     }
   }
 
