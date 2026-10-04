@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const asar = require('@electron/asar');
+const { normalizeArchivePath, toAsarLookupPath } = require('./archive-paths');
 function find(directory) {
   if (!fs.existsSync(directory)) return [];
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
@@ -12,11 +13,11 @@ function find(directory) {
 const archives = find(path.resolve(__dirname, '../release'));
 assert.ok(archives.length, 'No packaged app.asar found; run npm run dist first');
 for (const archive of archives) {
-  const files = new Set(asar.listPackage(archive).map(p => p.replace(/\\/g, '/').replace(/^\//, '')));
+  const files = new Set(asar.listPackage(archive).map(normalizeArchivePath));
   for (const file of ['dist/main.js', 'dist/renderer/html/index.html', 'dist/renderer/html/renderer.js', 'dist/renderer/js/worker/highlight.worker.js', 'dist/renderer/assets/icons/close.svg', 'dist/renderer/assets/logo/NCE/dark-logo.png', 'js/main/Preload.js', 'css/nsh/dark.css', 'css/nsh/light.css', 'package.json', 'node_modules/nsh/package.json', 'assets/icons/close.svg']) assert.ok(files.has(file), `${archive}: missing ${file}`);
   for (const directory of ['assets/fonts/', 'assets/flaticon/', 'assets/logo/']) assert.ok([...files].some(p => p.startsWith(directory)), `Missing ${directory}`);
   const htmlPath = 'dist/renderer/html/index.html';
-  const html = asar.extractFile(archive, htmlPath).toString();
+  const html = asar.extractFile(archive, toAsarLookupPath(htmlPath)).toString();
   for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
     if (/^(https?:|data:)/.test(match[1])) continue;
     const target = path.posix.normalize(path.posix.join(path.posix.dirname(htmlPath), match[1]));
