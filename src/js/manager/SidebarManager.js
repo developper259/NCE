@@ -381,7 +381,7 @@ class SidebarManager {
       return 0;
     }
 
-    return sidebar.offsetWidth || this.width;
+    return this.editor.domManager.getSidebarWidth(position) || this.width;
   }
 
   syncEditorLayout() {
@@ -420,6 +420,7 @@ class SidebarManager {
       this.rightSidebar.classList.add("open");
     }
 
+    this.editor.domManager.invalidateSidebarMetrics(position);
     this.syncEditorLayout();
 
     if (this.editor.sidebarResizer) {
@@ -444,6 +445,7 @@ class SidebarManager {
       this.rightSidebar.classList.remove("open");
     }
 
+    this.editor.domManager.invalidateSidebarMetrics(position);
     this.syncEditorLayout();
 
     if (this.editor.sidebarResizer) {

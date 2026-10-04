@@ -85,6 +85,7 @@ class DOMManager {
       left: { width: 0 },
       right: { width: 0 },
     };
+    this.sidebarMetricsValid = { left: false, right: false };
     this.sidebarResizer = { width: 48 };
   }
 
@@ -289,12 +290,8 @@ class DOMManager {
     // measurement. The editor is the clipping viewport.
     this.output.height = editorMetrics.clientHeight || editorMetrics.height;
 
-    this.sidebarRect.left = this.measureElement(
-      this.getElement(".sidebar-left"),
-    );
-    this.sidebarRect.right = this.measureElement(
-      this.getElement(".sidebar-right"),
-    );
+    this.measureSidebar("left");
+    this.measureSidebar("right");
   }
 
   getOutputRect() {
@@ -321,24 +318,27 @@ class DOMManager {
   }
 
   getSidebarWidth(side) {
-    const target =
-      side === "left"
-        ? this.getElement(".sidebar-left")
-        : this.getElement(".sidebar-right");
+    if (side !== "left" && side !== "right") return 0;
+    if (!this.sidebarMetricsValid[side]) this.measureSidebar(side);
+    return this.sidebarRect[side].width || 0;
+  }
 
-    if (target) {
-      return target.offsetWidth || 0;
+  measureSidebar(side) {
+    if (side !== "left" && side !== "right") return 0;
+    const selector = side === "left" ? ".sidebar-left" : ".sidebar-right";
+    const metrics = this.measureElement(this.getElement(selector));
+    this.sidebarRect[side] = metrics;
+    this.sidebarMetricsValid[side] = true;
+    return metrics.width || 0;
+  }
+
+  invalidateSidebarMetrics(side) {
+    if (side === "left" || side === "right") {
+      this.sidebarMetricsValid[side] = false;
+      return;
     }
-
-    if (side === "left") {
-      return this.sidebarRect.left.width || 0;
-    }
-
-    if (side === "right") {
-      return this.sidebarRect.right.width || 0;
-    }
-
-    return 0;
+    this.sidebarMetricsValid.left = false;
+    this.sidebarMetricsValid.right = false;
   }
 
   // =========================================================

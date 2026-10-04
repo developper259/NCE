@@ -50,14 +50,7 @@ class SidebarResizer {
     this.currentResizer = side;
     this.startX = e.clientX;
 
-    const sidebar =
-      side === "left"
-        ? this.editor.domManager.getElement(".sidebar-left")
-        : this.editor.domManager.getElement(".sidebar-right");
-
-    this.startWidth = sidebar
-      ? sidebar.offsetWidth
-      : this.editor.domManager.getSidebarWidth(side);
+    this.startWidth = this.editor.domManager.getSidebarWidth(side);
 
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
@@ -101,6 +94,7 @@ class SidebarResizer {
     if (sidebar) {
       sidebar.style.width = width + "px";
     }
+    this.editor.domManager.invalidateSidebarMetrics(side);
 
     const fileManager = this.editor.fileManagerOBJ;
     const editor = this.editor.editorOBJ;
@@ -137,21 +131,13 @@ class SidebarResizer {
   }
 
   updateResizerPositions() {
-    const leftSidebar = this.editor.domManager.getElement(".sidebar-left");
-    const rightSidebar = this.editor.domManager.getElement(".sidebar-right");
-
     const sideBarSelectorWidth = this.editor.domManager.sidebarResizer.width;
-
-    const leftSidebarWidth = leftSidebar
-      ? leftSidebar.offsetWidth
-      : this.editor.domManager.getSidebarWidth("left");
+    const leftSidebarWidth = this.editor.domManager.getSidebarWidth("left");
 
     this.leftResizer.style.left =
       sideBarSelectorWidth + leftSidebarWidth - 3 + "px";
 
-    const rightSidebarWidth = rightSidebar
-      ? rightSidebar.offsetWidth
-      : this.editor.domManager.getSidebarWidth("right");
+    const rightSidebarWidth = this.editor.domManager.getSidebarWidth("right");
     this.rightResizer.style.right = rightSidebarWidth - 3 + "px";
   }
 
