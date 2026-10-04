@@ -91,7 +91,7 @@ class Editor {
     this.bottomBar = new BottomBar(this);
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
-    this.settingsView = new SettingsView(this);
+    this._settingsView = null;
     this.pictureView = new PictureView(this);
     this.markdownView = new MarkdownView(this);
 
@@ -179,7 +179,7 @@ class Editor {
         console.error("[Auto Save] menu synchronization failed", error),
       );
     }
-    this.settingsView?.sync("files.autoSave");
+    this._settingsView?.sync("files.autoSave");
     return this.autoSaveEnabled;
   }
 
@@ -192,7 +192,7 @@ class Editor {
     this.setAutoSaveState(SETTINGS_GET("files.autoSave"), { persist: false });
     this.themeManager?.syncFromSettings?.(SETTINGS_GET("appearance.theme"));
     this.agentSidebar?.refreshModelSelector?.();
-    this.settingsView?.sync?.("agent.hiddenModels");
+    this._settingsView?.sync?.("agent.hiddenModels");
     void this.refreshSettingsJsonTab();
   }
 
@@ -204,8 +204,13 @@ class Editor {
 
   async openSettings(category) {
     const tab = await this.tabManager.openSettings();
-    if (category) this.settingsView?.openCategory?.(category);
+    if (category) this.getSettingsView().openCategory(category);
     return tab;
+  }
+
+  getSettingsView() {
+    if (!this._settingsView) this._settingsView = new SettingsView(this);
+    return this._settingsView;
   }
 
   async openSettingsJson() {
@@ -231,28 +236,28 @@ class Editor {
     this.editorOBJ.classList.toggle("editor-picture-active", pictureActive);
     this.editorOBJ.classList.toggle("editor-markdown-active", markdownActive);
     if (settingsActive) {
-      this.settingsView?.show();
+      this.getSettingsView().show();
       this.pictureView?.hide();
       this.markdownView?.hide();
       this.bottomBar?.hide();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (pictureActive) {
-      this.settingsView?.hide();
+      this._settingsView?.hide();
       this.markdownView?.hide();
       this.pictureView?.show(this.tabManager.activeTab);
       this.bottomBar?.showImagePreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (markdownActive) {
-      this.settingsView?.hide();
+      this._settingsView?.hide();
       this.pictureView?.hide();
       this.markdownView?.show(this.tabManager.activeTab);
       this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else {
-      this.settingsView?.hide();
+      this._settingsView?.hide();
       this.pictureView?.hide();
       this.markdownView?.hide();
       if (this.tabManager.activeFile) this.bottomBar?.show();

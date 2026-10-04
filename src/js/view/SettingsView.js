@@ -158,7 +158,7 @@ class SettingsView {
     }
   }
 
-  getSettings() {
+  static getSettings() {
     const shortcuts =
       typeof USERCONFIG_KEYBINDING === "undefined"
         ? []
@@ -173,6 +173,10 @@ class SettingsView {
             }),
           );
     return [...SETTINGS_UI, ...shortcuts];
+  }
+
+  getSettings() {
+    return SettingsView.getSettings();
   }
 
   renderNavigation() {

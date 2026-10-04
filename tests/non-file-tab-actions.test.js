@@ -149,19 +149,21 @@ test("Save and Save As dispatch to separate file operations", () => {
 
 test("the command palette exposes settings categories", () => {
   let panelOptions;
+  const SettingsView = {
+    getSettings: () => [
+      { category: "Editor" },
+      { category: "Files" },
+      { category: "Shortcuts" },
+    ],
+  };
   const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    SettingsView,
     USERCONFIG_KEYBINDING: [],
     CONFIG_KEYBINDING_DISPLAY: (key) => key,
   });
   const editor = {
     tabManager: { activeFile: null },
-    settingsView: {
-      getSettings: () => [
-        { category: "Editor" },
-        { category: "Files" },
-        { category: "Shortcuts" },
-      ],
-    },
+    get settingsView() { throw new Error("Settings view should stay lazy"); },
     quickPanel: {
       isOpen: () => false,
       open: (options) => { panelOptions = options; },

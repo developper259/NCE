@@ -206,11 +206,12 @@ class KeyBinding {
       return;
     }
 
-    const settingCategories = [
-      ...new Set(this.editor.settingsView?.getSettings?.().map(
-        (setting) => setting.category,
-      ) || []),
-    ].map((category) => ({
+    const settings = typeof SettingsView === "undefined"
+      ? this.editor.settingsView?.getSettings?.() || []
+      : SettingsView.getSettings();
+    const settingCategories = [...new Set(settings.map(
+      (setting) => setting.category,
+    ))].map((category) => ({
       id: `open-settings-${category.toLowerCase()}`,
       label: `Open ${category} Settings (UI)`,
       keywords: ["settings", category],

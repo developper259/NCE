@@ -110,6 +110,50 @@ test("startup commit updates only components needed for the active editor", () =
   assert.equal(editor.isOnRefresh, false);
 });
 
+test("SettingsView initializes only when a Settings tab becomes active", () => {
+  let constructions = 0;
+  let shows = 0;
+  let hides = 0;
+  class FakeSettingsView {
+    constructor() { constructions++; }
+    show() { shows++; }
+    hide() { hides++; }
+  }
+  const Editor = loadGlobal("src/js/main/Editor.js", "Editor", {
+    document: { addEventListener() {} },
+    window: {},
+    SettingsView: FakeSettingsView,
+    TAB_TYPES: { SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+  });
+  const editor = Object.assign(Object.create(Editor.prototype), {
+    _settingsView: null,
+    editorOBJ: { classList: { toggle() {} } },
+    tabManager: { activeTab: { type: "file" }, activeFile: {} },
+    pictureView: { hide() {} },
+    markdownView: { hide() {} },
+    bottomBar: { hide() {}, show() {} },
+    cursorController: { disable() {} },
+    setSelected() {},
+  });
+
+  editor.refreshMainContent();
+  assert.equal(constructions, 0);
+
+  editor.tabManager.activeTab = { type: "settings" };
+  editor.tabManager.activeFile = null;
+  editor.refreshMainContent();
+  assert.equal(constructions, 1);
+  assert.equal(shows, 1);
+  assert.equal(editor.getSettingsView(), editor.getSettingsView());
+  assert.equal(constructions, 1);
+
+  editor.tabManager.activeTab = { type: "file" };
+  editor.tabManager.activeFile = {};
+  editor.refreshMainContent();
+  assert.equal(hides, 1);
+  assert.equal(constructions, 1);
+});
+
 test("startup sidebar refresh keeps selector state without repainting active content", () => {
   const SidebarManager = loadGlobal(
     "src/js/manager/SidebarManager.js",
