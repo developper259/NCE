@@ -73,8 +73,8 @@ class tabManager {
           file.textTab.name = file.name;
         }
         if (file === this.activeTab) {
-          if (file.type === "picture") this.editor.pictureView?.invalidate(previousPath);
-          else this.editor.markdownView?.invalidate(previousPath);
+          if (file.type === "picture") this.editor._pictureView?.invalidate(previousPath);
+          else this.editor._markdownView?.invalidate(previousPath);
         }
         changed = true;
         continue;
@@ -111,8 +111,8 @@ class tabManager {
     for (const tab of this.tabs.filter((candidate) => ["picture", "markdown"].includes(candidate.type))) {
       if (tab.path && NCEPath.isInside(tab.path, path)) {
         tab.diskFingerprint = null;
-        if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.invalidate(tab.path);
-        else this.editor.markdownView?.invalidate(tab.path);
+        if (tab.type === TAB_TYPES.PICTURE) this.editor._pictureView?.invalidate(tab.path);
+        else this.editor._markdownView?.invalidate(tab.path);
       }
     }
 
@@ -220,9 +220,9 @@ class tabManager {
       this.editor.fileLoader.cancelLoading(file.path),
     ));
     this.editor.highlightController.closeAllFiles();
-    this.editor.pictureView?.clear?.();
-    this.editor.pictureView?.hide?.();
-    this.editor.markdownView?.clear?.();
+    this.editor._pictureView?.clear?.();
+    this.editor._pictureView?.hide?.();
+    this.editor._markdownView?.clear?.();
     this.tabs = [];
     this.activeTab = null;
     this.editor.fileExplorer.activeFilePath = null;
@@ -320,8 +320,8 @@ class tabManager {
       await this.setFocusTab(this.tabs[index === 0 ? 1 : index - 1]);
     }
     this.removeFileByID(tab.id);
-    if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.close?.(tab);
-    if (tab.type === "markdown") this.editor.markdownView?.close?.(tab);
+    if (tab.type === TAB_TYPES.PICTURE) this.editor._pictureView?.close?.(tab);
+    if (tab.type === "markdown") this.editor._markdownView?.close?.(tab);
     if (!this.tabs.length) {
       this.activeTab = null;
       this.editor.fileExplorer.activeFilePath = null;
@@ -526,15 +526,15 @@ class tabManager {
       const status = await pathStatus.call(this.editor.fileExplorer.fileOperations, tab.path);
       if (!status?.exists || status.isDirectory) {
         tab.diskFingerprint = null;
-        if (tab.type === TAB_TYPES.PICTURE) this.editor.pictureView?.invalidate(tab.path);
-        else this.editor.markdownView?.invalidate(tab.path);
+        if (tab.type === TAB_TYPES.PICTURE) this.editor._pictureView?.invalidate(tab.path);
+        else this.editor._markdownView?.invalidate(tab.path);
         return;
       }
       const fingerprint = `${status.size}:${status.mtimeMs}`;
       if (tab.diskFingerprint === fingerprint) return;
       tab.diskFingerprint = fingerprint;
       if (tab.type === TAB_TYPES.PICTURE) {
-        this.editor.pictureView?.invalidate(tab.path);
+        this.editor._pictureView?.invalidate(tab.path);
       } else {
         const textTab = tab.textTab;
         if (textTab?.isLoaded && textTab.isSaved) {
@@ -545,7 +545,7 @@ class tabManager {
           await textTab.loadLanguage();
           await textTab.loadContent();
         }
-        this.editor.markdownView?.invalidate(tab.path);
+        this.editor._markdownView?.invalidate(tab.path);
       }
     }));
   }
@@ -598,7 +598,9 @@ class tabManager {
       replacement.textTab = current;
     } else if (view === "markdown" && current.type === TAB_TYPES.FILE &&
         current.largeFileMode !== true &&
-        this.editor.markdownView?.isSupportedPath?.(current.path)) {
+        (typeof MarkdownView !== "undefined"
+          ? MarkdownView.isSupportedPath(current.path)
+          : this.editor._markdownView?.isSupportedPath?.(current.path))) {
       replacement = new MarkdownTab(current.id, current.path);
       replacement.textTab = current;
     } else if (view === "text" && [TAB_TYPES.PICTURE, TAB_TYPES.MARKDOWN].includes(current.type)) {

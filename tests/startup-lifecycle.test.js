@@ -129,8 +129,8 @@ test("SettingsView initializes only when a Settings tab becomes active", () => {
     _settingsView: null,
     editorOBJ: { classList: { toggle() {} } },
     tabManager: { activeTab: { type: "file" }, activeFile: {} },
-    pictureView: { hide() {} },
-    markdownView: { hide() {} },
+    _pictureView: { hide() {} },
+    _markdownView: { hide() {} },
     bottomBar: { hide() {}, show() {} },
     cursorController: { disable() {} },
     setSelected() {},
@@ -152,6 +152,69 @@ test("SettingsView initializes only when a Settings tab becomes active", () => {
   editor.refreshMainContent();
   assert.equal(hides, 1);
   assert.equal(constructions, 1);
+});
+
+test("Markdown and picture preview views initialize only when first activated", () => {
+  let pictureConstructions = 0;
+  let markdownConstructions = 0;
+  const calls = [];
+  class FakePictureView {
+    constructor() { pictureConstructions++; }
+    show(tab) { calls.push(`picture:show:${tab.path}`); }
+    hide() { calls.push("picture:hide"); }
+  }
+  class FakeMarkdownView {
+    constructor() { markdownConstructions++; }
+    show(tab) { calls.push(`markdown:show:${tab.path}`); }
+    hide() { calls.push("markdown:hide"); }
+  }
+  const Editor = loadGlobal("src/js/main/Editor.js", "Editor", {
+    document: { addEventListener() {} },
+    window: {},
+    PictureView: FakePictureView,
+    MarkdownView: FakeMarkdownView,
+    TAB_TYPES: { SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+  });
+  const editor = Object.assign(Object.create(Editor.prototype), {
+    _settingsView: null,
+    _pictureView: null,
+    _markdownView: null,
+    editorOBJ: { classList: { toggle() {} } },
+    tabManager: { activeTab: { type: "file", path: "/notes/readme.md" }, activeFile: {} },
+    bottomBar: { show() {}, showImagePreview() {}, showMarkdownPreview() {}, hide() {} },
+    cursorController: { disable() {} },
+    setSelected() {},
+  });
+
+  editor.refreshMainContent();
+  assert.equal(pictureConstructions, 0);
+  assert.equal(markdownConstructions, 0);
+
+  editor.tabManager.activeTab = { type: "picture", path: "/images/diagram.png" };
+  editor.tabManager.activeFile = null;
+  editor.refreshMainContent();
+  assert.equal(pictureConstructions, 1);
+  assert.equal(markdownConstructions, 0);
+  assert.equal(editor.getPictureView(), editor.getPictureView());
+
+  editor.tabManager.activeTab = { type: "markdown", path: "/notes/readme.md" };
+  editor.refreshMainContent();
+  assert.equal(markdownConstructions, 1);
+  assert.equal(pictureConstructions, 1);
+  assert.equal(editor.getMarkdownView(), editor.getMarkdownView());
+
+  editor.tabManager.activeTab = { type: "file", path: "/notes/readme.md" };
+  editor.tabManager.activeFile = {};
+  editor.refreshMainContent();
+  assert.equal(pictureConstructions, 1);
+  assert.equal(markdownConstructions, 1);
+  assert.deepEqual(calls, [
+    "picture:show:/images/diagram.png",
+    "picture:hide",
+    "markdown:show:/notes/readme.md",
+    "picture:hide",
+    "markdown:hide",
+  ]);
 });
 
 test("startup sidebar refresh keeps selector state without repainting active content", () => {

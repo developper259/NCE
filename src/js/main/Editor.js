@@ -92,8 +92,8 @@ class Editor {
     this.titleBar = new TitleBar(this);
     this.sidebarResizer = new SidebarResizer(this);
     this._settingsView = null;
-    this.pictureView = new PictureView(this);
-    this.markdownView = new MarkdownView(this);
+    this._pictureView = null;
+    this._markdownView = null;
 
     this.writerController.insertMode = true;
 
@@ -213,6 +213,16 @@ class Editor {
     return this._settingsView;
   }
 
+  getPictureView() {
+    if (!this._pictureView) this._pictureView = new PictureView(this);
+    return this._pictureView;
+  }
+
+  getMarkdownView() {
+    if (!this._markdownView) this._markdownView = new MarkdownView(this);
+    return this._markdownView;
+  }
+
   async openSettingsJson() {
     const settingsPath = await this.api.getSettingsPath?.();
     if (!settingsPath) return null;
@@ -237,29 +247,29 @@ class Editor {
     this.editorOBJ.classList.toggle("editor-markdown-active", markdownActive);
     if (settingsActive) {
       this.getSettingsView().show();
-      this.pictureView?.hide();
-      this.markdownView?.hide();
+      this._pictureView?.hide();
+      this._markdownView?.hide();
       this.bottomBar?.hide();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (pictureActive) {
       this._settingsView?.hide();
-      this.markdownView?.hide();
-      this.pictureView?.show(this.tabManager.activeTab);
+      this._markdownView?.hide();
+      this.getPictureView().show(this.tabManager.activeTab);
       this.bottomBar?.showImagePreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (markdownActive) {
       this._settingsView?.hide();
-      this.pictureView?.hide();
-      this.markdownView?.show(this.tabManager.activeTab);
+      this._pictureView?.hide();
+      this.getMarkdownView().show(this.tabManager.activeTab);
       this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);
     } else {
       this._settingsView?.hide();
-      this.pictureView?.hide();
-      this.markdownView?.hide();
+      this._pictureView?.hide();
+      this._markdownView?.hide();
       if (this.tabManager.activeFile) this.bottomBar?.show();
     }
   }

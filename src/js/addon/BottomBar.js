@@ -57,11 +57,15 @@ class BottomBar {
   }
 
   isImagePath(path) {
-    return Boolean(this.editor.pictureView?.isPreviewablePath?.(path));
+    if (typeof PictureView !== "undefined")
+      return PictureView.isPreviewablePath(path);
+    return Boolean(this.editor._pictureView?.isPreviewablePath?.(path));
   }
 
   isMarkdownPath(path) {
-    return Boolean(this.editor.markdownView?.isSupportedPath?.(path));
+    if (typeof MarkdownView !== "undefined")
+      return MarkdownView.isSupportedPath(path);
+    return Boolean(this.editor._markdownView?.isSupportedPath?.(path));
   }
 
   async openLanguage() {

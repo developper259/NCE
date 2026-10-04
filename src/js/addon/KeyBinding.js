@@ -232,8 +232,12 @@ class KeyBinding {
 
     const activeTab = this.editor.tabManager.activeTab;
     const viewTypeActions = Boolean(
-      this.editor.pictureView?.isPreviewablePath?.(activeTab?.path || "") ||
-      this.editor.markdownView?.isSupportedPath?.(activeTab?.path || ""),
+      (typeof PictureView !== "undefined"
+        ? PictureView.isPreviewablePath(activeTab?.path || "")
+        : this.editor._pictureView?.isPreviewablePath?.(activeTab?.path || "")) ||
+      (typeof MarkdownView !== "undefined"
+        ? MarkdownView.isSupportedPath(activeTab?.path || "")
+        : this.editor._markdownView?.isSupportedPath?.(activeTab?.path || "")),
     )
       ? [{
           id: "change-view-type",
