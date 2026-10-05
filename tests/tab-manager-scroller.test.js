@@ -474,6 +474,105 @@ test("resizing preserves native scrollLeft and recalculates its thumb ratio", ()
   assert.equal(scroller.proportion, 40);
 });
 
+test("right sidebar layout resizes the measured tab viewport on the next frame", () => {
+  const viewportWidth = 1000;
+  const { editor, component, container, content, scroller } = createFixture({
+    clientWidth: 952,
+    scrollWidth: 1200,
+  });
+  const frames = [];
+  const classes = () => {
+    const values = new Set();
+    return {
+      add(value) { values.add(value); },
+      remove(value) { values.delete(value); },
+      contains(value) { return values.has(value); },
+    };
+  };
+  const mainSection = { classList: classes() };
+  const sidebars = {
+    left: { classList: classes() },
+    right: { classList: classes() },
+  };
+  const editorElement = { style: {} };
+  const originalGetElement = editor.domManager.getElement.bind(editor.domManager);
+  editor.domManager.getElement = (selector) => {
+    if (selector === ".main-section") return mainSection;
+    if (selector === ".sidebar-left") return sidebars.left;
+    if (selector === ".sidebar-right") return sidebars.right;
+    return originalGetElement(selector);
+  };
+  Object.assign(editor.domManager, {
+    apply() {},
+    calculate() {},
+    getSidebarWidth(side) { return side === "left" ? 300 : 250; },
+    invalidateSidebarMetrics() {},
+    measureElements() {},
+  });
+  container.style = {};
+  editor.editorOBJ = editorElement;
+  editor.fileManagerOBJ = container;
+  editor.lineController = { resizeWidth() {} };
+  editor.sidebarResizer = { updateResizerVisibility() {} };
+  editor.tabManager = { tabScroller: component };
+  const tabs = [{ id: "first" }, { id: "second" }];
+  content.children = tabs;
+
+  const applyLayout = () => {
+    const left = Number.parseFloat(container.style.left) || 0;
+    const right = Number.parseFloat(container.style.right) || 0;
+    const availableWidth = viewportWidth - left - right;
+    container.clientWidth = availableWidth;
+    content.clientWidth = availableWidth;
+  };
+  const SidebarManager = loadGlobal(
+    "src/js/manager/SidebarManager.js",
+    "SidebarManager",
+    {
+      requestAnimationFrame(callback) {
+        frames.push(() => {
+          applyLayout();
+          callback();
+        });
+      },
+    },
+  );
+  const manager = Object.assign(Object.create(SidebarManager.prototype), {
+    editor,
+    leftSidebar: sidebars.left,
+    rightSidebar: sidebars.right,
+    selectorWidth: 48,
+    width: 350,
+  });
+  editor.sidebarManager = manager;
+  const initialRefreshCount = scroller.refreshCount;
+
+  manager.openSidebar("right");
+  assert.equal(container.style.right, "250px");
+  assert.equal(component.clientWidth, 952);
+  assert.equal(scroller.refreshCount, initialRefreshCount);
+  frames.shift()();
+
+  assert.equal(content.clientWidth, 702);
+  assert.equal(component.clientWidth, 702);
+  assert.equal(scroller.scrollerOBJWidth, 702);
+  assert.ok(Math.abs(scroller.proportion - 58.5) < 0.001);
+  assert.ok(Math.abs(scroller.thumbWidth - 410.67) < 0.01);
+  assert.equal(scroller.active, true);
+  assert.deepEqual(content.children, tabs);
+
+  manager.closeSidebar("right");
+  frames.shift()();
+
+  assert.equal(container.style.right, "0px");
+  assert.equal(content.clientWidth, 952);
+  assert.equal(component.clientWidth, 952);
+  assert.equal(scroller.scrollerOBJWidth, 952);
+  assert.ok(Math.abs(scroller.proportion - 79.333) < 0.001);
+  assert.ok(Math.abs(scroller.thumbWidth - (952 * 952) / 1200) < 0.01);
+  assert.deepEqual(content.children, tabs);
+});
+
 test("tab cycling remains implemented independently of horizontal scrolling", async () => {
   const TabManager = loadGlobal("src/js/manager/TabManager.js", "tabManager");
   const tabs = [{ id: 1 }, { id: 2 }];

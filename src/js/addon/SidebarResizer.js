@@ -96,39 +96,13 @@ class SidebarResizer {
     }
     this.editor.domManager.invalidateSidebarMetrics(side);
 
-    const fileManager = this.editor.fileManagerOBJ;
-    const editor = this.editor.editorOBJ;
-
-    if (side === "left") {
-      const totalWidth = this.editor.sidebarManager.selectorWidth + width;
-
-      if (fileManager) {
-        fileManager.style.left = totalWidth + "px";
-      }
-      if (editor) {
-        editor.style.left = totalWidth + "px";
-        editor.style.right = "0px";
-        editor.style.width = "";
-      }
-    } else if (side === "right") {
-      if (editor) {
-        editor.style.right = width + "px";
-        editor.style.width = "";
-      }
-    }
-
-    if (this.editor.domManager) {
-      this.editor.domManager.measureElements();
-      this.editor.domManager.calculate();
-      this.editor.domManager.apply();
-    }
+    this.editor.sidebarManager.width = width;
+    this.editor.sidebarManager.syncEditorLayout();
 
     this.updateResizerPositions();
     this.updateResizerVisibility();
 
-    this.editor.sidebarManager.width = width;
-    this.editor.lineController.resizeWidth();
-    this.editor.tabManager?.tabScroller?.refresh();
+    this.editor.sidebarManager.scheduleSidebarRefresh(side);
   }
 
   updateResizerPositions() {

@@ -347,6 +347,162 @@ app.whenReady().then(() => {
         assert.ok(tabScrollState.totalWidth > tabScrollState.visibleWidth);
         assert.equal(tabScrollState.compactHeight, "6px");
 
+        const sidebarLayoutStates = await run(`(async () => {
+          const sidebarManager = editor.sidebarManager;
+          const sidebarResizer = editor.sidebarResizer;
+          const fileManager = document.querySelector(".file-manager");
+          const editorElement = document.querySelector(".editor");
+          const list = document.querySelector(".file-manager .files-ul");
+          const tabScroller = editor.tabManager.tabScroller;
+          const scroller = tabScroller.hScroller;
+          const tabNodes = window.__tabScrollerTestNodes;
+          const nextLayout = async () => {
+            await new Promise(requestAnimationFrame);
+            await new Promise(requestAnimationFrame);
+          };
+          const snapshot = () => {
+            const mainRect = document.querySelector(".main-section").getBoundingClientRect();
+            const fileRect = fileManager.getBoundingClientRect();
+            const editorRect = editorElement.getBoundingClientRect();
+            const proportion = scroller.calculProp();
+            return {
+              editorLeft: editorRect.left - mainRect.left,
+              editorRight: mainRect.right - editorRect.right,
+              editorWidth: editorElement.clientWidth,
+              fileLeft: fileRect.left - mainRect.left,
+              fileRight: mainRect.right - fileRect.right,
+              fileWidth: fileManager.clientWidth,
+              inlineLeft: fileManager.style.left,
+              inlineRight: fileManager.style.right,
+              inlineWidth: fileManager.style.width,
+              listWidth: list.clientWidth,
+              nodesPreserved: tabNodes.every((node, index) => list.children[index] === node),
+              overflow: list.scrollWidth > list.clientWidth,
+              proportion,
+              expectedProportion: (list.clientWidth / list.scrollWidth) * 100,
+              tabScrollerWidth: tabScroller.clientWidth,
+              thumbWidth: scroller.itemOBJWidth,
+              expectedThumbWidth: Math.max(
+                scroller.scrollerOBJWidth * (proportion / 100),
+                20,
+              ),
+              trackWidth: scroller.scrollerOBJWidth,
+            };
+          };
+
+          sidebarManager.closeSidebar("left");
+          sidebarManager.closeSidebar("right");
+          await nextLayout();
+          sidebarResizer.applyWidth(300, "left");
+          sidebarResizer.applyWidth(250, "right");
+          await nextLayout();
+          const none = snapshot();
+
+          sidebarManager.openSidebar("left");
+          await nextLayout();
+          const left = snapshot();
+
+          sidebarManager.closeSidebar("left");
+          await nextLayout();
+          sidebarManager.openSidebar("right");
+          await nextLayout();
+          const right = snapshot();
+
+          sidebarManager.openSidebar("left");
+          await nextLayout();
+          const both = snapshot();
+
+          sidebarResizer.applyWidth(400, "left");
+          await nextLayout();
+          const resizedLeft = snapshot();
+
+          sidebarResizer.applyWidth(420, "right");
+          await nextLayout();
+          const resizedRight = snapshot();
+
+          return { none, left, right, both, resizedLeft, resizedRight };
+        })()`);
+        const assertSidebarLayout = (state, left, right) => {
+          const closeTo = (actual, expected, tolerance = 1) =>
+            Math.abs(actual - expected) <= tolerance;
+          assert.ok(closeTo(state.fileLeft, left), JSON.stringify(state));
+          assert.ok(closeTo(state.fileRight, right), JSON.stringify(state));
+          assert.ok(closeTo(state.editorLeft, left), JSON.stringify(state));
+          assert.ok(closeTo(state.editorRight, right), JSON.stringify(state));
+          assert.equal(state.inlineLeft, `${left}px`);
+          assert.equal(state.inlineRight, `${right}px`);
+          assert.equal(state.inlineWidth, "");
+          assert.ok(closeTo(state.fileWidth, state.listWidth), JSON.stringify(state));
+          assert.ok(closeTo(state.listWidth, state.tabScrollerWidth), JSON.stringify(state));
+          assert.ok(closeTo(state.fileWidth, state.editorWidth), JSON.stringify(state));
+          assert.ok(closeTo(state.fileWidth, state.trackWidth), JSON.stringify(state));
+          assert.ok(
+            closeTo(state.proportion, state.expectedProportion, 0.01),
+            JSON.stringify(state),
+          );
+          assert.ok(
+            closeTo(state.thumbWidth, state.expectedThumbWidth, 1),
+            JSON.stringify(state),
+          );
+          assert.equal(state.overflow, true);
+          assert.equal(state.nodesPreserved, true);
+        };
+        assertSidebarLayout(sidebarLayoutStates.none, 48, 0);
+        assertSidebarLayout(sidebarLayoutStates.left, 348, 0);
+        assertSidebarLayout(sidebarLayoutStates.right, 48, 250);
+        assertSidebarLayout(sidebarLayoutStates.both, 348, 250);
+        assertSidebarLayout(sidebarLayoutStates.resizedLeft, 448, 250);
+        assertSidebarLayout(sidebarLayoutStates.resizedRight, 448, 420);
+        assert.ok(
+          Math.abs(
+            sidebarLayoutStates.none.fileWidth -
+              sidebarLayoutStates.right.fileWidth -
+              250,
+          ) <= 1,
+        );
+        assert.ok(
+          Math.abs(
+            sidebarLayoutStates.both.fileWidth -
+              sidebarLayoutStates.resizedLeft.fileWidth -
+              100,
+          ) <= 1,
+        );
+        assert.ok(
+          Math.abs(
+            sidebarLayoutStates.resizedLeft.fileWidth -
+              sidebarLayoutStates.resizedRight.fileWidth -
+              170,
+          ) <= 1,
+        );
+
+        const sidebarScreenshotPath = process.env.NCE_SIDEBAR_SCREENSHOT_PATH;
+        if (sidebarScreenshotPath) {
+          fs.writeFileSync(sidebarScreenshotPath, (await win.capturePage()).toPNG());
+        }
+        const restoredSidebarLayout = await run(`(async () => {
+          editor.sidebarManager.closeSidebar("left");
+          editor.sidebarManager.closeSidebar("right");
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+          const fileManager = document.querySelector(".file-manager");
+          const list = document.querySelector(".file-manager .files-ul");
+          return {
+            left: fileManager.style.left,
+            right: fileManager.style.right,
+            width: list.clientWidth,
+            nodesPreserved: window.__tabScrollerTestNodes.every(
+              (node, index) => list.children[index] === node,
+            ),
+          };
+        })()`);
+        assert.equal(restoredSidebarLayout.left, "48px");
+        assert.equal(restoredSidebarLayout.right, "0px");
+        assert.equal(
+          restoredSidebarLayout.width,
+          sidebarLayoutStates.none.listWidth,
+        );
+        assert.equal(restoredSidebarLayout.nodesPreserved, true);
+
         const thumbCenterOffset = tabScrollState.thumbWidth / 2;
         const dragY = Math.round(tabScrollState.thumbTop + tabScrollState.thumbHeight / 2);
         const thumbCenterX = Math.round(tabScrollState.thumbLeft + thumbCenterOffset);

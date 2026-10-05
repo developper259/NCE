@@ -391,6 +391,8 @@ class SidebarManager {
 
     if (this.editor.fileManagerOBJ) {
       this.editor.fileManagerOBJ.style.left = `${leftOffset}px`;
+      this.editor.fileManagerOBJ.style.right = `${rightWidth}px`;
+      this.editor.fileManagerOBJ.style.width = "";
     }
 
     if (this.editor.editorOBJ) {
