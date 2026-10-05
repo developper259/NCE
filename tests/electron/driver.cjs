@@ -1,4 +1,4 @@
-const { app, dialog, Menu, session } = require("electron");
+const { app, dialog, Menu, screen, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
@@ -449,77 +449,278 @@ app.whenReady().then(() => {
           (await run('document.querySelector(".file-manager .files-ul").scrollLeft')) > 0,
         );
 
-        const originalSize = win.getSize();
+        const wasMaximized = win.isMaximized();
+        const originalBounds = win.getBounds();
         const readResizeState = () => run(`(() => {
+          const fileManager = document.querySelector(".file-manager");
           const list = document.querySelector(".file-manager .files-ul");
           const scroller = editor.tabManager.tabScroller.hScroller;
           const maxScroll = list.scrollWidth - list.clientWidth;
           const proportion = scroller.calculProp();
+          const expectedThumbWidth = Math.max(
+            scroller.scrollerOBJWidth * (proportion / 100),
+            20,
+          );
           return {
+            innerWidth: window.innerWidth,
+            documentWidth: document.documentElement.clientWidth,
+            fileManagerWidth: fileManager.clientWidth,
             listWidth: list.clientWidth,
             scrollWidth: list.scrollWidth,
             trackWidth: scroller.scrollerOBJWidth,
+            trackDOMWidth: scroller.scrollerOBJ.clientWidth,
             thumbWidth: scroller.itemOBJWidth,
+            thumbDOMWidth: scroller.itemOBJ.clientWidth,
             proportion,
             expectedProportion: list.scrollWidth > 0
               ? (list.clientWidth / list.scrollWidth) * 100
               : 100,
-            expectedThumbWidth: scroller.scrollerOBJWidth * (proportion / 100),
+            expectedThumbWidth,
             ratio: scroller.scrollRatio,
             expectedRatio: maxScroll > 0 ? list.scrollLeft / maxScroll : 0,
             scrollLeft: list.scrollLeft,
           };
         })()`);
-        const beforeResize = await readResizeState();
-        const expandedWidth = Math.max(originalSize[0] + 200, 1000);
-        try {
-          win.setSize(expandedWidth, originalSize[1]);
-          await waitForCondition(
-            async () => {
-              const state = await readResizeState();
-              return state.listWidth > beforeResize.listWidth &&
-                state.trackWidth > beforeResize.trackWidth &&
+        const readWindowState = () => ({
+          isMaximized: win.isMaximized(),
+          size: win.getSize(),
+          bounds: win.getBounds(),
+          contentBounds: win.getContentBounds(),
+        });
+        const waitForResizeStep = async (check, description) => {
+          try {
+            await waitForCondition(check, {
+              timeout: 5000,
+              description,
+            });
+          } catch (error) {
+            let rendererState;
+            try {
+              rendererState = await readResizeState();
+            } catch (readError) {
+              rendererState = { readError: readError.message };
+            }
+            throw new Error(
+              `${error.message}; BrowserWindow=${JSON.stringify(readWindowState())}; renderer=${JSON.stringify(rendererState)}`,
+              { cause: error },
+            );
+          }
+        };
+        const waitForStableBounds = async (
+          description,
+          expectedMaximized = false,
+        ) => {
+          let previousBounds = null;
+          let stableSamples = 0;
+          await waitForResizeStep(() => {
+            if (win.isMaximized() !== expectedMaximized) {
+              previousBounds = null;
+              stableSamples = 0;
+              return false;
+            }
+            const bounds = win.getBounds();
+            if (
+              previousBounds &&
+              bounds.x === previousBounds.x &&
+              bounds.y === previousBounds.y &&
+              bounds.width === previousBounds.width &&
+              bounds.height === previousBounds.height
+            ) {
+              stableSamples += 1;
+            } else {
+              stableSamples = 0;
+            }
+            previousBounds = bounds;
+            return stableSamples >= 2;
+          }, description);
+        };
+        const waitForRendererResize = async (
+          previousState,
+          description,
+          expectChange = true,
+        ) => {
+          const steps = [
+            [
+              "renderer viewport width",
+              (state) =>
+                Math.abs(state.innerWidth - win.getContentBounds().width) <= 1 &&
+                (!expectChange || state.innerWidth !== previousState.innerWidth),
+            ],
+            [
+              "document client width",
+              (state) =>
+                state.documentWidth > 0 &&
+                (!expectChange || state.documentWidth !== previousState.documentWidth),
+            ],
+            [
+              "file manager client width",
+              (state) =>
+                state.fileManagerWidth > 0 &&
+                (!expectChange || state.fileManagerWidth !== previousState.fileManagerWidth),
+            ],
+            [
+              "tab list client width",
+              (state) =>
+                state.listWidth > 0 &&
+                (!expectChange || state.listWidth !== previousState.listWidth),
+            ],
+            [
+              "tab scroller track width",
+              (state) =>
+                state.trackWidth > 0 &&
+                (!expectChange || state.trackWidth !== previousState.trackWidth),
+            ],
+            [
+              "tab scroller thumb geometry",
+              (state) =>
+                Math.abs(state.trackWidth - state.trackDOMWidth) < 1 &&
                 Math.abs(state.proportion - state.expectedProportion) < 1 &&
                 Math.abs(state.thumbWidth - state.expectedThumbWidth) < 2 &&
-                Math.abs(state.ratio - state.expectedRatio) < 0.04;
-            },
-            {
-              timeout: 5000,
-              description: "the tab viewport and thumb to grow with its window",
-            },
+                Math.abs(state.thumbDOMWidth - state.expectedThumbWidth) < 2 &&
+                Math.abs(state.ratio - state.expectedRatio) < 0.04,
+            ],
+          ];
+          for (const [step, check] of steps) {
+            await waitForResizeStep(
+              async () => check(await readResizeState()),
+              `${description}: ${step}`,
+            );
+          }
+          return readResizeState();
+        };
+        const setWindowWidth = async (width, description) => {
+          const bounds = win.getBounds();
+          const workArea = screen.getDisplayMatching(bounds).workArea;
+          const rightmostX = workArea.x + workArea.width - width;
+          const x = Math.max(workArea.x, Math.min(bounds.x, rightmostX));
+          const expectedChange = win.getSize()[0] !== width;
+          win.setBounds({ ...bounds, x, width });
+          await waitForResizeStep(
+            () => !win.isMaximized() && win.getSize()[0] === width,
+            `${description}: BrowserWindow width to become ${width}`,
           );
-          const afterExpand = await readResizeState();
-          assert.ok(afterExpand.listWidth > beforeResize.listWidth);
-          assert.ok(afterExpand.trackWidth > beforeResize.trackWidth);
-          assert.ok(afterExpand.proportion > beforeResize.proportion);
-          assert.equal(afterExpand.scrollLeft, beforeResize.scrollLeft);
-          assert.ok(Math.abs(afterExpand.ratio - afterExpand.expectedRatio) < 0.04);
+          return expectedChange;
+        };
 
-          const narrowerWidth = Math.max(800, expandedWidth - 160);
-          win.setSize(narrowerWidth, originalSize[1]);
-          await waitForCondition(
-            async () => {
-              const state = await readResizeState();
-              return state.listWidth < afterExpand.listWidth &&
-                state.trackWidth < afterExpand.trackWidth &&
-                Math.abs(state.proportion - state.expectedProportion) < 1 &&
-                Math.abs(state.thumbWidth - state.expectedThumbWidth) < 2;
-            },
-            {
-              timeout: 5000,
-              description: "the tab viewport and thumb to shrink with its window",
-            },
+        const beforeUnmaximize = await readResizeState();
+        try {
+          if (wasMaximized) {
+            win.unmaximize();
+            await waitForResizeStep(
+              () => !win.isMaximized(),
+              "BrowserWindow to leave maximized state",
+            );
+            await waitForStableBounds("restored BrowserWindow bounds to settle");
+            await waitForRendererResize(
+              beforeUnmaximize,
+              "renderer layout to follow unmaximize",
+            );
+          }
+
+          const workArea = screen.getDisplayMatching(win.getBounds()).workArea;
+          const expandedWidth = Math.min(1050, workArea.width);
+          const baselineWidth = Math.min(900, expandedWidth - 150);
+          const shrunkWidth = Math.max(801, baselineWidth - 50);
+          assert.ok(
+            baselineWidth > 800 &&
+              shrunkWidth < baselineWidth &&
+              expandedWidth > baselineWidth,
+            `Display work area is too narrow for three distinct resize states: ${JSON.stringify({
+              workArea,
+              baselineWidth,
+              expandedWidth,
+              shrunkWidth,
+            })}`,
           );
-          const afterResize = await readResizeState();
-          assert.ok(afterResize.listWidth < afterExpand.listWidth);
-          assert.ok(afterResize.trackWidth < afterExpand.trackWidth);
-          assert.ok(afterResize.proportion < afterExpand.proportion);
-          assert.equal(afterResize.scrollLeft, beforeResize.scrollLeft);
-          assert.ok(Math.abs(afterResize.proportion - afterResize.expectedProportion) < 1);
-          assert.ok(Math.abs(afterResize.thumbWidth - afterResize.expectedThumbWidth) < 2);
-          assert.ok(Math.abs(afterResize.ratio - afterResize.expectedRatio) < 0.04);
+
+          const beforeBaseline = await readResizeState();
+          const baselineChanged = await setWindowWidth(
+            baselineWidth,
+            "baseline resize",
+          );
+          const baseline = await waitForRendererResize(
+            beforeBaseline,
+            "tab scroller to settle at baseline width",
+            baselineChanged,
+          );
+          assert.equal(win.getSize()[0], baselineWidth);
+          assert.ok(baseline.listWidth > 0);
+
+          const expandFrom = baseline;
+          const expandedChanged = await setWindowWidth(
+            expandedWidth,
+            "expanded resize",
+          );
+          assert.ok(expandedChanged, "expanded BrowserWindow width must change");
+          const afterExpand = await waitForRendererResize(
+            expandFrom,
+            "tab scroller to grow after expand",
+          );
+          assert.ok(afterExpand.innerWidth > baseline.innerWidth);
+          assert.ok(afterExpand.listWidth > baseline.listWidth);
+          assert.ok(afterExpand.trackWidth > baseline.trackWidth);
+          assert.ok(afterExpand.proportion > baseline.proportion);
+          assert.equal(afterExpand.scrollLeft, baseline.scrollLeft);
+
+          const shrinkFrom = afterExpand;
+          const shrunkChanged = await setWindowWidth(
+            shrunkWidth,
+            "shrunk resize",
+          );
+          assert.ok(shrunkChanged, "shrunk BrowserWindow width must change");
+          const afterShrink = await waitForRendererResize(
+            shrinkFrom,
+            "tab scroller to shrink after expand",
+          );
+          assert.ok(afterShrink.innerWidth < afterExpand.innerWidth);
+          assert.ok(afterShrink.listWidth < afterExpand.listWidth);
+          assert.ok(afterShrink.trackWidth < afterExpand.trackWidth);
+          assert.ok(afterShrink.proportion < afterExpand.proportion);
+          assert.equal(afterShrink.scrollLeft, baseline.scrollLeft);
         } finally {
-          win.setSize(originalSize[0], originalSize[1]);
+          if (wasMaximized) {
+            const beforeRestore = await readResizeState();
+            if (!win.isMaximized()) win.maximize();
+            await waitForResizeStep(
+              () => win.isMaximized(),
+              "BrowserWindow to return to its original maximized state",
+            );
+            await waitForStableBounds(
+              "maximized BrowserWindow bounds to settle",
+              true,
+            );
+            await waitForRendererResize(
+              beforeRestore,
+              "renderer layout to follow restored maximize",
+            );
+          } else {
+            const beforeRestore = await readResizeState();
+            const restoreChangesWidth =
+              win.getSize()[0] !== originalBounds.width;
+            if (win.isMaximized()) {
+              win.unmaximize();
+              await waitForResizeStep(
+                () => !win.isMaximized(),
+                "BrowserWindow to leave maximized state before restoring bounds",
+              );
+            }
+            win.setBounds(originalBounds);
+            await waitForResizeStep(
+              () =>
+                !win.isMaximized() &&
+                win.getBounds().x === originalBounds.x &&
+                win.getBounds().y === originalBounds.y &&
+                win.getBounds().width === originalBounds.width &&
+                win.getBounds().height === originalBounds.height,
+              "BrowserWindow to return to its original bounds",
+            );
+            await waitForStableBounds("original BrowserWindow bounds to settle");
+            await waitForRendererResize(
+              beforeRestore,
+              "renderer layout to follow restored bounds",
+              restoreChangesWidth,
+            );
+          }
         }
 
         const screenshotPath = process.env.NCE_SCROLLER_SCREENSHOT_PATH;
