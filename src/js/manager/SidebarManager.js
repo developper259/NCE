@@ -384,7 +384,132 @@ class SidebarManager {
     return this.editor.domManager.getSidebarWidth(position) || this.width;
   }
 
-  syncEditorLayout() {
+  getMainSectionWidth() {
+    const section = this.editor.domManager.getElement(".main-section");
+    const measuredWidth = section?.clientWidth ||
+      section?.getBoundingClientRect?.().width ||
+      this.editor.domManager.window?.width ||
+      0;
+    return Math.max(0, measuredWidth);
+  }
+
+  getSidebarWidthBudget() {
+    return Math.max(
+      0,
+      this.getMainSectionWidth() -
+        this.selectorWidth -
+        SidebarManager.MIN_EDITOR_CONTENT_WIDTH,
+    );
+  }
+
+  getMaxSidebarWidth(position) {
+    if (position !== "left" && position !== "right") return 0;
+    const oppositePosition = position === "left" ? "right" : "left";
+    const oppositeWidth = this.getOpenSidebarWidth(oppositePosition);
+    const configuredMaximum = this.editor.sidebarResizer?.maxWidth ?? Infinity;
+    return Math.max(
+      0,
+      Math.min(
+        configuredMaximum,
+        this.getSidebarWidthBudget() - oppositeWidth,
+      ),
+    );
+  }
+
+  clampSidebarWidth(width, position) {
+    const resizer = this.editor.sidebarResizer;
+    const configuredMinimum = resizer?.minWidth ?? 0;
+    const maximum = this.getMaxSidebarWidth(position);
+    const minimum = Math.min(configuredMinimum, maximum);
+    const requested = Number.isFinite(Number(width)) ? Number(width) : minimum;
+    return Math.max(minimum, Math.min(maximum, requested));
+  }
+
+  getEffectiveSidebarWidths(resizedPosition = null) {
+    const leftOpen = this.leftSidebar?.classList.contains("open") === true;
+    const rightOpen = this.rightSidebar?.classList.contains("open") === true;
+    const resizer = this.editor.sidebarResizer;
+    const leftRequested = resizer?.getRequestedWidth("left") ?? this.width;
+    const rightRequested = resizer?.getRequestedWidth("right") ?? this.width;
+
+    if (resizedPosition === "left" && leftOpen) {
+      return {
+        left: this.clampSidebarWidth(leftRequested, "left"),
+        right: rightOpen ? this.getOpenSidebarWidth("right") : 0,
+      };
+    }
+    if (resizedPosition === "right" && rightOpen) {
+      return {
+        left: leftOpen ? this.getOpenSidebarWidth("left") : 0,
+        right: this.clampSidebarWidth(rightRequested, "right"),
+      };
+    }
+
+    if (!leftOpen && !rightOpen) return { left: 0, right: 0 };
+
+    const budget = this.getSidebarWidthBudget();
+    const minimum = resizer?.minWidth ?? 0;
+    const maximum = resizer?.maxWidth ?? Infinity;
+    const requestedLeft = leftOpen
+      ? Math.max(minimum, Math.min(maximum, leftRequested))
+      : 0;
+    const requestedRight = rightOpen
+      ? Math.max(minimum, Math.min(maximum, rightRequested))
+      : 0;
+
+    if (!leftOpen) {
+      return {
+        left: 0,
+        right: this.clampSidebarWidth(requestedRight, "right"),
+      };
+    }
+    if (!rightOpen) {
+      return {
+        left: this.clampSidebarWidth(requestedLeft, "left"),
+        right: 0,
+      };
+    }
+
+    if (requestedLeft + requestedRight <= budget) {
+      return { left: requestedLeft, right: requestedRight };
+    }
+
+    if (budget < minimum * 2) {
+      const requestedTotal = requestedLeft + requestedRight;
+      return {
+        left: requestedTotal > 0 ? (budget * requestedLeft) / requestedTotal : 0,
+        right: requestedTotal > 0 ? (budget * requestedRight) / requestedTotal : 0,
+      };
+    }
+
+    const extraBudget = budget - minimum * 2;
+    const leftExtra = requestedLeft - minimum;
+    const rightExtra = requestedRight - minimum;
+    const requestedExtra = leftExtra + rightExtra;
+    if (requestedExtra <= 0) return { left: minimum, right: minimum };
+
+    return {
+      left: minimum + (extraBudget * leftExtra) / requestedExtra,
+      right: minimum + (extraBudget * rightExtra) / requestedExtra,
+    };
+  }
+
+  syncEditorLayout(resizedPosition = null) {
+    const effectiveWidths = this.getEffectiveSidebarWidths(resizedPosition);
+    let widthsChanged = false;
+    for (const [position, width] of Object.entries(effectiveWidths)) {
+      if (!this.editor.sidebarResizer) continue;
+      const sidebar = position === "left" ? this.leftSidebar : this.rightSidebar;
+      if (!sidebar?.classList.contains("open")) continue;
+      widthsChanged = this.editor.sidebarResizer.setEffectiveWidth(
+        position,
+        width,
+      ) || widthsChanged;
+    }
+    if (widthsChanged) {
+      this.editor.sidebarResizer?.updateResizerPositions?.();
+    }
+
     const leftWidth = this.getOpenSidebarWidth("left");
     const rightWidth = this.getOpenSidebarWidth("right");
     const leftOffset = this.selectorWidth + leftWidth;
@@ -410,16 +535,23 @@ class SidebarManager {
     if (this.editor.cursorController) {
       this.editor.cursorController.updateCaretPosition();
     }
+
+    return widthsChanged;
   }
 
-  scheduleSidebarRefresh(position) {
+  scheduleSidebarRefresh(position = null) {
     requestAnimationFrame(() => {
       this.editor.lineController.resizeWidth();
       this.editor.tabManager?.tabScroller?.refresh();
-      const scroller = position === "left"
-        ? this.leftScroller
-        : this.rightScroller;
-      scroller?.refresh();
+      if (position === "left" || position === "right") {
+        const scroller = position === "left"
+          ? this.leftScroller
+          : this.rightScroller;
+        scroller?.refresh();
+      } else {
+        this.leftScroller?.refresh();
+        this.rightScroller?.refresh();
+      }
     });
   }
 
@@ -515,3 +647,5 @@ class SidebarManager {
     return false;
   }
 }
+
+SidebarManager.MIN_EDITOR_CONTENT_WIDTH = 300;

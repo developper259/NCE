@@ -275,6 +275,10 @@ class Events {
         this.editor.domManager.resize();
       }
 
+      if (this.editor.sidebarManager?.syncEditorLayout()) {
+        this.editor.sidebarManager.scheduleSidebarRefresh();
+      }
+
       if (this.editor.lineController) {
         this.editor.lineController.resize();
       }

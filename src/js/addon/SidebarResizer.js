@@ -7,6 +7,10 @@ class SidebarResizer {
     this.startWidth = 0;
     this.minWidth = 200;
     this.maxWidth = 500;
+    this.requestedWidths = {
+      left: this.editor.domManager.getSidebarWidth("left") || 250,
+      right: this.editor.domManager.getSidebarWidth("right") || 250,
+    };
 
     this.init();
   }
@@ -86,23 +90,48 @@ class SidebarResizer {
   }
 
   applyWidth(width, side) {
-    const sidebar =
-      side === "left"
-        ? this.editor.domManager.getElement(".sidebar-left")
-        : this.editor.domManager.getElement(".sidebar-right");
+    const numericWidth = Number(width);
+    if (!Number.isFinite(numericWidth)) return;
+    const requestedWidth = Math.max(
+      this.minWidth,
+      Math.min(this.maxWidth, numericWidth),
+    );
+    this.requestedWidths[side] = requestedWidth;
 
-    if (sidebar) {
-      sidebar.style.width = width + "px";
+    const sidebar = this.getSidebar(side);
+    if (sidebar && !sidebar.classList.contains("open")) {
+      sidebar.style.width = `${requestedWidth}px`;
+      this.editor.domManager.invalidateSidebarMetrics(side);
     }
-    this.editor.domManager.invalidateSidebarMetrics(side);
 
-    this.editor.sidebarManager.width = width;
-    this.editor.sidebarManager.syncEditorLayout();
+    this.editor.sidebarManager.syncEditorLayout(side);
 
     this.updateResizerPositions();
     this.updateResizerVisibility();
 
     this.editor.sidebarManager.scheduleSidebarRefresh(side);
+  }
+
+  getSidebar(side) {
+    return this.editor.domManager.getElement(
+      side === "left" ? ".sidebar-left" : ".sidebar-right",
+    );
+  }
+
+  getRequestedWidth(side) {
+    return this.requestedWidths[side];
+  }
+
+  setEffectiveWidth(side, width) {
+    const sidebar = this.getSidebar(side);
+    if (!sidebar) return false;
+
+    const nextWidth = `${Math.max(0, width)}px`;
+    if (sidebar.style.width === nextWidth) return false;
+
+    sidebar.style.width = nextWidth;
+    this.editor.domManager.invalidateSidebarMetrics(side);
+    return true;
   }
 
   updateResizerPositions() {

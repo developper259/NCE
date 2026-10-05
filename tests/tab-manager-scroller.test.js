@@ -489,10 +489,10 @@ test("right sidebar layout resizes the measured tab viewport on the next frame",
       contains(value) { return values.has(value); },
     };
   };
-  const mainSection = { classList: classes() };
+  const mainSection = { classList: classes(), clientWidth: viewportWidth };
   const sidebars = {
-    left: { classList: classes() },
-    right: { classList: classes() },
+    left: { classList: classes(), style: {} },
+    right: { classList: classes(), style: {} },
   };
   const editorElement = { style: {} };
   const originalGetElement = editor.domManager.getElement.bind(editor.domManager);
@@ -508,12 +508,25 @@ test("right sidebar layout resizes the measured tab viewport on the next frame",
     getSidebarWidth(side) { return side === "left" ? 300 : 250; },
     invalidateSidebarMetrics() {},
     measureElements() {},
+    window: { width: viewportWidth },
   });
   container.style = {};
   editor.editorOBJ = editorElement;
   editor.fileManagerOBJ = container;
   editor.lineController = { resizeWidth() {} };
-  editor.sidebarResizer = { updateResizerVisibility() {} };
+  editor.sidebarResizer = {
+    minWidth: 200,
+    maxWidth: 500,
+    getRequestedWidth(side) { return side === "left" ? 300 : 250; },
+    setEffectiveWidth(side, width) {
+      const sidebar = sidebars[side];
+      const nextWidth = `${width}px`;
+      if (sidebar.style.width === nextWidth) return false;
+      sidebar.style.width = nextWidth;
+      return true;
+    },
+    updateResizerVisibility() {},
+  };
   editor.tabManager = { tabScroller: component };
   const tabs = [{ id: "first" }, { id: "second" }];
   content.children = tabs;
