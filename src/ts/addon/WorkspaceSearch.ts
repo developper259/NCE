@@ -21,6 +21,7 @@ interface SearchOptions {
   requestId?: string;
   paths?: string[];
   replaceFirst?: boolean;
+  ignoreHiddenDirectories?: boolean;
 }
 
 interface SearchResult {
@@ -567,7 +568,10 @@ export class WorkspaceSearch {
         );
 
         if (entry.isDirectory()) {
-          if (this.ignoredDirectories.has(entry.name)) {
+          if (
+            this.ignoredDirectories.has(entry.name) ||
+            (options.ignoreHiddenDirectories && entry.name.startsWith("."))
+          ) {
             continue;
           }
 

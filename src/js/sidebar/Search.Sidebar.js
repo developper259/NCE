@@ -345,6 +345,7 @@ class SearchSidebar extends Sidebar {
         caseSensitive: this.caseSensitive,
         wholeWord: this.wholeWord,
         useRegex: this.useRegex,
+        ignoreHiddenDirectories: true,
       });
       if (!result?.success) console.error("Workspace replacement failed:", result?.error);
       await this.runSearch();
@@ -395,6 +396,7 @@ class SearchSidebar extends Sidebar {
           caseSensitive: this.caseSensitive,
           wholeWord: this.wholeWord,
           useRegex: this.useRegex,
+          ignoreHiddenDirectories: true,
           offset: 0,
           limit: this.resultsPageSize,
           requestId,
@@ -468,6 +470,7 @@ class SearchSidebar extends Sidebar {
           caseSensitive: this.caseSensitive,
           wholeWord: this.wholeWord,
           useRegex: this.useRegex,
+          ignoreHiddenDirectories: true,
           offset,
           limit: this.resultsPageSize,
           requestId,
