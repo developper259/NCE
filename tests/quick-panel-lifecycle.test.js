@@ -60,7 +60,8 @@ test("QuickPanel creates its DOM on first open and delegates native events", () 
   assert.equal(panel.open({ id: "smoke", mode: "input", value: "query" }), true);
   assert.equal(panel.initialized, true);
   assert.equal(hostQueries, 1);
-  assert.equal(created.length, 6);
+  assert.equal(created.length, 7);
+  assert.equal(panel.list.children[0].className, "quick-panel-list-layer");
   assert.equal(host.children.length, 1);
   const directListenerCount = [...created, host].reduce((count, element) =>
     count + [...element.listeners.values()].reduce(
@@ -72,5 +73,5 @@ test("QuickPanel creates its DOM on first open and delegates native events", () 
 
   assert.equal(panel.init(), true);
   assert.equal(hostQueries, 1);
-  assert.equal(created.length, 6);
+  assert.equal(created.length, 7);
 });

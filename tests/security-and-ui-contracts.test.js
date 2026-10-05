@@ -98,13 +98,17 @@ test("asset and command availability contracts stay aligned", () => {
   assert.doesNotMatch(menu, /label:\s*"(?:Replace|Documentation|Check for Updates)"/);
 });
 
-test("Quick Panel keeps Command Palette and Quick Open compact and scrollable", () => {
+test("Quick Panel keeps Command Palette and Quick Open compact with a custom virtual scroller", () => {
   const css = read("src/css/quickPanel.css");
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
   assert.match(css, /\.quick-panel-input\s*\{[\s\S]*?height:\s*30px/);
-  assert.match(css, /\.quick-panel-item\s*\{[\s\S]*?min-height:\s*30px/);
-  assert.match(css, /data-panel-id="command-palette"[\s\S]*?min-height:\s*30px/);
+  assert.match(css, /\.quick-panel-item\s*\{[\s\S]*?height:\s*var\(--quick-panel-row-height\)/);
+  assert.match(css, /data-panel-id="command-palette"[\s\S]*?padding-top:\s*2px/);
   assert.doesNotMatch(css, /data-panel-id="quick-open"/);
-  assert.match(css, /\.quick-panel-list\s*\{[\s\S]*?overflow-y:\s*auto/);
+  assert.match(css, /\.quick-panel-list\s*\{[\s\S]*?overflow:\s*hidden/);
+  assert.match(css, /--quick-panel-row-height:\s*30px/);
+  assert.doesNotMatch(css, /quick-panel-list::-webkit-scrollbar|scrollbar-width/);
+  assert.ok(rendererScripts.includes("js/scrollers/QuickPanel.Scroller.js"));
   assert.match(css, /max-height:\s*min\(420px, calc\(100vh - 60px\)\)/);
   assert.doesNotMatch(css, /border-color:\s*var\(--border-accent\)/);
 });

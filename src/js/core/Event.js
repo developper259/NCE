@@ -35,6 +35,8 @@ class Events {
     this.onVisibilityChange = this.onVisibilityChange.bind(this);
     this.onInput = this.onInput.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
+    this.onPointerOver = this.onPointerOver.bind(this);
+    this.onPointerOut = this.onPointerOut.bind(this);
     this.onCompositionStart = this.onCompositionStart.bind(this);
     this.onCompositionEnd = this.onCompositionEnd.bind(this);
     this.onContextMenu = this.onContextMenu.bind(this);
@@ -45,6 +47,8 @@ class Events {
 
     addEvent("click", this.onClick);
     addEvent("input", this.onInput);
+    addEvent("pointerover", this.onPointerOver);
+    addEvent("pointerout", this.onPointerOut);
     document.addEventListener("keydown", this.onKeyDown, true);
     addEvent("compositionstart", this.onCompositionStart);
     addEvent("compositionend", this.onCompositionEnd);
@@ -212,6 +216,14 @@ class Events {
     }
   }
 
+  onPointerOver(event) {
+    this.editor.quickPanel?.handleItemPointerOverEvent?.(event);
+  }
+
+  onPointerOut(event) {
+    this.editor.quickPanel?.handleItemPointerOutEvent?.(event);
+  }
+
   onContextMenu(event) {
     const target = event.target;
     if (this.editor.quickPanel?.handleContextMenu?.(event)) return;
@@ -270,6 +282,7 @@ class Events {
       if (this.editor.scrollerManager) {
         this.editor.scrollerManager.refreshAll();
       }
+      this.editor.quickPanel?.resultsScroller?.refresh();
     });
   }
 

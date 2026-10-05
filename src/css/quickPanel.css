@@ -82,28 +82,27 @@
 }
 
 .quick-panel-list {
+  --quick-panel-row-height: 30px;
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   max-height: 354px;
-  overflow-y: auto;
+  overflow: hidden;
   padding: 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scroller-bg) transparent;
 }
 
-.quick-panel-list::-webkit-scrollbar {
-  width: 8px;
-}
-
-.quick-panel-list::-webkit-scrollbar-thumb {
-  background: var(--scroller-bg);
-  border: 2px solid transparent;
-  border-radius: 8px;
-  background-clip: padding-box;
+.quick-panel-list-layer {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
 }
 
 .quick-panel-group-label {
+  display: flex;
+  align-items: flex-end;
+  height: var(--quick-panel-row-height);
+  box-sizing: border-box;
   padding: 7px 8px 3px;
   color: var(--text-secondary);
   font-size: 11px;
@@ -111,19 +110,31 @@
 }
 
 .quick-panel-separator {
+  display: flex;
+  align-items: center;
+  height: var(--quick-panel-row-height);
+  box-sizing: border-box;
+  margin: 0;
+  background: transparent;
+}
+
+.quick-panel-separator::before {
+  width: calc(100% - 6px);
   height: 1px;
-  min-height: 1px;
-  flex: 0 0 1px;
-  margin: 6px 3px;
+  margin: 0 3px;
   background: var(--border-secondary);
+  content: "";
 }
 
 .quick-panel-item {
   display: flex;
   align-items: center;
   gap: 9px;
-  min-height: 30px;
+  height: var(--quick-panel-row-height);
+  min-height: var(--quick-panel-row-height);
   padding: 3px 8px;
+  box-sizing: border-box;
+  overflow: hidden;
   color: var(--text-primary);
   text-align: left;
   background: transparent;
@@ -133,7 +144,6 @@
 }
 
 .quick-panel[data-panel-id="command-palette"] .quick-panel-item {
-  min-height: 30px;
   padding-top: 2px;
   padding-bottom: 2px;
 }

@@ -6,8 +6,10 @@ class QuickPanel {
     this.title = null;
     this.input = null;
     this.list = null;
+    this.listLayer = null;
     this.empty = null;
     this.error = null;
+    this.resultsScroller = null;
     this.initialized = false;
     this.session = null;
     this.previousFocus = null;
@@ -40,6 +42,10 @@ class QuickPanel {
     this.list.className = "quick-panel-list";
     this.list.setAttribute("role", "listbox");
 
+    this.listLayer = document.createElement("div");
+    this.listLayer.className = "quick-panel-list-layer";
+    this.list.appendChild(this.listLayer);
+
     this.empty = document.createElement("div");
     this.empty.className = "quick-panel-empty";
 
@@ -55,6 +61,11 @@ class QuickPanel {
     );
     this.host.appendChild(this.panel);
     this.host.setAttribute("aria-hidden", "true");
+
+    if (typeof QuickPanelScroller === "function") {
+      this.resultsScroller = new QuickPanelScroller(this.editor, this);
+      this.resultsScroller.attach(this.list, this.listLayer);
+    }
 
     this.initialized = true;
     return true;
@@ -86,6 +97,7 @@ class QuickPanel {
       selectedIndex: 0,
       options,
       loading: false,
+      loadError: false,
     };
     this.requestGeneration++;
 
@@ -105,6 +117,9 @@ class QuickPanel {
     this.empty.hidden = true;
     this.error.hidden = true;
 
+    if (mode === "pick") this.resultsScroller?.resume();
+    else this.resultsScroller?.suspend();
+
     this.render();
     this.input.focus();
     this.input.setSelectionRange(
@@ -122,6 +137,7 @@ class QuickPanel {
     const options = this.session.options;
     const previousFocus = this.previousFocus;
     this.requestGeneration++;
+    this.resultsScroller?.suspend();
     this.session = null;
     this.previousFocus = null;
     this.hoveredItem = null;
@@ -140,7 +156,7 @@ class QuickPanel {
     // Keep the rendered rows until the fade-out has completed.
     this.closeCleanupTimer = setTimeout(() => {
       this.closeCleanupTimer = null;
-      if (!this.session) this.list.replaceChildren();
+      if (!this.session) this.resultsScroller?.clear();
     }, transitionDuration);
 
     if (restoreFocus) {
@@ -265,6 +281,9 @@ class QuickPanel {
     const session = this.session;
     const provider = session.options.items;
     const generation = ++this.requestGeneration;
+    session.visibleItems = [];
+    session.selectedIndex = 0;
+    session.loadError = false;
     session.loading = typeof provider === "function";
     this.render();
 
@@ -283,8 +302,7 @@ class QuickPanel {
         return;
       session.items = [];
       session.loading = false;
-      this.empty.textContent = "Unable to load results";
-      this.empty.hidden = false;
+      session.loadError = true;
       this.render();
     }
   }
@@ -302,13 +320,16 @@ class QuickPanel {
             ...(Array.isArray(item.keywords) ? item.keywords : [])]
             .filter(Boolean).join(" ").toLowerCase().includes(query);
         });
-    const limit = Math.max(1, this.session.options.renderLimit || filtered.length || 1);
+    const configuredLimit = this.session.options.renderLimit;
+    const limit = configuredLimit
+      ? Math.max(1, Math.floor(configuredLimit))
+      : 0;
     const emptyItem = filtered.length === 0 && typeof this.session.options.emptyItem === "function"
       ? this.session.options.emptyItem(this.session.query)
       : null;
     this.session.visibleItems = emptyItem
       ? [emptyItem]
-      : filtered.slice(0, limit);
+      : limit > 0 ? filtered.slice(0, limit) : filtered;
 
     const selectedId = this.session.options.selectedId;
     const selectedIndex = this.session.visibleItems.findIndex(
@@ -323,7 +344,10 @@ class QuickPanel {
     if (!this.session || this.session.visibleItems.length === 0) return;
     const count = this.session.visibleItems.length;
     const nextIndex = (index + count) % count;
-    if (nextIndex === this.session.selectedIndex) return;
+    if (nextIndex === this.session.selectedIndex) {
+      this.scrollSelectedIntoView();
+      return;
+    }
 
     const previousIndex = this.session.selectedIndex;
     this.hoveredItem?.classList.remove("is-hovered");
@@ -339,11 +363,7 @@ class QuickPanel {
   }
 
   updateSelectionDOM(previousIndex, nextIndex) {
-    const rows = this.list.querySelectorAll(".quick-panel-item");
-    const previousRow = rows[previousIndex];
-    const nextRow = rows[nextIndex];
-    previousRow?.setAttribute("aria-selected", "false");
-    nextRow?.setAttribute("aria-selected", "true");
+    this.resultsScroller?.updateSelection(previousIndex, nextIndex);
   }
 
   moveSelection(offset) {
@@ -352,15 +372,22 @@ class QuickPanel {
   }
 
   scrollSelectedIntoView() {
-    const row = this.list.querySelectorAll(".quick-panel-item")[this.session?.selectedIndex];
-    row?.scrollIntoView?.({ block: "nearest" });
+    if (this.session) {
+      this.resultsScroller?.ensureIndexVisible(this.session.selectedIndex);
+    }
   }
 
   acceptRow(row) {
     if (!this.session || !row) return;
-    const item = this.session.visibleItems.find(
-      (candidate) => String(candidate.id) === row.dataset.itemId,
-    );
+    const itemIndex = Number(row.dataset.itemIndex);
+    const indexedItem = Number.isInteger(itemIndex)
+      ? this.session.visibleItems[itemIndex]
+      : null;
+    const item = indexedItem && String(indexedItem.id) === row.dataset.itemId
+      ? indexedItem
+      : this.session.visibleItems.find(
+          (candidate) => String(candidate.id) === row.dataset.itemId,
+        );
     if (item) this.accept(item);
   }
 
@@ -392,11 +419,11 @@ class QuickPanel {
   render() {
     if (!this.session) return;
 
-    this.list.replaceChildren();
     this.error.hidden = true;
     this.empty.hidden = true;
 
     if (this.session.mode === "input") {
+      this.resultsScroller?.setItems([]);
       const message = this.session.options.message;
       if (message) {
         this.empty.textContent = typeof message === "function"
@@ -406,11 +433,19 @@ class QuickPanel {
       return;
     }
     if (this.session.loading) {
+      this.resultsScroller?.setItems([]);
       this.empty.textContent = "Loading...";
       this.empty.hidden = false;
       return;
     }
+    if (this.session.loadError) {
+      this.resultsScroller?.setItems([]);
+      this.empty.textContent = "Unable to load results";
+      this.empty.hidden = false;
+      return;
+    }
     if (this.session.visibleItems.length === 0) {
+      this.resultsScroller?.setItems([]);
       const emptyMessage = this.session.options.emptyMessage;
       this.empty.textContent = typeof emptyMessage === "function"
         ? emptyMessage(this.session.query)
@@ -419,89 +454,106 @@ class QuickPanel {
       return;
     }
 
-    let previousSection = null;
-    let renderedRows = 0;
-    this.session.visibleItems.forEach((item, index) => {
-      if (item.separatorBefore && renderedRows > 0) {
-        const separator = document.createElement("div");
-        separator.className = "quick-panel-separator";
-        separator.setAttribute("role", "separator");
-        this.list.appendChild(separator);
-      }
-      const section = item.section || null;
-      if (section && section !== previousSection) {
-        const heading = document.createElement("div");
-        heading.className = "quick-panel-group-label";
-        heading.textContent = section;
-        heading.setAttribute("role", "presentation");
-        this.list.appendChild(heading);
-      }
-      previousSection = section;
+    this.resultsScroller?.resume();
+    this.resultsScroller?.setItems(this.session.visibleItems);
+  }
 
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "quick-panel-item";
-      row.dataset.itemId = String(item.id);
-      row.setAttribute("role", "option");
-      row.setAttribute(
-        "aria-selected",
-        String(index === this.session.selectedIndex),
-      );
-      row.disabled = Boolean(item.disabled);
+  createVirtualRow(entry, itemCount) {
+    if (entry.type === "separator") {
+      const separator = document.createElement("div");
+      separator.className = "quick-panel-separator";
+      separator.setAttribute("role", "separator");
+      return separator;
+    }
+    if (entry.type === "section") {
+      const heading = document.createElement("div");
+      heading.className = "quick-panel-group-label";
+      heading.textContent = entry.section;
+      heading.setAttribute("role", "presentation");
+      return heading;
+    }
 
-      if (item.icon) {
-        const icon = document.createElement("i");
-        icon.className = item.icon;
-        icon.setAttribute("aria-hidden", "true");
-        row.appendChild(icon);
-      }
+    const item = this.session.visibleItems[entry.itemIndex];
+    return this.createItemRow(item, entry.itemIndex, itemCount);
+  }
 
-      const content = document.createElement("span");
-      content.className = "quick-panel-item-content";
-      const label = document.createElement("span");
-      label.className = "quick-panel-item-label";
-      label.textContent = this.session.options.preserveLabelCase
-        ? String(item.label)
-        : this.capitalizeLabel(item.label);
-      content.appendChild(label);
+  createItemRow(item, index, itemCount) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "quick-panel-item";
+    row.dataset.itemIndex = String(index);
+    row.dataset.itemId = String(item.id);
+    row.setAttribute("role", "option");
+    row.setAttribute("aria-selected", String(index === this.session.selectedIndex));
+    row.setAttribute("aria-posinset", String(index + 1));
+    row.setAttribute("aria-setsize", String(itemCount));
+    row.disabled = Boolean(item.disabled);
 
-      if (item.description || item.detail) {
-        const description = document.createElement("span");
-        description.className = "quick-panel-item-description";
-        description.textContent = item.description || item.detail;
-        content.appendChild(description);
-      }
-      row.appendChild(content);
+    if (item.icon) {
+      const icon = document.createElement("i");
+      icon.className = item.icon;
+      icon.setAttribute("aria-hidden", "true");
+      row.appendChild(icon);
+    }
 
-      if (item.shortcut) {
-        const shortcut = document.createElement("span");
-        shortcut.className = "quick-panel-item-shortcut";
-        this.appendShortcut(shortcut, item.shortcut);
-        row.appendChild(shortcut);
-      }
+    const content = document.createElement("span");
+    content.className = "quick-panel-item-content";
+    const label = document.createElement("span");
+    label.className = "quick-panel-item-label";
+    label.textContent = this.session.options.preserveLabelCase
+      ? String(item.label)
+      : this.capitalizeLabel(item.label);
+    content.appendChild(label);
 
-      if (
-        item.checked === true ||
-        String(item.id) === String(this.session.options.selectedId)
-      ) {
-        const checkmark = document.createElement("span");
-        checkmark.className = "quick-panel-item-checkmark";
-        checkmark.textContent = "✓";
-        checkmark.setAttribute("aria-label", "Selected");
-        row.appendChild(checkmark);
-      }
+    if (item.description || item.detail) {
+      const description = document.createElement("span");
+      description.className = "quick-panel-item-description";
+      description.textContent = item.description || item.detail;
+      content.appendChild(description);
+    }
+    row.appendChild(content);
 
-      row.addEventListener("mouseenter", () => {
-        this.setSelection(index);
-        this.setHoveredItem(row);
-      });
-      row.addEventListener("mouseleave", () => {
-        this.clearHoveredItem(row);
-      });
+    if (item.shortcut) {
+      const shortcut = document.createElement("span");
+      shortcut.className = "quick-panel-item-shortcut";
+      this.appendShortcut(shortcut, item.shortcut);
+      row.appendChild(shortcut);
+    }
 
-      this.list.appendChild(row);
-      renderedRows++;
-    });
+    if (
+      item.checked === true ||
+      String(item.id) === String(this.session.options.selectedId)
+    ) {
+      const checkmark = document.createElement("span");
+      checkmark.className = "quick-panel-item-checkmark";
+      checkmark.textContent = "✓";
+      checkmark.setAttribute("aria-label", "Selected");
+      row.appendChild(checkmark);
+    }
+
+    return row;
+  }
+
+  handleItemPointerOverEvent(event) {
+    if (!this.session || this.session.mode !== "pick") return false;
+    const row = event.target.closest?.(".quick-panel-list .quick-panel-item");
+    if (!row || !this.list.contains(row) || row.contains(event.relatedTarget)) {
+      return false;
+    }
+    const index = Number(row.dataset.itemIndex);
+    if (Number.isInteger(index)) this.setSelection(index);
+    this.setHoveredItem(row);
+    return true;
+  }
+
+  handleItemPointerOutEvent(event) {
+    if (!this.session || this.session.mode !== "pick") return false;
+    const row = event.target.closest?.(".quick-panel-list .quick-panel-item");
+    if (!row || !this.list.contains(row) || row.contains(event.relatedTarget)) {
+      return false;
+    }
+    this.clearHoveredItem(row);
+    return true;
   }
 
   capitalizeLabel(label) {

@@ -47,7 +47,7 @@ test("Quick Open stays open without a project and shows an explicit message", ()
   assert.equal(panelCalls[0].emptyMessage(""), "Open a project first.");
 });
 
-test("Quick Open filters case-insensitively, ranks filenames, and limits DOM results", async () => {
+test("Quick Open filters case-insensitively and ranks matching filenames", async () => {
   const entries = [
     { name: "index-helper.js", path: "/project/src/index-helper.js", relativePath: "src/index-helper.js" },
     { name: "INDEX.js", path: "/project/src/INDEX.js", relativePath: "src/INDEX.js" },
@@ -59,7 +59,7 @@ test("Quick Open filters case-insensitively, ranks filenames, and limits DOM res
   assert.equal(items[0].icon, "fi fi-brands-js file-icon");
   assert.equal(JSON.stringify(manager.filter(items, "index").map((item) => item.label)),
     JSON.stringify(["src/INDEX.js", "src/index-helper.js", "index/other.js"]));
-  assert.equal(panelCalls[0].renderLimit, 100);
+  assert.equal(panelCalls[0].renderLimit, undefined);
   assert.equal(panelCalls[0].emptyMessage("missing"), "No matching files.");
 });
 

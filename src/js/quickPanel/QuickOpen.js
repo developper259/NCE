@@ -64,7 +64,6 @@ class QuickOpen {
       placeholder: "Search files...",
       items: rootPath ? () => this.getFiles(rootPath) : [],
       reloadOnInput: false,
-      renderLimit: 100,
       preserveLabelCase: true,
       filterItems: (items, query) => this.filter(items, query),
       emptyMessage: (query) => !rootPath ? "Open a project first."
