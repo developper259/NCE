@@ -1,0 +1,134 @@
+const assert = require("node:assert/strict");
+const fsp = require("node:fs").promises;
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+
+const {
+  MAX_WORKSPACE_INDEX_ENTRIES,
+  WORKSPACE_INDEX_CACHE_FILE,
+  WORKSPACE_INDEX_VERSION,
+  WorkspaceIndex,
+} = require("../dist/ts/addon/WorkspaceIndex.js");
+const { NceWorkspaceStorage } = require("../dist/ts/addon/NceWorkspaceStorage.js");
+
+test("WorkspaceIndex builds and reloads metadata-only entries atomically", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-valid-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-outside-"));
+  try {
+    await fsp.mkdir(path.join(root, "src"), { recursive: true });
+    await fsp.writeFile(path.join(root, "src", ".nce"), "ordinary filename\n");
+    await fsp.mkdir(path.join(root, ".hidden"), { recursive: true });
+    await fsp.mkdir(path.join(root, "node_modules", "pkg"), { recursive: true });
+    await fsp.mkdir(path.join(root, ".nce", "cache"), { recursive: true });
+    await fsp.writeFile(path.join(root, ".env"), "SECRET=value\n");
+    await fsp.writeFile(path.join(root, ".nce-file"), "ordinary file\n");
+    await fsp.writeFile(path.join(root, "src", "app.js"), "export const app = true;\n");
+    await fsp.writeFile(path.join(root, ".hidden", "notes.txt"), "hidden\n");
+    await fsp.writeFile(path.join(root, "archive.asar"), "opaque\n");
+    await fsp.writeFile(path.join(root, "node_modules", "pkg", "ignored.js"), "ignored\n");
+    await fsp.writeFile(path.join(root, ".nce", "cache", "internal.json"), "{}\n");
+    await fsp.writeFile(path.join(outside, "secret.txt"), "outside\n");
+    try {
+      await fsp.symlink(path.join(outside, "secret.txt"), path.join(root, "linked.txt"));
+    } catch {
+      // Symlink creation can be disabled by the host; all other index checks still run.
+    }
+
+    const index = new WorkspaceIndex();
+    assert.equal(await index.load(root), null);
+    const snapshot = await index.build(root);
+    assert.ok(snapshot);
+    assert.equal(snapshot.version, WORKSPACE_INDEX_VERSION);
+    assert.equal(snapshot.complete, true);
+    assert.deepEqual(snapshot.entries.map((entry) => entry.relativePath), [
+      ".env",
+      ".hidden/notes.txt",
+      ".nce-file",
+      "src/.nce",
+      "src/app.js",
+    ]);
+    assert.equal(snapshot.entries.every((entry) => entry.type === "file"), true);
+    assert.equal(snapshot.entries.some((entry) => "content" in entry), false);
+    assert.equal(snapshot.entries.find((entry) => entry.name === ".env").extension, "");
+
+    const cachePath = new NceWorkspaceStorage(root).getCachePath(WORKSPACE_INDEX_CACHE_FILE);
+    const persisted = JSON.parse(await fsp.readFile(cachePath, "utf8"));
+    assert.equal(persisted.version, WORKSPACE_INDEX_VERSION);
+    assert.equal(persisted.root, path.resolve(root));
+    assert.deepEqual(persisted.entries, snapshot.entries);
+    assert.deepEqual(
+      (await fsp.readdir(path.dirname(cachePath))).filter((name) => name.endsWith(".tmp")),
+      [],
+    );
+
+    const reloaded = await new WorkspaceIndex().load(root);
+    assert.deepEqual(reloaded.entries, snapshot.entries);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex treats corrupt and incompatible caches as misses", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-corrupt-"));
+  const storage = new NceWorkspaceStorage(root);
+  const cachePath = storage.getCachePath(WORKSPACE_INDEX_CACHE_FILE);
+  try {
+    await fsp.mkdir(path.dirname(cachePath), { recursive: true });
+    await fsp.writeFile(cachePath, "{broken json");
+    assert.equal(await new WorkspaceIndex().load(root), null);
+
+    await fsp.writeFile(cachePath, JSON.stringify({
+      version: WORKSPACE_INDEX_VERSION + 1,
+      root: path.resolve(root),
+      generatedAt: Date.now(),
+      complete: true,
+      entries: [],
+    }));
+    assert.equal(await new WorkspaceIndex().load(root), null);
+
+    await fsp.writeFile(cachePath, JSON.stringify({
+      version: WORKSPACE_INDEX_VERSION,
+      root: path.resolve(root),
+      generatedAt: Date.now(),
+      complete: true,
+      entries: [{
+        relativePath: "../outside.txt",
+        name: "outside.txt",
+        extension: ".txt",
+        size: 1,
+        mtimeMs: 1,
+        type: "file",
+      }],
+    }));
+    assert.equal(await new WorkspaceIndex().load(root), null);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex persists empty and large workspaces within its entry bound", async () => {
+  const emptyRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-empty-"));
+  const largeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-large-"));
+  try {
+    const empty = await new WorkspaceIndex().build(emptyRoot);
+    assert.deepEqual(empty.entries, []);
+    assert.deepEqual((await new WorkspaceIndex().load(emptyRoot)).entries, []);
+
+    const directory = path.join(largeRoot, "files");
+    await fsp.mkdir(directory);
+    await Promise.all(Array.from({ length: 1200 }, (_, index) =>
+      fsp.writeFile(path.join(directory, `file-${index}.js`), `const value = ${index};\n`),
+    ));
+    const large = await new WorkspaceIndex().build(largeRoot);
+    assert.equal(large.entries.length, 1200);
+    assert.ok(large.entries.length < MAX_WORKSPACE_INDEX_ENTRIES);
+    assert.equal(large.entries[0].relativePath, "files/file-0.js");
+    assert.equal(large.entries.at(-1).relativePath, "files/file-999.js");
+    assert.equal((await new WorkspaceIndex().load(largeRoot)).entries.length, 1200);
+  } finally {
+    await fsp.rm(emptyRoot, { recursive: true, force: true });
+    await fsp.rm(largeRoot, { recursive: true, force: true });
+  }
+});

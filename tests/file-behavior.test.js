@@ -149,7 +149,9 @@ test("temporary file fixtures support UTF-8, binary, and invalid UTF-8 cases", a
 test("FileManager and WorkspaceSearch source retain binary and ignored-directory guards", () => {
   const fileManager = fs.readFileSync(path.join(__dirname, "../src/ts/addon/FileManager.ts"), "utf8");
   const workspaceSearch = fs.readFileSync(path.join(__dirname, "../src/ts/addon/WorkspaceSearch.ts"), "utf8");
+  const workspaceIndex = fs.readFileSync(path.join(__dirname, "../src/ts/addon/WorkspaceIndex.ts"), "utf8");
   assert.match(fileManager, /TextDecoder\("utf-8", \{ fatal: true \}\)/);
   assert.match(fileManager, /BINARY_FILE/);
-  for (const ignored of ["node_modules", "dist", "coverage"]) assert.match(workspaceSearch, new RegExp(`\\"${ignored}\\"`));
+  assert.match(workspaceSearch, /WORKSPACE_INDEX_IGNORED_DIRECTORIES/);
+  for (const ignored of ["node_modules", "dist", "coverage"]) assert.match(workspaceIndex, new RegExp(`\\"${ignored}\\"`));
 });

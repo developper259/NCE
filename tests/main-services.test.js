@@ -767,6 +767,7 @@ test("Quick Open project listing is recursive, relative, and uses workspace igno
       ),
       false,
     );
+    await search.workspaceIndex.flush(root);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }
@@ -811,6 +812,14 @@ test("Quick Open prunes hidden directories and lists only NCE-openable files", a
       "src/normal/foo.js",
       "src/notes.custom",
     ]);
+    await search.workspaceIndex.flush(root);
+    const index = await search.workspaceIndex.load(root);
+    assert.ok(index.entries.some((entry) => entry.relativePath === ".env"));
+    assert.ok(index.entries.some((entry) => entry.relativePath === ".benchmark/a.js"));
+    assert.ok(index.entries.some((entry) => entry.relativePath === "src/components/.hidden/bar.js"));
+    assert.equal(index.entries.some((entry) => entry.relativePath.startsWith(".nce/")), false);
+    assert.equal(index.entries.some((entry) => entry.relativePath.startsWith(".git/")), false);
+    assert.equal(index.entries.some((entry) => entry.relativePath.endsWith("archive.asar")), false);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }

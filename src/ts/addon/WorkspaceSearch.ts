@@ -4,6 +4,10 @@ import path from "path";
 import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 import {
+  WORKSPACE_INDEX_IGNORED_DIRECTORIES,
+  WorkspaceIndex,
+} from "./WorkspaceIndex";
+import {
   BINARY_SAMPLE_SIZE,
   isOpenableImagePath,
   isOpenableFileSample,
@@ -133,26 +137,12 @@ interface ProjectFilesOptions {
 
 export class WorkspaceSearch {
   window: Window;
+  readonly workspaceIndex: WorkspaceIndex;
   private readonly cancelledRequests = new Set<string>();
   private readonly searchSessions = new Map<string, SearchSession>();
   private readonly cancelledSearchSessions = new Map<string, number>();
   private readonly maxSearchSessions = 8;
   private readonly searchSessionTtlMs = 5 * 60 * 1000;
-
-  private readonly ignoredDirectories = new Set([
-    ".git",
-    "node_modules",
-    "dist",
-    "build",
-    "out",
-    "coverage",
-    "temp",
-    "tmp",
-    ".next",
-    ".cache",
-    ".turbo",
-    ".nce",
-  ]);
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 50000;
@@ -191,6 +181,7 @@ export class WorkspaceSearch {
 
   constructor(window: Window) {
     this.window = window;
+    this.workspaceIndex = new WorkspaceIndex();
   }
 
   private async ensureWorkspaceStorage(rootPath: string): Promise<void> {
@@ -313,7 +304,7 @@ export class WorkspaceSearch {
         const absolutePath = path.join(directory, child.name);
         if (child.isDirectory()) {
           if (
-            this.ignoredDirectories.has(child.name) ||
+            WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(child.name) ||
             (ignoreHiddenDirectories && child.name.startsWith("."))
           ) continue;
           await walk(absolutePath);
@@ -335,19 +326,29 @@ export class WorkspaceSearch {
       }
     };
     await walk(root);
+    this.workspaceIndex.scheduleBuild(root);
     return { success: true, entries };
   }
 
-  private async isOpenableFile(filePath: string): Promise<boolean> {
+  private async isOpenableFile(
+    filePath: string,
+    knownSize?: number,
+  ): Promise<boolean> {
     let handle;
     try {
-      const stats = await fs.stat(filePath);
-      if (!stats.isFile()) return false;
-      if (isOpenableImagePath(filePath, stats.size)) return true;
-      const sample = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, stats.size));
+      let size: number;
+      if (typeof knownSize === "number" && Number.isFinite(knownSize)) {
+        size = knownSize;
+      } else {
+        const stats = await fs.stat(filePath);
+        if (!stats.isFile()) return false;
+        size = stats.size;
+      }
+      if (isOpenableImagePath(filePath, size)) return true;
+      const sample = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, size));
       handle = await fs.open(filePath, "r");
       const { bytesRead } = await handle.read(sample, 0, sample.length, 0);
-      return isOpenableFileSample(filePath, stats.size, sample.subarray(0, bytesRead));
+      return isOpenableFileSample(filePath, size, sample.subarray(0, bytesRead));
     } catch {
       return false;
     } finally {
@@ -441,7 +442,7 @@ export class WorkspaceSearch {
           path.relative(root, absolutePath),
         );
         if (child.isDirectory()) {
-          if (this.ignoredDirectories.has(child.name)) continue;
+          if (WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(child.name)) continue;
           directories += 1;
           entries.push({
             name: child.name,
@@ -1024,7 +1025,7 @@ export class WorkspaceSearch {
 
         if (entry.isDirectory()) {
           if (
-            this.ignoredDirectories.has(entry.name) ||
+            WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(entry.name) ||
             (options.ignoreHiddenDirectories && entry.name.startsWith("."))
           ) {
             continue;
