@@ -11,6 +11,7 @@ class tabManager {
     this.tabElements = new Map();
     this.lastVisibleTab = null;
     this.tabScroller = null;
+    this.activeTabListeners = new Set();
   }
 
   initScroller() {
@@ -56,6 +57,22 @@ class tabManager {
 
   getFileByPath(path) {
     return this.files.find((file) => NCEPath.equals(file.path, path));
+  }
+
+  onActiveTabChange(listener) {
+    if (typeof listener !== "function") return () => {};
+    this.activeTabListeners.add(listener);
+    return () => this.activeTabListeners.delete(listener);
+  }
+
+  notifyActiveTabChange(tab) {
+    for (const listener of this.activeTabListeners) {
+      try {
+        listener(tab);
+      } catch (error) {
+        console.error("Error notifying active tab listener:", error);
+      }
+    }
   }
 
   removeFileByID(id) {
@@ -215,6 +232,7 @@ class tabManager {
       activeFile: this.activeFile,
     });
     if (!isSetFocusFile) this.editor.refreshAll();
+    return lastAddedFile;
   }
 
   async prepareForQuit() {
@@ -467,6 +485,7 @@ class tabManager {
       this.editor.searchController?.saveActiveTabState?.(previousFile);
     }
     this.activeTab = tab;
+    this.notifyActiveTabChange(tab);
     if (tab.type !== TAB_TYPES.FILE) {
       this.editor.fileExplorer?.setActiveFile?.(
         ["picture", "markdown"].includes(tab.type) ? tab.path : null,

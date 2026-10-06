@@ -49,6 +49,7 @@ class SearchSidebar extends Sidebar {
     this.activeRequestId = null;
     this.isReplacing = false;
     this.replaceExpanded = false;
+    this.resultOpenController = null;
   }
 
   render() {
@@ -209,6 +210,7 @@ class SearchSidebar extends Sidebar {
     this.resultsScroller.attach(results, this.resultsLayer);
 
     const scheduleSearch = () => {
+      this.cancelResultNavigation();
       this.query = input.value;
       this.include = include.value;
       this.exclude = exclude.value;
@@ -355,6 +357,7 @@ class SearchSidebar extends Sidebar {
   }
 
   async runSearch() {
+    this.cancelResultNavigation();
     if (!this.isOpen) {
       return;
     }
@@ -431,6 +434,7 @@ class SearchSidebar extends Sidebar {
   }
 
   clearResults() {
+    this.cancelResultNavigation();
     this.results = [];
     this.totalMatches = 0;
     this.filesSearched = 0;
@@ -677,24 +681,41 @@ class SearchSidebar extends Sidebar {
     }
   }
 
+  cancelResultNavigation() {
+    this.resultOpenController?.abort();
+    this.resultOpenController = null;
+  }
+
   async openResult(result) {
     if (!result?.path) {
       return;
     }
 
+    this.cancelResultNavigation();
+    const controller = new AbortController();
+    this.resultOpenController = controller;
+    const tabManager = this.editor.tabManager;
+    let unsubscribeFocus = null;
     try {
-      this.editor.tabManager.openFileWithPath(result.path);
+      const tab = await tabManager.openFileWithPath(result.path);
+      if (!tab || controller.signal.aborted || tabManager.activeTab !== tab) return;
+      const file = tab.type === "file" ? tab : tab.textTab;
+      if (!file) return;
 
-      for (let i = 0; i < 30; i++) {
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-
-        if (
-          this.editor.tabManager.activeFile?.path === result.path &&
-          this.editor.lineController.lines.length > 0
-        ) {
-          break;
-        }
-      }
+      unsubscribeFocus = tabManager.onActiveTabChange?.((activeTab) => {
+        if (activeTab !== tab) controller.abort();
+      });
+      const lineReady = await this.editor.fileLoader.waitForLineLoaded(
+        file,
+        result.line,
+        { signal: controller.signal },
+      );
+      if (
+        !lineReady ||
+        controller.signal.aborted ||
+        this.resultOpenController !== controller ||
+        tabManager.activeTab !== tab
+      ) return;
 
       const documentIndex = Math.max(0, result.line - 1);
       const displayIndex =
@@ -710,7 +731,12 @@ class SearchSidebar extends Sidebar {
 
       this.editor.cursorController.updateCaretPosition();
     } catch (error) {
-      console.error("Error opening search result:", error);
+      if (error?.name !== "AbortError")
+        console.error("Error opening search result:", error);
+    } finally {
+      unsubscribeFocus?.();
+      if (this.resultOpenController === controller)
+        this.resultOpenController = null;
     }
   }
 
@@ -744,6 +770,7 @@ class SearchSidebar extends Sidebar {
 
   onClose() {
     clearTimeout(this.searchTimer);
+    this.cancelResultNavigation();
     this.resultsScroller.suspend();
   }
 }

@@ -15,6 +15,7 @@ class FileLoader {
         status: "idle", isLoading: false, isFullyLoaded: false,
         expectedTotalLines: 0, loadedLineCount: 0, timer: null,
         progressRefreshFrame: null, largeFileMode: false, size: 0, filePath,
+        lineWaiters: new Set(),
       });
     }
     return this.loadingStates.get(filePath);
@@ -33,8 +34,74 @@ class FileLoader {
     state.isLoading = status === "loading";
     state.isFullyLoaded = status === "loaded";
     state.error = error;
+    this.notifyLineWaiters(state);
     if (status !== "loading") state.resolve?.();
     this.editor.bottomBar?.refreshFileStatus?.();
+  }
+
+  settleLineWaiter(state, waiter, { value, error }) {
+    state.lineWaiters?.delete(waiter);
+    if (waiter.signal && waiter.abortHandler)
+      waiter.signal.removeEventListener("abort", waiter.abortHandler);
+    if (error) waiter.reject(error);
+    else waiter.resolve(value);
+  }
+
+  notifyLineWaiters(state) {
+    if (!state?.lineWaiters?.size) return;
+    for (const waiter of state.lineWaiters) {
+      if (state.loadedLineCount > waiter.lineIndex) {
+        this.settleLineWaiter(state, waiter, { value: true });
+      } else if (state.status === "loaded") {
+        this.settleLineWaiter(state, waiter, { value: false });
+      } else if (state.status === "failed" || state.status === "cancelled") {
+        this.settleLineWaiter(state, waiter, {
+          error: state.error || Object.assign(new Error("File loading cancelled"), {
+            name: state.status === "cancelled" ? "AbortError" : "Error",
+          }),
+        });
+      }
+    }
+  }
+
+  waitForLineLoaded(file, lineNumber, { signal } = {}) {
+    const lineIndex = Number.isFinite(Number(lineNumber))
+      ? Math.max(0, Math.floor(Number(lineNumber)) - 1)
+      : 0;
+    const state = file?.loadingState || this.loadingStates.get(file?.path);
+    if (state?.loadedLineCount > lineIndex) return Promise.resolve(true);
+    if (!state) return Promise.resolve(lineIndex < (file?.lines?.length || 0));
+    if (state.status === "loaded") return Promise.resolve(false);
+    if (state.status === "failed")
+      return Promise.reject(state.error || new Error("File loading failed"));
+    if (state.status === "cancelled") {
+      return Promise.reject(
+        Object.assign(new Error("File loading cancelled"), { name: "AbortError" }),
+      );
+    }
+    if (state.status !== "loading")
+      return Promise.resolve(lineIndex < (file?.lines?.length || 0));
+    if (signal?.aborted) {
+      return Promise.reject(
+        Object.assign(new Error("File navigation cancelled"), { name: "AbortError" }),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter = { lineIndex, resolve, reject, signal, abortHandler: null };
+      if (!state.lineWaiters) state.lineWaiters = new Set();
+      if (signal) {
+        waiter.abortHandler = () =>
+          this.settleLineWaiter(state, waiter, {
+            error: Object.assign(new Error("File navigation cancelled"), {
+              name: "AbortError",
+            }),
+          });
+        signal.addEventListener("abort", waiter.abortHandler, { once: true });
+      }
+      state.lineWaiters.add(waiter);
+      this.notifyLineWaiters(state);
+    });
   }
 
   async request(promise) {
@@ -156,6 +223,7 @@ class FileLoader {
           file.lineEndings[start + index] = response.lineEndings[index];
       }
       state.loadedLineCount = end;
+      this.notifyLineWaiters(state);
       this.scheduleLoadProgressRefresh(file, state);
       next(end);
     } catch (error) {

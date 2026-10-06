@@ -11,7 +11,10 @@ const [TAB_TYPES, Tab, SettingsTab, FileNode] = loadGlobal(
 );
 const NCEPath = loadGlobal('src/js/core/Path.js', 'NCEPath');
 const FileLoader = loadGlobal('src/js/addon/FileLoader.js', 'FileLoader', { LineNode, window: {} });
-const TabManager = loadGlobal('src/js/manager/TabManager.js', 'tabManager', { FileNode, SettingsTab, TAB_TYPES, NCEPath, getElement: () => null, Events: {} });
+const TabManager = loadGlobal('src/js/manager/TabManager.js', 'tabManager', {
+  FileNode, SettingsTab, TAB_TYPES, NCEPath, getElement: () => null, Events: {},
+  PictureView: { isSupportedPath: () => false },
+});
 const Editor = loadGlobal('src/js/main/Editor.js', 'Editor', {
   document: { addEventListener() {} }, window: {},
   SETTINGS_GET: () => false, SETTINGS_SET: async () => true,
@@ -260,6 +263,40 @@ test('Agent test runs flush a coalesced Auto Save before checking workspace file
   const dirtyPaths = await runner.dirtyPaths({});
   assert.equal(dirtyPaths.length, 0);
   assert.equal(flushes, 1);
+});
+
+test('openFileWithPath resolves after the selected file has its initial content', async () => {
+  const editor = setup();
+  editor.api = {
+    initializeFile: async () => ({
+      success: true,
+      totalLines: 1,
+      size: 4,
+      maxLineLength: 4,
+      incrementalEligible: true,
+    }),
+    getFileChunk: async () => ({ success: true, lines: ['text'] }),
+  };
+
+  const opened = await editor.tabManager.openFileWithPath('/workspace/file.js');
+
+  assert.equal(opened, editor.tabManager.activeTab);
+  assert.equal(opened.path, '/workspace/file.js');
+  assert.equal(opened.lines[0].getText(), 'text');
+});
+
+test('TabManager notifies active-tab waiters and supports listener cleanup', async () => {
+  const editor = setup();
+  const seen = [];
+  const unsubscribe = editor.tabManager.onActiveTabChange((tab) => seen.push(tab));
+  const first = new SettingsTab(20);
+  const second = new SettingsTab(21);
+
+  await editor.tabManager.setFocusTab(first);
+  unsubscribe();
+  await editor.tabManager.setFocusTab(second);
+
+  assert.deepEqual(seen, [first]);
 });
 
 test('deletedFromDisk takes priority over Auto Save for visual dirty state', () => {
