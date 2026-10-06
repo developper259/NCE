@@ -34,6 +34,8 @@ export class Watcher {
   private reportedWatcherErrors: Set<string> = new Set();
 
   onChange: ((filePath: string) => void) | null = null;
+  onWorkspaceEvent: ((event: string, filePath: string, rootPath: string) => void) | null = null;
+  onWatcherStop: ((rootPath: string) => void | Promise<void>) | null = null;
 
   constructor(window: BrowserWindow) {
     this.window = window;
@@ -108,6 +110,7 @@ export class Watcher {
       if (event === "change" && this.consumeOwnWrite(normalizedPath)) {
         return;
       }
+      this.onWorkspaceEvent?.(event, filePath, this.watchedPath);
 
       const dirPath = path.dirname(filePath);
 
@@ -299,6 +302,7 @@ export class Watcher {
   }
 
   async stopWatching(): Promise<void> {
+    const previousRoot = this.watchedPath;
     this.watchGeneration++;
     this.restarting = false;
     this.usePolling = false;
@@ -320,6 +324,13 @@ export class Watcher {
     this.watcher = null;
     this.watchedPath = "";
     if (watcher) await watcher.close();
+    if (previousRoot) {
+      try {
+        await this.onWatcherStop?.(previousRoot);
+      } catch (error) {
+        console.error("[Watcher] failed to flush workspace index:", error);
+      }
+    }
   }
 
   isWatching(): boolean {

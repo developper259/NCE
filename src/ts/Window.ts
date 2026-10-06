@@ -115,6 +115,14 @@ export class Window {
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
     else this.contextMenu.window = this.window;
     if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
+    this.watcher.onWorkspaceEvent = (event, filePath, rootPath) =>
+      this.workspaceSearch?.workspaceIndex.handleWatcherEvent(
+        rootPath,
+        event,
+        filePath,
+      );
+    this.watcher.onWatcherStop = (rootPath) =>
+      this.workspaceSearch?.workspaceIndex.flushEvents(rootPath);
     if (!this.agentApprovalManager)
       this.agentApprovalManager = new AgentApprovalManager(this);
     if (!this.agentProcessRunner)

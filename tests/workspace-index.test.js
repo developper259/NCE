@@ -10,6 +10,7 @@ const {
   WORKSPACE_INDEX_VERSION,
   WorkspaceIndex,
 } = require("../dist/ts/addon/WorkspaceIndex.js");
+const { isOpenableFileSample } = require("../dist/ts/addon/OpenableFile.js");
 const { NceWorkspaceStorage } = require("../dist/ts/addon/NceWorkspaceStorage.js");
 
 test("WorkspaceIndex builds and reloads metadata-only entries atomically", async () => {
@@ -130,5 +131,74 @@ test("WorkspaceIndex persists empty and large workspaces within its entry bound"
   } finally {
     await fsp.rm(emptyRoot, { recursive: true, force: true });
     await fsp.rm(largeRoot, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex coalesces adds, non-openable changes, deletes, directory deletes, and rename pairs", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-events-"));
+  const write = async (relativePath, content) => {
+    const filePath = path.join(root, relativePath);
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.writeFile(filePath, content);
+    return filePath;
+  };
+  try {
+    const changedPath = await write("src/change.js", "const original = true;\n");
+    const removedPath = await write("src/remove.js", "remove me\n");
+    await write("src/nested/child.js", "nested\n");
+    const oldName = await write("old-name.js", "rename me\n");
+    const newName = path.join(root, "new-name.js");
+    const index = new WorkspaceIndex();
+    await index.build(root);
+    const before = index.getDiagnostics();
+
+    const addedPath = await write("src/added.js", "new file\n");
+    index.handleWatcherEvent(root, "add", addedPath);
+    const binarySample = Buffer.from([0, 1, 2, 3, 4, 5]);
+    await fsp.writeFile(changedPath, binarySample);
+    assert.equal(isOpenableFileSample(changedPath, binarySample.length, binarySample), false);
+    index.handleWatcherEvent(root, "change", changedPath);
+    index.handleWatcherEvent(root, "change", changedPath);
+    await fsp.unlink(removedPath);
+    index.handleWatcherEvent(root, "unlink", removedPath);
+    await fsp.rename(oldName, newName);
+    index.handleWatcherEvent(root, "unlink", oldName);
+    index.handleWatcherEvent(root, "add", newName);
+    await fsp.rm(path.join(root, "src/nested"), { recursive: true });
+    index.handleWatcherEvent(root, "unlinkDir", path.join(root, "src/nested"));
+
+    await index.flush(root);
+    const after = await index.load(root);
+    assert.deepEqual(after.entries.map((entry) => entry.relativePath), [
+      "new-name.js",
+      "src/added.js",
+      "src/change.js",
+    ]);
+    assert.equal(after.entries.find((entry) => entry.relativePath === "src/change.js").size, 6);
+    const diagnostics = index.getDiagnostics();
+    assert.equal(diagnostics.persistedWrites - before.persistedWrites, 1);
+    assert.equal(diagnostics.batches - before.batches, 1);
+    assert.equal(diagnostics.received - before.received, 7);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex marks ambiguous watcher events stale and reconciles in the background", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-reconcile-"));
+  try {
+    await fsp.writeFile(path.join(root, "before.js"), "before\n");
+    const index = new WorkspaceIndex();
+    await index.build(root);
+    await fsp.rename(path.join(root, "before.js"), path.join(root, "after.js"));
+    index.handleWatcherEvent(root, "rename", path.join(root, "before.js"));
+    assert.equal(await index.load(root), null);
+
+    await index.flush(root);
+    const snapshot = await index.load(root);
+    assert.deepEqual(snapshot.entries.map((entry) => entry.relativePath), ["after.js"]);
+    assert.equal(index.getDiagnostics().reconciliations, 1);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });

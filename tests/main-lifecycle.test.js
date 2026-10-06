@@ -343,6 +343,8 @@ test("watcher batches events, matches one committed own save and cleans up timer
     cancelled = 0;
   const sent = [],
     invalidated = [];
+  const indexedEvents = [],
+    stoppedRoots = [];
   const { Watcher } = loadMain(
     "dist/ts/addon/Watcher.js",
     {
@@ -365,6 +367,8 @@ test("watcher batches events, matches one committed own save and cleans up timer
     webContents: { send: (...args) => sent.push(args) },
   });
   watcher.onChange = (p) => invalidated.push(p);
+  watcher.onWorkspaceEvent = (...args) => indexedEvents.push(args);
+  watcher.onWatcherStop = (rootPath) => stoppedRoots.push(rootPath);
   await watcher.startWatching("/temporary");
   source.emit("all", "add", "/temporary/a");
   source.emit("all", "change", "/temporary/a");
@@ -376,10 +380,14 @@ test("watcher batches events, matches one committed own save and cleans up timer
   assert.equal(sent.length, 1);
   assert.equal(sent[0][1].length, 2);
   assert.equal(invalidated.length, 4);
+  assert.equal(indexedEvents.length, 3);
+  assert.equal(indexedEvents.every(([, , rootPath]) => rootPath === "/temporary"), true);
   source.emit("all", "change", "/temporary/saved");
   timer();
   assert.equal(sent.length, 2);
+  assert.equal(indexedEvents.length, 4);
   await watcher.stopWatching();
+  assert.deepEqual(stoppedRoots, ["/temporary"]);
   assert.equal(closed, 1);
   assert.equal(watcher.isWatching(), false);
   assert.ok(cancelled);
@@ -627,15 +635,19 @@ test("a pending fallback from workspace A cannot replace workspace B", async () 
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
   }, { process: { platform: "linux" }, console: { warn() {}, error() {} } });
   const watcher = new Watcher({ webContents: { send() {} } });
+  const stoppedRoots = [];
+  watcher.onWatcherStop = (rootPath) => stoppedRoots.push(rootPath);
   await watcher.startWatching("/workspace-a");
   nativeSources[0].emit("error", { code: "UNKNOWN" });
   await watcher.startWatching("/workspace-b");
+  assert.deepEqual(stoppedRoots, ["/workspace-a"]);
   assert.equal(watcher.getWatchedPath(), "/workspace-b");
   releaseClose();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(nativeSources.length, 2);
   assert.equal(watcher.getWatchedPath(), "/workspace-b");
   await watcher.stopWatching();
+  assert.deepEqual(stoppedRoots, ["/workspace-a", "/workspace-b"]);
 });
 
 test("case-only rename rolls its temporary path back when commit fails", async () => {
