@@ -190,6 +190,28 @@ test("workspace search renders live batches, progress and ignores stale sessions
   assert.equal(sidebar.isSearching, true);
   assert.match(sidebar.getSummaryText(), /3 files scanned/);
   firstListener({
+    type: "reset",
+    sessionId: firstSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    totalMatches: 0,
+    filesSearched: 0,
+    scannedFiles: 0,
+  });
+  assert.equal(sidebar.results.length, 0);
+  assert.equal(sidebar.totalMatches, 0);
+  assert.equal(sidebar.filesSearched, 0);
+  assert.equal(sidebar.filesScanned, 0);
+  assert.equal(sidebar.isSearching, true);
+  firstListener({
+    type: "batch",
+    sessionId: firstSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    results: [{ path: "/workspace/rechecked.js", relativePath: "rechecked.js", name: "rechecked.js", line: 1, preview: "current", matchStart: 0, matchLength: 7 }],
+    totalMatches: 1,
+    filesSearched: 1,
+    scannedFiles: 4,
+  });
+  firstListener({
     type: "complete",
     sessionId: firstSession,
     workspaceGeneration: sidebar.workspaceGeneration,
@@ -198,6 +220,7 @@ test("workspace search renders live batches, progress and ignores stale sessions
     scannedFiles: 5,
   });
   await firstRun;
+  assert.equal(sidebar.results[0].name, "rechecked.js");
   assert.equal(sidebar.hasMoreResults, true);
   assert.equal(sidebar.nextResultsOffset, 1);
 

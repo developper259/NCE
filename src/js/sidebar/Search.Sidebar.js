@@ -488,6 +488,18 @@ class SearchSidebar extends Sidebar {
       message.workspaceGeneration !== this.workspaceGeneration
     ) return;
 
+    if (message.type === "reset") {
+      this.results = [];
+      this.totalMatches = 0;
+      this.filesSearched = 0;
+      this.filesScanned = 0;
+      this.nextResultsOffset = 0;
+      this.hasMoreResults = false;
+      this.resetResultsScroll = true;
+      this.refresh();
+      return;
+    }
+
     if (message.type === "batch") {
       if (Array.isArray(message.results) && message.results.length) {
         this.results = this.results.concat(message.results);

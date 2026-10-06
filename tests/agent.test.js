@@ -6,6 +6,10 @@ const os = require("node:os");
 const { createAgent } = require("./helpers/agent-runtime");
 const { FileManager } = require("../dist/ts/addon/FileManager");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch");
+async function flushSearchIndex(search, root) {
+  await search.workspaceIndex.flush(root);
+}
+
 async function setup(fetchMock) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-agent-"));
   const manager = new FileManager({});
@@ -120,7 +124,7 @@ async function setup(fetchMock) {
       getFolderContent: manager.getFolderContent.bind(manager),
     },
   };
-  return { root, editor, agent: createAgent(editor, fetchMock), manager };
+  return { root, editor, agent: createAgent(editor, fetchMock), manager, search };
 }
 
 async function setupEditable(content, { open = true, saved = true } = {}) {
@@ -668,7 +672,7 @@ test("internal test logs are readable explicitly but invisible to project state"
 });
 
 test("delete_file removes only safe workspace files and refreshes project caches", async () => {
-  const { root, agent, editor } = await setup();
+  const { root, agent, editor, search } = await setup();
   const outside = await fs.mkdtemp(
     path.join(os.tmpdir(), "nce-delete-outside-"),
   );
@@ -751,6 +755,7 @@ test("delete_file removes only safe workspace files and refreshes project caches
       "outside",
     );
   } finally {
+    await flushSearchIndex(search, root);
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(outside, { recursive: true, force: true });
   }
@@ -842,7 +847,7 @@ test("RunChangeTracker invalidates stale review gates when the change journal mo
 });
 
 test("Agent supports a real end-to-end workflow chain from inspection to review and completion", async () => {
-  const { root, agent } = await setup();
+  const { root, agent, search } = await setup();
   try {
     await fs.writeFile(path.join(root, "alpha.txt"), "alpha\n", "utf8");
     await fs.writeFile(path.join(root, "beta.txt"), "beta\n", "utf8");
@@ -858,14 +863,14 @@ test("Agent supports a real end-to-end workflow chain from inspection to review 
     });
     assert.equal(projectMap.success, true);
 
-    const search = await agent.executeToolCall({
+    const searchResult = await agent.executeToolCall({
       id: "scenario-search",
       function: {
         name: "search_code",
         arguments: JSON.stringify({ query: "alpha", offset: 0, limit: 10 }),
       },
     });
-    assert.equal(search.success, true);
+    assert.equal(searchResult.success, true);
 
     const read = await agent.executeToolCall({
       id: "scenario-read",
@@ -941,6 +946,7 @@ test("Agent supports a real end-to-end workflow chain from inspection to review 
     });
     assert.equal(complete.success, true);
   } finally {
+    await flushSearchIndex(search, root);
     await fs.rm(root, { recursive: true, force: true });
   }
 });
@@ -1137,17 +1143,17 @@ test("ResponseBudgetEstimator provides a bounded local estimate without extra AI
 });
 
 test("Agent public project, search, read and completion tools remain functional", async () => {
-  const { root, agent } = await setup();
+  const { root, agent, search } = await setup();
   try {
     await fs.writeFile(path.join(root, "sample.js"), "const needle = true;\n");
     const map = await agent.getTool("get_project_map").execute({});
     assert.equal(map.success, true);
     assert.match(map.text, /sample\.js/);
 
-    const search = await agent
+    const searchResult = await agent
       .getTool("search_code")
       .execute({ query: "needle" });
-    assert.equal(search.totalMatches, 1);
+    assert.equal(searchResult.totalMatches, 1);
     const read = await agent
       .getTool("read_file")
       .execute({ path: "sample.js" });
@@ -1159,6 +1165,7 @@ test("Agent public project, search, read and completion tools remain functional"
       .execute({ summary: "done" });
     assert.equal(completion.taskCompleteRequested, true);
   } finally {
+    await flushSearchIndex(search, root);
     await fs.rm(root, { recursive: true, force: true });
   }
 });

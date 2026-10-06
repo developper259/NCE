@@ -28,6 +28,7 @@ interface SearchOptions {
   paths?: string[];
   replaceFirst?: boolean;
   ignoreHiddenDirectories?: boolean;
+  forceFilesystemScan?: boolean;
 }
 
 interface SearchResult {
@@ -53,7 +54,7 @@ interface SearchResponse {
 interface SearchStreamMessage {
   sessionId: string;
   workspaceGeneration: number;
-  type: "batch" | "progress" | "complete" | "cancelled" | "error";
+  type: "batch" | "progress" | "complete" | "cancelled" | "error" | "reset";
   results?: SearchResult[];
   totalMatches: number;
   filesSearched: number;
@@ -73,7 +74,9 @@ interface SearchSession {
   totalMatches: number;
   filesSearched: number;
   scannedFiles: number;
+  candidateFiles: number;
   directoriesVisited: number;
+  usedIndex: boolean;
   filesRead: number;
   complete: boolean;
   cancelled: boolean;
@@ -785,6 +788,8 @@ export class WorkspaceSearch {
   getSearchSessionStats(sessionId?: string): {
     activeSessions: number;
     directoriesVisited?: number;
+    candidateFiles?: number;
+    usedIndex?: boolean;
     filesRead?: number;
     scannedFiles?: number;
     resultCount?: number;
@@ -796,6 +801,8 @@ export class WorkspaceSearch {
       activeSessions: this.searchSessions.size,
       ...(session ? {
         directoriesVisited: session.directoriesVisited,
+        candidateFiles: session.candidateFiles,
+        usedIndex: session.usedIndex,
         filesRead: session.filesRead,
         scannedFiles: session.scannedFiles,
         resultCount: session.results.length,
@@ -859,7 +866,9 @@ export class WorkspaceSearch {
         totalMatches: 0,
         filesSearched: 0,
         scannedFiles: 0,
+        candidateFiles: 0,
         directoriesVisited: 0,
+        usedIndex: false,
         filesRead: 0,
         complete: false,
         cancelled: false,
@@ -1013,198 +1022,203 @@ export class WorkspaceSearch {
     let totalMatches = 0;
 
     let filesSearched = 0;
-
-    const walk = async (directory: string): Promise<void> => {
-      if (session) session.directoriesVisited++;
-      if (options.requestId && this.cancelledRequests.has(options.requestId))
-        return;
-      if (session?.cancelled) return;
-      if (totalMatches >= maxMatches) {
-        return;
+    let indexSnapshot = null;
+    if (!options.forceFilesystemScan) {
+      indexSnapshot = await this.workspaceIndex.load(root);
+      if (indexSnapshot && this.workspaceIndex.requiresReconcile(root)) {
+        if (this.workspaceIndex.consumeNeedsReconcile(root))
+          this.workspaceIndex.scheduleReconcile(root);
+        indexSnapshot = null;
       }
+    }
+    const indexRevision = indexSnapshot
+      ? this.workspaceIndex.getRevision(root)
+      : 0;
 
-      let entries;
+    const isSearchCancelled = (): boolean =>
+      Boolean(
+        session?.cancelled ||
+        (options.requestId && this.cancelledRequests.has(options.requestId)),
+      );
 
+    const scanCandidate = async (
+      fullPath: string,
+      relativePath: string,
+      name: string,
+    ): Promise<void> => {
+      if (isSearchCancelled() || totalMatches >= maxMatches) return;
       try {
-        entries = await fs.readdir(directory, {
-          withFileTypes: true,
-        });
+        const stat = await fs.lstat(fullPath);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.size > this.maxFileSize)
+          return;
+
+        if (session) session.filesRead++;
+        const buffer = await this.readSearchFile(fullPath);
+        if (session) {
+          session.scannedFiles++;
+          this.scheduleSearchStreamProgress(session);
+        }
+
+        if (this.isBinary(buffer)) return;
+
+        const content = buffer.toString("utf8");
+        filesSearched++;
+        if (session) session.filesSearched = filesSearched;
+        const lines = content.split(/\r?\n/);
+
+        if (useMultilineMatcher) {
+          const matches = matcher(content);
+          const lineStarts = [0];
+          for (let index = 0; index < content.length; index++) {
+            if (content[index] === "\n") lineStarts.push(index + 1);
+          }
+
+          for (const match of matches) {
+            if (isSearchCancelled() || totalMatches >= maxMatches) return;
+            totalMatches++;
+            if (totalMatches <= offset || results.length >= limit) continue;
+            let lineIndex = 0;
+            while (
+              lineIndex + 1 < lineStarts.length &&
+              lineStarts[lineIndex + 1] <= match.index
+            ) lineIndex++;
+            const line = lines[lineIndex] || "";
+            const column = match.index - lineStarts[lineIndex];
+            const previewLength = Math.min(
+              match.length,
+              Math.max(0, line.length - column),
+            );
+            const preview = this.createPreview(line, column, previewLength);
+            this.addSearchResult(results, session, {
+              path: fullPath,
+              relativePath,
+              name,
+              line: lineIndex + 1,
+              column,
+              preview: preview.text,
+              matchStart: preview.matchStart,
+              matchLength: match.length,
+            }, totalMatches);
+          }
+          return;
+        }
+
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+          if (isSearchCancelled() || totalMatches >= maxMatches) return;
+          const line = lines[lineIndex];
+          const matches = matcher(line);
+          for (const match of matches) {
+            if (isSearchCancelled()) return;
+            totalMatches++;
+            if (totalMatches <= offset || results.length >= limit) continue;
+            const preview = this.createPreview(line, match.index, match.length);
+            this.addSearchResult(results, session, {
+              path: fullPath,
+              relativePath,
+              name,
+              line: lineIndex + 1,
+              column: match.index,
+              preview: preview.text,
+              matchStart: preview.matchStart,
+              matchLength: match.length,
+            }, totalMatches);
+          }
+        }
       } catch {
-        return;
-      }
-
-      entries.sort((a, b) => a.name.localeCompare(b.name));
-
-      for (const entry of entries) {
-        if (options.requestId && this.cancelledRequests.has(options.requestId))
-          return;
-        if (session?.cancelled) return;
-        if (totalMatches >= maxMatches) {
-          return;
-        }
-
-        const fullPath = path.join(directory, entry.name);
-
-        const relativePath = this.normalizeRelative(
-          path.relative(root, fullPath),
-        );
-
-        if (entry.isDirectory()) {
-          if (
-            WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(entry.name) ||
-            (options.ignoreHiddenDirectories && entry.name.startsWith("."))
-          ) {
-            continue;
-          }
-
-          if (this.matchesAny(relativePath, excludePatterns)) {
-            continue;
-          }
-
-          await walk(fullPath);
-
-          continue;
-        }
-
-        if (!entry.isFile()) {
-          continue;
-        }
-
-        if (path.extname(entry.name).toLowerCase() === ".asar") continue;
-
-        if (this.matchesAny(relativePath, excludePatterns)) {
-          continue;
-        }
-
-        if (
-          includePatterns.length > 0 &&
-          !this.matchesAny(relativePath, includePatterns)
-        ) {
-          continue;
-        }
-
-        try {
-          const stat = await fs.stat(fullPath);
-
-          if (stat.size > this.maxFileSize) {
-            continue;
-          }
-
-          if (session) session.filesRead++;
-          const buffer = await this.readSearchFile(fullPath);
-          if (session) {
-            session.scannedFiles++;
-            this.scheduleSearchStreamProgress(session);
-          }
-
-          if (this.isBinary(buffer)) {
-            continue;
-          }
-
-          const content = buffer.toString("utf8");
-
-          filesSearched++;
-          if (session) session.filesSearched = filesSearched;
-
-          const lines = content.split(/\r?\n/);
-
-          if (useMultilineMatcher) {
-            const matches = matcher(content);
-            const lineStarts = [0];
-            for (let index = 0; index < content.length; index++) {
-              if (content[index] === "\n") lineStarts.push(index + 1);
-            }
-
-            for (const match of matches) {
-              if (session?.cancelled) return;
-              if (
-                options.requestId &&
-                this.cancelledRequests.has(options.requestId)
-              )
-                return;
-              if (totalMatches >= maxMatches) return;
-              totalMatches++;
-              if (totalMatches <= offset || results.length >= limit) continue;
-
-              let lineIndex = 0;
-              while (
-                lineIndex + 1 < lineStarts.length &&
-                lineStarts[lineIndex + 1] <= match.index
-              ) {
-                lineIndex++;
-              }
-              const line = lines[lineIndex] || "";
-              const column = match.index - lineStarts[lineIndex];
-              const previewLength = Math.min(
-                match.length,
-                Math.max(0, line.length - column),
-              );
-              const preview = this.createPreview(line, column, previewLength);
-              this.addSearchResult(results, session, {
-                path: fullPath,
-                relativePath,
-                name: entry.name,
-                line: lineIndex + 1,
-                column,
-                preview: preview.text,
-                matchStart: preview.matchStart,
-                matchLength: match.length,
-              }, totalMatches);
-            }
-            continue;
-          }
-
-          for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            if (session?.cancelled) return;
-            if (totalMatches >= maxMatches) {
-              return;
-            }
-
-            const line = lines[lineIndex];
-
-            const matches = matcher(line);
-
-            for (const match of matches) {
-              if (
-                options.requestId &&
-                this.cancelledRequests.has(options.requestId)
-              )
-                return;
-              totalMatches++;
-              if (totalMatches <= offset || results.length >= limit) continue;
-
-              const preview = this.createPreview(
-                line,
-                match.index,
-                match.length,
-              );
-
-              this.addSearchResult(results, session, {
-                path: fullPath,
-
-                relativePath,
-
-                name: entry.name,
-
-                line: lineIndex + 1,
-
-                column: match.index,
-
-                preview: preview.text,
-
-                matchStart: preview.matchStart,
-
-                matchLength: match.length,
-              }, totalMatches);
-            }
-          }
-        } catch {
-          console.error("fail to fetch file");
-        }
+        // The file may have disappeared between discovery and content read.
       }
     };
 
-    await walk(root);
+    const shouldScanCandidate = (relativePath: string): boolean =>
+      !this.matchesAny(relativePath, excludePatterns) &&
+      (includePatterns.length === 0 ||
+        this.matchesAny(relativePath, includePatterns));
+
+    let usedIndex = Boolean(indexSnapshot);
+    if (session) session.usedIndex = usedIndex;
+    if (indexSnapshot) {
+      const candidates = indexSnapshot.entries
+        .filter((entry) =>
+          (!options.ignoreHiddenDirectories ||
+            !entry.relativePath.split("/").slice(0, -1)
+              .some((directory) => directory.startsWith("."))) &&
+          shouldScanCandidate(entry.relativePath),
+        );
+      if (session) session.candidateFiles = candidates.length;
+      for (const candidate of candidates) {
+        if (isSearchCancelled() || totalMatches >= maxMatches) break;
+        const fullPath = path.join(root, ...candidate.relativePath.split("/"));
+        await scanCandidate(fullPath, candidate.relativePath, candidate.name);
+      }
+    } else {
+      const walk = async (directory: string): Promise<void> => {
+        if (session) session.directoriesVisited++;
+        if (isSearchCancelled() || totalMatches >= maxMatches) return;
+        let entries;
+        try {
+          entries = await fs.readdir(directory, { withFileTypes: true });
+        } catch {
+          return;
+        }
+        entries.sort((left, right) => left.name.localeCompare(right.name));
+        for (const entry of entries) {
+          if (isSearchCancelled() || totalMatches >= maxMatches) return;
+          const fullPath = path.join(directory, entry.name);
+          const relativePath = this.normalizeRelative(
+            path.relative(root, fullPath),
+          );
+          if (entry.isDirectory()) {
+            if (
+              WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(entry.name) ||
+              (options.ignoreHiddenDirectories && entry.name.startsWith(".")) ||
+              this.matchesAny(relativePath, excludePatterns)
+            ) continue;
+            await walk(fullPath);
+            continue;
+          }
+          if (!entry.isFile() || path.extname(entry.name).toLowerCase() === ".asar")
+            continue;
+          if (!shouldScanCandidate(relativePath)) continue;
+          if (session) session.candidateFiles++;
+          await scanCandidate(fullPath, relativePath, entry.name);
+        }
+      };
+      await walk(root);
+      if (!options.forceFilesystemScan && !this.workspaceIndex.requiresReconcile(root))
+        this.workspaceIndex.scheduleBuild(root);
+    }
+
+    if (
+      indexSnapshot &&
+      this.workspaceIndex.getRevision(root) !== indexRevision &&
+      !isSearchCancelled()
+    ) {
+      await this.workspaceIndex.flushEvents(root);
+      if (session) {
+        if (session.streamBatchTimer) clearTimeout(session.streamBatchTimer);
+        if (session.streamProgressTimer) clearTimeout(session.streamProgressTimer);
+        session.streamBatchTimer = null;
+        session.streamProgressTimer = null;
+        session.streamBatch = [];
+        session.results = [];
+        session.cursor = 0;
+        session.totalMatches = 0;
+        session.filesSearched = 0;
+        session.scannedFiles = 0;
+        session.candidateFiles = 0;
+        session.directoriesVisited = 0;
+        session.filesRead = 0;
+        session.usedIndex = false;
+        session.streamedResultCount = 0;
+        session.complete = false;
+        if (session.streamEmitter)
+          this.emitSearchStreamMessage(session, { type: "reset" });
+      }
+      return this.searchUncached(root, query, {
+        ...options,
+        forceFilesystemScan: true,
+      }, session);
+    }
 
     return {
       results,

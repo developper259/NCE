@@ -37,6 +37,12 @@ async function tempWorkspace() {
   return root;
 }
 
+async function cleanupSearchWorkspaces(search, ...roots) {
+  if (search)
+    await Promise.all(roots.map((root) => search.workspaceIndex.flush(root)));
+  await Promise.all(roots.map((root) => fsp.rm(root, { recursive: true, force: true })));
+}
+
 test("NceWorkspaceStorage creates only local cache/temp infrastructure", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-storage-"));
   try {
@@ -300,8 +306,9 @@ test("Markdown image paths stay relative to the Markdown source and workspace", 
 
 test("WorkspaceSearch searches recursively while ignoring node_modules", async () => {
   const root = await tempWorkspace();
+  let search;
   try {
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const result = await search.search(root, "target", {
       caseSensitive: false,
       limit: 20,
@@ -338,14 +345,15 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
       false,
     );
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
 test("WorkspaceSearch reuses one bounded scan and result buffer across pages", async () => {
   const root = await tempWorkspace();
+  let search;
   try {
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const options = {
       sessionId: "workspace-search-session-pages",
       workspaceGeneration: 4,
@@ -372,12 +380,13 @@ test("WorkspaceSearch reuses one bounded scan and result buffer across pages", a
     assert.equal(afterPages.cursor, 4);
     assert.equal(afterPages.activeSessions, 1);
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
 test("WorkspaceSearch sessions preserve regex, whole-word, case and path filters", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-options-"));
+  let search;
   const write = async (relativePath, content) => {
     const filePath = path.join(root, relativePath);
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
@@ -388,7 +397,7 @@ test("WorkspaceSearch sessions preserve regex, whole-word, case and path filters
     await write("src/excluded/skip.txt", "needle\n");
     await write("notes.log", "needle\n");
     await write(".hidden/hidden.txt", "needle\n");
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const filters = {
       include: "src/**, notes.log",
       exclude: "src/excluded/**",
@@ -437,7 +446,7 @@ test("WorkspaceSearch sessions preserve regex, whole-word, case and path filters
     assert.equal(cappedSecond.totalMatches, 2);
     assert.equal(cappedSecond.hasMore, false);
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
@@ -445,10 +454,11 @@ test("WorkspaceSearch replaces sessions when query or workspace generation chang
   const firstRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-first-"));
   const secondRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-second-"));
   const sessionId = "workspace-search-session-replaced";
+  let search;
   try {
     await fsp.writeFile(path.join(firstRoot, "first.txt"), "alpha beta\n");
     await fsp.writeFile(path.join(secondRoot, "second.txt"), "alpha beta\n");
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const alpha = await search.search(firstRoot, "alpha", {
       sessionId,
       workspaceGeneration: 1,
@@ -467,16 +477,16 @@ test("WorkspaceSearch replaces sessions when query or workspace generation chang
     assert.equal(switched.results[0].path, path.join(secondRoot, "second.txt"));
     assert.equal(search.getSearchSessionStats(sessionId).activeSessions, 1);
   } finally {
-    await fsp.rm(firstRoot, { recursive: true, force: true });
-    await fsp.rm(secondRoot, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, firstRoot, secondRoot);
   }
 });
 
 test("WorkspaceSearch cancellation and TTL keep session storage bounded", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-cleanup-"));
+  let search;
   try {
     await fsp.writeFile(path.join(root, "hit.txt"), "hit\n");
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const cancelledId = "workspace-search-session-cancelled";
     await search.search(root, "hit", { sessionId: cancelledId, limit: 1 });
     search.cancelSearch(cancelledId);
@@ -506,12 +516,13 @@ test("WorkspaceSearch cancellation and TTL keep session storage bounded", async 
     search.cleanupSearchSessions(Date.now() + 6 * 60 * 1000);
     assert.equal(search.getSearchSessionStats().activeSessions, 0);
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
 test("WorkspaceSearch streams the first stable batch before completion and reuses its scan", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-stream-order-"));
+  let search;
   let slowReadStarted = false;
   let finished = false;
   try {
@@ -529,7 +540,7 @@ test("WorkspaceSearch streams the first stable batch before completion and reuse
         return super.readSearchFile(filePath);
       }
     }
-    const search = new DelayedWorkspaceSearch({ window: null });
+    search = new DelayedWorkspaceSearch({ window: null });
     const events = [];
     let firstBatchResolve;
     let completionResolve;
@@ -593,13 +604,14 @@ test("WorkspaceSearch streams the first stable batch before completion and reuse
       ],
     );
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
 test("WorkspaceSearch stream cancellation stops later batches and completion", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-stream-cancel-"));
   let releaseSlowRead;
+  let search;
   try {
     await fsp.writeFile(path.join(root, "a-fast.txt"), Array.from({ length: 150 }, () => "hit").join("\n"));
     await fsp.writeFile(path.join(root, "z-slow.txt"), "hit\n");
@@ -610,7 +622,7 @@ test("WorkspaceSearch stream cancellation stops later batches and completion", a
         return super.readSearchFile(filePath);
       }
     }
-    const search = new CancellableWorkspaceSearch({ window: null });
+    search = new CancellableWorkspaceSearch({ window: null });
     const events = [];
     let firstBatchResolve;
     let cancelledResolve;
@@ -641,12 +653,13 @@ test("WorkspaceSearch stream cancellation stops later batches and completion", a
     assert.equal(search.getSearchSessionStats().activeSessions, 0);
   } finally {
     releaseSlowRead?.();
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
 test("WorkspaceSearch include patterns match directories, globs, files, and multiple paths", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-includes-"));
+  let search;
   const files = [
     "src/index.js",
     "src/js/App.js",
@@ -662,7 +675,7 @@ test("WorkspaceSearch include patterns match directories, globs, files, and mult
       await fsp.writeFile(filePath, "needle\n");
     }
 
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const matchingPaths = async (include) => {
       const result = await search.search(root, "needle", { include });
       return result.results.map((entry) => entry.relativePath).sort();
@@ -700,7 +713,199 @@ test("WorkspaceSearch include patterns match directories, globs, files, and mult
       "src/js/nested/helper.js",
     ]);
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("WorkspaceSearch uses warm index candidates with filesystem result parity", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-index-parity-"));
+  const readPaths = [];
+  const fsModule = require("node:fs");
+  const originalReaddir = fsModule.promises.readdir;
+  let indexedReaddirCalls = 0;
+  let search;
+  const write = async (relativePath, content) => {
+    const filePath = path.join(root, ...relativePath.split("/"));
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.writeFile(filePath, content);
+  };
+  class TrackingWorkspaceSearch extends WorkspaceSearch {
+    async readSearchFile(filePath) {
+      readPaths.push(path.relative(root, filePath).split(path.sep).join("/"));
+      return super.readSearchFile(filePath);
+    }
+  }
+
+  try {
+    await write("src/a.txt", "needle in a\n");
+    await write("src/a/child.txt", "needle in nested a\n");
+    await write("src/z.txt", "needle in z\n");
+    await write("src/excluded/skip.txt", "needle excluded\n");
+    await write("src/.hidden/hidden.txt", "needle hidden\n");
+    await write("outside.txt", "needle outside include\n");
+    search = new TrackingWorkspaceSearch({ window: null });
+    const options = {
+      include: "src/**",
+      exclude: "src/excluded/**",
+      ignoreHiddenDirectories: true,
+      limit: 20,
+    };
+
+    const filesystem = await search.search(root, "needle", {
+      ...options,
+      sessionId: "workspace-search-missing-index",
+    });
+    assert.deepEqual(filesystem.results.map((entry) => entry.relativePath), [
+      "src/a/child.txt",
+      "src/a.txt",
+      "src/z.txt",
+    ]);
+    assert.equal(search.getSearchSessionStats("workspace-search-missing-index").usedIndex, false);
+    assert.deepEqual(readPaths, ["src/a/child.txt", "src/a.txt", "src/z.txt"]);
+
+    await search.workspaceIndex.flush(root);
+    readPaths.length = 0;
+    fsModule.promises.readdir = async (...args) => {
+      indexedReaddirCalls++;
+      return originalReaddir(...args);
+    };
+    const indexed = await search.search(root, "needle", {
+      ...options,
+      sessionId: "workspace-search-warm-index",
+    });
+    fsModule.promises.readdir = originalReaddir;
+
+    assert.deepEqual(indexed.results, filesystem.results);
+    assert.equal(indexedReaddirCalls, 0);
+    assert.deepEqual(readPaths, ["src/a/child.txt", "src/a.txt", "src/z.txt"]);
+    const stats = search.getSearchSessionStats("workspace-search-warm-index");
+    assert.equal(stats.usedIndex, true);
+    assert.equal(stats.candidateFiles, 3);
+    assert.equal(stats.filesRead, 3);
+  } finally {
+    fsModule.promises.readdir = originalReaddir;
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("WorkspaceSearch falls back when its persistent index is stale", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-stale-index-"));
+  let search;
+  try {
+    await fsp.writeFile(path.join(root, "existing.txt"), "needle existing\n");
+    const builder = new WorkspaceSearch({ window: null });
+    assert.ok(await builder.workspaceIndex.build(root));
+    await builder.workspaceIndex.flush(root);
+
+    search = new WorkspaceSearch({ window: null });
+    assert.ok(await search.workspaceIndex.load(root), "the persisted index should load");
+    await fsp.writeFile(path.join(root, "added-after-index.txt"), "needle added\n");
+    const result = await search.search(root, "needle", {
+      sessionId: "workspace-search-stale-index",
+      limit: 20,
+    });
+
+    assert.deepEqual(result.results.map((entry) => entry.relativePath), [
+      "added-after-index.txt",
+      "existing.txt",
+    ]);
+    assert.equal(search.getSearchSessionStats("workspace-search-stale-index").usedIndex, false);
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("WorkspaceSearch resets indexed results when a watcher reports a concurrent addition", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-index-concurrent-add-"));
+  const events = [];
+  let added = false;
+  let search;
+  let completeResolve;
+  const completed = new Promise((resolve) => { completeResolve = resolve; });
+  class ConcurrentAdditionSearch extends WorkspaceSearch {
+    async readSearchFile(filePath) {
+      if (!added) {
+        added = true;
+        const addedPath = path.join(root, "added.txt");
+        await fsp.writeFile(addedPath, "needle added\n");
+        this.workspaceIndex.handleWatcherEvent(root, "add", addedPath);
+      }
+      return super.readSearchFile(filePath);
+    }
+  }
+
+  try {
+    await fsp.writeFile(path.join(root, "existing.txt"), "needle existing\n");
+    search = new ConcurrentAdditionSearch({ window: null });
+    assert.ok(await search.workspaceIndex.build(root));
+    await search.workspaceIndex.flush(root);
+    const sessionId = "workspace-search-index-concurrent-add";
+    await search.startSearchStream(root, "needle", {
+      sessionId,
+      requestId: sessionId,
+      limit: 20,
+    }, (message) => {
+      events.push(message);
+      if (message.type === "complete") completeResolve(message);
+    });
+    const completion = await completed;
+
+    const resetIndex = events.findIndex((event) => event.type === "reset");
+    assert.ok(resetIndex >= 0, "the stream should announce that indexed results were discarded");
+    const finalResults = events.slice(resetIndex + 1)
+      .filter((event) => event.type === "batch")
+      .flatMap((event) => event.results);
+    assert.deepEqual(finalResults.map((entry) => entry.relativePath), [
+      "added.txt",
+      "existing.txt",
+    ]);
+    assert.equal(completion.totalMatches, 2);
+    const stats = search.getSearchSessionStats(sessionId);
+    assert.equal(stats.usedIndex, false);
+    assert.equal(stats.candidateFiles, 2);
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("WorkspaceSearch cancellation stops an indexed content scan", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-index-cancel-"));
+  const reads = [];
+  let enteredResolve;
+  let releaseRead;
+  let search;
+  const entered = new Promise((resolve) => { enteredResolve = resolve; });
+  const blockedRead = new Promise((resolve) => { releaseRead = resolve; });
+  class CancellableIndexedSearch extends WorkspaceSearch {
+    async readSearchFile(filePath) {
+      reads.push(path.basename(filePath));
+      if (path.basename(filePath) === "a.txt") {
+        enteredResolve();
+        await blockedRead;
+      }
+      return super.readSearchFile(filePath);
+    }
+  }
+
+  try {
+    await fsp.writeFile(path.join(root, "a.txt"), "needle first\n");
+    await fsp.writeFile(path.join(root, "b.txt"), "needle second\n");
+    search = new CancellableIndexedSearch({ window: null });
+    assert.ok(await search.workspaceIndex.build(root));
+    await search.workspaceIndex.flush(root);
+    const sessionId = "workspace-search-index-cancel";
+    const pending = search.search(root, "needle", { sessionId, limit: 20 });
+    await entered;
+    search.cancelSearch(sessionId);
+    releaseRead();
+    const result = await pending;
+
+    assert.deepEqual(result.results, []);
+    assert.deepEqual(reads, ["a.txt"]);
+    assert.equal(search.getSearchSessionStats().activeSessions, 0);
+  } finally {
+    releaseRead?.();
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 
@@ -906,6 +1111,7 @@ test("invalid ASAR stays opaque in explorer, search, and project map", async () 
   const root = await tempWorkspace();
   const archive = path.join(root, "broken.asar");
   await fsp.writeFile(archive, Buffer.from("not an Electron archive\0target"));
+  let search;
   try {
     const manager = new FileManager({});
     const names = await manager.getFolderContent(root);
@@ -918,7 +1124,7 @@ test("invalid ASAR stays opaque in explorer, search, and project map", async () 
       "BINARY_FILE",
     );
     assert.equal((await manager.getFileContent([archive]))[archive], undefined);
-    const search = new WorkspaceSearch({ window: null });
+    search = new WorkspaceSearch({ window: null });
     const result = await search.search(root, "target");
     assert.equal(
       result.results.some((entry) => entry.name === "broken.asar"),
@@ -935,7 +1141,7 @@ test("invalid ASAR stays opaque in explorer, search, and project map", async () 
       { binary: true, lineCount: null },
     );
   } finally {
-    await fsp.rm(root, { recursive: true, force: true });
+    await cleanupSearchWorkspaces(search, root);
   }
 });
 

@@ -22,6 +22,17 @@ export const WORKSPACE_INDEX_IGNORED_DIRECTORIES = new Set([
   ".nce",
 ]);
 
+export function compareWorkspaceIndexPaths(leftPath: string, rightPath: string): number {
+  const left = leftPath.split("/");
+  const right = rightPath.split("/");
+  const sharedLength = Math.min(left.length, right.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    const comparison = left[index].localeCompare(right[index]);
+    if (comparison !== 0) return comparison;
+  }
+  return left.length - right.length;
+}
+
 export interface WorkspaceIndexEntry {
   relativePath: string;
   name: string;
@@ -48,6 +59,7 @@ interface PendingWatcherEvent {
 export class WorkspaceIndex {
   private readonly snapshots = new Map<string, WorkspaceIndexSnapshot>();
   private readonly invalidRoots = new Map<string, number>();
+  private readonly rootRevisions = new Map<string, number>();
   private readonly buildQueues = new Map<string, Promise<void>>();
   private readonly writeQueues = new Map<string, Promise<void>>();
   private readonly activeBuildTokens = new Map<string, object>();
@@ -70,6 +82,7 @@ export class WorkspaceIndex {
   private readonly needsReconcileRoots = new Set<string>();
   private readonly maxCachedWorkspaces = 4;
   private readonly maxInvalidWorkspaces = 16;
+  private readonly maxRevisionWorkspaces = 64;
   private readonly watcherDebounceMs = 150;
   private readonly coalescedWatcherEvents = {
     received: 0,
@@ -88,6 +101,36 @@ export class WorkspaceIndex {
     if (!this.needsReconcileRoots.has(root)) return false;
     this.needsReconcileRoots.delete(root);
     return true;
+  }
+
+  getRevision(rootPath: string): number {
+    const root = path.resolve(rootPath);
+    const revision = this.rootRevisions.get(root) || 0;
+    this.rootRevisions.delete(root);
+    this.rootRevisions.set(root, revision);
+    return revision;
+  }
+
+  requiresReconcile(rootPath: string): boolean {
+    const root = path.resolve(rootPath);
+    return this.invalidRoots.has(root) ||
+      this.needsReconcileRoots.has(root) ||
+      this.pendingWatcherEvents.has(root) ||
+      this.eventFlushQueues.has(root) ||
+      this.reconcileTimers.has(root) ||
+      this.reconcileQueues.has(root) ||
+      this.buildQueues.has(root);
+  }
+
+  private bumpRevision(root: string): void {
+    const revision = (this.rootRevisions.get(root) || 0) + 1;
+    this.rootRevisions.delete(root);
+    this.rootRevisions.set(root, revision);
+    while (this.rootRevisions.size > this.maxRevisionWorkspaces) {
+      const oldestRoot = this.rootRevisions.keys().next().value;
+      if (!oldestRoot) break;
+      this.rootRevisions.delete(oldestRoot);
+    }
   }
 
   getCacheFilePath(rootPath: string): string {
@@ -158,7 +201,10 @@ export class WorkspaceIndex {
       paths.add(entry.relativePath);
       entries.push(entry);
     }
-    entries.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+    entries.sort((left, right) => compareWorkspaceIndexPaths(
+      left.relativePath,
+      right.relativePath,
+    ));
     return {
       version: WORKSPACE_INDEX_VERSION,
       root,
@@ -233,7 +279,10 @@ export class WorkspaceIndex {
       paths.add(entry.relativePath);
       normalized.push(entry);
     }
-    normalized.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+    normalized.sort((left, right) => compareWorkspaceIndexPaths(
+      left.relativePath,
+      right.relativePath,
+    ));
     return {
       version: WORKSPACE_INDEX_VERSION,
       root,
@@ -282,6 +331,7 @@ export class WorkspaceIndex {
     this.invalidRoots.delete(snapshot.root);
     this.needsReconcileRoots.delete(snapshot.root);
     this.remember(snapshot);
+    this.bumpRevision(snapshot.root);
     void this.queueWrite(snapshot).catch((error) => {
       console.warn("[NCE Workspace Index] Unable to persist index", {
         root: snapshot.root,
@@ -330,6 +380,7 @@ export class WorkspaceIndex {
     const absolutePath = path.resolve(filePath);
     const relativePath = path.relative(root, absolutePath);
     if (!relativePath || relativePath === ".") {
+      this.bumpRevision(root);
       if (event === "unlinkDir") this.markStale(root);
       else this.markStaleAndScheduleReconcile(root);
       return;
@@ -351,6 +402,7 @@ export class WorkspaceIndex {
         path.extname(pathParts[pathParts.length - 1]).toLowerCase() === ".asar")
     ) return;
 
+    this.bumpRevision(root);
     this.coalescedWatcherEvents.received += 1;
     if (!["add", "change", "unlink", "unlinkDir"].includes(event)) {
       this.markStaleAndScheduleReconcile(root);
@@ -623,6 +675,7 @@ export class WorkspaceIndex {
       this.invalidRoots.delete(root);
       this.needsReconcileRoots.delete(root);
       this.remember(snapshot);
+      this.bumpRevision(root);
       try {
         await this.queueWrite(snapshot);
       } catch (error: any) {
@@ -672,6 +725,7 @@ export class WorkspaceIndex {
     if (typeof rootPath !== "string" || !rootPath.trim()) return;
     const root = path.resolve(rootPath);
     this.activeBuildTokens.delete(root);
+    this.bumpRevision(root);
     this.rememberInvalidRoot(root);
     this.needsReconcileRoots.delete(root);
     this.snapshots.delete(root);
