@@ -19,6 +19,8 @@ interface SearchOptions {
   limit?: number;
   maxMatches?: number;
   requestId?: string;
+  sessionId?: string;
+  workspaceGeneration?: number;
   paths?: string[];
   replaceFirst?: boolean;
   ignoreHiddenDirectories?: boolean;
@@ -42,6 +44,24 @@ interface SearchResponse {
   offset: number;
   limit: number;
   hasMore: boolean;
+}
+
+interface SearchSession {
+  id: string;
+  root: string;
+  query: string;
+  optionsKey: string;
+  workspaceGeneration: number;
+  lastAccess: number;
+  results: SearchResult[];
+  cursor: number;
+  totalMatches: number;
+  filesSearched: number;
+  directoriesVisited: number;
+  filesRead: number;
+  complete: boolean;
+  cancelled: boolean;
+  promise: Promise<SearchResponse> | null;
 }
 
 interface ReplaceResponse {
@@ -96,6 +116,10 @@ interface ProjectFilesOptions {
 export class WorkspaceSearch {
   window: Window;
   private readonly cancelledRequests = new Set<string>();
+  private readonly searchSessions = new Map<string, SearchSession>();
+  private readonly cancelledSearchSessions = new Map<string, number>();
+  private readonly maxSearchSessions = 8;
+  private readonly searchSessionTtlMs = 5 * 60 * 1000;
 
   private readonly ignoredDirectories = new Set([
     ".git",
@@ -167,9 +191,9 @@ export class WorkspaceSearch {
         query: string,
         options: SearchOptions = {},
       ) => {
-        await this.ensureWorkspaceStorage(rootPath);
         const requestId = options?.requestId;
         if (requestId) this.cancelledRequests.delete(requestId);
+        await this.ensureWorkspaceStorage(rootPath);
         try {
           return await this.search(rootPath, query, options);
         } finally {
@@ -180,9 +204,7 @@ export class WorkspaceSearch {
     ipcMain.handle(
       "WorkspaceSearch:cancel",
       async (_event, requestId: string) => {
-        if (typeof requestId === "string" && requestId) {
-          this.cancelledRequests.add(requestId);
-        }
+        this.cancelSearch(requestId);
         return true;
       },
     );
@@ -475,10 +497,216 @@ export class WorkspaceSearch {
     }
   }
 
+  private searchOptionsKey(options: SearchOptions): string {
+    return JSON.stringify({
+      include: options.include ?? "",
+      exclude: options.exclude ?? "",
+      caseSensitive: options.caseSensitive === true,
+      useRegex: options.useRegex === true,
+      wholeWord: options.wholeWord === true,
+      ignoreHiddenDirectories: options.ignoreHiddenDirectories === true,
+      maxMatches: options.maxMatches ?? this.maxResults,
+    });
+  }
+
+  private cancelSession(session: SearchSession): void {
+    session.cancelled = true;
+    session.results = [];
+    this.searchSessions.delete(session.id);
+  }
+
+  cancelSearch(requestId: string): void {
+    if (typeof requestId !== "string" || !requestId) return;
+    const session = this.searchSessions.get(requestId);
+    if (session) {
+      this.cancelSession(session);
+      return;
+    }
+    if (requestId.startsWith("workspace-search-session-")) {
+      this.cancelledSearchSessions.set(requestId, Date.now());
+      while (this.cancelledSearchSessions.size > this.maxSearchSessions * 2) {
+        const oldestId = this.cancelledSearchSessions.keys().next().value;
+        if (!oldestId) break;
+        this.cancelledSearchSessions.delete(oldestId);
+      }
+      return;
+    }
+    this.cancelledRequests.add(requestId);
+  }
+
+  cleanupSearchSessions(now = Date.now()): void {
+    for (const session of this.searchSessions.values()) {
+      if (now - session.lastAccess >= this.searchSessionTtlMs)
+        this.cancelSession(session);
+    }
+    for (const [sessionId, cancelledAt] of this.cancelledSearchSessions) {
+      if (now - cancelledAt >= this.searchSessionTtlMs)
+        this.cancelledSearchSessions.delete(sessionId);
+    }
+  }
+
+  getSearchSessionStats(sessionId?: string): {
+    activeSessions: number;
+    directoriesVisited?: number;
+    filesRead?: number;
+    resultCount?: number;
+    cursor?: number;
+    complete?: boolean;
+  } {
+    const session = sessionId ? this.searchSessions.get(sessionId) : undefined;
+    return {
+      activeSessions: this.searchSessions.size,
+      ...(session ? {
+        directoriesVisited: session.directoriesVisited,
+        filesRead: session.filesRead,
+        resultCount: session.results.length,
+        cursor: session.cursor,
+        complete: session.complete,
+      } : {}),
+    };
+  }
+
+  private async searchWithSession(
+    rootPath: string,
+    query: string,
+    options: SearchOptions,
+  ): Promise<SearchResponse> {
+    const sessionId = options.sessionId!.slice(0, 256);
+    const root = path.resolve(rootPath);
+    const requestedWorkspaceGeneration = Number(options.workspaceGeneration);
+    const workspaceGeneration = Number.isFinite(requestedWorkspaceGeneration)
+      ? Math.max(0, Math.floor(requestedWorkspaceGeneration))
+      : 0;
+    const optionsKey = this.searchOptionsKey(options);
+    this.cleanupSearchSessions();
+
+    const cancellationTime = this.cancelledSearchSessions.get(sessionId);
+    if (cancellationTime !== undefined) {
+      this.cancelledSearchSessions.delete(sessionId);
+      if (Date.now() - cancellationTime < this.searchSessionTtlMs)
+        return this.emptySearchResponse(options);
+    }
+
+    let session = this.searchSessions.get(sessionId);
+    if (
+      session &&
+      (session.root !== root || session.query !== query ||
+        session.optionsKey !== optionsKey ||
+        session.workspaceGeneration !== workspaceGeneration)
+    ) {
+      this.cancelSession(session);
+      session = undefined;
+    }
+
+    if (!session) {
+      while (this.searchSessions.size >= this.maxSearchSessions) {
+        const oldest = [...this.searchSessions.values()].sort(
+          (left, right) => left.lastAccess - right.lastAccess,
+        )[0];
+        if (!oldest) break;
+        this.cancelSession(oldest);
+      }
+      const now = Date.now();
+      session = {
+        id: sessionId,
+        root,
+        query,
+        optionsKey,
+        workspaceGeneration,
+        lastAccess: now,
+        results: [],
+        cursor: 0,
+        totalMatches: 0,
+        filesSearched: 0,
+        directoriesVisited: 0,
+        filesRead: 0,
+        complete: false,
+        cancelled: false,
+        promise: null,
+      };
+      this.searchSessions.set(sessionId, session);
+    }
+
+    const activeSession = session!;
+    activeSession.lastAccess = Date.now();
+    if (!activeSession.complete && !activeSession.promise) {
+      const maxMatches = Math.min(
+        this.maxResults,
+        Math.max(1, Math.floor(options.maxMatches || this.maxResults)),
+      );
+      const scanOptions: SearchOptions = {
+        ...options,
+        offset: 0,
+        limit: maxMatches,
+        maxMatches,
+        sessionId: undefined,
+        requestId: options.requestId,
+      };
+      activeSession.promise = this.searchUncached(root, query, scanOptions, activeSession)
+        .then((response) => {
+          if (!activeSession.cancelled) {
+            activeSession.results = response.results;
+            activeSession.totalMatches = response.totalMatches;
+            activeSession.filesSearched = response.filesSearched;
+            activeSession.complete = true;
+          }
+          return response;
+        })
+        .finally(() => { activeSession.promise = null; });
+    }
+    if (activeSession.promise) await activeSession.promise;
+
+    if (activeSession.cancelled) return this.emptySearchResponse(options);
+    activeSession.lastAccess = Date.now();
+    const offset = Math.max(0, Math.floor(options.offset || 0));
+    const maxMatches = Math.min(
+      this.maxResults,
+      Math.max(1, Math.floor(options.maxMatches || this.maxResults)),
+    );
+    const limit = Math.min(maxMatches, Math.max(1, Math.floor(options.limit || 50)));
+    const results = activeSession.results.slice(offset, offset + limit);
+    activeSession.cursor = Math.max(activeSession.cursor, offset + results.length);
+    return {
+      results,
+      totalMatches: activeSession.totalMatches,
+      filesSearched: activeSession.filesSearched,
+      offset,
+      limit,
+      hasMore: offset + results.length < activeSession.totalMatches,
+    };
+  }
+
+  private emptySearchResponse(options: SearchOptions): SearchResponse {
+    return {
+      results: [],
+      totalMatches: 0,
+      filesSearched: 0,
+      offset: Math.max(0, Math.floor(options.offset || 0)),
+      limit: Math.max(1, Math.floor(options.limit || 50)),
+      hasMore: false,
+    };
+  }
+
   async search(
     rootPath: string,
     query: string,
     options: SearchOptions = {},
+  ): Promise<SearchResponse> {
+    if (
+      typeof options?.sessionId === "string" && options.sessionId &&
+      typeof rootPath === "string" && rootPath &&
+      typeof query === "string" && query && options && typeof options === "object"
+    ) {
+      return this.searchWithSession(rootPath, query, options);
+    }
+    return this.searchUncached(rootPath, query, options);
+  }
+
+  private async searchUncached(
+    rootPath: string,
+    query: string,
+    options: SearchOptions = {},
+    session?: SearchSession,
   ): Promise<SearchResponse> {
     const empty: SearchResponse = {
       results: [],
@@ -536,8 +764,10 @@ export class WorkspaceSearch {
     let filesSearched = 0;
 
     const walk = async (directory: string): Promise<void> => {
+      if (session) session.directoriesVisited++;
       if (options.requestId && this.cancelledRequests.has(options.requestId))
         return;
+      if (session?.cancelled) return;
       if (totalMatches >= maxMatches) {
         return;
       }
@@ -557,6 +787,7 @@ export class WorkspaceSearch {
       for (const entry of entries) {
         if (options.requestId && this.cancelledRequests.has(options.requestId))
           return;
+        if (session?.cancelled) return;
         if (totalMatches >= maxMatches) {
           return;
         }
@@ -608,6 +839,7 @@ export class WorkspaceSearch {
             continue;
           }
 
+          if (session) session.filesRead++;
           const buffer = await fs.readFile(fullPath);
 
           if (this.isBinary(buffer)) {
@@ -628,6 +860,7 @@ export class WorkspaceSearch {
             }
 
             for (const match of matches) {
+              if (session?.cancelled) return;
               if (
                 options.requestId &&
                 this.cancelledRequests.has(options.requestId)
@@ -666,6 +899,7 @@ export class WorkspaceSearch {
           }
 
           for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+            if (session?.cancelled) return;
             if (totalMatches >= maxMatches) {
               return;
             }

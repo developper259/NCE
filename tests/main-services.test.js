@@ -342,6 +342,168 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
   }
 });
 
+test("WorkspaceSearch reuses one bounded scan and result buffer across pages", async () => {
+  const root = await tempWorkspace();
+  try {
+    const search = new WorkspaceSearch({ window: null });
+    const options = {
+      sessionId: "workspace-search-session-pages",
+      workspaceGeneration: 4,
+      limit: 2,
+    };
+    const first = await search.search(root, "target", options);
+    const beforePages = search.getSearchSessionStats(options.sessionId);
+    const second = await search.search(root, "target", { ...options, offset: 2 });
+    const third = await search.search(root, "target", { ...options, offset: 4 });
+    const afterPages = search.getSearchSessionStats(options.sessionId);
+
+    assert.equal(first.results.length, 2);
+    assert.equal(first.hasMore, true);
+    assert.equal(second.results.length, 2);
+    assert.equal(second.hasMore, false);
+    assert.deepEqual(third.results, []);
+    assert.equal(first.totalMatches, 4);
+    assert.equal(second.filesSearched, 3);
+    assert.equal(afterPages.directoriesVisited, beforePages.directoriesVisited);
+    assert.equal(afterPages.filesRead, beforePages.filesRead);
+    assert.equal(afterPages.resultCount, beforePages.resultCount);
+    assert.equal(afterPages.directoriesVisited, 2);
+    assert.equal(afterPages.filesRead, 3);
+    assert.equal(afterPages.cursor, 4);
+    assert.equal(afterPages.activeSessions, 1);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceSearch sessions preserve regex, whole-word, case and path filters", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-options-"));
+  const write = async (relativePath, content) => {
+    const filePath = path.join(root, relativePath);
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.writeFile(filePath, content);
+  };
+  try {
+    await write("src/matches.txt", "Needle needleish\nneedle!\n");
+    await write("src/excluded/skip.txt", "needle\n");
+    await write("notes.log", "needle\n");
+    await write(".hidden/hidden.txt", "needle\n");
+    const search = new WorkspaceSearch({ window: null });
+    const filters = {
+      include: "src/**, notes.log",
+      exclude: "src/excluded/**",
+      caseSensitive: false,
+      useRegex: true,
+      wholeWord: true,
+      ignoreHiddenDirectories: true,
+    };
+    const direct = await search.search(root, "needle", { ...filters, limit: 20 });
+    const sessionId = "workspace-search-session-filter-parity";
+    const paged = [];
+    let offset = 0;
+    let page;
+    do {
+      page = await search.search(root, "needle", {
+        ...filters,
+        sessionId,
+        workspaceGeneration: 1,
+        offset,
+        limit: 1,
+      });
+      paged.push(...page.results);
+      offset += page.results.length;
+    } while (page.hasMore);
+
+    assert.deepEqual(paged, direct.results);
+    assert.equal(page.totalMatches, 3);
+    assert.equal(page.filesSearched, 2);
+
+    const cappedFirst = await search.search(root, "needle", {
+      ...filters,
+      sessionId: "workspace-search-session-limit",
+      workspaceGeneration: 1,
+      maxMatches: 2,
+      limit: 1,
+    });
+    const cappedSecond = await search.search(root, "needle", {
+      ...filters,
+      sessionId: "workspace-search-session-limit",
+      workspaceGeneration: 1,
+      maxMatches: 2,
+      offset: 1,
+      limit: 1,
+    });
+    assert.equal(cappedFirst.totalMatches, 2);
+    assert.equal(cappedSecond.totalMatches, 2);
+    assert.equal(cappedSecond.hasMore, false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceSearch replaces sessions when query or workspace generation changes", async () => {
+  const firstRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-first-"));
+  const secondRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-second-"));
+  const sessionId = "workspace-search-session-replaced";
+  try {
+    await fsp.writeFile(path.join(firstRoot, "first.txt"), "alpha beta\n");
+    await fsp.writeFile(path.join(secondRoot, "second.txt"), "alpha beta\n");
+    const search = new WorkspaceSearch({ window: null });
+    const alpha = await search.search(firstRoot, "alpha", {
+      sessionId,
+      workspaceGeneration: 1,
+    });
+    const beta = await search.search(firstRoot, "beta", {
+      sessionId,
+      workspaceGeneration: 1,
+    });
+    const switched = await search.search(secondRoot, "beta", {
+      sessionId,
+      workspaceGeneration: 2,
+    });
+
+    assert.equal(alpha.results[0].relativePath, "first.txt");
+    assert.equal(beta.results[0].preview, "alpha beta");
+    assert.equal(switched.results[0].path, path.join(secondRoot, "second.txt"));
+    assert.equal(search.getSearchSessionStats(sessionId).activeSessions, 1);
+  } finally {
+    await fsp.rm(firstRoot, { recursive: true, force: true });
+    await fsp.rm(secondRoot, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceSearch cancellation and TTL keep session storage bounded", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-session-cleanup-"));
+  try {
+    await fsp.writeFile(path.join(root, "hit.txt"), "hit\n");
+    const search = new WorkspaceSearch({ window: null });
+    const cancelledId = "workspace-search-session-cancelled";
+    await search.search(root, "hit", { sessionId: cancelledId, limit: 1 });
+    search.cancelSearch(cancelledId);
+    assert.equal(search.getSearchSessionStats().activeSessions, 0);
+
+    const preCancelledId = "workspace-search-session-pre-cancelled";
+    search.cancelSearch(preCancelledId);
+    const cancelled = await search.search(root, "hit", {
+      sessionId: preCancelledId,
+      requestId: preCancelledId,
+    });
+    assert.deepEqual(cancelled.results, []);
+    assert.equal(search.getSearchSessionStats().activeSessions, 0);
+
+    for (let index = 0; index < 10; index += 1) {
+      await search.search(root, "hit", {
+        sessionId: `workspace-search-session-bound-${index}`,
+      });
+    }
+    assert.equal(search.getSearchSessionStats().activeSessions, 8);
+    search.cleanupSearchSessions(Date.now() + 6 * 60 * 1000);
+    assert.equal(search.getSearchSessionStats().activeSessions, 0);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("WorkspaceSearch include patterns match directories, globs, files, and multiple paths", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-includes-"));
   const files = [

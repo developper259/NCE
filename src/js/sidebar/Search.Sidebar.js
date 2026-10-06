@@ -47,6 +47,7 @@ class SearchSidebar extends Sidebar {
     this.workspaceGeneration = 0;
     this.searchGeneration = 0;
     this.activeRequestId = null;
+    this.activeSearchSessionId = null;
     this.isReplacing = false;
     this.replaceExpanded = false;
     this.resultOpenController = null;
@@ -211,6 +212,8 @@ class SearchSidebar extends Sidebar {
 
     const scheduleSearch = () => {
       this.cancelResultNavigation();
+      this.cancelActiveSearch();
+      this.searchGeneration++;
       this.query = input.value;
       this.include = include.value;
       this.exclude = exclude.value;
@@ -369,22 +372,26 @@ class SearchSidebar extends Sidebar {
     }
 
     const rootPath = this.editor.fileExplorer.rootPath;
-    const workspaceGeneration = this.workspaceGeneration;
-    const searchGeneration = ++this.searchGeneration;
-    const requestId = `workspace-search-${searchGeneration}`;
-    const previousRequestId = this.activeRequestId;
-    this.activeRequestId = requestId;
-    if (previousRequestId) this.editor.api.cancelSearch?.(previousRequestId);
-    this.isLoadingMore = false;
-    this.hasMoreResults = false;
-    this.nextResultsOffset = 0;
-    this.resetResultsScroll = true;
-
     if (!rootPath) {
       this.clearResults();
       this.refresh();
       return;
     }
+    const workspaceGeneration = this.workspaceGeneration;
+    const searchGeneration = ++this.searchGeneration;
+    const sessionId = `workspace-search-session-${workspaceGeneration}-${searchGeneration}`;
+    const requestId = sessionId;
+    const previousRequestId = this.activeRequestId;
+    const previousSessionId = this.activeSearchSessionId;
+    this.activeRequestId = requestId;
+    this.activeSearchSessionId = sessionId;
+    if (previousRequestId) this.editor.api.cancelSearch?.(previousRequestId);
+    if (previousSessionId && previousSessionId !== previousRequestId)
+      this.editor.api.cancelSearch?.(previousSessionId);
+    this.isLoadingMore = false;
+    this.hasMoreResults = false;
+    this.nextResultsOffset = 0;
+    this.resetResultsScroll = true;
 
     this.isSearching = true;
     this.refresh();
@@ -403,6 +410,8 @@ class SearchSidebar extends Sidebar {
           offset: 0,
           limit: this.resultsPageSize,
           requestId,
+          sessionId,
+          workspaceGeneration,
         },
       );
 
@@ -435,6 +444,7 @@ class SearchSidebar extends Sidebar {
 
   clearResults() {
     this.cancelResultNavigation();
+    this.cancelActiveSearch();
     this.results = [];
     this.totalMatches = 0;
     this.filesSearched = 0;
@@ -443,6 +453,18 @@ class SearchSidebar extends Sidebar {
     this.isLoadingMore = false;
     this.resetResultsScroll = true;
     this.isSearching = false;
+  }
+
+  cancelActiveSearch() {
+    if (this.activeRequestId)
+      this.editor.api.cancelSearch?.(this.activeRequestId);
+    if (
+      this.activeSearchSessionId &&
+      this.activeSearchSessionId !== this.activeRequestId
+    )
+      this.editor.api.cancelSearch?.(this.activeSearchSessionId);
+    this.activeRequestId = null;
+    this.activeSearchSessionId = null;
   }
 
   async loadMoreResults() {
@@ -478,6 +500,8 @@ class SearchSidebar extends Sidebar {
           offset,
           limit: this.resultsPageSize,
           requestId,
+          sessionId: this.activeSearchSessionId,
+          workspaceGeneration,
         },
       );
 
@@ -771,6 +795,7 @@ class SearchSidebar extends Sidebar {
   onClose() {
     clearTimeout(this.searchTimer);
     this.cancelResultNavigation();
+    this.cancelActiveSearch();
     this.resultsScroller.suspend();
   }
 }

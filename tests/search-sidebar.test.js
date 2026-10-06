@@ -109,6 +109,49 @@ test("workspace search treats a whitespace-only query as empty without rewriting
   assert.equal(calls.length, 0);
 });
 
+test("workspace search pages reuse their session and query replacement cancels it", async () => {
+  const requests = [];
+  const cancellations = [];
+  const editor = {
+    fileExplorer: { rootPath: "/workspace" },
+    api: {
+      async searchInFiles(...args) {
+        requests.push(args);
+        const offset = args[2].offset;
+        return {
+          results: [{ path: `/workspace/result-${offset}.js`, line: 1 }],
+          totalMatches: 2,
+          filesSearched: 1,
+          offset,
+          hasMore: offset === 0,
+        };
+      },
+      cancelSearch(id) { cancellations.push(id); },
+    },
+  };
+  const sidebar = new SearchSidebar(editor);
+  sidebar.isOpen = true;
+  sidebar.query = "first";
+  sidebar.resultsPageSize = 1;
+
+  await sidebar.runSearch();
+  const firstSession = sidebar.activeSearchSessionId;
+  await sidebar.loadMoreResults();
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0][2].sessionId, firstSession);
+  assert.equal(requests[1][2].sessionId, firstSession);
+  assert.equal(requests[0][2].workspaceGeneration, sidebar.workspaceGeneration);
+  assert.equal(requests[1][2].offset, 1);
+  assert.equal(sidebar.results.length, 2);
+
+  sidebar.query = "replacement";
+  await sidebar.runSearch();
+  assert.ok(cancellations.includes(firstSession));
+  assert.notEqual(sidebar.activeSearchSessionId, firstSession);
+  assert.equal(requests[2][2].sessionId, sidebar.activeSearchSessionId);
+});
+
 test("search result navigation awaits opening and the requested progressive line", async () => {
   animationFrameRequests = 0;
   let openFile;
