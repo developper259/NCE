@@ -61,6 +61,9 @@ class tabManager {
   removeFileByID(id) {
     const index = this.getFileIndexByID(id);
     if (index !== -1) {
+      const tab = this.tabs[index];
+      tab?.disposeAutoSave?.();
+      tab?.textTab?.disposeAutoSave?.();
       this.tabs.splice(index, 1);
     }
   }
@@ -137,6 +140,7 @@ class tabManager {
       if (!file.path) continue;
 
       if (NCEPath.isInside(file.path, path)) {
+        file.cancelAutoSave?.();
         file.deletedFromDisk = true;
         file.setIsSaved(false);
         changed = true;
@@ -214,9 +218,11 @@ class tabManager {
   }
 
   async prepareForQuit() {
-    const dirtyFiles = this.tabs.map((tab) => tab.type === "file" ? tab : tab.textTab)
+    const files = this.tabs.map((tab) => tab.type === "file" ? tab : tab.textTab)
       .filter(Boolean)
-      .filter((file, index, files) => files.indexOf(file) === index)
+      .filter((file, index, allFiles) => allFiles.indexOf(file) === index);
+    await Promise.all(files.map((file) => file.flushAutoSave?.()));
+    const dirtyFiles = files
       .filter(
       (file) => !file.isSaved && !(file.isEmpty() && !file.hasPath()),
     );
@@ -233,6 +239,10 @@ class tabManager {
 
   async closeFiles({ skipPrepare = false } = {}) {
     if (!skipPrepare && !(await this.prepareForQuit())) return false;
+    for (const tab of this.tabs) {
+      tab.disposeAutoSave?.();
+      tab.textTab?.disposeAutoSave?.();
+    }
     await Promise.all(this.files.map((file) =>
       this.editor.fileLoader.cancelLoading(file.path),
     ));
@@ -279,6 +289,7 @@ class tabManager {
     if (!tab) return false;
     if (tab.type !== TAB_TYPES.FILE) return this.closeTab(tab);
     const file = tab;
+    await file.flushAutoSave?.();
 
     if (!file.isSaved) {
       if (!(file.isEmpty() && !file.hasPath())) {
@@ -331,6 +342,7 @@ class tabManager {
   async closeTab(tab) {
     if (!tab || !this.getFileByID(tab.id)) return false;
     if (tab.type === TAB_TYPES.FILE) return this.closeFile(tab.id);
+    if (tab.type === "markdown") await tab.textTab?.flushAutoSave?.();
     if (tab.type === "markdown" && tab.textTab && !tab.textTab.isSaved) {
       const choice = await this.editor.savePopupManager.confirmClose(tab.textTab.id);
       if (choice === "cancel") return false;
@@ -502,6 +514,7 @@ class tabManager {
     if (!file) return;
 
     if (!file.isSaved) {
+      file.cancelAutoSave?.();
       file.externalModified = true;
       this.refresh();
       return;
@@ -555,6 +568,7 @@ class tabManager {
         );
         if (!status?.exists || status.isDirectory) {
           if (!file.isSaved) {
+            file.cancelAutoSave?.();
             file.externalModified = true;
             this.refresh();
           } else {

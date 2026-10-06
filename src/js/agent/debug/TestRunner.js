@@ -35,7 +35,11 @@ class TestRunner {
     }
     if (autoSave)
       await Promise.all(
-        relevant.map(({ file }) => file.saveQueue?.catch?.(() => false)),
+        relevant.map(({ file }) =>
+          typeof file.flushAutoSave === "function"
+            ? file.flushAutoSave()
+            : file.saveQueue?.catch?.(() => false),
+        ),
       );
     const changed = [];
     for (const { file, relative } of relevant) {

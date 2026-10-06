@@ -16,6 +16,7 @@ const Editor = loadGlobal('src/js/main/Editor.js', 'Editor', {
   document: { addEventListener() {} }, window: {},
   SETTINGS_GET: () => false, SETTINGS_SET: async () => true,
 });
+const TestRunner = loadGlobal('src/js/agent/debug/TestRunner.js', 'TestRunner', { window: {} });
 const StatesManager = loadGlobal('src/js/manager/StatesManager.js', 'StatesManager', { FileNode, SettingsTab, TAB_TYPES });
 const quiet = { ...console, warn() {}, error() {} };
 
@@ -108,12 +109,12 @@ test('existing FileNode auto-save follows the shared state and safe save pipelin
   file.onChange(); await new Promise(r => setImmediate(r));
   assert.equal(writes, 0); assert.equal(file.isSaved, false);
   editor.setAutoSaveState(true, { persist: false });
-  file.onChange(); await new Promise(r => setImmediate(r));
+  file.onChange(); await file.flushAutoSave();
   assert.equal(writes, 1); assert.equal(file.isSaved, true);
 
   editor.api.saveFile = async () => false;
   const originalWarn = console.warn; console.warn = () => {};
-  try { file.onChange(); await new Promise(r => setImmediate(r)); }
+  try { file.onChange(); await file.flushAutoSave(); }
   finally { console.warn = originalWarn; }
   assert.equal(file.isSaved, false);
   editor.api.saveFile = async (filePath) => { writes++; return filePath; };
@@ -129,6 +130,7 @@ test('existing FileNode auto-save follows the shared state and safe save pipelin
   editor.tabManager.files.push(loading); editor.tabManager.activeFile = loading;
   loading.onChange(); await new Promise(r => setImmediate(r));
   assert.equal(writes, 1);
+  loading.cancelAutoSave();
 
   editor.tabManager.activeFile = file;
   editor.tabManager.markFileAsDeleted(file.path);
@@ -136,6 +138,128 @@ test('existing FileNode auto-save follows the shared state and safe save pipelin
   assert.equal(writes, 1);
   assert.equal(file.isSaved, false);
   assert.equal(file.deletedFromDisk, true);
+});
+
+test('Auto Save coalesces a rapid edit burst and serializes only the latest version', async () => {
+  const editor = setup();
+  editor.getAutoSaveState = () => true;
+  const writes = [];
+  editor.api = { saveFile: async (filePath, content) => { writes.push(content); return filePath; } };
+  const file = new FileNode(editor, 1, 'burst.txt', '/burst.txt');
+  file.loadingState = { status: 'loaded', expectedTotalLines: 1, loadedLineCount: 1 };
+  editor.tabManager.files = [file]; editor.tabManager.activeFile = file;
+  const serialize = file.serializeContent.bind(file);
+  let serializations = 0;
+  file.serializeContent = () => { serializations++; return serialize(); };
+
+  for (let version = 1; version <= 20; version++) {
+    file.editVersion = version;
+    file.lines[0].setText(`version-${version}`);
+    file.onChange();
+  }
+
+  assert.equal(writes.length, 0);
+  assert.equal(serializations, 0);
+  await new Promise((resolve) => setTimeout(resolve, 240));
+  await file.flushAutoSave();
+
+  assert.deepEqual(writes, ['version-20']);
+  assert.equal(serializations, 1);
+  assert.equal(file.isSaved, true);
+});
+
+test('Ctrl+S cancels a pending Auto Save delay and writes immediately', async () => {
+  const editor = setup();
+  editor.getAutoSaveState = () => true;
+  const writes = [];
+  editor.api = { saveFile: async (filePath, content) => { writes.push(content); return filePath; } };
+  const file = new FileNode(editor, 1, 'immediate.txt', '/immediate.txt');
+  file.loadingState = { status: 'loaded', expectedTotalLines: 1, loadedLineCount: 1 };
+  editor.tabManager.files = [file]; editor.tabManager.activeFile = file;
+  file.lines[0].setText('latest');
+  file.editVersion = 1;
+  file.onChange();
+
+  const save = file.save();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(writes, ['latest']);
+  assert.equal(file.autoSaveTimer, null);
+  assert.equal(await save, true);
+});
+
+test('close and quit flush the latest pending Auto Save before lifecycle completion', async () => {
+  const makeDirtyEditor = () => {
+    const editor = setup();
+    editor.getAutoSaveState = () => true;
+    const writes = [];
+    editor.api = { saveFile: async (filePath, content) => { writes.push(content); return filePath; } };
+    const file = new FileNode(editor, 1, 'pending.txt', '/pending.txt');
+    file.loadingState = { status: 'loaded', expectedTotalLines: 1, loadedLineCount: 1 };
+    editor.tabManager.files = [file]; editor.tabManager.activeFile = file;
+    file.lines[0].setText('final');
+    file.editVersion = 1;
+    file.onChange();
+    return { editor, file, writes };
+  };
+
+  const closing = makeDirtyEditor();
+  closing.editor.savePopupManager = { confirmClose: async () => assert.fail('saved Auto Save should not prompt') };
+  assert.equal(await closing.editor.tabManager.closeFile(closing.file.id), true);
+  assert.deepEqual(closing.writes, ['final']);
+  assert.equal(closing.file.autoSaveTimer, null);
+  assert.equal(closing.file.autoSaveDisposed, true);
+
+  const quitting = makeDirtyEditor();
+  quitting.editor.savePopupManager = { confirmClose: async () => assert.fail('saved Auto Save should not prompt') };
+  assert.equal(await quitting.editor.tabManager.prepareForQuit(), true);
+  assert.deepEqual(quitting.writes, ['final']);
+  assert.equal(quitting.file.isSaved, true);
+});
+
+test('a pending Auto Save never overwrites a file marked externally changed', async () => {
+  const editor = setup();
+  editor.getAutoSaveState = () => true;
+  let writes = 0;
+  editor.api = { saveFile: async () => { writes++; return '/conflict.txt'; } };
+  const file = new FileNode(editor, 1, 'conflict.txt', '/conflict.txt');
+  file.loadingState = { status: 'loaded', expectedTotalLines: 1, loadedLineCount: 1 };
+  editor.tabManager.files = [file]; editor.tabManager.activeFile = file;
+  file.lines[0].setText('local');
+  file.editVersion = 1;
+  file.onChange();
+  file.externalModified = true;
+
+  await file.flushAutoSave();
+
+  assert.equal(writes, 0);
+  assert.equal(file.externalModified, true);
+  assert.equal(file.isSaved, false);
+  file.disposeAutoSave();
+});
+
+test('Agent test runs flush a coalesced Auto Save before checking workspace files', async () => {
+  let flushes = 0;
+  const file = {
+    path: '/workspace/src.js',
+    isSaved: false,
+    saveQueue: Promise.resolve(true),
+    async flushAutoSave() { flushes++; this.isSaved = true; return true; },
+    serializeContent() { return 'latest'; },
+  };
+  const runner = Object.create(TestRunner.prototype);
+  runner.agent = {
+    editor: {
+      fileExplorer: { rootPath: '/workspace' },
+      tabManager: { files: [file] },
+      getAutoSaveState: () => true,
+    },
+    resolveWorkspacePath: (relativePath, root) => `${root}/${relativePath}`,
+    api: { getFileContent: async (paths) => ({ [paths[0]]: 'latest' }) },
+  };
+
+  const dirtyPaths = await runner.dirtyPaths({});
+  assert.equal(dirtyPaths.length, 0);
+  assert.equal(flushes, 1);
 });
 
 test('deletedFromDisk takes priority over Auto Save for visual dirty state', () => {

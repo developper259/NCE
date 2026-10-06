@@ -4,6 +4,7 @@ const TAB_TYPES = Object.freeze({
   PICTURE: "picture",
   MARKDOWN: "markdown",
 });
+const AUTO_SAVE_DEBOUNCE_MS = 180;
 
 class Tab {
   constructor(id, type, name, closable = true) {
@@ -60,6 +61,9 @@ class FileNode extends Tab {
     this.diskFingerprint = null;
     this.editVersion = 0;
     this.saveQueue = Promise.resolve(true);
+    this.autoSaveTimer = null;
+    this.autoSaveFlushPromise = null;
+    this.autoSaveDisposed = false;
 
     // KeyBinding
     this.historyX = undefined;
@@ -306,6 +310,7 @@ class FileNode extends Tab {
   }
 
   save() {
+    this.cancelAutoSave();
     return this.enqueueSaveOperation(() => this.performSave());
   }
 
@@ -324,9 +329,93 @@ class FileNode extends Tab {
     );
   }
 
-  async performSaveSnapshot(content, version, saveFile) {
+  scheduleAutoSave() {
+    if (
+      this.autoSaveDisposed ||
+      !this.shouldPersistChanges() ||
+      this.isSaved === true
+    ) {
+      this.cancelAutoSave();
+      return false;
+    }
+
+    this.cancelAutoSave();
+    this.autoSaveTimer = setTimeout(() => {
+      this.autoSaveTimer = null;
+      void this.flushAutoSave();
+    }, AUTO_SAVE_DEBOUNCE_MS);
+    return true;
+  }
+
+  cancelAutoSave() {
+    if (this.autoSaveTimer !== null) {
+      clearTimeout(this.autoSaveTimer);
+      this.autoSaveTimer = null;
+    }
+  }
+
+  disposeAutoSave() {
+    this.autoSaveDisposed = true;
+    this.cancelAutoSave();
+  }
+
+  flushAutoSave() {
+    this.cancelAutoSave();
+    if (this.autoSaveFlushPromise) return this.autoSaveFlushPromise;
+
+    let flushPromise;
+    flushPromise = this.runAutoSaveFlush().finally(() => {
+      if (this.autoSaveFlushPromise === flushPromise)
+        this.autoSaveFlushPromise = null;
+    });
+    this.autoSaveFlushPromise = flushPromise;
+    return flushPromise;
+  }
+
+  async runAutoSaveFlush() {
+    while (this.shouldPersistChanges() && this.isSaved !== true) {
+      const version = this.editVersion;
+      const result = await this.enqueueSaveOperation(() =>
+        this.performAutoSave(version),
+      );
+
+      // An edit during load or write makes that snapshot stale. Persist the
+      // latest version before a lifecycle flush is allowed to finish.
+      if (version !== this.editVersion && !result?.error) continue;
+      if (result?.saved === true || result?.unchanged === true) return true;
+      return false;
+    }
+    return true;
+  }
+
+  async performAutoSave(version) {
+    if (!this.shouldPersistChanges())
+      return { saved: false, skipped: true };
     if (version !== this.editVersion) return { saved: false, stale: true };
-    if (!(await this.ensureSaveable())) {
+    if (this.isSaved === true) return { saved: true, unchanged: true };
+    if (!(await this.ensureSaveable()))
+      return { saved: false, error: this.saveError || new Error("Save unavailable") };
+    if (!this.shouldPersistChanges())
+      return { saved: false, skipped: true };
+    if (version !== this.editVersion) return { saved: false, stale: true };
+
+    const content = this.serializeContent();
+    return this.performSaveSnapshot(
+      content,
+      version,
+      (filePath, snapshot) => this.editor.api.saveFile(filePath, snapshot),
+      { saveableChecked: true },
+    );
+  }
+
+  async performSaveSnapshot(
+    content,
+    version,
+    saveFile,
+    { saveableChecked = false } = {},
+  ) {
+    if (version !== this.editVersion) return { saved: false, stale: true };
+    if (!saveableChecked && !(await this.ensureSaveable())) {
       return {
         saved: false,
         error: this.saveError || new Error("Save unavailable"),
@@ -342,6 +431,7 @@ class FileNode extends Tab {
       this.deletedFromDisk = false;
       this.saveError = null;
       this.setIsSaved(true);
+      this.cancelAutoSave();
       this.editor.historyController?.markSaved(this);
       this.editor.tabManager.refresh();
       return { saved: true, result: saved };
@@ -366,6 +456,7 @@ class FileNode extends Tab {
       if (version === this.editVersion) {
         this.deletedFromDisk = false;
         this.setIsSaved(true);
+        this.cancelAutoSave();
         this.editor.historyController?.markSaved(this);
       }
       this.editor.tabManager.refresh();
@@ -377,6 +468,7 @@ class FileNode extends Tab {
   }
 
   saveAs() {
+    this.cancelAutoSave();
     this.saveQueue = this.saveQueue
       .catch(() => false)
       .then(() => this.performSaveAs());
@@ -414,6 +506,7 @@ class FileNode extends Tab {
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
     if (version === this.editVersion) {
       this.setIsSaved(true);
+      this.cancelAutoSave();
       this.editor.historyController?.markSaved(this);
     }
     const language = await this.editor.highlightController.detectLanguage(
@@ -480,9 +573,7 @@ class FileNode extends Tab {
         ? this.editor.historyController.isAtSavePoint(this)
         : false,
     );
-    if (this.shouldPersistChanges()) {
-      void this.save();
-    }
+    this.scheduleAutoSave();
     this.editor.tabManager.refresh();
   }
 
