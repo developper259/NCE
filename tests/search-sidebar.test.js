@@ -152,6 +152,148 @@ test("workspace search pages reuse their session and query replacement cancels i
   assert.equal(requests[2][2].sessionId, sidebar.activeSearchSessionId);
 });
 
+test("workspace search renders live batches, progress and ignores stale sessions", async () => {
+  const listeners = new Set();
+  const starts = [];
+  const editor = {
+    fileExplorer: { rootPath: "/workspace" },
+    api: {
+      onWorkspaceSearchEvent(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      async startWorkspaceSearch(...args) {
+        starts.push(args);
+        return { success: true, sessionId: args[2].sessionId };
+      },
+      cancelSearch() {},
+    },
+  };
+  const sidebar = new SearchSidebar(editor);
+  sidebar.isOpen = true;
+  sidebar.query = "first";
+
+  const firstRun = sidebar.runSearch();
+  await new Promise((resolve) => setImmediate(resolve));
+  const firstSession = starts[0][2].sessionId;
+  const firstListener = [...listeners][0];
+  firstListener({
+    type: "batch",
+    sessionId: firstSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    results: [{ path: "/workspace/first.js", relativePath: "first.js", name: "first.js", line: 1, preview: "first", matchStart: 0, matchLength: 5 }],
+    totalMatches: 1,
+    filesSearched: 1,
+    scannedFiles: 3,
+  });
+  assert.equal(sidebar.results.length, 1);
+  assert.equal(sidebar.isSearching, true);
+  assert.match(sidebar.getSummaryText(), /3 files scanned/);
+  firstListener({
+    type: "complete",
+    sessionId: firstSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    totalMatches: 2,
+    filesSearched: 2,
+    scannedFiles: 5,
+  });
+  await firstRun;
+  assert.equal(sidebar.hasMoreResults, true);
+  assert.equal(sidebar.nextResultsOffset, 1);
+
+  sidebar.query = "second";
+  const secondRun = sidebar.runSearch();
+  await new Promise((resolve) => setImmediate(resolve));
+  const secondSession = starts[1][2].sessionId;
+  const secondListener = [...listeners][0];
+  firstListener({
+    type: "batch",
+    sessionId: firstSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    results: [{ path: "/workspace/stale.js", name: "stale.js" }],
+    totalMatches: 99,
+    filesSearched: 99,
+    scannedFiles: 99,
+  });
+  assert.equal(sidebar.results.length, 0);
+  secondListener({
+    type: "batch",
+    sessionId: secondSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    results: [{ path: "/workspace/current.js", name: "current.js" }],
+    totalMatches: 1,
+    filesSearched: 1,
+    scannedFiles: 1,
+  });
+  secondListener({
+    type: "complete",
+    sessionId: secondSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    totalMatches: 1,
+    filesSearched: 1,
+    scannedFiles: 1,
+  });
+  await secondRun;
+  assert.equal(sidebar.results[0].name, "current.js");
+  assert.equal(sidebar.totalMatches, 1);
+});
+
+test("workspace search ignores late results and errors after a replacement", async () => {
+  const listeners = new Set();
+  const starts = [];
+  let rejectFirstStart;
+  const editor = {
+    fileExplorer: { rootPath: "/workspace" },
+    api: {
+      onWorkspaceSearchEvent(listener) {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+      startWorkspaceSearch(...args) {
+        starts.push(args);
+        if (starts.length === 1)
+          return new Promise((_resolve, reject) => { rejectFirstStart = reject; });
+        return Promise.resolve({ success: true, sessionId: args[2].sessionId });
+      },
+      cancelSearch() {},
+    },
+  };
+  const sidebar = new SearchSidebar(editor);
+  sidebar.isOpen = true;
+  sidebar.query = "old";
+  const oldRun = sidebar.runSearch();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  sidebar.query = "new";
+  const newRun = sidebar.runSearch();
+  await new Promise((resolve) => setImmediate(resolve));
+  const newSession = starts[1][2].sessionId;
+  const currentListener = [...listeners][0];
+  currentListener({
+    type: "batch",
+    sessionId: newSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    results: [{ path: "/workspace/new.js", name: "new.js" }],
+    totalMatches: 1,
+    filesSearched: 1,
+    scannedFiles: 1,
+  });
+  currentListener({
+    type: "complete",
+    sessionId: newSession,
+    workspaceGeneration: sidebar.workspaceGeneration,
+    totalMatches: 1,
+    filesSearched: 1,
+    scannedFiles: 1,
+  });
+  await newRun;
+  rejectFirstStart(new Error("old search failed"));
+  await oldRun;
+
+  assert.equal(sidebar.results.length, 1);
+  assert.equal(sidebar.results[0].name, "new.js");
+});
+
 test("search result navigation awaits opening and the requested progressive line", async () => {
   animationFrameRequests = 0;
   let openFile;

@@ -46,6 +46,17 @@ interface SearchResponse {
   hasMore: boolean;
 }
 
+interface SearchStreamMessage {
+  sessionId: string;
+  workspaceGeneration: number;
+  type: "batch" | "progress" | "complete" | "cancelled" | "error";
+  results?: SearchResult[];
+  totalMatches: number;
+  filesSearched: number;
+  scannedFiles: number;
+  error?: string;
+}
+
 interface SearchSession {
   id: string;
   root: string;
@@ -57,11 +68,18 @@ interface SearchSession {
   cursor: number;
   totalMatches: number;
   filesSearched: number;
+  scannedFiles: number;
   directoriesVisited: number;
   filesRead: number;
   complete: boolean;
   cancelled: boolean;
   promise: Promise<SearchResponse> | null;
+  streamEmitter: ((message: SearchStreamMessage) => void) | null;
+  streamLimit: number;
+  streamedResultCount: number;
+  streamBatch: SearchResult[];
+  streamBatchTimer: ReturnType<typeof setTimeout> | null;
+  streamProgressTimer: ReturnType<typeof setTimeout> | null;
 }
 
 interface ReplaceResponse {
@@ -196,6 +214,27 @@ export class WorkspaceSearch {
         await this.ensureWorkspaceStorage(rootPath);
         try {
           return await this.search(rootPath, query, options);
+        } finally {
+          if (requestId) this.cancelledRequests.delete(requestId);
+        }
+      },
+    );
+    ipcMain.handle(
+      "WorkspaceSearch:startStream",
+      async (event, rootPath: string, query: string, options: SearchOptions = {}) => {
+        const requestId = options?.requestId;
+        if (requestId) this.cancelledRequests.delete(requestId);
+        await this.ensureWorkspaceStorage(rootPath);
+        try {
+          return this.startSearchStream(
+            rootPath,
+            query,
+            options,
+            (message) => {
+              if (!event.sender.isDestroyed())
+                event.sender.send("WorkspaceSearch:streamEvent", message);
+            },
+          );
         } finally {
           if (requestId) this.cancelledRequests.delete(requestId);
         }
@@ -509,10 +548,183 @@ export class WorkspaceSearch {
     });
   }
 
+  private emitSearchStreamMessage(
+    session: SearchSession,
+    fields: Pick<SearchStreamMessage, "type"> &
+      Partial<Omit<SearchStreamMessage, "sessionId" | "workspaceGeneration" | "type">>,
+  ): void {
+    if (!session.streamEmitter) return;
+    try {
+      session.streamEmitter({
+        sessionId: session.id,
+        workspaceGeneration: session.workspaceGeneration,
+        type: fields.type,
+        results: fields.results,
+        totalMatches: fields.totalMatches ?? session.totalMatches,
+        filesSearched: fields.filesSearched ?? session.filesSearched,
+        scannedFiles: fields.scannedFiles ?? session.scannedFiles,
+        error: fields.error,
+      });
+    } catch (error) {
+      console.error("Unable to send workspace search update:", error);
+      session.streamEmitter = null;
+      if (session.streamBatchTimer) clearTimeout(session.streamBatchTimer);
+      if (session.streamProgressTimer) clearTimeout(session.streamProgressTimer);
+      session.streamBatchTimer = null;
+      session.streamProgressTimer = null;
+      session.streamBatch = [];
+    }
+  }
+
+  private flushSearchStreamBatch(session: SearchSession): void {
+    if (session.streamBatchTimer) clearTimeout(session.streamBatchTimer);
+    session.streamBatchTimer = null;
+    if (!session.streamBatch.length || session.cancelled) return;
+    const results = session.streamBatch.splice(0);
+    this.emitSearchStreamMessage(session, { type: "batch", results });
+  }
+
+  private queueSearchStreamResult(session: SearchSession, result: SearchResult): void {
+    if (
+      !session.streamEmitter ||
+      session.cancelled ||
+      session.streamedResultCount >= session.streamLimit
+    ) return;
+    session.streamBatch.push(result);
+    session.streamedResultCount++;
+    session.cursor = Math.max(session.cursor, session.streamedResultCount);
+    if (session.streamBatch.length >= 100) {
+      this.flushSearchStreamBatch(session);
+      return;
+    }
+    if (!session.streamBatchTimer) {
+      session.streamBatchTimer = setTimeout(
+        () => this.flushSearchStreamBatch(session),
+        50,
+      );
+    }
+  }
+
+  private scheduleSearchStreamProgress(session: SearchSession): void {
+    if (
+      !session.streamEmitter ||
+      session.streamProgressTimer ||
+      session.cancelled
+    ) return;
+    session.streamProgressTimer = setTimeout(() => {
+      session.streamProgressTimer = null;
+      this.emitSearchStreamMessage(session, { type: "progress" });
+    }, 100);
+  }
+
+  private replaySearchStreamResults(session: SearchSession): void {
+    session.streamBatch = [];
+    const results = session.results.slice(0, session.streamLimit);
+    session.streamedResultCount = results.length;
+    session.cursor = Math.max(session.cursor, results.length);
+    for (let start = 0; start < results.length; start += 100) {
+      this.emitSearchStreamMessage(session, {
+        type: "batch",
+        results: results.slice(start, start + 100),
+      });
+    }
+  }
+
+  private finishSearchStream(
+    session: SearchSession,
+    response: SearchResponse,
+  ): void {
+    if (session.cancelled || !session.streamEmitter) return;
+    session.totalMatches = response.totalMatches;
+    session.filesSearched = response.filesSearched;
+    this.flushSearchStreamBatch(session);
+    this.emitSearchStreamMessage(session, { type: "progress" });
+    this.emitSearchStreamMessage(session, { type: "complete" });
+    session.streamEmitter = null;
+    if (session.streamProgressTimer) clearTimeout(session.streamProgressTimer);
+    session.streamProgressTimer = null;
+  }
+
+  async startSearchStream(
+    rootPath: string,
+    query: string,
+    options: SearchOptions,
+    emit: (message: SearchStreamMessage) => void,
+  ): Promise<{ success: boolean; sessionId?: string; error?: string }> {
+    if (
+      typeof options?.sessionId !== "string" || !options.sessionId ||
+      typeof rootPath !== "string" || !rootPath ||
+      typeof query !== "string" || !query
+    ) return { success: false, error: "A workspace, query, and session are required." };
+
+    const pending = this.search(rootPath, query, options);
+    const session = this.searchSessions.get(options.sessionId.slice(0, 256));
+    if (!session) return { success: false, error: "The workspace search session was cancelled." };
+    session.streamEmitter = emit;
+    const maxMatches = Math.min(
+      this.maxResults,
+      Math.max(1, Math.floor(options.maxMatches || this.maxResults)),
+    );
+    session.streamLimit = Math.min(
+      maxMatches,
+      Math.max(1, Math.floor(options.limit || 50)),
+    );
+    this.replaySearchStreamResults(session);
+    void pending.then(
+      (response) => this.finishSearchStream(session, response),
+      (error) => {
+        if (!session.cancelled) {
+          if (session.streamBatchTimer) clearTimeout(session.streamBatchTimer);
+          if (session.streamProgressTimer) clearTimeout(session.streamProgressTimer);
+          session.streamBatchTimer = null;
+          session.streamProgressTimer = null;
+          session.streamBatch = [];
+          this.emitSearchStreamMessage(session, {
+            type: "error",
+            error: error?.message || String(error),
+          });
+          session.streamEmitter = null;
+        }
+      },
+    );
+    return { success: true, sessionId: session.id };
+  }
+
+  private addSearchResult(
+    results: SearchResult[],
+    session: SearchSession | undefined,
+    result: SearchResult,
+    totalMatches: number,
+  ): void {
+    results.push(result);
+    if (session) {
+      session.results.push(result);
+      session.totalMatches = totalMatches;
+      this.queueSearchStreamResult(session, result);
+    }
+  }
+
   private cancelSession(session: SearchSession): void {
+    if (session.cancelled) return;
     session.cancelled = true;
+    if (session.streamBatchTimer) clearTimeout(session.streamBatchTimer);
+    if (session.streamProgressTimer) clearTimeout(session.streamProgressTimer);
+    session.streamBatchTimer = null;
+    session.streamProgressTimer = null;
+    session.streamBatch = [];
+    this.emitSearchStreamMessage(session, { type: "cancelled" });
+    session.streamEmitter = null;
     session.results = [];
     this.searchSessions.delete(session.id);
+  }
+
+  private rememberCancelledSearchSession(sessionId: string): void {
+    this.cancelledSearchSessions.set(sessionId, Date.now());
+    while (this.cancelledSearchSessions.size > this.maxSearchSessions * 2) {
+      const oldestId = this.cancelledSearchSessions.keys().next().value;
+      if (!oldestId) break;
+      this.cancelledSearchSessions.delete(oldestId);
+    }
   }
 
   cancelSearch(requestId: string): void {
@@ -520,15 +732,11 @@ export class WorkspaceSearch {
     const session = this.searchSessions.get(requestId);
     if (session) {
       this.cancelSession(session);
+      this.rememberCancelledSearchSession(requestId);
       return;
     }
     if (requestId.startsWith("workspace-search-session-")) {
-      this.cancelledSearchSessions.set(requestId, Date.now());
-      while (this.cancelledSearchSessions.size > this.maxSearchSessions * 2) {
-        const oldestId = this.cancelledSearchSessions.keys().next().value;
-        if (!oldestId) break;
-        this.cancelledSearchSessions.delete(oldestId);
-      }
+      this.rememberCancelledSearchSession(requestId);
       return;
     }
     this.cancelledRequests.add(requestId);
@@ -536,8 +744,10 @@ export class WorkspaceSearch {
 
   cleanupSearchSessions(now = Date.now()): void {
     for (const session of this.searchSessions.values()) {
-      if (now - session.lastAccess >= this.searchSessionTtlMs)
+      if (now - session.lastAccess >= this.searchSessionTtlMs) {
         this.cancelSession(session);
+        this.rememberCancelledSearchSession(session.id);
+      }
     }
     for (const [sessionId, cancelledAt] of this.cancelledSearchSessions) {
       if (now - cancelledAt >= this.searchSessionTtlMs)
@@ -549,6 +759,7 @@ export class WorkspaceSearch {
     activeSessions: number;
     directoriesVisited?: number;
     filesRead?: number;
+    scannedFiles?: number;
     resultCount?: number;
     cursor?: number;
     complete?: boolean;
@@ -559,6 +770,7 @@ export class WorkspaceSearch {
       ...(session ? {
         directoriesVisited: session.directoriesVisited,
         filesRead: session.filesRead,
+        scannedFiles: session.scannedFiles,
         resultCount: session.results.length,
         cursor: session.cursor,
         complete: session.complete,
@@ -582,9 +794,9 @@ export class WorkspaceSearch {
 
     const cancellationTime = this.cancelledSearchSessions.get(sessionId);
     if (cancellationTime !== undefined) {
-      this.cancelledSearchSessions.delete(sessionId);
       if (Date.now() - cancellationTime < this.searchSessionTtlMs)
         return this.emptySearchResponse(options);
+      this.cancelledSearchSessions.delete(sessionId);
     }
 
     let session = this.searchSessions.get(sessionId);
@@ -605,6 +817,7 @@ export class WorkspaceSearch {
         )[0];
         if (!oldest) break;
         this.cancelSession(oldest);
+        this.rememberCancelledSearchSession(oldest.id);
       }
       const now = Date.now();
       session = {
@@ -618,11 +831,18 @@ export class WorkspaceSearch {
         cursor: 0,
         totalMatches: 0,
         filesSearched: 0,
+        scannedFiles: 0,
         directoriesVisited: 0,
         filesRead: 0,
         complete: false,
         cancelled: false,
         promise: null,
+        streamEmitter: null,
+        streamLimit: 0,
+        streamedResultCount: 0,
+        streamBatch: [],
+        streamBatchTimer: null,
+        streamProgressTimer: null,
       };
       this.searchSessions.set(sessionId, session);
     }
@@ -700,6 +920,10 @@ export class WorkspaceSearch {
       return this.searchWithSession(rootPath, query, options);
     }
     return this.searchUncached(rootPath, query, options);
+  }
+
+  protected readSearchFile(filePath: string): Promise<Buffer> {
+    return fs.readFile(filePath);
   }
 
   private async searchUncached(
@@ -840,7 +1064,11 @@ export class WorkspaceSearch {
           }
 
           if (session) session.filesRead++;
-          const buffer = await fs.readFile(fullPath);
+          const buffer = await this.readSearchFile(fullPath);
+          if (session) {
+            session.scannedFiles++;
+            this.scheduleSearchStreamProgress(session);
+          }
 
           if (this.isBinary(buffer)) {
             continue;
@@ -849,6 +1077,7 @@ export class WorkspaceSearch {
           const content = buffer.toString("utf8");
 
           filesSearched++;
+          if (session) session.filesSearched = filesSearched;
 
           const lines = content.split(/\r?\n/);
 
@@ -884,7 +1113,7 @@ export class WorkspaceSearch {
                 Math.max(0, line.length - column),
               );
               const preview = this.createPreview(line, column, previewLength);
-              results.push({
+              this.addSearchResult(results, session, {
                 path: fullPath,
                 relativePath,
                 name: entry.name,
@@ -893,7 +1122,7 @@ export class WorkspaceSearch {
                 preview: preview.text,
                 matchStart: preview.matchStart,
                 matchLength: match.length,
-              });
+              }, totalMatches);
             }
             continue;
           }
@@ -923,7 +1152,7 @@ export class WorkspaceSearch {
                 match.length,
               );
 
-              results.push({
+              this.addSearchResult(results, session, {
                 path: fullPath,
 
                 relativePath,
@@ -939,7 +1168,7 @@ export class WorkspaceSearch {
                 matchStart: preview.matchStart,
 
                 matchLength: match.length,
-              });
+              }, totalMatches);
             }
           }
         } catch {

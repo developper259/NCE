@@ -48,6 +48,9 @@ class SearchSidebar extends Sidebar {
     this.searchGeneration = 0;
     this.activeRequestId = null;
     this.activeSearchSessionId = null;
+    this.activeSearchResolve = null;
+    this.activeSearchStreamUnsubscribe = null;
+    this.filesScanned = 0;
     this.isReplacing = false;
     this.replaceExpanded = false;
     this.resultOpenController = null;
@@ -377,43 +380,80 @@ class SearchSidebar extends Sidebar {
       this.refresh();
       return;
     }
+    this.cancelActiveSearch();
     const workspaceGeneration = this.workspaceGeneration;
     const searchGeneration = ++this.searchGeneration;
     const sessionId = `workspace-search-session-${workspaceGeneration}-${searchGeneration}`;
     const requestId = sessionId;
-    const previousRequestId = this.activeRequestId;
-    const previousSessionId = this.activeSearchSessionId;
     this.activeRequestId = requestId;
     this.activeSearchSessionId = sessionId;
-    if (previousRequestId) this.editor.api.cancelSearch?.(previousRequestId);
-    if (previousSessionId && previousSessionId !== previousRequestId)
-      this.editor.api.cancelSearch?.(previousSessionId);
     this.isLoadingMore = false;
     this.hasMoreResults = false;
     this.nextResultsOffset = 0;
     this.resetResultsScroll = true;
+    this.results = [];
+    this.totalMatches = 0;
+    this.filesSearched = 0;
+    this.filesScanned = 0;
 
     this.isSearching = true;
     this.refresh();
 
     try {
-      const response = await this.editor.api.searchInFiles(
-        rootPath,
-        this.query,
-        {
-          include: this.include,
-          exclude: this.exclude,
-          caseSensitive: this.caseSensitive,
-          wholeWord: this.wholeWord,
-          useRegex: this.useRegex,
-          ignoreHiddenDirectories: true,
-          offset: 0,
-          limit: this.resultsPageSize,
-          requestId,
-          sessionId,
-          workspaceGeneration,
-        },
-      );
+      const options = {
+        include: this.include,
+        exclude: this.exclude,
+        caseSensitive: this.caseSensitive,
+        wholeWord: this.wholeWord,
+        useRegex: this.useRegex,
+        ignoreHiddenDirectories: true,
+        offset: 0,
+        limit: this.resultsPageSize,
+        requestId,
+        sessionId,
+        workspaceGeneration,
+      };
+      if (
+        typeof this.editor.api.startWorkspaceSearch === "function" &&
+        typeof this.editor.api.onWorkspaceSearchEvent === "function"
+      ) {
+        const streamComplete = new Promise((resolve) => {
+          this.activeSearchResolve = resolve;
+        });
+        const unsubscribe = this.editor.api.onWorkspaceSearchEvent((message) =>
+          this.handleSearchStreamMessage(message),
+        );
+        this.activeSearchStreamUnsubscribe =
+          typeof unsubscribe === "function" ? unsubscribe : null;
+        const started = await this.editor.api.startWorkspaceSearch(
+          rootPath,
+          this.query,
+          options,
+        );
+        if (!started?.success)
+          throw new Error(started?.error || "Workspace search could not start.");
+        await streamComplete;
+      } else {
+        const response = await this.editor.api.searchInFiles(
+          rootPath,
+          this.query,
+          options,
+        );
+
+        if (
+          !this.isOpen ||
+          searchGeneration !== this.searchGeneration ||
+          workspaceGeneration !== this.workspaceGeneration ||
+          !NCEPath.equals(rootPath, this.editor.fileExplorer.rootPath)
+        ) return;
+
+        this.results = Array.isArray(response?.results) ? response.results : [];
+        this.totalMatches = response?.totalMatches || 0;
+        this.filesSearched = response?.filesSearched || 0;
+        this.nextResultsOffset = (response?.offset ?? 0) + this.results.length;
+        this.hasMoreResults = this.results.length > 0 &&
+          (response?.hasMore ?? this.nextResultsOffset < this.totalMatches);
+      }
 
       if (
         !this.isOpen ||
@@ -424,15 +464,14 @@ class SearchSidebar extends Sidebar {
         return;
       }
 
-      this.results = Array.isArray(response?.results) ? response.results : [];
-      this.totalMatches = response?.totalMatches || 0;
-      this.filesSearched = response?.filesSearched || 0;
-      this.nextResultsOffset = (response?.offset ?? 0) + this.results.length;
-      this.hasMoreResults = this.results.length > 0 &&
-        (response?.hasMore ?? this.nextResultsOffset < this.totalMatches);
     } catch (error) {
+      if (
+        searchGeneration !== this.searchGeneration ||
+        workspaceGeneration !== this.workspaceGeneration
+      ) return;
       console.error("Error searching workspace:", error);
       this.clearResults();
+      this.refresh();
     } finally {
       if (searchGeneration === this.searchGeneration) {
         if (this.activeRequestId === requestId) this.activeRequestId = null;
@@ -442,12 +481,63 @@ class SearchSidebar extends Sidebar {
     }
   }
 
+  handleSearchStreamMessage(message) {
+    if (
+      !message ||
+      message.sessionId !== this.activeSearchSessionId ||
+      message.workspaceGeneration !== this.workspaceGeneration
+    ) return;
+
+    if (message.type === "batch") {
+      if (Array.isArray(message.results) && message.results.length) {
+        this.results = this.results.concat(message.results);
+        this.resetResultsScroll = false;
+      }
+    }
+    if (
+      message.type === "batch" ||
+      message.type === "progress" ||
+      message.type === "complete"
+    ) {
+      this.totalMatches = message.totalMatches ?? this.totalMatches;
+      this.filesSearched = message.filesSearched ?? this.filesSearched;
+      this.filesScanned = message.scannedFiles ?? this.filesScanned;
+    }
+
+    if (message.type === "complete") {
+      this.nextResultsOffset = this.results.length;
+      this.hasMoreResults = this.nextResultsOffset < this.totalMatches;
+      this.isSearching = false;
+      this.activeRequestId = null;
+      this.finishActiveSearchStream(message);
+    } else if (message.type === "cancelled") {
+      this.isSearching = false;
+      this.activeRequestId = null;
+      this.finishActiveSearchStream(message);
+    } else if (message.type === "error") {
+      console.error("Error searching workspace:", message.error);
+      this.clearResults();
+      this.finishActiveSearchStream(message);
+    }
+    this.refresh();
+  }
+
+  finishActiveSearchStream(result) {
+    this.activeSearchStreamUnsubscribe?.();
+    this.activeSearchStreamUnsubscribe = null;
+    const resolve = this.activeSearchResolve;
+    this.activeSearchResolve = null;
+    resolve?.(result);
+  }
+
   clearResults() {
     this.cancelResultNavigation();
     this.cancelActiveSearch();
+    this.searchGeneration++;
     this.results = [];
     this.totalMatches = 0;
     this.filesSearched = 0;
+    this.filesScanned = 0;
     this.nextResultsOffset = 0;
     this.hasMoreResults = false;
     this.isLoadingMore = false;
@@ -465,6 +555,12 @@ class SearchSidebar extends Sidebar {
       this.editor.api.cancelSearch?.(this.activeSearchSessionId);
     this.activeRequestId = null;
     this.activeSearchSessionId = null;
+    this.activeSearchStreamUnsubscribe?.();
+    this.activeSearchStreamUnsubscribe = null;
+    const resolve = this.activeSearchResolve;
+    this.activeSearchResolve = null;
+    resolve?.({ type: "cancelled" });
+    this.isSearching = false;
   }
 
   async loadMoreResults() {
@@ -545,7 +641,7 @@ class SearchSidebar extends Sidebar {
 
   getSummaryText() {
     if (this.isSearching) {
-      return "Searching…";
+      return `Searching… · ${this.filesScanned} files scanned · ${this.totalMatches} matches`;
     }
 
     if (!this.query) {
@@ -582,18 +678,19 @@ class SearchSidebar extends Sidebar {
     if (this.isSearching) {
       items.push({
         type: "placeholder",
-        text: "Searching…",
+        text: this.getSummaryText(),
         height: 58,
         rowHeight: 58,
       });
-    } else if (this.query && this.results.length === 0) {
+    }
+    if (!this.isSearching && this.query && this.results.length === 0) {
       items.push({
         type: "placeholder",
         text: "No results found.",
         height: 58,
         rowHeight: 58,
       });
-    } else if (this.query) {
+    } else if (this.query && this.results.length > 0) {
       const groups = new Map();
 
       for (const result of this.results) {
@@ -795,7 +892,14 @@ class SearchSidebar extends Sidebar {
   onClose() {
     clearTimeout(this.searchTimer);
     this.cancelResultNavigation();
-    this.cancelActiveSearch();
+    if (this.isSearching) {
+      this.searchGeneration++;
+      this.clearResults();
+    } else if (this.isLoadingMore && this.activeRequestId) {
+      this.editor.api.cancelSearch?.(this.activeRequestId);
+      this.activeRequestId = null;
+      this.isLoadingMore = false;
+    }
     this.resultsScroller.suspend();
   }
 }

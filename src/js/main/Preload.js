@@ -203,6 +203,13 @@ contextBridge.exposeInMainWorld("api", {
 
   searchInFiles: (rootPath, query, options = {}) =>
     ipcRenderer.invoke("WorkspaceSearch:search", rootPath, query, options),
+  startWorkspaceSearch: (rootPath, query, options = {}) =>
+    ipcRenderer.invoke("WorkspaceSearch:startStream", rootPath, query, options),
+  onWorkspaceSearchEvent: (callback) => {
+    const listener = (_event, message) => callback(message);
+    ipcRenderer.on("WorkspaceSearch:streamEvent", listener);
+    return () => ipcRenderer.removeListener("WorkspaceSearch:streamEvent", listener);
+  },
 
   replaceInFiles: (rootPath, query, replacement, options = {}) =>
     ipcRenderer.invoke(

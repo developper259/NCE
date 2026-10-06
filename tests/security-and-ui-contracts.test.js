@@ -25,7 +25,7 @@ test("Markdown renderer keeps strict default and isolates sanitized workspace pr
 test("Preload exposes the core IPC contract without node integration", () => {
   const preload = read("src/js/main/Preload.js");
   assert.match(preload, /contextBridge\.exposeInMainWorld\("api"/);
-  for (const method of ["rendererReady", "getNshEndpoint", "getFileContent", "saveFile", "startWatching", "searchInFiles", "onFileSystemChange"]) {
+  for (const method of ["rendererReady", "getNshEndpoint", "getFileContent", "saveFile", "startWatching", "searchInFiles", "startWorkspaceSearch", "onWorkspaceSearchEvent", "onFileSystemChange"]) {
     assert.match(preload, new RegExp(`${method}`));
   }
   assert.doesNotMatch(preload, /require\("fs"\)|require\("path"\)/);

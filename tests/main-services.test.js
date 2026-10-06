@@ -481,6 +481,12 @@ test("WorkspaceSearch cancellation and TTL keep session storage bounded", async 
     await search.search(root, "hit", { sessionId: cancelledId, limit: 1 });
     search.cancelSearch(cancelledId);
     assert.equal(search.getSearchSessionStats().activeSessions, 0);
+    const latePage = await search.search(root, "hit", {
+      sessionId: cancelledId,
+      offset: 1,
+    });
+    assert.deepEqual(latePage.results, []);
+    assert.equal(search.getSearchSessionStats().activeSessions, 0);
 
     const preCancelledId = "workspace-search-session-pre-cancelled";
     search.cancelSearch(preCancelledId);
@@ -500,6 +506,141 @@ test("WorkspaceSearch cancellation and TTL keep session storage bounded", async 
     search.cleanupSearchSessions(Date.now() + 6 * 60 * 1000);
     assert.equal(search.getSearchSessionStats().activeSessions, 0);
   } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceSearch streams the first stable batch before completion and reuses its scan", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-stream-order-"));
+  let slowReadStarted = false;
+  let finished = false;
+  try {
+    await fsp.writeFile(
+      path.join(root, "a-fast.txt"),
+      Array.from({ length: 150 }, () => "needle").join("\n"),
+    );
+    await fsp.writeFile(path.join(root, "z-slow.txt"), "needle\nneedle\n");
+    class DelayedWorkspaceSearch extends WorkspaceSearch {
+      async readSearchFile(filePath) {
+        if (path.basename(filePath) === "z-slow.txt") {
+          slowReadStarted = true;
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+        return super.readSearchFile(filePath);
+      }
+    }
+    const search = new DelayedWorkspaceSearch({ window: null });
+    const events = [];
+    let firstBatchResolve;
+    let completionResolve;
+    const firstBatchReceived = new Promise((resolve) => { firstBatchResolve = resolve; });
+    const completed = new Promise((resolve) => { completionResolve = resolve; });
+    const sessionId = "workspace-search-session-stream-order";
+    const started = await search.startSearchStream(root, "needle", {
+      sessionId,
+      requestId: sessionId,
+      workspaceGeneration: 3,
+      limit: 100,
+    }, (message) => {
+      events.push(message);
+      if (message.type === "batch" && firstBatchResolve) {
+        firstBatchResolve(message);
+        firstBatchResolve = null;
+      }
+      if (message.type === "complete") {
+        finished = true;
+        completionResolve(message);
+      }
+    });
+
+    assert.equal(started.success, true);
+    const firstBatch = await firstBatchReceived;
+    assert.equal(firstBatch.results.length, 100);
+    assert.equal(slowReadStarted, false);
+    assert.equal(finished, false);
+
+    const completion = await completed;
+    assert.equal(completion.totalMatches, 152);
+    assert.equal(completion.filesSearched, 2);
+    assert.equal(completion.scannedFiles, 2);
+    assert.equal(finished, true);
+    assert.ok(events.some((event) => event.type === "progress"));
+    assert.ok(events.filter((event) => event.type === "batch").every((event) => event.results.length <= 100));
+    const streamed = events.filter((event) => event.type === "batch").flatMap((event) => event.results);
+    assert.equal(streamed.length, 100);
+    assert.ok(streamed.every((result) => result.name === "a-fast.txt"));
+
+    const beforePage = search.getSearchSessionStats(sessionId);
+    const secondPage = await search.search(root, "needle", {
+      sessionId,
+      requestId: "workspace-search-session-stream-page-2",
+      workspaceGeneration: 3,
+      offset: 100,
+      limit: 100,
+    });
+    const afterPage = search.getSearchSessionStats(sessionId);
+    assert.equal(secondPage.results.length, 52);
+    assert.equal(secondPage.hasMore, false);
+    assert.equal(afterPage.directoriesVisited, beforePage.directoriesVisited);
+    assert.equal(afterPage.filesRead, beforePage.filesRead);
+    assert.equal(afterPage.cursor, 152);
+    assert.deepEqual(
+      streamed.concat(secondPage.results).map((result) => result.relativePath),
+      [
+        ...Array.from({ length: 150 }, () => "a-fast.txt"),
+        "z-slow.txt",
+        "z-slow.txt",
+      ],
+    );
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceSearch stream cancellation stops later batches and completion", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-stream-cancel-"));
+  let releaseSlowRead;
+  try {
+    await fsp.writeFile(path.join(root, "a-fast.txt"), Array.from({ length: 150 }, () => "hit").join("\n"));
+    await fsp.writeFile(path.join(root, "z-slow.txt"), "hit\n");
+    class CancellableWorkspaceSearch extends WorkspaceSearch {
+      async readSearchFile(filePath) {
+        if (path.basename(filePath) === "z-slow.txt")
+          await new Promise((resolve) => { releaseSlowRead = resolve; });
+        return super.readSearchFile(filePath);
+      }
+    }
+    const search = new CancellableWorkspaceSearch({ window: null });
+    const events = [];
+    let firstBatchResolve;
+    let cancelledResolve;
+    const firstBatchReceived = new Promise((resolve) => { firstBatchResolve = resolve; });
+    const cancelled = new Promise((resolve) => { cancelledResolve = resolve; });
+    const sessionId = "workspace-search-session-stream-cancel";
+    await search.startSearchStream(root, "hit", {
+      sessionId,
+      requestId: sessionId,
+      limit: 100,
+    }, (message) => {
+      events.push(message);
+      if (message.type === "batch" && firstBatchResolve) {
+        firstBatchResolve(message);
+        firstBatchResolve = null;
+      }
+      if (message.type === "cancelled") cancelledResolve(message);
+    });
+
+    await firstBatchReceived;
+    search.cancelSearch(sessionId);
+    await cancelled;
+    releaseSlowRead?.();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(events.filter((event) => event.type === "cancelled").length, 1);
+    assert.equal(events.some((event) => event.type === "complete"), false);
+    assert.equal(search.getSearchSessionStats().activeSessions, 0);
+  } finally {
+    releaseSlowRead?.();
     await fsp.rm(root, { recursive: true, force: true });
   }
 });
