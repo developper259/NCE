@@ -9,6 +9,8 @@ class FileExplorer extends Sidebar {
 
     this.projectExpanded = true;
     this.isLoaded = false;
+    this.isStale = false;
+    this.staleFolderPaths = new Set();
     this.workspaceSwitching = false;
     this.pendingScrollTop = 0;
     this.visibleRows = [];
@@ -110,24 +112,35 @@ class FileExplorer extends Sidebar {
       }
     }
 
-    const dirPaths = new Set(changes.map((change) => change.dirPath));
+    const dirPaths = [...new Set(changes
+      .map((change) => change.dirPath)
+      .filter((dirPath) => typeof dirPath === "string" && dirPath))];
 
-    if (dirPaths.has(this.rootPath)) {
+    if (dirPaths.some((dirPath) => NCEPath.equals(dirPath, this.rootPath))) {
       await this.loadFiles(this.getExpandedPaths(this.files));
       this.refresh();
       return;
     }
 
-    const refreshed = await Promise.all([...dirPaths].map((dirPath) =>
+    const workspaceDirPaths = dirPaths.filter((dirPath) =>
+      NCEPath.isInside(dirPath, this.rootPath),
+    );
+    const refreshed = await Promise.all(workspaceDirPaths.map((dirPath) =>
       this.refreshFolderIfLoaded(dirPath),
     ));
+    workspaceDirPaths.forEach((dirPath, index) => {
+      if (!refreshed[index]) {
+        if (!this.staleFolderPaths) this.staleFolderPaths = new Set();
+        this.staleFolderPaths.add(NCEPath.comparisonKey(dirPath));
+      }
+    });
     if (refreshed.some(Boolean)) this.refresh();
   }
 
   refreshFolderIfLoaded(dirPath) {
     const refreshRecursive = async (files) => {
       for (const file of files) {
-        if (file.type === "folder" && file.path === dirPath) {
+        if (file.type === "folder" && NCEPath.equals(file.path, dirPath)) {
           if (file.expanded) {
             file.children = await this.loadFolderContent(dirPath);
             return true;
@@ -146,6 +159,7 @@ class FileExplorer extends Sidebar {
   async loadFiles(expandedPaths = new Set()) {
     const rootPath = this.rootPath;
     if (!rootPath) return false;
+    this.isStale = true;
     try {
       const status = await this.fileOperations.pathStatus(rootPath);
       if (!status?.exists) {
@@ -191,6 +205,8 @@ class FileExplorer extends Sidebar {
 
       this.files = newFiles;
       this.isLoaded = true;
+      this.isStale = false;
+      this.staleFolderPaths?.clear();
       return true;
     } catch (error) {
       console.error("Error loading files:", error);
@@ -242,6 +258,8 @@ class FileExplorer extends Sidebar {
     this.files = [];
     this.activeFilePath = null;
     this.isLoaded = false;
+    this.isStale = false;
+    this.staleFolderPaths?.clear();
     this.clipboard = null;
     this.pendingScrollTop = 0;
     if (this.virtualScroller) this.virtualScroller.scrollTop = 0;
@@ -270,6 +288,7 @@ class FileExplorer extends Sidebar {
   async loadFolderContent(folderPath) {
     try {
       const items = await window.api.getFolderContent(folderPath);
+      this.staleFolderPaths?.delete(NCEPath.comparisonKey(folderPath));
       return items.map((item) => ({
         name: item.name,
         type: item.type,
@@ -278,6 +297,7 @@ class FileExplorer extends Sidebar {
         children: item.type === "folder" ? [] : undefined,
       }));
     } catch (error) {
+      this.staleFolderPaths?.add(NCEPath.comparisonKey(folderPath));
       console.error("Error loading folder content:", error);
       return [];
     }
@@ -628,8 +648,10 @@ class FileExplorer extends Sidebar {
 
   async onOpen({ restoring = false } = {}) {
     if (restoring) return;
-    const expandedSet = this.getExpandedPaths(this.files);
-    await this.loadFiles(expandedSet);
+    if (this.rootPath && (!this.isLoaded || this.isStale)) {
+      const expandedSet = this.getExpandedPaths(this.files);
+      await this.loadFiles(expandedSet);
+    }
     this.refresh();
   }
 
@@ -707,9 +729,13 @@ class FileExplorer extends Sidebar {
   async toggleFolder(folderPath) {
     const toggle = async (files) => {
       for (const file of files) {
-        if (file.path === folderPath && file.type === "folder") {
+        if (NCEPath.equals(file.path, folderPath) && file.type === "folder") {
           file.expanded = !file.expanded;
-          if (file.expanded && (!file.children || file.children.length === 0)) {
+          if (
+            file.expanded &&
+            (!file.children || file.children.length === 0 ||
+              this.staleFolderPaths?.has(NCEPath.comparisonKey(file.path)))
+          ) {
             file.children = await this.loadFolderContent(folderPath);
           }
           return true;
@@ -787,7 +813,7 @@ class FileExplorer extends Sidebar {
   }
 
   async refreshFolder(folderPath) {
-    if (folderPath === this.rootPath) {
+    if (NCEPath.equals(folderPath, this.rootPath)) {
       await this.loadFiles(this.getExpandedPaths(this.files));
     } else {
       const folder = this.findFileByPath(this.files, folderPath);

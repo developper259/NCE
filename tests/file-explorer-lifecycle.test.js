@@ -415,6 +415,69 @@ test("filesystem changes are handled without initializing the Agent runtime", as
   assert.equal(calls.refreshes, 1);
 });
 
+test("watcher refreshes an expanded folder and defers a collapsed folder until expansion", async () => {
+  const reads = [];
+  const api = {
+    async getFolderContent(folderPath) {
+      reads.push(folderPath);
+      return [{
+        name: `fresh-${NCEPath.basename(folderPath)}.js`,
+        type: "file",
+        path: `${folderPath}/fresh-${NCEPath.basename(folderPath)}.js`,
+      }];
+    },
+  };
+  const FileExplorer = loadFileExplorer(api);
+  const expanded = {
+    name: "src",
+    type: "folder",
+    path: "/workspace/src",
+    expanded: true,
+    children: [{ name: "old.js", type: "file", path: "/workspace/src/old.js" }],
+  };
+  const collapsed = {
+    name: "lib",
+    type: "folder",
+    path: "/workspace/lib",
+    expanded: false,
+    children: [{ name: "old.js", type: "file", path: "/workspace/lib/old.js" }],
+  };
+  let refreshes = 0;
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/workspace",
+    isLoaded: true,
+    files: [expanded, collapsed],
+    staleFolderPaths: new Set(),
+    editingState: null,
+    editor: {
+      quickOpen: { invalidate() {} },
+      tabManager: { reloadFileFromDisk() {}, markFileAsDeleted() {} },
+    },
+    refresh() { refreshes++; },
+  });
+
+  await explorer.handleFileSystemChanges([
+    { event: "add", filePath: "/workspace/src/new.js", dirPath: "/workspace/src" },
+    { event: "add", filePath: "/workspace/lib/new.js", dirPath: "/workspace/lib" },
+  ]);
+  assert.deepEqual(reads, ["/workspace/src"]);
+  assert.equal(expanded.children[0].name, "fresh-src.js");
+  assert.equal(
+    explorer.staleFolderPaths.has(NCEPath.comparisonKey("/workspace/lib")),
+    true,
+  );
+  assert.equal(refreshes, 1);
+
+  await explorer.toggleFolder("/workspace/lib");
+  assert.deepEqual(reads, ["/workspace/src", "/workspace/lib"]);
+  assert.equal(collapsed.children[0].name, "fresh-lib.js");
+  assert.equal(
+    explorer.staleFolderPaths.has(NCEPath.comparisonKey("/workspace/lib")),
+    false,
+  );
+  assert.equal(refreshes, 2);
+});
+
 test("workspace restoration can defer the initial File Explorer refresh", async () => {
   const FileExplorer = loadFileExplorer({
     async startWatching() {},
@@ -441,23 +504,168 @@ test("workspace restoration can defer the initial File Explorer refresh", async 
 });
 
 test("restoring the File Explorer sidebar skips its normal reload hook", async () => {
-  const FileExplorer = loadFileExplorer();
+  const reads = [];
+  const FileExplorer = loadFileExplorer({
+    async getFolderContent(folderPath) {
+      reads.push(folderPath);
+      return [];
+    },
+  });
   const explorer = Object.create(FileExplorer.prototype);
-  let loads = 0;
   let refreshes = 0;
   Object.assign(explorer, {
+    rootPath: "/project",
     files: [],
-    async loadFiles() { loads++; },
+    isLoaded: false,
+    isStale: false,
+    staleFolderPaths: new Set(),
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
     refresh() { refreshes++; },
   });
 
   await explorer.onOpen({ restoring: true });
-  assert.equal(loads, 0);
+  assert.deepEqual(reads, []);
   assert.equal(refreshes, 0);
 
   await explorer.onOpen();
-  assert.equal(loads, 1);
+  assert.deepEqual(reads, ["/project"]);
+  assert.equal(explorer.isLoaded, true);
   assert.equal(refreshes, 1);
+
+  // Closing and reopening resumes the existing model without reading the root again.
+  await explorer.onOpen();
+  assert.deepEqual(reads, ["/project"]);
+  assert.equal(refreshes, 2);
+
+  explorer.isStale = true;
+  await explorer.onOpen();
+  assert.deepEqual(reads, ["/project", "/project"]);
+  assert.equal(explorer.isStale, false);
+  assert.equal(refreshes, 3);
+});
+
+test("File Explorer close and reopen reuses the tree built for the active workspace", async () => {
+  const reads = [];
+  const FileExplorer = loadFileExplorer({
+    async getFolderContent(folderPath) {
+      reads.push(folderPath);
+      return [{ name: "file.js", type: "file", path: `${folderPath}/file.js` }];
+    },
+  });
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/project",
+    files: [],
+    isLoaded: false,
+    isStale: false,
+    staleFolderPaths: new Set(),
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
+    refresh() {},
+  });
+
+  await explorer.loadFiles();
+  await explorer.onOpen();
+  explorer.isOpen = false;
+  await explorer.onOpen();
+
+  assert.deepEqual(reads, ["/project"]);
+  assert.equal(explorer.isLoaded, true);
+});
+
+test("explicit File Explorer refresh reloads the root and restored expanded folders", async () => {
+  const reads = [];
+  const FileExplorer = loadFileExplorer({
+    async getFolderContent(folderPath) {
+      reads.push(folderPath);
+      if (folderPath === "/project")
+        return [{ name: "src", type: "folder", path: "/project/src" }];
+      return [{ name: "index.js", type: "file", path: `${folderPath}/index.js` }];
+    },
+  });
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/project",
+    files: [{
+      name: "src",
+      type: "folder",
+      path: "/project/src",
+      expanded: true,
+      children: [{ name: "old.js", type: "file", path: "/project/src/old.js" }],
+    }],
+    isLoaded: true,
+    isStale: false,
+    staleFolderPaths: new Set(),
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
+    refresh() {},
+  });
+
+  await explorer.refreshFolder("/project");
+  assert.deepEqual(reads, ["/project", "/project/src"]);
+  assert.equal(explorer.files[0].children[0].name, "index.js");
+  assert.equal(explorer.isLoaded, true);
+  assert.equal(explorer.isStale, false);
+});
+
+test("switching workspaces loads the new tree once and keeps it on sidebar reopen", async () => {
+  const reads = [];
+  const api = {
+    async startWatching() {},
+    async stopWatching() {},
+    async getFolderContent(folderPath) {
+      reads.push(folderPath);
+      return [{ name: "file.js", type: "file", path: `${folderPath}/file.js` }];
+    },
+  };
+  const FileExplorer = loadFileExplorer(api);
+  const editor = {
+    api: { async addRecentFolder() {} },
+    tabManager: {
+      async prepareForQuit() { return true; },
+      async closeFiles() { return true; },
+    },
+    searchSidebar: { resetWorkspace() {} },
+    quickOpen: { invalidate() {} },
+    agentSidebar: { manualContextManager: { handleWorkspaceChanged() {} } },
+    statesManager: {
+      persistenceSuspended: false,
+      noWorkspaceState: null,
+      lastWorkspace: null,
+      getNoWorkspaceState() { return {}; },
+      async saveWorkspaceState() { return true; },
+      async loadWorkspaceState() {},
+      async saveGlobalState() { return true; },
+    },
+    events: { callEvent() {} },
+  };
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "",
+    projectName: "",
+    files: [],
+    isLoaded: false,
+    isStale: false,
+    staleFolderPaths: new Set(),
+    workspaceSwitching: false,
+    editingState: null,
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
+    editor,
+    refresh() {},
+  });
+
+  assert.equal(await explorer.requestWorkspaceSwitch("/first"), true);
+  await explorer.onOpen();
+  assert.equal(await explorer.requestWorkspaceSwitch("/second"), true);
+  await explorer.onOpen();
+
+  assert.deepEqual(reads, ["/first", "/second"]);
+  assert.equal(explorer.rootPath, "/second");
+  assert.equal(explorer.files[0].path, "/second/file.js");
+  assert.equal(explorer.isLoaded, true);
 });
 
 test("workspace UI restoration never reopens the project", async () => {
