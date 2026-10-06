@@ -65,7 +65,9 @@ export class WorkspaceIndex {
     ReturnType<typeof setTimeout>
   >();
   private readonly reconcileQueues = new Map<string, Promise<void>>();
+  private readonly reconcileAgainRoots = new Set<string>();
   private readonly staleRemovals = new Map<string, Promise<void>>();
+  private readonly needsReconcileRoots = new Set<string>();
   private readonly maxCachedWorkspaces = 4;
   private readonly maxInvalidWorkspaces = 16;
   private readonly watcherDebounceMs = 150;
@@ -75,9 +77,17 @@ export class WorkspaceIndex {
     persistedWrites: 0,
     reconciliations: 0,
   };
+  onReconciled: ((rootPath: string) => void) | null = null;
 
   getDiagnostics() {
     return { ...this.coalescedWatcherEvents };
+  }
+
+  consumeNeedsReconcile(rootPath: string): boolean {
+    const root = path.resolve(rootPath);
+    if (!this.needsReconcileRoots.has(root)) return false;
+    this.needsReconcileRoots.delete(root);
+    return true;
   }
 
   getCacheFilePath(rootPath: string): string {
@@ -202,6 +212,7 @@ export class WorkspaceIndex {
       const snapshot = this.validateSnapshot(parsed, root);
       if (!snapshot) return null;
       this.remember(snapshot);
+      this.needsReconcileRoots.add(root);
       return snapshot;
     } catch {
       return null;
@@ -269,6 +280,7 @@ export class WorkspaceIndex {
       return false;
     }
     this.invalidRoots.delete(snapshot.root);
+    this.needsReconcileRoots.delete(snapshot.root);
     this.remember(snapshot);
     void this.queueWrite(snapshot).catch((error) => {
       console.warn("[NCE Workspace Index] Unable to persist index", {
@@ -296,6 +308,17 @@ export class WorkspaceIndex {
     void build.then(() => {
       if (this.buildQueues.get(root) === build) this.buildQueues.delete(root);
     });
+  }
+
+  scheduleReconcile(rootPath: string): void {
+    if (typeof rootPath !== "string" || !rootPath.trim()) return;
+    const root = path.resolve(rootPath);
+    const previousTimer = this.reconcileTimers.get(root);
+    if (previousTimer) clearTimeout(previousTimer);
+    this.reconcileTimers.set(root, setTimeout(() => {
+      this.reconcileTimers.delete(root);
+      void this.reconcile(root, true);
+    }, this.watcherDebounceMs));
   }
 
   handleWatcherEvent(rootPath: string, event: string, filePath: string): void {
@@ -409,6 +432,7 @@ export class WorkspaceIndex {
       }
     }
 
+    await this.reconcileQueues.get(root)?.catch(() => undefined);
     await this.buildQueues.get(root)?.catch(() => undefined);
     const snapshot = this.snapshots.get(root) || await this.load(root);
     if (!snapshot) {
@@ -480,6 +504,7 @@ export class WorkspaceIndex {
   }
 
   private markStale(root: string): void {
+    if (this.reconcileQueues.has(root)) this.reconcileAgainRoots.add(root);
     const buildWasActive = this.activeBuildTokens.has(root);
     this.activeBuildTokens.delete(root);
     if (!this.invalidRoots.has(root) || buildWasActive) {
@@ -495,15 +520,20 @@ export class WorkspaceIndex {
     this.reconcileTimers.delete(root);
   }
 
-  private async reconcile(root: string): Promise<void> {
+  private async reconcile(root: string, force = false): Promise<void> {
     const existing = this.reconcileQueues.get(root);
-    if (existing) return existing;
+    if (existing) {
+      if (force || this.invalidRoots.has(root))
+        this.reconcileAgainRoots.add(root);
+      return existing;
+    }
     const task = Promise.resolve().then(async () => {
       await this.staleRemovals.get(root)?.catch(() => undefined);
       await this.buildQueues.get(root)?.catch(() => undefined);
-      if (!this.invalidRoots.has(root) && await this.load(root)) return;
+      if (!force && !this.invalidRoots.has(root) && await this.load(root)) return;
       this.coalescedWatcherEvents.reconciliations += 1;
-      await this.build(root);
+      const snapshot = await this.build(root);
+      if (snapshot) this.onReconciled?.(root);
     });
     this.reconcileQueues.set(root, task);
     try {
@@ -516,6 +546,12 @@ export class WorkspaceIndex {
     } finally {
       if (this.reconcileQueues.get(root) === task)
         this.reconcileQueues.delete(root);
+      if (this.reconcileAgainRoots.delete(root)) {
+        this.reconcileTimers.set(root, setTimeout(() => {
+          this.reconcileTimers.delete(root);
+          void this.reconcile(root);
+        }, this.watcherDebounceMs));
+      }
     }
   }
 
@@ -585,6 +621,7 @@ export class WorkspaceIndex {
       const snapshot = this.createSnapshot(root, entries);
       if (!snapshot) return null;
       this.invalidRoots.delete(root);
+      this.needsReconcileRoots.delete(root);
       this.remember(snapshot);
       try {
         await this.queueWrite(snapshot);
@@ -606,11 +643,13 @@ export class WorkspaceIndex {
     if (rootPath) {
       const root = path.resolve(rootPath);
       await this.flushEvents(root);
-      const reconcileTimer = this.reconcileTimers.get(root);
-      if (reconcileTimer) {
+      while (this.reconcileTimers.has(root)) {
+        const reconcileTimer = this.reconcileTimers.get(root);
+        if (!reconcileTimer) break;
         clearTimeout(reconcileTimer);
         this.reconcileTimers.delete(root);
-        await this.reconcile(root);
+        await this.reconcile(root, true);
+        await this.reconcileQueues.get(root)?.catch(() => undefined);
       }
       await this.reconcileQueues.get(root)?.catch(() => undefined);
       await this.staleRemovals.get(root)?.catch(() => undefined);
@@ -634,6 +673,7 @@ export class WorkspaceIndex {
     const root = path.resolve(rootPath);
     this.activeBuildTokens.delete(root);
     this.rememberInvalidRoot(root);
+    this.needsReconcileRoots.delete(root);
     this.snapshots.delete(root);
     const target = new NceWorkspaceStorage(root).getCachePath(
       WORKSPACE_INDEX_CACHE_FILE,

@@ -825,6 +825,83 @@ test("Quick Open prunes hidden directories and lists only NCE-openable files", a
   }
 });
 
+test("Quick Open serves warm indexed paths without traversal and refreshes per workspace", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-quick-open-indexed-"));
+  const otherRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-quick-open-indexed-other-"));
+  const write = async (workspace, relativePath, content) => {
+    const filePath = path.join(workspace, relativePath);
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    await fsp.writeFile(filePath, content);
+    return filePath;
+  };
+  const fsModule = require("node:fs");
+  const originalReaddir = fsModule.promises.readdir;
+  let readdirCalls = 0;
+  try {
+    await write(root, ".env", "ROOT=value\n");
+    await write(root, ".benchmark/hidden.js", "hidden\n");
+    await write(root, "src/.hidden/hidden.js", "hidden\n");
+    await write(root, "src/app.js", "export const app = true;\n");
+    await write(root, "src/README.md", "# Notes\n");
+    await write(root, "src/diagram.png", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    await write(root, "src/notes.custom", "plain text fallback\n");
+    await write(root, "src/binary.mystery", Buffer.from([0, 1, 2, 3]));
+    await write(root, "src/archive.pdf", Buffer.from("%PDF-1.7\0binary"));
+    await write(root, "src/archive.asar", "opaque\n");
+    await write(otherRoot, "Other.ts", "export {};\n");
+
+    const builder = new WorkspaceSearch({ window: null });
+    assert.ok(await builder.workspaceIndex.build(root));
+    assert.ok(await builder.workspaceIndex.build(otherRoot));
+    const search = new WorkspaceSearch({ window: null });
+
+    fsModule.promises.readdir = async (...args) => {
+      readdirCalls++;
+      return originalReaddir(...args);
+    };
+    const first = await search.listProjectFiles(root, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+    assert.equal(readdirCalls, 0);
+    assert.deepEqual(first.entries.map((entry) => entry.relativePath), [
+      ".env",
+      "src/app.js",
+      "src/diagram.png",
+      "src/notes.custom",
+      "src/README.md",
+    ]);
+    fsModule.promises.readdir = originalReaddir;
+
+    // A persistent cache loads immediately; its reconciliation runs in the background.
+    await search.workspaceIndex.flush(root);
+    const removedPath = path.join(root, "src/README.md");
+    await fsp.unlink(removedPath);
+    search.workspaceIndex.handleWatcherEvent(root, "unlink", removedPath);
+    const addedPath = await write(root, "src/Added.md", "# Added\n");
+    search.workspaceIndex.handleWatcherEvent(root, "add", addedPath);
+    await search.workspaceIndex.flush(root);
+
+    const other = await search.listProjectFiles(otherRoot, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+    await search.workspaceIndex.flush(otherRoot);
+    const updated = await search.listProjectFiles(root, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+    assert.deepEqual(other.entries.map((entry) => entry.relativePath), ["Other.ts"]);
+    assert.ok(updated.entries.some((entry) => entry.relativePath === "src/Added.md"));
+    assert.equal(updated.entries.some((entry) => entry.relativePath === "src/README.md"), false);
+    assert.equal(readdirCalls, 0);
+  } finally {
+    fsModule.promises.readdir = originalReaddir;
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(otherRoot, { recursive: true, force: true });
+  }
+});
+
 test("invalid ASAR stays opaque in explorer, search, and project map", async () => {
   const root = await tempWorkspace();
   const archive = path.join(root, "broken.asar");

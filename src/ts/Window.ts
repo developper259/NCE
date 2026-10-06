@@ -123,6 +123,18 @@ export class Window {
       );
     this.watcher.onWatcherStop = (rootPath) =>
       this.workspaceSearch?.workspaceIndex.flushEvents(rootPath);
+    this.workspaceSearch.workspaceIndex.onReconciled = (rootPath) => {
+      const window = this.window;
+      if (
+        !window || window.isDestroyed() ||
+        path.resolve(this.watcher?.getWatchedPath() || "") !== path.resolve(rootPath)
+      ) return;
+      window.webContents.send("file-system-change", [{
+        event: "index-reconciled",
+        filePath: rootPath,
+        dirPath: rootPath,
+      }]);
+    };
     if (!this.agentApprovalManager)
       this.agentApprovalManager = new AgentApprovalManager(this);
     if (!this.agentProcessRunner)

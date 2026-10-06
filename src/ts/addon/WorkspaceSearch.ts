@@ -288,9 +288,43 @@ export class WorkspaceSearch {
       return failure("DIRECTORY_NOT_FOUND", "The workspace was not found.");
     }
 
-    const entries: ProjectFileEntry[] = [];
     const openableOnly = options?.openableOnly === true;
     const ignoreHiddenDirectories = options?.ignoreHiddenDirectories === true;
+    if (openableOnly) {
+      const index = await this.workspaceIndex.load(root);
+      if (index) {
+        if (this.workspaceIndex.consumeNeedsReconcile(root))
+          this.workspaceIndex.scheduleReconcile(root);
+        const candidates = index.entries.filter((entry) =>
+          !ignoreHiddenDirectories ||
+          !entry.relativePath.split("/").slice(0, -1)
+            .some((directory) => directory.startsWith(".")),
+        );
+        const entries: Array<ProjectFileEntry | undefined> =
+          new Array(candidates.length);
+        let nextCandidate = 0;
+        const workerCount = Math.min(16, candidates.length);
+        await Promise.all(Array.from({ length: workerCount }, async () => {
+          while (nextCandidate < candidates.length) {
+            const indexInList = nextCandidate++;
+            const candidate = candidates[indexInList];
+            const filePath = path.join(root, ...candidate.relativePath.split("/"));
+            if (!(await this.isOpenableFile(filePath))) continue;
+            entries[indexInList] = {
+              name: candidate.name,
+              path: filePath,
+              relativePath: candidate.relativePath,
+            };
+          }
+        }));
+        return {
+          success: true,
+          entries: entries.filter((entry): entry is ProjectFileEntry => Boolean(entry)),
+        };
+      }
+    }
+
+    const entries: ProjectFileEntry[] = [];
     const walk = async (directory: string): Promise<void> => {
       let children;
       try {
@@ -330,20 +364,12 @@ export class WorkspaceSearch {
     return { success: true, entries };
   }
 
-  private async isOpenableFile(
-    filePath: string,
-    knownSize?: number,
-  ): Promise<boolean> {
+  private async isOpenableFile(filePath: string): Promise<boolean> {
     let handle;
     try {
-      let size: number;
-      if (typeof knownSize === "number" && Number.isFinite(knownSize)) {
-        size = knownSize;
-      } else {
-        const stats = await fs.stat(filePath);
-        if (!stats.isFile()) return false;
-        size = stats.size;
-      }
+      const stats = await fs.lstat(filePath);
+      if (!stats.isFile() || stats.isSymbolicLink()) return false;
+      const size = stats.size;
       if (isOpenableImagePath(filePath, size)) return true;
       const sample = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, size));
       handle = await fs.open(filePath, "r");
