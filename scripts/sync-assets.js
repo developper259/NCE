@@ -1,6 +1,10 @@
 const fs = require("fs");
 const path = require("path");
-const { buildFlaticonCss, collectIconClasses } = require("./flaticon-css");
+const {
+  buildFlaticonCss,
+  collectFlaticonFontFiles,
+  collectIconClasses,
+} = require("./flaticon-css");
 
 const source = path.dirname(require.resolve("nsh/themes/dark.css"));
 const destination = path.resolve(__dirname, "../src/css/nsh");
@@ -81,16 +85,27 @@ writeCssAsset(
   flaticonCss.css,
   flaticonCss.sourceMap,
 );
-for (const file of fs.readdirSync(flaticonFontSource)) {
-  if (!file.startsWith("uicons-")) continue;
-  fs.copyFileSync(
-    path.join(flaticonFontSource, file),
-    path.join(path.dirname(flaticonDestination), file),
-  );
-  fs.copyFileSync(
-    path.join(flaticonFontSource, file),
-    path.join(devAssetRoot, "flaticon", file),
-  );
+const requiredFlaticonFonts = collectFlaticonFontFiles(flaticonCss.css);
+const flaticonAssetDirectories = [
+  path.dirname(flaticonDestination),
+  path.join(devAssetRoot, "flaticon"),
+];
+for (const directory of flaticonAssetDirectories) {
+  fs.mkdirSync(directory, { recursive: true });
+  for (const file of fs.readdirSync(directory)) {
+    if (file.startsWith("uicons-") && !requiredFlaticonFonts.has(file)) {
+      fs.rmSync(path.join(directory, file));
+    }
+  }
+}
+for (const file of requiredFlaticonFonts) {
+  const sourceFile = path.join(flaticonFontSource, file);
+  if (!fs.existsSync(sourceFile)) {
+    throw new Error(`Flaticon CSS references a missing font file: ${sourceFile}`);
+  }
+  for (const directory of flaticonAssetDirectories) {
+    fs.copyFileSync(sourceFile, path.join(directory, file));
+  }
 }
 fs.cpSync(
   path.resolve(__dirname, "../assets/fonts"),

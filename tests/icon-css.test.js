@@ -6,6 +6,7 @@ const postcss = require("postcss");
 const { root } = require("./helpers/runtime");
 const {
   buildFlaticonCss,
+  collectFlaticonFontFiles,
   collectIconClasses,
 } = require("../scripts/flaticon-css.js");
 
@@ -68,7 +69,24 @@ test("Flaticon CSS retains source and dynamic icons with reproducible mappings",
     return faces;
   };
   assert.equal(fontFaces(sourceCss).length, 9);
-  assert.deepEqual(fontFaces(first.css), fontFaces(css));
+  assert.deepEqual(first.stats.requiredFontFamilies, [
+    "uicons-brands",
+    "uicons-regular-rounded",
+  ]);
+  assert.equal(first.stats.retainedFontFaces, 2);
+  assert.equal(first.stats.removedFontFaces, 7);
+  assert.equal(fontFaces(first.css).length, 2);
+  assert.deepEqual(
+    [...collectFlaticonFontFiles(first.css)].sort(),
+    [
+      "uicons-brands-PQBQF6T3.woff",
+      "uicons-brands-XJPKRNBN.woff2",
+      "uicons-brands-ZJWE2ELA.eot",
+      "uicons-regular-rounded-ESQGLQQ4.eot",
+      "uicons-regular-rounded-J3WOUERV.woff2",
+      "uicons-regular-rounded-KDJ23353.woff",
+    ].sort(),
+  );
   assert.match(first.css, /sourceMappingURL=all\.css\.map/);
   const generatedMap = JSON.parse(first.sourceMap);
   assert.ok(generatedMap.sources.length >= 9);
@@ -100,4 +118,14 @@ test("synced Flaticon assets match the deterministic source-filtered build", () 
     fs.readFileSync(path.join(root, "src/assets/flaticon/all.css.map"), "utf8"),
     generated.sourceMap,
   );
+  const requiredFonts = collectFlaticonFontFiles(generated.css);
+  for (const directory of ["assets/flaticon", "src/assets/flaticon"]) {
+    const fontFiles = fs.readdirSync(path.join(root, directory))
+      .filter((file) => file.startsWith("uicons-"))
+      .sort();
+    assert.deepEqual(fontFiles, [...requiredFonts].sort());
+    for (const file of requiredFonts) {
+      assert.ok(fs.existsSync(path.join(root, directory, file)), `${directory}/${file} exists`);
+    }
+  }
 });
