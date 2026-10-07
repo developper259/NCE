@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { buildFlaticonCss, collectIconClasses } = require("./flaticon-css");
 
 const source = path.dirname(require.resolve("nsh/themes/dark.css"));
 const destination = path.resolve(__dirname, "../src/css/nsh");
@@ -17,7 +18,7 @@ const flaticonFontSource = path.resolve(
   "../node_modules/@flaticon/flaticon-uicons/css",
 );
 
-function writeCssAsset(sourceFile, destinationFile, contents) {
+function writeCssAsset(sourceFile, destinationFile, contents, generatedSourceMap) {
   const css = contents ?? fs.readFileSync(sourceFile, "utf8");
   fs.mkdirSync(path.dirname(destinationFile), { recursive: true });
   fs.writeFileSync(destinationFile, css);
@@ -40,7 +41,11 @@ function writeCssAsset(sourceFile, destinationFile, contents) {
     );
   }
   fs.mkdirSync(path.dirname(sourceMapDestination), { recursive: true });
-  fs.copyFileSync(sourceMapSource, sourceMapDestination);
+  if (generatedSourceMap === undefined) {
+    fs.copyFileSync(sourceMapSource, sourceMapDestination);
+  } else {
+    fs.writeFileSync(sourceMapDestination, generatedSourceMap);
+  }
 }
 
 fs.mkdirSync(destination, { recursive: true });
@@ -54,14 +59,27 @@ if (fs.existsSync(source)) {
   console.warn(`[NSH] Theme source is unavailable: ${source}`);
 }
 
-const flaticonCss = fs
+const flaticonCssSource = fs
   .readFileSync(flaticonSource, "utf8")
   .replaceAll("../uicons-", "./uicons-");
-writeCssAsset(flaticonSource, flaticonDestination, flaticonCss);
+const flaticonCss = buildFlaticonCss({
+  css: flaticonCssSource,
+  sourceMap: fs.readFileSync(`${flaticonSource}.map`, "utf8"),
+  sourcePath: flaticonSource,
+  destinationPath: flaticonDestination,
+  iconClasses: collectIconClasses(path.resolve(__dirname, "../src")),
+});
+writeCssAsset(
+  flaticonSource,
+  flaticonDestination,
+  flaticonCss.css,
+  flaticonCss.sourceMap,
+);
 writeCssAsset(
   flaticonSource,
   path.join(devAssetRoot, "flaticon/all.css"),
-  flaticonCss,
+  flaticonCss.css,
+  flaticonCss.sourceMap,
 );
 for (const file of fs.readdirSync(flaticonFontSource)) {
   if (!file.startsWith("uicons-")) continue;
