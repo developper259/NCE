@@ -359,6 +359,111 @@ test('an external change cannot be overwritten by a dirty editor buffer', async 
   assert.equal(file.externalModified, false);
 });
 
+test('external non-overlapping edits merge against the retained disk base', async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 1, 'merge.txt', '/merge.txt');
+  file.loadingState = { status: 'loaded', loadedLineCount: 2, expectedTotalLines: 2 };
+  file.lines = [new LineNode('local A'), new LineNode('two')];
+  file.mergeBaseContent = 'one\ntwo';
+  file.mergeBaseFingerprint = '7:1';
+  file.diskFingerprint = '7:1';
+  file.isSaved = false;
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+  const saveCalls = [];
+  editor.api = {
+    readFileForMerge: async () => ({
+      success: true,
+      content: 'one\nTWO',
+      fingerprint: '7:2',
+    }),
+    saveFile: async (...args) => { saveCalls.push(args); return args[0]; },
+  };
+
+  await editor.tabManager.reloadFileFromDisk(file.path);
+  assert.equal(file.serializeContent(), 'local A\nTWO');
+  assert.equal(file.externalModified, false);
+  assert.equal(file.mergeBaseContent, 'one\nTWO');
+  assert.equal(file.mergeDiskFingerprint, '7:2');
+  assert.equal(file.mergeConflictCount, 0);
+  assert.equal(file.isSaved, false);
+  assert.equal(await file.save(), true);
+  assert.equal(saveCalls[0][2], '7:2');
+  assert.equal(file.mergeBaseContent, 'local A\nTWO');
+});
+
+test('eligible initial loads retain their exact disk text as the merge base', async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 1, 'crlf.txt', '/crlf.txt');
+  const state = {
+    status: 'loaded', isLoading: false, isFullyLoaded: true,
+    loadedLineCount: 2, expectedTotalLines: 2,
+  };
+  editor.fileLoader = {
+    loadFile: async () => ({
+      initialLines: ['first', 'second'], totalLines: 2,
+      eol: '\r\n', hasFinalNewline: true, lineEndings: ['\r\n', '\r\n'],
+      largeFileMode: false, size: 15, incrementalEligible: true, state,
+    }),
+    getState: () => state,
+    loadRemainingLines() {},
+  };
+
+  await file.loadContent();
+  assert.equal(file.mergeBaseContent, 'first\r\nsecond\r\n');
+  assert.equal(file.mergeBaseFingerprint, null);
+});
+
+test('overlapping external edits create visible markers and block Auto Save', async () => {
+  const editor = setup();
+  editor.getAutoSaveState = () => true;
+  const file = new FileNode(editor, 1, 'merge-conflict.txt', '/merge-conflict.txt');
+  file.loadingState = { status: 'loaded', loadedLineCount: 1, expectedTotalLines: 1 };
+  file.lines = [new LineNode('local')];
+  file.mergeBaseContent = 'base';
+  file.diskFingerprint = '4:1';
+  file.isSaved = false;
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+  editor.api = { readFileForMerge: async () => ({
+    success: true,
+    content: 'disk',
+    fingerprint: '4:2',
+  }) };
+  let writes = 0;
+  editor.api.saveFile = async (filePath) => { writes++; return filePath; };
+
+  await editor.tabManager.reloadFileFromDisk(file.path);
+  assert.match(file.serializeContent(), /<<<<<<< LOCAL/);
+  assert.match(file.serializeContent(), /=======/);
+  assert.match(file.serializeContent(), />>>>>>> DISK/);
+  assert.equal(file.mergeConflictCount, 1);
+  assert.equal(file.shouldPersistChanges(), false);
+  await file.flushAutoSave();
+  assert.equal(writes, 0);
+
+  assert.equal(await file.save(), true);
+  assert.equal(writes, 1);
+  assert.equal(file.mergeConflictCount, 0);
+});
+
+test('unsupported and deleted external files preserve local text behind the save guard', async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 1, 'unsupported.txt', '/unsupported.txt');
+  file.loadingState = { status: 'loaded', loadedLineCount: 1, expectedTotalLines: 1 };
+  file.lines = [new LineNode('local remains')];
+  file.mergeBaseContent = 'disk base';
+  file.isSaved = false;
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+  editor.api = { readFileForMerge: async () => ({ success: false, reason: 'missing' }) };
+
+  await editor.tabManager.reloadFileFromDisk(file.path);
+  assert.equal(file.serializeContent(), 'local remains');
+  assert.equal(file.externalModified, true);
+  assert.equal(file.deletedFromDisk, true);
+});
+
 test('a new file is registered synchronously before asynchronous setup', () => {
   const editor = setup();
   const file = editor.tabManager.createEmptyFile();

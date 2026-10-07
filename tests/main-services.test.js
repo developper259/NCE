@@ -199,6 +199,48 @@ test("FileManager initializes, chunks, saves, and rejects binary/invalid UTF-8",
   }
 });
 
+test("FileManager reads bounded stable text for merge and checks merged-save fingerprints", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-merge-read-"));
+  try {
+    const filePath = path.join(root, "source.txt");
+    const manager = new FileManager({ window: null, watcher: null });
+    await fsp.writeFile(filePath, "base\r\nline\r\n");
+    const disk = await manager.readFileForMerge(filePath);
+    assert.deepEqual(disk, {
+      success: true,
+      content: "base\r\nline\r\n",
+      fingerprint: `${Buffer.byteLength("base\r\nline\r\n")}:${(await fsp.stat(filePath)).mtimeMs}`,
+    });
+    await manager.saveFile(filePath, "merged\r\nline\r\n", disk.fingerprint);
+    assert.equal(await fsp.readFile(filePath, "utf8"), "merged\r\nline\r\n");
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await assert.rejects(
+        manager.saveFile(filePath, "stale overwrite", disk.fingerprint),
+        (error) => error.code === "FILE_CHANGED_ON_DISK",
+      );
+    } finally {
+      console.error = originalError;
+    }
+    assert.equal(await fsp.readFile(filePath, "utf8"), "merged\r\nline\r\n");
+    assert.equal((await manager.readFileForMerge(path.join(root, "missing"))).reason, "missing");
+    assert.equal((await manager.readFileForMerge(root)).reason, "not-a-file");
+
+    const binaryPath = path.join(root, "binary.bin");
+    const invalidPath = path.join(root, "invalid.txt");
+    const largePath = path.join(root, "large.txt");
+    await fsp.writeFile(binaryPath, Buffer.from([0, 1, 2]));
+    await fsp.writeFile(invalidPath, Buffer.from([0xc3, 0x28]));
+    await fsp.writeFile(largePath, Buffer.alloc(1024 * 1024 + 1, 0x61));
+    assert.equal((await manager.readFileForMerge(binaryPath)).reason, "binary-file");
+    assert.equal((await manager.readFileForMerge(invalidPath)).reason, "invalid-encoding");
+    assert.equal((await manager.readFileForMerge(largePath)).reason, "file-too-large");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("FileManager reads allowlisted raster images with verified MIME and bounded paths", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-picture-"));
   try {

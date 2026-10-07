@@ -25,7 +25,7 @@ test("Markdown renderer keeps strict default and isolates sanitized workspace pr
 test("Preload exposes the core IPC contract without node integration", () => {
   const preload = read("src/js/main/Preload.js");
   assert.match(preload, /contextBridge\.exposeInMainWorld\("api"/);
-  for (const method of ["rendererReady", "getNshEndpoint", "getFileContent", "saveFile", "saveRecoverySnapshot", "listRecoverySnapshots", "readRecoverySnapshot", "deleteRecoverySnapshot", "confirmRecoverySnapshot", "startWatching", "searchInFiles", "startWorkspaceSearch", "onWorkspaceSearchEvent", "onFileSystemChange"]) {
+  for (const method of ["rendererReady", "getNshEndpoint", "getFileContent", "readFileForMerge", "saveFile", "saveRecoverySnapshot", "listRecoverySnapshots", "readRecoverySnapshot", "deleteRecoverySnapshot", "confirmRecoverySnapshot", "startWatching", "searchInFiles", "startWorkspaceSearch", "onWorkspaceSearchEvent", "onFileSystemChange"]) {
     assert.match(preload, new RegExp(`${method}`));
   }
   assert.doesNotMatch(preload, /require\("fs"\)|require\("path"\)/);
@@ -91,6 +91,7 @@ test("asset and command availability contracts stay aligned", () => {
     /\.file-el-btn img\s*\{[^}]*-webkit-user-drag:\s*none/s,
   );
   assert.ok(rendererScripts.includes("js/types/QuickPanel.js"));
+  assert.ok(rendererScripts.includes("js/core/ThreeWayMerge.js"));
   assert.match(keybindings, /action:\s*"open_command"/);
   assert.match(keybindings, /action:\s*"reload_window"/);
   assert.match(keybindings, /action:\s*"quit_app"/);

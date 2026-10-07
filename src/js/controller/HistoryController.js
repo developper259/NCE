@@ -88,6 +88,13 @@ class HistoryController {
     this.updateSavedState(file, state, { clearRecovery: false });
   }
 
+  markUnsavedBaseline(file = this.editor.tabManager.activeFile) {
+    const state = this.getState(file);
+    if (!state) return;
+    state.savedIndex = -1;
+    this.updateSavedState(file, state, { clearRecovery: false });
+  }
+
   clear(file = this.editor.tabManager.activeFile) {
     if (!file) return;
     this.states.set(file, {

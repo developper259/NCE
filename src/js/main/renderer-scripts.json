@@ -5,6 +5,7 @@
   "js/core/Path.js",
   "js/core/FileType.js",
   "js/core/Tools.js",
+  "js/core/ThreeWayMerge.js",
   "js/types/TextPositionIndex.js",
   "js/core/Event.js",
   "js/core/FileOperation.js",

@@ -155,6 +155,7 @@ export async function atomicWriteFile(
   filePath: string,
   content: string,
   operations: any = fs,
+  expectedFingerprint?: string,
 ): Promise<void> {
   const dir = path.dirname(filePath);
   const basename = path.basename(filePath);
@@ -195,6 +196,19 @@ export async function atomicWriteFile(
     for (const delayMs of RENAME_RETRY_DELAYS_MS) {
       if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       try {
+        if (expectedFingerprint !== undefined) {
+          let current: any;
+          try { current = await operations.stat(filePath); }
+          catch {
+            throw Object.assign(new Error("File changed on disk"), {
+              code: "FILE_CHANGED_ON_DISK",
+            });
+          }
+          if (`${current.size}:${current.mtimeMs}` !== expectedFingerprint)
+            throw Object.assign(new Error("File changed on disk"), {
+              code: "FILE_CHANGED_ON_DISK",
+            });
+        }
         await operations.rename(temporaryPath, filePath);
         temporaryPath = "";
         renameError = null;
@@ -413,8 +427,12 @@ export class FileManager {
       return await this.getFileContent(file);
     });
 
-    ipcMain.handle("FileManager:saveFile", async (event, path, content) => {
-      return await this.saveFile(path, content);
+    ipcMain.handle("FileManager:readFileForMerge", async (_event, filePath) =>
+      this.readFileForMerge(filePath),
+    );
+
+    ipcMain.handle("FileManager:saveFile", async (event, path, content, expectedFingerprint) => {
+      return await this.saveFile(path, content, expectedFingerprint);
     });
 
     ipcMain.handle(
@@ -709,9 +727,65 @@ export class FileManager {
     return fileContents;
   }
 
+  async readFileForMerge(filePath: unknown): Promise<{
+    success: boolean;
+    content?: string;
+    fingerprint?: string;
+    reason?: string;
+  }> {
+    const maximumBytes = 1024 * 1024;
+    if (!validPath(filePath) || !path.isAbsolute(filePath) || isAsarPath(filePath))
+      return { success: false, reason: "invalid-path" };
+    let handle: any = null;
+    try {
+      handle = await fs.open(filePath, "r");
+      const before = await handle.stat();
+      if (!before.isFile()) return { success: false, reason: "not-a-file" };
+      if (before.size > maximumBytes) return { success: false, reason: "file-too-large" };
+      const buffer = Buffer.alloc(maximumBytes + 1);
+      let bytesRead = 0;
+      while (bytesRead < buffer.length) {
+        const part = await handle.read(
+          buffer,
+          bytesRead,
+          buffer.length - bytesRead,
+          bytesRead,
+        );
+        if (part.bytesRead === 0) break;
+        bytesRead += part.bytesRead;
+      }
+      const after = await handle.stat();
+      const currentPath = await fs.stat(filePath);
+      if (before.dev !== after.dev || before.ino !== after.ino ||
+          before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
+          after.dev !== currentPath.dev || after.ino !== currentPath.ino ||
+          after.size !== currentPath.size || after.mtimeMs !== currentPath.mtimeMs ||
+          bytesRead !== after.size)
+        return { success: false, reason: "changed-during-read" };
+      if (bytesRead > maximumBytes) return { success: false, reason: "file-too-large" };
+      const bytes = buffer.subarray(0, bytesRead);
+      if (looksBinary(bytes.subarray(0, BINARY_SAMPLE_SIZE)))
+        return { success: false, reason: "binary-file" };
+      let content: string;
+      try { content = decodeUtf8(bytes); }
+      catch { return { success: false, reason: "invalid-encoding" }; }
+      return {
+        success: true,
+        content,
+        fingerprint: `${after.size}:${after.mtimeMs}`,
+      };
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return { success: false, reason: "missing" };
+      return { success: false, reason: "read-failed" };
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+
   async saveFile(
     filePath: string,
     content: string,
+    expectedFingerprint?: unknown,
   ): Promise<string | undefined> {
     if (!validPath(filePath) || typeof content !== "string") {
       return undefined;
@@ -720,12 +794,37 @@ export class FileManager {
     try {
       const dir = path.dirname(filePath);
 
-      await fs.mkdir(dir, {
-        recursive: true,
-      });
+      if (expectedFingerprint !== undefined) {
+        if (typeof expectedFingerprint !== "string" || expectedFingerprint.length > 128)
+          throw Object.assign(new Error("Invalid expected disk fingerprint"), {
+            code: "INVALID_FINGERPRINT",
+          });
+        let currentFingerprint: string;
+        try {
+          const current = await fs.stat(filePath);
+          currentFingerprint = `${current.size}:${current.mtimeMs}`;
+        } catch {
+          throw Object.assign(new Error("File changed on disk"), {
+            code: "FILE_CHANGED_ON_DISK",
+          });
+        }
+        if (currentFingerprint !== expectedFingerprint)
+          throw Object.assign(new Error("File changed on disk"), {
+            code: "FILE_CHANGED_ON_DISK",
+          });
+      } else {
+        await fs.mkdir(dir, {
+          recursive: true,
+        });
+      }
 
       ownWriteToken = this.window.watcher?.beginOwnWrite(filePath) || null;
-      await atomicWriteFile(filePath, content);
+      await atomicWriteFile(
+        filePath,
+        content,
+        fs,
+        typeof expectedFingerprint === "string" ? expectedFingerprint : undefined,
+      );
       this.window.watcher?.commitOwnWrite(filePath, ownWriteToken);
       this.clearFileCache(filePath);
       await this.window.reloadSettingsFromDisk?.(filePath);

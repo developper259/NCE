@@ -99,8 +99,11 @@ contextBridge.exposeInMainWorld("api", {
   getFileContent: (file) =>
     ipcRenderer.invoke("FileManager:getFileContent", file),
 
-  saveFile: (path, content) =>
-    ipcRenderer.invoke("FileManager:saveFile", path, content),
+  readFileForMerge: (path) =>
+    ipcRenderer.invoke("FileManager:readFileForMerge", path),
+
+  saveFile: (path, content, expectedFingerprint) =>
+    ipcRenderer.invoke("FileManager:saveFile", path, content, expectedFingerprint),
 
   saveRecoverySnapshot: (workspaceRoot, snapshot) =>
     ipcRenderer.invoke("FileManager:saveRecoverySnapshot", workspaceRoot, snapshot),

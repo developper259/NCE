@@ -566,7 +566,13 @@ class tabManager {
 
     if (!file.isSaved) {
       file.cancelAutoSave?.();
-      file.externalModified = true;
+      let merge = null;
+      try { merge = await file.mergeExternalChanges?.(); }
+      catch (error) { console.error("Error merging external file changes:", error); }
+      if (!merge?.merged) {
+        file.externalModified = true;
+        file.mergeDiskFingerprint = null;
+      }
       this.refresh();
       return;
     }
@@ -607,6 +613,8 @@ class tabManager {
     );
     if (status?.exists && !status.isDirectory) {
       file.diskFingerprint = `${status.size}:${status.mtimeMs}`;
+      if (file.mergeBaseContent)
+        file.mergeBaseFingerprint = file.diskFingerprint;
     }
   }
 

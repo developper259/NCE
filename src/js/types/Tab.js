@@ -83,6 +83,11 @@ class FileNode extends Tab {
     this.deletedFromDisk = false;
     this.externalModified = false;
     this.diskFingerprint = null;
+    this.mergeBaseContent = null;
+    this.mergeBaseFingerprint = null;
+    this.mergeDiskFingerprint = null;
+    this.mergeConflictCount = 0;
+    this.externalMergePromise = null;
     this.editVersion = 0;
     this.saveQueue = Promise.resolve(true);
     this.autoSaveTimer = null;
@@ -181,6 +186,10 @@ class FileNode extends Tab {
     this.deletedFromDisk = file.deletedFromDisk === true;
     this.externalModified = file.externalModified === true;
     this.diskFingerprint = file.diskFingerprint || null;
+    this.mergeBaseContent = file.mergeBaseContent || null;
+    this.mergeBaseFingerprint = file.mergeBaseFingerprint || null;
+    this.mergeDiskFingerprint = file.mergeDiskFingerprint || null;
+    this.mergeConflictCount = file.mergeConflictCount || 0;
     this.recoveryUntitledId = file.recoveryUntitledId || createRecoveryUntitledId();
     this.recoverySnapshotId = file.recoverySnapshotId || null;
     this.recoveryStoreRoot = file.recoveryStoreRoot || null;
@@ -287,6 +296,13 @@ class FileNode extends Tab {
         result.totalLines,
       );
       this.isLoaded = true;
+      if (result.incrementalEligible === true && !this.largeFileMode &&
+          result.initialLines.length === result.totalLines)
+        this.rememberMergeBase(this.serializeContent());
+      else {
+        this.mergeBaseContent = null;
+        this.mergeBaseFingerprint = null;
+      }
     } catch (error) {
       if (generation !== this.contentGeneration) return;
       this.loadError = error;
@@ -315,6 +331,129 @@ class FileNode extends Tab {
     }
   }
 
+  rememberMergeBase(content) {
+    const parsed = typeof content === "string"
+      ? ThreeWayTextMerge.parseRecords(content)
+      : null;
+    if (!parsed || this.largeFileMode === true ||
+        utf8ByteLength(content) > MAX_RECOVERY_SNAPSHOT_BYTES ||
+        parsed.records.length > MAX_RECOVERY_SNAPSHOT_LINES ||
+        parsed.records.some((record) => record.text.length > 1000)) {
+      this.mergeBaseContent = null;
+      this.mergeBaseFingerprint = null;
+      return false;
+    }
+    this.mergeBaseContent = content;
+    this.mergeBaseFingerprint = this.diskFingerprint || null;
+    return true;
+  }
+
+  async mergeExternalChanges() {
+    if (this.externalMergePromise) return this.externalMergePromise;
+    let mergePromise;
+    mergePromise = this.runExternalMerge().finally(() => {
+      if (this.externalMergePromise === mergePromise)
+        this.externalMergePromise = null;
+    });
+    this.externalMergePromise = mergePromise;
+    return mergePromise;
+  }
+
+  async runExternalMerge() {
+    if (!this.path || !this.mergeBaseContent || this.largeFileMode === true ||
+        typeof this.editor.api?.readFileForMerge !== "function")
+      return { merged: false, reason: "base-unavailable" };
+    try {
+      await this.editor.fileLoader.waitForFileLoaded(this);
+    } catch {
+      return { merged: false, reason: "file-not-fully-loaded" };
+    }
+
+    let disk;
+    try {
+      disk = await this.editor.api.readFileForMerge(this.path);
+    } catch {
+      return { merged: false, reason: "disk-read-failed" };
+    }
+    if (!disk?.success || typeof disk.content !== "string" ||
+        typeof disk.fingerprint !== "string") {
+      if (disk?.reason === "missing") this.deletedFromDisk = true;
+      return { merged: false, reason: disk?.reason || "disk-read-failed" };
+    }
+
+    const baseContent = this.mergeBaseContent;
+    const localContent = this.serializeContent();
+    const diskContent = disk.content;
+    if (diskContent === baseContent) {
+      this.diskFingerprint = disk.fingerprint;
+      this.mergeBaseFingerprint = disk.fingerprint;
+      this.mergeDiskFingerprint = disk.fingerprint;
+      this.externalModified = false;
+      this.deletedFromDisk = false;
+      if (localContent === diskContent) {
+        this.mergeConflictCount = 0;
+        this.setIsSaved(true);
+        this.editor.historyController?.markSaved(this);
+        await this.clearRecoverySnapshot();
+      } else {
+        this.scheduleAutoSave();
+      }
+      return { merged: true, conflicts: 0, changed: false };
+    }
+
+    const result = ThreeWayTextMerge.merge(baseContent, localContent, diskContent, {
+      maxBytes: MAX_RECOVERY_SNAPSHOT_BYTES,
+      maxLines: MAX_RECOVERY_SNAPSHOT_LINES,
+      maxEditDistance: 256,
+      diskFingerprint: disk.fingerprint,
+    });
+    if (!result.ok) {
+      this.editor.performanceMetrics?.increment("files.merge.fallbacks");
+      return { merged: false, reason: result.reason };
+    }
+
+    this.diskFingerprint = disk.fingerprint;
+    this.mergeBaseContent = diskContent;
+    this.mergeBaseFingerprint = disk.fingerprint;
+    this.mergeDiskFingerprint = disk.fingerprint;
+    this.externalModified = false;
+    this.deletedFromDisk = false;
+    this.mergeConflictCount = result.conflicts;
+
+    if (result.content !== localContent) {
+      const restored = this.restoreRecoveredContent(result.content, {
+        editVersion: this.editVersion,
+        snapshotId: this.recoverySnapshotId,
+        storeRoot: this.recoveryStoreRoot,
+      });
+      if (!restored) return { merged: false, reason: "apply-failed" };
+      this.mergeBaseContent = diskContent;
+      this.mergeBaseFingerprint = disk.fingerprint;
+      this.mergeDiskFingerprint = disk.fingerprint;
+      this.mergeConflictCount = result.conflicts;
+      this.editor.historyController?.markUnsavedBaseline?.(this);
+    } else if (localContent === diskContent) {
+      this.mergeConflictCount = 0;
+      this.setIsSaved(true);
+      this.editor.historyController?.markSaved(this);
+      await this.clearRecoverySnapshot();
+    } else {
+      this.setIsSaved(false);
+    }
+
+    this.editor.performanceMetrics?.increment("files.merge.successes");
+    if (result.conflicts > 0) {
+      this.editor.performanceMetrics?.increment("files.merge.conflicts", result.conflicts);
+      if (typeof alert === "function")
+        alert(`${result.conflicts} merge conflict${result.conflicts === 1 ? "" : "s"} inserted as LOCAL/DISK markers. Review both versions before saving.`);
+    } else {
+      this.scheduleAutoSave();
+    }
+    this.editor.bottomBar?.refreshFileStatus?.();
+    this.editor.tabManager?.refresh?.();
+    return { merged: true, conflicts: result.conflicts, changed: result.content !== localContent };
+  }
+
   getSyntaxMetrics() {
     if (!this.syntaxMetrics) {
       let logicalLength = Math.max(0, this.lines.length - 1);
@@ -341,8 +480,11 @@ class FileNode extends Tab {
       message = error.message || "NCE could not safely replace this file.";
     else if (error.code === "FILE_LOAD_FAILED")
       message = "File loading failed. Reload the file before saving.";
-    else if (error.code === "FILE_CHANGED_ON_DISK")
-      message = "File changed on disk. Use Save As to preserve your changes.";
+    else if (error.code === "FILE_CHANGED_ON_DISK" || /File changed on disk/.test(error?.message || "")) {
+      message = "File changed on disk again. NCE stopped the save to protect both versions; use Save As if you need to save this buffer.";
+      this.externalModified = true;
+      this.cancelAutoSave();
+    }
     else if (error.code === "FILE_NOT_FULLY_LOADED")
       message = "File is not fully loaded. Save was cancelled.";
     if (typeof alert === "function") alert(message);
@@ -632,6 +774,12 @@ class FileNode extends Tab {
     };
     this.editVersion = Math.max(this.editVersion + 1, Number(editVersion) || 0);
     this.externalModified = diskChanged === true;
+    if (diskChanged === true) {
+      this.mergeBaseContent = null;
+      this.mergeBaseFingerprint = null;
+      this.mergeDiskFingerprint = null;
+    }
+    this.mergeConflictCount = 0;
     this.deletedFromDisk = false;
     this.editor.historyController?.clear(this);
     this.recoverySnapshotId = snapshotId;
@@ -639,6 +787,7 @@ class FileNode extends Tab {
     this.recoveryStoreRoot = storeRoot || null;
     this.recoveryPreviousStoreRoot = storeRoot || null;
     this.setIsSaved(false);
+    this.editor.historyController?.markUnsavedBaseline?.(this);
     this.editor.lineController?.markDirtyAll?.();
     if (this === this.editor.tabManager?.activeFile)
       this.editor.lineController?.refresh?.(true);
@@ -694,7 +843,8 @@ class FileNode extends Tab {
     const result = await this.performSaveSnapshot(
       content,
       version,
-      (filePath, snapshot) => this.editor.api.saveFile(filePath, snapshot),
+      (filePath, snapshot, expectedFingerprint) =>
+        this.editor.api.saveFile(filePath, snapshot, expectedFingerprint),
       { saveableChecked: true },
     );
     metrics?.end(measure);
@@ -719,8 +869,17 @@ class FileNode extends Tab {
     }
     if (version !== this.editVersion) return { saved: false, stale: true };
     try {
-      const saved = await saveFile(this.path, content);
+      const saved = await saveFile(
+        this.path,
+        content,
+        this.mergeDiskFingerprint || undefined,
+      );
       if (!saved) throw new Error("Failed to save file");
+      this.rememberMergeBase(content);
+      this.mergeConflictCount = 0;
+      if (this.mergeDiskFingerprint)
+        await this.editor.tabManager?.captureDiskFingerprint?.(this);
+      this.mergeDiskFingerprint = null;
       if (version !== this.editVersion) {
         return { saved: false, stale: true, persisted: true };
       }
@@ -748,8 +907,17 @@ class FileNode extends Tab {
     const content = this.serializeContent();
     const version = this.editVersion;
     try {
-      const saved = await this.editor.api.saveFile(this.path, content);
+      const saved = await this.editor.api.saveFile(
+        this.path,
+        content,
+        this.mergeDiskFingerprint || undefined,
+      );
       if (!saved) throw new Error("Failed to save file");
+      this.rememberMergeBase(content);
+      this.mergeConflictCount = 0;
+      if (this.mergeDiskFingerprint)
+        await this.editor.tabManager?.captureDiskFingerprint?.(this);
+      this.mergeDiskFingerprint = null;
       if (version === this.editVersion) {
         this.deletedFromDisk = false;
         this.setIsSaved(true);
@@ -801,7 +969,11 @@ class FileNode extends Tab {
     this.path = selectedPath;
     this.deletedFromDisk = false;
     this.externalModified = false;
+    this.mergeDiskFingerprint = null;
+    this.mergeConflictCount = 0;
     this.name = selectedPath.replace(/\\/g, "/").split("/").pop() || this.name;
+    this.rememberMergeBase(content);
+    await this.editor.tabManager?.captureDiskFingerprint?.(this);
     if (version === this.editVersion) {
       this.setIsSaved(true);
       this.cancelAutoSave();
@@ -853,6 +1025,7 @@ class FileNode extends Tab {
     return (
       this.deletedFromDisk === true ||
       this.externalModified === true ||
+      this.mergeConflictCount > 0 ||
       Boolean(this.saveError) ||
       (this.isSaved !== true &&
         (this.largeFileMode === true || this.autoSave !== true))
@@ -865,7 +1038,8 @@ class FileNode extends Tab {
       this.autoSave === true &&
       Boolean(this.path) &&
       !this.deletedFromDisk &&
-      !this.externalModified
+      !this.externalModified &&
+      this.mergeConflictCount === 0
     );
   }
 

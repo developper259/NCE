@@ -23,9 +23,19 @@ function loadGlobal(relativePath, exportName, globals = {}) {
     WeakMap,
     Promise,
     TextDecoder,
+    TextEncoder,
     ...globals,
   };
   vm.createContext(context);
+  if (relativePath === "src/js/types/Tab.js") {
+    const mergeSource = fs.readFileSync(
+      path.join(root, "src/js/core/ThreeWayMerge.js"),
+      "utf8",
+    );
+    vm.runInContext(mergeSource, context, {
+      filename: "src/js/core/ThreeWayMerge.js",
+    });
+  }
   vm.runInContext(`${source}\nthis.__exported = ${exportName};`, context, {
     filename: relativePath,
   });
