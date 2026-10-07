@@ -270,6 +270,11 @@ class Events {
   }
 
   onResize(e) {
+    if (typeof this.editor.domManager?.scheduleLayout === "function") {
+      this.editor.domManager.resize();
+      return;
+    }
+
     requestAnimationFrame(() => {
       if (this.editor.domManager) {
         this.editor.domManager.resize();

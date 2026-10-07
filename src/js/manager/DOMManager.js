@@ -78,7 +78,8 @@ class DOMManager {
 
     this.lastWindowWidth = 0;
     this.lastWindowHeight = 0;
-    this.applyFrame = null;
+    this.layoutFrame = null;
+    this.pendingLayout = this.createLayoutState();
 
     this.outputRect = { left: 0, top: 0, width: 0, height: 0 };
     this.sidebarRect = {
@@ -107,11 +108,20 @@ class DOMManager {
   }
 
   destroy() {
-    if (!this.initialized) {
-      return;
-    }
-
+    if (this.layoutFrame !== null) this.cancelFrame(this.layoutFrame);
+    this.layoutFrame = null;
+    this.pendingLayout = this.createLayoutState();
     this.initialized = false;
+  }
+
+  createLayoutState() {
+    return {
+      window: false,
+      sidebar: false,
+      sidebarPosition: null,
+      sidebarPositionSet: new Set(),
+      apply: false,
+    };
   }
 
   // =========================================================
@@ -127,36 +137,7 @@ class DOMManager {
   }
 
   resize() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-    const previousEditorWidth = this.editorDimensions.width;
-    const previousEditorHeight = this.editorDimensions.height;
-    const previousOutputHeight = this.output.height;
-
-    this.measureElements();
-    const shouldRefresh =
-      width !== this.lastWindowWidth ||
-      height !== this.lastWindowHeight ||
-      this.editorDimensions.width !== previousEditorWidth ||
-      this.editorDimensions.height !== previousEditorHeight ||
-      this.output.height !== previousOutputHeight;
-
-    if (!shouldRefresh) {
-      return;
-    }
-
-    this.window.width = width;
-    this.window.height = height;
-
-    this.lastWindowWidth = width;
-    this.lastWindowHeight = height;
-
-    this.calculate();
-    this.scheduleApply();
-
-    if (this.editor && this.editor.lineController) {
-      this.editor.lineController.resize();
-    }
+    this.scheduleLayout({ window: true });
   }
 
   getElement(selector, root = document) {
@@ -260,6 +241,71 @@ class DOMManager {
 
   requestFrame(callback) {
     return requestAnimationFrame(callback);
+  }
+
+  scheduleLayout({
+    window: windowChanged = false,
+    sidebar = false,
+    sidebarPosition = null,
+    apply = false,
+  } = {}) {
+    const pending = this.pendingLayout;
+    pending.window ||= windowChanged;
+    pending.sidebar ||= sidebar || windowChanged;
+    pending.apply ||= apply;
+    if (pending.sidebar) {
+      if (
+        windowChanged ||
+        (sidebar && sidebarPosition !== "left" && sidebarPosition !== "right")
+      ) {
+        pending.sidebarPosition = "all";
+        pending.sidebarPositionSet.clear();
+      } else if (pending.sidebarPosition !== "all" && sidebarPosition) {
+        pending.sidebarPositionSet.add(sidebarPosition);
+        pending.sidebarPosition = pending.sidebarPositionSet.size === 1
+          ? sidebarPosition
+          : "all";
+      }
+    }
+
+    if (this.layoutFrame !== null) return this.layoutFrame;
+    this.layoutFrame = this.requestFrame(() => {
+      this.layoutFrame = null;
+      this.flushLayout();
+    });
+    return this.layoutFrame;
+  }
+
+  flushLayout() {
+    const pending = this.pendingLayout;
+    this.pendingLayout = this.createLayoutState();
+    const hasGeometryWork = pending.window || pending.sidebar;
+    if (!hasGeometryWork && !pending.apply) return false;
+
+    if (pending.window) {
+      this.measureWindow();
+      this.editor?.sidebarManager?.syncEditorLayout?.(null, { schedule: false });
+    }
+    if (hasGeometryWork) {
+      this.measureElements();
+      this.calculate();
+    }
+    this.apply();
+
+    if (pending.window) {
+      this.editor?.lineController?.resize?.();
+      this.editor?.scrollerManager?.refreshAll?.();
+      return true;
+    }
+
+    if (pending.sidebar) {
+      const position = pending.sidebarPosition === "all"
+        ? null
+        : pending.sidebarPosition;
+      this.editor?.sidebarManager?.refreshLayout?.(position);
+      return true;
+    }
+    return true;
   }
 
   cancelFrame(id) {
@@ -424,24 +470,23 @@ class DOMManager {
 
     width = Math.max(0, width);
 
-    this.lineNumbers.width = width;
-
-    this.output.x = width + 10;
-
-    this.output.width = Math.max(
+    const outputX = width + 10;
+    const outputWidth = Math.max(
       0,
-      this.editorDimensions.width - this.output.x,
+      this.editorDimensions.width - outputX,
     );
+    const changed = this.lineNumbers.width !== width ||
+      this.output.x !== outputX || this.output.width !== outputWidth;
 
-    this.scheduleApply();
+    this.lineNumbers.width = width;
+    this.output.x = outputX;
+    this.output.width = outputWidth;
+
+    if (changed) this.scheduleApply();
   }
 
   scheduleApply() {
-    if (this.applyFrame !== null) return;
-    this.applyFrame = requestAnimationFrame(() => {
-      this.applyFrame = null;
-      this.apply();
-    });
+    this.scheduleLayout({ apply: true });
   }
 
   getLineNumberWidth() {

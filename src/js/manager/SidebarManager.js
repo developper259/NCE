@@ -496,7 +496,7 @@ class SidebarManager {
     };
   }
 
-  syncEditorLayout(resizedPosition = null) {
+  syncEditorLayout(resizedPosition = null, { schedule = true } = {}) {
     const effectiveWidths = this.getEffectiveSidebarWidths(resizedPosition);
     let widthsChanged = false;
     for (const [position, width] of Object.entries(effectiveWidths)) {
@@ -528,35 +528,48 @@ class SidebarManager {
       this.editor.editorOBJ.style.width = "";
     }
 
-    if (this.editor.domManager) {
-      this.editor.domManager.measureElements();
-      this.editor.domManager.calculate();
-      this.editor.domManager.apply();
-    }
-
-    if (this.editor.cursorController) {
-      this.editor.cursorController.updateCaretPosition();
+    if (schedule && this.editor.domManager) {
+      if (typeof this.editor.domManager.scheduleLayout === "function") {
+        this.editor.domManager.scheduleLayout({
+          sidebar: true,
+          sidebarPosition: resizedPosition,
+        });
+      } else {
+        this.editor.domManager.measureElements();
+        this.editor.domManager.calculate();
+        this.editor.domManager.apply();
+        this.editor.cursorController?.updateCaretPosition();
+      }
     }
 
     return widthsChanged;
   }
 
   scheduleSidebarRefresh(position = null) {
-    requestAnimationFrame(() => {
-      this.editor.lineController.resizeWidth();
-      this.editor.tabManager?.tabScroller?.refresh(null, {
-        invalidateMetrics: true,
+    if (typeof this.editor.domManager?.scheduleLayout === "function") {
+      this.editor.domManager.scheduleLayout({
+        sidebar: true,
+        sidebarPosition: position,
       });
-      if (position === "left" || position === "right") {
-        const scroller = position === "left"
-          ? this.leftScroller
-          : this.rightScroller;
-        scroller?.refresh({ invalidateMetrics: true });
-      } else {
-        this.leftScroller?.refresh({ invalidateMetrics: true });
-        this.rightScroller?.refresh({ invalidateMetrics: true });
-      }
+      return;
+    }
+    requestAnimationFrame(() => this.refreshLayout(position));
+  }
+
+  refreshLayout(position = null) {
+    this.editor.lineController?.resizeWidth?.();
+    this.editor.tabManager?.tabScroller?.refresh(null, {
+      invalidateMetrics: true,
     });
+
+    const positions = position === "left" || position === "right"
+      ? [position]
+      : ["left", "right"];
+    for (const side of positions) {
+      const scroller = side === "left" ? this.leftScroller : this.rightScroller;
+      scroller?.refresh({ invalidateMetrics: true });
+    }
+    this.editor.cursorController?.updateCaretPosition?.();
   }
 
   openSidebar(position) {
@@ -570,7 +583,7 @@ class SidebarManager {
     }
 
     this.editor.domManager.invalidateSidebarMetrics(position);
-    this.syncEditorLayout();
+    this.syncEditorLayout(position);
 
     if (this.editor.sidebarResizer) {
       this.editor.sidebarResizer.updateResizerVisibility();
@@ -591,7 +604,7 @@ class SidebarManager {
     }
 
     this.editor.domManager.invalidateSidebarMetrics(position);
-    this.syncEditorLayout();
+    this.syncEditorLayout(position);
 
     if (this.editor.sidebarResizer) {
       this.editor.sidebarResizer.updateResizerVisibility();
