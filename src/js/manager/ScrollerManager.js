@@ -8,6 +8,12 @@ class ScrollerManager {
     this.scrollers = [];
     this.nextScrollerId = 0;
     this.destroyedScrollers = new WeakSet();
+    this.activeDrag = null;
+    this.dragDocument = null;
+    this.onDragPointerMove = (event) => this.handleDragPointerMove(event);
+    this.onDragPointerUp = (event) => this.handleDragPointerUp(event);
+    this.onDragPointerCancel = (event) => this.handleDragPointerCancel(event);
+    this.onDragLostPointerCapture = (event) => this.handleDragLostPointerCapture(event);
   }
 
   refreshAll() {
@@ -37,6 +43,9 @@ class ScrollerManager {
 
   removeScroller(scroller) {
     if (!scroller) return false;
+    if (this.activeDrag?.scroller === scroller) {
+      this.finishDrag({ notifyEnd: false });
+    }
     let removed = false;
     let index = this.scrollers.indexOf(scroller);
     while (index !== -1) {
@@ -65,7 +74,116 @@ class ScrollerManager {
 
   deactivateScroller(scroller) {
     if (!scroller || !this.scrollers.includes(scroller)) return false;
+    if (this.activeDrag?.scroller === scroller) {
+      this.finishDrag({ notifyEnd: false });
+    }
     scroller.setActive(false);
+    return true;
+  }
+
+  startDrag(scroller, event) {
+    if (
+      this.activeDrag ||
+      !scroller ||
+      !this.scrollers.includes(scroller) ||
+      scroller._destroyed ||
+      event?.pointerId === undefined ||
+      event?.pointerId === null ||
+      event?.isPrimary === false ||
+      (event?.button !== undefined && event.button !== 0)
+    ) {
+      return false;
+    }
+
+    const captureTarget = event.currentTarget || scroller.itemOBJ;
+    if (!captureTarget || !scroller.handlePointerDown(event)) return false;
+
+    this.activeDrag = {
+      scroller,
+      captureTarget,
+      pointerId: event.pointerId,
+    };
+    this.attachDragListeners();
+    try {
+      captureTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // The document pipeline still handles the pointer while it remains in
+      // the renderer if pointer capture is unavailable for this target.
+    }
+    return true;
+  }
+
+  attachDragListeners() {
+    if (this.dragDocument || typeof document === "undefined") return;
+    this.dragDocument = document;
+    this.dragDocument.addEventListener("pointermove", this.onDragPointerMove);
+    this.dragDocument.addEventListener("pointerup", this.onDragPointerUp);
+    this.dragDocument.addEventListener("pointercancel", this.onDragPointerCancel);
+    this.dragDocument.addEventListener(
+      "lostpointercapture",
+      this.onDragLostPointerCapture,
+    );
+  }
+
+  detachDragListeners() {
+    if (!this.dragDocument) return;
+    this.dragDocument.removeEventListener("pointermove", this.onDragPointerMove);
+    this.dragDocument.removeEventListener("pointerup", this.onDragPointerUp);
+    this.dragDocument.removeEventListener("pointercancel", this.onDragPointerCancel);
+    this.dragDocument.removeEventListener(
+      "lostpointercapture",
+      this.onDragLostPointerCapture,
+    );
+    this.dragDocument = null;
+  }
+
+  isActiveDragEvent(event) {
+    return Boolean(
+      this.activeDrag && event?.pointerId === this.activeDrag.pointerId,
+    );
+  }
+
+  handleDragPointerMove(event) {
+    if (!this.isActiveDragEvent(event)) return false;
+    this.activeDrag.scroller.handlePointerMove(event);
+    return true;
+  }
+
+  handleDragPointerUp(event) {
+    if (!this.isActiveDragEvent(event)) return false;
+    return this.finishDrag();
+  }
+
+  handleDragPointerCancel(event) {
+    if (!this.isActiveDragEvent(event)) return false;
+    return this.finishDrag();
+  }
+
+  handleDragLostPointerCapture(event) {
+    if (!this.isActiveDragEvent(event)) return false;
+    return this.finishDrag({ releaseCapture: false });
+  }
+
+  finishDrag({ notifyEnd = true, releaseCapture = true } = {}) {
+    const drag = this.activeDrag;
+    if (!drag) return false;
+    this.activeDrag = null;
+    this.detachDragListeners();
+
+    if (releaseCapture) {
+      try {
+        const hasCapture = drag.captureTarget.hasPointerCapture;
+        if (!hasCapture || hasCapture.call(drag.captureTarget, drag.pointerId)) {
+          drag.captureTarget.releasePointerCapture?.(drag.pointerId);
+        }
+      } catch {
+        // Capture may already have been released by the browser.
+      }
+    }
+
+    drag.scroller.handlePointerUp({
+      notifyEnd: notifyEnd && !drag.scroller._destroyed,
+    });
     return true;
   }
 

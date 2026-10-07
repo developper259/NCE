@@ -40,6 +40,7 @@
 .page-scroller-item {
   position: absolute;
   background-color: rgba(180, 180, 180, 0.4) !important;
+  touch-action: none;
 }
 
 .page-scroller-item:hover,

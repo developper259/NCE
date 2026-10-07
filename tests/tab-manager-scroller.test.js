@@ -220,7 +220,7 @@ test("Scroller compact mode defaults off and its active thumb appears on hover",
   assert.ok(classes.has("page-scroller-compact"));
   assert.ok(!classes.has("page-scroller-inactive"));
   assert.equal(initialized.scrollerOBJ.style.opacity, "0");
-  assert.equal(initialized.itemOBJ.listeners.has("mousedown"), true);
+  assert.equal(initialized.itemOBJ.listeners.has("pointerdown"), true);
   parent.listeners.get("mouseenter")();
   assert.equal(initialized.scrollerOBJ.style.opacity, "1");
 });

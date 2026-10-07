@@ -48,10 +48,8 @@ class Scroller {
     this.onScrollEnd = () => {};
     this.wheelDeltaHandler = null;
 
-    this._onMouseMove = this.handleMouseMove.bind(this);
-    this._onMouseUp = this.handleMouseUp.bind(this);
     this._onWheel = this.handleWheel.bind(this);
-    this._onThumbDown = null;
+    this._onPointerDown = null;
     this._onMouseEnter = null;
     this._onMouseLeave = null;
   }
@@ -221,6 +219,9 @@ class Scroller {
   }
 
   setActive(mode) {
+    if (!mode && this.manager?.activeDrag?.scroller === this) {
+      this.manager.finishDrag({ notifyEnd: false });
+    }
     this.active = mode;
     if (!this.scrollerOBJ) return;
     this.scrollerFast?.toggleClass("page-scroller-inactive", !mode);
@@ -230,25 +231,11 @@ class Scroller {
 
   addScrollListeners() {
     this.isDragging = false;
-    this._onThumbDown = (e) => {
-      this.isDragging = true;
-
-      if (this.editor && this.editor.sidebarResizer) {
-        this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.leftResizer)?.setDisplay("none");
-        this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.rightResizer)?.setDisplay("none");
-      }
-
-      const itemRect = this.editor.domManager.getElementMetrics(this.itemOBJ);
-      const isVertical =
-        this.type === this.editor.scrollerManager.VERTICAL_TYPE;
-      this.dragOffset = isVertical
-        ? e.clientY - itemRect.top
-        : e.clientX - itemRect.left;
-
-      this.updateVisibility();
-      e.preventDefault();
+    this._onPointerDown = (event) => {
+      const manager = this.manager || this.editor?.scrollerManager;
+      manager?.startDrag?.(this, event);
     };
-    this.itemOBJ.addEventListener("mousedown", this._onThumbDown);
+    this.itemOBJ.addEventListener("pointerdown", this._onPointerDown);
 
     this._onMouseEnter = () => {
       this.isHovered = true;
@@ -262,10 +249,28 @@ class Scroller {
     this.parentOBJ.addEventListener("mouseenter", this._onMouseEnter);
     this.parentOBJ.addEventListener("mouseleave", this._onMouseLeave);
 
-    document.addEventListener("mousemove", this._onMouseMove);
-    document.addEventListener("mouseup", this._onMouseUp);
     const wheelTarget = this.wheelTarget || this.parentOBJ;
     wheelTarget.addEventListener("wheel", this._onWheel, { passive: false });
+  }
+
+  handlePointerDown(event) {
+    if (!this.active || this._destroyed || !this.itemOBJ) return false;
+    this.isDragging = true;
+
+    if (this.editor && this.editor.sidebarResizer) {
+      this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.leftResizer)?.setDisplay("none");
+      this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.rightResizer)?.setDisplay("none");
+    }
+
+    const itemRect = this.editor.domManager.getElementMetrics(this.itemOBJ);
+    const isVertical = this.type === this.editor.scrollerManager.VERTICAL_TYPE;
+    this.dragOffset = isVertical
+      ? event.clientY - itemRect.top
+      : event.clientX - itemRect.left;
+
+    this.updateVisibility();
+    event.preventDefault?.();
+    return true;
   }
 
   destroy() {
@@ -284,11 +289,9 @@ class Scroller {
       clearTimeout(this._scrollEndTimer);
       this._scrollEndTimer = null;
     }
-    this.itemOBJ?.removeEventListener("mousedown", this._onThumbDown);
+    this.itemOBJ?.removeEventListener("pointerdown", this._onPointerDown);
     this.parentOBJ?.removeEventListener("mouseenter", this._onMouseEnter);
     this.parentOBJ?.removeEventListener("mouseleave", this._onMouseLeave);
-    document.removeEventListener("mousemove", this._onMouseMove);
-    document.removeEventListener("mouseup", this._onMouseUp);
     (this.wheelTarget || this.parentOBJ)?.removeEventListener("wheel", this._onWheel);
     this.scrollerFast?.remove();
     this.scrollerOBJ = null;
@@ -299,11 +302,9 @@ class Scroller {
     this.wheelTarget = null;
     this.isDragging = false;
     this.isHovered = false;
-    this._onThumbDown = null;
+    this._onPointerDown = null;
     this._onMouseEnter = null;
     this._onMouseLeave = null;
-    this._onMouseMove = null;
-    this._onMouseUp = null;
     this._onWheel = null;
     this.onScroll = null;
     this.onScrollEnd = null;
@@ -315,7 +316,7 @@ class Scroller {
     return true;
   }
 
-  handleMouseMove(e) {
+  handlePointerMove(e) {
     if (!this.isDragging || !this.active) return;
 
     const rect = this.editor.domManager.getElementMetrics(this.scrollerOBJ);
@@ -344,8 +345,12 @@ class Scroller {
     this.scheduleScrollRender();
   }
 
-  handleMouseUp() {
-    if (this.isDragging) this.onScrollEnd();
+  handleMouseMove(e) {
+    return this.handlePointerMove(e);
+  }
+
+  handlePointerUp({ notifyEnd = true } = {}) {
+    if (this.isDragging && notifyEnd) this.onScrollEnd();
     this.isDragging = false;
 
     if (this.editor && this.editor.sidebarResizer) {
@@ -353,6 +358,10 @@ class Scroller {
     }
 
     this.updateVisibility();
+  }
+
+  handleMouseUp() {
+    return this.handlePointerUp();
   }
 
   handleWheel(e) {

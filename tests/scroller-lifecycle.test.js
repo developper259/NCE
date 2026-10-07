@@ -95,11 +95,9 @@ test("low-level Scroller destroy clears registry, DOM, timers, RAF and listeners
   scroller.wheelTarget = removedFrom("wheel");
   scroller.itemOBJ = removedFrom("item");
   scroller.scrollerFast = { remove() { removedDom += 1; } };
-  scroller._onThumbDown = () => {};
+  scroller._onPointerDown = () => {};
   scroller._onMouseEnter = () => {};
   scroller._onMouseLeave = () => {};
-  scroller._onMouseMove = () => {};
-  scroller._onMouseUp = () => {};
   scroller._onWheel = () => {};
   scroller._rafId = 31;
   scroller._scrollEndTimer = 47;
@@ -111,12 +109,10 @@ test("low-level Scroller destroy clears registry, DOM, timers, RAF and listeners
   assert.deepEqual(clearedTimers, [47]);
   assert.equal(removedDom, 1);
   assert.deepEqual(removedListeners.map(([type]) => type).sort(), [
-    "item:mousedown",
+    "item:pointerdown",
     "parent:mouseenter",
     "parent:mouseleave",
     "wheel:wheel",
-    "mousemove",
-    "mouseup",
   ].sort());
   assert.equal(scroller.parentOBJ, null);
   assert.equal(scroller.scrollerOBJ, null);
