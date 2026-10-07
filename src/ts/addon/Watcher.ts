@@ -15,6 +15,8 @@ interface FileChange {
 
 export class Watcher {
   private window: InstanceType<typeof BrowserWindow>;
+  private observedWindow: InstanceType<typeof BrowserWindow> | null = null;
+  private visibilityListener: (() => void) | null = null;
   private watcher: any = null;
   private watchedPath: string = "";
 
@@ -39,10 +41,36 @@ export class Watcher {
 
   constructor(window: BrowserWindow) {
     this.window = window;
+    this.setWindow(window);
   }
 
   setWindow(window: BrowserWindow): void {
+    const previousWindow = this.observedWindow as any;
+    if (previousWindow && this.visibilityListener && typeof previousWindow.removeListener === "function") {
+      for (const event of ["show", "hide", "minimize", "restore", "focus", "blur"])
+        previousWindow.removeListener(event, this.visibilityListener);
+    }
     this.window = window;
+    this.observedWindow = window;
+    this.visibilityListener = () => this.updatePollingForeground();
+    const currentWindow = this.observedWindow as any;
+    if (typeof currentWindow.on === "function") {
+      for (const event of ["show", "hide", "minimize", "restore", "focus", "blur"])
+        currentWindow.on(event, this.visibilityListener);
+    }
+    this.updatePollingForeground();
+  }
+
+  private isWindowForeground(): boolean {
+    const window = this.window as any;
+    const visible = typeof window.isVisible === "function" ? window.isVisible() : true;
+    const minimized = typeof window.isMinimized === "function" ? window.isMinimized() : false;
+    const focused = typeof window.isFocused === "function" ? window.isFocused() : true;
+    return visible && !minimized && focused;
+  }
+
+  private updatePollingForeground(): void {
+    this.watcher?.setForeground?.(this.isWindowForeground());
   }
 
   handleIPC() {
@@ -84,7 +112,7 @@ export class Watcher {
 
   private createWatcher(projectPath: string, generation: number): void {
     const watcher = this.usePolling
-      ? new PollingWatcher(projectPath)
+      ? new PollingWatcher(projectPath, this.isWindowForeground())
       : chokidar.watch(projectPath, {
       ignored: watcherIgnored,
       persistent: true,

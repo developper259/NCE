@@ -14,10 +14,17 @@ function createWatcherHarness(platformOverride) {
   const errors = [];
 
   class FakePollingWatcher extends EventEmitter {
-    constructor(projectPath) {
+    constructor(projectPath, foreground = true) {
       super();
       this.projectPath = projectPath;
+      this.foreground = foreground;
+      this.foregroundChanges = [];
       pollingWatchers.push(this);
+    }
+    setForeground(foreground) {
+      if (this.foreground === foreground) return;
+      this.foreground = foreground;
+      this.foregroundChanges.push(foreground);
     }
     async close() {}
   }
@@ -45,8 +52,18 @@ function createWatcherHarness(platformOverride) {
     "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
   }, globals);
 
+  const window = new EventEmitter();
+  window.visible = true;
+  window.minimized = false;
+  window.focused = true;
+  window.isVisible = () => window.visible;
+  window.isMinimized = () => window.minimized;
+  window.isFocused = () => window.focused;
+  window.webContents = { send() {} };
+
   return {
-    watcher: new Watcher({ webContents: { send() {} } }),
+    watcher: new Watcher(window),
+    window,
     nativeSources,
     nativeOptions,
     pollingWatchers,
@@ -318,6 +335,43 @@ for (const [platform, expectedMode] of [
   });
 }
 
+test("macOS polling follows window foreground state and detaches from a replaced window", async () => {
+  const runtime = createWatcherHarness("darwin");
+  await runtime.watcher.startWatching("/temporary");
+  const polling = runtime.pollingWatchers[0];
+  assert.equal(polling.foreground, true);
+
+  runtime.window.focused = false;
+  runtime.window.emit("blur");
+  assert.deepEqual(polling.foregroundChanges, [false]);
+
+  runtime.window.focused = true;
+  runtime.window.emit("focus");
+  assert.deepEqual(polling.foregroundChanges, [false, true]);
+
+  const previousWindow = runtime.window;
+  const replacement = new EventEmitter();
+  replacement.visible = true;
+  replacement.minimized = false;
+  replacement.focused = true;
+  replacement.isVisible = () => replacement.visible;
+  replacement.isMinimized = () => replacement.minimized;
+  replacement.isFocused = () => replacement.focused;
+  replacement.webContents = { send() {} };
+  runtime.watcher.setWindow(replacement);
+
+  previousWindow.focused = false;
+  previousWindow.emit("blur");
+  assert.deepEqual(polling.foregroundChanges, [false, true]);
+  replacement.minimized = true;
+  replacement.emit("minimize");
+  assert.deepEqual(polling.foregroundChanges, [false, true, false]);
+  replacement.minimized = false;
+  replacement.emit("restore");
+  assert.deepEqual(polling.foregroundChanges, [false, true, false, true]);
+  await runtime.watcher.stopWatching();
+});
+
 for (const code of ["UNKNOWN", "EPERM", "EBUSY", "EMFILE", "ENFILE"]) {
   test(`watcher falls back to polling for recoverable native error ${code}`, async () => {
     const runtime = createWatcherHarness("linux");
@@ -515,15 +569,19 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
   const created = path.join(root, "new.js");
   const renamed = path.join(root, "test.js");
   const dotEnv = path.join(root, ".env");
+  const transition = path.join(root, "transition.js");
   const ignoredDirectory = path.join(root, "node_modules");
   await fs.writeFile(normal, "const value = 1;\n");
+  await fs.writeFile(transition, "const transition = 0;\n");
   await fs.writeFile(path.join(root, "foo.asar"), Buffer.from([1, 2, 3, 4, 5]));
   await fs.writeFile(path.join(root, "FOO.ASAR"), Buffer.from([6, 7, 8]));
   await fs.mkdir(ignoredDirectory);
   const { PollingWatcher } = require("../dist/ts/addon/WatcherPolling.js");
   const watcher = new PollingWatcher(root);
   const events = [];
+  const modes = [];
   watcher.on("all", (event, filePath) => events.push([event, filePath]));
+  watcher.on("mode", (mode) => modes.push(mode));
   const waitForEvent = async (predicate) => {
     const deadline = Date.now() + 4000;
     while (!events.some(predicate) && Date.now() < deadline) {
@@ -531,11 +589,22 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
     }
     assert.ok(events.some(predicate));
   };
+  const waitForMode = async (foreground, afterIndex = 0) => {
+    const deadline = Date.now() + 8000;
+    while (!modes.slice(afterIndex).some((mode) => mode.foreground === foreground) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    const mode = modes.slice(afterIndex).find((candidate) => candidate.foreground === foreground);
+    assert.ok(mode, `polling watcher did not settle into ${foreground ? "foreground" : "background"} mode`);
+    return mode;
+  };
   try {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("polling watcher was not ready")), 5000);
       watcher.once("ready", () => { clearTimeout(timer); resolve(); });
     });
+    const initialMode = await waitForMode(true);
+    assert.deepEqual([initialMode.interval, initialMode.binaryInterval], [400, 1000]);
     await new Promise((resolve) => setTimeout(resolve, 500));
     await fs.writeFile(normal, "const value = 22222;\n");
     await waitForEvent(([event, filePath]) => event === "change" && filePath === normal);
@@ -548,6 +617,23 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
     assert.equal(events.some(([, filePath]) => /\.asar(?:[\\/]|$)/i.test(filePath)), false);
     await fs.writeFile(dotEnv, "VISIBLE=1\n");
     await waitForEvent(([event, filePath]) => event === "add" && filePath === dotEnv);
+
+    const backgroundModePromise = waitForMode(false);
+    watcher.setForeground(false);
+    const changesBeforeBackgroundTransition = events.filter(([event, filePath]) => event === "change" && filePath === transition).length;
+    await fs.writeFile(transition, "const transition = 1;\n");
+    const backgroundMode = await backgroundModePromise;
+    assert.deepEqual([backgroundMode.interval, backgroundMode.binaryInterval], [2000, 5000]);
+    assert.equal(events.filter(([event, filePath]) => event === "change" && filePath === transition).length, changesBeforeBackgroundTransition + 1);
+
+    const foregroundModePromise = waitForMode(true, modes.length);
+    watcher.setForeground(true);
+    const changesBeforeForegroundTransition = events.filter(([event, filePath]) => event === "change" && filePath === transition).length;
+    await fs.writeFile(transition, "const transition = 2;\n");
+    const foregroundMode = await foregroundModePromise;
+    assert.deepEqual([foregroundMode.interval, foregroundMode.binaryInterval], [400, 1000]);
+    assert.equal(events.filter(([event, filePath]) => event === "change" && filePath === transition).length, changesBeforeForegroundTransition + 1);
+
     await fs.writeFile(path.join(ignoredDirectory, "ignored.js"), "ignored\n");
     await new Promise((resolve) => setTimeout(resolve, 600));
     assert.equal(events.some(([, filePath]) => filePath.includes("node_modules")), false);

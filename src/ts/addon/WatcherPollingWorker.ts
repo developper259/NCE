@@ -1,6 +1,9 @@
 const chokidar = require("chokidar");
 const { watcherIgnored } = require("./WatcherIgnore");
 const projectPath = process.argv[2];
+const foreground = process.argv[3] !== "background";
+const interval = foreground ? 400 : 2000;
+const binaryInterval = foreground ? 1000 : 5000;
 
 if (!projectPath) process.exit(1);
 
@@ -9,16 +12,19 @@ const watcher = chokidar.watch(projectPath, {
   persistent: true,
   ignoreInitial: true,
   usePolling: true,
-  interval: 400,
-  binaryInterval: 1000,
+  interval,
+  binaryInterval,
   awaitWriteFinish: {
     stabilityThreshold: 300,
     pollInterval: 100,
   },
 });
 
-watcher.on("all", (event: string, filePath: string) => {
-  process.send?.({ type: "all", event, filePath });
+watcher.on("all", (event: string, filePath: string, stats: any) => {
+  const signature = stats
+    ? `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}`
+    : null;
+  process.send?.({ type: "all", event, filePath, signature });
 });
 
 watcher.on("error", (error: any) => {
@@ -31,7 +37,12 @@ watcher.on("error", (error: any) => {
     },
   });
 });
-watcher.on("ready", () => process.send?.({ type: "ready" }));
+watcher.on("ready", () => process.send?.({
+  type: "ready",
+  foreground,
+  interval,
+  binaryInterval,
+}));
 
 let closing = false;
 const close = async () => {
