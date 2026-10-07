@@ -726,16 +726,27 @@ export class FileManager {
   async getFolderContent(dirPath: string): Promise<FileItem[]> {
     if (!dirPath) return [];
     try {
-      const entries = await fs.readdir(dirPath);
+      const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
       const items = await Promise.all(
-        entries.map(async (entry: string): Promise<FileItem> => {
-          const fullPath = path.join(dirPath, entry);
-          const stats = await statOpaqueEntry(fullPath);
+        entries.map(async (entry: any): Promise<FileItem> => {
+          const name = typeof entry === "string" ? entry : entry.name;
+          const fullPath = path.join(dirPath, name);
+          let isDirectory = entry?.isDirectory?.() === true;
+          const isRegularFile = entry?.isFile?.() === true;
+
+          // Dirents classify regular files and directories without a stat.
+          // Symlinks and special/opaque entries retain the previous stat path
+          // so links to directories and entries with unknown types keep their type.
+          if (!isDirectory && !isRegularFile) {
+            const stats = await statOpaqueEntry(fullPath);
+            isDirectory = stats.isDirectory();
+          }
+
           return {
-            name: entry,
+            name,
             path: fullPath,
-            type: stats.isDirectory() ? "folder" : "file",
+            type: isDirectory ? "folder" : "file",
           };
         }),
       );

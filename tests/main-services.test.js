@@ -1,5 +1,7 @@
 const assert = require("node:assert/strict");
 const fsp = require("node:fs").promises;
+const fsModule = require("node:fs");
+const Module = require("node:module");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
@@ -1142,6 +1144,130 @@ test("invalid ASAR stays opaque in explorer, search, and project map", async () 
     );
   } finally {
     await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("FileManager classifies normal folder entries from Dirents without per-entry stats", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-dirents-"));
+  const folderPath = path.join(root, "folder");
+  await fsp.mkdir(folderPath);
+  const fileNames = Array.from({ length: 32 }, (_, index) => `file-${index}.txt`);
+  await Promise.all(fileNames.map((name) => fsp.writeFile(path.join(root, name), "x")));
+  await fsp.writeFile(path.join(root, "archive.asar"), "opaque archive fixture");
+
+  let symlinksSupported = true;
+  try {
+    await fsp.symlink(fileNames[0], path.join(root, "linked-file.txt"));
+    await fsp.symlink(folderPath, path.join(root, "linked-folder"), "dir");
+  } catch (error) {
+    symlinksSupported = false;
+    await Promise.all([
+      fsp.rm(path.join(root, "linked-file.txt"), { force: true }),
+      fsp.rm(path.join(root, "linked-folder"), { force: true }),
+    ]);
+    if (!new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) {
+      await fsp.rm(root, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  const originalReaddir = fsModule.promises.readdir;
+  const originalLoad = Module._load;
+  const readdirCalls = [];
+  const statPaths = [];
+  fsModule.promises.readdir = function (dirPath, options) {
+    if (path.resolve(dirPath) === path.resolve(root)) readdirCalls.push(options);
+    return Reflect.apply(originalReaddir, this, arguments);
+  };
+  Module._load = function (request, parent, isMain) {
+    if (request === "original-fs") {
+      return {
+        promises: {
+          stat(filePath) {
+            statPaths.push(filePath);
+            return fsp.stat(filePath);
+          },
+        },
+      };
+    }
+    return Reflect.apply(originalLoad, this, arguments);
+  };
+
+  try {
+    const manager = new FileManager({});
+    const items = await manager.getFolderContent(root);
+    const names = items.map((item) => item.name);
+    const expected = [
+      "folder",
+      ...(symlinksSupported ? ["linked-folder"] : []),
+      "archive.asar",
+      ...fileNames,
+      ...(symlinksSupported ? ["linked-file.txt"] : []),
+    ];
+    expected.sort((a, b) => {
+      const aFolder = a === "folder" || a === "linked-folder";
+      const bFolder = b === "folder" || b === "linked-folder";
+      if (aFolder !== bFolder) return aFolder ? -1 : 1;
+      return a.localeCompare(b);
+    });
+
+    assert.deepEqual(names, expected);
+    assert.ok(items.every((item) => item.path === path.join(root, item.name)));
+    assert.equal(items.find((item) => item.name === "archive.asar")?.type, "file");
+    assert.equal(readdirCalls.length, 1);
+    assert.deepEqual(readdirCalls[0], { withFileTypes: true });
+    assert.deepEqual(
+      statPaths.sort(),
+      symlinksSupported
+        ? [path.join(root, "linked-file.txt"), path.join(root, "linked-folder")].sort()
+        : [],
+    );
+    if (symlinksSupported) {
+      assert.equal(items.find((item) => item.name === "linked-folder")?.type, "folder");
+      assert.equal(items.find((item) => item.name === "linked-file.txt")?.type, "file");
+    }
+  } finally {
+    fsModule.promises.readdir = originalReaddir;
+    Module._load = originalLoad;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("FileManager preserves listing failure behavior for an unreadable opaque entry", async (t) => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-dirents-error-"));
+  const target = path.join(root, "target.txt");
+  const link = path.join(root, "linked.txt");
+  await fsp.writeFile(target, "x");
+  try {
+    await fsp.symlink(target, link);
+  } catch (error) {
+    await fsp.rm(root, { recursive: true, force: true });
+    if (new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) {
+      t.skip("symbolic links are unavailable on this platform");
+      return;
+    }
+    throw error;
+  }
+
+  const originalLoad = Module._load;
+  const originalConsoleError = console.error;
+  const loggedErrors = [];
+  Module._load = function (request, parent, isMain) {
+    if (request === "original-fs") {
+      return { promises: { stat: async () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); } } };
+    }
+    return Reflect.apply(originalLoad, this, arguments);
+  };
+  console.error = (...args) => loggedErrors.push(args);
+  try {
+    const items = await new FileManager({}).getFolderContent(root);
+    assert.deepEqual(items, []);
+    assert.equal(loggedErrors.length, 1);
+    assert.equal(loggedErrors[0][1].code, "EACCES");
+  } finally {
+    Module._load = originalLoad;
+    console.error = originalConsoleError;
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });
 
