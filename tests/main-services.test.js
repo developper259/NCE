@@ -1151,6 +1151,68 @@ test("Quick Open serves warm indexed paths without traversal and refreshes per w
   }
 });
 
+test("Large Workspace Mode preserves project-file results across indexed and filesystem paths", async () => {
+  const indexedRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-large-workspace-indexed-"));
+  const fallbackRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-large-workspace-fallback-"));
+  const files = [
+    ["README.md", "# Workspace\n"],
+    ["src/app.js", "export const app = true;\n"],
+    ["src/notes.custom", "plain text fallback\n"],
+    [".hidden/secret.js", "hidden\n"],
+    ["src/binary.dat", Buffer.from([0, 1, 2, 3, 4])],
+  ];
+  const indexedSearch = new WorkspaceSearch({ window: null });
+  const fallbackSearch = new WorkspaceSearch({ window: null });
+  try {
+    for (const root of [indexedRoot, fallbackRoot]) {
+      for (const [relativePath, content] of files) {
+        const filePath = path.join(root, relativePath);
+        await fsp.mkdir(path.dirname(filePath), { recursive: true });
+        await fsp.writeFile(filePath, content);
+      }
+    }
+
+    const syntheticLargeEntries = files.map(([relativePath]) => {
+      const name = path.posix.basename(relativePath);
+      return {
+        relativePath,
+        name,
+        extension: path.posix.extname(name).toLowerCase(),
+        size: 2 * 1024 ** 3,
+        mtimeMs: 1,
+        type: "file",
+      };
+    });
+    assert.equal(indexedSearch.workspaceIndex.primeFromScan(indexedRoot, syntheticLargeEntries), true);
+    await indexedSearch.workspaceIndex.flush(indexedRoot);
+    assert.equal(indexedSearch.workspaceIndex.getStats(indexedRoot).largeWorkspaceMode, true);
+
+    const options = { openableOnly: true, ignoreHiddenDirectories: true };
+    const indexed = await indexedSearch.listProjectFiles(indexedRoot, options);
+    const fallback = await fallbackSearch.listProjectFiles(fallbackRoot, options);
+    assert.equal(indexed.success, true);
+    assert.equal(fallback.success, true);
+    assert.deepEqual(
+      indexed.entries.map((entry) => entry.relativePath).sort(),
+      fallback.entries.map((entry) => entry.relativePath).sort(),
+    );
+    assert.deepEqual(indexed.entries.map((entry) => entry.relativePath).sort(), [
+      "README.md",
+      "src/app.js",
+      "src/notes.custom",
+    ]);
+  } finally {
+    await Promise.all([
+      indexedSearch.workspaceIndex.flush(indexedRoot),
+      fallbackSearch.workspaceIndex.flush(fallbackRoot),
+    ]);
+    await Promise.all([
+      fsp.rm(indexedRoot, { recursive: true, force: true }),
+      fsp.rm(fallbackRoot, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test("invalid ASAR stays opaque in explorer, search, and project map", async () => {
   const root = await tempWorkspace();
   const archive = path.join(root, "broken.asar");

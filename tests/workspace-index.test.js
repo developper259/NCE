@@ -6,8 +6,10 @@ const test = require("node:test");
 
 const {
   MAX_WORKSPACE_INDEX_ENTRIES,
+  LARGE_WORKSPACE_MODE_THRESHOLDS,
   WORKSPACE_INDEX_CACHE_FILE,
   WORKSPACE_INDEX_VERSION,
+  summarizeWorkspaceIndex,
   WorkspaceIndex,
 } = require("../dist/ts/addon/WorkspaceIndex.js");
 const { isOpenableFileSample } = require("../dist/ts/addon/OpenableFile.js");
@@ -131,6 +133,95 @@ test("WorkspaceIndex persists empty and large workspaces within its entry bound"
   } finally {
     await fsp.rm(emptyRoot, { recursive: true, force: true });
     await fsp.rm(largeRoot, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex derives large mode from index dimensions and preserves watcher correctness", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-mode-"));
+  try {
+    await fsp.writeFile(path.join(root, "readme.md"), "small workspace\n");
+    const index = new WorkspaceIndex();
+    const updates = [];
+    index.onStatsUpdated = (stats) => updates.push(stats);
+    await index.build(root);
+    const small = index.getStats(root);
+    assert.equal(small.ready, true);
+    assert.equal(small.fileCount, 1);
+    assert.equal(small.directoryCount, 0);
+    assert.equal(small.largeWorkspaceMode, false);
+    assert.equal(index.getWatcherDebounceMs(root), 150);
+
+    const thresholdEntries = Array.from({
+      length: LARGE_WORKSPACE_MODE_THRESHOLDS.files * LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore,
+    }, (_, entryIndex) => {
+      const name = `threshold-${entryIndex}.js`;
+      return {
+        relativePath: name,
+        name,
+        extension: ".js",
+        size: 0,
+        mtimeMs: 1,
+        type: "file",
+      };
+    });
+    const atThreshold = summarizeWorkspaceIndex({
+      version: WORKSPACE_INDEX_VERSION,
+      root: path.resolve(root),
+      generatedAt: 2,
+      complete: true,
+      entries: thresholdEntries,
+    });
+    assert.equal(atThreshold.fileCount, 20_000);
+    assert.equal(atThreshold.pressureScore, LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore);
+    assert.equal(atThreshold.largeWorkspaceMode, true);
+
+    const largeEntries = Array.from({ length: 9000 }, (_, entryIndex) => {
+      const group = Math.floor(entryIndex / 6);
+      const name = `file-${entryIndex}.js`;
+      return {
+        relativePath: `groups/group-${group}/${name}`,
+        name,
+        extension: ".js",
+        size: 131072,
+        mtimeMs: 1,
+        type: "file",
+      };
+    });
+    const estimatedLarge = summarizeWorkspaceIndex({
+      version: WORKSPACE_INDEX_VERSION,
+      root: path.resolve(root),
+      generatedAt: 2,
+      complete: true,
+      entries: largeEntries,
+    });
+    assert.equal(estimatedLarge.fileCount, 9000);
+    assert.equal(estimatedLarge.directoryCount, 1501);
+    assert.equal(estimatedLarge.largeWorkspaceMode, true);
+
+    assert.equal(index.primeFromScan(root, largeEntries), true);
+    await index.flush(root);
+    assert.equal(index.getStats(root).largeWorkspaceMode, true);
+    assert.equal(index.getWatcherDebounceMs(root), 500);
+
+    const beforeWatcher = index.getDiagnostics();
+    const addedPath = path.join(root, "added.js");
+    await fsp.writeFile(addedPath, "still indexed\n");
+    index.handleWatcherEvent(root, "add", addedPath);
+    await index.flush(root);
+    assert.ok((await index.load(root)).entries.some((entry) => entry.relativePath === "added.js"));
+    assert.equal(index.getStats(root).largeWorkspaceMode, true);
+    const afterWatcher = index.getDiagnostics();
+    assert.equal(afterWatcher.received - beforeWatcher.received, 1);
+    assert.equal(afterWatcher.batches - beforeWatcher.batches, 1);
+    assert.equal(afterWatcher.persistedWrites - beforeWatcher.persistedWrites, 1);
+
+    await index.build(root);
+    assert.equal(index.getStats(root).largeWorkspaceMode, false);
+    assert.equal(index.getWatcherDebounceMs(root), 150);
+    assert.equal(updates.some((stats) => stats.largeWorkspaceMode), true);
+    assert.equal(updates.at(-1).largeWorkspaceMode, false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });
 

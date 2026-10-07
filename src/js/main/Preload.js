@@ -248,6 +248,14 @@ contextBridge.exposeInMainWorld("api", {
   listProjectFiles: (rootPath, options = {}) =>
     ipcRenderer.invoke("WorkspaceSearch:projectFiles", rootPath, options),
 
+  getWorkspaceIndexStats: (rootPath) =>
+    ipcRenderer.invoke("WorkspaceSearch:indexStats", rootPath),
+  onWorkspaceIndexStats: (callback) => {
+    const listener = (_event, stats) => callback(stats);
+    ipcRenderer.on("workspace-index-stats", listener);
+    return () => ipcRenderer.removeListener("workspace-index-stats", listener);
+  },
+
   onSaveRequest: (callback) =>
     ipcRenderer.on("Request:saveState", () => callback()),
 

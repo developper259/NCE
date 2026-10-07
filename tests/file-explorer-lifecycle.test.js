@@ -691,3 +691,42 @@ test("workspace UI restoration never reopens the project", async () => {
   });
   assert.equal(attempts, 0);
 });
+
+test("large workspace mode displays its cause and clears across workspace switches", () => {
+  const FileExplorer = loadFileExplorer();
+  const badge = {
+    hidden: true,
+    textContent: "",
+    title: "",
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+  };
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/project-a",
+    workspaceModeBadge: badge,
+    workspaceIndexStats: null,
+    largeWorkspaceMode: false,
+  });
+  const largeStats = {
+    root: "/project-a",
+    ready: true,
+    fileCount: 18000,
+    directoryCount: 2400,
+    totalIndexedBytes: 3 * 1024 ** 3,
+    pressureScore: 3.9,
+    largeWorkspaceMode: true,
+    generatedAt: 1,
+  };
+
+  assert.equal(explorer.applyWorkspaceIndexStats(largeStats), true);
+  assert.equal(badge.hidden, false);
+  assert.match(badge.textContent, /LARGE WORKSPACE MODE/);
+  assert.match(badge.title, /18,000 files/);
+  assert.match(badge.title, /all editor features remain available/i);
+
+  explorer.rootPath = "/project-b";
+  assert.equal(explorer.applyWorkspaceIndexStats(largeStats), false);
+  explorer.clearWorkspaceIndexStats();
+  assert.equal(badge.hidden, true);
+  assert.equal(badge.textContent, "");
+});

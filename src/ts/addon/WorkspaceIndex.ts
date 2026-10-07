@@ -6,6 +6,25 @@ export const WORKSPACE_INDEX_VERSION = 1;
 export const WORKSPACE_INDEX_CACHE_FILE = "files-index-v1.json";
 export const MAX_WORKSPACE_INDEX_ENTRIES = 200_000;
 export const MAX_WORKSPACE_INDEX_BYTES = 64 * 1024 * 1024;
+export const LARGE_WORKSPACE_MODE_THRESHOLDS = Object.freeze({
+  files: 10_000,
+  directories: 1_500,
+  totalIndexedBytes: 2 * 1024 * 1024 * 1024,
+  pressureScore: 2,
+});
+export const DEFAULT_INDEX_WATCHER_DEBOUNCE_MS = 150;
+export const LARGE_WORKSPACE_INDEX_WATCHER_DEBOUNCE_MS = 500;
+
+export interface WorkspaceIndexStats {
+  root: string;
+  ready: boolean;
+  fileCount: number;
+  directoryCount: number;
+  totalIndexedBytes: number;
+  pressureScore: number;
+  largeWorkspaceMode: boolean;
+  generatedAt: number | null;
+}
 
 export const WORKSPACE_INDEX_IGNORED_DIRECTORIES = new Set([
   ".git",
@@ -50,6 +69,40 @@ export interface WorkspaceIndexSnapshot {
   entries: WorkspaceIndexEntry[];
 }
 
+export function summarizeWorkspaceIndex(
+  snapshot: WorkspaceIndexSnapshot,
+  ready = true,
+): WorkspaceIndexStats {
+  const directories = new Set<string>();
+  let totalIndexedBytes = 0;
+  for (const entry of snapshot.entries) {
+    totalIndexedBytes = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      totalIndexedBytes + entry.size,
+    );
+    for (
+      let separatorIndex = entry.relativePath.indexOf("/");
+      separatorIndex !== -1;
+      separatorIndex = entry.relativePath.indexOf("/", separatorIndex + 1)
+    ) directories.add(entry.relativePath.slice(0, separatorIndex));
+  }
+  const fileCount = snapshot.entries.length;
+  const directoryCount = directories.size;
+  const pressureScore = fileCount / LARGE_WORKSPACE_MODE_THRESHOLDS.files +
+    directoryCount / LARGE_WORKSPACE_MODE_THRESHOLDS.directories +
+    totalIndexedBytes / LARGE_WORKSPACE_MODE_THRESHOLDS.totalIndexedBytes;
+  return {
+    root: snapshot.root,
+    ready,
+    fileCount,
+    directoryCount,
+    totalIndexedBytes,
+    pressureScore,
+    largeWorkspaceMode: pressureScore >= LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore,
+    generatedAt: snapshot.generatedAt,
+  };
+}
+
 interface PendingWatcherEvent {
   event: string;
   relativePath: string;
@@ -58,6 +111,8 @@ interface PendingWatcherEvent {
 
 export class WorkspaceIndex {
   private readonly snapshots = new Map<string, WorkspaceIndexSnapshot>();
+  private readonly statsByRoot = new Map<string, WorkspaceIndexStats>();
+  private readonly largeWorkspaceRoots = new Set<string>();
   private readonly invalidRoots = new Map<string, number>();
   private readonly rootRevisions = new Map<string, number>();
   private readonly buildQueues = new Map<string, Promise<void>>();
@@ -83,7 +138,7 @@ export class WorkspaceIndex {
   private readonly maxCachedWorkspaces = 4;
   private readonly maxInvalidWorkspaces = 16;
   private readonly maxRevisionWorkspaces = 64;
-  private readonly watcherDebounceMs = 150;
+  private readonly largeWorkspaceWatcherDebounceMs = LARGE_WORKSPACE_INDEX_WATCHER_DEBOUNCE_MS;
   private readonly coalescedWatcherEvents = {
     received: 0,
     batches: 0,
@@ -91,6 +146,35 @@ export class WorkspaceIndex {
     reconciliations: 0,
   };
   onReconciled: ((rootPath: string) => void) | null = null;
+  onStatsUpdated: ((stats: WorkspaceIndexStats) => void) | null = null;
+
+  getStats(rootPath: string): WorkspaceIndexStats {
+    const root = path.resolve(rootPath);
+    const previous = this.statsByRoot.get(root);
+    if (previous) {
+      const ready = this.snapshots.has(root) && !this.invalidRoots.has(root);
+      const stats = ready === previous.ready ? previous : { ...previous, ready };
+      this.statsByRoot.delete(root);
+      this.statsByRoot.set(root, stats);
+      return stats;
+    }
+    return {
+      root,
+      ready: false,
+      fileCount: 0,
+      directoryCount: 0,
+      totalIndexedBytes: 0,
+      pressureScore: 0,
+      largeWorkspaceMode: false,
+      generatedAt: null,
+    };
+  }
+
+  getWatcherDebounceMs(rootPath: string): number {
+    return this.largeWorkspaceRoots.has(path.resolve(rootPath))
+      ? this.largeWorkspaceWatcherDebounceMs
+      : DEFAULT_INDEX_WATCHER_DEBOUNCE_MS;
+  }
 
   getDiagnostics() {
     return { ...this.coalescedWatcherEvents };
@@ -217,10 +301,24 @@ export class WorkspaceIndex {
   private remember(snapshot: WorkspaceIndexSnapshot): void {
     this.snapshots.delete(snapshot.root);
     this.snapshots.set(snapshot.root, snapshot);
+    const stats = summarizeWorkspaceIndex(snapshot);
+    this.statsByRoot.delete(snapshot.root);
+    this.statsByRoot.set(snapshot.root, stats);
+    if (stats.largeWorkspaceMode) this.largeWorkspaceRoots.add(snapshot.root);
+    else this.largeWorkspaceRoots.delete(snapshot.root);
+    this.onStatsUpdated?.(stats);
     while (this.snapshots.size > this.maxCachedWorkspaces) {
       const oldestRoot = this.snapshots.keys().next().value;
       if (!oldestRoot) break;
       this.snapshots.delete(oldestRoot);
+      this.statsByRoot.delete(oldestRoot);
+      this.largeWorkspaceRoots.delete(oldestRoot);
+    }
+    while (this.statsByRoot.size > this.maxCachedWorkspaces) {
+      const oldestRoot = this.statsByRoot.keys().next().value;
+      if (!oldestRoot) break;
+      this.statsByRoot.delete(oldestRoot);
+      this.largeWorkspaceRoots.delete(oldestRoot);
     }
   }
 
@@ -368,7 +466,7 @@ export class WorkspaceIndex {
     this.reconcileTimers.set(root, setTimeout(() => {
       this.reconcileTimers.delete(root);
       void this.reconcile(root, true);
-    }, this.watcherDebounceMs));
+    }, this.getWatcherDebounceMs(root)));
   }
 
   handleWatcherEvent(rootPath: string, event: string, filePath: string): void {
@@ -429,7 +527,7 @@ export class WorkspaceIndex {
     this.watcherEventTimers.set(root, setTimeout(() => {
       this.watcherEventTimers.delete(root);
       void this.flushEvents(root);
-    }, this.watcherDebounceMs));
+    }, this.getWatcherDebounceMs(root)));
   }
 
   async flushEvents(rootPath: string): Promise<void> {
@@ -552,7 +650,7 @@ export class WorkspaceIndex {
     this.reconcileTimers.set(root, setTimeout(() => {
       this.reconcileTimers.delete(root);
       void this.reconcile(root);
-    }, this.watcherDebounceMs));
+    }, this.getWatcherDebounceMs(root)));
   }
 
   private markStale(root: string): void {
@@ -602,7 +700,7 @@ export class WorkspaceIndex {
         this.reconcileTimers.set(root, setTimeout(() => {
           this.reconcileTimers.delete(root);
           void this.reconcile(root);
-        }, this.watcherDebounceMs));
+        }, this.getWatcherDebounceMs(root)));
       }
     }
   }
@@ -729,6 +827,13 @@ export class WorkspaceIndex {
     this.rememberInvalidRoot(root);
     this.needsReconcileRoots.delete(root);
     this.snapshots.delete(root);
+    const previousStats = this.statsByRoot.get(root);
+    if (previousStats) {
+      const staleStats = { ...previousStats, ready: false };
+      this.statsByRoot.delete(root);
+      this.statsByRoot.set(root, staleStats);
+      this.onStatsUpdated?.(staleStats);
+    }
     const target = new NceWorkspaceStorage(root).getCachePath(
       WORKSPACE_INDEX_CACHE_FILE,
     );

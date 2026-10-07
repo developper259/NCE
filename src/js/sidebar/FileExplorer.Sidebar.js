@@ -19,6 +19,9 @@ class FileExplorer extends Sidebar {
     this.projectHeader = null;
     this.projectArrow = null;
     this.projectTitle = null;
+    this.workspaceModeBadge = null;
+    this.workspaceIndexStats = null;
+    this.largeWorkspaceMode = false;
     this.treeEmptyState = null;
     this.treeEmptyMessage = null;
     this.openFolderButton = null;
@@ -47,6 +50,9 @@ class FileExplorer extends Sidebar {
     this.fileOperations = new FileOperations();
 
     this.setupFileSystemWatcher();
+    this.unsubscribeWorkspaceIndexStats = window.api.onWorkspaceIndexStats?.((stats) =>
+      this.applyWorkspaceIndexStats(stats),
+    ) || null;
 
     this.initContextMenu();
   }
@@ -237,6 +243,9 @@ class FileExplorer extends Sidebar {
       return false;
     }
 
+    if (!NCEPath.equals(projectPath, this.rootPath)) {
+      this.clearWorkspaceIndexStats();
+    }
     this.rootPath = projectPath;
     this.projectName = NCEPath.basename(projectPath) || "Project";
 
@@ -249,6 +258,7 @@ class FileExplorer extends Sidebar {
     }
 
     if (!(await this.loadFiles())) return false;
+    this.requestWorkspaceIndexStats(projectPath);
     if (!deferRefresh) this.refresh();
 
     this.editor.agentSidebar?.manualContextManager?.handleWorkspaceChanged(this.rootPath);
@@ -265,6 +275,7 @@ class FileExplorer extends Sidebar {
     this.cancelEdit({ refresh: false });
     this.rootPath = "";
     this.projectName = "";
+    this.clearWorkspaceIndexStats();
     this.files = [];
     this.activeFilePath = null;
     this.isLoaded = false;
@@ -367,6 +378,7 @@ class FileExplorer extends Sidebar {
     this.projectTitle.textContent = this.projectName
       ? this.projectName.toUpperCase()
       : "NO FOLDER OPENED";
+    this.updateWorkspaceModeBadge();
     this.projectHeader.setAttribute("aria-expanded", String(this.projectExpanded));
     this.projectArrow.classList.toggle("expanded", this.projectExpanded);
     this.projectArrow.setAttribute("aria-hidden", "true");
@@ -381,6 +393,49 @@ class FileExplorer extends Sidebar {
       this.treeLayer.hidden = false;
     }
     return this.shell;
+  }
+
+  applyWorkspaceIndexStats(stats) {
+    if (!stats || typeof stats.root !== "string" || !this.rootPath ||
+        !NCEPath.equals(stats.root, this.rootPath) ||
+        !Number.isSafeInteger(stats.fileCount) ||
+        !Number.isSafeInteger(stats.directoryCount) ||
+        !Number.isFinite(stats.totalIndexedBytes)) return false;
+    this.workspaceIndexStats = stats;
+    this.largeWorkspaceMode = stats.largeWorkspaceMode === true;
+    this.updateWorkspaceModeBadge();
+    return true;
+  }
+
+  clearWorkspaceIndexStats() {
+    this.workspaceIndexStats = null;
+    this.largeWorkspaceMode = false;
+    this.updateWorkspaceModeBadge();
+  }
+
+  updateWorkspaceModeBadge() {
+    const badge = this.workspaceModeBadge;
+    if (!badge) return;
+    const stats = this.workspaceIndexStats;
+    const bytes = Number(stats?.totalIndexedBytes) || 0;
+    const size = bytes >= 1024 ** 3
+      ? `${(bytes / 1024 ** 3).toFixed(1)} GiB`
+      : `${(bytes / 1024 ** 2).toFixed(0)} MiB`;
+    const explanation = this.largeWorkspaceMode
+      ? `Large Workspace Mode is active (${Number(stats?.fileCount || 0).toLocaleString()} files, ${Number(stats?.directoryCount || 0).toLocaleString()} directories, ${size} indexed). NCE batches background index updates for larger projects; all editor features remain available.`
+      : "";
+    badge.hidden = !this.largeWorkspaceMode;
+    badge.textContent = this.largeWorkspaceMode ? "LARGE WORKSPACE MODE" : "";
+    badge.title = explanation;
+    badge.setAttribute("aria-label", explanation);
+  }
+
+  requestWorkspaceIndexStats(rootPath) {
+    if (typeof window.api.getWorkspaceIndexStats !== "function") return;
+    Promise.resolve(window.api.getWorkspaceIndexStats(rootPath)).then((stats) => {
+      if (NCEPath.equals(this.rootPath, rootPath))
+        this.applyWorkspaceIndexStats(stats);
+    }).catch(() => {});
   }
 
   ensureShell() {
@@ -403,6 +458,11 @@ class FileExplorer extends Sidebar {
     projectHeader.appendChild(arrow);
     const title = document.createElement("span");
     projectHeader.appendChild(title);
+    const workspaceModeBadge = document.createElement("span");
+    workspaceModeBadge.className = "file-explorer-large-workspace";
+    workspaceModeBadge.hidden = true;
+    workspaceModeBadge.setAttribute("role", "status");
+    projectHeader.appendChild(workspaceModeBadge);
     projectHeader.addEventListener("click", () => {
       this.projectExpanded = !this.projectExpanded;
       this.refresh();
@@ -469,6 +529,7 @@ class FileExplorer extends Sidebar {
     this.projectHeader = projectHeader;
     this.projectArrow = arrow;
     this.projectTitle = title;
+    this.workspaceModeBadge = workspaceModeBadge;
     this.treeEmptyState = emptyState;
     this.treeEmptyMessage = emptyMessage;
     this.openFolderButton = openFolderButton;
@@ -687,6 +748,8 @@ class FileExplorer extends Sidebar {
   destroy() {
     this.unsubscribeFileSystemWatcher?.();
     this.unsubscribeFileSystemWatcher = null;
+    this.unsubscribeWorkspaceIndexStats?.();
+    this.unsubscribeWorkspaceIndexStats = null;
     clearTimeout(this.scrollSaveTimer);
     this.scrollSaveTimer = null;
     this.virtualScroller?.destroy();

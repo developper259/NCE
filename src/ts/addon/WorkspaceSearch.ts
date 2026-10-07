@@ -196,6 +196,15 @@ export class WorkspaceSearch {
 
   handleIPC() {
     ipcMain.handle(
+      "WorkspaceSearch:indexStats",
+      async (_event, rootPath: unknown) => {
+        if (typeof rootPath !== "string" || !rootPath.trim()) return null;
+        const root = path.resolve(rootPath);
+        this.workspaceIndex.scheduleBuild(root);
+        return this.workspaceIndex.getStats(root);
+      },
+    );
+    ipcMain.handle(
       "WorkspaceSearch:search",
       async (
         _event,

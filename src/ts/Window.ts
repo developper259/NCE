@@ -135,6 +135,14 @@ export class Window {
         dirPath: rootPath,
       }]);
     };
+    this.workspaceSearch.workspaceIndex.onStatsUpdated = (stats) => {
+      const window = this.window;
+      if (
+        !window || window.isDestroyed() ||
+        path.resolve(this.watcher?.getWatchedPath() || "") !== path.resolve(stats.root)
+      ) return;
+      window.webContents.send("workspace-index-stats", stats);
+    };
     if (!this.agentApprovalManager)
       this.agentApprovalManager = new AgentApprovalManager(this);
     if (!this.agentProcessRunner)

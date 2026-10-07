@@ -212,7 +212,7 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   const header = explorer.projectHeader;
   const button = explorer.openFolderButton;
   const nodeCount = created.length;
-  assert.equal(nodeCount - 1, 10, "the Explorer shell is built from ten DOM nodes");
+  assert.equal(nodeCount - 1, 11, "the Explorer shell includes its status badge among eleven DOM nodes");
   const listenerCounts = [
     header.listeners.get("click").length,
     header.listeners.get("contextmenu").length,
