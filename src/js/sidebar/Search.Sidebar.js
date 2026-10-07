@@ -385,6 +385,9 @@ class SearchSidebar extends Sidebar {
     const searchGeneration = ++this.searchGeneration;
     const sessionId = `workspace-search-session-${workspaceGeneration}-${searchGeneration}`;
     const requestId = sessionId;
+    const metrics = this.editor.performanceMetrics;
+    const searchMeasure = metrics?.begin("workspaceSearch.run");
+    metrics?.increment("workspaceSearch.requests");
     this.activeRequestId = requestId;
     this.activeSearchSessionId = sessionId;
     this.isLoadingMore = false;
@@ -450,6 +453,8 @@ class SearchSidebar extends Sidebar {
         this.results = Array.isArray(response?.results) ? response.results : [];
         this.totalMatches = response?.totalMatches || 0;
         this.filesSearched = response?.filesSearched || 0;
+        metrics?.setGauge("workspaceSearch.filesScanned", response?.scannedFiles ?? this.filesSearched);
+        metrics?.setGauge("workspaceSearch.matches", this.totalMatches);
         this.nextResultsOffset = (response?.offset ?? 0) + this.results.length;
         this.hasMoreResults = this.results.length > 0 &&
           (response?.hasMore ?? this.nextResultsOffset < this.totalMatches);
@@ -473,6 +478,7 @@ class SearchSidebar extends Sidebar {
       this.clearResults();
       this.refresh();
     } finally {
+      metrics?.end(searchMeasure);
       if (searchGeneration === this.searchGeneration) {
         if (this.activeRequestId === requestId) this.activeRequestId = null;
         this.isSearching = false;
@@ -504,6 +510,7 @@ class SearchSidebar extends Sidebar {
       if (Array.isArray(message.results) && message.results.length) {
         this.results = this.results.concat(message.results);
         this.resetResultsScroll = false;
+        this.editor.performanceMetrics?.increment("workspaceSearch.batches");
       }
     }
     if (
@@ -514,15 +521,19 @@ class SearchSidebar extends Sidebar {
       this.totalMatches = message.totalMatches ?? this.totalMatches;
       this.filesSearched = message.filesSearched ?? this.filesSearched;
       this.filesScanned = message.scannedFiles ?? this.filesScanned;
+      this.editor.performanceMetrics?.setGauge("workspaceSearch.filesScanned", this.filesScanned);
+      this.editor.performanceMetrics?.setGauge("workspaceSearch.matches", this.totalMatches);
     }
 
     if (message.type === "complete") {
+      this.editor.performanceMetrics?.increment("workspaceSearch.completed");
       this.nextResultsOffset = this.results.length;
       this.hasMoreResults = this.nextResultsOffset < this.totalMatches;
       this.isSearching = false;
       this.activeRequestId = null;
       this.finishActiveSearchStream(message);
     } else if (message.type === "cancelled") {
+      this.editor.performanceMetrics?.increment("workspaceSearch.cancelled");
       this.isSearching = false;
       this.activeRequestId = null;
       this.finishActiveSearchStream(message);

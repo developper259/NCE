@@ -7,6 +7,7 @@ class FileLoader {
     this.incrementalMaxFileSize = 1024 * 1024;
     this.incrementalMaxLineLength = 1000;
     this.requestTimeoutMs = 15000;
+    this.firstFileReadyMarked = false;
   }
 
   getState(filePath) {
@@ -106,15 +107,24 @@ class FileLoader {
 
   async request(promise) {
     let timer;
+    const metrics = this.editor.performanceMetrics;
+    metrics?.increment("files.read.requests");
+    const measure = metrics?.begin("files.read.request");
     try {
       return await Promise.race([promise, new Promise((_, reject) => {
         timer = setTimeout(() => reject(new Error("File loading timed out")), this.requestTimeoutMs);
       })]);
-    } finally { clearTimeout(timer); }
+    } finally {
+      clearTimeout(timer);
+      metrics?.end(measure);
+    }
   }
 
   async loadFile(filePath) {
     await this.cancelLoading(filePath);
+    const metrics = this.editor.performanceMetrics;
+    metrics?.increment("files.open.requests");
+    const measure = metrics?.begin("files.open.initialLoad");
     this.loadingStates.delete(filePath);
     const state = this.getState(filePath);
     state.completion = new Promise((resolve) => { state.resolve = resolve; });
@@ -142,7 +152,12 @@ class FileLoader {
         });
       }
       state.loadedLineCount = count;
+      metrics?.increment("files.read.lines", chunk.lines.length);
       if (count === init.totalLines) this.finish(state, "loaded");
+      if (!this.firstFileReadyMarked) {
+        this.firstFileReadyMarked = true;
+        metrics?.mark("files.first.initialChunkReady");
+      }
       return { initialLines: chunk.lines, totalLines: init.totalLines,
         eol: init.eol || "\n", hasFinalNewline: init.hasFinalNewline === true,
         lineEndings: init.lineEndings || chunk.lineEndings || [],
@@ -151,6 +166,8 @@ class FileLoader {
     } catch (error) {
       if (state.status !== "cancelled") this.finish(state, "failed", error);
       throw error;
+    } finally {
+      metrics?.end(measure);
     }
   }
 
@@ -218,6 +235,7 @@ class FileLoader {
         file.totalLines = file.lines.length;
         file.syntaxMetrics = null;
       }
+      this.editor.performanceMetrics?.increment("files.read.lines", response.lines.length);
       if (file.largeFileMode && Array.isArray(response.lineEndings)) {
         for (let index = 0; index < response.lineEndings.length; index += 1)
           file.lineEndings[start + index] = response.lineEndings[index];

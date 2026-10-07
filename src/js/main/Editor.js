@@ -1,5 +1,7 @@
 class Editor {
   constructor() {
+    this.performanceMetrics = window.NCEPerformanceMetrics || null;
+    this.performanceMetrics?.mark("renderer.editor.constructed");
     this.isOnInit = true;
     this.isOnRefresh = false;
     this.isButtonChangePosition = false;
@@ -119,9 +121,20 @@ class Editor {
       this.applySettingsSnapshot(settings),
     );
     this.initLoadState();
-    this.api.rendererReady?.().catch?.((error) => {
-      console.error("[Startup] rendererReady failed", error);
-    });
+    const rendererReadyMeasure = this.performanceMetrics?.begin("startup.rendererReady");
+    const rendererReady = this.api.rendererReady?.();
+    if (rendererReady && typeof rendererReady.then === "function") {
+      Promise.resolve(rendererReady).then(() => {
+        this.performanceMetrics?.end(rendererReadyMeasure);
+        this.performanceMetrics?.mark("startup.renderer.ready");
+      }).catch((error) => {
+        this.performanceMetrics?.end(rendererReadyMeasure);
+        console.error("[Startup] rendererReady failed", error);
+      });
+    } else {
+      this.performanceMetrics?.end(rendererReadyMeasure);
+      this.performanceMetrics?.mark("startup.renderer.ready");
+    }
   }
 
   refreshAll({ renderSidebarContent = true } = {}) {

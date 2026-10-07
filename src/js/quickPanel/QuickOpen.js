@@ -15,13 +15,23 @@ class QuickOpen {
   }
 
   async getFiles(rootPath) {
-    if (this.cachedFiles && NCEPath.equals(rootPath, this.cachedRoot))
+    if (this.cachedFiles && NCEPath.equals(rootPath, this.cachedRoot)) {
+      this.editor.performanceMetrics?.increment("quickOpen.cacheHits");
       return this.cachedFiles;
+    }
+    this.editor.performanceMetrics?.increment("quickOpen.cacheMisses");
+    this.editor.performanceMetrics?.increment("quickOpen.fileListRequests");
+    const measure = this.editor.performanceMetrics?.begin("quickOpen.fileList");
     const generation = ++this.cacheGeneration;
-    const response = await this.editor.api.listProjectFiles(rootPath, {
-      openableOnly: true,
-      ignoreHiddenDirectories: true,
-    });
+    let response;
+    try {
+      response = await this.editor.api.listProjectFiles(rootPath, {
+        openableOnly: true,
+        ignoreHiddenDirectories: true,
+      });
+    } finally {
+      this.editor.performanceMetrics?.end(measure);
+    }
     if (generation !== this.cacheGeneration ||
         !NCEPath.equals(rootPath, this.editor.fileExplorer?.rootPath)) return [];
     if (!response?.success) return [];

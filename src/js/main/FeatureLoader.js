@@ -17,14 +17,24 @@ function rendererBundleIsLoaded(bundle) {
 }
 
 function ensureRendererBundle(bundle) {
-  if (rendererBundleIsLoaded(bundle)) return Promise.resolve();
+  const metrics = window.NCEPerformanceMetrics;
+  metrics?.increment(`renderer.bundle.${bundle}.requests`);
+  if (rendererBundleIsLoaded(bundle)) {
+    metrics?.increment(`renderer.bundle.${bundle}.alreadyLoaded`);
+    return Promise.resolve();
+  }
   const pending = NCE_RENDERER_BUNDLE_LOADS.get(bundle);
-  if (pending) return pending;
+  if (pending) {
+    metrics?.increment(`renderer.bundle.${bundle}.coalesced`);
+    return pending;
+  }
 
   const bundleUrls = { agent: "agent.js", markdown: "markdown.js" };
   const filename = bundleUrls[bundle];
   if (!filename) return Promise.reject(new Error(`Unknown renderer bundle: ${bundle}`));
 
+  const measure = metrics?.begin(`renderer.bundle.${bundle}.load`);
+  metrics?.increment(`renderer.bundle.${bundle}.loads`);
   const load = new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.async = true;
@@ -34,6 +44,8 @@ function ensureRendererBundle(bundle) {
     const fail = (message) => {
       script.remove();
       NCE_RENDERER_BUNDLE_LOADS.delete(bundle);
+      metrics?.end(measure);
+      metrics?.increment(`renderer.bundle.${bundle}.failures`);
       reject(new Error(message));
     };
 
@@ -42,6 +54,8 @@ function ensureRendererBundle(bundle) {
         fail(`Renderer ${bundle} bundle loaded without its entry classes`);
         return;
       }
+      metrics?.end(measure);
+      metrics?.mark(`renderer.bundle.${bundle}.ready`);
       resolve();
     };
     script.onerror = () => fail(`Failed to load renderer ${bundle} bundle`);

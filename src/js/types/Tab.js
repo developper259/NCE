@@ -344,6 +344,7 @@ class FileNode extends Tab {
       this.autoSaveTimer = null;
       void this.flushAutoSave();
     }, AUTO_SAVE_DEBOUNCE_MS);
+    this.editor.performanceMetrics?.increment("autosave.schedules");
     return true;
   }
 
@@ -363,6 +364,7 @@ class FileNode extends Tab {
     this.cancelAutoSave();
     if (this.autoSaveFlushPromise) return this.autoSaveFlushPromise;
 
+    this.editor.performanceMetrics?.increment("autosave.flushes");
     let flushPromise;
     flushPromise = this.runAutoSaveFlush().finally(() => {
       if (this.autoSaveFlushPromise === flushPromise)
@@ -400,12 +402,20 @@ class FileNode extends Tab {
     if (version !== this.editVersion) return { saved: false, stale: true };
 
     const content = this.serializeContent();
-    return this.performSaveSnapshot(
+    const metrics = this.editor.performanceMetrics;
+    metrics?.increment("autosave.writeAttempts");
+    const measure = metrics?.begin("autosave.write");
+    const result = await this.performSaveSnapshot(
       content,
       version,
       (filePath, snapshot) => this.editor.api.saveFile(filePath, snapshot),
       { saveableChecked: true },
     );
+    metrics?.end(measure);
+    if (result?.saved || result?.persisted)
+      metrics?.increment("autosave.persistedWrites");
+    if (result?.error) metrics?.increment("autosave.failures");
+    return result;
   }
 
   async performSaveSnapshot(

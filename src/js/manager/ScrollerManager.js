@@ -64,14 +64,19 @@ class ScrollerManager {
     const needsMetrics = forceMetrics || scroller._metricsDirty !== false;
     if (!scroller.active && !measureInactive) {
       scroller.refresh();
+      this.editor?.performanceMetrics?.increment("scrollers.refreshes");
       if (!scroller.active) {
         if (needsMetrics) scroller._metricsDirty = true;
         return true;
       }
     }
 
-    if (needsMetrics) scroller.refreshMetrics();
+    if (needsMetrics) {
+      this.editor?.performanceMetrics?.increment("scrollers.metricReads");
+      scroller.refreshMetrics();
+    }
     scroller.refresh();
+    this.editor?.performanceMetrics?.increment("scrollers.refreshes");
     return true;
   }
 

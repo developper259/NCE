@@ -249,6 +249,7 @@ class DOMManager {
     sidebarPosition = null,
     apply = false,
   } = {}) {
+    this.editor?.performanceMetrics?.increment("layout.requests");
     const pending = this.pendingLayout;
     pending.window ||= windowChanged;
     pending.sidebar ||= sidebar || windowChanged;
@@ -269,6 +270,7 @@ class DOMManager {
     }
 
     if (this.layoutFrame !== null) return this.layoutFrame;
+    this.editor?.performanceMetrics?.increment("layout.frames");
     this.layoutFrame = this.requestFrame(() => {
       this.layoutFrame = null;
       this.flushLayout();
@@ -277,6 +279,7 @@ class DOMManager {
   }
 
   flushLayout() {
+    this.editor?.performanceMetrics?.increment("layout.flushes");
     const pending = this.pendingLayout;
     this.pendingLayout = this.createLayoutState();
     const hasGeometryWork = pending.window || pending.sidebar;

@@ -501,23 +501,32 @@ class StatesManager {
   }
 
   async loadWorkspaceState(root) {
+    const metrics = this.editor.performanceMetrics;
+    const measure = metrics?.begin("workspace.restore");
+    metrics?.increment("workspace.restore.requests");
     const generation = ++this.restoreGeneration;
-    let state = null;
-    try { state = await this.editor.api.loadWorkspaceState?.(root); }
-    catch (error) { console.warn("[NCE Workspace State] load failed", error); }
-    if (generation !== this.restoreGeneration) return false;
-    if (!state || state.version !== this.workspaceVersion) {
-      if (state?.version)
-        console.warn("[NCE Workspace State] Unsupported version", state.version);
-      state = { version: this.workspaceVersion };
+    try {
+      let state = null;
+      try { state = await this.editor.api.loadWorkspaceState?.(root); }
+      catch (error) { console.warn("[NCE Workspace State] load failed", error); }
+      if (generation !== this.restoreGeneration) return false;
+      if (!state || state.version !== this.workspaceVersion) {
+        if (state?.version)
+          console.warn("[NCE Workspace State] Unsupported version", state.version);
+        state = { version: this.workspaceVersion };
+      }
+      const safeState = this.sanitizeWorkspaceState(state) || {
+        version: this.workspaceVersion,
+        tabManager: null,
+        sidebar: null,
+        fileExplorer: null,
+      };
+      const restored = await this.restoreWorkspaceState(safeState, root);
+      if (restored) metrics?.mark("workspace.restore.complete");
+      return restored;
+    } finally {
+      metrics?.end(measure);
     }
-    const safeState = this.sanitizeWorkspaceState(state) || {
-      version: this.workspaceVersion,
-      tabManager: null,
-      sidebar: null,
-      fileExplorer: null,
-    };
-    return this.restoreWorkspaceState(safeState, root);
   }
 
   async restoreWorkspaceState(state, root) {
@@ -547,9 +556,17 @@ class StatesManager {
   }
 
   async restoreNoWorkspaceState(state) {
-    await this.loadTabManagerState(state?.tabManager || null, null);
-    this.loadSidebarState(state?.sidebar || null);
-    return true;
+    const metrics = this.editor.performanceMetrics;
+    const measure = metrics?.begin("workspace.restore.noWorkspace");
+    metrics?.increment("workspace.restore.noWorkspaceRequests");
+    try {
+      await this.loadTabManagerState(state?.tabManager || null, null);
+      this.loadSidebarState(state?.sidebar || null);
+      metrics?.mark("workspace.restore.noWorkspaceComplete");
+      return true;
+    } finally {
+      metrics?.end(measure);
+    }
   }
 
   async loadTabManagerState(tabState, root = undefined) {
