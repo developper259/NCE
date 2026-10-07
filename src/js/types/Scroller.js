@@ -248,6 +248,17 @@ class Scroller {
     }
     this.active = mode;
     if (!mode) {
+      if (this._rafId !== null) {
+        const cancelFrame = this.editor?.domManager?.cancelFrame ||
+          (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+        cancelFrame?.(this._rafId);
+        this._rafId = null;
+      }
+      if (this._scrollEndTimer !== null) {
+        clearTimeout(this._scrollEndTimer);
+        this._scrollEndTimer = null;
+      }
+      this.targetScrollRatio = this.scrollRatio;
       if (this._interactionTimer !== null) {
         clearTimeout(this._interactionTimer);
         this._interactionTimer = null;

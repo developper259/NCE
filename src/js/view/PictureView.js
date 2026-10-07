@@ -27,9 +27,7 @@ class PictureView {
     this.status = this.host?.querySelector(".picture-view-status");
     this.content = this.host?.querySelector(".picture-view-content");
     this.viewport = this.host?.querySelector(".picture-view-viewport");
-    this.scroller = this.viewport
-      ? new PictureViewScroller(editor, this.viewport, this.host)
-      : null;
+    this.scroller = null;
     this.zoom = "fit";
     this.loadGeneration = 0;
     this.objectUrl = null;
@@ -56,11 +54,15 @@ class PictureView {
   show(tab) {
     if (!this.host) return;
     this.host.hidden = false;
-    this.scroller?.refresh();
+    const alreadyInitialized = Boolean(this.scroller);
+    if (!this.scroller && this.viewport)
+      this.scroller = new PictureViewScroller(this.editor, this.viewport, this.host);
+    if (alreadyInitialized) this.scroller?.resume();
     if (tab?.path && tab.path !== this.path) void this.load(tab);
   }
 
   hide() {
+    this.scroller?.suspend();
     if (this.host) this.host.hidden = true;
   }
 
@@ -107,7 +109,6 @@ class PictureView {
   onImageLoad() {
     this.setStatus("", "loaded");
     this.applyZoom();
-    this.scroller?.refresh();
   }
 
   onImageError() {
@@ -142,12 +143,11 @@ class PictureView {
       this.viewport.scrollLeft = 0;
       this.viewport.scrollTop = 0;
       this.applyZoom();
-      this.scroller?.refresh();
       return;
     }
 
     this.zoom = nextZoom;
-    this.applyZoom();
+    this.applyZoom(false);
     const resizedImage = this.image.getBoundingClientRect();
     const localX = pointerX - viewportRect.left;
     const localY = pointerY - viewportRect.top;
@@ -158,7 +158,7 @@ class PictureView {
     this.scroller?.refresh();
   }
 
-  applyZoom() {
+  applyZoom(refreshScroller = true) {
     if (!this.image) return;
     const fit = this.zoom === "fit";
     this.image.classList.toggle("fit", fit);
@@ -168,7 +168,7 @@ class PictureView {
       ? "auto"
       : `${this.image.naturalWidth * this.zoom / 100}px`;
     this.image.style.height = "auto";
-    this.scroller?.refresh();
+    if (refreshScroller) this.scroller?.refresh();
   }
 
   releaseObjectUrl() {
@@ -198,7 +198,6 @@ class PictureView {
     }
     this.applyZoom();
     this.setStatus("", "idle");
-    this.scroller?.refresh();
   }
 
   close(tab) {

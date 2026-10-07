@@ -7,6 +7,8 @@ class PictureViewScroller {
     this.hScroller = null;
     this.resizeObserver = null;
     this.observerMetricsInvalid = false;
+    this.suspended = false;
+    this.viewportListenerAttached = false;
     this.onViewportScroll = () => this.syncFromViewport();
 
     const manager = editor.scrollerManager;
@@ -19,7 +21,7 @@ class PictureViewScroller {
     this.configure(this.hScroller, false);
     manager.addScroller(this.vScroller);
     manager.addScroller(this.hScroller);
-    viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
+    this.attachViewportListener();
     if (typeof ResizeObserver === "function") {
       this.resizeObserver = new ResizeObserver((entries) => {
         this.scheduleObserverRefresh({
@@ -30,11 +32,22 @@ class PictureViewScroller {
       const image = viewport.querySelector(".picture-view-image");
       if (image) this.resizeObserver.observe(image);
     }
-    this.refresh();
+  }
+
+  attachViewportListener() {
+    if (!this.viewport || this.viewportListenerAttached) return;
+    this.viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
+    this.viewportListenerAttached = true;
+  }
+
+  detachViewportListener() {
+    if (!this.viewport || !this.viewportListenerAttached) return;
+    this.viewport.removeEventListener("scroll", this.onViewportScroll);
+    this.viewportListenerAttached = false;
   }
 
   scheduleObserverRefresh({ invalidateMetrics = false } = {}) {
-    if (!this.vScroller && !this.hScroller) return false;
+    if (this.suspended || (!this.vScroller && !this.hScroller)) return false;
     this.observerMetricsInvalid ||= invalidateMetrics;
     const manager = this.editor.scrollerManager;
     if (!manager?.scheduleObserverRefresh) {
@@ -73,6 +86,7 @@ class PictureViewScroller {
   }
 
   syncFromViewport({ invalidateMetrics = false } = {}) {
+    if (this.suspended) return;
     for (const [scroller, vertical] of [[this.vScroller, true], [this.hScroller, false]]) {
       if (!scroller) continue;
       const client = vertical ? this.viewport.clientHeight : this.viewport.clientWidth;
@@ -93,6 +107,7 @@ class PictureViewScroller {
   }
 
   refresh({ invalidateMetrics = false } = {}) {
+    if (this.suspended) return;
     invalidateMetrics ||= this.observerMetricsInvalid;
     this.editor.scrollerManager?.cancelObserverRefresh?.(this);
     this.observerMetricsInvalid = false;
@@ -101,13 +116,36 @@ class PictureViewScroller {
 
   setZoomed(zoomed) {
     this.zoomed = zoomed;
-    this.refresh();
+  }
+
+  suspend() {
+    if (this.suspended) return;
+    this.suspended = true;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
+    this.detachViewportListener();
+    this.resizeObserver?.disconnect();
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
+    this.editor.scrollerManager?.deactivateScroller?.(this.hScroller);
+  }
+
+  resume() {
+    if (!this.suspended) return;
+    this.suspended = false;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, { deferRefresh: true });
+    this.editor.scrollerManager?.activateScroller?.(this.hScroller, { deferRefresh: true });
+    this.attachViewportListener();
+    this.resizeObserver?.observe(this.viewport);
+    const image = this.viewport?.querySelector(".picture-view-image");
+    if (image) this.resizeObserver?.observe(image);
+    this.refresh({ invalidateMetrics: true });
   }
 
   destroy() {
     this.editor.scrollerManager?.cancelObserverRefresh?.(this);
     this.observerMetricsInvalid = false;
-    this.viewport?.removeEventListener("scroll", this.onViewportScroll);
+    this.suspend();
+    this.detachViewportListener();
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     const manager = this.editor.scrollerManager;

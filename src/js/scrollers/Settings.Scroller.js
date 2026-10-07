@@ -6,6 +6,7 @@ class SettingsScroller {
     this.vScroller = null;
     this.mutationObserver = null;
     this.resizeObserver = null;
+    this.suspended = false;
     this.scrollTop = 0;
     this.clientHeight = 0;
     this.scrollHeight = 0;
@@ -37,8 +38,6 @@ class SettingsScroller {
       false,
     );
     this.vScroller.wheelTarget = this.content;
-    this.editor.scrollerManager.addScroller(this.vScroller);
-
     this.vScroller.onRefresh = () => {};
     this.vScroller.calculProp = () => {
       if (!this.scrollHeight || !this.clientHeight) return 100;
@@ -55,6 +54,11 @@ class SettingsScroller {
       this.scrollTop = scrollRatio * maxScrollTop;
       this.content.scrollTop = this.scrollTop;
     };
+    const maxScrollTop = Math.max(0, this.scrollHeight - this.clientHeight);
+    this.vScroller.setScrollRatio(
+      maxScrollTop > 0 ? this.scrollTop / maxScrollTop : 0,
+    );
+    this.editor.scrollerManager.addScroller(this.vScroller);
 
     this.mutationObserver = new MutationObserver(() => this.scheduleObserverRefresh());
     this.mutationObserver.observe(this.content, {
@@ -64,11 +68,10 @@ class SettingsScroller {
     this.resizeObserver = new ResizeObserver(() => this.scheduleObserverRefresh());
     this.resizeObserver.observe(this.content);
 
-    this.refresh();
   }
 
   scheduleObserverRefresh() {
-    if (!this.vScroller) return false;
+    if (!this.vScroller || this.suspended) return false;
     const manager = this.editor.scrollerManager;
     if (!manager?.scheduleObserverRefresh) {
       this.refresh();
@@ -77,24 +80,47 @@ class SettingsScroller {
     return manager.scheduleObserverRefresh(this, () => this.refresh());
   }
 
-  refresh() {
+  refresh({ invalidateMetrics = false } = {}) {
     this.editor.scrollerManager?.cancelObserverRefresh?.(this);
-    if (!this.vScroller) return;
+    if (!this.vScroller || this.suspended) return;
 
     this.updateMetrics();
     const maxScrollTop = this.scrollHeight - this.clientHeight;
     const ratio = maxScrollTop > 0 ? this.scrollTop / maxScrollTop : 0;
     this.vScroller.setScrollRatio(ratio);
     const manager = this.editor.scrollerManager;
-    if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+    if (invalidateMetrics && manager?.invalidateScroller)
+      manager.invalidateScroller(this.vScroller);
+    else if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
     else {
       this.vScroller.refreshMetrics();
       this.vScroller.refresh();
     }
   }
 
+  suspend() {
+    if (!this.vScroller || this.suspended) return;
+    this.suspended = true;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.mutationObserver?.disconnect();
+    this.resizeObserver?.disconnect();
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
+  }
+
+  resume() {
+    if (!this.vScroller || !this.suspended) return;
+    this.suspended = false;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
+      deferRefresh: true,
+    });
+    this.mutationObserver?.observe(this.content, { childList: true, subtree: true });
+    this.resizeObserver?.observe(this.content);
+    this.refresh({ invalidateMetrics: true });
+  }
+
   destroy() {
     this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.suspend();
     this.mutationObserver?.disconnect();
     this.resizeObserver?.disconnect();
     this.mutationObserver = null;

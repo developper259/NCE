@@ -7,6 +7,8 @@ class MarkdownViewScroller {
     this.mutationObserver = null;
     this.resizeObserver = null;
     this.observerMetricsInvalid = false;
+    this.suspended = false;
+    this.viewportListenerAttached = false;
     this.onViewportScroll = () => this.syncFromViewport();
 
     const manager = editor.scrollerManager;
@@ -31,7 +33,7 @@ class MarkdownViewScroller {
     this.vScroller.onScrollEnd = () => this.syncFromViewport();
     manager.addScroller(this.vScroller);
 
-    viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
+    this.attachViewportListener();
     if (typeof MutationObserver === "function") {
       this.mutationObserver = new MutationObserver(() =>
         this.scheduleObserverRefresh(),
@@ -47,11 +49,22 @@ class MarkdownViewScroller {
       this.resizeObserver.observe(viewport);
       this.resizeObserver.observe(content);
     }
-    this.refresh();
+  }
+
+  attachViewportListener() {
+    if (!this.viewport || this.viewportListenerAttached) return;
+    this.viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
+    this.viewportListenerAttached = true;
+  }
+
+  detachViewportListener() {
+    if (!this.viewport || !this.viewportListenerAttached) return;
+    this.viewport.removeEventListener("scroll", this.onViewportScroll);
+    this.viewportListenerAttached = false;
   }
 
   scheduleObserverRefresh({ invalidateMetrics = false } = {}) {
-    if (!this.vScroller) return false;
+    if (!this.vScroller || this.suspended) return false;
     this.observerMetricsInvalid ||= invalidateMetrics;
     const manager = this.editor.scrollerManager;
     if (!manager?.scheduleObserverRefresh) {
@@ -68,7 +81,7 @@ class MarkdownViewScroller {
   }
 
   syncFromViewport({ invalidateMetrics = false } = {}) {
-    if (!this.vScroller) return;
+    if (!this.vScroller || this.suspended) return;
     const maxScroll = Math.max(
       0,
       this.viewport.scrollHeight - this.viewport.clientHeight,
@@ -86,16 +99,40 @@ class MarkdownViewScroller {
   }
 
   refresh({ invalidateMetrics = false } = {}) {
+    if (this.suspended) return;
     invalidateMetrics ||= this.observerMetricsInvalid;
     this.editor.scrollerManager?.cancelObserverRefresh?.(this);
     this.observerMetricsInvalid = false;
     this.syncFromViewport({ invalidateMetrics });
   }
 
+  suspend() {
+    if (!this.vScroller || this.suspended) return;
+    this.suspended = true;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
+    this.detachViewportListener();
+    this.mutationObserver?.disconnect();
+    this.resizeObserver?.disconnect();
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
+  }
+
+  resume() {
+    if (!this.vScroller || !this.suspended) return;
+    this.suspended = false;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, { deferRefresh: true });
+    this.attachViewportListener();
+    this.mutationObserver?.observe(this.content, { childList: true, subtree: true });
+    this.resizeObserver?.observe(this.viewport);
+    this.resizeObserver?.observe(this.content);
+    this.refresh({ invalidateMetrics: true });
+  }
+
   destroy() {
     this.editor.scrollerManager?.cancelObserverRefresh?.(this);
     this.observerMetricsInvalid = false;
-    this.viewport?.removeEventListener("scroll", this.onViewportScroll);
+    this.suspend();
+    this.detachViewportListener();
     this.mutationObserver?.disconnect();
     this.resizeObserver?.disconnect();
     this.mutationObserver = null;

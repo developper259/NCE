@@ -12,10 +12,36 @@ class ScrollerManager {
     this.observerRefreshCallbacks = new Map();
     this.activeDrag = null;
     this.dragDocument = null;
+    this.dragWindow = null;
     this.onDragPointerMove = (event) => this.handleDragPointerMove(event);
     this.onDragPointerUp = (event) => this.handleDragPointerUp(event);
     this.onDragPointerCancel = (event) => this.handleDragPointerCancel(event);
     this.onDragLostPointerCapture = (event) => this.handleDragLostPointerCapture(event);
+    this.onDragWindowBlur = () => this.finishDrag();
+    this.parentRemovalObserver = null;
+    this.observeParentRemoval();
+  }
+
+  observeParentRemoval() {
+    if (this.parentRemovalObserver || typeof MutationObserver !== "function" ||
+        typeof document === "undefined" || !document.documentElement) return;
+    this.parentRemovalObserver = new MutationObserver((records) => {
+      const removedNodes = [];
+      for (const record of records) {
+        for (const node of record.removedNodes || []) removedNodes.push(node);
+      }
+      if (!removedNodes.length) return;
+      for (const scroller of [...this.scrollers]) {
+        const parent = scroller.parentOBJ;
+        if (parent?.isConnected === false && removedNodes.some((node) =>
+          node === parent || node.contains?.(parent),
+        )) this.destroyScroller(scroller);
+      }
+    });
+    this.parentRemovalObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+    });
   }
 
   refreshAll() {
@@ -26,6 +52,10 @@ class ScrollerManager {
 
     let refreshed = 0;
     for (const scroller of [...this.scrollers]) {
+      if (scroller.parentOBJ?.isConnected === false) {
+        this.destroyScroller(scroller);
+        continue;
+      }
       scroller._metricsDirty = true;
       if (scroller._suspended) {
         this.editor?.performanceMetrics?.increment(
@@ -42,6 +72,10 @@ class ScrollerManager {
     if (this.editor.isOnInit) return 0;
     let refreshed = 0;
     for (const scroller of [...this.scrollers]) {
+      if (scroller.parentOBJ?.isConnected === false) {
+        this.destroyScroller(scroller);
+        continue;
+      }
       if (scroller._suspended || !scroller.active) continue;
       if (this.refreshScroller(scroller)) refreshed += 1;
     }
@@ -54,6 +88,10 @@ class ScrollerManager {
     measureInactive = false,
   } = {}) {
     if (!scroller || !this.scrollers.includes(scroller)) return false;
+    if (scroller.parentOBJ?.isConnected === false) {
+      this.destroyScroller(scroller);
+      return false;
+    }
     if (this.editor.isOnInit) {
       scroller._metricsDirty = true;
       return false;
@@ -137,6 +175,7 @@ class ScrollerManager {
   addScroller(scroller) {
     if (!scroller || scroller._destroyed) return null;
     if (this.scrollers.includes(scroller)) return scroller;
+    this.observeParentRemoval();
     scroller.id = this.nextScrollerId++;
     scroller.manager = this;
     scroller._suspended = false;
@@ -237,27 +276,36 @@ class ScrollerManager {
   }
 
   attachDragListeners() {
-    if (this.dragDocument || typeof document === "undefined") return;
-    this.dragDocument = document;
-    this.dragDocument.addEventListener("pointermove", this.onDragPointerMove);
-    this.dragDocument.addEventListener("pointerup", this.onDragPointerUp);
-    this.dragDocument.addEventListener("pointercancel", this.onDragPointerCancel);
-    this.dragDocument.addEventListener(
-      "lostpointercapture",
-      this.onDragLostPointerCapture,
-    );
+    if (this.dragDocument || this.dragWindow) return;
+    if (typeof document !== "undefined") {
+      this.dragDocument = document;
+      this.dragDocument.addEventListener("pointermove", this.onDragPointerMove);
+      this.dragDocument.addEventListener("pointerup", this.onDragPointerUp);
+      this.dragDocument.addEventListener("pointercancel", this.onDragPointerCancel);
+      this.dragDocument.addEventListener(
+        "lostpointercapture",
+        this.onDragLostPointerCapture,
+      );
+    }
+    if (typeof window !== "undefined") {
+      this.dragWindow = window;
+      this.dragWindow.addEventListener("blur", this.onDragWindowBlur);
+    }
   }
 
   detachDragListeners() {
-    if (!this.dragDocument) return;
-    this.dragDocument.removeEventListener("pointermove", this.onDragPointerMove);
-    this.dragDocument.removeEventListener("pointerup", this.onDragPointerUp);
-    this.dragDocument.removeEventListener("pointercancel", this.onDragPointerCancel);
-    this.dragDocument.removeEventListener(
-      "lostpointercapture",
-      this.onDragLostPointerCapture,
-    );
+    if (this.dragDocument) {
+      this.dragDocument.removeEventListener("pointermove", this.onDragPointerMove);
+      this.dragDocument.removeEventListener("pointerup", this.onDragPointerUp);
+      this.dragDocument.removeEventListener("pointercancel", this.onDragPointerCancel);
+      this.dragDocument.removeEventListener(
+        "lostpointercapture",
+        this.onDragLostPointerCapture,
+      );
+    }
     this.dragDocument = null;
+    this.dragWindow?.removeEventListener("blur", this.onDragWindowBlur);
+    this.dragWindow = null;
   }
 
   isActiveDragEvent(event) {
@@ -313,6 +361,8 @@ class ScrollerManager {
   destroyAll() {
     this.cancelObserverRefreshes();
     for (const scroller of [...this.scrollers]) this.destroyScroller(scroller);
+    this.parentRemovalObserver?.disconnect();
+    this.parentRemovalObserver = null;
   }
 
   createScroller(parent, type, isBody, options = {}) {

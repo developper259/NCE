@@ -146,4 +146,50 @@ test("scroller components use lifecycle APIs and never mutate the registry", () 
   ]) {
     assert.match(read(file), /destroy\(\)/, file);
   }
+  for (const [file, view] of [
+    ["src/js/scrollers/Settings.Scroller.js", "src/js/view/SettingsView.js"],
+    ["src/js/scrollers/PictureView.Scroller.js", "src/js/view/PictureView.js"],
+    ["src/js/scrollers/MarkdownView.Scroller.js", "src/js/view/MarkdownView.js"],
+  ]) {
+    assert.match(read(file), /suspend\(\)/, file);
+    assert.match(read(file), /resume\(\)/, file);
+    assert.match(read(view), /scroller\?\.suspend\(\)/, view);
+    assert.match(read(view), /scroller\?\.resume\(\)/, view);
+  }
+});
+
+test("ScrollerManager destroys scrollers whose parent subtree is removed", () => {
+  let observerCallback;
+  class FakeMutationObserver {
+    constructor(callback) { observerCallback = callback; }
+    observe() {}
+    disconnect() {}
+  }
+  class ScrollerStub {
+    init() {}
+    refreshMetrics() {}
+    refresh() {}
+    setActive() {}
+    destroy() { this.destroyed = true; }
+  }
+  const ScrollerManager = loadGlobal(
+    "src/js/manager/ScrollerManager.js",
+    "ScrollerManager",
+    {
+      Scroller: ScrollerStub,
+      MutationObserver: FakeMutationObserver,
+      document: { documentElement: {} },
+    },
+  );
+  const manager = new ScrollerManager({ isOnInit: true });
+  const parent = { isConnected: true };
+  const scroller = manager.createScroller(parent, manager.VERTICAL_TYPE, false);
+  manager.addScroller(scroller);
+  const removedAncestor = { contains(candidate) { return candidate === parent; } };
+  parent.isConnected = false;
+  observerCallback([{ removedNodes: [removedAncestor] }]);
+
+  assert.equal(scroller.destroyed, true);
+  assert.equal(manager.scrollers.length, 0);
+  manager.destroyAll();
 });

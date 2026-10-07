@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadGlobal } = require("./helpers/runtime");
 
-function createScroller() {
+function createScroller(extraGlobals = {}) {
   let nextTimerId = 0;
   const timers = new Map();
   const cleared = [];
@@ -19,6 +19,7 @@ function createScroller() {
     },
     requestAnimationFrame() { return 1; },
     cancelAnimationFrame() {},
+    ...extraGlobals,
   });
   const editor = {
     scrollerManager: { VERTICAL_TYPE: 0, HORIZONTAL_TYPE: 1 },
@@ -130,4 +131,24 @@ test("destroy during interaction clears the fade timer and visibility state", ()
   assert.equal(scroller.recentlyInteracted, false);
   assert.equal(fixture.timers.has(timerId), false);
   assert.ok(fixture.cleared.includes(timerId));
+});
+
+test("deactivation cancels pending animation and scroll-end work", () => {
+  const cancelledFrames = [];
+  const fixture = createScroller({
+    cancelAnimationFrame(id) { cancelledFrames.push(id); },
+  });
+  const { scroller } = fixture;
+  scroller._rafId = 44;
+  scroller._scrollEndTimer = 45;
+  scroller.scrollRatio = 0.25;
+  scroller.targetScrollRatio = 0.75;
+
+  scroller.setActive(false);
+
+  assert.deepEqual(cancelledFrames, [44]);
+  assert.ok(fixture.cleared.includes(45));
+  assert.equal(scroller._rafId, null);
+  assert.equal(scroller._scrollEndTimer, null);
+  assert.equal(scroller.targetScrollRatio, 0.25);
 });

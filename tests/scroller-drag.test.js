@@ -47,11 +47,12 @@ class FakeEventTarget {
 
 function createHarness() {
   const document = new FakeEventTarget();
+  const window = new FakeEventTarget();
   const Scroller = loadGlobal("src/js/types/Scroller.js", "Scroller", { document });
   const ScrollerManager = loadGlobal(
     "src/js/manager/ScrollerManager.js",
     "ScrollerManager",
-    { Scroller, document },
+    { Scroller, document, window },
   );
   const editor = {
     isOnInit: true,
@@ -64,7 +65,7 @@ function createHarness() {
     sidebarResizer: null,
   };
   editor.scrollerManager = new ScrollerManager(editor);
-  return { document, Scroller, manager: editor.scrollerManager, editor };
+  return { document, window, Scroller, manager: editor.scrollerManager, editor };
 }
 
 function createRegisteredScroller(harness, type) {
@@ -90,7 +91,7 @@ function createRegisteredScroller(harness, type) {
 
 test("ten scrollers share one pointer drag listener set and captured drags survive pointer exit", () => {
   const harness = createHarness();
-  const { manager, document } = harness;
+  const { manager, document, window } = harness;
   const scrollers = Array.from({ length: 10 }, () =>
     createRegisteredScroller(harness, manager.HORIZONTAL_TYPE),
   );
@@ -109,6 +110,7 @@ test("ten scrollers share one pointer drag listener set and captured drags survi
   assert.equal(prevented, true);
   assert.equal(manager.activeDrag.scroller, scroller);
   assert.equal(document.listenerCount, 4);
+  assert.equal(window.listenerCount, 1);
   assert.deepEqual(thumb.captureCalls, [11]);
 
   document.dispatch("pointermove", {
@@ -130,13 +132,14 @@ test("ten scrollers share one pointer drag listener set and captured drags survi
   document.dispatch("pointerup", { pointerId: 11 });
   assert.equal(manager.activeDrag, null);
   assert.equal(document.listenerCount, 0);
+  assert.equal(window.listenerCount, 0);
   assert.deepEqual(thumb.releaseCalls, [11]);
   assert.equal(scroller.isDragging, false);
 });
 
 test("vertical and horizontal drags use their axis, and pointercancel releases capture", () => {
   const harness = createHarness();
-  const { manager, document } = harness;
+  const { manager, document, window } = harness;
   const vertical = createRegisteredScroller(harness, manager.VERTICAL_TYPE);
   const horizontal = createRegisteredScroller(harness, manager.HORIZONTAL_TYPE);
 
@@ -153,6 +156,7 @@ test("vertical and horizontal drags use their axis, and pointercancel releases c
   assert.equal(manager.activeDrag, null);
   assert.deepEqual(vertical.itemOBJ.releaseCalls, [21]);
   assert.equal(document.listenerCount, 0);
+  assert.equal(window.listenerCount, 0);
 
   manager.startDrag(horizontal, {
     currentTarget: horizontal.itemOBJ,
@@ -169,7 +173,7 @@ test("vertical and horizontal drags use their axis, and pointercancel releases c
 
 test("destroying a scroller during drag releases capture and global listeners", () => {
   const harness = createHarness();
-  const { manager, document } = harness;
+  const { manager, document, window } = harness;
   let resizerRestoreCount = 0;
   const resizerDisplay = [];
   harness.editor.domManager.wrapFastNode = () => ({
@@ -193,8 +197,10 @@ test("destroying a scroller during drag releases capture and global listeners", 
     preventDefault() {},
   });
   assert.equal(document.listenerCount, 4);
+  assert.equal(window.listenerCount, 1);
   assert.equal(manager.destroyScroller(scroller), true);
   assert.equal(document.listenerCount, 0);
+  assert.equal(window.listenerCount, 0);
   assert.equal(manager.activeDrag, null);
   assert.deepEqual(thumb.releaseCalls, [31]);
   assert.deepEqual(resizerDisplay, ["none", "none"]);
@@ -206,7 +212,7 @@ test("destroying a scroller during drag releases capture and global listeners", 
 
 test("unexpected lost pointer capture cancels the active drag", () => {
   const harness = createHarness();
-  const { manager, document } = harness;
+  const { manager, document, window } = harness;
   const scroller = createRegisteredScroller(harness, manager.HORIZONTAL_TYPE);
   const thumb = scroller.itemOBJ;
 
@@ -222,13 +228,14 @@ test("unexpected lost pointer capture cancels the active drag", () => {
 
   assert.equal(manager.activeDrag, null);
   assert.equal(document.listenerCount, 0);
+  assert.equal(window.listenerCount, 0);
   assert.equal(scroller.isDragging, false);
   assert.deepEqual(thumb.releaseCalls, []);
 });
 
 test("deactivation cancels a drag before suspending its scroller", () => {
   const harness = createHarness();
-  const { manager, document } = harness;
+  const { manager, document, window } = harness;
   const scroller = createRegisteredScroller(harness, manager.VERTICAL_TYPE);
   const thumb = scroller.itemOBJ;
   manager.startDrag(scroller, {
@@ -244,5 +251,31 @@ test("deactivation cancels a drag before suspending its scroller", () => {
   assert.equal(scroller.isDragging, false);
   assert.equal(manager.activeDrag, null);
   assert.equal(document.listenerCount, 0);
+  assert.equal(window.listenerCount, 0);
   assert.deepEqual(thumb.releaseCalls, [51]);
+});
+
+test("window blur ends the active drag and releases pointer capture listeners", () => {
+  const harness = createHarness();
+  const { manager, document, window } = harness;
+  const scroller = createRegisteredScroller(harness, manager.VERTICAL_TYPE);
+  let scrollEndCount = 0;
+  scroller.onScrollEnd = () => { scrollEndCount += 1; };
+  const thumb = scroller.itemOBJ;
+  manager.startDrag(scroller, {
+    currentTarget: thumb,
+    pointerId: 61,
+    clientX: 0,
+    clientY: 25,
+    preventDefault() {},
+  });
+
+  window.dispatch("blur");
+
+  assert.equal(manager.activeDrag, null);
+  assert.equal(document.listenerCount, 0);
+  assert.equal(window.listenerCount, 0);
+  assert.deepEqual(thumb.releaseCalls, [61]);
+  assert.equal(scroller.isDragging, false);
+  assert.equal(scrollEndCount, 1);
 });

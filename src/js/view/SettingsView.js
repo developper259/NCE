@@ -88,7 +88,6 @@ class SettingsView {
     });
     this.renderNavigation();
     this.render();
-    this.initScroller();
     this.content.addEventListener("scroll", this.onContentScroll, {
       passive: true,
     });
@@ -113,8 +112,7 @@ class SettingsView {
   }
 
   refreshScroller() {
-    if (!this.scroller) return;
-    this.scroller.updateMetrics();
+    if (!this.scroller || this.host?.hidden || this.scroller.suspended) return;
     this.scroller.refresh();
   }
 
@@ -828,7 +826,8 @@ class SettingsView {
   show() {
     if (this.host) this.host.hidden = false;
     this.render({ preserveScroll: true });
-    this.refreshScroller();
+    this.initScroller();
+    this.scroller?.resume();
     if (!this.scrollRestored) {
       this.scrollRestored = true;
       this.restoreScrollTop();
@@ -836,6 +835,7 @@ class SettingsView {
   }
   hide() {
     this.saveScrollTop();
+    this.scroller?.suspend();
     if (this.host) this.host.hidden = true;
   }
 }
