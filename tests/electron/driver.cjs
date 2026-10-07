@@ -1102,15 +1102,73 @@ app.whenReady().then(() => {
           fs.writeFileSync(screenshotPath, (await win.capturePage()).toPNG());
         }
       } else {
-        // State loading is asynchronous after the preload handshake.
-        await run(`(async () => {
-          const deadline = Date.now() + 10000;
-          while (!editor.tabManager.activeFile?.isLoaded && Date.now() < deadline)
-            await new Promise(resolve => setTimeout(resolve, 20));
-          if (editor.tabManager.activeFile?.path !== ${JSON.stringify(target)}) throw Error('Session path not restored');
-          if (editor.tabManager.activeFile.serializeContent() !== 'const value = 1;') throw Error('Session text not restored');
-          return true;
-        })()`);
+        await waitForCondition(
+          async () => {
+            try {
+              return await run(`(() => {
+                const file = editor.tabManager.activeFile;
+                return file?.isLoaded === true &&
+                  file.path === ${JSON.stringify(target)} &&
+                  file.serializeContent() === 'const value = 1;';
+              })()`);
+            } catch {
+              return false;
+            }
+          },
+          {
+            timeout: 10000,
+            description: `${phase} session path and text to restore`,
+          },
+        );
+      }
+      if (phase === "reload") {
+        const windowId = win.id;
+        let finishedLoads = 0;
+        let renderProcessGone = null;
+        const onDidFinishLoad = () => { finishedLoads += 1; };
+        const onRenderProcessGone = (_event, details) => {
+          renderProcessGone = details;
+        };
+        win.webContents.on("did-finish-load", onDidFinishLoad);
+        win.webContents.once("render-process-gone", onRenderProcessGone);
+        try {
+          win.focus();
+          const reloadModifier = process.platform === "darwin" ? "meta" : "control";
+          win.webContents.sendInputEvent({
+            type: "keyDown",
+            keyCode: "R",
+            modifiers: [reloadModifier],
+          });
+          win.webContents.sendInputEvent({
+            type: "keyUp",
+            keyCode: "R",
+            modifiers: [reloadModifier],
+          });
+          await waitForCondition(
+            () => finishedLoads === 1,
+            { timeout: 10000, description: "window reload to finish loading" },
+          );
+          await waitForCondition(
+            async () => {
+              try {
+                return await run("editor.isOnInit === false");
+              } catch {
+                return false;
+              }
+            },
+            { timeout: 10000, description: "renderer startup after window reload" },
+          );
+          assert.equal(win.id, windowId, "reload keeps the BrowserWindow alive");
+          assert.equal(renderProcessGone, null, "reload must not crash the renderer");
+          assert.equal(
+            await run("editor.tabManager.activeFile.serializeContent() === 'const value = 1;'"),
+            true,
+            "reload restores the saved editor session",
+          );
+        } finally {
+          win.webContents.removeListener("did-finish-load", onDidFinishLoad);
+          win.webContents.removeListener("render-process-gone", onRenderProcessGone);
+        }
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "crash") {

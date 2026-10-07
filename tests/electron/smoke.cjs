@@ -15,7 +15,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
       child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
       const timer = setTimeout(() => { child.kill('SIGKILL'); }, 40000);
       child.once('error', err => { clearTimeout(timer); reject(err); });
-      child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${code}/${signal}: ${log}`)); });
+      child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${phase} ${code}/${signal}: ${log}`)); });
     });
     try {
       assert.equal(await fs.readFile(path.join(directory, `${phase}.ok`), 'utf8'), 'ok');
@@ -30,6 +30,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     assert.equal(state.noWorkspaceState.tabManager.tabs.length, 1);
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].type, 'file');
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].path, path.join(directory, 'smoke.js'));
+    await launch('reload');
     await launch('restore');
     await launch('crash');
     await launch('no-nsh');

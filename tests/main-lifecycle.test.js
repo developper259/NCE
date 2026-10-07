@@ -133,6 +133,7 @@ test("native application menu is kept only on macOS", () => {
 });
 
 test("window commands reject DevTools while reload, fullscreen and About remain available", async () => {
+  const scheduled = [];
   const { Window } = loadMain("dist/ts/Window.js", {
     electron: {},
     "./addon/FileManager": { FileManager: class {} },
@@ -141,15 +142,24 @@ test("window commands reject DevTools while reload, fullscreen and About remain 
     "./addon/ContextMenu": { ContextMenu: class {} },
     "./addon/WorkspaceSearch": { WorkspaceSearch: class {} },
     "./App": { App: class {} },
+  }, {
+    setTimeout: (callback, delay) => {
+      scheduled.push({ callback, delay });
+      return scheduled.length;
+    },
   });
   let fullscreen = false;
   let aboutCalls = 0;
   let reloadCalls = 0;
   const win = new Window({});
   win.window = {
+    isDestroyed: () => false,
     isFullScreen: () => fullscreen,
     setFullScreen: (value) => { fullscreen = value; },
-    webContents: { reload: () => { reloadCalls++; } },
+    webContents: {
+      isDestroyed: () => false,
+      reload: () => { reloadCalls++; },
+    },
   };
   win.appMenu = { showAbout: async () => { aboutCalls++; } };
 
@@ -157,6 +167,13 @@ test("window commands reject DevTools while reload, fullscreen and About remain 
   assert.equal(await win.executeWindowCommand("view.fullscreen"), true);
   assert.equal(fullscreen, true);
   assert.equal(await win.executeWindowCommand("view.reload"), true);
+  assert.equal(reloadCalls, 0, "reload starts after the IPC command can return");
+  assert.equal(win.rendererReady, false);
+  assert.equal(win.reloadPending, true);
+  assert.equal(await win.executeWindowCommand("view.reload"), false);
+  assert.equal(scheduled.length, 1, "concurrent reload requests are ignored");
+  assert.equal(scheduled[0].delay, 50);
+  scheduled[0].callback();
   assert.equal(reloadCalls, 1);
   assert.equal(await win.executeWindowCommand("help.about"), true);
   assert.equal(aboutCalls, 1);

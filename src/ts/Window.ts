@@ -23,6 +23,7 @@ const MACOS_TRAFFIC_LIGHT_Y = Math.round(
   (TITLEBAR_CONTROLS_HEIGHT - MACOS_TRAFFIC_LIGHT_SIZE) / 2,
 );
 const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
+const WINDOW_RELOAD_DELAY_MS = 50;
 
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
@@ -55,6 +56,7 @@ export class Window {
   app: App;
   forceQuit: boolean;
   rendererReady: boolean;
+  reloadPending: boolean;
   quitState: "idle" | "waiting-renderer" | "approved";
   quitTimer: ReturnType<typeof setTimeout> | null;
   ipcRegistered: boolean;
@@ -64,6 +66,7 @@ export class Window {
     this.app = app;
     this.forceQuit = false;
     this.rendererReady = false;
+    this.reloadPending = false;
     this.quitState = "idle";
     this.quitTimer = null;
     this.ipcRegistered = false;
@@ -74,6 +77,7 @@ export class Window {
   create() {
     this.forceQuit = false;
     this.rendererReady = false;
+    this.reloadPending = false;
     this.quitState = "idle";
 
     const appRoot = app.isPackaged
@@ -194,8 +198,12 @@ export class Window {
     this.window.webContents.on("render-process-gone", (_event, details) => {
       console.error("[Renderer] render-process-gone", details);
       this.rendererReady = false;
+      this.reloadPending = false;
       this.agentApprovalManager?.cancelAll();
       this.clearQuitTimer();
+    });
+    this.window.webContents.on("did-finish-load", () => {
+      this.reloadPending = false;
     });
     this.window.webContents.on(
       "preload-error",
@@ -399,14 +407,50 @@ export class Window {
         this.window.setFullScreen(!this.window.isFullScreen());
         return true;
       case "view.reload":
-        this.window.webContents.reload();
-        return true;
+        return this.reloadWindow();
       case "help.about":
         await this.appMenu?.showAbout();
         return true;
       default:
         return false;
     }
+  }
+
+  reloadWindow() {
+    const targetWindow = this.window;
+    const webContents = targetWindow?.webContents;
+    if (
+      !targetWindow ||
+      !webContents ||
+      targetWindow.isDestroyed() ||
+      webContents.isDestroyed() ||
+      this.reloadPending
+    ) {
+      return false;
+    }
+
+    this.reloadPending = true;
+    const wasRendererReady = this.rendererReady;
+    this.rendererReady = false;
+    setTimeout(() => {
+      if (
+        this.window !== targetWindow ||
+        targetWindow.isDestroyed() ||
+        webContents.isDestroyed()
+      ) {
+        this.reloadPending = false;
+        return;
+      }
+
+      try {
+        webContents.reload();
+      } catch (error) {
+        this.reloadPending = false;
+        this.rendererReady = wasRendererReady;
+        console.error("[Main] Failed to reload window", error);
+      }
+    }, WINDOW_RELOAD_DELAY_MS);
+    return true;
   }
 
   requestQuit() {
