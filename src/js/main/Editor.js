@@ -138,7 +138,11 @@ class Editor {
     this.cursorController.updateCaretPosition();
     this.lineController.refresh(true);
     this.lineController.restoreScroll();
-    this.scrollerManager.refreshAll();
+    if (typeof this.scrollerManager.refreshActive === "function") {
+      this.scrollerManager.refreshActive();
+    } else {
+      this.scrollerManager.refreshAll();
+    }
     this.bottomBar.refresh();
     this.sidebarManager.refreshAll({
       renderActiveMenu: renderSidebarContent,

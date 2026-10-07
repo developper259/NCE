@@ -157,7 +157,6 @@ class SearchResultsScroller {
 
     const needsMeasure = this.needsMeasure;
     const previousHeight = this.viewportHeight;
-    const previousTotalHeight = this._measuredTotalVirtualHeight;
     if (needsMeasure) {
       this.viewportHeight = this.editor.domManager
         .getElementMetrics(this.viewport).clientHeight;
@@ -172,11 +171,9 @@ class SearchResultsScroller {
       this.vScroller.nbItem = this.items.length;
       this.vScroller.heightByItem = 1;
       this.vScroller.setScrollRatio(ratio);
-      if (needsMeasure || previousHeight !== this.viewportHeight ||
-        previousTotalHeight !== this.totalVirtualHeight) {
-        this.vScroller.refreshMetrics();
-      }
     }
+
+    const metricsInvalidated = previousHeight !== this.viewportHeight;
 
     this.layerFast.setHeight(this.totalVirtualHeight);
     this.layerFast.setTransform(`translate3d(0, -${this.scrollY}px, 0)`);
@@ -208,9 +205,16 @@ class SearchResultsScroller {
       this.renderedVersion = this.itemsVersion;
     }
 
-    this._measuredTotalVirtualHeight = this.totalVirtualHeight;
     if (this.vScroller) {
-      this.vScroller.refresh();
+      const manager = this.editor.scrollerManager;
+      if (metricsInvalidated && manager?.invalidateScroller) {
+        manager.invalidateScroller(this.vScroller);
+      } else if (manager?.refreshScroller) {
+        manager.refreshScroller(this.vScroller);
+      } else {
+        if (metricsInvalidated) this.vScroller.refreshMetrics();
+        this.vScroller.refresh();
+      }
       const thumbMetrics = this.vScroller.readThumbMetrics();
       if (thumbMetrics) this.vScroller.writeThumbPosition(thumbMetrics);
     }
@@ -232,6 +236,9 @@ class SearchResultsScroller {
 
   resume() {
     this.suspended = false;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
+      deferRefresh: true,
+    });
     if (this.viewport) this._resizeObserver?.observe(this.viewport);
     this.scheduleRender(true);
   }

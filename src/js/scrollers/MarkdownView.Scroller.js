@@ -36,14 +36,18 @@ class MarkdownViewScroller {
       this.mutationObserver.observe(content, { childList: true, subtree: true });
     }
     if (typeof ResizeObserver === "function") {
-      this.resizeObserver = new ResizeObserver(() => this.refresh());
+      this.resizeObserver = new ResizeObserver((entries) => {
+        this.refresh({
+          invalidateMetrics: entries?.some((entry) => entry.target === viewport),
+        });
+      });
       this.resizeObserver.observe(viewport);
       this.resizeObserver.observe(content);
     }
     this.refresh();
   }
 
-  syncFromViewport() {
+  syncFromViewport({ invalidateMetrics = false } = {}) {
     if (!this.vScroller) return;
     const maxScroll = Math.max(
       0,
@@ -52,12 +56,17 @@ class MarkdownViewScroller {
     this.vScroller.setScrollRatio(
       maxScroll > 0 ? this.viewport.scrollTop / maxScroll : 0,
     );
-    this.vScroller.refreshMetrics();
-    this.vScroller.refresh();
+    const manager = this.editor.scrollerManager;
+    if (invalidateMetrics && manager?.invalidateScroller) {
+      manager.invalidateScroller(this.vScroller);
+    } else if (manager?.refreshScroller) {
+      manager.refreshScroller(this.vScroller);
+    }
+    else this.vScroller.refresh();
   }
 
-  refresh() {
-    this.syncFromViewport();
+  refresh({ invalidateMetrics = false } = {}) {
+    this.syncFromViewport({ invalidateMetrics });
   }
 
   destroy() {

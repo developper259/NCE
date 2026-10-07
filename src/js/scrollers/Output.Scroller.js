@@ -385,25 +385,18 @@ class OutputScroller {
   }
 
   refresh() {
-    if (this.vScroller) this.vScroller.refreshMetrics();
-    if (this.hScroller) this.hScroller.refreshMetrics();
-
     this.vScroller.nbItem = this.getTotalScrollLines();
     this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
     this.applyVerticalScrollFromRatio(this.vScroller.scrollRatio);
-    this.vScroller.refresh();
-
-    if (this.vScroller.calcIsActive()) {
-      this.editor.scrollerManager?.activateScroller?.(this.vScroller);
-    }
+    const manager = this.editor.scrollerManager;
+    if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+    else this.vScroller.refresh();
 
     this.hScroller.nbItem = this.lineController.maxLineLength;
     this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
     this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
-    this.hScroller.refresh();
-    if (this.hScroller.calcIsActive()) {
-      this.editor.scrollerManager?.activateScroller?.(this.hScroller);
-    }
+    if (manager?.refreshScroller) manager.refreshScroller(this.hScroller);
+    else this.hScroller.refresh();
   }
 
   refreshLoadProgress() {
@@ -411,11 +404,14 @@ class OutputScroller {
 
     this.vScroller.nbItem = this.getTotalScrollLines();
     this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
-    this.vScroller.refresh();
+    const manager = this.editor.scrollerManager;
+    if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+    else this.vScroller.refresh();
 
     this.hScroller.nbItem = this.lineController.maxLineLength + 2;
     this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
-    this.hScroller.refresh();
+    if (manager?.refreshScroller) manager.refreshScroller(this.hScroller);
+    else this.hScroller.refresh();
   }
 
   updateNbItem() {

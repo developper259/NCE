@@ -544,15 +544,17 @@ class SidebarManager {
   scheduleSidebarRefresh(position = null) {
     requestAnimationFrame(() => {
       this.editor.lineController.resizeWidth();
-      this.editor.tabManager?.tabScroller?.refresh();
+      this.editor.tabManager?.tabScroller?.refresh(null, {
+        invalidateMetrics: true,
+      });
       if (position === "left" || position === "right") {
         const scroller = position === "left"
           ? this.leftScroller
           : this.rightScroller;
-        scroller?.refresh();
+        scroller?.refresh({ invalidateMetrics: true });
       } else {
-        this.leftScroller?.refresh();
-        this.rightScroller?.refresh();
+        this.leftScroller?.refresh({ invalidateMetrics: true });
+        this.rightScroller?.refresh({ invalidateMetrics: true });
       }
     });
   }

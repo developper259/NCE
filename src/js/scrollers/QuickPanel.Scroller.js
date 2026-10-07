@@ -26,7 +26,6 @@ class QuickPanelScroller {
     this.forceRender = true;
     this.renderedRows = new Map();
     this.pendingEnsureIndex = null;
-    this.lastTotalVirtualHeight = -1;
 
     this._onWheel = (event) => this.handleWheel(event);
     this._resizeObserver = typeof ResizeObserver === "function"
@@ -117,6 +116,11 @@ class QuickPanelScroller {
     this.forceRender = true;
     this.needsMeasure = true;
     this.scheduleRender();
+    if (this.active && this.entries.length > 0) {
+      this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
+        deferRefresh: true,
+      });
+    }
   }
 
   clear() {
@@ -309,19 +313,25 @@ class QuickPanelScroller {
       this._renderedEnd = renderEnd;
     }
 
-    const totalChanged = this.lastTotalVirtualHeight !== this.totalVirtualHeight;
     if (this.vScroller) {
       this.vScroller.nbItem = this.entries.length;
       this.vScroller.heightByItem = this.rowHeight;
       const maxScrollY = this.getMaxScrollY();
       this.vScroller.setScrollRatio(maxScrollY > 0 ? this.scrollY / maxScrollY : 0);
-      if (measured || totalChanged || previousViewportHeight !== this.viewportHeight) {
-        this.vScroller.refreshMetrics();
+      if (previousViewportHeight !== this.viewportHeight) {
+        const manager = this.editor.scrollerManager;
+        if (manager?.invalidateScroller) manager.invalidateScroller(this.vScroller);
+        else {
+          this.vScroller.refreshMetrics();
+          this.vScroller.refresh();
+        }
+      } else {
+        const manager = this.editor.scrollerManager;
+        if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+        else this.vScroller.refresh();
       }
-      this.vScroller.refresh();
     }
 
-    this.lastTotalVirtualHeight = this.totalVirtualHeight;
   }
 
   renderRange(start, end) {
@@ -374,11 +384,15 @@ class QuickPanelScroller {
   }
 
   resume() {
-    if (this.active) {
+    const wasActive = this.active;
+    this.active = true;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
+      deferRefresh: true,
+    });
+    if (wasActive) {
       this.scheduleRender(true);
       return;
     }
-    this.active = true;
     if (this.viewport) this._resizeObserver?.observe(this.viewport);
     this.scheduleRender(true);
   }

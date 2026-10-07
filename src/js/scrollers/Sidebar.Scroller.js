@@ -7,7 +7,7 @@ class SidebarScroller {
     this._observer = null;
     this._resizeObserver = null;
     this.suspended = false;
-    this._onNativeScroll = () => this.refresh();
+    this._onNativeScroll = () => this.syncFromMenu();
 
     this.scrollTop = 0;
     this.clientHeight = 0;
@@ -76,25 +76,43 @@ class SidebarScroller {
       characterData: true,
     });
 
-    this._resizeObserver = new ResizeObserver(() => {
-      this.updateMetrics();
-      this.refresh();
-    });
+    this._resizeObserver = new ResizeObserver(() =>
+      this.refresh({ invalidateMetrics: true }),
+    );
     this._resizeObserver.observe(this.menuOBJ);
 
     this.refresh();
   }
 
-  refresh() {
+  refresh({ invalidateMetrics = false } = {}) {
     if (!this.vScroller || this.suspended) return;
 
     this.updateMetrics();
     const maxScrollTop = this.scrollHeight - this.clientHeight;
     const ratio = maxScrollTop > 0 ? this.scrollTop / maxScrollTop : 0;
     this.vScroller.setScrollRatio(ratio);
+    const manager = this.editor.scrollerManager;
+    if (invalidateMetrics && manager?.invalidateScroller) {
+      manager.invalidateScroller(this.vScroller);
+    } else if (manager?.refreshScroller) {
+      manager.refreshScroller(this.vScroller);
+    }
+    else {
+      this.vScroller.refreshMetrics();
+      this.vScroller.refresh();
+    }
+  }
 
-    this.vScroller.refreshMetrics();
-    this.vScroller.refresh();
+  syncFromMenu() {
+    if (!this.vScroller || !this.menuOBJ || this.suspended) return;
+    this.scrollTop = this.menuOBJ.scrollTop || 0;
+    const maxScrollTop = this.scrollHeight - this.clientHeight;
+    this.vScroller.setScrollRatio(
+      maxScrollTop > 0 ? this.scrollTop / maxScrollTop : 0,
+    );
+    const manager = this.editor.scrollerManager;
+    if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+    else this.vScroller.syncThumbPosition();
   }
 
   suspend() {
@@ -106,6 +124,9 @@ class SidebarScroller {
   resume() {
     if (!this.suspended) return;
     this.suspended = false;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
+      deferRefresh: true,
+    });
     this._observer?.observe(this.menuOBJ, {
       childList: true, subtree: true, characterData: true,
     });

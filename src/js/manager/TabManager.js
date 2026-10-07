@@ -560,7 +560,11 @@ class tabManager {
 
         this.editor.lineController.markDirtyAll();
         this.editor.lineController.refresh(true);
-        this.editor.scrollerManager.refreshAll();
+        if (typeof this.editor.scrollerManager.refreshActive === "function") {
+          this.editor.scrollerManager.refreshActive();
+        } else {
+          this.editor.scrollerManager.refreshAll();
+        }
       } else {
         file.isLoaded = false;
       }

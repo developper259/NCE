@@ -17,11 +17,66 @@ class ScrollerManager {
   }
 
   refreshAll() {
-    if (this.editor.isOnInit) return;
-    for (const scroller of [...this.scrollers]) {
-      scroller.refreshMetrics();
-      scroller.refresh();
+    if (this.editor.isOnInit) {
+      for (const scroller of this.scrollers) scroller._metricsDirty = true;
+      return 0;
     }
+
+    let refreshed = 0;
+    for (const scroller of [...this.scrollers]) {
+      scroller._metricsDirty = true;
+      if (this.refreshScroller(scroller, {
+        forceMetrics: true,
+        includeSuspended: true,
+        measureInactive: true,
+      })) refreshed += 1;
+    }
+    return refreshed;
+  }
+
+  refreshActive() {
+    if (this.editor.isOnInit) return 0;
+    let refreshed = 0;
+    for (const scroller of [...this.scrollers]) {
+      if (scroller._suspended || !scroller.active) continue;
+      if (this.refreshScroller(scroller)) refreshed += 1;
+    }
+    return refreshed;
+  }
+
+  refreshScroller(scroller, {
+    forceMetrics = false,
+    includeSuspended = false,
+    measureInactive = false,
+  } = {}) {
+    if (!scroller || !this.scrollers.includes(scroller)) return false;
+    if (this.editor.isOnInit) {
+      scroller._metricsDirty = true;
+      return false;
+    }
+    if (scroller._suspended && !includeSuspended) {
+      scroller._metricsDirty = true;
+      return false;
+    }
+
+    const needsMetrics = forceMetrics || scroller._metricsDirty !== false;
+    if (!scroller.active && !measureInactive) {
+      scroller.refresh();
+      if (!scroller.active) {
+        if (needsMetrics) scroller._metricsDirty = true;
+        return true;
+      }
+    }
+
+    if (needsMetrics) scroller.refreshMetrics();
+    scroller.refresh();
+    return true;
+  }
+
+  invalidateScroller(scroller) {
+    if (!scroller || !this.scrollers.includes(scroller)) return false;
+    scroller._metricsDirty = true;
+    return this.refreshScroller(scroller);
   }
 
   addScroller(scroller) {
@@ -29,6 +84,8 @@ class ScrollerManager {
     if (this.scrollers.includes(scroller)) return scroller;
     scroller.id = this.nextScrollerId++;
     scroller.manager = this;
+    scroller._suspended = false;
+    scroller._metricsDirty = true;
     this.scrollers.push(scroller);
     try {
       scroller.init();
@@ -37,7 +94,10 @@ class ScrollerManager {
       scroller.destroy?.();
       throw error;
     }
-    this.refreshAll();
+    this.refreshScroller(scroller, {
+      forceMetrics: true,
+      measureInactive: true,
+    });
     return scroller;
   }
 
@@ -66,14 +126,22 @@ class ScrollerManager {
     return true;
   }
 
-  activateScroller(scroller) {
+  activateScroller(scroller, { deferRefresh = false } = {}) {
     if (!scroller || !this.scrollers.includes(scroller)) return false;
-    scroller.setActive(true);
+    const wasSuspended = scroller._suspended;
+    scroller._suspended = false;
+    if (wasSuspended) scroller._metricsDirty = true;
+    if (wasSuspended || !scroller.active) scroller.setActive(true);
+    if (!deferRefresh) {
+      this.refreshScroller(scroller, { measureInactive: true });
+    }
     return true;
   }
 
   deactivateScroller(scroller) {
     if (!scroller || !this.scrollers.includes(scroller)) return false;
+    scroller._suspended = true;
+    scroller._metricsDirty = true;
     if (this.activeDrag?.scroller === scroller) {
       this.finishDrag({ notifyEnd: false });
     }
@@ -197,6 +265,8 @@ class ScrollerManager {
     s.type = type;
     s.isBody = isBody;
     s.manager = this;
+    s._suspended = false;
+    s._metricsDirty = true;
     return s;
   }
 

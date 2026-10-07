@@ -5,6 +5,8 @@ class Scroller {
     this.id = 0;
     this.manager = null;
     this._destroyed = false;
+    this._suspended = false;
+    this._metricsDirty = true;
     this.scrollX = 0;
     this.scrollY = 0;
     this.type = 0;
@@ -115,6 +117,7 @@ class Scroller {
     this.itemOBJWidth = itemMetrics.clientWidth;
     this.parentOBJHeight = parentMetrics.clientHeight;
     this.parentOBJWidth = parentMetrics.clientWidth;
+    this._metricsDirty = false;
   }
 
   syncThumbPosition() {

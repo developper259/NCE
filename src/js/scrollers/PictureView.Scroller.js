@@ -20,7 +20,11 @@ class PictureViewScroller {
     manager.addScroller(this.hScroller);
     viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
     if (typeof ResizeObserver === "function") {
-      this.resizeObserver = new ResizeObserver(() => this.refresh());
+      this.resizeObserver = new ResizeObserver((entries) => {
+        this.refresh({
+          invalidateMetrics: entries?.some((entry) => entry.target === viewport),
+        });
+      });
       this.resizeObserver.observe(viewport);
       const image = viewport.querySelector(".picture-view-image");
       if (image) this.resizeObserver.observe(image);
@@ -50,7 +54,7 @@ class PictureViewScroller {
       ? getPosition() / (getScroll() - getClient()) : 0);
   }
 
-  syncFromViewport() {
+  syncFromViewport({ invalidateMetrics = false } = {}) {
     for (const [scroller, vertical] of [[this.vScroller, true], [this.hScroller, false]]) {
       if (!scroller) continue;
       const client = vertical ? this.viewport.clientHeight : this.viewport.clientWidth;
@@ -58,13 +62,20 @@ class PictureViewScroller {
       const position = vertical ? this.viewport.scrollTop : this.viewport.scrollLeft;
       const maxScroll = Math.max(0, scroll - client);
       scroller.setScrollRatio(maxScroll ? position / maxScroll : 0);
-      scroller.refreshMetrics();
-      scroller.refresh();
+      const manager = this.editor.scrollerManager;
+      if (invalidateMetrics && manager?.invalidateScroller) {
+        manager.invalidateScroller(scroller);
+      } else if (manager?.refreshScroller) {
+        manager.refreshScroller(scroller);
+      } else {
+        if (invalidateMetrics) scroller.refreshMetrics();
+        scroller.refresh();
+      }
     }
   }
 
-  refresh() {
-    this.syncFromViewport();
+  refresh({ invalidateMetrics = false } = {}) {
+    this.syncFromViewport({ invalidateMetrics });
   }
 
   setZoomed(zoomed) {

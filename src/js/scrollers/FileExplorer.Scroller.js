@@ -71,6 +71,9 @@ class FileExplorerScroller {
 
   resume() {
     this.active = true;
+    this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
+      deferRefresh: true,
+    });
     this.scheduleRender(true);
   }
 
@@ -121,6 +124,7 @@ class FileExplorerScroller {
     if (!this.viewport || !this.layerFast) return;
     // Read before writing to the render layer or scrollbar.
     const needsMeasure = this.needsMeasure;
+    const previousViewportHeight = this.viewportHeight;
     const previousTotal = this.totalVisibleRows;
     if (needsMeasure) {
       this.viewportHeight = this.editor.domManager.getElementMetrics(this.viewport).clientHeight;
@@ -129,9 +133,7 @@ class FileExplorerScroller {
     this.maxViewRows = this.viewportHeight > 0 ? Math.ceil(this.viewportHeight / this.rowHeight) : 0;
     this.totalVisibleRows = this.explorer.visibleRows?.length || 0;
     this.renderedRowCount = Math.min(this.totalVisibleRows, this.maxViewRows + 1);
-    if (this.vScroller && (needsMeasure || previousTotal !== this.totalVisibleRows)) {
-      this.vScroller.refreshMetrics();
-    }
+    const metricsInvalidated = previousViewportHeight !== this.viewportHeight;
     const clamped = Math.min(this.scrollTop, this.getMaxScrollTop());
     this.scrollTop = clamped;
     this.startIndex = Math.floor(clamped / this.rowHeight);
@@ -148,8 +150,19 @@ class FileExplorerScroller {
       this.vScroller.nbItem = this.totalVisibleRows;
       this.vScroller.heightByItem = this.rowHeight;
       this.vScroller.setScrollRatio(this.getMaxScrollTop() ? clamped / this.getMaxScrollTop() : 0);
-      if (needsMeasure || previousTotal !== this.totalVisibleRows) this.vScroller.refresh();
-      else this.vScroller.writeThumbPosition(this.vScroller.readThumbMetrics());
+      if (metricsInvalidated) {
+        const manager = this.editor.scrollerManager;
+        if (manager?.invalidateScroller) manager.invalidateScroller(this.vScroller);
+        else {
+          this.vScroller.refreshMetrics();
+          this.vScroller.refresh();
+        }
+      } else {
+        const manager = this.editor.scrollerManager;
+        if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+        else if (previousTotal !== this.totalVisibleRows) this.vScroller.refresh();
+        else this.vScroller.writeThumbPosition(this.vScroller.readThumbMetrics());
+      }
     }
   }
 

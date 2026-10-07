@@ -74,8 +74,12 @@ class SettingsScroller {
     const maxScrollTop = this.scrollHeight - this.clientHeight;
     const ratio = maxScrollTop > 0 ? this.scrollTop / maxScrollTop : 0;
     this.vScroller.setScrollRatio(ratio);
-    this.vScroller.refreshMetrics();
-    this.vScroller.refresh();
+    const manager = this.editor.scrollerManager;
+    if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
+    else {
+      this.vScroller.refreshMetrics();
+      this.vScroller.refresh();
+    }
   }
 
   destroy() {

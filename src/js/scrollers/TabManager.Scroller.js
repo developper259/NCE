@@ -85,7 +85,7 @@ class TabManagerScroller {
     return Math.max(0, Math.min(nextScrollLeft, this.getMaxScroll()));
   }
 
-  refresh(ensureElement = null) {
+  refresh(ensureElement = null, { invalidateMetrics = false } = {}) {
     if (!this.hScroller || !this.content) return false;
 
     this.measureContent();
@@ -97,8 +97,16 @@ class TabManagerScroller {
     if (shouldScroll) this.content.scrollLeft = nextScrollLeft;
     this.measureContent();
 
-    this.hScroller.refreshMetrics();
-    this.hScroller.refresh();
+    const manager = this.editor.scrollerManager;
+    if (invalidateMetrics && manager?.invalidateScroller) {
+      manager.invalidateScroller(this.hScroller);
+    } else if (manager?.refreshScroller) {
+      manager.refreshScroller(this.hScroller);
+    }
+    else {
+      this.hScroller.refreshMetrics();
+      this.hScroller.refresh();
+    }
     return true;
   }
 
@@ -124,9 +132,11 @@ class TabManagerScroller {
 
   syncFromContent() {
     if (!this.hScroller || !this.content) return;
-    this.measureContent();
+    this.scrollLeft = this.content.scrollLeft || 0;
     this.hScroller.setScrollRatio(this.getScrollRatio());
-    this.hScroller.syncThumbPosition();
+    const manager = this.editor.scrollerManager;
+    if (manager?.refreshScroller) manager.refreshScroller(this.hScroller);
+    else this.hScroller.syncThumbPosition();
   }
 
   destroy() {

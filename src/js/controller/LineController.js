@@ -601,6 +601,13 @@ class LineController {
 
     this.markDirtyAll();
 
+    this.editor.scrollerManager?.invalidateScroller?.(
+      this.outputScroller?.vScroller,
+    );
+    this.editor.scrollerManager?.invalidateScroller?.(
+      this.outputScroller?.hScroller,
+    );
+
     this.refresh();
   }
 
