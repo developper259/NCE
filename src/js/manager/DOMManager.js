@@ -296,7 +296,7 @@ class DOMManager {
     this.apply();
 
     if (pending.window) {
-      this.editor?.lineController?.resize?.();
+      this.editor?.lineController?.resize?.({ deferScrollerRefresh: true });
       this.editor?.scrollerManager?.refreshAll?.();
       return true;
     }

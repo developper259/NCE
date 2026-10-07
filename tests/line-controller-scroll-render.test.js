@@ -148,6 +148,22 @@ function makeController(lineCount = 12, visibleRows = 4) {
   return { controller, editor, file, lines, output, scrolledHighlightIndexes };
 }
 
+test("window resize defers output thumb refresh to the shared scroller pass", () => {
+  const { controller } = makeController();
+  const calls = [];
+  controller.editor.isOnRefresh = false;
+  controller.outputScroller = { clampScrollState() {} };
+  controller.syncDimensions = () => calls.push("dimensions");
+  controller.markDirtyAll = () => calls.push("dirty");
+  controller.refresh = (...args) => calls.push(args);
+
+  controller.resize({ deferScrollerRefresh: true });
+
+  assert.deepEqual(calls.slice(0, 2), ["dimensions", "dirty"]);
+  assert.equal(calls[2][0], true);
+  assert.equal(calls[2][1].deferScrollerRefresh, true);
+});
+
 test("one-line vertical scroll reuses unchanged highlighted rows and rebuilds only the entering row", () => {
   const { controller, file, output, scrolledHighlightIndexes } = makeController();
   const originalRows = output.children.slice();

@@ -124,3 +124,42 @@ test("vertical thumb scroll uses the focused row refresh path", () => {
   assert.deepEqual(calls, [["focused refresh", 7]]);
   assert.notEqual(lineController.startIndex, 7);
 });
+
+test("layout refresh updates output scroll state and leaves thumb reads to one manager pass", () => {
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller");
+  const refreshed = [];
+  const scroller = Object.create(OutputScroller.prototype);
+  scroller.editor = {
+    scrollerManager: {
+      refreshScroller(target) { refreshed.push(target.id); },
+    },
+  };
+  scroller.lineController = { maxLineLength: 300 };
+  scroller.vScroller = {
+    id: "vertical",
+    nbItem: 0,
+    setScrollRatio(value) { this.scrollRatio = value; },
+  };
+  scroller.hScroller = {
+    id: "horizontal",
+    nbItem: 0,
+    setScrollRatio(value) { this.scrollRatio = value; },
+  };
+  scroller.getTotalScrollLines = () => 500;
+  scroller.getVerticalScrollRatioFromState = () => 0.4;
+  scroller.getHorizontalScrollRatioFromState = () => 0.2;
+  scroller.applyVerticalScrollFromRatio = (value) => { scroller.verticalState = value; };
+  scroller.applyHorizontalScrollFromRatio = (value) => { scroller.horizontalState = value; };
+
+  scroller.refresh({ deferScrollerRefresh: true });
+  assert.deepEqual(refreshed, []);
+  assert.deepEqual([
+    scroller.vScroller.nbItem,
+    scroller.vScroller.scrollRatio,
+    scroller.hScroller.nbItem,
+    scroller.hScroller.scrollRatio,
+  ], [500, 0.4, 300, 0.2]);
+
+  scroller.refresh();
+  assert.deepEqual(refreshed, ["vertical", "horizontal"]);
+});

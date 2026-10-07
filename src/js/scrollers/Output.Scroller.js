@@ -384,10 +384,16 @@ class OutputScroller {
     this.refresh();
   }
 
-  refresh() {
+  refresh({ deferScrollerRefresh = false } = {}) {
     this.vScroller.nbItem = this.getTotalScrollLines();
     this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
     this.applyVerticalScrollFromRatio(this.vScroller.scrollRatio);
+    if (deferScrollerRefresh) {
+      this.hScroller.nbItem = this.lineController.maxLineLength;
+      this.hScroller.setScrollRatio(this.getHorizontalScrollRatioFromState());
+      this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
+      return;
+    }
     const manager = this.editor.scrollerManager;
     if (manager?.refreshScroller) manager.refreshScroller(this.vScroller);
     else this.vScroller.refresh();

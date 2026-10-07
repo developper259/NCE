@@ -611,7 +611,7 @@ class LineController {
     this.refresh();
   }
 
-  resize() {
+  resize({ deferScrollerRefresh = false } = {}) {
     this.syncDimensions();
 
     if (this.outputScroller) {
@@ -621,7 +621,7 @@ class LineController {
     if (!this.editor.isOnRefresh) {
       this.markDirtyAll();
 
-      this.refresh(true);
+      this.refresh(true, { deferScrollerRefresh });
     }
   }
 
@@ -1618,7 +1618,7 @@ class LineController {
     return l.children[index];
   }
 
-  refresh(forcedInit = false) {
+  refresh(forcedInit = false, { deferScrollerRefresh = false } = {}) {
     if (!this.editor.tabManager.activeFile) {
       return;
     }
@@ -1658,7 +1658,7 @@ class LineController {
     this.updateLineNumberWidth();
 
     this.outputScroller.updateNbItem();
-    this.outputScroller.refresh();
+    this.outputScroller.refresh({ deferScrollerRefresh });
     this.applyScrollTransform();
 
     this.editor.cursorController.updateCaretPosition();

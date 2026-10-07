@@ -24,7 +24,7 @@ function createHarness() {
       refreshLayout(...args) { calls.push(["refresh-sidebar", ...args]); },
     },
     lineController: {
-      resize() { calls.push(["resize-lines"]); },
+      resize(options) { calls.push(["resize-lines", options]); },
       resizeWidth() { calls.push(["resize-line-width"]); },
     },
     scrollerManager: { refreshAll() { calls.push(["refresh-scrollers"]); } },
@@ -67,6 +67,8 @@ test("ten synchronous window resizes share one read-calculate-write frame", () =
     "resize-lines",
     "refresh-scrollers",
   ]);
+  assert.equal(harness.calls.at(-2)[0], "resize-lines");
+  assert.equal(harness.calls.at(-2)[1].deferScrollerRefresh, true);
   assert.equal(harness.frames.length, 0);
 });
 
