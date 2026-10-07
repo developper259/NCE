@@ -9,6 +9,10 @@ function formatAgentWorkDuration(milliseconds) {
 }
 
 class AgentSidebar extends Sidebar {
+  static MESSAGE_WINDOW_SIZE = 80;
+  static MESSAGE_WINDOW_CHUNK_SIZE = 40;
+  static MESSAGE_WINDOW_MAX_SIZE = 160;
+
   constructor(editor) {
     super("agent", "Agent", "fi fi-rr-sparkles", "right", editor);
 
@@ -17,6 +21,10 @@ class AgentSidebar extends Sidebar {
     this.messagesViewport = null;
     this.messagesElement = null;
     this.messagesScroller = null;
+    this.messageWindowStates = new Map();
+    this.messageWindowControls = null;
+    this.renderedMessageSessionId = null;
+    this.messagesScrollHandler = null;
     this.pendingScrollTop = 0;
     this.scrollToBottomAfterRestore = false;
     this.scrollBottomFrame = null;
@@ -400,6 +408,7 @@ class AgentSidebar extends Sidebar {
       ? request.runId
       : session.runId;
     if (!Number.isInteger(runId)) return;
+    const shouldScroll = this.captureConversationFollow(session);
     const group = this.getActivityGroup(session, runId, true);
     if (!group) return;
     const item = {
@@ -420,14 +429,13 @@ class AgentSidebar extends Sidebar {
     session.streamingMessage = null;
     this.scheduleConversationSave(session);
     if (session.id === this.activeSessionId && this.messagesElement) {
-      this.removeEmptyState();
       const refs = this.activityElements.get(group);
       if (!refs?.row?.isConnected) {
-        const row = this.createActivityElement(group);
-        if (!row.isConnected) this.messagesElement.appendChild(row);
+        this.renderConversationMessageIfVisible(session, group, shouldScroll);
+      } else {
+        this.updateActivityHeader(group);
       }
-      this.updateActivityHeader(group);
-      this.scrollMessagesToBottom();
+      if (shouldScroll) this.scrollMessagesToBottom();
     }
   }
 
@@ -743,6 +751,8 @@ class AgentSidebar extends Sidebar {
     const messages = document.createElement("div");
     messages.className = "agent-sidebar-messages";
     this.messagesElement = messages;
+    this.messagesScrollHandler = () => this.handleMessagesScroll();
+    messages.addEventListener("scroll", this.messagesScrollHandler, { passive: true });
     this.renderMessages(messages);
     messages.scrollTop = this.pendingScrollTop;
     messagesViewport.appendChild(messages);
@@ -993,6 +1003,7 @@ class AgentSidebar extends Sidebar {
     if (!session || !session.isGenerating || session.runId !== context.runId) {
       return;
     }
+    const shouldScroll = this.captureConversationFollow(session);
     const group = this.getActivityGroup(session, context.runId, true);
     if (!group) return;
     group.role = "activity";
@@ -1035,12 +1046,9 @@ class AgentSidebar extends Sidebar {
     }
 
     if (session.id !== this.activeSessionId || !this.messagesElement) return item;
-    const shouldScroll = this.shouldAutoScrollMessages();
-    this.removeEmptyState();
     let groupRefs = this.activityElements.get(group);
     if (!groupRefs?.row?.isConnected) {
-      const groupElement = this.createActivityElement(group);
-      if (!groupElement.isConnected) this.messagesElement.appendChild(groupElement);
+      this.renderConversationMessageIfVisible(session, group, shouldScroll);
       groupRefs = this.activityElements.get(group);
     } else {
       this.updateActivityHeader(group);
@@ -1055,6 +1063,7 @@ class AgentSidebar extends Sidebar {
     if (!session || !session.isGenerating || session.runId !== context.runId) {
       return;
     }
+    const shouldScroll = this.captureConversationFollow(session);
     const group = this.getActivityGroup(session, context.runId, true);
     if (!group || !event.userMessage) return;
     group.role = "activity";
@@ -1083,12 +1092,9 @@ class AgentSidebar extends Sidebar {
     this.scheduleConversationSave(session);
 
     if (session.id !== this.activeSessionId || !this.messagesElement) return;
-    const shouldScroll = this.shouldAutoScrollMessages();
-    this.removeEmptyState();
     let groupRefs = this.activityElements.get(group);
     if (!groupRefs?.row?.isConnected) {
-      const row = this.createActivityElement(group);
-      if (!row.isConnected) this.messagesElement.appendChild(row);
+      this.renderConversationMessageIfVisible(session, group, shouldScroll);
       groupRefs = this.activityElements.get(group);
     } else {
       this.updateActivityHeader(group);
@@ -1285,6 +1291,7 @@ class AgentSidebar extends Sidebar {
 
   startAgentWork(session, runId) {
     if (!session || !Number.isInteger(runId)) return;
+    const shouldScroll = this.captureConversationFollow(session);
     this.stopAgentWorkTicker();
     session.workState = { runId, startedAt: Date.now(), finishedAt: null, status: "running" };
     // Give every user prompt its own work row, even when the run produces no
@@ -1297,9 +1304,9 @@ class AgentSidebar extends Sidebar {
     group.items ||= [];
     if (session.id === this.activeSessionId) {
       if (this.messagesElement) {
-        const row = this.createActivityElement(group);
-        if (!row.isConnected) this.messagesElement.appendChild(row);
+        this.renderConversationMessageIfVisible(session, group, shouldScroll);
       }
+      if (shouldScroll) this.scrollMessagesToBottom();
       this.syncAgentWorkTicker();
     }
     this.scheduleConversationSave(session);
@@ -1378,6 +1385,7 @@ class AgentSidebar extends Sidebar {
     if (existing?.row?.isConnected) return;
     const row = document.createElement("div");
     row.className = "agent-work-log agent-work-log-pending";
+    row._agentConversationSession = session;
     const header = this.createWorkHeader(session);
     row.appendChild(header);
     const refs = this.workLogElements.get(session);
@@ -2263,37 +2271,342 @@ class AgentSidebar extends Sidebar {
     return inputArea;
   }
 
+  getConversationMessageEntries(session) {
+    this.ensureSessionSegments(session);
+    return (session?.messages || []).flatMap((message) => {
+      if (message?.role === "activity" || message?.type === "activity")
+        return [message];
+      if (message?.type === "reasoning" || message?.role === "reasoning")
+        return [];
+      return [message];
+    });
+  }
+
+  getConversationWindowState(session, messageCount) {
+    if (!this.messageWindowStates) this.messageWindowStates = new Map();
+    const sessionId = session?.id || "";
+    let state = this.messageWindowStates.get(sessionId);
+    if (!state) {
+      const windowSize = Math.min(
+        AgentSidebar.MESSAGE_WINDOW_SIZE,
+        messageCount,
+      );
+      state = {
+        start: Math.max(0, messageCount - windowSize),
+        end: messageCount,
+        windowSize,
+        followLatest: true,
+        totalMessages: messageCount,
+        scrollTop: null,
+      };
+      this.messageWindowStates.set(sessionId, state);
+    } else {
+      state.windowSize = Math.max(
+        1,
+        Math.min(
+          AgentSidebar.MESSAGE_WINDOW_MAX_SIZE,
+          Number(state.windowSize) || AgentSidebar.MESSAGE_WINDOW_SIZE,
+        ),
+      );
+      if (state.followLatest) {
+        state.end = messageCount;
+        state.start = Math.max(0, messageCount - state.windowSize);
+      } else {
+        state.start = Math.max(0, Math.min(state.start, messageCount));
+        state.end = Math.max(state.start, Math.min(state.end, messageCount));
+      }
+      state.totalMessages = messageCount;
+    }
+    return state;
+  }
+
+  createConversationWindowButton(direction, session, messageCount) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "agent-sidebar-message-window-control";
+    button.dataset.agentWindowAction = direction;
+    button.textContent = direction === "older"
+      ? `Load ${messageCount} earlier messages`
+      : `Show ${messageCount} newer messages`;
+    button.setAttribute("aria-label", button.textContent);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.loadConversationMessageChunk(direction, session.id);
+    });
+    return button;
+  }
+
+  createConversationMessageRow(session, message, index) {
+    const isActivity = message?.role === "activity" || message?.type === "activity";
+    const row = isActivity
+      ? this.createActivityElement(message)
+      : this.createMessageElement(message);
+    if (!row.dataset) row.dataset = {};
+    row.dataset.agentMessageIndex = String(index);
+    row._agentConversationMessage = message;
+    row._agentConversationSession = session;
+    return row;
+  }
+
+  releaseConversationMessageRow(row) {
+    if (!row) return;
+    const markdownElements = [
+      ...(row.classList?.contains("agent-sidebar-markdown") ? [row] : []),
+      ...(row.querySelectorAll?.(".agent-sidebar-markdown") || []),
+    ];
+    for (const element of markdownElements)
+      this.markdownRenderer?.destroy?.(element);
+
+    const message = row._agentConversationMessage;
+    if (message) {
+      this.messageElements?.delete?.(message);
+      this.activityElements?.delete?.(message);
+      for (const item of message.items || [])
+        this.activityItemElements?.delete?.(item.id);
+    }
+    const session = row._agentConversationSession;
+    const workRefs = session && this.workLogElements?.get?.(session);
+    if (workRefs?.row === row) this.workLogElements.delete(session);
+    row.remove?.();
+  }
+
+  updateConversationWindowControls(session, entries = null) {
+    const controls = this.messageWindowControls;
+    if (!controls || controls.sessionId !== session?.id || !this.messagesElement)
+      return;
+    const messages = entries || this.getConversationMessageEntries(session);
+    const state = this.getConversationWindowState(session, messages.length);
+    if (state.start > 0) {
+      if (!controls.older) {
+        controls.older = this.createConversationWindowButton(
+          "older",
+          session,
+          state.start,
+        );
+        const firstMessage = [...this.messagesElement.children].find((child) =>
+          child.dataset?.agentMessageIndex !== undefined,
+        );
+        this.messagesElement.insertBefore(controls.older, firstMessage || null);
+      } else {
+        controls.older.textContent = `Load ${state.start} earlier messages`;
+        controls.older.setAttribute("aria-label", controls.older.textContent);
+      }
+    } else if (controls.older) {
+      controls.older.remove();
+      controls.older = null;
+    }
+
+    const newerCount = messages.length - state.end;
+    if (newerCount > 0) {
+      if (!controls.newer) {
+        controls.newer = this.createConversationWindowButton(
+          "newer",
+          session,
+          newerCount,
+        );
+        this.messagesElement.appendChild(controls.newer);
+      } else {
+        controls.newer.textContent = `Show ${newerCount} newer messages`;
+        controls.newer.setAttribute("aria-label", controls.newer.textContent);
+      }
+    } else if (controls.newer) {
+      controls.newer.remove();
+      controls.newer = null;
+    }
+  }
+
+  renderConversationMessageIfVisible(session, message, shouldFollow = false) {
+    if (
+      !session || session.id !== this.activeSessionId ||
+      !this.messagesElement
+    ) return false;
+    const entries = this.getConversationMessageEntries(session);
+    const state = this.getConversationWindowState(session, entries.length);
+    if (shouldFollow) state.followLatest = true;
+    const index = entries.indexOf(message);
+    if (index < 0 || index < state.start || index >= state.end) {
+      this.updateConversationWindowControls(session, entries);
+      return false;
+    }
+
+    this.removeEmptyState();
+    let row = this.messageElements?.get?.(message)?.row ||
+      this.activityElements?.get?.(message)?.row || null;
+    if (!row?.isConnected) {
+      row = this.createConversationMessageRow(session, message, index);
+      const reference = [...this.messagesElement.children].find((child) =>
+        Number(child.dataset?.agentMessageIndex) > index,
+      ) || this.messageWindowControls?.newer || null;
+      this.messagesElement.insertBefore(row, reference);
+    } else {
+      row.dataset.agentMessageIndex = String(index);
+      row._agentConversationMessage = message;
+      row._agentConversationSession = session;
+    }
+
+    for (const child of [...this.messagesElement.children]) {
+      const childIndex = Number(child.dataset?.agentMessageIndex);
+      if (
+        Number.isInteger(childIndex) &&
+        (childIndex < state.start || childIndex >= state.end)
+      ) this.releaseConversationMessageRow(child);
+    }
+    this.updateConversationWindowControls(session, entries);
+    return true;
+  }
+
+  loadConversationMessageChunk(direction, sessionId) {
+    const session = this.getSession(sessionId);
+    if (
+      !session || session.id !== this.activeSessionId ||
+      !this.messagesElement
+    ) return false;
+    const entries = this.getConversationMessageEntries(session);
+    const state = this.getConversationWindowState(session, entries.length);
+    const oldStart = state.start;
+    const oldEnd = state.end;
+    let nextStart = oldStart;
+    let nextEnd = oldEnd;
+    const chunkSize = AgentSidebar.MESSAGE_WINDOW_CHUNK_SIZE;
+
+    if (direction === "older") {
+      if (oldStart === 0) return false;
+      nextStart = Math.max(0, oldStart - chunkSize);
+      nextEnd = Math.min(oldEnd, nextStart + AgentSidebar.MESSAGE_WINDOW_MAX_SIZE);
+      state.followLatest = false;
+    } else {
+      if (oldEnd >= entries.length) return false;
+      nextEnd = Math.min(entries.length, oldEnd + chunkSize);
+      const nextSize = Math.min(
+        AgentSidebar.MESSAGE_WINDOW_MAX_SIZE,
+        Math.max(oldEnd - oldStart, nextEnd - oldEnd + oldEnd - oldStart),
+      );
+      nextStart = Math.max(0, nextEnd - nextSize);
+      state.followLatest = nextEnd === entries.length;
+    }
+
+    const anchorIndex = direction === "older"
+      ? oldStart
+      : Math.max(oldStart, nextStart);
+    const anchor = [...this.messagesElement.children].find((child) =>
+      Number(child.dataset?.agentMessageIndex) === anchorIndex,
+    );
+    const anchorTop = anchor?.getBoundingClientRect?.().top;
+    state.start = nextStart;
+    state.end = nextEnd;
+    state.windowSize = Math.max(1, nextEnd - nextStart);
+    state.totalMessages = entries.length;
+
+    if (direction === "older") {
+      const reference = anchor || this.messageWindowControls?.newer || null;
+      for (let index = nextStart; index < oldStart; index += 1) {
+        const row = this.createConversationMessageRow(session, entries[index], index);
+        this.messagesElement.insertBefore(row, reference);
+      }
+    } else {
+      const reference = this.messageWindowControls?.newer || null;
+      for (let index = oldEnd; index < nextEnd; index += 1) {
+        const row = this.createConversationMessageRow(session, entries[index], index);
+        this.messagesElement.insertBefore(row, reference);
+      }
+    }
+
+    for (const child of [...this.messagesElement.children]) {
+      const index = Number(child.dataset?.agentMessageIndex);
+      if (
+        Number.isInteger(index) &&
+        (index < nextStart || index >= nextEnd)
+      ) this.releaseConversationMessageRow(child);
+    }
+    this.updateConversationWindowControls(session, entries);
+    if (direction === "newer" && state.followLatest) {
+      this.scrollMessagesToBottom();
+    } else if (anchor && anchor.isConnected && Number.isFinite(anchorTop)) {
+      const nextAnchorTop = anchor.getBoundingClientRect().top;
+      this.messagesElement.scrollTop += nextAnchorTop - anchorTop;
+      state.scrollTop = this.messagesElement.scrollTop;
+      this.messagesScroller?.updateMetrics();
+      this.messagesScroller?.refresh();
+    }
+    return true;
+  }
+
+  handleMessagesScroll() {
+    const session = this.getActiveSession();
+    if (!session || !this.messagesElement) return;
+    const state = this.messageWindowStates?.get(session.id);
+    if (!state) return;
+    const distanceFromBottom = this.messagesElement.scrollHeight -
+      this.messagesElement.scrollTop - this.messagesElement.clientHeight;
+    state.followLatest = distanceFromBottom < 48 &&
+      state.end === state.totalMessages;
+    state.scrollTop = this.messagesElement.scrollTop;
+  }
+
+  captureConversationFollow(session) {
+    if (!session || session.id !== this.activeSessionId || !this.messagesElement)
+      return false;
+    const state = this.messageWindowStates?.get(session.id);
+    const shouldFollow = this.shouldAutoScrollMessages() &&
+      (!state || state.end >= state.totalMessages);
+    if (state) state.followLatest = shouldFollow;
+    return shouldFollow;
+  }
+
+  showLatestConversation(session, resetWindowSize = false) {
+    if (!session || session.id !== this.activeSessionId) return;
+    const entries = this.getConversationMessageEntries(session);
+    const state = this.getConversationWindowState(session, entries.length);
+    if (resetWindowSize)
+      state.windowSize = Math.min(AgentSidebar.MESSAGE_WINDOW_SIZE, entries.length);
+    state.followLatest = true;
+    state.end = entries.length;
+    state.start = Math.max(0, entries.length - state.windowSize);
+  }
+
   renderMessages(container) {
     this.stopAgentWorkTicker();
-    container
-      .querySelectorAll(".agent-sidebar-markdown")
-      .forEach((element) => this.markdownRenderer.destroy(element));
+    for (const child of [...(container.children || [])])
+      this.releaseConversationMessageRow(child);
     container.replaceChildren();
+    this.messageWindowControls = null;
 
     const session = this.getActiveSession();
+    this.renderedMessageSessionId = session?.id || null;
 
     if (!session || (session.messages.length === 0 && !session.isGenerating)) {
       container.appendChild(this.createEmptyState());
       this.updateReasoningControl(session);
       return;
     }
-    this.ensureSessionSegments(session);
+    const entries = this.getConversationMessageEntries(session);
+    const state = this.getConversationWindowState(session, entries.length);
+    const controls = { sessionId: session.id, older: null, newer: null };
+    this.messageWindowControls = controls;
+    if (state.start > 0) {
+      controls.older = this.createConversationWindowButton(
+        "older",
+        session,
+        state.start,
+      );
+      container.appendChild(controls.older);
+    }
 
     let currentRunHasActivity = false;
     for (const message of session.messages) {
-      if ((message?.role === "activity" || message?.type === "activity") && message.runId === session.runId) {
-        currentRunHasActivity = true;
-      }
-      if (message?.role === "activity" || message?.type === "activity") {
-        container.appendChild(this.createActivityElement(message));
-      } else if (message?.type !== "reasoning" && message?.role !== "reasoning") {
-        container.appendChild(this.createMessageElement(message));
-      }
+      if (
+        (message?.role === "activity" || message?.type === "activity") &&
+        message.runId === session.runId
+      ) currentRunHasActivity = true;
+    }
+    for (let index = state.start; index < state.end; index += 1) {
+      const row = this.createConversationMessageRow(session, entries[index], index);
+      container.appendChild(row);
     }
 
-    if (session.isGenerating && session.workState?.runId === session.runId && !currentRunHasActivity) {
+    if (session.isGenerating && session.workState?.runId === session.runId && !currentRunHasActivity)
       this.renderTemporaryWorkHeader(session);
-    }
 
     if (session.queue && session.queue.length > 0) {
       session.queue.forEach((queuedContent, index) => {
@@ -2308,13 +2621,22 @@ class AgentSidebar extends Sidebar {
         );
       });
     }
+    const newerCount = entries.length - state.end;
+    if (newerCount > 0) {
+      controls.newer = this.createConversationWindowButton(
+        "newer",
+        session,
+        newerCount,
+      );
+      container.appendChild(controls.newer);
+    }
     this.syncAgentWorkTicker();
     this.updateReasoningControl(session);
   }
 
   removeEmptyState() {
     this.messagesElement
-      ?.querySelector(":scope > .agent-sidebar-empty-state")
+      ?.querySelector?.(":scope > .agent-sidebar-empty-state")
       ?.remove();
   }
 
@@ -3100,6 +3422,9 @@ class AgentSidebar extends Sidebar {
       this.messagesElement.scrollHeight -
       this.messagesElement.scrollTop -
       this.messagesElement.clientHeight;
+    const session = this.getActiveSession();
+    const state = session && this.messageWindowStates?.get(session.id);
+    if (state && state.end < state.totalMessages) return false;
     return distanceFromBottom < 48;
   }
 
@@ -3110,6 +3435,7 @@ class AgentSidebar extends Sidebar {
     if (!session || !session.isGenerating || session.runId !== context.runId) {
       return;
     }
+    const shouldFollow = this.captureConversationFollow(session);
 
     const message = this.getRunSegment(
       session,
@@ -3129,10 +3455,13 @@ class AgentSidebar extends Sidebar {
     this.scheduleConversationSave(session);
     const refs = this.messageElements.get(message);
     if (!refs?.row?.isConnected) {
-      this.removeEmptyState();
       if (session.id === this.activeSessionId && this.messagesElement) {
-        this.messagesElement.appendChild(this.createMessageElement(message));
-        this.scrollMessagesToBottom();
+        const rendered = this.renderConversationMessageIfVisible(
+          session,
+          message,
+          shouldFollow,
+        );
+        if (rendered && shouldFollow) this.scrollMessagesToBottom();
       }
       return;
     }
@@ -3712,12 +4041,30 @@ class AgentSidebar extends Sidebar {
     }
 
     if (renderMessages && this.messagesElement) {
+      const previousSessionId = this.renderedMessageSessionId;
+      const nextSession = this.getActiveSession();
+      const switchingSession = previousSessionId !== null &&
+        previousSessionId !== nextSession?.id;
       const shouldScroll = this.shouldAutoScrollMessages();
       const previousScrollTop = this.messagesElement.scrollTop;
+      const previousState = previousSessionId &&
+        this.messageWindowStates?.get(previousSessionId);
+      if (previousState) previousState.scrollTop = previousScrollTop;
       this.renderMessages(this.messagesElement);
-      if (shouldScroll) this.scrollMessagesToBottom();
+      if (switchingSession && nextSession) {
+        const nextState = this.messageWindowStates?.get(nextSession.id);
+        const restoredScrollTop = Number.isFinite(nextState?.scrollTop)
+          ? nextState.scrollTop
+          : nextState?.followLatest ? this.messagesElement.scrollHeight : 0;
+        this.messagesElement.scrollTop = restoredScrollTop;
+        if (nextState) nextState.scrollTop = restoredScrollTop;
+        this.messagesScroller?.updateMetrics();
+        this.messagesScroller?.refresh();
+      } else if (shouldScroll) this.scrollMessagesToBottom();
       else {
         this.messagesElement.scrollTop = previousScrollTop;
+        const state = nextSession && this.messageWindowStates?.get(nextSession.id);
+        if (state) state.scrollTop = previousScrollTop;
         this.messagesScroller?.updateMetrics();
         this.messagesScroller?.refresh();
       }
@@ -3885,6 +4232,9 @@ class AgentSidebar extends Sidebar {
     if (!this.messagesElement) return;
     const apply = () => {
       this.messagesElement.scrollTop = this.messagesElement.scrollHeight;
+      const session = this.getActiveSession();
+      const state = session && this.messageWindowStates?.get(session.id);
+      if (state) state.scrollTop = this.messagesElement.scrollTop;
       this.messagesScroller?.updateMetrics();
       this.messagesScroller?.vScroller?.setScrollRatio(1);
       this.messagesScroller?.vScroller?.refreshMetrics();
@@ -4179,6 +4529,7 @@ class AgentSidebar extends Sidebar {
     }
 
     this.sessions.splice(index, 1);
+    this.messageWindowStates?.delete?.(sessionId);
 
     if (this.sessions.length === 0) {
       this.createSession();
@@ -4375,6 +4726,7 @@ class AgentSidebar extends Sidebar {
       timestamp: this.formatTime(),
     });
 
+    this.showLatestConversation(session, true);
     this.refresh();
     this.updateSessionInfoPopover();
   }
@@ -4426,6 +4778,8 @@ class AgentSidebar extends Sidebar {
       timestamp: this.formatTime(),
     };
     session.messages.push(userMessage);
+    if (session.id === this.activeSessionId)
+      this.showLatestConversation(session, true);
     session.pendingManualContextMessage = userMessage;
     session.usage.userMessages += 1;
     session.usage.runs += 1;
@@ -4486,13 +4840,6 @@ class AgentSidebar extends Sidebar {
           message.content = agentReply;
           message.timestamp = this.formatTime();
           message.streaming = false;
-          if (session.id === this.activeSessionId && this.messagesElement) {
-            this.removeEmptyState();
-            this.messagesElement.appendChild(
-              this.createMessageElement(message),
-            );
-            this.scrollMessagesToBottom();
-          }
         }
       }
     } catch (error) {
@@ -4554,13 +4901,19 @@ class AgentSidebar extends Sidebar {
       this.scheduleConversationSave(session, true);
 
       this.processQueue(session.id);
+      const shouldFollow = session.id === this.activeSessionId &&
+        this.shouldAutoScrollMessages();
       this.refresh();
-      if (session.id === this.activeSessionId) this.scrollMessagesToBottom();
+      if (shouldFollow) this.scrollMessagesToBottom();
     }
   }
 
   destroy() {
     this.stopAgentWorkTicker();
+    this.messagesElement?.removeEventListener?.("scroll", this.messagesScrollHandler);
+    this.messagesScrollHandler = null;
+    this.messageWindowStates?.clear?.();
+    this.messageWindowControls = null;
     if (this.approvalMenuClickHandler)
       document.removeEventListener("click", this.approvalMenuClickHandler);
     if (this.reasoningOutsideClickHandler)

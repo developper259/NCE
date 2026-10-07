@@ -307,6 +307,25 @@
 
 .agent-sidebar-messages-has-reasoning { padding-bottom: 38px; }
 
+.agent-sidebar-message-window-control {
+  align-self: center;
+  flex: 0 0 auto;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agent-sidebar-message-window-control:hover {
+  color: var(--text-primary);
+  border-color: var(--border-secondary);
+}
+
 .agent-sidebar-messages,
 .agent-sidebar-messages * {
   user-select: none !important;
