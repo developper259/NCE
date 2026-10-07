@@ -19,18 +19,21 @@ export interface WorkspacePerformanceProfile {
   mode: "normal" | "large";
   indexWatcherDebounceMs: number;
   maxCachedSearchSessions: number;
+  indexProbeConcurrency: number;
 }
 export const NORMAL_WORKSPACE_PERFORMANCE_PROFILE: Readonly<WorkspacePerformanceProfile> =
   Object.freeze({
     mode: "normal",
     indexWatcherDebounceMs: DEFAULT_INDEX_WATCHER_DEBOUNCE_MS,
     maxCachedSearchSessions: 8,
+    indexProbeConcurrency: 8,
   });
 export const LARGE_WORKSPACE_PERFORMANCE_PROFILE: Readonly<WorkspacePerformanceProfile> =
   Object.freeze({
     mode: "large",
     indexWatcherDebounceMs: LARGE_WORKSPACE_INDEX_WATCHER_DEBOUNCE_MS,
     maxCachedSearchSessions: 4,
+    indexProbeConcurrency: 4,
   });
 
 export interface WorkspaceIndexStats {
@@ -172,6 +175,8 @@ export class WorkspaceIndex {
     persistedWrites: 0,
     reconciliations: 0,
   };
+  private activeFileProbes = 0;
+  private probeConcurrencyMax = 0;
   onReconciled: ((rootPath: string) => void) | null = null;
   onStatsUpdated: ((stats: WorkspaceIndexStats) => void) | null = null;
 
@@ -208,7 +213,10 @@ export class WorkspaceIndex {
   }
 
   getDiagnostics() {
-    return { ...this.coalescedWatcherEvents };
+    return {
+      ...this.coalescedWatcherEvents,
+      probeConcurrencyMax: this.probeConcurrencyMax,
+    };
   }
 
   getLifecycleStats() {
@@ -811,11 +819,15 @@ export class WorkspaceIndex {
       }
       if (!rootStats.isDirectory()) return null;
 
-      const entries: WorkspaceIndexEntry[] = [];
+      const candidates: Array<{
+        absolutePath: string;
+        name: string;
+        relativePath: string;
+      }> = [];
       let truncated = false;
       let incomplete = false;
       const walk = async (directory: string): Promise<void> => {
-        if (truncated) return;
+        if (truncated || this.activeBuildTokens.get(root) !== token) return;
         let children;
         try {
           children = await fs.readdir(directory, { withFileTypes: true });
@@ -825,7 +837,8 @@ export class WorkspaceIndex {
         }
         children.sort((left, right) => left.name.localeCompare(right.name));
         for (const child of children) {
-          if (truncated || child.isSymbolicLink()) continue;
+          if (truncated || this.activeBuildTokens.get(root) !== token) return;
+          if (child.isSymbolicLink()) continue;
           const absolutePath = path.join(directory, child.name);
           if (child.isDirectory()) {
             if (WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(child.name)) continue;
@@ -834,34 +847,72 @@ export class WorkspaceIndex {
           }
           if (!child.isFile() || path.extname(child.name).toLowerCase() === ".asar")
             continue;
-          if (entries.length >= MAX_WORKSPACE_INDEX_ENTRIES) {
+          if (candidates.length >= MAX_WORKSPACE_INDEX_ENTRIES) {
             truncated = true;
             break;
           }
-          try {
-            const stats = await fs.lstat(absolutePath);
-            if (!stats.isFile() || stats.isSymbolicLink()) continue;
-            entries.push({
-              relativePath: path.relative(root, absolutePath)
-                .split(path.sep).join("/"),
-              name: child.name,
-              extension: path.extname(child.name).toLowerCase(),
-              size: stats.size,
-              mtimeMs: stats.mtimeMs,
-              type: "file",
-              openable: await isOpenableFileAtPath(absolutePath, stats.size),
-            });
-          } catch (error: any) {
-            if (error?.code !== "ENOENT") incomplete = true;
-          }
+          candidates.push({
+            absolutePath,
+            name: child.name,
+            relativePath: path.relative(root, absolutePath)
+              .split(path.sep).join("/"),
+          });
         }
       };
       await walk(root);
+      if (this.activeBuildTokens.get(root) !== token) return null;
+
+      const probedEntries: Array<WorkspaceIndexEntry | null> =
+        Array.from({ length: candidates.length }, () => null);
+      let nextCandidate = 0;
+      const probe = async (): Promise<void> => {
+        while (this.activeBuildTokens.get(root) === token) {
+          const candidateIndex = nextCandidate++;
+          if (candidateIndex >= candidates.length) return;
+          const candidate = candidates[candidateIndex];
+          this.activeFileProbes += 1;
+          this.probeConcurrencyMax = Math.max(
+            this.probeConcurrencyMax,
+            this.activeFileProbes,
+          );
+          try {
+            const stats = await fs.lstat(candidate.absolutePath);
+            if (this.activeBuildTokens.get(root) !== token) return;
+            if (!stats.isFile() || stats.isSymbolicLink()) continue;
+            const openable = await isOpenableFileAtPath(
+              candidate.absolutePath,
+              stats.size,
+            );
+            if (this.activeBuildTokens.get(root) !== token) return;
+            probedEntries[candidateIndex] = {
+              relativePath: candidate.relativePath,
+              name: candidate.name,
+              extension: path.extname(candidate.name).toLowerCase(),
+              size: stats.size,
+              mtimeMs: stats.mtimeMs,
+              type: "file",
+              openable,
+            };
+          } catch (error: any) {
+            if (error?.code !== "ENOENT") incomplete = true;
+          } finally {
+            this.activeFileProbes -= 1;
+          }
+        }
+      };
+      const concurrency = this.getPerformanceProfile(root).indexProbeConcurrency;
+      await Promise.all(Array.from(
+        { length: Math.min(concurrency, candidates.length) },
+        () => probe(),
+      ));
       if (this.activeBuildTokens.get(root) !== token) return null;
       if (truncated || incomplete) {
         await this.invalidate(root);
         return null;
       }
+      const entries = probedEntries.filter(
+        (entry): entry is WorkspaceIndexEntry => entry !== null,
+      );
       const snapshot = this.createSnapshot(root, entries);
       if (!snapshot) return null;
       this.invalidRoots.delete(root);

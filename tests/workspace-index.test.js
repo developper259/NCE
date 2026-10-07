@@ -191,6 +191,7 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
       mode: "normal",
       indexWatcherDebounceMs: 150,
       maxCachedSearchSessions: 8,
+      indexProbeConcurrency: 8,
     });
 
     const thresholdEntries = Array.from({
@@ -248,6 +249,7 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
     assert.equal(index.getWatcherDebounceMs(root), 500);
     assert.equal(index.getPerformanceProfile(root).mode, "large");
     assert.equal(index.getPerformanceProfile(root).maxCachedSearchSessions, 4);
+    assert.equal(index.getPerformanceProfile(root).indexProbeConcurrency, 4);
 
     const beforeWatcher = index.getDiagnostics();
     const addedPath = path.join(root, "added.js");
@@ -266,10 +268,211 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
     assert.equal(index.getWatcherDebounceMs(root), 150);
     assert.equal(index.getPerformanceProfile(root).mode, "normal");
     assert.equal(index.getPerformanceProfile(root).maxCachedSearchSessions, 8);
+    assert.equal(index.getPerformanceProfile(root).indexProbeConcurrency, 8);
     assert.equal(updates.some((stats) => stats.largeWorkspaceMode), true);
     assert.equal(updates.at(-1).largeWorkspaceMode, false);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex bounds file probes and keeps deterministic order in each profile", async () => {
+  const roots = [];
+  const createRoot = async (prefix) => {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), prefix));
+    roots.push(root);
+    await Promise.all(Array.from({ length: 24 }, (_, index) =>
+      fsp.writeFile(path.join(root, `file-${String(index).padStart(2, "0")}.txt`), "text\n"),
+    ));
+    return root;
+  };
+  const probeWithDelay = async (index, root, expectedPeak) => {
+    const active = { count: 0, max: 0 };
+    const originalOpen = fsp.open;
+    fsp.open = async (...args) => {
+      active.count += 1;
+      active.max = Math.max(active.max, active.count);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      try {
+        return await originalOpen.apply(fsp, args);
+      } finally {
+        active.count -= 1;
+      }
+    };
+    try {
+      const snapshot = await index.build(root);
+      assert.ok(snapshot);
+      assert.equal(active.max, expectedPeak);
+      assert.equal(index.getDiagnostics().probeConcurrencyMax, expectedPeak);
+      assert.deepEqual(snapshot.entries.map((entry) => entry.relativePath),
+        Array.from({ length: 24 }, (_, fileIndex) =>
+          `file-${String(fileIndex).padStart(2, "0")}.txt`));
+    } finally {
+      fsp.open = originalOpen;
+    }
+  };
+
+  const normalRoot = await createRoot("nce-workspace-probe-normal-");
+  try {
+    await probeWithDelay(new WorkspaceIndex(), normalRoot, 8);
+
+    const largeRoot = await createRoot("nce-workspace-probe-large-");
+    const largeIndex = new WorkspaceIndex();
+    const thresholdEntries = Array.from({
+      length: LARGE_WORKSPACE_MODE_THRESHOLDS.files * LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore,
+    }, (_, entryIndex) => {
+      const name = `cached-${entryIndex}.js`;
+      return {
+        relativePath: name,
+        name,
+        extension: ".js",
+        size: 0,
+        mtimeMs: 1,
+        type: "file",
+        openable: true,
+      };
+    });
+    assert.equal(largeIndex.primeFromScan(largeRoot, thresholdEntries), true);
+    await largeIndex.flush(largeRoot);
+    assert.equal(largeIndex.getPerformanceProfile(largeRoot).mode, "large");
+    await probeWithDelay(largeIndex, largeRoot, 4);
+  } finally {
+    for (const root of roots) await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex tolerates vanished files and stops a cancelled probe pool", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-probe-cancel-"));
+  try {
+    await Promise.all(Array.from({ length: 24 }, (_, index) =>
+      fsp.writeFile(path.join(root, `file-${String(index).padStart(2, "0")}.txt`), "text\n"),
+    ));
+
+    const missingPath = path.join(root, "file-00.txt");
+    const originalLstat = fsp.lstat;
+    fsp.lstat = async (target, ...args) => {
+      if (path.resolve(String(target)) === missingPath) {
+        const error = new Error("file disappeared");
+        error.code = "ENOENT";
+        throw error;
+      }
+      return originalLstat.call(fsp, target, ...args);
+    };
+    try {
+      const snapshot = await new WorkspaceIndex().build(root);
+      assert.ok(snapshot);
+      assert.equal(snapshot.entries.some((entry) => entry.relativePath === "file-00.txt"), false);
+      assert.equal(snapshot.entries.length, 23);
+    } finally {
+      fsp.lstat = originalLstat;
+    }
+
+    const inaccessiblePath = path.join(root, "file-01.txt");
+    fsp.lstat = async (target, ...args) => {
+      if (path.resolve(String(target)) === inaccessiblePath) {
+        const error = new Error("permission denied");
+        error.code = "EACCES";
+        throw error;
+      }
+      return originalLstat.call(fsp, target, ...args);
+    };
+    try {
+      assert.equal(await new WorkspaceIndex().build(root), null);
+    } finally {
+      fsp.lstat = originalLstat;
+    }
+
+    const index = new WorkspaceIndex();
+    const originalOpen = fsp.open;
+    let notifyOpen;
+    const firstOpen = new Promise((resolve) => { notifyOpen = resolve; });
+    let releaseOpen;
+    const openGate = new Promise((resolve) => { releaseOpen = resolve; });
+    let started = 0;
+    fsp.open = async (...args) => {
+      started += 1;
+      notifyOpen();
+      await openGate;
+      return originalOpen.apply(fsp, args);
+    };
+    const building = index.build(root);
+    try {
+      await firstOpen;
+      index.handleWatcherEvent(root, "rename", path.join(root, "file-01.txt"));
+      releaseOpen();
+      assert.equal(await building, null);
+      assert.ok(started <= 8);
+      assert.equal(index.getLifecycleStats().activeBuildTokens, 0);
+    } finally {
+      releaseOpen();
+      fsp.open = originalOpen;
+      await index.flush(root);
+    }
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceIndex release and invalidate cancel active probes before writing stale data", async () => {
+  const roots = [];
+  const makeRoot = async () => {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-probe-lifecycle-"));
+    roots.push(root);
+    await Promise.all(Array.from({ length: 24 }, (_, index) =>
+      fsp.writeFile(path.join(root, `file-${String(index).padStart(2, "0")}.txt`), "text\n"),
+    ));
+    return root;
+  };
+  const startBlockedBuild = async (index, root) => {
+    const originalOpen = fsp.open;
+    let notifyOpen;
+    const firstOpen = new Promise((resolve) => { notifyOpen = resolve; });
+    let releaseOpen;
+    const openGate = new Promise((resolve) => { releaseOpen = resolve; });
+    fsp.open = async (...args) => {
+      notifyOpen();
+      await openGate;
+      return originalOpen.apply(fsp, args);
+    };
+    const building = index.build(root);
+    await firstOpen;
+    return {
+      building,
+      restore: () => { fsp.open = originalOpen; },
+      releaseOpen,
+    };
+  };
+
+  try {
+    const releaseRoot = await makeRoot();
+    const releaseIndex = new WorkspaceIndex();
+    const originalSnapshot = await releaseIndex.build(releaseRoot);
+    assert.ok(originalSnapshot);
+    await releaseIndex.flush(releaseRoot);
+    const cachePath = releaseIndex.getCacheFilePath(releaseRoot);
+    const persistedBeforeRelease = JSON.parse(await fsp.readFile(cachePath, "utf8"));
+
+    const releaseBuild = await startBlockedBuild(releaseIndex, releaseRoot);
+    await releaseIndex.release(releaseRoot);
+    releaseBuild.releaseOpen();
+    releaseBuild.restore();
+    assert.equal(await releaseBuild.building, null);
+    const persistedAfterRelease = JSON.parse(await fsp.readFile(cachePath, "utf8"));
+    assert.equal(persistedAfterRelease.generatedAt, persistedBeforeRelease.generatedAt);
+
+    const invalidateRoot = await makeRoot();
+    const invalidateIndex = new WorkspaceIndex();
+    const invalidateBuild = await startBlockedBuild(invalidateIndex, invalidateRoot);
+    const invalidateCachePath = invalidateIndex.getCacheFilePath(invalidateRoot);
+    await invalidateIndex.invalidate(invalidateRoot);
+    invalidateBuild.releaseOpen();
+    invalidateBuild.restore();
+    assert.equal(await invalidateBuild.building, null);
+    await invalidateIndex.flush(invalidateRoot);
+    assert.equal(await fsp.stat(invalidateCachePath).catch(() => null), null);
+    assert.equal(invalidateIndex.getLifecycleStats().activeBuildTokens, 0);
+  } finally {
+    for (const root of roots) await fsp.rm(root, { recursive: true, force: true });
   }
 });
 
