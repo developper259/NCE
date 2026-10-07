@@ -17,10 +17,17 @@ function element(tag = "div") {
       add(...names) { names.forEach((name) => this.values.add(name)); },
       remove(...names) { names.forEach((name) => this.values.delete(name)); },
       contains(name) { return this.values.has(name); },
+      toggle(name, force) {
+        const shouldAdd = force === undefined ? !this.values.has(name) : force;
+        if (shouldAdd) this.values.add(name);
+        else this.values.delete(name);
+        return shouldAdd;
+      },
     },
     appendChild(child) { this.children.push(child); child.parentElement = this; return child; },
     replaceChildren(...children) { this.children = children; },
     addEventListener() {},
+    setAttribute(name, value) { this[name] = String(value); },
     removeAttribute(name) {
       if (name.startsWith("data-")) delete this.dataset[name.slice(5)];
     },
@@ -29,6 +36,7 @@ function element(tag = "div") {
 }
 
 function visibleText(node) {
+  if (node.hidden) return "";
   return [node.textContent, ...node.children.map(visibleText)].join("");
 }
 

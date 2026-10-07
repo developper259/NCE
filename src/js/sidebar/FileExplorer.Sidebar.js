@@ -15,6 +15,16 @@ class FileExplorer extends Sidebar {
     this.pendingScrollTop = 0;
     this.visibleRows = [];
     this.visibleRowByPath = new Map();
+    this.shell = null;
+    this.projectHeader = null;
+    this.projectArrow = null;
+    this.projectTitle = null;
+    this.treeEmptyState = null;
+    this.treeEmptyMessage = null;
+    this.openFolderButton = null;
+    this.treeViewport = null;
+    this.treeLayer = null;
+    this.treeLayerFast = null;
     this.virtualScroller = typeof FileExplorerScroller === "function"
       ? new FileExplorerScroller(editor, this) : null;
     this.scrollSaveTimer = null;
@@ -346,15 +356,35 @@ class FileExplorer extends Sidebar {
   }
 
   render() {
-    this.rebuildVisibleRows();
-    this.treeViewport = null;
-    this.treeLayer = null;
-    this.treeLayerFast = null;
+    this.ensureShell();
     if (this.activeFilePath) {
       if (!this.editor.tabManager.getFileByPath(this.activeFilePath)) {
         this.activeFilePath = null;
       }
     }
+
+    this.rebuildVisibleRows();
+    this.projectTitle.textContent = this.projectName
+      ? this.projectName.toUpperCase()
+      : "NO FOLDER OPENED";
+    this.projectHeader.setAttribute("aria-expanded", String(this.projectExpanded));
+    this.projectArrow.classList.toggle("expanded", this.projectExpanded);
+    this.projectArrow.setAttribute("aria-hidden", "true");
+    this.treeViewport.hidden = !this.projectExpanded;
+
+    if (!this.rootPath) {
+      this.renderNoFolderState();
+    } else if (this.files.length === 0) {
+      this.renderEmptyFolderState();
+    } else {
+      this.treeEmptyState.hidden = true;
+      this.treeLayer.hidden = false;
+    }
+    return this.shell;
+  }
+
+  ensureShell() {
+    if (this.shell) return this.shell;
 
     const container = document.createElement("div");
     container.className = "file-explorer-container";
@@ -366,89 +396,94 @@ class FileExplorer extends Sidebar {
 
     const projectHeader = document.createElement("div");
     projectHeader.className = "sidebar-project-header";
-
+    projectHeader.setAttribute("role", "button");
+    projectHeader.setAttribute("aria-expanded", String(this.projectExpanded));
     const arrow = document.createElement("i");
-    arrow.className = `folder-arrow fi fi-rr-angle-small-right ${this.projectExpanded ? "expanded" : ""}`;
+    arrow.className = "folder-arrow fi fi-rr-angle-small-right";
     projectHeader.appendChild(arrow);
-
-    const titleSpan = document.createElement("span");
-    titleSpan.textContent = this.projectName
-      ? this.projectName.toUpperCase()
-      : "NO FOLDER OPENED";
-    projectHeader.appendChild(titleSpan);
-
+    const title = document.createElement("span");
+    projectHeader.appendChild(title);
     projectHeader.addEventListener("click", () => {
       this.projectExpanded = !this.projectExpanded;
       this.refresh();
     });
+    projectHeader.addEventListener("contextmenu", (event) => {
+      if (!this.rootPath) return;
+      event.preventDefault();
+      this.editor.contextMenuManager.openContextMenu(
+        "file-explorer-project",
+        null,
+      );
+    });
+    container.appendChild(projectHeader);
 
-    projectHeader.addEventListener("contextmenu", (e) => {
-      if (this.rootPath) {
-        e.preventDefault();
+    const viewport = document.createElement("div");
+    viewport.className = "file-tree file-tree-viewport";
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state-message";
+    const emptyMessage = document.createElement("span");
+    emptyState.appendChild(emptyMessage);
+    const openFolderButton = document.createElement("button");
+    openFolderButton.className = "open-folder-btn";
+    openFolderButton.textContent = "Open Folder";
+    openFolderButton.addEventListener("click", () => this.selectFolder());
+    emptyState.appendChild(openFolderButton);
+    viewport.appendChild(emptyState);
+
+    const layer = document.createElement("div");
+    layer.className = "file-tree-render-layer";
+    viewport.appendChild(layer);
+    viewport.addEventListener("contextmenu", (event) => {
+      if (!event.target.closest?.(".file-item") && this.rootPath) {
+        event.preventDefault();
         this.editor.contextMenuManager.openContextMenu(
-          "file-explorer-project",
+          "file-explorer-background",
           null,
         );
       }
     });
+    viewport.addEventListener("click", (event) => {
+      const item = event.target.closest?.(".file-item");
+      if (!item || item.classList.contains("editing")) return;
+      const file = this.visibleRowByPath?.get(item.dataset.path);
+      if (!file) return;
+      event.stopPropagation();
+      if (file.type === "folder") this.toggleFolder(file.path);
+      else this.openFile(file.path);
+    });
+    viewport.addEventListener("contextmenu", (event) => {
+      const item = event.target.closest?.(".file-item");
+      if (!item) return;
+      const file = this.visibleRowByPath?.get(item.dataset.path);
+      if (!file) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.editor.contextMenuManager.openContextMenu(
+        file.type === "folder" ? "file-explorer-folder" : "file-explorer-file",
+        file,
+      );
+    });
+    container.appendChild(viewport);
 
-    container.appendChild(projectHeader);
-
-    if (this.projectExpanded) {
-      const treeContainer = document.createElement("div");
-      treeContainer.className = "file-tree file-tree-viewport";
-
-      treeContainer.addEventListener("contextmenu", (e) => {
-        if (!e.target.closest?.(".file-item") && this.rootPath) {
-          e.preventDefault();
-          this.editor.contextMenuManager.openContextMenu(
-            "file-explorer-background",
-            null,
-          );
-        }
-      });
-
-      if (!this.rootPath) {
-        this.renderNoFolderState(treeContainer);
-      } else if (this.files.length === 0) {
-        this.renderEmptyFolderState(treeContainer);
-      } else {
-        const layer = document.createElement("div");
-        layer.className = "file-tree-render-layer";
-        treeContainer.appendChild(layer);
-        treeContainer.addEventListener("click", (event) => {
-          const item = event.target.closest?.(".file-item");
-          if (!item || item.classList.contains("editing")) return;
-          const file = this.visibleRowByPath?.get(item.dataset.path);
-          if (!file) return;
-          event.stopPropagation();
-          if (file.type === "folder") this.toggleFolder(file.path);
-          else this.openFile(file.path);
-        });
-        treeContainer.addEventListener("contextmenu", (event) => {
-          const item = event.target.closest?.(".file-item");
-          if (!item) return;
-          const file = this.visibleRowByPath?.get(item.dataset.path);
-          if (!file) return;
-          event.preventDefault();
-          event.stopPropagation();
-          this.editor.contextMenuManager.openContextMenu(
-            file.type === "folder" ? "file-explorer-folder" : "file-explorer-file", file,
-          );
-        });
-        this.treeViewport = treeContainer;
-        this.treeLayer = layer;
-        this.treeLayerFast = this.editor.domManager.wrapFastNode(layer);
-      }
-      container.appendChild(treeContainer);
-    }
-
+    this.shell = container;
+    this.projectHeader = projectHeader;
+    this.projectArrow = arrow;
+    this.projectTitle = title;
+    this.treeEmptyState = emptyState;
+    this.treeEmptyMessage = emptyMessage;
+    this.openFolderButton = openFolderButton;
+    this.treeViewport = viewport;
+    this.treeLayer = layer;
+    this.treeLayerFast = this.editor.domManager.wrapFastNode(layer);
     return container;
   }
 
   refresh() {
     this.pendingScrollTop = this.virtualScroller?.scrollTop ?? this.pendingScrollTop;
-    super.refresh();
+    const content = this.render();
+    if (this.isOpen && this.element && content.parentNode !== this.element) {
+      this.element.replaceChildren(content);
+    }
     if (this.isOpen && this.virtualScroller) {
       this.virtualScroller.attach(this.treeViewport, this.treeLayer);
       this.virtualScroller.scrollTop = this.pendingScrollTop;
@@ -502,24 +537,18 @@ class FileExplorer extends Sidebar {
     else domManager.replaceChildren(this.treeLayer, fragment);
   }
 
-  renderNoFolderState(container) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state-message";
-    emptyState.textContent = "You have not yet opened a folder.";
-
-    const openBtn = document.createElement("button");
-    openBtn.className = "open-folder-btn";
-    openBtn.textContent = "Open Folder";
-    openBtn.addEventListener("click", this.selectFolder.bind(this));
-    emptyState.appendChild(openBtn);
-    container.appendChild(emptyState);
+  renderNoFolderState() {
+    this.treeEmptyMessage.textContent = "You have not yet opened a folder.";
+    this.openFolderButton.hidden = false;
+    this.treeEmptyState.hidden = false;
+    this.treeLayer.hidden = true;
   }
 
-  renderEmptyFolderState(container) {
-    const emptyState = document.createElement("div");
-    emptyState.className = "empty-state-message empty-folder-message";
-    emptyState.textContent = "Folder empty";
-    container.appendChild(emptyState);
+  renderEmptyFolderState() {
+    this.treeEmptyMessage.textContent = "Folder empty";
+    this.openFolderButton.hidden = true;
+    this.treeEmptyState.hidden = false;
+    this.treeLayer.hidden = true;
   }
 
   createFileRow(file, depth) {

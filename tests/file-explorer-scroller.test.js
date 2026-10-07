@@ -126,6 +126,185 @@ test("row height remains synchronized with CSS", () => {
   assert.match(css, /--file-explorer-row-height:\s*22px/);
 });
 
+test("File Explorer keeps one shell, viewport, layer and delegated listener set", async () => {
+  const created = [];
+  class Element {
+    constructor(tagName) {
+      this.tagName = tagName;
+      this.children = [];
+      this.dataset = {};
+      this.style = {};
+      this.listeners = new Map();
+      this.attributes = new Map();
+      this.replaceChildrenCount = 0;
+      this.classList = {
+        values: new Set(),
+        add: (...values) => values.forEach((value) => this.classList.values.add(value)),
+        remove: (...values) => values.forEach((value) => this.classList.values.delete(value)),
+        contains: (value) => this.classList.values.has(value),
+        toggle: (value, force) => {
+          const enabled = force === undefined ? !this.classList.values.has(value) : force;
+          if (enabled) this.classList.values.add(value);
+          else this.classList.values.delete(value);
+          return enabled;
+        },
+      };
+      created.push(this);
+    }
+    set className(value) { this._className = value; }
+    get className() { return this._className || ""; }
+    setAttribute(name, value) { this.attributes.set(name, String(value)); }
+    appendChild(child) {
+      if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1);
+      this.children.push(child);
+      child.parentNode = this;
+      return child;
+    }
+    replaceChildren(...children) {
+      this.replaceChildrenCount += 1;
+      for (const child of this.children) child.parentNode = null;
+      this.children = [];
+      for (const child of children) this.appendChild(child);
+    }
+    addEventListener(type, listener) {
+      const handlers = this.listeners.get(type) || [];
+      handlers.push(listener);
+      this.listeners.set(type, handlers);
+    }
+  }
+  const document = { createElement: (tagName) => new Element(tagName) };
+  const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
+  const FileExplorer = loadGlobal("src/js/sidebar/FileExplorer.Sidebar.js", "FileExplorer", {
+    Sidebar: class {}, FileOperations: class {}, NCEPath, document,
+    window: { api: {} },
+  });
+  const explorer = Object.create(FileExplorer.prototype);
+  const host = new Element("menu");
+  const virtualCalls = [];
+  Object.assign(explorer, {
+    activeFilePath: null,
+    projectName: "project",
+    projectExpanded: true,
+    files: [{
+      name: "src", type: "folder", path: "/project/src", expanded: false,
+      children: [{ name: "a.js", type: "file", path: "/project/src/a.js" }],
+    }],
+    rootPath: "/project",
+    pendingScrollTop: 0,
+    isOpen: true,
+    element: host,
+    virtualScroller: {
+      scrollTop: 0,
+      attach(viewport, layer) { virtualCalls.push(["attach", viewport, layer]); },
+      invalidateRows() { virtualCalls.push(["invalidate"]); },
+    },
+    editor: {
+      tabManager: { getFileByPath: () => true },
+      domManager: { wrapFastNode: (node) => ({ node }) },
+      contextMenuManager: { openContextMenu() {} },
+    },
+  });
+
+  explorer.refresh();
+  const shell = explorer.shell;
+  const viewport = explorer.treeViewport;
+  const layer = explorer.treeLayer;
+  const header = explorer.projectHeader;
+  const button = explorer.openFolderButton;
+  const nodeCount = created.length;
+  assert.equal(nodeCount - 1, 10, "the Explorer shell is built from ten DOM nodes");
+  const listenerCounts = [
+    header.listeners.get("click").length,
+    header.listeners.get("contextmenu").length,
+    viewport.listeners.get("click").length,
+    viewport.listeners.get("contextmenu").length,
+    button.listeners.get("click").length,
+  ];
+  assert.equal(host.children[0], shell);
+  assert.deepEqual(listenerCounts, [1, 1, 1, 2, 1]);
+
+  header.listeners.get("click")[0]();
+  assert.equal(explorer.treeViewport, viewport);
+  assert.equal(viewport.hidden, true);
+  header.listeners.get("click")[0]();
+  await explorer.toggleFolder("/project/src");
+  assert.equal(explorer.visibleRows.length, 2);
+
+  explorer.files[0].name = "renamed";
+  explorer.refresh();
+  explorer.files.push({ name: "created.js", type: "file", path: "/project/created.js" });
+  explorer.refresh();
+  explorer.files.pop();
+  explorer.refresh();
+  explorer.rootPath = "/next";
+  explorer.projectName = "next";
+  explorer.files = [];
+  explorer.refresh();
+  assert.equal(explorer.treeEmptyMessage.textContent, "Folder empty");
+  explorer.rootPath = "";
+  explorer.projectName = "";
+  explorer.refresh();
+  assert.equal(explorer.treeEmptyMessage.textContent, "You have not yet opened a folder.");
+
+  assert.equal(explorer.shell, shell);
+  assert.equal(explorer.treeViewport, viewport);
+  assert.equal(explorer.treeLayer, layer);
+  assert.equal(host.children[0], shell);
+  assert.equal(host.replaceChildrenCount, 1);
+  assert.equal(created.length, nodeCount);
+  assert.deepEqual([
+    header.listeners.get("click").length,
+    header.listeners.get("contextmenu").length,
+    viewport.listeners.get("click").length,
+    viewport.listeners.get("contextmenu").length,
+    button.listeners.get("click").length,
+  ], listenerCounts);
+  assert.ok(virtualCalls.filter(([name]) => name === "invalidate").length >= 7);
+});
+
+test("SidebarManager does not replace an unchanged File Explorer shell", () => {
+  class Node {}
+  const SidebarManager = loadGlobal(
+    "src/js/manager/SidebarManager.js",
+    "SidebarManager",
+    { Node, USERCONFIG_SIDEBAR_MENUS: [] },
+  );
+  const content = new Node();
+  const container = {
+    classList: { toggle() {} },
+    childNodes: [],
+    firstChild: null,
+    replaceChildrenCount: 0,
+    replaceChildren(node) {
+      this.replaceChildrenCount += 1;
+      if (this.firstChild) this.firstChild.parentNode = null;
+      this.firstChild = node;
+      this.childNodes = [node];
+      node.parentNode = this;
+    },
+  };
+  const manager = Object.create(SidebarManager.prototype);
+  Object.assign(manager, {
+    leftMenuContainer: container,
+    leftScroller: null,
+    editor: { fileExplorer: { virtualScroller: { suspend() {}, attach() {}, resume() {} } } },
+  });
+  let renders = 0;
+  const menu = {
+    id: "file-explorer",
+    position: "left",
+    render() {
+      renders += 1;
+      return content;
+    },
+  };
+  manager.renderMenuContent(menu);
+  manager.renderMenuContent(menu);
+  assert.equal(renders, 2);
+  assert.equal(container.replaceChildrenCount, 1);
+  assert.equal(container.firstChild, content);
+});
+
 test("twenty thousand visible files mount only viewport rows", () => {
   const element = () => {
     const node = {

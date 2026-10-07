@@ -616,7 +616,13 @@ class SidebarManager {
       const content = menu.render();
 
       if (content instanceof Node) {
-        container.replaceChildren(content);
+        if (
+          content.parentNode !== container ||
+          container.childNodes?.length !== 1 ||
+          container.firstChild !== content
+        ) {
+          container.replaceChildren(content);
+        }
       } else {
         container.innerHTML = content;
       }
