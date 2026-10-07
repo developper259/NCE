@@ -67,7 +67,7 @@ test("suspended scrollers stay unmeasured during active and targeted refreshes",
   assert.equal(scrollers.slice(2).reduce((sum, scroller) => sum + scroller.metricReads, 0), 0);
 });
 
-test("activation measures one resumed scroller and explicit full refresh measures all", () => {
+test("activation measures one resumed scroller and full refresh skips suspended views", () => {
   const { manager, addScroller } = createManager();
   const scrollers = Array.from({ length: 10 }, addScroller);
   manager.deactivateScroller(scrollers[0]);
@@ -77,7 +77,31 @@ test("activation measures one resumed scroller and explicit full refresh measure
   assert.equal(scrollers[0].metricReads, 3);
   assert.equal(scrollers.slice(1).reduce((sum, scroller) => sum + scroller.metricReads, 0), 0);
 
+  manager.deactivateScroller(scrollers[0]);
   for (const scroller of scrollers) scroller.metricReads = 0;
-  assert.equal(manager.refreshAll(), 10);
-  assert.deepEqual(scrollers.map((scroller) => scroller.metricReads), Array(10).fill(3));
+  assert.equal(manager.refreshAll(), 9);
+  assert.deepEqual(scrollers.map((scroller) => scroller.metricReads), [
+    0, ...Array(9).fill(3),
+  ]);
+  assert.equal(scrollers[0]._metricsDirty, true);
+});
+
+test("hidden invalidations coalesce until resume performs one metric refresh", () => {
+  const { manager, addScroller } = createManager();
+  const scroller = addScroller();
+  manager.deactivateScroller(scroller);
+  scroller.metricReads = 0;
+  scroller.refreshCount = 0;
+
+  assert.equal(manager.invalidateScroller(scroller), false);
+  assert.equal(manager.invalidateScroller(scroller), false);
+  assert.equal(manager.refreshAll(), 0);
+  assert.equal(scroller.metricReads, 0);
+  assert.equal(scroller.refreshCount, 0);
+  assert.equal(scroller._metricsDirty, true);
+
+  assert.equal(manager.activateScroller(scroller), true);
+  assert.equal(scroller.metricReads, 3);
+  assert.equal(scroller.refreshCount, 1);
+  assert.equal(scroller._metricsDirty, false);
 });

@@ -27,11 +27,13 @@ class ScrollerManager {
     let refreshed = 0;
     for (const scroller of [...this.scrollers]) {
       scroller._metricsDirty = true;
-      if (this.refreshScroller(scroller, {
-        forceMetrics: true,
-        includeSuspended: true,
-        measureInactive: true,
-      })) refreshed += 1;
+      if (scroller._suspended) {
+        this.editor?.performanceMetrics?.increment(
+          "scrollers.skippedHiddenRefreshes",
+        );
+        continue;
+      }
+      if (this.refreshScroller(scroller, { forceMetrics: true })) refreshed += 1;
     }
     return refreshed;
   }
