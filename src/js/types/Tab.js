@@ -394,7 +394,7 @@ class FileNode extends Tab {
         this.mergeConflictCount = 0;
         this.setIsSaved(true);
         this.editor.historyController?.markSaved(this);
-        await this.clearRecoverySnapshot();
+        await this.clearRecoverySnapshot({ committed: true, editVersion: this.editVersion });
       } else {
         this.scheduleAutoSave();
       }
@@ -436,7 +436,7 @@ class FileNode extends Tab {
       this.mergeConflictCount = 0;
       this.setIsSaved(true);
       this.editor.historyController?.markSaved(this);
-      await this.clearRecoverySnapshot();
+      await this.clearRecoverySnapshot({ committed: true, editVersion: this.editVersion });
     } else {
       this.setIsSaved(false);
     }
@@ -696,7 +696,7 @@ class FileNode extends Tab {
     }
   }
 
-  async clearRecoverySnapshot() {
+  async clearRecoverySnapshot({ committed = false, editVersion = this.editVersion } = {}) {
     this.cancelRecoverySnapshot();
     if (this.recoveryFlushPromise) await this.recoveryFlushPromise.catch(() => false);
     const records = [
@@ -705,10 +705,24 @@ class FileNode extends Tab {
     ].filter((record, index, all) => record.id &&
       all.findIndex((candidate) => candidate.id === record.id && candidate.root === record.root) === index);
     for (const record of records) {
+      let markedCommitted = false;
+      if (committed && typeof this.editor.api?.markRecoverySnapshotCommitted === "function") {
+        try {
+          markedCommitted = await this.editor.api.markRecoverySnapshotCommitted(
+            record.root || null,
+            record.id,
+            editVersion,
+            this.diskFingerprint || this.mergeBaseFingerprint || null,
+          ) === true;
+        } catch { /* A successful disk save remains successful if recovery cleanup fails. */ }
+        this.editor.performanceMetrics?.increment(markedCommitted
+          ? "recovery.snapshot.staleMarked"
+          : "recovery.snapshot.staleMarkFailures");
+      }
       const deleted = await this.deleteRecoveryRecord(record.root, record.id);
       if (!deleted) {
         this.editor.performanceMetrics?.increment("recovery.snapshot.deleteFailures");
-        return false;
+        if (!(committed && markedCommitted)) return false;
       }
       if (this.recoverySnapshotId === record.id &&
           this.recoveryStoreRoot === record.root)
@@ -888,7 +902,7 @@ class FileNode extends Tab {
       this.setIsSaved(true);
       this.cancelAutoSave();
       this.editor.historyController?.markSaved(this);
-      await this.clearRecoverySnapshot();
+      await this.clearRecoverySnapshot({ committed: true, editVersion: version }).catch(() => false);
       this.editor.tabManager.refresh();
       return { saved: true, result: saved };
     } catch (error) {
@@ -923,7 +937,7 @@ class FileNode extends Tab {
         this.setIsSaved(true);
         this.cancelAutoSave();
         this.editor.historyController?.markSaved(this);
-        await this.clearRecoverySnapshot();
+        await this.clearRecoverySnapshot({ committed: true, editVersion: version }).catch(() => false);
       }
       this.editor.tabManager.refresh();
       return true;
@@ -978,7 +992,7 @@ class FileNode extends Tab {
       this.setIsSaved(true);
       this.cancelAutoSave();
       this.editor.historyController?.markSaved(this);
-      await this.clearRecoverySnapshot();
+      await this.clearRecoverySnapshot({ committed: true, editVersion: version }).catch(() => false);
     }
     const language = await this.editor.highlightController.detectLanguage(
       this.name,

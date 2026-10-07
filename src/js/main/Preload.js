@@ -113,6 +113,14 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("FileManager:readRecoverySnapshot", workspaceRoot, id),
   deleteRecoverySnapshot: (workspaceRoot, id) =>
     ipcRenderer.invoke("FileManager:deleteRecoverySnapshot", workspaceRoot, id),
+  markRecoverySnapshotCommitted: (workspaceRoot, id, editVersion, diskFingerprint) =>
+    ipcRenderer.invoke(
+      "FileManager:markRecoverySnapshotCommitted",
+      workspaceRoot,
+      id,
+      editVersion,
+      diskFingerprint,
+    ),
   confirmRecoverySnapshot: (snapshot) =>
     ipcRenderer.invoke("FileManager:confirmRecoverySnapshot", snapshot),
 

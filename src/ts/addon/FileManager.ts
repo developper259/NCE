@@ -456,6 +456,11 @@ export class FileManager {
         (await this.getRecoveryStore(root))?.delete(id) || false,
     );
     ipcMain.handle(
+      "FileManager:markRecoverySnapshotCommitted",
+      async (_event, root: string | null, id: string, editVersion: number, diskFingerprint: string | null) =>
+        (await this.getRecoveryStore(root))?.markCommitted(id, editVersion, diskFingerprint) || false,
+    );
+    ipcMain.handle(
       "FileManager:confirmRecoverySnapshot",
       async (_event, snapshot: { displayName?: unknown; timestamp?: unknown; diskChanged?: unknown; diskMissing?: unknown }) =>
         this.confirmRecoverySnapshot(snapshot),

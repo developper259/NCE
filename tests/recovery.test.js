@@ -97,6 +97,73 @@ test("path recovery records report disk changes without touching the original fi
   }
 });
 
+test("committed recovery markers suppress snapshots after a failed delete across restart", async () => {
+  const root = await temporaryRoot();
+  try {
+    const store = new DirtyBufferRecoveryStore(root);
+    const saved = await store.save(snapshot({ identity: "untitled:committed", editVersion: 7 }));
+    let failSnapshotDelete = true;
+    const operations = Object.create(fsp);
+    operations.rm = async (target, options) => {
+      if (failSnapshotDelete && target.endsWith(`${saved.id}.json`)) {
+        throw Object.assign(new Error("injected delete failure"), { code: "EIO" });
+      }
+      return fsp.rm(target, options);
+    };
+    const failing = new DirtyBufferRecoveryStore(root, { operations });
+    assert.equal(await failing.markCommitted(saved.id, 7, "12:34"), true);
+    assert.equal(await failing.delete(saved.id), false);
+    failSnapshotDelete = false;
+
+    const restarted = new DirtyBufferRecoveryStore(root);
+    assert.equal(await restarted.read(saved.id), null);
+    assert.deepEqual(await restarted.list(), []);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a later dirty edit supersedes its older committed recovery marker", async () => {
+  const root = await temporaryRoot();
+  try {
+    const store = new DirtyBufferRecoveryStore(root);
+    const first = await store.save(snapshot({ identity: "untitled:versioned", editVersion: 10 }));
+    assert.equal(await store.markCommitted(first.id, 10, null), true);
+    const later = await store.save(snapshot({
+      identity: "untitled:versioned",
+      content: "new dirty content",
+      editVersion: 11,
+    }));
+    assert.equal(later.id, first.id);
+    const restarted = new DirtyBufferRecoveryStore(root);
+    assert.equal((await restarted.list())[0].editVersion, 11);
+    assert.equal((await restarted.read(first.id)).content, "new dirty content");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("path recovery keeps disk-missing metadata for uncommitted snapshots", async () => {
+  const root = await temporaryRoot();
+  const filePath = path.join(root, "missing.txt");
+  try {
+    const saved = await new DirtyBufferRecoveryStore(root).save(snapshot({
+      identity: "path:missing.txt",
+      kind: "path",
+      filePath,
+      relativePath: "missing.txt",
+      displayName: "missing.txt",
+      diskFingerprint: "4:10",
+    }));
+    const listed = await new DirtyBufferRecoveryStore(root).list();
+    assert.equal(listed[0].id, saved.id);
+    assert.equal(listed[0].diskChanged, false);
+    assert.equal(listed[0].diskMissing, true);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("FileManager derives workspace-relative recovery identity and rejects invalid roots", async () => {
   const root = await temporaryRoot();
   const filePath = path.join(root, "nested", "file.txt");
@@ -354,6 +421,86 @@ test("restoring a stale snapshot keeps the disk conflict guard active", async ()
   assert.equal(writes, 0);
   assert.equal(file.externalModified, true);
   file.disposeRecovery();
+});
+
+test("a successful save stays successful when snapshot deletion fails", async () => {
+  const { editor } = createEditor();
+  const id = "7".repeat(64);
+  const calls = [];
+  editor.fileExplorer = { rootPath: "/workspace" };
+  editor.fileLoader = { async waitForFileLoaded() {} };
+  editor.api = {
+    async saveFile(filePath, content) { calls.push(["save", filePath, content]); return filePath; },
+    async markRecoverySnapshotCommitted(...args) { calls.push(["mark", ...args]); return true; },
+    async deleteRecoverySnapshot(...args) { calls.push(["delete", ...args]); return false; },
+  };
+  editor.tabManager = { refresh() {} };
+  const file = new FileNode(editor, 3, "source.txt", "/workspace/source.txt");
+  file.lines = [new LineNode("saved content")];
+  file.isLoaded = true;
+  file.loadingState = { status: "loaded", loadedLineCount: 1, expectedTotalLines: 1 };
+  file.editVersion = 9;
+  file.isSaved = false;
+  file.recoverySnapshotId = id;
+  file.recoveryStoreRoot = "/workspace";
+
+  assert.equal(await file.save(), true);
+  assert.deepEqual(calls.find(([kind]) => kind === "mark"), [
+    "mark", "/workspace", id, 9, null,
+  ]);
+  assert.equal(calls.some(([kind]) => kind === "delete"), true);
+  assert.equal(file.recoverySnapshotId, null);
+  assert.equal(file.isSaved, true);
+  file.disposeRecovery();
+});
+
+test("save snapshots and Save As keep committed recovery cleanup best effort", async () => {
+  for (const strategy of ["snapshot", "saveAs"]) {
+    const { editor } = createEditor();
+    const id = (strategy === "snapshot" ? "8" : "9").repeat(64);
+    const calls = [];
+    editor.fileExplorer = { rootPath: "/workspace" };
+    editor.fileLoader = { async waitForFileLoaded() {} };
+    editor.api = {
+      async saveFile(filePath, content) { calls.push(["save", filePath, content]); return filePath; },
+      async markRecoverySnapshotCommitted(...args) { calls.push(["mark", ...args]); return true; },
+      async deleteRecoverySnapshot(...args) { calls.push(["delete", ...args]); return false; },
+    };
+    editor.tabManager = {
+      activeFile: null,
+      refresh() {},
+      async selectNewFile() { return "/workspace/new.txt"; },
+      async captureDiskFingerprint() {},
+    };
+    editor.highlightController = {
+      async detectLanguage() { return "text"; },
+      async changeLanguage() {},
+    };
+    const file = new FileNode(
+      editor,
+      4,
+      strategy === "saveAs" ? "Untitled" : "source.txt",
+      strategy === "saveAs" ? null : "/workspace/source.txt",
+    );
+    file.lines = [new LineNode("saved content")];
+    file.isLoaded = true;
+    file.loadingState = { status: "loaded", loadedLineCount: 1, expectedTotalLines: 1 };
+    file.editVersion = 12;
+    file.isSaved = false;
+    file.recoverySnapshotId = id;
+    file.recoveryStoreRoot = "/workspace";
+
+    const result = strategy === "snapshot"
+      ? await file.performSaveSnapshot("saved content", 12, async () => "/workspace/source.txt")
+      : await file.performSaveAs();
+    assert.equal(strategy === "snapshot" ? result.saved : result, true);
+    assert.deepEqual(calls.find(([kind]) => kind === "mark"), [
+      "mark", "/workspace", id, 12, null,
+    ]);
+    assert.equal(file.recoverySnapshotId, null);
+    assert.equal(file.isSaved, true);
+    file.disposeRecovery();
+  }
 });
 
 test("startup recovery restores only after explicit choice and does not write to disk", async () => {

@@ -40,6 +40,15 @@ interface DirtyBufferRecoveryRecord extends DirtyBufferRecoveryInput {
   schemaVersion: number;
   id: string;
   timestamp: number;
+  committed?: boolean;
+}
+
+interface DirtyBufferRecoveryCommitMarker {
+  schemaVersion: number;
+  id: string;
+  editVersion: number;
+  diskFingerprint: string | null;
+  timestamp: number;
 }
 
 type FileOperations = typeof fs;
@@ -90,6 +99,38 @@ export class DirtyBufferRecoveryStore {
     if (!/^[a-f0-9]{64}$/.test(id))
       throw new Error("Invalid recovery snapshot id.");
     return path.join(this.recoveryRoot, `${id}.json`);
+  }
+
+  private commitMarkerPath(id: string): string {
+    if (!/^[a-f0-9]{64}$/.test(id))
+      throw new Error("Invalid recovery snapshot id.");
+    return path.join(this.recoveryRoot, `${id}.committed.json`);
+  }
+
+  private async readCommitMarker(
+    id: string,
+  ): Promise<DirtyBufferRecoveryCommitMarker | null> {
+    const target = this.commitMarkerPath(id);
+    try {
+      const stats = await this.operations.lstat(target);
+      if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 4096) {
+        await this.operations.rm(target, { force: true });
+        return null;
+      }
+      const parsed: unknown = JSON.parse(await this.operations.readFile(target, "utf8"));
+      if (!isRecord(parsed) || parsed.schemaVersion !== DIRTY_BUFFER_RECOVERY_VERSION ||
+          parsed.id !== id || !Number.isSafeInteger(parsed.editVersion) ||
+          Number(parsed.editVersion) < 0 || !Number.isFinite(parsed.timestamp) ||
+          !(parsed.diskFingerprint === null || validText(parsed.diskFingerprint, 256))) {
+        await this.operations.rm(target, { force: true });
+        return null;
+      }
+      return parsed as unknown as DirtyBufferRecoveryCommitMarker;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT")
+        await this.operations.rm(target, { force: true }).catch(() => undefined);
+      return null;
+    }
   }
 
   private async ensureDirectory(): Promise<void> {
@@ -166,6 +207,21 @@ export class DirtyBufferRecoveryStore {
     }
     const now = this.now();
     const records: DirtyBufferRecoveryRecord[] = [];
+    const commitMarkers = new Map<string, DirtyBufferRecoveryCommitMarker>();
+    await Promise.all(names.map(async (name) => {
+      if (/^[a-f0-9]{64}\.committed\.json$/.test(name)) {
+        const id = name.slice(0, -".committed.json".length);
+        const marker = await this.readCommitMarker(id);
+        if (marker) commitMarkers.set(id, marker);
+        return;
+      }
+      if (/^[a-f0-9]{64}\.committed\.json\.\d+\.[a-f0-9]{16}\.tmp$/.test(name)) {
+        await this.operations.rm(path.join(this.recoveryRoot, name), {
+          recursive: true,
+          force: true,
+        }).catch(() => undefined);
+      }
+    }));
     await Promise.all(names.map(async (name) => {
       if (/^[a-f0-9]{64}\.\d+\.[a-f0-9]{16}\.tmp$/.test(name)) {
         await this.operations.rm(path.join(this.recoveryRoot, name), {
@@ -225,7 +281,17 @@ export class DirtyBufferRecoveryStore {
           await this.operations.rm(target, { force: true });
           return;
         }
-        records.push(parsed as unknown as DirtyBufferRecoveryRecord);
+        const record = parsed as unknown as DirtyBufferRecoveryRecord;
+        const marker = commitMarkers.get(id);
+        if (marker && record.editVersion <= marker.editVersion) {
+          record.committed = true;
+        } else if (marker) {
+          // A later dirty edit supersedes the save marker for this identity.
+          await this.operations.rm(this.commitMarkerPath(id), { force: true })
+            .catch(() => undefined);
+          commitMarkers.delete(id);
+        }
+        records.push(record);
       } catch {
         await this.operations.rm(target, { force: true }).catch(() => undefined);
       }
@@ -237,11 +303,15 @@ export class DirtyBufferRecoveryStore {
     const now = this.now();
     let retained = records.filter((record) => {
       const fresh = now - record.timestamp <= MAX_RECOVERY_AGE_MS;
-      return fresh;
+      return fresh && !record.committed;
     });
     for (const record of records) {
-      if (now - record.timestamp > MAX_RECOVERY_AGE_MS)
-        await this.operations.rm(this.recordPath(record.id), { force: true });
+      if (record.committed || now - record.timestamp > MAX_RECOVERY_AGE_MS) {
+        try {
+          await this.operations.rm(this.recordPath(record.id), { force: true });
+          await this.operations.rm(this.commitMarkerPath(record.id), { force: true });
+        } catch { /* The marker keeps undeletable committed snapshots hidden. */ }
+      }
     }
     const measureTotal = () => retained
       .filter((record) => record.id !== replacingId)
@@ -349,9 +419,57 @@ export class DirtyBufferRecoveryStore {
       if (!/^[a-f0-9]{64}$/.test(id)) return null;
       try {
         await this.ensureDirectory();
-        return (await this.readRecords()).find((record) => record.id === id) || null;
+        return (await this.readRecords()).find((record) =>
+          record.id === id && record.committed !== true) || null;
       } catch {
         return null;
+      }
+    });
+  }
+
+  async markCommitted(
+    id: string,
+    editVersion: number,
+    diskFingerprint: string | null = null,
+  ): Promise<boolean> {
+    return this.serialize(async () => {
+      if (!/^[a-f0-9]{64}$/.test(id) || !Number.isSafeInteger(editVersion) ||
+          editVersion < 0 || !(diskFingerprint === null || validText(diskFingerprint, 256)))
+        return false;
+      try {
+        await this.ensureDirectory();
+        const previous = await this.readCommitMarker(id);
+        const marker: DirtyBufferRecoveryCommitMarker = {
+          schemaVersion: DIRTY_BUFFER_RECOVERY_VERSION,
+          id,
+          editVersion: Math.max(editVersion, previous?.editVersion ?? 0),
+          diskFingerprint: editVersion >= (previous?.editVersion ?? -1)
+            ? diskFingerprint : previous?.diskFingerprint ?? null,
+          timestamp: this.now(),
+        };
+        const target = this.commitMarkerPath(id);
+        const temporary = `${target}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
+        try {
+          const handle = await this.operations.open(temporary, "wx", 0o600);
+          try {
+            await handle.writeFile(JSON.stringify(marker), "utf8");
+            await handle.sync();
+          } finally {
+            await handle.close();
+          }
+          await this.operations.rename(temporary, target);
+          try {
+            const directory = await this.operations.open(this.recoveryRoot, "r");
+            try { await directory.sync(); }
+            finally { await directory.close(); }
+          } catch { /* Directory fsync is not available on every platform. */ }
+        } catch (error) {
+          await this.operations.rm(temporary, { force: true }).catch(() => undefined);
+          throw error;
+        }
+        return true;
+      } catch {
+        return false;
       }
     });
   }
@@ -361,6 +479,7 @@ export class DirtyBufferRecoveryStore {
       if (!/^[a-f0-9]{64}$/.test(id)) return false;
       try {
         await this.operations.rm(this.recordPath(id), { force: true });
+        await this.operations.rm(this.commitMarkerPath(id), { force: true });
         return true;
       } catch {
         return false;
