@@ -32,6 +32,17 @@ class QuickOpen {
     } finally {
       this.editor.performanceMetrics?.end(measure);
     }
+    if (response?.success) {
+      if (response.indexHit) {
+        this.editor.performanceMetrics?.increment("quickOpen.indexHits");
+      } else {
+        this.editor.performanceMetrics?.increment("quickOpen.indexFallbacks");
+      }
+      this.editor.performanceMetrics?.increment(
+        "quickOpen.filesProbed",
+        Number(response.filesProbed) || 0,
+      );
+    }
     if (generation !== this.cacheGeneration ||
         !NCEPath.equals(rootPath, this.editor.fileExplorer?.rootPath)) return [];
     if (!response?.success) return [];

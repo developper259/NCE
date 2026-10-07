@@ -1,4 +1,5 @@
 import path from "path";
+import { promises as fs } from "fs";
 
 export const MAX_IMAGE_FILE_SIZE = 100 * 1024 * 1024;
 export const BINARY_SAMPLE_SIZE = 8192;
@@ -43,4 +44,22 @@ export function isOpenableFileSample(
   if (extension === ".asar") return false;
   if (isOpenableImagePath(filePath, size)) return true;
   return !looksBinary(sample);
+}
+
+export async function isOpenableFileAtPath(
+  filePath: string,
+  size: number,
+): Promise<boolean> {
+  if (isOpenableImagePath(filePath, size)) return true;
+  let handle;
+  try {
+    handle = await fs.open(filePath, "r");
+    const sample = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, size));
+    const { bytesRead } = await handle.read(sample, 0, sample.length, 0);
+    return isOpenableFileSample(filePath, size, sample.subarray(0, bytesRead));
+  } catch {
+    return false;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
 }

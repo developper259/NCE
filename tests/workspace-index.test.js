@@ -27,6 +27,7 @@ test("WorkspaceIndex builds and reloads metadata-only entries atomically", async
     await fsp.writeFile(path.join(root, ".env"), "SECRET=value\n");
     await fsp.writeFile(path.join(root, ".nce-file"), "ordinary file\n");
     await fsp.writeFile(path.join(root, "src", "app.js"), "export const app = true;\n");
+    await fsp.writeFile(path.join(root, "src", "binary.unknown"), Buffer.from([0, 1, 2, 3]));
     await fsp.writeFile(path.join(root, ".hidden", "notes.txt"), "hidden\n");
     await fsp.writeFile(path.join(root, "archive.asar"), "opaque\n");
     await fsp.writeFile(path.join(root, "node_modules", "pkg", "ignored.js"), "ignored\n");
@@ -50,8 +51,12 @@ test("WorkspaceIndex builds and reloads metadata-only entries atomically", async
       ".nce-file",
       "src/.nce",
       "src/app.js",
+      "src/binary.unknown",
     ]);
     assert.equal(snapshot.entries.every((entry) => entry.type === "file"), true);
+    assert.equal(snapshot.entries.every((entry) => typeof entry.openable === "boolean"), true);
+    assert.equal(snapshot.entries.find((entry) => entry.name === ".env").openable, true);
+    assert.equal(snapshot.entries.find((entry) => entry.name === "binary.unknown").openable, false);
     assert.equal(snapshot.entries.some((entry) => "content" in entry), false);
     assert.equal(snapshot.entries.find((entry) => entry.name === ".env").extension, "");
 
@@ -83,7 +88,7 @@ test("WorkspaceIndex treats corrupt and incompatible caches as misses", async ()
     assert.equal(await new WorkspaceIndex().load(root), null);
 
     await fsp.writeFile(cachePath, JSON.stringify({
-      version: WORKSPACE_INDEX_VERSION + 1,
+      version: 1,
       root: path.resolve(root),
       generatedAt: Date.now(),
       complete: true,
@@ -103,6 +108,7 @@ test("WorkspaceIndex treats corrupt and incompatible caches as misses", async ()
         size: 1,
         mtimeMs: 1,
         type: "file",
+        openable: true,
       }],
     }));
     assert.equal(await new WorkspaceIndex().load(root), null);
@@ -162,6 +168,7 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
         size: 0,
         mtimeMs: 1,
         type: "file",
+        openable: true,
       };
     });
     const atThreshold = summarizeWorkspaceIndex({
@@ -185,6 +192,7 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
         size: 131072,
         mtimeMs: 1,
         type: "file",
+        openable: true,
       };
     });
     const estimatedLarge = summarizeWorkspaceIndex({
@@ -266,6 +274,8 @@ test("WorkspaceIndex coalesces adds, non-openable changes, deletes, directory de
       "src/change.js",
     ]);
     assert.equal(after.entries.find((entry) => entry.relativePath === "src/change.js").size, 6);
+    assert.equal(after.entries.find((entry) => entry.relativePath === "src/change.js").openable, false);
+    assert.equal(after.entries.find((entry) => entry.relativePath === "src/added.js").openable, true);
     const diagnostics = index.getDiagnostics();
     assert.equal(diagnostics.persistedWrites - before.persistedWrites, 1);
     assert.equal(diagnostics.batches - before.batches, 1);

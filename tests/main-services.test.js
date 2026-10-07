@@ -1085,7 +1085,11 @@ test("Quick Open serves warm indexed paths without traversal and refreshes per w
   };
   const fsModule = require("node:fs");
   const originalReaddir = fsModule.promises.readdir;
+  const originalOpen = fsModule.promises.open;
+  const originalLstat = fsModule.promises.lstat;
   let readdirCalls = 0;
+  let openCalls = 0;
+  let lstatCalls = 0;
   try {
     await write(root, ".env", "ROOT=value\n");
     await write(root, ".benchmark/hidden.js", "hidden\n");
@@ -1099,20 +1103,31 @@ test("Quick Open serves warm indexed paths without traversal and refreshes per w
     await write(root, "src/archive.asar", "opaque\n");
     await write(otherRoot, "Other.ts", "export {};\n");
 
-    const builder = new WorkspaceSearch({ window: null });
-    assert.ok(await builder.workspaceIndex.build(root));
-    assert.ok(await builder.workspaceIndex.build(otherRoot));
     const search = new WorkspaceSearch({ window: null });
+    assert.ok(await search.workspaceIndex.build(root));
+    assert.ok(await search.workspaceIndex.build(otherRoot));
 
     fsModule.promises.readdir = async (...args) => {
       readdirCalls++;
       return originalReaddir(...args);
     };
+    fsModule.promises.open = async (...args) => {
+      openCalls++;
+      return originalOpen(...args);
+    };
+    fsModule.promises.lstat = async (...args) => {
+      lstatCalls++;
+      return originalLstat(...args);
+    };
     const first = await search.listProjectFiles(root, {
       openableOnly: true,
       ignoreHiddenDirectories: true,
     });
+    assert.equal(first.indexHit, true);
+    assert.equal(first.filesProbed, 0);
     assert.equal(readdirCalls, 0);
+    assert.equal(openCalls, 0);
+    assert.equal(lstatCalls, 0);
     assert.deepEqual(first.entries.map((entry) => entry.relativePath), [
       ".env",
       "src/app.js",
@@ -1120,9 +1135,11 @@ test("Quick Open serves warm indexed paths without traversal and refreshes per w
       "src/notes.custom",
       "src/README.md",
     ]);
+    fsModule.promises.open = originalOpen;
+    fsModule.promises.lstat = originalLstat;
     fsModule.promises.readdir = originalReaddir;
 
-    // A persistent cache loads immediately; its reconciliation runs in the background.
+    // The in-memory snapshot stays warm while watcher updates patch its metadata.
     await search.workspaceIndex.flush(root);
     const removedPath = path.join(root, "src/README.md");
     await fsp.unlink(removedPath);
@@ -1146,8 +1163,79 @@ test("Quick Open serves warm indexed paths without traversal and refreshes per w
     assert.equal(readdirCalls, 0);
   } finally {
     fsModule.promises.readdir = originalReaddir;
+    fsModule.promises.open = originalOpen;
+    fsModule.promises.lstat = originalLstat;
     await fsp.rm(root, { recursive: true, force: true });
     await fsp.rm(otherRoot, { recursive: true, force: true });
+  }
+});
+
+test("Quick Open filters 10k indexed entries without per-file filesystem probes", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-quick-open-indexed-10k-"));
+  const search = new WorkspaceSearch({ window: null });
+  const fsModule = require("node:fs");
+  const operations = ["readdir", "lstat", "open"];
+  const originals = Object.fromEntries(operations.map((name) => [
+    name,
+    fsModule.promises[name],
+  ]));
+  let perFileReads = 0;
+  try {
+    const entries = Array.from({ length: 10_050 }, (_, index) => {
+      const name = `file-${index}.txt`;
+      return {
+        relativePath: `src/${name}`,
+        name,
+        extension: ".txt",
+        size: 24,
+        mtimeMs: 1,
+        type: "file",
+        openable: true,
+      };
+    });
+    assert.equal(search.workspaceIndex.primeFromScan(root, entries), true);
+    await search.workspaceIndex.flush(root);
+
+    for (const operation of operations) {
+      fsModule.promises[operation] = async (...args) => {
+        perFileReads += 1;
+        return originals[operation](...args);
+      };
+    }
+    const result = await search.listProjectFiles(root, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+    assert.equal(result.indexHit, true);
+    assert.equal(result.filesProbed, 0);
+    assert.equal(result.entries.length, 10_050);
+    assert.equal(perFileReads, 0);
+  } finally {
+    for (const operation of operations)
+      fsModule.promises[operation] = originals[operation];
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Quick Open falls back to file probes while a persisted index is stale", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-quick-open-stale-index-"));
+  try {
+    await fsp.writeFile(path.join(root, "note.txt"), "plain text\n");
+    const builder = new WorkspaceSearch({ window: null });
+    assert.ok(await builder.workspaceIndex.build(root));
+    await builder.workspaceIndex.flush(root);
+
+    const coldSearch = new WorkspaceSearch({ window: null });
+    const result = await coldSearch.listProjectFiles(root, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+    assert.equal(result.indexHit, false);
+    assert.equal(result.filesProbed, 1);
+    assert.deepEqual(result.entries.map((entry) => entry.relativePath), ["note.txt"]);
+    await coldSearch.workspaceIndex.flush(root);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });
 
@@ -1181,6 +1269,7 @@ test("Large Workspace Mode preserves project-file results across indexed and fil
         size: 2 * 1024 ** 3,
         mtimeMs: 1,
         type: "file",
+        openable: !relativePath.endsWith("binary.dat"),
       };
     });
     assert.equal(indexedSearch.workspaceIndex.primeFromScan(indexedRoot, syntheticLargeEntries), true);

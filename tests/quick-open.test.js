@@ -11,6 +11,7 @@ function createQuickOpen({ rootPath = "/project", entries = [] } = {}) {
   const openCalls = [];
   const panelCalls = [];
   const listCalls = [];
+  const metricCounters = new Map();
   const panel = {
     session: null,
     input: { focusCalls: 0, focus() { this.focusCalls++; } },
@@ -29,12 +30,22 @@ function createQuickOpen({ rootPath = "/project", entries = [] } = {}) {
     },
     api: { async listProjectFiles(root, options) {
       listCalls.push([root, options]);
-      return { success: true, entries };
+      return { success: true, entries, indexHit: false, filesProbed: 0 };
     } },
+    performanceMetrics: {
+      increment(name, amount = 1) {
+        metricCounters.set(name, (metricCounters.get(name) || 0) + amount);
+      },
+      begin() { return null; },
+      end() {},
+    },
     tabManager: { openFileWithPath(filePath) { openCalls.push(filePath); } },
   };
   const QuickOpen = loadGlobal("src/js/quickPanel/QuickOpen.js", "QuickOpen", { NCEPath });
-  return { manager: new QuickOpen(editor), editor, panel, panelCalls, openCalls, listCalls };
+  return {
+    manager: new QuickOpen(editor), editor, panel, panelCalls, openCalls,
+    listCalls, metricCounters,
+  };
 }
 
 test("Quick Open stays open without a project and shows an explicit message", () => {
@@ -90,6 +101,33 @@ test("Quick Open requests openable files and prunes hidden directories in the wo
     openableOnly: true,
     ignoreHiddenDirectories: true,
   }]]);
+});
+
+test("Quick Open records indexed hits, filesystem fallbacks and avoided probes", async () => {
+  const fixture = createQuickOpen({
+    entries: [{ name: "App.js", path: "/project/App.js", relativePath: "App.js" }],
+  });
+  fixture.editor.api.listProjectFiles = async () => ({
+    success: true,
+    entries: [{ name: "App.js", path: "/project/App.js", relativePath: "App.js" }],
+    indexHit: true,
+    filesProbed: 0,
+  });
+  await fixture.manager.getFiles("/project");
+  assert.equal(fixture.metricCounters.get("quickOpen.indexHits"), 1);
+  assert.equal(fixture.metricCounters.get("quickOpen.indexFallbacks"), undefined);
+  assert.equal(fixture.metricCounters.get("quickOpen.filesProbed"), 0);
+
+  fixture.manager.invalidate("/project");
+  fixture.editor.api.listProjectFiles = async () => ({
+    success: true,
+    entries: [],
+    indexHit: false,
+    filesProbed: 3,
+  });
+  await fixture.manager.getFiles("/project");
+  assert.equal(fixture.metricCounters.get("quickOpen.indexFallbacks"), 1);
+  assert.equal(fixture.metricCounters.get("quickOpen.filesProbed"), 3);
 });
 
 test("Quick Open image support stays aligned with PictureView preview support", () => {

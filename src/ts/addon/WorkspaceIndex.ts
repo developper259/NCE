@@ -1,9 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
+import { isOpenableFileAtPath } from "./OpenableFile";
 
-export const WORKSPACE_INDEX_VERSION = 1;
-export const WORKSPACE_INDEX_CACHE_FILE = "files-index-v1.json";
+export const WORKSPACE_INDEX_VERSION = 2;
+export const WORKSPACE_INDEX_CACHE_FILE = "files-index-v2.json";
 export const MAX_WORKSPACE_INDEX_ENTRIES = 200_000;
 export const MAX_WORKSPACE_INDEX_BYTES = 64 * 1024 * 1024;
 export const LARGE_WORKSPACE_MODE_THRESHOLDS = Object.freeze({
@@ -59,10 +60,11 @@ export interface WorkspaceIndexEntry {
   size: number;
   mtimeMs: number;
   type: "file";
+  openable: boolean;
 }
 
 export interface WorkspaceIndexSnapshot {
-  version: 1;
+  version: 2;
   root: string;
   generatedAt: number;
   complete: true;
@@ -236,7 +238,8 @@ export class WorkspaceIndex {
       !Number.isFinite(candidate.mtimeMs) ||
       candidate.size! < 0 ||
       candidate.mtimeMs! < 0 ||
-      candidate.type !== "file"
+      candidate.type !== "file" ||
+      typeof candidate.openable !== "boolean"
     ) return null;
 
     const relativePath = candidate.relativePath.replace(/\\/g, "/");
@@ -258,6 +261,7 @@ export class WorkspaceIndex {
       size: candidate.size!,
       mtimeMs: candidate.mtimeMs!,
       type: "file",
+      openable: candidate.openable,
     };
   }
 
@@ -322,6 +326,18 @@ export class WorkspaceIndex {
     }
   }
 
+  private touch(root: string): void {
+    const snapshot = this.snapshots.get(root);
+    if (!snapshot) return;
+    this.snapshots.delete(root);
+    this.snapshots.set(root, snapshot);
+    const stats = this.statsByRoot.get(root);
+    if (stats) {
+      this.statsByRoot.delete(root);
+      this.statsByRoot.set(root, stats);
+    }
+  }
+
   private rememberInvalidRoot(root: string): void {
     this.invalidRoots.delete(root);
     this.invalidRoots.set(root, Date.now());
@@ -343,7 +359,7 @@ export class WorkspaceIndex {
     }
     const memory = this.snapshots.get(root);
     if (memory?.complete) {
-      this.remember(memory);
+      this.touch(root);
       return memory;
     }
 
@@ -617,6 +633,7 @@ export class WorkspaceIndex {
           size: stats.size,
           mtimeMs: stats.mtimeMs,
           type: "file",
+          openable: await isOpenableFileAtPath(change.filePath, stats.size),
         });
       } catch (error: any) {
         if (error?.code === "ENOENT") entries.delete(change.relativePath);
@@ -747,7 +764,8 @@ export class WorkspaceIndex {
             break;
           }
           try {
-            const stats = await fs.stat(absolutePath);
+            const stats = await fs.lstat(absolutePath);
+            if (!stats.isFile() || stats.isSymbolicLink()) continue;
             entries.push({
               relativePath: path.relative(root, absolutePath)
                 .split(path.sep).join("/"),
@@ -756,6 +774,7 @@ export class WorkspaceIndex {
               size: stats.size,
               mtimeMs: stats.mtimeMs,
               type: "file",
+              openable: await isOpenableFileAtPath(absolutePath, stats.size),
             });
           } catch (error: any) {
             if (error?.code !== "ENOENT") incomplete = true;

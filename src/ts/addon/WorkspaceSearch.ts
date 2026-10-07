@@ -8,9 +8,7 @@ import {
   WorkspaceIndex,
 } from "./WorkspaceIndex";
 import {
-  BINARY_SAMPLE_SIZE,
-  isOpenableImagePath,
-  isOpenableFileSample,
+  isOpenableFileAtPath,
 } from "./OpenableFile";
 
 interface SearchOptions {
@@ -131,6 +129,8 @@ interface ProjectFileEntry {
 interface ProjectFilesResponse {
   success: boolean;
   entries: ProjectFileEntry[];
+  indexHit?: boolean;
+  filesProbed?: number;
   error?: { code: string; message: string };
 }
 interface ProjectFilesOptions {
@@ -288,6 +288,8 @@ export class WorkspaceSearch {
     const failure = (code: string, message: string): ProjectFilesResponse => ({
       success: false,
       entries: [],
+      indexHit: false,
+      filesProbed: 0,
       error: { code, message },
     });
     if (typeof rootPath !== "string" || !rootPath)
@@ -307,36 +309,28 @@ export class WorkspaceSearch {
       if (index) {
         if (this.workspaceIndex.consumeNeedsReconcile(root))
           this.workspaceIndex.scheduleReconcile(root);
-        const candidates = index.entries.filter((entry) =>
-          !ignoreHiddenDirectories ||
-          !entry.relativePath.split("/").slice(0, -1)
-            .some((directory) => directory.startsWith(".")),
-        );
-        const entries: Array<ProjectFileEntry | undefined> =
-          new Array(candidates.length);
-        let nextCandidate = 0;
-        const workerCount = Math.min(16, candidates.length);
-        await Promise.all(Array.from({ length: workerCount }, async () => {
-          while (nextCandidate < candidates.length) {
-            const indexInList = nextCandidate++;
-            const candidate = candidates[indexInList];
-            const filePath = path.join(root, ...candidate.relativePath.split("/"));
-            if (!(await this.isOpenableFile(filePath))) continue;
-            entries[indexInList] = {
+        if (!this.workspaceIndex.requiresReconcile(root)) {
+          const entries: ProjectFileEntry[] = [];
+          for (const candidate of index.entries) {
+            if (!candidate.openable) continue;
+            const directories = ignoreHiddenDirectories
+              ? candidate.relativePath.split("/").slice(0, -1)
+              : [];
+            if (directories.some((directory) => directory.startsWith(".")))
+              continue;
+            entries.push({
               name: candidate.name,
-              path: filePath,
+              path: path.join(root, ...candidate.relativePath.split("/")),
               relativePath: candidate.relativePath,
-            };
+            });
           }
-        }));
-        return {
-          success: true,
-          entries: entries.filter((entry): entry is ProjectFileEntry => Boolean(entry)),
-        };
+          return { success: true, entries, indexHit: true, filesProbed: 0 };
+        }
       }
     }
 
     const entries: ProjectFileEntry[] = [];
+    let filesProbed = 0;
     const walk = async (directory: string): Promise<void> => {
       let children;
       try {
@@ -361,7 +355,10 @@ export class WorkspaceSearch {
           path.extname(child.name).toLowerCase() === ".asar"
         )
           continue;
-        if (openableOnly && !(await this.isOpenableFile(absolutePath))) continue;
+        if (openableOnly) {
+          filesProbed += 1;
+          if (!(await this.isOpenableFile(absolutePath))) continue;
+        }
         entries.push({
           name: child.name,
           path: absolutePath,
@@ -373,24 +370,21 @@ export class WorkspaceSearch {
     };
     await walk(root);
     this.workspaceIndex.scheduleBuild(root);
-    return { success: true, entries };
+    return {
+      success: true,
+      entries,
+      indexHit: false,
+      filesProbed,
+    };
   }
 
   private async isOpenableFile(filePath: string): Promise<boolean> {
-    let handle;
     try {
       const stats = await fs.lstat(filePath);
       if (!stats.isFile() || stats.isSymbolicLink()) return false;
-      const size = stats.size;
-      if (isOpenableImagePath(filePath, size)) return true;
-      const sample = Buffer.alloc(Math.min(BINARY_SAMPLE_SIZE, size));
-      handle = await fs.open(filePath, "r");
-      const { bytesRead } = await handle.read(sample, 0, sample.length, 0);
-      return isOpenableFileSample(filePath, size, sample.subarray(0, bytesRead));
+      return await isOpenableFileAtPath(filePath, stats.size);
     } catch {
       return false;
-    } finally {
-      await handle?.close().catch(() => {});
     }
   }
 
