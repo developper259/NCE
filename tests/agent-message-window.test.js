@@ -207,13 +207,25 @@ function fixture(count = 500, id = "conversation-a") {
   sidebar.sessions = [session];
   sidebar.activeSessionId = id;
   sidebar.messageWindowStates = new Map();
+  sidebar.conversationMessageIndexes = new WeakMap();
+  sidebar.metricCounters = new Map();
+  sidebar.editor = {
+    contextMenuManager: { openContextMenu() {} },
+    performanceMetrics: {
+      increment(name, amount = 1) {
+        sidebar.metricCounters.set(
+          name,
+          (sidebar.metricCounters.get(name) || 0) + amount,
+        );
+      },
+    },
+  };
   sidebar.messageElements = new WeakMap();
   sidebar.activityElements = new WeakMap();
   sidebar.activityItemElements = new Map();
   sidebar.workLogElements = new WeakMap();
   sidebar.messageWindowControls = null;
   sidebar.markdownRenderer = markdownRenderer;
-  sidebar.editor = { contextMenuManager: { openContextMenu() {} } };
   sidebar.stopAgentWorkTicker = () => {};
   sidebar.syncAgentWorkTicker = () => {};
   sidebar.updateReasoningControl = () => {};
@@ -267,6 +279,17 @@ test("500-message conversations mount a bounded recent DOM window with copy acti
   const copyHandler = copyButton.listeners.get("click")[0];
   await copyHandler({ stopPropagation() {} });
   assert.equal(copiedMessages.at(-1), "Message 499");
+});
+
+test("500, 5k, and 50k message models keep the mounted window bounded", () => {
+  for (const count of [500, 5_000, 50_000]) {
+    const { sidebar, session, container } = fixture(count, `conversation-${count}`);
+    session.segments = [{ type: "assistant", content: "existing segment" }];
+    sidebar.renderMessages(container);
+    assert.equal(sidebar.getConversationMessageEntries(session).length, count);
+    assert.equal(messageRows(container).length, 80);
+    assert.ok(elementCount(container) < 600);
+  }
 });
 
 test("loading older chunks preserves the anchor and caps mounted message rows", () => {
@@ -381,4 +404,57 @@ test("streaming updates stay visible at the latest window and remain available w
     row._agentConversationMessage === session.messages.at(-1),
   ));
   assert.equal(session.messages.length, 502);
+});
+
+test("50k-message streaming lookups inspect only newly appended messages", () => {
+  const { sidebar, session, container } = fixture(50_000, "conversation-50k-stream");
+  session.segments = [{ type: "assistant", content: "existing segment" }];
+  let numericReads = 0;
+  session.messages = new Proxy(session.messages, {
+    get(target, property, receiver) {
+      if (typeof property === "string" && /^\d+$/.test(property))
+        numericReads += 1;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+  session.isGenerating = true;
+  session.runId = 1;
+  sidebar.renderMessages(container);
+  assert.equal(messageRows(container).length, 80);
+  assert.equal(sidebar.metricCounters.get("agent.messageWindow.cacheRebuilds"), 1);
+
+  numericReads = 0;
+  const context = {
+    sessionId: session.id,
+    runId: 1,
+    contentMode: "delta",
+  };
+  sidebar.handleAgentToken("first", context);
+  assert.ok(numericReads <= 1, `expected O(1) append lookup, got ${numericReads} reads`);
+  const readsAfterAppend = numericReads;
+  sidebar.handleAgentToken(" update", context);
+  assert.equal(numericReads, readsAfterAppend, "later token must use the cached WeakMap lookup");
+  assert.equal(sidebar.metricCounters.get("agent.messageWindow.incrementalEntries"), 1);
+  assert.equal(sidebar.metricCounters.get("agent.messageWindow.streamingLookups"), 2);
+  assert.equal(messageRows(container).length, 80);
+});
+
+test("message index updates incrementally for activity and excludes reasoning segments", () => {
+  const { sidebar, session } = fixture(500);
+  session.segments = [{ type: "assistant", content: "existing segment" }];
+  const initial = sidebar.getConversationMessageEntries(session);
+  const reasoning = { type: "reasoning", role: "reasoning", content: "private" };
+  session.messages.push(reasoning);
+  assert.equal(sidebar.getConversationMessageEntries(session), initial);
+  assert.equal(initial.includes(reasoning), false);
+
+  const activity = { type: "activity", role: "activity", items: [] };
+  session.messages.push(activity);
+  assert.equal(sidebar.getConversationMessageEntries(session).at(-1), activity);
+  activity.items.push({ id: "tool-1", status: "success" });
+  assert.equal(sidebar.getConversationMessageEntries(session).at(-1), activity);
+
+  session.messages = session.messages.filter((entry) => entry !== activity);
+  assert.equal(sidebar.getConversationMessageEntries(session).includes(activity), false);
+  assert.equal(sidebar.metricCounters.get("agent.messageWindow.cacheRebuilds"), 2);
 });

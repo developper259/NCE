@@ -22,6 +22,7 @@ class AgentSidebar extends Sidebar {
     this.messagesElement = null;
     this.messagesScroller = null;
     this.messageWindowStates = new Map();
+    this.conversationMessageIndexes = new WeakMap();
     this.messageWindowControls = null;
     this.renderedMessageSessionId = null;
     this.messagesScrollHandler = null;
@@ -2271,15 +2272,53 @@ class AgentSidebar extends Sidebar {
     return inputArea;
   }
 
-  getConversationMessageEntries(session) {
+  getConversationMessageWindowIndex(session) {
+    if (!session) return { entries: [], indexByMessage: new WeakMap() };
+    if (!this.conversationMessageIndexes)
+      this.conversationMessageIndexes = new WeakMap();
     this.ensureSessionSegments(session);
-    return (session?.messages || []).flatMap((message) => {
-      if (message?.role === "activity" || message?.type === "activity")
-        return [message];
+    const messages = Array.isArray(session.messages) ? session.messages : [];
+    let index = this.conversationMessageIndexes.get(session);
+    const rebuild = !index || index.sourceMessages !== messages ||
+      index.sourceLength > messages.length;
+    if (rebuild) {
+      index = {
+        sourceMessages: messages,
+        sourceLength: 0,
+        entries: [],
+        indexByMessage: new WeakMap(),
+      };
+      this.editor?.performanceMetrics?.increment(
+        "agent.messageWindow.cacheRebuilds",
+      );
+    }
+
+    const start = rebuild ? 0 : index.sourceLength;
+    let appended = 0;
+    for (let messageIndex = start; messageIndex < messages.length; messageIndex += 1) {
+      const message = messages[messageIndex];
       if (message?.type === "reasoning" || message?.role === "reasoning")
-        return [];
-      return [message];
-    });
+        continue;
+      if (!message || typeof message !== "object") continue;
+      if (!index.indexByMessage.has(message)) {
+        index.indexByMessage.set(message, index.entries.length);
+        index.entries.push(message);
+        appended += 1;
+      }
+    }
+    index.sourceLength = messages.length;
+    this.conversationMessageIndexes.set(session, index);
+    if (appended > 0 && !rebuild) {
+      this.editor?.performanceMetrics?.increment(
+        "agent.messageWindow.incrementalEntries",
+        appended,
+      );
+    }
+    return index;
+  }
+
+  getConversationMessageEntries(session) {
+    return this.getConversationMessageWindowIndex(session).entries;
   }
 
   getConversationWindowState(session, messageCount) {
@@ -2421,10 +2460,14 @@ class AgentSidebar extends Sidebar {
       !session || session.id !== this.activeSessionId ||
       !this.messagesElement
     ) return false;
-    const entries = this.getConversationMessageEntries(session);
+    const windowIndex = this.getConversationMessageWindowIndex(session);
+    const entries = windowIndex.entries;
     const state = this.getConversationWindowState(session, entries.length);
     if (shouldFollow) state.followLatest = true;
-    const index = entries.indexOf(message);
+    this.editor?.performanceMetrics?.increment(
+      "agent.messageWindow.streamingLookups",
+    );
+    const index = windowIndex.indexByMessage.get(message) ?? -1;
     if (index < 0 || index < state.start || index >= state.end) {
       this.updateConversationWindowControls(session, entries);
       return false;
