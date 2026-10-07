@@ -73,16 +73,19 @@ class HistoryController {
     }
   }
 
-  updateSavedState(file, state) {
+  updateSavedState(file, state, { clearRecovery = true } = {}) {
     if (!file) return;
-    file.setIsSaved(state.savedIndex >= 0 && state.index === state.savedIndex);
+    const isSaved = state.savedIndex >= 0 && state.index === state.savedIndex;
+    file.setIsSaved(isSaved);
+    if (isSaved && clearRecovery)
+      void file.clearRecoverySnapshot?.();
   }
 
   markSaved(file = this.editor.tabManager.activeFile) {
     const state = this.getState(file);
     if (!state) return;
     state.savedIndex = state.index;
-    this.updateSavedState(file, state);
+    this.updateSavedState(file, state, { clearRecovery: false });
   }
 
   clear(file = this.editor.tabManager.activeFile) {

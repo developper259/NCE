@@ -102,6 +102,17 @@ contextBridge.exposeInMainWorld("api", {
   saveFile: (path, content) =>
     ipcRenderer.invoke("FileManager:saveFile", path, content),
 
+  saveRecoverySnapshot: (workspaceRoot, snapshot) =>
+    ipcRenderer.invoke("FileManager:saveRecoverySnapshot", workspaceRoot, snapshot),
+  listRecoverySnapshots: (workspaceRoot) =>
+    ipcRenderer.invoke("FileManager:listRecoverySnapshots", workspaceRoot),
+  readRecoverySnapshot: (workspaceRoot, id) =>
+    ipcRenderer.invoke("FileManager:readRecoverySnapshot", workspaceRoot, id),
+  deleteRecoverySnapshot: (workspaceRoot, id) =>
+    ipcRenderer.invoke("FileManager:deleteRecoverySnapshot", workspaceRoot, id),
+  confirmRecoverySnapshot: (snapshot) =>
+    ipcRenderer.invoke("FileManager:confirmRecoverySnapshot", snapshot),
+
   confirmUnsavedChanges: (fileName) =>
     ipcRenderer.invoke("FileManager:confirmUnsavedChanges", fileName),
 

@@ -5,6 +5,30 @@ const TAB_TYPES = Object.freeze({
   MARKDOWN: "markdown",
 });
 const AUTO_SAVE_DEBOUNCE_MS = 180;
+const RECOVERY_SNAPSHOT_DEBOUNCE_MS = 120;
+const MAX_RECOVERY_SNAPSHOT_BYTES = 1024 * 1024;
+const MAX_RECOVERY_SNAPSHOT_LINES = 100000;
+
+function createRecoveryUntitledId() {
+  const random = Math.random().toString(36).slice(2, 14);
+  return `${Date.now().toString(36)}-${random}`;
+}
+
+function utf8ByteLength(value) {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff &&
+        index + 1 < value.length && value.charCodeAt(index + 1) >= 0xdc00 &&
+        value.charCodeAt(index + 1) <= 0xdfff) {
+      bytes += 4;
+      index += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
 
 class Tab {
   constructor(id, type, name, closable = true) {
@@ -64,6 +88,15 @@ class FileNode extends Tab {
     this.autoSaveTimer = null;
     this.autoSaveFlushPromise = null;
     this.autoSaveDisposed = false;
+    this.recoveryUntitledId = createRecoveryUntitledId();
+    this.recoverySnapshotId = null;
+    this.recoveryStoreRoot = null;
+    this.recoveryPreviousSnapshotId = null;
+    this.recoveryPreviousStoreRoot = null;
+    this.recoveryTimer = null;
+    this.recoveryFlushPromise = null;
+    this.recoveryGeneration = 0;
+    this.recoveryDisposed = false;
 
     // KeyBinding
     this.historyX = undefined;
@@ -138,6 +171,8 @@ class FileNode extends Tab {
   }
 
   replaceFile(file) {
+    this.cancelRecoverySnapshot();
+    void this.clearRecoverySnapshot();
     this.name = file.name;
     this.path = file.path;
     this.searchReplaceValue = "";
@@ -146,6 +181,11 @@ class FileNode extends Tab {
     this.deletedFromDisk = file.deletedFromDisk === true;
     this.externalModified = file.externalModified === true;
     this.diskFingerprint = file.diskFingerprint || null;
+    this.recoveryUntitledId = file.recoveryUntitledId || createRecoveryUntitledId();
+    this.recoverySnapshotId = file.recoverySnapshotId || null;
+    this.recoveryStoreRoot = file.recoveryStoreRoot || null;
+    this.recoveryPreviousSnapshotId = file.recoveryPreviousSnapshotId || null;
+    this.recoveryPreviousStoreRoot = file.recoveryPreviousStoreRoot || null;
 
     this.historyX = file.historyX;
 
@@ -360,6 +400,252 @@ class FileNode extends Tab {
     this.cancelAutoSave();
   }
 
+  scheduleRecoverySnapshot() {
+    if (this.recoveryDisposed || this.isSaved === true ||
+        this.largeFileMode === true || typeof this.editor.api?.saveRecoverySnapshot !== "function") {
+      this.cancelRecoveryTimer();
+      return false;
+    }
+    if (this.lines.length > MAX_RECOVERY_SNAPSHOT_LINES) {
+      this.editor.performanceMetrics?.increment("recovery.snapshot.skipped");
+      this.cancelRecoveryTimer();
+      return false;
+    }
+    this.cancelRecoveryTimer();
+    this.recoveryGeneration += 1;
+    const generation = this.recoveryGeneration;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
+      if (generation === this.recoveryGeneration)
+        void this.flushRecoverySnapshot();
+    }, RECOVERY_SNAPSHOT_DEBOUNCE_MS);
+    this.editor.performanceMetrics?.increment("recovery.snapshot.schedules");
+    return true;
+  }
+
+  cancelRecoveryTimer() {
+    if (this.recoveryTimer !== null) {
+      clearTimeout(this.recoveryTimer);
+      this.recoveryTimer = null;
+    }
+  }
+
+  cancelRecoverySnapshot() {
+    this.cancelRecoveryTimer();
+    this.recoveryGeneration += 1;
+  }
+
+  disposeRecovery() {
+    this.recoveryDisposed = true;
+    this.cancelRecoverySnapshot();
+  }
+
+  flushRecoverySnapshot() {
+    this.cancelRecoveryTimer();
+    if (this.recoveryFlushPromise) return this.recoveryFlushPromise;
+    let flushPromise;
+    flushPromise = this.runRecoverySnapshotFlush().finally(() => {
+      if (this.recoveryFlushPromise === flushPromise)
+        this.recoveryFlushPromise = null;
+    });
+    this.recoveryFlushPromise = flushPromise;
+    return flushPromise;
+  }
+
+  async runRecoverySnapshotFlush() {
+    while (this.isSaved !== true && !this.recoveryDisposed &&
+        this.largeFileMode !== true) {
+      if (this.lines.length > MAX_RECOVERY_SNAPSHOT_LINES) {
+        this.editor.performanceMetrics?.increment("recovery.snapshot.skipped");
+        return false;
+      }
+      const version = this.editVersion;
+      const generation = this.recoveryGeneration;
+      if (this.path && typeof this.editor.fileLoader?.waitForFileLoaded === "function") {
+        try {
+          await this.editor.fileLoader.waitForFileLoaded(this);
+        } catch {
+          this.editor.performanceMetrics?.increment("recovery.snapshot.skipped");
+          return false;
+        }
+      }
+      if (version !== this.editVersion) {
+        this.cancelRecoveryTimer();
+        continue;
+      }
+      if (this.lines.length > MAX_RECOVERY_SNAPSHOT_LINES) {
+        this.editor.performanceMetrics?.increment("recovery.snapshot.skipped");
+        return false;
+      }
+      if (this.largeFileMode === true || this.recoveryDisposed || this.isSaved === true)
+        return false;
+
+      let content;
+      try {
+        content = this.serializeContent();
+      } catch {
+        this.editor.performanceMetrics?.increment("recovery.snapshot.skipped");
+        return false;
+      }
+      if (utf8ByteLength(content) > MAX_RECOVERY_SNAPSHOT_BYTES) {
+        this.editor.performanceMetrics?.increment("recovery.snapshot.skipped");
+        return false;
+      }
+
+      const workspaceRoot = this.editor.fileExplorer?.rootPath || null;
+      const measure = this.editor.performanceMetrics?.begin("recovery.snapshot.write");
+      let result;
+      try {
+        result = await this.editor.api.saveRecoverySnapshot(workspaceRoot, {
+          filePath: this.path || null,
+          untitledId: this.path ? null : this.recoveryUntitledId,
+          displayName: this.name || "Untitled buffer",
+          content,
+          lineCount: this.lines.length,
+          editVersion: version,
+          diskFingerprint: this.diskFingerprint || null,
+        });
+      } catch {
+        result = null;
+      } finally {
+        this.editor.performanceMetrics?.end(measure);
+      }
+      if (!result?.success || typeof result.id !== "string") {
+        this.editor.performanceMetrics?.increment("recovery.snapshot.failures");
+        return false;
+      }
+
+      const previousId = this.recoverySnapshotId || this.recoveryPreviousSnapshotId;
+      const previousRoot = this.recoveryStoreRoot;
+      this.recoverySnapshotId = result.id;
+      this.recoveryStoreRoot = workspaceRoot;
+      this.recoveryPreviousSnapshotId = null;
+      this.recoveryPreviousStoreRoot = null;
+      this.editor.performanceMetrics?.increment("recovery.snapshot.writes");
+
+      if (this.isSaved === true || this.recoveryDisposed || this.largeFileMode === true ||
+          version !== this.editVersion || generation !== this.recoveryGeneration) {
+        await this.deleteRecoveryRecord(workspaceRoot, result.id);
+        if (this.recoverySnapshotId === result.id) this.recoverySnapshotId = null;
+        if (this.isSaved === true || this.recoveryDisposed || this.largeFileMode === true)
+          return false;
+        this.cancelRecoveryTimer();
+        continue;
+      }
+      if (previousId && (previousId !== result.id || previousRoot !== workspaceRoot)) {
+        const removedPrevious = await this.deleteRecoveryRecord(previousRoot, previousId);
+        if (!removedPrevious) {
+          this.recoveryPreviousSnapshotId = previousId;
+          this.recoveryPreviousStoreRoot = previousRoot;
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  async deleteRecoveryRecord(root, id) {
+    if (!id || typeof this.editor.api?.deleteRecoverySnapshot !== "function")
+      return false;
+    try {
+      return await this.editor.api.deleteRecoverySnapshot(root || null, id);
+    } catch {
+      return false;
+    }
+  }
+
+  async clearRecoverySnapshot() {
+    this.cancelRecoverySnapshot();
+    if (this.recoveryFlushPromise) await this.recoveryFlushPromise.catch(() => false);
+    const records = [
+      { id: this.recoverySnapshotId, root: this.recoveryStoreRoot },
+      { id: this.recoveryPreviousSnapshotId, root: this.recoveryPreviousStoreRoot },
+    ].filter((record, index, all) => record.id &&
+      all.findIndex((candidate) => candidate.id === record.id && candidate.root === record.root) === index);
+    for (const record of records) {
+      const deleted = await this.deleteRecoveryRecord(record.root, record.id);
+      if (!deleted) {
+        this.editor.performanceMetrics?.increment("recovery.snapshot.deleteFailures");
+        return false;
+      }
+      if (this.recoverySnapshotId === record.id &&
+          this.recoveryStoreRoot === record.root)
+        this.recoverySnapshotId = null;
+      if (this.recoveryPreviousSnapshotId === record.id &&
+          this.recoveryPreviousStoreRoot === record.root)
+        this.recoveryPreviousSnapshotId = null;
+    }
+    if (!records.length) return true;
+    this.recoveryPreviousStoreRoot = null;
+    return true;
+  }
+
+  restoreRecoveredContent(content, {
+    editVersion = 0,
+    diskChanged = false,
+    snapshotId = null,
+    storeRoot = null,
+  } = {}) {
+    if (typeof content !== "string") return false;
+    const lines = [];
+    const endings = [];
+    const newline = /\r\n|\r|\n/g;
+    let start = 0;
+    let match;
+    while ((match = newline.exec(content))) {
+      lines.push(content.slice(start, match.index));
+      endings.push(match[0]);
+      start = match.index + match[0].length;
+    }
+    lines.push(content.slice(start));
+    const hasFinalNewline = endings.length > 0 && start === content.length;
+    if (hasFinalNewline) lines.pop();
+    if (!lines.length) lines.push("");
+    const counts = new Map();
+    for (const ending of endings) counts.set(ending, (counts.get(ending) || 0) + 1);
+    const eol = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || "\n";
+
+    this.cancelRecoverySnapshot();
+    this.lines = lines.map((text) => new LineNode(text));
+    this.lineEndings = endings;
+    this.eol = eol;
+    this.hasFinalNewline = hasFinalNewline;
+    this.totalLines = this.lines.length;
+    this.maxLineLengthDirty = true;
+    this.syntaxMetrics = null;
+    this._lineLengthRecords = null;
+    this._lineLengthHeap = null;
+    this._lineLengthCount = -1;
+    this._logicalLineLengths = null;
+    this._logicalLengthTree = null;
+    this._logicalLengthCount = -1;
+    this.startIndex = 0;
+    this.largeFileMode = false;
+    this.largeFileSize = 0;
+    this.isLoaded = true;
+    this.loadingState = {
+      status: "loaded",
+      isLoading: false,
+      isFullyLoaded: true,
+      loadedLineCount: this.lines.length,
+      expectedTotalLines: this.lines.length,
+    };
+    this.editVersion = Math.max(this.editVersion + 1, Number(editVersion) || 0);
+    this.externalModified = diskChanged === true;
+    this.deletedFromDisk = false;
+    this.editor.historyController?.clear(this);
+    this.recoverySnapshotId = snapshotId;
+    this.recoveryPreviousSnapshotId = snapshotId;
+    this.recoveryStoreRoot = storeRoot || null;
+    this.recoveryPreviousStoreRoot = storeRoot || null;
+    this.setIsSaved(false);
+    this.editor.lineController?.markDirtyAll?.();
+    if (this === this.editor.tabManager?.activeFile)
+      this.editor.lineController?.refresh?.(true);
+    this.editor.tabManager?.refresh?.();
+    return true;
+  }
+
   flushAutoSave() {
     this.cancelAutoSave();
     if (this.autoSaveFlushPromise) return this.autoSaveFlushPromise;
@@ -443,6 +729,7 @@ class FileNode extends Tab {
       this.setIsSaved(true);
       this.cancelAutoSave();
       this.editor.historyController?.markSaved(this);
+      await this.clearRecoverySnapshot();
       this.editor.tabManager.refresh();
       return { saved: true, result: saved };
     } catch (error) {
@@ -468,6 +755,7 @@ class FileNode extends Tab {
         this.setIsSaved(true);
         this.cancelAutoSave();
         this.editor.historyController?.markSaved(this);
+        await this.clearRecoverySnapshot();
       }
       this.editor.tabManager.refresh();
       return true;
@@ -518,6 +806,7 @@ class FileNode extends Tab {
       this.setIsSaved(true);
       this.cancelAutoSave();
       this.editor.historyController?.markSaved(this);
+      await this.clearRecoverySnapshot();
     }
     const language = await this.editor.highlightController.detectLanguage(
       this.name,
@@ -551,6 +840,9 @@ class FileNode extends Tab {
 
   setIsSaved(value) {
     this.isSaved = value;
+    if (value === false) {
+      this.scheduleRecoverySnapshot();
+    }
   }
 
   get autoSave() {

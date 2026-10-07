@@ -91,6 +91,7 @@ class WorkspaceFileManager {
     openFile.saveError = null;
     openFile.setIsSaved(true);
     this.agent.editor.historyController?.markSaved?.(openFile);
+    await openFile.clearRecoverySnapshot?.();
     return { saved: true };
   }
 

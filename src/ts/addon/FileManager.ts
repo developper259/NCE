@@ -10,6 +10,10 @@ import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 import { LargeFileStore } from "./LargeFileStore";
 import {
+  DirtyBufferRecoveryStore,
+  type DirtyBufferRecoveryInput,
+} from "./DirtyBufferRecovery";
+import {
   BINARY_SAMPLE_SIZE,
   IMAGE_MIME_TYPES,
   looksBinary,
@@ -321,6 +325,8 @@ export class FileManager {
   private largeFileStore = new LargeFileStore();
   private stateSaveQueue: Promise<boolean> = Promise.resolve(true);
   private workspaceStateSaveQueues: Map<string, Promise<boolean>> = new Map();
+  private recoveryStores: Map<string, DirtyBufferRecoveryStore> = new Map();
+  private recoveryStoreLoads: Map<string, Promise<DirtyBufferRecoveryStore | null>> = new Map();
 
   constructor(window: Window) {
     this.window = window;
@@ -410,6 +416,32 @@ export class FileManager {
     ipcMain.handle("FileManager:saveFile", async (event, path, content) => {
       return await this.saveFile(path, content);
     });
+
+    ipcMain.handle(
+      "FileManager:saveRecoverySnapshot",
+      async (_event, root: string | null, snapshot: unknown) =>
+        this.saveRecoverySnapshot(root, snapshot),
+    );
+    ipcMain.handle(
+      "FileManager:listRecoverySnapshots",
+      async (_event, root: string | null) =>
+        (await this.getRecoveryStore(root))?.list() || [],
+    );
+    ipcMain.handle(
+      "FileManager:readRecoverySnapshot",
+      async (_event, root: string | null, id: string) =>
+        (await this.getRecoveryStore(root))?.read(id) || null,
+    );
+    ipcMain.handle(
+      "FileManager:deleteRecoverySnapshot",
+      async (_event, root: string | null, id: string) =>
+        (await this.getRecoveryStore(root))?.delete(id) || false,
+    );
+    ipcMain.handle(
+      "FileManager:confirmRecoverySnapshot",
+      async (_event, snapshot: { displayName?: unknown; timestamp?: unknown; diskChanged?: unknown; diskMissing?: unknown }) =>
+        this.confirmRecoverySnapshot(snapshot),
+    );
 
     ipcMain.handle(
       "FileManager:confirmUnsavedChanges",
@@ -704,6 +736,140 @@ export class FileManager {
       console.error("Error saving file:", error);
       throw error;
     }
+  }
+
+  private async getRecoveryStore(
+    workspaceRoot: unknown,
+  ): Promise<DirtyBufferRecoveryStore | null> {
+    let requestedRoot: string;
+    if (workspaceRoot === null || workspaceRoot === undefined || workspaceRoot === "") {
+      requestedRoot = app.getPath("userData");
+    } else if (validPath(workspaceRoot) && path.isAbsolute(workspaceRoot)) {
+      requestedRoot = workspaceRoot;
+    } else {
+      return null;
+    }
+    let root: string;
+    try {
+      root = await fs.realpath(requestedRoot);
+    } catch {
+      return null;
+    }
+    let store = this.recoveryStores.get(root);
+    if (store) {
+      this.recoveryStores.delete(root);
+      this.recoveryStores.set(root, store);
+      return store;
+    }
+    const pending = this.recoveryStoreLoads.get(root);
+    if (pending) return pending;
+    const load = (async () => {
+      try {
+        if (!(await fs.stat(root)).isDirectory()) return null;
+        const created = new DirtyBufferRecoveryStore(root);
+        this.recoveryStores.set(root, created);
+        while (this.recoveryStores.size > 32)
+          this.recoveryStores.delete(this.recoveryStores.keys().next().value as string);
+        return created;
+      } catch {
+        return null;
+      }
+    })();
+    this.recoveryStoreLoads.set(root, load);
+    try { return await load; }
+    finally {
+      if (this.recoveryStoreLoads.get(root) === load)
+        this.recoveryStoreLoads.delete(root);
+    }
+  }
+
+  async saveRecoverySnapshot(
+    workspaceRoot: unknown,
+    snapshotValue: unknown,
+  ): Promise<{ success: boolean; id?: string; reason?: string }> {
+    if (!snapshotValue || typeof snapshotValue !== "object" ||
+        Array.isArray(snapshotValue))
+      return { success: false, reason: "INVALID_SNAPSHOT" };
+    const snapshot = snapshotValue as Record<string, unknown>;
+    if (typeof snapshot.content !== "string" ||
+        typeof snapshot.displayName !== "string" ||
+        !Number.isSafeInteger(snapshot.lineCount) ||
+        !Number.isSafeInteger(snapshot.editVersion))
+      return { success: false, reason: "INVALID_SNAPSHOT" };
+
+    const store = await this.getRecoveryStore(workspaceRoot);
+    if (!store) return { success: false, reason: "INVALID_WORKSPACE" };
+    let record: DirtyBufferRecoveryInput;
+    if (typeof snapshot.filePath === "string" && validPath(snapshot.filePath) &&
+        path.isAbsolute(snapshot.filePath)) {
+      let filePath = path.resolve(snapshot.filePath);
+      try {
+        filePath = await fs.realpath(filePath);
+      } catch {
+        try {
+          filePath = path.join(
+            await fs.realpath(path.dirname(filePath)),
+            path.basename(filePath),
+          );
+        } catch { /* Keep the normalized path when the original parent is gone. */ }
+      }
+      const relative = path.relative(store.root, filePath);
+      const relativePath = relative === "" || (relative !== ".." &&
+        !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+        ? relative.split(path.sep).join("/")
+        : null;
+      record = {
+        identity: `path:${relativePath ?? filePath}`,
+        kind: "path",
+        filePath,
+        relativePath,
+        displayName: snapshot.displayName,
+        content: snapshot.content,
+        lineCount: snapshot.lineCount as number,
+        editVersion: snapshot.editVersion as number,
+        diskFingerprint: typeof snapshot.diskFingerprint === "string"
+          ? snapshot.diskFingerprint : null,
+      };
+    } else if (typeof snapshot.untitledId === "string" &&
+        /^[A-Za-z0-9._-]{1,160}$/.test(snapshot.untitledId)) {
+      record = {
+        identity: `untitled:${snapshot.untitledId}`,
+        kind: "untitled",
+        displayName: snapshot.displayName,
+        content: snapshot.content,
+        lineCount: snapshot.lineCount as number,
+        editVersion: snapshot.editVersion as number,
+      };
+    } else {
+      return { success: false, reason: "INVALID_SNAPSHOT" };
+    }
+    return store.save(record);
+  }
+
+  async confirmRecoverySnapshot(snapshot: {
+    displayName?: unknown;
+    timestamp?: unknown;
+    diskChanged?: unknown;
+    diskMissing?: unknown;
+  }): Promise<"restore" | "discard" | "cancel"> {
+    if (!this.window.window || !validPath(snapshot?.displayName)) return "cancel";
+    const date = Number.isFinite(snapshot.timestamp)
+      ? new Date(Number(snapshot.timestamp)).toLocaleString()
+      : "an earlier session";
+    const detail = snapshot.diskChanged === true
+      ? "The file on disk changed after this recovery snapshot. Restoring keeps the recovered text in NCE and does not write to disk."
+      : snapshot.diskMissing === true
+        ? "The original file is missing. Restoring opens the recovered text as a new unsaved buffer."
+        : "Restoring opens the recovered text as an unsaved buffer and does not write to disk.";
+    const { response } = await dialog.showMessageBox(this.window.window, {
+      type: "warning",
+      buttons: ["Restore", "Discard", "Later"],
+      defaultId: 0,
+      cancelId: 2,
+      message: `Recover unsaved changes for “${snapshot.displayName}”?`,
+      detail: `Saved ${date}. ${detail}`,
+    });
+    return response === 0 ? "restore" : response === 1 ? "discard" : "cancel";
   }
 
   async confirmUnsavedChanges(fileName: string): Promise<UnsavedCloseChoice> {

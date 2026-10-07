@@ -490,8 +490,13 @@ class Editor {
           new Promise((resolve) => setTimeout(resolve, 1800)),
         ]);
         const saved = await this.statesManager.save();
-        if (saved !== false) await this.api.approveQuit?.();
-        else await this.api.cancelQuit?.();
+        if (saved !== false) {
+          const recoveryCleared = this.statesManager.clearRecoverySnapshotsOnQuit
+            ? await this.statesManager.clearRecoverySnapshotsOnQuit()
+            : await this.tabManager.clearRecoverySnapshots?.();
+          if (recoveryCleared !== false) await this.api.approveQuit?.();
+          else await this.api.cancelQuit?.();
+        } else await this.api.cancelQuit?.();
       } catch (error) {
         console.error("Failed to prepare quit:", error);
         await this.api.cancelQuit?.();
@@ -504,6 +509,7 @@ class Editor {
     const apply = async (state) => {
       if (loaded) return;
       if (!state) {
+        await this.statesManager?.offerDirtyBufferRecovery?.(null);
         if (this.isOnInit)
           this.events.callEvent(Events.ON_LOADED, {
             isStateLoaded: false,

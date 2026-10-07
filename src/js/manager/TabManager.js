@@ -89,6 +89,8 @@ class tabManager {
       const tab = this.tabs[index];
       tab?.disposeAutoSave?.();
       tab?.textTab?.disposeAutoSave?.();
+      tab?.disposeRecovery?.();
+      tab?.textTab?.disposeRecovery?.();
       this.tabs.splice(index, 1);
     }
   }
@@ -247,7 +249,10 @@ class tabManager {
     const files = this.tabs.map((tab) => tab.type === "file" ? tab : tab.textTab)
       .filter(Boolean)
       .filter((file, index, allFiles) => allFiles.indexOf(file) === index);
-    await Promise.all(files.map((file) => file.flushAutoSave?.()));
+    await Promise.all(files.flatMap((file) => [
+      file.flushAutoSave?.(),
+      file.flushRecoverySnapshot?.(),
+    ]));
     const dirtyFiles = files
       .filter(
       (file) => !file.isSaved && !(file.isEmpty() && !file.hasPath()),
@@ -265,9 +270,12 @@ class tabManager {
 
   async closeFiles({ skipPrepare = false } = {}) {
     if (!skipPrepare && !(await this.prepareForQuit())) return false;
+    if (!(await this.clearRecoverySnapshots())) return false;
     for (const tab of this.tabs) {
       tab.disposeAutoSave?.();
       tab.textTab?.disposeAutoSave?.();
+      tab.disposeRecovery?.();
+      tab.textTab?.disposeRecovery?.();
     }
     await Promise.all(this.files.map((file) =>
       this.editor.fileLoader.cancelLoading(file.path),
@@ -334,6 +342,9 @@ class tabManager {
       }
     }
 
+    if (file.clearRecoverySnapshot &&
+        !(await file.clearRecoverySnapshot())) return false;
+
     if (id == this.activeFile?.id) {
       if (this.tabs.length > 1) {
         const index = this.getFileIndexByID(id);
@@ -375,6 +386,8 @@ class tabManager {
       if (choice === "save" && (!(await tab.textTab.save()) || !tab.textTab.isSaved))
         return false;
     }
+    if (tab.textTab?.clearRecoverySnapshot &&
+        !(await tab.textTab.clearRecoverySnapshot())) return false;
     if (tab.id === this.activeTab?.id && this.tabs.length > 1) {
       const index = this.getFileIndexByID(tab.id);
       await this.setFocusTab(this.tabs[index === 0 ? 1 : index - 1]);
@@ -426,6 +439,17 @@ class tabManager {
     }
 
     return true;
+  }
+
+  async clearRecoverySnapshots() {
+    const files = this.tabs
+      .map((tab) => tab.type === TAB_TYPES.FILE ? tab : tab.textTab)
+      .filter(Boolean)
+      .filter((file, index, allFiles) => allFiles.indexOf(file) === index);
+    const results = await Promise.all(files.map((file) =>
+      file.clearRecoverySnapshot?.() ?? true,
+    ));
+    return results.every((result) => result !== false);
   }
 
   async closeOtherFiles(file) {

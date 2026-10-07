@@ -162,7 +162,8 @@ export class NceWorkspaceStorage {
     const now = Date.now();
     await Promise.all(
       entries.map(async (entry) => {
-        if (!entry.isDirectory() || (keepRunId && entry.name === keepRunId))
+        if (!entry.isDirectory() || entry.name === "recovery" ||
+            (keepRunId && entry.name === keepRunId))
           return;
         const candidate = path.join(this.tempRoot, entry.name);
         try {
