@@ -157,6 +157,7 @@ export class WorkspaceIndex {
   private readonly maxCachedWorkspaces = 4;
   private readonly maxInvalidWorkspaces = 16;
   private readonly maxRevisionWorkspaces = 64;
+  private readonly maxTransientWorkspaces = 64;
   private readonly coalescedWatcherEvents = {
     received: 0,
     batches: 0,
@@ -200,6 +201,37 @@ export class WorkspaceIndex {
 
   getDiagnostics() {
     return { ...this.coalescedWatcherEvents };
+  }
+
+  getLifecycleStats() {
+    return {
+      cachedWorkspaces: this.snapshots.size,
+      statsWorkspaces: this.statsByRoot.size,
+      largeWorkspaceRoots: this.largeWorkspaceRoots.size,
+      invalidRoots: this.invalidRoots.size,
+      rootRevisions: this.rootRevisions.size,
+      needsReconcileRoots: this.needsReconcileRoots.size,
+      buildQueues: this.buildQueues.size,
+      writeQueues: this.writeQueues.size,
+      activeBuildTokens: this.activeBuildTokens.size,
+      pendingWatcherRoots: this.pendingWatcherEvents.size,
+      watcherEventTimers: this.watcherEventTimers.size,
+      eventFlushQueues: this.eventFlushQueues.size,
+      reconcileTimers: this.reconcileTimers.size,
+      reconcileQueues: this.reconcileQueues.size,
+      reconcileAgainRoots: this.reconcileAgainRoots.size,
+      staleRemovals: this.staleRemovals.size,
+    };
+  }
+
+  private rememberNeedsReconcile(root: string): void {
+    this.needsReconcileRoots.delete(root);
+    this.needsReconcileRoots.add(root);
+    while (this.needsReconcileRoots.size > this.maxTransientWorkspaces) {
+      const oldestRoot = this.needsReconcileRoots.values().next().value;
+      if (!oldestRoot) break;
+      this.needsReconcileRoots.delete(oldestRoot);
+    }
   }
 
   consumeNeedsReconcile(rootPath: string): boolean {
@@ -392,7 +424,7 @@ export class WorkspaceIndex {
       const snapshot = this.validateSnapshot(parsed, root);
       if (!snapshot) return null;
       this.remember(snapshot);
-      this.needsReconcileRoots.add(root);
+      this.rememberNeedsReconcile(root);
       return snapshot;
     } catch {
       return null;
@@ -856,6 +888,61 @@ export class WorkspaceIndex {
       ...this.staleRemovals.keys(),
     ]);
     await Promise.all([...roots].map((root) => this.flush(root)));
+  }
+
+  async release(
+    rootPath: string,
+    { preserveCache = true }: { preserveCache?: boolean } = {},
+  ): Promise<void> {
+    if (typeof rootPath !== "string" || !rootPath.trim()) return;
+    const root = path.resolve(rootPath);
+    this.bumpRevision(root);
+    await this.flushEvents(root);
+
+    for (let pass = 0; pass < 3; pass += 1) {
+      const reconcileTimer = this.reconcileTimers.get(root);
+      if (reconcileTimer) clearTimeout(reconcileTimer);
+      this.reconcileTimers.delete(root);
+      this.activeBuildTokens.delete(root);
+      const pending = [
+        this.eventFlushQueues.get(root),
+        this.reconcileQueues.get(root),
+        this.staleRemovals.get(root),
+        this.buildQueues.get(root),
+        this.writeQueues.get(root),
+      ].filter((promise): promise is Promise<void> => Boolean(promise));
+      if (!pending.length) break;
+      await Promise.allSettled(pending);
+    }
+
+    const reconcileTimer = this.reconcileTimers.get(root);
+    if (reconcileTimer) clearTimeout(reconcileTimer);
+    const watcherTimer = this.watcherEventTimers.get(root);
+    if (watcherTimer) clearTimeout(watcherTimer);
+    this.reconcileTimers.delete(root);
+    this.watcherEventTimers.delete(root);
+    this.pendingWatcherEvents.delete(root);
+    this.eventFlushQueues.delete(root);
+    this.reconcileQueues.delete(root);
+    this.reconcileAgainRoots.delete(root);
+    this.staleRemovals.delete(root);
+    this.buildQueues.delete(root);
+    this.writeQueues.delete(root);
+    this.activeBuildTokens.delete(root);
+
+    let rootExists = preserveCache;
+    if (rootExists) {
+      try { rootExists = (await fs.stat(root)).isDirectory(); }
+      catch { rootExists = false; }
+    }
+    if (!rootExists) {
+      this.snapshots.delete(root);
+      this.statsByRoot.delete(root);
+      this.largeWorkspaceRoots.delete(root);
+      this.invalidRoots.delete(root);
+      this.rootRevisions.delete(root);
+      this.needsReconcileRoots.delete(root);
+    }
   }
 
   async invalidate(rootPath: string): Promise<void> {

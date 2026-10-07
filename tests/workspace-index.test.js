@@ -242,6 +242,73 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
   }
 });
 
+test("WorkspaceIndex releases watcher state while retaining a bounded cache across workspaces", async () => {
+  const roots = [];
+  const index = new WorkspaceIndex();
+  try {
+    for (let workspace = 0; workspace < 10; workspace += 1) {
+      const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-release-"));
+      roots.push(root);
+      const filePath = path.join(root, "tracked.txt");
+      await fsp.writeFile(filePath, `workspace ${workspace}\n`);
+      await index.build(root);
+      await fsp.writeFile(filePath, `updated workspace ${workspace}\n`);
+      index.handleWatcherEvent(root, "change", filePath);
+      await index.release(root);
+      const state = index.getLifecycleStats();
+      assert.equal(state.pendingWatcherRoots, 0);
+      assert.equal(state.watcherEventTimers, 0);
+      assert.equal(state.eventFlushQueues, 0);
+      assert.equal(state.reconcileTimers, 0);
+      assert.equal(state.reconcileQueues, 0);
+      assert.equal(state.staleRemovals, 0);
+      assert.equal(state.buildQueues, 0);
+      assert.equal(state.writeQueues, 0);
+      assert.equal(state.activeBuildTokens, 0);
+      assert.equal(state.reconcileAgainRoots, 0);
+    }
+    const state = index.getLifecycleStats();
+    assert.equal(state.cachedWorkspaces, 4);
+    assert.equal(state.statsWorkspaces, 4);
+    assert.equal(state.largeWorkspaceRoots, 0);
+    assert.ok(state.rootRevisions <= 64);
+    assert.ok(state.needsReconcileRoots <= 64);
+    assert.equal((await index.load(roots.at(-1))).entries[0].size,
+      Buffer.byteLength(`updated workspace 9\n`));
+  } finally {
+    await Promise.all(roots.map((root) => fsp.rm(root, { recursive: true, force: true })));
+  }
+});
+
+test("WorkspaceIndex bounds cache-load reconciliation state across many roots", async () => {
+  const roots = [];
+  const index = new WorkspaceIndex();
+  try {
+    for (let workspace = 0; workspace < 72; workspace += 1) {
+      const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-load-bound-"));
+      roots.push(root);
+      const storage = new NceWorkspaceStorage(root);
+      await fsp.mkdir(path.dirname(storage.getCachePath(WORKSPACE_INDEX_CACHE_FILE)), {
+        recursive: true,
+      });
+      await fsp.writeFile(storage.getCachePath(WORKSPACE_INDEX_CACHE_FILE), JSON.stringify({
+        version: WORKSPACE_INDEX_VERSION,
+        root: path.resolve(root),
+        generatedAt: Date.now(),
+        complete: true,
+        entries: [],
+      }));
+      assert.ok(await index.load(root));
+    }
+    const state = index.getLifecycleStats();
+    assert.equal(state.cachedWorkspaces, 4);
+    assert.equal(state.statsWorkspaces, 4);
+    assert.equal(state.needsReconcileRoots, 64);
+  } finally {
+    await Promise.all(roots.map((root) => fsp.rm(root, { recursive: true, force: true })));
+  }
+});
+
 test("WorkspaceIndex coalesces adds, non-openable changes, deletes, directory deletes, and rename pairs", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-events-"));
   const write = async (relativePath, content) => {

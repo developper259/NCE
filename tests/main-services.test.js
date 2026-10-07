@@ -612,6 +612,8 @@ test("WorkspaceSearch retains fewer page sessions for large workspaces", async (
     assert.equal(search.getSearchSessionStats().activeSessions, 8);
     assert.equal(search.getSearchSessionStats("workspace-search-large-5").workspaceSessions, 4);
     assert.equal(search.getSearchSessionStats("workspace-search-large-5").complete, true);
+    await search.releaseWorkspace(largeRoot);
+    assert.equal(search.getSearchSessionStats().activeSessions, 4);
   } finally {
     await cleanupSearchWorkspaces(search, normalRoot, largeRoot);
   }

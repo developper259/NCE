@@ -122,7 +122,7 @@ export class Window {
         filePath,
       );
     this.watcher.onWatcherStop = (rootPath) =>
-      this.workspaceSearch?.workspaceIndex.flushEvents(rootPath);
+      this.workspaceSearch?.releaseWorkspace(rootPath);
     this.workspaceSearch.workspaceIndex.onReconciled = (rootPath) => {
       const window = this.window;
       if (

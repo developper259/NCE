@@ -788,6 +788,20 @@ export class WorkspaceSearch {
     }
   }
 
+  async releaseWorkspace(rootPath: string): Promise<void> {
+    if (typeof rootPath !== "string" || !rootPath.trim()) return;
+    const root = path.resolve(rootPath);
+    const pendingSearches: Promise<SearchResponse>[] = [];
+    for (const session of [...this.searchSessions.values()]) {
+      if (session.root !== root) continue;
+      if (session.promise) pendingSearches.push(session.promise);
+      this.cancelSession(session);
+      this.rememberCancelledSearchSession(session.id);
+    }
+    await Promise.allSettled(pendingSearches);
+    await this.workspaceIndex.release(root);
+  }
+
   getSearchSessionStats(sessionId?: string): {
     activeSessions: number;
     directoriesVisited?: number;
