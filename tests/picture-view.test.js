@@ -80,7 +80,8 @@ test("PictureView creates vertical and horizontal NCE scrollers only for overflo
   const status = { hidden: true, dataset: {}, textContent: "" };
   const viewport = {
     clientHeight: 100, clientWidth: 100, scrollHeight: 120, scrollWidth: 160,
-    scrollTop: 10, scrollLeft: 30, addEventListener() {}, querySelector: () => image,
+    scrollTop: 10, scrollLeft: 30, addEventListener() {}, removeEventListener() {},
+    querySelector: () => image,
   };
   const host = {
     hidden: true,
@@ -109,6 +110,8 @@ test("PictureView creates vertical and horizontal NCE scrollers only for overflo
     },
   };
   const view = new PictureView(editor);
+  assert.equal(instances.length, 0, "hidden previews do not create scrollers");
+  view.show();
   assert.equal(instances.length, 2);
   assert.equal(instances[0].parent, host);
   view.scroller.setZoomed(true);
@@ -119,6 +122,9 @@ test("PictureView creates vertical and horizontal NCE scrollers only for overflo
   instances[1].onScroll(1);
   assert.equal(view.viewport.scrollTop, 20);
   assert.equal(view.viewport.scrollLeft, 60);
+  view.hide();
+  view.show();
+  assert.equal(instances.length, 2, "reopening reuses its scrollers");
   viewport.scrollHeight = viewport.clientHeight;
   viewport.scrollWidth = viewport.clientWidth;
   view.scroller.refresh();
