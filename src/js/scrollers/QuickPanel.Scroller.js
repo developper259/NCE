@@ -1,3 +1,5 @@
+const WHEEL_GESTURE_SILENCE_MS = 100;
+
 class QuickPanelScroller {
   constructor(editor, quickPanel) {
     this.editor = editor;
@@ -26,8 +28,24 @@ class QuickPanelScroller {
     this.forceRender = true;
     this.renderedRows = new Map();
     this.pendingEnsureIndex = null;
+    this.lastWheelActivity = null;
+    this.wheelTailGuardTarget = null;
+    this.wheelTailGuardTimer = null;
 
     this._onWheel = (event) => this.handleWheel(event);
+    this._onWheelTailGuard = (event) => {
+      if (
+        this.lastWheelActivity === null ||
+        Date.now() - this.lastWheelActivity >= WHEEL_GESTURE_SILENCE_MS
+      ) {
+        this.clearWheelTailGuard();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      this.lastWheelActivity = Date.now();
+      this.scheduleWheelTailGuardRelease();
+    };
     this._resizeObserver = typeof ResizeObserver === "function"
       ? new ResizeObserver(() => this.scheduleRender(true))
       : null;
@@ -230,6 +248,7 @@ class QuickPanelScroller {
         ? delta * this.viewportHeight
         : delta;
 
+    this.lastWheelActivity = Date.now();
     event.preventDefault();
     event.stopPropagation();
 
@@ -384,6 +403,7 @@ class QuickPanelScroller {
 
   suspend() {
     this.active = false;
+    this.armWheelTailGuard();
     if (this.viewport) this._resizeObserver?.unobserve(this.viewport);
     if (this.frame !== null) {
       const cancelFrame = this.editor.domManager?.cancelFrame ||
@@ -396,6 +416,10 @@ class QuickPanelScroller {
 
   resume() {
     const wasActive = this.active;
+    if (!wasActive) {
+      this.clearWheelTailGuard();
+      this.lastWheelActivity = null;
+    }
     this.active = true;
     this.editor.scrollerManager?.activateScroller?.(this.vScroller, {
       deferRefresh: true,
@@ -410,6 +434,8 @@ class QuickPanelScroller {
 
   destroy() {
     this.suspend();
+    this.clearWheelTailGuard();
+    this.lastWheelActivity = null;
     this.detachViewport();
     this._resizeObserver?.disconnect();
     this._resizeObserver = null;
@@ -417,5 +443,69 @@ class QuickPanelScroller {
     this.viewport = null;
     this.layer = null;
     this.layerFast = null;
+  }
+
+  armWheelTailGuard() {
+    if (this.lastWheelActivity === null) return false;
+    const elapsed = Date.now() - this.lastWheelActivity;
+    if (elapsed >= WHEEL_GESTURE_SILENCE_MS) {
+      this.lastWheelActivity = null;
+      return false;
+    }
+
+    const target = this.viewport?.ownerDocument?.defaultView ||
+      (typeof window !== "undefined" ? window : null);
+    if (!target?.addEventListener) return false;
+
+    if (!this.wheelTailGuardTarget) {
+      this.wheelTailGuardTarget = target;
+      target.addEventListener("wheel", this._onWheelTailGuard, {
+        capture: true,
+        passive: false,
+      });
+    }
+    this.scheduleWheelTailGuardRelease();
+    return true;
+  }
+
+  scheduleWheelTailGuardRelease() {
+    if (!this.wheelTailGuardTarget || this.lastWheelActivity === null) return;
+    if (this.wheelTailGuardTimer !== null) {
+      clearTimeout(this.wheelTailGuardTimer);
+      this.wheelTailGuardTimer = null;
+    }
+
+    const elapsed = Date.now() - this.lastWheelActivity;
+    const remaining = WHEEL_GESTURE_SILENCE_MS - elapsed;
+    if (remaining <= 0) {
+      this.clearWheelTailGuard();
+      return;
+    }
+
+    this.wheelTailGuardTimer = setTimeout(() => {
+      this.wheelTailGuardTimer = null;
+      if (
+        this.lastWheelActivity !== null &&
+        Date.now() - this.lastWheelActivity >= WHEEL_GESTURE_SILENCE_MS
+      ) {
+        this.clearWheelTailGuard();
+      } else {
+        this.scheduleWheelTailGuardRelease();
+      }
+    }, remaining);
+  }
+
+  clearWheelTailGuard() {
+    if (this.wheelTailGuardTimer !== null) {
+      clearTimeout(this.wheelTailGuardTimer);
+      this.wheelTailGuardTimer = null;
+    }
+    this.wheelTailGuardTarget?.removeEventListener(
+      "wheel",
+      this._onWheelTailGuard,
+      { capture: true },
+    );
+    this.wheelTailGuardTarget = null;
+    this.lastWheelActivity = null;
   }
 }

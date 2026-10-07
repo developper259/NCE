@@ -16,6 +16,40 @@ class FakeResizeObserver {
   trigger() { this.callback(); }
 }
 
+let fakeWheelNow = 1000;
+let nextFakeWheelTimerId = 1;
+const fakeWheelTimers = new Map();
+
+class FakeWheelDate extends Date {
+  static now() { return fakeWheelNow; }
+}
+
+function advanceWheelTime(milliseconds) {
+  fakeWheelNow += milliseconds;
+  while (true) {
+    const due = [...fakeWheelTimers.entries()]
+      .filter(([, timer]) => timer.due <= fakeWheelNow)
+      .sort((left, right) => left[1].due - right[1].due)[0];
+    if (!due) return;
+    fakeWheelTimers.delete(due[0]);
+    due[1].callback();
+  }
+}
+
+function createWheelEvent(deltaY, { deltaX = 0 } = {}) {
+  return {
+    type: "wheel",
+    deltaX,
+    deltaY,
+    deltaMode: 0,
+    shiftKey: false,
+    defaultPrevented: false,
+    propagationStopped: false,
+    preventDefault() { this.defaultPrevented = true; },
+    stopPropagation() { this.propagationStopped = true; },
+  };
+}
+
 class FakeElement {
   constructor(tagName) {
     this.tagName = tagName;
@@ -87,6 +121,7 @@ class FakeElement {
     return null;
   }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  removeAttribute(name) { this.attributes.delete(name); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   addEventListener(name, listener) {
     const listeners = this.listeners.get(name) || [];
@@ -96,6 +131,10 @@ class FakeElement {
   removeEventListener(name, listener) {
     const listeners = this.listeners.get(name) || [];
     this.listeners.set(name, listeners.filter((candidate) => candidate !== listener));
+  }
+  dispatchEvent(event) {
+    for (const listener of this.listeners.get(event.type) || []) listener(event);
+    return !event.defaultPrevented;
   }
   focus() {}
   blur() {}
@@ -111,7 +150,7 @@ class FakeElement {
 function makeDocument() {
   const host = new FakeElement("div");
   const created = [];
-  return {
+  const document = {
     host,
     created,
     activeElement: null,
@@ -121,10 +160,13 @@ function makeDocument() {
     },
     createElement(tagName) {
       const element = new FakeElement(tagName);
+      element.ownerDocument = document;
       created.push(element);
       return element;
     },
   };
+  host.ownerDocument = document;
+  return document;
 }
 
 function makeEnvironment({ viewportHeight = 360 } = {}) {
@@ -134,12 +176,27 @@ function makeEnvironment({ viewportHeight = 360 } = {}) {
   let globalRefreshes = 0;
   let height = viewportHeight;
   const document = makeDocument();
+  const windowListeners = new Map();
   const window = {
     api: { platform: "linux" },
+    addEventListener(type, listener) {
+      const listeners = windowListeners.get(type) || [];
+      listeners.push(listener);
+      windowListeners.set(type, listeners);
+    },
+    removeEventListener(type, listener) {
+      const listeners = windowListeners.get(type) || [];
+      windowListeners.set(type, listeners.filter((candidate) => candidate !== listener));
+    },
+    listenerCount(type) { return windowListeners.get(type)?.length || 0; },
+    dispatchEvent(event) {
+      for (const listener of windowListeners.get(event.type) || []) listener(event);
+    },
     getComputedStyle: () => ({
       getPropertyValue: (name) => name === "--quick-panel-row-height" ? "30px" : "",
     }),
   };
+  document.defaultView = window;
   const domManager = {
     fastNodes: new WeakMap(),
     wrapFastNode(node) {
@@ -227,12 +284,23 @@ function makeEnvironment({ viewportHeight = 360 } = {}) {
 const QuickPanelScroller = loadGlobal(
   "src/js/scrollers/QuickPanel.Scroller.js",
   "QuickPanelScroller",
-  { ResizeObserver: FakeResizeObserver, window: { getComputedStyle: () => ({ getPropertyValue: () => "30px" }) } },
+  {
+    Date: FakeWheelDate,
+    ResizeObserver: FakeResizeObserver,
+    clearTimeout(id) { fakeWheelTimers.delete(id); },
+    setTimeout(callback, delay) {
+      const id = nextFakeWheelTimerId++;
+      fakeWheelTimers.set(id, { callback, due: fakeWheelNow + delay });
+      return id;
+    },
+    window: { getComputedStyle: () => ({ getPropertyValue: () => "30px" }) },
+  },
 );
 
 function makeVirtualFixture(options = {}) {
   const env = makeEnvironment(options);
   const viewport = new FakeElement("div");
+  viewport.ownerDocument = env.document;
   viewport.className = "quick-panel-list";
   const layer = new FakeElement("div");
   layer.className = "quick-panel-list-layer";
@@ -462,6 +530,7 @@ test("QuickPanel contains vertical wheel input at its scroll boundaries", () => 
     wheel({ deltaY: 10 }),
     { prevented: false, stopped: false },
   );
+  fixture.scroller.destroy();
 });
 
 test("QuickPanel consumes vertical wheel input when results do not overflow", () => {
@@ -488,6 +557,186 @@ test("QuickPanel consumes vertical wheel input when results do not overflow", ()
   assert.equal(prevented, true);
   assert.equal(stopped, true);
   assert.equal(fixture.scroller.scrollY, 0);
+});
+
+test("QuickPanel contains trailing wheel input after close without scrolling the editor", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+
+  const initialEditorScrollY = 120;
+  let editorScrollY = initialEditorScrollY;
+  fixture.scroller.handleWheel(createWheelEvent(24));
+  fixture.scroller.suspend();
+  assert.equal(fixture.window.listenerCount("wheel"), 1);
+
+  const residual = createWheelEvent(8);
+  fixture.window.dispatchEvent(residual);
+  if (!residual.defaultPrevented) editorScrollY += residual.deltaY;
+
+  assert.equal(residual.defaultPrevented, true);
+  assert.equal(residual.propagationStopped, true);
+  assert.equal(editorScrollY, initialEditorScrollY);
+  fixture.scroller.destroy();
+});
+
+test("QuickPanel releases wheel ownership after a full silence window", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+  fixture.scroller.handleWheel(createWheelEvent(24));
+  fixture.scroller.suspend();
+
+  advanceWheelTime(100);
+  assert.equal(fixture.window.listenerCount("wheel"), 0);
+
+  let editorScrollY = 120;
+  const newEditorGesture = createWheelEvent(12);
+  fixture.window.dispatchEvent(newEditorGesture);
+  if (!newEditorGesture.defaultPrevented) editorScrollY += newEditorGesture.deltaY;
+
+  assert.equal(newEditorGesture.defaultPrevented, false);
+  assert.equal(editorScrollY, 132);
+  fixture.scroller.destroy();
+});
+
+test("a new editor gesture after silence passes even if the guard timer is delayed", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+  fixture.scroller.handleWheel(createWheelEvent(24));
+  fixture.scroller.suspend();
+
+  fakeWheelNow += 100;
+  const newEditorGesture = createWheelEvent(12);
+  fixture.window.dispatchEvent(newEditorGesture);
+
+  assert.equal(newEditorGesture.defaultPrevented, false);
+  assert.equal(newEditorGesture.propagationStopped, false);
+  assert.equal(fixture.window.listenerCount("wheel"), 0);
+  assert.equal(fakeWheelTimers.size, 0);
+  fixture.scroller.destroy();
+});
+
+test("closing QuickPanel without recent wheel input installs no guard", () => {
+  const fixture = makeVirtualFixture();
+  fixture.scroller.resume();
+  fixture.scroller.suspend();
+
+  assert.equal(fixture.window.listenerCount("wheel"), 0);
+  assert.equal(fixture.scroller.wheelTailGuardTimer, null);
+  fixture.scroller.destroy();
+});
+
+test("keyboard-only QuickPanel navigation leaves editor wheel input available", async () => {
+  const env = makeEnvironment();
+  const QuickPanel = loadGlobal("src/js/types/QuickPanel.js", "QuickPanel", {
+    document: env.document,
+    window: env.window,
+    QuickPanelScroller,
+  });
+  const panel = new QuickPanel(env.editor);
+  panel.open({
+    id: "keyboard-only",
+    mode: "pick",
+    items: [{ id: "one", label: "One" }, { id: "two", label: "Two" }],
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  env.flushFrames();
+  panel.handleKeyDown({ key: "ArrowDown", preventDefault() {}, stopPropagation() {} });
+  panel.close({ restoreFocus: false });
+
+  assert.equal(env.window.listenerCount("wheel"), 0);
+  const editorWheel = createWheelEvent(12);
+  env.window.dispatchEvent(editorWheel);
+  assert.equal(editorWheel.defaultPrevented, false);
+  panel.destroy();
+});
+
+test("switching QuickPanel sessions transfers wheel handling to the new panel", async () => {
+  const env = makeEnvironment();
+  const QuickPanel = loadGlobal("src/js/types/QuickPanel.js", "QuickPanel", {
+    document: env.document,
+    window: env.window,
+    QuickPanelScroller,
+  });
+  const panel = new QuickPanel(env.editor);
+  const items = Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  }));
+  panel.open({ id: "panel-a", mode: "pick", items });
+  await new Promise((resolve) => setImmediate(resolve));
+  env.flushFrames();
+  panel.resultsScroller.handleWheel(createWheelEvent(16));
+
+  panel.open({ id: "panel-b", mode: "pick", items });
+  await new Promise((resolve) => setImmediate(resolve));
+  env.flushFrames();
+
+  assert.equal(panel.resultsScroller.active, true);
+  assert.equal(env.window.listenerCount("wheel"), 0);
+  const panelWheel = createWheelEvent(16);
+  panel.list.dispatchEvent(panelWheel);
+  assert.equal(panelWheel.defaultPrevented, true);
+  assert.equal(panelWheel.propagationStopped, true);
+  panel.destroy();
+});
+
+test("destroying QuickPanelScroller during the wheel tail guard removes its listener and timer", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+  fixture.scroller.handleWheel(createWheelEvent(24));
+  fixture.scroller.suspend();
+  assert.equal(fixture.window.listenerCount("wheel"), 1);
+  assert.notEqual(fixture.scroller.wheelTailGuardTimer, null);
+
+  fixture.scroller.destroy();
+
+  assert.equal(fixture.window.listenerCount("wheel"), 0);
+  assert.equal(fixture.scroller.wheelTailGuardTimer, null);
+  assert.equal(fakeWheelTimers.size, 0);
+});
+
+test("each residual wheel extends the guard until a full silence window", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+  fixture.scroller.handleWheel(createWheelEvent(24));
+  fixture.scroller.suspend();
+
+  advanceWheelTime(80);
+  fixture.window.dispatchEvent(createWheelEvent(8));
+  advanceWheelTime(80);
+  assert.equal(fixture.window.listenerCount("wheel"), 1);
+
+  fixture.window.dispatchEvent(createWheelEvent(4));
+  advanceWheelTime(99);
+  assert.equal(fixture.window.listenerCount("wheel"), 1);
+  advanceWheelTime(1);
+  assert.equal(fixture.window.listenerCount("wheel"), 0);
+  fixture.scroller.destroy();
 });
 
 test("QuickPanel keeps its input outside the virtual viewport and navigates large results", async () => {
