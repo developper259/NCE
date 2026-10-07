@@ -1,3 +1,5 @@
+const INTERACTION_VISIBILITY_MS = 650;
+
 class Scroller {
   constructor(e, options = {}) {
     this.editor = e;
@@ -32,6 +34,7 @@ class Scroller {
     this.targetScrollRatio = 0;
     this._rafId = null;
     this._scrollEndTimer = null;
+    this._interactionTimer = null;
 
     this.strength = 0.5;
     this.renderMargin = 5;
@@ -40,6 +43,7 @@ class Scroller {
     this.heightByItem = 0;
 
     this.isHovered = false;
+    this.recentlyInteracted = false;
     this.dragOffset = 0;
 
     this.calculProp = () => 0;
@@ -75,6 +79,7 @@ class Scroller {
   }
 
   scheduleScrollRender() {
+    this.markRecentlyInteracted();
     if (this._scrollEndTimer !== null) {
       clearTimeout(this._scrollEndTimer);
       this._scrollEndTimer = null;
@@ -188,11 +193,27 @@ class Scroller {
 
   updateVisibility() {
     if (!this.scrollerOBJ) return;
-    if (this.active && (this.isHovered || this.isDragging)) {
+    if (this.active && (
+      this.isHovered || this.isDragging || this.recentlyInteracted
+    )) {
       this.scrollerFast?.setOpacity(1);
     } else {
       this.scrollerFast?.setOpacity(0);
     }
+  }
+
+  markRecentlyInteracted() {
+    if (this._interactionTimer !== null) {
+      clearTimeout(this._interactionTimer);
+      this._interactionTimer = null;
+    }
+    this.recentlyInteracted = true;
+    this.updateVisibility();
+    this._interactionTimer = setTimeout(() => {
+      this._interactionTimer = null;
+      this.recentlyInteracted = false;
+      this.updateVisibility();
+    }, INTERACTION_VISIBILITY_MS);
   }
 
   refresh() {
@@ -226,6 +247,13 @@ class Scroller {
       this.manager.finishDrag({ notifyEnd: false });
     }
     this.active = mode;
+    if (!mode) {
+      if (this._interactionTimer !== null) {
+        clearTimeout(this._interactionTimer);
+        this._interactionTimer = null;
+      }
+      this.recentlyInteracted = false;
+    }
     if (!this.scrollerOBJ) return;
     this.scrollerFast?.toggleClass("page-scroller-inactive", !mode);
 
@@ -259,6 +287,7 @@ class Scroller {
   handlePointerDown(event) {
     if (!this.active || this._destroyed || !this.itemOBJ) return false;
     this.isDragging = true;
+    this.markRecentlyInteracted();
 
     if (this.editor && this.editor.sidebarResizer) {
       this.editor.domManager.wrapFastNode(this.editor.sidebarResizer.leftResizer)?.setDisplay("none");
@@ -292,6 +321,10 @@ class Scroller {
       clearTimeout(this._scrollEndTimer);
       this._scrollEndTimer = null;
     }
+    if (this._interactionTimer !== null) {
+      clearTimeout(this._interactionTimer);
+      this._interactionTimer = null;
+    }
     this.itemOBJ?.removeEventListener("pointerdown", this._onPointerDown);
     this.parentOBJ?.removeEventListener("mouseenter", this._onMouseEnter);
     this.parentOBJ?.removeEventListener("mouseleave", this._onMouseLeave);
@@ -305,6 +338,7 @@ class Scroller {
     this.wheelTarget = null;
     this.isDragging = false;
     this.isHovered = false;
+    this.recentlyInteracted = false;
     this._onPointerDown = null;
     this._onMouseEnter = null;
     this._onMouseLeave = null;
@@ -353,8 +387,10 @@ class Scroller {
   }
 
   handlePointerUp({ notifyEnd = true } = {}) {
-    if (this.isDragging && notifyEnd) this.onScrollEnd();
+    const wasDragging = this.isDragging;
+    if (wasDragging && notifyEnd) this.onScrollEnd();
     this.isDragging = false;
+    if (wasDragging && !this._destroyed) this.markRecentlyInteracted();
 
     if (this.editor && this.editor.sidebarResizer) {
       this.editor.sidebarResizer.updateResizerVisibility();
@@ -386,6 +422,7 @@ class Scroller {
     const delta = isVertical ? e.deltaY : e.shiftKey ? e.deltaY : e.deltaX;
     if (!isVertical && delta === 0) return;
 
+    this.markRecentlyInteracted();
     e.preventDefault();
     if (!isVertical && delta !== 0) e.stopPropagation();
     if (!isVertical && typeof this.wheelDeltaHandler === "function") {
