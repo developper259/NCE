@@ -135,6 +135,122 @@ test("TabManager refresh preserves tab DOM identity and updates only changed sta
   assert.equal(manager.tabElements.get("1").element, aEntry.element);
 });
 
+test("TabManager refreshes only the changed tab dirty marker", () => {
+  const ul = new FakeElement("ul");
+  const visibilityRequests = [];
+  const stateCalls = { contexts: 0, fullRefreshes: 0 };
+  const TabManager = loadGlobal(
+    "src/js/manager/TabManager.js",
+    "tabManager",
+    {
+      TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+      getElement: (selector) => selector === ".file-manager .files-ul" ? ul : null,
+      document: { createElement: (tagName) => new FakeElement(tagName) },
+    },
+  );
+  const active = {
+    id: 10,
+    type: "file",
+    name: "active.js",
+    dirty: false,
+    isVisuallyDirty() { return this.dirty; },
+  };
+  const other = {
+    id: 11,
+    type: "file",
+    name: "other.js",
+    dirty: false,
+    isVisuallyDirty() { return this.dirty; },
+  };
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    editor: {
+      api: { setActiveFileContext() { stateCalls.contexts++; } },
+      titleBar: { refresh() {} },
+      isOnInit: false,
+      isActive: true,
+      reset() {},
+      reactive() {},
+    },
+    tabs: [active, other],
+    activeTab: active,
+    tabElements: new Map(),
+    tabScroller: {
+      ensureElementVisible(element) { visibilityRequests.push(element); },
+      refresh() { assert.fail("only the active tab visibility should be checked"); },
+    },
+  });
+
+  manager.refresh();
+  const activeEntry = manager.tabElements.get("10");
+  const otherEntry = manager.tabElements.get("11");
+  stateCalls.contexts = 0;
+  manager.refresh = () => { stateCalls.fullRefreshes++; };
+  manager.updateFileOBJ = () => assert.fail("dirty refresh must not update every tab");
+
+  active.dirty = true;
+  assert.equal(manager.refreshTabState(active), true);
+  const dirtyControl = activeEntry.closeControl;
+  assert.equal(dirtyControl.classList.contains("file-unsaved"), true);
+  for (let index = 0; index < 99; index++)
+    assert.equal(manager.refreshTabState(active), false);
+  assert.equal(activeEntry.closeControl, dirtyControl);
+  assert.equal(manager.tabElements.get("11"), otherEntry);
+  assert.equal(stateCalls.contexts, 0);
+  assert.equal(stateCalls.fullRefreshes, 0);
+  assert.equal(visibilityRequests.length, 2);
+});
+
+test("TabManager batches dirty-state changes across tabs into one visibility refresh", () => {
+  const ul = new FakeElement("ul");
+  const visibilityRequests = [];
+  const TabManager = loadGlobal(
+    "src/js/manager/TabManager.js",
+    "tabManager",
+    {
+      TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+      getElement: (selector) => selector === ".file-manager .files-ul" ? ul : null,
+      document: { createElement: (tagName) => new FakeElement(tagName) },
+    },
+  );
+  const files = [1, 2, 3].map((id) => ({
+    id,
+    type: "file",
+    name: `${id}.js`,
+    dirty: true,
+    isVisuallyDirty() { return this.dirty; },
+  }));
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    editor: {
+      api: { setActiveFileContext() {} },
+      titleBar: { refresh() {} },
+      isOnInit: false,
+      isActive: true,
+      reset() {},
+      reactive() {},
+    },
+    tabs: files,
+    activeTab: files[1],
+    tabElements: new Map(),
+    tabScroller: {
+      ensureElementVisible(element) { visibilityRequests.push(element); },
+      refresh() { visibilityRequests.push("refresh"); },
+    },
+  });
+
+  manager.refresh();
+  visibilityRequests.length = 0;
+  for (const file of files) file.dirty = false;
+
+  assert.equal(manager.refreshTabStates(), true);
+  assert.equal(manager.refreshTabStates(), false);
+  assert.deepEqual(visibilityRequests, [manager.tabElements.get("2").element]);
+  for (const file of files) {
+    const entry = manager.tabElements.get(String(file.id));
+    assert.equal(entry.dirty, false);
+    assert.equal(entry.closeControl.classList.contains("file-saved"), true);
+  }
+});
+
 test("TabManager hide and show do not toggle the tab-bar bottom divider", () => {
   const calls = [];
   const TabManager = loadGlobal(

@@ -834,6 +834,53 @@ class tabManager {
     return layoutChanged;
   }
 
+  refreshTabState(file, { refreshScroller = true, ensureVisibility = true } = {}) {
+    const entry = file && this.tabElements?.get(String(file.id));
+    if (!entry) return false;
+
+    // Text edits only affect the edited file's dirty marker. Avoid walking or
+    // rewriting every open tab for this state transition.
+    const dirty = file.type === TAB_TYPES.FILE &&
+      typeof file.isVisuallyDirty === "function" && file.isVisuallyDirty();
+    if (entry.dirty === dirty && entry.closeControl?.parentElement === entry.element)
+      return false;
+
+    const closeControl = this.createCloseControl(dirty);
+    if (entry.closeControl?.parentElement === entry.element) {
+      entry.element.replaceChild(closeControl, entry.closeControl);
+    } else {
+      entry.element.appendChild(closeControl);
+    }
+    entry.closeControl = closeControl;
+    entry.dirty = dirty;
+
+    const index = this.tabs.indexOf(file);
+    const activeIndex = this.tabs.indexOf(this.activeTab);
+    if (ensureVisibility && index !== -1 && index <= activeIndex)
+      this.ensureActiveTabVisible();
+    else if (refreshScroller)
+      this.tabScroller?.refresh();
+    return true;
+  }
+
+  refreshTabStates() {
+    const activeIndex = this.tabs.indexOf(this.activeTab);
+    let changed = false;
+    let activeChanged = false;
+    for (let index = 0; index < this.tabs.length; index++) {
+      if (!this.refreshTabState(this.tabs[index], {
+        refreshScroller: false,
+        ensureVisibility: false,
+      })) continue;
+      changed = true;
+      if (index <= activeIndex) activeChanged = true;
+    }
+
+    if (activeChanged) this.ensureActiveTabVisible();
+    else if (changed) this.tabScroller?.refresh();
+    return changed;
+  }
+
   onContextMenu(tabElement) {
     const file = this.getFileByID(tabElement?.id);
     if (!file) return false;

@@ -33,6 +33,27 @@ test("writer inserts text and emits complete NSH line mapping", () => {
   }));
 });
 
+test("range edits fold cursor and selection notifications into one change event", () => {
+  const { editor, file } = setup("");
+  const selectionOptions = [];
+  const cursorOptions = [];
+  editor.selectController.unSelectAll = (options) => selectionOptions.push(options);
+  editor.cursorController.setCursorPosition = (row, column, options) => {
+    file.row = row;
+    file.column = column;
+    cursorOptions.push(options);
+  };
+
+  editor.writerController.write("x");
+
+  assert.equal(selectionOptions.length, 1);
+  assert.equal(selectionOptions[0].emitEvent, false);
+  assert.equal(cursorOptions.length, 1);
+  assert.equal(cursorOptions[0].emitEvent, false);
+  assert.deepEqual(editor.events.calls.map(({ name }) => name), ["onChange"]);
+  assert.equal(file.column, 1);
+});
+
 test("writer handles multiline insertion, deletion, join, and replacement", () => {
   const { editor, file } = setup("hello world\nthird");
   editor.writerController.replaceRange("NCE\nworks", 1, 6, 1, 11);

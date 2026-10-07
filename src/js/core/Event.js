@@ -102,7 +102,7 @@ class Events {
         console.error("Event " + e + " not found !");
         return;
     }
-    this.onEvent(arg);
+    this.onEvent(arg, e);
   }
   // Custom Event
   cursorMove(arg) {}
@@ -119,11 +119,33 @@ class Events {
     // ------- File.js ------
     if (this.editor.tabManager.activeFile)
       this.editor.tabManager.activeFile.onChange();
-    this.editor.titleBar?.refresh();
+    if (typeof this.editor.titleBar?.refreshDocumentTitle === "function") {
+      this.editor.titleBar.refreshDocumentTitle();
+    } else {
+      this.editor.titleBar?.refresh();
+    }
   }
-  onEvent(arg) {
-    // ------- BottomBar.js ------
-    this.editor.bottomBar.refresh();
+  onEvent(arg, eventName) {
+    const bottomBar = this.editor.bottomBar;
+    if (!bottomBar) return;
+
+    if (
+      eventName === Events.CURSOR_ENABLED ||
+      eventName === Events.CURSOR_DISABLED
+    ) return;
+
+    if (
+      eventName === Events.CURSOR_CHANGE ||
+      eventName === Events.ON_SELECT ||
+      eventName === Events.ON_CHANGE
+    ) {
+      if (typeof bottomBar.refreshCursorOBJ === "function") {
+        bottomBar.refreshCursorOBJ();
+        return;
+      }
+    }
+
+    bottomBar.refresh?.();
   }
   onSave(arg) {
     this.editor.statesManager.save();

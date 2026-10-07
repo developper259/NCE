@@ -521,6 +521,12 @@ class TitleBar {
 
   refresh() {
     if (!this.title) return;
+    this.refreshDocumentTitle();
+    this.refreshDisabledItems();
+  }
+
+  refreshDocumentTitle() {
+    if (!this.title) return;
     const file = this.editor.tabManager.activeFile;
     const activeTab = this.editor.tabManager.activeTab;
     const tabName = file?.name || ([TAB_TYPES.PICTURE, TAB_TYPES.MARKDOWN].includes(activeTab?.type) ? activeTab.name : "");
@@ -529,9 +535,9 @@ class TitleBar {
       ? `${tabName}${project ? ` · ${project}` : ""}`
       : project || "NCE";
     const showDirtyIndicator = file?.isVisuallyDirty() === true;
-    this.title.textContent = `${showDirtyIndicator ? "● " : ""}${context}`;
-    this.title.title = context;
-    this.refreshDisabledItems();
+    const titleText = `${showDirtyIndicator ? "● " : ""}${context}`;
+    if (this.title.textContent !== titleText) this.title.textContent = titleText;
+    if (this.title.title !== context) this.title.title = context;
   }
 
   destroy() {

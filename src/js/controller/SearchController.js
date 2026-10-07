@@ -601,7 +601,7 @@ class SearchController {
   }
 
   refresh() {
-    if (!this.isOpen) return;
+    if (!this.isOpen || !this.input?.value) return;
 
     this.search(this.input.value);
   }

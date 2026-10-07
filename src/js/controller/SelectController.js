@@ -177,7 +177,7 @@ class SelectController {
     return !!range && index + 1 >= range.start.row && index + 1 <= range.end.row;
   }
 
-  setSelection(start, end) {
+  setSelection(start, end, { emitEvent = true } = {}) {
     if (!this.editor.tabManager.activeFile || !start || !end) return;
     this.editor.tabManager.activeFile._selectionRange = null;
     this.editor.tabManager.activeFile._selectionTextCache = null;
@@ -188,7 +188,9 @@ class SelectController {
 
     this.startSelect = normalizedStart;
     this.endSelect = normalizedEnd;
-    cursor.setCursorPosition(normalizedEnd.row, normalizedEnd.column);
+    cursor.setCursorPosition(normalizedEnd.row, normalizedEnd.column, {
+      emitEvent,
+    });
 
     if (normalizedStart.row === normalizedEnd.row) {
       this.calculSelectSimpleLine();
@@ -196,7 +198,7 @@ class SelectController {
       this.calculSelectMultiLine();
     }
 
-    this.emitSelectionChange();
+    if (emitEvent) this.emitSelectionChange();
   }
 
   refreshSelectionDOM() {
@@ -472,7 +474,7 @@ class SelectController {
       Math.max(0, range.endColumn) + (range.endRow - range.startRow);
   }
 
-  unSelectAll() {
+  unSelectAll({ emitEvent = true } = {}) {
     if (!this.editor.tabManager.activeFile) return;
 
     this.containsSelected = "";
@@ -490,7 +492,7 @@ class SelectController {
       }
     }
 
-    this.emitSelectionChange();
+    if (emitEvent) this.emitSelectionChange();
   }
 
   unSelectLine(index) {

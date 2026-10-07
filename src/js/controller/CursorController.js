@@ -182,7 +182,7 @@ class CursorController {
       this.editor.lineController.setFocusLine(this.row);
       this.editor.setSelected(true);
 
-      if (!this.editor.isOnInit) {
+      if (!this.editor.isOnInit && options.emitEvent !== false) {
         this.editor.events.callEvent(Events.CURSOR_CHANGE, {
           row: this.row,
           column: this.column,

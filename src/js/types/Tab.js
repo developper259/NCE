@@ -574,7 +574,11 @@ class FileNode extends Tab {
         : false,
     );
     this.scheduleAutoSave();
-    this.editor.tabManager.refresh();
+    if (typeof this.editor.tabManager.refreshTabState === "function") {
+      this.editor.tabManager.refreshTabState(this);
+    } else {
+      this.editor.tabManager.refresh();
+    }
   }
 
   keepDiff() {

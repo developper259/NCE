@@ -460,16 +460,18 @@ class WriterController {
     const cursorAfter = options.cursor || this.advancePosition(start, text);
     file.row = cursorAfter.row;
     file.column = cursorAfter.column;
-    this.editor.selectController.unSelectAll();
+    this.editor.selectController.unSelectAll({ emitEvent: false });
     if (options.selection)
       this.editor.selectController.setSelection(
         options.selection.start,
         options.selection.end,
+        { emitEvent: false },
       );
     lineController.markDirtyFrom(start.row - 1);
     this.editor.cursorController.setCursorPosition(
       cursorAfter.row,
       cursorAfter.column,
+      { emitEvent: false },
     );
     if (options.ensureVisible) this.ensureCursorVisible(cursorAfter.row);
 
@@ -582,7 +584,7 @@ class WriterController {
 
     const newCursor = this.deleteRange(start, end);
 
-    selectCtrl.unSelectAll();
+    if (!newCursor) selectCtrl.unSelectAll();
 
     return newCursor;
   }

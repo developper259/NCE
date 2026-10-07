@@ -171,15 +171,18 @@ class BottomBar {
   }
 
   refreshCursorOBJ() {
-    if (!this.editor.tabManager.activeFile) return;
+    if (!this.cursorOBJ || !this.cursorStatusElement ||
+        !this.editor.tabManager.activeFile) return;
 
     if (this.editor.tabManager.activeFile.loadError) {
-      this.cursorOBJ.innerText = "";
-      this.cursorStatusElement.style.display = "none";
+      if (this.cursorOBJ.innerText !== "") this.cursorOBJ.innerText = "";
+      if (this.cursorStatusElement.style.display !== "none")
+        this.cursorStatusElement.style.display = "none";
       return;
     }
 
-    this.cursorStatusElement.style.display = "";
+    if (this.cursorStatusElement.style.display !== "")
+      this.cursorStatusElement.style.display = "";
 
     let r = "";
     let countLine = this.editor.selectController.getNumberLineSelected();
@@ -193,7 +196,7 @@ class BottomBar {
         " characters selected";
     }
 
-    this.cursorOBJ.innerText = r;
+    if (this.cursorOBJ.innerText !== r) this.cursorOBJ.innerText = r;
   }
 
   refreshScrollers() {

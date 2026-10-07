@@ -173,8 +173,21 @@ class Editor {
   }
 
   setAutoSaveState(enabled, { persist = true } = {}) {
+    const previousState = this.autoSaveEnabled === true;
     this.autoSaveEnabled = enabled === true;
     this.titleBar?.refreshAutoSaveState?.();
+    if (previousState !== this.autoSaveEnabled) {
+      if (typeof this.tabManager?.refreshTabStates === "function") {
+        this.tabManager.refreshTabStates();
+      } else {
+        this.tabManager?.refresh?.();
+      }
+      if (typeof this.titleBar?.refreshDocumentTitle === "function") {
+        this.titleBar.refreshDocumentTitle();
+      } else {
+        this.titleBar?.refresh?.();
+      }
+    }
     if (persist) {
       const synchronization = SETTINGS_SET(
         "files.autoSave",
