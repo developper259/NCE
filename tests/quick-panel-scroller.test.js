@@ -408,6 +408,88 @@ test("ensureIndexVisible, wheel deltas, thumb ratios, and resize stay synchroniz
   assert.ok(fixture.scroller.scrollY <= bottom);
 });
 
+test("QuickPanel contains vertical wheel input at its scroll boundaries", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 100 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+
+  const wheel = ({ deltaX = 0, deltaY, shiftKey = false }) => {
+    let prevented = false;
+    let stopped = false;
+    fixture.scroller.handleWheel({
+      deltaX,
+      deltaY,
+      deltaMode: 0,
+      shiftKey,
+      preventDefault() { prevented = true; },
+      stopPropagation() { stopped = true; },
+    });
+    return { prevented, stopped };
+  };
+
+  fixture.scroller.setScrollY(0);
+  assert.deepEqual(wheel({ deltaY: -20 }), { prevented: true, stopped: true });
+  assert.equal(fixture.scroller.scrollY, 0);
+
+  fixture.scroller.setScrollY(fixture.scroller.getMaxScrollY());
+  const bottom = fixture.scroller.scrollY;
+  assert.deepEqual(wheel({ deltaY: 20 }), { prevented: true, stopped: true });
+  assert.equal(fixture.scroller.scrollY, bottom);
+
+  fixture.scroller.setScrollY(bottom / 2);
+  const middle = fixture.scroller.scrollY;
+  assert.deepEqual(wheel({ deltaY: 20 }), { prevented: true, stopped: true });
+  assert.equal(fixture.scroller.scrollY, middle + 20);
+  fixture.flushFrames();
+  assert.deepEqual(wheel({ deltaY: -20 }), { prevented: true, stopped: true });
+  assert.equal(fixture.scroller.scrollY, middle);
+
+  assert.deepEqual(
+    wheel({ deltaX: 30, deltaY: 10 }),
+    { prevented: false, stopped: false },
+  );
+  assert.deepEqual(
+    wheel({ deltaY: 10, shiftKey: true }),
+    { prevented: false, stopped: false },
+  );
+
+  fixture.scroller.suspend();
+  assert.deepEqual(
+    wheel({ deltaY: 10 }),
+    { prevented: false, stopped: false },
+  );
+});
+
+test("QuickPanel consumes vertical wheel input when results do not overflow", () => {
+  const fixture = makeVirtualFixture();
+  fixture.setItems(Array.from({ length: 3 }, (_, index) => ({
+    id: `${index}`,
+    label: `${index}`,
+  })));
+  fixture.scroller.resume();
+  fixture.flushFrames();
+  assert.equal(fixture.scroller.vScroller.active, false);
+
+  let prevented = false;
+  let stopped = false;
+  fixture.scroller.handleWheel({
+    deltaX: 0,
+    deltaY: 20,
+    deltaMode: 0,
+    shiftKey: false,
+    preventDefault() { prevented = true; },
+    stopPropagation() { stopped = true; },
+  });
+
+  assert.equal(prevented, true);
+  assert.equal(stopped, true);
+  assert.equal(fixture.scroller.scrollY, 0);
+});
+
 test("QuickPanel keeps its input outside the virtual viewport and navigates large results", async () => {
   const env = makeEnvironment();
   const QuickPanel = loadGlobal("src/js/types/QuickPanel.js", "QuickPanel", {

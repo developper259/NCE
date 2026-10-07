@@ -211,22 +211,33 @@ class QuickPanelScroller {
   }
 
   handleWheel(event) {
-    if (!this.vScroller?.active && this.editor.scrollerManager) return;
-    if (!this.isScrollable() || event.shiftKey) return;
-    if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+    if (!this.active || event.shiftKey) return;
 
+    const horizontalDelta = Number(event.deltaX ?? 0);
     const delta = Number(event.deltaY);
-    if (!Number.isFinite(delta) || delta === 0) return;
+    if (
+      !Number.isFinite(horizontalDelta) ||
+      !Number.isFinite(delta) ||
+      delta === 0 ||
+      Math.abs(horizontalDelta) > Math.abs(delta)
+    ) {
+      return;
+    }
+
     const pixels = event.deltaMode === 1
       ? delta * this.rowHeight
       : event.deltaMode === 2
         ? delta * this.viewportHeight
         : delta;
-    const next = Math.max(0, Math.min(this.scrollY + pixels, this.getMaxScrollY()));
-    if (next === this.scrollY) return;
 
     event.preventDefault();
     event.stopPropagation();
+
+    if (!this.isScrollable()) return;
+
+    const next = Math.max(0, Math.min(this.scrollY + pixels, this.getMaxScrollY()));
+    if (next === this.scrollY) return;
+
     this.setScrollY(next);
   }
 
