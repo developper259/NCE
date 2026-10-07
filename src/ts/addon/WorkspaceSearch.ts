@@ -798,6 +798,7 @@ export class WorkspaceSearch {
     resultCount?: number;
     cursor?: number;
     complete?: boolean;
+    workspaceSessions?: number;
   } {
     const session = sessionId ? this.searchSessions.get(sessionId) : undefined;
     return {
@@ -811,6 +812,8 @@ export class WorkspaceSearch {
         resultCount: session.results.length,
         cursor: session.cursor,
         complete: session.complete,
+        workspaceSessions: [...this.searchSessions.values()]
+          .filter((candidate) => candidate.root === session.root).length,
       } : {}),
     };
   }
@@ -848,6 +851,17 @@ export class WorkspaceSearch {
     }
 
     if (!session) {
+      const rootSessionLimit = this.workspaceIndex
+        .getPerformanceProfile(root).maxCachedSearchSessions;
+      const sameRootSessions = [...this.searchSessions.values()]
+        .filter((candidate) => candidate.root === root)
+        .sort((left, right) => left.lastAccess - right.lastAccess);
+      while (sameRootSessions.length >= rootSessionLimit) {
+        const oldest = sameRootSessions.shift();
+        if (!oldest) break;
+        this.cancelSession(oldest);
+        this.rememberCancelledSearchSession(oldest.id);
+      }
       while (this.searchSessions.size >= this.maxSearchSessions) {
         const oldest = [...this.searchSessions.values()].sort(
           (left, right) => left.lastAccess - right.lastAccess,

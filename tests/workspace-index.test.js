@@ -156,6 +156,11 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
     assert.equal(small.directoryCount, 0);
     assert.equal(small.largeWorkspaceMode, false);
     assert.equal(index.getWatcherDebounceMs(root), 150);
+    assert.deepEqual(index.getPerformanceProfile(root), {
+      mode: "normal",
+      indexWatcherDebounceMs: 150,
+      maxCachedSearchSessions: 8,
+    });
 
     const thresholdEntries = Array.from({
       length: LARGE_WORKSPACE_MODE_THRESHOLDS.files * LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore,
@@ -210,6 +215,8 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
     await index.flush(root);
     assert.equal(index.getStats(root).largeWorkspaceMode, true);
     assert.equal(index.getWatcherDebounceMs(root), 500);
+    assert.equal(index.getPerformanceProfile(root).mode, "large");
+    assert.equal(index.getPerformanceProfile(root).maxCachedSearchSessions, 4);
 
     const beforeWatcher = index.getDiagnostics();
     const addedPath = path.join(root, "added.js");
@@ -226,6 +233,8 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
     await index.build(root);
     assert.equal(index.getStats(root).largeWorkspaceMode, false);
     assert.equal(index.getWatcherDebounceMs(root), 150);
+    assert.equal(index.getPerformanceProfile(root).mode, "normal");
+    assert.equal(index.getPerformanceProfile(root).maxCachedSearchSessions, 8);
     assert.equal(updates.some((stats) => stats.largeWorkspaceMode), true);
     assert.equal(updates.at(-1).largeWorkspaceMode, false);
   } finally {

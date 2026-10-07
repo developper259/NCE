@@ -15,6 +15,23 @@ export const LARGE_WORKSPACE_MODE_THRESHOLDS = Object.freeze({
 });
 export const DEFAULT_INDEX_WATCHER_DEBOUNCE_MS = 150;
 export const LARGE_WORKSPACE_INDEX_WATCHER_DEBOUNCE_MS = 500;
+export interface WorkspacePerformanceProfile {
+  mode: "normal" | "large";
+  indexWatcherDebounceMs: number;
+  maxCachedSearchSessions: number;
+}
+export const NORMAL_WORKSPACE_PERFORMANCE_PROFILE: Readonly<WorkspacePerformanceProfile> =
+  Object.freeze({
+    mode: "normal",
+    indexWatcherDebounceMs: DEFAULT_INDEX_WATCHER_DEBOUNCE_MS,
+    maxCachedSearchSessions: 8,
+  });
+export const LARGE_WORKSPACE_PERFORMANCE_PROFILE: Readonly<WorkspacePerformanceProfile> =
+  Object.freeze({
+    mode: "large",
+    indexWatcherDebounceMs: LARGE_WORKSPACE_INDEX_WATCHER_DEBOUNCE_MS,
+    maxCachedSearchSessions: 4,
+  });
 
 export interface WorkspaceIndexStats {
   root: string;
@@ -140,7 +157,6 @@ export class WorkspaceIndex {
   private readonly maxCachedWorkspaces = 4;
   private readonly maxInvalidWorkspaces = 16;
   private readonly maxRevisionWorkspaces = 64;
-  private readonly largeWorkspaceWatcherDebounceMs = LARGE_WORKSPACE_INDEX_WATCHER_DEBOUNCE_MS;
   private readonly coalescedWatcherEvents = {
     received: 0,
     batches: 0,
@@ -173,9 +189,13 @@ export class WorkspaceIndex {
   }
 
   getWatcherDebounceMs(rootPath: string): number {
+    return this.getPerformanceProfile(rootPath).indexWatcherDebounceMs;
+  }
+
+  getPerformanceProfile(rootPath: string): Readonly<WorkspacePerformanceProfile> {
     return this.largeWorkspaceRoots.has(path.resolve(rootPath))
-      ? this.largeWorkspaceWatcherDebounceMs
-      : DEFAULT_INDEX_WATCHER_DEBOUNCE_MS;
+      ? LARGE_WORKSPACE_PERFORMANCE_PROFILE
+      : NORMAL_WORKSPACE_PERFORMANCE_PROFILE;
   }
 
   getDiagnostics() {

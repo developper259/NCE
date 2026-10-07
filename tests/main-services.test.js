@@ -15,6 +15,7 @@ const {
   atomicWriteFile,
 } = require("../dist/ts/addon/FileManager.js");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch.js");
+const { LARGE_WORKSPACE_MODE_THRESHOLDS } = require("../dist/ts/addon/WorkspaceIndex.js");
 const {
   AgentProcessRunner,
 } = require("../dist/ts/addon/AgentProcessRunner.js");
@@ -561,6 +562,58 @@ test("WorkspaceSearch cancellation and TTL keep session storage bounded", async 
     assert.equal(search.getSearchSessionStats().activeSessions, 0);
   } finally {
     await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("WorkspaceSearch retains fewer page sessions for large workspaces", async () => {
+  const normalRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-profile-normal-"));
+  const largeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-profile-large-"));
+  let search;
+  try {
+    await fsp.writeFile(path.join(normalRoot, "a.txt"), "needle\n");
+    await fsp.writeFile(path.join(largeRoot, "a.txt"), "needle\n");
+    search = new WorkspaceSearch({ window: null });
+    const largeEntries = Array.from({
+      length: LARGE_WORKSPACE_MODE_THRESHOLDS.files * LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore,
+    }, (_, index) => {
+      const name = index === 0 ? "a.txt" : `z-${index}.txt`;
+      return {
+        relativePath: name,
+        name,
+        extension: ".txt",
+        size: 7,
+        mtimeMs: 1,
+        type: "file",
+        openable: true,
+      };
+    });
+    assert.equal(search.workspaceIndex.primeFromScan(largeRoot, largeEntries), true);
+    await search.workspaceIndex.flush(largeRoot);
+    assert.equal(search.workspaceIndex.getPerformanceProfile(normalRoot).mode, "normal");
+    assert.equal(search.workspaceIndex.getPerformanceProfile(largeRoot).mode, "large");
+
+    for (let index = 0; index < 10; index += 1) {
+      await search.search(normalRoot, "needle", {
+        sessionId: `workspace-search-normal-${index}`,
+        maxMatches: 1,
+        limit: 1,
+      });
+    }
+    assert.equal(search.getSearchSessionStats().activeSessions, 8);
+    assert.equal(search.getSearchSessionStats("workspace-search-normal-9").workspaceSessions, 8);
+
+    for (let index = 0; index < 6; index += 1) {
+      await search.search(largeRoot, "needle", {
+        sessionId: `workspace-search-large-${index}`,
+        maxMatches: 1,
+        limit: 1,
+      });
+    }
+    assert.equal(search.getSearchSessionStats().activeSessions, 8);
+    assert.equal(search.getSearchSessionStats("workspace-search-large-5").workspaceSessions, 4);
+    assert.equal(search.getSearchSessionStats("workspace-search-large-5").complete, true);
+  } finally {
+    await cleanupSearchWorkspaces(search, normalRoot, largeRoot);
   }
 });
 
