@@ -305,27 +305,25 @@ export class WorkspaceSearch {
     const openableOnly = options?.openableOnly === true;
     const ignoreHiddenDirectories = options?.ignoreHiddenDirectories === true;
     if (openableOnly) {
-      const index = await this.workspaceIndex.load(root);
+      const index = await this.workspaceIndex.load(root, {
+        freshness: "allow-stale-while-revalidate",
+      });
       if (index) {
-        if (this.workspaceIndex.consumeNeedsReconcile(root))
-          this.workspaceIndex.scheduleReconcile(root);
-        if (!this.workspaceIndex.requiresReconcile(root)) {
-          const entries: ProjectFileEntry[] = [];
-          for (const candidate of index.entries) {
-            if (!candidate.openable) continue;
-            const directories = ignoreHiddenDirectories
-              ? candidate.relativePath.split("/").slice(0, -1)
-              : [];
-            if (directories.some((directory) => directory.startsWith(".")))
-              continue;
-            entries.push({
-              name: candidate.name,
-              path: path.join(root, ...candidate.relativePath.split("/")),
-              relativePath: candidate.relativePath,
-            });
-          }
-          return { success: true, entries, indexHit: true, filesProbed: 0 };
+        const entries: ProjectFileEntry[] = [];
+        for (const candidate of index.entries) {
+          if (!candidate.openable) continue;
+          const directories = ignoreHiddenDirectories
+            ? candidate.relativePath.split("/").slice(0, -1)
+            : [];
+          if (directories.some((directory) => directory.startsWith(".")))
+            continue;
+          entries.push({
+            name: candidate.name,
+            path: path.join(root, ...candidate.relativePath.split("/")),
+            relativePath: candidate.relativePath,
+          });
         }
+        return { success: true, entries, indexHit: true, filesProbed: 0 };
       }
     }
 
@@ -1055,12 +1053,9 @@ export class WorkspaceSearch {
     let filesSearched = 0;
     let indexSnapshot = null;
     if (!options.forceFilesystemScan) {
-      indexSnapshot = await this.workspaceIndex.load(root);
-      if (indexSnapshot && this.workspaceIndex.requiresReconcile(root)) {
-        if (this.workspaceIndex.consumeNeedsReconcile(root))
-          this.workspaceIndex.scheduleReconcile(root);
-        indexSnapshot = null;
-      }
+      indexSnapshot = await this.workspaceIndex.load(root, {
+        freshness: "require-current",
+      });
     }
     const indexRevision = indexSnapshot
       ? this.workspaceIndex.getRevision(root)

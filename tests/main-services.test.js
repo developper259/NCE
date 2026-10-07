@@ -1272,24 +1272,55 @@ test("Quick Open filters 10k indexed entries without per-file filesystem probes"
   }
 });
 
-test("Quick Open falls back to file probes while a persisted index is stale", async () => {
+test("Quick Open serves a persisted index immediately while reconciling it", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-quick-open-stale-index-"));
+  const coldSearch = new WorkspaceSearch({ window: null });
+  const operations = ["readdir", "open", "lstat"];
+  const originals = Object.fromEntries(operations.map((operation) => [
+    operation,
+    fsModule.promises[operation],
+  ]));
+  let perFileReads = 0;
   try {
     await fsp.writeFile(path.join(root, "note.txt"), "plain text\n");
     const builder = new WorkspaceSearch({ window: null });
     assert.ok(await builder.workspaceIndex.build(root));
     await builder.workspaceIndex.flush(root);
 
-    const coldSearch = new WorkspaceSearch({ window: null });
+    await fsp.rm(path.join(root, "note.txt"));
+    await fsp.writeFile(path.join(root, "new.js"), "export const fresh = true;\n");
+
+    for (const operation of operations) {
+      fsModule.promises[operation] = async (...args) => {
+        perFileReads += 1;
+        return originals[operation].apply(fsModule.promises, args);
+      };
+    }
     const result = await coldSearch.listProjectFiles(root, {
       openableOnly: true,
       ignoreHiddenDirectories: true,
     });
-    assert.equal(result.indexHit, false);
-    assert.equal(result.filesProbed, 1);
+    assert.equal(result.indexHit, true);
+    assert.equal(result.filesProbed, 0);
     assert.deepEqual(result.entries.map((entry) => entry.relativePath), ["note.txt"]);
+    assert.equal(perFileReads, 0);
+    assert.ok(coldSearch.workspaceIndex.getLifecycleStats().reconcileTimers >= 1);
+
+    for (const operation of operations)
+      fsModule.promises[operation] = originals[operation];
     await coldSearch.workspaceIndex.flush(root);
+
+    const reconciled = await coldSearch.listProjectFiles(root, {
+      openableOnly: true,
+      ignoreHiddenDirectories: true,
+    });
+    assert.equal(reconciled.indexHit, true);
+    assert.equal(reconciled.filesProbed, 0);
+    assert.deepEqual(reconciled.entries.map((entry) => entry.relativePath), ["new.js"]);
   } finally {
+    for (const operation of operations)
+      fsModule.promises[operation] = originals[operation];
+    await coldSearch.workspaceIndex.flush(root);
     await fsp.rm(root, { recursive: true, force: true });
   }
 });

@@ -6,6 +6,7 @@ const test = require("node:test");
 
 const {
   MAX_WORKSPACE_INDEX_ENTRIES,
+  MAX_WORKSPACE_INDEX_BYTES,
   LARGE_WORKSPACE_MODE_THRESHOLDS,
   WORKSPACE_INDEX_CACHE_FILE,
   WORKSPACE_INDEX_VERSION,
@@ -86,6 +87,36 @@ test("WorkspaceIndex treats corrupt and incompatible caches as misses", async ()
     await fsp.mkdir(path.dirname(cachePath), { recursive: true });
     await fsp.writeFile(cachePath, "{broken json");
     assert.equal(await new WorkspaceIndex().load(root), null);
+
+    await fsp.writeFile(cachePath, JSON.stringify({
+      version: WORKSPACE_INDEX_VERSION,
+      root: `${path.resolve(root)}-different`,
+      generatedAt: Date.now(),
+      complete: true,
+      entries: [],
+    }));
+    assert.equal(await new WorkspaceIndex().load(root), null);
+
+    await fsp.writeFile(cachePath, JSON.stringify({
+      version: WORKSPACE_INDEX_VERSION,
+      root: path.resolve(root),
+      generatedAt: Date.now(),
+      complete: false,
+      entries: [],
+    }));
+    assert.equal(await new WorkspaceIndex().load(root), null);
+
+    const originalStat = fsp.stat;
+    fsp.stat = async (target, ...args) => {
+      if (path.resolve(String(target)) === path.resolve(cachePath))
+        return { size: MAX_WORKSPACE_INDEX_BYTES + 1 };
+      return originalStat.call(fsp, target, ...args);
+    };
+    try {
+      assert.equal(await new WorkspaceIndex().load(root), null);
+    } finally {
+      fsp.stat = originalStat;
+    }
 
     await fsp.writeFile(cachePath, JSON.stringify({
       version: 1,

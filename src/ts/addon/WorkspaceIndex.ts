@@ -88,6 +88,14 @@ export interface WorkspaceIndexSnapshot {
   entries: WorkspaceIndexEntry[];
 }
 
+export type WorkspaceIndexFreshness =
+  | "require-current"
+  | "allow-stale-while-revalidate";
+
+export interface WorkspaceIndexLoadOptions {
+  freshness?: WorkspaceIndexFreshness;
+}
+
 export function summarizeWorkspaceIndex(
   snapshot: WorkspaceIndexSnapshot,
   ready = true,
@@ -400,7 +408,22 @@ export class WorkspaceIndex {
     }
   }
 
-  async load(rootPath: string): Promise<WorkspaceIndexSnapshot | null> {
+  private applyFreshnessPolicy(
+    root: string,
+    snapshot: WorkspaceIndexSnapshot,
+    freshness?: WorkspaceIndexFreshness,
+  ): WorkspaceIndexSnapshot | null {
+    if (!freshness) return snapshot;
+    if (this.consumeNeedsReconcile(root)) this.scheduleReconcile(root);
+    if (freshness === "require-current" && this.requiresReconcile(root))
+      return null;
+    return snapshot;
+  }
+
+  async load(
+    rootPath: string,
+    options: WorkspaceIndexLoadOptions = {},
+  ): Promise<WorkspaceIndexSnapshot | null> {
     if (typeof rootPath !== "string" || !rootPath.trim()) return null;
     const root = path.resolve(rootPath);
     if (this.invalidRoots.has(root)) return null;
@@ -412,7 +435,7 @@ export class WorkspaceIndex {
     const memory = this.snapshots.get(root);
     if (memory?.complete) {
       this.touch(root);
-      return memory;
+      return this.applyFreshnessPolicy(root, memory, options.freshness);
     }
 
     const storage = new NceWorkspaceStorage(root);
@@ -425,7 +448,7 @@ export class WorkspaceIndex {
       if (!snapshot) return null;
       this.remember(snapshot);
       this.rememberNeedsReconcile(root);
-      return snapshot;
+      return this.applyFreshnessPolicy(root, snapshot, options.freshness);
     } catch {
       return null;
     }
