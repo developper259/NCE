@@ -3,6 +3,8 @@ class Scroller {
     this.editor = e;
     this.compact = options.compact === true;
     this.id = 0;
+    this.manager = null;
+    this._destroyed = false;
     this.scrollX = 0;
     this.scrollY = 0;
     this.type = 0;
@@ -73,7 +75,10 @@ class Scroller {
   }
 
   scheduleScrollRender() {
-    if (this._scrollEndTimer) clearTimeout(this._scrollEndTimer);
+    if (this._scrollEndTimer !== null) {
+      clearTimeout(this._scrollEndTimer);
+      this._scrollEndTimer = null;
+    }
     this._scrollEndTimer = setTimeout(() => {
       this._scrollEndTimer = null;
       this.onScrollEnd();
@@ -264,8 +269,21 @@ class Scroller {
   }
 
   destroy() {
-    if (this._rafId !== null) cancelAnimationFrame(this._rafId);
-    if (this._scrollEndTimer) clearTimeout(this._scrollEndTimer);
+    if (this._destroyed) return false;
+    this._destroyed = true;
+    const manager = this.manager || this.editor?.scrollerManager;
+    manager?.removeScroller?.(this);
+    this.manager = null;
+    if (this._rafId !== null) {
+      const cancelFrame = this.editor?.domManager?.cancelFrame ||
+        (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+      cancelFrame?.(this._rafId);
+      this._rafId = null;
+    }
+    if (this._scrollEndTimer !== null) {
+      clearTimeout(this._scrollEndTimer);
+      this._scrollEndTimer = null;
+    }
     this.itemOBJ?.removeEventListener("mousedown", this._onThumbDown);
     this.parentOBJ?.removeEventListener("mouseenter", this._onMouseEnter);
     this.parentOBJ?.removeEventListener("mouseleave", this._onMouseLeave);
@@ -277,6 +295,24 @@ class Scroller {
     this.itemOBJ = null;
     this.scrollerFast = null;
     this.itemFast = null;
+    this.parentOBJ = null;
+    this.wheelTarget = null;
+    this.isDragging = false;
+    this.isHovered = false;
+    this._onThumbDown = null;
+    this._onMouseEnter = null;
+    this._onMouseLeave = null;
+    this._onMouseMove = null;
+    this._onMouseUp = null;
+    this._onWheel = null;
+    this.onScroll = null;
+    this.onScrollEnd = null;
+    this.onRefresh = null;
+    this.onBeforeRefresh = null;
+    this.wheelDeltaHandler = null;
+    this.calculProp = null;
+    this.calcIsActive = null;
+    return true;
   }
 
   handleMouseMove(e) {

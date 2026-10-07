@@ -64,5 +64,13 @@ class MarkdownViewScroller {
     this.viewport?.removeEventListener("scroll", this.onViewportScroll);
     this.mutationObserver?.disconnect();
     this.resizeObserver?.disconnect();
+    this.mutationObserver = null;
+    this.resizeObserver = null;
+    const manager = this.editor.scrollerManager;
+    if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
+    else this.vScroller?.destroy?.();
+    this.vScroller = null;
+    this.viewport = null;
+    this.content = null;
   }
 }

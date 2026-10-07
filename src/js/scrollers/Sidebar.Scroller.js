@@ -100,7 +100,7 @@ class SidebarScroller {
   suspend() {
     this.suspended = true;
     this._observer?.disconnect();
-    this.vScroller?.setActive(false);
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
   }
 
   resume() {
@@ -116,5 +116,13 @@ class SidebarScroller {
     this.menuOBJ?.removeEventListener("scroll", this._onNativeScroll);
     if (this._observer) this._observer.disconnect();
     if (this._resizeObserver) this._resizeObserver.disconnect();
+    this._observer = null;
+    this._resizeObserver = null;
+    const manager = this.editor.scrollerManager;
+    if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
+    else this.vScroller?.destroy?.();
+    this.vScroller = null;
+    this.menuOBJ = null;
+    this.sidebarOBJ = null;
   }
 }

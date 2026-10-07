@@ -227,7 +227,7 @@ class SearchResultsScroller {
   suspend() {
     this.suspended = true;
     this._resizeObserver?.unobserve(this.viewport);
-    this.vScroller?.setActive(false);
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
   }
 
   resume() {
@@ -237,15 +237,18 @@ class SearchResultsScroller {
   }
 
   destroy() {
-    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    if (this.frame !== null) {
+      const cancelFrame = this.editor.domManager?.cancelFrame ||
+        (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+      cancelFrame?.(this.frame);
+      this.frame = null;
+    }
     this.viewport?.removeEventListener("wheel", this._onWheel);
     this._resizeObserver?.disconnect();
-    this.vScroller?.destroy();
-    const scrollers = this.editor.scrollerManager?.scrollers;
-    if (scrollers) {
-      const index = scrollers.indexOf(this.vScroller);
-      if (index !== -1) scrollers.splice(index, 1);
-    }
+    this._resizeObserver = null;
+    const manager = this.editor.scrollerManager;
+    if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
+    else this.vScroller?.destroy?.();
     this.vScroller = null;
     this.viewport = null;
     this.layer = null;

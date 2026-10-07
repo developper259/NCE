@@ -177,6 +177,21 @@ class QuickPanel {
     return true;
   }
 
+  destroy() {
+    if (this.session) this.close({ notifyCancel: false, restoreFocus: false });
+    clearTimeout(this.closeCleanupTimer);
+    this.closeCleanupTimer = null;
+    this.resultsScroller?.destroy();
+    this.resultsScroller = null;
+    this.panel?.remove();
+    this.host?.removeAttribute("aria-hidden");
+    this.panel = null;
+    this.host = null;
+    this.list = null;
+    this.listLayer = null;
+    this.initialized = false;
+  }
+
   isOpen(id) {
     return Boolean(this.session && (!id || this.session.id === id));
   }

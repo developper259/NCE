@@ -914,4 +914,16 @@ class SearchSidebar extends Sidebar {
     }
     this.resultsScroller.suspend();
   }
+
+  destroy() {
+    clearTimeout(this.searchTimer);
+    this.searchTimer = null;
+    this.cancelResultNavigation();
+    this.activeSearchStreamUnsubscribe?.();
+    this.activeSearchStreamUnsubscribe = null;
+    this.resultsScroller?.destroy();
+    this.resultsScroller = null;
+    this.container?.remove();
+    this.container = null;
+  }
 }

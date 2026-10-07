@@ -22,6 +22,14 @@ class tabManager {
     return this.tabScroller;
   }
 
+  destroy() {
+    clearTimeout(this.focusResyncTimer);
+    this.focusResyncTimer = null;
+    this.tabScroller?.destroy();
+    this.tabScroller = null;
+    this.activeTabListeners.clear();
+  }
+
   get files() {
     // Keep the legacy collection identity for file-only integrations while
     // excluding non-file tabs from file-specific code paths.

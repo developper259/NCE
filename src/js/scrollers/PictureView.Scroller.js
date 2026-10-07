@@ -75,5 +75,14 @@ class PictureViewScroller {
   destroy() {
     this.viewport?.removeEventListener("scroll", this.onViewportScroll);
     this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    const manager = this.editor.scrollerManager;
+    for (const scroller of [this.vScroller, this.hScroller]) {
+      if (manager?.destroyScroller) manager.destroyScroller(scroller);
+      else scroller?.destroy?.();
+    }
+    this.vScroller = null;
+    this.hScroller = null;
+    this.viewport = null;
   }
 }

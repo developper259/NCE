@@ -47,6 +47,7 @@ class OutputScroller {
   }
 
   init() {
+    if (this.vScroller || !this.editor.scrollerManager) return;
     // Vertical scroller
     this.vScroller = this.editor.scrollerManager.createScroller(
       this.editor.editorOBJ,
@@ -122,6 +123,26 @@ class OutputScroller {
     this.hScroller.onScroll = (scrollRatio) => {
       this.applyHorizontalScrollFromRatio(scrollRatio);
     };
+  }
+
+  destroy() {
+    if (this.horizontalWheelFrame !== null) {
+      const cancelFrame = this.editor.domManager?.cancelFrame ||
+        (typeof cancelAnimationFrame === "function"
+          ? cancelAnimationFrame
+          : clearTimeout);
+      cancelFrame(this.horizontalWheelFrame);
+      this.horizontalWheelFrame = null;
+    }
+    this.pendingHorizontalColumns = 0;
+    const manager = this.editor.scrollerManager;
+    for (const scroller of [this.vScroller, this.hScroller]) {
+      if (manager?.destroyScroller) manager.destroyScroller(scroller);
+      else scroller?.destroy?.();
+    }
+    this.vScroller = null;
+    this.hScroller = null;
+    this.lineController = null;
   }
 
   queueHorizontalWheel(delta, event) {
@@ -342,10 +363,10 @@ class OutputScroller {
     this.clampScrollState();
 
     if (this.vScroller.calcIsActive()) {
-      this.vScroller.setActive(true);
+      this.editor.scrollerManager?.activateScroller?.(this.vScroller);
     }
     if (this.hScroller.calcIsActive()) {
-      this.hScroller.setActive(true);
+      this.editor.scrollerManager?.activateScroller?.(this.hScroller);
     }
 
     this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
@@ -373,7 +394,7 @@ class OutputScroller {
     this.vScroller.refresh();
 
     if (this.vScroller.calcIsActive()) {
-      this.vScroller.setActive(true);
+      this.editor.scrollerManager?.activateScroller?.(this.vScroller);
     }
 
     this.hScroller.nbItem = this.lineController.maxLineLength;
@@ -381,7 +402,7 @@ class OutputScroller {
     this.applyHorizontalScrollFromRatio(this.hScroller.scrollRatio);
     this.hScroller.refresh();
     if (this.hScroller.calcIsActive()) {
-      this.hScroller.setActive(true);
+      this.editor.scrollerManager?.activateScroller?.(this.hScroller);
     }
   }
 

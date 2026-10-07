@@ -6,24 +6,71 @@ class ScrollerManager {
     this.HORIZONTAL_TYPE = 1; // -
 
     this.scrollers = [];
-
+    this.nextScrollerId = 0;
+    this.destroyedScrollers = new WeakSet();
   }
 
   refreshAll() {
     if (this.editor.isOnInit) return;
-    for (let scroller of this.scrollers) {
+    for (const scroller of [...this.scrollers]) {
       scroller.refreshMetrics();
       scroller.refresh();
     }
   }
 
   addScroller(scroller) {
-    if (!scroller) return;
-    scroller.id = this.scrollers.length;
-    scroller.init();
-
+    if (!scroller || scroller._destroyed) return null;
+    if (this.scrollers.includes(scroller)) return scroller;
+    scroller.id = this.nextScrollerId++;
+    scroller.manager = this;
     this.scrollers.push(scroller);
+    try {
+      scroller.init();
+    } catch (error) {
+      this.removeScroller(scroller);
+      scroller.destroy?.();
+      throw error;
+    }
     this.refreshAll();
+    return scroller;
+  }
+
+  removeScroller(scroller) {
+    if (!scroller) return false;
+    let removed = false;
+    let index = this.scrollers.indexOf(scroller);
+    while (index !== -1) {
+      this.scrollers.splice(index, 1);
+      removed = true;
+      index = this.scrollers.indexOf(scroller);
+    }
+    if (scroller.manager === this) scroller.id = null;
+    return removed;
+  }
+
+  destroyScroller(scroller) {
+    if (!scroller || this.destroyedScrollers.has(scroller)) return false;
+    if (!this.scrollers.includes(scroller) && scroller.manager !== this) return false;
+    this.destroyedScrollers.add(scroller);
+    this.removeScroller(scroller);
+    scroller.destroy?.();
+    return true;
+  }
+
+  activateScroller(scroller) {
+    if (!scroller || !this.scrollers.includes(scroller)) return false;
+    scroller.setActive(true);
+    return true;
+  }
+
+  deactivateScroller(scroller) {
+    if (!scroller || !this.scrollers.includes(scroller)) return false;
+    scroller.setActive(false);
+    return true;
+  }
+
+  destroyAll() {
+    for (const scroller of [...this.scrollers]) this.destroyScroller(scroller);
   }
 
   createScroller(parent, type, isBody, options = {}) {
@@ -31,7 +78,7 @@ class ScrollerManager {
     s.parentOBJ = parent;
     s.type = type;
     s.isBody = isBody;
-    s.id = this.scrollers.length;
+    s.manager = this;
     return s;
   }
 

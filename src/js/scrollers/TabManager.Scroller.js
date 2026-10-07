@@ -128,4 +128,14 @@ class TabManagerScroller {
     this.hScroller.setScrollRatio(this.getScrollRatio());
     this.hScroller.syncThumbPosition();
   }
+
+  destroy() {
+    this.content?.removeEventListener("scroll", this.onNativeScroll);
+    const manager = this.editor.scrollerManager;
+    if (manager?.destroyScroller) manager.destroyScroller(this.hScroller);
+    else this.hScroller?.destroy?.();
+    this.hScroller = null;
+    this.content = null;
+    this.container = null;
+  }
 }

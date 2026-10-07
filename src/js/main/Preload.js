@@ -240,8 +240,11 @@ contextBridge.exposeInMainWorld("api", {
   onLoadState: (callback) =>
     ipcRenderer.on("Request:loadState", (_event, state) => callback(state)),
 
-  onFileSystemChange: (callback) =>
-    ipcRenderer.on("file-system-change", (_event, data) => callback(data)),
+  onFileSystemChange: (callback) => {
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on("file-system-change", listener);
+    return () => ipcRenderer.removeListener("file-system-change", listener);
+  },
 
   onContextMenuTriggered: (callback) =>
     ipcRenderer.on("ContextMenu:triggered", (_event, actionName) =>

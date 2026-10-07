@@ -293,6 +293,8 @@ class SidebarManager {
       this.settingsKeydownHandler = null;
     }
     this.closeSettingsMenu();
+    this.leftScroller?.destroy();
+    this.leftScroller = null;
   }
 
   getActiveMenuForPosition(position) {

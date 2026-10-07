@@ -58,6 +58,7 @@ class SettingsView {
     this.scroller = null;
     this.scrollSaveTimer = null;
     this.scrollRestored = false;
+    this.onContentScroll = () => this.scheduleScrollSave();
     this.build();
   }
 
@@ -88,7 +89,7 @@ class SettingsView {
     this.renderNavigation();
     this.render();
     this.initScroller();
-    this.content.addEventListener("scroll", () => this.scheduleScrollSave(), {
+    this.content.addEventListener("scroll", this.onContentScroll, {
       passive: true,
     });
   }
@@ -115,6 +116,19 @@ class SettingsView {
     if (!this.scroller) return;
     this.scroller.updateMetrics();
     this.scroller.refresh();
+  }
+
+  destroy() {
+    clearTimeout(this.scrollSaveTimer);
+    this.scrollSaveTimer = null;
+    this.content?.removeEventListener("scroll", this.onContentScroll);
+    this.scroller?.destroy();
+    this.scroller = null;
+    this.host?.replaceChildren();
+    this.search = null;
+    this.layout = null;
+    this.nav = null;
+    this.content = null;
   }
 
   restoreScrollTop() {

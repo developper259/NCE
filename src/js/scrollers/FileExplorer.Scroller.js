@@ -46,7 +46,7 @@ class FileExplorerScroller {
     this.vScroller.onScroll = (ratio) => this.setScrollRatio(ratio);
     this.vScroller.onRefresh = () => {};
     manager.addScroller(this.vScroller);
-    this.vScroller.setActive(false);
+    manager.deactivateScroller?.(this.vScroller);
   }
 
   attach(viewport, layer) {
@@ -62,7 +62,7 @@ class FileExplorerScroller {
       if (viewport) this._resizeObserver?.observe(viewport);
       else {
         this.totalVisibleRows = 0;
-        this.vScroller?.setActive(false);
+        this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
       }
     }
     this.init();
@@ -76,7 +76,7 @@ class FileExplorerScroller {
 
   suspend() {
     this.active = false;
-    this.vScroller?.setActive(false);
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
   }
 
   calcIsActive() {
@@ -160,15 +160,18 @@ class FileExplorerScroller {
 
   destroy() {
     this.suspend();
-    if (this.frame !== null) (this.editor.domManager?.cancelFrame || cancelAnimationFrame)(this.frame);
+    if (this.frame !== null) {
+      const cancelFrame = this.editor.domManager?.cancelFrame ||
+        (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+      cancelFrame?.(this.frame);
+      this.frame = null;
+    }
     this.viewport?.removeEventListener("wheel", this._onWheel);
     this._resizeObserver?.disconnect();
-    this.vScroller?.destroy();
-    const scrollers = this.editor.scrollerManager?.scrollers;
-    if (scrollers) {
-      const index = scrollers.indexOf(this.vScroller);
-      if (index !== -1) scrollers.splice(index, 1);
-    }
+    this._resizeObserver = null;
+    const manager = this.editor.scrollerManager;
+    if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
+    else this.vScroller?.destroy?.();
     this.vScroller = null;
     this.viewport = null;
     this.layer = null;

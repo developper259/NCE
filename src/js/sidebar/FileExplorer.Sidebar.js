@@ -71,7 +71,7 @@ class FileExplorer extends Sidebar {
   }
 
   setupFileSystemWatcher() {
-    window.api.onFileSystemChange((data) => {
+    this.unsubscribeFileSystemWatcher = window.api.onFileSystemChange((data) => {
       Promise.resolve(this.handleFileSystemChanges(data)).catch((error) =>
         console.error("Error handling filesystem changes:", error),
       );
@@ -682,6 +682,20 @@ class FileExplorer extends Sidebar {
       await this.loadFiles(expandedSet);
     }
     this.refresh();
+  }
+
+  destroy() {
+    this.unsubscribeFileSystemWatcher?.();
+    this.unsubscribeFileSystemWatcher = null;
+    clearTimeout(this.scrollSaveTimer);
+    this.scrollSaveTimer = null;
+    this.virtualScroller?.destroy();
+    this.virtualScroller = null;
+    this.shell?.remove();
+    this.shell = null;
+    this.treeViewport = null;
+    this.treeLayer = null;
+    this.treeLayerFast = null;
   }
 
   async selectFolder() {

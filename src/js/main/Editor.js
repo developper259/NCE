@@ -261,6 +261,21 @@ class Editor {
     return this.agent;
   }
 
+  destroy() {
+    this.quickPanel?.destroy?.();
+    this.fileExplorer?.destroy?.();
+    this.searchSidebar?.destroy?.();
+    this.agentSidebar?.destroy?.();
+    this._settingsView?.destroy?.();
+    this._pictureView?.destroy?.();
+    this._markdownView?.destroy?.();
+    this.tabManager?.destroy?.();
+    this.sidebarManager?.destroy?.();
+    this.lineController?.outputScroller?.destroy?.();
+    this.scrollerManager?.destroyAll?.();
+    this.domManager?.destroy?.();
+  }
+
   async openSettingsJson() {
     const settingsPath = await this.api.getSettingsPath?.();
     if (!settingsPath) return null;

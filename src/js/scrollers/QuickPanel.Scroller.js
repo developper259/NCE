@@ -74,12 +74,9 @@ class QuickPanelScroller {
       this._hasWheelListener = false;
     }
     if (this.vScroller) {
-      this.vScroller.destroy();
-      const scrollers = this.editor.scrollerManager?.scrollers;
-      if (scrollers) {
-        const index = scrollers.indexOf(this.vScroller);
-        if (index !== -1) scrollers.splice(index, 1);
-      }
+      const manager = this.editor.scrollerManager;
+      if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
+      else this.vScroller.destroy?.();
       this.vScroller = null;
     }
     if (this.viewport) this._resizeObserver?.unobserve(this.viewport);
@@ -136,7 +133,7 @@ class QuickPanelScroller {
     this.forceRender = true;
     this.clearRenderedRows();
     this.layerFast?.setHeight(0);
-    this.vScroller?.setActive(false);
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
   }
 
   clearRenderedRows() {
@@ -373,7 +370,7 @@ class QuickPanelScroller {
       cancelFrame?.(this.frame);
       this.frame = null;
     }
-    this.vScroller?.setActive(false);
+    this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
   }
 
   resume() {
@@ -390,6 +387,7 @@ class QuickPanelScroller {
     this.suspend();
     this.detachViewport();
     this._resizeObserver?.disconnect();
+    this._resizeObserver = null;
     this.clearRenderedRows();
     this.viewport = null;
     this.layer = null;
