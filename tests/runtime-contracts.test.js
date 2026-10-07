@@ -110,6 +110,8 @@ test("Watcher batches events and can retarget a recreated BrowserWindow", () => 
 test("critical renderer components and build assets are registered", () => {
   const html = read("src/html/index.html");
   const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
+  const agentScripts = JSON.parse(read("src/js/main/renderer-agent-scripts.json"));
+  const markdownScripts = JSON.parse(read("src/js/main/renderer-markdown-scripts.json"));
   const requiredScripts = [
     "controller/WriterController.js",
     "controller/HistoryController.js",
@@ -119,10 +121,8 @@ test("critical renderer components and build assets are registered", () => {
     "types/QuickPanel.js",
     "quickPanel/GoToLine.js",
     "manager/StatesManager.js",
-    "addon/MarkdownRenderer.js",
     "sidebar/FileExplorer.Sidebar.js",
     "sidebar/Search.Sidebar.js",
-    "sidebar/Agent.Sidebar.js",
   ];
   assert.deepEqual(
     [...html.matchAll(/<script\b(?=[^>]*\bsrc="([^"]+)")[^>]*>\s*<\/script>/g)].map(
@@ -134,6 +134,9 @@ test("critical renderer components and build assets are registered", () => {
     assert.ok(rendererScripts.includes(`js/${script}`), script);
     assert.equal(fs.existsSync(path.join(root, "src/js", script)), true, script);
   }
+  assert.ok(agentScripts.includes("js/sidebar/Agent.Sidebar.js"));
+  assert.ok(markdownScripts.includes("js/addon/MarkdownRenderer.js"));
+  assert.ok(markdownScripts.includes("js/vendor/markdown-it.umd.min.js"));
   const packageJson = JSON.parse(read("package.json"));
   assert.equal(packageJson.scripts.typecheck, "tsc --noEmit");
   assert.match(packageJson.scripts.test, /node --test/);

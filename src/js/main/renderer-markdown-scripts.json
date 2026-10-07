@@ -1,0 +1,6 @@
+[
+  "js/vendor/markdown-it.umd.min.js",
+  "js/addon/MarkdownRenderer.js",
+  "js/view/MarkdownView.js",
+  "js/scrollers/MarkdownView.Scroller.js"
+]

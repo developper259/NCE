@@ -52,8 +52,15 @@ test("index references resolve in development and packaged layouts", async () =>
   const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
   const { buildRendererScript } = await import("../scripts/renderer-entrypoint.mjs");
   const rendererBundle = await buildRendererScript();
+  const agentBundle = await buildRendererScript("agent");
+  const markdownBundle = await buildRendererScript("markdown");
   assert.ok(rendererScripts.length > 0);
   assert.match(rendererBundle, /class Editor\s*\{/);
+  assert.doesNotMatch(rendererBundle, /class Agent\s*\{|class AgentSidebar\s*\{|class MarkdownRenderer\s*\{/);
+  assert.match(agentBundle, /class Agent\s*\{/);
+  assert.match(agentBundle, /class AgentSidebar\s+extends Sidebar/);
+  assert.match(markdownBundle, /class MarkdownRenderer\s*\{/);
+  assert.match(markdownBundle, /class MarkdownView\s*\{/);
 
   for (const reference of htmlReferences()) {
     if (reference === "./renderer.js") continue;
@@ -103,7 +110,17 @@ test("Vite development serves the classic renderer entrypoint and Worker", async
     const renderer = await rendererResponse.text();
     assert.equal(rendererResponse.status, 200);
     assert.match(renderer, /class Editor\s*\{/);
-    assert.ok(renderer.indexOf("class Editor") > renderer.indexOf("class Agent"));
+    assert.doesNotMatch(renderer, /class Agent\s*\{|class AgentSidebar\s*\{|class MarkdownRenderer\s*\{/);
+
+    const agentResponse = await fetch(`${origin}/html/agent.js`);
+    const agent = await agentResponse.text();
+    assert.equal(agentResponse.status, 200);
+    assert.match(agent, /class AgentSidebar\s+extends Sidebar/);
+
+    const markdownResponse = await fetch(`${origin}/html/markdown.js`);
+    const markdown = await markdownResponse.text();
+    assert.equal(markdownResponse.status, 200);
+    assert.match(markdown, /class MarkdownRenderer\s*\{/);
 
     const workerResponse = await fetch(`${origin}/js/worker/highlight.worker.js`);
     assert.equal(workerResponse.status, 200);

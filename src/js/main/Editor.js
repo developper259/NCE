@@ -57,7 +57,7 @@ class Editor {
 
     this.fileExplorer = new FileExplorer(this);
     this.searchSidebar = new SearchSidebar(this);
-    this.agentSidebar = new AgentSidebar(this);
+    this.agentSidebar = new LazyAgentSidebar(this);
 
     this.sidebarManager.registerMenu(this.fileExplorer);
     this.sidebarManager.registerMenu(this.searchSidebar);
@@ -224,8 +224,40 @@ class Editor {
     return this._markdownView;
   }
 
+  async ensureAgentSidebar() {
+    await ensureAgentBundle();
+    if (this.agentSidebar instanceof AgentSidebar) return this.agentSidebar;
+
+    const lazySidebar = this.agentSidebar;
+    const sidebar = new AgentSidebar(this);
+    const wasOpen = lazySidebar?.isOpen === true;
+    this.agentSidebar = sidebar;
+    this.sidebarManager.registerMenu(sidebar);
+    if (this.sidebarManager.leftActiveMenu === lazySidebar)
+      this.sidebarManager.leftActiveMenu = sidebar;
+    if (this.sidebarManager.rightActiveMenu === lazySidebar)
+      this.sidebarManager.rightActiveMenu = sidebar;
+    if (this.sidebarManager.activeMenu === lazySidebar)
+      this.sidebarManager.activeMenu = sidebar;
+
+    if (lazySidebar?.pendingConfigState)
+      await sidebar.loadConfigState(lazySidebar.pendingConfigState);
+    if (lazySidebar?.pendingScrollState) sidebar.restoreScrollState();
+    if (wasOpen) {
+      sidebar.open();
+      this.sidebarManager.renderMenuContent(sidebar);
+    }
+    this.sidebarManager.renderTabSelector();
+    return sidebar;
+  }
+
   ensureAgent() {
-    if (!this.agent) this.agent = new Agent(this);
+    if (!this.agent) {
+      if (typeof Agent === "undefined") {
+        throw new Error("Load the Agent feature bundle before creating Agent");
+      }
+      this.agent = new Agent(this);
+    }
     return this.agent;
   }
 
@@ -268,7 +300,15 @@ class Editor {
     } else if (markdownActive) {
       this._settingsView?.hide();
       this._pictureView?.hide();
-      this.getMarkdownView().show(this.tabManager.activeTab);
+      const activeTab = this.tabManager.activeTab;
+      if (typeof MarkdownView !== "undefined") {
+        this.getMarkdownView().show(activeTab);
+      } else {
+        void ensureMarkdownBundle().then(() => {
+          if (this.tabManager.activeTab?.type === TAB_TYPES.MARKDOWN)
+            this.getMarkdownView().show(this.tabManager.activeTab);
+        }).catch((error) => console.error("Failed to load Markdown feature:", error));
+      }
       this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);

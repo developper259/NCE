@@ -32,12 +32,20 @@ function createAgent(
     fetch: fetchMock,
   };
   vm.createContext(context);
-  const rendererScripts = JSON.parse(
-    fs.readFileSync(
-      path.join(root, "src/js/main/renderer-scripts.json"),
-      "utf8",
+  const rendererScripts = [
+    ...JSON.parse(
+      fs.readFileSync(
+        path.join(root, "src/js/main/renderer-scripts.json"),
+        "utf8",
+      ),
     ),
-  );
+    ...JSON.parse(
+      fs.readFileSync(
+        path.join(root, "src/js/main/renderer-agent-scripts.json"),
+        "utf8",
+      ),
+    ),
+  ];
   const files = rendererScripts.filter(
     (file) => file.startsWith("config/") || /^js\/(?:agent\/|core\/Agent\.js$)/.test(file),
   );

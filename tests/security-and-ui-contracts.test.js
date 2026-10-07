@@ -40,7 +40,7 @@ test("TabManager protects asynchronous focus changes and dirty close flows", () 
 });
 
 test("Agent tool surface is present and remains local-testable", () => {
-  const rendererScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
+  const rendererScripts = JSON.parse(read("src/js/main/renderer-agent-scripts.json"));
   for (const script of [
     "agent/runtime/AgentRunner.js",
     "agent/tools/ToolRegistry.js",

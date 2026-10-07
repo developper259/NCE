@@ -63,9 +63,7 @@ class BottomBar {
   }
 
   isMarkdownPath(path) {
-    if (typeof MarkdownView !== "undefined")
-      return MarkdownView.isSupportedPath(path);
-    return Boolean(this.editor._markdownView?.isSupportedPath?.(path));
+    return FileType.isMarkdownPath(path);
   }
 
   async openLanguage() {

@@ -677,10 +677,8 @@ class tabManager {
       replacement = new PictureTab(current.id, current.path);
       replacement.textTab = current;
     } else if (view === "markdown" && current.type === TAB_TYPES.FILE &&
-        current.largeFileMode !== true &&
-        (typeof MarkdownView !== "undefined"
-          ? MarkdownView.isSupportedPath(current.path)
-          : this.editor._markdownView?.isSupportedPath?.(current.path))) {
+        current.largeFileMode !== true && FileType.isMarkdownPath(current.path)) {
+      await ensureMarkdownBundle();
       replacement = new MarkdownTab(current.id, current.path);
       replacement.textTab = current;
     } else if (view === "text" && [TAB_TYPES.PICTURE, TAB_TYPES.MARKDOWN].includes(current.type)) {

@@ -71,6 +71,22 @@ app.whenReady().then(() => {
         await nce.window.executeWindowCommand("view.devtools"),
         false,
       );
+      if (phase === "write") {
+        assert.equal(
+          await run('typeof Agent === "undefined" && typeof AgentSidebar === "undefined" && typeof MarkdownRenderer === "undefined"'),
+          true,
+        );
+        assert.equal(
+          await run(`(async () => {
+            await ensureMarkdownBundle();
+            await ensureAgentBundle();
+            return typeof Agent === "function" &&
+              typeof AgentSidebar === "function" &&
+              typeof MarkdownRenderer === "function";
+          })()`),
+          true,
+        );
+      }
       const quickOpenModifier =
         process.platform === "darwin" ? "meta" : "control";
       if (process.platform === "darwin") {
