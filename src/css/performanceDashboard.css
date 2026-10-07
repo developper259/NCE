@@ -1,0 +1,125 @@
+.nce-performance-dashboard-host {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.nce-performance-dashboard-host[hidden] {
+  display: none;
+}
+
+.nce-performance-dashboard {
+  display: flex;
+  flex-direction: column;
+  width: min(900px, calc(100vw - 48px));
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: hidden;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+.nce-performance-dashboard-header,
+.nce-performance-dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.nce-performance-dashboard-header {
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.nce-performance-dashboard-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.nce-performance-dashboard-actions {
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.nce-performance-dashboard button {
+  min-height: 28px;
+  padding: 4px 10px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.nce-performance-dashboard button:hover,
+.nce-performance-dashboard button:focus-visible {
+  border-color: var(--border-secondary);
+  outline: none;
+}
+
+.nce-performance-dashboard-output {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 8px 16px 14px;
+  overflow: auto;
+}
+
+.nce-performance-dashboard-group {
+  min-width: 0;
+  padding: 10px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 5px;
+}
+
+.nce-performance-dashboard-group h3 {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nce-performance-dashboard-group dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  margin: 0;
+  font-size: 11px;
+}
+
+.nce-performance-dashboard-group dt {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+}
+
+.nce-performance-dashboard-group dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.nce-performance-dashboard-status {
+  min-height: 16px;
+  margin: 0;
+  padding: 0 16px 12px;
+  color: var(--text-secondary);
+  font-size: 10px;
+}
+
+@media (max-width: 640px) {
+  .nce-performance-dashboard-output {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

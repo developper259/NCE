@@ -249,6 +249,12 @@ class KeyBinding {
       keywords: ["theme", "appearance", "color"],
       data: { themePicker: true },
     });
+    const developerItems = [{
+      id: "developer-performance",
+      label: "Developer: Performance",
+      keywords: ["developer", "performance", "metrics", "dashboard"],
+      data: { performanceDashboard: true },
+    }];
 
     const activeTab = this.editor.tabManager.activeTab;
     const viewTypeActions = Boolean(
@@ -278,7 +284,7 @@ class KeyBinding {
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
-    const allActions = settingCategories.concat(viewTypeActions, shortcutItems);
+    const allActions = settingCategories.concat(developerItems, viewTypeActions, shortcutItems);
     const recentlyUsedItems = this.recentCommandIds
       .map((id) => allActions.find((item) => item.id === id))
       .filter(Boolean)
@@ -348,6 +354,9 @@ class KeyBinding {
     }
     if (item?.data?.settingsJson) {
       return this.editor.openSettingsJson?.();
+    }
+    if (item?.data?.performanceDashboard) {
+      return this.editor.openPerformanceDashboard?.();
     }
     if (item?.data?.settingsCategory) {
       return this.editor.openSettings(item.data.settingsCategory);

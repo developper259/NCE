@@ -96,6 +96,7 @@ class Editor {
     this._settingsView = null;
     this._pictureView = null;
     this._markdownView = null;
+    this._performanceDashboard = null;
 
     this.writerController.insertMode = true;
 
@@ -254,6 +255,16 @@ class Editor {
     return this._markdownView;
   }
 
+  getPerformanceDashboard() {
+    if (!this._performanceDashboard)
+      this._performanceDashboard = new PerformanceDashboard(this);
+    return this._performanceDashboard;
+  }
+
+  openPerformanceDashboard() {
+    return this.getPerformanceDashboard().show();
+  }
+
   async ensureAgentSidebar() {
     await ensureAgentBundle();
     if (this.agentSidebar instanceof AgentSidebar) return this.agentSidebar;
@@ -299,6 +310,7 @@ class Editor {
     this._settingsView?.destroy?.();
     this._pictureView?.destroy?.();
     this._markdownView?.destroy?.();
+    this._performanceDashboard?.destroy?.();
     this.tabManager?.destroy?.();
     this.sidebarManager?.destroy?.();
     this.lineController?.outputScroller?.destroy?.();

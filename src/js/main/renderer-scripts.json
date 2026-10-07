@@ -62,5 +62,6 @@
   "js/contextMenu/SidebarTitle.ContextMenu.js",
   "js/contextMenu/Input.ContextMenu.js",
   "config/Application.js",
+  "js/view/PerformanceDashboard.js",
   "js/main/Editor.js"
 ]
