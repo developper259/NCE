@@ -6,6 +6,7 @@ class PictureViewScroller {
     this.vScroller = null;
     this.hScroller = null;
     this.resizeObserver = null;
+    this.observerMetricsInvalid = false;
     this.onViewportScroll = () => this.syncFromViewport();
 
     const manager = editor.scrollerManager;
@@ -21,7 +22,7 @@ class PictureViewScroller {
     viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
     if (typeof ResizeObserver === "function") {
       this.resizeObserver = new ResizeObserver((entries) => {
-        this.refresh({
+        this.scheduleObserverRefresh({
           invalidateMetrics: entries?.some((entry) => entry.target === viewport),
         });
       });
@@ -30,6 +31,23 @@ class PictureViewScroller {
       if (image) this.resizeObserver.observe(image);
     }
     this.refresh();
+  }
+
+  scheduleObserverRefresh({ invalidateMetrics = false } = {}) {
+    if (!this.vScroller && !this.hScroller) return false;
+    this.observerMetricsInvalid ||= invalidateMetrics;
+    const manager = this.editor.scrollerManager;
+    if (!manager?.scheduleObserverRefresh) {
+      const shouldInvalidate = this.observerMetricsInvalid;
+      this.observerMetricsInvalid = false;
+      this.refresh({ invalidateMetrics: shouldInvalidate });
+      return true;
+    }
+    return manager.scheduleObserverRefresh(this, () => {
+      const shouldInvalidate = this.observerMetricsInvalid;
+      this.observerMetricsInvalid = false;
+      this.refresh({ invalidateMetrics: shouldInvalidate });
+    });
   }
 
   configure(scroller, vertical) {
@@ -75,6 +93,9 @@ class PictureViewScroller {
   }
 
   refresh({ invalidateMetrics = false } = {}) {
+    invalidateMetrics ||= this.observerMetricsInvalid;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     this.syncFromViewport({ invalidateMetrics });
   }
 
@@ -84,6 +105,8 @@ class PictureViewScroller {
   }
 
   destroy() {
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     this.viewport?.removeEventListener("scroll", this.onViewportScroll);
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;

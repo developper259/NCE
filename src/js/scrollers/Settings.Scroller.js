@@ -56,18 +56,29 @@ class SettingsScroller {
       this.content.scrollTop = this.scrollTop;
     };
 
-    this.mutationObserver = new MutationObserver(() => this.refresh());
+    this.mutationObserver = new MutationObserver(() => this.scheduleObserverRefresh());
     this.mutationObserver.observe(this.content, {
       childList: true,
       subtree: true,
     });
-    this.resizeObserver = new ResizeObserver(() => this.refresh());
+    this.resizeObserver = new ResizeObserver(() => this.scheduleObserverRefresh());
     this.resizeObserver.observe(this.content);
 
     this.refresh();
   }
 
+  scheduleObserverRefresh() {
+    if (!this.vScroller) return false;
+    const manager = this.editor.scrollerManager;
+    if (!manager?.scheduleObserverRefresh) {
+      this.refresh();
+      return true;
+    }
+    return manager.scheduleObserverRefresh(this, () => this.refresh());
+  }
+
   refresh() {
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
     if (!this.vScroller) return;
 
     this.updateMetrics();
@@ -83,6 +94,7 @@ class SettingsScroller {
   }
 
   destroy() {
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
     this.mutationObserver?.disconnect();
     this.resizeObserver?.disconnect();
     this.mutationObserver = null;

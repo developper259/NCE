@@ -6,6 +6,7 @@ class MarkdownViewScroller {
     this.vScroller = null;
     this.mutationObserver = null;
     this.resizeObserver = null;
+    this.observerMetricsInvalid = false;
     this.onViewportScroll = () => this.syncFromViewport();
 
     const manager = editor.scrollerManager;
@@ -32,12 +33,14 @@ class MarkdownViewScroller {
 
     viewport.addEventListener("scroll", this.onViewportScroll, { passive: true });
     if (typeof MutationObserver === "function") {
-      this.mutationObserver = new MutationObserver(() => this.refresh());
+      this.mutationObserver = new MutationObserver(() =>
+        this.scheduleObserverRefresh(),
+      );
       this.mutationObserver.observe(content, { childList: true, subtree: true });
     }
     if (typeof ResizeObserver === "function") {
       this.resizeObserver = new ResizeObserver((entries) => {
-        this.refresh({
+        this.scheduleObserverRefresh({
           invalidateMetrics: entries?.some((entry) => entry.target === viewport),
         });
       });
@@ -45,6 +48,23 @@ class MarkdownViewScroller {
       this.resizeObserver.observe(content);
     }
     this.refresh();
+  }
+
+  scheduleObserverRefresh({ invalidateMetrics = false } = {}) {
+    if (!this.vScroller) return false;
+    this.observerMetricsInvalid ||= invalidateMetrics;
+    const manager = this.editor.scrollerManager;
+    if (!manager?.scheduleObserverRefresh) {
+      const shouldInvalidate = this.observerMetricsInvalid;
+      this.observerMetricsInvalid = false;
+      this.refresh({ invalidateMetrics: shouldInvalidate });
+      return true;
+    }
+    return manager.scheduleObserverRefresh(this, () => {
+      const shouldInvalidate = this.observerMetricsInvalid;
+      this.observerMetricsInvalid = false;
+      this.refresh({ invalidateMetrics: shouldInvalidate });
+    });
   }
 
   syncFromViewport({ invalidateMetrics = false } = {}) {
@@ -66,10 +86,15 @@ class MarkdownViewScroller {
   }
 
   refresh({ invalidateMetrics = false } = {}) {
+    invalidateMetrics ||= this.observerMetricsInvalid;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     this.syncFromViewport({ invalidateMetrics });
   }
 
   destroy() {
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     this.viewport?.removeEventListener("scroll", this.onViewportScroll);
     this.mutationObserver?.disconnect();
     this.resizeObserver?.disconnect();

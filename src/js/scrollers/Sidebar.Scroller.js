@@ -6,6 +6,7 @@ class SidebarScroller {
     this.vScroller = null;
     this._observer = null;
     this._resizeObserver = null;
+    this.observerMetricsInvalid = false;
     this.suspended = false;
     this._onNativeScroll = () => this.syncFromMenu();
 
@@ -69,7 +70,7 @@ class SidebarScroller {
     this.menuOBJ.addEventListener("scroll", this._onNativeScroll, {
       passive: true,
     });
-    this._observer = new MutationObserver(() => this.refresh());
+    this._observer = new MutationObserver(() => this.scheduleObserverRefresh());
     this._observer.observe(this.menuOBJ, {
       childList: true,
       subtree: true,
@@ -77,14 +78,34 @@ class SidebarScroller {
     });
 
     this._resizeObserver = new ResizeObserver(() =>
-      this.refresh({ invalidateMetrics: true }),
+      this.scheduleObserverRefresh({ invalidateMetrics: true }),
     );
     this._resizeObserver.observe(this.menuOBJ);
 
     this.refresh();
   }
 
+  scheduleObserverRefresh({ invalidateMetrics = false } = {}) {
+    if (!this.vScroller || this.suspended) return false;
+    this.observerMetricsInvalid ||= invalidateMetrics;
+    const manager = this.editor.scrollerManager;
+    if (!manager?.scheduleObserverRefresh) {
+      const shouldInvalidate = this.observerMetricsInvalid;
+      this.observerMetricsInvalid = false;
+      this.refresh({ invalidateMetrics: shouldInvalidate });
+      return true;
+    }
+    return manager.scheduleObserverRefresh(this, () => {
+      const shouldInvalidate = this.observerMetricsInvalid;
+      this.observerMetricsInvalid = false;
+      this.refresh({ invalidateMetrics: shouldInvalidate });
+    });
+  }
+
   refresh({ invalidateMetrics = false } = {}) {
+    invalidateMetrics ||= this.observerMetricsInvalid;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     if (!this.vScroller || this.suspended) return;
 
     this.updateMetrics();
@@ -117,7 +138,10 @@ class SidebarScroller {
 
   suspend() {
     this.suspended = true;
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     this._observer?.disconnect();
+    this._resizeObserver?.unobserve(this.menuOBJ);
     this.editor.scrollerManager?.deactivateScroller?.(this.vScroller);
   }
 
@@ -130,10 +154,13 @@ class SidebarScroller {
     this._observer?.observe(this.menuOBJ, {
       childList: true, subtree: true, characterData: true,
     });
+    this._resizeObserver?.observe(this.menuOBJ);
     this.refresh();
   }
 
   destroy() {
+    this.editor.scrollerManager?.cancelObserverRefresh?.(this);
+    this.observerMetricsInvalid = false;
     this.menuOBJ?.removeEventListener("scroll", this._onNativeScroll);
     if (this._observer) this._observer.disconnect();
     if (this._resizeObserver) this._resizeObserver.disconnect();

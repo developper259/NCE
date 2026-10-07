@@ -8,6 +8,8 @@ class ScrollerManager {
     this.scrollers = [];
     this.nextScrollerId = 0;
     this.destroyedScrollers = new WeakSet();
+    this.observerRefreshFrame = null;
+    this.observerRefreshCallbacks = new Map();
     this.activeDrag = null;
     this.dragDocument = null;
     this.onDragPointerMove = (event) => this.handleDragPointerMove(event);
@@ -77,6 +79,52 @@ class ScrollerManager {
     if (!scroller || !this.scrollers.includes(scroller)) return false;
     scroller._metricsDirty = true;
     return this.refreshScroller(scroller);
+  }
+
+  scheduleObserverRefresh(owner, callback) {
+    if (!owner || typeof callback !== "function") return false;
+    this.observerRefreshCallbacks.set(owner, callback);
+    if (this.observerRefreshFrame !== null) return true;
+
+    const requestFrame = this.editor?.domManager?.requestFrame ||
+      (typeof requestAnimationFrame === "function" ? requestAnimationFrame : null);
+    if (!requestFrame) {
+      this.observerRefreshCallbacks.delete(owner);
+      callback();
+      return true;
+    }
+
+    this.observerRefreshFrame = requestFrame(() => {
+      this.observerRefreshFrame = null;
+      const owners = [...this.observerRefreshCallbacks.keys()];
+      for (const pendingOwner of owners) {
+        const pendingCallback = this.observerRefreshCallbacks.get(pendingOwner);
+        if (!pendingCallback) continue;
+        this.observerRefreshCallbacks.delete(pendingOwner);
+        pendingCallback();
+      }
+    });
+    return true;
+  }
+
+  cancelObserverRefresh(owner) {
+    if (!owner || !this.observerRefreshCallbacks.delete(owner)) return false;
+    if (this.observerRefreshCallbacks.size === 0 && this.observerRefreshFrame !== null) {
+      const cancelFrame = this.editor?.domManager?.cancelFrame ||
+        (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+      cancelFrame?.(this.observerRefreshFrame);
+      this.observerRefreshFrame = null;
+    }
+    return true;
+  }
+
+  cancelObserverRefreshes() {
+    this.observerRefreshCallbacks.clear();
+    if (this.observerRefreshFrame === null) return;
+    const cancelFrame = this.editor?.domManager?.cancelFrame ||
+      (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+    cancelFrame?.(this.observerRefreshFrame);
+    this.observerRefreshFrame = null;
   }
 
   addScroller(scroller) {
@@ -256,6 +304,7 @@ class ScrollerManager {
   }
 
   destroyAll() {
+    this.cancelObserverRefreshes();
     for (const scroller of [...this.scrollers]) this.destroyScroller(scroller);
   }
 
