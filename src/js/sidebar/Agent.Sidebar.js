@@ -29,6 +29,7 @@ class AgentSidebar extends Sidebar {
     this.pendingScrollTop = 0;
     this.scrollToBottomAfterRestore = false;
     this.scrollBottomFrame = null;
+    this.pendingAnimationFrames = new Set();
     this.changesElement = null;
     this.inputElement = null;
     this.inputWrapperElement = null;
@@ -111,6 +112,36 @@ class AgentSidebar extends Sidebar {
       entry.target.addEventListener(entry.type, entry.handler, entry.options);
       entry.attached = true;
     }
+  }
+
+  scheduleSidebarAnimationFrame(callback) {
+    if (typeof requestAnimationFrame !== "function") return null;
+    if (!this.pendingAnimationFrames) this.pendingAnimationFrames = new Set();
+    let frameId = null;
+    let completedSynchronously = false;
+    frameId = requestAnimationFrame(() => {
+      completedSynchronously = true;
+      this.pendingAnimationFrames?.delete(frameId);
+      callback();
+    });
+    if (completedSynchronously) return null;
+    this.pendingAnimationFrames.add(frameId);
+    return frameId;
+  }
+
+  cancelSidebarAnimationFrame(frameId) {
+    if (frameId === null || frameId === undefined) return false;
+    if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
+    this.pendingAnimationFrames?.delete(frameId);
+    return true;
+  }
+
+  cancelPendingSidebarAnimationFrames() {
+    for (const frameId of this.pendingAnimationFrames || []) {
+      if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
+    }
+    this.pendingAnimationFrames?.clear();
+    this.scrollBottomFrame = null;
   }
 
   removeGlobalListeners({ forget = false } = {}) {
@@ -1875,7 +1906,7 @@ class AgentSidebar extends Sidebar {
       menu.style.left = `${anchorRect.left}px`;
       menu.style.right = "auto";
 
-      requestAnimationFrame(() => {
+      this.scheduleSidebarAnimationFrame(() => {
         const menuRect = menu.getBoundingClientRect();
         const left = Math.max(edgePadding, Math.min(
           anchorRect.left,
@@ -4364,9 +4395,9 @@ class AgentSidebar extends Sidebar {
 
     apply();
     if (this.scrollBottomFrame !== null) {
-      cancelAnimationFrame(this.scrollBottomFrame);
+      this.cancelSidebarAnimationFrame(this.scrollBottomFrame);
     }
-    this.scrollBottomFrame = requestAnimationFrame(() => {
+    this.scrollBottomFrame = this.scheduleSidebarAnimationFrame(() => {
       this.scrollBottomFrame = null;
       apply();
     });
@@ -4374,7 +4405,7 @@ class AgentSidebar extends Sidebar {
 
   scheduleRestoredBottomScroll() {
     if (!this.scrollToBottomAfterRestore || !this.isOpen || !this.messagesElement) return;
-    requestAnimationFrame(() => {
+    this.scheduleSidebarAnimationFrame(() => {
       if (!this.scrollToBottomAfterRestore || !this.isOpen || !this.messagesElement) return;
       this.scrollMessagesToBottom();
       this.scrollToBottomAfterRestore = false;
@@ -4382,7 +4413,7 @@ class AgentSidebar extends Sidebar {
   }
 
   focusInput() {
-    requestAnimationFrame(() => {
+    this.scheduleSidebarAnimationFrame(() => {
       if (this.inputElement) {
         this.inputElement.focus({ preventScroll: true });
       }
@@ -4807,7 +4838,7 @@ class AgentSidebar extends Sidebar {
       this.sessionInfoPopover.style.left = `${initialLeft}px`;
       this.sessionInfoPopover.style.top = "auto";
       this.sessionInfoPopover.style.bottom = `${window.innerHeight - rect.top + 6}px`;
-      requestAnimationFrame(() => {
+      this.scheduleSidebarAnimationFrame(() => {
         if (!this.sessionInfoOpen || !this.sessionInfoPopover) return;
         const popoverRect = this.sessionInfoPopover.getBoundingClientRect();
         const left = Math.min(
@@ -5052,6 +5083,7 @@ class AgentSidebar extends Sidebar {
 
   destroy() {
     this.stopAgentWorkTicker();
+    this.cancelPendingSidebarAnimationFrames();
     this.closeSessionInfo();
     this.removeGlobalListeners({ forget: true });
     this.messagesElement?.removeEventListener?.("scroll", this.messagesScrollHandler);
@@ -5113,6 +5145,7 @@ class AgentSidebar extends Sidebar {
 
   onClose() {
     this.stopAgentWorkTicker();
+    this.cancelPendingSidebarAnimationFrames();
     this.closeSessionInfo();
     this.sessionInfoPopover?.remove();
     this.sessionInfoPopover = null;

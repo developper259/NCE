@@ -102,3 +102,58 @@ test("Agent global listeners stay stable across reopen and input area reconstruc
   assert.doesNotMatch(source, /document\.addEventListener\(/);
   assert.doesNotMatch(source, /window\.addEventListener\(/);
 });
+
+test("Agent cancels scheduled animation frames on close and destroy", () => {
+  const frames = new Map();
+  const cancelledFrames = [];
+  let nextFrameId = 1;
+  const AgentSidebar = loadGlobal(
+    "src/js/sidebar/Agent.Sidebar.js",
+    "AgentSidebar",
+    {
+      Sidebar: class Sidebar {},
+      requestAnimationFrame(callback) {
+        const id = nextFrameId++;
+        frames.set(id, callback);
+        return id;
+      },
+      cancelAnimationFrame(id) {
+        cancelledFrames.push(id);
+        frames.delete(id);
+      },
+    },
+  );
+  const sidebar = Object.assign(Object.create(AgentSidebar.prototype), {
+    globalListeners: new Map(),
+    globalListenersActive: false,
+    pendingAnimationFrames: new Set(),
+    scrollBottomFrame: null,
+    stopAgentWorkTicker() {},
+    closeSessionInfo() {},
+    removeGlobalListeners() {},
+    sessionInfoPopover: null,
+    messagesElement: null,
+    messagesScroller: null,
+    messageWindowStates: new Map(),
+    editor: { sidebarManager: { rightScroller: null } },
+  });
+
+  const first = sidebar.scheduleSidebarAnimationFrame(() => {});
+  const second = sidebar.scheduleSidebarAnimationFrame(() => {});
+  sidebar.onClose();
+  assert.deepEqual(cancelledFrames, [first, second]);
+  assert.equal(sidebar.pendingAnimationFrames.size, 0);
+  assert.equal(frames.size, 0);
+
+  const third = sidebar.scheduleSidebarAnimationFrame(() => {});
+  sidebar.destroy();
+  assert.equal(cancelledFrames.at(-1), third);
+  assert.equal(sidebar.pendingAnimationFrames.size, 0);
+  assert.equal(frames.size, 0);
+
+  const source = fs.readFileSync(
+    path.join(__dirname, "../src/js/sidebar/Agent.Sidebar.js"),
+    "utf8",
+  );
+  assert.equal([...source.matchAll(/requestAnimationFrame\(/g)].length, 1);
+});
