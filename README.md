@@ -28,14 +28,7 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 
 NCE also includes a deeply integrated AI coding agent designed to work directly with the editor, workspace, files and project tooling.
 
-**Current version**: **0.0.1-beta.4**
-
-## Beta 4 highlights
-
-- Faster Quick Open startup from the persisted workspace index
-- Bounded workspace indexing and more targeted File Explorer refreshes
-- Cleaner QuickPanel, scroller and Agent listener lifecycles
-- Smaller Electron package with WOFF2-only Flaticon fonts
+**Current version**: **0.0.1-beta.3**
 
 ## Beta 3 highlights
 
@@ -143,7 +136,7 @@ Build artifacts are generated in `release/`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.4**
+Current version: **0.0.1-beta.3**
 
 ## License
 
