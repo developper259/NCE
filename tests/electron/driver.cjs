@@ -737,6 +737,67 @@ app.whenReady().then(() => {
           return smallWidth;
         })()`);
         assert.equal(smallFileGutterWidth, 50);
+        const mixedTabNavigation = await run(`(async () => {
+          const manager = editor.tabManager;
+          const file = window.__gutterSmokeFile;
+          const originalTabs = window.__gutterSmokeOriginalTabs;
+          const settings = {
+            id: manager.getNextID(),
+            type: "settings",
+            name: "Settings",
+          };
+          const frame = () => new Promise(requestAnimationFrame);
+          manager.tabs = [file, settings];
+          manager.activeTab = file;
+          manager.refresh();
+
+          await editor.keyBinding.control_next_tab();
+          const fileToView = manager.activeTab === settings &&
+            manager.activeFile === null &&
+            editor.editorOBJ.classList.contains("editor-settings-active") &&
+            getComputedStyle(editor.cD).display === "none";
+
+          await editor.keyBinding.control_previous_tab();
+          const viewToFile = manager.activeTab === file &&
+            manager.activeFile === file &&
+            !editor.editorOBJ.classList.contains("editor-settings-active") &&
+            getComputedStyle(editor.cD).display !== "none";
+
+          await editor.keyBinding.control_next_tab();
+          await editor.keyBinding.control_next_tab();
+          const nextWraps = manager.activeTab === file;
+          await editor.keyBinding.control_previous_tab();
+          const previousWraps = manager.activeTab === settings;
+
+          manager.tabs = [settings];
+          manager.activeTab = settings;
+          manager.refresh();
+          const oneViewDisablesCycling = manager.canCycleTabs === false &&
+            editor.keyBinding.isActionEnabled("next_tab") === false &&
+            editor.keyBinding.isActionEnabled("previous_tab") === false;
+          editor.keyBinding.exec({ action: "next_tab" }, {});
+          const disabledActionKeepsView = manager.activeTab === settings;
+
+          manager.tabs = [...originalTabs, file];
+          await manager.setFocusTab(file);
+          await frame();
+          return { fileToView, viewToFile, nextWraps, previousWraps,
+            oneViewDisablesCycling, disabledActionKeepsView };
+        })()`);
+        assert.equal(mixedTabNavigation.fileToView, true);
+        assert.equal(mixedTabNavigation.viewToFile, true);
+        assert.equal(mixedTabNavigation.nextWraps, true);
+        assert.equal(mixedTabNavigation.previousWraps, true);
+        assert.equal(mixedTabNavigation.oneViewDisablesCycling, true);
+        assert.equal(mixedTabNavigation.disabledActionKeepsView, true);
+        await waitForCondition(
+          () => nce.window.appMenu?.canCycleTabs === true,
+          { description: "native tab cycling to enable with multiple tabs" },
+        );
+        if (process.platform === "darwin") {
+          assert.equal(nce.window.appMenu.menu.getMenuItemById("next-tab").enabled, true);
+          assert.equal(nce.window.appMenu.menu.getMenuItemById("previous-tab").enabled, true);
+        }
         const gutterSidebarWidths = await run(`(async () => {
           const manager = editor.sidebarManager;
           const layer = document.querySelector(".line-numbers");

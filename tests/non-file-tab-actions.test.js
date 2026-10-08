@@ -13,6 +13,7 @@ function createTabActionFixture(types) {
     tabs,
     activeTab,
     activeFile: activeTab?.type === "file" ? activeTab : null,
+    get canCycleTabs() { return this.tabs.length > 1; },
     closeActiveFile: () => calls.push(["close_file", activeTab]),
     closeFiles: () => calls.push(["close_all_file"]),
   };
@@ -25,7 +26,7 @@ function createTabActionFixture(types) {
 
 function getTitleBarCloseItems(fixture) {
   const TitleBar = loadGlobal("src/js/addon/TitleBar.js", "TitleBar");
-  const items = ["close_file", "close_all_file", "save", "unselect_all"].map((command) => ({
+  const items = ["close_file", "close_all_file", "save", "unselect_all", "next_tab", "previous_tab"].map((command) => ({
     dataset: { command, staticDisabled: "false" },
     disabled: false,
   }));
@@ -129,8 +130,21 @@ for (const [label, types] of [
     assert.equal(titleBarDisabled.get("close_all_file"), false);
     assert.equal(titleBarDisabled.get("save"), types.at(-1) !== "file");
     assert.equal(titleBarDisabled.get("unselect_all"), types.at(-1) !== "file");
+    assert.equal(titleBarDisabled.get("next_tab"), types.length <= 1);
+    assert.equal(titleBarDisabled.get("previous_tab"), types.length <= 1);
   });
 }
+
+test("tab cycling remains enabled for multiple views without an active file", () => {
+  const fixture = createTabActionFixture(["settings", "picture"]);
+  const titleBarDisabled = getTitleBarCloseItems(fixture);
+
+  assert.equal(fixture.tabManager.activeFile, null);
+  assert.equal(fixture.keyBinding.isActionEnabled("next_tab"), true);
+  assert.equal(fixture.keyBinding.isActionEnabled("previous_tab"), true);
+  assert.equal(titleBarDisabled.get("next_tab"), false);
+  assert.equal(titleBarDisabled.get("previous_tab"), false);
+});
 
 test("close shortcuts dispatch to the same active-tab and open-tabs actions", () => {
   const fixture = createTabActionFixture(["file", "settings", "picture"]);
@@ -165,6 +179,8 @@ test("the command palette hides file commands outside a file tab", () => {
       { action: "open_command", key: "Meta+Shift+P", in_editor: false },
       { action: "save_as", key: "Meta+Shift+S", in_editor: false },
       { action: "quick_open", key: "Meta+P", in_editor: false },
+      { action: "next_tab", key: "Ctrl+Tab", in_editor: false },
+      { action: "previous_tab", key: "Ctrl+Shift+Tab", in_editor: false },
       { action: "find", key: "Meta+F", in_editor: false },
       { action: "go_to_line", key: "Meta+G", in_editor: false },
       { action: "delete_line", key: "Meta+Shift+K", in_editor: false },
@@ -173,7 +189,10 @@ test("the command palette hides file commands outside a file tab", () => {
     CONFIG_KEYBINDING_DISPLAY: (key) => key,
   });
   const keyBinding = new KeyBinding({
-    tabManager: { activeFile: null, prepareForQuit: async () => true },
+    tabManager: {
+      tabs: [], activeFile: null, canCycleTabs: false,
+      prepareForQuit: async () => true,
+    },
     quickPanel: {
       isOpen: () => false,
       open: (options) => {
@@ -187,6 +206,33 @@ test("the command palette hides file commands outside a file tab", () => {
   assert.deepEqual(
     [...panelOptions.items].map((item) => item.id),
     ["select-color-theme", "open-settings-json", "developer-performance", "quick_open", "toggle_search"],
+  );
+});
+
+test("the command palette includes tab cycling for two views and no active file", () => {
+  let panelOptions;
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    USERCONFIG_KEYBINDING: [
+      { action: "next_tab", key: "Ctrl+Tab", in_editor: false },
+      { action: "previous_tab", key: "Ctrl+Shift+Tab", in_editor: false },
+    ],
+    CONFIG_KEYBINDING_DISPLAY: (key) => key,
+  });
+  const tabs = [{ id: 1, type: "settings" }, { id: 2, type: "picture" }];
+  const keyBinding = new KeyBinding({
+    tabManager: { tabs, activeFile: null, canCycleTabs: true },
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => { panelOptions = options; },
+    },
+  });
+
+  keyBinding.control_open_command();
+
+  assert.equal(
+    JSON.stringify(panelOptions.items.map((item) => item.id)
+      .filter((id) => id === "next_tab" || id === "previous_tab")),
+    JSON.stringify(["next_tab", "previous_tab"]),
   );
 });
 
@@ -346,7 +392,7 @@ test("tab and titlebar propagate the active file context to both menus", () => {
 
   assert.match(
     tabManager,
-    /setActiveFileContext\?\.\(Boolean\(this\.activeFile\)\)/,
+    /setActiveFileContext\(\s*context\.hasActiveFile,\s*context\.canCycleTabs,\s*\)/,
   );
   assert.match(
     titleBar,

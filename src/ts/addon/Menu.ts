@@ -9,6 +9,7 @@ export class AppMenu {
   WinAPP: Window;
   autoSaveItem: InstanceType<typeof MenuItem> | null = null;
   hasActiveFile = false;
+  canCycleTabs = false;
 
   readonly fileActionIds = [
     "save",
@@ -57,6 +58,7 @@ export class AppMenu {
       this.WinAPP.app.settings?.get?.("files.autoSave") === true,
     );
     this.setFileActionsEnabled(this.hasActiveFile);
+    this.setTabCyclingEnabled(this.canCycleTabs);
     Menu.setApplicationMenu(this.menu);
   }
 
@@ -65,6 +67,14 @@ export class AppMenu {
     for (const id of this.fileActionIds) {
       const item = this.menu?.getMenuItemById?.(id);
       if (item) item.enabled = this.hasActiveFile;
+    }
+  }
+
+  setTabCyclingEnabled(enabled: boolean) {
+    this.canCycleTabs = enabled === true;
+    for (const id of ["next-tab", "previous-tab"]) {
+      const item = this.menu?.getMenuItemById?.(id);
+      if (item) item.enabled = this.canCycleTabs;
     }
   }
 
@@ -407,6 +417,7 @@ export class AppMenu {
           },
 
           {
+            id: "next-tab",
             label: "Next Tab",
 
             accelerator: this.getAccelerator("next_tab"),
@@ -415,6 +426,7 @@ export class AppMenu {
           },
 
           {
+            id: "previous-tab",
             label: "Previous Tab",
 
             accelerator: this.getAccelerator("previous_tab"),

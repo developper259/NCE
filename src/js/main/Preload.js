@@ -10,8 +10,12 @@ contextBridge.exposeInMainWorld("api", {
   writeClipboardText: (text) => ipcRenderer.invoke("Clipboard:writeText", text),
   setMenuShortcutsIgnored: (ignored) =>
     ipcRenderer.invoke("App:setIgnoreMenuShortcuts", ignored === true),
-  setActiveFileContext: (hasActiveFile) =>
-    ipcRenderer.invoke("App:setActiveFileContext", hasActiveFile === true),
+  setActiveFileContext: (hasActiveFile, canCycleTabs) =>
+    ipcRenderer.invoke(
+      "App:setActiveFileContext",
+      hasActiveFile === true,
+      canCycleTabs === true,
+    ),
   setAutoSaveState: (enabled) =>
     ipcRenderer.invoke("App:setAutoSaveState", enabled === true),
   getSettings: () => ipcRenderer.invoke("Settings:getAll"),

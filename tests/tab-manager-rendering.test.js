@@ -476,6 +476,10 @@ test("closing the last non-file tab clears active tab state through the fast pat
   assert.equal(calls.resets, 1);
   assert.equal(calls.mainContent, 1);
   assert.equal(calls.refreshAll, 0);
-  assert.equal(calls.contexts.at(-1), false);
+  assert.equal(calls.contexts.length, 0);
+  assert.equal(JSON.stringify(manager.lastNativeTabContext), JSON.stringify({
+    hasActiveFile: false,
+    canCycleTabs: false,
+  }));
   assert.equal(calls.titles, 1);
 });

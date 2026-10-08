@@ -72,7 +72,7 @@ class KeyBinding {
     }
     if (action === "close_all_file") return tabs.length > 0;
     if (action === "next_tab" || action === "previous_tab")
-      return tabs.length > 1;
+      return tabManager.canCycleTabs === true;
     if (this.fileActions.has(action)) return Boolean(tabManager.activeFile);
     return true;
   }

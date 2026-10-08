@@ -256,8 +256,8 @@ export class Window {
       );
       ipcMain.handle(
         "App:setActiveFileContext",
-        async (_event, hasActiveFile) =>
-          this.setActiveFileContext(hasActiveFile),
+        async (_event, hasActiveFile, canCycleTabs) =>
+          this.setActiveFileContext(hasActiveFile, canCycleTabs),
       );
       ipcMain.handle("App:setAutoSaveState", async (_event, enabled) => {
         if (typeof enabled !== "boolean") return false;
@@ -394,9 +394,11 @@ export class Window {
     return true;
   }
 
-  setActiveFileContext(hasActiveFile: unknown) {
+  setActiveFileContext(hasActiveFile: unknown, canCycleTabs?: unknown) {
     if (typeof hasActiveFile !== "boolean") return false;
     this.appMenu?.setFileActionsEnabled(hasActiveFile);
+    if (typeof canCycleTabs === "boolean")
+      this.appMenu?.setTabCyclingEnabled(canCycleTabs);
     return true;
   }
 

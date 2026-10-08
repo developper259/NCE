@@ -233,6 +233,21 @@ test("native menu rebuilds from current keybindings and preserves static items",
   );
 });
 
+test("native Next and Previous Tab items follow the shared cycle availability", () => {
+  const fixture = createMenuHarness();
+  fixture.appMenu.setTabCyclingEnabled(false);
+  assert.equal(fixture.item("Next Tab").enabled, false);
+  assert.equal(fixture.item("Previous Tab").enabled, false);
+
+  fixture.appMenu.setTabCyclingEnabled(true);
+  assert.equal(fixture.item("Next Tab").enabled, true);
+  assert.equal(fixture.item("Previous Tab").enabled, true);
+
+  fixture.appMenu.setFileActionsEnabled(false);
+  assert.equal(fixture.item("Next Tab").enabled, true);
+  assert.equal(fixture.item("Previous Tab").enabled, true);
+});
+
 test("native Open Recent exposes folders, dispatches selection and clears history", async () => {
   const fixture = createMenuHarness({
     recentFolders: ["/projects/NSH", "/projects/NCE"],
@@ -251,6 +266,7 @@ test("Window refreshes the native menu only after a persisted keybinding change"
   let refreshes = 0;
   let autoSaveUpdates = 0;
   const fileContextUpdates = [];
+  const tabCycleUpdates = [];
   const { Window } = loadMain("dist/ts/Window.js", {
     electron: {},
     "./addon/FileManager": { FileManager: class {} },
@@ -272,6 +288,7 @@ test("Window refreshes the native menu only after a persisted keybinding change"
     refreshKeybindings: () => refreshes++,
     setAutoSaveState: () => autoSaveUpdates++,
     setFileActionsEnabled: (enabled) => fileContextUpdates.push(enabled),
+    setTabCyclingEnabled: (enabled) => tabCycleUpdates.push(enabled),
   };
 
   assert.equal(await window.setSetting("keybindings.find", "Mod+L"), true);
@@ -288,8 +305,10 @@ test("Window refreshes the native menu only after a persisted keybinding change"
     "editor.tabWidth",
     "files.autoSave",
   ]);
+  assert.equal(window.setActiveFileContext(true, false), true);
+  assert.equal(window.setActiveFileContext(false, true), true);
   assert.equal(window.setActiveFileContext(true), true);
-  assert.equal(window.setActiveFileContext(false), true);
   assert.equal(window.setActiveFileContext("false"), false);
-  assert.deepEqual(fileContextUpdates, [true, false]);
+  assert.deepEqual(fileContextUpdates, [true, false, true]);
+  assert.deepEqual(tabCycleUpdates, [false, true]);
 });

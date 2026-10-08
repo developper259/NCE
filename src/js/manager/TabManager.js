@@ -7,6 +7,7 @@ class tabManager {
 
     this.idCounter = 0;
     this.focusGeneration = 0;
+    this.lastNativeTabContext = null;
     this.focusResyncTimer = null;
     this.pendingCloseOperations = new Map();
     this.pendingSaveOperations = new Map();
@@ -50,6 +51,30 @@ class tabManager {
   }
   set activeFile(file) {
     this.activeTab = file?.type === TAB_TYPES.FILE ? file : null;
+  }
+
+  get canCycleTabs() {
+    return this.tabs.length > 1;
+  }
+
+  syncNativeTabContext() {
+    const setActiveFileContext = this.editor.api?.setActiveFileContext;
+    if (typeof setActiveFileContext !== "function") return false;
+
+    const context = {
+      hasActiveFile: Boolean(this.activeFile),
+      canCycleTabs: this.canCycleTabs,
+    };
+    if (this.lastNativeTabContext &&
+        this.lastNativeTabContext.hasActiveFile === context.hasActiveFile &&
+        this.lastNativeTabContext.canCycleTabs === context.canCycleTabs) return false;
+
+    this.lastNativeTabContext = context;
+    void this.editor.api.setActiveFileContext(
+      context.hasActiveFile,
+      context.canCycleTabs,
+    );
+    return true;
   }
 
   getNextID() {
@@ -536,7 +561,7 @@ class tabManager {
 
   async cycleTab(direction) {
     const count = this.tabs.length;
-    if (count < 2 || !Number.isFinite(direction) || direction === 0) return false;
+    if (!this.canCycleTabs || !Number.isFinite(direction) || direction === 0) return false;
 
     const step = direction > 0 ? 1 : -1;
     const currentIndex = this.tabs.indexOf(this.activeTab);
@@ -563,6 +588,7 @@ class tabManager {
     }
     this.activeTab = tab;
     this.notifyActiveTabChange(tab);
+    this.syncNativeTabContext();
     if (tab.type !== TAB_TYPES.FILE) {
       this.editor.fileExplorer?.setActiveFile?.(
         ["picture", "markdown"].includes(tab.type) ? tab.path : null,
@@ -571,6 +597,7 @@ class tabManager {
       this.editor.refreshMainContent?.();
       if (tab.type === TAB_TYPES.PICTURE || tab.type === "markdown")
         await this.capturePictureFingerprint(tab);
+      if (focusGeneration !== this.focusGeneration) return;
       this.refresh();
       return;
     }
@@ -1015,7 +1042,7 @@ class tabManager {
       this.tabScroller?.refresh();
     }
 
-    this.editor.api?.setActiveFileContext?.(Boolean(this.activeFile));
+    this.syncNativeTabContext();
     if (refreshTitle) this.editor.titleBar?.refresh();
 
     if (this.tabs.length === 0) {
