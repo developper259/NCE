@@ -30,6 +30,8 @@ class AgentSidebar extends Sidebar {
     this.scrollToBottomAfterRestore = false;
     this.scrollBottomFrame = null;
     this.pendingAnimationFrames = new Set();
+    this.focusInputGeneration = 0;
+    this.focusOwnershipGeneration = 0;
     this.changesElement = null;
     this.inputElement = null;
     this.inputWrapperElement = null;
@@ -137,6 +139,7 @@ class AgentSidebar extends Sidebar {
   }
 
   cancelPendingSidebarAnimationFrames() {
+    this.focusInputGeneration = (this.focusInputGeneration || 0) + 1;
     for (const frameId of this.pendingAnimationFrames || []) {
       if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameId);
     }
@@ -4422,10 +4425,30 @@ class AgentSidebar extends Sidebar {
   }
 
   focusInput() {
+    const generation = this.focusInputGeneration =
+      (this.focusInputGeneration || 0) + 1;
+    const ownershipGeneration = this.focusOwnershipGeneration || 0;
+    const focusOwner = document.activeElement;
     this.scheduleSidebarAnimationFrame(() => {
-      if (this.inputElement) {
-        this.inputElement.focus({ preventScroll: true });
-      }
+      if (generation !== this.focusInputGeneration || !this.isOpen) return;
+      const input = this.inputElement;
+      if (!input?.isConnected) return;
+      if (ownershipGeneration !== this.focusOwnershipGeneration) return;
+      if (this.editor.quickPanel?.isOpen?.()) return;
+
+      const activeModal = [...(document.querySelectorAll?.(
+        '[aria-modal="true"], dialog[open]',
+      ) || [])].some((modal) => {
+        if (modal.open === true) return true;
+        if (modal.hidden || modal.getAttribute?.("aria-hidden") === "true")
+          return false;
+        return !modal.closest?.('[hidden], [aria-hidden="true"]');
+      });
+      if (activeModal) return;
+      if (document.activeElement !== focusOwner &&
+          document.activeElement !== input) return;
+
+      input.focus({ preventScroll: true });
     });
   }
 
@@ -5111,6 +5134,10 @@ class AgentSidebar extends Sidebar {
 
   onOpen() {
     this.ensureInitialized();
+    this.registerGlobalListener("focus-ownership", document, "focusin", () => {
+      this.focusOwnershipGeneration =
+        (this.focusOwnershipGeneration || 0) + 1;
+    });
     this.activateGlobalListeners();
     this.refresh();
     this.scheduleRestoredBottomScroll();

@@ -2,6 +2,45 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { loadGlobal } = require("./helpers/runtime");
 
+test("opening Quick Panel focuses its input while Agent is visible", () => {
+  const agentInput = { className: "agent-sidebar-input" };
+  const document = { activeElement: agentInput };
+  const QuickPanel = loadGlobal(
+    "src/js/types/QuickPanel.js",
+    "QuickPanel",
+    { document },
+  );
+  const panel = Object.assign(Object.create(QuickPanel.prototype), {
+    editor: {},
+    initialized: true,
+    closeCleanupTimer: null,
+    requestGeneration: 0,
+    host: {
+      classList: { add() {}, remove() {} },
+      setAttribute() {},
+    },
+    panel: { dataset: {} },
+    title: { textContent: "", hidden: false },
+    input: {
+      type: "text",
+      placeholder: "",
+      value: "",
+      setAttribute() {},
+      setSelectionRange() {},
+      focus() { document.activeElement = this; },
+    },
+    list: { hidden: false },
+    empty: { hidden: false },
+    error: { hidden: false },
+    resultsScroller: null,
+    render() {},
+    async loadItems() {},
+  });
+
+  assert.equal(panel.open({ id: "quick-open", mode: "pick", items: [] }), true);
+  assert.equal(document.activeElement, panel.input);
+});
+
 test("closing Quick Panel releases its hidden input before restoring focus", () => {
   const QuickPanel = loadGlobal(
     "src/js/types/QuickPanel.js",

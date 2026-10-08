@@ -69,18 +69,18 @@ test("Agent global listeners stay stable across reopen and input area reconstruc
   registerSidebarListeners();
   for (let cycle = 0; cycle < 3; cycle += 1) {
     sidebar.onOpen();
-    assert.equal(document.listenerCount(), 5);
+    assert.equal(document.listenerCount(), 6);
     assert.equal(window.listenerCount(), 0);
 
     // renderInputArea replaces a keyed handler when it rebuilds its controls.
     sidebar.registerGlobalListener("context-outside", document, "click", () => {});
-    assert.equal(document.listenerCount(), 5);
+    assert.equal(document.listenerCount(), 6);
 
     openSessionInfo();
-    assert.equal(document.listenerCount(), 7);
+    assert.equal(document.listenerCount(), 8);
     assert.equal(window.listenerCount(), 1);
     sidebar.closeSessionInfo();
-    assert.equal(document.listenerCount(), 5);
+    assert.equal(document.listenerCount(), 6);
     assert.equal(window.listenerCount(), 0);
 
     sidebar.onClose();
@@ -89,7 +89,7 @@ test("Agent global listeners stay stable across reopen and input area reconstruc
   }
 
   sidebar.onOpen();
-  assert.equal(document.listenerCount(), 5);
+  assert.equal(document.listenerCount(), 6);
   sidebar.destroy();
   assert.equal(document.listenerCount(), 0);
   assert.equal(window.listenerCount(), 0);
