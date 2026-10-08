@@ -249,6 +249,7 @@ app.whenReady().then(() => {
           workspaceNameRestingColor,
           "hovering the workspace name activates its own hover style",
         );
+        moveMouseTo(largeWorkspaceHoverTargets.neutral);
         const largeWorkspaceOpen = await run(`(() => {
           const explorer = editor.fileExplorer;
           const shell = explorer.shell;
