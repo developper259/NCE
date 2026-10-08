@@ -57,6 +57,21 @@ test("Agent tool surface is present and remains local-testable", () => {
   assert.doesNotMatch(read("src/js/agent/model/ModelClient.js"), /fetch\([^)]*openai\.com/);
 });
 
+test("Agent Settings use the shared lightweight catalog without loading the Agent runtime", () => {
+  const coreScripts = JSON.parse(read("src/js/main/renderer-scripts.json"));
+  const agentScripts = JSON.parse(read("src/js/main/renderer-agent-scripts.json"));
+  const settingsView = read("src/js/view/SettingsView.js");
+  const agentAI = read("src/config/AgentAI.js");
+
+  assert.ok(coreScripts.includes("config/AgentProviderCatalog.js"));
+  assert.equal(coreScripts.includes("config/AgentAI.js"), false);
+  assert.ok(agentScripts.includes("config/AgentAI.js"));
+  assert.match(settingsView, /AgentProviderCatalog\.getProviders\(\)/);
+  assert.match(settingsView, /AgentProviderCatalog\.getModelKey\(/);
+  assert.doesNotMatch(settingsView, /\bAgentAI\b/);
+  assert.match(agentAI, /providers:\s*AgentProviderCatalog\.providers/);
+});
+
 test("titlebar full wrapper and internal safe content area stay structurally separated", () => {
   const html = read("src/html/index.html");
   const css = read("src/css/titlebar.css");

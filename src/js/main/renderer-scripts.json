@@ -1,6 +1,7 @@
 [
   "js/core/PerformanceMetrics.js",
   "config/Settings.js",
+  "config/AgentProviderCatalog.js",
   "js/manager/ThemeManager.js",
   "js/core/Path.js",
   "js/core/FileType.js",

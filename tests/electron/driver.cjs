@@ -99,6 +99,81 @@ app.whenReady().then(() => {
           await run('typeof Agent === "undefined" && typeof AgentSidebar === "undefined" && typeof MarkdownRenderer === "undefined"'),
           true,
         );
+        const settingsOpen = await run(`(async () => {
+          window.__agentSettingsRendererErrors = [];
+          window.__agentSettingsOnError = event => window.__agentSettingsRendererErrors.push(event.message);
+          window.__agentSettingsOnRejection = event => window.__agentSettingsRendererErrors.push(String(event.reason));
+          window.addEventListener("error", window.__agentSettingsOnError);
+          window.addEventListener("unhandledrejection", window.__agentSettingsOnRejection);
+          const settingsTab = await editor.openSettings("Agent");
+          const modelInput = document.querySelector(".agent-model-setting input[type=checkbox]");
+          if (!modelInput) throw Error("Agent Models settings rendered no models");
+          const firstProvider = AgentProviderCatalog.getProviders()[0];
+          const firstModel = Object.values(firstProvider.models)[0];
+          window.__agentSettingsTestTabId = settingsTab.id;
+          window.__agentSettingsModelInput = modelInput;
+          window.__agentSettingsModelKey = AgentProviderCatalog.getModelKey(firstProvider.id, firstModel.id);
+          window.__agentSettingsModelWasVisible = modelInput.checked;
+          return {
+            tabType: settingsTab.type,
+            modelCount: document.querySelectorAll(".agent-model-setting").length,
+            category: SETTINGS_GET("ui.settingsCategory"),
+          };
+        })()`);
+        assert.equal(settingsOpen.tabType, "settings");
+        assert.ok(settingsOpen.modelCount > 0);
+        assert.equal(settingsOpen.category, "Agent");
+        await waitForCondition(
+          async () => (await run('window.api.getSettings()'))?.ui?.settingsCategory === "Agent",
+          { description: "Agent Settings category to persist before restart" },
+        );
+        const modelKey = await run("window.__agentSettingsModelKey");
+        const modelWasVisible = await run("window.__agentSettingsModelWasVisible");
+        await run("window.__agentSettingsModelInput.click()");
+        await waitForCondition(
+          async () => (await run("window.api.getSettings()"))?.agent?.hiddenModels?.includes(modelKey) === modelWasVisible,
+          { description: "Agent model visibility setting to persist after a cold-start toggle" },
+        );
+        await run("window.__agentSettingsModelInput.click()");
+        await waitForCondition(
+          async () => (await run("window.api.getSettings()"))?.agent?.hiddenModels?.includes(modelKey) === !modelWasVisible,
+          { description: "Agent model visibility setting to return to its original state" },
+        );
+        const settingsColdStart = await run(`(async () => {
+          document.querySelector("#agent-settings-tab-providers").click();
+          const providerCount = document.querySelectorAll(".agent-provider-setting").length;
+          const apiKeyControlCount = document.querySelectorAll(".agent-provider-key-actions button").length;
+          if (!providerCount || !apiKeyControlCount)
+            throw Error("Agent Providers settings did not render provider controls");
+          document.querySelector(".agent-provider-key-actions button:not(.agent-provider-remove)").click();
+          const apiKeyPromptOpened = editor.quickPanel.isOpen("agent-api-key");
+          if (!apiKeyPromptOpened)
+            throw Error("Cold-start provider API key control did not open its input prompt");
+          editor.quickPanel.close();
+          document.querySelector("#agent-settings-tab-models").click();
+          const result = {
+            providerCount,
+            apiKeyControlCount,
+            apiKeyPromptOpened,
+            category: SETTINGS_GET("ui.settingsCategory"),
+            agentBundleLoaded: typeof AgentAI !== "undefined",
+            markdownBundleLoaded: typeof MarkdownRenderer !== "undefined",
+            rendererErrors: window.__agentSettingsRendererErrors,
+          };
+          window.removeEventListener("error", window.__agentSettingsOnError);
+          window.removeEventListener("unhandledrejection", window.__agentSettingsOnRejection);
+          const settingsTab = editor.tabManager.tabs.find(tab => tab.id === window.__agentSettingsTestTabId);
+          if (!(await editor.tabManager.closeTab(settingsTab)))
+            throw Error("Cold-start Agent Settings tab did not close cleanly");
+          return result;
+        })()`);
+        assert.ok(settingsColdStart.providerCount > 0);
+        assert.ok(settingsColdStart.apiKeyControlCount > 0);
+        assert.equal(settingsColdStart.apiKeyPromptOpened, true);
+        assert.equal(settingsColdStart.category, "Agent");
+        assert.equal(settingsColdStart.agentBundleLoaded, false);
+        assert.equal(settingsColdStart.markdownBundleLoaded, false);
+        assert.deepEqual(settingsColdStart.rendererErrors, []);
         assert.deepEqual(
           await run(`(async () => {
             editor.sidebarManager.openMenu("agent");
@@ -1299,11 +1374,15 @@ app.whenReady().then(() => {
           await run(`(async () => {
             editor.sidebarManager.openMenu("agent");
             await editor.ensureAgentSidebar();
-            return editor.agentSidebar.isOpen &&
+            const settingsTab = await editor.openSettings("Agent");
+            const settingsWorksAfterAgentLoad =
+              document.querySelectorAll(".agent-model-setting").length > 0;
+            if (!(await editor.tabManager.closeTab(settingsTab))) return false;
+            return settingsWorksAfterAgentLoad && editor.agentSidebar.isOpen &&
               editor.sidebarManager.rightActiveMenu === editor.agentSidebar;
           })()`),
           true,
-          "Agent sidebar is active when the session is saved",
+          "Agent Settings works before and after lazy Agent initialization",
         );
         assert.equal(await run(`(async () => {
           const saved = await window.api.saveRecoverySnapshot(null, {
@@ -1319,6 +1398,11 @@ app.whenReady().then(() => {
         })()`), true, "recovery fixture persists across the simulated clean quit");
       }
       if (phase === "reload") {
+        assert.equal(
+          await run('SETTINGS_GET("ui.settingsCategory")'),
+          "Agent",
+          "Agent Settings category persists across renderer restart",
+        );
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&

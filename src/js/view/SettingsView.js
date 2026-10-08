@@ -368,7 +368,7 @@ class SettingsView {
     const container = document.createElement("div");
 
     const hiddenModels = new Set(SETTINGS_GET("agent.hiddenModels") || []);
-    for (const provider of AgentAI.getProviders()) {
+    for (const provider of AgentProviderCatalog.getProviders()) {
       const models = Object.values(provider.models || {});
       if (!models.length) continue;
       const group = document.createElement("section");
@@ -383,7 +383,7 @@ class SettingsView {
       const panel = document.createElement("div");
       panel.className = "settings-panel";
       for (const model of models) {
-        const key = AgentAI.getModelKey(provider.id, model.id);
+        const key = AgentProviderCatalog.getModelKey(provider.id, model.id);
         const row = document.createElement("div");
         row.className = "settings-panel-row agent-model-setting";
         const text = document.createElement("span");
@@ -421,7 +421,7 @@ class SettingsView {
 
     const panel = document.createElement("div");
     panel.className = "settings-panel agent-providers-panel";
-    for (const provider of AgentAI.getProviders()) {
+    for (const provider of AgentProviderCatalog.getProviders()) {
       panel.appendChild(this.createAgentProviderControl(provider));
     }
     container.appendChild(panel);
@@ -479,7 +479,7 @@ class SettingsView {
       save.disabled = true;
       error.textContent = "";
       error.hidden = true;
-      const value = await this.editor.agentSidebar?.requestApiKey?.(provider);
+      const value = await this.editor.requestAgentApiKey(provider);
       if (!value) {
         save.disabled = false;
         return;

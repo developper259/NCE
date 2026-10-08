@@ -155,6 +155,51 @@ test("SettingsView initializes only when a Settings tab becomes active", () => {
   assert.equal(constructions, 1);
 });
 
+test("Editor API key prompt works through the core Quick Panel without Agent runtime", async () => {
+  const Editor = loadGlobal("src/js/main/Editor.js", "Editor", {
+    document: { addEventListener() {} },
+    window: {},
+  });
+  let promptOptions = null;
+  let open = false;
+  let closeOptions = null;
+  const editor = Object.assign(Object.create(Editor.prototype), {
+    quickPanel: {
+      open(options) {
+        promptOptions = options;
+        open = true;
+      },
+      isOpen(id) {
+        return id === "agent-api-key" && open;
+      },
+      close(options) {
+        closeOptions = options;
+        open = false;
+        if (options?.notifyCancel !== false) promptOptions.onCancel();
+      },
+    },
+  });
+  const provider = { name: "OpenRouter" };
+
+  const accepted = editor.requestAgentApiKey(provider);
+  assert.equal(promptOptions.id, "agent-api-key");
+  assert.equal(promptOptions.inputType, "password");
+  assert.equal(promptOptions.title, "OpenRouter API key");
+  promptOptions.onAccept("  test-key  ");
+  assert.equal(await accepted, "test-key");
+
+  const controller = new AbortController();
+  const canceled = editor.requestAgentApiKey(provider, {
+    invalid: true,
+    signal: controller.signal,
+  });
+  assert.equal(promptOptions.title, "Replace OpenRouter API key");
+  controller.abort();
+  assert.equal(closeOptions.notifyCancel, false);
+  assert.equal(await canceled, "");
+  assert.equal(open, false);
+});
+
 test("Markdown and picture preview views initialize only when first activated", () => {
   let pictureConstructions = 0;
   let markdownConstructions = 0;

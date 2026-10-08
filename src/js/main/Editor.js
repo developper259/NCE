@@ -240,6 +240,45 @@ class Editor {
     return tab;
   }
 
+  requestAgentApiKey(provider, options = {}) {
+    const quickPanel = this.quickPanel;
+    if (!quickPanel) return Promise.resolve("");
+
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener?.("abort", onAbort);
+        resolve(value);
+      };
+      const onAbort = () => {
+        if (quickPanel.isOpen("agent-api-key")) {
+          quickPanel.close({ notifyCancel: false });
+        }
+        finish("");
+      };
+
+      if (options.signal?.aborted) {
+        finish("");
+        return;
+      }
+
+      options.signal?.addEventListener?.("abort", onAbort, { once: true });
+      quickPanel.open({
+        id: "agent-api-key",
+        mode: "input",
+        title: options.invalid
+          ? `Replace ${provider.name} API key`
+          : `${provider.name} API key`,
+        placeholder: `${provider.name} API key`,
+        inputType: "password",
+        onAccept: (value) => finish(String(value || "").trim()),
+        onCancel: () => finish(""),
+      });
+    });
+  }
+
   getSettingsView() {
     if (!this._settingsView) this._settingsView = new SettingsView(this);
     return this._settingsView;
