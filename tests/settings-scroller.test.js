@@ -146,7 +146,7 @@ test("Agent sidebar bounds SidebarScroller to the messages viewport", () => {
     "utf8",
   ));
   assert.match(source, /new SidebarScroller\(/);
-  assert.match(source, /new SidebarScroller\(\s*this\.editor,\s*messagesViewport,\s*messages,/);
+  assert.match(source, /afterRender\(\)\s*\{[\s\S]*new SidebarScroller\(\s*this\.editor,\s*this\.messagesViewport,\s*this\.messagesElement,/);
   assert.match(source, /sidebarManager\.rightScroller\s*=\s*this\.messagesScroller/);
   assert.match(source, /messagesElement\.scrollTop\s*=\s*this\.messagesElement\.scrollHeight/);
   assert.match(source, /vScroller\?\.setScrollRatio\(1\)/);

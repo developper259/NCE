@@ -845,16 +845,6 @@ class AgentSidebar extends Sidebar {
     this.renderReasoningControl(messagesViewport);
     container.appendChild(messagesViewport);
 
-    this.messagesScroller = new SidebarScroller(
-      this.editor,
-      messagesViewport,
-      messages,
-    );
-    this.messagesScroller.init();
-    this.messagesScroller.refresh();
-    this.editor.sidebarManager.rightScroller = this.messagesScroller;
-    this.scheduleRestoredBottomScroll();
-
     const changes = document.createElement("div");
     changes.className = "agent-sidebar-changes";
     this.changesElement = changes;
@@ -864,6 +854,25 @@ class AgentSidebar extends Sidebar {
     container.appendChild(this.renderInputArea());
 
     return container;
+  }
+
+  afterRender() {
+    const scrollerWasDestroyed = this.messagesScroller?.vScroller?._destroyed;
+    if (scrollerWasDestroyed) {
+      this.messagesScroller.destroy();
+      this.messagesScroller = null;
+    }
+    if (!this.messagesScroller && this.messagesViewport?.isConnected) {
+      this.messagesScroller = new SidebarScroller(
+        this.editor,
+        this.messagesViewport,
+        this.messagesElement,
+      );
+      this.messagesScroller.init();
+      this.messagesScroller.refresh();
+      this.editor.sidebarManager.rightScroller = this.messagesScroller;
+    }
+    this.scheduleRestoredBottomScroll();
   }
 
   renderHeader() {

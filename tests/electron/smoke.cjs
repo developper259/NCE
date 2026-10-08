@@ -30,6 +30,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     assert.equal(state.noWorkspaceState.tabManager.tabs.length, 1);
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].type, 'file');
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].path, path.join(directory, 'smoke.js'));
+    assert.equal(state.noWorkspaceState.sidebar.rightActiveMenuId, 'agent');
     await launch('reload');
     await launch('restore');
     await launch('crash');

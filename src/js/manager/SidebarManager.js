@@ -643,6 +643,7 @@ class SidebarManager {
       } else {
         container.innerHTML = content;
       }
+      menu.afterRender?.();
       if (menu.position === "left" && menu.id === "file-explorer") {
         this.editor.fileExplorer?.virtualScroller?.attach(
           this.editor.fileExplorer.treeViewport,

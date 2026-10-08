@@ -71,6 +71,19 @@ app.whenReady().then(() => {
           description: "editor session restoration to finish",
         },
       );
+      if (phase !== "write") {
+        await waitForCondition(
+          async () => (await run(`typeof AgentSidebar !== "undefined" &&
+            editor.agentSidebar instanceof AgentSidebar &&
+            editor.agentSidebar.isOpen &&
+            editor.sidebarManager.rightActiveMenu === editor.agentSidebar &&
+            editor.agentSidebar.messagesScroller?.vScroller?._destroyed === false`)) === true,
+          {
+            timeout: 10000,
+            description: "restored Agent sidebar to finish lazy initialization",
+          },
+        );
+      }
       assert.equal(win.isVisible(), true);
       const prefs = win.webContents.getLastWebPreferences();
       assert.equal(prefs.sandbox, true);
@@ -85,6 +98,61 @@ app.whenReady().then(() => {
         assert.equal(
           await run('typeof Agent === "undefined" && typeof AgentSidebar === "undefined" && typeof MarkdownRenderer === "undefined"'),
           true,
+        );
+        assert.deepEqual(
+          await run(`(async () => {
+            editor.sidebarManager.openMenu("agent");
+            editor.sidebarManager.closeMenu("agent");
+            editor.sidebarManager.openMenu("agent");
+            await editor.ensureAgentSidebar();
+            const sidebar = editor.agentSidebar;
+            const scroller = sidebar.messagesScroller;
+            const listenerCount = sidebar.globalListeners.size;
+            const sessions = sidebar.sessions;
+            const activeSession = sidebar.getActiveSession();
+            if (activeSession) activeSession.draft = "reopen draft";
+            for (let index = 0; index < 10; index += 1) {
+              editor.sidebarManager.closeMenu("agent");
+              if (editor.agentSidebar !== sidebar) return false;
+              editor.sidebarManager.openMenu("agent");
+              if (!sidebar.isOpen || sidebar.messagesScroller !== scroller) return false;
+            }
+            editor.sidebarManager.openMenu("search");
+            await new Promise(requestAnimationFrame);
+            editor.sidebarManager.openMenu("agent");
+            await new Promise(requestAnimationFrame);
+            return {
+              registered: editor.sidebarManager.menus.get("agent") === sidebar,
+              active: editor.sidebarManager.rightActiveMenu === sidebar,
+              currentScroller: editor.sidebarManager.rightScroller === sidebar.messagesScroller,
+              wrapperStable: sidebar.messagesScroller === scroller,
+              scrollerAlive: sidebar.messagesScroller.vScroller?._destroyed === false,
+              agentBundleLoads: document.querySelectorAll(
+                'script[data-nce-renderer-bundle="agent"]',
+              ).length,
+              scrollerCount: editor.scrollerManager.scrollers.filter(
+                item => item.parentOBJ === sidebar.messagesViewport,
+              ).length,
+              sessionsPreserved: sidebar.sessions === sessions,
+              draftPreserved: activeSession ? activeSession.draft === "reopen draft" : true,
+              listenerCountPreserved: sidebar.globalListeners.size === listenerCount,
+              listenersAttached: [...sidebar.globalListeners.values()].every(entry => entry.attached),
+            };
+          })()`),
+          {
+            registered: true,
+            active: true,
+            currentScroller: true,
+            wrapperStable: true,
+            scrollerAlive: true,
+            agentBundleLoads: 1,
+            scrollerCount: 1,
+            sessionsPreserved: true,
+            draftPreserved: true,
+            listenerCountPreserved: true,
+            listenersAttached: true,
+          },
+          "Agent can reopen repeatedly and after switching sidebars without duplicating lifecycle resources",
         );
         assert.equal(
           await run(`(async () => {
@@ -1179,6 +1247,31 @@ app.whenReady().then(() => {
           win.webContents.removeListener("did-finish-load", onDidFinishLoad);
           win.webContents.removeListener("render-process-gone", onRenderProcessGone);
         }
+      }
+      if (phase === "write") {
+        assert.equal(
+          await run(`(async () => {
+            editor.sidebarManager.openMenu("agent");
+            await editor.ensureAgentSidebar();
+            return editor.agentSidebar.isOpen &&
+              editor.sidebarManager.rightActiveMenu === editor.agentSidebar;
+          })()`),
+          true,
+          "Agent sidebar is active when the session is saved",
+        );
+      }
+      if (phase === "reload") {
+        await waitForCondition(
+          async () => (await run(`typeof AgentSidebar !== "undefined" &&
+            editor.agentSidebar instanceof AgentSidebar &&
+            editor.agentSidebar.isOpen &&
+            editor.sidebarManager.rightActiveMenu === editor.agentSidebar &&
+            editor.agentSidebar.messagesScroller?.vScroller?._destroyed === false`)) === true,
+          {
+            timeout: 10000,
+            description: "restored Agent sidebar to finish lazy initialization",
+          },
+        );
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "crash") {
