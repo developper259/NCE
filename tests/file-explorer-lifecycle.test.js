@@ -921,7 +921,19 @@ test("workspace dialog restores focus after native close and ignores a stale res
   frames.delete(staleRestoreId);
   explorer.showWorkspaceModeDialog();
   assert.equal(document.activeElement, closeButton);
+  const reopenedFocus = explorer.workspaceModeDialogPreviousFocus;
+  explorer.restoreWorkspaceModeDialogFocus();
+  assert.equal(explorer.workspaceModeDialogPreviousFocus, reopenedFocus);
   staleRestore();
   assert.equal(dialog.open, true);
   assert.equal(document.activeElement, closeButton);
+
+  dialog.open = false;
+  document.activeElement = document.body;
+  explorer.restoreWorkspaceModeDialogFocus();
+  const [finalRestoreId] = frames.keys();
+  const finalRestore = frames.get(finalRestoreId);
+  frames.delete(finalRestoreId);
+  finalRestore();
+  assert.equal(document.activeElement, header);
 });
