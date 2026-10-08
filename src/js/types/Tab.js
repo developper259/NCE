@@ -284,7 +284,7 @@ class FileNode extends Tab {
       this._lineLengthCount = -1;
       this._lineMetricsTabWidth = null;
       this.maxLineLengthDirty = true;
-      this.totalLines = this.lines.length;
+      this.totalLines = result.totalLines;
       this.syntaxMetrics = null;
       this.loadError = null;
       this.deletedFromDisk = false;

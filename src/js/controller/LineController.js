@@ -20,6 +20,7 @@ class LineController {
 
     this.marginChars = 10;
     this.marginLines = 3;
+    this.lastLineNumberWidth = null;
 
     this.outputScroller = new OutputScroller(editor);
     this.outputScroller.setLineController(this);
@@ -127,11 +128,15 @@ class LineController {
   }
 
   set totalLines(value) {
-    if (!this.editor.tabManager.activeFile) {
-      return;
-    }
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return;
 
-    this.editor.tabManager.activeFile.totalLines = value;
+    const expectedTotalLines = file.loadingState?.status === "loading"
+      ? file.loadingState.expectedTotalLines
+      : 0;
+    file.totalLines = Number.isSafeInteger(expectedTotalLines)
+      ? Math.max(value, expectedTotalLines)
+      : value;
   }
 
   get startIndex() {
@@ -678,7 +683,12 @@ class LineController {
     file.lines.push(...lineNodes);
     this.syncLineLengthsForAppend(file, startIndex, lineNodes);
     this.syncLogicalLineLengthsForAppend(file, startIndex, lineNodes);
-    file.totalLines = file.lines.length;
+    const expectedTotalLines = file.loadingState?.status === "loading"
+      ? file.loadingState.expectedTotalLines
+      : 0;
+    file.totalLines = Number.isSafeInteger(expectedTotalLines)
+      ? Math.max(file.lines.length, expectedTotalLines)
+      : file.lines.length;
     file.syntaxMetrics = null;
   }
 
@@ -1387,23 +1397,39 @@ class LineController {
   }
 
   calculateLineNumberWidth() {
-    if (this.lines.length === 0) {
-      return 50;
-    }
+    const file = this.editor.tabManager.activeFile;
+    const loadingState = file?.loadingState;
+    const knownTotalLines = loadingState?.status === "loading"
+      ? Math.max(
+        this.lines.length,
+        Number.isSafeInteger(loadingState.expectedTotalLines)
+          ? loadingState.expectedTotalLines
+          : 0,
+      )
+      : Math.max(
+        this.lines.length,
+        Number.isSafeInteger(file?.totalLines) ? file.totalLines : 0,
+      );
+    const maxDigits = Math.max(1, knownTotalLines).toString().length;
+    const characterWidth = Number.isFinite(this.editor.letterSize) &&
+      this.editor.letterSize > 0
+      ? this.editor.letterSize
+      : 10.8;
 
-    const maxLineNumber = this.lines.length;
-
-    const maxDigits = maxLineNumber.toString().length;
-
-    return Math.max(50, maxDigits * 10 + 15);
+    // Line numbers use the editor's real monospace character metric. Keep
+    // the CSS right offset (10px) plus a small breathing gap in the gutter.
+    return Math.max(50, Math.ceil(maxDigits * characterWidth) + 15);
   }
 
   updateLineNumberWidth() {
     const width = this.calculateLineNumberWidth();
+    if (width === this.lastLineNumberWidth) return width;
 
+    this.lastLineNumberWidth = width;
     this.lineNumberFast?.setWidth(width);
 
     this.editor.updateBaseX(width);
+    return width;
   }
 
   getVisibleTokens(tokens, slicedLine) {

@@ -638,11 +638,140 @@ app.whenReady().then(() => {
           );
         }
       } else if (phase === "tabs") {
+        const gutterSmokePath = path.join(directory, "gutter-large.js");
+        const gutterSmokeLine = `const gutterSmokeValue = "${"x".repeat(90)}";`;
+        fs.writeFileSync(
+          gutterSmokePath,
+          Array.from({ length: 12000 }, () => gutterSmokeLine).join("\n"),
+        );
         await waitForCondition(
           async () =>
             (await run("!editor.tabManager.activeFile || editor.tabManager.activeFile.isLoaded")) === true,
           { description: "the restored tab to load before exercising tab scrolling" },
         );
+        const gutterLoad = await run(`(async () => {
+          const manager = editor.tabManager;
+          const originalFile = manager.activeFile;
+          const originalTabs = [...manager.tabs];
+          const queuedIdleCallbacks = [];
+          const requestIdleCallback = window.requestIdleCallback;
+          window.__gutterSmokeOriginalFile = originalFile;
+          window.__gutterSmokeOriginalTabs = originalTabs;
+          window.requestIdleCallback = (callback) => {
+            queuedIdleCallbacks.push(callback);
+            return queuedIdleCallbacks.length;
+          };
+          try {
+            const File = originalFile.constructor;
+            const largeFile = new File(
+              editor,
+              manager.getNextID(),
+              "gutter-large.js",
+              ${JSON.stringify(gutterSmokePath)},
+            );
+            window.__gutterSmokeFile = largeFile;
+            await manager.openFile(largeFile);
+            const state = largeFile.loadingState;
+            if (state?.status !== "loading" || state.expectedTotalLines !== 12000 ||
+                largeFile.lines.length >= state.expectedTotalLines || !queuedIdleCallbacks.length) {
+              throw Error("Large gutter fixture did not remain in progressive loading");
+            }
+
+            const layer = document.querySelector(".line-numbers");
+            const context = document.createElement("canvas").getContext("2d");
+            context.font = getComputedStyle(layer).font;
+            const longestNumberWidth = context.measureText("88888").width;
+            const layerWidth = layer.getBoundingClientRect().width;
+            if (layerWidth + 0.5 < longestNumberWidth + 15) {
+              throw Error("Progressive gutter clipped expected 5-digit labels: " + layerWidth + "px");
+            }
+            if (Math.abs(editor.baseX - layerWidth - 10) > 0.5 ||
+                editor.output.style.left !== editor.baseX + "px") {
+              throw Error("Editor output did not move with the initial gutter width");
+            }
+            return { layerWidth, longestNumberWidth, loadedLines: largeFile.lines.length };
+          } finally {
+            window.requestIdleCallback = requestIdleCallback;
+            for (const callback of queuedIdleCallbacks) {
+              requestIdleCallback(callback, { timeout: 100 });
+            }
+          }
+        })()`);
+        assert.ok(gutterLoad.layerWidth + 0.5 >= gutterLoad.longestNumberWidth + 15);
+        assert.ok(gutterLoad.loadedLines < 12000);
+        await waitForCondition(
+          async () =>
+            (await run('window.__gutterSmokeFile?.loadingState?.status === "loaded"')) === true,
+          { timeout: 15000, description: "progressive gutter fixture to finish loading" },
+        );
+        const fullGutterState = await run(`(() => {
+          const file = window.__gutterSmokeFile;
+          editor.cursorController.setCursorPosition(12000, 0);
+          const layer = document.querySelector(".line-numbers");
+          const line = [...layer.children].find((element) => element.textContent === "12000");
+          if (!line) throw Error("Last 5-digit line number was not rendered");
+          const layerRect = layer.getBoundingClientRect();
+          const lineRect = line.getBoundingClientRect();
+          const context = document.createElement("canvas").getContext("2d");
+          context.font = getComputedStyle(layer).font;
+          return {
+            lineCount: file.lines.length,
+            lineNumber: line.textContent,
+            layerWidth: layerRect.width,
+            lineLeft: lineRect.left,
+            lineRight: lineRect.right,
+            layerLeft: layerRect.left,
+            layerRight: layerRect.right,
+            requiredWidth: context.measureText("88888").width + 15,
+          };
+        })()`);
+        assert.equal(fullGutterState.lineCount, 12000);
+        assert.ok(fullGutterState.layerWidth + 0.5 >= fullGutterState.requiredWidth);
+        assert.ok(fullGutterState.lineLeft >= fullGutterState.layerLeft - 0.5);
+        assert.ok(fullGutterState.lineRight <= fullGutterState.layerRight + 0.5);
+        const smallFileGutterWidth = await run(`(async () => {
+          const manager = editor.tabManager;
+          await manager.setFocusTab(window.__gutterSmokeOriginalFile);
+          const smallWidth = document.querySelector(".line-numbers").getBoundingClientRect().width;
+          await manager.setFocusTab(window.__gutterSmokeFile);
+          return smallWidth;
+        })()`);
+        assert.equal(smallFileGutterWidth, 50);
+        const gutterSidebarWidths = await run(`(async () => {
+          const manager = editor.sidebarManager;
+          const layer = document.querySelector(".line-numbers");
+          const getWidth = () => layer.getBoundingClientRect().width;
+          const frame = () => new Promise(requestAnimationFrame);
+          const originalLeft = document.querySelector(".sidebar-left").classList.contains("open");
+          const originalRight = document.querySelector(".sidebar-right").classList.contains("open");
+          const result = {};
+          try {
+            manager.closeSidebar("left");
+            manager.closeSidebar("right");
+            await frame();
+            result.none = getWidth();
+            manager.openSidebar("left");
+            await frame();
+            result.left = getWidth();
+            manager.closeSidebar("left");
+            manager.openSidebar("right");
+            await frame();
+            result.right = getWidth();
+            manager.openSidebar("left");
+            await frame();
+            result.both = getWidth();
+          } finally {
+            if (originalLeft) manager.openSidebar("left");
+            else manager.closeSidebar("left");
+            if (originalRight) manager.openSidebar("right");
+            else manager.closeSidebar("right");
+            await frame();
+          }
+          return result;
+        })()`);
+        for (const width of Object.values(gutterSidebarWidths)) {
+          assert.ok(Math.abs(width - fullGutterState.layerWidth) <= 0.5);
+        }
         const tabScrollState = await run(`(async () => {
           const manager = editor.tabManager;
           let file = manager.activeFile;
@@ -740,6 +869,7 @@ app.whenReady().then(() => {
             expectedProportion: hasMeasurableRatio
               ? (list.clientWidth / list.scrollWidth) * 100 : null,
             tabScrollerWidth: tabScroller.clientWidth,
+            gutterWidth: document.querySelector(".line-numbers").getBoundingClientRect().width,
             thumbWidth: scroller.itemOBJWidth,
             expectedThumbWidth: Math.max(
               scroller.scrollerOBJWidth * (proportion / 100),
@@ -879,6 +1009,7 @@ app.whenReady().then(() => {
               expectedProportion: hasMeasurableRatio
                 ? (list.clientWidth / list.scrollWidth) * 100 : null,
               tabScrollerWidth: tabScroller.clientWidth,
+              gutterWidth: document.querySelector(".line-numbers").getBoundingClientRect().width,
               thumbWidth: scroller.itemOBJWidth,
               expectedThumbWidth: Math.max(
                 scroller.scrollerOBJWidth * (proportion / 100),
@@ -952,6 +1083,10 @@ app.whenReady().then(() => {
         };
         for (const state of Object.values(sidebarLayoutStates)) {
           assertSidebarLayout(state);
+          assert.ok(
+            Math.abs(state.gutterWidth - fullGutterState.layerWidth) <= 0.5,
+            `Gutter width changed with sidebar layout: ${JSON.stringify(state)}`,
+          );
         }
         assert.equal(sidebarLayoutStates.none.effectiveLeftWidth, 0);
         assert.equal(sidebarLayoutStates.none.effectiveRightWidth, 0);
@@ -1172,6 +1307,7 @@ app.whenReady().then(() => {
           return {
             innerWidth: window.innerWidth,
             documentWidth: document.documentElement.clientWidth,
+            gutterWidth: document.querySelector(".line-numbers").getBoundingClientRect().width,
             fileManagerWidth: fileManager.clientWidth,
             listWidth: list.clientWidth,
             scrollWidth: list.scrollWidth,
@@ -1353,6 +1489,7 @@ app.whenReady().then(() => {
           );
           assert.equal(win.getSize()[0], baselineWidth);
           assert.ok(baseline.listWidth > 0);
+          assert.ok(Math.abs(baseline.gutterWidth - fullGutterState.layerWidth) <= 0.5);
 
           const expandFrom = baseline;
           const expandedChanged = await setWindowWidth(
@@ -1369,6 +1506,7 @@ app.whenReady().then(() => {
           assert.ok(afterExpand.trackWidth > baseline.trackWidth);
           assert.ok(afterExpand.proportion > baseline.proportion);
           assert.equal(afterExpand.scrollLeft, baseline.scrollLeft);
+          assert.ok(Math.abs(afterExpand.gutterWidth - fullGutterState.layerWidth) <= 0.5);
 
           const shrinkFrom = afterExpand;
           const shrunkChanged = await setWindowWidth(
@@ -1385,6 +1523,7 @@ app.whenReady().then(() => {
           assert.ok(afterShrink.trackWidth < afterExpand.trackWidth);
           assert.ok(afterShrink.proportion < afterExpand.proportion);
           assert.equal(afterShrink.scrollLeft, baseline.scrollLeft);
+          assert.ok(Math.abs(afterShrink.gutterWidth - fullGutterState.layerWidth) <= 0.5);
         } finally {
           if (wasMaximized) {
             const beforeRestore = await readResizeState();
