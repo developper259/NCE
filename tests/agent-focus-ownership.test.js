@@ -20,7 +20,11 @@ function createAgentSidebar() {
     removeEventListener(type, listener) {
       this.listeners.get(type)?.delete(listener);
     },
-    querySelectorAll() { return this.modals; },
+    querySelectorAll() {
+      return this.modals.filter((modal) =>
+        modal.tagName !== "DIALOG" || modal.open === true,
+      );
+    },
     dispatch(type, event) {
       for (const listener of this.listeners.get(type) || []) listener(event);
     },
@@ -101,6 +105,7 @@ test("Agent's scheduled focus yields to a Quick Panel focus change", () => {
 
 test("Agent focuses on open when no modal or newer focus owner is active", () => {
   const { document, frames, sidebar } = createAgentSidebar();
+  document.modals = [{ tagName: "DIALOG", open: false }];
   sidebar.onOpen();
   const [frameId] = frames.keys();
 

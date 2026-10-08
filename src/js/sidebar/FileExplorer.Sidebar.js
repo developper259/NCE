@@ -25,6 +25,7 @@ class FileExplorer extends Sidebar {
     this.workspaceModeDialog = null;
     this.workspaceModeDialogValues = new Map();
     this.workspaceModeDialogPreviousFocus = null;
+    this.workspaceModeFocusGeneration = 0;
     this.onWorkspaceModeDialogClick = (event) => {
       if (event.target === this.workspaceModeDialog)
         this.closeWorkspaceModeDialog();
@@ -598,6 +599,7 @@ class FileExplorer extends Sidebar {
     if (!dialog) return false;
     this.updateWorkspaceModeDialogStats();
     if (dialog.open) return true;
+    this.workspaceModeFocusGeneration++;
     this.workspaceModeDialogPreviousFocus = document.activeElement;
     dialog.showModal();
     this.workspaceModeBadge?.setAttribute("aria-expanded", "true");
@@ -630,24 +632,49 @@ class FileExplorer extends Sidebar {
 
   restoreWorkspaceModeDialogFocus() {
     const previousFocus = this.workspaceModeDialogPreviousFocus;
+    if (!previousFocus) return;
     this.workspaceModeDialogPreviousFocus = null;
-    if (!previousFocus) {
-      this.workspaceModeBadge?.setAttribute("aria-expanded", "false");
-      return;
-    }
-    const previousIsAvailable = previousFocus?.isConnected &&
-      !previousFocus.hidden && !previousFocus.closest?.("[hidden]");
-    const focusTarget = previousIsAvailable
-      ? previousFocus
-      : this.projectHeader?.isConnected ? this.projectHeader : null;
-    if (typeof focusTarget?.focus === "function")
-      focusTarget.focus({ preventScroll: true });
+    const generation = this.workspaceModeFocusGeneration =
+      (this.workspaceModeFocusGeneration || 0) + 1;
+    const isAvailable = (element) => element?.isConnected &&
+      !element.hidden &&
+      !element.closest?.('[hidden], [aria-hidden="true"], dialog:not([open])');
+    const restoreFocus = () => {
+      if (generation !== this.workspaceModeFocusGeneration ||
+          this.workspaceModeDialog?.open ||
+          this.editor?.quickPanel?.isOpen?.()) return;
+      const activeModal = [...(document.querySelectorAll?.(
+        '[aria-modal="true"]:not(dialog), dialog[open]',
+      ) || [])].some((modal) => {
+        if (modal.open === true) return true;
+        if (modal.hidden || modal.getAttribute?.("aria-hidden") === "true")
+          return false;
+        return !modal.closest?.('[hidden], [aria-hidden="true"]');
+      });
+      if (activeModal) return;
+
+      const focusTarget = isAvailable(previousFocus)
+        ? previousFocus
+        : isAvailable(this.projectHeader) ? this.projectHeader : null;
+      const activeElement = document.activeElement;
+      if (activeElement !== previousFocus &&
+          activeElement !== document.body &&
+          activeElement !== focusTarget &&
+          !activeElement?.closest?.("dialog:not([open])")) return;
+      if (typeof focusTarget?.focus === "function")
+        focusTarget.focus({ preventScroll: true });
+    };
+    if (typeof requestAnimationFrame === "function")
+      requestAnimationFrame(restoreFocus);
+    else
+      restoreFocus();
     this.workspaceModeBadge?.setAttribute("aria-expanded", "false");
   }
 
   destroyWorkspaceModeDialog() {
     const dialog = this.workspaceModeDialog;
     if (!dialog) return;
+    this.workspaceModeFocusGeneration++;
     this.workspaceModeDialogPreviousFocus = null;
     if (dialog.open) dialog.close();
     dialog.removeEventListener("click", this.onWorkspaceModeDialogClick);

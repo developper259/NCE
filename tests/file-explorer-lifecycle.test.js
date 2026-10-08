@@ -4,7 +4,7 @@ const { loadGlobal } = require("./helpers/runtime");
 
 const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
 
-function loadFileExplorer(windowApi = {}, confirmImpl = () => true) {
+function loadFileExplorer(windowApi = {}, confirmImpl = () => true, runtime = {}) {
   return loadGlobal("src/js/sidebar/FileExplorer.Sidebar.js", "FileExplorer", {
     Sidebar: class {},
     FileOperations: class {},
@@ -25,6 +25,7 @@ function loadFileExplorer(windowApi = {}, confirmImpl = () => true) {
     buildFolderContextMenu() {},
     buildBackgroundContextMenu() {},
     buildProjectContextMenu() {},
+    ...runtime,
   });
 }
 
@@ -842,4 +843,85 @@ test("large workspace mode displays its cause and clears across workspace switch
   assert.equal(badge.textContent, "");
   assert.equal(dialogCloses, 1);
   assert.equal(explorer.workspaceModeDialog.open, false);
+});
+
+test("workspace dialog restores focus after native close and ignores a stale restore after reopen", () => {
+  const frames = new Map();
+  let nextFrameId = 1;
+  const document = {
+    body: { tagName: "BODY" },
+    activeElement: null,
+    modals: [],
+    querySelectorAll() {
+      return this.modals.filter((modal) =>
+        modal.tagName !== "DIALOG" || modal.open === true,
+      );
+    },
+  };
+  const FileExplorer = loadFileExplorer({}, () => true, {
+    document,
+    requestAnimationFrame(callback) {
+      const id = nextFrameId++;
+      frames.set(id, callback);
+      return id;
+    },
+  });
+  const badge = {
+    isConnected: true,
+    hidden: true,
+    attributes: {},
+    setAttribute(name, value) { this.attributes[name] = value; },
+    closest() { return null; },
+  };
+  const header = {
+    isConnected: true,
+    hidden: false,
+    closest() { return null; },
+    focus() { document.activeElement = this; },
+  };
+  const closeButton = {
+    isConnected: true,
+    hidden: false,
+    focus() { document.activeElement = this; },
+  };
+  const dialog = {
+    tagName: "DIALOG",
+    open: false,
+    getAttribute() { return "true"; },
+    showModal() { this.open = true; },
+    querySelector() { return closeButton; },
+  };
+  document.modals = [dialog];
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    editor: { quickPanel: { isOpen: () => false } },
+    largeWorkspaceMode: true,
+    workspaceIndexStats: { fileCount: 18000 },
+    workspaceModeBadge: badge,
+    workspaceModeDialog: dialog,
+    workspaceModeDialogPreviousFocus: badge,
+    workspaceModeFocusGeneration: 0,
+    projectHeader: header,
+    updateWorkspaceModeDialogStats() {},
+  });
+  document.activeElement = document.body;
+
+  explorer.restoreWorkspaceModeDialogFocus();
+  assert.equal(document.activeElement, document.body);
+  const [restoreId] = frames.keys();
+  const restore = frames.get(restoreId);
+  frames.delete(restoreId);
+  restore();
+  assert.equal(document.activeElement, header);
+
+  document.activeElement = badge;
+  explorer.workspaceModeDialogPreviousFocus = badge;
+  explorer.restoreWorkspaceModeDialogFocus();
+  const [staleRestoreId] = frames.keys();
+  const staleRestore = frames.get(staleRestoreId);
+  frames.delete(staleRestoreId);
+  explorer.showWorkspaceModeDialog();
+  assert.equal(document.activeElement, closeButton);
+  staleRestore();
+  assert.equal(dialog.open, true);
+  assert.equal(document.activeElement, closeButton);
 });

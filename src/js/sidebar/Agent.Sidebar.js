@@ -4437,7 +4437,7 @@ class AgentSidebar extends Sidebar {
       if (this.editor.quickPanel?.isOpen?.()) return;
 
       const activeModal = [...(document.querySelectorAll?.(
-        '[aria-modal="true"], dialog[open]',
+        '[aria-modal="true"]:not(dialog), dialog[open]',
       ) || [])].some((modal) => {
         if (modal.open === true) return true;
         if (modal.hidden || modal.getAttribute?.("aria-hidden") === "true")
