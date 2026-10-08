@@ -58,6 +58,8 @@ class AgentSidebar extends Sidebar {
     this.openApprovalMenu = null;
     this.approvalMenuClickHandler = null;
     this.reasoningOutsideClickHandler = null;
+    this.globalListeners = new Map();
+    this.globalListenersActive = false;
     this.apiKeys = new Map();
     this.agent = null;
     this._agentInitialized = false;
@@ -76,6 +78,48 @@ class AgentSidebar extends Sidebar {
     this.apiKeyLoadPromise = Promise.resolve();
   }
 
+  registerGlobalListener(key, target, type, handler, options) {
+    this.removeGlobalListener(key, true);
+    if (!target?.addEventListener || typeof handler !== "function") return false;
+    const entry = {
+      target,
+      type,
+      handler,
+      options,
+      attached: this.globalListenersActive,
+    };
+    if (entry.attached) target.addEventListener(type, handler, options);
+    this.globalListeners.set(key, entry);
+    return true;
+  }
+
+  removeGlobalListener(key, forget = false) {
+    const entry = this.globalListeners?.get(key);
+    if (!entry) return false;
+    if (entry.attached) {
+      entry.target.removeEventListener(entry.type, entry.handler, entry.options);
+      entry.attached = false;
+    }
+    if (forget) this.globalListeners.delete(key);
+    return true;
+  }
+
+  activateGlobalListeners() {
+    this.globalListenersActive = true;
+    for (const entry of this.globalListeners?.values() || []) {
+      if (entry.attached) continue;
+      entry.target.addEventListener(entry.type, entry.handler, entry.options);
+      entry.attached = true;
+    }
+  }
+
+  removeGlobalListeners({ forget = false } = {}) {
+    this.globalListenersActive = false;
+    for (const key of this.globalListeners?.keys() || [])
+      this.removeGlobalListener(key, forget);
+    if (forget) this.globalListeners?.clear();
+  }
+
   ensureInitialized() {
     if (this._agentInitialized) return this.agent;
     this._agentInitialized = true;
@@ -92,13 +136,23 @@ class AgentSidebar extends Sidebar {
       this.openApprovalMenu?.classList.add("hidden");
       this.openApprovalMenu = null;
     };
-    document.addEventListener("click", this.approvalMenuClickHandler);
+    this.registerGlobalListener(
+      "approval-menu-outside-click",
+      document,
+      "click",
+      this.approvalMenuClickHandler,
+    );
     this.reasoningOutsideClickHandler = (event) => {
       if (!this.reasoningPanelOpen || this.reasoningControl?.contains(event.target)) return;
       this.reasoningPanelOpen = false;
       this.updateReasoningControl();
     };
-    document.addEventListener("click", this.reasoningOutsideClickHandler);
+    this.registerGlobalListener(
+      "reasoning-outside-click",
+      document,
+      "click",
+      this.reasoningOutsideClickHandler,
+    );
 
     this.agent = this.editor.ensureAgent();
     this.editor.contextMenuManager?.setMenu("agent-message", buildAgentMessageContextMenu(this));
@@ -1762,6 +1816,12 @@ class AgentSidebar extends Sidebar {
   }
 
   renderInputArea() {
+    for (const key of [
+      "input-context-escape",
+      "input-context-outside-click",
+      "input-model-menu-outside-click",
+    ]) this.removeGlobalListener(key, true);
+
     const inputArea = document.createElement("div");
     inputArea.className = "agent-sidebar-input-area";
 
@@ -1948,17 +2008,29 @@ class AgentSidebar extends Sidebar {
     contextContainer.appendChild(contextTrigger);
     contextContainer.addEventListener("click", (event) => event.stopPropagation());
     toolbar.appendChild(contextContainer);
-    document.addEventListener("keydown", (event) => {
+    this.contextMenuEscapeHandler = (event) => {
       if (event.key === "Escape" && !contextMenu.classList.contains("hidden")) {
         contextMenu.classList.add("hidden"); contextTrigger.setAttribute("aria-expanded", "false"); this.focusInput();
       }
-    });
-    document.addEventListener("click", (event) => {
+    };
+    this.contextMenuOutsideClickHandler = (event) => {
       if (!contextContainer.contains(event.target) && !contextMenu.contains(event.target)) {
         contextMenu.classList.add("hidden");
         contextTrigger.setAttribute("aria-expanded", "false");
       }
-    });
+    };
+    this.registerGlobalListener(
+      "input-context-escape",
+      document,
+      "keydown",
+      this.contextMenuEscapeHandler,
+    );
+    this.registerGlobalListener(
+      "input-context-outside-click",
+      document,
+      "click",
+      this.contextMenuOutsideClickHandler,
+    );
 
     const modeDropdownContainer = document.createElement("div");
     modeDropdownContainer.className =
@@ -2218,7 +2290,7 @@ class AgentSidebar extends Sidebar {
       }
     });
 
-    document.addEventListener("click", (e) => {
+    this.modelMenuOutsideClickHandler = (e) => {
       if (
         !modelDropdownContainer.contains(e.target) &&
         !modeDropdownContainer.contains(e.target) &&
@@ -2228,7 +2300,13 @@ class AgentSidebar extends Sidebar {
         dropdownMenu.classList.add("hidden");
         modeMenu.classList.add("hidden");
       }
-    });
+    };
+    this.registerGlobalListener(
+      "input-model-menu-outside-click",
+      document,
+      "click",
+      this.modelMenuOutsideClickHandler,
+    );
 
     modelDropdownContainer.appendChild(triggerBtn);
 
@@ -4636,23 +4714,36 @@ class AgentSidebar extends Sidebar {
       popover.setAttribute("role", "dialog");
       document.body.appendChild(popover);
       this.sessionInfoPopover = popover;
-      this.sessionInfoOutsideClick = (event) => {
-        if (
-          this.sessionInfoOpen &&
-          !popover.contains(event.target) &&
-          !this.sessionInfoButton?.contains(event.target)
-        ) {
-          this.closeSessionInfo();
-        }
-      };
-      this.sessionInfoEscape = (event) => {
-        if (event.key === "Escape") this.closeSessionInfo();
-      };
-      this.sessionInfoResize = () => this.updateSessionInfoPopover();
-      document.addEventListener("click", this.sessionInfoOutsideClick);
-      document.addEventListener("keydown", this.sessionInfoEscape);
-      window.addEventListener("resize", this.sessionInfoResize);
     }
+    this.sessionInfoOutsideClick ||= (event) => {
+      if (
+        this.sessionInfoOpen &&
+        !this.sessionInfoPopover?.contains(event.target) &&
+        !this.sessionInfoButton?.contains(event.target)
+      ) this.closeSessionInfo();
+    };
+    this.sessionInfoEscape ||= (event) => {
+      if (event.key === "Escape") this.closeSessionInfo();
+    };
+    this.sessionInfoResize ||= () => this.updateSessionInfoPopover();
+    this.registerGlobalListener(
+      "session-info-outside-click",
+      document,
+      "click",
+      this.sessionInfoOutsideClick,
+    );
+    this.registerGlobalListener(
+      "session-info-escape",
+      document,
+      "keydown",
+      this.sessionInfoEscape,
+    );
+    this.registerGlobalListener(
+      "session-info-resize",
+      window,
+      "resize",
+      this.sessionInfoResize,
+    );
     this.sessionInfoOpen = true;
     this.sessionInfoPopover.classList.remove("hidden");
     this.sessionInfoPopover.style.display = "block";
@@ -4663,6 +4754,14 @@ class AgentSidebar extends Sidebar {
     this.sessionInfoOpen = false;
     this.sessionInfoPopover?.classList.add("hidden");
     if (this.sessionInfoPopover) this.sessionInfoPopover.style.display = "none";
+    for (const key of [
+      "session-info-outside-click",
+      "session-info-escape",
+      "session-info-resize",
+    ]) this.removeGlobalListener(key, true);
+    this.sessionInfoOutsideClick = null;
+    this.sessionInfoEscape = null;
+    this.sessionInfoResize = null;
   }
 
   updateSessionInfoPopover() {
@@ -4953,18 +5052,24 @@ class AgentSidebar extends Sidebar {
 
   destroy() {
     this.stopAgentWorkTicker();
+    this.closeSessionInfo();
+    this.removeGlobalListeners({ forget: true });
     this.messagesElement?.removeEventListener?.("scroll", this.messagesScrollHandler);
     this.messagesScrollHandler = null;
     this.messagesScroller?.destroy();
-    if (this.editor.sidebarManager?.rightScroller === this.messagesScroller)
+    if (
+      this.messagesScroller &&
+      this.editor?.sidebarManager?.rightScroller === this.messagesScroller
+    )
       this.editor.sidebarManager.rightScroller = null;
     this.messagesScroller = null;
     this.messageWindowStates?.clear?.();
     this.messageWindowControls = null;
-    if (this.approvalMenuClickHandler)
-      document.removeEventListener("click", this.approvalMenuClickHandler);
-    if (this.reasoningOutsideClickHandler)
-      document.removeEventListener("click", this.reasoningOutsideClickHandler);
+    this.approvalMenuClickHandler = null;
+    this.reasoningOutsideClickHandler = null;
+    this.contextMenuEscapeHandler = null;
+    this.contextMenuOutsideClickHandler = null;
+    this.modelMenuOutsideClickHandler = null;
     if (this.reasoningCopyTimer) clearTimeout(this.reasoningCopyTimer);
     this.approvalUnsubscribe?.();
     this.markdownRenderer?.destroyAll?.();
@@ -5000,6 +5105,7 @@ class AgentSidebar extends Sidebar {
 
   onOpen() {
     this.ensureInitialized();
+    this.activateGlobalListeners();
     this.refresh();
     this.scheduleRestoredBottomScroll();
     this.focusInput();
@@ -5008,13 +5114,8 @@ class AgentSidebar extends Sidebar {
   onClose() {
     this.stopAgentWorkTicker();
     this.closeSessionInfo();
-    if (this.sessionInfoOutsideClick)
-      document.removeEventListener("click", this.sessionInfoOutsideClick);
-    if (this.sessionInfoEscape)
-      document.removeEventListener("keydown", this.sessionInfoEscape);
-    if (this.sessionInfoResize)
-      window.removeEventListener("resize", this.sessionInfoResize);
     this.sessionInfoPopover?.remove();
     this.sessionInfoPopover = null;
+    this.removeGlobalListeners();
   }
 }
