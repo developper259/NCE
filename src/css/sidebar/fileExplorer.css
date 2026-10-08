@@ -135,7 +135,7 @@
   user-select: none;
 }
 
-.sidebar-project-header:hover {
+.sidebar-project-header > span:hover {
   color: var(--text-primary);
 }
 

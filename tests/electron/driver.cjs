@@ -176,7 +176,7 @@ app.whenReady().then(() => {
         assert.deepEqual(settingsColdStart.rendererErrors, []);
         const largeWorkspaceRootA = JSON.stringify(path.join(directory, "workspace-a"));
         const largeWorkspaceRootB = JSON.stringify(path.join(directory, "workspace-b"));
-        const largeWorkspaceOpen = await run(`(() => {
+        const largeWorkspaceHoverTargets = await run(`(() => {
           const explorer = editor.fileExplorer;
           explorer.rootPath = ${largeWorkspaceRootA};
           explorer.projectName = "Workspace A";
@@ -198,6 +198,61 @@ app.whenReady().then(() => {
           };
           if (!explorer.applyWorkspaceIndexStats(stats))
             throw Error("Large workspace stats were rejected for the active workspace");
+          const titleRect = explorer.projectTitle.getBoundingClientRect();
+          const badgeRect = badge.getBoundingClientRect();
+          const neutralRect = shell.querySelector(".sidebar-main-title").getBoundingClientRect();
+          return {
+            title: { x: titleRect.x, y: titleRect.y, width: titleRect.width, height: titleRect.height },
+            badge: { x: badgeRect.x, y: badgeRect.y, width: badgeRect.width, height: badgeRect.height },
+            neutral: { x: neutralRect.x, y: neutralRect.y, width: neutralRect.width, height: neutralRect.height },
+          };
+        })()`);
+        win.focus();
+        const moveMouseTo = (rect) => win.webContents.sendInputEvent({
+          type: "mouseMove",
+          x: Math.round(rect.x + rect.width / 2),
+          y: Math.round(rect.y + rect.height / 2),
+        });
+        moveMouseTo(largeWorkspaceHoverTargets.neutral);
+        await waitForCondition(
+          async () => (await run("!editor.fileExplorer.projectHeader.matches(':hover')")) === true,
+          { description: "pointer to leave the workspace header" },
+        );
+        const workspaceNameRestingColor = await run(
+          "getComputedStyle(editor.fileExplorer.projectTitle).color",
+        );
+        const badgeRestingColor = await run(
+          "getComputedStyle(editor.fileExplorer.workspaceModeBadge).color",
+        );
+        moveMouseTo(largeWorkspaceHoverTargets.badge);
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.workspaceModeBadge.matches(':hover')")) === true,
+          { description: "pointer to hover the Large Workspace Mode badge" },
+        );
+        assert.equal(
+          await run("getComputedStyle(editor.fileExplorer.projectTitle).color"),
+          workspaceNameRestingColor,
+          "hovering the Large Workspace Mode badge leaves the workspace name at rest",
+        );
+        assert.notEqual(
+          await run("getComputedStyle(editor.fileExplorer.workspaceModeBadge).color"),
+          badgeRestingColor,
+          "hovering the Large Workspace Mode badge activates its own hover style",
+        );
+        moveMouseTo(largeWorkspaceHoverTargets.title);
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.projectTitle.matches(':hover')")) === true,
+          { description: "pointer to hover the workspace name" },
+        );
+        assert.notEqual(
+          await run("getComputedStyle(editor.fileExplorer.projectTitle).color"),
+          workspaceNameRestingColor,
+          "hovering the workspace name activates its own hover style",
+        );
+        const largeWorkspaceOpen = await run(`(() => {
+          const explorer = editor.fileExplorer;
+          const shell = explorer.shell;
+          const badge = explorer.workspaceModeBadge;
           badge.focus();
           badge.click();
           const dialog = explorer.workspaceModeDialog;
