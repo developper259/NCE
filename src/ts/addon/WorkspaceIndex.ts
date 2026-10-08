@@ -163,6 +163,7 @@ export class WorkspaceIndex {
   >();
   private readonly reconcileQueues = new Map<string, Promise<void>>();
   private readonly reconcileAgainRoots = new Set<string>();
+  private readonly reconcileBaselines = new Map<string, WorkspaceIndexSnapshot>();
   private readonly staleRemovals = new Map<string, Promise<void>>();
   private readonly needsReconcileRoots = new Set<string>();
   private readonly maxCachedWorkspaces = 4;
@@ -177,7 +178,7 @@ export class WorkspaceIndex {
   };
   private activeFileProbes = 0;
   private probeConcurrencyMax = 0;
-  onReconciled: ((rootPath: string) => void) | null = null;
+  onReconciled: ((rootPath: string, changedDirectories: string[]) => void) | null = null;
   onStatsUpdated: ((stats: WorkspaceIndexStats) => void) | null = null;
 
   getStats(rootPath: string): WorkspaceIndexStats {
@@ -236,6 +237,7 @@ export class WorkspaceIndex {
       reconcileTimers: this.reconcileTimers.size,
       reconcileQueues: this.reconcileQueues.size,
       reconcileAgainRoots: this.reconcileAgainRoots.size,
+      reconcileBaselines: this.reconcileBaselines.size,
       staleRemovals: this.staleRemovals.size,
     };
   }
@@ -755,6 +757,16 @@ export class WorkspaceIndex {
 
   private markStale(root: string): void {
     if (this.reconcileQueues.has(root)) this.reconcileAgainRoots.add(root);
+    const snapshot = this.snapshots.get(root);
+    if (snapshot) {
+      this.reconcileBaselines.delete(root);
+      this.reconcileBaselines.set(root, snapshot);
+      while (this.reconcileBaselines.size > this.maxTransientWorkspaces) {
+        const oldestRoot = this.reconcileBaselines.keys().next().value;
+        if (!oldestRoot) break;
+        this.reconcileBaselines.delete(oldestRoot);
+      }
+    }
     const buildWasActive = this.activeBuildTokens.has(root);
     this.activeBuildTokens.delete(root);
     if (!this.invalidRoots.has(root) || buildWasActive) {
@@ -782,8 +794,16 @@ export class WorkspaceIndex {
       await this.buildQueues.get(root)?.catch(() => undefined);
       if (!force && !this.invalidRoots.has(root) && await this.load(root)) return;
       this.coalescedWatcherEvents.reconciliations += 1;
+      const previousSnapshot = this.snapshots.get(root) ||
+        this.reconcileBaselines.get(root) || null;
       const snapshot = await this.build(root);
-      if (snapshot) this.onReconciled?.(root);
+      if (snapshot) {
+        this.reconcileBaselines.delete(root);
+        this.onReconciled?.(
+          root,
+          this.getChangedDirectories(previousSnapshot, snapshot),
+        );
+      }
     });
     this.reconcileQueues.set(root, task);
     try {
@@ -803,6 +823,58 @@ export class WorkspaceIndex {
         }, this.getWatcherDebounceMs(root)));
       }
     }
+  }
+
+  private getChangedDirectories(
+    previous: WorkspaceIndexSnapshot | null,
+    current: WorkspaceIndexSnapshot,
+  ): string[] {
+    if (!previous) return [];
+    const previousPaths = new Set(previous.entries.map((entry) => entry.relativePath));
+    const currentPaths = new Set(current.entries.map((entry) => entry.relativePath));
+    const changedDirectories = new Set<string>();
+    const addDirectory = (relativePath: string): void => {
+      const segments = relativePath === "." ? [] : relativePath.split("/");
+      changedDirectories.add(path.join(current.root, ...segments));
+    };
+    const addParent = (relativePath: string): void =>
+      addDirectory(path.posix.dirname(relativePath));
+
+    for (const relativePath of previousPaths) {
+      if (!currentPaths.has(relativePath)) addParent(relativePath);
+    }
+    for (const relativePath of currentPaths) {
+      if (!previousPaths.has(relativePath)) addParent(relativePath);
+    }
+
+    const collectDirectories = (paths: Set<string>): Set<string> => {
+      const directories = new Set<string>();
+      for (const relativePath of paths) {
+        const segments = relativePath.split("/");
+        for (let index = 1; index < segments.length; index += 1)
+          directories.add(segments.slice(0, index).join("/"));
+      }
+      return directories;
+    };
+    const previousDirectories = collectDirectories(previousPaths);
+    const currentDirectories = collectDirectories(currentPaths);
+    for (const relativePath of previousDirectories) {
+      if (!currentDirectories.has(relativePath)) addParent(relativePath);
+    }
+    for (const relativePath of currentDirectories) {
+      if (!previousDirectories.has(relativePath)) addParent(relativePath);
+    }
+
+    const sorted = [...changedDirectories].sort((left, right) => left.localeCompare(right));
+    return sorted.filter((candidate, index) =>
+      !sorted.some((ancestor, ancestorIndex) =>
+        ancestorIndex !== index && (() => {
+          const relative = path.relative(ancestor, candidate);
+          return relative !== "" && relative !== ".." &&
+            !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+        })(),
+      ),
+    );
   }
 
   async build(rootPath: string): Promise<WorkspaceIndexSnapshot | null> {
@@ -999,6 +1071,7 @@ export class WorkspaceIndex {
     this.eventFlushQueues.delete(root);
     this.reconcileQueues.delete(root);
     this.reconcileAgainRoots.delete(root);
+    this.reconcileBaselines.delete(root);
     this.staleRemovals.delete(root);
     this.buildQueues.delete(root);
     this.writeQueues.delete(root);

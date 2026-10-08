@@ -96,6 +96,7 @@ class FileExplorer extends Sidebar {
       return;
     }
 
+    const directoryPaths = new Set();
     for (const change of changes) {
       if (change.event === "change") {
         this.editor.agent?.fileKnowledge?.invalidateFile?.(
@@ -126,31 +127,44 @@ class FileExplorer extends Sidebar {
           this.cancelEdit({ refresh: false });
         }
       }
+
+      if (["add", "unlink", "addDir", "unlinkDir"].includes(change.event)) {
+        if (typeof change.dirPath === "string" && change.dirPath)
+          directoryPaths.add(change.dirPath);
+      } else if (
+        change.event === "index-reconciled" &&
+        Array.isArray(change.changedDirectories)
+      ) {
+        for (const dirPath of change.changedDirectories) {
+          if (typeof dirPath === "string" && dirPath)
+            directoryPaths.add(dirPath);
+        }
+      }
     }
 
-    const dirPaths = [...new Set(changes
-      .map((change) => change.dirPath)
-      .filter((dirPath) => typeof dirPath === "string" && dirPath))];
-
-    if (dirPaths.some((dirPath) => NCEPath.equals(dirPath, this.rootPath))) {
-      await this.loadFiles(this.getExpandedPaths(this.files));
-      this.refresh();
-      return;
-    }
-
-    const workspaceDirPaths = dirPaths.filter((dirPath) =>
+    const workspaceDirPaths = [...directoryPaths].filter((dirPath) =>
       NCEPath.isInside(dirPath, this.rootPath),
     );
-    const refreshed = await Promise.all(workspaceDirPaths.map((dirPath) =>
+    const rootChanged = workspaceDirPaths.some((dirPath) =>
+      NCEPath.equals(dirPath, this.rootPath),
+    );
+    if (rootChanged) {
+      await this.loadFiles(new Set(), { preserveExpandedContents: true });
+    }
+
+    const nestedDirectoryPaths = workspaceDirPaths.filter((dirPath) =>
+      !NCEPath.equals(dirPath, this.rootPath),
+    );
+    const refreshed = await Promise.all(nestedDirectoryPaths.map((dirPath) =>
       this.refreshFolderIfLoaded(dirPath),
     ));
-    workspaceDirPaths.forEach((dirPath, index) => {
+    nestedDirectoryPaths.forEach((dirPath, index) => {
       if (!refreshed[index]) {
         if (!this.staleFolderPaths) this.staleFolderPaths = new Set();
         this.staleFolderPaths.add(NCEPath.comparisonKey(dirPath));
       }
     });
-    if (refreshed.some(Boolean)) this.refresh();
+    if (rootChanged || refreshed.some(Boolean)) this.refresh();
   }
 
   refreshFolderIfLoaded(dirPath) {
@@ -172,7 +186,7 @@ class FileExplorer extends Sidebar {
     return refreshRecursive(this.files);
   }
 
-  async loadFiles(expandedPaths = new Set()) {
+  async loadFiles(expandedPaths = new Set(), { preserveExpandedContents = false } = {}) {
     const rootPath = this.rootPath;
     if (!rootPath) return false;
     this.isStale = true;
@@ -207,13 +221,21 @@ class FileExplorer extends Sidebar {
         }
         return false;
       }
-      const newFiles = items.map((item) => ({
-        name: item.name,
-        type: item.type,
-        path: item.path,
-        expanded: false,
-        children: item.type === "folder" ? [] : undefined,
-      }));
+      const existingByPath = preserveExpandedContents
+        ? new Map(this.files.map((item) => [item.path, item]))
+        : null;
+      const newFiles = items.map((item) => {
+        const previous = existingByPath?.get(item.path);
+        return {
+          name: item.name,
+          type: item.type,
+          path: item.path,
+          expanded: previous?.type === "folder" ? previous.expanded : false,
+          children: item.type === "folder"
+            ? previous?.type === "folder" ? previous.children : []
+            : undefined,
+        };
+      });
 
       if (expandedPaths.size > 0) {
         await this.restoreExpandedFolders(newFiles, expandedPaths);
@@ -222,7 +244,22 @@ class FileExplorer extends Sidebar {
       this.files = newFiles;
       this.isLoaded = true;
       this.isStale = false;
-      this.staleFolderPaths?.clear();
+      if (preserveExpandedContents) {
+        const rootKey = NCEPath.comparisonKey(rootPath);
+        const existingRootFolders = newFiles
+          .filter((item) => item.type === "folder")
+          .map((item) => NCEPath.comparisonKey(item.path));
+        for (const stalePath of this.staleFolderPaths || []) {
+          if (
+            stalePath === rootKey ||
+            !existingRootFolders.some((folderPath) =>
+              stalePath === folderPath || stalePath.startsWith(`${folderPath}/`),
+            )
+          ) this.staleFolderPaths.delete(stalePath);
+        }
+      } else {
+        this.staleFolderPaths?.clear();
+      }
       return true;
     } catch (error) {
       console.error("Error loading files:", error);

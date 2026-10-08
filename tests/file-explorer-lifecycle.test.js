@@ -382,11 +382,11 @@ test("deleted workspace is invalidated and a new workspace can open", async () =
 
 test("filesystem changes are handled without initializing the Agent runtime", async () => {
   const FileExplorer = loadFileExplorer();
-  const calls = { reload: [], deleted: [], loads: 0, refreshes: 0 };
+  const calls = { reload: [], deleted: [], invalidations: [], loads: [], refreshes: 0 };
   const editor = {
     agent: null,
     ensureAgent() { assert.fail("filesystem updates must not initialize Agent"); },
-    quickOpen: { invalidate() {} },
+    quickOpen: { invalidate(root) { calls.invalidations.push(root); } },
     tabManager: {
       reloadFileFromDisk(path) { calls.reload.push(path); },
       markFileAsDeleted(path) { calls.deleted.push(path); },
@@ -397,22 +397,113 @@ test("filesystem changes are handled without initializing the Agent runtime", as
     files: [],
     editingState: null,
     editor,
-    getExpandedPaths() { return new Set(); },
-    async loadFiles() { calls.loads++; },
+    async loadFiles(...args) { calls.loads.push(args); },
     refresh() { calls.refreshes++; },
   });
 
   await explorer.handleFileSystemChanges([
     { event: "change", filePath: "/workspace/edited.js", dirPath: "/workspace" },
+    { event: "change", filePath: "/workspace/src/app.js", dirPath: "/workspace/src" },
+  ]);
+
+  assert.equal(editor.agent, null);
+  assert.deepEqual(calls.reload, ["/workspace/edited.js", "/workspace/src/app.js"]);
+  assert.equal(calls.loads.length, 0);
+  assert.equal(calls.refreshes, 0);
+  assert.deepEqual(calls.invalidations, ["/workspace"]);
+
+  await explorer.handleFileSystemChanges([
     { event: "add", filePath: "/workspace/new.js", dirPath: "/workspace" },
     { event: "unlink", filePath: "/workspace/deleted.js", dirPath: "/workspace" },
   ]);
 
-  assert.equal(editor.agent, null);
-  assert.deepEqual(calls.reload, ["/workspace/edited.js"]);
   assert.deepEqual(calls.deleted, ["/workspace/deleted.js"]);
-  assert.equal(calls.loads, 1);
+  assert.equal(calls.loads.length, 1);
+  assert.deepEqual(calls.loads[0][0], new Set());
+  assert.equal(calls.loads[0][1].preserveExpandedContents, true);
   assert.equal(calls.refreshes, 1);
+  assert.deepEqual(calls.invalidations, ["/workspace", "/workspace"]);
+});
+
+test("root-only tree refresh preserves loaded descendants without rereading them", async () => {
+  const root = "/workspace";
+  const reads = [];
+  const FileExplorer = loadFileExplorer({
+    async getFolderContent(folderPath) {
+      reads.push(folderPath);
+      return [
+        { name: "src", type: "folder", path: `${root}/src` },
+        { name: "new.js", type: "file", path: `${root}/new.js` },
+      ];
+    },
+  });
+  const oldChild = { name: "app.js", type: "file", path: `${root}/src/app.js` };
+  const expandedFolder = {
+    name: "src",
+    type: "folder",
+    path: `${root}/src`,
+    expanded: true,
+    children: [oldChild],
+  };
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: root,
+    files: [expandedFolder],
+    staleFolderPaths: new Set(),
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
+    editor: {
+      quickOpen: { invalidate() {} },
+      tabManager: { markFileAsDeleted() {}, reloadFileFromDisk() {} },
+    },
+    refresh() {},
+  });
+
+  await explorer.handleFileSystemChanges([
+    { event: "add", filePath: `${root}/new.js`, dirPath: root },
+    { event: "addDir", filePath: `${root}/assets`, dirPath: root },
+    { event: "unlinkDir", filePath: `${root}/old-folder`, dirPath: root },
+  ]);
+
+  assert.deepEqual(reads, [root]);
+  assert.equal(explorer.files.length, 2);
+  assert.equal(explorer.files[0].expanded, true);
+  assert.equal(explorer.files[0].children[0], oldChild);
+  assert.equal(explorer.files[1].name, "new.js");
+});
+
+test("index reconciliation refreshes only directories with structural differences", async () => {
+  const FileExplorer = loadFileExplorer();
+  const refreshedFolders = [];
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/workspace",
+    files: [],
+    staleFolderPaths: new Set(),
+    editingState: null,
+    editor: {
+      quickOpen: { invalidate() {} },
+      tabManager: { reloadFileFromDisk() {}, markFileAsDeleted() {} },
+    },
+    async refreshFolderIfLoaded(dirPath) {
+      refreshedFolders.push(dirPath);
+      return true;
+    },
+    refresh() {},
+  });
+
+  await explorer.handleFileSystemChanges([
+    { event: "index-reconciled", filePath: "/workspace", changedDirectories: [] },
+  ]);
+  assert.deepEqual(refreshedFolders, []);
+
+  await explorer.handleFileSystemChanges([
+    {
+      event: "index-reconciled",
+      filePath: "/workspace",
+      changedDirectories: ["/workspace/src/components"],
+    },
+  ]);
+  assert.deepEqual(refreshedFolders, ["/workspace/src/components"]);
 });
 
 test("watcher refreshes an expanded folder and defers a collapsed folder until expansion", async () => {
@@ -435,6 +526,7 @@ test("watcher refreshes an expanded folder and defers a collapsed folder until e
     expanded: true,
     children: [{ name: "old.js", type: "file", path: "/workspace/src/old.js" }],
   };
+  const deletedFiles = [];
   const collapsed = {
     name: "lib",
     type: "folder",
@@ -451,16 +543,23 @@ test("watcher refreshes an expanded folder and defers a collapsed folder until e
     editingState: null,
     editor: {
       quickOpen: { invalidate() {} },
-      tabManager: { reloadFileFromDisk() {}, markFileAsDeleted() {} },
+      tabManager: {
+        reloadFileFromDisk() {},
+        markFileAsDeleted(filePath) { deletedFiles.push(filePath); },
+      },
     },
     refresh() { refreshes++; },
   });
 
   await explorer.handleFileSystemChanges([
     { event: "add", filePath: "/workspace/src/new.js", dirPath: "/workspace/src" },
+    { event: "addDir", filePath: "/workspace/src/generated", dirPath: "/workspace/src" },
+    { event: "unlinkDir", filePath: "/workspace/src/removed", dirPath: "/workspace/src" },
+    { event: "unlink", filePath: "/workspace/src/deleted.js", dirPath: "/workspace/src" },
     { event: "add", filePath: "/workspace/lib/new.js", dirPath: "/workspace/lib" },
   ]);
   assert.deepEqual(reads, ["/workspace/src"]);
+  assert.deepEqual(deletedFiles, ["/workspace/src/removed", "/workspace/src/deleted.js"]);
   assert.equal(expanded.children[0].name, "fresh-src.js");
   assert.equal(
     explorer.staleFolderPaths.has(NCEPath.comparisonKey("/workspace/lib")),

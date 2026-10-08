@@ -127,7 +127,7 @@ export class Window {
       );
     this.watcher.onWatcherStop = (rootPath) =>
       this.workspaceSearch?.releaseWorkspace(rootPath);
-    this.workspaceSearch.workspaceIndex.onReconciled = (rootPath) => {
+    this.workspaceSearch.workspaceIndex.onReconciled = (rootPath, changedDirectories) => {
       const window = this.window;
       if (
         !window || window.isDestroyed() ||
@@ -136,7 +136,7 @@ export class Window {
       window.webContents.send("file-system-change", [{
         event: "index-reconciled",
         filePath: rootPath,
-        dirPath: rootPath,
+        changedDirectories,
       }]);
     };
     this.workspaceSearch.workspaceIndex.onStatsUpdated = (stats) => {

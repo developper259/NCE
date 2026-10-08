@@ -282,13 +282,15 @@ test("WorkspaceIndex scheduled cache revalidation rebuilds the persisted snapsho
   const originalClearTimeout = global.clearTimeout;
   let fireTimer;
   try {
-    await fsp.writeFile(path.join(root, "old.txt"), "old\n");
+    await fsp.mkdir(path.join(root, "src"));
+    await fsp.writeFile(path.join(root, "src", "old.js"), "old\n");
     const writer = new WorkspaceIndex();
     assert.ok(await writer.build(root));
     await writer.flush(root);
 
-    await fsp.rm(path.join(root, "old.txt"));
-    await fsp.writeFile(path.join(root, "new.js"), "export const fresh = true;\n");
+    await fsp.rm(path.join(root, "src", "old.js"));
+    await fsp.mkdir(path.join(root, "src", "components"));
+    await fsp.writeFile(path.join(root, "src", "components", "new.js"), "export const fresh = true;\n");
 
     global.setTimeout = (callback) => {
       fireTimer = callback;
@@ -298,19 +300,23 @@ test("WorkspaceIndex scheduled cache revalidation rebuilds the persisted snapsho
     const reader = new WorkspaceIndex();
     let notifyReconciled;
     const reconciled = new Promise((resolve) => { notifyReconciled = resolve; });
-    reader.onReconciled = (workspaceRoot) => notifyReconciled(workspaceRoot);
+    reader.onReconciled = (workspaceRoot, changedDirectories) =>
+      notifyReconciled({ workspaceRoot, changedDirectories });
 
     const cached = await reader.load(root, {
       freshness: "allow-stale-while-revalidate",
     });
-    assert.deepEqual(cached.entries.map((entry) => entry.relativePath), ["old.txt"]);
+    assert.deepEqual(cached.entries.map((entry) => entry.relativePath), ["src/old.js"]);
     assert.equal(typeof fireTimer, "function");
     fireTimer();
 
     const result = await reconciled;
     await reader.flush(root);
-    assert.equal(result, path.resolve(root));
-    assert.deepEqual((await reader.load(root)).entries.map((entry) => entry.relativePath), ["new.js"]);
+    assert.equal(result.workspaceRoot, path.resolve(root));
+    assert.deepEqual(result.changedDirectories, [path.join(root, "src")]);
+    assert.deepEqual((await reader.load(root)).entries.map((entry) => entry.relativePath), [
+      "src/components/new.js",
+    ]);
   } finally {
     global.setTimeout = originalSetTimeout;
     global.clearTimeout = originalClearTimeout;
@@ -542,6 +548,7 @@ test("WorkspaceIndex releases watcher state while retaining a bounded cache acro
       assert.equal(state.writeQueues, 0);
       assert.equal(state.activeBuildTokens, 0);
       assert.equal(state.reconcileAgainRoots, 0);
+      assert.equal(state.reconcileBaselines, 0);
     }
     const state = index.getLifecycleStats();
     assert.equal(state.cachedWorkspaces, 4);
@@ -643,6 +650,10 @@ test("WorkspaceIndex marks ambiguous watcher events stale and reconciles in the 
     await fsp.writeFile(path.join(root, "before.js"), "before\n");
     const index = new WorkspaceIndex();
     await index.build(root);
+    let reconciliation;
+    index.onReconciled = (workspaceRoot, changedDirectories) => {
+      reconciliation = { workspaceRoot, changedDirectories };
+    };
     await fsp.rename(path.join(root, "before.js"), path.join(root, "after.js"));
     index.handleWatcherEvent(root, "rename", path.join(root, "before.js"));
     assert.equal(await index.load(root), null);
@@ -650,7 +661,10 @@ test("WorkspaceIndex marks ambiguous watcher events stale and reconciles in the 
     await index.flush(root);
     const snapshot = await index.load(root);
     assert.deepEqual(snapshot.entries.map((entry) => entry.relativePath), ["after.js"]);
+    assert.equal(reconciliation.workspaceRoot, path.resolve(root));
+    assert.deepEqual(reconciliation.changedDirectories, [path.resolve(root)]);
     assert.equal(index.getDiagnostics().reconciliations, 1);
+    assert.equal(index.getLifecycleStats().reconcileBaselines, 0);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }
