@@ -143,6 +143,9 @@ test("scroller components use lifecycle APIs and never mutate the registry", () 
     "src/js/view/SettingsView.js",
     "src/js/sidebar/FileExplorer.Sidebar.js",
     "src/js/sidebar/Search.Sidebar.js",
+    "src/js/sidebar/Agent.Sidebar.js",
+    "src/js/manager/SidebarManager.js",
+    "src/js/manager/TabManager.js",
   ]) {
     assert.match(read(file), /destroy\(\)/, file);
   }
@@ -158,12 +161,12 @@ test("scroller components use lifecycle APIs and never mutate the registry", () 
   }
 });
 
-test("ScrollerManager destroys scrollers whose parent subtree is removed", () => {
-  let observerCallback;
+test("ScrollerManager avoids a global DOM observer and cleans detached parents on refresh", () => {
+  let observerStarts = 0;
   class FakeMutationObserver {
-    constructor(callback) { observerCallback = callback; }
-    observe() {}
-    disconnect() {}
+    constructor() {}
+    observe() { observerStarts += 1; }
+    disconnect() { observerStarts -= 1; }
   }
   class ScrollerStub {
     init() {}
@@ -185,11 +188,66 @@ test("ScrollerManager destroys scrollers whose parent subtree is removed", () =>
   const parent = { isConnected: true };
   const scroller = manager.createScroller(parent, manager.VERTICAL_TYPE, false);
   manager.addScroller(scroller);
-  const removedAncestor = { contains(candidate) { return candidate === parent; } };
+  assert.equal(observerStarts, 0);
   parent.isConnected = false;
-  observerCallback([{ removedNodes: [removedAncestor] }]);
+  assert.equal(manager.refreshAll(), 0);
 
   assert.equal(scroller.destroyed, true);
   assert.equal(manager.scrollers.length, 0);
   manager.destroyAll();
+  assert.equal(observerStarts, 0);
+});
+
+test("owner destroy removes a disconnected scroller and repeated destroy is safe", () => {
+  class ScrollerStub {
+    init() {}
+    refreshMetrics() {}
+    refresh() {}
+    setActive() {}
+    destroy() { this.destroyed = true; }
+  }
+  const ScrollerManager = loadGlobal(
+    "src/js/manager/ScrollerManager.js",
+    "ScrollerManager",
+    { Scroller: ScrollerStub },
+  );
+  const manager = new ScrollerManager({ isOnInit: true });
+  const parent = { isConnected: true };
+  const scroller = manager.addScroller(
+    manager.createScroller(parent, manager.VERTICAL_TYPE, false),
+  );
+  parent.isConnected = false;
+  assert.equal(manager.destroyScroller(scroller), true);
+  assert.equal(manager.destroyScroller(scroller), false);
+  assert.equal(manager.scrollers.includes(scroller), false);
+  assert.equal(scroller.destroyed, true);
+});
+
+test("Agent sidebar destroys its owned scroller before dropping references", () => {
+  const AgentSidebar = loadGlobal(
+    "src/js/sidebar/Agent.Sidebar.js",
+    "AgentSidebar",
+    {
+      Sidebar: class Sidebar {},
+      document: { removeEventListener() {} },
+    },
+  );
+  let destroys = 0;
+  const messagesScroller = { destroy() { destroys += 1; } };
+  const editor = { sidebarManager: { rightScroller: messagesScroller } };
+  const sidebar = Object.assign(Object.create(AgentSidebar.prototype), {
+    editor,
+    messagesScroller,
+    stopAgentWorkTicker() {},
+    messagesElement: null,
+    messagesScrollHandler: null,
+    messageWindowStates: new Map(),
+    markdownRenderer: null,
+  });
+
+  sidebar.destroy();
+
+  assert.equal(destroys, 1);
+  assert.equal(sidebar.messagesScroller, null);
+  assert.equal(editor.sidebarManager.rightScroller, null);
 });

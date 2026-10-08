@@ -18,35 +18,17 @@ class ScrollerManager {
     this.onDragPointerCancel = (event) => this.handleDragPointerCancel(event);
     this.onDragLostPointerCapture = (event) => this.handleDragLostPointerCapture(event);
     this.onDragWindowBlur = () => this.finishDrag();
-    this.parentRemovalObserver = null;
-    this.observeParentRemoval();
-  }
-
-  observeParentRemoval() {
-    if (this.parentRemovalObserver || typeof MutationObserver !== "function" ||
-        typeof document === "undefined" || !document.documentElement) return;
-    this.parentRemovalObserver = new MutationObserver((records) => {
-      const removedNodes = [];
-      for (const record of records) {
-        for (const node of record.removedNodes || []) removedNodes.push(node);
-      }
-      if (!removedNodes.length) return;
-      for (const scroller of [...this.scrollers]) {
-        const parent = scroller.parentOBJ;
-        if (parent?.isConnected === false && removedNodes.some((node) =>
-          node === parent || node.contains?.(parent),
-        )) this.destroyScroller(scroller);
-      }
-    });
-    this.parentRemovalObserver.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
   }
 
   refreshAll() {
     if (this.editor.isOnInit) {
-      for (const scroller of this.scrollers) scroller._metricsDirty = true;
+      for (const scroller of [...this.scrollers]) {
+        if (scroller.parentOBJ?.isConnected === false) {
+          this.destroyScroller(scroller);
+          continue;
+        }
+        scroller._metricsDirty = true;
+      }
       return 0;
     }
 
@@ -69,7 +51,13 @@ class ScrollerManager {
   }
 
   refreshActive() {
-    if (this.editor.isOnInit) return 0;
+    if (this.editor.isOnInit) {
+      for (const scroller of [...this.scrollers]) {
+        if (scroller.parentOBJ?.isConnected === false)
+          this.destroyScroller(scroller);
+      }
+      return 0;
+    }
     let refreshed = 0;
     for (const scroller of [...this.scrollers]) {
       if (scroller.parentOBJ?.isConnected === false) {
@@ -175,7 +163,6 @@ class ScrollerManager {
   addScroller(scroller) {
     if (!scroller || scroller._destroyed) return null;
     if (this.scrollers.includes(scroller)) return scroller;
-    this.observeParentRemoval();
     scroller.id = this.nextScrollerId++;
     scroller.manager = this;
     scroller._suspended = false;
@@ -361,8 +348,6 @@ class ScrollerManager {
   destroyAll() {
     this.cancelObserverRefreshes();
     for (const scroller of [...this.scrollers]) this.destroyScroller(scroller);
-    this.parentRemovalObserver?.disconnect();
-    this.parentRemovalObserver = null;
   }
 
   createScroller(parent, type, isBody, options = {}) {

@@ -4955,6 +4955,10 @@ class AgentSidebar extends Sidebar {
     this.stopAgentWorkTicker();
     this.messagesElement?.removeEventListener?.("scroll", this.messagesScrollHandler);
     this.messagesScrollHandler = null;
+    this.messagesScroller?.destroy();
+    if (this.editor.sidebarManager?.rightScroller === this.messagesScroller)
+      this.editor.sidebarManager.rightScroller = null;
+    this.messagesScroller = null;
     this.messageWindowStates?.clear?.();
     this.messageWindowControls = null;
     if (this.approvalMenuClickHandler)
