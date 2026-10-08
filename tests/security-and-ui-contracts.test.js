@@ -36,7 +36,8 @@ test("TabManager protects asynchronous focus changes and dirty close flows", () 
   assert.match(source, /focusGeneration/);
   assert.match(source, /await this\.setFocusFile\(file\)/);
   assert.match(source, /confirmClose\(id\)/);
-  assert.match(source, /await file\.save\(\)/);
+  assert.match(source, /await this\.saveFileOnce\(file\)/);
+  assert.match(source, /this\.pendingSaveOperations = new Map\(\)/);
 });
 
 test("Agent tool surface is present and remains local-testable", () => {

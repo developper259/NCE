@@ -11,6 +11,7 @@ const [TAB_TYPES, Tab, SettingsTab, FileNode] = loadGlobal(
 );
 const NCEPath = loadGlobal('src/js/core/Path.js', 'NCEPath');
 const FileLoader = loadGlobal('src/js/addon/FileLoader.js', 'FileLoader', { LineNode, window: {} });
+const SavePopup = loadGlobal('src/js/addon/SavePopup.js', 'SavePopup');
 const TabManager = loadGlobal('src/js/manager/TabManager.js', 'tabManager', {
   FileNode, SettingsTab, TAB_TYPES, NCEPath, getElement: () => null, Events: {},
   PictureView: { isSupportedPath: () => false },
@@ -38,6 +39,59 @@ function setup() {
   editor.tabManager.refresh = () => {};
   editor.fileLoader = new FileLoader(editor);
   return editor;
+}
+
+for (const choice of ['dontSave', 'save']) {
+test(`concurrent Close and Quit share one ${choice} decision and save/close once`, async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 42, 'same.js', '/tmp/same.js');
+  file.isSaved = false;
+  file.isEmpty = () => false;
+  file.flushAutoSave = async () => true;
+  file.flushRecoverySnapshot = async () => true;
+  file.clearRecoverySnapshot = async () => true;
+  let saveCount = 0;
+  file.save = async () => {
+    saveCount += 1;
+    file.isSaved = true;
+    return true;
+  };
+  editor.tabManager.files = [file];
+  editor.tabManager.activeTab = file;
+  let resolvePrompt;
+  let promptStarted;
+  const started = new Promise((resolve) => { promptStarted = resolve; });
+  let promptCount = 0;
+  editor.api = {
+    confirmUnsavedChanges(fileId, fileName) {
+      assert.equal(fileId, file.id);
+      assert.equal(fileName, file.name);
+      promptCount += 1;
+      promptStarted();
+      return new Promise((resolve) => { resolvePrompt = resolve; });
+    },
+  };
+  let fileClosed = 0;
+  editor.highlightController.closeFile = async () => { fileClosed += 1; };
+  editor.savePopupManager = new SavePopup(editor, editor.tabManager);
+
+  const closeRequest = editor.tabManager.closeFile(file.id);
+  const duplicateCloseRequest = editor.tabManager.closeFile(file.id);
+  const quitRequest = editor.tabManager.prepareForQuit();
+  assert.equal(closeRequest, duplicateCloseRequest);
+  await started;
+  assert.equal(promptCount, 1);
+  resolvePrompt(choice);
+
+  assert.deepEqual(await Promise.all([closeRequest, duplicateCloseRequest, quitRequest]), [
+    true,
+    true,
+    true,
+  ]);
+  assert.equal(editor.tabManager.tabs.length, 0);
+  assert.equal(fileClosed, 1);
+  assert.equal(saveCount, choice === 'save' ? 1 : 0);
+});
 }
 
 for (const choices of [[], ['save'], ['dontSave'], ['cancel'], ['save', 'dontSave'], ['save', 'cancel']]) {

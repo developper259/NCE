@@ -124,8 +124,8 @@ contextBridge.exposeInMainWorld("api", {
   confirmRecoverySnapshot: (snapshot) =>
     ipcRenderer.invoke("FileManager:confirmRecoverySnapshot", snapshot),
 
-  confirmUnsavedChanges: (fileName) =>
-    ipcRenderer.invoke("FileManager:confirmUnsavedChanges", fileName),
+  confirmUnsavedChanges: (fileId, fileName) =>
+    ipcRenderer.invoke("FileManager:confirmUnsavedChanges", fileId, fileName),
 
   getFolderContent: (dirPath) =>
     ipcRenderer.invoke("FileManager:getFolderContent", dirPath),

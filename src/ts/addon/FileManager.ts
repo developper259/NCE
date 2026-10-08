@@ -341,6 +341,8 @@ export class FileManager {
   private workspaceStateSaveQueues: Map<string, Promise<boolean>> = new Map();
   private recoveryStores: Map<string, DirtyBufferRecoveryStore> = new Map();
   private recoveryStoreLoads: Map<string, Promise<DirtyBufferRecoveryStore | null>> = new Map();
+  private unsavedChangePrompts: Map<string, Promise<UnsavedCloseChoice>> = new Map();
+  private unsavedChangeDialogQueue: Promise<void> = Promise.resolve();
 
   constructor(window: Window) {
     this.window = window;
@@ -468,9 +470,8 @@ export class FileManager {
 
     ipcMain.handle(
       "FileManager:confirmUnsavedChanges",
-      async (event, fileName: string) => {
-        if (!this.window.window) return "cancel";
-        return await this.confirmUnsavedChanges(fileName);
+      async (_event, fileId: string | number, fileName: string) => {
+        return await this.confirmUnsavedChanges(fileId, fileName);
       },
     );
 
@@ -976,21 +977,52 @@ export class FileManager {
     return response === 0 ? "restore" : response === 1 ? "discard" : "cancel";
   }
 
-  async confirmUnsavedChanges(fileName: string): Promise<UnsavedCloseChoice> {
-    if (!this.window.window) return "cancel";
+  confirmUnsavedChanges(
+    fileId: string | number,
+    fileName: string,
+  ): Promise<UnsavedCloseChoice> {
+    const validFileId =
+      (typeof fileId === "string" && fileId.length > 0) ||
+      (typeof fileId === "number" && Number.isSafeInteger(fileId));
+    if (
+      !validFileId ||
+      typeof fileName !== "string" ||
+      !this.window.window
+    ) return Promise.resolve("cancel");
 
-    const { response } = await dialog.showMessageBox(this.window.window, {
-      type: "warning",
-      buttons: ["Save", "Don't Save", "Cancel"],
-      defaultId: 0,
-      cancelId: 2,
-      message: `Do you want to save the changes you made to "${fileName}"?`,
-      detail: "Your changes will be lost if you don't save them.",
+    const identity = `${typeof fileId}:${fileId}`;
+    const pending = this.unsavedChangePrompts.get(identity);
+    if (pending) return pending;
+
+    const queued = this.unsavedChangeDialogQueue.then(async () => {
+      if (!this.window.window) return "cancel" as const;
+      try {
+        const { response } = await dialog.showMessageBox(this.window.window, {
+          type: "warning",
+          buttons: ["Save", "Don't Save", "Cancel"],
+          defaultId: 0,
+          cancelId: 2,
+          message: `Do you want to save the changes you made to "${fileName}"?`,
+          detail: "Your changes will be lost if you don't save them.",
+        });
+
+        if (response === 0) return "save" as const;
+        if (response === 1) return "dontSave" as const;
+        return "cancel" as const;
+      } catch {
+        return "cancel" as const;
+      }
     });
+    this.unsavedChangeDialogQueue = queued.then(() => undefined, () => undefined);
 
-    if (response === 0) return "save";
-    if (response === 1) return "dontSave";
-    return "cancel";
+    let confirmation: Promise<UnsavedCloseChoice>;
+    confirmation = queued.finally(() => {
+      if (this.unsavedChangePrompts.get(identity) === confirmation) {
+        this.unsavedChangePrompts.delete(identity);
+      }
+    });
+    this.unsavedChangePrompts.set(identity, confirmation);
+    return confirmation;
   }
 
   async getFolderContent(dirPath: string): Promise<FileItem[]> {

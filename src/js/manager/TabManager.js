@@ -8,6 +8,8 @@ class tabManager {
     this.idCounter = 0;
     this.focusGeneration = 0;
     this.focusResyncTimer = null;
+    this.pendingCloseOperations = new Map();
+    this.pendingSaveOperations = new Map();
     this.tabElements = new Map();
     this.lastVisibleTab = null;
     this.tabScroller = null;
@@ -261,7 +263,7 @@ class tabManager {
     for (const file of dirtyFiles) {
       const choice = await this.editor.savePopupManager.confirmClose(file.id);
       if (choice === "cancel") return false;
-      if (choice === "save" && (!(await file.save()) || !file.isSaved))
+      if (choice === "save" && (!(await this.saveFileOnce(file)) || !file.isSaved))
         return false;
     }
 
@@ -307,7 +309,7 @@ class tabManager {
       if (choice === "save") {
         if (this.activeFile?.id !== file.id) await this.setFocusFile(file);
         try {
-          const saved = await file.save();
+          const saved = await this.saveFileOnce(file);
           if (saved === false || !file.isSaved) return false;
         } catch (error) {
           console.error("Error saving file before deletion:", error);
@@ -318,10 +320,48 @@ class tabManager {
     return true;
   }
 
-  async closeFile(id) {
+  runCloseOperation(id, operation) {
+    const pending = this.pendingCloseOperations.get(id);
+    if (pending) return pending;
+
+    let closeOperation;
+    closeOperation = Promise.resolve()
+      .then(operation)
+      .finally(() => {
+        if (this.pendingCloseOperations.get(id) === closeOperation) {
+          this.pendingCloseOperations.delete(id);
+        }
+      });
+    this.pendingCloseOperations.set(id, closeOperation);
+    return closeOperation;
+  }
+
+  saveFileOnce(file) {
+    const pending = this.pendingSaveOperations.get(file);
+    if (pending) return pending;
+
+    let saveOperation;
+    saveOperation = Promise.resolve()
+      .then(() => file.save())
+      .finally(() => {
+        if (this.pendingSaveOperations.get(file) === saveOperation) {
+          this.pendingSaveOperations.delete(file);
+        }
+      });
+    this.pendingSaveOperations.set(file, saveOperation);
+    return saveOperation;
+  }
+
+  closeFile(id) {
     const tab = this.getFileByID(id);
-    if (!tab) return false;
+    if (!tab) return Promise.resolve(false);
     if (tab.type !== TAB_TYPES.FILE) return this.closeTab(tab);
+    return this.runCloseOperation(id, () => this.closeFileOperation(id));
+  }
+
+  async closeFileOperation(id) {
+    const tab = this.getFileByID(id);
+    if (!tab || tab.type !== TAB_TYPES.FILE) return false;
     const file = tab;
     await file.flushAutoSave?.();
 
@@ -332,7 +372,7 @@ class tabManager {
         if (choice === "save") {
           if (this.activeFile?.id !== id) await this.setFocusFile(file);
           try {
-            const saved = await file.save();
+            const saved = await this.saveFileOnce(file);
             if (saved === false || !file.isSaved) return false;
           } catch (error) {
             console.error("Error saving file before close:", error);
@@ -376,14 +416,19 @@ class tabManager {
     return true;
   }
 
-  async closeTab(tab) {
-    if (!tab || !this.getFileByID(tab.id)) return false;
+  closeTab(tab) {
+    if (!tab || !this.getFileByID(tab.id)) return Promise.resolve(false);
     if (tab.type === TAB_TYPES.FILE) return this.closeFile(tab.id);
+    return this.runCloseOperation(tab.id, () => this.closeTabOperation(tab));
+  }
+
+  async closeTabOperation(tab) {
+    if (!tab || !this.getFileByID(tab.id)) return false;
     if (tab.type === "markdown") await tab.textTab?.flushAutoSave?.();
     if (tab.type === "markdown" && tab.textTab && !tab.textTab.isSaved) {
       const choice = await this.editor.savePopupManager.confirmClose(tab.textTab.id);
       if (choice === "cancel") return false;
-      if (choice === "save" && (!(await tab.textTab.save()) || !tab.textTab.isSaved))
+      if (choice === "save" && (!(await this.saveFileOnce(tab.textTab)) || !tab.textTab.isSaved))
         return false;
     }
     if (tab.textTab?.clearRecoverySnapshot &&
