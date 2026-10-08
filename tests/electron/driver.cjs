@@ -364,10 +364,29 @@ app.whenReady().then(() => {
         );
         assert.equal(await run("document.activeElement.textContent === 'Got it'"), true);
         await run("editor.fileExplorer.clearWorkspaceIndexStats()");
-        await waitForCondition(
-          async () => (await run("document.activeElement === editor.fileExplorer.projectHeader")) === true,
-          { description: "focus to move to the project header when the badge is hidden on workspace change" },
-        );
+        try {
+          await waitForCondition(
+            async () => (await run("document.activeElement === editor.fileExplorer.projectHeader")) === true,
+            { description: "focus to move to the project header when the badge is hidden on workspace change" },
+          );
+        } catch (error) {
+          console.error("[Workspace focus diagnostic]", JSON.stringify({
+            windowFocused: win.isFocused(),
+            webContentsFocused: win.webContents.isFocused(),
+            renderer: await run(`({
+              documentFocused: document.hasFocus(),
+              activeTag: document.activeElement?.tagName || null,
+              activeClass: typeof document.activeElement?.className === "string"
+                ? document.activeElement.className : null,
+              headerTabIndex: editor.fileExplorer.projectHeader?.tabIndex ?? null,
+              headerConnected: editor.fileExplorer.projectHeader?.isConnected === true,
+              badgeHidden: editor.fileExplorer.workspaceModeBadge?.hidden === true,
+              dialogOpen: editor.fileExplorer.workspaceModeDialog?.open === true,
+              restoreTrace: window.__nceWorkspaceFocusRestoreTrace || [],
+            })`),
+          }));
+          throw error;
+        }
         assert.deepEqual(
           await run(`(() => ({
             popupOpen: editor.fileExplorer.workspaceModeDialog.open,

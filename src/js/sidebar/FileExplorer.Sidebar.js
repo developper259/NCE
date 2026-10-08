@@ -636,13 +636,40 @@ class FileExplorer extends Sidebar {
     this.workspaceModeDialogPreviousFocus = null;
     const generation = this.workspaceModeFocusGeneration =
       (this.workspaceModeFocusGeneration || 0) + 1;
+    const recordFocusRestore = (stage, extra = {}) => {
+      if (typeof window === "undefined") return;
+      const trace = window.__nceWorkspaceFocusRestoreTrace ||
+        (window.__nceWorkspaceFocusRestoreTrace = []);
+      const active = document.activeElement;
+      trace.push({
+        stage,
+        generation,
+        currentGeneration: this.workspaceModeFocusGeneration,
+        dialogOpen: this.workspaceModeDialog?.open === true,
+        documentFocused: document.hasFocus?.() ?? null,
+        activeTag: active?.tagName || null,
+        activeClass: typeof active?.className === "string" ? active.className : null,
+        ...extra,
+      });
+      if (trace.length > 20) trace.shift();
+    };
+    recordFocusRestore("scheduled", {
+      previousFocusTag: previousFocus?.tagName || null,
+      previousFocusHidden: previousFocus?.hidden === true,
+      headerConnected: this.projectHeader?.isConnected === true,
+    });
     const isAvailable = (element) => element?.isConnected &&
       !element.hidden &&
       !element.closest?.('[hidden], [aria-hidden="true"], dialog:not([open])');
     const restoreFocus = () => {
-      if (generation !== this.workspaceModeFocusGeneration ||
-          this.workspaceModeDialog?.open ||
-          this.editor?.quickPanel?.isOpen?.()) return;
+      if (generation !== this.workspaceModeFocusGeneration) {
+        recordFocusRestore("skipped-generation");
+        return;
+      }
+      if (this.workspaceModeDialog?.open || this.editor?.quickPanel?.isOpen?.()) {
+        recordFocusRestore("skipped-newer-modal");
+        return;
+      }
       const activeModal = [...(document.querySelectorAll?.(
         '[aria-modal="true"]:not(dialog), dialog[open]',
       ) || [])].some((modal) => {
@@ -651,7 +678,10 @@ class FileExplorer extends Sidebar {
           return false;
         return !modal.closest?.('[hidden], [aria-hidden="true"]');
       });
-      if (activeModal) return;
+      if (activeModal) {
+        recordFocusRestore("skipped-active-modal", { activeModal: true });
+        return;
+      }
 
       const focusTarget = isAvailable(previousFocus)
         ? previousFocus
@@ -660,9 +690,21 @@ class FileExplorer extends Sidebar {
       if (activeElement !== previousFocus &&
           activeElement !== document.body &&
           activeElement !== focusTarget &&
-          !activeElement?.closest?.("dialog:not([open])")) return;
+          !activeElement?.closest?.("dialog:not([open])")) {
+        recordFocusRestore("skipped-focus-owner", {
+          targetTag: focusTarget?.tagName || null,
+        });
+        return;
+      }
+      recordFocusRestore("focus-before", {
+        targetTag: focusTarget?.tagName || null,
+        targetClass: typeof focusTarget?.className === "string"
+          ? focusTarget.className : null,
+        targetConnected: focusTarget?.isConnected === true,
+      });
       if (typeof focusTarget?.focus === "function")
         focusTarget.focus({ preventScroll: true });
+      recordFocusRestore("focus-after");
     };
     if (typeof requestAnimationFrame === "function")
       requestAnimationFrame(restoreFocus);
