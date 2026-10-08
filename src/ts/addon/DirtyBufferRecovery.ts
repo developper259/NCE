@@ -21,11 +21,13 @@ export interface DirtyBufferRecoveryInput {
   lineCount: number;
   editVersion: number;
   diskFingerprint?: string | null;
+  mergeBaseContent?: string | null;
 }
 
 export interface DirtyBufferRecoveryMetadata {
   id: string;
   kind: "path" | "untitled";
+  untitledId: string | null;
   filePath: string | null;
   relativePath: string | null;
   displayName: string;
@@ -184,6 +186,9 @@ export class DirtyBufferRecoveryStore {
         relativePath,
         diskFingerprint: validText(input.diskFingerprint, 256)
           ? input.diskFingerprint : null,
+        mergeBaseContent: typeof input.mergeBaseContent === "string" &&
+          Buffer.byteLength(input.mergeBaseContent, "utf8") <= MAX_RECOVERY_SNAPSHOT_BYTES
+          ? input.mergeBaseContent : null,
       };
     }
     if (input.filePath || input.relativePath ||
@@ -194,6 +199,7 @@ export class DirtyBufferRecoveryStore {
       filePath: null,
       relativePath: null,
       diskFingerprint: null,
+      mergeBaseContent: null,
     };
   }
 
@@ -237,16 +243,18 @@ export class DirtyBufferRecoveryStore {
         const stats = await this.operations.lstat(target);
         if (!stats.isFile() || stats.isSymbolicLink() ||
             stats.size > MAX_RECOVERY_RECORD_BYTES) {
-          await this.operations.rm(target, { force: true });
+          console.warn("[NCE Recovery] Ignoring an unsafe or oversized recovery record.");
           return;
         }
         const parsed: unknown = JSON.parse(await this.operations.readFile(target, "utf8"));
         if (!isRecord(parsed) || parsed.schemaVersion !== DIRTY_BUFFER_RECOVERY_VERSION ||
             parsed.id !== id || !Number.isFinite(parsed.timestamp) ||
-            now - Number(parsed.timestamp) > MAX_RECOVERY_AGE_MS ||
             Number(parsed.timestamp) > now + 5 * 60 * 1000 ||
             typeof parsed.content !== "string" ||
             Buffer.byteLength(parsed.content, "utf8") > MAX_RECOVERY_SNAPSHOT_BYTES ||
+            !(parsed.mergeBaseContent === undefined || parsed.mergeBaseContent === null ||
+              (typeof parsed.mergeBaseContent === "string" &&
+                Buffer.byteLength(parsed.mergeBaseContent, "utf8") <= MAX_RECOVERY_SNAPSHOT_BYTES)) ||
             !Number.isSafeInteger(parsed.lineCount) ||
             Number(parsed.lineCount) < 1 || Number(parsed.lineCount) > MAX_RECOVERY_SNAPSHOT_LINES ||
             !validText(parsed.identity, 8192) ||
@@ -254,13 +262,13 @@ export class DirtyBufferRecoveryStore {
             crypto.createHash("sha256").update(String(parsed.identity)).digest("hex") !== id ||
             !validText(parsed.displayName, 256) ||
             !Number.isSafeInteger(parsed.editVersion) || Number(parsed.editVersion) < 0) {
-          await this.operations.rm(target, { force: true });
+          console.warn("[NCE Recovery] Ignoring an invalid recovery record.");
           return;
         }
         if (parsed.kind === "path" &&
             (!validText(parsed.filePath, 16_384) || !path.isAbsolute(parsed.filePath) ||
              typeof parsed.identity !== "string" || !parsed.identity.startsWith("path:"))) {
-          await this.operations.rm(target, { force: true });
+          console.warn("[NCE Recovery] Ignoring an invalid path recovery record.");
           return;
         }
         if (parsed.kind === "path") {
@@ -272,12 +280,19 @@ export class DirtyBufferRecoveryStore {
           if (parsed.filePath !== normalizedPath ||
               parsed.relativePath !== relativePath ||
               parsed.identity !== expectedIdentity) {
-            await this.operations.rm(target, { force: true });
+            console.warn("[NCE Recovery] Ignoring a mismatched path recovery record.");
             return;
           }
         }
         if (parsed.kind === "untitled" &&
-            (parsed.filePath || !/^untitled:[A-Za-z0-9._-]{1,160}$/.test(String(parsed.identity)))) {
+            (parsed.filePath || parsed.mergeBaseContent ||
+             !/^untitled:[A-Za-z0-9._-]{1,160}$/.test(String(parsed.identity)))) {
+          console.warn("[NCE Recovery] Ignoring an invalid untitled recovery record.");
+          return;
+        }
+        // Expire only fully validated stale snapshots. A corrupt record with
+        // an old timestamp is still preserved because its contents may matter.
+        if (now - Number(parsed.timestamp) > MAX_RECOVERY_AGE_MS) {
           await this.operations.rm(target, { force: true });
           return;
         }
@@ -293,7 +308,7 @@ export class DirtyBufferRecoveryStore {
         }
         records.push(record);
       } catch {
-        await this.operations.rm(target, { force: true }).catch(() => undefined);
+        console.warn("[NCE Recovery] Could not read a recovery record; it was preserved.");
       }
     }));
     return records.sort((a, b) => b.timestamp - a.timestamp);
@@ -351,6 +366,17 @@ export class DirtyBufferRecoveryStore {
         const records = await this.readRecords();
         await this.prune(records, bytes, id);
         const target = this.recordPath(id);
+        const knownRecord = records.some((candidate) => candidate.id === id);
+        if (!knownRecord) {
+          try {
+            await this.operations.lstat(target);
+            // Never atomically replace an unreadable record at the same stable
+            // identity: it may still contain recoverable user text.
+            return { success: false, reason: "RECOVERY_EXISTING_INVALID" };
+          } catch (error: any) {
+            if (error?.code !== "ENOENT") throw error;
+          }
+        }
         const temporary = `${target}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
         try {
           const handle = await this.operations.open(temporary, "wx", 0o600);
@@ -390,6 +416,8 @@ export class DirtyBufferRecoveryStore {
           return {
             id: record.id,
             kind: record.kind,
+            untitledId: record.kind === "untitled"
+              ? record.identity.slice("untitled:".length) : null,
             filePath: record.filePath || null,
             relativePath: record.relativePath || null,
             displayName: record.displayName,

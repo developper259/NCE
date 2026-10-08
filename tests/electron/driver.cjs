@@ -1184,7 +1184,7 @@ app.whenReady().then(() => {
           async () => {
             try {
               return await run(`(() => {
-                const file = editor.tabManager.activeFile;
+                const file = editor.tabManager.getFileByPath(${JSON.stringify(target)});
                 return file?.isLoaded === true &&
                   file.path === ${JSON.stringify(target)} &&
                   file.serializeContent() === 'const value = 1;';
@@ -1200,6 +1200,26 @@ app.whenReady().then(() => {
         );
       }
       if (phase === "reload") {
+        const recovered = await run(`(() => {
+          const file = editor.tabManager.tabs.find(tab =>
+            tab.type === "file" && !tab.path &&
+            tab.recoveryUntitledId === "electron-smoke-recovery");
+          return file ? {
+            content: file.serializeContent(),
+            dirty: file.isSaved === false,
+            noConfirmationApi: typeof window.api.confirmRecoverySnapshot === "undefined",
+          } : null;
+        })()`);
+        assert.deepEqual(recovered, {
+          content: "recovered by smoke\r\n🙂 end\n",
+          dirty: true,
+          noConfirmationApi: true,
+        }, "Electron automatically restores an untitled recovery buffer as dirty");
+        assert.equal(
+          fs.readFileSync(target, "utf8"),
+          "const value = 1;",
+          "recovery does not overwrite an existing disk file",
+        );
         const windowId = win.id;
         let finishedLoads = 0;
         let renderProcessGone = null;
@@ -1210,6 +1230,9 @@ app.whenReady().then(() => {
         win.webContents.on("did-finish-load", onDidFinishLoad);
         win.webContents.once("render-process-gone", onRenderProcessGone);
         try {
+          // Reload follows the normal unsaved-buffer workflow; the smoke
+          // dialog chooses Don't Save so recovery must carry the text forward.
+          dialog.showMessageBox = async () => ({ response: 1 });
           win.focus();
           const reloadModifier = process.platform === "darwin" ? "meta" : "control";
           win.webContents.sendInputEvent({
@@ -1236,12 +1259,35 @@ app.whenReady().then(() => {
             },
             { timeout: 10000, description: "renderer startup after window reload" },
           );
+          await run(`(async () => {
+            const file = editor.tabManager.getFileByPath(${JSON.stringify(target)});
+            if (!file) return false;
+            await editor.tabManager.setFocusFile(file);
+            return true;
+          })()`);
+          await waitForCondition(
+            async () => (await run(`(() => {
+              const file = editor.tabManager.getFileByPath(${JSON.stringify(target)});
+              return file?.isLoaded === true && file.serializeContent() === "const value = 1;";
+            })()`)) === true,
+            { timeout: 10000, description: "saved file contents to load after renderer reload" },
+          );
           assert.equal(win.id, windowId, "reload keeps the BrowserWindow alive");
           assert.equal(renderProcessGone, null, "reload must not crash the renderer");
           assert.equal(
-            await run("editor.tabManager.activeFile.serializeContent() === 'const value = 1;'"),
+            await run(`editor.tabManager.getFileByPath(${JSON.stringify(target)})?.serializeContent() === 'const value = 1;'`),
             true,
             "reload restores the saved editor session",
+          );
+          assert.deepEqual(
+            await run(`(() => {
+              const file = editor.tabManager.tabs.find(tab =>
+                tab.type === "file" && !tab.path &&
+                tab.recoveryUntitledId === "electron-smoke-recovery");
+              return file ? { content: file.serializeContent(), dirty: file.isSaved === false } : null;
+            })()`),
+            { content: "recovered by smoke\r\n🙂 end\n", dirty: true },
+            "renderer reload automatically restores the dirty buffer without duplication",
           );
         } finally {
           win.webContents.removeListener("did-finish-load", onDidFinishLoad);
@@ -1259,6 +1305,18 @@ app.whenReady().then(() => {
           true,
           "Agent sidebar is active when the session is saved",
         );
+        assert.equal(await run(`(async () => {
+          const saved = await window.api.saveRecoverySnapshot(null, {
+            untitledId: "electron-smoke-recovery",
+            displayName: "recovered.txt",
+            content: "recovered by smoke\\r\\n🙂 end\\n",
+            lineCount: 2,
+            editVersion: 1,
+          });
+          if (!saved?.success) return false;
+          editor.statesManager.clearRecoverySnapshotsOnQuit = async () => true;
+          return true;
+        })()`), true, "recovery fixture persists across the simulated clean quit");
       }
       if (phase === "reload") {
         await waitForCondition(
@@ -1272,6 +1330,7 @@ app.whenReady().then(() => {
             description: "restored Agent sidebar to finish lazy initialization",
           },
         );
+        dialog.showMessageBox = async () => ({ response: 1 });
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "crash") {

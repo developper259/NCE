@@ -646,6 +646,7 @@ class FileNode extends Tab {
           lineCount: this.lines.length,
           editVersion: version,
           diskFingerprint: this.diskFingerprint || null,
+          mergeBaseContent: this.path ? this.mergeBaseContent : null,
         });
       } catch {
         result = null;
@@ -741,6 +742,9 @@ class FileNode extends Tab {
     diskChanged = false,
     snapshotId = null,
     storeRoot = null,
+    untitledId = null,
+    mergeBaseContent = null,
+    mergeBaseFingerprint = null,
   } = {}) {
     if (typeof content !== "string") return false;
     const lines = [];
@@ -793,6 +797,11 @@ class FileNode extends Tab {
       this.mergeBaseFingerprint = null;
       this.mergeDiskFingerprint = null;
     }
+    if (typeof mergeBaseContent === "string" && this.path) {
+      this.mergeBaseContent = mergeBaseContent;
+      this.mergeBaseFingerprint = typeof mergeBaseFingerprint === "string"
+        ? mergeBaseFingerprint : null;
+    }
     this.mergeConflictCount = 0;
     this.deletedFromDisk = false;
     this.editor.historyController?.clear(this);
@@ -800,6 +809,9 @@ class FileNode extends Tab {
     this.recoveryPreviousSnapshotId = snapshotId;
     this.recoveryStoreRoot = storeRoot || null;
     this.recoveryPreviousStoreRoot = storeRoot || null;
+    if (!this.path && typeof untitledId === "string" &&
+        /^[A-Za-z0-9._-]{1,160}$/.test(untitledId))
+      this.recoveryUntitledId = untitledId;
     this.setIsSaved(false);
     this.editor.historyController?.markUnsavedBaseline?.(this);
     this.editor.lineController?.markDirtyAll?.();

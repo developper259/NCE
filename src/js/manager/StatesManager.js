@@ -6,6 +6,8 @@ class StatesManager {
     this.lastWorkspace = null;
     this.noWorkspaceState = null;
     this.restoreGeneration = 0;
+    this.restoredRecoverySnapshots = new Set();
+    this.recoveringSnapshots = new Set();
     this.persistenceSuspended = false;
     this.workspaceLimits = Object.freeze({
       tabs: 256,
@@ -118,6 +120,9 @@ class StatesManager {
       if (root && tab.path && serializedPath === null) return [];
       return [{
         id: tab.id, type: TAB_TYPES.FILE, name: tab.name, path: serializedPath,
+        recoveryUntitledId: !serializedPath &&
+          /^[A-Za-z0-9._-]{1,160}$/.test(tab.recoveryUntitledId || "")
+          ? tab.recoveryUntitledId : undefined,
         row: tab.row, column: tab.column,
         offsetX: tab.offsetX, offsetY: tab.offsetY,
         startIndex: tab.startIndex, maxLineLength: tab.maxLineLength,
@@ -275,6 +280,10 @@ class StatesManager {
     // A persisted display name is never trusted. Named files derive it from the
     // validated path; untitled buffers use a fixed application-owned label.
     const name = path ? NCEPath.basename(path) : "New file";
+    const recoveryUntitledId = !path &&
+      typeof value.recoveryUntitledId === "string" &&
+      /^[A-Za-z0-9._-]{1,160}$/.test(value.recoveryUntitledId)
+      ? value.recoveryUntitledId : undefined;
     const selectedLines = [];
     if (Array.isArray(value.selectedLines)) {
       for (const entry of value.selectedLines.slice(0, this.workspaceLimits.selectedLines)) {
@@ -294,6 +303,7 @@ class StatesManager {
     seenIds.add(id);
     return {
       id, type, name, path,
+      ...(recoveryUntitledId ? { recoveryUntitledId } : {}),
       row: this.safeInteger(value.row),
       column: this.safeInteger(value.column),
       offsetX: this.safeInteger(value.offsetX),
@@ -522,9 +532,10 @@ class StatesManager {
         fileExplorer: null,
       };
       const restored = await this.restoreWorkspaceState(safeState, root);
-      if (restored) {
-        await this.offerDirtyBufferRecovery(root);
-        await this.offerDirtyBufferRecovery(null);
+      if (restored && generation === this.restoreGeneration) {
+        await this.offerDirtyBufferRecovery(root, generation);
+        if (generation === this.restoreGeneration)
+          await this.offerDirtyBufferRecovery(null, generation);
       }
       if (restored) metrics?.mark("workspace.restore.complete");
       return restored;
@@ -563,10 +574,12 @@ class StatesManager {
     const metrics = this.editor.performanceMetrics;
     const measure = metrics?.begin("workspace.restore.noWorkspace");
     metrics?.increment("workspace.restore.noWorkspaceRequests");
+    const generation = ++this.restoreGeneration;
     try {
       await this.loadTabManagerState(state?.tabManager || null, null);
+      if (generation !== this.restoreGeneration) return false;
       this.loadSidebarState(state?.sidebar || null);
-      await this.offerDirtyBufferRecovery(null);
+      await this.offerDirtyBufferRecovery(null, generation);
       metrics?.mark("workspace.restore.noWorkspaceComplete");
       return true;
     } finally {
@@ -641,6 +654,9 @@ class StatesManager {
             }
           }
           tab = new FileNode(this.editor, runtimeId, data.name, filePath);
+          if (!filePath && typeof data.recoveryUntitledId === "string" &&
+              /^[A-Za-z0-9._-]{1,160}$/.test(data.recoveryUntitledId))
+            tab.recoveryUntitledId = data.recoveryUntitledId;
           Object.assign(tab, {
             row: data.row, column: data.column,
             offsetX: data.offsetX || 0, offsetY: data.offsetY || 0,
@@ -666,10 +682,10 @@ class StatesManager {
     else manager.refresh?.();
   }
 
-  async offerDirtyBufferRecovery(root) {
+  async offerDirtyBufferRecovery(root, generation = this.restoreGeneration) {
     const api = this.editor.api;
     if (typeof api?.listRecoverySnapshots !== "function" ||
-        typeof api?.confirmRecoverySnapshot !== "function") return 0;
+        typeof api?.readRecoverySnapshot !== "function") return 0;
     let snapshots;
     try {
       snapshots = await api.listRecoverySnapshots(root || null);
@@ -677,122 +693,117 @@ class StatesManager {
       console.warn("[NCE Recovery] Unable to list recovered buffers:", error);
       return 0;
     }
-    if (!Array.isArray(snapshots) || !snapshots.length) return 0;
+    if (generation !== this.restoreGeneration || !Array.isArray(snapshots) ||
+        !snapshots.length) return 0;
     let restored = 0;
     for (const metadata of snapshots) {
+      if (generation !== this.restoreGeneration) break;
       if (!metadata || typeof metadata.id !== "string" ||
-          typeof metadata.displayName !== "string") continue;
-      const recoveredPath = metadata.relativePath && root
-        ? this.resolveWorkspacePath(metadata.relativePath, root)
-        : metadata.filePath;
-      const existingTab = metadata.kind === "path" &&
-        typeof recoveredPath === "string"
-        ? this.editor.tabManager?.tabs?.find((tab) => tab.path &&
-          NCEPath.equals(tab.path, recoveredPath))
-        : null;
-      const existingFile = existingTab?.type === TAB_TYPES.FILE
-        ? existingTab
-        : existingTab?.textTab || null;
-      if (existingFile) {
-        existingFile.recoverySnapshotId = metadata.id;
-        existingFile.recoveryPreviousSnapshotId = metadata.id;
-        existingFile.recoveryStoreRoot = root || null;
-      }
+          !/^[a-f0-9]{64}$/.test(metadata.id) ||
+          typeof metadata.displayName !== "string" ||
+          (metadata.kind !== "path" && metadata.kind !== "untitled")) continue;
+      const recoveryKey = JSON.stringify([root || null, metadata.id]);
+      if (this.restoredRecoverySnapshots.has(recoveryKey) ||
+          this.recoveringSnapshots.has(recoveryKey)) continue;
+      this.recoveringSnapshots.add(recoveryKey);
       this.editor.performanceMetrics?.increment("recovery.snapshots.offered");
-      let choice = "cancel";
       try {
-        choice = await api.confirmRecoverySnapshot(metadata);
-      } catch (error) {
-        console.warn("[NCE Recovery] Recovery decision failed:", error);
-      }
-      if (choice === "discard") {
-        await api.deleteRecoverySnapshot?.(root || null, metadata.id);
-        if (existingFile?.recoverySnapshotId === metadata.id) {
-          existingFile.recoverySnapshotId = null;
-          existingFile.recoveryPreviousSnapshotId = null;
+        const recoveredPath = metadata.kind === "path"
+          ? root
+            ? (typeof metadata.relativePath === "string"
+              ? this.resolveWorkspacePath(metadata.relativePath, root) : null)
+            : (typeof metadata.filePath === "string" &&
+              (metadata.filePath.startsWith("/") || /^[A-Za-z]:[\\/]/.test(metadata.filePath))
+              ? metadata.filePath : null)
+          : null;
+        const untitledId = metadata.kind === "untitled" &&
+          typeof metadata.untitledId === "string" &&
+          /^[A-Za-z0-9._-]{1,160}$/.test(metadata.untitledId)
+          ? metadata.untitledId : `recovered-${metadata.id}`;
+        let snapshot;
+        try {
+          snapshot = await api.readRecoverySnapshot(root || null, metadata.id);
+        } catch {
+          console.warn("[NCE Recovery] Unable to read a recovery record; it was preserved.");
         }
-        this.editor.performanceMetrics?.increment("recovery.snapshots.discarded");
-        continue;
-      }
-      if (choice !== "restore") continue;
+        if (generation !== this.restoreGeneration) break;
+        if (!snapshot || typeof snapshot.content !== "string") continue;
 
-      let snapshot;
-      try {
-        snapshot = await api.readRecoverySnapshot?.(root || null, metadata.id);
-      } catch (error) {
-        console.warn("[NCE Recovery] Unable to read recovered buffer:", error);
-      }
-      if (!snapshot || typeof snapshot.content !== "string") {
-        await api.deleteRecoverySnapshot?.(root || null, metadata.id);
-        continue;
-      }
-
-      const manager = this.editor.tabManager;
-      let file = null;
-      let diskChanged = metadata.diskChanged === true;
-      const pathCanRestore = metadata.kind === "path" &&
-        typeof recoveredPath === "string" && metadata.diskMissing !== true;
-      if (pathCanRestore) {
-        if (existingTab?.type === TAB_TYPES.MARKDOWN) {
+        const manager = this.editor.tabManager;
+        let existingTab = null;
+        let existingFile = null;
+        if (metadata.kind === "path" && recoveredPath) {
+          existingTab = manager?.tabs?.find((tab) => tab.path &&
+            NCEPath.equals(tab.path, recoveredPath)) || null;
+          existingFile = existingTab?.type === TAB_TYPES.FILE
+            ? existingTab : existingTab?.textTab || null;
+        } else if (metadata.kind === "untitled") {
+          existingFile = manager?.tabs?.find((tab) => tab.type === TAB_TYPES.FILE &&
+            !tab.path && tab.recoveryUntitledId === untitledId) || null;
+        }
+        let file = existingFile;
+        let diskChanged = metadata.diskChanged === true;
+        const pathCanRestore = metadata.kind === "path" && recoveredPath &&
+          metadata.diskMissing !== true;
+        if (!file && pathCanRestore && generation === this.restoreGeneration) {
           try {
-            await manager.setFocusTab?.(existingTab);
-            file = await manager.switchActiveTabView?.("text");
-          } catch { file = null; }
-        } else {
-          file = existingFile || manager.getFileByPath?.(recoveredPath) || null;
-        }
-        if (!file) {
-          try { file = await manager.openFileWithPath(recoveredPath); }
-          catch { file = null; }
-        }
-        if (file && (file.type !== TAB_TYPES.FILE || file.loadError ||
-            file.largeFileMode === true)) {
-          if (file.type === TAB_TYPES.FILE) {
-            if (file.recoverySnapshotId === metadata.id) {
-              file.recoverySnapshotId = null;
-              file.recoveryPreviousSnapshotId = null;
+            if (existingTab?.type === TAB_TYPES.MARKDOWN) {
+              await manager.setFocusTab?.(existingTab);
+              file = await manager.switchActiveTabView?.("text");
+            } else {
+              file = manager.getFileByPath?.(recoveredPath) ||
+                await manager.openFileWithPath?.(recoveredPath);
             }
-            await manager.closeFile?.(file.id);
-          }
-          file = null;
+          } catch { file = null; }
         }
-      }
-
-      if (!file) {
-        file = manager.createEmptyFile?.() || null;
+        if (generation !== this.restoreGeneration) break;
+        if (file && (file.type !== TAB_TYPES.FILE || file.loadError ||
+            file.largeFileMode === true)) file = null;
         if (file) {
-          file.name = `${metadata.displayName} (Recovered)`;
-          await manager.setFocusFile?.(file);
+          file.recoverySnapshotId = metadata.id;
+          file.recoveryPreviousSnapshotId = metadata.id;
+          file.recoveryStoreRoot = root || null;
+          try {
+            await manager?.setFocusFile?.(file);
+            if (generation !== this.restoreGeneration) break;
+            await this.editor.fileLoader?.waitForFileLoaded?.(file);
+          } catch { file = null; }
+          if (generation !== this.restoreGeneration) break;
+          if (file && metadata.diskFingerprint &&
+              file.diskFingerprint !== metadata.diskFingerprint)
+            diskChanged = true;
         }
-      } else {
-        await manager.setFocusFile?.(file);
-        try { await this.editor.fileLoader?.waitForFileLoaded?.(file); }
-        catch {
-          if (file.recoverySnapshotId === metadata.id) {
-            file.recoverySnapshotId = null;
-            file.recoveryPreviousSnapshotId = null;
-          }
-          file = null;
-        }
-        if (file && metadata.diskFingerprint &&
-            file.diskFingerprint !== metadata.diskFingerprint)
-          diskChanged = true;
-      }
 
-      if (!file || typeof file.restoreRecoveredContent !== "function") {
-        console.warn("[NCE Recovery] Could not open a buffer for recovery:", metadata.displayName);
-        continue;
+        if (!file) {
+          if (generation !== this.restoreGeneration) break;
+          file = manager?.createEmptyFile?.() || null;
+          if (file) {
+            file.name = `${metadata.displayName} (Recovered)`;
+            file.recoveryUntitledId = untitledId;
+          }
+        }
+        if (generation !== this.restoreGeneration) break;
+        if (!file || typeof file.restoreRecoveredContent !== "function") {
+          console.warn("[NCE Recovery] Could not create a buffer for a recovery record.");
+          continue;
+        }
+        const applied = file.restoreRecoveredContent(snapshot.content, {
+          editVersion: snapshot.editVersion,
+          diskChanged,
+          snapshotId: metadata.id,
+          storeRoot: root || null,
+          untitledId: file.path ? null : untitledId,
+          mergeBaseContent: snapshot.mergeBaseContent,
+          mergeBaseFingerprint: snapshot.diskFingerprint,
+        });
+        if (!applied) continue;
+        this.restoredRecoverySnapshots.add(recoveryKey);
+        restored += 1;
+        this.editor.performanceMetrics?.increment("recovery.snapshots.restored");
+        this.editor.performanceMetrics?.mark("recovery.snapshot.restored");
+      } finally {
+        this.recoveringSnapshots.delete(recoveryKey);
       }
-      const applied = file.restoreRecoveredContent(snapshot.content, {
-        editVersion: snapshot.editVersion,
-        diskChanged,
-        snapshotId: metadata.id,
-        storeRoot: root || null,
-      });
-      if (!applied) continue;
-      restored += 1;
-      this.editor.performanceMetrics?.increment("recovery.snapshots.restored");
-      this.editor.performanceMetrics?.mark("recovery.snapshot.restored");
     }
     return restored;
   }

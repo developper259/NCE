@@ -463,12 +463,6 @@ export class FileManager {
         (await this.getRecoveryStore(root))?.markCommitted(id, editVersion, diskFingerprint) || false,
     );
     ipcMain.handle(
-      "FileManager:confirmRecoverySnapshot",
-      async (_event, snapshot: { displayName?: unknown; timestamp?: unknown; diskChanged?: unknown; diskMissing?: unknown }) =>
-        this.confirmRecoverySnapshot(snapshot),
-    );
-
-    ipcMain.handle(
       "FileManager:confirmUnsavedChanges",
       async (_event, fileId: string | number, fileName: string) => {
         return await this.confirmUnsavedChanges(fileId, fileName);
@@ -934,6 +928,8 @@ export class FileManager {
         editVersion: snapshot.editVersion as number,
         diskFingerprint: typeof snapshot.diskFingerprint === "string"
           ? snapshot.diskFingerprint : null,
+        mergeBaseContent: typeof snapshot.mergeBaseContent === "string"
+          ? snapshot.mergeBaseContent : null,
       };
     } else if (typeof snapshot.untitledId === "string" &&
         /^[A-Za-z0-9._-]{1,160}$/.test(snapshot.untitledId)) {
@@ -949,32 +945,6 @@ export class FileManager {
       return { success: false, reason: "INVALID_SNAPSHOT" };
     }
     return store.save(record);
-  }
-
-  async confirmRecoverySnapshot(snapshot: {
-    displayName?: unknown;
-    timestamp?: unknown;
-    diskChanged?: unknown;
-    diskMissing?: unknown;
-  }): Promise<"restore" | "discard" | "cancel"> {
-    if (!this.window.window || !validPath(snapshot?.displayName)) return "cancel";
-    const date = Number.isFinite(snapshot.timestamp)
-      ? new Date(Number(snapshot.timestamp)).toLocaleString()
-      : "an earlier session";
-    const detail = snapshot.diskChanged === true
-      ? "The file on disk changed after this recovery snapshot. Restoring keeps the recovered text in NCE and does not write to disk."
-      : snapshot.diskMissing === true
-        ? "The original file is missing. Restoring opens the recovered text as a new unsaved buffer."
-        : "Restoring opens the recovered text as an unsaved buffer and does not write to disk.";
-    const { response } = await dialog.showMessageBox(this.window.window, {
-      type: "warning",
-      buttons: ["Restore", "Discard", "Later"],
-      defaultId: 0,
-      cancelId: 2,
-      message: `Recover unsaved changes for “${snapshot.displayName}”?`,
-      detail: `Saved ${date}. ${detail}`,
-    });
-    return response === 0 ? "restore" : response === 1 ? "discard" : "cancel";
   }
 
   confirmUnsavedChanges(

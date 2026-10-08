@@ -121,9 +121,6 @@ contextBridge.exposeInMainWorld("api", {
       editVersion,
       diskFingerprint,
     ),
-  confirmRecoverySnapshot: (snapshot) =>
-    ipcRenderer.invoke("FileManager:confirmRecoverySnapshot", snapshot),
-
   confirmUnsavedChanges: (fileId, fileName) =>
     ipcRenderer.invoke("FileManager:confirmUnsavedChanges", fileId, fileName),
 

@@ -42,6 +42,7 @@ function snapshot(overrides = {}) {
     content: "first\r\nsecond\n",
     lineCount: 2,
     editVersion: 1,
+    mergeBaseContent: null,
     ...overrides,
   };
 }
@@ -241,20 +242,44 @@ test("recovery refuses a symlinked storage directory", async () => {
   }
 });
 
-test("corrupt and aged recovery records are removed during listing", async () => {
+test("corrupt recovery records are preserved and aged records are expired during listing", async () => {
   const root = await temporaryRoot();
   let now = 1_800_000_000_000;
   try {
     const store = new DirtyBufferRecoveryStore(root, { now: () => now });
     const aged = await store.save(snapshot({ identity: "untitled:aged" }));
     const corrupt = await store.save(snapshot({ identity: "untitled:corrupt" }));
+    const agedCorrupt = await store.save(snapshot({ identity: "untitled:aged-corrupt" }));
     await fsp.writeFile(store.recoveryRoot + `/${corrupt.id}.json`, "{broken", "utf8");
+    const agedCorruptRecord = await store.read(agedCorrupt.id);
+    await fsp.writeFile(
+      store.recoveryRoot + `/${agedCorrupt.id}.json`,
+      JSON.stringify({ ...agedCorruptRecord, timestamp: now - MAX_RECOVERY_AGE_MS - 1, content: null }),
+      "utf8",
+    );
     const abandonedTemp = path.join(store.recoveryRoot, `${"a".repeat(64)}.1234.${"b".repeat(16)}.tmp`);
     await fsp.writeFile(abandonedTemp, "interrupted atomic write", "utf8");
     now += MAX_RECOVERY_AGE_MS + 1;
-    assert.deepEqual(await store.list(), []);
+    const originalWarn = console.warn;
+    console.warn = () => {};
+    let listed;
+    try { listed = await store.list(); }
+    finally { console.warn = originalWarn; }
+    assert.deepEqual(listed, []);
     assert.equal(await fsp.access(store.recoveryRoot + `/${aged.id}.json`).then(() => true, () => false), false);
-    assert.equal(await fsp.access(store.recoveryRoot + `/${corrupt.id}.json`).then(() => true, () => false), false);
+    assert.equal(await fsp.access(store.recoveryRoot + `/${corrupt.id}.json`).then(() => true, () => false), true);
+    assert.equal(await fsp.access(store.recoveryRoot + `/${agedCorrupt.id}.json`).then(() => true, () => false), true);
+    const preservedCorruptBytes = await fsp.readFile(
+      store.recoveryRoot + `/${corrupt.id}.json`, "utf8",
+    );
+    assert.equal((await store.save(snapshot({
+      identity: "untitled:corrupt", content: "new content",
+    }))).reason, "RECOVERY_EXISTING_INVALID");
+    assert.equal(await fsp.readFile(store.recoveryRoot + `/${corrupt.id}.json`, "utf8"), preservedCorruptBytes);
+    const originalWarnRead = console.warn;
+    console.warn = () => {};
+    try { assert.equal(await store.read(corrupt.id), null); }
+    finally { console.warn = originalWarnRead; }
     assert.equal(await fsp.access(abandonedTemp).then(() => true, () => false), false);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
@@ -503,29 +528,33 @@ test("save snapshots and Save As keep committed recovery cleanup best effort", a
   }
 });
 
-test("startup recovery restores only after explicit choice and does not write to disk", async () => {
+test("startup recovery restores automatically, retains merge base, and never writes to disk", async () => {
   const { editor } = createEditor();
   const metadata = {
     id: "b".repeat(64), kind: "path", filePath: "/workspace/source.txt",
+    relativePath: "source.txt",
     displayName: "source.txt", diskFingerprint: "4:10", diskChanged: true,
     diskMissing: false, timestamp: Date.now(),
   };
   const file = new FileNode(editor, 2, "source.txt", metadata.filePath);
   file.diskFingerprint = "9:20";
-  const calls = { confirmed: 0, read: 0, deleted: 0, saved: 0 };
+  const calls = { read: 0, deleted: 0, saved: 0 };
   editor.tabManager = {
     tabs: [file], activeFile: file,
     getFileByPath(candidate) { return candidate === file.path ? file : null; },
     async setFocusFile(candidate) { this.activeFile = candidate; return candidate; },
+    refresh() {},
   };
   editor.fileLoader = { async waitForFileLoaded() {} };
   editor.lineController.markDirtyAll = () => {};
   editor.api = {
     async listRecoverySnapshots() { return [metadata]; },
-    async confirmRecoverySnapshot(value) { calls.confirmed++; assert.equal(value.id, metadata.id); return "restore"; },
     async readRecoverySnapshot() {
       calls.read++;
-      return { content: "recovered local text", editVersion: 4 };
+      return {
+        content: "local edit\ntwo\n", editVersion: 4,
+        diskFingerprint: "4:10", mergeBaseContent: "one\ntwo\n",
+      };
     },
     async deleteRecoverySnapshot() { calls.deleted++; return true; },
     async saveFile() { calls.saved++; return file.path; },
@@ -533,13 +562,28 @@ test("startup recovery restores only after explicit choice and does not write to
   editor.fileExplorer = { rootPath: "/workspace" };
   const manager = new StatesManager(editor);
   assert.equal(await manager.offerDirtyBufferRecovery("/workspace"), 1);
-  assert.equal(calls.confirmed, 1);
+  assert.equal(await manager.offerDirtyBufferRecovery("/workspace"), 0);
   assert.equal(calls.read, 1);
   assert.equal(calls.deleted, 0);
   assert.equal(calls.saved, 0);
-  assert.equal(file.serializeContent(), "recovered local text");
+  assert.equal(file.serializeContent(), "local edit\ntwo\n");
   assert.equal(file.externalModified, true);
+  assert.equal(file.mergeBaseContent, "one\ntwo\n");
+  assert.equal(file.mergeBaseFingerprint, "4:10");
   assert.equal(file.isSaved, false);
+
+  let writes = 0;
+  editor.fileLoader.waitForFileLoaded = async () => {};
+  editor.api.readFileForMerge = async () => ({
+    success: true, content: "one\nTWO\n", fingerprint: "9:21",
+  });
+  editor.api.saveFile = async () => { writes++; return file.path; };
+  const merged = await file.mergeExternalChanges();
+  assert.equal(merged.merged, true);
+  assert.equal(file.serializeContent(), "local edit\nTWO\n");
+  assert.equal(file.externalModified, false);
+  assert.equal(writes, 0);
+  assert.equal(calls.saved, 0);
   file.disposeRecovery();
 });
 
@@ -570,10 +614,10 @@ test("restoring a Markdown buffer switches its preview tab back to text first", 
   editor.api = {
     async listRecoverySnapshots() {
       return [{ id: "9".repeat(64), kind: "path", filePath: pathValue,
+        relativePath: "README.md",
         displayName: "README.md", timestamp: Date.now(), diskMissing: false,
         diskChanged: false }];
     },
-    async confirmRecoverySnapshot() { return "restore"; },
     async readRecoverySnapshot() { return { content: "recovered markdown", editVersion: 3 }; },
     async deleteRecoverySnapshot() { return true; },
   };
@@ -584,22 +628,157 @@ test("restoring a Markdown buffer switches its preview tab back to text first", 
   file.disposeRecovery();
 });
 
-test("declining recovery deletes the snapshot while cancelling leaves it available", async () => {
-  for (const choice of ["discard", "cancel"]) {
-    const { editor } = createEditor();
-    const calls = { read: 0, deleted: 0 };
-    editor.api = {
-      async listRecoverySnapshots() { return [{ id: "c".repeat(64), displayName: "Untitled", kind: "untitled" }]; },
-      async confirmRecoverySnapshot() { return choice; },
-      async readRecoverySnapshot() { calls.read++; return null; },
-      async deleteRecoverySnapshot() { calls.deleted++; return true; },
+test("missing-file recovery creates an untitled dirty buffer without recreating the file", async () => {
+  const { editor } = createEditor();
+  const metadata = {
+    id: "c".repeat(64), kind: "path", filePath: "/workspace/missing.txt",
+    relativePath: "missing.txt", displayName: "missing.txt", diskMissing: true,
+    diskChanged: false,
+  };
+  const tabs = [];
+  let creates = 0, writes = 0;
+  editor.tabManager = {
+    tabs,
+    createEmptyFile() {
+      creates++;
+      const file = new FileNode(editor, creates, "New file", null);
+      tabs.push(file);
+      return file;
+    },
+    refresh() {},
+  };
+  editor.api = {
+    async listRecoverySnapshots() { return [metadata]; },
+    async readRecoverySnapshot() { return { content: "kept locally", editVersion: 2 }; },
+    async saveFile() { writes++; return metadata.filePath; },
+  };
+  editor.fileExplorer = { rootPath: "/workspace" };
+  const manager = new StatesManager(editor);
+  assert.equal(await manager.offerDirtyBufferRecovery("/workspace"), 1);
+  assert.equal(creates, 1);
+  assert.equal(tabs[0].path, null);
+  assert.equal(tabs[0].serializeContent(), "kept locally");
+  assert.equal(tabs[0].isSaved, false);
+  assert.equal(writes, 0);
+  tabs[0].disposeRecovery();
+});
+
+test("untitled recovery is automatic, idempotent, and keeps identity across restart", async () => {
+  const metadata = {
+    id: "d".repeat(64), kind: "untitled", untitledId: "stable-buffer",
+    displayName: "Untitled", diskMissing: false, diskChanged: false,
+  };
+  const snapshot = { content: "first\r\n🙂 last\n", editVersion: 3 };
+  let reads = 0, created = 0;
+  const api = {
+    async listRecoverySnapshots() { return [metadata]; },
+    async readRecoverySnapshot() { reads++; return snapshot; },
+  };
+  function attachTabManager(editor) {
+    const manager = {
+      tabs: [], activeTab: null, activeFile: null, idCounter: 1,
+      getNextID() { return ++this.idCounter; },
+      async setFocusFile(file) { this.activeTab = this.activeFile = file; },
+      async setFocusTab(tab) { this.activeTab = tab; this.activeFile = null; },
+      createEmptyFile() {
+        created++;
+        const file = new FileNode(editor, this.getNextID(), "New file", null);
+        this.tabs.push(file); this.activeTab = this.activeFile = file;
+        return file;
+      },
+      refresh() {},
     };
-    editor.tabManager = { tabs: [] };
-    const manager = new StatesManager(editor);
-    assert.equal(await manager.offerDirtyBufferRecovery(null), 0);
-    assert.equal(calls.read, 0);
-    assert.equal(calls.deleted, choice === "discard" ? 1 : 0);
+    editor.tabManager = manager;
+    return manager;
   }
+  const { editor } = createEditor();
+  editor.api = api;
+  const tabs = attachTabManager(editor);
+  const manager = new StatesManager(editor);
+  assert.equal(await manager.offerDirtyBufferRecovery(null), 1);
+  assert.equal(await manager.offerDirtyBufferRecovery(null), 0);
+  assert.equal(tabs.tabs.length, 1);
+  assert.equal(created, 1);
+  const recovered = tabs.tabs[0];
+  assert.equal(recovered.recoveryUntitledId, "stable-buffer");
+  assert.equal(recovered.serializeContent(), snapshot.content);
+  assert.equal(recovered.isSaved, false);
+  assert.deepEqual(Array.from(recovered.lineEndings), ["\r\n", "\n"]);
+  assert.equal(recovered.hasFinalNewline, true);
+  const savedState = manager.sanitizeTabManager(manager.getTabManagerState(null));
+  assert.equal(savedState.tabs[0].recoveryUntitledId, "stable-buffer");
+
+  const restarted = createEditor();
+  restarted.editor.api = api;
+  const restartedTabs = attachTabManager(restarted.editor);
+  const restartedManager = new StatesManager(restarted.editor);
+  await restartedManager.restoreNoWorkspaceState({ tabManager: savedState });
+  assert.equal(restartedTabs.tabs.length, 1);
+  assert.equal(restartedTabs.tabs[0].recoveryUntitledId, "stable-buffer");
+  assert.equal(restartedTabs.tabs[0].serializeContent(), snapshot.content);
+  assert.equal(reads, 2);
+  recovered.disposeRecovery();
+  restartedTabs.tabs[0].disposeRecovery();
+});
+
+test("workspace switching invalidates recovery results while snapshots are being read", async () => {
+  const { editor } = createEditor();
+  let finishRead;
+  const metadata = {
+    id: "e".repeat(64), kind: "untitled", untitledId: "switch-buffer",
+    displayName: "Untitled",
+  };
+  const tabs = [];
+  editor.tabManager = {
+    tabs,
+    createEmptyFile() {
+      const file = new FileNode(editor, 1, "New file", null);
+      tabs.push(file);
+      return file;
+    },
+  };
+  editor.api = {
+    async listRecoverySnapshots() { return [metadata]; },
+    readRecoverySnapshot() {
+      return new Promise((resolve) => { finishRead = resolve; });
+    },
+  };
+  const manager = new StatesManager(editor);
+  const pending = manager.offerDirtyBufferRecovery("/workspace", 0);
+  await new Promise((resolve) => setImmediate(resolve));
+  manager.restoreGeneration++;
+  finishRead({ content: "stale workspace buffer", editVersion: 1 });
+  assert.equal(await pending, 0);
+  assert.equal(tabs.length, 0);
+});
+
+test("startup without a workspace restores recovery snapshots automatically", async () => {
+  const { editor } = createEditor();
+  editor.fileExplorer = { rootPath: "" };
+  const tabs = [];
+  editor.tabManager = {
+    tabs, activeTab: null, activeFile: null,
+    createEmptyFile() {
+      const file = new FileNode(editor, 1, "New file", null);
+      tabs.push(file); this.activeTab = this.activeFile = file;
+      return file;
+    },
+    async setFocusFile(file) { this.activeTab = this.activeFile = file; },
+    refresh() {},
+  };
+  editor.api = {
+    async listRecoverySnapshots() {
+      return [{ id: "f".repeat(64), kind: "untitled", untitledId: "no-workspace",
+        displayName: "Untitled" }];
+    },
+    async readRecoverySnapshot() { return { content: "restored", editVersion: 1 }; },
+  };
+  assert.equal(await new StatesManager(editor).restoreNoWorkspaceState({
+    tabManager: null, sidebar: null,
+  }), true);
+  assert.equal(tabs.length, 1);
+  assert.equal(tabs[0].serializeContent(), "restored");
+  tabs[0].disposeRecovery();
 });
 
 test("clean quit clears orphaned recovery records for the active workspace and untitled scope", async () => {
