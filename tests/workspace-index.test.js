@@ -276,6 +276,68 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
   }
 });
 
+test("Workspace performance profiles stay isolated through release and stale stats", async () => {
+  const largeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-profile-isolated-large-"));
+  const normalRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-profile-isolated-normal-"));
+  const index = new WorkspaceIndex();
+  try {
+    await fsp.writeFile(path.join(largeRoot, "readme.md"), "large workspace cache\n");
+    await fsp.writeFile(path.join(normalRoot, "readme.md"), "normal workspace\n");
+    const largeEntries = Array.from({
+      length: LARGE_WORKSPACE_MODE_THRESHOLDS.files * LARGE_WORKSPACE_MODE_THRESHOLDS.pressureScore,
+    }, (_, entryIndex) => {
+      const name = `cached-${entryIndex}.js`;
+      return {
+        relativePath: name,
+        name,
+        extension: ".js",
+        size: 0,
+        mtimeMs: 1,
+        type: "file",
+        openable: true,
+      };
+    });
+    assert.equal(index.primeFromScan(largeRoot, largeEntries), true);
+    await index.flush(largeRoot);
+    await index.build(normalRoot);
+
+    assert.deepEqual(index.getPerformanceProfile(largeRoot), {
+      mode: "large",
+      indexWatcherDebounceMs: 500,
+      maxCachedSearchSessions: 4,
+      indexProbeConcurrency: 4,
+    });
+    assert.deepEqual(index.getPerformanceProfile(normalRoot), {
+      mode: "normal",
+      indexWatcherDebounceMs: 150,
+      maxCachedSearchSessions: 8,
+      indexProbeConcurrency: 8,
+    });
+
+    await index.release(largeRoot);
+    assert.equal(index.getPerformanceProfile(largeRoot).mode, "large");
+    assert.equal(index.getPerformanceProfile(normalRoot).mode, "normal");
+
+    await index.invalidate(largeRoot);
+    assert.equal(index.getStats(largeRoot).ready, false);
+    assert.equal(index.getStats(largeRoot).largeWorkspaceMode, true);
+    assert.equal(index.getPerformanceProfile(largeRoot).indexProbeConcurrency, 4);
+    await index.build(largeRoot);
+    assert.equal(index.getStats(largeRoot).largeWorkspaceMode, false);
+    assert.equal(index.getPerformanceProfile(largeRoot).mode, "normal");
+    assert.equal(index.getPerformanceProfile(normalRoot).mode, "normal");
+
+    await index.release(largeRoot, { preserveCache: false });
+    assert.equal(index.getStats(largeRoot).ready, false);
+    assert.equal(index.getPerformanceProfile(largeRoot).mode, "normal");
+  } finally {
+    await Promise.all([
+      fsp.rm(largeRoot, { recursive: true, force: true }),
+      fsp.rm(normalRoot, { recursive: true, force: true }),
+    ]);
+  }
+});
+
 test("WorkspaceIndex scheduled cache revalidation rebuilds the persisted snapshot", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-scheduled-reconcile-"));
   const originalSetTimeout = global.setTimeout;
