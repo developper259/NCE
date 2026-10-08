@@ -316,8 +316,8 @@ test("Output transform layers skip repeated height and transform mutations", () 
 
   controller.applyOutputTransform();
   controller.applyOutputTransform();
-  for (const layer of layers) {
-    assert.equal(layer.style.height, "220px");
+  for (const [index, layer] of layers.entries()) {
+    assert.equal(layer.style.height, index === 1 ? "219px" : "220px");
     assert.equal(layer.style.transform, "translate(0px, -4px)");
     assert.equal(layer.styleWrites.get("height"), 1);
     assert.equal(layer.styleWrites.get("transform"), 1);

@@ -80,3 +80,22 @@ test("gutter writes are coalesced and large-to-small file switches shrink immedi
   assert.deepEqual(widths, [80, 50]);
   assert.deepEqual(baseXs, [90, 60]);
 });
+
+test("line number layer is one pixel shorter than rendered editor output", () => {
+  const { controller } = makeController({ lines: [], totalLines: 0 });
+  const heights = {};
+  for (const name of ["outputFast", "lineNumberFast", "selectOutputFast", "searchOutputFast"])
+    controller[name] = {
+      setHeight(height) { heights[name] = height; },
+      setTransform() {},
+    };
+  controller.getRenderedLayerHeight = () => 480;
+  controller.getOutputTransform = () => "translate(0px, 0px)";
+
+  controller.applyOutputTransform();
+
+  assert.equal(heights.outputFast, "480px");
+  assert.equal(heights.lineNumberFast, "479px");
+  assert.equal(heights.selectOutputFast, "480px");
+  assert.equal(heights.searchOutputFast, "480px");
+});

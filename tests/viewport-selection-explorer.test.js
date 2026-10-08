@@ -166,8 +166,8 @@ test("fractional vertical scroll keeps the rendered layers covering the viewport
       controller.renderedLineCount * controller.getLineHeight() - offsetY;
     assert.ok(lastSlotBottom >= controller.getViewportHeight());
 
-    for (const layer of Object.values(layers)) {
-      assert.equal(layer.style.height, "120px");
+    for (const [name, layer] of Object.entries(layers)) {
+      assert.equal(layer.style.height, name === "lineNumberOutput" ? "119px" : "120px");
       assert.equal(layer.style.transform, `translate(0px, ${-offsetY}px)`);
     }
   }

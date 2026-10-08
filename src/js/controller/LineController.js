@@ -305,10 +305,12 @@ class LineController {
   applyOutputTransform() {
     const transform = this.getOutputTransform();
 
-    const height = `${this.getRenderedLayerHeight()}px`;
+    const renderedHeight = this.getRenderedLayerHeight();
+    const height = `${renderedHeight}px`;
+    const lineNumberHeight = `${Math.max(0, renderedHeight - 1)}px`;
 
     this.outputFast?.setHeight(height);
-    this.lineNumberFast?.setHeight(height);
+    this.lineNumberFast?.setHeight(lineNumberHeight);
     this.selectOutputFast?.setHeight(height);
     this.searchOutputFast?.setHeight(height);
 
