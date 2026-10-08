@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const asar = require('@electron/asar');
+const postcss = require('postcss');
 const { normalizeArchivePath, toAsarLookupPath } = require('./archive-paths');
 function find(directory) {
   if (!fs.existsSync(directory)) return [];
@@ -60,8 +61,21 @@ for (const archive of archives) {
   assert.ok(cssPaths.length, `${archive}: no packaged renderer CSS bundle referenced by HTML`);
 
   let fontReferences = 0;
+  const flaticonFamilies = new Set();
   for (const cssPath of cssPaths) {
     const css = asar.extractFile(archive, toAsarLookupPath(cssPath)).toString();
+    postcss.parse(css).walkAtRules('font-face', rule => {
+      const family = rule.nodes?.find(node =>
+        node.type === 'decl' && node.prop.toLowerCase() === 'font-family',
+      )?.value.replace(/["']/g, '').trim();
+      if (!family?.startsWith('uicons-')) return;
+      flaticonFamilies.add(family);
+      const source = rule.nodes?.find(node =>
+        node.type === 'decl' && node.prop.toLowerCase() === 'src',
+      )?.value || '';
+      assert.match(source, /\.woff2/ , `${archive}: ${family} has no WOFF2 source`);
+      assert.doesNotMatch(source, /\.woff(?!2)|\.eot/, `${archive}: ${family} includes a legacy font source`);
+    });
     for (const match of css.matchAll(/url\(([^)]+)\)/g)) {
       const reference = match[1].trim().replace(/^['"]|['"]$/g, '');
       if (/^(data:|https?:|#)/i.test(reference)) continue;
@@ -72,5 +86,9 @@ for (const archive of archives) {
     }
   }
   assert.ok(fontReferences, `${archive}: no packaged font referenced by renderer CSS`);
+  assert.deepEqual([...flaticonFamilies].sort(), [
+    'uicons-brands',
+    'uicons-regular-rounded',
+  ], `${archive}: expected only the used Flaticon families`);
   console.log(`Packaged runtime verified: ${path.relative(process.cwd(), archive)} (${cssPaths.length} CSS bundle(s), ${fontReferences} font reference(s))`);
 }

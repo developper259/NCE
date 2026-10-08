@@ -51,6 +51,16 @@ app.whenReady().then(() => {
         ),
         true,
       );
+      assert.equal(
+        await run(`(async () => {
+          const regular = await document.fonts.load('16px "uicons-regular-rounded"', '\\uf153');
+          const brands = await document.fonts.load('16px "uicons-brands"', '\\uf178');
+          return regular.some(font => font.family === 'uicons-regular-rounded') &&
+            brands.some(font => font.family === 'uicons-brands');
+        })()`),
+        true,
+        "Flaticon regular and brand WOFF2 fonts load in Chromium",
+      );
       // The main-process preload handshake can complete before asynchronous
       // session restoration, especially on Windows CI. Do not snapshot
       // activeFile or dispatch shortcuts while startup is still mutating it.

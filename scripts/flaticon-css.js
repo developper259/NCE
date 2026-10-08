@@ -104,6 +104,16 @@ function buildFlaticonCss({
           stats.removedFontFaces += 1;
           rule.remove();
         } else {
+          const source = rule.nodes?.find((node) =>
+            node.type === "decl" && node.prop.toLowerCase() === "src",
+          );
+          const woff2Source = source?.value.match(
+            /(?:^|,)\s*(url\([^)]*\.woff2(?:[?#][^)]*)?\)\s*format\(\s*(?:"woff2"|'woff2'|woff2)\s*\))/i,
+          )?.[1];
+          if (!source || !woff2Source) {
+            throw new Error(`Required Flaticon family has no WOFF2 source: ${family}`);
+          }
+          source.value = woff2Source.trim();
           stats.retainedFontFaces += 1;
         }
       });

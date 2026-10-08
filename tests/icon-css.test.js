@@ -76,15 +76,16 @@ test("Flaticon CSS retains source and dynamic icons with reproducible mappings",
   assert.equal(first.stats.retainedFontFaces, 2);
   assert.equal(first.stats.removedFontFaces, 7);
   assert.equal(fontFaces(first.css).length, 2);
+  for (const face of fontFaces(first.css)) {
+    assert.match(face, /\.woff2/);
+    assert.match(face, /format\(["']?woff2["']?\)/);
+    assert.doesNotMatch(face, /\.woff(?!2)|\.eot/);
+  }
   assert.deepEqual(
     [...collectFlaticonFontFiles(first.css)].sort(),
     [
-      "uicons-brands-PQBQF6T3.woff",
       "uicons-brands-XJPKRNBN.woff2",
-      "uicons-brands-ZJWE2ELA.eot",
-      "uicons-regular-rounded-ESQGLQQ4.eot",
       "uicons-regular-rounded-J3WOUERV.woff2",
-      "uicons-regular-rounded-KDJ23353.woff",
     ].sort(),
   );
   assert.match(first.css, /sourceMappingURL=all\.css\.map/);
