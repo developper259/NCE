@@ -41,27 +41,13 @@
     },
     "files": [
       "dist/**/*",
-      "assets/**/*",
+      "assets/logo/NCE/dark-logo.png",
       "package.json",
       {
-        "from": "src/config/",
-        "to": "config/",
+        "from": "src/js/main/",
+        "to": "js/main/",
         "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "src/js/",
-        "to": "js/",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "src/css/",
-        "to": "css/",
-        "filter": [
-          "**/*"
+          "Preload.js"
         ]
       }
     ],
