@@ -422,7 +422,7 @@ export class WorkspaceIndex {
     freshness?: WorkspaceIndexFreshness,
   ): WorkspaceIndexSnapshot | null {
     if (!freshness) return snapshot;
-    if (this.consumeNeedsReconcile(root)) this.scheduleReconcile(root);
+    if (this.consumeNeedsReconcile(root)) this.scheduleReconcile(root, true);
     if (freshness === "require-current" && this.requiresReconcile(root))
       return null;
     return snapshot;
@@ -557,14 +557,14 @@ export class WorkspaceIndex {
     });
   }
 
-  scheduleReconcile(rootPath: string): void {
+  scheduleReconcile(rootPath: string, force = false): void {
     if (typeof rootPath !== "string" || !rootPath.trim()) return;
     const root = path.resolve(rootPath);
     const previousTimer = this.reconcileTimers.get(root);
     if (previousTimer) clearTimeout(previousTimer);
     this.reconcileTimers.set(root, setTimeout(() => {
       this.reconcileTimers.delete(root);
-      void this.reconcile(root, true);
+      void this.reconcile(root, force);
     }, this.getWatcherDebounceMs(root)));
   }
 

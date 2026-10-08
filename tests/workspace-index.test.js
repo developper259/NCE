@@ -276,6 +276,48 @@ test("WorkspaceIndex derives large mode from index dimensions and preserves watc
   }
 });
 
+test("WorkspaceIndex scheduled cache revalidation rebuilds the persisted snapshot", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-scheduled-reconcile-"));
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  let fireTimer;
+  try {
+    await fsp.writeFile(path.join(root, "old.txt"), "old\n");
+    const writer = new WorkspaceIndex();
+    assert.ok(await writer.build(root));
+    await writer.flush(root);
+
+    await fsp.rm(path.join(root, "old.txt"));
+    await fsp.writeFile(path.join(root, "new.js"), "export const fresh = true;\n");
+
+    global.setTimeout = (callback) => {
+      fireTimer = callback;
+      return { scheduledWorkspaceReconcile: true };
+    };
+    global.clearTimeout = () => {};
+    const reader = new WorkspaceIndex();
+    let notifyReconciled;
+    const reconciled = new Promise((resolve) => { notifyReconciled = resolve; });
+    reader.onReconciled = (workspaceRoot) => notifyReconciled(workspaceRoot);
+
+    const cached = await reader.load(root, {
+      freshness: "allow-stale-while-revalidate",
+    });
+    assert.deepEqual(cached.entries.map((entry) => entry.relativePath), ["old.txt"]);
+    assert.equal(typeof fireTimer, "function");
+    fireTimer();
+
+    const result = await reconciled;
+    await reader.flush(root);
+    assert.equal(result, path.resolve(root));
+    assert.deepEqual((await reader.load(root)).entries.map((entry) => entry.relativePath), ["new.js"]);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("WorkspaceIndex bounds file probes and keeps deterministic order in each profile", async () => {
   const roots = [];
   const createRoot = async (prefix) => {
