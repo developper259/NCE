@@ -144,13 +144,118 @@
   padding: 2px 5px;
   border: 1px solid var(--border-primary);
   border-radius: 8px;
+  appearance: none;
+  background: transparent;
   color: var(--text-secondary);
+  font-family: inherit;
   font-size: 8px;
   font-weight: 600;
   letter-spacing: 0.2px;
   line-height: 1.2;
   white-space: nowrap;
-  cursor: help;
+  cursor: pointer;
+}
+
+.file-explorer-large-workspace:hover,
+.file-explorer-large-workspace:focus-visible {
+  border-color: var(--border-secondary);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.file-explorer-large-workspace-dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: auto;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+}
+
+.file-explorer-large-workspace-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.file-explorer-large-workspace-dialog-content {
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+  font-size: 12px;
+}
+
+.file-explorer-large-workspace-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.file-explorer-large-workspace-dialog h3 {
+  margin: 2px 0 -4px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.file-explorer-large-workspace-dialog p {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.file-explorer-large-workspace-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  margin: 0;
+  padding: 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-primary);
+  border-radius: 5px;
+}
+
+.file-explorer-large-workspace-stats dt {
+  color: var(--text-secondary);
+}
+
+.file-explorer-large-workspace-stats dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.file-explorer-large-workspace-optimizations {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.file-explorer-large-workspace-availability {
+  color: var(--text-primary) !important;
+}
+
+.file-explorer-large-workspace-close {
+  justify-self: end;
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.file-explorer-large-workspace-close:hover,
+.file-explorer-large-workspace-close:focus-visible {
+  border-color: var(--border-secondary);
+  outline: none;
 }
 
 .empty-state-message {

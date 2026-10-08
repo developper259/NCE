@@ -174,6 +174,187 @@ app.whenReady().then(() => {
         assert.equal(settingsColdStart.agentBundleLoaded, false);
         assert.equal(settingsColdStart.markdownBundleLoaded, false);
         assert.deepEqual(settingsColdStart.rendererErrors, []);
+        const largeWorkspaceRootA = JSON.stringify(path.join(directory, "workspace-a"));
+        const largeWorkspaceRootB = JSON.stringify(path.join(directory, "workspace-b"));
+        const largeWorkspaceOpen = await run(`(() => {
+          const explorer = editor.fileExplorer;
+          explorer.rootPath = ${largeWorkspaceRootA};
+          explorer.projectName = "Workspace A";
+          explorer.files = [];
+          explorer.isLoaded = true;
+          editor.sidebarManager.openMenu("file-explorer");
+          explorer.refresh();
+          const shell = explorer.shell;
+          const badge = explorer.workspaceModeBadge;
+          const stats = {
+            root: explorer.rootPath,
+            ready: false,
+            fileCount: 12001,
+            directoryCount: 1600,
+            totalIndexedBytes: 3 * 1024 ** 3,
+            pressureScore: 3,
+            largeWorkspaceMode: true,
+            generatedAt: Date.now(),
+          };
+          if (!explorer.applyWorkspaceIndexStats(stats))
+            throw Error("Large workspace stats were rejected for the active workspace");
+          badge.focus();
+          badge.click();
+          const dialog = explorer.workspaceModeDialog;
+          if (!dialog?.open) throw Error("Large Workspace Mode information did not open");
+          explorer.showWorkspaceModeDialog();
+          return {
+            badgeTag: badge.tagName,
+            badgeVisible: !badge.hidden,
+            badgeExpanded: badge.getAttribute("aria-expanded"),
+            headerExpanded: explorer.projectExpanded,
+            dialogCount: document.querySelectorAll("#file-explorer-large-workspace-dialog").length,
+            dialogRole: dialog.getAttribute("role"),
+            dialogModal: dialog.getAttribute("aria-modal"),
+            dialogTitle: dialog.querySelector("h2")?.textContent,
+            dialogDescription: dialog.querySelector("#large-workspace-dialog-description")?.textContent,
+            files: dialog.querySelector('[data-stat="files"]')?.textContent.replace(/[^0-9]/g, ""),
+            directories: dialog.querySelector('[data-stat="directories"]')?.textContent.replace(/[^0-9]/g, ""),
+            indexedSize: dialog.querySelector('[data-stat="size"]')?.textContent,
+            indexStatus: dialog.querySelector('[data-stat="status"]')?.textContent,
+            optimizationCount: dialog.querySelectorAll(".file-explorer-large-workspace-optimizations li").length,
+            allFeaturesAvailable: dialog.textContent.includes("All editor features remain available."),
+            focusInitial: document.activeElement === dialog.querySelector(".file-explorer-large-workspace-close"),
+            shellPreserved: explorer.shell === shell,
+          };
+        })()`);
+        assert.equal(largeWorkspaceOpen.badgeTag, "BUTTON");
+        assert.equal(largeWorkspaceOpen.badgeVisible, true);
+        assert.equal(largeWorkspaceOpen.badgeExpanded, "true");
+        assert.equal(largeWorkspaceOpen.headerExpanded, true);
+        assert.equal(largeWorkspaceOpen.dialogCount, 1);
+        assert.equal(largeWorkspaceOpen.dialogRole, "dialog");
+        assert.equal(largeWorkspaceOpen.dialogModal, "true");
+        assert.equal(largeWorkspaceOpen.dialogTitle, "Large Workspace Mode");
+        assert.match(largeWorkspaceOpen.dialogDescription, /automatically adjusts background operations/);
+        assert.equal(largeWorkspaceOpen.files, "12001");
+        assert.equal(largeWorkspaceOpen.directories, "1600");
+        assert.equal(largeWorkspaceOpen.indexedSize, "3.0 GiB");
+        assert.equal(largeWorkspaceOpen.indexStatus, "Updating");
+        assert.equal(largeWorkspaceOpen.optimizationCount, 3);
+        assert.equal(largeWorkspaceOpen.allFeaturesAvailable, true);
+        assert.equal(largeWorkspaceOpen.focusInitial, true);
+        assert.equal(largeWorkspaceOpen.shellPreserved, true);
+        await run(`editor.fileExplorer.applyWorkspaceIndexStats({
+          root: editor.fileExplorer.rootPath,
+          ready: true,
+          fileCount: 13000,
+          directoryCount: 1700,
+          totalIndexedBytes: 4 * 1024 ** 3,
+          pressureScore: 4,
+          largeWorkspaceMode: true,
+          generatedAt: Date.now(),
+        })`);
+        assert.deepEqual(
+          await run(`(() => {
+            const dialog = editor.fileExplorer.workspaceModeDialog;
+            return {
+              files: dialog.querySelector('[data-stat="files"]').textContent.replace(/[^0-9]/g, ""),
+              directories: dialog.querySelector('[data-stat="directories"]').textContent.replace(/[^0-9]/g, ""),
+              indexedSize: dialog.querySelector('[data-stat="size"]').textContent,
+              indexStatus: dialog.querySelector('[data-stat="status"]').textContent,
+              headerExpanded: editor.fileExplorer.projectExpanded,
+              dialogCount: document.querySelectorAll("#file-explorer-large-workspace-dialog").length,
+            };
+          })()`),
+          {
+            files: "13000",
+            directories: "1700",
+            indexedSize: "4.0 GiB",
+            indexStatus: "Ready",
+            headerExpanded: true,
+            dialogCount: 1,
+          },
+          "Large Workspace Mode dialog follows updated current workspace statistics without rebuilding the Explorer shell",
+        );
+        win.focus();
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === false,
+          { description: "Large Workspace Mode dialog to close with Escape" },
+        );
+        await waitForCondition(
+          async () => (await run("document.activeElement === editor.fileExplorer.workspaceModeBadge")) === true,
+          { description: "focus to return to the Large Workspace Mode badge after Escape" },
+        );
+        await run("editor.fileExplorer.workspaceModeBadge.focus()");
+        win.focus();
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === true,
+          { description: "Enter to activate the Large Workspace Mode badge" },
+        );
+        assert.equal(await run("document.activeElement === editor.fileExplorer.workspaceModeDialog.querySelector('.file-explorer-large-workspace-close')"), true);
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === false,
+          { description: "dialog to close before Space activation" },
+        );
+        await run("editor.fileExplorer.workspaceModeBadge.focus()");
+        win.focus();
+        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Space" });
+        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Space" });
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === true,
+          { description: "Space to activate the Large Workspace Mode badge" },
+        );
+        assert.equal(await run("document.activeElement.textContent === 'Got it'"), true);
+        await run("editor.fileExplorer.clearWorkspaceIndexStats()");
+        await waitForCondition(
+          async () => (await run("document.activeElement === editor.fileExplorer.projectHeader")) === true,
+          { description: "focus to move to the project header when the badge is hidden on workspace change" },
+        );
+        assert.deepEqual(
+          await run(`(() => ({
+            popupOpen: editor.fileExplorer.workspaceModeDialog.open,
+            badgeHidden: editor.fileExplorer.workspaceModeBadge.hidden,
+            badgeExpanded: editor.fileExplorer.workspaceModeBadge.getAttribute("aria-expanded"),
+            focusRestored: document.activeElement === editor.fileExplorer.projectHeader,
+          }))()`),
+          { popupOpen: false, badgeHidden: true, badgeExpanded: "false", focusRestored: true },
+          "workspace change closes the dialog, hides the stale badge, and restores focus",
+        );
+        const largeWorkspaceB = await run(`(() => {
+          const explorer = editor.fileExplorer;
+          explorer.rootPath = ${largeWorkspaceRootB};
+          explorer.projectName = "Workspace B";
+          explorer.refresh();
+          return {
+            oldStatsAccepted: explorer.applyWorkspaceIndexStats({
+              root: ${largeWorkspaceRootA}, ready: true, fileCount: 1,
+              directoryCount: 1, totalIndexedBytes: 1, largeWorkspaceMode: true,
+            }),
+            currentStatsAccepted: explorer.applyWorkspaceIndexStats({
+              root: explorer.rootPath, ready: true, fileCount: 24000,
+              directoryCount: 2600, totalIndexedBytes: 5 * 1024 ** 3,
+              largeWorkspaceMode: true,
+            }),
+          };
+        })()`);
+        assert.deepEqual(largeWorkspaceB, { oldStatsAccepted: false, currentStatsAccepted: true });
+        assert.equal(await run(`(() => {
+          const explorer = editor.fileExplorer;
+          explorer.workspaceModeBadge.focus();
+          explorer.workspaceModeBadge.click();
+          return explorer.workspaceModeDialog.querySelector('[data-stat="files"]').textContent.replace(/[^0-9]/g, "");
+        })()`), "24000");
+        await run("editor.fileExplorer.workspaceModeDialog.click()");
+        assert.equal(await run("editor.fileExplorer.workspaceModeDialog.open"), false);
+        await run(`(() => {
+          const explorer = editor.fileExplorer;
+          explorer.clearWorkspaceIndexStats();
+          explorer.rootPath = "";
+          explorer.projectName = "";
+          explorer.refresh();
+        })()`);
         assert.deepEqual(
           await run(`(async () => {
             editor.sidebarManager.openMenu("agent");

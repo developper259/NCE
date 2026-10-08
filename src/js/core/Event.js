@@ -323,6 +323,7 @@ class Events {
 
   onKeyDown(event) {
     if (this.editor.quickPanel?.handleKeyDownEvent?.(event)) return;
+    if (this.editor.fileExplorer?.handleWorkspaceModeKeyDown?.(event)) return;
     this.editor.keyBindingManager?.onKey(event);
   }
 
