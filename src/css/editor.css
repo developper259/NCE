@@ -8,6 +8,7 @@
   box-sizing: border-box;
   overflow: hidden;
   background-color: var(--bg-secondary);
+  isolation: isolate;
 }
 
 .editor,

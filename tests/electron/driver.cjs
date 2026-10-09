@@ -949,12 +949,19 @@ app.whenReady().then(() => {
           const sidebarManager = editor.sidebarManager;
           const fileManager = document.querySelector(".file-manager");
           const editorElement = document.querySelector(".editor");
+          const bottomBar = document.querySelector(".bottomBar");
           const mainSection = document.querySelector(".main-section");
           const list = document.querySelector(".file-manager .files-ul");
           const tabScroller = editor.tabManager.tabScroller;
           const scroller = tabScroller.hScroller;
           const leftSidebar = document.querySelector(".sidebar-left");
           const rightSidebar = document.querySelector(".sidebar-right");
+          const editorRect = editorElement.getBoundingClientRect();
+          const bottomBarRect = bottomBar.getBoundingClientRect();
+          const boundaryElement = document.elementFromPoint(
+            editorRect.left + 25,
+            bottomBarRect.top + 0.5,
+          );
           const proportion = scroller.calculProp();
           const hasMeasurableRatio = list.scrollWidth > 0 && list.clientWidth > 0;
           return {
@@ -972,6 +979,7 @@ app.whenReady().then(() => {
             listWidth: list.clientWidth,
             leftOpen: leftSidebar.classList.contains("open"),
             rightOpen: rightSidebar.classList.contains("open"),
+            bottomBarOwnsEditorBoundary: boundaryElement?.closest(".bottomBar") === bottomBar,
             leftWidth: leftSidebar.getBoundingClientRect().width,
             rightWidth: rightSidebar.getBoundingClientRect().width,
             effectiveLeftWidth: leftSidebar.classList.contains("open")
@@ -1089,12 +1097,19 @@ app.whenReady().then(() => {
             const sidebarManager = editor.sidebarManager;
             const fileManager = document.querySelector(".file-manager");
             const editorElement = document.querySelector(".editor");
+            const bottomBar = document.querySelector(".bottomBar");
             const mainSection = document.querySelector(".main-section");
             const list = document.querySelector(".file-manager .files-ul");
             const tabScroller = editor.tabManager.tabScroller;
             const scroller = tabScroller.hScroller;
             const leftSidebar = document.querySelector(".sidebar-left");
             const rightSidebar = document.querySelector(".sidebar-right");
+            const editorRect = editorElement.getBoundingClientRect();
+            const bottomBarRect = bottomBar.getBoundingClientRect();
+            const boundaryElement = document.elementFromPoint(
+              editorRect.left + 25,
+              bottomBarRect.top + 0.5,
+            );
             const proportion = scroller.calculProp();
             const hasMeasurableRatio = list.scrollWidth > 0 && list.clientWidth > 0;
             return {
@@ -1112,6 +1127,7 @@ app.whenReady().then(() => {
               listWidth: list.clientWidth,
               leftOpen: leftSidebar.classList.contains("open"),
               rightOpen: rightSidebar.classList.contains("open"),
+              bottomBarOwnsEditorBoundary: boundaryElement?.closest(".bottomBar") === bottomBar,
               leftWidth: leftSidebar.getBoundingClientRect().width,
               rightWidth: rightSidebar.getBoundingClientRect().width,
               effectiveLeftWidth: leftSidebar.classList.contains("open")
@@ -1177,6 +1193,7 @@ app.whenReady().then(() => {
           assert.ok(state.editorWidth >= state.minEditorWidth, JSON.stringify(state));
           assert.ok(state.listWidth >= state.minEditorWidth, JSON.stringify(state));
           assert.ok(state.listWidth > 0, JSON.stringify(state));
+          assert.equal(state.bottomBarOwnsEditorBoundary, true, JSON.stringify(state));
           assert.ok(closeTo(state.fileLeft, left), JSON.stringify(state));
           assert.ok(closeTo(state.fileRight, right), JSON.stringify(state));
           assert.ok(closeTo(state.editorLeft, left), JSON.stringify(state));
