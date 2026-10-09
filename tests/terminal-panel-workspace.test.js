@@ -53,6 +53,7 @@ function record(id, workspaceKey, baseLabel, customLabel = null) {
     workspaceKey,
     baseLabel,
     customLabel,
+    duplicateIndex: null,
     displayLabel: baseLabel,
     cwd: "/secret/workspace",
     commandHistory: ["secret command"],
@@ -77,7 +78,7 @@ test("runtime tab registries, selection and persisted metadata stay isolated per
   assert.deepEqual(JSON.parse(JSON.stringify(panel.getPersistedState())), {
     version: 1,
     activeTabIndex: 0,
-    tabs: [{ baseLabel: "zsh — a", customLabel: null }],
+    tabs: [{ baseLabel: "zsh — a", customLabel: null, duplicateIndex: null }],
   });
   assert.equal(JSON.stringify(panel.getPersistedState()).includes("pty-a"), false);
   assert.equal(JSON.stringify(panel.getPersistedState()).includes("secret"), false);
@@ -95,40 +96,83 @@ test("persisted tabs restore as metadata without reusing PTY identifiers", () =>
   panel.activateWorkspace("/canonical/project", "/project", {
     activeTabIndex: 1,
     tabs: [
-      { baseLabel: "zsh — project", customLabel: null, sessionId: "old-uuid" },
-      { baseLabel: "npm — project", customLabel: "Dev server", command: "npm start" },
+      { baseLabel: "zsh — project", customLabel: null, duplicateIndex: null, sessionId: "old-uuid" },
+      { baseLabel: "zsh — project", customLabel: null, duplicateIndex: 1, command: "npm start" },
     ],
   });
   const state = panel.currentState;
   assert.deepEqual(JSON.parse(JSON.stringify(state.pendingRestoreTabs)), [
-    { baseLabel: "zsh — project", customLabel: null },
-    { baseLabel: "npm — project", customLabel: "Dev server" },
+    { baseLabel: "zsh — project", customLabel: null, duplicateIndex: null },
+    { baseLabel: "zsh — project", customLabel: null, duplicateIndex: 1 },
   ]);
   assert.equal(state.sessions.size, 0);
   assert.equal(JSON.stringify(panel.getPersistedState()).includes("old-uuid"), false);
   assert.equal(JSON.stringify(panel.getPersistedState()).includes("npm start"), false);
 });
 
-test("smart labels omit suffixes for single tabs and recalculate after duplicate close", () => {
+test("duplicate labels keep a stable unsuffixed primary and allocate the first free positive index", () => {
   const panel = makePanel();
   const state = panel.getWorkspaceState("/a");
   const first = record("first", "/a", "zsh — project");
-  const second = record("second", "/a", "zsh — project");
   state.sessions.set(first.id, first);
-  state.sessions.set(second.id, second);
-  panel.recomputeLabels(state);
-  assert.deepEqual([first.displayLabel, second.displayLabel], [
-    "zsh — project (1)", "zsh — project (2)",
-  ]);
-  state.sessions.delete(second.id);
+  first.duplicateIndex = panel.allocateDuplicateIndex(first, state);
   panel.recomputeLabels(state);
   assert.equal(first.displayLabel, "zsh — project");
 
-  first.customLabel = "Python REPL";
-  const renamed = record("renamed", "/a", "python — project", "Build output");
-  state.sessions.set(renamed.id, renamed);
+  const second = record("second", "/a", "zsh — project");
+  state.sessions.set(second.id, second);
+  second.duplicateIndex = panel.allocateDuplicateIndex(second, state);
   panel.recomputeLabels(state);
-  assert.deepEqual([first.displayLabel, renamed.displayLabel], ["Python REPL", "Build output"]);
+  assert.deepEqual([first.displayLabel, second.displayLabel], ["zsh — project", "zsh — project (1)"]);
+
+  const third = record("third", "/a", "zsh — project");
+  state.sessions.set(third.id, third);
+  third.duplicateIndex = panel.allocateDuplicateIndex(third, state);
+  panel.recomputeLabels(state);
+  assert.deepEqual([first.displayLabel, second.displayLabel, third.displayLabel], [
+    "zsh — project", "zsh — project (1)", "zsh — project (2)",
+  ]);
+
+  state.sessions.delete(second.id);
+  panel.recomputeLabels(state);
+  assert.deepEqual([first.displayLabel, third.displayLabel], ["zsh — project", "zsh — project (2)"]);
+
+  const fourth = record("fourth", "/a", "zsh — project");
+  state.sessions.set(fourth.id, fourth);
+  fourth.duplicateIndex = panel.allocateDuplicateIndex(fourth, state);
+  panel.recomputeLabels(state);
+  assert.equal(fourth.displayLabel, "zsh — project (1)");
+
+  state.sessions.delete(first.id);
+  state.sessions.delete(fourth.id);
+  state.sessions.delete(third.id);
+  state.sessions.set(third.id, third);
+  panel.normalizeSingletonDuplicateIndices(state, "zsh — project");
+  panel.recomputeLabels(state);
+  assert.equal(third.displayLabel, "zsh — project");
+});
+
+test("custom names retain their value and collision suffixes stay workspace scoped", () => {
+  const panel = makePanel();
+  const a = panel.getWorkspaceState("/a");
+  const first = record("first", "/a", "zsh — project", "Development");
+  a.sessions.set(first.id, first);
+  first.duplicateIndex = panel.allocateDuplicateIndex(first, a);
+  const second = record("second", "/a", "npm — project", "Development");
+  a.sessions.set(second.id, second);
+  second.duplicateIndex = panel.allocateDuplicateIndex(second, a);
+  panel.recomputeLabels(a);
+  assert.deepEqual([first.customLabel, first.displayLabel, second.customLabel, second.displayLabel], [
+    "Development", "Development", "Development", "Development (1)",
+  ]);
+
+  const b = panel.getWorkspaceState("/b");
+  const otherWorkspace = record("other", "/b", "zsh — project");
+  b.sessions.set(otherWorkspace.id, otherWorkspace);
+  otherWorkspace.duplicateIndex = panel.allocateDuplicateIndex(otherWorkspace, b);
+  panel.recomputeLabels(b);
+  assert.equal(otherWorkspace.displayLabel, "zsh — project");
+  assert.equal(JSON.parse(JSON.stringify(panel.getPersistedState("/a"))).tabs[1].duplicateIndex, 1);
 });
 
 test("open requests share one lazy first-terminal creation promise", async () => {

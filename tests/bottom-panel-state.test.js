@@ -29,8 +29,8 @@ function createHarness(rootPath = null) {
       version: 1,
       activeTabIndex: 1,
       tabs: [
-        { baseLabel: "zsh — project", customLabel: null },
-        { baseLabel: "zsh — project", customLabel: "Development" },
+        { baseLabel: "zsh — project", customLabel: null, duplicateIndex: null },
+        { baseLabel: "zsh — project", customLabel: "Development", duplicateIndex: null },
       ],
       sessionId: "must-not-persist",
     },
@@ -83,8 +83,8 @@ test("Bottom Panel metadata is workspace scoped and excludes runtime identifiers
       version: 1,
       activeTabIndex: 1,
       tabs: [
-        { baseLabel: "zsh — project", customLabel: null },
-        { baseLabel: "zsh — project", customLabel: "Development" },
+        { baseLabel: "zsh — project", customLabel: null, duplicateIndex: null },
+        { baseLabel: "zsh — project", customLabel: "Development", duplicateIndex: null },
       ],
     },
   });
@@ -112,7 +112,7 @@ test("workspace version 1 and stale maximized fields sanitize into the current s
       terminal: {
         activeTabIndex: 8,
         tabs: [
-          { baseLabel: "shell", customLabel: "Dev", sessionId: "old-session" },
+          { baseLabel: "shell", customLabel: "Dev", duplicateIndex: 2, sessionId: "old-session" },
           { baseLabel: "bad\0label", customLabel: null },
         ],
       },
@@ -126,7 +126,7 @@ test("workspace version 1 and stale maximized fields sanitize into the current s
     terminal: {
       version: 1,
       activeTabIndex: 0,
-      tabs: [{ baseLabel: "shell", customLabel: "Dev" }],
+      tabs: [{ baseLabel: "shell", customLabel: "Dev", duplicateIndex: 2 }],
     },
   });
   assert.equal(JSON.stringify(safe).includes("sessionId"), false);

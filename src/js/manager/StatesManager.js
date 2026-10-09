@@ -125,11 +125,15 @@ class StatesManager {
           if (!this.isRecord(tab)) return [];
           const baseLabel = this.safeString(tab.baseLabel, 128);
           const customLabel = this.safeString(tab.customLabel, 80);
+          const duplicateIndex = Number.isInteger(tab.duplicateIndex) &&
+            tab.duplicateIndex > 0 && tab.duplicateIndex <= 9999
+            ? tab.duplicateIndex : null;
           if (tab.baseLabel !== undefined && !baseLabel) return [];
           if (tab.customLabel !== undefined && tab.customLabel !== null && !customLabel) return [];
           return [{
             baseLabel: baseLabel || "Terminal",
             customLabel: customLabel || null,
+            duplicateIndex,
           }];
         })
       : [];

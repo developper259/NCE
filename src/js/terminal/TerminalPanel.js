@@ -131,6 +131,8 @@ export class TerminalPanel {
         ? terminalState.tabs.map((tab) => ({
             baseLabel: this.safeLabel(tab?.baseLabel) || "Terminal",
             customLabel: this.safeLabel(tab?.customLabel) || null,
+            duplicateIndex: Number.isInteger(tab?.duplicateIndex) && tab.duplicateIndex > 0
+              ? tab.duplicateIndex : null,
           }))
         : [];
       state.restoreActiveIndex = Number.isInteger(terminalState.activeTabIndex)
@@ -161,10 +163,14 @@ export class TerminalPanel {
     const restoredTabs = records.map((record) => ({
           baseLabel: this.safeLabel(record.baseLabel) || "Terminal",
           customLabel: this.safeLabel(record.customLabel) || null,
+          duplicateIndex: Number.isInteger(record.duplicateIndex) && record.duplicateIndex > 0
+            ? record.duplicateIndex : null,
         }));
     const pendingTabs = (state.pendingRestoreTabs || []).map((tab) => ({
           baseLabel: this.safeLabel(tab.baseLabel) || "Terminal",
           customLabel: this.safeLabel(tab.customLabel) || null,
+          duplicateIndex: Number.isInteger(tab.duplicateIndex) && tab.duplicateIndex > 0
+            ? tab.duplicateIndex : null,
         }));
     const tabs = state.pendingRestoreTabs?.length
       ? [...restoredTabs, ...pendingTabs]
@@ -216,6 +222,7 @@ export class TerminalPanel {
         const record = await this.createTerminal({
           workspaceKey: ownerKey,
           customLabel: metadata.customLabel,
+          duplicateIndex: metadata.duplicateIndex,
           focus: false,
           activate: false,
           reportError: ownerKey === this.currentWorkspaceKey,
@@ -227,6 +234,7 @@ export class TerminalPanel {
         this.editor.statesManager?.scheduleBottomPanelStateSave?.(ownerKey);
       }
       state.pendingRestoreTabs = null;
+      this.normalizeSingletonDuplicateIndices(state);
       state.activeSessionId = state.restoreSessionIds[
         Math.min(state.restoreActiveIndex, Math.max(0, state.restoreSessionIds.length - 1))
       ] || state.restoreSessionIds[0] || state.activeSessionId || null;
@@ -271,6 +279,7 @@ export class TerminalPanel {
   async createTerminal({
     workspaceKey = this.currentWorkspaceKey,
     customLabel = null,
+    duplicateIndex,
     focus = true,
     activate = true,
     reportError = true,
@@ -308,9 +317,10 @@ export class TerminalPanel {
       internalId: pendingId,
       workspaceKey,
       workspaceRoot: state.workspaceRoot,
-      baseLabel: "Terminal",
+      baseLabel: "Starting terminal…",
       customLabel: this.safeLabel(customLabel) || null,
-      displayLabel: "Terminal",
+      duplicateIndex: null,
+      displayLabel: "Starting terminal…",
       shell: "",
       cwd: "",
       terminal,
@@ -378,6 +388,7 @@ export class TerminalPanel {
       record.shell = result.shell || "shell";
       record.cwd = typeof result.cwd === "string" ? result.cwd : "";
       record.baseLabel = this.createBaseLabel(record, state);
+      record.duplicateIndex = this.allocateDuplicateIndex(record, state, duplicateIndex);
       state.sessions.set(record.id, record);
       this.sessionIndex.set(record.id, record);
       if (state.activeSessionId === pendingId) state.activeSessionId = record.id;
@@ -437,20 +448,50 @@ export class TerminalPanel {
       ? value.trim().slice(0, 128) : null;
   }
 
-  recomputeLabels(state) {
-    const records = [...state.sessions.values()].filter((record) => !record.disposed);
-    const counts = new Map();
-    for (const record of records) {
-      const label = this.safeLabel(record.customLabel) || this.safeLabel(record.baseLabel) || "Terminal";
-      counts.set(label, (counts.get(label) || 0) + 1);
+  getNameBase(record) {
+    return this.safeLabel(record.customLabel) || this.safeLabel(record.baseLabel) || "Terminal";
+  }
+
+  allocateDuplicateIndex(record, state, preferredIndex = undefined) {
+    const name = this.getNameBase(record);
+    const occupied = new Set([...state.sessions.values()]
+      .filter((other) => other !== record && !other.disposed && this.getNameBase(other) === name)
+      .map((other) => Number.isInteger(other.duplicateIndex) && other.duplicateIndex > 0
+        ? other.duplicateIndex : null));
+
+    if (preferredIndex === null && !occupied.has(null)) return null;
+    if (Number.isInteger(preferredIndex) && preferredIndex > 0 && !occupied.has(preferredIndex))
+      return preferredIndex;
+    if (!occupied.has(null)) return null;
+
+    let index = 1;
+    while (occupied.has(index)) index++;
+    return index;
+  }
+
+  normalizeSingletonDuplicateIndices(state, name = null) {
+    const groups = new Map();
+    for (const record of state.sessions.values()) {
+      if (record.disposed) continue;
+      const base = this.getNameBase(record);
+      if (name !== null && base !== name) continue;
+      const group = groups.get(base) || [];
+      group.push(record);
+      groups.set(base, group);
     }
-    const seen = new Map();
-    for (const record of records) {
-      const base = this.safeLabel(record.customLabel) || this.safeLabel(record.baseLabel) || "Terminal";
-      const duplicate = counts.get(base) > 1;
-      const number = (seen.get(base) || 0) + 1;
-      seen.set(base, number);
-      record.displayLabel = duplicate ? `${base} (${number})` : base;
+    for (const [base, records] of groups) {
+      if (records.length === 1 && records[0].duplicateIndex !== null) {
+        records[0].duplicateIndex = null;
+      }
+    }
+  }
+
+  recomputeLabels(state) {
+    for (const record of state.sessions.values()) {
+      if (record.disposed) continue;
+      const base = this.getNameBase(record);
+      record.displayLabel = Number.isInteger(record.duplicateIndex) && record.duplicateIndex > 0
+        ? `${base} (${record.duplicateIndex})` : base;
     }
   }
 
@@ -570,6 +611,7 @@ export class TerminalPanel {
     const state = this.currentState;
     const record = state.sessions.get(id);
     if (!record || record.workspaceKey !== this.currentWorkspaceKey || record.closingPromise) return false;
+    const removedName = this.getNameBase(record);
     record.closingPromise = Promise.resolve();
     const wasActive = state.activeSessionId === id;
     const keepTabFocus = this.tabsList?.contains?.(document.activeElement) === true;
@@ -584,6 +626,7 @@ export class TerminalPanel {
     }
     if (wasActive) state.activeSessionId = state.sessions.keys().next().value || null;
     this.disposeRecord(record);
+    this.normalizeSingletonDuplicateIndices(state, removedName);
     this.recomputeLabels(state);
     this.renderTabs();
     if (keepTabFocus && state.activeSessionId) {
@@ -675,7 +718,6 @@ export class TerminalPanel {
   renderTabs() {
     if (!this.tabsList) return;
     const state = this.currentState;
-    this.recomputeLabels(state);
     this.tabsList.replaceChildren();
     const records = [...state.sessions.entries()];
     for (const [id, record] of records) {
@@ -756,6 +798,7 @@ export class TerminalPanel {
       if (save && input.value.trim()) {
         const custom = input.value.trim().slice(0, 80);
         record.customLabel = custom === record.baseLabel ? null : custom;
+        record.duplicateIndex = this.allocateDuplicateIndex(record, this.currentState);
         this.recomputeLabels(this.currentState);
         this.notifyWorkspaceChanged(this.currentWorkspaceKey);
       }
