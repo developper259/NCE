@@ -2080,6 +2080,7 @@ app.whenReady().then(() => {
         const terminalWorkspaceB = path.join(directory, "terminal-workspace-b");
         fs.mkdirSync(terminalWorkspaceA, { recursive: true });
         fs.mkdirSync(terminalWorkspaceB, { recursive: true });
+        const canonicalTerminalWorkspaceA = await fs.promises.realpath(terminalWorkspaceA);
         assert.equal(
           await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
           true,
@@ -2112,7 +2113,7 @@ app.whenReady().then(() => {
         })()`);
         assert.equal(firstTerminal.terminal, true, "the renderer creates an xterm instance");
         assert.ok(firstTerminal.shell, "the active system shell is identified");
-        assert.equal(firstTerminal.cwd, fs.realpathSync(terminalWorkspaceA), "new PTYs start in the canonical active workspace root");
+        assert.equal(firstTerminal.cwd, canonicalTerminalWorkspaceA, "new PTYs start in the canonical active workspace root");
         assert.doesNotMatch(firstTerminal.displayLabel, /\(\d+\)$/,
           "the first terminal keeps its unsuffixed label");
         const terminalSurfaces = await run(`(() => {
@@ -2559,6 +2560,7 @@ app.whenReady().then(() => {
           "cold startup does not create restored PTYs before opening their workspace");
         dialog.showMessageBox = async () => ({ response: 1 });
         const terminalWorkspaceA = path.join(directory, "terminal-workspace-a");
+        const canonicalTerminalWorkspaceA = await fs.promises.realpath(terminalWorkspaceA);
         const previousTerminalIds = JSON.parse(fs.readFileSync(
           path.join(directory, "terminal-previous-ids.json"), "utf8",
         ));
@@ -2585,7 +2587,7 @@ app.whenReady().then(() => {
           "restart creates fresh PTY identifiers");
         assert.equal(restoredTerminals.some(record => record.customLabel === "Workspace A Dev"), true,
           "custom terminal names survive restart");
-        assert.equal(restoredTerminals.every(record => record.cwd === fs.realpathSync(terminalWorkspaceA)), true);
+        assert.equal(restoredTerminals.every(record => record.cwd === canonicalTerminalWorkspaceA), true);
         assert.equal(restoredTerminals.some(record =>
           /NCE_PTY_FIRST|NCE_PTY_SECOND|NCE_LONG_PROCESS_READY|NCE_HIDDEN_WORKSPACE_OUTPUT/.test(record.text),
         ), false, "restart does not replay old commands or terminal output");
