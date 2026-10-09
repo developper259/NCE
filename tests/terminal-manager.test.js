@@ -1,6 +1,11 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { TerminalManager, resolveTerminalShell } = require("../dist/ts/terminal/TerminalManager.js");
+const {
+  TerminalManager,
+  classifyPtySpawnFailure,
+  inspectPtySpawnHelper,
+  resolveTerminalShell,
+} = require("../dist/ts/terminal/TerminalManager.js");
 const { normalizeTerminalLink, terminalLimits } = require("../dist/ts/terminal/TerminalTypes.js");
 const nodePtyEntry = require.resolve("node-pty");
 
@@ -47,7 +52,7 @@ class FakePty {
   }
 }
 
-function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn } = {}) {
+function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn, logger = { error() {} }, platform = "linux" } = {}) {
   let activeWorkspace = workspace;
   const owner = new FakeWebContents();
   const attacker = new FakeWebContents();
@@ -59,13 +64,13 @@ function fixture({ workspace = "/workspace with accents/é", access = async () =
   };
   const manager = new TerminalManager({
     owner,
-    platform: process.platform,
+    platform,
     env: { PATH: "/bin", SHELL: "/test shell/zsh", HOME: "/home/test" },
     homeDir: "/home/test",
     getWorkspacePath: () => activeWorkspace,
     getShellSetting: () => "/configured shell/Terminal",
     fs: fakeFs,
-    logger: { error() {} },
+    logger,
     spawn: spawn || ((shell, args, options) => {
       const child = new FakePty();
       ptys.push({ shell, args, options, child });
@@ -112,6 +117,150 @@ test("TerminalManager validates creation and starts a real PTY in the verified w
   assert.equal((await f.manager.create({ sender: f.attacker }, { cols: 100, rows: 32 })).error.code, "UNAUTHORIZED");
   assert.equal((await f.manager.create({ sender: f.owner }, { cols: 1, rows: 32 })).error.code, "INVALID_SIZE");
   assert.equal(f.ptys.length, 1);
+});
+
+test("TerminalManager supports repeated create, kill, and create without stale sessions", async () => {
+  const f = fixture();
+  const ids = new Set();
+  for (let index = 0; index < 20; index++) {
+    const created = await create(f);
+    assert.equal(created.success, true, `create ${index}`);
+    assert.equal(ids.has(created.sessionId), false, "a closed PTY ID is never reused");
+    ids.add(created.sessionId);
+    const child = f.ptys[index].child;
+
+    assert.deepEqual(f.manager.close(
+      { sender: f.owner }, created.sessionId, created.workspaceKey,
+    ), { success: true });
+    assert.equal(child.kills, 1, "each PTY is killed once");
+    assert.equal(child.dataListeners.size, 0, "data subscriptions are released");
+    assert.equal(child.exitListeners.size, 0, "late exit callbacks are detached");
+    assert.equal(f.manager.sessions.size, 0, "closed sessions are removed from the manager");
+    assert.equal(f.manager.close(
+      { sender: f.owner }, created.sessionId, created.workspaceKey,
+    ).error.code, "SESSION_UNAVAILABLE");
+    assert.equal(child.kills, 1, "a repeated close never kills the same PTY again");
+    child.emitExit(0);
+    assert.equal(f.manager.sessions.size, 0, "a late exit cannot restore a removed session");
+  }
+  assert.equal(ids.size, 20);
+  assert.equal(f.ptys.length, 20);
+  assert.equal(f.manager.pendingCreates.size, 0);
+});
+
+test("closing an owner cancels pending PTY creation and releases its reservation", async () => {
+  const f = fixture({ workspace: "/projects/pending" });
+  const scope = await f.manager.getWorkspaceScope();
+  let releaseRealpath;
+  const gate = new Promise((resolve) => { releaseRealpath = resolve; });
+  f.fakeFs.realpath = async (value) => {
+    if (value === "/projects/pending") await gate;
+    return value;
+  };
+
+  const pending = f.manager.create({ sender: f.owner }, {
+    cols: 80, rows: 24, workspaceKey: scope.workspaceKey,
+  });
+  assert.equal(f.manager.pendingCreates.get(f.owner), 1);
+  f.manager.closeForOwner(f.owner);
+  releaseRealpath();
+
+  assert.equal((await pending).error.code, "CREATE_CANCELLED");
+  assert.equal(f.ptys.length, 0, "cancelled work never spawns a PTY");
+  assert.equal(f.manager.sessions.size, 0);
+  assert.equal(f.manager.pendingCreates.size, 0);
+
+  assert.equal((await create(f)).success, true, "the manager remains usable after cancellation");
+  f.manager.closeAll();
+  assert.equal(f.manager.sessions.size, 0);
+});
+
+test("a failed spawn can be retried without a stale ID or pending reservation", async () => {
+  const f = fixture();
+  let attempts = 0;
+  f.manager.spawnPty = (shell, args, options) => {
+    attempts++;
+    if (attempts === 1) throw new Error("posix_spawnp failed.");
+    const child = new FakePty();
+    f.ptys.push({ shell, args, options, child });
+    return child;
+  };
+
+  const failed = await create(f);
+  assert.equal(failed.error.code, "PTY_SPAWN_FAILED");
+  assert.equal(f.manager.pendingCreates.size, 0);
+  assert.equal(f.manager.sessions.size, 0);
+
+  const retried = await create(f);
+  assert.equal(retried.success, true);
+  assert.equal(retried.sessionId, f.manager.sessions.keys().next().value);
+  assert.equal(f.manager.pendingCreates.size, 0);
+  f.manager.closeAll();
+});
+
+test("an unusable resolved working directory fails before native spawn", async () => {
+  const f = fixture({ workspace: "/workspace that disappeared" });
+  f.fakeFs.stat = async () => ({ isDirectory: () => false });
+
+  const result = await create(f);
+  assert.equal(result.error.code, "INVALID_CWD");
+  assert.match(result.error.message, /working folder is unavailable/i);
+  assert.equal(f.ptys.length, 0);
+  assert.equal(f.manager.pendingCreates.size, 0);
+});
+
+test("PTY spawn errors are classified from established evidence and logged without environment values", async () => {
+  const logs = [];
+  const f = fixture({
+    logger: { error: (...values) => logs.push(values) },
+    spawn: () => { throw new Error("posix_spawn failed: Too many open files"); },
+  });
+  const result = await create(f);
+  assert.equal(result.error.code, "PTY_RESOURCE_EXHAUSTED");
+  assert.match(result.error.message, /system cannot allocate/i);
+  assert.equal(f.manager.pendingCreates.size, 0);
+  assert.equal(f.manager.sessions.size, 0);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0][0], "[Terminal] Failed to create PTY session");
+  assert.equal(logs[0][1].cause.message, "posix_spawn failed: Too many open files");
+  assert.equal(logs[0][1].cwd, "/workspace with accents/é");
+  assert.equal(logs[0][1].shellExecutable, "/configured shell/Terminal");
+  assert.equal(logs[0][1].activeSessions, 0);
+  assert.equal(logs[0][1].pendingCreates, 1);
+  assert.equal("env" in logs[0][1], false);
+  assert.equal("PATH" in logs[0][1], false);
+
+  assert.equal(classifyPtySpawnFailure(new Error("posix_spawnp failed."), null), "PTY_SPAWN_FAILED");
+  assert.equal(classifyPtySpawnFailure(new Error("Argument list too long"), null), "PTY_SPAWN_FAILED");
+});
+
+test("macOS spawn-helper diagnostics distinguish missing and non-executable helpers", () => {
+  const nonExecutable = inspectPtySpawnHelper("darwin", "arm64", {
+    existsSync: (file) => file.endsWith("/prebuilds/darwin-arm64/pty.node"),
+    statSync: () => ({ mode: 0o100644 }),
+    accessSync: () => { throw Object.assign(new Error("permission denied"), { code: "EACCES" }); },
+  });
+  assert.equal(nonExecutable.status, "not-executable");
+  assert.equal(nonExecutable.permissions, "644");
+  assert.match(nonExecutable.path, /prebuilds\/darwin-arm64\/spawn-helper$/);
+  assert.equal(classifyPtySpawnFailure(new Error("posix_spawnp failed."), nonExecutable), "PTY_HELPER_NOT_EXECUTABLE");
+
+  const missingHelper = inspectPtySpawnHelper("darwin", "arm64", {
+    existsSync: (file) => file.endsWith("/prebuilds/darwin-arm64/pty.node"),
+    statSync: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
+    accessSync: () => { throw Error("missing"); },
+  });
+  assert.equal(missingHelper.status, "unavailable");
+  assert.equal(classifyPtySpawnFailure(new Error("posix_spawnp failed."), missingHelper), "PTY_HELPER_UNAVAILABLE");
+
+  const missing = inspectPtySpawnHelper("darwin", "x64", {
+    existsSync: () => false,
+    statSync: () => { throw Error("missing"); },
+    accessSync: () => { throw Error("missing"); },
+  });
+  assert.equal(missing.status, "unavailable");
+  assert.equal(classifyPtySpawnFailure(new Error("posix_spawnp failed."), missing), "PTY_HELPER_UNAVAILABLE");
+  assert.equal(inspectPtySpawnHelper("linux", "x64").status, "not-applicable");
 });
 
 test("TerminalManager resolves the configured executable and falls back to an available platform shell", async () => {

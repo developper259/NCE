@@ -13,7 +13,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
       const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
       let log = '';
       child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
-      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 60000);
+      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 90000);
       child.once('error', err => { clearTimeout(timer); reject(err); });
       child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${phase} ${code}/${signal}: ${log}`)); });
     });

@@ -19,7 +19,7 @@ dialog.showMessageBox = async () => ({ response: 2 });
 const timer = setTimeout(() => {
   console.error("Electron smoke timed out");
   app.exit(1);
-}, 45000);
+}, 90000);
 const { App } = require("../../dist/ts/App.js");
 const nce = new App();
 function findMenuItem(menu, label) {
@@ -2204,14 +2204,16 @@ app.whenReady().then(() => {
             bottomRest: getComputedStyle(bottom).backgroundColor,
             sidebarTransition: getComputedStyle(sidebar).transitionDuration,
             bottomTransition: getComputedStyle(bottom).transitionDuration,
+            reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
             panelOverflow: getComputedStyle(panel).overflow,
           };
         })()`);
         assert.equal(resizerGeometry.sidebar.width, 4);
         assert.equal(resizerGeometry.bottom.height, 4);
         assert.equal(resizerGeometry.sidebarRest, resizerGeometry.bottomRest);
-        assert.equal(resizerGeometry.sidebarTransition, "0.2s");
-        assert.equal(resizerGeometry.bottomTransition, "0.2s");
+        const expectedResizerTransition = resizerGeometry.reducedMotion ? "0s" : "0.2s";
+        assert.equal(resizerGeometry.sidebarTransition, expectedResizerTransition);
+        assert.equal(resizerGeometry.bottomTransition, expectedResizerTransition);
         assert.equal(resizerGeometry.panelOverflow, "hidden");
         assert.ok(Math.abs(resizerGeometry.bottom.top - resizerGeometry.panel.top) <= 1,
           "the horizontal handle starts at the unclipped panel edge");
@@ -2229,7 +2231,18 @@ app.whenReady().then(() => {
           async () => (await run('document.querySelector(".bottom-panel-resize-handle").matches(":hover")')) === true,
           { description: "Bottom Panel resizer hover state" },
         );
-        const bottomHoverColor = await run('getComputedStyle(document.querySelector(".bottom-panel-resize-handle")).backgroundColor');
+        const bottomHoverColor = await run(`(async () => {
+          const element = document.querySelector(".bottom-panel-resize-handle");
+          let previous = "";
+          let stableFrames = 0;
+          for (let frame = 0; frame < 120 && stableFrames < 3; frame++) {
+            await new Promise(requestAnimationFrame);
+            const color = getComputedStyle(element).backgroundColor;
+            stableFrames = color === previous ? stableFrames + 1 : 0;
+            previous = color;
+          }
+          return previous;
+        })()`);
         await movePointerTo(
           resizerGeometry.sidebar.left + resizerGeometry.sidebar.width / 2,
           resizerGeometry.sidebar.top + resizerGeometry.sidebar.height / 2,
@@ -2238,7 +2251,18 @@ app.whenReady().then(() => {
           async () => (await run('document.querySelector(".sidebar-resizer-left").matches(":hover")')) === true,
           { description: "Sidebar resizer hover state" },
         );
-        const sidebarHoverColor = await run('getComputedStyle(document.querySelector(".sidebar-resizer-left")).backgroundColor');
+        const sidebarHoverColor = await run(`(async () => {
+          const element = document.querySelector(".sidebar-resizer-left");
+          let previous = "";
+          let stableFrames = 0;
+          for (let frame = 0; frame < 120 && stableFrames < 3; frame++) {
+            await new Promise(requestAnimationFrame);
+            const color = getComputedStyle(element).backgroundColor;
+            stableFrames = color === previous ? stableFrames + 1 : 0;
+            previous = color;
+          }
+          return previous;
+        })()`);
         assert.equal(bottomHoverColor, sidebarHoverColor,
           "the Bottom Panel and sidebar resizers render the same computed hover color");
         await run(`document.querySelector(".sidebar-resizer-left").style.display = window.__ncePreviousSidebarResizerDisplay`);
@@ -2314,13 +2338,94 @@ app.whenReady().then(() => {
           async () => (await run("Boolean(editor.terminalPanel.sessions.size === 1 && [...editor.terminalPanel.sessions.values()][0].id)")) === true,
           { timeout: 15000, description: "workspace B's independent first terminal" },
         );
-        const workspaceBTerminal = await run(`(() => {
+        let workspaceBTerminal = await run(`(() => {
           const [id, record] = [...editor.terminalPanel.sessions.entries()][0];
           return { id, workspaceKey: record.workspaceKey };
         })()`);
         assert.notEqual(workspaceBTerminal.id, firstTerminal.id);
         assert.notEqual(workspaceBTerminal.id, secondTerminal.id);
         await run(`window.__terminalWorkspaceB = editor.terminalPanel.sessions.get(${JSON.stringify(workspaceBTerminal.id)}).terminal; true`);
+
+        const respawnIds = new Set([workspaceBTerminal.id]);
+        const fdCount = () => process.platform === "darwin"
+          ? fs.readdirSync("/dev/fd").length
+          : null;
+        for (let index = 0; index < 20; index++) {
+          const previousId = workspaceBTerminal.id;
+          const previousFdCount = fdCount();
+          const previousPid = nce.window.terminalManager.sessions.get(previousId)?.process?.pid;
+          assert.ok(previousPid, `cycle ${index} has a live native PTY process`);
+          assert.equal(
+            await run(`editor.terminalPanel.closeSession(${JSON.stringify(previousId)})`),
+            true,
+            `cycle ${index} closes the last terminal tab`,
+          );
+          let closeState;
+          try {
+            await waitForCondition(
+              async () => {
+                closeState = {
+                  renderer: await run(`({
+                    sessions: editor.terminalPanel.sessions.size,
+                    panelVisible: editor.bottomPanelManager.visible,
+                    initialOpenAttempted: editor.terminalPanel.currentState.initialOpenAttempted,
+                  })`),
+                  mainSessions: nce.window.terminalManager.sessions.size,
+                  pendingCreates: nce.window.terminalManager.pendingCreates.size,
+                };
+                return closeState.renderer.sessions === 0 &&
+                  closeState.renderer.panelVisible === false &&
+                  closeState.renderer.initialOpenAttempted === false &&
+                  !nce.window.terminalManager.sessions.has(previousId) &&
+                  closeState.mainSessions === 2 && closeState.pendingCreates === 0;
+              },
+              { timeout: 5000, description: `cycle ${index} removes the last terminal session` },
+            );
+          } catch (error) {
+            throw new Error(`${error.message}; last state=${JSON.stringify(closeState)}`, { cause: error });
+          }
+          await waitForCondition(() => {
+            try { process.kill(previousPid, 0); return false; }
+            catch (error) { return error?.code === "ESRCH"; }
+          }, { timeout: 5000, description: `cycle ${index} reaps PTY process ${previousPid}` });
+
+          assert.equal(await run('editor.bottomPanelManager.openPanel("terminal")'), true,
+            `cycle ${index} reopens Terminal`);
+          await waitForCondition(
+            async () => (await run(`editor.terminalPanel.sessions.size === 1 &&
+              [...editor.terminalPanel.sessions.values()].every(record => Boolean(record.id))`)) === true &&
+              nce.window.terminalManager.sessions.size === 3 &&
+              nce.window.terminalManager.pendingCreates.size === 0,
+            { timeout: 10000, description: `cycle ${index} creates one workspace B PTY` },
+          );
+          workspaceBTerminal = await run(`(() => {
+            const [id, record] = [...editor.terminalPanel.sessions.entries()][0];
+            return { id, workspaceKey: record.workspaceKey };
+          })()`);
+          assert.equal(nce.window.terminalManager.sessions.has(workspaceBTerminal.id), true,
+            `cycle ${index} registers the new PTY in the main process`);
+          assert.equal(respawnIds.has(workspaceBTerminal.id), false,
+            `cycle ${index} receives a fresh PTY ID`);
+          respawnIds.add(workspaceBTerminal.id);
+          const marker = `NCE_PTY_RESPAWN_${index}`;
+          await run(`window.api.writeTerminalSession(
+            ${JSON.stringify(workspaceBTerminal.id)},
+            ${JSON.stringify(workspaceBTerminal.workspaceKey)},
+            ${JSON.stringify(`echo ${marker}\r`)}
+          )`);
+          await waitForCondition(
+            async () => (await run(`${getTerminalText(workspaceBTerminal.id)}.includes(${JSON.stringify(marker)})`)) === true,
+            { timeout: 10000, description: `cycle ${index} receives real shell stdout` },
+          );
+          await run(`window.__terminalWorkspaceB = editor.terminalPanel.sessions.get(${JSON.stringify(workspaceBTerminal.id)}).terminal; true`);
+          if (previousFdCount !== null) {
+            await waitForCondition(() => fdCount() <= previousFdCount + 2, {
+              timeout: 5000,
+              description: `cycle ${index} releases native PTY descriptors`,
+            });
+          }
+        }
+        assert.equal(respawnIds.size, 21, "all 20 respawns use distinct PTY IDs");
 
         assert.equal(
           await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),

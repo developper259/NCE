@@ -32,7 +32,7 @@
   "dependencies": {
     "chokidar": "^5.0.0",
     "markdown-it": "^15.0.0",
-    "node-pty": "^1.1.0",
+    "node-pty": "1.2.0-beta.15",
     "nsh": "github:developper259/NSH#4b5d48f341e06595cf04c80b77382f5a9a587ff9"
   },
   "build": {

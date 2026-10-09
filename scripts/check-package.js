@@ -114,10 +114,16 @@ for (const archive of archives) {
     file.endsWith('/build/Release/pty.node') && file.includes('node_modules/node-pty/'),
   );
   assert.ok(nativeModule, `${archive}: node-pty native module is not unpacked`);
-  if (process.platform === 'darwin' || process.platform === 'linux') {
-    assert.ok([...unpackedFiles].some(file =>
+  if (process.platform === 'darwin') {
+    const helper = [...unpackedFiles].find(file =>
       file.endsWith('/build/Release/spawn-helper') && file.includes('node_modules/node-pty/'),
-    ), `${archive}: node-pty spawn-helper is not unpacked`);
+    );
+    assert.ok(helper, `${archive}: node-pty spawn-helper is not unpacked`);
+    assert.notEqual(
+      fs.statSync(path.join(unpackedRoot, ...helper.split('/'))).mode & 0o111,
+      0,
+      `${archive}: node-pty spawn-helper is not executable`,
+    );
   }
   if (process.platform === 'win32') {
     assert.ok([...unpackedFiles].some(file =>
