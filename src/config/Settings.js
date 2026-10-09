@@ -42,7 +42,11 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor", settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
-  files: Object.freeze({ autoSave: false, confirmDelete: true }),
+  files: Object.freeze({
+    autoSave: false,
+    confirmDelete: true,
+    confirmNonEmptyFolderDeletion: true,
+  }),
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
   keybindings: DEFAULT_KEYBINDINGS,
@@ -88,6 +92,10 @@ function SETTINGS_INITIALIZE(settings) {
         typeof settings?.files?.confirmDelete === "boolean"
           ? settings.files.confirmDelete
           : DEFAULT_RENDERER_SETTINGS.files.confirmDelete,
+      confirmNonEmptyFolderDeletion:
+        typeof settings?.files?.confirmNonEmptyFolderDeletion === "boolean"
+          ? settings.files.confirmNonEmptyFolderDeletion
+          : DEFAULT_RENDERER_SETTINGS.files.confirmNonEmptyFolderDeletion,
     },
     appearance: {
       theme:
@@ -203,7 +211,9 @@ async function SETTINGS_SET(key, value) {
 
   if (
     section === "files" &&
-    (property === "autoSave" || property === "confirmDelete") &&
+    (property === "autoSave" ||
+      property === "confirmDelete" ||
+      property === "confirmNonEmptyFolderDeletion") &&
     typeof value !== "boolean"
   ) {
     return false;

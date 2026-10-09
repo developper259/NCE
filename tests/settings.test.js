@@ -27,6 +27,7 @@ test("missing settings are created in userData with defaults", async () => {
     const manager = new SettingsManager(root);
     assert.deepEqual(await manager.initialize(), DEFAULT_SETTINGS);
     assert.equal(manager.get("files.confirmDelete"), true);
+    assert.equal(manager.get("files.confirmNonEmptyFolderDeletion"), true);
     assert.deepEqual(await readSettings(root), DEFAULT_SETTINGS);
     assert.equal(manager.settingsPath, path.join(root, "settings.json"));
   } finally {
@@ -42,15 +43,25 @@ test("valid settings persist across manager restarts and set writes JSON", async
     assert.equal(await first.set("editor.tabWidth", 8), true);
     assert.equal(await first.set("files.autoSave", true), true);
     assert.equal(await first.set("files.confirmDelete", false), true);
+    assert.equal(first.get("files.confirmNonEmptyFolderDeletion"), true);
+    assert.equal(await first.set("files.confirmNonEmptyFolderDeletion", false), true);
     const second = new SettingsManager(root);
     await second.initialize();
     assert.equal(second.get("editor.tabWidth"), 8);
     assert.equal(second.get("files.autoSave"), true);
     assert.equal(second.get("files.confirmDelete"), false);
+    assert.equal(second.get("files.confirmNonEmptyFolderDeletion"), false);
+    assert.equal(await second.set("files.confirmDelete", true), true);
+    assert.equal(second.get("files.confirmNonEmptyFolderDeletion"), false);
+    assert.equal(await second.set("files.confirmNonEmptyFolderDeletion", true), true);
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
-      files: { autoSave: true, confirmDelete: false },
+      files: {
+        autoSave: true,
+        confirmDelete: true,
+        confirmNonEmptyFolderDeletion: true,
+      },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
@@ -138,7 +149,11 @@ test("malformed and invalid known settings fall back without crashing", async ()
       path.join(root, "settings.json"),
       JSON.stringify({
         editor: { tabWidth: "wide" },
-        files: { autoSave: 1, confirmDelete: "no" },
+        files: {
+          autoSave: 1,
+          confirmDelete: "no",
+          confirmNonEmptyFolderDeletion: "no",
+        },
       }),
     );
     const invalid = new SettingsManager(root);
@@ -155,6 +170,7 @@ test("missing known defaults are merged while unknown properties survive", async
       path.join(root, "settings.json"),
       JSON.stringify({
         editor: { tabWidth: 4, futureEditorSetting: true },
+        files: { autoSave: true, confirmDelete: false },
         futureSection: { value: 1 },
       }),
     );
@@ -162,7 +178,11 @@ test("missing known defaults are merged while unknown properties survive", async
     assert.deepEqual(await manager.initialize(), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 4 },
-      files: { autoSave: false, confirmDelete: true },
+      files: {
+        autoSave: true,
+        confirmDelete: false,
+        confirmNonEmptyFolderDeletion: true,
+      },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
@@ -188,13 +208,18 @@ test("queued concurrent writes leave a complete latest settings document", async
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 12 },
-      files: { autoSave: true, confirmDelete: true },
+      files: {
+        autoSave: true,
+        confirmDelete: true,
+        confirmNonEmptyFolderDeletion: true,
+      },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);
     assert.equal(await manager.set("files.confirmDelete", "no"), false);
+    assert.equal(await manager.set("files.confirmNonEmptyFolderDeletion", "no"), false);
     assert.equal(await manager.set("unknown.value", true), false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -212,6 +237,8 @@ test("a failed settings write does not change the in-memory source of truth", as
     assert.equal(manager.get("editor.tabWidth"), 2);
     assert.equal(await manager.set("files.confirmDelete", false), false);
     assert.equal(manager.get("files.confirmDelete"), true);
+    assert.equal(await manager.set("files.confirmNonEmptyFolderDeletion", false), false);
+    assert.equal(manager.get("files.confirmNonEmptyFolderDeletion"), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -7,7 +7,11 @@ export interface Settings {
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
-  files: { autoSave: boolean; confirmDelete: boolean };
+  files: {
+    autoSave: boolean;
+    confirmDelete: boolean;
+    confirmNonEmptyFolderDeletion: boolean;
+  };
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
   keybindings: Record<string, string | null>;
@@ -60,7 +64,11 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor" as const, settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
-  files: Object.freeze({ autoSave: false, confirmDelete: true }),
+  files: Object.freeze({
+    autoSave: false,
+    confirmDelete: true,
+    confirmNonEmptyFolderDeletion: true,
+  }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
   keybindings: DEFAULT_KEYBINDINGS,
@@ -72,6 +80,7 @@ const KNOWN_KEYS = new Set([
   "editor.tabWidth",
   "files.autoSave",
   "files.confirmDelete",
+  "files.confirmNonEmptyFolderDeletion",
   "appearance.theme",
   "agent.hiddenModels",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
@@ -223,6 +232,8 @@ export class SettingsManager {
       files: {
         autoSave: this.settings.files.autoSave,
         confirmDelete: this.settings.files.confirmDelete,
+        confirmNonEmptyFolderDeletion:
+          this.settings.files.confirmNonEmptyFolderDeletion,
       },
       appearance: { theme: this.settings.appearance.theme },
       agent: {
@@ -352,6 +363,12 @@ export class SettingsManager {
     )
       ? merged.files.confirmDelete
       : fallback.files.confirmDelete;
+    merged.files.confirmNonEmptyFolderDeletion = this.isValid(
+      "files.confirmNonEmptyFolderDeletion",
+      merged.files.confirmNonEmptyFolderDeletion,
+    )
+      ? merged.files.confirmNonEmptyFolderDeletion
+      : fallback.files.confirmNonEmptyFolderDeletion;
     merged.appearance.theme = this.isValid(
       "appearance.theme",
       merged.appearance.theme,
@@ -440,7 +457,11 @@ export class SettingsManager {
         (value as number) <= 16
       );
     }
-    if (key === "files.autoSave" || key === "files.confirmDelete") {
+    if (
+      key === "files.autoSave" ||
+      key === "files.confirmDelete" ||
+      key === "files.confirmNonEmptyFolderDeletion"
+    ) {
       return typeof value === "boolean";
     }
     if (key === "appearance.theme") {

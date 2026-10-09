@@ -55,30 +55,42 @@ function createSettingsViewContext() {
   return { context, writes };
 }
 
-test("Files settings expose the persistent confirmation checkbox", () => {
+test("Files settings expose both persistent confirmation checkboxes", () => {
   const { context } = createSettingsViewContext();
-  const setting = context.__SettingsView.getSettings().find(
-    (item) => item.key === "files.confirmDelete",
+  const settings = context.__SettingsView.getSettings().filter((item) =>
+    ["files.confirmDelete", "files.confirmNonEmptyFolderDeletion"].includes(item.key),
   );
-  assert.deepEqual(
-    JSON.parse(JSON.stringify({
-      category: setting.category,
-      label: setting.label,
-      description: setting.description,
-      control: setting.control,
-    })),
+  assert.deepEqual(JSON.parse(JSON.stringify(settings.map(({ key, category, label, description, control }) => ({
+    key,
+    category,
+    label,
+    description,
+    control,
+  })))), [
     {
+      key: "files.confirmDelete",
       category: "Files",
       label: "Confirm File Deletion",
       description: "Ask for confirmation before deleting files and folders.",
       control: "checkbox",
     },
-  );
+    {
+      key: "files.confirmNonEmptyFolderDeletion",
+      category: "Files",
+      label: "Ask for Not Empty Folder",
+      description: "Ask for confirmation before permanently deleting a folder that contains files or subfolders.",
+      control: "checkbox",
+    },
+  ]);
 });
 
 test("checkbox changes persist the selected setting without calling Auto Save for file deletion", async () => {
   const { context, writes } = createSettingsViewContext();
-  context.SETTINGS_INITIALIZE({ files: { autoSave: false, confirmDelete: true } });
+  context.SETTINGS_INITIALIZE({ files: {
+    autoSave: false,
+    confirmDelete: true,
+    confirmNonEmptyFolderDeletion: true,
+  } });
   const autoSaveCalls = [];
   const refreshed = [];
   const view = Object.create(context.__SettingsView.prototype);
@@ -106,13 +118,28 @@ test("checkbox changes persist the selected setting without calling Auto Save fo
   assert.deepEqual(writes, [["files.confirmDelete", false]]);
   assert.deepEqual(autoSaveCalls, []);
   assert.equal(context.SETTINGS_GET("files.confirmDelete"), false);
+  assert.equal(context.SETTINGS_GET("files.confirmNonEmptyFolderDeletion"), true);
   assert.equal(deleteInput.disabled, false);
 
   view.sync("files.confirmDelete");
   assert.equal(deleteInput.checked, false);
   context.SETTINGS_INITIALIZE({ files: { confirmDelete: true } });
+  assert.equal(context.SETTINGS_GET("files.confirmNonEmptyFolderDeletion"), true);
   view.sync("files.confirmDelete");
   assert.equal(deleteInput.checked, true);
+
+  const nonEmptyControl = view.createCheckbox(
+    { key: "files.confirmNonEmptyFolderDeletion" },
+    "setting-files-confirmNonEmptyFolderDeletion",
+  );
+  const nonEmptyInput = nonEmptyControl.children[0];
+  inputs.set(nonEmptyInput.id, nonEmptyInput);
+  assert.equal(nonEmptyInput.checked, true);
+  nonEmptyInput.checked = false;
+  await nonEmptyInput.emit("change");
+  assert.deepEqual(writes.slice(-1), [["files.confirmNonEmptyFolderDeletion", false]]);
+  assert.equal(context.SETTINGS_GET("files.confirmDelete"), true);
+  assert.equal(context.SETTINGS_GET("files.confirmNonEmptyFolderDeletion"), false);
 
   const autoSaveControl = view.createCheckbox(
     { key: "files.autoSave", apply: (editor, value) => {
@@ -125,13 +152,13 @@ test("checkbox changes persist the selected setting without calling Auto Save fo
   autoSaveInput.checked = true;
   await autoSaveInput.emit("change");
   assert.deepEqual(autoSaveCalls, [true]);
-  assert.equal(refreshed.length, 2);
+  assert.equal(refreshed.length, 3);
 });
 
 test("a rejected checkbox write restores the persisted value", async () => {
   const { context } = createSettingsViewContext();
   context.window.api.setSetting = async () => false;
-  context.SETTINGS_INITIALIZE({ files: { confirmDelete: true } });
+  context.SETTINGS_INITIALIZE({ files: { confirmDelete: true, confirmNonEmptyFolderDeletion: true } });
   const view = Object.create(context.__SettingsView.prototype);
   view.editor = { bottomBar: { refreshScrollers() {} } };
   const checkbox = view.createCheckbox(

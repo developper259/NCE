@@ -44,6 +44,15 @@ const SETTINGS_UI = Object.freeze([
     control: "checkbox",
   },
   {
+    key: "files.confirmNonEmptyFolderDeletion",
+    category: "Files",
+    label: "Ask for Not Empty Folder",
+    description:
+      "Ask for confirmation before permanently deleting a folder that contains files or subfolders.",
+    keywords: ["confirm", "delete", "folder", "non-empty", "recursive"],
+    control: "checkbox",
+  },
+  {
     key: "agent.settings",
     category: "Agent",
     label: "Agent",
