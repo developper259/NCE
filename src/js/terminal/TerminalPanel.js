@@ -4,55 +4,65 @@ export class TerminalPanel {
     this.Terminal = Terminal;
     this.FitAddon = FitAddon;
     this.WebLinksAddon = WebLinksAddon;
-    this.sessions = new Map();
+    this.workspaceSessions = new Map();
+    this.sessionIndex = new Map();
     this.pendingOutput = new Map();
-    this.activeSessionId = null;
-    this.nextNumber = 1;
-    this.hasOpened = false;
+    this.closedSessionIds = new Set();
+    this.currentWorkspaceKey = "no-workspace";
+    this.currentWorkspaceRoot = null;
+    this.workspaceGeneration = 0;
+    this.pendingNumber = 0;
     this.destroyed = false;
     this.frame = null;
 
     this.element = document.createElement("section");
     this.element.className = "terminal-panel";
-    this.element.setAttribute("aria-label", "Terminal sessions");
+    this.element.setAttribute("aria-label", "Terminal workspace");
     this.element.innerHTML = `
-      <div class="terminal-tabs" role="tablist" aria-label="Terminal sessions">
-        <div class="terminal-tabs-list"></div>
+      <div class="terminal-tabs">
+        <div class="terminal-tabs-list" role="tablist" aria-label="Terminal sessions"></div>
         <div class="terminal-tabs-actions">
-          <button class="bottom-panel-button terminal-select-all" type="button" title="Select All" aria-label="Select All">Select All</button>
-          <button class="bottom-panel-button terminal-copy" type="button" title="Copy Selection" aria-label="Copy Selection">Copy</button>
-          <button class="bottom-panel-button terminal-paste" type="button" title="Paste" aria-label="Paste">Paste</button>
-          <button class="bottom-panel-button terminal-clear" type="button" title="Clear Terminal" aria-label="Clear Terminal">Clear</button>
+          <button class="bottom-panel-icon-button terminal-actions-toggle" type="button" aria-label="Terminal actions" aria-haspopup="menu" aria-expanded="false" title="Terminal actions">
+            <i class="fi fi-rr-menu-dots" aria-hidden="true"></i>
+          </button>
+          <div class="terminal-actions-menu" role="menu" hidden>
+            <button type="button" role="menuitem" data-action="select-all">Select All</button>
+            <button type="button" role="menuitem" data-action="copy">Copy Selection</button>
+            <button type="button" role="menuitem" data-action="paste">Paste</button>
+            <button type="button" role="menuitem" data-action="clear">Clear Terminal</button>
+          </div>
         </div>
       </div>
       <div class="terminal-view"></div>`;
     this.tabsList = this.element.querySelector(".terminal-tabs-list");
     this.view = this.element.querySelector(".terminal-view");
+    this.actionsToggle = this.element.querySelector(".terminal-actions-toggle");
+    this.actionsMenu = this.element.querySelector(".terminal-actions-menu");
     this.errorStatus = null;
-    this.emptyStatus = null;
-    this.onClearClick = () => this.getActiveSession()?.terminal.clear();
-    this.onSelectAllClick = () => this.getActiveSession()?.terminal.selectAll();
-    this.onCopyClick = () => {
-      const selection = this.getActiveSession()?.terminal.getSelection();
-      if (selection) void this.editor.api.writeClipboardText(selection).catch((error) =>
-        console.error("[Terminal] Failed to copy terminal selection", error),
-      );
+
+    this.onActionsToggle = () => this.toggleActionsMenu();
+    this.onActionsMenuClick = (event) => {
+      const action = event.target?.closest?.("[data-action]")?.dataset?.action;
+      if (!action) return;
+      this.closeActionsMenu();
+      void this.runAction(action);
     };
-    this.onPasteClick = async () => {
-      const record = this.getActiveSession();
-      if (!record) return;
-      try {
-        const text = await this.editor.api.readClipboardText();
-        if (typeof text === "string") record.terminal.paste(text);
-        if (this.isActive(record)) record.terminal.focus();
-      } catch (error) {
-        console.error("[Terminal] Failed to paste terminal content", error);
-      }
+    this.onOutsidePointerDown = (event) => {
+      if (!this.element.querySelector(".terminal-tabs-actions")?.contains(event.target))
+        this.closeActionsMenu();
     };
-    this.element.querySelector(".terminal-clear")?.addEventListener("click", this.onClearClick);
-    this.element.querySelector(".terminal-select-all")?.addEventListener("click", this.onSelectAllClick);
-    this.element.querySelector(".terminal-copy")?.addEventListener("click", this.onCopyClick);
-    this.element.querySelector(".terminal-paste")?.addEventListener("click", this.onPasteClick);
+    this.onTabsKeyDown = (event) => this.handleTabsKeyDown(event);
+    this.onActionsMenuKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      this.closeActionsMenu();
+      this.actionsToggle?.focus();
+    };
+    this.actionsToggle?.addEventListener("click", this.onActionsToggle);
+    this.actionsMenu?.addEventListener("click", this.onActionsMenuClick);
+    this.actionsMenu?.addEventListener("keydown", this.onActionsMenuKeyDown);
+    this.tabsList?.addEventListener("keydown", this.onTabsKeyDown);
+    document.addEventListener("pointerdown", this.onOutsidePointerDown);
 
     this.removeOutputListener = editor.api.onTerminalOutput?.((payload) => this.handleOutput(payload));
     this.removeExitListener = editor.api.onTerminalExit?.((payload) => this.handleExit(payload));
@@ -60,21 +70,195 @@ export class TerminalPanel {
     this.applyTheme();
   }
 
-  onOpen({ restoring = false } = {}) {
-    if (this.hasOpened) {
+  get currentState() {
+    return this.getWorkspaceState(this.currentWorkspaceKey);
+  }
+
+  // Kept as a read-only compatibility surface for diagnostics and tests. The
+  // actual registries are isolated in workspaceSessions.
+  get sessions() {
+    return this.currentState.sessions;
+  }
+
+  get activeSessionId() {
+    return this.currentState.activeSessionId;
+  }
+
+  set activeSessionId(value) {
+    this.currentState.activeSessionId = value;
+  }
+
+  getWorkspaceState(workspaceKey, workspaceRoot = null) {
+    const key = typeof workspaceKey === "string" && workspaceKey
+      ? workspaceKey : "no-workspace";
+    let state = this.workspaceSessions.get(key);
+    if (!state) {
+      state = {
+        workspaceKey: key,
+        workspaceRoot,
+        sessions: new Map(),
+        activeSessionId: null,
+        pendingRestoreTabs: null,
+        restoreActiveIndex: 0,
+        restoreSessionIds: [],
+        initialOpenPromise: null,
+        initialOpenAttempted: false,
+        lastError: null,
+      };
+      this.workspaceSessions.set(key, state);
+    } else if (workspaceRoot) {
+      state.workspaceRoot = workspaceRoot;
+    }
+    return state;
+  }
+
+  activateWorkspace(workspaceKey, workspaceRoot = null, terminalState = null) {
+    if (this.destroyed || typeof workspaceKey !== "string" || !workspaceKey) return false;
+    const changed = this.currentWorkspaceKey !== workspaceKey;
+    if (changed) {
+      this.workspaceGeneration += 1;
+      this.closeActionsMenu();
+      const previous = this.getWorkspaceState(this.currentWorkspaceKey);
+      const focused = this.getActiveSessionFor(previous);
+      if (focused) focused.terminal.blur?.();
+    }
+
+    this.currentWorkspaceKey = workspaceKey;
+    this.currentWorkspaceRoot = workspaceRoot || null;
+    const state = this.getWorkspaceState(workspaceKey, workspaceRoot);
+    if (!state.sessions.size && terminalState && !state.pendingRestoreTabs) {
+      state.pendingRestoreTabs = Array.isArray(terminalState.tabs)
+        ? terminalState.tabs.map((tab) => ({
+            baseLabel: this.safeLabel(tab?.baseLabel) || "Terminal",
+            customLabel: this.safeLabel(tab?.customLabel) || null,
+          }))
+        : [];
+      state.restoreActiveIndex = Number.isInteger(terminalState.activeTabIndex)
+        ? Math.max(0, terminalState.activeTabIndex) : 0;
+    }
+
+    this.hideInactiveWorkspaceSessions();
+    this.renderTabs();
+    const active = this.getActiveSession();
+    if (active) this.showActive(active);
+    else this.clearTerminalActions();
+    this.clearStatus();
+    if (this.editor.bottomPanelManager?.visible) this.scheduleFit();
+    return true;
+  }
+
+  getPersistedState(workspaceKey = this.currentWorkspaceKey) {
+    const state = this.getWorkspaceState(workspaceKey);
+    const liveRecords = [...state.sessions.values()].filter((record) => !record.disposed);
+    const records = state.pendingRestoreTabs?.length
+      ? [
+          ...state.restoreSessionIds
+            .map((id) => state.sessions.get(id))
+            .filter((record) => record && !record.disposed),
+          ...liveRecords.filter((record) => !state.restoreSessionIds.includes(record.id)),
+        ]
+      : liveRecords;
+    const restoredTabs = records.map((record) => ({
+          baseLabel: this.safeLabel(record.baseLabel) || "Terminal",
+          customLabel: this.safeLabel(record.customLabel) || null,
+        }));
+    const pendingTabs = (state.pendingRestoreTabs || []).map((tab) => ({
+          baseLabel: this.safeLabel(tab.baseLabel) || "Terminal",
+          customLabel: this.safeLabel(tab.customLabel) || null,
+        }));
+    const tabs = state.pendingRestoreTabs?.length
+      ? [...restoredTabs, ...pendingTabs]
+      : restoredTabs.length ? restoredTabs : pendingTabs;
+    let activeTabIndex = 0;
+    if (state.pendingRestoreTabs?.length) {
+      activeTabIndex = Math.min(state.restoreActiveIndex || 0, Math.max(0, tabs.length - 1));
+    } else if (records.length) {
+      const index = records.findIndex((record) => record.id === state.activeSessionId);
+      activeTabIndex = index >= 0 ? index : 0;
+    } else {
+      activeTabIndex = Math.min(state.restoreActiveIndex || 0, Math.max(0, tabs.length - 1));
+    }
+    return { version: 1, activeTabIndex, tabs };
+  }
+
+  onOpen() {
+    const state = this.currentState;
+    this.clearStatus();
+    if (state.sessions.size) {
+      const active = this.getActiveSession();
+      if (active) this.showActive(active);
+      if (state.pendingRestoreTabs?.length && !state.initialOpenPromise) {
+        state.initialOpenAttempted = true;
+        state.initialOpenPromise = this.restoreOrCreateInitialSessions(state)
+          .finally(() => { state.initialOpenPromise = null; });
+      }
       this.scheduleFit();
       return;
     }
-    this.hasOpened = true;
-    if (restoring) this.showEmptyState();
-    else void this.createTerminal();
+    if (state.initialOpenAttempted && state.lastError) {
+      this.showError(state.lastError, state.workspaceKey);
+      return;
+    }
+    if (!state.initialOpenPromise && !state.initialOpenAttempted) {
+      state.initialOpenAttempted = true;
+      state.initialOpenPromise = this.restoreOrCreateInitialSessions(state)
+        .finally(() => { state.initialOpenPromise = null; });
+    }
+  }
+
+  async restoreOrCreateInitialSessions(state) {
+    const ownerKey = state.workspaceKey;
+    const generation = this.workspaceGeneration;
+    const pending = state.pendingRestoreTabs;
+    if (pending?.length) {
+      while (pending.length && !this.destroyed) {
+        const metadata = pending[0];
+        const record = await this.createTerminal({
+          workspaceKey: ownerKey,
+          customLabel: metadata.customLabel,
+          focus: false,
+          activate: false,
+          reportError: ownerKey === this.currentWorkspaceKey,
+          returnRecord: true,
+        });
+        if (!record) return false;
+        state.restoreSessionIds.push(record.id);
+        pending.shift();
+        this.editor.statesManager?.scheduleBottomPanelStateSave?.(ownerKey);
+      }
+      state.pendingRestoreTabs = null;
+      state.activeSessionId = state.restoreSessionIds[
+        Math.min(state.restoreActiveIndex, Math.max(0, state.restoreSessionIds.length - 1))
+      ] || state.restoreSessionIds[0] || state.activeSessionId || null;
+      if (state.workspaceKey === this.currentWorkspaceKey) {
+        this.renderTabs();
+        const active = this.getActiveSession();
+        if (active) this.showActive(active);
+        if (generation === this.workspaceGeneration) this.scheduleFit();
+      }
+      this.notifyWorkspaceChanged(ownerKey);
+      return Boolean(state.restoreSessionIds.length);
+    }
+
+    const created = await this.createTerminal({
+      workspaceKey: ownerKey,
+      focus: true,
+      activate: true,
+      reportError: ownerKey === this.currentWorkspaceKey,
+    });
+    return Boolean(created);
   }
 
   onActivate() {
+    const record = this.getActiveSession();
+    if (record) this.showActive(record);
     this.scheduleFit();
   }
 
-  onDeactivate() {}
+  onDeactivate() {
+    this.closeActionsMenu();
+    this.getActiveSession()?.terminal.blur?.();
+  }
 
   onResize() {
     this.scheduleFit();
@@ -84,10 +268,21 @@ export class TerminalPanel {
     this.applyTheme();
   }
 
-  async createTerminal() {
-    if (this.destroyed) return false;
-    const focusInitiator = document.activeElement;
-    this.clearStatus();
+  async createTerminal({
+    workspaceKey = this.currentWorkspaceKey,
+    customLabel = null,
+    focus = true,
+    activate = true,
+    reportError = true,
+    returnRecord = false,
+  } = {}) {
+    if (this.destroyed || typeof workspaceKey !== "string" || !workspaceKey) return null;
+    const state = this.getWorkspaceState(workspaceKey);
+    const isCurrent = () => !this.destroyed && this.currentWorkspaceKey === workspaceKey;
+    const generation = this.workspaceGeneration;
+    const focusInitiator = focus && isCurrent() ? document.activeElement : null;
+    if (isCurrent()) this.clearStatus();
+
     const terminal = new this.Terminal({
       cursorBlink: true,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
@@ -107,11 +302,17 @@ export class TerminalPanel {
       );
     });
     terminal.loadAddon(webLinksAddon);
+    const pendingId = `pending-${++this.pendingNumber}`;
     const record = {
       id: null,
-      number: this.nextNumber++,
-      label: "Terminal",
+      internalId: pendingId,
+      workspaceKey,
+      workspaceRoot: state.workspaceRoot,
+      baseLabel: "Terminal",
+      customLabel: this.safeLabel(customLabel) || null,
+      displayLabel: "Terminal",
       shell: "",
+      cwd: "",
       terminal,
       fitAddon,
       webLinksAddon,
@@ -120,75 +321,170 @@ export class TerminalPanel {
       rows: 0,
       exited: false,
       disposed: false,
+      closingPromise: null,
       subscriptions: [],
     };
     record.wrapper.className = "terminal-instance";
     record.wrapper.hidden = true;
+    record.wrapper.id = `terminal-view-${++this.pendingNumber}`;
+    record.wrapper.setAttribute("role", "tabpanel");
+    record.wrapper.setAttribute("aria-label", "Terminal output");
     this.view?.appendChild(record.wrapper);
     terminal.open(record.wrapper);
     record.subscriptions.push(terminal.onData((data) => {
-      if (!record.id || record.exited || record.disposed) return;
-      void this.editor.api.writeTerminalSession(record.id, data).catch((error) =>
-        console.error("[Terminal] Failed to write terminal input", error),
+      if (!record.id || record.exited || record.disposed || !this.isActive(record)) return;
+      void this.editor.api.writeTerminalSession(record.id, record.workspaceKey, data).catch((error) =>
+        console.error("[Terminal] Failed to write PTY input", error),
       );
     }));
     record.subscriptions.push(terminal.onResize(({ cols, rows }) => {
-      this.syncPtySize(record, cols, rows);
+      if (record.workspaceKey === this.currentWorkspaceKey)
+        this.syncPtySize(record, cols, rows);
     }));
-    this.sessions.set(`pending-${record.number}`, record);
-    this.activeSessionId = `pending-${record.number}`;
-    this.renderTabs();
-    this.showActive(record);
+    state.sessions.set(pendingId, record);
+    if (activate) state.activeSessionId = pendingId;
+    this.recomputeLabels(state);
+    if (isCurrent()) {
+      this.renderTabs();
+      if (activate) this.showActive(record);
+      if (this.editor.bottomPanelManager?.visible) void this.fitRecord(record);
+    }
 
     try {
-      await this.fitRecord(record);
+      if (isCurrent()) await this.fitRecord(record);
+      const scope = await this.editor.api.getTerminalWorkspaceScope?.();
+      if (this.destroyed || record.disposed || scope?.workspaceKey !== workspaceKey) {
+        throw new Error("The active workspace changed. Reopen the terminal and try again.");
+      }
       const result = await this.editor.api.createTerminalSession({
         cols: Math.max(2, terminal.cols || 80),
         rows: Math.max(2, terminal.rows || 24),
-      });
-      if (!result?.success || typeof result.sessionId !== "string") {
+      }, workspaceKey);
+      if (!result?.success || typeof result.sessionId !== "string")
         throw new Error(result?.error?.message || "Failed to start terminal.");
+      if (result.workspaceKey !== workspaceKey) {
+        void this.editor.api.closeTerminalSession(result.sessionId, result.workspaceKey).catch(() => false);
+        throw new Error("Terminal ownership could not be verified.");
       }
       if (record.disposed || this.destroyed) {
         this.pendingOutput.delete(result.sessionId);
-        await this.editor.api.closeTerminalSession(result.sessionId);
+        void this.editor.api.closeTerminalSession(result.sessionId, workspaceKey).catch(() => false);
         return false;
       }
-      this.sessions.delete(`pending-${record.number}`);
+
+      state.sessions.delete(pendingId);
       record.id = result.sessionId;
+      record.internalId = result.sessionId;
       record.shell = result.shell || "shell";
       record.cwd = typeof result.cwd === "string" ? result.cwd : "";
-      const folder = record.cwd.split(/[\\/]/).filter(Boolean).at(-1) || "Home";
-      record.label = `${record.shell} — ${folder} (${record.number})`;
-      this.sessions.set(record.id, record);
-      this.activeSessionId = record.id;
-      this.renderTabs();
-      this.showActive(record);
-      this.scheduleFit();
+      record.baseLabel = this.createBaseLabel(record, state);
+      state.sessions.set(record.id, record);
+      this.sessionIndex.set(record.id, record);
+      if (state.activeSessionId === pendingId) state.activeSessionId = record.id;
+      this.recomputeLabels(state);
       const pending = this.pendingOutput.get(record.id) || [];
       this.pendingOutput.delete(record.id);
-      for (const payload of pending) this.writeOutput(record, payload);
-      if (this.shouldTakeFocus(record, focusInitiator)) record.terminal.focus();
-      return true;
+      for (const payload of pending) {
+        if (payload.workspaceKey === workspaceKey) this.writeOutput(record, payload);
+        else void this.editor.api.acknowledgeTerminalOutput(
+          payload.sessionId, payload.workspaceKey, payload.sequence,
+        );
+      }
+
+      if (workspaceKey === this.currentWorkspaceKey) {
+        this.renderTabs();
+        if (state.activeSessionId === record.id) this.showActive(record);
+        if (this.editor.bottomPanelManager?.visible) this.scheduleFit({ focus: false });
+        if (focus && generation === this.workspaceGeneration && this.shouldTakeFocus(record, focusInitiator))
+          record.terminal.focus();
+      }
+      state.lastError = null;
+      this.notifyWorkspaceChanged(workspaceKey);
+      return returnRecord ? record : true;
     } catch (error) {
+      const cancelled = record.disposed;
+      if (record.id) this.sessionIndex.delete(record.id);
+      state.sessions.delete(record.internalId);
       this.disposeRecord(record);
-      this.sessions.delete(`pending-${record.number}`);
-      this.activeSessionId = this.sessions.keys().next().value || null;
-      this.renderTabs();
-      if (this.destroyed) return false;
-      this.showError(error?.message || "Failed to start terminal.");
+      if (state.activeSessionId === record.internalId)
+        state.activeSessionId = state.sessions.keys().next().value || null;
+      this.recomputeLabels(state);
+      if (!cancelled) state.lastError = error?.message || "Failed to start terminal.";
+      if (workspaceKey === this.currentWorkspaceKey) {
+        this.renderTabs();
+        const active = this.getActiveSession();
+        if (active) this.showActive(active);
+        else this.clearTerminalActions();
+        if (!cancelled && reportError) this.showError(state.lastError, workspaceKey);
+      }
       return false;
     }
   }
 
+  createBaseLabel(record, state) {
+    const rootName = this.pathBasename(record.workspaceRoot) ||
+      this.pathBasename(record.cwd) || "Home";
+    return `${record.shell} — ${rootName}`;
+  }
+
+  pathBasename(value) {
+    if (typeof NCEPath !== "undefined" && NCEPath?.basename) return NCEPath.basename(value);
+    return typeof value === "string" ? value.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop() || "" : "";
+  }
+
+  safeLabel(value) {
+    return typeof value === "string" && value.trim()
+      ? value.trim().slice(0, 128) : null;
+  }
+
+  recomputeLabels(state) {
+    const records = [...state.sessions.values()].filter((record) => !record.disposed);
+    const counts = new Map();
+    for (const record of records) {
+      const label = this.safeLabel(record.customLabel) || this.safeLabel(record.baseLabel) || "Terminal";
+      counts.set(label, (counts.get(label) || 0) + 1);
+    }
+    const seen = new Map();
+    for (const record of records) {
+      const base = this.safeLabel(record.customLabel) || this.safeLabel(record.baseLabel) || "Terminal";
+      const duplicate = counts.get(base) > 1;
+      const number = (seen.get(base) || 0) + 1;
+      seen.set(base, number);
+      record.displayLabel = duplicate ? `${base} (${number})` : base;
+    }
+  }
+
+  notifyWorkspaceChanged(workspaceKey) {
+    this.recomputeLabels(this.getWorkspaceState(workspaceKey));
+    if (workspaceKey === this.currentWorkspaceKey) {
+      this.renderTabs();
+      this.editor.bottomPanelManager?.syncControls?.();
+    }
+    this.editor.statesManager?.scheduleBottomPanelStateSave?.(workspaceKey);
+  }
+
   handleOutput(payload) {
     if (!payload || typeof payload.sessionId !== "string" ||
-        typeof payload.data !== "string" || !Number.isSafeInteger(payload.sequence)) return;
-    const record = this.sessions.get(payload.sessionId);
+        typeof payload.workspaceKey !== "string" || typeof payload.data !== "string" ||
+        !Number.isSafeInteger(payload.sequence)) return;
+    const record = this.sessionIndex.get(payload.sessionId);
     if (!record) {
+      if (this.closedSessionIds.has(payload.sessionId)) {
+        void this.editor.api.acknowledgeTerminalOutput(
+          payload.sessionId, payload.workspaceKey, payload.sequence,
+        );
+        return;
+      }
+      if (this.pendingOutput.size >= 8 && !this.pendingOutput.has(payload.sessionId)) return;
       const pending = this.pendingOutput.get(payload.sessionId) || [];
-      pending.push(payload);
+      if (pending.length < 2) pending.push(payload);
       this.pendingOutput.set(payload.sessionId, pending);
+      return;
+    }
+    if (payload.workspaceKey !== record.workspaceKey) {
+      void this.editor.api.acknowledgeTerminalOutput(
+        payload.sessionId, payload.workspaceKey, payload.sequence,
+      );
       return;
     }
     this.writeOutput(record, payload);
@@ -196,39 +492,49 @@ export class TerminalPanel {
 
   writeOutput(record, payload) {
     if (record.disposed) {
-      void this.editor.api.acknowledgeTerminalOutput(payload.sessionId, payload.sequence);
+      void this.editor.api.acknowledgeTerminalOutput(
+        payload.sessionId, record.workspaceKey, payload.sequence,
+      );
       return;
     }
     record.terminal.write(payload.data, () => {
-      void this.editor.api.acknowledgeTerminalOutput(payload.sessionId, payload.sequence)
-        .catch((error) => console.error("[Terminal] Failed to acknowledge output", error));
+      void this.editor.api.acknowledgeTerminalOutput(
+        payload.sessionId, record.workspaceKey, payload.sequence,
+      ).catch((error) => console.error("[Terminal] Failed to acknowledge PTY output", error));
     });
   }
 
   handleExit(payload) {
-    const record = this.sessions.get(payload?.sessionId);
-    if (!record || record.exited) return;
+    const record = this.sessionIndex.get(payload?.sessionId);
+    if (!record || payload.workspaceKey !== record.workspaceKey || record.exited) return;
     record.exited = true;
     record.exitCode = Number.isInteger(payload.exitCode) ? payload.exitCode : null;
-    record.terminal.write(`\r\n\x1b[90m[Process exited${record.exitCode === null ? "" : ` with code ${record.exitCode}`}]\x1b[0m\r\n`);
-    this.renderTabs();
+    const exitLabel = record.exitCode === null
+      ? "Process exited" : `Process exited with code ${record.exitCode}`;
+    record.terminal.write(`\r\n\x1b[90m[${exitLabel}]\x1b[0m\r\n`);
+    if (record.workspaceKey === this.currentWorkspaceKey) this.renderTabs();
   }
 
   handleError(payload) {
-    const record = this.sessions.get(payload?.sessionId);
+    const record = this.sessionIndex.get(payload?.sessionId);
     const error = payload?.error;
-    if (!record || !error) return;
+    if (!record || payload.workspaceKey !== record.workspaceKey || !error) return;
     record.exited = true;
     record.terminal.write(`\r\n\x1b[31m${error.message || "Terminal session unavailable."}\x1b[0m\r\n`);
-    this.renderTabs();
+    if (record.workspaceKey === this.currentWorkspaceKey) this.renderTabs();
+  }
+
+  getActiveSessionFor(state) {
+    return state?.sessions.get(state.activeSessionId) || null;
   }
 
   getActiveSession() {
-    return this.sessions.get(this.activeSessionId) || null;
+    return this.getActiveSessionFor(this.currentState);
   }
 
   isActive(record) {
-    return !this.destroyed && this.activeSessionId === record.id &&
+    return !this.destroyed && record.workspaceKey === this.currentWorkspaceKey &&
+      this.currentState.activeSessionId === record.id &&
       this.editor.bottomPanelManager?.visible === true;
   }
 
@@ -241,59 +547,101 @@ export class TerminalPanel {
     );
   }
 
-  activateSession(id) {
-    const record = this.sessions.get(id);
-    if (!record || this.destroyed) return false;
-    this.activeSessionId = id;
+  activateSession(id, { focus = true } = {}) {
+    const state = this.currentState;
+    const record = state.sessions.get(id);
+    if (!record || record.workspaceKey !== this.currentWorkspaceKey) return false;
+    const keepTabFocus = this.tabsList?.contains?.(document.activeElement) &&
+      document.activeElement?.getAttribute?.("role") === "tab";
+    const changed = state.activeSessionId !== id;
+    state.activeSessionId = id;
     this.renderTabs();
+    if (keepTabFocus) {
+      const index = [...state.sessions.keys()].indexOf(id);
+      this.tabsList?.querySelectorAll?.('[role="tab"]')?.[index]?.focus?.();
+    }
     this.showActive(record);
-    this.scheduleFit({ focus: true });
+    this.scheduleFit({ focus });
+    if (changed) this.notifyWorkspaceChanged(this.currentWorkspaceKey);
     return true;
   }
 
   async closeSession(id) {
-    const record = this.sessions.get(id);
-    if (!record) return false;
-    if (id && !String(id).startsWith("pending-")) {
-      await this.editor.api.closeTerminalSession(id).catch(() => false);
+    const state = this.currentState;
+    const record = state.sessions.get(id);
+    if (!record || record.workspaceKey !== this.currentWorkspaceKey || record.closingPromise) return false;
+    record.closingPromise = Promise.resolve();
+    const wasActive = state.activeSessionId === id;
+    const keepTabFocus = this.tabsList?.contains?.(document.activeElement) === true;
+    state.sessions.delete(id);
+    if (record.id) {
+      this.sessionIndex.delete(record.id);
+      this.closedSessionIds.add(record.id);
+      if (this.closedSessionIds.size > 32)
+        this.closedSessionIds.delete(this.closedSessionIds.values().next().value);
+      this.pendingOutput.delete(record.id);
+      state.restoreSessionIds = state.restoreSessionIds.filter((sessionId) => sessionId !== record.id);
     }
-    this.sessions.delete(id);
+    if (wasActive) state.activeSessionId = state.sessions.keys().next().value || null;
     this.disposeRecord(record);
-    if (this.activeSessionId === id) {
-      this.activeSessionId = this.sessions.keys().next().value || null;
-    }
+    this.recomputeLabels(state);
     this.renderTabs();
+    if (keepTabFocus && state.activeSessionId) {
+      const index = [...state.sessions.keys()].indexOf(state.activeSessionId);
+      this.tabsList?.querySelectorAll?.('[role="tab"]')?.[index]?.focus?.();
+    }
     const active = this.getActiveSession();
     if (active) this.showActive(active);
-    else this.showEmptyState();
+    else this.clearTerminalActions();
+    this.notifyWorkspaceChanged(this.currentWorkspaceKey);
+
+    if (!state.sessions.size) {
+      state.initialOpenAttempted = false;
+      state.lastError = null;
+      this.editor.bottomPanelManager?.closePanel?.({ restoreFocus: false });
+    }
+    if (record.id) {
+      const close = Promise.resolve(this.editor.api.closeTerminalSession(record.id, record.workspaceKey))
+        .catch((error) => {
+          console.error("[Terminal] Failed to close PTY session", error);
+          return false;
+        });
+      let timeoutId;
+      const timeout = new Promise((resolve) => {
+        timeoutId = setTimeout(() => resolve(false), 2000);
+      });
+      void Promise.race([close, timeout]).finally(() => clearTimeout(timeoutId));
+    }
     return true;
   }
 
   showActive(record) {
     this.clearStatus();
-    this.emptyStatus?.remove();
-    this.emptyStatus = null;
-    for (const candidate of this.sessions.values())
-      candidate.wrapper.hidden = candidate !== record;
-    this.element.querySelector(".terminal-clear").disabled = !record;
+    for (const state of this.workspaceSessions.values()) {
+      for (const candidate of state.sessions.values())
+        candidate.wrapper.hidden = candidate !== record;
+    }
+    const selected = Boolean(record);
+    for (const button of this.actionsMenu?.querySelectorAll?.("[data-action]") || [])
+      button.disabled = !selected;
   }
 
-  showEmptyState() {
-    if (!this.view) return;
-    for (const record of this.sessions.values()) record.wrapper.hidden = true;
-    this.element.querySelector(".terminal-clear").disabled = true;
-    this.clearStatus();
-    const empty = document.createElement("div");
-    empty.className = "terminal-empty-state";
-    const message = document.createElement("p");
-    message.textContent = "No terminal sessions. Create a terminal to get started.";
-    empty.appendChild(message);
-    this.emptyStatus = empty;
-    this.view.replaceChildren(empty);
+  hideInactiveWorkspaceSessions() {
+    for (const state of this.workspaceSessions.values()) {
+      for (const record of state.sessions.values()) {
+        record.wrapper.hidden = record.workspaceKey !== this.currentWorkspaceKey ||
+          record.id !== this.currentState.activeSessionId;
+      }
+    }
   }
 
-  showError(message) {
-    if (!this.view) return;
+  clearTerminalActions() {
+    for (const button of this.actionsMenu?.querySelectorAll?.("[data-action]") || [])
+      button.disabled = true;
+  }
+
+  showError(message, workspaceKey = this.currentWorkspaceKey) {
+    if (!this.view || workspaceKey !== this.currentWorkspaceKey) return;
     this.clearStatus();
     const status = document.createElement("div");
     status.className = "terminal-error-state";
@@ -304,15 +652,18 @@ export class TerminalPanel {
     retry.type = "button";
     retry.className = "bottom-panel-button";
     retry.textContent = "Retry";
-    retry.addEventListener("click", () => void this.createTerminal(), { once: true });
+    retry.addEventListener("click", () => {
+      if (workspaceKey !== this.currentWorkspaceKey) return;
+      this.clearStatus();
+      const state = this.currentState;
+      state.initialOpenAttempted = true;
+      if (!state.initialOpenPromise) {
+        state.initialOpenPromise = this.restoreOrCreateInitialSessions(state)
+          .finally(() => { state.initialOpenPromise = null; });
+      }
+    }, { once: true });
     status.append(text, retry);
-    if (!this.sessions.size) {
-      this.emptyStatus?.remove();
-      this.emptyStatus = null;
-      this.view.replaceChildren(status);
-    } else {
-      this.view.appendChild(status);
-    }
+    this.view.appendChild(status);
     this.errorStatus = status;
   }
 
@@ -323,22 +674,29 @@ export class TerminalPanel {
 
   renderTabs() {
     if (!this.tabsList) return;
+    const state = this.currentState;
+    this.recomputeLabels(state);
     this.tabsList.replaceChildren();
-    for (const [id, record] of this.sessions) {
+    const records = [...state.sessions.entries()];
+    for (const [id, record] of records) {
       const tab = document.createElement("div");
       tab.className = "terminal-tab";
       tab.setAttribute("role", "presentation");
       const activate = document.createElement("button");
       activate.className = "terminal-tab-select";
       activate.type = "button";
+      activate.id = `terminal-tab-${this.domSafeId(id)}`;
       activate.setAttribute("role", "tab");
-      activate.setAttribute("aria-selected", String(id === this.activeSessionId));
-      activate.textContent = record.label;
-      activate.title = `Shell: ${record.shell}\nWorking directory: ${record.cwd}`;
+      activate.setAttribute("aria-controls", record.wrapper.id);
+      activate.setAttribute("aria-selected", String(id === state.activeSessionId));
+      activate.tabIndex = id === state.activeSessionId ? 0 : -1;
+      activate.textContent = record.displayLabel;
+      activate.title = `${record.displayLabel}\nShell: ${record.shell || "Starting…"}\nInitial directory: ${record.cwd || "Pending"}`;
       if (record.exited) {
         const status = document.createElement("span");
         status.className = "terminal-tab-exited";
         status.textContent = "exited";
+        status.setAttribute("aria-label", "Process exited");
         activate.appendChild(status);
       }
       activate.addEventListener("click", () => this.activateSession(id));
@@ -346,8 +704,8 @@ export class TerminalPanel {
       const close = document.createElement("button");
       close.type = "button";
       close.className = "terminal-tab-close";
-      close.setAttribute("aria-label", `Close ${record.label}`);
-      close.title = "Close Terminal";
+      close.setAttribute("aria-label", `Close ${record.displayLabel}`);
+      close.title = `Close ${record.displayLabel}`;
       close.innerHTML = '<i class="fi fi-rr-cross-small" aria-hidden="true"></i>';
       close.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -356,14 +714,38 @@ export class TerminalPanel {
       tab.append(activate, close);
       this.tabsList.appendChild(tab);
     }
+    const active = this.getActiveSession();
+    if (active) this.showActive(active);
+    else this.clearTerminalActions();
+  }
+
+  domSafeId(value) {
+    return String(value).replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 80);
+  }
+
+  handleTabsKeyDown(event) {
+    if (!event.target?.matches?.('[role="tab"]')) return;
+    const tabs = [...(this.tabsList?.querySelectorAll?.('[role="tab"]') || [])];
+    if (!tabs.length) return;
+    const current = tabs.indexOf(event.target);
+    let next = current;
+    if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = tabs.length - 1;
+    else return;
+    event.preventDefault();
+    const id = [...this.currentState.sessions.keys()][next];
+    this.activateSession(id, { focus: false });
+    this.tabsList?.querySelectorAll?.('[role="tab"]')?.[next]?.focus?.();
   }
 
   renameSession(id, button) {
-    const record = this.sessions.get(id);
-    if (!record || record.disposed) return;
+    const record = this.currentState.sessions.get(id);
+    if (!record || record.disposed || record.workspaceKey !== this.currentWorkspaceKey) return;
     const input = document.createElement("input");
     input.className = "terminal-tab-rename";
-    input.value = record.label;
+    input.value = record.customLabel || record.baseLabel;
     input.setAttribute("aria-label", "Terminal name");
     button.replaceWith(input);
     input.focus();
@@ -371,9 +753,14 @@ export class TerminalPanel {
     const finish = (save) => {
       if (input.dataset.finished === "true") return;
       input.dataset.finished = "true";
-      if (save && input.value.trim()) record.label = input.value.trim().slice(0, 80);
+      if (save && input.value.trim()) {
+        const custom = input.value.trim().slice(0, 80);
+        record.customLabel = custom === record.baseLabel ? null : custom;
+        this.recomputeLabels(this.currentState);
+        this.notifyWorkspaceChanged(this.currentWorkspaceKey);
+      }
       this.renderTabs();
-      this.activateSession(id);
+      this.activateSession(id, { focus: false });
     };
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") finish(true);
@@ -382,18 +769,57 @@ export class TerminalPanel {
     input.addEventListener("blur", () => finish(true), { once: true });
   }
 
+  toggleActionsMenu() {
+    if (!this.actionsMenu) return;
+    const open = this.actionsMenu.hidden;
+    this.actionsMenu.hidden = !open;
+    this.actionsToggle?.setAttribute("aria-expanded", String(open));
+    if (open) this.actionsMenu.querySelector('[role="menuitem"]')?.focus();
+  }
+
+  closeActionsMenu() {
+    if (!this.actionsMenu || this.actionsMenu.hidden) return;
+    this.actionsMenu.hidden = true;
+    this.actionsToggle?.setAttribute("aria-expanded", "false");
+  }
+
+  async runAction(action) {
+    const record = this.getActiveSession();
+    if (!record || !this.isActive(record)) return false;
+    if (action === "select-all") record.terminal.selectAll();
+    else if (action === "clear") record.terminal.clear();
+    else if (action === "copy") {
+      const selection = record.terminal.getSelection();
+      if (selection) {
+        try { await this.editor.api.writeClipboardText(selection); }
+        catch (error) { console.error("[Terminal] Failed to copy terminal selection", error); }
+      }
+    } else if (action === "paste") {
+      try {
+        const text = await this.editor.api.readClipboardText();
+        if (typeof text === "string" && this.isActive(record)) record.terminal.paste(text);
+      } catch (error) {
+        console.error("[Terminal] Failed to paste terminal content", error);
+      }
+    }
+    if (this.isActive(record)) record.terminal.focus();
+    return true;
+  }
+
   scheduleFit({ focus = false } = {}) {
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     const focusOrigin = focus ? document.activeElement : null;
+    const workspaceKey = this.currentWorkspaceKey;
+    const generation = this.workspaceGeneration;
     this.frame = requestAnimationFrame(() => {
       this.frame = null;
+      if (workspaceKey !== this.currentWorkspaceKey || generation !== this.workspaceGeneration) return;
       const record = this.getActiveSession();
       if (!record || !this.isActive(record)) return;
       void this.fitRecord(record).then(() => {
         if (
-          focus &&
-          this.isActive(record) &&
-          document.activeElement === focusOrigin &&
+          focus && generation === this.workspaceGeneration &&
+          this.isActive(record) && document.activeElement === focusOrigin &&
           focusOrigin?.isConnected
         ) record.terminal.focus();
       });
@@ -401,7 +827,8 @@ export class TerminalPanel {
   }
 
   async fitRecord(record) {
-    if (record.disposed || !record.wrapper?.isConnected || record.wrapper.hidden) return false;
+    if (record.disposed || record.workspaceKey !== this.currentWorkspaceKey ||
+        !record.wrapper?.isConnected || record.wrapper.hidden) return false;
     const bounds = record.wrapper.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return false;
     try { record.fitAddon.fit(); } catch { return false; }
@@ -413,11 +840,12 @@ export class TerminalPanel {
 
   syncPtySize(record, cols, rows) {
     if (!record.id || record.exited || record.disposed ||
+        record.workspaceKey !== this.currentWorkspaceKey ||
         !Number.isInteger(cols) || !Number.isInteger(rows) || cols < 2 || rows < 2 ||
         (record.cols === cols && record.rows === rows)) return;
     record.cols = cols;
     record.rows = rows;
-    void this.editor.api.resizeTerminalSession(record.id, cols, rows).catch((error) =>
+    void this.editor.api.resizeTerminalSession(record.id, record.workspaceKey, cols, rows).catch((error) =>
       console.error("[Terminal] Failed to resize PTY", error),
     );
   }
@@ -434,7 +862,8 @@ export class TerminalPanel {
 
   applyTheme() {
     const theme = this.getXtermTheme();
-    for (const record of this.sessions.values()) record.terminal.options.theme = theme;
+    for (const state of this.workspaceSessions.values())
+      for (const record of state.sessions.values()) record.terminal.options.theme = theme;
   }
 
   focus() {
@@ -443,7 +872,7 @@ export class TerminalPanel {
       record.terminal.focus();
       return true;
     }
-    this.element.querySelector(".terminal-tabs .terminal-tab-select")?.focus();
+    this.element.querySelector('.terminal-tabs [role="tab"]')?.focus();
     return false;
   }
 
@@ -466,15 +895,21 @@ export class TerminalPanel {
     this.removeOutputListener?.();
     this.removeExitListener?.();
     this.removeErrorListener?.();
-    this.element.querySelector(".terminal-clear")?.removeEventListener("click", this.onClearClick);
-    this.element.querySelector(".terminal-select-all")?.removeEventListener("click", this.onSelectAllClick);
-    this.element.querySelector(".terminal-copy")?.removeEventListener("click", this.onCopyClick);
-    this.element.querySelector(".terminal-paste")?.removeEventListener("click", this.onPasteClick);
-    for (const record of this.sessions.values()) {
-      if (record.id) void this.editor.api.closeTerminalSession(record.id).catch(() => false);
-      this.disposeRecord(record);
+    this.actionsToggle?.removeEventListener("click", this.onActionsToggle);
+    this.actionsMenu?.removeEventListener("click", this.onActionsMenuClick);
+    this.actionsMenu?.removeEventListener("keydown", this.onActionsMenuKeyDown);
+    this.tabsList?.removeEventListener("keydown", this.onTabsKeyDown);
+    document.removeEventListener("pointerdown", this.onOutsidePointerDown);
+    for (const state of this.workspaceSessions.values()) {
+      for (const record of state.sessions.values()) {
+        if (record.id)
+          void this.editor.api.closeTerminalSession(record.id, record.workspaceKey).catch(() => false);
+        this.disposeRecord(record);
+      }
+      state.sessions.clear();
     }
-    this.sessions.clear();
+    this.workspaceSessions.clear();
+    this.sessionIndex.clear();
     this.pendingOutput.clear();
     this.element.remove();
   }

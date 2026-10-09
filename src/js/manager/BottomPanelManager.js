@@ -6,7 +6,9 @@ class BottomPanelManager {
     this.visible = false;
     this.height = BottomPanelManager.DEFAULT_HEIGHT;
     this.preferredHeight = BottomPanelManager.DEFAULT_HEIGHT;
-    this.maximized = false;
+    this.workspaceKey = "no-workspace";
+    this.workspaceRoot = null;
+    this.workspaceSnapshots = new Map();
     this.focusBeforeOpen = null;
     this.drag = null;
     this.activationGeneration = 0;
@@ -16,10 +18,10 @@ class BottomPanelManager {
     this.resizeHandle = this.root?.querySelector(
       ".bottom-panel-resize-handle",
     );
-    this.titleElement = this.root?.querySelector(".bottom-panel-title");
+    this.viewNavigation = this.root?.querySelector(".bottom-panel-views");
     this.contentElement = this.root?.querySelector(".bottom-panel-content");
     this.newButton = this.root?.querySelector(".bottom-panel-new");
-    this.maximizeButton = this.root?.querySelector(".bottom-panel-maximize");
+    this.killButton = this.root?.querySelector(".bottom-panel-kill");
     this.closeButton = this.root?.querySelector(".bottom-panel-close");
     this.toggleButton = editor.domManager.getElement(
       ".bottomBar-terminal-toggle",
@@ -27,8 +29,7 @@ class BottomPanelManager {
 
     this.onToggleClick = () => this.togglePanel("terminal");
     this.onNewClick = () => this.runActiveAction("onNew");
-    this.onMaximizeClick = () =>
-      this.maximized ? this.restore() : this.maximize();
+    this.onKillClick = () => this.runActiveAction("onKill");
     this.onCloseClick = () => this.closePanel();
     this.onPointerDown = (event) => this.startResize(event);
     this.onPointerMove = (event) => this.moveResize(event);
@@ -37,13 +38,13 @@ class BottomPanelManager {
     this.onLostPointerCapture = (event) => this.finishResize(event);
     this.onWindowBlur = () => this.cancelResize();
     this.onResizeKeyDown = (event) => this.handleResizeKeyDown(event);
-    this.onResizeDoubleClick = () =>
-      this.maximized ? this.restore() : this.maximize();
+    this.onViewTabKeyDown = (event) => this.handleViewTabKeyDown(event);
 
     this.toggleButton?.addEventListener("click", this.onToggleClick);
     this.newButton?.addEventListener("click", this.onNewClick);
-    this.maximizeButton?.addEventListener("click", this.onMaximizeClick);
+    this.killButton?.addEventListener("click", this.onKillClick);
     this.closeButton?.addEventListener("click", this.onCloseClick);
+    this.viewNavigation?.addEventListener("keydown", this.onViewTabKeyDown);
     this.resizeHandle?.addEventListener("pointerdown", this.onPointerDown);
     this.resizeHandle?.addEventListener("pointermove", this.onPointerMove);
     this.resizeHandle?.addEventListener("pointerup", this.onPointerUp);
@@ -53,10 +54,6 @@ class BottomPanelManager {
       this.onLostPointerCapture,
     );
     this.resizeHandle?.addEventListener("keydown", this.onResizeKeyDown);
-    this.resizeHandle?.addEventListener(
-      "dblclick",
-      this.onResizeDoubleClick,
-    );
     window.addEventListener("blur", this.onWindowBlur);
     this.syncControls();
   }
@@ -100,12 +97,50 @@ class BottomPanelManager {
   }
 
   getPanelState() {
+    const snapshot = this.workspaceSnapshots.get(this.workspaceKey) || {};
+    const terminal = this.getActivePanel()?.view?.getPersistedState?.(this.workspaceKey) ||
+      snapshot.terminal || { version: 1, activeTabIndex: 0, tabs: [] };
     return {
       visible: this.visible,
       height: this.preferredHeight,
-      maximized: this.maximized,
       activePanelId: this.activePanelId,
+      terminal,
     };
+  }
+
+  getWorkspacePanelState(workspaceKey) {
+    if (workspaceKey === this.workspaceKey) return this.getPanelState();
+    const snapshot = this.workspaceSnapshots.get(workspaceKey) || {};
+    const terminal = this.getActivePanel()?.view?.getPersistedState?.(workspaceKey) ||
+      snapshot.terminal || { version: 1, activeTabIndex: 0, tabs: [] };
+    return {
+      visible: snapshot.visible === true,
+      height: Number.isFinite(snapshot.height) ? snapshot.height : BottomPanelManager.DEFAULT_HEIGHT,
+      activePanelId: snapshot.activePanelId || "terminal",
+      terminal,
+    };
+  }
+
+  getWorkspaceRoot(workspaceKey) {
+    if (workspaceKey === this.workspaceKey) return this.workspaceRoot;
+    return this.workspaceSnapshots.get(workspaceKey)?.workspaceRoot || null;
+  }
+
+  suspendWorkspaceSwitch() {
+    if (this.destroyed) return false;
+    this.workspaceSnapshots.set(this.workspaceKey, {
+      ...this.getPanelState(),
+      workspaceRoot: this.workspaceRoot,
+    });
+    const panel = this.getActivePanel();
+    panel?.view?.onDeactivate?.();
+    if (panel) panel.viewActive = false;
+    this.activationGeneration += 1;
+    this.visible = false;
+    this.applyLayout();
+    this.scheduleLayout();
+    this.syncControls();
+    return true;
   }
 
   async setActivePanel(panelId, options = {}) {
@@ -172,6 +207,11 @@ class BottomPanelManager {
         throw new Error(`The ${panel.title} panel did not initialize.`);
       panel.view = view;
       panel.viewCreated = true;
+      view.activateWorkspace?.(
+        this.workspaceKey,
+        this.workspaceRoot,
+        this.workspaceSnapshots.get(this.workspaceKey)?.terminal,
+      );
       if (this.visible && this.activePanelId === panel.id && view.element) {
         this.contentElement?.replaceChildren(view.element);
       }
@@ -258,42 +298,31 @@ class BottomPanelManager {
     return true;
   }
 
+  handleViewTabKeyDown(event) {
+    if (!event.target?.matches?.('[role="tab"]')) return false;
+    const tabs = [...(this.viewNavigation?.querySelectorAll?.('[role="tab"]') || [])];
+    if (!tabs.length) return false;
+    const current = tabs.indexOf(event.target);
+    let next = current;
+    if (event.key === "ArrowRight") next = (current + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") next = (current - 1 + tabs.length) % tabs.length;
+    else if (event.key === "Home") next = 0;
+    else if (event.key === "End") next = tabs.length - 1;
+    else return false;
+    event.preventDefault();
+    const panelId = [...this.panels.keys()][next];
+    void this.openPanel(panelId, { focus: false });
+    tabs[next]?.focus();
+    return true;
+  }
+
   resize(height) {
     const bounds = this.getHeightBounds();
     if (!Number.isFinite(height) || bounds.max <= 0) return false;
     const next = Math.round(Math.min(bounds.max, Math.max(bounds.min, height)));
-    if (next === this.height && !this.maximized) return false;
+    if (next === this.height) return false;
     this.height = next;
     this.preferredHeight = next;
-    this.maximized = false;
-    this.syncControls();
-    this.scheduleLayout();
-    this.notifyStateChanged();
-    return true;
-  }
-
-  maximize() {
-    if (!this.visible) return false;
-    const bounds = this.getHeightBounds();
-    if (bounds.max <= 0 || (this.maximized && this.height === bounds.max))
-      return false;
-    if (!this.maximized) this.preferredHeight = this.height;
-    this.maximized = true;
-    this.height = bounds.max;
-    this.syncControls();
-    this.scheduleLayout();
-    this.notifyStateChanged();
-    return true;
-  }
-
-  restore() {
-    if (!this.maximized) return false;
-    const bounds = this.getHeightBounds();
-    this.maximized = false;
-    this.height = Math.round(
-      Math.min(bounds.max, Math.max(bounds.min, this.preferredHeight)),
-    );
-    this.preferredHeight = this.height;
     this.syncControls();
     this.scheduleLayout();
     this.notifyStateChanged();
@@ -320,10 +349,6 @@ class BottomPanelManager {
   }
 
   onViewportResize() {
-    if (this.maximized) {
-      this.height = this.getHeightBounds().max;
-      return true;
-    }
     const bounds = this.getHeightBounds();
     const clamped = Math.min(bounds.max, Math.max(bounds.min, this.height));
     if (clamped === this.height) return false;
@@ -358,8 +383,12 @@ class BottomPanelManager {
     for (const panel of this.panels.values()) panel.view?.onThemeChanged?.();
   }
 
-  restoreState(state) {
+  restoreState(state, workspaceKey = this.workspaceKey, workspaceRoot = null) {
     const safe = state && typeof state === "object" ? state : {};
+    if (typeof workspaceKey === "string" && workspaceKey) {
+      this.workspaceKey = workspaceKey;
+      this.workspaceRoot = workspaceRoot || null;
+    }
     const rawHeight = safe.height;
     const height = Number.isFinite(rawHeight)
       ? Math.min(1200, Math.max(BottomPanelManager.MIN_HEIGHT, rawHeight))
@@ -371,9 +400,21 @@ class BottomPanelManager {
 
     this.visible = safe.visible === true && Boolean(activePanelId);
     this.activePanelId = activePanelId;
-    this.maximized = safe.maximized === true;
     this.preferredHeight = Math.round(height);
     this.height = this.preferredHeight;
+    this.workspaceSnapshots.set(this.workspaceKey, {
+      visible: this.visible,
+      height: this.preferredHeight,
+      activePanelId,
+      terminal: safe.terminal || { version: 1, activeTabIndex: 0, tabs: [] },
+      workspaceRoot: this.workspaceRoot,
+    });
+    const panel = this.panels.get("terminal");
+    panel?.view?.activateWorkspace?.(
+      this.workspaceKey,
+      this.workspaceRoot,
+      safe.terminal,
+    );
     this.syncControls();
     this.scheduleLayout();
     if (this.visible) {
@@ -383,21 +424,44 @@ class BottomPanelManager {
   }
 
   notifyStateChanged() {
-    this.editor.statesManager?.scheduleGlobalStateSave?.();
+    this.workspaceSnapshots.set(this.workspaceKey, this.getPanelState());
+    this.editor.statesManager?.scheduleBottomPanelStateSave?.(this.workspaceKey);
   }
 
   syncControls() {
     const active = this.getActivePanel();
-    if (this.titleElement) this.titleElement.textContent = active?.title || "";
-    if (this.newButton) this.newButton.hidden = typeof active?.onNew !== "function";
-    if (this.maximizeButton) {
-      this.maximizeButton.textContent = this.maximized ? "Restore" : "Maximize";
-      this.maximizeButton.setAttribute(
-        "aria-label",
-        this.maximized ? "Restore Bottom Panel" : "Maximize Bottom Panel",
+    if (this.viewNavigation) {
+      const panels = [...this.panels.values()];
+      const existing = [...(this.viewNavigation.children || [])];
+      const matches = existing.length === panels.length && existing.every(
+        (tab, index) => tab.dataset?.panelId === panels[index]?.id,
       );
-      this.maximizeButton.title = this.maximized ? "Restore" : "Maximize";
+      if (!matches) {
+        this.viewNavigation.replaceChildren();
+        for (const panel of panels) {
+          const tab = document.createElement("button");
+          tab.type = "button";
+          tab.className = "bottom-panel-view-tab";
+          tab.id = `bottom-panel-view-${panel.id}`;
+          tab.dataset.panelId = panel.id;
+          tab.setAttribute("role", "tab");
+          tab.setAttribute("aria-controls", "bottom-panel-content");
+          tab.textContent = panel.title;
+          tab.addEventListener("click", () => void this.openPanel(panel.id));
+          this.viewNavigation.appendChild(tab);
+        }
+      }
+      for (const tab of this.viewNavigation.querySelectorAll?.('[role="tab"]') || []) {
+        const selected = tab.dataset.panelId === this.activePanelId;
+        tab.setAttribute("aria-selected", String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      }
     }
+    if (this.newButton) this.newButton.hidden = typeof active?.onNew !== "function";
+    if (this.killButton) this.killButton.disabled =
+      typeof active?.onKill !== "function" || active.canKill?.() === false;
+    if (this.contentElement && active)
+      this.contentElement.setAttribute("aria-labelledby", `bottom-panel-view-${active.id}`);
     if (this.toggleButton) {
       this.toggleButton.setAttribute("aria-expanded", String(this.visible));
     }
@@ -418,7 +482,6 @@ class BottomPanelManager {
       event?.pointerId === undefined
     ) return false;
     event.preventDefault?.();
-    if (this.maximized) this.restore();
     this.drag = {
       pointerId: event.pointerId,
       startY: event.clientY,
@@ -470,8 +533,9 @@ class BottomPanelManager {
     this.cancelResize();
     this.toggleButton?.removeEventListener("click", this.onToggleClick);
     this.newButton?.removeEventListener("click", this.onNewClick);
-    this.maximizeButton?.removeEventListener("click", this.onMaximizeClick);
+    this.killButton?.removeEventListener("click", this.onKillClick);
     this.closeButton?.removeEventListener("click", this.onCloseClick);
+    this.viewNavigation?.removeEventListener("keydown", this.onViewTabKeyDown);
     this.resizeHandle?.removeEventListener("pointerdown", this.onPointerDown);
     this.resizeHandle?.removeEventListener("pointermove", this.onPointerMove);
     this.resizeHandle?.removeEventListener("pointerup", this.onPointerUp);
@@ -481,10 +545,6 @@ class BottomPanelManager {
       this.onLostPointerCapture,
     );
     this.resizeHandle?.removeEventListener("keydown", this.onResizeKeyDown);
-    this.resizeHandle?.removeEventListener(
-      "dblclick",
-      this.onResizeDoubleClick,
-    );
     window.removeEventListener("blur", this.onWindowBlur);
     for (const panel of this.panels.values()) panel.view?.destroy?.();
     this.panels.clear();

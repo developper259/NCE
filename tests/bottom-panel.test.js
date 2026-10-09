@@ -58,7 +58,9 @@ function createManagerHarness() {
     visible: false,
     height: 250,
     preferredHeight: 250,
-    maximized: false,
+    workspaceKey: "no-workspace",
+    workspaceRoot: null,
+    workspaceSnapshots: new Map(),
     focusBeforeOpen: null,
     drag: null,
     activationGeneration: 0,
@@ -68,7 +70,8 @@ function createManagerHarness() {
     titleElement: new ElementStub(),
     contentElement: new ElementStub(),
     newButton: new ElementStub(),
-    maximizeButton: new ElementStub(),
+    viewNavigation: null,
+    killButton: new ElementStub(),
     closeButton: new ElementStub(),
     toggleButton: new ElementStub(),
   });
@@ -135,10 +138,8 @@ test("panel visibility preserves the view and resizing stays within live layout 
 
   assert.equal(manager.resize(1000), true);
   assert.equal(manager.height, 522);
-  assert.equal(manager.maximize(), true);
-  assert.equal(manager.height, 522);
-  assert.equal(manager.restore(), true);
-  assert.equal(manager.height, 522);
+  assert.equal("maximize" in manager, false);
+  assert.equal("restore" in manager, false);
   assert.equal(manager.closePanel(), true);
   assert.equal(manager.visible, false);
 });
@@ -159,10 +160,20 @@ test("restored panel state is validated and does not restore a PTY session", () 
   }))), {
     visible: false,
     height: 1200,
-    maximized: true,
     activePanelId: "terminal",
+    terminal: { version: 1, activeTabIndex: 0, tabs: [] },
   });
+  assert.equal(manager.maximized, undefined, "stale maximize metadata is ignored");
   assert.equal(manager.panels.get("terminal").view, null);
+});
+
+test("Bottom Panel UI contains navigation and kill controls with no maximize action", () => {
+  const html = read("src/html/index.html");
+  assert.match(html, /class="bottom-panel-views" role="tablist"/);
+  assert.match(html, /class="[^"]*bottom-panel-kill[^"]*"[^>]*aria-label="Kill Active Terminal"/);
+  assert.doesNotMatch(html, /bottom-panel-maximize|Maximize Bottom Panel|Restore Bottom Panel/);
+  assert.match(read("src/css/bottomPanel.css"), /\.bottom-panel-resize-handle:hover::after[^]*--border-accent/);
+  assert.match(read("src/css/bottomPanel.css"), /prefers-reduced-motion:\s*reduce/);
 });
 
 test("DOMManager coalesces Bottom Panel geometry and refreshes editor metrics", () => {

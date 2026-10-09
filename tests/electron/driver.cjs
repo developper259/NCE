@@ -19,7 +19,7 @@ dialog.showMessageBox = async () => ({ response: 2 });
 const timer = setTimeout(() => {
   console.error("Electron smoke timed out");
   app.exit(1);
-}, 30000);
+}, 45000);
 const { App } = require("../../dist/ts/App.js");
 const nce = new App();
 function findMenuItem(menu, label) {
@@ -2076,20 +2076,15 @@ app.whenReady().then(() => {
           true,
           "Agent Settings works before and after lazy Agent initialization",
         );
-        assert.equal(await run(`(async () => {
-          const saved = await window.api.saveRecoverySnapshot(null, {
-            untitledId: "electron-smoke-recovery",
-            displayName: "recovered.txt",
-            content: "recovered by smoke\\r\\n🙂 end\\n",
-            lineCount: 2,
-            editVersion: 1,
-          });
-          if (!saved?.success) return false;
-          editor.statesManager.clearRecoverySnapshotsOnQuit = async () => true;
-          return true;
-        })()`), true, "recovery fixture persists across the simulated clean quit");
-
-        await run(`window.api.startWatching(${JSON.stringify(directory)})`);
+        const terminalWorkspaceA = path.join(directory, "terminal-workspace-a");
+        const terminalWorkspaceB = path.join(directory, "terminal-workspace-b");
+        fs.mkdirSync(terminalWorkspaceA, { recursive: true });
+        fs.mkdirSync(terminalWorkspaceB, { recursive: true });
+        assert.equal(
+          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
+          true,
+          "the terminal isolation smoke test opens workspace A through the real switch flow",
+        );
         assert.equal(
           await run('editor.bottomPanelManager.openPanel("terminal")'),
           true,
@@ -2108,6 +2103,7 @@ app.whenReady().then(() => {
           const record = [...editor.terminalPanel.sessions.values()][0];
           return {
             id: record.id,
+            workspaceKey: record.workspaceKey,
             terminal: Boolean(record.terminal),
             shell: record.shell,
             cwd: record.cwd,
@@ -2115,7 +2111,7 @@ app.whenReady().then(() => {
         })()`);
         assert.equal(firstTerminal.terminal, true, "the renderer creates an xterm instance");
         assert.ok(firstTerminal.shell, "the active system shell is identified");
-        assert.equal(firstTerminal.cwd, fs.realpathSync(directory), "new PTYs start in the canonical active workspace root");
+        assert.equal(firstTerminal.cwd, fs.realpathSync(terminalWorkspaceA), "new PTYs start in the canonical active workspace root");
         const terminalLayout = await run(`(() => {
           const panel = document.querySelector(".bottom-panel").getBoundingClientRect();
           const editorBounds = document.querySelector(".editor").getBoundingClientRect();
@@ -2142,13 +2138,14 @@ app.whenReady().then(() => {
         assert.ok(Math.abs(terminalLayout.leftSidebarBottom - terminalLayout.bottomBarTop) <= 1);
         assert.ok(Math.abs(terminalLayout.rightSidebarBottom - terminalLayout.bottomBarTop) <= 1);
         const getTerminalText = (id) => `(() => {
-          const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)});
+          const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)}) ||
+            window.__terminalWorkspaceARecords?.get(${JSON.stringify(id)});
           const buffer = record?.terminal.buffer.active;
           return buffer ? Array.from({ length: buffer.length }, (_, index) =>
             buffer.getLine(index)?.translateToString(true) || "",
           ).join("\\n") : "";
         })()`;
-        await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, ${JSON.stringify("echo NCE_PTY_FIRST\r")})`);
+        await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).workspaceKey, ${JSON.stringify("echo NCE_PTY_FIRST\r")})`);
         await waitForCondition(
           async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_FIRST")`)) === true,
           { timeout: 10000, description: "first real PTY shell output" },
@@ -2164,21 +2161,104 @@ app.whenReady().then(() => {
           return records.length === 2 ? { id: records[1].id } : null;
         })()`);
         assert.ok(secondTerminal?.id, "two independent terminal tabs are present");
-        await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, ${JSON.stringify("echo NCE_PTY_SECOND\r")})`);
+        await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(secondTerminal.id)}).workspaceKey, ${JSON.stringify("echo NCE_PTY_SECOND\r")})`);
         await waitForCondition(
           async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_PTY_SECOND")`)) === true,
           { timeout: 10000, description: "second real PTY shell output" },
         );
         assert.equal(await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_SECOND")`), false, "terminal output stays with its session");
 
-        const initialPanelHeight = await run("editor.bottomPanelManager.height");
-        await run(`editor.bottomPanelManager.resize(${initialPanelHeight + 24})`);
+        await run(`window.__terminalWorkspaceA = new Map(
+          [...editor.terminalPanel.sessions].map(([id, record]) => [id, record.terminal]),
+        ); window.__terminalWorkspaceARecords = new Map(editor.terminalPanel.sessions); true`);
+        const cancelledSwitch = await run(`(async () => {
+          const tabs = editor.tabManager;
+          const prepare = tabs.prepareForQuit;
+          tabs.prepareForQuit = async () => false;
+          try {
+            return await editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceB)});
+          } finally {
+            tabs.prepareForQuit = prepare;
+          }
+        })()`);
+        assert.equal(
+          cancelledSwitch,
+          false,
+          "canceling workspace preparation leaves workspace A active",
+        );
+        assert.equal(await run(`editor.fileExplorer.rootPath === ${JSON.stringify(terminalWorkspaceA)} &&
+          editor.terminalPanel.sessions.size === 2 &&
+          editor.terminalPanel.sessions.has(${JSON.stringify(firstTerminal.id)})`), true,
+        "a canceled switch preserves A's terminal tabs and live sessions");
+        dialog.showMessageBox = async () => ({ response: 1 });
+        assert.equal(
+          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceB)})`),
+          true,
+          "workspace A can switch to workspace B while both A PTYs remain live",
+        );
+        assert.equal(await run("editor.terminalPanel.sessions.size === 0"), true, "workspace B never displays workspace A sessions");
+        await run('editor.bottomPanelManager.openPanel("terminal")');
         await waitForCondition(
-          async () => (await run(`Math.round(document.querySelector(".bottom-panel").getBoundingClientRect().height) === ${initialPanelHeight + 24}`)) === true,
+          async () => (await run("Boolean(editor.terminalPanel.sessions.size === 1 && [...editor.terminalPanel.sessions.values()][0].id)")) === true,
+          { timeout: 15000, description: "workspace B's independent first terminal" },
+        );
+        const workspaceBTerminal = await run(`(() => {
+          const [id, record] = [...editor.terminalPanel.sessions.entries()][0];
+          return { id, workspaceKey: record.workspaceKey };
+        })()`);
+        assert.notEqual(workspaceBTerminal.id, firstTerminal.id);
+        assert.notEqual(workspaceBTerminal.id, secondTerminal.id);
+        await run(`window.__terminalWorkspaceB = editor.terminalPanel.sessions.get(${JSON.stringify(workspaceBTerminal.id)}).terminal; true`);
+
+        assert.equal(
+          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
+          true,
+          "returning to workspace A restores its workspace state",
+        );
+        assert.equal(await run(`editor.terminalPanel.sessions.size === 2 &&
+          editor.terminalPanel.sessions.has(${JSON.stringify(firstTerminal.id)}) &&
+          editor.terminalPanel.sessions.has(${JSON.stringify(secondTerminal.id)})`), true);
+        assert.equal(await run(`editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).terminal ===
+          window.__terminalWorkspaceA.get(${JSON.stringify(firstTerminal.id)})`), true, "workspace A reuses its existing xterm instance");
+        assert.equal(await run(`editor.terminalPanel.activeSessionId === ${JSON.stringify(secondTerminal.id)}`), true, "workspace A restores its selected terminal");
+
+        assert.equal(
+          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceB)})`),
+          true,
+          "workspace B can be restored after switching back to A",
+        );
+        assert.equal(await run(`editor.terminalPanel.sessions.size === 1 &&
+          editor.terminalPanel.sessions.has(${JSON.stringify(workspaceBTerminal.id)})`), true);
+        assert.equal(await run(`editor.terminalPanel.sessions.get(${JSON.stringify(workspaceBTerminal.id)}).terminal ===
+          window.__terminalWorkspaceB`), true, "workspace B reuses its original xterm instance");
+        await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, ${JSON.stringify(firstTerminal.workspaceKey || "")}, ${JSON.stringify("echo NCE_HIDDEN_WORKSPACE_OUTPUT\r")})`);
+        await waitForCondition(
+          async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_HIDDEN_WORKSPACE_OUTPUT")`)) === true,
+          { timeout: 10000, description: "workspace A PTY output while workspace B is active" },
+        );
+        assert.equal(await run("editor.terminalPanel.sessions.size === 1"), true, "background A output cannot add a tab to B");
+        assert.equal(
+          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
+          true,
+        );
+
+        assert.equal(await run('editor.bottomPanelManager.openPanel("terminal")'), true,
+          "workspace A's restored Terminal view is activated before resize validation");
+        const initialPanelHeight = await run("editor.bottomPanelManager.height");
+        assert.equal(await run(`editor.bottomPanelManager.resize(${initialPanelHeight + 24})`), true,
+          "the Bottom Panel accepts a height change within its bounds");
+        await waitForCondition(
+          async () => (await run(`(() => {
+            const panel = document.querySelector(".bottom-panel");
+            const manager = editor.bottomPanelManager;
+            return manager.visible && !panel.hidden &&
+              Math.round(panel.getBoundingClientRect().height) === manager.height;
+          })()`)) === true,
           { timeout: 3000, description: "Bottom Panel resize layout" },
         );
         await run("editor.bottomPanelManager.closePanel()");
-        assert.equal(nce.window.terminalManager.sessions.size, 2, "hiding the panel preserves both PTYs");
+        assert.equal(nce.window.terminalManager.sessions.size, 3,
+          "hiding the panel preserves A's PTYs and B's background PTY");
         assert.equal(await run("editor.terminalPanel.sessions.size === 2 && editor.bottomPanelManager.visible === false"), true);
         assert.equal(await run("window.api.getSettings().then(settings => settings.terminal.shell === '')"), true, "the renderer remains responsive while the panel is hidden");
         await run('editor.bottomPanelManager.openPanel("terminal")');
@@ -2187,7 +2267,7 @@ app.whenReady().then(() => {
         assert.equal(await run(`window.__smokeTerminalInstance === editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).terminal`), true, "the same xterm instance remains mounted");
 
         const longCommand = 'node -e "console.log(\'NCE_LONG_PROCESS_READY\');setTimeout(()=>{},30000)"\r';
-        await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, ${JSON.stringify(longCommand)})`);
+        await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(secondTerminal.id)}).workspaceKey, ${JSON.stringify(longCommand)})`);
         await waitForCondition(
           async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_LONG_PROCESS_READY")`)) === true,
           { timeout: 10000, description: "long-running terminal process startup" },
@@ -2195,8 +2275,45 @@ app.whenReady().then(() => {
         await run("editor.bottomPanelManager.closePanel()");
         assert.equal(nce.window.terminalManager.sessions.get(secondTerminal.id).isExited, false, "a long-running PTY survives hiding the panel");
         assert.equal(await run("editor.tabManager.tabs.length >= 0"), true, "the editor stays responsive beside a long-running process");
+        await run('editor.bottomPanelManager.openPanel("terminal")');
         assert.equal(await run(`editor.terminalPanel.closeSession(${JSON.stringify(firstTerminal.id)})`), true);
-        assert.equal(nce.window.terminalManager.sessions.size, 1, "closing a terminal ends only that session");
+        assert.equal(nce.window.terminalManager.sessions.size, 2,
+          "closing one terminal ends only that A session while B stays alive");
+        assert.equal(await run("editor.terminalPanel.createTerminal()"), true, "a closed tab can be replaced without losing the running process");
+        assert.equal(await run(`(() => {
+          const record = editor.terminalPanel.getActiveSession();
+          const button = [...document.querySelectorAll(".terminal-tab-select")]
+            .find(candidate => candidate.getAttribute("aria-selected") === "true");
+          if (!record || !button) return false;
+          button.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+          const input = document.querySelector(".terminal-tab-rename");
+          if (!input) return false;
+          input.value = "Workspace A Dev";
+          input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+          return record.customLabel === "Workspace A Dev";
+        })()`), true, "terminal tab names can be customized and are persisted by workspace");
+        fs.writeFileSync(
+          path.join(directory, "terminal-previous-ids.json"),
+          JSON.stringify(await run("[...editor.terminalPanel.sessions.keys()]")),
+        );
+        assert.equal(await run(`editor.bottomPanelManager.workspaceKey ===
+          editor.terminalPanel.currentWorkspaceKey &&
+          editor.fileExplorer.rootPath === ${JSON.stringify(terminalWorkspaceA)} &&
+          editor.bottomPanelManager.getPanelState().visible === true`), true,
+        "workspace A is active and its Bottom Panel is visible before persisting");
+        assert.equal(await run("editor.fileExplorer.closeProject()"), true, "the terminal smoke test returns to No Workspace without reassigning its live PTY");
+        assert.equal(await run(`(async () => {
+          const saved = await window.api.saveRecoverySnapshot(null, {
+            untitledId: "electron-smoke-recovery",
+            displayName: "recovered.txt",
+            content: "recovered by smoke\\r\\n🙂 end\\n",
+            lineCount: 2,
+            editVersion: 1,
+          });
+          if (!saved?.success) return false;
+          editor.statesManager.clearRecoverySnapshotsOnQuit = async () => true;
+          return true;
+        })()`), true, "recovery fixture persists across the simulated clean quit");
         // The remaining long-running PTY is intentionally left for the window-close
         // lifecycle assertion below; closing the renderer must reap it.
       }
@@ -2217,7 +2334,44 @@ app.whenReady().then(() => {
             description: "restored Agent sidebar to finish lazy initialization",
           },
         );
+        assert.equal(await run('typeof window.NCE_TERMINAL_RUNTIME === "undefined"'), true,
+          "renderer startup does not load terminal UI eagerly");
+        assert.equal(nce.window.terminalManager.sessions.size, 0,
+          "cold startup does not create restored PTYs before opening their workspace");
         dialog.showMessageBox = async () => ({ response: 1 });
+        const terminalWorkspaceA = path.join(directory, "terminal-workspace-a");
+        const previousTerminalIds = JSON.parse(fs.readFileSync(
+          path.join(directory, "terminal-previous-ids.json"), "utf8",
+        ));
+        assert.equal(await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`), true,
+          "workspace switching restores terminal metadata from disk");
+        await waitForCondition(
+          async () => (await run(`editor.terminalPanel?.sessions?.size === 2 &&
+            [...editor.terminalPanel.sessions.values()].every(record => Boolean(record.id))`)) === true,
+          { timeout: 15000, description: "new PTYs lazily restore the persisted workspace tabs" },
+        );
+        const restoredTerminals = await run(`(() => {
+          const records = [...editor.terminalPanel.sessions.values()];
+          return records.map(record => ({
+            id: record.id,
+            customLabel: record.customLabel,
+            cwd: record.cwd,
+            text: Array.from({ length: record.terminal.buffer.active.length }, (_, index) =>
+              record.terminal.buffer.active.getLine(index)?.translateToString(true) || "",
+            ).join("\\n"),
+          }));
+        })()`);
+        assert.equal(restoredTerminals.length, 2);
+        assert.equal(restoredTerminals.some(record => previousTerminalIds.includes(record.id)), false,
+          "restart creates fresh PTY identifiers");
+        assert.equal(restoredTerminals.some(record => record.customLabel === "Workspace A Dev"), true,
+          "custom terminal names survive restart");
+        assert.equal(restoredTerminals.every(record => record.cwd === fs.realpathSync(terminalWorkspaceA)), true);
+        assert.equal(restoredTerminals.some(record =>
+          /NCE_PTY_FIRST|NCE_PTY_SECOND|NCE_LONG_PROCESS_READY|NCE_HIDDEN_WORKSPACE_OUTPUT/.test(record.text),
+        ), false, "restart does not replay old commands or terminal output");
+        assert.equal(await run("editor.fileExplorer.closeProject()"), true,
+          "the terminal restore phase returns to No Workspace for the remaining smoke phases");
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "write") {

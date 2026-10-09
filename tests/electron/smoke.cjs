@@ -4,7 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-test('real Electron: preload, editing, Save As, quit and session restore', { timeout: 170000 }, async () => {
+test('real Electron: preload, editing, Save As, quit and session restore', { timeout: 240000 }, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-'));
   await fs.writeFile(path.join(directory, '.nce-smoke'), '');
   async function launch(phase) {
@@ -13,7 +13,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
       const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
       let log = '';
       child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
-      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 40000);
+      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 60000);
       child.once('error', err => { clearTimeout(timer); reject(err); });
       child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${phase} ${code}/${signal}: ${log}`)); });
     });
@@ -31,6 +31,22 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].type, 'file');
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].path, path.join(directory, 'smoke.js'));
     assert.equal(state.noWorkspaceState.sidebar.rightActiveMenuId, 'agent');
+    const workspaceTerminalState = JSON.parse(await fs.readFile(
+      path.join(directory, 'terminal-workspace-a', '.nce', 'workspace.json'), 'utf8',
+    ));
+    assert.equal(workspaceTerminalState.version, 2);
+    assert.equal(workspaceTerminalState.bottomPanel.visible, true);
+    assert.equal(workspaceTerminalState.bottomPanel.terminal.tabs.length, 2);
+    assert.equal(
+      workspaceTerminalState.bottomPanel.terminal.tabs.some(tab => tab.customLabel === 'Workspace A Dev'),
+      true,
+      'workspace state persists a custom terminal label',
+    );
+    assert.doesNotMatch(
+      JSON.stringify(workspaceTerminalState.bottomPanel),
+      /sessionId|ptyId|command|stdout|stderr|NCE_PTY_FIRST|NCE_LONG_PROCESS_READY/,
+      'workspace state stores no process IDs, commands, output, or process state',
+    );
     await launch('reload');
     await launch('restore');
     await launch('crash');

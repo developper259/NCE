@@ -52,6 +52,10 @@ class Editor {
         return editor.terminalPanel;
       },
       onNew: () => this.terminalPanel?.createTerminal?.(),
+      onKill: () => this.terminalPanel?.closeSession?.(
+        this.terminalPanel?.activeSessionId,
+      ),
+      canKill: () => Boolean(this.terminalPanel?.getActiveSession?.()),
     });
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
