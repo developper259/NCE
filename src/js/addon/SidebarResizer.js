@@ -24,13 +24,13 @@ class SidebarResizer {
 
   createResizers() {
     this.leftResizer = document.createElement("div");
-    this.leftResizer.className = "sidebar-resizer sidebar-resizer-left";
+    this.leftResizer.className = "nce-panel-resizer sidebar-resizer sidebar-resizer-left";
     this.editor.domManager
       .getElement(".main-section")
       .appendChild(this.leftResizer);
 
     this.rightResizer = document.createElement("div");
-    this.rightResizer.className = "sidebar-resizer sidebar-resizer-right";
+    this.rightResizer.className = "nce-panel-resizer sidebar-resizer sidebar-resizer-right";
     this.editor.domManager
       .getElement(".main-section")
       .appendChild(this.rightResizer);

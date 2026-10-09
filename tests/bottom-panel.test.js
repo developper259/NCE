@@ -172,8 +172,42 @@ test("Bottom Panel UI contains navigation and kill controls with no maximize act
   assert.match(html, /class="bottom-panel-views" role="tablist"/);
   assert.match(html, /class="[^"]*bottom-panel-kill[^"]*"[^>]*aria-label="Kill Active Terminal"/);
   assert.doesNotMatch(html, /bottom-panel-maximize|Maximize Bottom Panel|Restore Bottom Panel/);
-  assert.match(read("src/css/bottomPanel.css"), /\.bottom-panel-resize-handle:hover::after[^]*--border-accent/);
   assert.match(read("src/css/bottomPanel.css"), /prefers-reduced-motion:\s*reduce/);
+  assert.match(html, /class="nce-panel-resizer bottom-panel-resize-handle"/);
+  assert.match(read("src/js/addon/SidebarResizer.js"), /className = "nce-panel-resizer sidebar-resizer/);
+  const sharedResizerCss = read("src/css/sidebar.css");
+  assert.match(sharedResizerCss, /\.nce-panel-resizer\s*\{[^}]*transition:\s*background-color 0\.2s/s);
+  assert.match(sharedResizerCss, /\.nce-panel-resizer:hover\s*\{[^}]*background-color:\s*var\(--border-accent\)/s);
+  assert.match(sharedResizerCss, /\.sidebar-resizer\s*\{[^}]*width:\s*4px/s);
+  assert.match(read("src/css/bottomPanel.css"), /\.bottom-panel-resize-handle\s*\{[^}]*height:\s*4px/s);
+});
+
+test("Bottom Panel resizer keeps pointer capture through drag and releases it on completion", () => {
+  const { manager, calls } = createManagerHarness();
+  manager.visible = true;
+  let captured = null;
+  let released = null;
+  const target = {
+    setPointerCapture(id) { captured = id; },
+    hasPointerCapture(id) { return captured === id; },
+    releasePointerCapture(id) { released = id; captured = null; },
+  };
+  let prevented = 0;
+  assert.equal(manager.startResize({
+    button: 0,
+    pointerId: 7,
+    clientY: 200,
+    currentTarget: target,
+    preventDefault() { prevented++; },
+  }), true);
+  assert.equal(captured, 7);
+  assert.equal(manager.moveResize({ pointerId: 7, clientY: 180, preventDefault() { prevented++; } }), true);
+  assert.equal(manager.height, 270);
+  assert.equal(manager.finishResize({ pointerId: 7 }), true);
+  assert.equal(released, 7);
+  assert.equal(manager.drag, null);
+  assert.ok(prevented >= 2);
+  assert.ok(calls.some(([name]) => name === "layout"));
 });
 
 test("DOMManager coalesces Bottom Panel geometry and refreshes editor metrics", () => {
