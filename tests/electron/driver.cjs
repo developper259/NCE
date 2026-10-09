@@ -2107,11 +2107,60 @@ app.whenReady().then(() => {
             terminal: Boolean(record.terminal),
             shell: record.shell,
             cwd: record.cwd,
+            displayLabel: record.displayLabel,
           };
         })()`);
         assert.equal(firstTerminal.terminal, true, "the renderer creates an xterm instance");
         assert.ok(firstTerminal.shell, "the active system shell is identified");
         assert.equal(firstTerminal.cwd, fs.realpathSync(terminalWorkspaceA), "new PTYs start in the canonical active workspace root");
+        assert.doesNotMatch(firstTerminal.displayLabel, /\(\d+\)$/,
+          "the first terminal keeps its unsuffixed label");
+        const terminalSurfaces = await run(`(() => {
+          const themeManager = editor.themeManager;
+          const originalPreference = themeManager.getPreference();
+          const record = [...editor.terminalPanel.sessions.values()][0];
+          const results = {};
+          const measure = () => {
+            const panel = editor.terminalPanel.element;
+            const view = panel.querySelector(".terminal-view");
+            const instance = record.wrapper;
+            const xterm = instance.querySelector(".xterm");
+            const viewport = xterm.querySelector(".xterm-viewport");
+            const screen = xterm.querySelector(".xterm-screen");
+            return {
+              colors: [panel, view, instance, xterm, viewport, screen]
+                .map(element => getComputedStyle(element).backgroundColor),
+              themedBackground: record.terminal.options.theme.background,
+              themeToken: getComputedStyle(document.documentElement)
+                .getPropertyValue("--bg-secondary").trim(),
+              rects: [view, instance, xterm, viewport].map(element => {
+                const rect = element.getBoundingClientRect();
+                return { width: rect.width, height: rect.height };
+              }),
+            };
+          };
+          try {
+            for (const preference of ["dark", "light", "system"]) {
+              themeManager.syncFromSettings(preference);
+              results[preference] = measure();
+            }
+          } finally {
+            themeManager.syncFromSettings(originalPreference);
+          }
+          return results;
+        })()`);
+        for (const [theme, result] of Object.entries(terminalSurfaces)) {
+          assert.ok(result.colors.every(color => color === result.colors[0]),
+            `${theme} theme gives the terminal surface, xterm, viewport, and screen one background`);
+          assert.equal(result.themedBackground, result.themeToken,
+            `${theme} xterm canvas theme uses the NCE surface token`);
+          for (const rect of result.rects.slice(1)) {
+            assert.ok(Math.abs(rect.width - result.rects[0].width) <= 1,
+              `${theme} xterm viewport spans the terminal content width`);
+            assert.ok(Math.abs(rect.height - result.rects[0].height) <= 1,
+              `${theme} xterm viewport spans the terminal content height`);
+          }
+        }
         const terminalLayout = await run(`(() => {
           const panel = document.querySelector(".bottom-panel").getBoundingClientRect();
           const editorBounds = document.querySelector(".editor").getBoundingClientRect();
@@ -2137,6 +2186,62 @@ app.whenReady().then(() => {
         assert.ok(Math.abs(terminalLayout.panelBottom - terminalLayout.bottomBarTop) <= 1);
         assert.ok(Math.abs(terminalLayout.leftSidebarBottom - terminalLayout.bottomBarTop) <= 1);
         assert.ok(Math.abs(terminalLayout.rightSidebarBottom - terminalLayout.bottomBarTop) <= 1);
+        const resizerGeometry = await run(`(() => {
+          const sidebar = document.querySelector(".sidebar-resizer-left");
+          const bottom = document.querySelector(".bottom-panel-resize-handle");
+          const panel = document.querySelector(".bottom-panel");
+          window.__ncePreviousSidebarResizerDisplay = sidebar.style.display;
+          sidebar.style.display = "block";
+          const bounds = element => {
+            const rect = element.getBoundingClientRect();
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+          };
+          return {
+            sidebar: bounds(sidebar),
+            bottom: bounds(bottom),
+            panel: bounds(panel),
+            sidebarRest: getComputedStyle(sidebar).backgroundColor,
+            bottomRest: getComputedStyle(bottom).backgroundColor,
+            sidebarTransition: getComputedStyle(sidebar).transitionDuration,
+            bottomTransition: getComputedStyle(bottom).transitionDuration,
+            panelOverflow: getComputedStyle(panel).overflow,
+          };
+        })()`);
+        assert.equal(resizerGeometry.sidebar.width, 4);
+        assert.equal(resizerGeometry.bottom.height, 4);
+        assert.equal(resizerGeometry.sidebarRest, resizerGeometry.bottomRest);
+        assert.equal(resizerGeometry.sidebarTransition, "0.2s");
+        assert.equal(resizerGeometry.bottomTransition, "0.2s");
+        assert.equal(resizerGeometry.panelOverflow, "hidden");
+        assert.ok(Math.abs(resizerGeometry.bottom.top - resizerGeometry.panel.top) <= 1,
+          "the horizontal handle starts at the unclipped panel edge");
+        assert.ok(resizerGeometry.bottom.top + resizerGeometry.bottom.height <=
+          resizerGeometry.panel.top + resizerGeometry.panel.height,
+        "the horizontal resizer hit area remains inside the clipped panel");
+        const movePointerTo = async (x, y) => {
+          win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
+        };
+        await movePointerTo(
+          resizerGeometry.bottom.left + resizerGeometry.bottom.width / 2,
+          resizerGeometry.bottom.top + resizerGeometry.bottom.height / 2,
+        );
+        await waitForCondition(
+          async () => (await run('document.querySelector(".bottom-panel-resize-handle").matches(":hover")')) === true,
+          { description: "Bottom Panel resizer hover state" },
+        );
+        const bottomHoverColor = await run('getComputedStyle(document.querySelector(".bottom-panel-resize-handle")).backgroundColor');
+        await movePointerTo(
+          resizerGeometry.sidebar.left + resizerGeometry.sidebar.width / 2,
+          resizerGeometry.sidebar.top + resizerGeometry.sidebar.height / 2,
+        );
+        await waitForCondition(
+          async () => (await run('document.querySelector(".sidebar-resizer-left").matches(":hover")')) === true,
+          { description: "Sidebar resizer hover state" },
+        );
+        const sidebarHoverColor = await run('getComputedStyle(document.querySelector(".sidebar-resizer-left")).backgroundColor');
+        assert.equal(bottomHoverColor, sidebarHoverColor,
+          "the Bottom Panel and sidebar resizers render the same computed hover color");
+        await run(`document.querySelector(".sidebar-resizer-left").style.display = window.__ncePreviousSidebarResizerDisplay`);
         const getTerminalText = (id) => `(() => {
           const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)}) ||
             window.__terminalWorkspaceARecords?.get(${JSON.stringify(id)});
@@ -2158,9 +2263,16 @@ app.whenReady().then(() => {
         );
         const secondTerminal = await run(`(() => {
           const records = [...editor.terminalPanel.sessions.values()];
-          return records.length === 2 ? { id: records[1].id } : null;
+          return records.length === 2 ? {
+            id: records[1].id,
+            labels: records.map(record => record.displayLabel),
+          } : null;
         })()`);
         assert.ok(secondTerminal?.id, "two independent terminal tabs are present");
+        assert.deepEqual(secondTerminal.labels, [
+          firstTerminal.displayLabel,
+          `${firstTerminal.displayLabel} (1)`,
+        ], "adding a duplicate leaves the primary unchanged and suffixes only the new tab");
         await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(secondTerminal.id)}).workspaceKey, ${JSON.stringify("echo NCE_PTY_SECOND\r")})`);
         await waitForCondition(
           async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_PTY_SECOND")`)) === true,
