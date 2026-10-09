@@ -3,7 +3,7 @@
   top: calc(-1 * var(--file-manager-height));
   left: 0;
   width: 100%;
-  height: calc(var(--output-height) + var(--file-manager-height));
+  height: calc(100% + var(--file-manager-height));
   box-sizing: border-box;
   display: flex;
   flex-direction: column;

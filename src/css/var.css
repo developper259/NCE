@@ -57,6 +57,7 @@
   --output-height: calc(90% - 18px);
   --sidebar-height: calc(var(--output-height) + var(--file-manager-height));
   --bottombar-height: 20px;
+  --bottom-panel-height: 0px;
   --file-manager-height: 38px;
   
 

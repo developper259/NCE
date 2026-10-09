@@ -36,6 +36,37 @@
 }
 
 .bottomBar-el[hidden] { display: none; }
+.bottomBar-terminal-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.bottomBar-terminal-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.bottomBar-terminal-toggle:hover,
+.bottomBar-terminal-toggle[aria-expanded="true"] {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.bottomBar-terminal-toggle:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -2px;
+}
 .bottomBar-preview-mode #language,
 .bottomBar-preview-mode #config-space,
 .bottomBar-preview-mode .bottomBar-cursor-status { display: none !important; }

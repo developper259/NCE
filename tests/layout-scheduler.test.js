@@ -107,6 +107,7 @@ test("SidebarManager coalesces width writes and refreshes the affected sidebar o
   };
   editor.editorOBJ = { style: {} };
   editor.fileManagerOBJ = { style: {} };
+  editor.bottomPanelManager = { root: { style: {} } };
   editor.sidebarResizer = {
     setEffectiveWidth(side, width) {
       leftSidebar.style.width = `${width}px`;
@@ -141,6 +142,11 @@ test("SidebarManager coalesces width writes and refreshes the affected sidebar o
   assert.equal(leftSidebar.style.width, "320px");
   assert.equal(editor.editorOBJ.style.left, "368px");
   assert.equal(editor.fileManagerOBJ.style.left, "368px");
+  assert.deepEqual(editor.bottomPanelManager.root.style, {
+    left: "368px",
+    right: "0px",
+    width: "",
+  });
   harness.flushFrame();
 
   assert.deepEqual(harness.calls.map(([name]) => name), [

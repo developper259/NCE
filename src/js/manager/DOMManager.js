@@ -118,6 +118,7 @@ class DOMManager {
     return {
       window: false,
       sidebar: false,
+      bottomPanel: false,
       sidebarPosition: null,
       sidebarPositionSet: new Set(),
       apply: false,
@@ -246,6 +247,7 @@ class DOMManager {
   scheduleLayout({
     window: windowChanged = false,
     sidebar = false,
+    bottomPanel = false,
     sidebarPosition = null,
     apply = false,
   } = {}) {
@@ -253,6 +255,7 @@ class DOMManager {
     const pending = this.pendingLayout;
     pending.window ||= windowChanged;
     pending.sidebar ||= sidebar || windowChanged;
+    pending.bottomPanel ||= bottomPanel;
     pending.apply ||= apply;
     if (pending.sidebar) {
       if (
@@ -282,13 +285,19 @@ class DOMManager {
     this.editor?.performanceMetrics?.increment("layout.flushes");
     const pending = this.pendingLayout;
     this.pendingLayout = this.createLayoutState();
-    const hasGeometryWork = pending.window || pending.sidebar;
+    const hasGeometryWork = pending.window || pending.sidebar ||
+      pending.bottomPanel;
     if (!hasGeometryWork && !pending.apply) return false;
 
     if (pending.window) {
       this.measureWindow();
+      this.editor?.bottomPanelManager?.onViewportResize?.();
       this.editor?.sidebarManager?.syncEditorLayout?.(null, { schedule: false });
+    } else if (pending.bottomPanel) {
+      this.editor?.bottomPanelManager?.onViewportResize?.();
     }
+    if (pending.window || pending.bottomPanel)
+      this.editor?.bottomPanelManager?.applyLayout?.();
     if (hasGeometryWork) {
       this.measureElements();
       this.calculate();
@@ -298,7 +307,13 @@ class DOMManager {
     if (pending.window) {
       this.editor?.lineController?.resize?.({ deferScrollerRefresh: true });
       this.editor?.scrollerManager?.refreshAll?.();
+      this.editor?.bottomPanelManager?.onLayoutResize?.();
       return true;
+    }
+
+    if (pending.bottomPanel) {
+      this.editor?.lineController?.resize?.({ deferScrollerRefresh: true });
+      this.editor?.scrollerManager?.refreshActive?.();
     }
 
     if (pending.sidebar) {
@@ -306,6 +321,11 @@ class DOMManager {
         ? null
         : pending.sidebarPosition;
       this.editor?.sidebarManager?.refreshLayout?.(position);
+      this.editor?.bottomPanelManager?.onLayoutResize?.();
+      return true;
+    }
+    if (pending.bottomPanel) {
+      this.editor?.bottomPanelManager?.onLayoutResize?.();
       return true;
     }
     return true;

@@ -228,8 +228,9 @@
 
 .main-section > .editor {
   top: var(--file-manager-height);
-  bottom: var(--bottombar-height);
+  bottom: calc(var(--bottombar-height) + var(--bottom-panel-height, 0px));
   height: auto;
+  isolation: isolate;
 }
 
 .main-section > .sidebar-tab-selector,

@@ -1,0 +1,499 @@
+class BottomPanelManager {
+  constructor(editor) {
+    this.editor = editor;
+    this.panels = new Map();
+    this.activePanelId = null;
+    this.visible = false;
+    this.height = BottomPanelManager.DEFAULT_HEIGHT;
+    this.preferredHeight = BottomPanelManager.DEFAULT_HEIGHT;
+    this.maximized = false;
+    this.focusBeforeOpen = null;
+    this.drag = null;
+    this.activationGeneration = 0;
+    this.destroyed = false;
+
+    this.root = editor.domManager.getElement(".bottom-panel");
+    this.resizeHandle = this.root?.querySelector(
+      ".bottom-panel-resize-handle",
+    );
+    this.titleElement = this.root?.querySelector(".bottom-panel-title");
+    this.contentElement = this.root?.querySelector(".bottom-panel-content");
+    this.newButton = this.root?.querySelector(".bottom-panel-new");
+    this.maximizeButton = this.root?.querySelector(".bottom-panel-maximize");
+    this.closeButton = this.root?.querySelector(".bottom-panel-close");
+    this.toggleButton = editor.domManager.getElement(
+      ".bottomBar-terminal-toggle",
+    );
+
+    this.onToggleClick = () => this.togglePanel("terminal");
+    this.onNewClick = () => this.runActiveAction("onNew");
+    this.onMaximizeClick = () =>
+      this.maximized ? this.restore() : this.maximize();
+    this.onCloseClick = () => this.closePanel();
+    this.onPointerDown = (event) => this.startResize(event);
+    this.onPointerMove = (event) => this.moveResize(event);
+    this.onPointerUp = (event) => this.finishResize(event);
+    this.onPointerCancel = (event) => this.finishResize(event);
+    this.onLostPointerCapture = (event) => this.finishResize(event);
+    this.onWindowBlur = () => this.cancelResize();
+    this.onResizeKeyDown = (event) => this.handleResizeKeyDown(event);
+    this.onResizeDoubleClick = () =>
+      this.maximized ? this.restore() : this.maximize();
+
+    this.toggleButton?.addEventListener("click", this.onToggleClick);
+    this.newButton?.addEventListener("click", this.onNewClick);
+    this.maximizeButton?.addEventListener("click", this.onMaximizeClick);
+    this.closeButton?.addEventListener("click", this.onCloseClick);
+    this.resizeHandle?.addEventListener("pointerdown", this.onPointerDown);
+    this.resizeHandle?.addEventListener("pointermove", this.onPointerMove);
+    this.resizeHandle?.addEventListener("pointerup", this.onPointerUp);
+    this.resizeHandle?.addEventListener("pointercancel", this.onPointerCancel);
+    this.resizeHandle?.addEventListener(
+      "lostpointercapture",
+      this.onLostPointerCapture,
+    );
+    this.resizeHandle?.addEventListener("keydown", this.onResizeKeyDown);
+    this.resizeHandle?.addEventListener(
+      "dblclick",
+      this.onResizeDoubleClick,
+    );
+    window.addEventListener("blur", this.onWindowBlur);
+    this.syncControls();
+  }
+
+  registerPanel(panel) {
+    if (
+      !panel ||
+      typeof panel.id !== "string" ||
+      !panel.id.trim() ||
+      typeof panel.title !== "string" ||
+      typeof panel.createView !== "function" ||
+      this.panels.has(panel.id)
+    ) return false;
+
+    this.panels.set(panel.id, {
+      ...panel,
+      loadPromise: null,
+      view: null,
+      viewCreated: false,
+      viewActive: false,
+    });
+    this.syncControls();
+    return true;
+  }
+
+  unregisterPanel(panelId) {
+    const panel = this.panels.get(panelId);
+    if (!panel) return false;
+    if (this.activePanelId === panelId) this.closePanel({ restoreFocus: false });
+    panel.view?.destroy?.();
+    panel.view = null;
+    this.panels.delete(panelId);
+    if (this.activePanelId === panelId) this.activePanelId = null;
+    this.syncControls();
+    this.notifyStateChanged();
+    return true;
+  }
+
+  getActivePanel() {
+    return this.panels.get(this.activePanelId) || null;
+  }
+
+  getPanelState() {
+    return {
+      visible: this.visible,
+      height: this.preferredHeight,
+      maximized: this.maximized,
+      activePanelId: this.activePanelId,
+    };
+  }
+
+  async setActivePanel(panelId, options = {}) {
+    return this.openPanel(panelId, options);
+  }
+
+  async openPanel(panelId, { restoring = false, focus = true } = {}) {
+    const panel = this.panels.get(panelId);
+    if (!panel || this.destroyed) return false;
+    const requestedFocusTarget = document.activeElement;
+    const activation = ++this.activationGeneration;
+
+    if (!this.visible) {
+      this.focusBeforeOpen = document.activeElement;
+      this.visible = true;
+    }
+    const changed = this.activePanelId !== panelId;
+    if (changed) {
+      const previous = this.getActivePanel();
+      previous?.view?.onDeactivate?.();
+      if (previous) previous.viewActive = false;
+      this.activePanelId = panelId;
+      if (this.contentElement && panel.view?.element) {
+        this.contentElement.replaceChildren(panel.view.element);
+      }
+    }
+
+    this.syncControls();
+    this.scheduleLayout();
+    this.notifyStateChanged();
+
+    try {
+      await this.ensurePanelView(panel);
+      if (
+        this.destroyed ||
+        activation !== this.activationGeneration ||
+        !this.visible ||
+        this.activePanelId !== panelId
+      )
+        return false;
+      if (!panel.viewActive) {
+        panel.view?.onOpen?.({ restoring });
+        panel.view?.onActivate?.();
+        panel.viewActive = true;
+      }
+      if (focus && document.activeElement === requestedFocusTarget)
+        panel.view?.focus?.();
+      return true;
+    } catch (error) {
+      if (!this.destroyed && this.visible && this.activePanelId === panelId)
+        this.showLoadError(panel, error);
+      return false;
+    }
+  }
+
+  async ensurePanelView(panel, { retry = false } = {}) {
+    if (panel.viewCreated && panel.view) return panel.view;
+    if (panel.loadPromise && !retry) return panel.loadPromise;
+
+    panel.loadPromise = (async () => {
+      this.showLoadingState();
+      const view = await panel.createView(this.contentElement, this.editor);
+      if (!view || typeof view !== "object")
+        throw new Error(`The ${panel.title} panel did not initialize.`);
+      panel.view = view;
+      panel.viewCreated = true;
+      if (this.visible && this.activePanelId === panel.id && view.element) {
+        this.contentElement?.replaceChildren(view.element);
+      }
+      return view;
+    })();
+
+    try {
+      return await panel.loadPromise;
+    } finally {
+      panel.loadPromise = null;
+    }
+  }
+
+  showLoadingState() {
+    if (!this.contentElement) return;
+    const message = document.createElement("div");
+    message.className = "bottom-panel-message";
+    message.setAttribute("role", "status");
+    message.textContent = "Loading terminal…";
+    this.contentElement.replaceChildren(message);
+  }
+
+  showLoadError(panel, error) {
+    if (!this.contentElement) return;
+    const message = document.createElement("div");
+    message.className = "bottom-panel-message bottom-panel-error";
+    const text = document.createElement("p");
+    text.textContent = "The Terminal panel could not be loaded.";
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "bottom-panel-button";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", async () => {
+      retry.disabled = true;
+      try {
+        await this.ensurePanelView(panel, { retry: true });
+        if (this.activePanelId !== panel.id || !this.visible) return;
+        if (!panel.viewActive) {
+          panel.view?.onOpen?.({ restoring: false });
+          panel.view?.onActivate?.();
+          panel.viewActive = true;
+        }
+        panel.view?.focus?.();
+      } catch (retryError) {
+        this.showLoadError(panel, retryError);
+      }
+    }, { once: true });
+    message.append(text, retry);
+    this.contentElement.replaceChildren(message);
+    console.error("Failed to load Bottom Panel view:", error);
+  }
+
+  async togglePanel(panelId, options = {}) {
+    if (this.visible && this.activePanelId === panelId) {
+      return this.closePanel();
+    }
+    return this.openPanel(panelId, options);
+  }
+
+  closePanel({ restoreFocus = true } = {}) {
+    if (!this.visible) return false;
+    const panel = this.getActivePanel();
+    panel?.view?.onDeactivate?.();
+    panel?.view?.onClose?.();
+    if (panel) panel.viewActive = false;
+    this.activationGeneration += 1;
+    this.visible = false;
+    this.scheduleLayout();
+    this.syncControls();
+    this.notifyStateChanged();
+
+    if (restoreFocus) {
+      const target = this.focusBeforeOpen;
+      this.focusBeforeOpen = null;
+      if (target?.isConnected && !target.closest?.("[hidden]")) target.focus?.();
+    }
+    return true;
+  }
+
+  runActiveAction(action) {
+    const callback = this.getActivePanel()?.[action];
+    if (typeof callback !== "function") return false;
+    callback.call(this.getActivePanel());
+    return true;
+  }
+
+  resize(height) {
+    const bounds = this.getHeightBounds();
+    if (!Number.isFinite(height) || bounds.max <= 0) return false;
+    const next = Math.round(Math.min(bounds.max, Math.max(bounds.min, height)));
+    if (next === this.height && !this.maximized) return false;
+    this.height = next;
+    this.preferredHeight = next;
+    this.maximized = false;
+    this.syncControls();
+    this.scheduleLayout();
+    this.notifyStateChanged();
+    return true;
+  }
+
+  maximize() {
+    if (!this.visible) return false;
+    const bounds = this.getHeightBounds();
+    if (bounds.max <= 0 || (this.maximized && this.height === bounds.max))
+      return false;
+    if (!this.maximized) this.preferredHeight = this.height;
+    this.maximized = true;
+    this.height = bounds.max;
+    this.syncControls();
+    this.scheduleLayout();
+    this.notifyStateChanged();
+    return true;
+  }
+
+  restore() {
+    if (!this.maximized) return false;
+    const bounds = this.getHeightBounds();
+    this.maximized = false;
+    this.height = Math.round(
+      Math.min(bounds.max, Math.max(bounds.min, this.preferredHeight)),
+    );
+    this.preferredHeight = this.height;
+    this.syncControls();
+    this.scheduleLayout();
+    this.notifyStateChanged();
+    return true;
+  }
+
+  getHeightBounds() {
+    const mainSection = this.editor.domManager.getElement(".main-section");
+    const measuredHeight = mainSection?.clientHeight ||
+      mainSection?.getBoundingClientRect?.().height || 0;
+    const windowHeight = this.editor.domManager.getWindowHeight?.() ||
+      window.innerHeight || 0;
+    const available = Math.max(0, measuredHeight || windowHeight - 36);
+    const topTabs = BottomPanelManager.FILE_MANAGER_HEIGHT;
+    const bottomBar = BottomPanelManager.BOTTOM_BAR_HEIGHT;
+    const minimumEditorHeight = Math.min(
+      BottomPanelManager.MIN_EDITOR_HEIGHT,
+      Math.max(0, available - topTabs - bottomBar),
+    );
+    const max = Math.max(0, Math.floor(
+      available - topTabs - bottomBar - minimumEditorHeight,
+    ));
+    return { min: Math.min(BottomPanelManager.MIN_HEIGHT, max), max };
+  }
+
+  onViewportResize() {
+    if (this.maximized) {
+      this.height = this.getHeightBounds().max;
+      return true;
+    }
+    const bounds = this.getHeightBounds();
+    const clamped = Math.min(bounds.max, Math.max(bounds.min, this.height));
+    if (clamped === this.height) return false;
+    this.height = clamped;
+    this.preferredHeight = clamped;
+    this.syncControls();
+    return true;
+  }
+
+  applyLayout() {
+    const height = this.visible ? this.height : 0;
+    document.documentElement.style.setProperty(
+      "--bottom-panel-height",
+      `${Math.max(0, Math.round(height))}px`,
+    );
+    if (this.root) {
+      this.root.hidden = !this.visible;
+      this.root.setAttribute("aria-hidden", String(!this.visible));
+    }
+  }
+
+  scheduleLayout() {
+    this.editor.domManager.scheduleLayout({ bottomPanel: true });
+  }
+
+  onLayoutResize() {
+    if (!this.visible) return;
+    this.getActivePanel()?.view?.onResize?.();
+  }
+
+  onThemeChanged() {
+    for (const panel of this.panels.values()) panel.view?.onThemeChanged?.();
+  }
+
+  restoreState(state) {
+    const safe = state && typeof state === "object" ? state : {};
+    const rawHeight = safe.height;
+    const height = Number.isFinite(rawHeight)
+      ? Math.min(1200, Math.max(BottomPanelManager.MIN_HEIGHT, rawHeight))
+      : BottomPanelManager.DEFAULT_HEIGHT;
+    const activePanelId = typeof safe.activePanelId === "string" &&
+      this.panels.has(safe.activePanelId)
+      ? safe.activePanelId
+      : this.panels.has("terminal") ? "terminal" : null;
+
+    this.visible = safe.visible === true && Boolean(activePanelId);
+    this.activePanelId = activePanelId;
+    this.maximized = safe.maximized === true;
+    this.preferredHeight = Math.round(height);
+    this.height = this.preferredHeight;
+    this.syncControls();
+    this.scheduleLayout();
+    if (this.visible) {
+      void this.openPanel(activePanelId, { restoring: true, focus: false });
+    }
+    return this.getPanelState();
+  }
+
+  notifyStateChanged() {
+    this.editor.statesManager?.scheduleGlobalStateSave?.();
+  }
+
+  syncControls() {
+    const active = this.getActivePanel();
+    if (this.titleElement) this.titleElement.textContent = active?.title || "";
+    if (this.newButton) this.newButton.hidden = typeof active?.onNew !== "function";
+    if (this.maximizeButton) {
+      this.maximizeButton.textContent = this.maximized ? "Restore" : "Maximize";
+      this.maximizeButton.setAttribute(
+        "aria-label",
+        this.maximized ? "Restore Bottom Panel" : "Maximize Bottom Panel",
+      );
+      this.maximizeButton.title = this.maximized ? "Restore" : "Maximize";
+    }
+    if (this.toggleButton) {
+      this.toggleButton.setAttribute("aria-expanded", String(this.visible));
+    }
+    if (this.resizeHandle) {
+      const bounds = this.getHeightBounds();
+      this.resizeHandle.setAttribute("aria-valuemin", String(bounds.min));
+      this.resizeHandle.setAttribute("aria-valuemax", String(bounds.max));
+      this.resizeHandle.setAttribute("aria-valuenow", String(this.height));
+    }
+  }
+
+  startResize(event) {
+    if (
+      this.destroyed ||
+      !this.visible ||
+      this.drag ||
+      event?.button !== 0 ||
+      event?.pointerId === undefined
+    ) return false;
+    event.preventDefault?.();
+    if (this.maximized) this.restore();
+    this.drag = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: this.height,
+      target: event.currentTarget || this.resizeHandle,
+    };
+    try {
+      this.drag.target?.setPointerCapture?.(event.pointerId);
+    } catch {}
+    return true;
+  }
+
+  moveResize(event) {
+    if (!this.drag || event?.pointerId !== this.drag.pointerId) return false;
+    event.preventDefault?.();
+    return this.resize(this.drag.startHeight + this.drag.startY - event.clientY);
+  }
+
+  finishResize(event) {
+    if (!this.drag || (event?.pointerId !== undefined &&
+        event.pointerId !== this.drag.pointerId)) return false;
+    const { pointerId, target } = this.drag;
+    this.drag = null;
+    try {
+      if (target?.hasPointerCapture?.(pointerId))
+        target.releasePointerCapture(pointerId);
+    } catch {}
+    return true;
+  }
+
+  cancelResize() {
+    return this.finishResize();
+  }
+
+  handleResizeKeyDown(event) {
+    const bounds = this.getHeightBounds();
+    if (event.key === "ArrowUp") this.resize(this.height + 20);
+    else if (event.key === "ArrowDown") this.resize(this.height - 20);
+    else if (event.key === "Home") this.resize(bounds.min);
+    else if (event.key === "End") this.resize(bounds.max);
+    else return false;
+    event.preventDefault();
+    return true;
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.cancelResize();
+    this.toggleButton?.removeEventListener("click", this.onToggleClick);
+    this.newButton?.removeEventListener("click", this.onNewClick);
+    this.maximizeButton?.removeEventListener("click", this.onMaximizeClick);
+    this.closeButton?.removeEventListener("click", this.onCloseClick);
+    this.resizeHandle?.removeEventListener("pointerdown", this.onPointerDown);
+    this.resizeHandle?.removeEventListener("pointermove", this.onPointerMove);
+    this.resizeHandle?.removeEventListener("pointerup", this.onPointerUp);
+    this.resizeHandle?.removeEventListener("pointercancel", this.onPointerCancel);
+    this.resizeHandle?.removeEventListener(
+      "lostpointercapture",
+      this.onLostPointerCapture,
+    );
+    this.resizeHandle?.removeEventListener("keydown", this.onResizeKeyDown);
+    this.resizeHandle?.removeEventListener(
+      "dblclick",
+      this.onResizeDoubleClick,
+    );
+    window.removeEventListener("blur", this.onWindowBlur);
+    for (const panel of this.panels.values()) panel.view?.destroy?.();
+    this.panels.clear();
+    this.contentElement?.replaceChildren();
+  }
+}
+
+BottomPanelManager.DEFAULT_HEIGHT = 250;
+BottomPanelManager.MIN_HEIGHT = 120;
+BottomPanelManager.MIN_EDITOR_HEIGHT = 120;
+BottomPanelManager.FILE_MANAGER_HEIGHT = 38;
+BottomPanelManager.BOTTOM_BAR_HEIGHT = 20;

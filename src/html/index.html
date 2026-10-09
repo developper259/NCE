@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="../css/titlebar.css" />
     <link rel="stylesheet" href="../css/editor.css" />
     <link rel="stylesheet" href="../css/bottomBar.css" />
+    <link rel="stylesheet" href="../css/bottomPanel.css" />
     <link rel="stylesheet" href="../css/quickPanel.css" />
     <link rel="stylesheet" href="../css/performanceDashboard.css" />
     <link rel="stylesheet" href="../css/tabManager.css" />
@@ -141,8 +142,53 @@
       <div class="sidebar-right box">
         <div class="sidebar-menu"></div>
       </div>
+      <section class="bottom-panel" aria-label="Bottom Panel" hidden>
+        <div
+          class="bottom-panel-resize-handle"
+          role="separator"
+          aria-label="Resize Bottom Panel"
+          aria-orientation="horizontal"
+          aria-valuemin="120"
+          aria-valuemax="400"
+          aria-valuenow="250"
+          tabindex="0"
+        ></div>
+        <header class="bottom-panel-header">
+          <h2 class="bottom-panel-title"></h2>
+          <div class="bottom-panel-actions">
+            <button class="bottom-panel-button bottom-panel-new" type="button">
+              <span aria-hidden="true">+</span> New Terminal
+            </button>
+            <button class="bottom-panel-button bottom-panel-maximize" type="button">
+              Maximize
+            </button>
+            <button
+              class="bottom-panel-button bottom-panel-close"
+              type="button"
+              aria-label="Close Bottom Panel"
+              title="Close"
+            >
+              <i class="fi fi-rr-cross-small" aria-hidden="true"></i>
+            </button>
+          </div>
+        </header>
+        <div class="bottom-panel-content" role="tabpanel"></div>
+      </section>
       <div class="bottomBar box-top">
-        <section class="left"></section>
+        <section class="left">
+          <button
+            class="bottomBar-terminal-toggle"
+            type="button"
+            aria-label="Toggle Terminal"
+            aria-expanded="false"
+            title="Toggle Terminal"
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+              <path d="m3 4 4 4-4 4M9 12h4" />
+            </svg>
+            <span>Terminal</span>
+          </button>
+        </section>
         <section class="middle">
           <div class="bottomBar-el bottomBar-file-status" style="display: none">
             <span class="bottomBar-text"></span>

@@ -30,6 +30,7 @@
   "js/manager/ContextMenuManager.js",
   "js/types/FastDOMNode.js",
   "js/manager/DOMManager.js",
+  "js/manager/BottomPanelManager.js",
   "js/addon/BottomBar.js",
   "js/addon/SavePopup.js",
   "js/addon/TitleBar.js",

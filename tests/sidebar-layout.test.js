@@ -31,6 +31,7 @@ function fixture({ leftWidth = 300, rightWidth = 250, viewportWidth = 1400 } = {
   };
   const fileManager = { style: {} };
   const editorElement = { style: {} };
+  const bottomPanel = { style: {} };
   const SidebarManager = loadGlobal(
     "src/js/manager/SidebarManager.js",
     "SidebarManager",
@@ -47,6 +48,7 @@ function fixture({ leftWidth = 300, rightWidth = 250, viewportWidth = 1400 } = {
       if (selector === ".main-section") return mainSection;
       if (selector === ".sidebar-left") return sidebars.left;
       if (selector === ".sidebar-right") return sidebars.right;
+      if (selector === ".bottom-panel") return bottomPanel;
       return null;
     },
     getSidebarWidth(side) {
@@ -91,6 +93,7 @@ function fixture({ leftWidth = 300, rightWidth = 250, viewportWidth = 1400 } = {
     calls,
     domManager,
     editorElement,
+    bottomPanel,
     fileManager,
     frames,
     mainSection,
@@ -126,6 +129,29 @@ test("editor and tab manager share the bounds for every sidebar state", () => {
     layout.manager.syncEditorLayout();
 
     assertHorizontalBounds(layout, current.left, current.right);
+  }
+});
+
+test("Bottom Panel follows the selector and both open sidebar bounds", () => {
+  const cases = [
+    { leftOpen: false, rightOpen: false, left: 48, right: 0 },
+    { leftOpen: true, rightOpen: false, left: 348, right: 0 },
+    { leftOpen: false, rightOpen: true, left: 48, right: 250 },
+    { leftOpen: true, rightOpen: true, left: 348, right: 250 },
+  ];
+
+  for (const current of cases) {
+    const layout = fixture();
+    if (current.leftOpen) layout.sidebars.left.classList.add("open");
+    if (current.rightOpen) layout.sidebars.right.classList.add("open");
+
+    layout.manager.syncEditorLayout();
+
+    assert.deepEqual(layout.bottomPanel.style, {
+      left: `${current.left}px`,
+      right: `${current.right}px`,
+      width: "",
+    });
   }
 });
 

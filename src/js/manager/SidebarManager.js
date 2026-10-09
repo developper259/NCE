@@ -528,6 +528,14 @@ class SidebarManager {
       this.editor.editorOBJ.style.width = "";
     }
 
+    const bottomPanel = this.editor.bottomPanelManager?.root ||
+      this.editor.domManager.getElement(".bottom-panel");
+    if (bottomPanel) {
+      bottomPanel.style.left = `${leftOffset}px`;
+      bottomPanel.style.right = `${rightWidth}px`;
+      bottomPanel.style.width = "";
+    }
+
     if (schedule && this.editor.domManager) {
       if (typeof this.editor.domManager.scheduleLayout === "function") {
         this.editor.domManager.scheduleLayout({

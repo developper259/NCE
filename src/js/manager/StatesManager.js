@@ -9,6 +9,7 @@ class StatesManager {
     this.restoredRecoverySnapshots = new Set();
     this.recoveringSnapshots = new Set();
     this.persistenceSuspended = false;
+    this.globalSaveTimer = null;
     this.workspaceLimits = Object.freeze({
       tabs: 256,
       expandedPaths: 2048,
@@ -22,6 +23,8 @@ class StatesManager {
 
   async save() {
     if (this.persistenceSuspended) return true;
+    if (this.globalSaveTimer !== null) clearTimeout(this.globalSaveTimer);
+    this.globalSaveTimer = null;
     const root = this.editor.fileExplorer?.rootPath || null;
     try {
       if (root && !(await this.saveWorkspaceState(root))) return false;
@@ -49,6 +52,7 @@ class StatesManager {
       version: this.globalVersion,
       lastWorkspace: this.lastWorkspace,
       agent: this.getAgentState(),
+      bottomPanel: this.getBottomPanelState(),
       noWorkspaceState: this.noWorkspaceState ||
         (hasWorkspace ? null : this.getNoWorkspaceState()),
     };
@@ -74,6 +78,46 @@ class StatesManager {
 
   async saveGlobalState() {
     return this.editor.api.saveEditorState(JSON.stringify(this.getGlobalState()));
+  }
+
+  getBottomPanelState() {
+    const state = this.editor.bottomPanelManager?.getPanelState?.() || {
+      visible: false,
+      height: 250,
+      maximized: false,
+      activePanelId: "terminal",
+    };
+    return this.sanitizeBottomPanelState(state) || {
+      visible: false,
+      height: 250,
+      maximized: false,
+      activePanelId: "terminal",
+    };
+  }
+
+  scheduleGlobalStateSave() {
+    if (this.persistenceSuspended) return false;
+    if (this.globalSaveTimer !== null) clearTimeout(this.globalSaveTimer);
+    this.globalSaveTimer = setTimeout(() => {
+      this.globalSaveTimer = null;
+      void this.saveGlobalState().catch((error) =>
+        console.error("Failed to save global editor state:", error),
+      );
+    }, 300);
+    return true;
+  }
+
+  sanitizeBottomPanelState(value) {
+    if (!this.isRecord(value)) return null;
+    const height = Number.isFinite(value.height)
+      ? Math.min(1200, Math.max(120, Math.round(value.height)))
+      : 250;
+    return {
+      visible: value.visible === true,
+      height,
+      maximized: value.maximized === true,
+      activePanelId: value.activePanelId === "terminal" ? "terminal" : null,
+    };
   }
 
   async saveWorkspaceState(root = this.editor.fileExplorer?.rootPath) {
@@ -418,11 +462,17 @@ class StatesManager {
   }
 
   async loadStates(state) {
-    if (!state) return this.restoreNoWorkspaceState(null);
+    if (!state) {
+      this.editor.bottomPanelManager?.restoreState?.(null);
+      return this.restoreNoWorkspaceState(null);
+    }
     const globalState = state.version === this.globalVersion
       ? state : await this.migrateLegacyState(state);
     this.lastWorkspace = globalState.lastWorkspace || null;
     this.noWorkspaceState = globalState.noWorkspaceState || null;
+    this.editor.bottomPanelManager?.restoreState?.(
+      this.sanitizeBottomPanelState(globalState.bottomPanel),
+    );
     if (globalState.agent) {
       await Promise.resolve(this.editor.agentSidebar?.loadConfigState?.(globalState.agent))
         .catch((error) => console.error("Failed to restore Agent state:", error));
