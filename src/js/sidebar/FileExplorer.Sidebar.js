@@ -34,15 +34,20 @@ class FileExplorer extends Sidebar {
       this.restoreWorkspaceModeDialogFocus();
     this.deleteDialog = null;
     this.deleteDialogTitle = null;
+    this.deleteDialogSubtitle = null;
     this.deleteDialogMessage = null;
+    this.deleteDialogItemIcon = null;
+    this.deleteDialogItemName = null;
     this.deleteDialogCheckboxLabel = null;
     this.deleteDialogCheckbox = null;
     this.deleteDialogCancelButton = null;
     this.deleteDialogDeleteButton = null;
     this.deleteDialogSession = null;
     this.deleteDialogFocusGeneration = 0;
+    this.deleteProgressPreviousFocus = null;
     this.deleteWorkspaceGeneration = 0;
     this.pendingDeleteOperation = null;
+    this.localRemovalTargets = new Map();
     this.deleteExplorerDestroyed = false;
     this.onDeleteDialogCancel = (event) => {
       event.preventDefault();
@@ -141,6 +146,12 @@ class FileExplorer extends Sidebar {
 
     const directoryPaths = new Set();
     for (const change of changes) {
+      const isLocalRemoval =
+        (change.event === "unlink" || change.event === "unlinkDir") &&
+        [...(this.localRemovalTargets?.keys?.() || [])].some((removedPath) =>
+          NCEPath.isInside(change.filePath, removedPath),
+        );
+      if (isLocalRemoval) continue;
       if (change.event === "change") {
         this.editor.agent?.fileKnowledge?.invalidateFile?.(
           change.filePath,
@@ -787,6 +798,8 @@ class FileExplorer extends Sidebar {
 
     const viewport = document.createElement("div");
     viewport.className = "file-tree file-tree-viewport";
+    viewport.setAttribute("role", "tree");
+    viewport.setAttribute("aria-label", "File Explorer");
     const emptyState = document.createElement("div");
     emptyState.className = "empty-state-message";
     const emptyMessage = document.createElement("span");
@@ -816,6 +829,7 @@ class FileExplorer extends Sidebar {
       const file = this.visibleRowByPath?.get(item.dataset.path);
       if (!file) return;
       event.stopPropagation();
+      item.focus?.({ preventScroll: true });
       if (file.type === "folder") this.toggleFolder(file.path);
       else this.openFile(file.path);
     });
@@ -826,10 +840,36 @@ class FileExplorer extends Sidebar {
       if (!file) return;
       event.preventDefault();
       event.stopPropagation();
+      item.focus?.({ preventScroll: true });
       this.editor.contextMenuManager.openContextMenu(
         file.type === "folder" ? "file-explorer-folder" : "file-explorer-file",
         file,
       );
+    });
+    viewport.addEventListener("keydown", (event) => {
+      const current = event.target.closest?.(".file-item");
+      if (!current || current.classList.contains("editing")) return;
+      const rows = [...(this.treeLayer?.querySelectorAll?.(".file-item") || [])];
+      const currentIndex = rows.indexOf(current);
+      let nextIndex = currentIndex;
+      if (event.key === "ArrowDown") nextIndex = Math.min(rows.length - 1, currentIndex + 1);
+      else if (event.key === "ArrowUp") nextIndex = Math.max(0, currentIndex - 1);
+      else if (event.key === "Home") nextIndex = 0;
+      else if (event.key === "End") nextIndex = rows.length - 1;
+      else if (event.key === "Enter" || event.key === " ") {
+        const file = this.visibleRowByPath?.get(current.dataset.path);
+        if (!file) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (file.type === "folder") this.toggleFolder(file.path);
+        else this.openFile(file.path);
+        return;
+      } else return;
+      if (nextIndex !== currentIndex && rows[nextIndex]) {
+        event.preventDefault();
+        event.stopPropagation();
+        rows[nextIndex].focus({ preventScroll: true });
+      }
     });
     container.appendChild(viewport);
 
@@ -925,6 +965,11 @@ class FileExplorer extends Sidebar {
     const fileItem = createElement("div");
     fileItem.setClassName(`file-item ${file.type}`);
     fileItem.setDataset("path", file.path);
+    fileItem.setAttribute("tabindex", "0");
+    fileItem.setAttribute("role", "treeitem");
+    fileItem.setAttribute("aria-label", `${file.type}: ${file.name}`);
+    if (file.type === "folder")
+      fileItem.setAttribute("aria-expanded", String(file.expanded === true));
     fileItem.setCSSVariable("--depth", depth);
     fileItem.toggleClass("active-file", file.path === this.activeFilePath);
 
@@ -1058,6 +1103,9 @@ class FileExplorer extends Sidebar {
     this.invalidateDeleteContext({ restoreFocus: false });
     window.removeEventListener?.("pagehide", this.onDeleteWindowPageHide);
     this.destroyDeleteDialog();
+    for (const timer of this.localRemovalTargets?.values?.() || [])
+      clearTimeout(timer);
+    this.localRemovalTargets?.clear?.();
     this.unsubscribeFileSystemWatcher?.();
     this.unsubscribeFileSystemWatcher = null;
     this.unsubscribeWorkspaceIndexStats?.();
@@ -1461,14 +1509,42 @@ class FileExplorer extends Sidebar {
     dialog.setAttribute("role", "dialog");
     dialog.setAttribute("aria-modal", "true");
     dialog.setAttribute("aria-labelledby", "file-explorer-delete-title");
-    dialog.setAttribute("aria-describedby", "file-explorer-delete-message");
+    dialog.setAttribute(
+      "aria-describedby",
+      "file-explorer-delete-subtitle file-explorer-delete-message",
+    );
 
     const content = document.createElement("div");
     content.className = "file-explorer-delete-dialog-content";
+    const heading = document.createElement("div");
+    heading.className = "file-explorer-delete-heading";
+    const trashBadge = document.createElement("span");
+    trashBadge.className = "file-explorer-delete-trash-badge";
+    trashBadge.setAttribute("aria-hidden", "true");
+    const trashIcon = document.createElement("i");
+    trashIcon.className = "fi fi-rr-trash";
+    trashBadge.appendChild(trashIcon);
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "file-explorer-delete-title-group";
     const title = document.createElement("h2");
     title.id = "file-explorer-delete-title";
+    const subtitle = document.createElement("p");
+    subtitle.id = "file-explorer-delete-subtitle";
+    subtitle.className = "file-explorer-delete-subtitle";
+    subtitle.textContent = "This action cannot be undone.";
+    titleGroup.append(title, subtitle);
+    heading.append(trashBadge, titleGroup);
     const message = document.createElement("p");
+    message.className = "file-explorer-delete-description";
     message.id = "file-explorer-delete-message";
+
+    const item = document.createElement("div");
+    item.className = "file-explorer-delete-item";
+    const itemIcon = document.createElement("i");
+    itemIcon.setAttribute("aria-hidden", "true");
+    const itemName = document.createElement("span");
+    itemName.className = "file-explorer-delete-item-name";
+    item.append(itemIcon, itemName);
 
     const checkboxLabel = document.createElement("label");
     checkboxLabel.className = "file-explorer-delete-checkbox";
@@ -1491,7 +1567,7 @@ class FileExplorer extends Sidebar {
     deleteButton.className = "file-explorer-delete-confirm danger";
     deleteButton.textContent = "Delete";
     actions.append(cancelButton, deleteButton);
-    content.append(title, message, checkboxLabel, actions);
+    content.append(heading, message, item, checkboxLabel, actions);
     dialog.appendChild(content);
 
     dialog.addEventListener("cancel", this.onDeleteDialogCancel);
@@ -1503,7 +1579,10 @@ class FileExplorer extends Sidebar {
 
     this.deleteDialog = dialog;
     this.deleteDialogTitle = title;
+    this.deleteDialogSubtitle = subtitle;
     this.deleteDialogMessage = message;
+    this.deleteDialogItemIcon = itemIcon;
+    this.deleteDialogItemName = itemName;
     this.deleteDialogCheckboxLabel = checkboxLabel;
     this.deleteDialogCheckbox = checkbox;
     this.deleteDialogCancelButton = cancelButton;
@@ -1511,18 +1590,40 @@ class FileExplorer extends Sidebar {
     return dialog;
   }
 
-  showDeleteConfirmation(file, { recursive = false } = {}) {
+  showDeleteConfirmation(file, { action = "trash" } = {}) {
     const dialog = this.ensureDeleteDialog();
     if (!dialog || dialog.open || this.deleteDialogSession) {
       return Promise.resolve({ confirmed: false, dontAskAgain: false });
     }
 
     const isFolder = file.type === "folder";
-    this.deleteDialogTitle.textContent = isFolder ? "Delete folder?" : "Delete file?";
-    this.deleteDialogMessage.textContent = recursive
-      ? `Are you sure you want to permanently delete folder "${file.name}" and all files and subfolders inside it?`
-      : `Are you sure you want to permanently delete "${file.name}"?`;
-    this.deleteDialogCheckboxLabel.hidden = recursive;
+    const isTrash = action === "trash";
+    this.deleteDialog.setAttribute("data-mode", isTrash ? "trash" : "permanent");
+    this.deleteDialogTitle.textContent = isTrash
+      ? "Move to Trash"
+      : "Delete Permanently";
+    this.deleteDialogSubtitle.hidden = isTrash;
+    this.deleteDialogSubtitle.textContent = "This action cannot be undone.";
+    this.deleteDialogSubtitle.removeAttribute("aria-live");
+    this.deleteDialogMessage.textContent = isTrash
+      ? isFolder
+        ? "Move this folder and its contents to the Trash?"
+        : "Move this file to the Trash?"
+      : isFolder
+        ? "Permanently delete this folder? All files and subfolders inside will also be permanently deleted."
+        : "Permanently delete this file?";
+    this.deleteDialogItemIcon.className = isFolder
+      ? "fi fi-rr-folder file-explorer-delete-folder-icon"
+      : "fi fi-rr-file file-explorer-delete-file-icon";
+    this.deleteDialogItemName.textContent = file.name;
+    this.deleteDialogItemName.title = file.name;
+    this.deleteDialogCheckboxLabel.hidden = !isTrash;
+    this.deleteDialogDeleteButton.textContent = isTrash
+      ? "Move to Trash"
+      : "Delete Permanently";
+    this.deleteDialogDeleteButton.className = isTrash
+      ? "file-explorer-delete-confirm"
+      : "file-explorer-delete-confirm danger";
     this.deleteDialogCheckbox.checked = false;
     this.deleteDialogCancelButton.disabled = false;
     this.deleteDialogDeleteButton.disabled = false;
@@ -1562,6 +1663,64 @@ class FileExplorer extends Sidebar {
       event.preventDefault();
       event.target.click();
     }
+    return true;
+  }
+
+  showDeleteProgress(action) {
+    const dialog = this.ensureDeleteDialog();
+    if (!dialog || dialog.open || this.deleteDialogSession) return false;
+    const isTrash = action === "trash";
+    this.deleteProgressPreviousFocus = document.activeElement;
+    dialog.setAttribute("data-mode", isTrash ? "trash" : "permanent");
+    dialog.setAttribute("aria-busy", "true");
+    this.deleteDialogTitle.textContent = isTrash
+      ? "Moving to Trash"
+      : "Deleting Permanently";
+    this.deleteDialogSubtitle.hidden = false;
+    this.deleteDialogSubtitle.setAttribute("aria-live", "polite");
+    this.deleteDialogSubtitle.textContent = isTrash
+      ? "Moving item to the system Trash…"
+      : "Deleting item permanently…";
+    this.deleteDialogCheckboxLabel.hidden = true;
+    this.deleteDialogCancelButton.disabled = true;
+    this.deleteDialogDeleteButton.disabled = true;
+    this.deleteDialogDeleteButton.textContent = isTrash ? "Moving…" : "Deleting…";
+    try {
+      dialog.showModal();
+      return true;
+    } catch (error) {
+      dialog.removeAttribute("aria-busy");
+      this.deleteProgressPreviousFocus = null;
+      console.warn("Unable to show file-removal progress:", error);
+      return false;
+    }
+  }
+
+  closeDeleteProgress() {
+    const dialog = this.deleteDialog;
+    if (!dialog?.hasAttribute?.("aria-busy")) return false;
+    if (dialog.open) dialog.close();
+    dialog.removeAttribute("aria-busy");
+    this.deleteDialogCancelButton.disabled = false;
+    this.deleteDialogDeleteButton.disabled = false;
+    const previousFocus = this.deleteProgressPreviousFocus;
+    this.deleteProgressPreviousFocus = null;
+    if (previousFocus) this.restoreDeleteDialogFocus({ previousFocus });
+    return true;
+  }
+
+  handleFileExplorerRemovalShortcut(event) {
+    if (event?.key !== "Delete" || event.altKey || event.ctrlKey || event.metaKey || event.repeat)
+      return false;
+    const item = event.target?.closest?.(".file-item");
+    if (!item || !this.shell?.contains?.(item) || item.classList?.contains("editing"))
+      return false;
+    const file = this.visibleRowByPath?.get(item.dataset?.path);
+    if (!file) return false;
+    event.preventDefault();
+    event.stopPropagation?.();
+    if (event.shiftKey) void this.permanentlyDelete(file);
+    else void this.moveToTrash(file);
     return true;
   }
 
@@ -1660,7 +1819,10 @@ class FileExplorer extends Sidebar {
     dialog.remove();
     this.deleteDialog = null;
     this.deleteDialogTitle = null;
+    this.deleteDialogSubtitle = null;
     this.deleteDialogMessage = null;
+    this.deleteDialogItemIcon = null;
+    this.deleteDialogItemName = null;
     this.deleteDialogCheckboxLabel = null;
     this.deleteDialogCheckbox = null;
     this.deleteDialogCancelButton = null;
@@ -1674,7 +1836,28 @@ class FileExplorer extends Sidebar {
       NCEPath.equals(this.rootPath, rootPath);
   }
 
-  deleteEntry(file) {
+  async persistDeleteConfirmationChoice(settingKey, confirmation) {
+    if (!confirmation?.dontAskAgain) return true;
+    try {
+      const saved = await SETTINGS_SET(settingKey, false);
+      if (!saved)
+        console.error(`[Settings] Could not save ${settingKey}.`);
+      return saved;
+    } catch (error) {
+      console.error(`[Settings] Could not save ${settingKey}.`, error);
+      return false;
+    }
+  }
+
+  moveToTrash(file) {
+    return this.runFileRemoval(file, "trash");
+  }
+
+  permanentlyDelete(file) {
+    return this.runFileRemoval(file, "permanent-delete");
+  }
+
+  runFileRemoval(file, action) {
     if (
       !file ||
       !["file", "folder"].includes(file.type) ||
@@ -1688,7 +1871,8 @@ class FileExplorer extends Sidebar {
     ) return Promise.resolve(false);
 
     if (this.pendingDeleteOperation) {
-      return NCEPath.equals(this.pendingDeleteOperation.path, file.path)
+      return NCEPath.equals(this.pendingDeleteOperation.path, file.path) &&
+        this.pendingDeleteOperation.action === action
         ? this.pendingDeleteOperation.promise
         : Promise.resolve(false);
     }
@@ -1696,7 +1880,7 @@ class FileExplorer extends Sidebar {
     const rootPath = this.rootPath;
     const generation = this.deleteWorkspaceGeneration || 0;
     let promise;
-    promise = this.performDeleteEntry(file, rootPath, generation)
+    promise = this.performFileRemoval(file, action, rootPath, generation)
       .catch((error) => {
         console.error("Error deleting entry:", error);
         return false;
@@ -1705,71 +1889,88 @@ class FileExplorer extends Sidebar {
         if (this.pendingDeleteOperation?.promise === promise)
           this.pendingDeleteOperation = null;
       });
-    this.pendingDeleteOperation = { path: file.path, promise };
+    this.pendingDeleteOperation = { path: file.path, action, promise };
     return promise;
   }
 
-  async performDeleteEntry(file, rootPath, generation) {
+  async performFileRemoval(file, action, rootPath, generation) {
     if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
 
-    if (SETTINGS_GET("files.confirmDelete") !== false) {
-      const confirmation = await this.showDeleteConfirmation(file);
+    const confirmMove = action === "trash" &&
+      SETTINGS_GET("files.confirmMoveToTrash") !== false;
+    // Keep a confirmation for every folder while confirmation is enabled, and
+    // always for folders when disabled because their contents may be recursive.
+    const confirmPermanent = action === "permanent-delete" &&
+      (file.type === "folder" ||
+        SETTINGS_GET("files.confirmPermanentDelete") !== false);
+    if (confirmMove || confirmPermanent) {
+      const confirmation = await this.showDeleteConfirmation(file, { action });
       if (!this.isDeleteRequestCurrent(rootPath, generation) ||
           !confirmation?.confirmed) return false;
-      if (confirmation.dontAskAgain) {
-        try {
-          const saved = await SETTINGS_SET("files.confirmDelete", false);
-          if (!saved)
-            console.error("[Settings] Could not save files.confirmDelete.");
-        } catch (error) {
-          console.error("[Settings] Could not save files.confirmDelete.", error);
+      if (action === "trash") {
+        const preferenceSaved = await this.persistDeleteConfirmationChoice(
+          "files.confirmMoveToTrash",
+          confirmation,
+        );
+        if (confirmation.dontAskAgain && !preferenceSaved) {
+          if (typeof alert === "function")
+            alert("The confirmation preference could not be saved. The item was not moved, and confirmations remain enabled.");
+          return false;
         }
-        if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
       }
+      if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
     }
 
     if (
-      file.type === "file" &&
       typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
       !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
     ) return false;
     if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
 
-    let result = await this.fileOperations.delete(file.path, false);
-    if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
-    if (
-      !result?.success &&
-      file.type === "folder" &&
-      result?.code === "FOLDER_NOT_EMPTY"
-    ) {
-      const confirmation = await this.showDeleteConfirmation(file, {
-        recursive: true,
+    this.showDeleteProgress(action);
+    let result;
+    try {
+      result = action === "trash"
+        ? await this.fileOperations.moveToTrash(file.path)
+        : await this.fileOperations.permanentlyDelete(file.path);
+    } catch (error) {
+      console.warn("File removal IPC failed", {
+        action,
+        code: error?.code || "IPC_ERROR",
       });
-      if (!this.isDeleteRequestCurrent(rootPath, generation) ||
-          !confirmation?.confirmed) return false;
-      if (
-        typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
-        !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
-      ) return false;
-      if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
-      result = await this.fileOperations.delete(file.path, true);
-      if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+      result = {
+        success: false,
+        code: "OPERATION_FAILED",
+        error: action === "trash"
+          ? "The system could not move this item to the Trash."
+          : "The item could not be permanently deleted.",
+      };
+    } finally {
+      this.closeDeleteProgress();
     }
     if (!result?.success) {
       if (result?.code === "SOURCE_NOT_FOUND") return false;
       if (typeof alert === "function") {
-        alert(
-          result?.code === "FOLDER_NOT_EMPTY"
-            ? `Folder "${file.name}" is not empty.`
-            : result?.error || "Unable to delete the item.",
-        );
+        alert(result?.error || (action === "trash"
+          ? "Unable to move the item to the Trash."
+          : "Unable to permanently delete the item."));
       }
       return false;
     }
 
+    const removedPath = file.path;
+    clearTimeout(this.localRemovalTargets.get(removedPath));
+    let removalTimer;
+    removalTimer = setTimeout(() => {
+      if (this.localRemovalTargets.get(removedPath) === removalTimer)
+        this.localRemovalTargets.delete(removedPath);
+    }, 5000);
+    removalTimer?.unref?.();
+    this.localRemovalTargets.set(removedPath, removalTimer);
+    this.editor.quickOpen?.invalidate?.(rootPath);
     this.editor.tabManager.markFileAsDeleted(file.path);
-    const parentPath = NCEPath.dirname(file.path);
-    await this.refreshFolder(parentPath);
+    if (this.isDeleteRequestCurrent(rootPath, generation))
+      await this.refreshFolder(NCEPath.dirname(file.path));
     return true;
   }
 

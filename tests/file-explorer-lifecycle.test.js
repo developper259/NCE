@@ -67,6 +67,14 @@ class TestElement {
     return this.attributes.get(name) ?? null;
   }
 
+  hasAttribute(name) {
+    return this.attributes.has(name);
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+
   addEventListener(type, callback) {
     if (typeof callback !== "function") return;
     const callbacks = this.listeners.get(type) || new Set();
@@ -163,15 +171,19 @@ class TestDocument {
 }
 
 function deleteExplorerFixture({
-  confirmDelete = true,
+  confirmMoveToTrash = true,
+  confirmPermanentDelete = true,
   persistSetting = async () => true,
-  deleteResults = [{ success: true }],
+  operationResults = [{ success: true }],
   prepareFilesForDeletion = async () => true,
   file = { name: "example.js", path: "/project/example.js", type: "file" },
   rootPath = "/project",
 } = {}) {
   const document = new TestDocument();
-  const settings = { "files.confirmDelete": confirmDelete };
+  const settings = {
+    "files.confirmMoveToTrash": confirmMoveToTrash,
+    "files.confirmPermanentDelete": confirmPermanentDelete,
+  };
   const settingWrites = [];
   const deleteCalls = [];
   const prepareCalls = [];
@@ -213,6 +225,7 @@ function deleteExplorerFixture({
     deleteWorkspaceGeneration: 0,
     deleteExplorerDestroyed: false,
     pendingDeleteOperation: null,
+    localRemovalTargets: new Map(),
     deleteDialog: null,
     deleteDialogTitle: null,
     deleteDialogMessage: null,
@@ -225,9 +238,13 @@ function deleteExplorerFixture({
     projectHeader,
     refreshFolderCalls: [],
     fileOperations: {
-      async delete(path, force) {
-        deleteCalls.push([path, force]);
-        return deleteResults.shift() || { success: true };
+      async moveToTrash(path) {
+        deleteCalls.push(["trash", path]);
+        return operationResults.shift() || { success: true };
+      },
+      async permanentlyDelete(path) {
+        deleteCalls.push(["permanent", path]);
+        return operationResults.shift() || { success: true };
       },
     },
     editor: {
@@ -311,22 +328,22 @@ function explorerFixture(rename) {
   return { explorer, calls };
 }
 
-test("delete confirmation defaults to safe Cancel and restores focus", async () => {
+test("Move to Trash dialog is neutral, names the item, and defaults focus to Cancel", async () => {
   const fixture = deleteExplorerFixture();
   fixture.explorer.projectHeader.focus();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
+  const operation = fixture.explorer.moveToTrash(fixture.file);
   const dialog = fixture.explorer.deleteDialog;
   assert.equal(dialog.open, true);
-  assert.equal(fixture.explorer.deleteDialogTitle.textContent, "Delete file?");
-  assert.equal(
-    fixture.explorer.deleteDialogMessage.textContent,
-    'Are you sure you want to permanently delete "example.js"?',
-  );
-  assert.equal(fixture.explorer.deleteDialogCheckbox.checked, false);
-  assert.equal(fixture.explorer.deleteDialogCancelButton.textContent, "Cancel");
-  assert.equal(fixture.explorer.deleteDialogDeleteButton.textContent, "Delete");
+  assert.equal(fixture.explorer.deleteDialogTitle.textContent, "Move to Trash");
+  assert.equal(fixture.explorer.deleteDialogMessage.textContent, "Move this file to the Trash?");
+  assert.equal(fixture.explorer.deleteDialogSubtitle.hidden, true);
+  assert.equal(fixture.explorer.deleteDialogItemName.textContent, "example.js");
+  assert.equal(fixture.explorer.deleteDialogItemName.title, "example.js");
+  assert.match(fixture.explorer.deleteDialogItemIcon.className, /file/);
+  assert.equal(dialog.getAttribute("aria-labelledby"), "file-explorer-delete-title");
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.hidden, false);
+  assert.equal(fixture.explorer.deleteDialogDeleteButton.textContent, "Move to Trash");
   assert.equal(fixture.document.activeElement, fixture.explorer.deleteDialogCancelButton);
-
   fixture.explorer.deleteDialogCancelButton.click();
   assert.equal(await operation, false);
   assert.deepEqual(fixture.deleteCalls, []);
@@ -334,215 +351,229 @@ test("delete confirmation defaults to safe Cancel and restores focus", async () 
   assert.equal(fixture.document.activeElement, fixture.explorer.projectHeader);
 });
 
-test("confirmed file deletion prepares unsaved buffers and deletes once", async () => {
+test("confirmed Move to Trash prepares dirty buffers and calls the trash operation once", async () => {
   const fixture = deleteExplorerFixture();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
+  const operation = fixture.explorer.moveToTrash(fixture.file);
   fixture.explorer.deleteDialogDeleteButton.click();
   assert.equal(await operation, true);
   assert.deepEqual(fixture.prepareCalls, [fixture.file.path]);
   assert.deepEqual(fixture.deleteCalls, [
-    [fixture.file.path, false],
+    ["trash", fixture.file.path],
     ["marked", fixture.file.path],
   ]);
   assert.deepEqual(fixture.explorer.refreshFolderCalls, ["/project"]);
 });
 
-test("checking Don't ask again and cancelling does not change settings", async () => {
+test("Don't ask again changes only the Move to Trash preference after confirmation", async () => {
   const fixture = deleteExplorerFixture();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
+  const operation = fixture.explorer.moveToTrash(fixture.file);
+  fixture.explorer.deleteDialogCheckbox.checked = true;
+  fixture.explorer.deleteDialogDeleteButton.click();
+  assert.equal(await operation, true);
+  assert.deepEqual(fixture.settingWrites, [["files.confirmMoveToTrash", false]]);
+  assert.equal(fixture.settings["files.confirmMoveToTrash"], false);
+  assert.equal(fixture.settings["files.confirmPermanentDelete"], true);
+  assert.deepEqual(fixture.deleteCalls.slice(0, 1), [["trash", fixture.file.path]]);
+});
+
+test("Move to Trash is aborted when saving the confirmation preference fails", async () => {
+  const fixture = deleteExplorerFixture({ persistSetting: async () => false });
+  const operation = fixture.explorer.moveToTrash(fixture.file);
+  fixture.explorer.deleteDialogCheckbox.checked = true;
+  fixture.explorer.deleteDialogDeleteButton.click();
+  assert.equal(await operation, false);
+  assert.deepEqual(fixture.settingWrites, [["files.confirmMoveToTrash", false]]);
+  assert.equal(fixture.settings["files.confirmMoveToTrash"], true);
+  assert.deepEqual(fixture.deleteCalls, []);
+  assert.match(fixture.alerts[0], /preference could not be saved/i);
+});
+
+test("cancelling with Don't ask again checked leaves preferences and disk unchanged", async () => {
+  const fixture = deleteExplorerFixture();
+  const operation = fixture.explorer.moveToTrash(fixture.file);
   fixture.explorer.deleteDialogCheckbox.checked = true;
   fixture.explorer.deleteDialogCancelButton.click();
   assert.equal(await operation, false);
   assert.deepEqual(fixture.settingWrites, []);
-  assert.equal(fixture.settings["files.confirmDelete"], true);
+  assert.equal(fixture.settings["files.confirmMoveToTrash"], true);
   assert.deepEqual(fixture.deleteCalls, []);
 });
 
-test("checking Don't ask again saves the preference before deleting", async () => {
-  const fixture = deleteExplorerFixture();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
-  fixture.explorer.deleteDialogCheckbox.checked = true;
-  fixture.explorer.deleteDialogDeleteButton.click();
-  assert.equal(await operation, true);
-  assert.deepEqual(fixture.settingWrites, [["files.confirmDelete", false]]);
-  assert.equal(fixture.settings["files.confirmDelete"], false);
-  assert.deepEqual(fixture.deleteCalls.slice(0, 1), [[fixture.file.path, false]]);
-});
-
-test("a failed preference write keeps future confirmations enabled but honors Delete", async () => {
-  const fixture = deleteExplorerFixture({ persistSetting: async () => false });
-  const operation = fixture.explorer.deleteEntry(fixture.file);
-  fixture.explorer.deleteDialogCheckbox.checked = true;
-  fixture.explorer.deleteDialogDeleteButton.click();
-  assert.equal(await operation, true);
-  assert.equal(fixture.settings["files.confirmDelete"], true);
-  assert.deepEqual(fixture.settingWrites, [["files.confirmDelete", false]]);
-  assert.equal(fixture.deleteCalls.some(([path]) => path === fixture.file.path), true);
-});
-
-test("disabled ordinary confirmation still protects unsaved files", async () => {
+test("disabled Trash confirmation still asks about dirty files before moving", async () => {
   const fixture = deleteExplorerFixture({
-    confirmDelete: false,
+    confirmMoveToTrash: false,
     prepareFilesForDeletion: async () => false,
   });
-  assert.equal(await fixture.explorer.deleteEntry(fixture.file), false);
+  assert.equal(await fixture.explorer.moveToTrash(fixture.file), false);
   assert.equal(fixture.explorer.deleteDialog, null);
   assert.deepEqual(fixture.prepareCalls, [fixture.file.path]);
   assert.deepEqual(fixture.deleteCalls, []);
 });
 
-test("non-empty folders always require a second recursive confirmation", async () => {
-  const file = { name: "components", path: "/project/components", type: "folder" };
+test("non-empty folders move to Trash in one operation after preparing descendant buffers", async () => {
+  const folder = { name: "components", path: "/project/components", type: "folder" };
+  const fixture = deleteExplorerFixture({ file: folder });
+  const operation = fixture.explorer.moveToTrash(folder);
+  assert.equal(fixture.explorer.deleteDialogTitle.textContent, "Move to Trash");
+  assert.equal(fixture.explorer.deleteDialogMessage.textContent, "Move this folder and its contents to the Trash?");
+  fixture.explorer.deleteDialogDeleteButton.click();
+  assert.equal(await operation, true);
+  assert.deepEqual(fixture.prepareCalls, [folder.path]);
+  assert.deepEqual(fixture.deleteCalls, [["trash", folder.path], ["marked", folder.path]]);
+});
+
+test("a Trash failure reports an error and never falls back to permanent deletion", async () => {
   const fixture = deleteExplorerFixture({
-    confirmDelete: false,
-    file,
-    deleteResults: [
-      { success: false, code: "FOLDER_NOT_EMPTY" },
-      { success: true },
-    ],
+    operationResults: [{ success: false, code: "TRASH_FAILED", error: "The system could not move this item to the Trash." }],
   });
-  const operation = fixture.explorer.deleteEntry(file);
+  const operation = fixture.explorer.moveToTrash(fixture.file);
+  fixture.explorer.deleteDialogDeleteButton.click();
+  assert.equal(await operation, false);
+  assert.deepEqual(fixture.deleteCalls, [["trash", fixture.file.path]]);
+  assert.deepEqual(fixture.alerts, ["The system could not move this item to the Trash."]);
+  assert.equal(fixture.deleteCalls.some(([kind]) => kind === "marked"), false);
+  assert.deepEqual(fixture.explorer.refreshFolderCalls, []);
+});
+
+test("the removal dialog disables both actions while the OS operation is pending", async () => {
+  let finish;
+  const operationResult = new Promise((resolve) => { finish = resolve; });
+  const fixture = deleteExplorerFixture({ operationResults: [operationResult] });
+  const operation = fixture.explorer.moveToTrash(fixture.file);
+  fixture.explorer.deleteDialogDeleteButton.click();
   await new Promise(setImmediate);
   assert.equal(fixture.explorer.deleteDialog.open, true);
-  assert.equal(fixture.explorer.deleteDialogTitle.textContent, "Delete folder?");
-  assert.match(fixture.explorer.deleteDialogMessage.textContent, /all files and subfolders inside it/);
-  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.hidden, true);
-  fixture.explorer.deleteDialogDeleteButton.click();
+  assert.equal(fixture.explorer.deleteDialog.getAttribute("aria-busy"), "true");
+  assert.equal(fixture.explorer.deleteDialogCancelButton.disabled, true);
+  assert.equal(fixture.explorer.deleteDialogDeleteButton.disabled, true);
+  finish({ success: true });
   assert.equal(await operation, true);
-  assert.deepEqual(fixture.deleteCalls, [
-    [file.path, false],
-    [file.path, true],
-    ["marked", file.path],
-  ]);
-  assert.deepEqual(fixture.prepareCalls, [file.path]);
+  assert.equal(fixture.explorer.deleteDialog.open, false);
+  assert.equal(fixture.explorer.deleteDialogCancelButton.disabled, false);
+  assert.equal(fixture.explorer.deleteDialogDeleteButton.disabled, false);
 });
 
-test("ordinary and recursive folder confirmations are shown one at a time", async () => {
-  const file = { name: "components", path: "/project/components", type: "folder" };
-  const fixture = deleteExplorerFixture({
-    file,
-    deleteResults: [
-      { success: false, code: "FOLDER_NOT_EMPTY" },
-      { success: true },
-    ],
-  });
-  const operation = fixture.explorer.deleteEntry(file);
-  const dialog = fixture.explorer.deleteDialog;
-  const bodyDialogCount = () =>
-    fixture.document.body.children.filter((child) => child.tagName === "DIALOG").length;
-  assert.equal(dialog.open, true);
-  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.hidden, false);
-  fixture.explorer.deleteDialogDeleteButton.click();
-  await new Promise(setImmediate);
-  assert.equal(fixture.explorer.deleteDialog, dialog);
-  assert.equal(dialog.open, true);
-  assert.match(fixture.explorer.deleteDialogMessage.textContent, /all files and subfolders inside it/);
+test("Delete Permanently has a distinct destructive confirmation", async () => {
+  const fixture = deleteExplorerFixture();
+  const operation = fixture.explorer.permanentlyDelete(fixture.file);
+  assert.equal(fixture.explorer.deleteDialogTitle.textContent, "Delete Permanently");
+  assert.equal(fixture.explorer.deleteDialogSubtitle.textContent, "This action cannot be undone.");
+  assert.equal(fixture.explorer.deleteDialogMessage.textContent, "Permanently delete this file?");
   assert.equal(fixture.explorer.deleteDialogCheckboxLabel.hidden, true);
-  assert.equal(bodyDialogCount(), 1);
+  assert.equal(fixture.explorer.deleteDialogDeleteButton.textContent, "Delete Permanently");
+  assert.match(fixture.explorer.deleteDialogDeleteButton.className, /danger/);
   fixture.explorer.deleteDialogDeleteButton.click();
   assert.equal(await operation, true);
-  assert.equal(dialog.open, false);
+  assert.deepEqual(fixture.deleteCalls, [["permanent", fixture.file.path], ["marked", fixture.file.path]]);
+  assert.deepEqual(fixture.settingWrites, []);
 });
 
-test("cancelling recursive folder deletion never calls delete with force", async () => {
-  const file = { name: "components", path: "/project/components", type: "folder" };
+test("permanent confirmation preference can skip a simple file but not dirty-buffer checks", async () => {
   const fixture = deleteExplorerFixture({
-    confirmDelete: false,
-    file,
-    deleteResults: [{ success: false, code: "FOLDER_NOT_EMPTY" }],
+    confirmPermanentDelete: false,
+    prepareFilesForDeletion: async () => false,
   });
-  const operation = fixture.explorer.deleteEntry(file);
-  await new Promise(setImmediate);
+  assert.equal(await fixture.explorer.permanentlyDelete(fixture.file), false);
+  assert.equal(fixture.explorer.deleteDialog, null);
+  assert.deepEqual(fixture.prepareCalls, [fixture.file.path]);
+  assert.deepEqual(fixture.deleteCalls, []);
+});
+
+test("folders retain a permanent confirmation when the preference is disabled", async () => {
+  const folder = { name: "components", path: "/project/components", type: "folder" };
+  const fixture = deleteExplorerFixture({ confirmPermanentDelete: false, file: folder });
+  const operation = fixture.explorer.permanentlyDelete(folder);
+  assert.equal(fixture.explorer.deleteDialog.open, true);
+  assert.match(fixture.explorer.deleteDialogMessage.textContent, /All files and subfolders inside/);
   fixture.explorer.deleteDialogCancelButton.click();
   assert.equal(await operation, false);
-  assert.deepEqual(fixture.deleteCalls, [[file.path, false]]);
+  assert.deepEqual(fixture.deleteCalls, []);
 });
 
-test("double clicks and concurrent delete requests cannot duplicate a deletion", async () => {
-  const fixture = deleteExplorerFixture();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
-  const duplicate = fixture.explorer.deleteEntry(fixture.file);
-  const other = fixture.explorer.deleteEntry({
-    name: "other.js",
-    path: "/project/other.js",
-    type: "file",
-  });
-  assert.equal(duplicate, operation);
-  assert.equal(await other, false);
-  fixture.explorer.deleteDialogDeleteButton.click();
+test("a permanent folder deletion prepares every descendant before the explicit operation", async () => {
+  const folder = { name: "components", path: "/project/components", type: "folder" };
+  const fixture = deleteExplorerFixture({ file: folder });
+  const operation = fixture.explorer.permanentlyDelete(folder);
   fixture.explorer.deleteDialogDeleteButton.click();
   assert.equal(await operation, true);
-  assert.equal(fixture.deleteCalls.filter(([path]) => path === fixture.file.path).length, 1);
+  assert.deepEqual(fixture.prepareCalls, [folder.path]);
+  assert.deepEqual(fixture.deleteCalls, [["permanent", folder.path], ["marked", folder.path]]);
 });
 
 test("Escape cancels and workspace changes invalidate an open confirmation", async () => {
   const fixture = deleteExplorerFixture();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
+  const operation = fixture.explorer.moveToTrash(fixture.file);
   const escape = fixture.explorer.deleteDialog.dispatch("cancel");
   assert.equal(escape.defaultPrevented, true);
   assert.equal(await operation, false);
-
-  const second = fixture.explorer.deleteEntry(fixture.file);
+  const second = fixture.explorer.moveToTrash(fixture.file);
   fixture.explorer.invalidateDeleteContext();
   assert.equal(await second, false);
   assert.deepEqual(fixture.deleteCalls, []);
   assert.equal(fixture.explorer.deleteDialog.open, false);
-
-  const reopened = fixture.explorer.deleteEntry(fixture.file);
-  assert.equal(fixture.explorer.deleteDialog.open, true);
-  fixture.explorer.deleteDialogCancelButton.click();
-  assert.equal(await reopened, false);
 });
 
-test("root paths are never offered for deletion and missing entries fail quietly", async () => {
+test("root and outside paths are rejected and missing entries fail quietly", async () => {
   const fixture = deleteExplorerFixture({
-    deleteResults: [{ success: false, code: "SOURCE_NOT_FOUND" }],
+    file: { name: "outside", path: "/elsewhere/a.js", type: "file" },
   });
-  assert.equal(await fixture.explorer.deleteEntry({
-    name: "project",
-    path: "/project",
-    type: "folder",
-  }), false);
-  const operation = fixture.explorer.deleteEntry(fixture.file);
-  fixture.explorer.deleteDialogDeleteButton.click();
-  assert.equal(await operation, false);
-  assert.deepEqual(fixture.alerts, []);
-});
-
-test("symlink entries use non-recursive deletion", async () => {
-  const symlink = { name: "linked-folder", path: "/project/linked-folder", type: "file" };
-  const fixture = deleteExplorerFixture({ file: symlink });
-  const operation = fixture.explorer.deleteEntry(symlink);
-  fixture.explorer.deleteDialogDeleteButton.click();
-  assert.equal(await operation, true);
-  assert.deepEqual(fixture.deleteCalls.slice(0, 1), [[symlink.path, false]]);
-});
-
-test("window page hide cancels a pending confirmation", async () => {
-  const fixture = deleteExplorerFixture();
-  const operation = fixture.explorer.deleteEntry(fixture.file);
-  fixture.explorer.onDeleteWindowPageHide();
-  assert.equal(await operation, false);
-  assert.equal(fixture.explorer.deleteDialog.open, false);
+  assert.equal(await fixture.explorer.moveToTrash({ name: "project", path: "/project", type: "folder" }), false);
+  assert.equal(await fixture.explorer.moveToTrash(fixture.file), false);
   assert.deepEqual(fixture.deleteCalls, []);
 });
 
-test("permission and filesystem failures are reported without recursive retry", async () => {
-  const file = { name: "components", path: "/project/components", type: "folder" };
-  const fixture = deleteExplorerFixture({
-    file,
-    deleteResults: [
-      { success: false, code: "FOLDER_NOT_EMPTY" },
-      { success: false, code: "PERMISSION_DENIED", error: "Permission denied." },
-    ],
-  });
-  const operation = fixture.explorer.deleteEntry(file);
+test("same-path double clicks share one operation and different paths are serialized", async () => {
+  const fixture = deleteExplorerFixture();
+  const operation = fixture.explorer.moveToTrash(fixture.file);
+  const duplicate = fixture.explorer.moveToTrash(fixture.file);
+  const other = fixture.explorer.moveToTrash({ name: "other.js", path: "/project/other.js", type: "file" });
+  assert.equal(duplicate, operation);
+  assert.equal(await other, false);
   fixture.explorer.deleteDialogDeleteButton.click();
-  await new Promise(setImmediate);
+  assert.equal(await operation, true);
+  assert.equal(fixture.deleteCalls.filter(([kind, path]) => kind === "trash" && path === fixture.file.path).length, 1);
+});
+
+test("the Delete shortcuts are scoped to a focused Explorer row", () => {
+  const fixture = deleteExplorerFixture({ confirmMoveToTrash: false, confirmPermanentDelete: false });
+  const row = { dataset: { path: fixture.file.path }, classList: { contains: () => false } };
+  row.closest = (selector) => selector === ".file-item" ? row : null;
+  fixture.explorer.shell = { contains: (element) => element === row };
+  fixture.explorer.visibleRowByPath = new Map([[fixture.file.path, fixture.file]]);
+  const calls = [];
+  fixture.explorer.moveToTrash = (file) => calls.push(["trash", file]);
+  fixture.explorer.permanentlyDelete = (file) => calls.push(["permanent", file]);
+  const makeEvent = (shiftKey) => ({
+    key: "Delete", shiftKey, target: row, preventDefault() {}, stopPropagation() {},
+  });
+  assert.equal(fixture.explorer.handleFileExplorerRemovalShortcut(makeEvent(false)), true);
+  assert.equal(fixture.explorer.handleFileExplorerRemovalShortcut(makeEvent(true)), true);
+  assert.deepEqual(calls, [["trash", fixture.file], ["permanent", fixture.file]]);
+  const editorTarget = { closest: () => null };
+  assert.equal(fixture.explorer.handleFileExplorerRemovalShortcut({
+    key: "Delete", shiftKey: true, target: editorTarget,
+  }), false);
+});
+
+test("a Trash symlink entry follows the same operation path without recursive fallback", async () => {
+  const symlink = { name: "linked-folder", path: "/project/linked-folder", type: "file" };
+  const fixture = deleteExplorerFixture({ file: symlink });
+  const operation = fixture.explorer.moveToTrash(symlink);
+  fixture.explorer.deleteDialogDeleteButton.click();
+  assert.equal(await operation, true);
+  assert.deepEqual(fixture.deleteCalls.slice(0, 1), [["trash", symlink.path]]);
+});
+
+test("permission failures keep tabs and explorer entries intact", async () => {
+  const fixture = deleteExplorerFixture({
+    operationResults: [{ success: false, code: "PERMISSION_DENIED", error: "NCE does not have permission to move this item to the Trash." }],
+  });
+  const operation = fixture.explorer.moveToTrash(fixture.file);
   fixture.explorer.deleteDialogDeleteButton.click();
   assert.equal(await operation, false);
-  assert.deepEqual(fixture.deleteCalls, [[file.path, false], [file.path, true]]);
-  assert.deepEqual(fixture.alerts, ["Permission denied."]);
+  assert.deepEqual(fixture.alerts, ["NCE does not have permission to move this item to the Trash."]);
+  assert.equal(fixture.deleteCalls.some(([kind]) => kind === "marked"), false);
+  assert.deepEqual(fixture.explorer.refreshFolderCalls, []);
 });
 
 test("inline rename recovers from invalid input and a later rename succeeds", async () => {

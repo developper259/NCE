@@ -61,6 +61,11 @@
   border-radius: 0;
 }
 
+.file-item:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -1px;
+}
+
 .file-item.active-file {
   background-color: var(--bg-active);
   color: var(--text-white);
@@ -259,16 +264,17 @@
 }
 
 .file-explorer-delete-dialog {
-  width: min(420px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  width: min(400px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 32px));
   margin: auto;
   padding: 0;
-  overflow: auto;
+  overflow: hidden auto;
   color: var(--text-primary);
   background: var(--bg-secondary);
-  border: 1px solid var(--border-secondary);
-  border-radius: 8px;
-  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.42);
+  border: 1px solid var(--border-primary);
+  border-radius: 9px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -278,29 +284,114 @@
 
 .file-explorer-delete-dialog-content {
   display: grid;
-  gap: 16px;
-  padding: 20px;
+  gap: 13px;
+  padding: 18px;
   font-size: 13px;
+}
+
+.file-explorer-delete-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.file-explorer-delete-trash-badge {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  place-items: center;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 16px;
+}
+
+.file-explorer-delete-dialog[data-mode="permanent"] .file-explorer-delete-trash-badge {
+  border-color: rgba(190, 83, 94, 0.28);
+  background: rgba(190, 83, 94, 0.1);
+  color: #bb6670;
+}
+
+.file-explorer-delete-title-group {
+  min-width: 0;
 }
 
 .file-explorer-delete-dialog h2 {
   margin: 0;
-  font-size: 16px;
+  color: var(--text-primary);
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.25;
 }
 
-.file-explorer-delete-dialog p {
+.file-explorer-delete-subtitle,
+.file-explorer-delete-description {
   margin: 0;
+  line-height: 1.45;
+}
+
+.file-explorer-delete-subtitle {
+  margin-top: 3px;
   color: var(--text-secondary);
-  line-height: 1.5;
+  font-size: 11px;
+}
+
+.file-explorer-delete-subtitle[hidden],
+.file-explorer-delete-checkbox[hidden] {
+  display: none;
+}
+
+.file-explorer-delete-description {
+  color: var(--text-primary);
+  font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.file-explorer-delete-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.file-explorer-delete-item > i {
+  flex: 0 0 auto;
+  width: 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-align: center;
+}
+
+.file-explorer-delete-item > .file-explorer-delete-folder-icon {
+  color: var(--accent-caret);
+}
+
+.file-explorer-delete-item-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-explorer-delete-checkbox {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 18px;
   color: var(--text-secondary);
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -313,15 +404,21 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  margin-top: 1px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border-primary);
 }
 
 .file-explorer-delete-actions button {
-  min-height: 30px;
-  padding: 5px 12px;
+  min-height: 31px;
+  padding: 5px 13px;
   border: 1px solid var(--border-primary);
-  border-radius: 4px;
+  border-radius: 5px;
   font: inherit;
+  font-size: 12px;
   cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease;
 }
 
 .file-explorer-delete-cancel {
@@ -329,20 +426,52 @@
   background: var(--bg-primary);
 }
 
+.file-explorer-delete-cancel:hover {
+  border-color: var(--border-secondary);
+  background: var(--bg-hover-alt);
+}
+
 .file-explorer-delete-confirm.danger {
-  border-color: var(--error-color, #b42318);
+  border-color: #b64d58;
   color: #fff;
-  background: var(--error-color, #b42318);
+  background: #b64d58;
+}
+
+.file-explorer-delete-confirm:not(.danger) {
+  border-color: var(--border-primary);
+  color: var(--text-primary);
+  background: var(--bg-hover-alt);
+}
+
+.file-explorer-delete-confirm:not(.danger):hover {
+  border-color: var(--border-secondary);
+  background: var(--bg-primary);
+}
+
+.file-explorer-delete-confirm.danger:hover {
+  border-color: #a23f49;
+  background: #a23f49;
 }
 
 .file-explorer-delete-actions button:focus-visible {
-  outline: 2px solid var(--accent-primary);
+  outline: 2px solid var(--text-secondary);
   outline-offset: 2px;
+}
+
+.file-explorer-delete-actions button:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .file-explorer-delete-actions button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+@media (max-width: 460px) {
+  .file-explorer-delete-dialog-content {
+    gap: 11px;
+    padding: 15px;
+  }
 }
 
 .empty-state-message {

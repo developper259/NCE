@@ -41,6 +41,61 @@ function setup() {
   return editor;
 }
 
+test("prepareFilesForDeletion handles dirty descendants and honors Save, Don't Save, and Cancel", async () => {
+  const nestedDirty = {
+    id: 10, type: TAB_TYPES.FILE, path: "/project/src/nested/dirty.js", isSaved: false,
+    async save() { this.isSaved = true; return true; },
+  };
+  const secondDirty = {
+    id: 11, type: TAB_TYPES.FILE, path: "/project/src/other.js", isSaved: false,
+    async save() { this.isSaved = true; return true; },
+  };
+  const clean = { id: 12, type: TAB_TYPES.FILE, path: "/project/src/clean.js", isSaved: true };
+  const outside = { id: 13, type: TAB_TYPES.FILE, path: "/project/docs/dirty.js", isSaved: false };
+  const manager = Object.create(TabManager.prototype);
+  manager.tabs = [nestedDirty, secondDirty, clean, outside];
+  manager.activeTab = clean;
+  manager.pendingSaveOperations = new Map();
+  const prompts = [];
+  manager.editor = {
+    savePopupManager: {
+      async confirmClose(id) {
+        prompts.push(id);
+        return id === nestedDirty.id ? "save" : "dontSave";
+      },
+    },
+  };
+  const focused = [];
+  manager.setFocusFile = async (file) => {
+    focused.push(file.id);
+    manager.activeTab = file;
+  };
+
+  assert.equal(await manager.prepareFilesForDeletion("/project/src"), true);
+  assert.deepEqual(prompts, [nestedDirty.id, secondDirty.id]);
+  assert.deepEqual(focused, [nestedDirty.id]);
+  assert.equal(nestedDirty.isSaved, true);
+  assert.equal(secondDirty.isSaved, false);
+  assert.equal(outside.isSaved, false);
+});
+
+test("prepareFilesForDeletion stops before deletion on Cancel or a failed Save", async () => {
+  const dirty = {
+    id: 21, type: TAB_TYPES.FILE, path: "/project/src/dirty.js", isSaved: false,
+    async save() { return false; },
+  };
+  const manager = Object.create(TabManager.prototype);
+  manager.tabs = [dirty];
+  manager.activeTab = dirty;
+  manager.pendingSaveOperations = new Map();
+  manager.editor = { savePopupManager: { async confirmClose() { return "cancel"; } } };
+  assert.equal(await manager.prepareFilesForDeletion("/project/src"), false);
+
+  manager.editor.savePopupManager.confirmClose = async () => "save";
+  assert.equal(await manager.prepareFilesForDeletion("/project/src"), false);
+  assert.equal(dirty.isSaved, false);
+});
+
 for (const choice of ['dontSave', 'save']) {
 test(`concurrent Close and Quit share one ${choice} decision and save/close once`, async () => {
   const editor = setup();

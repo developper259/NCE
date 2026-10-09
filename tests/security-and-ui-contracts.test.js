@@ -29,7 +29,24 @@ test("Preload exposes the core IPC contract without node integration", () => {
     assert.match(preload, new RegExp(`${method}`));
   }
   assert.doesNotMatch(preload, /confirmRecoverySnapshot/);
+  assert.match(preload, /moveToTrash:\s*\(targetPath\)\s*=>\s*ipcRenderer\.invoke\("FileManager:moveToTrash"/);
+  assert.match(preload, /permanentlyDelete:\s*\(targetPath\)\s*=>\s*ipcRenderer\.invoke\("FileManager:permanentlyDelete"/);
+  assert.doesNotMatch(preload, /deleteEntry:\s*\(/);
+  assert.doesNotMatch(preload, /"FileManager:delete"/);
   assert.doesNotMatch(preload, /require\("fs"\)|require\("path"\)/);
+});
+
+test("File Explorer keeps Trash and permanent deletion as separate explicit actions", () => {
+  const menu = read("src/js/contextMenu/FileExplorer.ContextMenu.js");
+  const explorer = read("src/js/sidebar/FileExplorer.Sidebar.js");
+  const manager = read("src/ts/addon/FileManager.ts");
+  assert.match(menu, /name: "Move to Trash",\s*keys: "Delete"/);
+  assert.match(menu, /name: "Delete Permanently\.\.\.",\s*keys: "Shift\+Delete"/);
+  assert.match(explorer, /handleFileExplorerRemovalShortcut/);
+  assert.match(explorer, /if \(event\.shiftKey\) void this\.permanentlyDelete\(file\)/);
+  assert.doesNotMatch(explorer, /fileOperations\.delete\(/);
+  assert.match(manager, /await this\.trashItem\(validated\.path\)/);
+  assert.doesNotMatch(manager, /deleteEntry\s*\(/);
 });
 
 test("TabManager protects asynchronous focus changes and dirty close flows", () => {

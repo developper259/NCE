@@ -51,6 +51,15 @@ app.whenReady().then(() => {
         ),
         true,
       );
+      assert.deepEqual(await run(`(async () => ({
+        trash: await window.api.moveToTrash(null),
+        permanent: await window.api.permanentlyDelete(null),
+        legacyDelete: typeof window.api.deleteEntry,
+      }))()`), {
+        trash: { success: false, code: "INVALID_PATH", error: "Invalid file path or arguments." },
+        permanent: { success: false, code: "INVALID_PATH", error: "Invalid file path or arguments." },
+        legacyDelete: "undefined",
+      });
       assert.equal(
         await run(`(async () => {
           const regular = await document.fonts.load('16px "uicons-regular-rounded"', '\\uf153');
@@ -691,15 +700,33 @@ app.whenReady().then(() => {
             modal: dialog.getAttribute("aria-modal"),
             initialFocus: document.activeElement === editor.fileExplorer.deleteDialogCancelButton,
             deleteButtonClass: editor.fileExplorer.deleteDialogDeleteButton.className,
+            width: dialog.getBoundingClientRect().width,
+            borderRadius: getComputedStyle(dialog).borderRadius,
+            trashIcon: dialog.querySelector(".file-explorer-delete-trash-badge i")?.className,
           };
         })()`);
         assert.equal(deleteDialogOpened.open, true);
-        assert.equal(deleteDialogOpened.title, "Delete file?");
-        assert.equal(deleteDialogOpened.message, 'Are you sure you want to permanently delete "keyboard.js"?');
+        assert.equal(deleteDialogOpened.title, "Move to Trash");
+        assert.equal(deleteDialogOpened.message, "Move this file to the Trash?");
         assert.equal(deleteDialogOpened.role, "dialog");
         assert.equal(deleteDialogOpened.modal, "true");
         assert.equal(deleteDialogOpened.initialFocus, true);
-        assert.match(deleteDialogOpened.deleteButtonClass, /danger/);
+        assert.doesNotMatch(deleteDialogOpened.deleteButtonClass, /danger/);
+        assert.ok(deleteDialogOpened.width <= 400);
+        assert.equal(deleteDialogOpened.borderRadius, "9px");
+        assert.match(deleteDialogOpened.trashIcon, /fi-rr-trash/);
+        assert.equal(
+          await run('editor.fileExplorer.deleteDialogSubtitle.textContent'),
+          "This action cannot be undone.",
+        );
+        assert.equal(
+          await run('editor.fileExplorer.deleteDialogCheckboxLabel.textContent.trim()'),
+          "Don't ask again",
+        );
+        assert.equal(
+          await run('getComputedStyle(editor.fileExplorer.deleteDialogItemName).textOverflow'),
+          "ellipsis",
+        );
         win.focus();
         const sendKeyboardKey = (keyCode, modifiers = []) => {
           const options = { keyCode };
@@ -729,16 +756,57 @@ app.whenReady().then(() => {
         );
         const deleteDialogReopened = await run(`(() => {
           window.__deleteConfirmationResult = null;
-          editor.fileExplorer.showDeleteConfirmation({ type: "folder", name: "components" })
+          editor.fileExplorer.showDeleteConfirmation(
+            { type: "folder", name: "components" }, { action: "permanent-delete" })
             .then(result => { window.__deleteConfirmationResult = result; });
-          return editor.fileExplorer.deleteDialog.open;
+          return {
+            open: editor.fileExplorer.deleteDialog.open,
+            title: editor.fileExplorer.deleteDialogTitle.textContent,
+            message: editor.fileExplorer.deleteDialogMessage.textContent,
+            button: editor.fileExplorer.deleteDialogDeleteButton.textContent,
+          };
         })()`);
-        assert.equal(deleteDialogReopened, true);
+        assert.equal(deleteDialogReopened.open, true);
+        assert.equal(deleteDialogReopened.title, "Delete Permanently");
+        assert.equal(
+          deleteDialogReopened.message,
+          "Permanently delete this folder? All files and subfolders inside will also be permanently deleted.",
+        );
+        assert.equal(deleteDialogReopened.button, "Delete Permanently");
+        assert.equal(
+          await run("editor.fileExplorer.deleteDialogCheckboxLabel.hidden"),
+          true,
+        );
         win.focus();
         sendKeyboardKey("Escape");
         await waitForCondition(
           async () => (await run("window.__deleteConfirmationResult?.confirmed === false")) === true,
           { description: "Escape to cancel the reopened delete confirmation" },
+        );
+        const longFolderName = `folder-${"long-name-".repeat(16)}`;
+        const longFolderDialog = await run(`(() => {
+          window.__deleteConfirmationResult = null;
+          const name = ${JSON.stringify(longFolderName)};
+          editor.fileExplorer.showDeleteConfirmation(
+            { type: "folder", name }, { action: "permanent-delete" })
+            .then(result => { window.__deleteConfirmationResult = result; });
+          const itemName = editor.fileExplorer.deleteDialogItemName;
+          return {
+            open: editor.fileExplorer.deleteDialog.open,
+            title: itemName.title,
+            textOverflow: getComputedStyle(itemName).textOverflow,
+            overflowed: itemName.scrollWidth > itemName.clientWidth,
+          };
+        })()`);
+        assert.equal(longFolderDialog.open, true);
+        assert.equal(longFolderDialog.title, longFolderName);
+        assert.equal(longFolderDialog.textOverflow, "ellipsis");
+        assert.equal(longFolderDialog.overflowed, true);
+        win.focus();
+        sendKeyboardKey("Escape");
+        await waitForCondition(
+          async () => (await run("window.__deleteConfirmationResult?.confirmed === false")) === true,
+          { description: "Escape to cancel the long folder name confirmation" },
         );
         await run('document.querySelector("#delete-confirmation-focus-target")?.remove()');
         await run(`(async () => {

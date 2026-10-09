@@ -49,10 +49,15 @@ function buildFileContextMenu(explorer) {
       keys: "F2",
       callback: (file) => explorer.startRename(file),
     },
-    delete: {
-      name: "Delete",
+    moveToTrash: {
+      name: "Move to Trash",
       keys: "Delete",
-      callback: (file) => explorer.deleteEntry(file),
+      callback: (file) => explorer.moveToTrash(file),
+    },
+    permanentlyDelete: {
+      name: "Delete Permanently...",
+      keys: "Shift+Delete",
+      callback: (file) => explorer.permanentlyDelete(file),
     },
   };
 }
@@ -117,10 +122,15 @@ function buildFolderContextMenu(explorer) {
       keys: "F2",
       callback: (folder) => explorer.startRename(folder),
     },
-    delete: {
-      name: "Delete",
+    moveToTrash: {
+      name: "Move to Trash",
       keys: "Delete",
-      callback: (folder) => explorer.deleteEntry(folder),
+      callback: (folder) => explorer.moveToTrash(folder),
+    },
+    permanentlyDelete: {
+      name: "Delete Permanently...",
+      keys: "Shift+Delete",
+      callback: (folder) => explorer.permanentlyDelete(folder),
     },
   };
 }
