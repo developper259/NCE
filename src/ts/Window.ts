@@ -15,6 +15,8 @@ import { ContextMenu } from "./addon/ContextMenu";
 import { WorkspaceSearch } from "./addon/WorkspaceSearch";
 import { AgentApprovalManager } from "./addon/AgentApprovalManager";
 import { AgentProcessRunner } from "./addon/AgentProcessRunner";
+import { TerminalManager } from "./terminal/TerminalManager";
+import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { App } from "./App";
 
 const TITLEBAR_CONTROLS_HEIGHT = 35;
@@ -53,6 +55,7 @@ export class Window {
   workspaceSearch: WorkspaceSearch | undefined;
   agentApprovalManager: AgentApprovalManager | undefined;
   agentProcessRunner: AgentProcessRunner | undefined;
+  terminalManager: TerminalManager | undefined;
   app: App;
   forceQuit: boolean;
   rendererReady: boolean;
@@ -72,6 +75,7 @@ export class Window {
     this.ipcRegistered = false;
     this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
+    this.terminalManager = undefined;
   }
 
   create() {
@@ -114,6 +118,14 @@ export class Window {
     if (!this.fileManager) this.fileManager = new FileManager(this);
     if (!this.watcher) this.watcher = new Watcher(this.window);
     else this.watcher.setWindow(this.window);
+    if (!this.terminalManager) {
+      this.terminalManager = new TerminalManager({
+        getWorkspacePath: () => this.watcher?.getWatchedPath() || null,
+        getShellSetting: () => this.app.settings.get("terminal.shell"),
+      });
+    }
+    const terminalOwner = this.window.webContents;
+    this.terminalManager.attachOwner(terminalOwner);
     this.watcher.onChange = (filePath) =>
       this.fileManager?.clearFileCache(filePath);
     if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
@@ -200,8 +212,15 @@ export class Window {
       this.rendererReady = false;
       this.reloadPending = false;
       this.agentApprovalManager?.cancelAll();
+      this.terminalManager?.closeForOwner(terminalOwner);
       this.clearQuitTimer();
     });
+    this.window.webContents.on(
+      "did-start-navigation",
+      (_event, _url, _inPlace, isMainFrame) => {
+        if (isMainFrame) this.terminalManager?.closeForOwner(terminalOwner);
+      },
+    );
     this.window.webContents.on("did-finish-load", () => {
       this.reloadPending = false;
     });
@@ -238,6 +257,7 @@ export class Window {
 
     this.window.on("closed", () => {
       this.agentApprovalManager?.cancelAll();
+      this.terminalManager?.closeForOwner(terminalOwner);
       this.window = null;
     });
 
@@ -275,6 +295,18 @@ export class Window {
       );
       ipcMain.handle("Settings:set", async (_event, key, value) => {
         return this.setSetting(key, value);
+      });
+      ipcMain.handle("Terminal:openExternalLink", async (event, rawUrl) => {
+        if (!this.terminalManager?.ownsSender(event.sender)) return false;
+        const url = normalizeTerminalLink(rawUrl);
+        if (!url) return false;
+        try {
+          await shell.openExternal(url);
+          return true;
+        } catch (error) {
+          console.error("[Terminal] Failed to open external link", error);
+          return false;
+        }
       });
       ipcMain.handle("RecentFolders:getAll", async () =>
         this.app.recentFolders.getAll(),
@@ -329,6 +361,7 @@ export class Window {
       this.workspaceSearch.handleIPC();
       this.agentApprovalManager?.handleIPC();
       this.agentProcessRunner.handleIPC();
+      this.terminalManager.registerIPC();
       this.ipcRegistered = true;
     }
   }

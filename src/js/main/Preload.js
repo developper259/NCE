@@ -22,6 +22,32 @@ contextBridge.exposeInMainWorld("api", {
   getSetting: (key) => ipcRenderer.invoke("Settings:get", key),
   getSettingsPath: () => ipcRenderer.invoke("Settings:getPath"),
   setSetting: (key, value) => ipcRenderer.invoke("Settings:set", key, value),
+  createTerminalSession: (size) => ipcRenderer.invoke("Terminal:create", size),
+  writeTerminalSession: (sessionId, data) =>
+    ipcRenderer.invoke("Terminal:write", sessionId, data),
+  resizeTerminalSession: (sessionId, cols, rows) =>
+    ipcRenderer.invoke("Terminal:resize", sessionId, cols, rows),
+  acknowledgeTerminalOutput: (sessionId, sequence) =>
+    ipcRenderer.invoke("Terminal:ack", sessionId, sequence),
+  closeTerminalSession: (sessionId) =>
+    ipcRenderer.invoke("Terminal:close", sessionId),
+  openTerminalExternalLink: (url) =>
+    ipcRenderer.invoke("Terminal:openExternalLink", url),
+  onTerminalOutput: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("Terminal:output", listener);
+    return () => ipcRenderer.removeListener("Terminal:output", listener);
+  },
+  onTerminalExit: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("Terminal:exit", listener);
+    return () => ipcRenderer.removeListener("Terminal:exit", listener);
+  },
+  onTerminalError: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on("Terminal:error", listener);
+    return () => ipcRenderer.removeListener("Terminal:error", listener);
+  },
   getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),
   addRecentFolder: (folderPath) =>
     ipcRenderer.invoke("RecentFolders:add", folderPath),

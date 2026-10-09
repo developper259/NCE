@@ -16,11 +16,12 @@
     "prebuild": "npm run sync-assets",
     "build:main": "tsc",
     "build:renderer": "vite build --config vite.config.mjs",
-    "start": "npm run build:main && node scripts/start-dev.js",
-    "build": "npm run build:main && npm run build:renderer && electron-builder --publish never",
-    "dist": "npm run sync-assets && npm run build:main && npm run build:renderer && electron-builder --dir --publish never",
+    "start": "npm run build:main && npm run rebuild:native && node scripts/start-dev.js",
+    "build": "npm run build:main && npm run build:renderer && npm run rebuild:native && electron-builder --publish never",
+    "dist": "npm run sync-assets && npm run build:main && npm run build:renderer && npm run rebuild:native && electron-builder --dir --publish never",
     "check": "npm run typecheck && npm test",
-    "test:electron": "npm run sync-assets && npm run build:main && npm run build:renderer && node --test tests/electron/smoke.cjs",
+    "rebuild:native": "electron-rebuild -f -w node-pty && node node_modules/node-pty/scripts/post-install.js",
+    "test:electron": "npm run sync-assets && npm run build:main && npm run build:renderer && npm run rebuild:native && node --test tests/electron/smoke.cjs",
     "test:packaged": "node scripts/check-package.js"
   },
   "author": {
@@ -31,6 +32,7 @@
   "dependencies": {
     "chokidar": "^5.0.0",
     "markdown-it": "^15.0.0",
+    "node-pty": "^1.1.0",
     "nsh": "github:developper259/NSH#4b5d48f341e06595cf04c80b77382f5a9a587ff9"
   },
   "build": {
@@ -42,6 +44,7 @@
     "files": [
       "dist/**/*",
       "assets/logo/NCE/dark-logo.png",
+      "!node_modules/node-pty/prebuilds/**/*",
       "package.json",
       {
         "from": "src/js/main/",
@@ -51,6 +54,8 @@
         ]
       }
     ],
+    "asarUnpack": ["node_modules/node-pty/build/Release/**/*"],
+    "npmRebuild": true,
     "win": {
       "target": "nsis",
       "icon": "assets/logo/NCE/dark-logo.ico"
@@ -73,7 +78,11 @@
     }
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
     "@flaticon/flaticon-uicons": "^3.3.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^42.4.1",
     "electron-builder": "^26.15.3",
     "postcss": "8.5.28",
