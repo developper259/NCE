@@ -8,7 +8,7 @@ The Terminal view keeps a runtime registry per canonical workspace key. Main der
 
 Each workspace retains its live PTY sessions and xterm instances while NCE remains open. Switching projects hides the previous workspace's terminal DOM, activates the destination's tabs and selected session, and leaves its processes running. Returning to a workspace reconnects the same xterm instances and process output. New sessions are created in the current project root, or the home directory in `no-workspace`.
 
-Runtime state includes PTYs, xterm instances, streams, listeners, and internal session IDs. It is never serialized. Workspace version 2 stores only Bottom Panel visibility, preferred height, active view ID, terminal tab order, base labels, custom labels, and active tab index. It does not store commands, terminal output, environment variables, or old PTY IDs. The global editor file keeps a separate panel snapshot for `no-workspace`; project panel state is saved in that project's `.nce/workspace.json`. Legacy workspace version 1 and older global panel settings are sanitized and migrated. Obsolete `maximized` values are ignored.
+Runtime state includes PTYs, xterm instances, streams, listeners, and internal session IDs. It is never serialized. Workspace version 2 stores only Bottom Panel visibility, preferred height, active view ID, terminal tab order, base labels, custom labels, duplicate-name indexes, and active tab index. It does not store commands, terminal output, environment variables, or old PTY IDs. The global editor file keeps a separate panel snapshot for `no-workspace`; project panel state is saved in that project's `.nce/workspace.json`. Legacy workspace version 1 and older global panel settings are sanitized and migrated. Obsolete `maximized` values are ignored.
 
 ## Switch and restart lifecycle
 
@@ -22,9 +22,11 @@ Opening the Terminal view with no live sessions creates one shell; overlapping o
 
 The first row is the Bottom Panel view navigation. Terminal is registered as a view, so future views can join the same tab registry. The compact actions provide New Terminal, Kill Terminal (the current workspace's selected tab), and Close Bottom Panel (hide only). Maximize/restore and double-click maximize handling have been removed. Select All, Copy Selection, Paste, and Clear Terminal are available from the terminal overflow menu; terminal keyboard shortcuts remain available.
 
-The second row contains only terminal session tabs and their close buttons. Double-click a tab name to rename it. A custom name is persisted with its workspace. Otherwise, the label is derived from shell and initial workspace folder. Duplicate labels receive `(1)`, `(2)`, and so on; a unique label has no number. Internal session IDs are never displayed.
+The second row contains only terminal session tabs and their close buttons. Double-click a tab name to rename it. A custom name is persisted with its workspace. Otherwise, the label is derived from shell and initial workspace folder. The first matching tab keeps the unsuffixed label; later duplicates get the first available positive suffix, such as `(1)` and `(2)`. Adding a duplicate never renames existing tabs. Suffix allocation lives on each workspace's session records, and a lone remaining duplicate returns to its base label. Internal session IDs are never displayed.
 
-The horizontal resize separator follows the sidebar resizer's transparent hit area and subtle `--border-accent` hover treatment. Pointer capture keeps dragging continuous; Arrow Up/Down and Home/End resize it from the keyboard. Min/max bounds preserve an editor viewport. Layout work is scheduled through `DOMManager`.
+The terminal surface, xterm viewport, and xterm screen use the same `--terminal-surface` token, which follows `--bg-secondary` in dark and light themes. This overrides xterm's default black viewport while retaining its themed canvas rendering for ANSI colors and selection. The xterm padding stays inside that same surface.
+
+Sidebar and Bottom Panel resize handles share the `.nce-panel-resizer` visual rules: a transparent 4px band at rest, the same accent hover color across the hit area, and a shared 200ms transition. Their hit areas match the visible band. Pointer capture keeps Bottom Panel dragging continuous; Arrow Up/Down and Home/End resize it from the keyboard. Min/max bounds preserve an editor viewport. Layout work is scheduled through `DOMManager`.
 
 ## Lazy loading and packaging
 
