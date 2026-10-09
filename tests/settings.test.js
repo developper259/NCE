@@ -35,6 +35,29 @@ test("missing settings are created in userData with defaults", async () => {
   }
 });
 
+test("terminal shell preference and Terminal category validate and persist", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    assert.equal(manager.get("terminal.shell"), "");
+    assert.equal(manager.get("keybindings.toggle_terminal"), "Mod+J");
+    assert.equal(await manager.set("terminal.shell", "/path with spaces/zsh"), true);
+    assert.equal(await manager.set("ui.settingsCategory", "Terminal"), true);
+    assert.equal(await manager.set("terminal.shell", "bad\0shell"), false);
+    assert.equal(await manager.set("terminal.shell", "x".repeat(513)), false);
+    assert.equal(await manager.set("terminal.shell", null), false);
+
+    const restarted = new SettingsManager(root);
+    await restarted.initialize();
+    assert.equal(restarted.get("terminal.shell"), "/path with spaces/zsh");
+    assert.equal(restarted.get("ui.settingsCategory"), "Terminal");
+    assert.equal((await readSettings(root)).terminal.shell, "/path with spaces/zsh");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("valid settings persist across manager restarts and set writes JSON", async () => {
   const root = await temporaryUserData();
   try {
@@ -68,6 +91,7 @@ test("valid settings persist across manager restarts and set writes JSON", async
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
+      terminal: { shell: "" },
       keybindings: DEFAULT_KEYBINDINGS,
     });
   } finally {
@@ -216,6 +240,7 @@ test("missing known defaults are merged while unknown properties survive", async
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
+      terminal: { shell: "" },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     const disk = await readSettings(root);
@@ -246,6 +271,7 @@ test("queued concurrent writes leave a complete latest settings document", async
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
+      terminal: { shell: "" },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);

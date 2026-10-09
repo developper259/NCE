@@ -13,6 +13,9 @@ function rendererBundleIsLoaded(bundle) {
   if (bundle === "markdown") {
     return typeof MarkdownRenderer !== "undefined" && typeof MarkdownView !== "undefined";
   }
+  if (bundle === "terminal") {
+    return typeof window.NCE_TERMINAL_RUNTIME?.createPanel === "function";
+  }
   return false;
 }
 
@@ -29,7 +32,11 @@ function ensureRendererBundle(bundle) {
     return pending;
   }
 
-  const bundleUrls = { agent: "agent.js", markdown: "markdown.js" };
+  const bundleUrls = {
+    agent: "agent.js",
+    markdown: "markdown.js",
+    terminal: "../js/terminal/entry.js",
+  };
   const filename = bundleUrls[bundle];
   if (!filename) return Promise.reject(new Error(`Unknown renderer bundle: ${bundle}`));
 
@@ -39,6 +46,7 @@ function ensureRendererBundle(bundle) {
     const script = document.createElement("script");
     script.async = true;
     script.dataset.nceRendererBundle = bundle;
+    if (bundle === "terminal") script.type = "module";
     script.src = new URL(filename, NCE_RENDERER_BASE_URL).href;
 
     const fail = (message) => {
@@ -67,6 +75,10 @@ function ensureRendererBundle(bundle) {
 
 function ensureMarkdownBundle() {
   return ensureRendererBundle("markdown");
+}
+
+function ensureTerminalBundle() {
+  return ensureRendererBundle("terminal");
 }
 
 function ensureAgentBundle() {

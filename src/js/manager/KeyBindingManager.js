@@ -252,6 +252,24 @@ class KeyBindingManager {
     // Skip when a shortcut capture is active in settings
     if (document.querySelector(".setting-shortcut-btn.listening")) return;
 
+    if (!document.hasFocus()) return;
+
+    const shortcutKey = this.getShortcutKey(eventKey, e);
+    const binding = CONFIG_KEYBINDING_CONTAINSKEY(shortcutKey)
+      ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
+      : null;
+
+    const terminalElement = e.target?.closest?.(".xterm");
+    if (terminalElement?.classList?.contains("xterm")) {
+      if (binding?.in_editor === false) {
+        if (e.repeat && !["next_tab", "previous_tab"].includes(binding.action)) return;
+        this.editor.keyBinding.exec(binding, e);
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
+
     const isModifier = e.metaKey || e.ctrlKey;
     const key = eventKey.toLowerCase();
     if (isModifier && key === "c") {
@@ -263,13 +281,6 @@ class KeyBindingManager {
         return;
       }
     }
-
-    if (!document.hasFocus()) return;
-
-    const shortcutKey = this.getShortcutKey(eventKey, e);
-    const binding = CONFIG_KEYBINDING_CONTAINSKEY(shortcutKey)
-      ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
-      : null;
 
     // Global UI shortcuts are edge-triggered so holding a key cannot repeatedly
     // toggle them. Tab cycling and editor navigation remain repeatable.
@@ -303,6 +314,7 @@ class KeyBindingManager {
 
   onCompositionEnd(event) {
     this.isComposing = false;
+    if (event?.target?.closest?.(".xterm")) return;
     if (this.isNativeInputTarget(event?.target)) return;
 
     const text = typeof event?.data === "string" ? event.data : "";

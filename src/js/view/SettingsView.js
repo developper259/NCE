@@ -59,6 +59,14 @@ const SETTINGS_UI = Object.freeze([
     keywords: ["agent", "model", "AI", "provider", "API", "key"],
     control: "agent",
   },
+  {
+    key: "terminal.shell",
+    category: "Terminal",
+    label: "Shell",
+    description: "Executable used for new terminal sessions. Leave empty to use the system default.",
+    keywords: ["shell", "terminal", "powershell", "zsh", "bash", "cmd"],
+    control: "text",
+  },
 ]);
 
 const SETTINGS_CATEGORY_META = Object.freeze({
@@ -66,6 +74,7 @@ const SETTINGS_CATEGORY_META = Object.freeze({
   Files: { description: "Configure file and save behavior." },
   Shortcuts: { description: "Configure keyboard shortcuts." },
   Agent: { description: "Configure AI models and providers." },
+  Terminal: { description: "Configure the integrated system terminal." },
 });
 
 class SettingsView {
@@ -602,6 +611,11 @@ class SettingsView {
     input.className = "setting-input";
     input.value = String(SETTINGS_GET(setting.key) || "");
     input.setAttribute("aria-label", setting.label);
+    if (setting.key === "terminal.shell") {
+      input.placeholder = "System default";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+    }
     input.addEventListener("change", async () => {
       const previous = String(SETTINGS_GET(setting.key) || "");
       const value = input.value.trim();
@@ -851,6 +865,12 @@ class SettingsView {
   }
 
   sync(key) {
+    if (key === "terminal.shell") {
+      const input = this.host?.querySelector("#setting-terminal-shell");
+      if (input && document.activeElement !== input)
+        input.value = String(SETTINGS_GET(key) || "");
+      return;
+    }
     const setting = this.getSettings().find(
       (item) => item.key === key && item.control === "checkbox",
     );

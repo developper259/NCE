@@ -225,3 +225,35 @@ test("Meta+V pastes into the focused native input through KeyBindingManager", as
   assert.deepEqual(calls, []);
   assert.equal(event.defaultPrevented, true);
 });
+
+test("terminal focus leaves Ctrl+C, Ctrl+V and ordinary keys to xterm", () => {
+  for (const [action, key] of [["copy", "c"], ["paste", "v"], ["editor_action", "ArrowUp"]]) {
+    const { manager, calls } = fixture({ action, in_editor: true }, {}, `Ctrl+${key}`);
+    const event = keyboardEvent({ closest: (selector) => selector === ".xterm"
+      ? { classList: { contains: (name) => name === "xterm" } }
+      : null }, {
+      key,
+      ctrlKey: true,
+      metaKey: false,
+    });
+    manager.onKey(event);
+    assert.deepEqual(calls, [], `${action} must stay in xterm`);
+    assert.equal(event.defaultPrevented, false);
+  }
+});
+
+test("terminal focus still dispatches configured global commands and Toggle Terminal", () => {
+  for (const [action, key] of [["toggle_terminal", "j"], ["open_command", "p"]]) {
+    const { manager, calls } = fixture({ action, in_editor: false }, {}, `Ctrl+${key}`);
+    const event = keyboardEvent({ closest: (selector) => selector === ".xterm"
+      ? { classList: { contains: (name) => name === "xterm" } }
+      : null }, {
+      key,
+      ctrlKey: true,
+      metaKey: false,
+    });
+    manager.onKey(event);
+    assert.deepEqual(calls, [action]);
+    assert.equal(event.defaultPrevented, true);
+  }
+});

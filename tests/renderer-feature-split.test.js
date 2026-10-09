@@ -38,7 +38,7 @@ function createLoader() {
     console,
   });
   vm.runInContext(
-    `${read("src/js/main/FeatureLoader.js")}\nthis.loader = { ensureAgentBundle, ensureMarkdownBundle };`,
+    `${read("src/js/main/FeatureLoader.js")}\nthis.loader = { ensureAgentBundle, ensureMarkdownBundle, ensureTerminalBundle };`,
     context,
   );
   return { context, scripts, loader: context.loader };
@@ -83,6 +83,34 @@ test("feature loader deduplicates concurrent requests and retries after a failed
   await retry;
 });
 
+test("terminal bundle is an independently lazy ES module with coalesced retry", async () => {
+  const { context, scripts, loader } = createLoader();
+  const first = loader.ensureTerminalBundle();
+  const concurrent = loader.ensureTerminalBundle();
+  assert.equal(first, concurrent);
+  assert.equal(scripts.length, 1);
+  assert.equal(scripts[0].type, "module");
+  assert.equal(
+    scripts[0].src,
+    "file:///Applications/NCE.app/Contents/Resources/app.asar/dist/renderer/js/terminal/entry.js",
+  );
+  context.window.NCE_TERMINAL_RUNTIME = { createPanel() {} };
+  scripts[0].onload();
+  await first;
+  await loader.ensureTerminalBundle();
+  assert.equal(scripts.length, 1);
+
+  const retry = createLoader();
+  const failed = retry.loader.ensureTerminalBundle();
+  retry.scripts[0].onerror();
+  await assert.rejects(failed, /Failed to load renderer terminal bundle/);
+  const next = retry.loader.ensureTerminalBundle();
+  assert.equal(retry.scripts.length, 2);
+  retry.context.window.NCE_TERMINAL_RUNTIME = { createPanel() {} };
+  retry.scripts[1].onload();
+  await next;
+});
+
 test("renderer build keeps heavy Agent and Markdown code out of core", async () => {
   const { buildRendererScript } = await import("../scripts/renderer-entrypoint.mjs");
   const [core, agent, markdown] = await Promise.all([
@@ -95,6 +123,7 @@ test("renderer build keeps heavy Agent and Markdown code out of core", async () 
     assert.equal(core.includes(feature), false, `core includes ${feature}`);
   assert.doesNotMatch(core, /class (?:Agent|AgentSidebar|AgentRunner|MarkdownRenderer|MarkdownView)\b/);
   assert.doesNotMatch(core, /function markdownit\b|var markdownit\b/);
+  assert.doesNotMatch(core, /class TerminalPanel\b|@xterm\//);
   for (const feature of ["AgentRunner", "AgentSidebar", "ManualContextManager", "TestRunner"])
     assert.equal(agent.includes(feature), true, `agent is missing ${feature}`);
   for (const feature of ["MarkdownRenderer", "MarkdownView", "markdownit"])
@@ -105,4 +134,6 @@ test("renderer build keeps heavy Agent and Markdown code out of core", async () 
   const entrypoint = read("scripts/renderer-entrypoint.mjs");
   assert.match(entrypoint, /html\/agent\.js/);
   assert.match(entrypoint, /html\/markdown\.js/);
+  assert.doesNotMatch(read("src/js/main/renderer-scripts.json"), /TerminalPanel|xterm/);
+  assert.match(read("vite.config.mjs"), /js\/terminal\/entry\.js/);
 });

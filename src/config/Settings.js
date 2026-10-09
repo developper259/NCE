@@ -22,6 +22,7 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
   toggle_file_explorer: "Mod+B",
   toggle_search: "Mod+Shift+F",
   toggle_agent: "Mod+L",
+  toggle_terminal: "Mod+J",
   open_settings: "Mod+,",
   quit_app: "Mod+Q",
   reload_window: "Mod+R",
@@ -49,6 +50,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   }),
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
+  terminal: Object.freeze({ shell: "" }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
@@ -58,6 +60,7 @@ let RENDERER_SETTINGS = {
   files: { ...DEFAULT_RENDERER_SETTINGS.files },
   appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
   agent: { hiddenModels: [] },
+  terminal: { ...DEFAULT_RENDERER_SETTINGS.terminal },
   keybindings: { ...DEFAULT_RENDERER_SETTINGS.keybindings },
 };
 
@@ -65,7 +68,7 @@ function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
     ui: {
       settingsCategory:
-        ["Editor", "Files", "Shortcuts", "Agent"].includes(settings?.ui?.settingsCategory)
+        ["Editor", "Files", "Shortcuts", "Agent", "Terminal"].includes(settings?.ui?.settingsCategory)
           ? settings.ui.settingsCategory
           : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,
       settingsScrollTop:
@@ -113,6 +116,13 @@ function SETTINGS_INITIALIZE(settings) {
             (value) => typeof value === "string" && value.trim() && value.length <= 512,
         ))]
         : [],
+    },
+    terminal: {
+      shell: typeof settings?.terminal?.shell === "string" &&
+        settings.terminal.shell.length <= 512 &&
+        !settings.terminal.shell.includes("\0")
+        ? settings.terminal.shell
+        : DEFAULT_RENDERER_SETTINGS.terminal.shell,
     },
     keybindings: Object.fromEntries(
       Object.entries(DEFAULT_KEYBINDINGS).map(([action, shortcut]) => [

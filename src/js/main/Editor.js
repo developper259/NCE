@@ -38,6 +38,21 @@ class Editor {
     this.keyBindingManager = new KeyBindingManager(this);
     this.scrollerManager = new ScrollerManager(this);
     this.sidebarManager = new SidebarManager(this);
+    this.bottomPanelManager = new BottomPanelManager(this);
+    this.bottomPanelManager.registerPanel({
+      id: "terminal",
+      title: "Terminal",
+      createView: async (container, editor) => {
+        await ensureTerminalBundle();
+        const runtime = window.NCE_TERMINAL_RUNTIME;
+        if (typeof runtime?.createPanel !== "function") {
+          throw new Error("Terminal renderer is unavailable.");
+        }
+        editor.terminalPanel = runtime.createPanel(editor, container);
+        return editor.terminalPanel;
+      },
+      onNew: () => this.terminalPanel?.createTerminal?.(),
+    });
     this.fileLoader = new FileLoader(this);
     this.statesManager = new StatesManager(this);
     this.contextMenuManager = new ContextMenuManager(this);
@@ -232,6 +247,7 @@ class Editor {
     this.agentSidebar?.refreshModelSelector?.();
     this._settingsView?.sync?.("files.confirmMoveToTrash");
     this._settingsView?.sync?.("files.confirmPermanentDelete");
+    this._settingsView?.sync?.("terminal.shell");
     this._settingsView?.sync?.("agent.hiddenModels");
     void this.refreshSettingsJsonTab();
   }
@@ -358,6 +374,7 @@ class Editor {
     this._pictureView?.destroy?.();
     this._markdownView?.destroy?.();
     this._performanceDashboard?.destroy?.();
+    this.bottomPanelManager?.destroy?.();
     this.tabManager?.destroy?.();
     this.sidebarManager?.destroy?.();
     this.lineController?.outputScroller?.destroy?.();

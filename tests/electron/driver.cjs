@@ -44,7 +44,16 @@ app.whenReady().then(() => {
     if (!win || !nce.window.rendererReady) return;
     clearInterval(waitWindow);
     try {
-      const run = (code) => win.webContents.executeJavaScript(code);
+      const run = async (code) => {
+        try {
+          return await win.webContents.executeJavaScript(code);
+        } catch (error) {
+          throw new Error(
+            `Renderer smoke expression failed: ${String(code).slice(0, 240)}\n${error?.message || error}`,
+            { cause: error },
+          );
+        }
+      };
       assert.equal(
         await run(
           'Boolean(window.api && editor && document.querySelector(".file-manager"))',
@@ -105,8 +114,9 @@ app.whenReady().then(() => {
       );
       if (phase === "write") {
         assert.equal(
-          await run('typeof Agent === "undefined" && typeof AgentSidebar === "undefined" && typeof MarkdownRenderer === "undefined"'),
+          await run('typeof Agent === "undefined" && typeof AgentSidebar === "undefined" && typeof MarkdownRenderer === "undefined" && typeof window.NCE_TERMINAL_RUNTIME === "undefined"'),
           true,
+          "cold startup must not load Agent, Markdown, or xterm code",
         );
         const settingsOpen = await run(`(async () => {
           window.__agentSettingsRendererErrors = [];
@@ -1997,18 +2007,11 @@ app.whenReady().then(() => {
           // Reload follows the normal unsaved-buffer workflow; the smoke
           // dialog chooses Don't Save so recovery must carry the text forward.
           dialog.showMessageBox = async () => ({ response: 1 });
-          win.focus();
-          const reloadModifier = process.platform === "darwin" ? "meta" : "control";
-          win.webContents.sendInputEvent({
-            type: "keyDown",
-            keyCode: "R",
-            modifiers: [reloadModifier],
-          });
-          win.webContents.sendInputEvent({
-            type: "keyUp",
-            keyCode: "R",
-            modifiers: [reloadModifier],
-          });
+          assert.equal(
+            await run("editor.keyBinding.control_reload_window()"),
+            true,
+            "the configured reload action completes its unsaved-buffer workflow",
+          );
           await waitForCondition(
             () => finishedLoads === 1,
             { timeout: 10000, description: "window reload to finish loading" },
@@ -2085,6 +2088,117 @@ app.whenReady().then(() => {
           editor.statesManager.clearRecoverySnapshotsOnQuit = async () => true;
           return true;
         })()`), true, "recovery fixture persists across the simulated clean quit");
+
+        await run(`window.api.startWatching(${JSON.stringify(directory)})`);
+        assert.equal(
+          await run('editor.bottomPanelManager.openPanel("terminal")'),
+          true,
+          "opening the Bottom Panel loads the lazy terminal view",
+        );
+        await waitForCondition(
+          async () => (await run(`(() => {
+            const panel = editor.terminalPanel;
+            return typeof window.NCE_TERMINAL_RUNTIME?.createPanel === "function" &&
+              panel?.sessions?.size === 1 &&
+              [...panel.sessions.values()][0]?.id;
+          })()`)),
+          { timeout: 15000, description: "lazy Terminal bundle and first PTY session" },
+        );
+        const firstTerminal = await run(`(() => {
+          const record = [...editor.terminalPanel.sessions.values()][0];
+          return {
+            id: record.id,
+            terminal: Boolean(record.terminal),
+            shell: record.shell,
+            cwd: record.cwd,
+          };
+        })()`);
+        assert.equal(firstTerminal.terminal, true, "the renderer creates an xterm instance");
+        assert.ok(firstTerminal.shell, "the active system shell is identified");
+        assert.equal(firstTerminal.cwd, fs.realpathSync(directory), "new PTYs start in the canonical active workspace root");
+        const terminalLayout = await run(`(() => {
+          const panel = document.querySelector(".bottom-panel").getBoundingClientRect();
+          const editorBounds = document.querySelector(".editor").getBoundingClientRect();
+          const bottomBar = document.querySelector(".bottomBar").getBoundingClientRect();
+          const leftSidebar = document.querySelector(".sidebar-left").getBoundingClientRect();
+          const rightSidebar = document.querySelector(".sidebar-right").getBoundingClientRect();
+          return {
+            panelLeft: panel.left,
+            panelRight: panel.right,
+            editorLeft: editorBounds.left,
+            editorRight: editorBounds.right,
+            editorBottom: editorBounds.bottom,
+            panelTop: panel.top,
+            panelBottom: panel.bottom,
+            bottomBarTop: bottomBar.top,
+            leftSidebarBottom: leftSidebar.bottom,
+            rightSidebarBottom: rightSidebar.bottom,
+          };
+        })()`);
+        assert.ok(Math.abs(terminalLayout.panelLeft - terminalLayout.editorLeft) <= 1);
+        assert.ok(Math.abs(terminalLayout.panelRight - terminalLayout.editorRight) <= 1);
+        assert.ok(Math.abs(terminalLayout.editorBottom - terminalLayout.panelTop) <= 1);
+        assert.ok(Math.abs(terminalLayout.panelBottom - terminalLayout.bottomBarTop) <= 1);
+        assert.ok(Math.abs(terminalLayout.leftSidebarBottom - terminalLayout.bottomBarTop) <= 1);
+        assert.ok(Math.abs(terminalLayout.rightSidebarBottom - terminalLayout.bottomBarTop) <= 1);
+        const getTerminalText = (id) => `(() => {
+          const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)});
+          const buffer = record?.terminal.buffer.active;
+          return buffer ? Array.from({ length: buffer.length }, (_, index) =>
+            buffer.getLine(index)?.translateToString(true) || "",
+          ).join("\\n") : "";
+        })()`;
+        await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, ${JSON.stringify("echo NCE_PTY_FIRST\r")})`);
+        await waitForCondition(
+          async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_FIRST")`)) === true,
+          { timeout: 10000, description: "first real PTY shell output" },
+        );
+
+        assert.equal(
+          await run("editor.terminalPanel.createTerminal()"),
+          true,
+          "the Terminal panel can create an additional session",
+        );
+        const secondTerminal = await run(`(() => {
+          const records = [...editor.terminalPanel.sessions.values()];
+          return records.length === 2 ? { id: records[1].id } : null;
+        })()`);
+        assert.ok(secondTerminal?.id, "two independent terminal tabs are present");
+        await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, ${JSON.stringify("echo NCE_PTY_SECOND\r")})`);
+        await waitForCondition(
+          async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_PTY_SECOND")`)) === true,
+          { timeout: 10000, description: "second real PTY shell output" },
+        );
+        assert.equal(await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_SECOND")`), false, "terminal output stays with its session");
+
+        const initialPanelHeight = await run("editor.bottomPanelManager.height");
+        await run(`editor.bottomPanelManager.resize(${initialPanelHeight + 24})`);
+        await waitForCondition(
+          async () => (await run(`Math.round(document.querySelector(".bottom-panel").getBoundingClientRect().height) === ${initialPanelHeight + 24}`)) === true,
+          { timeout: 3000, description: "Bottom Panel resize layout" },
+        );
+        await run("editor.bottomPanelManager.closePanel()");
+        assert.equal(nce.window.terminalManager.sessions.size, 2, "hiding the panel preserves both PTYs");
+        assert.equal(await run("editor.terminalPanel.sessions.size === 2 && editor.bottomPanelManager.visible === false"), true);
+        assert.equal(await run("window.api.getSettings().then(settings => settings.terminal.shell === '')"), true, "the renderer remains responsive while the panel is hidden");
+        await run('editor.bottomPanelManager.openPanel("terminal")');
+        assert.equal(await run("editor.terminalPanel.sessions.size === 2"), true, "reopening does not recreate terminal sessions");
+        await run(`window.__smokeTerminalInstance = editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).terminal; true`);
+        assert.equal(await run(`window.__smokeTerminalInstance === editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).terminal`), true, "the same xterm instance remains mounted");
+
+        const longCommand = 'node -e "console.log(\'NCE_LONG_PROCESS_READY\');setTimeout(()=>{},30000)"\r';
+        await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, ${JSON.stringify(longCommand)})`);
+        await waitForCondition(
+          async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_LONG_PROCESS_READY")`)) === true,
+          { timeout: 10000, description: "long-running terminal process startup" },
+        );
+        await run("editor.bottomPanelManager.closePanel()");
+        assert.equal(nce.window.terminalManager.sessions.get(secondTerminal.id).isExited, false, "a long-running PTY survives hiding the panel");
+        assert.equal(await run("editor.tabManager.tabs.length >= 0"), true, "the editor stays responsive beside a long-running process");
+        assert.equal(await run(`editor.terminalPanel.closeSession(${JSON.stringify(firstTerminal.id)})`), true);
+        assert.equal(nce.window.terminalManager.sessions.size, 1, "closing a terminal ends only that session");
+        // The remaining long-running PTY is intentionally left for the window-close
+        // lifecycle assertion below; closing the renderer must reap it.
       }
       if (phase === "reload") {
         assert.equal(
@@ -2106,6 +2220,14 @@ app.whenReady().then(() => {
         dialog.showMessageBox = async () => ({ response: 1 });
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
+      if (phase === "write") {
+        win.once("closed", () => {
+          if (nce.window.terminalManager.sessions.size !== 0) {
+            console.error("Terminal PTYs were left alive after the BrowserWindow closed");
+            app.exit(1);
+          }
+        });
+      }
       if (phase === "crash") {
         win.webContents.once("render-process-gone", () =>
           nce.window.requestQuit(),

@@ -76,6 +76,7 @@ class TitleBar {
         items: [
           ["File Explorer", "toggle_file_explorer"],
           ["Search", "toggle_search"],
+          ["Terminal", "toggle_terminal"],
           ["Agent", "toggle_agent"],
           ["Quick Open...", "quick_open"],
           ["Next Tab", "next_tab"],

@@ -3,7 +3,7 @@ import path from "node:path";
 
 export interface Settings {
   ui: {
-    settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent";
+    settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal";
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
@@ -14,6 +14,7 @@ export interface Settings {
   };
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
+  terminal: { shell: string };
   keybindings: Record<string, string | null>;
 }
 
@@ -44,6 +45,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
     toggle_file_explorer: "Mod+B",
     toggle_search: "Mod+Shift+F",
     toggle_agent: "Mod+L",
+    toggle_terminal: "Mod+J",
     open_settings: "Mod+,",
     quit_app: "Mod+Q",
     reload_window: "Mod+R",
@@ -71,6 +73,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
+  terminal: { shell: "" },
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
@@ -83,6 +86,7 @@ const KNOWN_KEYS = new Set([
   "files.confirmPermanentDelete",
   "appearance.theme",
   "agent.hiddenModels",
+  "terminal.shell",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
 ]);
 
@@ -238,6 +242,7 @@ export class SettingsManager {
       agent: {
         hiddenModels: [...this.settings.agent.hiddenModels],
       },
+      terminal: { shell: this.settings.terminal.shell },
       keybindings: Object.fromEntries(
         Object.keys(DEFAULT_KEYBINDINGS).map((action) => [
           action,
@@ -331,6 +336,7 @@ export class SettingsManager {
     if (!isObject(merged.files)) merged.files = {};
     if (!isObject(merged.appearance)) merged.appearance = {};
     if (!isObject(merged.agent)) merged.agent = {};
+    if (!isObject(merged.terminal)) merged.terminal = {};
     if (!isObject(merged.keybindings)) merged.keybindings = {};
     merged.ui.settingsCategory = this.isValid(
       "ui.settingsCategory",
@@ -388,6 +394,9 @@ export class SettingsManager {
         ))]
       : [...fallback.agent.hiddenModels];
     delete merged.agent.hiddenProviders;
+    merged.terminal.shell = this.isValid("terminal.shell", merged.terminal.shell)
+      ? merged.terminal.shell.trim()
+      : fallback.terminal.shell;
 
     const legacySaveShortcut = merged.keybindings.save;
     const legacySaveAsShortcuts = [
@@ -449,7 +458,7 @@ export class SettingsManager {
 
   private isValid(key: string, value: unknown): boolean {
     if (key === "ui.settingsCategory") {
-      return ["Editor", "Files", "Shortcuts", "Agent"].includes(String(value));
+      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal"].includes(String(value));
     }
     if (key === "ui.settingsScrollTop") {
       return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
@@ -481,6 +490,9 @@ export class SettingsManager {
             entry.length <= 512,
         )
       );
+    }
+    if (key === "terminal.shell") {
+      return typeof value === "string" && value.length <= 512 && !value.includes("\0");
     }
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
       if (value === null) return true;

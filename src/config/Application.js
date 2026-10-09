@@ -116,6 +116,11 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "toggle_terminal",
+    description: "Toggle Terminal",
+    in_editor: false,
+  },
+  {
     action: "open_settings",
     description: "Open Settings",
     in_editor: false,

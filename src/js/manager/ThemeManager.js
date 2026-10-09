@@ -79,6 +79,7 @@ class ThemeManager {
       editorElement.classList.remove("nsh-theme-dark", "nsh-theme-light");
       editorElement.classList.add(`nsh-theme-${definition.syntaxTheme}`);
     }
+    this.editor?.bottomPanelManager?.onThemeChanged?.();
     return definition.id;
   }
 

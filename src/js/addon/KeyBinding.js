@@ -45,6 +45,7 @@ class KeyBinding {
       toggle_file_explorer: this.control_toggle_file_explorer,
       toggle_search: this.control_toggle_search,
       toggle_agent: this.control_toggle_agent,
+      toggle_terminal: this.control_toggle_terminal,
 
       Escape: this.key_escape,
       Tab: this.key_tab,
@@ -425,6 +426,10 @@ class KeyBinding {
     if (this.editor.sidebarManager) {
       this.editor.sidebarManager.toggleMenu("agent");
     }
+  }
+
+  control_toggle_terminal(s, c, m, a) {
+    void this.editor.bottomPanelManager?.togglePanel("terminal");
   }
 
   // --- Key functions ---

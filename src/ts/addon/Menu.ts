@@ -401,6 +401,14 @@ export class AppMenu {
           },
 
           {
+            label: "Terminal",
+
+            accelerator: this.getAccelerator("toggle_terminal"),
+
+            click: () => this.executeKeybinding("toggle_terminal"),
+          },
+
+          {
             label: "Agent",
 
             accelerator: this.getAccelerator("toggle_agent"),

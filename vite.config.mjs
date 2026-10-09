@@ -20,7 +20,16 @@ export default defineConfig({
     outDir: path.join(projectRoot, "dist/renderer"),
     emptyOutDir: true,
     rollupOptions: {
-      input: path.join(sourceRoot, "html/index.html"),
+      input: {
+        app: path.join(sourceRoot, "html/index.html"),
+        terminal: path.join(sourceRoot, "js/terminal/entry.js"),
+      },
+      output: {
+        entryFileNames: (chunk) => chunk.name === "terminal"
+          ? "js/terminal/entry.js"
+          : "assets/[name]-[hash].js",
+        chunkFileNames: "js/terminal/[name]-[hash].js",
+      },
     },
   },
 });
