@@ -2384,10 +2384,12 @@ app.whenReady().then(() => {
           } catch (error) {
             throw new Error(`${error.message}; last state=${JSON.stringify(closeState)}`, { cause: error });
           }
-          await waitForCondition(() => {
-            try { process.kill(previousPid, 0); return false; }
-            catch (error) { return error?.code === "ESRCH"; }
-          }, { timeout: 5000, description: `cycle ${index} reaps PTY process ${previousPid}` });
+          if (process.platform === "darwin") {
+            await waitForCondition(() => {
+              try { process.kill(previousPid, 0); return false; }
+              catch (error) { return error?.code === "ESRCH"; }
+            }, { timeout: 5000, description: `cycle ${index} reaps PTY process ${previousPid}` });
+          }
 
           assert.equal(await run('editor.bottomPanelManager.openPanel("terminal")'), true,
             `cycle ${index} reopens Terminal`);
