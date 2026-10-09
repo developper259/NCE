@@ -58,7 +58,7 @@ function createSettingsViewContext() {
 test("Files settings expose both persistent confirmation checkboxes", () => {
   const { context } = createSettingsViewContext();
   const settings = context.__SettingsView.getSettings().filter((item) =>
-    ["files.confirmDelete", "files.confirmNonEmptyFolderDeletion"].includes(item.key),
+    ["files.confirmMoveToTrash", "files.confirmPermanentDelete"].includes(item.key),
   );
   assert.deepEqual(JSON.parse(JSON.stringify(settings.map(({ key, category, label, description, control }) => ({
     key,
@@ -68,28 +68,35 @@ test("Files settings expose both persistent confirmation checkboxes", () => {
     control,
   })))), [
     {
-      key: "files.confirmDelete",
+      key: "files.confirmMoveToTrash",
       category: "Files",
-      label: "Confirm File Deletion",
-      description: "Ask for confirmation before deleting files and folders.",
+      label: "Confirm Move to Trash",
+      description: "Ask before moving files or folders to the Trash.",
       control: "checkbox",
     },
     {
-      key: "files.confirmNonEmptyFolderDeletion",
+      key: "files.confirmPermanentDelete",
       category: "Files",
-      label: "Ask for Not Empty Folder",
-      description: "Ask for confirmation before permanently deleting a folder that contains files or subfolders.",
+      label: "Confirm Permanent Deletion",
+      description: "Ask before permanently deleting files or folders.",
       control: "checkbox",
     },
   ]);
+  const view = Object.create(context.__SettingsView.prototype);
+  view.query = "permanent";
+  view.category = "Editor";
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(view.getVisibleSettings().map((setting) => setting.key))),
+    ["files.confirmPermanentDelete"],
+  );
 });
 
 test("checkbox changes persist the selected setting without calling Auto Save for file deletion", async () => {
   const { context, writes } = createSettingsViewContext();
   context.SETTINGS_INITIALIZE({ files: {
     autoSave: false,
-    confirmDelete: true,
-    confirmNonEmptyFolderDeletion: true,
+    confirmMoveToTrash: true,
+    confirmPermanentDelete: true,
   } });
   const autoSaveCalls = [];
   const refreshed = [];
@@ -107,39 +114,43 @@ test("checkbox changes persist the selected setting without calling Auto Save fo
   };
 
   const deleteControl = view.createCheckbox(
-    { key: "files.confirmDelete" },
-    "setting-files-confirmDelete",
+    { key: "files.confirmMoveToTrash" },
+    "setting-files-confirmMoveToTrash",
   );
   const deleteInput = deleteControl.children[0];
   inputs.set(deleteInput.id, deleteInput);
   assert.equal(deleteInput.checked, true);
   deleteInput.checked = false;
   await deleteInput.emit("change");
-  assert.deepEqual(writes, [["files.confirmDelete", false]]);
+  assert.deepEqual(writes, [["files.confirmMoveToTrash", false]]);
   assert.deepEqual(autoSaveCalls, []);
-  assert.equal(context.SETTINGS_GET("files.confirmDelete"), false);
-  assert.equal(context.SETTINGS_GET("files.confirmNonEmptyFolderDeletion"), true);
+  assert.equal(context.SETTINGS_GET("files.confirmMoveToTrash"), false);
+  assert.equal(context.SETTINGS_GET("files.confirmPermanentDelete"), true);
   assert.equal(deleteInput.disabled, false);
 
-  view.sync("files.confirmDelete");
+  view.sync("files.confirmMoveToTrash");
   assert.equal(deleteInput.checked, false);
-  context.SETTINGS_INITIALIZE({ files: { confirmDelete: true } });
-  assert.equal(context.SETTINGS_GET("files.confirmNonEmptyFolderDeletion"), true);
-  view.sync("files.confirmDelete");
+  context.SETTINGS_INITIALIZE({ files: { confirmMoveToTrash: true } });
+  assert.equal(context.SETTINGS_GET("files.confirmPermanentDelete"), true);
+  view.sync("files.confirmMoveToTrash");
   assert.equal(deleteInput.checked, true);
 
   const nonEmptyControl = view.createCheckbox(
-    { key: "files.confirmNonEmptyFolderDeletion" },
-    "setting-files-confirmNonEmptyFolderDeletion",
+    { key: "files.confirmPermanentDelete" },
+    "setting-files-confirmPermanentDelete",
   );
   const nonEmptyInput = nonEmptyControl.children[0];
   inputs.set(nonEmptyInput.id, nonEmptyInput);
   assert.equal(nonEmptyInput.checked, true);
   nonEmptyInput.checked = false;
   await nonEmptyInput.emit("change");
-  assert.deepEqual(writes.slice(-1), [["files.confirmNonEmptyFolderDeletion", false]]);
-  assert.equal(context.SETTINGS_GET("files.confirmDelete"), true);
-  assert.equal(context.SETTINGS_GET("files.confirmNonEmptyFolderDeletion"), false);
+  assert.deepEqual(writes.slice(-1), [["files.confirmPermanentDelete", false]]);
+  assert.equal(context.SETTINGS_GET("files.confirmMoveToTrash"), true);
+  assert.equal(context.SETTINGS_GET("files.confirmPermanentDelete"), false);
+  nonEmptyInput.checked = true;
+  await nonEmptyInput.emit("change");
+  assert.equal(context.SETTINGS_GET("files.confirmMoveToTrash"), true);
+  assert.equal(context.SETTINGS_GET("files.confirmPermanentDelete"), true);
 
   const autoSaveControl = view.createCheckbox(
     { key: "files.autoSave", apply: (editor, value) => {
@@ -152,21 +163,21 @@ test("checkbox changes persist the selected setting without calling Auto Save fo
   autoSaveInput.checked = true;
   await autoSaveInput.emit("change");
   assert.deepEqual(autoSaveCalls, [true]);
-  assert.equal(refreshed.length, 3);
+  assert.equal(refreshed.length, 4);
 });
 
 test("a rejected checkbox write restores the persisted value", async () => {
   const { context } = createSettingsViewContext();
   context.window.api.setSetting = async () => false;
-  context.SETTINGS_INITIALIZE({ files: { confirmDelete: true, confirmNonEmptyFolderDeletion: true } });
+  context.SETTINGS_INITIALIZE({ files: { confirmMoveToTrash: true, confirmPermanentDelete: true } });
   const view = Object.create(context.__SettingsView.prototype);
   view.editor = { bottomBar: { refreshScrollers() {} } };
   const checkbox = view.createCheckbox(
-    { key: "files.confirmDelete" },
-    "setting-files-confirmDelete",
+    { key: "files.confirmMoveToTrash" },
+    "setting-files-confirmMoveToTrash",
   ).children[0];
   checkbox.checked = false;
   await checkbox.emit("change");
   assert.equal(checkbox.checked, true);
-  assert.equal(context.SETTINGS_GET("files.confirmDelete"), true);
+  assert.equal(context.SETTINGS_GET("files.confirmMoveToTrash"), true);
 });

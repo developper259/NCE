@@ -36,20 +36,19 @@ const SETTINGS_UI = Object.freeze([
     },
   },
   {
-    key: "files.confirmDelete",
+    key: "files.confirmMoveToTrash",
     category: "Files",
-    label: "Confirm File Deletion",
-    description: "Ask for confirmation before deleting files and folders.",
-    keywords: ["confirm", "delete", "files", "folders", "deletion"],
+    label: "Confirm Move to Trash",
+    description: "Ask before moving files or folders to the Trash.",
+    keywords: ["confirm", "trash", "files", "folders", "deletion"],
     control: "checkbox",
   },
   {
-    key: "files.confirmNonEmptyFolderDeletion",
+    key: "files.confirmPermanentDelete",
     category: "Files",
-    label: "Ask for Not Empty Folder",
-    description:
-      "Ask for confirmation before permanently deleting a folder that contains files or subfolders.",
-    keywords: ["confirm", "delete", "folder", "non-empty", "recursive"],
+    label: "Confirm Permanent Deletion",
+    description: "Ask before permanently deleting files or folders.",
+    keywords: ["confirm", "delete", "folder", "permanent", "irreversible"],
     control: "checkbox",
   },
   {

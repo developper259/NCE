@@ -9,8 +9,8 @@ export interface Settings {
   editor: { tabWidth: number };
   files: {
     autoSave: boolean;
-    confirmDelete: boolean;
-    confirmNonEmptyFolderDeletion: boolean;
+    confirmMoveToTrash: boolean;
+    confirmPermanentDelete: boolean;
   };
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
@@ -66,8 +66,8 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({
     autoSave: false,
-    confirmDelete: true,
-    confirmNonEmptyFolderDeletion: true,
+    confirmMoveToTrash: true,
+    confirmPermanentDelete: true,
   }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
@@ -79,8 +79,8 @@ const KNOWN_KEYS = new Set([
   "ui.settingsScrollTop",
   "editor.tabWidth",
   "files.autoSave",
-  "files.confirmDelete",
-  "files.confirmNonEmptyFolderDeletion",
+  "files.confirmMoveToTrash",
+  "files.confirmPermanentDelete",
   "appearance.theme",
   "agent.hiddenModels",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
@@ -231,9 +231,8 @@ export class SettingsManager {
       editor: { tabWidth: this.settings.editor.tabWidth },
       files: {
         autoSave: this.settings.files.autoSave,
-        confirmDelete: this.settings.files.confirmDelete,
-        confirmNonEmptyFolderDeletion:
-          this.settings.files.confirmNonEmptyFolderDeletion,
+        confirmMoveToTrash: this.settings.files.confirmMoveToTrash,
+        confirmPermanentDelete: this.settings.files.confirmPermanentDelete,
       },
       appearance: { theme: this.settings.appearance.theme },
       agent: {
@@ -357,18 +356,23 @@ export class SettingsManager {
     )
       ? merged.files.autoSave
       : fallback.files.autoSave;
-    merged.files.confirmDelete = this.isValid(
-      "files.confirmDelete",
-      merged.files.confirmDelete,
+    merged.files.confirmMoveToTrash = this.isValid(
+      "files.confirmMoveToTrash",
+      merged.files.confirmMoveToTrash,
     )
-      ? merged.files.confirmDelete
-      : fallback.files.confirmDelete;
-    merged.files.confirmNonEmptyFolderDeletion = this.isValid(
-      "files.confirmNonEmptyFolderDeletion",
-      merged.files.confirmNonEmptyFolderDeletion,
+      ? merged.files.confirmMoveToTrash
+      : typeof merged.files.confirmDelete === "boolean"
+        ? merged.files.confirmDelete
+        : fallback.files.confirmMoveToTrash;
+    // The legacy non-empty-folder preference governed permanent deletion.
+    // It is intentionally not migrated to the new preference: opting out of
+    // that warning never opts a user into fewer permanent-delete safeguards.
+    merged.files.confirmPermanentDelete = this.isValid(
+      "files.confirmPermanentDelete",
+      merged.files.confirmPermanentDelete,
     )
-      ? merged.files.confirmNonEmptyFolderDeletion
-      : fallback.files.confirmNonEmptyFolderDeletion;
+      ? merged.files.confirmPermanentDelete
+      : fallback.files.confirmPermanentDelete;
     merged.appearance.theme = this.isValid(
       "appearance.theme",
       merged.appearance.theme,
@@ -459,8 +463,8 @@ export class SettingsManager {
     }
     if (
       key === "files.autoSave" ||
-      key === "files.confirmDelete" ||
-      key === "files.confirmNonEmptyFolderDeletion"
+      key === "files.confirmMoveToTrash" ||
+      key === "files.confirmPermanentDelete"
     ) {
       return typeof value === "boolean";
     }

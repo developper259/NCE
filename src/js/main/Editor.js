@@ -230,8 +230,8 @@ class Editor {
     }
     this.themeManager?.syncFromSettings?.(SETTINGS_GET("appearance.theme"));
     this.agentSidebar?.refreshModelSelector?.();
-    this._settingsView?.sync?.("files.confirmDelete");
-    this._settingsView?.sync?.("files.confirmNonEmptyFolderDeletion");
+    this._settingsView?.sync?.("files.confirmMoveToTrash");
+    this._settingsView?.sync?.("files.confirmPermanentDelete");
     this._settingsView?.sync?.("agent.hiddenModels");
     void this.refreshSettingsJsonTab();
   }

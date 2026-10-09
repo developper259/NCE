@@ -3,20 +3,32 @@ module.exports = async function exerciseUI() {
   check(Boolean(document.querySelector('.nce-titlebar')), 'NCE Title Bar');
   check(getComputedStyle(document.querySelector('.nce-titlebar')).webkitAppRegion === 'drag', 'Title Bar drag region');
 
-  const confirmDeleteSetting = SettingsView.getSettings().find(
-    setting => setting.key === 'files.confirmDelete',
+  const confirmTrashSetting = SettingsView.getSettings().find(
+    setting => setting.key === 'files.confirmMoveToTrash',
   );
-  check(confirmDeleteSetting?.category === 'Files', 'Confirm File Deletion Files category');
-  check(confirmDeleteSetting?.label === 'Confirm File Deletion', 'Confirm File Deletion label');
-  check(confirmDeleteSetting?.description === 'Ask for confirmation before deleting files and folders.', 'Confirm File Deletion description');
+  const confirmPermanentSetting = SettingsView.getSettings().find(
+    setting => setting.key === 'files.confirmPermanentDelete',
+  );
+  check(confirmTrashSetting?.category === 'Files', 'Confirm Move to Trash Files category');
+  check(confirmTrashSetting?.label === 'Confirm Move to Trash', 'Confirm Move to Trash label');
+  check(confirmTrashSetting?.description === 'Ask before moving files or folders to the Trash.', 'Confirm Move to Trash description');
+  check(confirmPermanentSetting?.category === 'Files', 'Confirm Permanent Deletion Files category');
+  check(confirmPermanentSetting?.label === 'Confirm Permanent Deletion', 'Confirm Permanent Deletion label');
+  check(confirmPermanentSetting?.description === 'Ask before permanently deleting files or folders.', 'Confirm Permanent Deletion description');
   const confirmationSettingView = Object.create(SettingsView.prototype);
   confirmationSettingView.editor = editor;
   const confirmationControl = confirmationSettingView.createCheckbox(
-    confirmDeleteSetting,
-    'setting-files-confirmDelete-smoke',
+    confirmTrashSetting,
+    'setting-files-confirmMoveToTrash-smoke',
   );
   const confirmationInput = confirmationControl.querySelector('input');
-  const previousConfirmDelete = SETTINGS_GET('files.confirmDelete');
+  const nonEmptyControl = confirmationSettingView.createCheckbox(
+    confirmPermanentSetting,
+    'setting-files-confirmPermanentDelete-smoke',
+  );
+  const nonEmptyInput = nonEmptyControl.querySelector('input');
+  const previousConfirmTrash = SETTINGS_GET('files.confirmMoveToTrash');
+  const previousConfirmPermanent = SETTINGS_GET('files.confirmPermanentDelete');
   let autoSaveCallsFromDeletePreference = 0;
   const originalSetAutoSaveState = editor.setAutoSaveState;
   editor.setAutoSaveState = function (...args) {
@@ -24,23 +36,38 @@ module.exports = async function exerciseUI() {
     return originalSetAutoSaveState.apply(this, args);
   };
   document.body.append(confirmationControl);
+  document.body.append(nonEmptyControl);
   try {
     const waitForConfirmDelete = async value => {
       const deadline = Date.now() + 3000;
-      while ((SETTINGS_GET('files.confirmDelete') !== value || confirmationInput.disabled) && Date.now() < deadline)
+      while ((SETTINGS_GET('files.confirmMoveToTrash') !== value || confirmationInput.disabled) && Date.now() < deadline)
         await new Promise(resolve => setTimeout(resolve, 10));
-      check(SETTINGS_GET('files.confirmDelete') === value, `files.confirmDelete becomes ${value}`);
-      check(confirmationInput.checked === value, `checkbox reflects files.confirmDelete ${value}`);
+      check(SETTINGS_GET('files.confirmMoveToTrash') === value, `files.confirmMoveToTrash becomes ${value}`);
+      check(confirmationInput.checked === value, `checkbox reflects files.confirmMoveToTrash ${value}`);
       check(confirmationInput.disabled === false, 'Confirm File Deletion write settles before another click');
     };
     confirmationInput.click();
-    await waitForConfirmDelete(!previousConfirmDelete);
+    await waitForConfirmDelete(!previousConfirmTrash);
     confirmationInput.click();
-    await waitForConfirmDelete(previousConfirmDelete);
+    await waitForConfirmDelete(previousConfirmTrash);
+    const waitForNonEmpty = async value => {
+      const deadline = Date.now() + 3000;
+      while ((SETTINGS_GET('files.confirmPermanentDelete') !== value || nonEmptyInput.disabled) && Date.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 10));
+      check(SETTINGS_GET('files.confirmPermanentDelete') === value, `files.confirmPermanentDelete becomes ${value}`);
+      check(nonEmptyInput.checked === value, `checkbox reflects files.confirmPermanentDelete ${value}`);
+      check(SETTINGS_GET('files.confirmMoveToTrash') === previousConfirmTrash, 'permanent-delete preference leaves Trash preference unchanged');
+      check(nonEmptyInput.disabled === false, 'Ask for Not Empty Folder write settles before another click');
+    };
+    nonEmptyInput.click();
+    await waitForNonEmpty(!previousConfirmPermanent);
+    nonEmptyInput.click();
+    await waitForNonEmpty(previousConfirmPermanent);
     check(autoSaveCallsFromDeletePreference === 0, 'Confirm File Deletion never changes Auto Save');
   } finally {
     editor.setAutoSaveState = originalSetAutoSaveState;
     confirmationControl.remove();
+    nonEmptyControl.remove();
   }
 
   editor.titleBar.destroy();

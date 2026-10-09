@@ -44,8 +44,8 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   editor: Object.freeze({ tabWidth: 2 }),
   files: Object.freeze({
     autoSave: false,
-    confirmDelete: true,
-    confirmNonEmptyFolderDeletion: true,
+    confirmMoveToTrash: true,
+    confirmPermanentDelete: true,
   }),
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
@@ -88,14 +88,16 @@ function SETTINGS_INITIALIZE(settings) {
         typeof settings?.files?.autoSave === "boolean"
           ? settings.files.autoSave
           : DEFAULT_RENDERER_SETTINGS.files.autoSave,
-      confirmDelete:
-        typeof settings?.files?.confirmDelete === "boolean"
-          ? settings.files.confirmDelete
-          : DEFAULT_RENDERER_SETTINGS.files.confirmDelete,
-      confirmNonEmptyFolderDeletion:
-        typeof settings?.files?.confirmNonEmptyFolderDeletion === "boolean"
-          ? settings.files.confirmNonEmptyFolderDeletion
-          : DEFAULT_RENDERER_SETTINGS.files.confirmNonEmptyFolderDeletion,
+      confirmMoveToTrash:
+        typeof settings?.files?.confirmMoveToTrash === "boolean"
+          ? settings.files.confirmMoveToTrash
+          : typeof settings?.files?.confirmDelete === "boolean"
+            ? settings.files.confirmDelete
+            : DEFAULT_RENDERER_SETTINGS.files.confirmMoveToTrash,
+      confirmPermanentDelete:
+        typeof settings?.files?.confirmPermanentDelete === "boolean"
+          ? settings.files.confirmPermanentDelete
+          : DEFAULT_RENDERER_SETTINGS.files.confirmPermanentDelete,
     },
     appearance: {
       theme:
@@ -212,8 +214,8 @@ async function SETTINGS_SET(key, value) {
   if (
     section === "files" &&
     (property === "autoSave" ||
-      property === "confirmDelete" ||
-      property === "confirmNonEmptyFolderDeletion") &&
+      property === "confirmMoveToTrash" ||
+      property === "confirmPermanentDelete") &&
     typeof value !== "boolean"
   ) {
     return false;

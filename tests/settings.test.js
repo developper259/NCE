@@ -26,8 +26,8 @@ test("missing settings are created in userData with defaults", async () => {
   try {
     const manager = new SettingsManager(root);
     assert.deepEqual(await manager.initialize(), DEFAULT_SETTINGS);
-    assert.equal(manager.get("files.confirmDelete"), true);
-    assert.equal(manager.get("files.confirmNonEmptyFolderDeletion"), true);
+    assert.equal(manager.get("files.confirmMoveToTrash"), true);
+    assert.equal(manager.get("files.confirmPermanentDelete"), true);
     assert.deepEqual(await readSettings(root), DEFAULT_SETTINGS);
     assert.equal(manager.settingsPath, path.join(root, "settings.json"));
   } finally {
@@ -42,30 +42,61 @@ test("valid settings persist across manager restarts and set writes JSON", async
     await first.initialize();
     assert.equal(await first.set("editor.tabWidth", 8), true);
     assert.equal(await first.set("files.autoSave", true), true);
-    assert.equal(await first.set("files.confirmDelete", false), true);
-    assert.equal(first.get("files.confirmNonEmptyFolderDeletion"), true);
-    assert.equal(await first.set("files.confirmNonEmptyFolderDeletion", false), true);
+    assert.equal(await first.set("files.confirmMoveToTrash", false), true);
+    assert.equal(first.get("files.confirmPermanentDelete"), true);
+    assert.equal(await first.set("files.confirmPermanentDelete", false), true);
     const second = new SettingsManager(root);
     await second.initialize();
     assert.equal(second.get("editor.tabWidth"), 8);
     assert.equal(second.get("files.autoSave"), true);
-    assert.equal(second.get("files.confirmDelete"), false);
-    assert.equal(second.get("files.confirmNonEmptyFolderDeletion"), false);
-    assert.equal(await second.set("files.confirmDelete", true), true);
-    assert.equal(second.get("files.confirmNonEmptyFolderDeletion"), false);
-    assert.equal(await second.set("files.confirmNonEmptyFolderDeletion", true), true);
+    assert.equal(second.get("files.confirmMoveToTrash"), false);
+    assert.equal(second.get("files.confirmPermanentDelete"), false);
+    assert.equal(await second.set("files.confirmMoveToTrash", true), true);
+    assert.equal(second.get("files.confirmPermanentDelete"), false);
+    assert.equal(await second.set("files.confirmPermanentDelete", true), true);
+    const third = new SettingsManager(root);
+    await third.initialize();
+    assert.equal(third.get("files.confirmMoveToTrash"), true);
+    assert.equal(third.get("files.confirmPermanentDelete"), true);
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
       files: {
         autoSave: true,
-        confirmDelete: true,
-        confirmNonEmptyFolderDeletion: true,
+        confirmMoveToTrash: true,
+        confirmPermanentDelete: true,
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("legacy deletion settings migrate conservatively without weakening permanent-delete confirmation", async () => {
+  const root = await temporaryUserData();
+  try {
+    await fs.writeFile(path.join(root, "settings.json"), JSON.stringify({
+      files: {
+        autoSave: true,
+        confirmDelete: false,
+        confirmNonEmptyFolderDeletion: false,
+      },
+    }));
+    const manager = new SettingsManager(root);
+    const migrated = await manager.initialize();
+    assert.equal(migrated.files.autoSave, true);
+    assert.equal(migrated.files.confirmMoveToTrash, false);
+    assert.equal(migrated.files.confirmPermanentDelete, true);
+    assert.equal(manager.get("files.confirmDelete"), undefined);
+    assert.equal(manager.get("files.confirmNonEmptyFolderDeletion"), undefined);
+    const disk = await readSettings(root);
+    assert.equal(disk.files.confirmDelete, false);
+    assert.equal(disk.files.confirmNonEmptyFolderDeletion, false);
+    assert.equal(disk.files.confirmMoveToTrash, false);
+    assert.equal(disk.files.confirmPermanentDelete, true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -151,8 +182,8 @@ test("malformed and invalid known settings fall back without crashing", async ()
         editor: { tabWidth: "wide" },
         files: {
           autoSave: 1,
-          confirmDelete: "no",
-          confirmNonEmptyFolderDeletion: "no",
+          confirmMoveToTrash: "no",
+          confirmPermanentDelete: "no",
         },
       }),
     );
@@ -170,7 +201,7 @@ test("missing known defaults are merged while unknown properties survive", async
       path.join(root, "settings.json"),
       JSON.stringify({
         editor: { tabWidth: 4, futureEditorSetting: true },
-        files: { autoSave: true, confirmDelete: false },
+        files: { autoSave: true, confirmMoveToTrash: false },
         futureSection: { value: 1 },
       }),
     );
@@ -180,8 +211,8 @@ test("missing known defaults are merged while unknown properties survive", async
       editor: { tabWidth: 4 },
       files: {
         autoSave: true,
-        confirmDelete: false,
-        confirmNonEmptyFolderDeletion: true,
+        confirmMoveToTrash: false,
+        confirmPermanentDelete: true,
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
@@ -210,16 +241,16 @@ test("queued concurrent writes leave a complete latest settings document", async
       editor: { tabWidth: 12 },
       files: {
         autoSave: true,
-        confirmDelete: true,
-        confirmNonEmptyFolderDeletion: true,
+        confirmMoveToTrash: true,
+        confirmPermanentDelete: true,
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);
-    assert.equal(await manager.set("files.confirmDelete", "no"), false);
-    assert.equal(await manager.set("files.confirmNonEmptyFolderDeletion", "no"), false);
+    assert.equal(await manager.set("files.confirmMoveToTrash", "no"), false);
+    assert.equal(await manager.set("files.confirmPermanentDelete", "no"), false);
     assert.equal(await manager.set("unknown.value", true), false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -235,10 +266,10 @@ test("a failed settings write does not change the in-memory source of truth", as
 
     assert.equal(await manager.set("editor.tabWidth", 8), false);
     assert.equal(manager.get("editor.tabWidth"), 2);
-    assert.equal(await manager.set("files.confirmDelete", false), false);
-    assert.equal(manager.get("files.confirmDelete"), true);
-    assert.equal(await manager.set("files.confirmNonEmptyFolderDeletion", false), false);
-    assert.equal(manager.get("files.confirmNonEmptyFolderDeletion"), true);
+    assert.equal(await manager.set("files.confirmMoveToTrash", false), false);
+    assert.equal(manager.get("files.confirmMoveToTrash"), true);
+    assert.equal(await manager.set("files.confirmPermanentDelete", false), false);
+    assert.equal(manager.get("files.confirmPermanentDelete"), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -443,7 +474,7 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   });
   assert.equal(get("editor.tabWidth"), 5);
   assert.equal(get("files.autoSave"), true);
-  assert.equal(get("files.confirmDelete"), true);
+  assert.equal(get("files.confirmMoveToTrash"), true);
   assert.equal(get("keybindings.save"), "Mod+Alt+S");
   assert.deepEqual(
     bindings.map((binding) => binding.key),
@@ -451,13 +482,36 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   );
   assert.equal(await set("editor.tabWidth", 3), true);
   assert.equal(get("editor.tabWidth"), 3);
-  assert.equal(await set("files.confirmDelete", false), true);
-  assert.equal(get("files.confirmDelete"), false);
-  assert.deepEqual(writes, [["editor.tabWidth", 3], ["files.confirmDelete", false]]);
-  initialize({ editor: { tabWidth: 99 }, files: { autoSave: "yes", confirmDelete: "no" } });
+  assert.equal(await set("files.confirmMoveToTrash", false), true);
+  assert.equal(get("files.confirmMoveToTrash"), false);
+  assert.equal(await set("files.confirmPermanentDelete", false), true);
+  assert.equal(get("files.confirmPermanentDelete"), false);
+  assert.deepEqual(writes, [
+    ["editor.tabWidth", 3],
+    ["files.confirmMoveToTrash", false],
+    ["files.confirmPermanentDelete", false],
+  ]);
+  initialize({ editor: { tabWidth: 99 }, files: {
+    autoSave: "yes",
+    confirmMoveToTrash: "no",
+    confirmPermanentDelete: "no",
+  } });
   assert.equal(get("editor.tabWidth"), 2);
   assert.equal(get("files.autoSave"), false);
-  assert.equal(get("files.confirmDelete"), true);
+  assert.equal(get("files.confirmMoveToTrash"), true);
+  assert.equal(get("files.confirmPermanentDelete"), true);
+});
+
+test("renderer settings migrate legacy ordinary confirmation without changing permanent confirmation", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const [initialize, get] = loadGlobal(
+    "src/config/Settings.js",
+    "[SETTINGS_INITIALIZE, SETTINGS_GET]",
+    { window: { api: {} } },
+  );
+  initialize({ files: { confirmDelete: false, confirmNonEmptyFolderDeletion: false } });
+  assert.equal(get("files.confirmMoveToTrash"), false);
+  assert.equal(get("files.confirmPermanentDelete"), true);
 });
 
 test("renderer settings roll back a preference when its write rejects", async () => {
@@ -471,7 +525,9 @@ test("renderer settings roll back a preference when its write rejects", async ()
     },
   );
   const [initialize, get, set] = globals;
-  initialize({ files: { confirmDelete: true } });
-  assert.equal(await set("files.confirmDelete", false), false);
-  assert.equal(get("files.confirmDelete"), true);
+  initialize({ files: { confirmMoveToTrash: true } });
+  assert.equal(await set("files.confirmMoveToTrash", false), false);
+  assert.equal(get("files.confirmMoveToTrash"), true);
+  assert.equal(await set("files.confirmPermanentDelete", false), false);
+  assert.equal(get("files.confirmPermanentDelete"), true);
 });
