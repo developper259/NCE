@@ -83,6 +83,23 @@
 .setting-input { box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--border-secondary); border-radius: 3px; outline: none; background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 12px; }
 .setting-select { min-width: 82px; }
 .setting-input { width: 150px; }
+.nce-checkbox { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 18px; color: var(--text-secondary); font-size: 12px; line-height: 18px; cursor: pointer; user-select: none; }
+.nce-checkbox[hidden] { display: none; }
+.nce-checkbox > input[type="checkbox"] { position: absolute; inset: 0 auto auto 0; width: 18px; height: 18px; margin: 0; opacity: 0; appearance: none; cursor: inherit; }
+.nce-checkbox-box { display: grid; flex: 0 0 18px; place-items: center; width: 18px; height: 18px; box-sizing: border-box; border: 1px solid var(--border-secondary); border-radius: 5px; background: var(--bg-primary); color: var(--text-primary); transition: background-color 140ms ease, border-color 140ms ease; }
+.nce-checkbox-box svg { width: 12px; height: 12px; overflow: visible; opacity: 0; transform: scale(.8); transition: opacity 140ms ease, transform 140ms ease; }
+.nce-checkbox-box path { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.nce-checkbox:hover > input[type="checkbox"]:not(:disabled) + .nce-checkbox-box { border-color: var(--text-secondary); }
+.nce-checkbox > input[type="checkbox"]:checked + .nce-checkbox-box { border-color: var(--border-secondary); background: var(--bg-active); }
+.nce-checkbox > input[type="checkbox"]:checked + .nce-checkbox-box svg { opacity: 1; transform: scale(1); }
+.nce-checkbox > input[type="checkbox"]:focus-visible + .nce-checkbox-box { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+.nce-checkbox:has(> input[type="checkbox"]:disabled) { opacity: .55; cursor: not-allowed; }
+.nce-checkbox > input[type="checkbox"]:disabled + .nce-checkbox-box,
+.nce-checkbox > input[type="checkbox"]:disabled ~ .nce-checkbox-text { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  .nce-checkbox-box,
+  .nce-checkbox-box svg { transition: none; }
+}
 .settings-search:focus-visible,
 .setting-select:focus-visible,
 .setting-input:focus-visible,

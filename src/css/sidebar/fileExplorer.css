@@ -385,21 +385,6 @@
   white-space: nowrap;
 }
 
-.file-explorer-delete-checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 18px;
-  color: var(--text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.file-explorer-delete-checkbox input {
-  margin: 0;
-  accent-color: var(--accent-primary);
-}
-
 .file-explorer-delete-actions {
   display: flex;
   justify-content: flex-end;

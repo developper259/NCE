@@ -1547,13 +1547,30 @@ class FileExplorer extends Sidebar {
     item.append(itemIcon, itemName);
 
     const checkboxLabel = document.createElement("label");
-    checkboxLabel.className = "file-explorer-delete-checkbox";
+    checkboxLabel.className = "nce-checkbox file-explorer-delete-checkbox";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.checked = false;
+    const checkboxBox = document.createElement("span");
+    checkboxBox.className = "nce-checkbox-box";
+    checkboxBox.setAttribute("aria-hidden", "true");
+    const checkboxIcon = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg",
+    );
+    checkboxIcon.setAttribute("viewBox", "0 0 16 16");
+    checkboxIcon.setAttribute("focusable", "false");
+    const checkboxTick = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "path",
+    );
+    checkboxTick.setAttribute("d", "M3.25 8.25 6.5 11.5 12.75 4.75");
+    checkboxIcon.appendChild(checkboxTick);
+    checkboxBox.appendChild(checkboxIcon);
     const checkboxText = document.createElement("span");
+    checkboxText.className = "nce-checkbox-text";
     checkboxText.textContent = "Don't ask again";
-    checkboxLabel.append(checkbox, checkboxText);
+    checkboxLabel.append(checkbox, checkboxBox, checkboxText);
 
     const actions = document.createElement("div");
     actions.className = "file-explorer-delete-actions";

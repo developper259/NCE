@@ -165,6 +165,10 @@ class TestDocument {
     return new TestElement(this, tagName);
   }
 
+  createElementNS(_namespace, tagName) {
+    return new TestElement(this, tagName);
+  }
+
   querySelectorAll() {
     return [];
   }
@@ -342,6 +346,14 @@ test("Move to Trash dialog is neutral, names the item, and defaults focus to Can
   assert.match(fixture.explorer.deleteDialogItemIcon.className, /file/);
   assert.equal(dialog.getAttribute("aria-labelledby"), "file-explorer-delete-title");
   assert.equal(fixture.explorer.deleteDialogCheckboxLabel.hidden, false);
+  assert.match(fixture.explorer.deleteDialogCheckboxLabel.className, /nce-checkbox/);
+  assert.equal(fixture.explorer.deleteDialogCheckbox.type, "checkbox");
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.children[0], fixture.explorer.deleteDialogCheckbox);
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.children[1].className, "nce-checkbox-box");
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.children[1].getAttribute("aria-hidden"), "true");
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.children[1].children[0].tagName, "SVG");
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.children[1].children[0].children[0].tagName, "PATH");
+  assert.equal(fixture.explorer.deleteDialogCheckboxLabel.children[2].textContent, "Don't ask again");
   assert.equal(fixture.explorer.deleteDialogDeleteButton.textContent, "Move to Trash");
   assert.equal(fixture.document.activeElement, fixture.explorer.deleteDialogCancelButton);
   fixture.explorer.deleteDialogCancelButton.click();

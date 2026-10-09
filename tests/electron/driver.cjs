@@ -715,6 +715,87 @@ app.whenReady().then(() => {
         assert.ok(deleteDialogOpened.width <= 400);
         assert.equal(deleteDialogOpened.borderRadius, "9px");
         assert.match(deleteDialogOpened.trashIcon, /fi-rr-trash/);
+        const checkboxPresentation = await run(`(() => {
+          const root = document.documentElement;
+          const oldTheme = root.getAttribute("data-theme");
+          const label = editor.fileExplorer.deleteDialogCheckboxLabel;
+          const input = editor.fileExplorer.deleteDialogCheckbox;
+          const box = label.querySelector(".nce-checkbox-box");
+          const settleTransitions = () => {
+            for (const transition of box.getAnimations({ subtree: true }))
+              transition.finish();
+          };
+          const rect = box.getBoundingClientRect();
+          root.setAttribute("data-theme", "dark");
+          const darkUnchecked = getComputedStyle(box).backgroundColor;
+          input.checked = true;
+          settleTransitions();
+          const darkChecked = getComputedStyle(box).backgroundColor;
+          const darkTickOpacity = getComputedStyle(box.querySelector("svg")).opacity;
+          root.setAttribute("data-theme", "light");
+          settleTransitions();
+          input.checked = false;
+          settleTransitions();
+          const lightUnchecked = getComputedStyle(box).backgroundColor;
+          input.checked = true;
+          settleTransitions();
+          const lightChecked = getComputedStyle(box).backgroundColor;
+          const lightTickOpacity = getComputedStyle(box.querySelector("svg")).opacity;
+          input.checked = false;
+          settleTransitions();
+          const result = {
+            type: input.type,
+            tabIndex: input.tabIndex,
+            appearance: getComputedStyle(input).appearance,
+            opacity: getComputedStyle(input).opacity,
+            width: rect.width,
+            height: rect.height,
+            darkUnchecked,
+            darkChecked,
+            lightUnchecked,
+            lightChecked,
+            darkTickOpacity,
+            lightTickOpacity,
+            svgPath: box.querySelector("path")?.getAttribute("d"),
+          };
+          if (oldTheme === null) root.removeAttribute("data-theme");
+          else root.setAttribute("data-theme", oldTheme);
+          return result;
+        })()`);
+        assert.equal(checkboxPresentation.type, "checkbox");
+        assert.equal(checkboxPresentation.tabIndex, 0);
+        assert.equal(checkboxPresentation.appearance, "none");
+        assert.equal(checkboxPresentation.opacity, "0");
+        assert.equal(checkboxPresentation.width, 18);
+        assert.equal(checkboxPresentation.height, 18);
+        assert.notEqual(checkboxPresentation.darkUnchecked, checkboxPresentation.darkChecked);
+        assert.notEqual(checkboxPresentation.lightUnchecked, checkboxPresentation.lightChecked);
+        assert.notEqual(checkboxPresentation.darkUnchecked, checkboxPresentation.lightUnchecked);
+        assert.notEqual(checkboxPresentation.darkChecked, checkboxPresentation.lightChecked);
+        assert.equal(checkboxPresentation.darkTickOpacity, "1");
+        assert.equal(checkboxPresentation.lightTickOpacity, "1");
+        assert.match(checkboxPresentation.svgPath, /^M/);
+        const checkboxClickBehavior = await run(`(() => {
+          const input = editor.fileExplorer.deleteDialogCheckbox;
+          const text = editor.fileExplorer.deleteDialogCheckboxLabel.querySelector(".nce-checkbox-text");
+          window.__nceCheckboxChangeCount = 0;
+          input.addEventListener("change", () => window.__nceCheckboxChangeCount++);
+          text.click();
+          const afterText = { checked: input.checked, changes: window.__nceCheckboxChangeCount };
+          input.click();
+          const afterInput = { checked: input.checked, changes: window.__nceCheckboxChangeCount };
+          input.disabled = true;
+          text.click();
+          input.click();
+          const disabled = { checked: input.checked, changes: window.__nceCheckboxChangeCount };
+          const disabledOpacity = getComputedStyle(editor.fileExplorer.deleteDialogCheckboxLabel).opacity;
+          input.disabled = false;
+          return { afterText, afterInput, disabled, disabledOpacity };
+        })()`);
+        assert.deepEqual(checkboxClickBehavior.afterText, { checked: true, changes: 1 });
+        assert.deepEqual(checkboxClickBehavior.afterInput, { checked: false, changes: 2 });
+        assert.deepEqual(checkboxClickBehavior.disabled, { checked: false, changes: 2 });
+        assert.notEqual(checkboxClickBehavior.disabledOpacity, "1");
         assert.equal(
           await run('editor.fileExplorer.deleteDialogSubtitle.textContent'),
           "This action cannot be undone.",
@@ -727,6 +808,7 @@ app.whenReady().then(() => {
           await run('getComputedStyle(editor.fileExplorer.deleteDialogItemName).textOverflow'),
           "ellipsis",
         );
+        await run("editor.fileExplorer.deleteDialogCancelButton.focus()");
         win.focus();
         const sendKeyboardKey = (keyCode, modifiers = []) => {
           const options = { keyCode };
@@ -744,6 +826,22 @@ app.whenReady().then(() => {
           async () => (await run("document.activeElement === editor.fileExplorer.deleteDialogCheckbox")) === true,
           { description: "Delete dialog focus trap to wrap to its checkbox" },
         );
+        assert.equal(
+          await run("document.activeElement === editor.fileExplorer.deleteDialogCheckbox"),
+          true,
+        );
+        sendKeyboardKey("Space");
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.deleteDialogCheckbox.checked")) === true,
+          { description: "Space toggles the focused NCE checkbox" },
+        );
+        assert.equal(await run("window.__nceCheckboxChangeCount"), 3);
+        sendKeyboardKey("Space");
+        await waitForCondition(
+          async () => (await run("editor.fileExplorer.deleteDialogCheckbox.checked")) === false,
+          { description: "Space toggles the focused NCE checkbox off" },
+        );
+        assert.equal(await run("window.__nceCheckboxChangeCount"), 4);
         await run("editor.fileExplorer.deleteDialogDeleteButton.focus()");
         sendKeyboardKey("Enter");
         await waitForCondition(
