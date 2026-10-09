@@ -7,6 +7,7 @@
   --bg-hover: #2c2c2c;
   --bg-hover-alt: #242424;
   --bg-active: #333333;
+  --terminal-surface: var(--bg-secondary);
   --tab-bar-background: #171717;
   
   /* Border colors */

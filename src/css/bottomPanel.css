@@ -24,29 +24,9 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 9px;
+  height: 4px;
   cursor: ns-resize;
   touch-action: none;
-}
-
-.bottom-panel-resize-handle::after {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1px;
-  content: "";
-  background: var(--border-primary);
-  transition: background-color 140ms ease;
-}
-
-.bottom-panel-resize-handle:hover::after,
-.bottom-panel-resize-handle:focus-visible::after {
-  background: var(--border-accent);
-}
-
-.bottom-panel-resize-handle:focus-visible {
-  outline: none;
 }
 
 .bottom-panel-header {
@@ -193,7 +173,7 @@
   min-height: 0;
   overflow: hidden;
   color: var(--text-primary);
-  background: var(--bg-secondary);
+  background: var(--terminal-surface);
 }
 
 .terminal-tabs {
@@ -351,7 +331,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--bg-secondary);
+  background: var(--terminal-surface);
 }
 
 .terminal-instance {
@@ -359,6 +339,7 @@
   inset: 0;
   min-width: 0;
   min-height: 0;
+  background: var(--terminal-surface);
 }
 
 .terminal-instance[hidden] {
@@ -370,6 +351,12 @@
   height: 100%;
   padding: 6px 9px;
   box-sizing: border-box;
+  background: var(--terminal-surface);
+}
+
+.terminal-instance .xterm .xterm-viewport,
+.terminal-instance .xterm .xterm-screen {
+  background-color: var(--terminal-surface);
 }
 
 .terminal-error-state {
@@ -380,7 +367,7 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--bg-secondary);
+  background: var(--terminal-surface);
   color: var(--text-secondary);
   font-size: 12px;
 }
@@ -392,7 +379,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .bottom-panel-resize-handle::after,
   .bottom-panel-view-tab,
   .bottom-panel-icon-button {
     scroll-behavior: auto;
