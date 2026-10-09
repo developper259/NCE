@@ -427,7 +427,8 @@ class FileExplorer extends Sidebar {
 
     if (!switching) {
       if (!(await this.editor.tabManager.prepareForQuit())) return false;
-      await this.editor.statesManager.saveWorkspaceState(this.rootPath);
+      if (!(await this.editor.statesManager.saveWorkspaceState(this.rootPath))) return false;
+      this.editor.bottomPanelManager?.suspendWorkspaceSwitch?.();
       this.editor.statesManager.persistenceSuspended = true;
       try {
         await this.editor.tabManager.closeFiles({ skipPrepare: true });
@@ -1167,6 +1168,9 @@ class FileExplorer extends Sidebar {
     if (!(await this.editor.tabManager.prepareForQuit())) return false;
 
     const previousRoot = this.rootPath;
+    const previousPanelKey = this.editor.bottomPanelManager?.workspaceKey ||
+      (previousRoot ? NCEPath.comparisonKey(previousRoot) : "no-workspace");
+    const previousPanelState = this.editor.bottomPanelManager?.getPanelState?.() || null;
     if (previousRoot) {
       // Persist the current workspace while its tabs, explorer and sidebar are
       // still intact. A failed snapshot must not partially switch workspaces.
@@ -1177,16 +1181,39 @@ class FileExplorer extends Sidebar {
       this.editor.statesManager.noWorkspaceState =
         this.editor.statesManager.getNoWorkspaceState();
     }
+    this.editor.bottomPanelManager?.suspendWorkspaceSwitch?.();
     this.editor.statesManager.persistenceSuspended = true;
+    let opened = false;
     try {
       await this.editor.tabManager.closeFiles({ skipPrepare: true });
       this.editor.searchSidebar?.resetWorkspace?.();
       if (this.rootPath) await this.closeProject({ switching: true });
 
       this.isLoaded = false;
-      if (!(await this.loadProject(folderPath, { deferRefresh: true }))) return false;
+      opened = await this.loadProject(folderPath, { deferRefresh: true });
     } finally {
       this.editor.statesManager.persistenceSuspended = false;
+    }
+
+    if (!opened) {
+      if (previousRoot) {
+        const restoredRoot = await this.loadProject(previousRoot, { deferRefresh: true });
+        if (restoredRoot) {
+          await this.editor.statesManager.loadWorkspaceState(previousRoot);
+        } else if (previousPanelState) {
+          this.editor.bottomPanelManager?.restoreState?.(
+            previousPanelState,
+            previousPanelKey,
+            previousRoot,
+          );
+        }
+      } else {
+        if (this.rootPath) await this.closeProject({ switching: true });
+        await this.editor.statesManager.restoreNoWorkspaceState(
+          this.editor.statesManager.noWorkspaceState,
+        );
+      }
+      return false;
     }
 
     await this.editor.statesManager.loadWorkspaceState(folderPath);

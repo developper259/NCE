@@ -78,7 +78,7 @@ test("workspace snapshots contain relative paths and no Agent scroll position", 
   editor.tabManager.tabs = [a, settings];
   editor.tabManager.activeTab = a;
   const state = manager.getWorkspaceState("/projects/A");
-  assert.equal(state.version, 1);
+  assert.equal(state.version, 2);
   assert.equal(state.tabManager.tabs[0].path, "src/a.js");
   assert.deepEqual(Array.from(state.fileExplorer.expandedPaths), ["src", "src/components"]);
   assert.equal(state.fileExplorer.activeFilePath, "src/b.js");

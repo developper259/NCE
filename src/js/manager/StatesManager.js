@@ -2,7 +2,7 @@ class StatesManager {
   constructor(editor) {
     this.editor = editor;
     this.globalVersion = 2;
-    this.workspaceVersion = 1;
+    this.workspaceVersion = 2;
     this.lastWorkspace = null;
     this.noWorkspaceState = null;
     this.restoreGeneration = 0;
@@ -10,6 +10,10 @@ class StatesManager {
     this.recoveringSnapshots = new Set();
     this.persistenceSuspended = false;
     this.globalSaveTimer = null;
+    this.workspaceRoots = new Map();
+    this.bottomPanelSaveTimers = new Map();
+    this.workspaceSaveQueues = new Map();
+    this.legacyBottomPanelState = null;
     this.workspaceLimits = Object.freeze({
       tabs: 256,
       expandedPaths: 2048,
@@ -52,7 +56,6 @@ class StatesManager {
       version: this.globalVersion,
       lastWorkspace: this.lastWorkspace,
       agent: this.getAgentState(),
-      bottomPanel: this.getBottomPanelState(),
       noWorkspaceState: this.noWorkspaceState ||
         (hasWorkspace ? null : this.getNoWorkspaceState()),
     };
@@ -62,6 +65,7 @@ class StatesManager {
     return {
       tabManager: this.getTabManagerState(null),
       sidebar: this.getSidebarState(),
+      bottomPanel: this.getBottomPanelState("no-workspace"),
     };
   }
 
@@ -73,6 +77,7 @@ class StatesManager {
       sidebar: this.getSidebarState(),
       fileExplorer: this.getFileExplorerState(root),
       search: this.getSearchState(),
+      bottomPanel: this.getBottomPanelState(),
     };
   }
 
@@ -80,18 +85,20 @@ class StatesManager {
     return this.editor.api.saveEditorState(JSON.stringify(this.getGlobalState()));
   }
 
-  getBottomPanelState() {
-    const state = this.editor.bottomPanelManager?.getPanelState?.() || {
+  getBottomPanelState(workspaceKey = this.editor.bottomPanelManager?.workspaceKey) {
+    const panelManager = this.editor.bottomPanelManager;
+    const state = panelManager?.getWorkspacePanelState?.(workspaceKey) ||
+      panelManager?.getPanelState?.() || {
       visible: false,
       height: 250,
-      maximized: false,
       activePanelId: "terminal",
+      terminal: { version: 1, activeTabIndex: 0, tabs: [] },
     };
     return this.sanitizeBottomPanelState(state) || {
       visible: false,
       height: 250,
-      maximized: false,
       activePanelId: "terminal",
+      terminal: { version: 1, activeTabIndex: 0, tabs: [] },
     };
   }
 
@@ -112,26 +119,130 @@ class StatesManager {
     const height = Number.isFinite(value.height)
       ? Math.min(1200, Math.max(120, Math.round(value.height)))
       : 250;
+    const terminalValue = this.isRecord(value.terminal) ? value.terminal : {};
+    const tabs = Array.isArray(terminalValue.tabs)
+      ? terminalValue.tabs.slice(0, 8).flatMap((tab) => {
+          if (!this.isRecord(tab)) return [];
+          const baseLabel = this.safeString(tab.baseLabel, 128);
+          const customLabel = this.safeString(tab.customLabel, 80);
+          if (tab.baseLabel !== undefined && !baseLabel) return [];
+          if (tab.customLabel !== undefined && tab.customLabel !== null && !customLabel) return [];
+          return [{
+            baseLabel: baseLabel || "Terminal",
+            customLabel: customLabel || null,
+          }];
+        })
+      : [];
+    const activeTabIndex = Number.isInteger(terminalValue.activeTabIndex)
+      ? Math.min(Math.max(terminalValue.activeTabIndex, 0), Math.max(0, tabs.length - 1))
+      : 0;
     return {
       visible: value.visible === true,
       height,
-      maximized: value.maximized === true,
       activePanelId: value.activePanelId === "terminal" ? "terminal" : null,
+      terminal: { version: 1, activeTabIndex, tabs },
     };
   }
 
   async saveWorkspaceState(root = this.editor.fileExplorer?.rootPath) {
-    const state = this.sanitizeWorkspaceState(this.getWorkspaceState(root));
-    if (!state || typeof this.editor.api.saveWorkspaceState !== "function")
-      return false;
-    const success = await this.editor.api.saveWorkspaceState(root, state);
-    console.info("[NCE Workspace State]", {
-      action: "save", root,
-      tabs: state.tabManager?.tabs?.length || 0,
-      expandedFolders: state.fileExplorer?.expandedPaths?.length || 0,
-      success: success !== false,
+    this.cancelBottomPanelStateSaveForRoot(root);
+    return this.enqueueWorkspaceSave(root, async () => {
+      const state = this.sanitizeWorkspaceState(this.getWorkspaceState(root));
+      if (!state || typeof this.editor.api.saveWorkspaceState !== "function")
+        return false;
+      const success = await this.editor.api.saveWorkspaceState(root, state);
+      console.info("[NCE Workspace State]", {
+        action: "save", root,
+        tabs: state.tabManager?.tabs?.length || 0,
+        expandedFolders: state.fileExplorer?.expandedPaths?.length || 0,
+        success: success !== false,
+      });
+      return success !== false;
     });
-    return success !== false;
+  }
+
+  cancelBottomPanelStateSaveForRoot(root) {
+    if (!root) return false;
+    const panelManager = this.editor.bottomPanelManager;
+    let workspaceKey = panelManager?.workspaceKey;
+    let workspaceRoot = workspaceKey && workspaceKey !== "no-workspace"
+      ? panelManager.workspaceRoot || this.workspaceRoots.get(workspaceKey)
+      : null;
+    if (!workspaceRoot || !NCEPath.equals(workspaceRoot, root)) {
+      workspaceKey = null;
+      for (const [candidateKey, candidateRoot] of this.workspaceRoots) {
+        if (NCEPath.equals(candidateRoot, root)) {
+          workspaceKey = candidateKey;
+          break;
+        }
+      }
+    }
+    if (!workspaceKey) return false;
+    const timer = this.bottomPanelSaveTimers.get(workspaceKey);
+    if (timer === undefined) return false;
+    clearTimeout(timer);
+    this.bottomPanelSaveTimers.delete(workspaceKey);
+    return true;
+  }
+
+  enqueueWorkspaceSave(root, callback) {
+    if (!root) return Promise.resolve(false);
+    const key = NCEPath.comparisonKey(root);
+    const previous = this.workspaceSaveQueues.get(key) || Promise.resolve(true);
+    const current = previous.catch(() => false).then(callback);
+    this.workspaceSaveQueues.set(key, current);
+    return current.finally(() => {
+      if (this.workspaceSaveQueues.get(key) === current)
+        this.workspaceSaveQueues.delete(key);
+    });
+  }
+
+  scheduleBottomPanelStateSave(workspaceKey = this.editor.bottomPanelManager?.workspaceKey) {
+    if (this.persistenceSuspended || typeof workspaceKey !== "string") return false;
+    const previous = this.bottomPanelSaveTimers.get(workspaceKey);
+    if (previous !== undefined) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      this.bottomPanelSaveTimers.delete(workspaceKey);
+      const manager = this.editor.bottomPanelManager;
+      const state = this.sanitizeBottomPanelState(
+        manager?.getWorkspacePanelState?.(workspaceKey),
+      );
+      if (!state) return;
+      if (workspaceKey === "no-workspace") {
+        this.noWorkspaceState = {
+          ...(this.noWorkspaceState || this.getNoWorkspaceState()),
+          bottomPanel: state,
+        };
+        this.scheduleGlobalStateSave();
+        return;
+      }
+      const root = this.workspaceRoots.get(workspaceKey) ||
+        manager?.getWorkspaceRoot?.(workspaceKey);
+      if (!root) return;
+      void this.saveWorkspaceBottomPanelState(root, state);
+    }, 300);
+    this.bottomPanelSaveTimers.set(workspaceKey, timer);
+    return true;
+  }
+
+  async saveWorkspaceBottomPanelState(root, bottomPanel) {
+    if (typeof this.editor.api.loadWorkspaceState !== "function" ||
+        typeof this.editor.api.saveWorkspaceState !== "function") return false;
+    return this.enqueueWorkspaceSave(root, async () => {
+      let existing = null;
+      try { existing = await this.editor.api.loadWorkspaceState(root); }
+      catch (error) { console.warn("[NCE Workspace State] bottom panel load failed", error); }
+      const base = this.sanitizeWorkspaceState(existing) || {
+        version: this.workspaceVersion,
+        tabManager: null,
+        sidebar: null,
+        fileExplorer: null,
+        search: null,
+        bottomPanel: null,
+      };
+      base.bottomPanel = this.sanitizeBottomPanelState(bottomPanel);
+      return (await this.editor.api.saveWorkspaceState(root, base)) !== false;
+    });
   }
 
   getAgentState() {
@@ -451,28 +562,35 @@ class StatesManager {
   // SECURITY BOUNDARY: workspace.json is editable, untrusted local input.
   // Build a new allowlisted object; never merge parsed values into runtime objects.
   sanitizeWorkspaceState(value) {
-    if (!this.isRecord(value) || value.version !== this.workspaceVersion) return null;
+    if (!this.isRecord(value) || ![1, this.workspaceVersion].includes(value.version)) return null;
     return {
       version: this.workspaceVersion,
       tabManager: this.sanitizeTabManager(value.tabManager),
       sidebar: this.sanitizeSidebarState(value.sidebar),
       fileExplorer: this.sanitizeExplorerState(value.fileExplorer),
       search: this.sanitizeSearchState(value.search),
+      bottomPanel: this.sanitizeBottomPanelState(value.bottomPanel),
     };
   }
 
   async loadStates(state) {
     if (!state) {
-      this.editor.bottomPanelManager?.restoreState?.(null);
       return this.restoreNoWorkspaceState(null);
     }
     const globalState = state.version === this.globalVersion
       ? state : await this.migrateLegacyState(state);
     this.lastWorkspace = globalState.lastWorkspace || null;
-    this.noWorkspaceState = globalState.noWorkspaceState || null;
-    this.editor.bottomPanelManager?.restoreState?.(
-      this.sanitizeBottomPanelState(globalState.bottomPanel),
-    );
+    this.legacyBottomPanelState = this.sanitizeBottomPanelState(globalState.bottomPanel);
+    this.noWorkspaceState = this.sanitizeNoWorkspaceState(globalState.noWorkspaceState);
+    if (!this.lastWorkspace && this.legacyBottomPanelState) {
+      if (!this.noWorkspaceState?.bottomPanel) {
+        this.noWorkspaceState = {
+          ...(this.noWorkspaceState || {}),
+          bottomPanel: this.legacyBottomPanelState,
+        };
+      }
+      this.legacyBottomPanelState = null;
+    }
     if (globalState.agent) {
       await Promise.resolve(this.editor.agentSidebar?.loadConfigState?.(globalState.agent))
         .catch((error) => console.error("Failed to restore Agent state:", error));
@@ -484,6 +602,7 @@ class StatesManager {
       );
       if (opened) return this.loadWorkspaceState(this.lastWorkspace);
       this.lastWorkspace = null;
+      this.legacyBottomPanelState = null;
       await this.saveGlobalState();
     }
     return this.restoreNoWorkspaceState(this.noWorkspaceState);
@@ -491,11 +610,14 @@ class StatesManager {
 
   async migrateLegacyState(legacy) {
     const root = legacy.fileExplorer?.rootPath || null;
+    this.legacyBottomPanelState = this.sanitizeBottomPanelState(legacy.bottomPanel);
     const globalState = {
       version: this.globalVersion, lastWorkspace: root,
       agent: legacy.agent || null,
       noWorkspaceState: root ? null : {
-        tabManager: legacy.tabManager || null, sidebar: legacy.sidebar || null,
+        tabManager: legacy.tabManager || null,
+        sidebar: legacy.sidebar || null,
+        ...(this.legacyBottomPanelState ? { bottomPanel: this.legacyBottomPanelState } : {}),
       },
     };
     if (root && typeof this.editor.api.saveWorkspaceState === "function") {
@@ -511,9 +633,12 @@ class StatesManager {
             return relative === null ? [] : [relative];
           }),
         },
+        bottomPanel: this.legacyBottomPanelState,
       });
-      if (migratedWorkspace)
+      if (migratedWorkspace) {
         await this.editor.api.saveWorkspaceState(root, migratedWorkspace);
+        this.legacyBottomPanelState = null;
+      }
     }
     await this.editor.api?.saveEditorState?.(JSON.stringify(globalState));
     return globalState;
@@ -570,19 +695,35 @@ class StatesManager {
       try { state = await this.editor.api.loadWorkspaceState?.(root); }
       catch (error) { console.warn("[NCE Workspace State] load failed", error); }
       if (generation !== this.restoreGeneration) return false;
-      if (!state || state.version !== this.workspaceVersion) {
+      let workspaceScope = null;
+      try { workspaceScope = await this.editor.api.getTerminalWorkspaceScope?.(); }
+      catch (error) { console.warn("[Terminal] Workspace scope lookup failed", error); }
+      if (generation !== this.restoreGeneration) return false;
+      const workspaceKey = workspaceScope?.workspacePath &&
+        NCEPath.equals(workspaceScope.workspacePath, root) &&
+        typeof workspaceScope.workspaceKey === "string"
+        ? workspaceScope.workspaceKey : NCEPath.comparisonKey(root);
+      this.workspaceRoots.set(workspaceKey, root);
+      if (!state || ![1, this.workspaceVersion].includes(state.version)) {
         if (state?.version)
           console.warn("[NCE Workspace State] Unsupported version", state.version);
         state = { version: this.workspaceVersion };
       }
+      const needsUpgrade = state.version !== this.workspaceVersion;
       const safeState = this.sanitizeWorkspaceState(state) || {
         version: this.workspaceVersion,
         tabManager: null,
         sidebar: null,
         fileExplorer: null,
+        bottomPanel: null,
       };
-      const restored = await this.restoreWorkspaceState(safeState, root);
+      if (!safeState.bottomPanel && this.legacyBottomPanelState) {
+        safeState.bottomPanel = this.legacyBottomPanelState;
+        this.legacyBottomPanelState = null;
+      }
+      const restored = await this.restoreWorkspaceState(safeState, root, workspaceKey);
       if (restored && generation === this.restoreGeneration) {
+        if (needsUpgrade || safeState.bottomPanel) await this.saveWorkspaceState(root);
         await this.offerDirtyBufferRecovery(root, generation);
         if (generation === this.restoreGeneration)
           await this.offerDirtyBufferRecovery(null, generation);
@@ -594,12 +735,13 @@ class StatesManager {
     }
   }
 
-  async restoreWorkspaceState(state, root) {
+  async restoreWorkspaceState(state, root, workspaceKey = NCEPath.comparisonKey(root)) {
     const safeState = this.sanitizeWorkspaceState(state) || {
       version: this.workspaceVersion,
       tabManager: null,
       sidebar: null,
       fileExplorer: null,
+      bottomPanel: null,
     };
     await this.loadTabManagerState(safeState.tabManager, root);
     await this.loadFileExplorerState(safeState.fileExplorer, root);
@@ -611,6 +753,11 @@ class StatesManager {
     });
     this.editor.searchController?.restoreWorkspaceState?.(
       safeState.search.controller,
+    );
+    this.editor.bottomPanelManager?.restoreState?.(
+      safeState.bottomPanel,
+      workspaceKey,
+      root,
     );
     console.info("[NCE Workspace State]", {
       action: "restore", root,
@@ -629,12 +776,26 @@ class StatesManager {
       await this.loadTabManagerState(state?.tabManager || null, null);
       if (generation !== this.restoreGeneration) return false;
       this.loadSidebarState(state?.sidebar || null);
+      this.editor.bottomPanelManager?.restoreState?.(
+        this.sanitizeBottomPanelState(state?.bottomPanel),
+        "no-workspace",
+        null,
+      );
       await this.offerDirtyBufferRecovery(null, generation);
       metrics?.mark("workspace.restore.noWorkspaceComplete");
       return true;
     } finally {
       metrics?.end(measure);
     }
+  }
+
+  sanitizeNoWorkspaceState(value) {
+    if (!this.isRecord(value)) return null;
+    return {
+      tabManager: value.tabManager || null,
+      sidebar: this.sanitizeSidebarState(value.sidebar),
+      bottomPanel: this.sanitizeBottomPanelState(value.bottomPanel),
+    };
   }
 
   async loadTabManagerState(tabState, root = undefined) {
