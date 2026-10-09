@@ -22,15 +22,17 @@ contextBridge.exposeInMainWorld("api", {
   getSetting: (key) => ipcRenderer.invoke("Settings:get", key),
   getSettingsPath: () => ipcRenderer.invoke("Settings:getPath"),
   setSetting: (key, value) => ipcRenderer.invoke("Settings:set", key, value),
-  createTerminalSession: (size) => ipcRenderer.invoke("Terminal:create", size),
-  writeTerminalSession: (sessionId, data) =>
-    ipcRenderer.invoke("Terminal:write", sessionId, data),
-  resizeTerminalSession: (sessionId, cols, rows) =>
-    ipcRenderer.invoke("Terminal:resize", sessionId, cols, rows),
-  acknowledgeTerminalOutput: (sessionId, sequence) =>
-    ipcRenderer.invoke("Terminal:ack", sessionId, sequence),
-  closeTerminalSession: (sessionId) =>
-    ipcRenderer.invoke("Terminal:close", sessionId),
+  getTerminalWorkspaceScope: () => ipcRenderer.invoke("Terminal:getWorkspaceScope"),
+  createTerminalSession: (size, workspaceKey) =>
+    ipcRenderer.invoke("Terminal:create", { ...size, workspaceKey }),
+  writeTerminalSession: (sessionId, workspaceKey, data) =>
+    ipcRenderer.invoke("Terminal:write", sessionId, workspaceKey, data),
+  resizeTerminalSession: (sessionId, workspaceKey, cols, rows) =>
+    ipcRenderer.invoke("Terminal:resize", sessionId, workspaceKey, cols, rows),
+  acknowledgeTerminalOutput: (sessionId, workspaceKey, sequence) =>
+    ipcRenderer.invoke("Terminal:ack", sessionId, workspaceKey, sequence),
+  closeTerminalSession: (sessionId, workspaceKey) =>
+    ipcRenderer.invoke("Terminal:close", sessionId, workspaceKey),
   openTerminalExternalLink: (url) =>
     ipcRenderer.invoke("Terminal:openExternalLink", url),
   onTerminalOutput: (callback) => {

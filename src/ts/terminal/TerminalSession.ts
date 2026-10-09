@@ -22,6 +22,7 @@ function splitUtf8(text: string, maxBytes: number): string[] {
 
 export class TerminalSession {
   readonly id: string;
+  readonly workspaceKey: string;
   readonly owner: WebContents;
   private process: IPty | null;
   private readonly logger: Pick<Console, "error">;
@@ -36,8 +37,15 @@ export class TerminalSession {
   private inFlight: { sequence: number; bytes: number } | null = null;
   private paused = false;
 
-  constructor(id: string, owner: WebContents, process: IPty, logger: Pick<Console, "error">) {
+  constructor(
+    id: string,
+    workspaceKey: string,
+    owner: WebContents,
+    process: IPty,
+    logger: Pick<Console, "error">,
+  ) {
     this.id = id;
+    this.workspaceKey = workspaceKey;
     this.owner = owner;
     this.process = process;
     this.logger = logger;
@@ -102,6 +110,7 @@ export class TerminalSession {
     if (this.queuedBytes + bytes + (this.inFlight?.bytes || 0) > terminalLimits.maxOutputBytes) {
       this.send("Terminal:error", {
         sessionId: this.id,
+        workspaceKey: this.workspaceKey,
         error: {
           code: "OUTPUT_LIMIT",
           message: "Terminal output exceeded the safe buffering limit; the process was stopped.",
@@ -131,6 +140,7 @@ export class TerminalSession {
         this.pendingExit = null;
         this.send("Terminal:exit", {
           sessionId: this.id,
+          workspaceKey: this.workspaceKey,
           exitCode: exit.exitCode,
           signal: exit.signal,
         });
@@ -144,6 +154,7 @@ export class TerminalSession {
     this.inFlight = { sequence, bytes };
     this.send("Terminal:output", {
       sessionId: this.id,
+      workspaceKey: this.workspaceKey,
       sequence,
       data,
     } satisfies TerminalOutputMessage);

@@ -9,6 +9,7 @@ import {
   terminalLimits,
   type TerminalActionResult,
   type TerminalCreateResult,
+  type TerminalWorkspaceScope,
 } from "./TerminalTypes";
 
 type Shell = { path: string; args: string[]; name: string };
@@ -39,6 +40,21 @@ function validId(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function workspacePathApi(platform: NodeJS.Platform) {
+  return platform === "win32" ? path.win32 : path;
+}
+
+function workspaceKeyFor(value: string, platform: NodeJS.Platform): string {
+  const pathApi = workspacePathApi(platform);
+  const normalized = pathApi.normalize(pathApi.resolve(value));
+  return platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function validWorkspaceKey(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 4096 &&
+    !value.includes("\0");
 }
 
 async function executablePath(
@@ -145,10 +161,29 @@ export class TerminalManager {
     if (this.ipcRegistered) return;
     this.ipcRegistered = true;
     this.ipc.handle("Terminal:create", (event, size) => this.create(event, size));
-    this.ipc.handle("Terminal:write", (event, id, data) => this.write(event, id, data));
-    this.ipc.handle("Terminal:resize", (event, id, cols, rows) => this.resize(event, id, cols, rows));
-    this.ipc.handle("Terminal:ack", (event, id, sequence) => this.ack(event, id, sequence));
-    this.ipc.handle("Terminal:close", (event, id) => this.close(event, id));
+    this.ipc.handle("Terminal:getWorkspaceScope", (event) =>
+      this.isOwner(event.sender) ? this.getWorkspaceScope() : null,
+    );
+    this.ipc.handle("Terminal:write", (event, id, workspaceKey, data) =>
+      validWorkspaceKey(workspaceKey)
+        ? this.write(event, id, workspaceKey, data)
+        : this.actionFailure("INVALID_INPUT", "Invalid terminal workspace."),
+    );
+    this.ipc.handle("Terminal:resize", (event, id, workspaceKey, cols, rows) =>
+      validWorkspaceKey(workspaceKey)
+        ? this.resize(event, id, workspaceKey, cols, rows)
+        : this.actionFailure("INVALID_INPUT", "Invalid terminal workspace."),
+    );
+    this.ipc.handle("Terminal:ack", (event, id, workspaceKey, sequence) =>
+      validWorkspaceKey(workspaceKey)
+        ? this.ack(event, id, workspaceKey, sequence)
+        : this.actionFailure("INVALID_INPUT", "Invalid terminal workspace."),
+    );
+    this.ipc.handle("Terminal:close", (event, id, workspaceKey) =>
+      validWorkspaceKey(workspaceKey)
+        ? this.close(event, id, workspaceKey)
+        : this.actionFailure("INVALID_INPUT", "Invalid terminal workspace."),
+    );
   }
 
   private isOwner(sender: WebContents): boolean {
@@ -164,19 +199,27 @@ export class TerminalManager {
     const cols = request?.cols;
     const rows = request?.rows;
     if (!validDimensions(cols) || !validDimensions(rows)) return this.failure("INVALID_SIZE", "Invalid terminal dimensions.");
+    const workspacePath = this.getWorkspacePath() || null;
     const count = [...this.sessions.values()].filter((session) => session.owner === event.sender).length;
     const pending = this.pendingCreates.get(event.sender) || 0;
-    if (count + pending >= terminalLimits.maxSessions) return this.failure("SESSION_LIMIT", `NCE supports up to ${terminalLimits.maxSessions} terminal sessions.`);
+    if (count + pending >= terminalLimits.maxSessions) return this.failure("SESSION_LIMIT", `NCE supports up to ${terminalLimits.maxSessions} live terminal sessions across all workspaces.`);
     this.pendingCreates.set(event.sender, pending + 1);
 
     try {
+      // Reserve a session slot before any async filesystem/shell resolution so
+      // concurrent create requests cannot exceed the global per-window limit.
+      const scope = await this.resolveWorkspaceScope(workspacePath);
+      if (!validWorkspaceKey(request?.workspaceKey) || request?.workspaceKey !== scope.workspaceKey)
+        return this.failure("WORKSPACE_CHANGED", "The active workspace changed. Reopen the terminal and try again.");
       const shell = await resolveTerminalShell(this.getShellSetting(), {
         platform: this.platform,
         env: this.env,
         fs: this.fsApi,
       });
-      const cwd = await this.resolveCwd();
       if (!this.isOwner(event.sender)) return this.failure("UNAUTHORIZED", "Terminal access is unavailable.");
+      // `workspacePath` and its canonical key were captured before any await.
+      // A renderer can identify the requested scope but cannot provide a CWD.
+      const cwd = scope.cwd;
       const childEnv: Record<string, string> = Object.fromEntries(
         Object.entries(this.env).filter((entry): entry is [string, string] =>
           typeof entry[1] === "string",
@@ -197,9 +240,9 @@ export class TerminalManager {
         ...(this.platform === "win32" ? { useConpty: true } : {}),
       });
       const id = randomUUID();
-      const session = new TerminalSession(id, event.sender, child, this.logger);
+      const session = new TerminalSession(id, scope.workspaceKey, event.sender, child, this.logger);
       this.sessions.set(id, session);
-      return { success: true, sessionId: id, shell: shell.name, cwd };
+      return { success: true, sessionId: id, shell: shell.name, cwd, workspaceKey: scope.workspaceKey };
     } catch (error: unknown) {
       this.logger.error("[Terminal] Failed to create PTY session", error);
       const code = isRecord(error) && typeof error.code === "string"
@@ -216,14 +259,41 @@ export class TerminalManager {
     }
   }
 
-  private async resolveCwd(): Promise<string> {
-    const requested = this.getWorkspacePath();
+  async getWorkspaceScope(): Promise<TerminalWorkspaceScope> {
+    const requested = this.getWorkspacePath() || null;
+    return this.resolveWorkspaceScope(requested);
+  }
+
+  private async resolveWorkspaceScope(requested: string | null): Promise<TerminalWorkspaceScope> {
     if (typeof requested === "string" && requested.trim() && !requested.includes("\0")) {
+      const pathApi = workspacePathApi(this.platform);
+      let workspacePath = pathApi.normalize(pathApi.resolve(requested));
+      let cwd = workspacePath;
       try {
-        const real = await this.fsApi.realpath(path.resolve(requested));
-        if ((await this.fsApi.stat(real)).isDirectory()) return real;
-      } catch {}
+        const real = await this.fsApi.realpath(workspacePath);
+        if ((await this.fsApi.stat(real)).isDirectory()) {
+          workspacePath = real;
+          cwd = real;
+        } else {
+          cwd = await this.resolveHomeDirectory();
+        }
+      } catch {
+        cwd = await this.resolveHomeDirectory();
+      }
+      return {
+        workspaceKey: workspaceKeyFor(workspacePath, this.platform),
+        workspacePath: requested,
+        cwd,
+      };
     }
+    return {
+      workspaceKey: "no-workspace",
+      workspacePath: null,
+      cwd: await this.resolveHomeDirectory(),
+    };
+  }
+
+  private async resolveHomeDirectory(): Promise<string> {
     try {
       const realHome = await this.fsApi.realpath(this.homeDir);
       if ((await this.fsApi.stat(realHome)).isDirectory()) return realHome;
@@ -231,42 +301,42 @@ export class TerminalManager {
     return this.homeDir;
   }
 
-  write(event: { sender: WebContents }, id: unknown, data: unknown): TerminalActionResult {
+  write(event: { sender: WebContents }, id: unknown, workspaceKey: unknown, data: unknown): TerminalActionResult {
     if (!this.isOwner(event.sender)) return this.actionFailure("UNAUTHORIZED", "Terminal access is unavailable.");
     if (!validId(id) || typeof data !== "string" ||
         Buffer.byteLength(data, "utf8") > terminalLimits.maxWriteBytes) return this.actionFailure("INVALID_INPUT", "Invalid terminal input.");
     const session = this.sessions.get(id);
-    if (!session || session.owner !== event.sender) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable.");
+    if (!session || session.owner !== event.sender || session.workspaceKey !== workspaceKey) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable in this workspace.");
     return session.write(data)
       ? { success: true }
       : this.actionFailure("SESSION_EXITED", "Terminal session is no longer running.");
   }
 
-  resize(event: { sender: WebContents }, id: unknown, cols: unknown, rows: unknown): TerminalActionResult {
+  resize(event: { sender: WebContents }, id: unknown, workspaceKey: unknown, cols: unknown, rows: unknown): TerminalActionResult {
     if (!this.isOwner(event.sender)) return this.actionFailure("UNAUTHORIZED", "Terminal access is unavailable.");
     if (!validId(id) || !validDimensions(cols) || !validDimensions(rows)) return this.actionFailure("INVALID_SIZE", "Invalid terminal dimensions.");
     const session = this.sessions.get(id);
-    if (!session || session.owner !== event.sender) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable.");
+    if (!session || session.owner !== event.sender || session.workspaceKey !== workspaceKey) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable in this workspace.");
     return session.resize(cols, rows)
       ? { success: true }
       : this.actionFailure("SESSION_EXITED", "Terminal session is no longer running.");
   }
 
-  ack(event: { sender: WebContents }, id: unknown, sequence: unknown): TerminalActionResult {
+  ack(event: { sender: WebContents }, id: unknown, workspaceKey: unknown, sequence: unknown): TerminalActionResult {
     if (!this.isOwner(event.sender)) return this.actionFailure("UNAUTHORIZED", "Terminal access is unavailable.");
     if (!validId(id) || !Number.isSafeInteger(sequence)) return this.actionFailure("INVALID_INPUT", "Invalid terminal acknowledgement.");
     const session = this.sessions.get(id);
-    if (!session || session.owner !== event.sender) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable.");
+    if (!session || session.owner !== event.sender || session.workspaceKey !== workspaceKey) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable in this workspace.");
     return session.acknowledge(sequence as number)
       ? { success: true }
       : this.actionFailure("STALE_ACK", "Terminal output acknowledgement is stale.");
   }
 
-  close(event: { sender: WebContents }, id: unknown): TerminalActionResult {
+  close(event: { sender: WebContents }, id: unknown, workspaceKey: unknown): TerminalActionResult {
     if (!this.isOwner(event.sender)) return this.actionFailure("UNAUTHORIZED", "Terminal access is unavailable.");
     if (!validId(id)) return this.actionFailure("INVALID_INPUT", "Invalid terminal session identifier.");
     const session = this.sessions.get(id);
-    if (!session || session.owner !== event.sender) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable.");
+    if (!session || session.owner !== event.sender || session.workspaceKey !== workspaceKey) return this.actionFailure("SESSION_UNAVAILABLE", "Terminal session is unavailable in this workspace.");
     this.removeSession(session);
     return { success: true };
   }

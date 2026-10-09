@@ -48,6 +48,7 @@ class FakePty {
 }
 
 function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn } = {}) {
+  let activeWorkspace = workspace;
   const owner = new FakeWebContents();
   const attacker = new FakeWebContents();
   const ptys = [];
@@ -61,7 +62,7 @@ function fixture({ workspace = "/workspace with accents/é", access = async () =
     platform: process.platform,
     env: { PATH: "/bin", SHELL: "/test shell/zsh", HOME: "/home/test" },
     homeDir: "/home/test",
-    getWorkspacePath: () => workspace,
+    getWorkspacePath: () => activeWorkspace,
     getShellSetting: () => "/configured shell/Terminal",
     fs: fakeFs,
     logger: { error() {} },
@@ -71,11 +72,17 @@ function fixture({ workspace = "/workspace with accents/é", access = async () =
       return child;
     }),
   });
-  return { owner, attacker, ptys, manager, fakeFs };
+  return {
+    owner, attacker, ptys, manager, fakeFs,
+    setWorkspace(value) { activeWorkspace = value; },
+  };
 }
 
 async function create(f) {
-  return f.manager.create({ sender: f.owner }, { cols: 100, rows: 32 });
+  const scope = await f.manager.getWorkspaceScope();
+  return f.manager.create({ sender: f.owner }, {
+    cols: 100, rows: 32, workspaceKey: scope.workspaceKey,
+  });
 }
 
 test("loading Window's terminal manager does not load the native PTY module", () => {
@@ -92,6 +99,7 @@ test("TerminalManager validates creation and starts a real PTY in the verified w
   assert.equal(result.success, true);
   assert.match(result.sessionId, /^[0-9a-f-]{36}$/i);
   assert.equal(result.shell, "Terminal");
+  assert.equal(result.workspaceKey, await f.manager.getWorkspaceScope().then((scope) => scope.workspaceKey));
   assert.equal(f.ptys.length, 1);
   assert.equal(f.ptys[0].shell, "/configured shell/Terminal");
   assert.deepEqual(f.ptys[0].args, []);
@@ -156,6 +164,83 @@ test("TerminalManager verifies the workspace directory and falls back to home", 
   assert.equal(f.ptys[0].options.cwd, "/home/test");
 });
 
+test("terminal sessions retain an immutable canonical workspace owner across switches", async () => {
+  const f = fixture({ workspace: "/projects/a" });
+  const first = await create(f);
+  f.setWorkspace("/projects/b");
+  const second = await create(f);
+  assert.notEqual(first.workspaceKey, second.workspaceKey);
+  assert.deepEqual(f.manager.write(
+    { sender: f.owner }, first.sessionId, first.workspaceKey, "echo a\r",
+  ), { success: true });
+  assert.equal(f.manager.write(
+    { sender: f.owner }, first.sessionId, second.workspaceKey, "echo leaked\r",
+  ).error.code, "SESSION_UNAVAILABLE");
+  assert.equal(f.ptys[0].options.cwd, "/projects/a");
+  assert.equal(f.ptys[1].options.cwd, "/projects/b");
+  assert.equal(f.manager.close({ sender: f.owner }, first.sessionId, second.workspaceKey).success, false);
+  assert.equal(f.manager.close({ sender: f.owner }, first.sessionId, first.workspaceKey).success, true);
+});
+
+test("workspace scope keys resolve symlinks and normalize Windows casing", async () => {
+  const posix = fixture({ workspace: "/alias/project" });
+  posix.fakeFs.realpath = async (value) => value === "/alias/project"
+    ? "/real/project" : value;
+  assert.equal((await posix.manager.getWorkspaceScope()).workspaceKey, "/real/project");
+
+  const owner = new FakeWebContents();
+  const windows = new TerminalManager({
+    owner,
+    platform: "win32",
+    env: {},
+    homeDir: "C:\\Users\\Test",
+    getWorkspacePath: () => "C:\\Work\\Alias",
+    getShellSetting: () => "",
+    fs: {
+      access: async () => {},
+      realpath: async (value) => value.toLowerCase().includes("work")
+        ? "C:\\Work\\Canonical" : value,
+      stat: async () => ({ isDirectory: () => true }),
+    },
+    spawn: () => new FakePty(),
+    logger: { error() {} },
+  });
+  const scope = await windows.getWorkspaceScope();
+  assert.equal(scope.workspaceKey, "c:\\work\\canonical");
+  assert.equal(scope.workspacePath, "C:\\Work\\Alias");
+});
+
+test("No Workspace has an isolated identity and cannot silently adopt a later project", async () => {
+  const f = fixture({ workspace: null });
+  const home = await create(f);
+  assert.equal(home.workspaceKey, "no-workspace");
+  assert.equal(f.ptys[0].options.cwd, "/home/test");
+  f.setWorkspace("/projects/new");
+  const project = await create(f);
+  assert.notEqual(project.workspaceKey, home.workspaceKey);
+  assert.equal(f.ptys[1].options.cwd, "/projects/new");
+});
+
+test("a create request captures its workspace before asynchronous shell setup", async () => {
+  const f = fixture({ workspace: "/projects/a" });
+  const scopeA = await f.manager.getWorkspaceScope();
+  let releaseRealpath;
+  const realpathGate = new Promise((resolve) => { releaseRealpath = resolve; });
+  f.fakeFs.realpath = async (value) => {
+    if (value === "/projects/a") await realpathGate;
+    return value;
+  };
+  const pending = f.manager.create({ sender: f.owner }, {
+    cols: 80, rows: 24, workspaceKey: scopeA.workspaceKey,
+  });
+  f.setWorkspace("/projects/b");
+  releaseRealpath();
+  const result = await pending;
+  assert.equal(result.success, true);
+  assert.equal(result.workspaceKey, scopeA.workspaceKey);
+  assert.equal(f.ptys[0].options.cwd, "/projects/a");
+});
+
 test("TerminalManager limits concurrent session creation and isolates session ownership", async () => {
   const f = fixture();
   const pending = Array.from({ length: terminalLimits.maxSessions + 2 }, () => create(f));
@@ -164,12 +249,13 @@ test("TerminalManager limits concurrent session creation and isolates session ow
   assert.equal(results.filter((item) => item.error?.code === "SESSION_LIMIT").length, 2);
   assert.equal(f.ptys.length, terminalLimits.maxSessions);
   const first = results.find((item) => item.success);
-  assert.equal(f.manager.write({ sender: f.attacker }, first.sessionId, "echo nope" ).error.code, "UNAUTHORIZED");
-  assert.equal(f.manager.write({ sender: f.owner }, first.sessionId, "x".repeat(terminalLimits.maxWriteBytes + 1)).error.code, "INVALID_INPUT");
-  assert.equal(f.manager.resize({ sender: f.owner }, first.sessionId, 0, 24).error.code, "INVALID_SIZE");
-  assert.deepEqual(f.manager.resize({ sender: f.owner }, first.sessionId, 132, 42), { success: true });
+  assert.equal(f.manager.write({ sender: f.attacker }, first.sessionId, first.workspaceKey, "echo nope" ).error.code, "UNAUTHORIZED");
+  assert.equal(f.manager.write({ sender: f.owner }, first.sessionId, first.workspaceKey, "x".repeat(terminalLimits.maxWriteBytes + 1)).error.code, "INVALID_INPUT");
+  assert.equal(f.manager.resize({ sender: f.owner }, first.sessionId, first.workspaceKey, 0, 24).error.code, "INVALID_SIZE");
+  assert.deepEqual(f.manager.resize({ sender: f.owner }, first.sessionId, first.workspaceKey, 132, 42), { success: true });
   assert.deepEqual(f.ptys[0].child.resizes, [[132, 42]]);
-  assert.deepEqual(f.manager.write({ sender: f.owner }, first.sessionId, "echo ok\r"), { success: true });
+  assert.deepEqual(f.manager.write({ sender: f.owner }, first.sessionId, first.workspaceKey, "echo ok\r"), { success: true });
+  assert.equal(f.manager.write({ sender: f.owner }, first.sessionId, "another-workspace", "echo leaked\r").error.code, "SESSION_UNAVAILABLE");
   assert.deepEqual(f.ptys[0].child.writes, ["echo ok\r"]);
 });
 
@@ -182,11 +268,11 @@ test("TerminalSession batches UTF-8 output in order and applies acknowledgement 
   let output = f.owner.take("Terminal:output");
   assert.ok(output);
   assert.ok(Buffer.byteLength(output.data, "utf8") <= terminalLimits.outputChunkBytes);
-  assert.equal(f.manager.ack({ sender: f.owner }, result.sessionId, output.sequence + 1).error.code, "STALE_ACK");
+  assert.equal(f.manager.ack({ sender: f.owner }, result.sessionId, result.workspaceKey, output.sequence + 1).error.code, "STALE_ACK");
 
   const reconstructed = [output.data];
   while (true) {
-    const acked = f.manager.ack({ sender: f.owner }, result.sessionId, output.sequence);
+    const acked = f.manager.ack({ sender: f.owner }, result.sessionId, result.workspaceKey, output.sequence);
     assert.deepEqual(acked, { success: true });
     output = f.owner.take("Terminal:output");
     if (!output) break;
@@ -199,7 +285,7 @@ test("TerminalSession batches UTF-8 output in order and applies acknowledgement 
   assert.equal(child.pauses, 1);
   let current = f.owner.take("Terminal:output");
   while (current) {
-    f.manager.ack({ sender: f.owner }, result.sessionId, current.sequence);
+    f.manager.ack({ sender: f.owner }, result.sessionId, result.workspaceKey, current.sequence);
     current = f.owner.take("Terminal:output");
   }
   assert.equal(child.resumes, 1);
@@ -218,12 +304,12 @@ test("TerminalSession drains buffered PTY output before publishing the exit even
   while (output) {
     chunks.push(output.data);
     assert.equal(f.owner.take("Terminal:exit"), null, "exit waits until every output chunk is acknowledged");
-    f.manager.ack({ sender: f.owner }, result.sessionId, output.sequence);
+    f.manager.ack({ sender: f.owner }, result.sessionId, result.workspaceKey, output.sequence);
     output = f.owner.take("Terminal:output");
   }
   assert.equal(chunks.join(""), expected);
   assert.deepEqual(f.owner.take("Terminal:exit"), {
-    sessionId: result.sessionId, exitCode: 0, signal: null,
+    sessionId: result.sessionId, workspaceKey: result.workspaceKey, exitCode: 0, signal: null,
   });
 });
 
@@ -234,18 +320,18 @@ test("TerminalSession stops safely on output overflow, reports exit, and cleans 
   child.emitData("x".repeat(terminalLimits.maxOutputBytes + 1));
   assert.equal(f.owner.take("Terminal:error").error.code, "OUTPUT_LIMIT");
   assert.equal(child.kills, 1);
-  assert.equal(f.manager.write({ sender: f.owner }, result.sessionId, "still running" ).error.code, "SESSION_EXITED");
-  assert.deepEqual(f.manager.close({ sender: f.owner }, result.sessionId), { success: true });
-  assert.equal(f.manager.close({ sender: f.owner }, result.sessionId).error.code, "SESSION_UNAVAILABLE");
+  assert.equal(f.manager.write({ sender: f.owner }, result.sessionId, result.workspaceKey, "still running" ).error.code, "SESSION_EXITED");
+  assert.deepEqual(f.manager.close({ sender: f.owner }, result.sessionId, result.workspaceKey), { success: true });
+  assert.equal(f.manager.close({ sender: f.owner }, result.sessionId, result.workspaceKey).error.code, "SESSION_UNAVAILABLE");
   assert.equal(child.kills, 1, "close after overflow is idempotent");
 
   const next = await create(f);
   const nextChild = f.ptys[1].child;
   nextChild.emitExit(7, 2);
   assert.deepEqual(f.owner.take("Terminal:exit"), {
-    sessionId: next.sessionId, exitCode: 7, signal: 2,
+    sessionId: next.sessionId, workspaceKey: next.workspaceKey, exitCode: 7, signal: 2,
   });
-  assert.equal(f.manager.write({ sender: f.owner }, next.sessionId, "no" ).error.code, "SESSION_EXITED");
+  assert.equal(f.manager.write({ sender: f.owner }, next.sessionId, next.workspaceKey, "no" ).error.code, "SESSION_EXITED");
   f.owner.destroyed = true;
   f.manager.closeForOwner(f.owner);
   assert.equal(nextChild.kills, 0, "an exited process is not killed again");
@@ -255,10 +341,10 @@ test("TerminalManager closes all sessions belonging to a reloaded or destroyed w
   const f = fixture();
   const first = await create(f);
   const second = await create(f);
-  assert.equal(f.manager.close({ sender: f.owner }, first.sessionId).success, true);
+  assert.equal(f.manager.close({ sender: f.owner }, first.sessionId, first.workspaceKey).success, true);
   assert.equal(f.ptys[0].child.kills, 1);
   f.manager.closeForOwner(f.owner);
   f.manager.closeForOwner(f.owner);
   assert.equal(f.ptys[1].child.kills, 1);
-  assert.equal(f.manager.write({ sender: f.owner }, second.sessionId, "no").error.code, "SESSION_UNAVAILABLE");
+  assert.equal(f.manager.write({ sender: f.owner }, second.sessionId, second.workspaceKey, "no").error.code, "SESSION_UNAVAILABLE");
 });

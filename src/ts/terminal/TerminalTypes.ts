@@ -6,8 +6,14 @@ export type TerminalSize = {
 };
 
 export type TerminalCreateResult =
-  | { success: true; sessionId: string; shell: string; cwd: string }
+  | { success: true; sessionId: string; shell: string; cwd: string; workspaceKey: string }
   | { success: false; error: TerminalError };
+
+export type TerminalWorkspaceScope = {
+  workspaceKey: string;
+  workspacePath: string | null;
+  cwd: string;
+};
 
 export type TerminalActionResult =
   | { success: true }
@@ -15,6 +21,7 @@ export type TerminalActionResult =
 
 export type TerminalOutputMessage = {
   sessionId: string;
+  workspaceKey: string;
   sequence: number;
   data: string;
 };
