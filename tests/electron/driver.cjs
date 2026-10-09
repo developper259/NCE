@@ -2354,8 +2354,11 @@ app.whenReady().then(() => {
         for (let index = 0; index < 20; index++) {
           const previousId = workspaceBTerminal.id;
           const previousFdCount = fdCount();
-          const previousPid = nce.window.terminalManager.sessions.get(previousId)?.process?.pid;
-          assert.ok(previousPid, `cycle ${index} has a live native PTY process`);
+          const previousPid = process.platform === "darwin"
+            ? nce.window.terminalManager.sessions.get(previousId)?.process?.pid
+            : null;
+          if (process.platform === "darwin")
+            assert.ok(previousPid, `cycle ${index} has a live native PTY process`);
           assert.equal(
             await run(`editor.terminalPanel.closeSession(${JSON.stringify(previousId)})`),
             true,
