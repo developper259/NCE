@@ -332,7 +332,7 @@ function explorerFixture(rename) {
   return { explorer, calls };
 }
 
-test("Move to Trash dialog is neutral, names the item, and defaults focus to Cancel", async () => {
+test("Move to Trash dialog names the item and defaults focus to Cancel", async () => {
   const fixture = deleteExplorerFixture();
   fixture.explorer.projectHeader.focus();
   const operation = fixture.explorer.moveToTrash(fixture.file);

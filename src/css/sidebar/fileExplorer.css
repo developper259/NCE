@@ -302,17 +302,11 @@
   height: 36px;
   flex: 0 0 36px;
   place-items: center;
-  border: 1px solid var(--border-primary);
+  border: 1px solid rgba(190, 83, 94, 0.28);
   border-radius: 8px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 16px;
-}
-
-.file-explorer-delete-dialog[data-mode="permanent"] .file-explorer-delete-trash-badge {
-  border-color: rgba(190, 83, 94, 0.28);
   background: rgba(190, 83, 94, 0.1);
   color: #bb6670;
+  font-size: 16px;
 }
 
 .file-explorer-delete-title-group {
@@ -423,14 +417,14 @@
 }
 
 .file-explorer-delete-confirm:not(.danger) {
-  border-color: var(--border-primary);
-  color: var(--text-primary);
-  background: var(--bg-hover-alt);
+  border-color: #b64d58;
+  color: #fff;
+  background: #b64d58;
 }
 
 .file-explorer-delete-confirm:not(.danger):hover {
-  border-color: var(--border-secondary);
-  background: var(--bg-primary);
+  border-color: #a23f49;
+  background: #a23f49;
 }
 
 .file-explorer-delete-confirm.danger:hover {
