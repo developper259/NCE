@@ -16,7 +16,7 @@ test("electron-builder skips only a prepared same-architecture Windows node-pty 
     appDir,
   };
 
-  assert.equal(await beforeBuild(context), undefined, "missing runtime files leave builder rebuilding enabled");
+  assert.equal(await beforeBuild(context), true, "missing runtime files leave builder rebuilding enabled");
   for (const file of [
     "conpty.node",
     path.join("conpty", "conpty.dll"),
@@ -29,8 +29,8 @@ test("electron-builder skips only a prepared same-architecture Windows node-pty 
 
   assert.equal(await beforeBuild(context), false, "a prepared Windows native runtime is kept intact");
   const otherArch = process.arch === "arm64" ? "x64" : "arm64";
-  assert.equal(await beforeBuild({ ...context, arch: otherArch }), undefined,
+  assert.equal(await beforeBuild({ ...context, arch: otherArch }), true,
     "cross-architecture builds still use electron-builder's native rebuild");
-  assert.equal(await beforeBuild({ ...context, platform: { nodeName: "darwin" } }), undefined,
+  assert.equal(await beforeBuild({ ...context, platform: { nodeName: "darwin" } }), true,
     "other platforms keep electron-builder's normal rebuild behavior");
 });

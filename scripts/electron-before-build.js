@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 exports.default = async function skipRedundantWindowsNativeRebuild(context) {
-  if (context.platform?.nodeName !== "win32" || context.arch !== process.arch) return;
+  if (context.platform?.nodeName !== "win32" || context.arch !== process.arch) return true;
 
   const releaseDirectory = path.join(
     context.appDir,
@@ -16,7 +16,7 @@ exports.default = async function skipRedundantWindowsNativeRebuild(context) {
     path.join("conpty", "conpty.dll"),
     path.join("conpty", "OpenConsole.exe"),
   ];
-  if (!preparedFiles.every((file) => fs.existsSync(path.join(releaseDirectory, file)))) return;
+  if (!preparedFiles.every((file) => fs.existsSync(path.join(releaseDirectory, file)))) return true;
 
   console.log("[NCE] Skipping redundant Windows native rebuild; node-pty is already rebuilt for this architecture.");
   return false;
