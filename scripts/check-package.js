@@ -15,12 +15,18 @@ const archives = find(path.resolve(__dirname, '../release'));
 assert.ok(archives.length, 'No packaged app.asar found; run npm run dist first');
 for (const archive of archives) {
   const files = new Set(asar.listPackage(archive).map(normalizeArchivePath));
+  assert.equal(
+    [...files].some(file => file.startsWith('node_modules/node-pty/prebuilds/')),
+    false,
+    `${archive}: platform prebuilds should not be duplicated in the package`,
+  );
   for (const file of [
     'dist/main.js',
     'dist/renderer/html/index.html',
     'dist/renderer/html/renderer.js',
     'dist/renderer/html/agent.js',
     'dist/renderer/html/markdown.js',
+    'dist/renderer/js/terminal/entry.js',
     'dist/renderer/js/worker/highlight.worker.js',
     'dist/renderer/assets/icons/close.svg',
     'dist/renderer/assets/logo/NCE/dark-logo.png',
@@ -28,6 +34,8 @@ for (const archive of archives) {
     'assets/logo/NCE/dark-logo.png',
     'package.json',
     'node_modules/nsh/package.json',
+    'node_modules/node-pty/package.json',
+    'node_modules/node-pty/lib/unixTerminal.js',
   ]) assert.ok(files.has(file), `${archive}: missing ${file}`);
 
   const packagedSources = [...files].filter(file => ![
@@ -86,9 +94,42 @@ for (const archive of archives) {
     }
   }
   assert.ok(fontReferences, `${archive}: no packaged font referenced by renderer CSS`);
+
+  const rendererSource = asar.extractFile(archive, toAsarLookupPath('dist/renderer/html/renderer.js')).toString();
+  assert.doesNotMatch(rendererSource, /(?:@xterm\/|TerminalPanel)/, `${archive}: xterm leaked into the startup renderer bundle`);
+
+  const unpackedRoot = `${archive}.unpacked`;
+  assert.ok(fs.existsSync(unpackedRoot), `${archive}: no app.asar.unpacked directory`);
+  const unpackedFiles = new Set();
+  function collectUnpacked(directory) {
+    if (!fs.existsSync(directory)) return;
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const file = path.join(directory, entry.name);
+      if (entry.isDirectory()) collectUnpacked(file);
+      else unpackedFiles.add(path.relative(unpackedRoot, file).replaceAll(path.sep, '/'));
+    }
+  }
+  collectUnpacked(unpackedRoot);
+  const nativeModule = [...unpackedFiles].find(file =>
+    file.endsWith('/build/Release/pty.node') && file.includes('node_modules/node-pty/'),
+  );
+  assert.ok(nativeModule, `${archive}: node-pty native module is not unpacked`);
+  if (process.platform === 'darwin' || process.platform === 'linux') {
+    assert.ok([...unpackedFiles].some(file =>
+      file.endsWith('/build/Release/spawn-helper') && file.includes('node_modules/node-pty/'),
+    ), `${archive}: node-pty spawn-helper is not unpacked`);
+  }
+  if (process.platform === 'win32') {
+    assert.ok([...unpackedFiles].some(file =>
+      file.endsWith('/build/Release/conpty.node') && file.includes('node_modules/node-pty/'),
+    ), `${archive}: node-pty ConPTY module is not unpacked`);
+    assert.ok([...unpackedFiles].some(file =>
+      file.endsWith('/build/Release/conpty/conpty.dll') && file.includes('node_modules/node-pty/'),
+    ), `${archive}: node-pty ConPTY runtime DLL is not unpacked`);
+  }
   assert.deepEqual([...flaticonFamilies].sort(), [
     'uicons-brands',
     'uicons-regular-rounded',
   ], `${archive}: expected only the used Flaticon families`);
-  console.log(`Packaged runtime verified: ${path.relative(process.cwd(), archive)} (${cssPaths.length} CSS bundle(s), ${fontReferences} font reference(s))`);
+  console.log(`Packaged runtime verified: ${path.relative(process.cwd(), archive)} (${cssPaths.length} CSS bundle(s), ${fontReferences} font reference(s), node-pty unpacked)`);
 }
