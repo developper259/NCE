@@ -278,18 +278,20 @@ class FileExplorer extends Sidebar {
       const existingByPath = preserveExpandedContents
         ? new Map(this.files.map((item) => [item.path, item]))
         : null;
-      const newFiles = items.map((item) => {
-        const previous = existingByPath?.get(item.path);
-        return {
-          name: item.name,
-          type: item.type,
-          path: item.path,
-          expanded: previous?.type === "folder" ? previous.expanded : false,
-          children: item.type === "folder"
-            ? previous?.type === "folder" ? previous.children : []
-            : undefined,
-        };
-      });
+      const newFiles = items
+        .filter((item) => item.name !== ".nce")
+        .map((item) => {
+          const previous = existingByPath?.get(item.path);
+          return {
+            name: item.name,
+            type: item.type,
+            path: item.path,
+            expanded: previous?.type === "folder" ? previous.expanded : false,
+            children: item.type === "folder"
+              ? previous?.type === "folder" ? previous.children : []
+              : undefined,
+          };
+        });
 
       if (expandedPaths.size > 0) {
         await this.restoreExpandedFolders(newFiles, expandedPaths);
