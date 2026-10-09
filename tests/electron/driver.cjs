@@ -673,6 +673,74 @@ app.whenReady().then(() => {
           );
         }
         await run(`(${require("./ui.cjs").toString()})()`);
+        const deleteDialogOpened = await run(`(() => {
+          const focusTarget = document.createElement("button");
+          focusTarget.id = "delete-confirmation-focus-target";
+          document.body.appendChild(focusTarget);
+          focusTarget.focus();
+          window.__deleteConfirmationResult = null;
+          window.__deleteConfirmationPromise = editor.fileExplorer
+            .showDeleteConfirmation({ type: "file", name: "keyboard.js" })
+            .then(result => { window.__deleteConfirmationResult = result; });
+          const dialog = editor.fileExplorer.deleteDialog;
+          return {
+            open: dialog.open,
+            title: editor.fileExplorer.deleteDialogTitle.textContent,
+            message: editor.fileExplorer.deleteDialogMessage.textContent,
+            role: dialog.getAttribute("role"),
+            modal: dialog.getAttribute("aria-modal"),
+            initialFocus: document.activeElement === editor.fileExplorer.deleteDialogCancelButton,
+            deleteButtonClass: editor.fileExplorer.deleteDialogDeleteButton.className,
+          };
+        })()`);
+        assert.equal(deleteDialogOpened.open, true);
+        assert.equal(deleteDialogOpened.title, "Delete file?");
+        assert.equal(deleteDialogOpened.message, 'Are you sure you want to permanently delete "keyboard.js"?');
+        assert.equal(deleteDialogOpened.role, "dialog");
+        assert.equal(deleteDialogOpened.modal, "true");
+        assert.equal(deleteDialogOpened.initialFocus, true);
+        assert.match(deleteDialogOpened.deleteButtonClass, /danger/);
+        win.focus();
+        const sendKeyboardKey = (keyCode, modifiers = []) => {
+          const options = { keyCode };
+          if (modifiers.length > 0) options.modifiers = modifiers;
+          win.webContents.sendInputEvent({ type: "keyDown", ...options });
+          win.webContents.sendInputEvent({ type: "keyUp", ...options });
+        };
+        sendKeyboardKey("Tab");
+        await waitForCondition(
+          async () => (await run("document.activeElement === editor.fileExplorer.deleteDialogDeleteButton")) === true,
+          { description: "Delete dialog Tab navigation to the destructive action" },
+        );
+        sendKeyboardKey("Tab");
+        await waitForCondition(
+          async () => (await run("document.activeElement === editor.fileExplorer.deleteDialogCheckbox")) === true,
+          { description: "Delete dialog focus trap to wrap to its checkbox" },
+        );
+        await run("editor.fileExplorer.deleteDialogDeleteButton.focus()");
+        sendKeyboardKey("Enter");
+        await waitForCondition(
+          async () => (await run("window.__deleteConfirmationResult?.confirmed === true")) === true,
+          { description: "Enter to confirm the focused Delete action" },
+        );
+        await waitForCondition(
+          async () => (await run('document.activeElement?.id === "delete-confirmation-focus-target"')) === true,
+          { description: "focus to return after closing the delete confirmation" },
+        );
+        const deleteDialogReopened = await run(`(() => {
+          window.__deleteConfirmationResult = null;
+          editor.fileExplorer.showDeleteConfirmation({ type: "folder", name: "components" })
+            .then(result => { window.__deleteConfirmationResult = result; });
+          return editor.fileExplorer.deleteDialog.open;
+        })()`);
+        assert.equal(deleteDialogReopened, true);
+        win.focus();
+        sendKeyboardKey("Escape");
+        await waitForCondition(
+          async () => (await run("window.__deleteConfirmationResult?.confirmed === false")) === true,
+          { description: "Escape to cancel the reopened delete confirmation" },
+        );
+        await run('document.querySelector("#delete-confirmation-focus-target")?.remove()');
         await run(`(async () => {
           const file = editor.tabManager.createEmptyFile();
           await editor.tabManager.setFocusFile(file);

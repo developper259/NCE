@@ -7,7 +7,7 @@ export interface Settings {
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
-  files: { autoSave: boolean };
+  files: { autoSave: boolean; confirmDelete: boolean };
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
   keybindings: Record<string, string | null>;
@@ -60,7 +60,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor" as const, settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
-  files: Object.freeze({ autoSave: false }),
+  files: Object.freeze({ autoSave: false, confirmDelete: true }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
   keybindings: DEFAULT_KEYBINDINGS,
@@ -71,6 +71,7 @@ const KNOWN_KEYS = new Set([
   "ui.settingsScrollTop",
   "editor.tabWidth",
   "files.autoSave",
+  "files.confirmDelete",
   "appearance.theme",
   "agent.hiddenModels",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
@@ -219,7 +220,10 @@ export class SettingsManager {
         settingsScrollTop: this.settings.ui.settingsScrollTop,
       },
       editor: { tabWidth: this.settings.editor.tabWidth },
-      files: { autoSave: this.settings.files.autoSave },
+      files: {
+        autoSave: this.settings.files.autoSave,
+        confirmDelete: this.settings.files.confirmDelete,
+      },
       appearance: { theme: this.settings.appearance.theme },
       agent: {
         hiddenModels: [...this.settings.agent.hiddenModels],
@@ -342,6 +346,12 @@ export class SettingsManager {
     )
       ? merged.files.autoSave
       : fallback.files.autoSave;
+    merged.files.confirmDelete = this.isValid(
+      "files.confirmDelete",
+      merged.files.confirmDelete,
+    )
+      ? merged.files.confirmDelete
+      : fallback.files.confirmDelete;
     merged.appearance.theme = this.isValid(
       "appearance.theme",
       merged.appearance.theme,
@@ -430,7 +440,9 @@ export class SettingsManager {
         (value as number) <= 16
       );
     }
-    if (key === "files.autoSave") return typeof value === "boolean";
+    if (key === "files.autoSave" || key === "files.confirmDelete") {
+      return typeof value === "boolean";
+    }
     if (key === "appearance.theme") {
       return value === "system" || value === "dark" || value === "light";
     }

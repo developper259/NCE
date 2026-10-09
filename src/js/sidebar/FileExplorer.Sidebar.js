@@ -32,6 +32,39 @@ class FileExplorer extends Sidebar {
     };
     this.onWorkspaceModeDialogClose = () =>
       this.restoreWorkspaceModeDialogFocus();
+    this.deleteDialog = null;
+    this.deleteDialogTitle = null;
+    this.deleteDialogMessage = null;
+    this.deleteDialogCheckboxLabel = null;
+    this.deleteDialogCheckbox = null;
+    this.deleteDialogCancelButton = null;
+    this.deleteDialogDeleteButton = null;
+    this.deleteDialogSession = null;
+    this.deleteDialogFocusGeneration = 0;
+    this.deleteWorkspaceGeneration = 0;
+    this.pendingDeleteOperation = null;
+    this.deleteExplorerDestroyed = false;
+    this.onDeleteDialogCancel = (event) => {
+      event.preventDefault();
+      this.finishDeleteConfirmation({ confirmed: false, dontAskAgain: false });
+    };
+    this.onDeleteDialogClose = () => this.completeDeleteConfirmation();
+    this.onDeleteDialogClick = (event) => {
+      if (event.target === this.deleteDialog)
+        this.finishDeleteConfirmation({ confirmed: false, dontAskAgain: false });
+    };
+    this.onDeleteDialogCancelClick = () =>
+      this.finishDeleteConfirmation({ confirmed: false, dontAskAgain: false });
+    this.onDeleteDialogDeleteClick = () =>
+      this.finishDeleteConfirmation({
+        confirmed: true,
+        dontAskAgain: this.deleteDialogCheckbox?.checked === true,
+      });
+    this.onDeleteWindowPageHide = () => {
+      this.deleteExplorerDestroyed = true;
+      this.invalidateDeleteContext({ restoreFocus: false });
+    };
+    window.addEventListener?.("pagehide", this.onDeleteWindowPageHide, { once: true });
     this.treeEmptyState = null;
     this.treeEmptyMessage = null;
     this.openFolderButton = null;
@@ -283,6 +316,8 @@ class FileExplorer extends Sidebar {
 
   async loadProject(projectPath, { deferRefresh = false } = {}) {
     if (!projectPath) return false;
+    if (this.rootPath && !NCEPath.equals(projectPath, this.rootPath))
+      this.invalidateDeleteContext({ restoreFocus: false });
     const status = await this.fileOperations.pathStatus(projectPath);
     if (!status?.exists || !status.isDirectory) {
       if (status?.code && status.code !== "SOURCE_NOT_FOUND")
@@ -318,6 +353,7 @@ class FileExplorer extends Sidebar {
   }
 
   resetWorkspaceState() {
+    this.invalidateDeleteContext({ restoreFocus: false });
     this.editor.quickOpen?.invalidate(this.rootPath);
     this.cancelEdit({ refresh: false });
     this.rootPath = "";
@@ -334,6 +370,7 @@ class FileExplorer extends Sidebar {
   }
 
   async invalidateWorkspace() {
+    this.invalidateDeleteContext({ restoreFocus: false });
     if (!this.rootPath) return;
     this.editor.agent?.stop?.();
     const previousRootPath = this.rootPath;
@@ -372,6 +409,7 @@ class FileExplorer extends Sidebar {
   }
 
   async closeProject({ switching = false } = {}) {
+    this.invalidateDeleteContext({ restoreFocus: false });
     if (!this.rootPath) return;
 
     if (!switching) {
@@ -1016,6 +1054,10 @@ class FileExplorer extends Sidebar {
   }
 
   destroy() {
+    this.deleteExplorerDestroyed = true;
+    this.invalidateDeleteContext({ restoreFocus: false });
+    window.removeEventListener?.("pagehide", this.onDeleteWindowPageHide);
+    this.destroyDeleteDialog();
     this.unsubscribeFileSystemWatcher?.();
     this.unsubscribeFileSystemWatcher = null;
     this.unsubscribeWorkspaceIndexStats?.();
@@ -1044,6 +1086,7 @@ class FileExplorer extends Sidebar {
 
   async requestWorkspaceSwitch(folderPath, { fromRecent = false } = {}) {
     if (!folderPath || this.workspaceSwitching) return false;
+    this.invalidateDeleteContext({ restoreFocus: false });
     this.workspaceSwitching = true;
 
     try {
@@ -1408,60 +1451,326 @@ class FileExplorer extends Sidebar {
     }
   }
 
-  async deleteEntry(file) {
-    const label = file.type === "folder" ? "folder" : "file";
-    if (!confirm(`Are you sure you want to delete ${label} "${file.name}"?`)) {
-      return;
+  ensureDeleteDialog() {
+    if (this.deleteDialog) return this.deleteDialog;
+    if (!document.body || typeof document.createElement !== "function")
+      return null;
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "file-explorer-delete-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "file-explorer-delete-title");
+    dialog.setAttribute("aria-describedby", "file-explorer-delete-message");
+
+    const content = document.createElement("div");
+    content.className = "file-explorer-delete-dialog-content";
+    const title = document.createElement("h2");
+    title.id = "file-explorer-delete-title";
+    const message = document.createElement("p");
+    message.id = "file-explorer-delete-message";
+
+    const checkboxLabel = document.createElement("label");
+    checkboxLabel.className = "file-explorer-delete-checkbox";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = false;
+    const checkboxText = document.createElement("span");
+    checkboxText.textContent = "Don't ask again";
+    checkboxLabel.append(checkbox, checkboxText);
+
+    const actions = document.createElement("div");
+    actions.className = "file-explorer-delete-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "file-explorer-delete-cancel";
+    cancelButton.textContent = "Cancel";
+    cancelButton.autofocus = true;
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "file-explorer-delete-confirm danger";
+    deleteButton.textContent = "Delete";
+    actions.append(cancelButton, deleteButton);
+    content.append(title, message, checkboxLabel, actions);
+    dialog.appendChild(content);
+
+    dialog.addEventListener("cancel", this.onDeleteDialogCancel);
+    dialog.addEventListener("close", this.onDeleteDialogClose);
+    dialog.addEventListener("click", this.onDeleteDialogClick);
+    cancelButton.addEventListener("click", this.onDeleteDialogCancelClick);
+    deleteButton.addEventListener("click", this.onDeleteDialogDeleteClick);
+    document.body.appendChild(dialog);
+
+    this.deleteDialog = dialog;
+    this.deleteDialogTitle = title;
+    this.deleteDialogMessage = message;
+    this.deleteDialogCheckboxLabel = checkboxLabel;
+    this.deleteDialogCheckbox = checkbox;
+    this.deleteDialogCancelButton = cancelButton;
+    this.deleteDialogDeleteButton = deleteButton;
+    return dialog;
+  }
+
+  showDeleteConfirmation(file, { recursive = false } = {}) {
+    const dialog = this.ensureDeleteDialog();
+    if (!dialog || dialog.open || this.deleteDialogSession) {
+      return Promise.resolve({ confirmed: false, dontAskAgain: false });
     }
 
-    try {
+    const isFolder = file.type === "folder";
+    this.deleteDialogTitle.textContent = isFolder ? "Delete folder?" : "Delete file?";
+    this.deleteDialogMessage.textContent = recursive
+      ? `Are you sure you want to permanently delete folder "${file.name}" and all files and subfolders inside it?`
+      : `Are you sure you want to permanently delete "${file.name}"?`;
+    this.deleteDialogCheckboxLabel.hidden = recursive;
+    this.deleteDialogCheckbox.checked = false;
+    this.deleteDialogCancelButton.disabled = false;
+    this.deleteDialogDeleteButton.disabled = false;
+
+    return new Promise((resolve) => {
+      const session = {
+        resolve,
+        result: null,
+        previousFocus: document.activeElement,
+        restoreFocus: true,
+        completed: false,
+      };
+      this.deleteDialogSession = session;
+      try {
+        dialog.showModal();
+        this.deleteDialogCancelButton.focus({ preventScroll: true });
+      } catch (error) {
+        console.error("Unable to open delete confirmation:", error);
+        session.result = { confirmed: false, dontAskAgain: false };
+        this.completeDeleteConfirmation();
+      }
+    });
+  }
+
+  handleDeleteDialogKeyDown(event) {
+    if (!this.deleteDialog?.open) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      event.stopPropagation?.();
+      this.finishDeleteConfirmation({ confirmed: false, dontAskAgain: false });
+    } else if (
+      event.key === "Enter" &&
+      (event.target === this.deleteDialogCancelButton ||
+        event.target === this.deleteDialogDeleteButton)
+    ) {
+      event.preventDefault();
+      event.target.click();
+    }
+    return true;
+  }
+
+  finishDeleteConfirmation(result, { restoreFocus = true } = {}) {
+    const session = this.deleteDialogSession;
+    if (!session || session.result) return false;
+    session.result = result;
+    session.restoreFocus = restoreFocus;
+    if (this.deleteDialog?.open) this.deleteDialog.close();
+    else this.completeDeleteConfirmation();
+    return true;
+  }
+
+  completeDeleteConfirmation() {
+    const session = this.deleteDialogSession;
+    if (!session || session.completed) return false;
+    this.deleteDialogSession = null;
+    session.completed = true;
+    const result = session.result || {
+      confirmed: false,
+      dontAskAgain: false,
+    };
+    if (session.restoreFocus) this.restoreDeleteDialogFocus(session);
+    session.resolve(result);
+    return true;
+  }
+
+  restoreDeleteDialogFocus(session) {
+    const generation = this.deleteDialogFocusGeneration =
+      (this.deleteDialogFocusGeneration || 0) + 1;
+    const schedule = typeof requestAnimationFrame === "function"
+      ? requestAnimationFrame
+      : (callback) => setTimeout(callback, 0);
+    schedule(() => {
+      if (generation !== this.deleteDialogFocusGeneration || this.deleteDialog?.open)
+        return;
+      if (this.editor?.quickPanel?.isOpen?.()) return;
+      const activeModal = [...(document.querySelectorAll?.(
+        '[aria-modal="true"]:not(dialog), dialog[open]',
+      ) || [])].some((modal) => {
+        if (modal.open === true) return true;
+        if (modal.hidden || modal.getAttribute?.("aria-hidden") === "true")
+          return false;
+        return !modal.closest?.('[hidden], [aria-hidden="true"]');
+      });
+      if (activeModal) return;
+
+      const available = (element) => element?.isConnected &&
+        !element.hidden &&
+        !element.closest?.('[hidden], [aria-hidden="true"], dialog:not([open])');
+      const focusTarget = available(session.previousFocus)
+        ? session.previousFocus
+        : available(this.projectHeader) ? this.projectHeader : null;
+      const activeElement = document.activeElement;
+      if (activeElement !== document.body &&
+          activeElement !== session.previousFocus &&
+          activeElement !== focusTarget &&
+          !activeElement?.closest?.("dialog:not([open])")) return;
+      focusTarget?.focus?.({ preventScroll: true });
+    });
+  }
+
+  cancelDeleteConfirmation({ restoreFocus = true } = {}) {
+    return this.finishDeleteConfirmation(
+      { confirmed: false, dontAskAgain: false },
+      { restoreFocus },
+    );
+  }
+
+  invalidateDeleteContext({ restoreFocus = false } = {}) {
+    this.deleteWorkspaceGeneration = (this.deleteWorkspaceGeneration || 0) + 1;
+    this.cancelDeleteConfirmation({ restoreFocus });
+  }
+
+  destroyDeleteDialog() {
+    const dialog = this.deleteDialog;
+    if (!dialog) return;
+    const session = this.deleteDialogSession;
+    this.deleteDialogSession = null;
+    if (session && !session.completed) {
+      session.completed = true;
+      session.resolve({ confirmed: false, dontAskAgain: false });
+    }
+    if (dialog.open) dialog.close();
+    dialog.removeEventListener("cancel", this.onDeleteDialogCancel);
+    dialog.removeEventListener("close", this.onDeleteDialogClose);
+    dialog.removeEventListener("click", this.onDeleteDialogClick);
+    this.deleteDialogCancelButton?.removeEventListener(
+      "click",
+      this.onDeleteDialogCancelClick,
+    );
+    this.deleteDialogDeleteButton?.removeEventListener(
+      "click",
+      this.onDeleteDialogDeleteClick,
+    );
+    dialog.remove();
+    this.deleteDialog = null;
+    this.deleteDialogTitle = null;
+    this.deleteDialogMessage = null;
+    this.deleteDialogCheckboxLabel = null;
+    this.deleteDialogCheckbox = null;
+    this.deleteDialogCancelButton = null;
+    this.deleteDialogDeleteButton = null;
+  }
+
+  isDeleteRequestCurrent(rootPath, generation) {
+    return !this.deleteExplorerDestroyed &&
+      !this.workspaceSwitching &&
+      generation === this.deleteWorkspaceGeneration &&
+      NCEPath.equals(this.rootPath, rootPath);
+  }
+
+  deleteEntry(file) {
+    if (
+      !file ||
+      !["file", "folder"].includes(file.type) ||
+      typeof file.path !== "string" ||
+      !file.path ||
+      !this.rootPath ||
+      this.workspaceSwitching ||
+      this.deleteExplorerDestroyed ||
+      NCEPath.equals(file.path, this.rootPath) ||
+      !NCEPath.isInside(file.path, this.rootPath)
+    ) return Promise.resolve(false);
+
+    if (this.pendingDeleteOperation) {
+      return NCEPath.equals(this.pendingDeleteOperation.path, file.path)
+        ? this.pendingDeleteOperation.promise
+        : Promise.resolve(false);
+    }
+
+    const rootPath = this.rootPath;
+    const generation = this.deleteWorkspaceGeneration || 0;
+    let promise;
+    promise = this.performDeleteEntry(file, rootPath, generation)
+      .catch((error) => {
+        console.error("Error deleting entry:", error);
+        return false;
+      })
+      .finally(() => {
+        if (this.pendingDeleteOperation?.promise === promise)
+          this.pendingDeleteOperation = null;
+      });
+    this.pendingDeleteOperation = { path: file.path, promise };
+    return promise;
+  }
+
+  async performDeleteEntry(file, rootPath, generation) {
+    if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+
+    if (SETTINGS_GET("files.confirmDelete") !== false) {
+      const confirmation = await this.showDeleteConfirmation(file);
+      if (!this.isDeleteRequestCurrent(rootPath, generation) ||
+          !confirmation?.confirmed) return false;
+      if (confirmation.dontAskAgain) {
+        try {
+          const saved = await SETTINGS_SET("files.confirmDelete", false);
+          if (!saved)
+            console.error("[Settings] Could not save files.confirmDelete.");
+        } catch (error) {
+          console.error("[Settings] Could not save files.confirmDelete.", error);
+        }
+        if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+      }
+    }
+
+    if (
+      file.type === "file" &&
+      typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
+      !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
+    ) return false;
+    if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+
+    let result = await this.fileOperations.delete(file.path, false);
+    if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+    if (
+      !result?.success &&
+      file.type === "folder" &&
+      result?.code === "FOLDER_NOT_EMPTY"
+    ) {
+      const confirmation = await this.showDeleteConfirmation(file, {
+        recursive: true,
+      });
+      if (!this.isDeleteRequestCurrent(rootPath, generation) ||
+          !confirmation?.confirmed) return false;
       if (
-        file.type === "file" &&
         typeof this.editor.tabManager.prepareFilesForDeletion === "function" &&
         !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
-      ) {
-        return;
-      }
-      let result = await this.fileOperations.delete(file.path, false);
-      if (
-        !result?.success &&
-        file.type === "folder" &&
-        result.code === "FOLDER_NOT_EMPTY"
-      ) {
-        if (
-          !confirm(
-            `Folder "${file.name}" is not empty.\n\n` +
-              "Deleting it will permanently delete all files and subfolders inside it.\n\n" +
-              "Do you really want to continue?",
-          )
-        ) {
-          return;
-        }
-        if (
-          typeof this.editor.tabManager.prepareFilesForDeletion ===
-            "function" &&
-          !(await this.editor.tabManager.prepareFilesForDeletion(file.path))
-        ) {
-          return;
-        }
-        result = await this.fileOperations.delete(file.path, true);
-      }
-      if (!result?.success) {
+      ) return false;
+      if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+      result = await this.fileOperations.delete(file.path, true);
+      if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
+    }
+    if (!result?.success) {
+      if (result?.code === "SOURCE_NOT_FOUND") return false;
+      if (typeof alert === "function") {
         alert(
           result?.code === "FOLDER_NOT_EMPTY"
             ? `Folder "${file.name}" is not empty.`
             : result?.error || "Unable to delete the item.",
         );
-        return;
       }
-
-      this.editor.tabManager.markFileAsDeleted(file.path);
-
-      const parentPath = NCEPath.dirname(file.path);
-      await this.refreshFolder(parentPath);
-    } catch (error) {
-      console.error("Error deleting entry:", error);
+      return false;
     }
+
+    this.editor.tabManager.markFileAsDeleted(file.path);
+    const parentPath = NCEPath.dirname(file.path);
+    await this.refreshFolder(parentPath);
+    return true;
   }
 
   setClipboard(file, mode) {

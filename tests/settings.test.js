@@ -26,6 +26,7 @@ test("missing settings are created in userData with defaults", async () => {
   try {
     const manager = new SettingsManager(root);
     assert.deepEqual(await manager.initialize(), DEFAULT_SETTINGS);
+    assert.equal(manager.get("files.confirmDelete"), true);
     assert.deepEqual(await readSettings(root), DEFAULT_SETTINGS);
     assert.equal(manager.settingsPath, path.join(root, "settings.json"));
   } finally {
@@ -40,14 +41,16 @@ test("valid settings persist across manager restarts and set writes JSON", async
     await first.initialize();
     assert.equal(await first.set("editor.tabWidth", 8), true);
     assert.equal(await first.set("files.autoSave", true), true);
+    assert.equal(await first.set("files.confirmDelete", false), true);
     const second = new SettingsManager(root);
     await second.initialize();
     assert.equal(second.get("editor.tabWidth"), 8);
     assert.equal(second.get("files.autoSave"), true);
+    assert.equal(second.get("files.confirmDelete"), false);
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
-      files: { autoSave: true },
+      files: { autoSave: true, confirmDelete: false },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
@@ -135,7 +138,7 @@ test("malformed and invalid known settings fall back without crashing", async ()
       path.join(root, "settings.json"),
       JSON.stringify({
         editor: { tabWidth: "wide" },
-        files: { autoSave: 1 },
+        files: { autoSave: 1, confirmDelete: "no" },
       }),
     );
     const invalid = new SettingsManager(root);
@@ -159,7 +162,7 @@ test("missing known defaults are merged while unknown properties survive", async
     assert.deepEqual(await manager.initialize(), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 4 },
-      files: { autoSave: false },
+      files: { autoSave: false, confirmDelete: true },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
@@ -185,12 +188,13 @@ test("queued concurrent writes leave a complete latest settings document", async
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 12 },
-      files: { autoSave: true },
+      files: { autoSave: true, confirmDelete: true },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);
+    assert.equal(await manager.set("files.confirmDelete", "no"), false);
     assert.equal(await manager.set("unknown.value", true), false);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -206,6 +210,8 @@ test("a failed settings write does not change the in-memory source of truth", as
 
     assert.equal(await manager.set("editor.tabWidth", 8), false);
     assert.equal(manager.get("editor.tabWidth"), 2);
+    assert.equal(await manager.set("files.confirmDelete", false), false);
+    assert.equal(manager.get("files.confirmDelete"), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -410,6 +416,7 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   });
   assert.equal(get("editor.tabWidth"), 5);
   assert.equal(get("files.autoSave"), true);
+  assert.equal(get("files.confirmDelete"), true);
   assert.equal(get("keybindings.save"), "Mod+Alt+S");
   assert.deepEqual(
     bindings.map((binding) => binding.key),
@@ -417,8 +424,27 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   );
   assert.equal(await set("editor.tabWidth", 3), true);
   assert.equal(get("editor.tabWidth"), 3);
-  assert.deepEqual(writes, [["editor.tabWidth", 3]]);
-  initialize({ editor: { tabWidth: 99 }, files: { autoSave: "yes" } });
+  assert.equal(await set("files.confirmDelete", false), true);
+  assert.equal(get("files.confirmDelete"), false);
+  assert.deepEqual(writes, [["editor.tabWidth", 3], ["files.confirmDelete", false]]);
+  initialize({ editor: { tabWidth: 99 }, files: { autoSave: "yes", confirmDelete: "no" } });
   assert.equal(get("editor.tabWidth"), 2);
   assert.equal(get("files.autoSave"), false);
+  assert.equal(get("files.confirmDelete"), true);
+});
+
+test("renderer settings roll back a preference when its write rejects", async () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const globals = loadGlobal(
+    "src/config/Settings.js",
+    "[SETTINGS_INITIALIZE, SETTINGS_GET, SETTINGS_SET]",
+    {
+      window: { api: { setSetting: async () => { throw new Error("disk full"); } } },
+      console: { error() {} },
+    },
+  );
+  const [initialize, get, set] = globals;
+  initialize({ files: { confirmDelete: true } });
+  assert.equal(await set("files.confirmDelete", false), false);
+  assert.equal(get("files.confirmDelete"), true);
 });

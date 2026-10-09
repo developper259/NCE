@@ -220,10 +220,17 @@ class Editor {
   }
 
   applySettingsSnapshot(settings) {
+    const autoSaveEnabled = this.getAutoSaveState();
     SETTINGS_INITIALIZE(settings);
-    this.setAutoSaveState(SETTINGS_GET("files.autoSave"), { persist: false });
+    const nextAutoSaveEnabled = SETTINGS_GET("files.autoSave");
+    if (autoSaveEnabled !== nextAutoSaveEnabled) {
+      this.setAutoSaveState(nextAutoSaveEnabled, { persist: false });
+    } else {
+      this._settingsView?.sync?.("files.autoSave");
+    }
     this.themeManager?.syncFromSettings?.(SETTINGS_GET("appearance.theme"));
     this.agentSidebar?.refreshModelSelector?.();
+    this._settingsView?.sync?.("files.confirmDelete");
     this._settingsView?.sync?.("agent.hiddenModels");
     void this.refreshSettingsJsonTab();
   }

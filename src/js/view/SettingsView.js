@@ -30,6 +30,18 @@ const SETTINGS_UI = Object.freeze([
     description: "Automatically save modified files.",
     keywords: ["auto", "save", "files"],
     control: "checkbox",
+    apply: (editor, enabled) => {
+      editor.setAutoSaveState(enabled);
+      return true;
+    },
+  },
+  {
+    key: "files.confirmDelete",
+    category: "Files",
+    label: "Confirm File Deletion",
+    description: "Ask for confirmation before deleting files and folders.",
+    keywords: ["confirm", "delete", "files", "folders", "deletion"],
+    control: "checkbox",
   },
   {
     key: "agent.settings",
@@ -554,9 +566,23 @@ class SettingsView {
     input.checked = SETTINGS_GET(setting.key) === true;
     const track = document.createElement("span");
     track.setAttribute("aria-hidden", "true");
-    input.addEventListener("change", () =>
-      this.editor.setAutoSaveState(input.checked),
-    );
+    input.addEventListener("change", async () => {
+      const requestedValue = input.checked;
+      input.disabled = true;
+      try {
+        const result = setting.apply
+          ? await setting.apply(this.editor, requestedValue)
+          : await SETTINGS_SET(setting.key, requestedValue);
+        const saved = result === true || result?.success === true;
+        if (!saved) input.checked = SETTINGS_GET(setting.key) === true;
+      } catch (error) {
+        input.checked = SETTINGS_GET(setting.key) === true;
+        console.error(`[Settings] Failed to update ${setting.key}`, error);
+      } finally {
+        input.disabled = false;
+        this.editor.bottomBar?.refreshScrollers?.();
+      }
+    });
     label.append(input, track);
     return label;
   }
@@ -817,10 +843,16 @@ class SettingsView {
   }
 
   sync(key) {
-    if (key === "files.autoSave") {
-      const input = this.host?.querySelector("#setting-files-autoSave");
-      if (input) input.checked = this.editor.getAutoSaveState();
-    }
+    const setting = this.getSettings().find(
+      (item) => item.key === key && item.control === "checkbox",
+    );
+    if (!setting) return;
+    const id = `setting-${setting.key.replace(/\./g, "-")}`;
+    const input = this.host?.querySelector(`#${id}`);
+    if (!input) return;
+    input.checked = setting.key === "files.autoSave"
+      ? this.editor.getAutoSaveState()
+      : SETTINGS_GET(setting.key) === true;
   }
 
   show() {

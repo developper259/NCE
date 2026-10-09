@@ -42,7 +42,7 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor", settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
-  files: Object.freeze({ autoSave: false }),
+  files: Object.freeze({ autoSave: false, confirmDelete: true }),
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
   keybindings: DEFAULT_KEYBINDINGS,
@@ -84,6 +84,10 @@ function SETTINGS_INITIALIZE(settings) {
         typeof settings?.files?.autoSave === "boolean"
           ? settings.files.autoSave
           : DEFAULT_RENDERER_SETTINGS.files.autoSave,
+      confirmDelete:
+        typeof settings?.files?.confirmDelete === "boolean"
+          ? settings.files.confirmDelete
+          : DEFAULT_RENDERER_SETTINGS.files.confirmDelete,
     },
     appearance: {
       theme:
@@ -197,6 +201,14 @@ async function SETTINGS_SET(key, value) {
     }
   }
 
+  if (
+    section === "files" &&
+    (property === "autoSave" || property === "confirmDelete") &&
+    typeof value !== "boolean"
+  ) {
+    return false;
+  }
+
   if (section === "agent" && property === "hiddenModels") {
     if (
       !Array.isArray(value) ||
@@ -205,7 +217,14 @@ async function SETTINGS_SET(key, value) {
     value = [...new Set(value)];
   }
   RENDERER_SETTINGS[section][property] = value;
-  const saved = await window.api.setSetting(key, value);
+  let saved = false;
+  try {
+    saved = await window.api.setSetting(key, value);
+  } catch (error) {
+    RENDERER_SETTINGS[section][property] = previous;
+    console.error(`[Settings] Failed to save ${key}`, error);
+    return false;
+  }
   if (!saved) RENDERER_SETTINGS[section][property] = previous;
   if (
     saved &&

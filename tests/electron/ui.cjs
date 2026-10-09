@@ -3,6 +3,46 @@ module.exports = async function exerciseUI() {
   check(Boolean(document.querySelector('.nce-titlebar')), 'NCE Title Bar');
   check(getComputedStyle(document.querySelector('.nce-titlebar')).webkitAppRegion === 'drag', 'Title Bar drag region');
 
+  const confirmDeleteSetting = SettingsView.getSettings().find(
+    setting => setting.key === 'files.confirmDelete',
+  );
+  check(confirmDeleteSetting?.category === 'Files', 'Confirm File Deletion Files category');
+  check(confirmDeleteSetting?.label === 'Confirm File Deletion', 'Confirm File Deletion label');
+  check(confirmDeleteSetting?.description === 'Ask for confirmation before deleting files and folders.', 'Confirm File Deletion description');
+  const confirmationSettingView = Object.create(SettingsView.prototype);
+  confirmationSettingView.editor = editor;
+  const confirmationControl = confirmationSettingView.createCheckbox(
+    confirmDeleteSetting,
+    'setting-files-confirmDelete-smoke',
+  );
+  const confirmationInput = confirmationControl.querySelector('input');
+  const previousConfirmDelete = SETTINGS_GET('files.confirmDelete');
+  let autoSaveCallsFromDeletePreference = 0;
+  const originalSetAutoSaveState = editor.setAutoSaveState;
+  editor.setAutoSaveState = function (...args) {
+    autoSaveCallsFromDeletePreference++;
+    return originalSetAutoSaveState.apply(this, args);
+  };
+  document.body.append(confirmationControl);
+  try {
+    const waitForConfirmDelete = async value => {
+      const deadline = Date.now() + 3000;
+      while ((SETTINGS_GET('files.confirmDelete') !== value || confirmationInput.disabled) && Date.now() < deadline)
+        await new Promise(resolve => setTimeout(resolve, 10));
+      check(SETTINGS_GET('files.confirmDelete') === value, `files.confirmDelete becomes ${value}`);
+      check(confirmationInput.checked === value, `checkbox reflects files.confirmDelete ${value}`);
+      check(confirmationInput.disabled === false, 'Confirm File Deletion write settles before another click');
+    };
+    confirmationInput.click();
+    await waitForConfirmDelete(!previousConfirmDelete);
+    confirmationInput.click();
+    await waitForConfirmDelete(previousConfirmDelete);
+    check(autoSaveCallsFromDeletePreference === 0, 'Confirm File Deletion never changes Auto Save');
+  } finally {
+    editor.setAutoSaveState = originalSetAutoSaveState;
+    confirmationControl.remove();
+  }
+
   editor.titleBar.destroy();
   const commandCalls = [];
   const titleEditor = {
