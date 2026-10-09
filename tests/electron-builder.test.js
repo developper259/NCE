@@ -28,7 +28,8 @@ test("electron-builder skips only a prepared same-architecture Windows node-pty 
   }
 
   assert.equal(await beforeBuild(context), false, "a prepared Windows native runtime is kept intact");
-  assert.equal(await beforeBuild({ ...context, arch: "arm64" }), undefined,
+  const otherArch = process.arch === "arm64" ? "x64" : "arm64";
+  assert.equal(await beforeBuild({ ...context, arch: otherArch }), undefined,
     "cross-architecture builds still use electron-builder's native rebuild");
   assert.equal(await beforeBuild({ ...context, platform: { nodeName: "darwin" } }), undefined,
     "other platforms keep electron-builder's normal rebuild behavior");
