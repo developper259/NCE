@@ -110,10 +110,10 @@ for (const archive of archives) {
     }
   }
   collectUnpacked(unpackedRoot);
-  const nativeModule = [...unpackedFiles].find(file =>
-    file.endsWith('/build/Release/pty.node') && file.includes('node_modules/node-pty/'),
-  );
-  assert.ok(nativeModule, `${archive}: node-pty native module is not unpacked`);
+  const nativeModule = process.platform === 'win32' ? 'conpty.node' : 'pty.node';
+  assert.ok([...unpackedFiles].some(file =>
+    file.endsWith(`/build/Release/${nativeModule}`) && file.includes('node_modules/node-pty/'),
+  ), `${archive}: node-pty ${nativeModule} native module is not unpacked`);
   if (process.platform === 'darwin') {
     const helper = [...unpackedFiles].find(file =>
       file.endsWith('/build/Release/spawn-helper') && file.includes('node_modules/node-pty/'),
@@ -127,8 +127,8 @@ for (const archive of archives) {
   }
   if (process.platform === 'win32') {
     assert.ok([...unpackedFiles].some(file =>
-      file.endsWith('/build/Release/conpty.node') && file.includes('node_modules/node-pty/'),
-    ), `${archive}: node-pty ConPTY module is not unpacked`);
+      file.endsWith('/build/Release/conpty_console_list.node') && file.includes('node_modules/node-pty/'),
+    ), `${archive}: node-pty ConPTY process-list module is not unpacked`);
     assert.ok([...unpackedFiles].some(file =>
       file.endsWith('/build/Release/conpty/conpty.dll') && file.includes('node_modules/node-pty/'),
     ), `${archive}: node-pty ConPTY runtime DLL is not unpacked`);
