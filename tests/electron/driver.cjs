@@ -727,6 +727,7 @@ app.whenReady().then(() => {
           };
           const rect = box.getBoundingClientRect();
           root.setAttribute("data-theme", "dark");
+          settleTransitions();
           const darkUnchecked = getComputedStyle(box).backgroundColor;
           input.checked = true;
           settleTransitions();
