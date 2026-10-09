@@ -8,6 +8,7 @@ const {
 } = require("../dist/ts/terminal/TerminalManager.js");
 const { normalizeTerminalLink, terminalLimits } = require("../dist/ts/terminal/TerminalTypes.js");
 const nodePtyEntry = require.resolve("node-pty");
+const normalizePath = (value) => String(value).replace(/\\/g, "/");
 
 class FakeWebContents {
   constructor() {
@@ -236,17 +237,17 @@ test("PTY spawn errors are classified from established evidence and logged witho
 
 test("macOS spawn-helper diagnostics distinguish missing and non-executable helpers", () => {
   const nonExecutable = inspectPtySpawnHelper("darwin", "arm64", {
-    existsSync: (file) => file.endsWith("/prebuilds/darwin-arm64/pty.node"),
+    existsSync: (file) => normalizePath(file).endsWith("/prebuilds/darwin-arm64/pty.node"),
     statSync: () => ({ mode: 0o100644 }),
     accessSync: () => { throw Object.assign(new Error("permission denied"), { code: "EACCES" }); },
   });
   assert.equal(nonExecutable.status, "not-executable");
   assert.equal(nonExecutable.permissions, "644");
-  assert.match(nonExecutable.path, /prebuilds\/darwin-arm64\/spawn-helper$/);
+  assert.match(normalizePath(nonExecutable.path), /prebuilds\/darwin-arm64\/spawn-helper$/);
   assert.equal(classifyPtySpawnFailure(new Error("posix_spawnp failed."), nonExecutable), "PTY_HELPER_NOT_EXECUTABLE");
 
   const missingHelper = inspectPtySpawnHelper("darwin", "arm64", {
-    existsSync: (file) => file.endsWith("/prebuilds/darwin-arm64/pty.node"),
+    existsSync: (file) => normalizePath(file).endsWith("/prebuilds/darwin-arm64/pty.node"),
     statSync: () => { throw Object.assign(new Error("missing"), { code: "ENOENT" }); },
     accessSync: () => { throw Error("missing"); },
   });
