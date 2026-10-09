@@ -132,6 +132,9 @@ for (const archive of archives) {
     assert.ok([...unpackedFiles].some(file =>
       file.endsWith('/build/Release/conpty/conpty.dll') && file.includes('node_modules/node-pty/'),
     ), `${archive}: node-pty ConPTY runtime DLL is not unpacked`);
+    assert.ok([...unpackedFiles].some(file =>
+      file.endsWith('/build/Release/conpty/OpenConsole.exe') && file.includes('node_modules/node-pty/'),
+    ), `${archive}: node-pty OpenConsole runtime is not unpacked`);
   }
   assert.deepEqual([...flaticonFamilies].sort(), [
     'uicons-brands',

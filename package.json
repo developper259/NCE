@@ -56,6 +56,7 @@
     ],
     "asarUnpack": ["node_modules/node-pty/build/Release/**/*"],
     "npmRebuild": true,
+    "beforeBuild": "./scripts/electron-before-build.js",
     "win": {
       "target": "nsis",
       "icon": "assets/logo/NCE/dark-logo.ico"
