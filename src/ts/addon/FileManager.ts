@@ -43,6 +43,7 @@ export interface FileItem {
 
 export interface FileOperationResult {
   success: boolean;
+  action?: "trash" | "permanent-delete";
   path?: string;
   type?: "file" | "folder";
   forced?: boolean;
@@ -335,6 +336,7 @@ export async function atomicWriteFile(
 
 export class FileManager {
   window: Window;
+  private readonly trashItem: (targetPath: string) => Promise<void>;
   private fileCache: Map<string, string[]> = new Map();
   private largeFileStore = new LargeFileStore();
   private stateSaveQueue: Promise<boolean> = Promise.resolve(true);
@@ -343,9 +345,16 @@ export class FileManager {
   private recoveryStoreLoads: Map<string, Promise<DirtyBufferRecoveryStore | null>> = new Map();
   private unsavedChangePrompts: Map<string, Promise<UnsavedCloseChoice>> = new Map();
   private unsavedChangeDialogQueue: Promise<void> = Promise.resolve();
+  private deletionQueue: Promise<void> = Promise.resolve();
+  private pendingDeletionOperations = new Map<string, Promise<FileOperationResult>>();
 
-  constructor(window: Window) {
+  constructor(
+    window: Window,
+    trashItem: (targetPath: string) => Promise<void> = (targetPath) =>
+      shell.trashItem(targetPath),
+  ) {
     this.window = window;
+    this.trashItem = trashItem;
   }
 
   async agentFileOperation(root: string, operation: string, args: unknown[]) {
@@ -357,7 +366,10 @@ export class FileManager {
       createFile: { paths: [0], run: this.createFile.bind(this) },
       createFolder: { paths: [0], run: this.createFolder.bind(this) },
       renameEntry: { paths: [0, 1], run: this.renameEntry.bind(this) },
-      deleteEntry: { paths: [0], run: this.deleteEntry.bind(this) },
+      permanentlyDelete: {
+        paths: [0],
+        run: this.permanentlyDelete.bind(this),
+      },
       copyEntry: { paths: [0, 1], run: this.copyEntry.bind(this) },
       moveEntry: { paths: [0, 1], run: this.moveEntry.bind(this) },
       duplicateEntry: { paths: [0], run: this.duplicateEntry.bind(this) },
@@ -371,6 +383,17 @@ export class FileManager {
     const method = methods[operation];
     try {
       const realRoot = await fs.realpath(root);
+      if (operation === "permanentlyDelete") {
+        const activeRoot = this.window.watcher?.getWatchedPath?.();
+        if (!validPath(activeRoot) ||
+            path.resolve(await fs.realpath(activeRoot)) !== path.resolve(realRoot)) {
+          return {
+            success: false,
+            code: "WORKSPACE_NOT_ACTIVE",
+            error: "The requested workspace is not active.",
+          };
+        }
+      }
       const inside = (base: string, target: string) => {
         const relative = path.relative(base, target);
         return (
@@ -559,12 +582,16 @@ export class FileManager {
     );
 
     ipcMain.handle(
-      "FileManager:delete",
-      async (event, targetPath: string, force: unknown = false) => {
-        return await this.deleteEntry(
-          targetPath,
-          typeof force === "boolean" ? force : false,
-        );
+      "FileManager:moveToTrash",
+      async (_event, targetPath: unknown) => {
+        return await this.moveToTrash(targetPath);
+      },
+    );
+
+    ipcMain.handle(
+      "FileManager:permanentlyDelete",
+      async (_event, targetPath: unknown) => {
+        return await this.permanentlyDelete(targetPath);
       },
     );
 
@@ -1151,64 +1178,311 @@ export class FileManager {
     }
   }
 
-  async deleteEntry(
-    targetPath: string,
-    force: boolean = false,
-  ): Promise<FileOperationResult> {
-    if (
-      !validPath(targetPath) ||
-      path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root
-    )
+  private async withDeletionLock<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.deletionQueue;
+    let release!: () => void;
+    this.deletionQueue = new Promise<void>((resolve) => { release = resolve; });
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+
+  private async validateDeletionTarget(targetValue: unknown): Promise<
+    | { path: string; root: string; type: "file" | "folder"; isSymbolicLink: boolean }
+    | FileOperationResult
+  > {
+    if (!validPath(targetValue) || targetValue !== targetValue.trim())
       return invalidPath();
-    if (typeof force !== "boolean") {
+    const targetPath = path.resolve(targetValue);
+    if (!path.isAbsolute(targetValue) || targetPath === path.parse(targetPath).root)
+      return invalidPath();
+
+    const watchedRoot = this.window.watcher?.getWatchedPath?.();
+    if (!validPath(watchedRoot) || !path.isAbsolute(watchedRoot)) {
       return {
         success: false,
-        code: "INVALID_ARGUMENT",
-        error: "force must be boolean.",
+        code: "NO_ACTIVE_WORKSPACE",
+        error: "Open a workspace before deleting files.",
       };
     }
+
+    const lexicalRoot = path.resolve(watchedRoot);
+    if (lexicalRoot === path.parse(lexicalRoot).root) {
+      return {
+        success: false,
+        code: "PROTECTED_PATH",
+        error: "A filesystem root cannot be used as an NCE workspace.",
+      };
+    }
+    const lexicalRelative = path.relative(lexicalRoot, targetPath);
+    if (targetPath === lexicalRoot) {
+      return {
+        success: false,
+        code: "PROTECTED_PATH",
+        error: "The workspace root and NCE internal files cannot be deleted.",
+      };
+    }
+    if (
+      lexicalRelative === ".." ||
+      lexicalRelative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(lexicalRelative)
+    ) {
+      return {
+        success: false,
+        code: "OUTSIDE_WORKSPACE",
+        error: "The path must remain inside the active workspace.",
+      };
+    }
+    if (NceWorkspaceStorage.isInternalPath(targetPath, watchedRoot)) {
+      return {
+        success: false,
+        code: "PROTECTED_PATH",
+        error: "The workspace root and NCE internal files cannot be deleted.",
+      };
+    }
+
     try {
-      const stats = await fs.lstat(targetPath);
-      if (stats.isDirectory()) {
-        if (force) {
-          await fs.rm(targetPath, { recursive: true, force: true });
-        } else {
-          await fs.rmdir(targetPath);
-        }
-        this.clearFileCache(targetPath);
+      const [root, stats] = await Promise.all([
+        fs.realpath(watchedRoot),
+        fs.lstat(targetPath),
+      ]);
+      if (root === path.parse(root).root) {
         return {
-          success: true,
-          path: targetPath,
-          type: "folder",
-          ...(force ? { forced: true } : {}),
+          success: false,
+          code: "PROTECTED_PATH",
+          error: "A filesystem root cannot be used as an NCE workspace.",
         };
       }
-      await fs.unlink(targetPath);
-      this.clearFileCache(targetPath);
-      return { success: true, path: targetPath, type: "file" };
-    } catch (error: any) {
-      const code =
-        error?.code === "ENOENT"
-          ? "SOURCE_NOT_FOUND"
-          : error?.code === "ENOTEMPTY" || error?.code === "EEXIST"
-            ? "FOLDER_NOT_EMPTY"
-            : error?.code === "EACCES" || error?.code === "EPERM"
-              ? "PERMISSION_DENIED"
-              : "DELETE_FAILED";
-      if (code !== "SOURCE_NOT_FOUND" && code !== "FOLDER_NOT_EMPTY") {
-        console.error("Error deleting entry:", error);
+      const relativeTarget = path.relative(path.resolve(watchedRoot), targetPath);
+      const relativeRealRoot = path.relative(root, targetPath);
+      const insideLexicalRoot = relativeTarget !== ".." &&
+        !relativeTarget.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relativeTarget);
+      if (
+        !insideLexicalRoot ||
+        path.resolve(watchedRoot) === targetPath ||
+        targetPath === root ||
+        relativeRealRoot === "" ||
+        NceWorkspaceStorage.isInternalPath(targetPath, watchedRoot)
+      ) {
+        return {
+          success: false,
+          code: "PROTECTED_PATH",
+          error: "The workspace root and NCE internal files cannot be deleted.",
+        };
       }
+
+      const parentRealPath = await fs.realpath(path.dirname(targetPath));
+      const relativeParent = path.relative(root, parentRealPath);
+      if (
+        relativeParent === ".." ||
+        relativeParent.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relativeParent)
+      ) {
+        return {
+          success: false,
+          code: "OUTSIDE_WORKSPACE",
+          error: "The path must remain inside the active workspace.",
+        };
+      }
+
+      const isSymbolicLink = stats.isSymbolicLink();
+      if (!isSymbolicLink) {
+        const realTargetPath = await fs.realpath(targetPath);
+        const relativeTargetReal = path.relative(root, realTargetPath);
+        if (
+          relativeTargetReal === ".." ||
+          relativeTargetReal.startsWith(`..${path.sep}`) ||
+          path.isAbsolute(relativeTargetReal)
+        ) {
+          return {
+            success: false,
+            code: "OUTSIDE_WORKSPACE",
+            error: "The path must remain inside the active workspace.",
+          };
+        }
+      }
+
+      if (!stats.isFile() && !stats.isDirectory() && !isSymbolicLink) {
+        return {
+          success: false,
+          code: "UNSUPPORTED_ENTRY_TYPE",
+          error: "This file system entry type cannot be deleted from NCE.",
+        };
+      }
+      return {
+        path: targetPath,
+        root,
+        type: stats.isDirectory() ? "folder" : "file",
+        isSymbolicLink,
+      };
+    } catch (error: any) {
+      const code = error?.code === "ENOENT"
+        ? "SOURCE_NOT_FOUND"
+        : error?.code === "EACCES" || error?.code === "EPERM"
+          ? "PERMISSION_DENIED"
+          : "PATH_VALIDATION_FAILED";
       return {
         success: false,
         code,
-        type: code === "FOLDER_NOT_EMPTY" ? "folder" : undefined,
-        path: targetPath,
-        error:
-          code === "FOLDER_NOT_EMPTY"
-            ? "The folder is not empty."
-            : error?.message || "Delete failed.",
+        error: code === "SOURCE_NOT_FOUND"
+          ? "The file or folder no longer exists."
+          : code === "PERMISSION_DENIED"
+            ? "NCE does not have permission to access this path."
+            : "NCE could not safely validate this path.",
       };
     }
+  }
+
+  private runDeletionOperation(
+    targetValue: unknown,
+    operation: () => Promise<FileOperationResult>,
+  ): Promise<FileOperationResult> {
+    if (!validPath(targetValue) || !path.isAbsolute(targetValue) ||
+        targetValue !== targetValue.trim()) return Promise.resolve(invalidPath());
+    const key = process.platform === "win32"
+      ? path.resolve(targetValue).toLowerCase()
+      : path.resolve(targetValue);
+    const existing = this.pendingDeletionOperations.get(key);
+    if (existing) return existing;
+    let pending: Promise<FileOperationResult>;
+    pending = this.withDeletionLock(operation).finally(() => {
+      if (this.pendingDeletionOperations.get(key) === pending)
+        this.pendingDeletionOperations.delete(key);
+    });
+    this.pendingDeletionOperations.set(key, pending);
+    return pending;
+  }
+
+  moveToTrash(targetValue: unknown): Promise<FileOperationResult> {
+    return this.runDeletionOperation(targetValue, async () => {
+      const validated = await this.validateDeletionTarget(targetValue);
+      if ("success" in validated) return validated;
+      try {
+        // Recheck the entry immediately before invoking the OS API. lstat keeps
+        // symlinks as links instead of resolving their targets.
+        const latestValidation = await this.validateDeletionTarget(validated.path);
+        if ("success" in latestValidation) return latestValidation;
+        const latest = await fs.lstat(validated.path);
+        if (
+          latest.isSymbolicLink() !== validated.isSymbolicLink ||
+          (latest.isDirectory() ? "folder" : "file") !== validated.type
+        ) {
+          return {
+            success: false,
+            action: "trash",
+            code: "PATH_CHANGED",
+            error: "The file system entry changed before it could be moved.",
+          };
+        }
+        const currentRoot = this.window.watcher?.getWatchedPath?.();
+        if (!validPath(currentRoot) || path.resolve(await fs.realpath(currentRoot)) !== path.resolve(validated.root)) {
+          return {
+            success: false,
+            action: "trash",
+            code: "WORKSPACE_CHANGED",
+            error: "The active workspace changed. Try again.",
+          };
+        }
+        await this.trashItem(validated.path);
+        this.clearFileCache(validated.path);
+        return {
+          success: true,
+          action: "trash",
+          path: validated.path,
+          type: validated.type,
+        };
+      } catch (error: any) {
+        const code = error?.code === "ENOENT"
+          ? "SOURCE_NOT_FOUND"
+          : error?.code === "EACCES" || error?.code === "EPERM"
+            ? "PERMISSION_DENIED"
+            : error?.code === "EBUSY" || error?.code === "ETXTBSY"
+              ? "ENTRY_BUSY"
+              : "TRASH_FAILED";
+        console.warn("[FileManager] Move to Trash failed", { code });
+        return {
+          success: false,
+          action: "trash",
+          code,
+          path: validated.path,
+          type: validated.type,
+          error: code === "SOURCE_NOT_FOUND"
+            ? "The file or folder no longer exists."
+            : code === "PERMISSION_DENIED"
+              ? "NCE does not have permission to move this item to the Trash."
+              : code === "ENTRY_BUSY"
+                ? "The file or folder is currently in use."
+                : "The system could not move this item to the Trash.",
+        };
+      }
+    });
+  }
+
+  permanentlyDelete(targetValue: unknown): Promise<FileOperationResult> {
+    return this.runDeletionOperation(targetValue, async () => {
+      const validated = await this.validateDeletionTarget(targetValue);
+      if ("success" in validated) return validated;
+      try {
+        const latestValidation = await this.validateDeletionTarget(validated.path);
+        if ("success" in latestValidation) return latestValidation;
+        const latest = await fs.lstat(validated.path);
+        if (
+          latest.isSymbolicLink() !== validated.isSymbolicLink ||
+          (latest.isDirectory() ? "folder" : "file") !== validated.type
+        ) {
+          return {
+            success: false,
+            action: "permanent-delete",
+            code: "PATH_CHANGED",
+            error: "The file system entry changed before it could be deleted.",
+          };
+        }
+        const currentRoot = this.window.watcher?.getWatchedPath?.();
+        if (!validPath(currentRoot) || path.resolve(await fs.realpath(currentRoot)) !== path.resolve(validated.root)) {
+          return {
+            success: false,
+            action: "permanent-delete",
+            code: "WORKSPACE_CHANGED",
+            error: "The active workspace changed. Try again.",
+          };
+        }
+        await fs.rm(validated.path, { recursive: true, force: false });
+        this.clearFileCache(validated.path);
+        return {
+          success: true,
+          action: "permanent-delete",
+          path: validated.path,
+          type: validated.type,
+        };
+      } catch (error: any) {
+        const code = error?.code === "ENOENT"
+          ? "SOURCE_NOT_FOUND"
+          : error?.code === "EACCES" || error?.code === "EPERM"
+            ? "PERMISSION_DENIED"
+            : error?.code === "EBUSY" || error?.code === "ETXTBSY"
+              ? "ENTRY_BUSY"
+              : "DELETE_FAILED";
+        console.warn("[FileManager] Permanent deletion failed", { code });
+        return {
+          success: false,
+          action: "permanent-delete",
+          code,
+          path: validated.path,
+          type: validated.type,
+          error: code === "SOURCE_NOT_FOUND"
+            ? "The file or folder no longer exists."
+            : code === "PERMISSION_DENIED"
+              ? "NCE does not have permission to delete this item."
+              : code === "ENTRY_BUSY"
+                ? "The file or folder is currently in use."
+                : "The file or folder could not be permanently deleted.",
+        };
+      }
+    });
   }
 
   async createFile(

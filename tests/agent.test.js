@@ -12,7 +12,14 @@ async function flushSearchIndex(search, root) {
 
 async function setup(fetchMock) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-agent-"));
-  const manager = new FileManager({});
+  const manager = new FileManager({
+    watcher: {
+      getWatchedPath: () => root,
+      beginOwnWrite: () => null,
+      commitOwnWrite() {},
+      cancelOwnWrite() {},
+    },
+  });
   const search = new WorkspaceSearch({});
   const files = new Map();
   const originalWriteFile = fs.writeFile.bind(fs);
@@ -502,8 +509,8 @@ test("delete_folder reconciles a filesystem error after deletion and reports cle
   try {
     const target = path.join(root, "tmp");
     await fs.mkdir(target);
-    const actualDelete = agent.api.deleteEntry;
-    agent.api.deleteEntry = async (...args) => {
+    const actualDelete = agent.api.permanentlyDelete;
+    agent.api.permanentlyDelete = async (...args) => {
       await actualDelete(...args);
       throw new Error("response lost after deletion");
     };

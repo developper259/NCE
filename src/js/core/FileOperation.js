@@ -3,9 +3,12 @@ class FileOperations {
     return window.api.renameEntry(oldPath, newPath);
   }
 
-  async delete(targetPath, force = false) {
-    const safeForce = typeof force === "boolean" ? force : false;
-    return window.api.deleteEntry(targetPath, safeForce);
+  async moveToTrash(targetPath) {
+    return window.api.moveToTrash(targetPath);
+  }
+
+  async permanentlyDelete(targetPath) {
+    return window.api.permanentlyDelete(targetPath);
   }
 
   async createFile(dirPath, fileName, content = "", overwrite = false) {

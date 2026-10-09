@@ -977,7 +977,7 @@ class WorkspaceFileManager {
         : null;
     const deleteGuard = this.agent.getMutationGuardError();
     if (deleteGuard) return { success: false, error: deleteGuard };
-    const operation = await this.agent.api?.deleteEntry?.(target.absolutePath);
+    const operation = await this.agent.api?.permanentlyDelete?.(target.absolutePath);
     if (!operation?.success) {
       return {
         success: false,
@@ -1174,10 +1174,7 @@ class WorkspaceFileManager {
     let operation;
     let deletionError = null;
     try {
-      operation = await this.agent.api?.deleteEntry?.(
-        target.absolutePath,
-        true,
-      );
+      operation = await this.agent.api?.permanentlyDelete?.(target.absolutePath);
     } catch (error) {
       deletionError = error;
       console.warn("[NCE Agent delete_folder] filesystem_delete failed", {

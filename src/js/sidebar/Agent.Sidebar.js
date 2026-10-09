@@ -3971,7 +3971,7 @@ class AgentSidebar extends Sidebar {
         this.agent.fileSnapshots.delete(change.snapshotKey);
         await this.editor?.tabManager?.reloadFileFromDisk?.(absolutePath);
       } else {
-        const result = await this.editor?.api?.deleteEntry?.(absolutePath);
+        const result = await this.editor?.api?.permanentlyDelete?.(absolutePath);
         if (!result?.success) return false;
         this.editor?.tabManager?.markFileAsDeleted?.(absolutePath);
       }

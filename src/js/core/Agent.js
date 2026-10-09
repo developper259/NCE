@@ -8,7 +8,7 @@ class Agent {
       "createFile",
       "createFolder",
       "renameEntry",
-      "deleteEntry",
+      "permanentlyDelete",
       "copyEntry",
       "moveEntry",
       "duplicateEntry",

@@ -1768,7 +1768,7 @@ test("copy fallback does not follow a symbolic-link destination", { skip: proces
 
 test("FileManager mutation safety, cache invalidation and nested creation", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-operations-"));
-  const manager = new FileManager({});
+  const manager = new FileManager({ watcher: { getWatchedPath: () => root } });
   try {
     assert.equal(
       (await manager.createFile(root, "nested/a.txt", "original")).success,
@@ -1791,11 +1791,11 @@ test("FileManager mutation safety, cache invalidation and nested creation", asyn
     assert.equal((await manager.renameEntry(moved, renamed)).success, true);
     assert.equal((await manager.getFileChunk(moved, 0, 1)).success, false);
     await manager.initializeFile(renamed);
-    assert.equal((await manager.deleteEntry(renamed)).success, true);
+    assert.equal((await manager.permanentlyDelete(renamed)).success, true);
     assert.equal((await manager.getFileChunk(renamed, 0, 1)).success, false);
     for (const invalid of [null, 123, {}, "", "   ", "bad\0path"]) {
       assert.equal(await manager.saveFile(invalid, "x"), undefined);
-      assert.equal((await manager.deleteEntry(invalid)).success, false);
+      assert.equal((await manager.permanentlyDelete(invalid)).success, false);
       assert.equal(
         (await manager.createFile(invalid, "file", "x")).success,
         false,
@@ -1815,70 +1815,164 @@ test("FileManager mutation safety, cache invalidation and nested creation", asyn
   }
 });
 
-test("FileManager deletes files and folders only with explicit recursive force", async () => {
-  const root = await fsp.mkdtemp(
-    path.join(os.tmpdir(), "nce-delete-contract-"),
+test("FileManager moves files and folders to the native Trash operation", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-trash-contract-"));
+  const calls = [];
+  const manager = new FileManager(
+    { watcher: { getWatchedPath: () => root } },
+    async (targetPath) => { calls.push(targetPath); },
   );
-  const manager = new FileManager({});
   try {
     const file = path.join(root, "file.txt");
     await fsp.writeFile(file, "content");
-    assert.deepEqual(await manager.deleteEntry(file, false), {
+    assert.deepEqual(await manager.moveToTrash(file), {
       success: true,
+      action: "trash",
       path: file,
       type: "file",
     });
+    assert.equal(await fsp.readFile(file, "utf8"), "content");
 
     const emptyFolder = path.join(root, "empty");
     await fsp.mkdir(emptyFolder);
-    assert.deepEqual(await manager.deleteEntry(emptyFolder, false), {
-      success: true,
-      path: emptyFolder,
-      type: "folder",
-    });
+    assert.equal((await manager.moveToTrash(emptyFolder)).type, "folder");
 
     const nonEmpty = path.join(root, "non-empty");
     const child = path.join(nonEmpty, "child.txt");
     await fsp.mkdir(nonEmpty);
     await fsp.writeFile(child, "keep");
-    const refused = await manager.deleteEntry(nonEmpty, false);
-    assert.equal(refused.success, false);
-    assert.equal(refused.code, "FOLDER_NOT_EMPTY");
+    assert.equal((await manager.moveToTrash(nonEmpty)).success, true);
     assert.equal(await fsp.readFile(child, "utf8"), "keep");
-
-    const forced = await manager.deleteEntry(nonEmpty, true);
-    assert.equal(forced.success, true);
-    assert.equal(forced.type, "folder");
-    assert.equal(forced.forced, true);
-    await assert.rejects(fsp.access(nonEmpty));
-
-    const missing = await manager.deleteEntry(
-      path.join(root, "missing"),
-      false,
-    );
-    assert.equal(missing.code, "SOURCE_NOT_FOUND");
-
-    assert.equal(
-      (await manager.deleteEntry(path.parse(root).root, true)).code,
-      "INVALID_PATH",
-    );
-    if (process.platform !== "win32") {
-      const external = await fsp.mkdtemp(
-        path.join(os.tmpdir(), "nce-delete-link-target-"),
-      );
-      const link = path.join(root, "external-link");
-      try {
-        await fsp.writeFile(path.join(external, "keep.txt"), "keep");
-        await fsp.symlink(external, link, "dir");
-        const linkResult = await manager.deleteEntry(link, true);
-        assert.equal(linkResult.success, true);
-        await fsp.access(path.join(external, "keep.txt"));
-      } finally {
-        await fsp.rm(external, { recursive: true, force: true });
-      }
-    }
+    assert.deepEqual(calls, [file, emptyFolder, nonEmpty]);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Trash errors are structured and never fall back to permanent filesystem deletion", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-trash-failure-"));
+  const file = path.join(root, "file.txt");
+  await fsp.writeFile(file, "keep");
+  const manager = new FileManager(
+    { watcher: { getWatchedPath: () => root } },
+    async () => { throw Object.assign(new Error("private full path"), { code: "EPERM" }); },
+  );
+  try {
+    const result = await manager.moveToTrash(file);
+    assert.deepEqual(result, {
+      success: false,
+      action: "trash",
+      code: "PERMISSION_DENIED",
+      path: file,
+      type: "file",
+      error: "NCE does not have permission to move this item to the Trash.",
+    });
+    assert.equal(await fsp.readFile(file, "utf8"), "keep");
+    assert.equal(result.error.includes(root), false);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent requests for one path share a single native Trash operation", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-trash-race-"));
+  const file = path.join(root, "file.txt");
+  await fsp.writeFile(file, "keep");
+  let releaseTrash;
+  const waitForTrash = new Promise((resolve) => { releaseTrash = resolve; });
+  let notifyTrashStarted;
+  const trashStarted = new Promise((resolve) => { notifyTrashStarted = resolve; });
+  const calls = [];
+  const manager = new FileManager(
+    { watcher: { getWatchedPath: () => root } },
+    async (target) => { calls.push(target); notifyTrashStarted(); await waitForTrash; },
+  );
+  try {
+    const first = manager.moveToTrash(file);
+    const duplicate = manager.moveToTrash(file);
+    assert.equal(duplicate, first);
+    await trashStarted;
+    assert.deepEqual(calls, [file]);
+    releaseTrash();
+    assert.equal((await first).success, true);
+  } finally {
+    releaseTrash();
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("Move to Trash passes a symlink entry itself without following its target", { skip: process.platform === "win32" }, async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-trash-symlink-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-trash-target-"));
+  const externalFile = path.join(outside, "keep.txt");
+  const link = path.join(root, "linked-folder");
+  const calls = [];
+  const manager = new FileManager(
+    { watcher: { getWatchedPath: () => root } },
+    async (target) => { calls.push(target); },
+  );
+  try {
+    await fsp.writeFile(externalFile, "keep");
+    await fsp.symlink(outside, link, "dir");
+    assert.equal((await manager.moveToTrash(link)).success, true);
+    assert.deepEqual(calls, [link]);
+    await fsp.access(externalFile);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("deletion IPC operations reject roots, outside paths, internal paths, and missing targets", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-delete-security-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-delete-outside-"));
+  const manager = new FileManager(
+    { watcher: { getWatchedPath: () => root } },
+    async () => {},
+  );
+  try {
+    const file = path.join(root, "file.txt");
+    await fsp.writeFile(file, "keep");
+    assert.equal((await manager.moveToTrash(root)).code, "PROTECTED_PATH");
+    assert.equal((await manager.permanentlyDelete(root)).code, "PROTECTED_PATH");
+    assert.equal((await manager.moveToTrash(path.join(outside, "outside.txt"))).code, "OUTSIDE_WORKSPACE");
+    assert.equal((await manager.moveToTrash(path.join(root, ".nce", "workspace.json"))).code, "PROTECTED_PATH");
+    assert.equal((await manager.moveToTrash(path.join(root, ".nce"))).code, "PROTECTED_PATH");
+    assert.equal((await manager.permanentlyDelete(path.join(root, "missing"))).code, "SOURCE_NOT_FOUND");
+    assert.equal((await new FileManager({}).permanentlyDelete(file)).code, "NO_ACTIVE_WORKSPACE");
+    assert.equal((await manager.moveToTrash(path.parse(root).root)).code, "INVALID_PATH");
+    assert.equal(await fsp.readFile(file, "utf8"), "keep");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("permanent deletion is distinct, recursive only by explicit call, and does not follow symlinks", { skip: process.platform === "win32" }, async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-permanent-delete-"));
+  const external = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-delete-link-target-"));
+  const manager = new FileManager({ watcher: { getWatchedPath: () => root } }, async () => {
+    assert.fail("permanent deletion must not call the Trash operation");
+  });
+  try {
+    const folder = path.join(root, "non-empty");
+    const child = path.join(folder, "child.txt");
+    await fsp.mkdir(folder);
+    await fsp.writeFile(child, "remove");
+    const result = await manager.permanentlyDelete(folder);
+    assert.equal(result.success, true);
+    assert.equal(result.action, "permanent-delete");
+    await assert.rejects(fsp.access(folder));
+
+    const externalFile = path.join(external, "keep.txt");
+    const link = path.join(root, "external-link");
+    await fsp.writeFile(externalFile, "keep");
+    await fsp.symlink(external, link, "dir");
+    assert.equal((await manager.permanentlyDelete(link)).success, true);
+    await fsp.access(externalFile);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+    await fsp.rm(external, { recursive: true, force: true });
   }
 });
 

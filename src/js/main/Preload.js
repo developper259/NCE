@@ -187,12 +187,11 @@ contextBridge.exposeInMainWorld("api", {
   renameEntry: (oldPath, newPath) =>
     ipcRenderer.invoke("FileManager:rename", oldPath, newPath),
 
-  deleteEntry: (targetPath, force = false) =>
-    ipcRenderer.invoke(
-      "FileManager:delete",
-      targetPath,
-      typeof force === "boolean" ? force : false,
-    ),
+  moveToTrash: (targetPath) =>
+    ipcRenderer.invoke("FileManager:moveToTrash", targetPath),
+
+  permanentlyDelete: (targetPath) =>
+    ipcRenderer.invoke("FileManager:permanentlyDelete", targetPath),
 
   createFile: (dirPath, fileName, content = "", overwrite = false) =>
     ipcRenderer.invoke(
