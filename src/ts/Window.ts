@@ -334,6 +334,8 @@ export class Window {
         this.clearQuitTimer();
         this.quitState = "approved";
         this.forceQuit = true;
+        const owner = this.window?.webContents;
+        if (owner) this.terminalManager?.closeForOwner(owner);
         this.window?.close();
         return true;
       });
@@ -499,6 +501,7 @@ export class Window {
       return false;
     if (!this.rendererReady || this.window.webContents.isDestroyed()) {
       this.forceQuit = true;
+      this.terminalManager?.closeForOwner(this.window.webContents);
       this.window.close();
       return true;
     }
@@ -521,6 +524,7 @@ export class Window {
           if (response === 0 && this.window) {
             this.forceQuit = true;
             this.quitState = "approved";
+            this.terminalManager?.closeForOwner(this.window.webContents);
             this.window.close();
           } else {
             this.quitState = "idle";
