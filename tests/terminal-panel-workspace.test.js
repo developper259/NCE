@@ -215,11 +215,14 @@ test("tab management shortcuts operate on the active workspace's terminal sessio
   state.sessions.set("pty-two", record("pty-two", "no-workspace", "zsh — two"));
   state.activeSessionId = "pty-two";
   const calls = [];
-  panel.createTerminal = () => calls.push("new");
-  panel.closeSession = (id) => calls.push(`close:${id}`);
-  panel.activateSession = (id) => {
+  panel.createTerminal = () => {
+    calls.push("new");
+    return Promise.resolve(true);
+  };
+  panel.closeSession = (id, options) => calls.push(`close:${id}:${options?.focusTerminal === true}`);
+  panel.activateSession = (id, options) => {
     state.activeSessionId = id;
-    calls.push(`activate:${id}`);
+    calls.push(`activate:${id}:${options?.focusTerminal === true}`);
   };
 
   assert.equal(panel.handleTabKeybinding("new_file"), true);
@@ -231,11 +234,11 @@ test("tab management shortcuts operate on the active workspace's terminal sessio
 
   assert.deepEqual(calls, [
     "new",
-    "close:pty-two",
-    "activate:pty-one",
-    "activate:pty-two",
-    "close:pty-one",
-    "close:pty-two",
+    "close:pty-two:true",
+    "activate:pty-one:true",
+    "activate:pty-two:true",
+    "close:pty-one:false",
+    "close:pty-two:false",
   ]);
 });
 
@@ -303,6 +306,56 @@ test("selecting a terminal session tab returns keyboard focus to xterm", () => {
   assert.equal(terminalFocusCalls, 1);
   assert.equal(tabFocusCalls, 0);
   assert.equal(fitFocus, false);
+});
+
+test("next, previous and close shortcuts keep focus in the active terminal", async () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const focusCalls = new Map();
+  for (const id of ["first-session", "second-session"]) {
+    const session = record(id, state.workspaceKey, id);
+    focusCalls.set(id, 0);
+    session.terminal.focus = () => focusCalls.set(id, focusCalls.get(id) + 1);
+    state.sessions.set(id, session);
+  }
+  state.activeSessionId = "first-session";
+  panel.tabsList = { contains: () => false };
+  panel.renderTabs = () => {};
+  panel.showActive = () => {};
+  panel.scheduleFit = () => {};
+  panel.activateSession = TerminalPanel.prototype.activateSession;
+  panel.closeSession = TerminalPanel.prototype.closeSession;
+  context.document = { activeElement: {} };
+
+  panel.handleTabKeybinding("next_tab");
+  assert.equal(panel.activeSessionId, "second-session");
+  assert.equal(focusCalls.get("second-session"), 1);
+
+  panel.handleTabKeybinding("previous_tab");
+  assert.equal(panel.activeSessionId, "first-session");
+  assert.equal(focusCalls.get("first-session"), 1);
+
+  panel.activeSessionId = "second-session";
+  panel.handleTabKeybinding("close_file");
+  assert.equal(panel.activeSessionId, "first-session");
+  assert.equal(focusCalls.get("first-session"), 2);
+  await Promise.resolve();
+});
+
+test("new terminal shortcut restores focus after the session is created", async () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  let focusCalls = 0;
+  const active = record("active-session", state.workspaceKey, "zsh — project");
+  active.terminal.focus = () => { focusCalls++; };
+  state.sessions.set(active.id, active);
+  state.activeSessionId = active.id;
+  panel.createTerminal = () => Promise.resolve(true);
+
+  panel.handleTabKeybinding("new_file");
+  await Promise.resolve();
+
+  assert.equal(focusCalls, 1);
 });
 
 test("only the active workspace can close one of its terminal sessions", async () => {

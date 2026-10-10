@@ -197,11 +197,13 @@ export class TerminalPanel {
   handleTabKeybinding(action) {
     const state = this.currentState;
     if (action === "new_file") {
-      void this.createTerminal();
+      const focusActiveTerminal = () => this.getActiveSession()?.terminal.focus?.();
+      void this.createTerminal().then(focusActiveTerminal, focusActiveTerminal);
       return true;
     }
     if (action === "close_file") {
-      if (state.activeSessionId) void this.closeSession(state.activeSessionId);
+      if (state.activeSessionId)
+        void this.closeSession(state.activeSessionId, { focusTerminal: true });
       return true;
     }
     if (action === "close_all_file") {
@@ -227,7 +229,7 @@ export class TerminalPanel {
     const nextIndex = currentIndex < 0
       ? direction > 0 ? 0 : ids.length - 1
       : (currentIndex + direction + ids.length) % ids.length;
-    return this.activateSession(ids[nextIndex]);
+    return this.activateSession(ids[nextIndex], { focusTerminal: true });
   }
 
   closeAllSessions() {
@@ -657,7 +659,7 @@ export class TerminalPanel {
     return true;
   }
 
-  async closeSession(id) {
+  async closeSession(id, { focusTerminal = false } = {}) {
     const state = this.currentState;
     const record = state.sessions.get(id);
     if (!record || record.workspaceKey !== this.currentWorkspaceKey || record.closingPromise) return false;
@@ -679,15 +681,18 @@ export class TerminalPanel {
     this.normalizeSingletonDuplicateIndices(state, removedName);
     this.recomputeLabels(state);
     this.renderTabs();
-    if (keepTabFocus && state.activeSessionId && state.sessions.size > 1) {
+    if (keepTabFocus && !focusTerminal && state.activeSessionId && state.sessions.size > 1) {
       const index = [...state.sessions.keys()].indexOf(state.activeSessionId);
       this.tabsList?.querySelectorAll?.('[role="tab"]')?.[index]?.focus?.();
-    } else if (keepTabFocus && state.activeSessionId) {
-      this.getActiveSession()?.terminal.focus?.();
     }
     const active = this.getActiveSession();
-    if (active) this.showActive(active);
-    else this.clearTerminalActions();
+    if (active) {
+      this.showActive(active);
+      if (focusTerminal || (keepTabFocus && state.sessions.size <= 1))
+        active.terminal.focus?.();
+    } else {
+      this.clearTerminalActions();
+    }
     this.notifyWorkspaceChanged(this.currentWorkspaceKey);
 
     if (!state.sessions.size) {
