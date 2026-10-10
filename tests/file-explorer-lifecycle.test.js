@@ -1255,30 +1255,11 @@ test("workspace UI restoration never reopens the project", async () => {
   assert.equal(attempts, 0);
 });
 
-test("large workspace mode displays its cause and clears across workspace switches", () => {
+test("large workspace index stats stay scoped without badge or popup UI", () => {
   const FileExplorer = loadFileExplorer();
-  let refreshedDialogStats = 0;
-  let dialogCloses = 0;
-  const badge = {
-    hidden: true,
-    textContent: "",
-    title: "",
-    attributes: {},
-    setAttribute(name, value) { this.attributes[name] = value; },
-  };
   const explorer = Object.assign(Object.create(FileExplorer.prototype), {
     rootPath: "/project-a",
-    workspaceModeBadge: badge,
     workspaceIndexStats: null,
-    largeWorkspaceMode: false,
-    workspaceModeDialog: {
-      open: true,
-      close() {
-        dialogCloses++;
-        this.open = false;
-      },
-    },
-    updateWorkspaceModeDialogStats() { refreshedDialogStats++; },
   });
   const largeStats = {
     root: "/project-a",
@@ -1292,111 +1273,14 @@ test("large workspace mode displays its cause and clears across workspace switch
   };
 
   assert.equal(explorer.applyWorkspaceIndexStats(largeStats), true);
-  assert.equal(badge.hidden, false);
-  assert.match(badge.textContent, /LARGE WORKSPACE MODE/);
-  assert.match(badge.title, /18,000 files/);
-  assert.match(badge.title, /all editor features remain available/i);
-  assert.equal(refreshedDialogStats, 1);
-  assert.equal(explorer.formatIndexedSize(3 * 1024 ** 3), "3.0 GiB");
+  assert.equal(explorer.workspaceIndexStats, largeStats);
+  assert.equal(explorer.workspaceModeBadge, undefined);
+  assert.equal(explorer.workspaceModeDialog, undefined);
+  assert.equal(typeof explorer.showWorkspaceModeDialog, "undefined");
+  assert.equal(typeof explorer.restoreWorkspaceModeDialogFocus, "undefined");
 
   explorer.rootPath = "/project-b";
   assert.equal(explorer.applyWorkspaceIndexStats(largeStats), false);
   explorer.clearWorkspaceIndexStats();
-  assert.equal(badge.hidden, true);
-  assert.equal(badge.textContent, "");
-  assert.equal(dialogCloses, 1);
-  assert.equal(explorer.workspaceModeDialog.open, false);
-});
-
-test("workspace dialog restores focus after native close and ignores a stale restore after reopen", () => {
-  const frames = new Map();
-  let nextFrameId = 1;
-  const document = {
-    body: { tagName: "BODY" },
-    activeElement: null,
-    modals: [],
-    querySelectorAll() {
-      return this.modals.filter((modal) =>
-        modal.tagName !== "DIALOG" || modal.open === true,
-      );
-    },
-  };
-  const FileExplorer = loadFileExplorer({}, () => true, {
-    document,
-    requestAnimationFrame(callback) {
-      const id = nextFrameId++;
-      frames.set(id, callback);
-      return id;
-    },
-  });
-  const badge = {
-    isConnected: true,
-    hidden: true,
-    attributes: {},
-    setAttribute(name, value) { this.attributes[name] = value; },
-    closest() { return null; },
-  };
-  const header = {
-    isConnected: true,
-    hidden: false,
-    closest() { return null; },
-    focus() { document.activeElement = this; },
-  };
-  const closeButton = {
-    isConnected: true,
-    hidden: false,
-    focus() { document.activeElement = this; },
-  };
-  const dialog = {
-    tagName: "DIALOG",
-    open: false,
-    getAttribute() { return "true"; },
-    showModal() { this.open = true; },
-    querySelector() { return closeButton; },
-  };
-  document.modals = [dialog];
-  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
-    editor: { quickPanel: { isOpen: () => false } },
-    largeWorkspaceMode: true,
-    workspaceIndexStats: { fileCount: 18000 },
-    workspaceModeBadge: badge,
-    workspaceModeDialog: dialog,
-    workspaceModeDialogPreviousFocus: badge,
-    workspaceModeFocusGeneration: 0,
-    projectHeader: header,
-    updateWorkspaceModeDialogStats() {},
-  });
-  document.activeElement = document.body;
-
-  explorer.restoreWorkspaceModeDialogFocus();
-  assert.equal(document.activeElement, document.body);
-  const [restoreId] = frames.keys();
-  const restore = frames.get(restoreId);
-  frames.delete(restoreId);
-  restore();
-  assert.equal(document.activeElement, header);
-
-  document.activeElement = badge;
-  explorer.workspaceModeDialogPreviousFocus = badge;
-  explorer.restoreWorkspaceModeDialogFocus();
-  const [staleRestoreId] = frames.keys();
-  const staleRestore = frames.get(staleRestoreId);
-  frames.delete(staleRestoreId);
-  explorer.showWorkspaceModeDialog();
-  assert.equal(document.activeElement, closeButton);
-  const reopenedFocus = explorer.workspaceModeDialogPreviousFocus;
-  explorer.restoreWorkspaceModeDialogFocus();
-  assert.equal(explorer.workspaceModeDialogPreviousFocus, reopenedFocus);
-  staleRestore();
-  assert.equal(dialog.open, true);
-  assert.equal(document.activeElement, closeButton);
-
-  dialog.open = false;
-  document.activeElement = document.body;
-  explorer.restoreWorkspaceModeDialogFocus();
-  const [finalRestoreId] = frames.keys();
-  const finalRestore = frames.get(finalRestoreId);
-  frames.delete(finalRestoreId);
-  finalRestore();
-  assert.equal(document.activeElement, header);
+  assert.equal(explorer.workspaceIndexStats, null);
 });

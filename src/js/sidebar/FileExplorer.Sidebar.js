@@ -19,19 +19,7 @@ class FileExplorer extends Sidebar {
     this.projectHeader = null;
     this.projectArrow = null;
     this.projectTitle = null;
-    this.workspaceModeBadge = null;
     this.workspaceIndexStats = null;
-    this.largeWorkspaceMode = false;
-    this.workspaceModeDialog = null;
-    this.workspaceModeDialogValues = new Map();
-    this.workspaceModeDialogPreviousFocus = null;
-    this.workspaceModeFocusGeneration = 0;
-    this.onWorkspaceModeDialogClick = (event) => {
-      if (event.target === this.workspaceModeDialog)
-        this.closeWorkspaceModeDialog();
-    };
-    this.onWorkspaceModeDialogClose = () =>
-      this.restoreWorkspaceModeDialogFocus();
     this.deleteDialog = null;
     this.deleteDialogTitle = null;
     this.deleteDialogSubtitle = null;
@@ -474,14 +462,27 @@ class FileExplorer extends Sidebar {
     }
 
     this.rebuildVisibleRows();
-    this.projectTitle.textContent = this.projectName
-      ? this.projectName.toUpperCase()
-      : "NO FOLDER OPENED";
-    this.updateWorkspaceModeBadge();
-    this.projectHeader.setAttribute("aria-expanded", String(this.projectExpanded));
+    const hasWorkspace = Boolean(this.rootPath);
+    this.projectTitle.textContent = hasWorkspace
+      ? (this.projectName || NCEPath.basename(this.rootPath) || "Project").toUpperCase()
+      : "EXPLORER";
+    this.projectTitle.title = hasWorkspace
+      ? `${this.projectName || NCEPath.basename(this.rootPath) || "Project"}\n${this.rootPath}`
+      : "EXPLORER";
+    this.projectHeader.classList.toggle("has-workspace", hasWorkspace);
+    if (hasWorkspace) {
+      this.projectHeader.setAttribute("role", "button");
+      this.projectHeader.tabIndex = 0;
+      this.projectHeader.setAttribute("aria-expanded", String(this.projectExpanded));
+    } else {
+      this.projectHeader.removeAttribute("role");
+      this.projectHeader.removeAttribute("aria-expanded");
+      this.projectHeader.tabIndex = -1;
+    }
+    this.projectArrow.hidden = !hasWorkspace;
     this.projectArrow.classList.toggle("expanded", this.projectExpanded);
     this.projectArrow.setAttribute("aria-hidden", "true");
-    this.treeViewport.hidden = !this.projectExpanded;
+    this.treeViewport.hidden = hasWorkspace && !this.projectExpanded;
 
     if (!this.rootPath) {
       this.renderNoFolderState();
@@ -501,241 +502,11 @@ class FileExplorer extends Sidebar {
         !Number.isSafeInteger(stats.directoryCount) ||
         !Number.isFinite(stats.totalIndexedBytes)) return false;
     this.workspaceIndexStats = stats;
-    this.largeWorkspaceMode = stats.largeWorkspaceMode === true;
-    this.updateWorkspaceModeBadge();
     return true;
   }
 
   clearWorkspaceIndexStats() {
     this.workspaceIndexStats = null;
-    this.largeWorkspaceMode = false;
-    this.updateWorkspaceModeBadge();
-  }
-
-  formatIndexedSize(bytes) {
-    const size = Math.max(0, Number(bytes) || 0);
-    if (size >= 1024 ** 3) return `${(size / 1024 ** 3).toFixed(1)} GiB`;
-    if (size >= 1024 ** 2) return `${(size / 1024 ** 2).toFixed(1)} MiB`;
-    if (size >= 1024) return `${(size / 1024).toFixed(1)} KiB`;
-    return `${Math.round(size)} B`;
-  }
-
-  updateWorkspaceModeBadge() {
-    const badge = this.workspaceModeBadge;
-    const stats = this.workspaceIndexStats;
-    if (badge) {
-      const size = this.formatIndexedSize(stats?.totalIndexedBytes);
-      const explanation = this.largeWorkspaceMode
-        ? `Large Workspace Mode is active (${Number(stats?.fileCount || 0).toLocaleString()} files, ${Number(stats?.directoryCount || 0).toLocaleString()} directories, ${size} indexed). Click for details; all editor features remain available.`
-        : "";
-      badge.hidden = !this.largeWorkspaceMode;
-      badge.textContent = this.largeWorkspaceMode ? "LARGE WORKSPACE MODE" : "";
-      badge.title = explanation;
-      badge.setAttribute(
-        "aria-label",
-        this.largeWorkspaceMode
-          ? "Large Workspace Mode. Show workspace indexing details."
-          : "",
-      );
-      badge.setAttribute(
-        "aria-expanded",
-        String(this.workspaceModeDialog?.open === true),
-      );
-    }
-
-    if (!this.largeWorkspaceMode) {
-      this.closeWorkspaceModeDialog();
-      return;
-    }
-    if (this.workspaceModeDialog?.open) this.updateWorkspaceModeDialogStats();
-  }
-
-  ensureWorkspaceModeDialog() {
-    if (this.workspaceModeDialog) return this.workspaceModeDialog;
-    if (!document.body) return null;
-
-    const dialog = document.createElement("dialog");
-    dialog.className = "file-explorer-large-workspace-dialog";
-    dialog.id = "file-explorer-large-workspace-dialog";
-    dialog.setAttribute("role", "dialog");
-    dialog.setAttribute("aria-modal", "true");
-    dialog.setAttribute("aria-labelledby", "large-workspace-dialog-title");
-    dialog.setAttribute("aria-describedby", "large-workspace-dialog-description");
-
-    const content = document.createElement("div");
-    content.className = "file-explorer-large-workspace-dialog-content";
-    const heading = document.createElement("h2");
-    heading.id = "large-workspace-dialog-title";
-    heading.textContent = "Large Workspace Mode";
-    const description = document.createElement("p");
-    description.id = "large-workspace-dialog-description";
-    description.textContent =
-      "NCE detected a large workspace and automatically adjusts background operations to reduce unnecessary resource usage.";
-
-    const stats = document.createElement("dl");
-    stats.className = "file-explorer-large-workspace-stats";
-    const statLabels = [
-      ["files", "Files indexed"],
-      ["directories", "Directories"],
-      ["size", "Indexed size"],
-      ["status", "Index status"],
-    ];
-    this.workspaceModeDialogValues = new Map();
-    for (const [key, label] of statLabels) {
-      const term = document.createElement("dt");
-      term.textContent = label;
-      const value = document.createElement("dd");
-      value.dataset.stat = key;
-      stats.append(term, value);
-      this.workspaceModeDialogValues.set(key, value);
-    }
-
-    const optimizationsHeading = document.createElement("h3");
-    optimizationsHeading.textContent = "Background optimizations";
-    const optimizations = document.createElement("ul");
-    optimizations.className = "file-explorer-large-workspace-optimizations";
-    for (const detail of [
-      "Index change notifications are batched and debounced for 500 ms (150 ms in normal mode).",
-      "Indexing uses up to 4 concurrent file probes (8 in normal mode).",
-      "Up to 4 search result sessions are cached for this workspace (8 in normal mode).",
-    ]) {
-      const item = document.createElement("li");
-      item.textContent = detail;
-      optimizations.appendChild(item);
-    }
-
-    const availability = document.createElement("p");
-    availability.className = "file-explorer-large-workspace-availability";
-    availability.textContent = "All editor features remain available.";
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.className = "file-explorer-large-workspace-close";
-    closeButton.textContent = "Got it";
-    closeButton.autofocus = true;
-    closeButton.addEventListener("click", () => this.closeWorkspaceModeDialog());
-
-    content.append(
-      heading,
-      description,
-      stats,
-      optimizationsHeading,
-      optimizations,
-      availability,
-      closeButton,
-    );
-    dialog.appendChild(content);
-    dialog.addEventListener("click", this.onWorkspaceModeDialogClick);
-    dialog.addEventListener("close", this.onWorkspaceModeDialogClose);
-    document.body.appendChild(dialog);
-    this.workspaceModeDialog = dialog;
-    return dialog;
-  }
-
-  updateWorkspaceModeDialogStats() {
-    const stats = this.workspaceIndexStats;
-    if (!stats || !this.workspaceModeDialogValues.size) return false;
-    this.workspaceModeDialogValues.get("files").textContent =
-      Number(stats.fileCount).toLocaleString();
-    this.workspaceModeDialogValues.get("directories").textContent =
-      Number(stats.directoryCount).toLocaleString();
-    this.workspaceModeDialogValues.get("size").textContent =
-      this.formatIndexedSize(stats.totalIndexedBytes);
-    this.workspaceModeDialogValues.get("status").textContent =
-      stats.ready === true ? "Ready" : "Updating";
-    return true;
-  }
-
-  showWorkspaceModeDialog() {
-    if (!this.largeWorkspaceMode || !this.workspaceIndexStats) return false;
-    const dialog = this.ensureWorkspaceModeDialog();
-    if (!dialog) return false;
-    this.updateWorkspaceModeDialogStats();
-    if (dialog.open) return true;
-    this.workspaceModeFocusGeneration++;
-    this.workspaceModeDialogPreviousFocus = document.activeElement;
-    dialog.showModal();
-    this.workspaceModeBadge?.setAttribute("aria-expanded", "true");
-    this.workspaceModeDialog.querySelector(".file-explorer-large-workspace-close")?.focus();
-    return true;
-  }
-
-  handleWorkspaceModeKeyDown(event) {
-    if (this.workspaceModeDialog?.open && event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      this.closeWorkspaceModeDialog();
-      return true;
-    }
-    if (event.target !== this.workspaceModeBadge ||
-        (event.key !== "Enter" && event.key !== " ")) return false;
-    event.preventDefault();
-    event.stopPropagation();
-    this.showWorkspaceModeDialog();
-    return true;
-  }
-
-  closeWorkspaceModeDialog() {
-    const dialog = this.workspaceModeDialog;
-    if (dialog?.open) dialog.close();
-    else this.restoreWorkspaceModeDialogFocus();
-    this.workspaceModeBadge?.setAttribute("aria-expanded", "false");
-    return Boolean(dialog);
-  }
-
-  restoreWorkspaceModeDialogFocus() {
-    // A close event from an older dialog session can arrive after a rapid
-    // reopen; leave the new session's focus target for its own close event.
-    if (this.workspaceModeDialog?.open) return;
-    const previousFocus = this.workspaceModeDialogPreviousFocus;
-    if (!previousFocus) return;
-    this.workspaceModeDialogPreviousFocus = null;
-    const generation = this.workspaceModeFocusGeneration =
-      (this.workspaceModeFocusGeneration || 0) + 1;
-    const isAvailable = (element) => element?.isConnected &&
-      !element.hidden &&
-      !element.closest?.('[hidden], [aria-hidden="true"], dialog:not([open])');
-    const restoreFocus = () => {
-      if (generation !== this.workspaceModeFocusGeneration) return;
-      if (this.workspaceModeDialog?.open || this.editor?.quickPanel?.isOpen?.()) return;
-      const activeModal = [...(document.querySelectorAll?.(
-        '[aria-modal="true"]:not(dialog), dialog[open]',
-      ) || [])].some((modal) => {
-        if (modal.open === true) return true;
-        if (modal.hidden || modal.getAttribute?.("aria-hidden") === "true")
-          return false;
-        return !modal.closest?.('[hidden], [aria-hidden="true"]');
-      });
-      if (activeModal) return;
-
-      const focusTarget = isAvailable(previousFocus)
-        ? previousFocus
-        : isAvailable(this.projectHeader) ? this.projectHeader : null;
-      const activeElement = document.activeElement;
-      if (activeElement !== previousFocus &&
-          activeElement !== document.body &&
-          activeElement !== focusTarget &&
-          !activeElement?.closest?.("dialog:not([open])")) return;
-      if (typeof focusTarget?.focus === "function")
-        focusTarget.focus({ preventScroll: true });
-    };
-    if (typeof requestAnimationFrame === "function")
-      requestAnimationFrame(restoreFocus);
-    else
-      restoreFocus();
-    this.workspaceModeBadge?.setAttribute("aria-expanded", "false");
-  }
-
-  destroyWorkspaceModeDialog() {
-    const dialog = this.workspaceModeDialog;
-    if (!dialog) return;
-    this.workspaceModeFocusGeneration++;
-    this.workspaceModeDialogPreviousFocus = null;
-    if (dialog.open) dialog.close();
-    dialog.removeEventListener("click", this.onWorkspaceModeDialogClick);
-    dialog.removeEventListener("close", this.onWorkspaceModeDialogClose);
-    dialog.remove();
-    this.workspaceModeDialog = null;
-    this.workspaceModeDialogValues.clear();
   }
 
   requestWorkspaceIndexStats(rootPath) {
@@ -752,46 +523,32 @@ class FileExplorer extends Sidebar {
     const container = document.createElement("div");
     container.className = "file-explorer-container";
 
-    const mainTitle = document.createElement("div");
-    mainTitle.className = "sidebar-main-title";
-    mainTitle.textContent = "EXPLORER";
-    container.appendChild(mainTitle);
-
     const projectHeader = document.createElement("div");
-    projectHeader.className = "sidebar-project-header";
-    projectHeader.setAttribute("role", "button");
-    projectHeader.tabIndex = 0;
-    projectHeader.setAttribute("aria-expanded", String(this.projectExpanded));
+    projectHeader.className = "sidebar-main-title sidebar-project-header";
+    projectHeader.tabIndex = -1;
     const arrow = document.createElement("i");
     arrow.className = "folder-arrow fi fi-rr-angle-small-right";
+    arrow.hidden = !this.rootPath;
     projectHeader.appendChild(arrow);
     const title = document.createElement("span");
+    title.className = "sidebar-project-title";
     projectHeader.appendChild(title);
-    const workspaceModeBadge = document.createElement("button");
-    workspaceModeBadge.type = "button";
-    workspaceModeBadge.className = "file-explorer-large-workspace";
-    workspaceModeBadge.hidden = true;
-    workspaceModeBadge.setAttribute("aria-haspopup", "dialog");
-    workspaceModeBadge.setAttribute("aria-controls", "file-explorer-large-workspace-dialog");
-    projectHeader.appendChild(workspaceModeBadge);
     projectHeader.addEventListener("click", () => {
+      if (!this.rootPath) return;
       this.projectExpanded = !this.projectExpanded;
       this.refresh();
     });
     projectHeader.addEventListener("keydown", (event) => {
-      if (event.target !== projectHeader ||
+      if (!this.rootPath || event.target !== projectHeader ||
           (event.key !== "Enter" && event.key !== " ")) return;
       event.preventDefault();
       this.projectExpanded = !this.projectExpanded;
       this.refresh();
     });
-    workspaceModeBadge.addEventListener("click", (event) => {
-      event.stopPropagation();
-      this.showWorkspaceModeDialog();
-    });
     projectHeader.addEventListener("contextmenu", (event) => {
       if (!this.rootPath) return;
       event.preventDefault();
+      event.stopPropagation();
       this.editor.contextMenuManager.openContextMenu(
         "file-explorer-project",
         null,
@@ -880,7 +637,6 @@ class FileExplorer extends Sidebar {
     this.projectHeader = projectHeader;
     this.projectArrow = arrow;
     this.projectTitle = title;
-    this.workspaceModeBadge = workspaceModeBadge;
     this.treeEmptyState = emptyState;
     this.treeEmptyMessage = emptyMessage;
     this.openFolderButton = openFolderButton;
@@ -1117,7 +873,6 @@ class FileExplorer extends Sidebar {
     this.scrollSaveTimer = null;
     this.virtualScroller?.destroy();
     this.virtualScroller = null;
-    this.destroyWorkspaceModeDialog();
     this.shell?.remove();
     this.shell = null;
     this.treeViewport = null;

@@ -124,6 +124,10 @@ test("flattened tree excludes closed descendants and collapsed project", () => {
 test("row height remains synchronized with CSS", () => {
   const css = fs.readFileSync("src/css/sidebar/fileExplorer.css", "utf8");
   assert.match(css, /--file-explorer-row-height:\s*22px/);
+  assert.match(css, /sidebar-project-title[\s\S]*text-overflow:\s*ellipsis/);
+  assert.match(css, /sidebar-project-header:focus-visible/);
+  assert.match(css, /sidebar-project-header\.has-workspace \.sidebar-project-title:hover/);
+  assert.doesNotMatch(css, /file-explorer-large-workspace/);
 });
 
 test("File Explorer keeps one shell, viewport, layer and delegated listener set", async () => {
@@ -154,6 +158,8 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
     set className(value) { this._className = value; }
     get className() { return this._className || ""; }
     setAttribute(name, value) { this.attributes.set(name, String(value)); }
+    removeAttribute(name) { this.attributes.delete(name); }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
     appendChild(child) {
       if (child.parentNode) child.parentNode.children.splice(child.parentNode.children.indexOf(child), 1);
       this.children.push(child);
@@ -181,6 +187,7 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   const explorer = Object.create(FileExplorer.prototype);
   const host = new Element("menu");
   const virtualCalls = [];
+  const contextMenus = [];
   Object.assign(explorer, {
     activeFilePath: null,
     projectName: "project",
@@ -201,7 +208,7 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
     editor: {
       tabManager: { getFileByPath: () => true },
       domManager: { wrapFastNode: (node) => ({ node }) },
-      contextMenuManager: { openContextMenu() {} },
+      contextMenuManager: { openContextMenu(...args) { contextMenus.push(args); } },
     },
   });
 
@@ -212,7 +219,16 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   const header = explorer.projectHeader;
   const button = explorer.openFolderButton;
   const nodeCount = created.length;
-  assert.equal(nodeCount - 1, 11, "the Explorer shell includes its status badge among eleven DOM nodes");
+  assert.equal(nodeCount - 1, 9, "the Explorer shell has one header and nine supporting DOM nodes");
+  assert.equal(shell.children.length, 2, "the unique workspace header sits directly above the tree viewport");
+  assert.equal(shell.children[0], header);
+  assert.equal(header.children.length, 2, "the workspace header only contains its chevron and title");
+  assert.match(header.className, /sidebar-main-title/);
+  assert.equal(header.getAttribute("role"), "button");
+  assert.equal(header.getAttribute("aria-expanded"), "true");
+  assert.equal(header.tabIndex, 0);
+  assert.equal(explorer.projectTitle.textContent, "PROJECT");
+  assert.equal(explorer.projectTitle.title, "project\n/project");
   const listenerCounts = [
     header.listeners.get("click").length,
     header.listeners.get("contextmenu").length,
@@ -227,6 +243,39 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   assert.equal(explorer.treeViewport, viewport);
   assert.equal(viewport.hidden, true);
   header.listeners.get("click")[0]();
+  assert.equal(header.getAttribute("aria-expanded"), "true");
+
+  let keyboardPrevented = false;
+  header.listeners.get("keydown")[0]({
+    target: header,
+    key: "Enter",
+    preventDefault() { keyboardPrevented = true; },
+  });
+  assert.equal(keyboardPrevented, true);
+  assert.equal(header.getAttribute("aria-expanded"), "false");
+  assert.equal(viewport.hidden, true);
+  header.listeners.get("keydown")[0]({
+    target: header,
+    key: " ",
+    preventDefault() { keyboardPrevented = true; },
+  });
+  assert.equal(header.getAttribute("aria-expanded"), "true");
+
+  let contextPrevented = false;
+  let contextPropagationStopped = false;
+  header.listeners.get("contextmenu")[0]({
+    preventDefault() { contextPrevented = true; },
+    stopPropagation() { contextPropagationStopped = true; },
+  });
+  assert.equal(contextPrevented, true);
+  assert.equal(contextPropagationStopped, true);
+  assert.deepEqual(contextMenus, [["file-explorer-project", null]]);
+
+  explorer.projectName = "A workspace name that is far too long to fit in this sidebar";
+  explorer.refresh();
+  assert.equal(explorer.projectTitle.textContent, explorer.projectName.toUpperCase());
+  assert.equal(explorer.projectTitle.title, `${explorer.projectName}\n/project`);
+
   await explorer.toggleFolder("/project/src");
   assert.equal(explorer.visibleRows.length, 2);
 
@@ -240,10 +289,22 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   explorer.projectName = "next";
   explorer.files = [];
   explorer.refresh();
+  assert.equal(explorer.projectTitle.textContent, "NEXT");
+  assert.equal(explorer.projectTitle.title, "next\n/next");
   assert.equal(explorer.treeEmptyMessage.textContent, "Folder empty");
   explorer.rootPath = "";
   explorer.projectName = "";
+  explorer.projectExpanded = false;
   explorer.refresh();
+  assert.equal(explorer.projectTitle.textContent, "EXPLORER");
+  assert.equal(header.getAttribute("role"), null);
+  assert.equal(header.getAttribute("aria-expanded"), null);
+  assert.equal(header.tabIndex, -1);
+  assert.equal(explorer.projectArrow.hidden, true);
+  assert.equal(viewport.hidden, false, "Open Folder remains reachable after a collapsed workspace closes");
+  assert.equal(button.hidden, false);
+  header.listeners.get("click")[0]();
+  assert.equal(explorer.projectExpanded, false, "the no-workspace header is not an interactive collapse control");
   assert.equal(explorer.treeEmptyMessage.textContent, "You have not yet opened a folder.");
 
   assert.equal(explorer.shell, shell);

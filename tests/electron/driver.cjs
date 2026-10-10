@@ -195,7 +195,7 @@ app.whenReady().then(() => {
         assert.deepEqual(settingsColdStart.rendererErrors, []);
         const largeWorkspaceRootA = JSON.stringify(path.join(directory, "workspace-a"));
         const largeWorkspaceRootB = JSON.stringify(path.join(directory, "workspace-b"));
-        const largeWorkspaceHoverTargets = await run(`(() => {
+        const workspaceHeader = await run(`(() => {
           const explorer = editor.fileExplorer;
           explorer.rootPath = ${largeWorkspaceRootA};
           explorer.projectName = "Workspace A";
@@ -204,7 +204,6 @@ app.whenReady().then(() => {
           editor.sidebarManager.openMenu("file-explorer");
           explorer.refresh();
           const shell = explorer.shell;
-          const badge = explorer.workspaceModeBadge;
           const stats = {
             root: explorer.rootPath,
             ready: false,
@@ -218,21 +217,94 @@ app.whenReady().then(() => {
           if (!explorer.applyWorkspaceIndexStats(stats))
             throw Error("Large workspace stats were rejected for the active workspace");
           const titleRect = explorer.projectTitle.getBoundingClientRect();
-          const badgeRect = badge.getBoundingClientRect();
-          const neutralRect = shell.querySelector(".sidebar-main-title").getBoundingClientRect();
+          const arrowRect = explorer.projectArrow.getBoundingClientRect();
+          const headerRect = explorer.projectHeader.getBoundingClientRect();
+          const outsideRect = explorer.treeViewport.getBoundingClientRect();
+          const originalName = explorer.projectName;
+          explorer.projectName = "Workspace Name ".repeat(16);
+          explorer.refresh();
+          const longName = {
+            text: explorer.projectTitle.textContent,
+            tooltip: explorer.projectTitle.title,
+            overflow: getComputedStyle(explorer.projectTitle).textOverflow,
+            whiteSpace: getComputedStyle(explorer.projectTitle).whiteSpace,
+          };
+          explorer.projectName = originalName;
+          explorer.refresh();
           return {
             title: { x: titleRect.x, y: titleRect.y, width: titleRect.width, height: titleRect.height },
-            badge: { x: badgeRect.x, y: badgeRect.y, width: badgeRect.width, height: badgeRect.height },
-            neutral: { x: neutralRect.x, y: neutralRect.y, width: neutralRect.width, height: neutralRect.height },
+            arrow: { x: arrowRect.x, y: arrowRect.y, width: arrowRect.width, height: arrowRect.height },
+            header: { x: headerRect.x, y: headerRect.y, width: headerRect.width, height: headerRect.height },
+            outside: { x: outsideRect.x, y: outsideRect.y, width: outsideRect.width, height: outsideRect.height },
+            headerCount: shell.querySelectorAll(".sidebar-project-header").length,
+            mainTitleCount: shell.querySelectorAll(".sidebar-main-title").length,
+            duplicateTitleCount: shell.querySelectorAll(".sidebar-main-title:not(.sidebar-project-header)").length,
+            badgeCount: shell.querySelectorAll(".file-explorer-large-workspace").length,
+            dialogCount: document.querySelectorAll("#file-explorer-large-workspace-dialog").length,
+            headerName: explorer.projectTitle.textContent,
+            headerPathTooltip: explorer.projectTitle.title,
+            headerRole: explorer.projectHeader.getAttribute("role"),
+            headerExpanded: explorer.projectHeader.getAttribute("aria-expanded"),
+            longName,
           };
         })()`);
+        assert.equal(workspaceHeader.headerCount, 1);
+        assert.equal(workspaceHeader.mainTitleCount, 1);
+        assert.equal(workspaceHeader.duplicateTitleCount, 0);
+        assert.equal(workspaceHeader.badgeCount, 0);
+        assert.equal(workspaceHeader.dialogCount, 0);
+        assert.equal(workspaceHeader.headerName, "WORKSPACE A");
+        assert.equal(workspaceHeader.headerPathTooltip, `Workspace A\n${path.join(directory, "workspace-a")}`);
+        assert.equal(workspaceHeader.headerRole, "button");
+        assert.equal(workspaceHeader.headerExpanded, "true");
+        assert.equal(workspaceHeader.longName.text, "WORKSPACE NAME ".repeat(16));
+        assert.match(workspaceHeader.longName.tooltip, /Workspace Name .*\n/);
+        assert.equal(workspaceHeader.longName.overflow, "ellipsis");
+        assert.equal(workspaceHeader.longName.whiteSpace, "nowrap");
         win.focus();
         const moveMouseTo = (rect) => win.webContents.sendInputEvent({
           type: "mouseMove",
           x: Math.round(rect.x + rect.width / 2),
           y: Math.round(rect.y + rect.height / 2),
         });
-        moveMouseTo(largeWorkspaceHoverTargets.neutral);
+        assert.deepEqual(await run(`(() => {
+          const header = editor.fileExplorer.projectHeader;
+          header.click();
+          const collapsed = {
+            expanded: header.getAttribute("aria-expanded"),
+            viewportHidden: editor.fileExplorer.treeViewport.hidden,
+          };
+          header.click();
+          return {
+            collapsed,
+            expanded: header.getAttribute("aria-expanded"),
+            viewportHidden: editor.fileExplorer.treeViewport.hidden,
+          };
+        })()`), {
+          collapsed: { expanded: "false", viewportHidden: true },
+          expanded: "true",
+          viewportHidden: false,
+        });
+
+        const workspaceContextMenu = await run(`(() => {
+          const manager = editor.contextMenuManager;
+          const openContextMenu = manager.openContextMenu;
+          let opened = null;
+          manager.openContextMenu = (...args) => { opened = args; };
+          try {
+            const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+            editor.fileExplorer.projectHeader.dispatchEvent(event);
+            return { opened, prevented: event.defaultPrevented };
+          } finally {
+            manager.openContextMenu = openContextMenu;
+          }
+        })()`);
+        assert.deepEqual(workspaceContextMenu, {
+          opened: ["file-explorer-project", null],
+          prevented: true,
+        });
+
+        moveMouseTo(workspaceHeader.outside);
         await waitForCondition(
           async () => (await run("!editor.fileExplorer.projectHeader.matches(':hover')")) === true,
           { description: "pointer to leave the workspace header" },
@@ -240,25 +312,10 @@ app.whenReady().then(() => {
         const workspaceNameRestingColor = await run(
           "getComputedStyle(editor.fileExplorer.projectTitle).color",
         );
-        const badgeRestingColor = await run(
-          "getComputedStyle(editor.fileExplorer.workspaceModeBadge).color",
+        const headerRestingBackground = await run(
+          "getComputedStyle(editor.fileExplorer.projectHeader).backgroundColor",
         );
-        moveMouseTo(largeWorkspaceHoverTargets.badge);
-        await waitForCondition(
-          async () => (await run("editor.fileExplorer.workspaceModeBadge.matches(':hover')")) === true,
-          { description: "pointer to hover the Large Workspace Mode badge" },
-        );
-        assert.equal(
-          await run("getComputedStyle(editor.fileExplorer.projectTitle).color"),
-          workspaceNameRestingColor,
-          "hovering the Large Workspace Mode badge leaves the workspace name at rest",
-        );
-        assert.notEqual(
-          await run("getComputedStyle(editor.fileExplorer.workspaceModeBadge).color"),
-          badgeRestingColor,
-          "hovering the Large Workspace Mode badge activates its own hover style",
-        );
-        moveMouseTo(largeWorkspaceHoverTargets.title);
+        moveMouseTo(workspaceHeader.title);
         await waitForCondition(
           async () => (await run("editor.fileExplorer.projectTitle.matches(':hover')")) === true,
           { description: "pointer to hover the workspace name" },
@@ -266,137 +323,28 @@ app.whenReady().then(() => {
         assert.notEqual(
           await run("getComputedStyle(editor.fileExplorer.projectTitle).color"),
           workspaceNameRestingColor,
-          "hovering the workspace name activates its own hover style",
+          "hover changes only the workspace name appearance",
         );
-        moveMouseTo(largeWorkspaceHoverTargets.neutral);
-        const largeWorkspaceOpen = await run(`(() => {
-          const explorer = editor.fileExplorer;
-          const shell = explorer.shell;
-          const badge = explorer.workspaceModeBadge;
-          badge.focus();
-          badge.click();
-          const dialog = explorer.workspaceModeDialog;
-          if (!dialog?.open) throw Error("Large Workspace Mode information did not open");
-          explorer.showWorkspaceModeDialog();
-          return {
-            badgeTag: badge.tagName,
-            badgeVisible: !badge.hidden,
-            badgeExpanded: badge.getAttribute("aria-expanded"),
-            headerExpanded: explorer.projectExpanded,
-            dialogCount: document.querySelectorAll("#file-explorer-large-workspace-dialog").length,
-            dialogRole: dialog.getAttribute("role"),
-            dialogModal: dialog.getAttribute("aria-modal"),
-            dialogTitle: dialog.querySelector("h2")?.textContent,
-            dialogDescription: dialog.querySelector("#large-workspace-dialog-description")?.textContent,
-            files: dialog.querySelector('[data-stat="files"]')?.textContent.replace(/[^0-9]/g, ""),
-            directories: dialog.querySelector('[data-stat="directories"]')?.textContent.replace(/[^0-9]/g, ""),
-            indexedSize: dialog.querySelector('[data-stat="size"]')?.textContent,
-            indexStatus: dialog.querySelector('[data-stat="status"]')?.textContent,
-            optimizationCount: dialog.querySelectorAll(".file-explorer-large-workspace-optimizations li").length,
-            allFeaturesAvailable: dialog.textContent.includes("All editor features remain available."),
-            focusInitial: document.activeElement === dialog.querySelector(".file-explorer-large-workspace-close"),
-            shellPreserved: explorer.shell === shell,
-          };
-        })()`);
-        assert.equal(largeWorkspaceOpen.badgeTag, "BUTTON");
-        assert.equal(largeWorkspaceOpen.badgeVisible, true);
-        assert.equal(largeWorkspaceOpen.badgeExpanded, "true");
-        assert.equal(largeWorkspaceOpen.headerExpanded, true);
-        assert.equal(largeWorkspaceOpen.dialogCount, 1);
-        assert.equal(largeWorkspaceOpen.dialogRole, "dialog");
-        assert.equal(largeWorkspaceOpen.dialogModal, "true");
-        assert.equal(largeWorkspaceOpen.dialogTitle, "Large Workspace Mode");
-        assert.match(largeWorkspaceOpen.dialogDescription, /automatically adjusts background operations/);
-        assert.equal(largeWorkspaceOpen.files, "12001");
-        assert.equal(largeWorkspaceOpen.directories, "1600");
-        assert.equal(largeWorkspaceOpen.indexedSize, "3.0 GiB");
-        assert.equal(largeWorkspaceOpen.indexStatus, "Updating");
-        assert.equal(largeWorkspaceOpen.optimizationCount, 3);
-        assert.equal(largeWorkspaceOpen.allFeaturesAvailable, true);
-        assert.equal(largeWorkspaceOpen.focusInitial, true);
-        assert.equal(largeWorkspaceOpen.shellPreserved, true);
-        await run(`editor.fileExplorer.applyWorkspaceIndexStats({
-          root: editor.fileExplorer.rootPath,
-          ready: true,
-          fileCount: 13000,
-          directoryCount: 1700,
-          totalIndexedBytes: 4 * 1024 ** 3,
-          pressureScore: 4,
-          largeWorkspaceMode: true,
-          generatedAt: Date.now(),
-        })`);
-        assert.deepEqual(
-          await run(`(() => {
-            const dialog = editor.fileExplorer.workspaceModeDialog;
-            return {
-              files: dialog.querySelector('[data-stat="files"]').textContent.replace(/[^0-9]/g, ""),
-              directories: dialog.querySelector('[data-stat="directories"]').textContent.replace(/[^0-9]/g, ""),
-              indexedSize: dialog.querySelector('[data-stat="size"]').textContent,
-              indexStatus: dialog.querySelector('[data-stat="status"]').textContent,
-              headerExpanded: editor.fileExplorer.projectExpanded,
-              dialogCount: document.querySelectorAll("#file-explorer-large-workspace-dialog").length,
-            };
-          })()`),
-          {
-            files: "13000",
-            directories: "1700",
-            indexedSize: "4.0 GiB",
-            indexStatus: "Ready",
-            headerExpanded: true,
-            dialogCount: 1,
-          },
-          "Large Workspace Mode dialog follows updated current workspace statistics without rebuilding the Explorer shell",
+        assert.equal(
+          await run("getComputedStyle(editor.fileExplorer.projectHeader).backgroundColor"),
+          headerRestingBackground,
+          "hover does not draw a box across the workspace header",
         );
-        win.focus();
-        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
-        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
+        moveMouseTo(workspaceHeader.arrow);
         await waitForCondition(
-          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === false,
-          { description: "Large Workspace Mode dialog to close with Escape" },
+          async () => (await run("!editor.fileExplorer.projectTitle.matches(':hover')")) === true,
+          { description: "pointer to leave the workspace name" },
         );
-        await waitForCondition(
-          async () => (await run("document.activeElement === editor.fileExplorer.workspaceModeBadge")) === true,
-          { description: "focus to return to the Large Workspace Mode badge after Escape" },
+        assert.equal(
+          await run("getComputedStyle(editor.fileExplorer.projectTitle).color"),
+          workspaceNameRestingColor,
+          "hover styling does not extend from the title to the header",
         );
-        await run("editor.fileExplorer.workspaceModeBadge.focus()");
-        win.focus();
-        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
-        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
-        await waitForCondition(
-          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === true,
-          { description: "Enter to activate the Large Workspace Mode badge" },
+        assert.equal(
+          await run("getComputedStyle(editor.fileExplorer.projectHeader).backgroundColor"),
+          headerRestingBackground,
         );
-        assert.equal(await run("document.activeElement === editor.fileExplorer.workspaceModeDialog.querySelector('.file-explorer-large-workspace-close')"), true);
-        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
-        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Escape" });
-        await waitForCondition(
-          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === false,
-          { description: "dialog to close before Space activation" },
-        );
-        await run("editor.fileExplorer.workspaceModeBadge.focus()");
-        win.focus();
-        win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Space" });
-        win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Space" });
-        await waitForCondition(
-          async () => (await run("editor.fileExplorer.workspaceModeDialog.open")) === true,
-          { description: "Space to activate the Large Workspace Mode badge" },
-        );
-        assert.equal(await run("document.activeElement.textContent === 'Got it'"), true);
-        await run("editor.fileExplorer.clearWorkspaceIndexStats()");
-        await waitForCondition(
-          async () => (await run("document.activeElement === editor.fileExplorer.projectHeader")) === true,
-          { description: "focus to move to the project header when the badge is hidden on workspace change" },
-        );
-        assert.deepEqual(
-          await run(`(() => ({
-            popupOpen: editor.fileExplorer.workspaceModeDialog.open,
-            badgeHidden: editor.fileExplorer.workspaceModeBadge.hidden,
-            badgeExpanded: editor.fileExplorer.workspaceModeBadge.getAttribute("aria-expanded"),
-            focusRestored: document.activeElement === editor.fileExplorer.projectHeader,
-          }))()`),
-          { popupOpen: false, badgeHidden: true, badgeExpanded: "false", focusRestored: true },
-          "workspace change closes the dialog, hides the stale badge, and restores focus",
-        );
+
         const largeWorkspaceB = await run(`(() => {
           const explorer = editor.fileExplorer;
           explorer.rootPath = ${largeWorkspaceRootB};
@@ -412,24 +360,75 @@ app.whenReady().then(() => {
               directoryCount: 2600, totalIndexedBytes: 5 * 1024 ** 3,
               largeWorkspaceMode: true,
             }),
+            headerName: explorer.projectTitle.textContent,
+            headerPath: explorer.projectTitle.title,
+            headerCount: explorer.shell.querySelectorAll(".sidebar-project-header").length,
+            duplicateTitleCount: explorer.shell.querySelectorAll(".sidebar-main-title:not(.sidebar-project-header)").length,
+            badgeCount: explorer.shell.querySelectorAll(".file-explorer-large-workspace").length,
+            dialogCount: document.querySelectorAll("#file-explorer-large-workspace-dialog").length,
           };
         })()`);
-        assert.deepEqual(largeWorkspaceB, { oldStatsAccepted: false, currentStatsAccepted: true });
-        assert.equal(await run(`(() => {
-          const explorer = editor.fileExplorer;
-          explorer.workspaceModeBadge.focus();
-          explorer.workspaceModeBadge.click();
-          return explorer.workspaceModeDialog.querySelector('[data-stat="files"]').textContent.replace(/[^0-9]/g, "");
-        })()`), "24000");
-        await run("editor.fileExplorer.workspaceModeDialog.click()");
-        assert.equal(await run("editor.fileExplorer.workspaceModeDialog.open"), false);
+        assert.deepEqual(largeWorkspaceB, {
+          oldStatsAccepted: false,
+          currentStatsAccepted: true,
+          headerName: "WORKSPACE B",
+          headerPath: `Workspace B\n${path.join(directory, "workspace-b")}`,
+          headerCount: 1,
+          duplicateTitleCount: 0,
+          badgeCount: 0,
+          dialogCount: 0,
+        });
         await run(`(() => {
           const explorer = editor.fileExplorer;
           explorer.clearWorkspaceIndexStats();
           explorer.rootPath = "";
           explorer.projectName = "";
+          explorer.projectExpanded = false;
           explorer.refresh();
         })()`);
+        assert.deepEqual(await run(`(() => {
+          const explorer = editor.fileExplorer;
+          let opened = null;
+          const manager = editor.contextMenuManager;
+          const openContextMenu = manager.openContextMenu;
+          manager.openContextMenu = (...args) => { opened = args; };
+          let event;
+          try {
+            event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+            explorer.projectHeader.dispatchEvent(event);
+          } finally {
+            manager.openContextMenu = openContextMenu;
+          }
+          const snapshot = {
+            title: explorer.projectTitle.textContent,
+            headerCount: explorer.shell.querySelectorAll(".sidebar-project-header").length,
+            duplicateTitleCount: explorer.shell.querySelectorAll(".sidebar-main-title:not(.sidebar-project-header)").length,
+            role: explorer.projectHeader.getAttribute("role"),
+            expanded: explorer.projectHeader.getAttribute("aria-expanded"),
+            arrowHidden: explorer.projectArrow.hidden,
+            tabIndex: explorer.projectHeader.tabIndex,
+            viewportHidden: explorer.treeViewport.hidden,
+            openFolderHidden: explorer.openFolderButton.hidden,
+            contextMenu: opened,
+            defaultPrevented: event.defaultPrevented,
+          };
+          explorer.projectHeader.click();
+          snapshot.expandedAfterClick = explorer.projectExpanded;
+          return snapshot;
+        })()`), {
+          title: "EXPLORER",
+          headerCount: 1,
+          duplicateTitleCount: 0,
+          role: null,
+          expanded: null,
+          arrowHidden: true,
+          tabIndex: -1,
+          viewportHidden: false,
+          openFolderHidden: false,
+          contextMenu: ["sidebar-title", { menuId: "file-explorer" }],
+          defaultPrevented: true,
+          expandedAfterClick: false,
+        });
         assert.deepEqual(
           await run(`(async () => {
             editor.sidebarManager.openMenu("agent");
