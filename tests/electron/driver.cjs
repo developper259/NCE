@@ -205,7 +205,10 @@ app.whenReady().then(() => {
         assert.equal(await nce.windowManager.openWorkspaceInNewWindow(workspaceAInput), true);
         assert.equal(nce.windowManager.getAllWindows().length, countBeforeDuplicate,
           "opening an already-open workspace focuses its existing window");
-        assert.equal(nce.windowManager.getFocusedWindow(), windowA);
+        await waitForCondition(
+          () => nce.windowManager.getFocusedWindow() === windowA,
+          { timeout: 5000, description: "existing workspace window to receive focus" },
+        );
 
         const windowBId = windowB.id;
         const windowBProcess = windowB.terminalManager;
@@ -2030,9 +2033,12 @@ app.whenReady().then(() => {
               "maximized BrowserWindow bounds to settle",
               true,
             );
+            const maximizeChangesRendererWidth =
+              Math.abs(win.getContentBounds().width - beforeRestore.innerWidth) > 1;
             await waitForRendererResize(
               beforeRestore,
               "renderer layout to follow restored maximize",
+              maximizeChangesRendererWidth,
             );
           } else {
             const beforeRestore = await readResizeState();
