@@ -153,6 +153,10 @@ class BottomBar {
     this.refreshScrollers();
   }
 
+  setSettingsActive(active) {
+    this.bottomBarElement?.classList.toggle("bottomBar-settings-mode", active === true);
+  }
+
   refreshFileStatus() {
     if (!this.fileStatusElement) return;
     const file = this.editor.tabManager.activeFile;
@@ -218,7 +222,7 @@ class BottomBar {
     const middleBottomBar = getElement(".bottomBar .middle");
     const rightBottomBar = getElement(".bottomBar .right");
 
-    leftBottomBar.style.display = "none";
+    leftBottomBar.style.display = "flex";
     middleBottomBar.style.display = "none";
     rightBottomBar.style.display = "none";
   }

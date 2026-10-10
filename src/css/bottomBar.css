@@ -70,7 +70,10 @@
 }
 .bottomBar-preview-mode #language,
 .bottomBar-preview-mode #config-space,
-.bottomBar-preview-mode .bottomBar-cursor-status { display: none !important; }
+.bottomBar-preview-mode .bottomBar-cursor-status,
+.bottomBar-settings-mode #language,
+.bottomBar-settings-mode #config-space,
+.bottomBar-settings-mode .bottomBar-cursor-status { display: none !important; }
 
 .scroller-open:active {
   background-color: var(--bg-active);

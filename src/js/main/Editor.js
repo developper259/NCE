@@ -408,6 +408,7 @@ class Editor {
     this.editorOBJ.classList.toggle("editor-settings-active", settingsActive);
     this.editorOBJ.classList.toggle("editor-picture-active", pictureActive);
     this.editorOBJ.classList.toggle("editor-markdown-active", markdownActive);
+    this.bottomBar?.setSettingsActive?.(settingsActive);
     if (settingsActive) {
       this.getSettingsView().show();
       this._pictureView?.hide();
