@@ -156,9 +156,9 @@ class CursorController {
     );
     if (!posReal) return;
 
-    if (this.isNewPosition(posReal.row, posReal.column)) {
-      this.setCursorPosition(posReal.row, posReal.column, options);
-    }
+    // Reapply even an unchanged position so clicks can restore focus and show
+    // the caret after it was hidden or the editor lost focus.
+    this.setCursorPosition(posReal.row, posReal.column, options);
 
     return posReal;
   }
