@@ -34,10 +34,17 @@ export class TerminalPanel {
         </div>
       </div>
       <div class="terminal-view"></div>`;
+    this.tabsElement = this.element.querySelector(".terminal-tabs");
     this.tabsList = this.element.querySelector(".terminal-tabs-list");
     this.view = this.element.querySelector(".terminal-view");
+    this.actionsContainer = this.element.querySelector(".terminal-tabs-actions");
     this.actionsToggle = this.element.querySelector(".terminal-actions-toggle");
     this.actionsMenu = this.element.querySelector(".terminal-actions-menu");
+    const actionsSlot = editor.bottomPanelManager?.root?.querySelector?.(
+      ".bottom-panel-terminal-actions-slot",
+    );
+    if (actionsSlot && this.actionsContainer)
+      actionsSlot.appendChild(this.actionsContainer);
     this.errorStatus = null;
 
     this.onActionsToggle = () => this.toggleActionsMenu();
@@ -48,7 +55,7 @@ export class TerminalPanel {
       void this.runAction(action);
     };
     this.onOutsidePointerDown = (event) => {
-      if (!this.element.querySelector(".terminal-tabs-actions")?.contains(event.target))
+      if (!this.actionsContainer?.contains(event.target))
         this.closeActionsMenu();
     };
     this.onTabsKeyDown = (event) => this.handleTabsKeyDown(event);
@@ -185,6 +192,48 @@ export class TerminalPanel {
       activeTabIndex = Math.min(state.restoreActiveIndex || 0, Math.max(0, tabs.length - 1));
     }
     return { version: 1, activeTabIndex, tabs };
+  }
+
+  handleTabKeybinding(action) {
+    const state = this.currentState;
+    if (action === "new_file") {
+      void this.createTerminal();
+      return true;
+    }
+    if (action === "close_file") {
+      if (state.activeSessionId) void this.closeSession(state.activeSessionId);
+      return true;
+    }
+    if (action === "close_all_file") {
+      this.closeAllSessions();
+      return true;
+    }
+    if (action === "next_tab") {
+      this.cycleSession(1);
+      return true;
+    }
+    if (action === "previous_tab") {
+      this.cycleSession(-1);
+      return true;
+    }
+    return false;
+  }
+
+  cycleSession(direction) {
+    const state = this.currentState;
+    const ids = [...state.sessions.keys()];
+    if (!ids.length) return false;
+    const currentIndex = ids.indexOf(state.activeSessionId);
+    const nextIndex = currentIndex < 0
+      ? direction > 0 ? 0 : ids.length - 1
+      : (currentIndex + direction + ids.length) % ids.length;
+    return this.activateSession(ids[nextIndex]);
+  }
+
+  closeAllSessions() {
+    const ids = [...this.currentState.sessions.keys()];
+    for (const id of ids) void this.closeSession(id);
+    return ids.length > 0;
   }
 
   onOpen() {
@@ -588,7 +637,7 @@ export class TerminalPanel {
     );
   }
 
-  activateSession(id, { focus = true } = {}) {
+  activateSession(id, { focus = true, focusTerminal = false } = {}) {
     const state = this.currentState;
     const record = state.sessions.get(id);
     if (!record || record.workspaceKey !== this.currentWorkspaceKey) return false;
@@ -597,12 +646,13 @@ export class TerminalPanel {
     const changed = state.activeSessionId !== id;
     state.activeSessionId = id;
     this.renderTabs();
-    if (keepTabFocus) {
+    if (keepTabFocus && !focusTerminal) {
       const index = [...state.sessions.keys()].indexOf(id);
       this.tabsList?.querySelectorAll?.('[role="tab"]')?.[index]?.focus?.();
     }
     this.showActive(record);
-    this.scheduleFit({ focus });
+    this.scheduleFit({ focus: focus && !focusTerminal });
+    if (focusTerminal) record.terminal.focus?.();
     if (changed) this.notifyWorkspaceChanged(this.currentWorkspaceKey);
     return true;
   }
@@ -629,9 +679,11 @@ export class TerminalPanel {
     this.normalizeSingletonDuplicateIndices(state, removedName);
     this.recomputeLabels(state);
     this.renderTabs();
-    if (keepTabFocus && state.activeSessionId) {
+    if (keepTabFocus && state.activeSessionId && state.sessions.size > 1) {
       const index = [...state.sessions.keys()].indexOf(state.activeSessionId);
       this.tabsList?.querySelectorAll?.('[role="tab"]')?.[index]?.focus?.();
+    } else if (keepTabFocus && state.activeSessionId) {
+      this.getActiveSession()?.terminal.focus?.();
     }
     const active = this.getActiveSession();
     if (active) this.showActive(active);
@@ -718,11 +770,15 @@ export class TerminalPanel {
   renderTabs() {
     if (!this.tabsList) return;
     const state = this.currentState;
-    this.tabsList.replaceChildren();
     const records = [...state.sessions.entries()];
-    for (const [id, record] of records) {
+    const showTabManager = records.length > 1;
+    if (this.tabsElement) this.tabsElement.hidden = !showTabManager;
+    this.tabsList.hidden = !showTabManager;
+    this.tabsList.replaceChildren();
+    for (const [id, record] of showTabManager ? records : []) {
       const tab = document.createElement("div");
       tab.className = "terminal-tab";
+      tab.classList.toggle("is-active", id === state.activeSessionId);
       tab.setAttribute("role", "presentation");
       const activate = document.createElement("button");
       activate.className = "terminal-tab-select";
@@ -732,8 +788,14 @@ export class TerminalPanel {
       activate.setAttribute("aria-controls", record.wrapper.id);
       activate.setAttribute("aria-selected", String(id === state.activeSessionId));
       activate.tabIndex = id === state.activeSessionId ? 0 : -1;
-      activate.textContent = record.displayLabel;
       activate.title = `${record.displayLabel}\nShell: ${record.shell || "Starting…"}\nInitial directory: ${record.cwd || "Pending"}`;
+      const icon = document.createElement("i");
+      icon.className = "fi fi-rr-terminal terminal-tab-icon";
+      icon.setAttribute("aria-hidden", "true");
+      const label = document.createElement("span");
+      label.className = "terminal-tab-label";
+      label.textContent = record.displayLabel;
+      activate.append(icon, label);
       if (record.exited) {
         const status = document.createElement("span");
         status.className = "terminal-tab-exited";
@@ -741,7 +803,9 @@ export class TerminalPanel {
         status.setAttribute("aria-label", "Process exited");
         activate.appendChild(status);
       }
-      activate.addEventListener("click", () => this.activateSession(id));
+      activate.addEventListener("click", () =>
+        this.activateSession(id, { focusTerminal: true }),
+      );
       activate.addEventListener("dblclick", () => this.renameSession(id, activate));
       const close = document.createElement("button");
       close.type = "button";
@@ -896,7 +960,7 @@ export class TerminalPanel {
   getXtermTheme() {
     const style = getComputedStyle(document.documentElement);
     return {
-      background: style.getPropertyValue("--bg-secondary").trim(),
+      background: style.getPropertyValue("--terminal-surface").trim(),
       foreground: style.getPropertyValue("--text-primary").trim(),
       cursor: style.getPropertyValue("--text-primary").trim(),
       selectionBackground: style.getPropertyValue("--selection-bg").trim(),
@@ -943,6 +1007,7 @@ export class TerminalPanel {
     this.actionsMenu?.removeEventListener("keydown", this.onActionsMenuKeyDown);
     this.tabsList?.removeEventListener("keydown", this.onTabsKeyDown);
     document.removeEventListener("pointerdown", this.onOutsidePointerDown);
+    this.actionsContainer?.remove();
     for (const state of this.workspaceSessions.values()) {
       for (const record of state.sessions.values()) {
         if (record.id)

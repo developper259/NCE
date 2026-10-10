@@ -11,6 +11,21 @@ const context = vm.createContext({ console, Map, Set, Promise, URL, setTimeout, 
 vm.runInContext(`${source}\nthis.TerminalPanel = TerminalPanel;`, context);
 const TerminalPanel = context.TerminalPanel;
 
+class ElementStub {
+  constructor() {
+    this.children = [];
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this.classList = { toggle() {} };
+    this.hidden = false;
+  }
+  setAttribute(name, value) { this.attributes.set(name, value); }
+  append(...children) { this.children.push(...children); }
+  appendChild(child) { this.children.push(child); return child; }
+  replaceChildren(...children) { this.children = children; }
+  addEventListener(name, listener) { this.listeners.set(name, listener); }
+}
+
 function makePanel() {
   const panel = Object.create(TerminalPanel.prototype);
   Object.assign(panel, {
@@ -191,6 +206,103 @@ test("open requests share one lazy first-terminal creation promise", async () =>
   finish(true);
   await state.initialOpenPromise;
   assert.equal(state.sessions.size, 0, "the single creation attempt is coalesced");
+});
+
+test("tab management shortcuts operate on the active workspace's terminal sessions", () => {
+  const panel = makePanel();
+  const state = panel.getWorkspaceState("no-workspace");
+  state.sessions.set("pty-one", record("pty-one", "no-workspace", "zsh — one"));
+  state.sessions.set("pty-two", record("pty-two", "no-workspace", "zsh — two"));
+  state.activeSessionId = "pty-two";
+  const calls = [];
+  panel.createTerminal = () => calls.push("new");
+  panel.closeSession = (id) => calls.push(`close:${id}`);
+  panel.activateSession = (id) => {
+    state.activeSessionId = id;
+    calls.push(`activate:${id}`);
+  };
+
+  assert.equal(panel.handleTabKeybinding("new_file"), true);
+  assert.equal(panel.handleTabKeybinding("close_file"), true);
+  assert.equal(panel.handleTabKeybinding("previous_tab"), true);
+  assert.equal(panel.handleTabKeybinding("next_tab"), true);
+  assert.equal(panel.handleTabKeybinding("close_all_file"), true);
+  assert.equal(panel.handleTabKeybinding("save"), false);
+
+  assert.deepEqual(calls, [
+    "new",
+    "close:pty-two",
+    "activate:pty-one",
+    "activate:pty-two",
+    "close:pty-one",
+    "close:pty-two",
+  ]);
+});
+
+test("session tab manager is shown only when at least two sessions are open", () => {
+  context.document = { createElement: () => new ElementStub() };
+  const panel = makePanel();
+  const state = panel.currentState;
+  const onlySession = record("only-session", state.workspaceKey, "zsh — project");
+  onlySession.wrapper = { id: "terminal-view-only-session" };
+  state.sessions.set(onlySession.id, onlySession);
+  state.activeSessionId = onlySession.id;
+  panel.tabsElement = new ElementStub();
+  panel.tabsList = new ElementStub();
+  panel.renderTabs = TerminalPanel.prototype.renderTabs;
+  panel.showActive = () => {};
+
+  panel.renderTabs();
+
+  assert.equal(panel.tabsElement.hidden, true);
+  assert.equal(panel.tabsList.hidden, true);
+  assert.equal(panel.tabsList.children.length, 0);
+
+  const secondSession = record("second-session", state.workspaceKey, "zsh — project 2");
+  secondSession.wrapper = { id: "terminal-view-second-session" };
+  state.sessions.set(secondSession.id, secondSession);
+  panel.renderTabs();
+
+  assert.equal(panel.tabsElement.hidden, false);
+  assert.equal(panel.tabsList.hidden, false);
+  assert.equal(panel.tabsList.children.length, 2);
+  assert.equal(panel.tabsList.children[0].children[0].attributes.get("aria-selected"), "true");
+
+  let activation = null;
+  panel.activateSession = (id, options) => { activation = { id, options }; };
+  panel.tabsList.children[1].children[0].listeners.get("click")();
+  assert.equal(activation.id, "second-session");
+  assert.equal(activation.options.focusTerminal, true);
+});
+
+test("selecting a terminal session tab returns keyboard focus to xterm", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  let terminalFocusCalls = 0;
+  let tabFocusCalls = 0;
+  let fitFocus = null;
+  for (const id of ["first-session", "second-session"]) {
+    const session = record(id, state.workspaceKey, id);
+    session.terminal.focus = () => { terminalFocusCalls++; };
+    state.sessions.set(id, session);
+  }
+  state.activeSessionId = "first-session";
+  panel.tabsList = {
+    contains: () => true,
+    querySelectorAll: () => [{ focus() { tabFocusCalls++; } }],
+  };
+  panel.showActive = () => {};
+  panel.scheduleFit = (options) => { fitFocus = options.focus; };
+  context.document = {
+    activeElement: { getAttribute: () => "tab" },
+  };
+
+  panel.activateSession("second-session", { focusTerminal: true });
+
+  assert.equal(panel.activeSessionId, "second-session");
+  assert.equal(terminalFocusCalls, 1);
+  assert.equal(tabFocusCalls, 0);
+  assert.equal(fitFocus, false);
 });
 
 test("only the active workspace can close one of its terminal sessions", async () => {

@@ -22,6 +22,9 @@ class BottomPanelManager {
     this.contentElement = this.root?.querySelector(".bottom-panel-content");
     this.newButton = this.root?.querySelector(".bottom-panel-new");
     this.killButton = this.root?.querySelector(".bottom-panel-kill");
+    this.terminalActionsSlot = this.root?.querySelector(
+      ".bottom-panel-terminal-actions-slot",
+    );
     this.closeButton = this.root?.querySelector(".bottom-panel-close");
     this.toggleButton = editor.domManager.getElement(
       ".bottomBar-terminal-toggle",
@@ -432,11 +435,15 @@ class BottomPanelManager {
     const active = this.getActivePanel();
     if (this.viewNavigation) {
       const panels = [...this.panels.values()];
+      const navigationVisible = panels.length > 1;
+      this.viewNavigation.hidden = !navigationVisible;
       const existing = [...(this.viewNavigation.children || [])];
       const matches = existing.length === panels.length && existing.every(
         (tab, index) => tab.dataset?.panelId === panels[index]?.id,
       );
-      if (!matches) {
+      if (!navigationVisible) {
+        if (existing.length) this.viewNavigation.replaceChildren();
+      } else if (!matches) {
         this.viewNavigation.replaceChildren();
         for (const panel of panels) {
           const tab = document.createElement("button");
@@ -451,17 +458,26 @@ class BottomPanelManager {
           this.viewNavigation.appendChild(tab);
         }
       }
-      for (const tab of this.viewNavigation.querySelectorAll?.('[role="tab"]') || []) {
-        const selected = tab.dataset.panelId === this.activePanelId;
-        tab.setAttribute("aria-selected", String(selected));
-        tab.tabIndex = selected ? 0 : -1;
+      if (navigationVisible) {
+        for (const tab of this.viewNavigation.querySelectorAll?.('[role="tab"]') || []) {
+          const selected = tab.dataset.panelId === this.activePanelId;
+          tab.setAttribute("aria-selected", String(selected));
+          tab.tabIndex = selected ? 0 : -1;
+        }
       }
     }
     if (this.newButton) this.newButton.hidden = typeof active?.onNew !== "function";
     if (this.killButton) this.killButton.disabled =
       typeof active?.onKill !== "function" || active.canKill?.() === false;
-    if (this.contentElement && active)
-      this.contentElement.setAttribute("aria-labelledby", `bottom-panel-view-${active.id}`);
+    if (this.terminalActionsSlot)
+      this.terminalActionsSlot.hidden = active?.id !== "terminal";
+    if (this.contentElement && active) {
+      const panels = [...this.panels.values()];
+      const labelId = panels.length > 1
+        ? `bottom-panel-view-${active.id}`
+        : "bottom-panel-title";
+      this.contentElement.setAttribute("aria-labelledby", labelId);
+    }
     if (this.toggleButton) {
       this.toggleButton.hidden = (this.editor.tabManager?.tabs?.length || 0) === 0;
       this.toggleButton.setAttribute("aria-expanded", String(this.visible));

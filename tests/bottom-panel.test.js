@@ -39,6 +39,7 @@ function createManagerHarness() {
   const document = {
     activeElement: new ElementStub(),
     documentElement: new ElementStub(),
+    body: { style: {} },
     createElement() { return new ElementStub(); },
   };
   const mainSection = new ElementStub(700);
@@ -167,10 +168,23 @@ test("restored panel state is validated and does not restore a PTY session", () 
   assert.equal(manager.panels.get("terminal").view, null);
 });
 
-test("Bottom Panel UI contains navigation and kill controls with no maximize action", () => {
+test("Bottom Panel UI keeps its title static and only exposes multi-view navigation", () => {
   const html = read("src/html/index.html");
   assert.match(html, /class="bottom-panel-views" role="tablist"/);
+  const header = html.match(/<header class="bottom-panel-header">([\s\S]*?)<\/header>/)?.[1] || "";
+  const title = header.match(/<h2 class="bottom-panel-title" id="bottom-panel-title">Terminal<\/h2>/)?.[0];
+  assert.ok(title, "Terminal is rendered as a semantic heading");
+  assert.doesNotMatch(title, /<button|role=|tabindex=|aria-selected=/i);
+  assert.match(html, /class="bottom-panel-views" role="tablist"[^>]*hidden><\/nav>/);
+  assert.match(read("src/js/manager/BottomPanelManager.js"), /panels\.length > 1/);
   assert.match(html, /class="[^"]*bottom-panel-kill[^"]*"[^>]*aria-label="Kill Active Terminal"/);
+  assert.match(html, /bottom-panel-terminal-actions-slot/);
+  const terminalCss = read("src/css/bottomPanel.css");
+  const sessionStrip = terminalCss.match(/\.terminal-tabs\s*\{([^}]+)\}/)?.[1] || "";
+  assert.match(sessionStrip, /background:\s*var\(--terminal-surface\)/);
+  assert.doesNotMatch(sessionStrip, /border-bottom/);
+  assert.match(terminalCss, /\.terminal-tab:hover\s*\{[^}]*background:\s*var\(--bg-hover\)/s);
+  assert.match(read("src/js/terminal/TerminalPanel.js"), /getPropertyValue\("--terminal-surface"\)/);
   assert.doesNotMatch(html, /bottom-panel-maximize|Maximize Bottom Panel|Restore Bottom Panel/);
   assert.match(read("src/css/bottomPanel.css"), /prefers-reduced-motion:\s*reduce/);
   assert.match(html, /class="nce-panel-resizer bottom-panel-resize-handle"/);

@@ -2,6 +2,13 @@ class KeyBindingManager {
   constructor(e) {
     this.editor = e;
     this.isComposing = false;
+    this.terminalTabActions = new Set([
+      "new_file",
+      "close_file",
+      "close_all_file",
+      "next_tab",
+      "previous_tab",
+    ]);
   }
 
   isNativeInputTarget(target) {
@@ -258,6 +265,21 @@ class KeyBindingManager {
     const binding = CONFIG_KEYBINDING_CONTAINSKEY(shortcutKey)
       ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
       : null;
+
+    const terminalContext = e.target?.closest?.(
+      ".terminal-panel, .bottom-panel-terminal-actions-slot",
+    );
+    if (
+      terminalContext &&
+      binding?.in_editor === false &&
+      this.terminalTabActions.has(binding.action)
+    ) {
+      if (e.repeat && !["next_tab", "previous_tab"].includes(binding.action)) return;
+      this.editor.terminalPanel?.handleTabKeybinding?.(binding.action);
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
 
     const terminalElement = e.target?.closest?.(".xterm");
     if (terminalElement?.classList?.contains("xterm")) {

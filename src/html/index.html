@@ -154,7 +154,8 @@
           tabindex="0"
         ></div>
         <header class="bottom-panel-header">
-          <nav class="bottom-panel-views" role="tablist" aria-label="Bottom Panel views"></nav>
+          <h2 class="bottom-panel-title" id="bottom-panel-title">Terminal</h2>
+          <nav class="bottom-panel-views" role="tablist" aria-label="Bottom Panel views" hidden></nav>
           <div class="bottom-panel-actions">
             <button class="bottom-panel-icon-button bottom-panel-new" type="button" aria-label="New Terminal" title="New Terminal">
               <i class="fi fi-rr-plus-small" aria-hidden="true"></i>
@@ -162,6 +163,7 @@
             <button class="bottom-panel-icon-button bottom-panel-kill" type="button" aria-label="Kill Active Terminal" title="Kill Active Terminal" disabled>
               <i class="fi fi-rr-trash" aria-hidden="true"></i>
             </button>
+            <div class="bottom-panel-terminal-actions-slot" hidden></div>
             <button
               class="bottom-panel-icon-button bottom-panel-close"
               type="button"

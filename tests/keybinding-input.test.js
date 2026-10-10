@@ -60,6 +60,7 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
   const editor = {
     selected: false,
     tabManager: { activeFile: null },
+    terminalPanel: options.terminalPanel || null,
     keyBinding: { exec(item) { calls.push(item.action); } },
   };
   return { manager: new KeyBindingManager(editor), calls };
@@ -255,5 +256,43 @@ test("terminal focus still dispatches configured global commands and Toggle Term
     manager.onKey(event);
     assert.deepEqual(calls, [action]);
     assert.equal(event.defaultPrevented, true);
+  }
+});
+
+test("terminal focus routes tab management shortcuts to terminal sessions", () => {
+  for (const shortcut of [
+    { action: "new_file", key: "n", shiftKey: false },
+    { action: "close_file", key: "w", shiftKey: false },
+    { action: "close_all_file", key: "w", shiftKey: true },
+    { action: "next_tab", key: "Tab", shiftKey: false },
+    { action: "previous_tab", key: "Tab", shiftKey: true },
+  ]) {
+    const terminalCalls = [];
+    const { manager, calls } = fixture(
+      { action: shortcut.action, in_editor: false },
+      { terminalPanel: {
+        handleTabKeybinding(action) { terminalCalls.push(action); return true; },
+      } },
+      `Ctrl+${shortcut.shiftKey ? "Shift+" : ""}${shortcut.key}`,
+    );
+    const target = {
+      closest(selector) {
+        return selector.includes(".terminal-panel") ? {} : null;
+      },
+    };
+    const event = keyboardEvent(target, {
+      key: shortcut.key,
+      keyCode: shortcut.key === "Tab" ? 9 : undefined,
+      ctrlKey: true,
+      metaKey: false,
+      shiftKey: shortcut.shiftKey,
+    });
+
+    manager.onKey(event);
+
+    assert.deepEqual(terminalCalls, [shortcut.action]);
+    assert.deepEqual(calls, [], "terminal tab commands must not reach the editor tab manager");
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(event.propagationStopped, true);
   }
 });
