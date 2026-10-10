@@ -25,6 +25,9 @@ class KeyBinding {
       go_to_line: this.control_go_to_line,
       open_folder: this.control_open_folder,
       new_file: this.control_new_file,
+      new_terminal: this.control_new_terminal,
+      kill_terminal: this.control_kill_terminal,
+      kill_all_terminals: this.control_kill_all_terminals,
       close_file: this.control_close_file,
       close_all_file: this.control_close_all_file,
       next_tab: this.control_next_tab,
@@ -132,6 +135,35 @@ class KeyBinding {
 
   control_new_file(s, c, m, a) {
     this.editor.tabManager.createEmptyFile();
+  }
+
+  async control_new_terminal() {
+    const manager = this.editor.bottomPanelManager;
+    if (!manager) return false;
+    const savedTabs = this.editor.terminalPanel?.getPersistedState?.(
+      manager.workspaceKey,
+    )?.tabs || manager.getPanelState?.().terminal?.tabs || [];
+    const hadTerminalTabs = savedTabs.length > 0;
+    if (!(await manager.openPanel("terminal"))) return false;
+
+    const terminalPanel = this.editor.terminalPanel;
+    if (!terminalPanel) return false;
+    if (hadTerminalTabs || !terminalPanel.getActiveSession?.())
+      return terminalPanel.createTerminal?.() || false;
+    return true;
+  }
+
+  control_kill_terminal() {
+    const terminalPanel = this.editor.terminalPanel;
+    const session = terminalPanel?.getActiveSession?.();
+    if (!session) return false;
+    return terminalPanel.closeSession?.(session.id) || false;
+  }
+
+  control_kill_all_terminals() {
+    const terminalPanel = this.editor.terminalPanel;
+    if (!terminalPanel?.getActiveSession?.()) return false;
+    return terminalPanel.closeAllSessions?.() || false;
   }
 
   async control_close_file(s, c, m, a) {

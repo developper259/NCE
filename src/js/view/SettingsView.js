@@ -203,12 +203,14 @@ class SettingsView {
     const shortcuts =
       typeof USERCONFIG_KEYBINDING === "undefined"
         ? []
-        : USERCONFIG_KEYBINDING.filter((binding) => binding.description).map(
+        : USERCONFIG_KEYBINDING.filter(
+            (binding) => binding.description || binding.label,
+          ).map(
             (binding) => ({
               key: `keybindings.${binding.action}`,
               category: "Shortcuts",
-              label: binding.description,
-              description: `Keyboard shortcut for ${binding.action.replace(/_/g, " ")}.`,
+              label: binding.description || binding.label,
+              description: `Keyboard shortcut for ${(binding.description || binding.label).toLowerCase()}.`,
               keywords: [binding.action, "shortcut", "keybinding"],
               control: "shortcut",
             }),

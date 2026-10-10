@@ -36,6 +36,21 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "new_terminal",
+    description: "Create a new terminal session",
+    in_editor: false,
+  },
+  {
+    action: "kill_terminal",
+    description: "Close the active terminal session",
+    in_editor: false,
+  },
+  {
+    action: "kill_all_terminals",
+    description: "Close all terminal sessions in the active workspace",
+    in_editor: false,
+  },
+  {
     action: "close_file",
     description: "Close the current file",
     in_editor: false,

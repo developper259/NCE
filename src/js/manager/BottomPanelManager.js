@@ -153,7 +153,6 @@ class BottomPanelManager {
   async openPanel(panelId, { restoring = false, focus = true } = {}) {
     const panel = this.panels.get(panelId);
     if (!panel || this.destroyed) return false;
-    const requestedFocusTarget = document.activeElement;
     const activation = ++this.activationGeneration;
 
     if (!this.visible) {
@@ -172,6 +171,7 @@ class BottomPanelManager {
     }
 
     this.syncControls();
+    this.applyLayout();
     this.scheduleLayout();
     this.notifyStateChanged();
 
@@ -184,13 +184,29 @@ class BottomPanelManager {
         this.activePanelId !== panelId
       )
         return false;
+      if (focus) {
+        panel.view?.focus?.();
+        this.editor.domManager.requestFrame?.(() => {
+          if (
+            !this.destroyed &&
+            activation === this.activationGeneration &&
+            this.visible &&
+            this.activePanelId === panelId
+          ) panel.view?.focus?.();
+        });
+      }
       if (!panel.viewActive) {
-        panel.view?.onOpen?.({ restoring });
+        await panel.view?.onOpen?.({ restoring, focus });
+        if (
+          this.destroyed ||
+          activation !== this.activationGeneration ||
+          !this.visible ||
+          this.activePanelId !== panelId
+        ) return false;
         panel.view?.onActivate?.();
         panel.viewActive = true;
       }
-      if (focus && document.activeElement === requestedFocusTarget)
-        panel.view?.focus?.();
+      if (focus) panel.view?.focus?.();
       return true;
     } catch (error) {
       if (!this.destroyed && this.visible && this.activePanelId === panelId)
@@ -479,7 +495,7 @@ class BottomPanelManager {
       this.contentElement.setAttribute("aria-labelledby", labelId);
     }
     if (this.toggleButton) {
-      this.toggleButton.hidden = (this.editor.tabManager?.tabs?.length || 0) === 0;
+      this.toggleButton.hidden = false;
       this.toggleButton.setAttribute("aria-expanded", String(this.visible));
     }
     if (this.resizeHandle) {

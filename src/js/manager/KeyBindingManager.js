@@ -4,6 +4,7 @@ class KeyBindingManager {
     this.isComposing = false;
     this.terminalTabActions = new Set([
       "new_file",
+      "new_terminal",
       "close_file",
       "close_all_file",
       "next_tab",

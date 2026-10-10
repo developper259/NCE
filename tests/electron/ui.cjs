@@ -92,7 +92,7 @@ module.exports = async function exerciseUI() {
     },
   };
   const titleBar = new TitleBar(titleEditor);
-  check(titleBar.menuButtons.length === 4, 'Windows renderer menus');
+  check(titleBar.menuButtons.length === 5, 'Windows renderer menus including Terminal');
   check(titleBar.root.querySelector('[data-command="open_recent_menu"]'), 'Open Recent renderer submenu');
   check(titleBar.root.querySelector('.nce-titlebar-submenu .nce-titlebar-menu-item')?.disabled === true, 'Empty Open Recent state');
   titleBar.setRecentFolders(['/tmp/workspace']);

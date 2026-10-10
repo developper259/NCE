@@ -401,14 +401,6 @@ export class AppMenu {
           },
 
           {
-            label: "Terminal",
-
-            accelerator: this.getAccelerator("toggle_terminal"),
-
-            click: () => this.executeKeybinding("toggle_terminal"),
-          },
-
-          {
             label: "Agent",
 
             accelerator: this.getAccelerator("toggle_agent"),
@@ -468,6 +460,56 @@ export class AppMenu {
             accelerator: this.getAccelerator("reload_window"),
 
             click: () => this.reloadWindow(),
+          },
+        ],
+      }),
+    );
+
+    /*
+     * =======================================================
+     * TERMINAL
+     * =======================================================
+     */
+
+    this.menu.append(
+      new MenuItem({
+        label: "Terminal",
+
+        submenu: [
+          {
+            label: "New Terminal",
+
+            accelerator: this.getAccelerator("new_terminal"),
+
+            click: () => this.executeKeybinding("new_terminal"),
+          },
+
+          {
+            label: "Kill Terminal",
+
+            accelerator: this.getAccelerator("kill_terminal"),
+
+            click: () => this.executeKeybinding("kill_terminal"),
+          },
+
+          {
+            label: "Kill All Terminals",
+
+            accelerator: this.getAccelerator("kill_all_terminals"),
+
+            click: () => this.executeKeybinding("kill_all_terminals"),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Toggle Terminal",
+
+            accelerator: this.getAccelerator("toggle_terminal"),
+
+            click: () => this.executeKeybinding("toggle_terminal"),
           },
         ],
       }),

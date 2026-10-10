@@ -76,7 +76,6 @@ class TitleBar {
         items: [
           ["File Explorer", "toggle_file_explorer"],
           ["Search", "toggle_search"],
-          ["Terminal", "toggle_terminal"],
           ["Agent", "toggle_agent"],
           ["Quick Open...", "quick_open"],
           ["Next Tab", "next_tab"],
@@ -86,6 +85,17 @@ class TitleBar {
           null,
           ["Toggle Fullscreen", "view.fullscreen"],
           ["Reload Window", "reload_window"],
+        ],
+      },
+      {
+        id: "terminal",
+        label: "Terminal",
+        items: [
+          ["New Terminal", "new_terminal"],
+          ["Kill Terminal", "kill_terminal"],
+          ["Kill All Terminals", "kill_all_terminals"],
+          null,
+          ["Toggle Terminal", "toggle_terminal"],
         ],
       },
       {

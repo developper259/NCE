@@ -196,7 +196,7 @@ export class TerminalPanel {
 
   handleTabKeybinding(action) {
     const state = this.currentState;
-    if (action === "new_file") {
+    if (action === "new_file" || action === "new_terminal") {
       const focusActiveTerminal = () => this.getActiveSession()?.terminal.focus?.();
       void this.createTerminal().then(focusActiveTerminal, focusActiveTerminal);
       return true;
@@ -238,7 +238,7 @@ export class TerminalPanel {
     return ids.length > 0;
   }
 
-  onOpen() {
+  onOpen({ focus = true } = {}) {
     const state = this.currentState;
     this.clearStatus();
     if (state.sessions.size) {
@@ -246,24 +246,25 @@ export class TerminalPanel {
       if (active) this.showActive(active);
       if (state.pendingRestoreTabs?.length && !state.initialOpenPromise) {
         state.initialOpenAttempted = true;
-        state.initialOpenPromise = this.restoreOrCreateInitialSessions(state)
+        state.initialOpenPromise = this.restoreOrCreateInitialSessions(state, { focus })
           .finally(() => { state.initialOpenPromise = null; });
       }
       this.scheduleFit();
-      return;
+      return state.initialOpenPromise;
     }
     if (state.initialOpenAttempted && state.lastError) {
       this.showError(state.lastError, state.workspaceKey);
-      return;
+      return undefined;
     }
     if (!state.initialOpenPromise && !state.initialOpenAttempted) {
       state.initialOpenAttempted = true;
-      state.initialOpenPromise = this.restoreOrCreateInitialSessions(state)
+      state.initialOpenPromise = this.restoreOrCreateInitialSessions(state, { focus })
         .finally(() => { state.initialOpenPromise = null; });
     }
+    return state.initialOpenPromise;
   }
 
-  async restoreOrCreateInitialSessions(state) {
+  async restoreOrCreateInitialSessions(state, { focus = true } = {}) {
     const ownerKey = state.workspaceKey;
     const generation = this.workspaceGeneration;
     const pending = state.pendingRestoreTabs;
@@ -296,12 +297,17 @@ export class TerminalPanel {
         if (generation === this.workspaceGeneration) this.scheduleFit();
       }
       this.notifyWorkspaceChanged(ownerKey);
+      if (
+        focus && state.workspaceKey === this.currentWorkspaceKey &&
+        this.editor.bottomPanelManager?.visible &&
+        this.editor.bottomPanelManager.activePanelId === "terminal"
+      ) this.getActiveSession()?.terminal.focus?.();
       return Boolean(state.restoreSessionIds.length);
     }
 
     const created = await this.createTerminal({
       workspaceKey: ownerKey,
-      focus: true,
+      focus,
       activate: true,
       reportError: ownerKey === this.currentWorkspaceKey,
     });
@@ -407,7 +413,10 @@ export class TerminalPanel {
     this.recomputeLabels(state);
     if (isCurrent()) {
       this.renderTabs();
-      if (activate) this.showActive(record);
+      if (activate) {
+        this.showActive(record);
+        if (focus) terminal.focus();
+      }
       if (this.editor.bottomPanelManager?.visible) void this.fitRecord(record);
     }
 
@@ -666,6 +675,7 @@ export class TerminalPanel {
     const removedName = this.getNameBase(record);
     record.closingPromise = Promise.resolve();
     const wasActive = state.activeSessionId === id;
+    const activeIndex = wasActive ? [...state.sessions.keys()].indexOf(id) : -1;
     const keepTabFocus = this.tabsList?.contains?.(document.activeElement) === true;
     state.sessions.delete(id);
     if (record.id) {
@@ -676,7 +686,10 @@ export class TerminalPanel {
       this.pendingOutput.delete(record.id);
       state.restoreSessionIds = state.restoreSessionIds.filter((sessionId) => sessionId !== record.id);
     }
-    if (wasActive) state.activeSessionId = state.sessions.keys().next().value || null;
+    if (wasActive) {
+      const remainingIds = [...state.sessions.keys()];
+      state.activeSessionId = remainingIds[Math.max(0, activeIndex - 1)] || null;
+    }
     this.disposeRecord(record);
     this.normalizeSingletonDuplicateIndices(state, removedName);
     this.recomputeLabels(state);
