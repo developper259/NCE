@@ -191,8 +191,19 @@ function createMockElement(tagName = "div") {
       }
       return results;
     },
+    closest: (selector) => {
+      let current = element;
+      while (current) {
+        if (matches(current, selector)) return current;
+        current = current.parentNode;
+      }
+      return null;
+    },
     get children() {
       return children;
+    },
+    get options() {
+      return children.filter((child) => child.tagName === "OPTION");
     },
   };
 
@@ -506,6 +517,7 @@ describe("Keyboard Shortcut Conflict Detection", () => {
     const docListeners = {};
     const mockDoc = {
       createElement: (tag) => createMockElement(tag),
+      createElementNS: (_namespace, tag) => createMockElement(tag),
       addEventListener: (type, handler) => {
         docListeners[type] = docListeners[type] || [];
         docListeners[type].push(handler);

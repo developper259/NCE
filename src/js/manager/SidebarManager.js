@@ -637,8 +637,7 @@ class SidebarManager {
           this.leftScroller?.suspend();
         } else {
           this.editor.fileExplorer?.virtualScroller?.suspend();
-          if (searchActive) this.leftScroller?.suspend();
-          else this.leftScroller?.resume();
+          this.leftScroller?.resume();
         }
       }
       const content = menu.render();
