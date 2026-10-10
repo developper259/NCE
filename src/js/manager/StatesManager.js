@@ -993,7 +993,7 @@ class StatesManager {
           if (generation !== this.restoreGeneration) break;
           file = manager?.createEmptyFile?.() || null;
           if (file) {
-            file.name = `${metadata.displayName} (Recovered)`;
+            file.name = metadata.displayName;
             file.recoveryUntitledId = untitledId;
           }
         }

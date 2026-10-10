@@ -2003,8 +2003,8 @@ app.whenReady().then(() => {
         win.webContents.on("did-finish-load", onDidFinishLoad);
         win.webContents.once("render-process-gone", onRenderProcessGone);
         try {
-          // Reload follows the normal unsaved-buffer workflow; the smoke
-          // dialog chooses Don't Save so recovery must carry the text forward.
+          // Reload follows the normal unsaved-buffer workflow; choosing
+          // Don't Save discards this buffer's recovery snapshot.
           dialog.showMessageBox = async () => ({ response: 1 });
           assert.equal(
             await run("editor.keyBinding.control_reload_window()"),
@@ -2045,15 +2045,16 @@ app.whenReady().then(() => {
             true,
             "reload restores the saved editor session",
           );
-          assert.deepEqual(
-            await run(`(() => {
+          const bufferAfterReload = await run(`(() => {
               const file = editor.tabManager.tabs.find(tab =>
                 tab.type === "file" && !tab.path &&
                 tab.recoveryUntitledId === "electron-smoke-recovery");
               return file ? { content: file.serializeContent(), dirty: file.isSaved === false } : null;
-            })()`),
-            { content: "recovered by smoke\r\n🙂 end\n", dirty: true },
-            "renderer reload automatically restores the dirty buffer without duplication",
+            })()`);
+          assert.deepEqual(
+            bufferAfterReload,
+            { content: "", dirty: false },
+            "Don't Save discards recovered content instead of restoring it after reload",
           );
         } finally {
           win.webContents.removeListener("did-finish-load", onDidFinishLoad);

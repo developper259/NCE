@@ -369,6 +369,9 @@ class KeyBinding {
     if (!(await this.editor.tabManager.prepareForQuit())) return false;
     const saved = await this.editor.statesManager.save();
     if (saved === false) return false;
+    const recoveryCleared = await this.editor.statesManager
+      .clearRecoverySnapshotsOnQuit?.();
+    if (recoveryCleared === false) return false;
     return this.editor.api.appCommand("view.reload");
   }
 
