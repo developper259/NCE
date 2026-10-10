@@ -426,6 +426,10 @@ export class Window {
   }
 
   requestOpenRecentFolder(folderPath: string) {
+    if (this.app.settings.get("files.openRecentIn") === "new-window") {
+      void this.app.windowManager.openWorkspaceInNewWindow(folderPath);
+      return;
+    }
     void this.app.windowManager.focusWorkspace(folderPath, this.id).then((focused) => {
       if (!focused && this.window && !this.window.isDestroyed())
         this.window.webContents.send("open-recent-folder-requested", folderPath);

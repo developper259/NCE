@@ -112,16 +112,7 @@ export class AppMenu {
     return [
       ...folders.map((folderPath: string) => ({
         label: folderPath,
-        submenu: [
-          {
-            label: "Open",
-            click: () => this.WinAPP.requestOpenRecentFolder(folderPath),
-          },
-          {
-            label: "Open in New Window",
-            click: () => this.WinAPP.app.windowManager.openWorkspaceInNewWindow(folderPath),
-          },
-        ],
+        click: () => this.WinAPP.requestOpenRecentFolder(folderPath),
       })),
       { type: "separator" as const },
       {

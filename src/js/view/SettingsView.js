@@ -52,6 +52,19 @@ const SETTINGS_UI = Object.freeze([
     control: "checkbox",
   },
   {
+    key: "files.openRecentIn",
+    category: "Files",
+    label: "Open Recent Folders In",
+    description: "Choose whether a recent folder opens in the current window or a new window.",
+    keywords: ["recent", "folder", "workspace", "window", "open"],
+    control: "select",
+    valueType: "string",
+    options: [
+      { value: "current-window", label: "Current Window" },
+      { value: "new-window", label: "New Window" },
+    ],
+  },
+  {
     key: "agent.settings",
     category: "Agent",
     label: "Agent",
@@ -873,13 +886,16 @@ class SettingsView {
         input.value = String(SETTINGS_GET(key) || "");
       return;
     }
-    const setting = this.getSettings().find(
-      (item) => item.key === key && item.control === "checkbox",
-    );
+    const setting = this.getSettings().find((item) => item.key === key);
     if (!setting) return;
     const id = `setting-${setting.key.replace(/\./g, "-")}`;
     const input = this.host?.querySelector(`#${id}`);
     if (!input) return;
+    if (setting.control === "select") {
+      if (document.activeElement !== input) input.value = String(SETTINGS_GET(key));
+      return;
+    }
+    if (setting.control !== "checkbox") return;
     input.checked = setting.key === "files.autoSave"
       ? this.editor.getAutoSaveState()
       : SETTINGS_GET(setting.key) === true;

@@ -53,6 +53,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
     autoSave: false,
     confirmMoveToTrash: true,
     confirmPermanentDelete: true,
+    openRecentIn: "current-window",
   }),
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
@@ -107,6 +108,11 @@ function SETTINGS_INITIALIZE(settings) {
         typeof settings?.files?.confirmPermanentDelete === "boolean"
           ? settings.files.confirmPermanentDelete
           : DEFAULT_RENDERER_SETTINGS.files.confirmPermanentDelete,
+      openRecentIn:
+        settings?.files?.openRecentIn === "current-window" ||
+        settings?.files?.openRecentIn === "new-window"
+          ? settings.files.openRecentIn
+          : DEFAULT_RENDERER_SETTINGS.files.openRecentIn,
     },
     appearance: {
       theme:
@@ -233,6 +239,15 @@ async function SETTINGS_SET(key, value) {
       property === "confirmMoveToTrash" ||
       property === "confirmPermanentDelete") &&
     typeof value !== "boolean"
+  ) {
+    return false;
+  }
+
+  if (
+    section === "files" &&
+    property === "openRecentIn" &&
+    value !== "current-window" &&
+    value !== "new-window"
   ) {
     return false;
   }

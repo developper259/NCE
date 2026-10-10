@@ -11,6 +11,7 @@ export interface Settings {
     autoSave: boolean;
     confirmMoveToTrash: boolean;
     confirmPermanentDelete: boolean;
+    openRecentIn: "current-window" | "new-window";
   };
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
@@ -76,6 +77,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
     autoSave: false,
     confirmMoveToTrash: true,
     confirmPermanentDelete: true,
+    openRecentIn: "current-window" as const,
   }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
@@ -90,6 +92,7 @@ const KNOWN_KEYS = new Set([
   "files.autoSave",
   "files.confirmMoveToTrash",
   "files.confirmPermanentDelete",
+  "files.openRecentIn",
   "appearance.theme",
   "agent.hiddenModels",
   "terminal.shell",
@@ -243,6 +246,7 @@ export class SettingsManager {
         autoSave: this.settings.files.autoSave,
         confirmMoveToTrash: this.settings.files.confirmMoveToTrash,
         confirmPermanentDelete: this.settings.files.confirmPermanentDelete,
+        openRecentIn: this.settings.files.openRecentIn,
       },
       appearance: { theme: this.settings.appearance.theme },
       agent: {
@@ -385,6 +389,12 @@ export class SettingsManager {
     )
       ? merged.files.confirmPermanentDelete
       : fallback.files.confirmPermanentDelete;
+    merged.files.openRecentIn = this.isValid(
+      "files.openRecentIn",
+      merged.files.openRecentIn,
+    )
+      ? merged.files.openRecentIn
+      : fallback.files.openRecentIn;
     merged.appearance.theme = this.isValid(
       "appearance.theme",
       merged.appearance.theme,
@@ -482,6 +492,9 @@ export class SettingsManager {
       key === "files.confirmPermanentDelete"
     ) {
       return typeof value === "boolean";
+    }
+    if (key === "files.openRecentIn") {
+      return value === "current-window" || value === "new-window";
     }
     if (key === "appearance.theme") {
       return value === "system" || value === "dark" || value === "light";

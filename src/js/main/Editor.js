@@ -251,6 +251,7 @@ class Editor {
     this.agentSidebar?.refreshModelSelector?.();
     this._settingsView?.sync?.("files.confirmMoveToTrash");
     this._settingsView?.sync?.("files.confirmPermanentDelete");
+    this._settingsView?.sync?.("files.openRecentIn");
     this._settingsView?.sync?.("terminal.shell");
     this._settingsView?.sync?.("agent.hiddenModels");
     void this.refreshSettingsJsonTab();
@@ -393,6 +394,9 @@ class Editor {
   }
 
   openRecentFolder(folderPath) {
+    if (SETTINGS_GET("files.openRecentIn") === "new-window") {
+      return this.api.openWorkspaceInNewWindow?.(folderPath) ?? false;
+    }
     return this.fileExplorer.openRecentFolder(folderPath);
   }
 

@@ -254,14 +254,12 @@ test("native Next and Previous Tab items follow the shared cycle availability", 
   assert.equal(fixture.item("Previous Tab").enabled, true);
 });
 
-test("native Open Recent exposes folders, dispatches selection and clears history", async () => {
+test("native Open Recent opens the selected folder and clears history", async () => {
   const fixture = createMenuHarness({
     recentFolders: ["/projects/NSH", "/projects/NCE"],
   });
-  fixture.item("/projects/NCE").submenu[0].click();
+  fixture.item("/projects/NCE").click();
   assert.deepEqual(fixture.openRecentCalls, ["/projects/NCE"]);
-  fixture.item("/projects/NCE").submenu[1].click();
-  assert.deepEqual(fixture.openWorkspaceCalls, ["/projects/NCE"]);
   await fixture.item("Clear Recently Opened").click();
   assert.equal(fixture.clearRecentCalls, 1);
 
