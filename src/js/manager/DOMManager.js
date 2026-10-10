@@ -314,6 +314,14 @@ class DOMManager {
     if (pending.bottomPanel) {
       this.editor?.lineController?.resize?.({ deferScrollerRefresh: true });
       this.editor?.scrollerManager?.refreshActive?.();
+      const outputVerticalScroller =
+        this.editor?.lineController?.outputScroller?.vScroller;
+      if (outputVerticalScroller) {
+        this.editor?.scrollerManager?.refreshScroller?.(
+          outputVerticalScroller,
+          { forceMetrics: true, measureInactive: true },
+        );
+      }
     }
 
     if (pending.sidebar) {

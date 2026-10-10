@@ -463,6 +463,7 @@ class BottomPanelManager {
     if (this.contentElement && active)
       this.contentElement.setAttribute("aria-labelledby", `bottom-panel-view-${active.id}`);
     if (this.toggleButton) {
+      this.toggleButton.hidden = (this.editor.tabManager?.tabs?.length || 0) === 0;
       this.toggleButton.setAttribute("aria-expanded", String(this.visible));
     }
     if (this.resizeHandle) {
@@ -488,6 +489,8 @@ class BottomPanelManager {
       startHeight: this.height,
       target: event.currentTarget || this.resizeHandle,
     };
+    document.body.style.cursor = "row-resize";
+    document.body.style.userSelect = "none";
     try {
       this.drag.target?.setPointerCapture?.(event.pointerId);
     } catch {}
@@ -505,6 +508,8 @@ class BottomPanelManager {
         event.pointerId !== this.drag.pointerId)) return false;
     const { pointerId, target } = this.drag;
     this.drag = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
     try {
       if (target?.hasPointerCapture?.(pointerId))
         target.releasePointerCapture(pointerId);

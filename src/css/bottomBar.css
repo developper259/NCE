@@ -49,6 +49,7 @@
   font-size: 11px;
   cursor: pointer;
 }
+.bottomBar-terminal-toggle[hidden] { display: none; }
 .bottomBar-terminal-toggle svg {
   width: 14px;
   height: 14px;

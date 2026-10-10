@@ -993,6 +993,7 @@ class tabManager {
   }
 
   refresh({ resetWhenEmpty = true, refreshTitle = true } = {}) {
+    this.editor.bottomPanelManager?.syncControls?.();
     const ul = getElement(".file-manager .files-ul");
     if (!ul) return;
 
