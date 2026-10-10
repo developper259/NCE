@@ -101,6 +101,20 @@ class SettingsView {
     this.scrollSaveTimer = null;
     this.scrollRestored = false;
     this.onContentScroll = () => this.scheduleScrollSave();
+    this.openSettingSelect = null;
+    this.settingSelectPositionListener = null;
+    this.onSettingSelectOutsidePointerDown = (event) => {
+      if (
+        this.openSettingSelect &&
+        !this.openSettingSelect.contains(event.target)
+      ) {
+        this.closeSettingSelect(this.openSettingSelect);
+      }
+    };
+    document.addEventListener(
+      "pointerdown",
+      this.onSettingSelectOutsidePointerDown,
+    );
     this.build();
   }
 
@@ -159,6 +173,11 @@ class SettingsView {
   }
 
   destroy() {
+    this.closeSettingSelect();
+    document.removeEventListener(
+      "pointerdown",
+      this.onSettingSelectOutsidePointerDown,
+    );
     clearTimeout(this.scrollSaveTimer);
     this.scrollSaveTimer = null;
     this.content?.removeEventListener("scroll", this.onContentScroll);
@@ -282,6 +301,7 @@ class SettingsView {
 
   render({ preserveScroll = false } = {}) {
     if (!this.content) return;
+    this.closeSettingSelect();
     const previousScrollTop = preserveScroll ? this.content.scrollTop : 0;
     this.content.scrollTop = 0;
     const settings = this.getVisibleSettings();
@@ -344,10 +364,12 @@ class SettingsView {
     const label = document.createElement("label");
     const controlId = `setting-${setting.key.replace(/\./g, "-")}`;
     label.className = "setting-label";
-    label.htmlFor = controlId;
+    label.htmlFor = setting.control === "select" ? `${controlId}-trigger` : controlId;
+    if (setting.control === "select") label.id = `${controlId}-label`;
     label.textContent = setting.label;
     const description = document.createElement("p");
     description.className = "setting-description";
+    description.id = `${controlId}-description`;
     description.textContent = setting.description;
     text.append(label, description);
     const control =
@@ -564,9 +586,14 @@ class SettingsView {
   }
 
   createSelect(setting, id) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "setting-select-wrap";
+
     const select = document.createElement("select");
     select.id = id;
-    select.className = "setting-select";
+    select.className = "setting-select-source";
+    select.tabIndex = -1;
+    select.setAttribute("aria-hidden", "true");
     for (const optionValue of setting.options) {
       const option = document.createElement("option");
       const value = typeof optionValue === "object" ? optionValue.value : optionValue;
@@ -575,17 +602,244 @@ class SettingsView {
       select.appendChild(option);
     }
     select.value = String(SETTINGS_GET(setting.key));
+
+    const trigger = document.createElement("button");
+    trigger.id = `${id}-trigger`;
+    trigger.type = "button";
+    trigger.className = "setting-select";
+    trigger.setAttribute("aria-haspopup", "listbox");
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.setAttribute("aria-controls", `${id}-listbox`);
+    trigger.setAttribute("aria-labelledby", `${id}-label`);
+    trigger.setAttribute("aria-describedby", `${id}-description`);
+
+    const selectedLabel = document.createElement("span");
+    selectedLabel.className = "setting-select-value";
+    const measurementLabel = document.createElement("span");
+    measurementLabel.className = "setting-select-measure";
+    measurementLabel.setAttribute("aria-hidden", "true");
+    measurementLabel.textContent = [...select.options]
+      .map((option) => option.textContent || "")
+      .sort((first, second) => second.length - first.length)[0] || "";
+    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    arrow.setAttribute("class", "setting-select-arrow");
+    arrow.setAttribute("viewBox", "0 0 12 12");
+    arrow.setAttribute("aria-hidden", "true");
+    const arrowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    arrowPath.setAttribute("d", "m3 4.5 3 3 3-3");
+    arrow.appendChild(arrowPath);
+    trigger.append(selectedLabel, measurementLabel, arrow);
+
+    const listbox = document.createElement("div");
+    listbox.id = `${id}-listbox`;
+    listbox.className = "setting-select-menu";
+    listbox.setAttribute("role", "listbox");
+    listbox.setAttribute("aria-labelledby", `${id}-label`);
+    listbox.tabIndex = 0;
+    listbox.hidden = true;
+
+    const options = [];
+    let activeIndex = -1;
+    let typeahead = "";
+    let typeaheadTimer = null;
+    const setActiveOption = (index) => {
+      if (!options.length) return;
+      activeIndex = (index + options.length) % options.length;
+      const activeOption = options[activeIndex];
+      listbox.setAttribute("aria-activedescendant", activeOption.id);
+      for (const [optionIndex, option] of options.entries())
+        option.classList.toggle("active", optionIndex === activeIndex);
+      activeOption.scrollIntoView?.({ block: "nearest" });
+    };
+    const openMenu = () => {
+      this.openSettingSelectMenu(wrapper, select, listbox, trigger);
+      const selectedIndex = [...select.options].findIndex(
+        (option) => option.value === select.value,
+      );
+      setActiveOption(Math.max(0, selectedIndex));
+    };
+    const commitOption = (option) => {
+      if (!option) return;
+      if (select.value !== option.dataset.value) {
+        select.value = option.dataset.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      this.closeSettingSelect(wrapper, true);
+    };
+
+    for (const [index, nativeOption] of [...select.options].entries()) {
+      const option = document.createElement("div");
+      option.id = `${id}-option-${index}`;
+      option.className = "setting-select-option";
+      option.setAttribute("role", "option");
+      option.dataset.value = nativeOption.value;
+      option.textContent = nativeOption.textContent;
+      option.addEventListener("pointerdown", (event) => event.preventDefault());
+      option.addEventListener("pointermove", () => setActiveOption(index));
+      option.addEventListener("click", () => commitOption(option));
+      listbox.appendChild(option);
+      options.push(option);
+    }
+
+    trigger.addEventListener("click", () => {
+      if (this.openSettingSelect === wrapper) this.closeSettingSelect(wrapper);
+      else openMenu();
+    });
+    trigger.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) return;
+      event.preventDefault();
+      openMenu();
+      if (event.key === "ArrowUp") setActiveOption(options.length - 1);
+    });
+    listbox.addEventListener("keydown", (event) => {
+      if (event.key === "Tab") {
+        setTimeout(() => this.closeSettingSelect(wrapper), 0);
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        this.closeSettingSelect(wrapper, true);
+      } else if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActiveOption(activeIndex + 1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActiveOption(activeIndex - 1);
+      } else if (event.key === "Home") {
+        event.preventDefault();
+        setActiveOption(0);
+      } else if (event.key === "End") {
+        event.preventDefault();
+        setActiveOption(options.length - 1);
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        commitOption(options[activeIndex]);
+      } else if (
+        event.key.length === 1 &&
+        !event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey
+      ) {
+        typeahead += event.key.toLowerCase();
+        clearTimeout(typeaheadTimer);
+        typeaheadTimer = setTimeout(() => {
+          typeahead = "";
+        }, 700);
+        const matchingIndex = options.findIndex((option) =>
+          option.textContent.trim().toLowerCase().startsWith(typeahead),
+        );
+        if (matchingIndex >= 0) setActiveOption(matchingIndex);
+      }
+    });
+
     select.addEventListener("change", async () => {
       const previous = SETTINGS_GET(setting.key);
       const value = setting.valueType === "string" ? select.value : Number(select.value);
+      this.syncSelectPresentation(select);
       const res = setting.apply
         ? await setting.apply(this.editor, value)
         : await SETTINGS_SET(setting.key, value);
-      if (!res || (typeof res === "object" && !res.success))
+      if (!res || (typeof res === "object" && !res.success)) {
         select.value = String(previous);
+        this.syncSelectPresentation(select);
+      }
       this.editor.bottomBar?.refreshScrollers?.();
     });
-    return select;
+
+    wrapper.append(select, trigger, listbox);
+    this.syncSelectPresentation(select);
+    return wrapper;
+  }
+
+  syncSelectPresentation(select) {
+    const wrapper = select?.closest(".setting-select-wrap");
+    if (!wrapper) return;
+    const selectedLabel = wrapper.querySelector(".setting-select-value");
+    const listbox = wrapper.querySelector(".setting-select-menu");
+    if (!selectedLabel || !listbox) return;
+    const selectedOption = [...select.options].find(
+      (option) => option.value === select.value,
+    );
+    selectedLabel.textContent = selectedOption?.textContent || "";
+    for (const option of listbox.children) {
+      const selected = option.dataset.value === select.value;
+      option.setAttribute("aria-selected", String(selected));
+      option.classList.toggle("selected", selected);
+    }
+  }
+
+  openSettingSelectMenu(wrapper, select, listbox, trigger) {
+    if (this.openSettingSelect && this.openSettingSelect !== wrapper)
+      this.closeSettingSelect(this.openSettingSelect);
+    this.openSettingSelect = wrapper;
+    wrapper.classList.add("open");
+    listbox.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    const selectedIndex = [...select.options].findIndex(
+      (option) => option.value === select.value,
+    );
+    const activeOption = listbox.children[Math.max(0, selectedIndex)];
+    if (activeOption) listbox.setAttribute("aria-activedescendant", activeOption.id);
+    this.positionSettingSelectMenu(wrapper);
+    this.settingSelectPositionListener = () =>
+      this.positionSettingSelectMenu(wrapper);
+    window.addEventListener("resize", this.settingSelectPositionListener);
+    document.addEventListener("scroll", this.settingSelectPositionListener, true);
+    listbox.focus({ preventScroll: true });
+  }
+
+  positionSettingSelectMenu(wrapper) {
+    if (!wrapper || wrapper !== this.openSettingSelect) return;
+    const trigger = wrapper.querySelector(".setting-select");
+    const menu = wrapper.querySelector(".setting-select-menu");
+    if (!trigger || !menu) return;
+    const rect = trigger.getBoundingClientRect();
+    const margin = 8;
+    menu.style.width = "max-content";
+    menu.style.minWidth = `${rect.width}px`;
+    menu.style.maxWidth = `calc(100vw - ${margin * 2}px)`;
+    const menuWidth = menu.getBoundingClientRect().width;
+    const left = Math.max(
+      margin,
+      Math.min(rect.left, window.innerWidth - menuWidth - margin),
+    );
+    const availableBelow = Math.max(0, window.innerHeight - rect.bottom - margin - 6);
+    const availableAbove = Math.max(0, rect.top - margin - 6);
+    const menuHeight = Math.min(220, menu.scrollHeight);
+    const openAbove =
+      availableBelow < Math.min(menuHeight, 100) && availableAbove > availableBelow;
+    const availableAtPlacement = openAbove ? availableAbove : availableBelow;
+    menu.style.left = `${left}px`;
+    menu.style.maxHeight = `${Math.min(220, Math.max(72, availableAtPlacement))}px`;
+    menu.style.top = openAbove ? "auto" : `${rect.bottom + 6}px`;
+    menu.style.bottom = openAbove
+      ? `${window.innerHeight - rect.top + 6}px`
+      : "auto";
+  }
+
+  closeSettingSelect(wrapper = this.openSettingSelect, restoreFocus = false) {
+    if (!wrapper) return;
+    const trigger = wrapper.querySelector(".setting-select");
+    const menu = wrapper.querySelector(".setting-select-menu");
+    if (menu) {
+      menu.hidden = true;
+      menu.removeAttribute("aria-activedescendant");
+    }
+    trigger?.setAttribute("aria-expanded", "false");
+    wrapper.classList.remove("open");
+    if (this.openSettingSelect === wrapper) {
+      this.openSettingSelect = null;
+      if (this.settingSelectPositionListener) {
+        window.removeEventListener("resize", this.settingSelectPositionListener);
+        document.removeEventListener(
+          "scroll",
+          this.settingSelectPositionListener,
+          true,
+        );
+        this.settingSelectPositionListener = null;
+      }
+    }
+    if (restoreFocus) trigger?.focus({ preventScroll: true });
   }
 
   createCheckbox(setting, id) {
@@ -892,7 +1146,10 @@ class SettingsView {
     const input = this.host?.querySelector(`#${id}`);
     if (!input) return;
     if (setting.control === "select") {
-      if (document.activeElement !== input) input.value = String(SETTINGS_GET(key));
+      const wrapper = input.closest(".setting-select-wrap");
+      if (!wrapper?.contains(document.activeElement))
+        input.value = String(SETTINGS_GET(key));
+      this.syncSelectPresentation(input);
       return;
     }
     if (setting.control !== "checkbox") return;
