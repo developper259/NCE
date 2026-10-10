@@ -205,13 +205,16 @@ class SearchSidebar extends Sidebar {
     const results = document.createElement("div");
     results.className = "search-sidebar-results";
     this.resultsElement = results;
+    const resultsViewport = document.createElement("div");
+    resultsViewport.className = "search-sidebar-results-viewport";
     const resultsLayer = this.editor.domManager.createFastElement("div");
     resultsLayer.setClassName("search-sidebar-results-layer");
     this.resultsLayer = resultsLayer.domNode;
-    this.editor.domManager.wrapFastNode(results)?.appendChild(resultsLayer);
+    this.editor.domManager.wrapFastNode(resultsViewport)?.appendChild(resultsLayer);
     this.renderResults();
+    results.appendChild(resultsViewport);
     container.appendChild(results);
-    this.resultsScroller.attach(results, this.resultsLayer);
+    this.resultsScroller.attach(results, resultsViewport, this.resultsLayer);
 
     const scheduleSearch = () => {
       this.cancelResultNavigation();

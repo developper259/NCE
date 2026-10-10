@@ -125,10 +125,15 @@
 
 .sidebar-menu {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
+}
+
+.sidebar-menu.search-sidebar-mode {
+  overflow: hidden;
 }
 
 .sidebar-menu::-webkit-scrollbar {

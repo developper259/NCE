@@ -629,13 +629,16 @@ class SidebarManager {
     if (container) {
       if (menu.position === "left") {
         const explorerActive = menu.id === "file-explorer";
+        const searchActive = menu.id === "search";
         container.classList.toggle("file-explorer-mode", explorerActive);
+        container.classList.toggle("search-sidebar-mode", searchActive);
         if (explorerActive) {
           container.scrollTop = 0;
           this.leftScroller?.suspend();
         } else {
           this.editor.fileExplorer?.virtualScroller?.suspend();
-          this.leftScroller?.resume();
+          if (searchActive) this.leftScroller?.suspend();
+          else this.leftScroller?.resume();
         }
       }
       const content = menu.render();

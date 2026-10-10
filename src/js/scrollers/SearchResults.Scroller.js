@@ -3,6 +3,7 @@ class SearchResultsScroller {
     this.editor = editor;
     this.renderItem = renderItem;
     this.onNearEnd = onNearEnd;
+    this.host = null;
     this.viewport = null;
     this.layer = null;
     this.layerFast = null;
@@ -21,16 +22,24 @@ class SearchResultsScroller {
     this.suspended = false;
 
     this._onWheel = (event) => {
-      if (!this.vScroller?.active || event.shiftKey) return;
-      if (Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
-      if (!event.deltaY) return;
+      if (this.suspended || !this.viewport || event.shiftKey) return;
+      if (Math.abs(event.deltaX) > Math.abs(event.deltaY) || !event.deltaY) return;
+
+      const viewportHeight = this.readViewportHeight();
+      if (viewportHeight !== this.viewportHeight) {
+        this.viewportHeight = viewportHeight;
+        this.scheduleRender(true);
+      }
+      if (viewportHeight <= 0 || this.totalVirtualHeight <= viewportHeight) return;
 
       event.preventDefault();
       event.stopPropagation();
+      this.vScroller?.markRecentlyInteracted?.();
+
       const delta = event.deltaMode === 1
         ? event.deltaY * 16
         : event.deltaMode === 2
-          ? event.deltaY * this.viewportHeight
+          ? event.deltaY * viewportHeight
           : event.deltaY;
       this.setScrollY(this.scrollY + delta);
     };
@@ -40,11 +49,16 @@ class SearchResultsScroller {
       : null;
   }
 
-  attach(viewport, layer) {
-    if (this.viewport !== viewport || this.layer !== layer) {
+  attach(host, viewport, layer) {
+    if (
+      this.host !== host ||
+      this.viewport !== viewport ||
+      this.layer !== layer
+    ) {
       this.viewport?.removeEventListener("wheel", this._onWheel);
       if (this.viewport) this._resizeObserver?.unobserve(this.viewport);
 
+      this.host = host;
       this.viewport = viewport;
       this.layer = layer;
       this.layerFast = this.editor.domManager?.wrapFastNode?.(layer) || null;
@@ -61,23 +75,31 @@ class SearchResultsScroller {
   }
 
   initScroller() {
-    if (this.vScroller || !this.viewport || !this.editor.scrollerManager) return;
+    if (
+      this.vScroller ||
+      !this.host?.isConnected ||
+      !this.viewport ||
+      !this.editor.scrollerManager
+    ) return;
 
     const manager = this.editor.scrollerManager;
     this.vScroller = manager.createScroller(
-      this.viewport,
+      this.host,
       manager.VERTICAL_TYPE,
       false,
     );
     this.vScroller.wheelTarget = this.viewport;
-    // The virtual viewport needs pixel-based wheel movement; keep Scroller's
-    // thumb dragging while routing wheel deltas through this virtual range.
-    this.vScroller._onWheel = this._onWheel;
+    // The custom wheel handler owns virtual scrolling; the Scroller's handler
+    // stays disabled so one wheel gesture is never applied twice.
+    this.vScroller._onWheel = () => {};
     this.vScroller.calculProp = () => this.totalVirtualHeight > 0
       ? Math.min(100, (this.viewportHeight / this.totalVirtualHeight) * 100)
       : 100;
-    this.vScroller.calcIsActive = () => !this.suspended &&
-      this.viewportHeight > 0 && this.totalVirtualHeight > this.viewportHeight;
+    this.vScroller.calcIsActive = () => {
+      this.viewportHeight = this.readViewportHeight();
+      return !this.suspended && this.viewportHeight > 0 &&
+        this.totalVirtualHeight > this.viewportHeight;
+    };
     this.vScroller.onScroll = (ratio) => {
       this.setScrollY(ratio * this.getMaxScrollY());
     };
@@ -97,12 +119,22 @@ class SearchResultsScroller {
     this.itemsVersion++;
     this.visibleStart = -1;
     this.visibleEnd = -1;
-    if (resetScroll) this.scrollY = 0;
+    if (resetScroll) {
+      this.scrollY = 0;
+    }
     this.scheduleRender(true);
   }
 
   getMaxScrollY() {
     return Math.max(0, this.totalVirtualHeight - this.viewportHeight);
+  }
+
+  readViewportHeight() {
+    if (!this.viewport) return 0;
+    const measuredHeight = this.editor.domManager?.getElementMetrics?.(
+      this.viewport,
+    )?.clientHeight;
+    return measuredHeight || this.viewport.clientHeight || 0;
   }
 
   setScrollY(value) {
@@ -154,12 +186,14 @@ class SearchResultsScroller {
 
   update() {
     if (!this.viewport || !this.layerFast || this.suspended) return;
+    // Search.Sidebar builds its DOM before SidebarManager mounts it. Wait until
+    // the host is connected so ScrollerManager does not discard the scroller.
+    this.initScroller();
 
     const needsMeasure = this.needsMeasure;
     const previousHeight = this.viewportHeight;
     if (needsMeasure) {
-      this.viewportHeight = this.editor.domManager
-        .getElementMetrics(this.viewport).clientHeight;
+      this.viewportHeight = this.readViewportHeight();
       this.needsMeasure = false;
     }
 
@@ -257,6 +291,7 @@ class SearchResultsScroller {
     if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
     else this.vScroller?.destroy?.();
     this.vScroller = null;
+    this.host = null;
     this.viewport = null;
     this.layer = null;
     this.layerFast = null;
