@@ -25,8 +25,14 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
   }
   try {
     await launch('write');
-    const state = JSON.parse(await fs.readFile(path.join(directory, 'profile', 'state.json'), 'utf8'));
-    assert.equal(state.version, 2);
+    const sessionStore = JSON.parse(await fs.readFile(
+      path.join(directory, 'profile', 'window-sessions.json'), 'utf8',
+    ));
+    const state = sessionStore.sessions
+      .map(session => session.rendererState)
+      .find(rendererState => rendererState?.noWorkspaceState?.tabManager?.tabs?.length);
+    assert.equal(sessionStore.version, 1);
+    assert.ok(state, 'the window session contains the restored renderer state');
     assert.equal(state.noWorkspaceState.tabManager.tabs.length, 1);
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].type, 'file');
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].path, path.join(directory, 'smoke.js'));
@@ -52,5 +58,6 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     await launch('crash');
     await launch('no-nsh');
     await launch('tabs');
+    await launch('multiwindow');
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

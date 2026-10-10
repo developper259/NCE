@@ -100,7 +100,13 @@ module.exports = async function exerciseUI() {
   const recentTrigger = titleBar.root.querySelector('[data-command="open_recent_menu"]');
   recentTrigger.focus();
   titleBar.handleDocumentKeyDown({ key: 'ArrowRight', preventDefault() {}, stopPropagation() {} });
-  check(document.activeElement?.textContent === '/tmp/workspace', 'Open Recent keyboard submenu entry');
+  check(document.activeElement?.textContent.startsWith('/tmp/workspace'), 'Open Recent keyboard submenu entry');
+  titleBar.handleDocumentKeyDown({ key: 'ArrowRight', preventDefault() {}, stopPropagation() {} });
+  check(document.activeElement?.textContent === 'Open', 'Recent folder keyboard actions');
+  titleBar.handleDocumentKeyDown({ key: 'ArrowDown', preventDefault() {}, stopPropagation() {} });
+  check(document.activeElement?.textContent === 'Open in New Window', 'Open in New Window keyboard action');
+  titleBar.handleDocumentKeyDown({ key: 'ArrowLeft', preventDefault() {}, stopPropagation() {} });
+  check(document.activeElement?.textContent.startsWith('/tmp/workspace'), 'Recent folder submenu keyboard return');
   titleBar.handleDocumentKeyDown({ key: 'ArrowLeft', preventDefault() {}, stopPropagation() {} });
   check(document.activeElement === recentTrigger, 'Open Recent keyboard submenu exit');
   titleBar.setRecentFolders([]);

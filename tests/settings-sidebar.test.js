@@ -68,7 +68,7 @@ test("settings path is exposed through a dedicated preload and IPC operation", (
   const windowSource = read("src/ts/Window.ts");
 
   assert.match(preload, /getSettingsPath:\s*\(\) => ipcRenderer\.invoke\("Settings:getPath"\)/);
-  assert.match(windowSource, /ipcMain\.handle\("Settings:getPath",[\s\S]*?this\.app\.settings\.settingsPath/);
+  assert.match(windowSource, /this\.ipc\.handle\("Settings:getPath",[\s\S]*?this\.app\.settings\.settingsPath/);
   assert.doesNotMatch(preload, /require\("(?:fs|path)"\)/);
 });
 
@@ -78,5 +78,6 @@ test("settings changes refresh the open settings JSON tab", () => {
 
   assert.match(editor, /refreshSettingsJsonTab/);
   assert.match(editor, /reloadFileFromDisk\(settingsPath\)/);
-  assert.match(windowSource, /settings-changed.*this\.app\.settings\.getAll\(\)/s);
+  assert.match(windowSource, /const settings = this\.app\.settings\.getAll\?\.\(\)/);
+  assert.match(windowSource, /broadcastToWindows\("settings-changed", settings\)/);
 });

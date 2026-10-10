@@ -40,8 +40,9 @@ app.whenReady().then(() => {
     done({ cancel: !local });
   });
   const waitWindow = setInterval(async () => {
-    const win = nce.window.window;
-    if (!win || !nce.window.rendererReady) return;
+    const activeWindow = nce.window;
+    const win = activeWindow?.window;
+    if (!win || !activeWindow.rendererReady) return;
     clearInterval(waitWindow);
     try {
       const run = async (code) => {
@@ -89,7 +90,7 @@ app.whenReady().then(() => {
           description: "editor session restoration to finish",
         },
       );
-      if (phase !== "write") {
+      if (phase !== "write" && phase !== "multiwindow") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -112,6 +113,121 @@ app.whenReady().then(() => {
         await nce.window.executeWindowCommand("view.devtools"),
         false,
       );
+      if (phase === "multiwindow") {
+        const workspaceAInput = path.join(directory, "multi-window-a");
+        const workspaceBInput = path.join(directory, "multi-window-b");
+        fs.mkdirSync(workspaceAInput, { recursive: true });
+        fs.mkdirSync(workspaceBInput, { recursive: true });
+        const workspaceA = await fs.promises.realpath(workspaceAInput);
+        const workspaceB = await fs.promises.realpath(workspaceBInput);
+        const fileA = path.join(workspaceA, "window-a.js");
+        const fileB = path.join(workspaceB, "window-b.js");
+        fs.writeFileSync(fileA, "const owner = 'window-a';\n");
+        fs.writeFileSync(fileB, "const owner = 'window-b';\n");
+
+        const initialWindow = nce.windowManager.getAllWindows().find(candidate => candidate.window === win);
+        assert.ok(initialWindow, "the initial BrowserWindow is registered");
+        assert.equal(await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(workspaceAInput)})`), true);
+        await waitForCondition(
+          async () => (await run(`editor.fileExplorer.rootPath === ${JSON.stringify(workspaceA)}`)) === true,
+          { timeout: 10000, description: "Window A to open its workspace" },
+        );
+
+        assert.equal(await nce.windowManager.openWorkspaceInNewWindow(workspaceBInput), true);
+        let windowA = null;
+        let windowB = null;
+        await waitForCondition(async () => {
+          windowA = nce.windowManager.findWindowByWorkspace(workspaceA);
+          windowB = nce.windowManager.findWindowByWorkspace(workspaceB);
+          if (!windowA?.window || !windowB?.window || !windowB.rendererReady) return false;
+          return windowB.window.webContents.executeJavaScript(
+            `editor.isOnInit === false && editor.fileExplorer.rootPath === ${JSON.stringify(workspaceB)}`,
+          );
+        }, { timeout: 15000, description: "Window B renderer and workspace restoration" });
+
+        assert.equal(nce.windowManager.getAllWindows().length, 2);
+        assert.notEqual(windowA.id, windowB.id);
+        assert.notEqual(windowA.window.webContents, windowB.window.webContents);
+        const runA = code => windowA.window.webContents.executeJavaScript(code);
+        const runB = code => windowB.window.webContents.executeJavaScript(code);
+        assert.deepEqual(await Promise.all([
+          runA("editor.fileExplorer.rootPath"),
+          runB("editor.fileExplorer.rootPath"),
+        ]), [workspaceA, workspaceB]);
+        assert.match(windowA.window.getTitle(), /multi-window-a$/);
+        assert.match(windowB.window.getTitle(), /multi-window-b$/);
+
+        await Promise.all([
+          runA(`editor.tabManager.openFileWithPath(${JSON.stringify(fileA)}).then(() => true)`),
+          runB(`editor.tabManager.openFileWithPath(${JSON.stringify(fileB)}).then(() => true)`),
+        ]);
+        assert.deepEqual(await Promise.all([
+          runA("editor.tabManager.tabs.map(tab => tab.path)"),
+          runB("editor.tabManager.tabs.map(tab => tab.path)"),
+        ]), [[fileA], [fileB]]);
+
+        const initialAutoSave = await runA("window.api.getSetting('files.autoSave')");
+        await runB(`(() => {
+          window.__multiWindowSettingsChange = new Promise(resolve => {
+            window.__multiWindowSettingsUnsubscribe = window.api.onSettingsChanged(resolve);
+            setTimeout(() => resolve(null), 5000);
+          });
+          return true;
+        })()`);
+        assert.equal(await runA(`window.api.setSetting('files.autoSave', ${JSON.stringify(!initialAutoSave)})`), true);
+        const changedSettings = await runB("window.__multiWindowSettingsChange");
+        assert.equal(changedSettings?.files?.autoSave, !initialAutoSave,
+          "global settings changes broadcast to the other live window");
+        await runB("window.__multiWindowSettingsUnsubscribe?.(); true");
+
+        await Promise.all([
+          runA('editor.bottomPanelManager.openPanel("terminal")'),
+          runB('editor.bottomPanelManager.openPanel("terminal")'),
+        ]);
+        await waitForCondition(async () => {
+          const sessions = await Promise.all([
+            runA("[...editor.terminalPanel.sessions.keys()]"),
+            runB("[...editor.terminalPanel.sessions.keys()]"),
+          ]);
+          return sessions.every(value => Array.isArray(value) && value.length === 1);
+        }, { timeout: 15000, description: "independent terminal sessions in both windows" });
+        const [terminalA, terminalB] = await Promise.all([
+          runA("[...editor.terminalPanel.sessions.keys()][0]"),
+          runB("[...editor.terminalPanel.sessions.keys()][0]"),
+        ]);
+        assert.notEqual(terminalA, terminalB, "each window creates a distinct PTY session");
+        assert.equal(windowA.terminalManager.sessions.has(terminalA), true);
+        assert.equal(windowA.terminalManager.sessions.has(terminalB), false);
+        assert.equal(windowB.terminalManager.sessions.has(terminalB), true);
+        assert.equal(windowB.terminalManager.sessions.has(terminalA), false);
+
+        const countBeforeDuplicate = nce.windowManager.getAllWindows().length;
+        assert.equal(await nce.windowManager.openWorkspaceInNewWindow(workspaceAInput), true);
+        assert.equal(nce.windowManager.getAllWindows().length, countBeforeDuplicate,
+          "opening an already-open workspace focuses its existing window");
+        assert.equal(nce.windowManager.getFocusedWindow(), windowA);
+
+        const windowBId = windowB.id;
+        const windowBProcess = windowB.terminalManager;
+        windowB.window.close();
+        await waitForCondition(
+          () => !nce.windowManager.windows.has(windowBId),
+          { timeout: 15000, description: "native close button to close only Window B" },
+        );
+        await windowB.waitForDisposal();
+        assert.equal(nce.windowManager.getAllWindows().length, 1);
+        assert.equal(nce.windowManager.getAllWindows()[0], windowA);
+        assert.equal(windowA.window.isDestroyed(), false);
+        assert.equal(windowA.terminalManager.sessions.size, 1,
+          "closing B preserves Window A's live PTY");
+        assert.equal(windowBProcess.sessions.size, 0,
+          "closing B releases only its PTY resources");
+        assert.equal(nce.windowManager.windows.has(windowBId), false);
+
+        fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
+        assert.equal(await nce.requestQuitAll(), true, "the remaining windows quit cleanly");
+        return;
+      }
       if (phase === "write") {
         assert.equal(
           await run('typeof Agent === "undefined" && typeof AgentSidebar === "undefined" && typeof MarkdownRenderer === "undefined" && typeof window.NCE_TERMINAL_RUNTIME === "undefined"'),
@@ -2081,6 +2197,7 @@ app.whenReady().then(() => {
         fs.mkdirSync(terminalWorkspaceA, { recursive: true });
         fs.mkdirSync(terminalWorkspaceB, { recursive: true });
         const canonicalTerminalWorkspaceA = await fs.promises.realpath(terminalWorkspaceA);
+        const canonicalTerminalWorkspaceB = await fs.promises.realpath(terminalWorkspaceB);
         assert.equal(
           await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
           true,
@@ -2323,7 +2440,7 @@ app.whenReady().then(() => {
           false,
           "canceling workspace preparation leaves workspace A active",
         );
-        assert.equal(await run(`editor.fileExplorer.rootPath === ${JSON.stringify(terminalWorkspaceA)} &&
+        assert.equal(await run(`editor.fileExplorer.rootPath === ${JSON.stringify(canonicalTerminalWorkspaceA)} &&
           editor.terminalPanel.sessions.size === 2 &&
           editor.terminalPanel.sessions.has(${JSON.stringify(firstTerminal.id)})`), true,
         "a canceled switch preserves A's terminal tabs and live sessions");
@@ -2333,6 +2450,8 @@ app.whenReady().then(() => {
           true,
           "workspace A can switch to workspace B while both A PTYs remain live",
         );
+        assert.equal(await run(`editor.fileExplorer.rootPath === ${JSON.stringify(canonicalTerminalWorkspaceB)}`), true,
+          "workspace roots use the filesystem's canonical path after switching");
         assert.equal(await run("editor.terminalPanel.sessions.size === 0"), true, "workspace B never displays workspace A sessions");
         await run('editor.bottomPanelManager.openPanel("terminal")');
         await waitForCondition(
@@ -2521,7 +2640,7 @@ app.whenReady().then(() => {
         );
         assert.equal(await run(`editor.bottomPanelManager.workspaceKey ===
           editor.terminalPanel.currentWorkspaceKey &&
-          editor.fileExplorer.rootPath === ${JSON.stringify(terminalWorkspaceA)} &&
+          editor.fileExplorer.rootPath === ${JSON.stringify(canonicalTerminalWorkspaceA)} &&
           editor.bottomPanelManager.getPanelState().visible === true`), true,
         "workspace A is active and its Bottom Panel is visible before persisting");
         assert.equal(await run("editor.fileExplorer.closeProject()"), true, "the terminal smoke test returns to No Workspace without reassigning its live PTY");
@@ -2599,19 +2718,24 @@ app.whenReady().then(() => {
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "write") {
+        const terminalManager = nce.window.terminalManager;
         win.once("closed", () => {
-          if (nce.window.terminalManager.sessions.size !== 0) {
+          if (terminalManager.sessions.size !== 0) {
             console.error("Terminal PTYs were left alive after the BrowserWindow closed");
             app.exit(1);
           }
         });
       }
       if (phase === "crash") {
-        win.webContents.once("render-process-gone", () =>
-          nce.window.requestQuit(),
-        );
+        const crashedWindow = nce.window;
+        win.webContents.once("render-process-gone", () => {
+          void (async () => {
+            await crashedWindow.waitForDisposal();
+            await nce.requestQuitAll();
+          })();
+        });
         win.webContents.forcefullyCrashRenderer();
-      } else nce.window.requestQuit();
+      } else void nce.requestQuitAll();
     } catch (error) {
       console.error(error);
       app.exit(1);

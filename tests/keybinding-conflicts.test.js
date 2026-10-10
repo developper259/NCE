@@ -351,7 +351,7 @@ describe("Keyboard Shortcut Conflict Detection", () => {
       await first.initialize();
 
       assert.equal(
-        await first.set("keybindings.new_file", "Mod+Shift+N"),
+        await first.set("keybindings.new_file", "Mod+Alt+N"),
         true,
       );
       assert.equal(await first.set("keybindings.go_to_line", "Mod+P"), false);
@@ -359,7 +359,7 @@ describe("Keyboard Shortcut Conflict Detection", () => {
       const restarted = new SettingsManager(rootDir);
       await restarted.initialize();
 
-      assert.equal(restarted.get("keybindings.new_file"), "Mod+Shift+N");
+      assert.equal(restarted.get("keybindings.new_file"), "Mod+Alt+N");
       assert.equal(restarted.get("keybindings.go_to_line"), "Mod+G");
       assert.equal(restarted.get("keybindings.quick_open"), "Mod+P");
     } finally {

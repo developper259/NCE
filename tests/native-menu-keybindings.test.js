@@ -12,6 +12,7 @@ function createMenuHarness(overrides = {}) {
     ? overrides.recentFolders
     : [];
   const openRecentCalls = [];
+  const openWorkspaceCalls = [];
   const rendererMessages = [];
   let clearRecentCalls = 0;
 
@@ -85,11 +86,15 @@ function createMenuHarness(overrides = {}) {
       app: {
         settings: { get: (key) => values.get(key) },
         recentFolders: { getAll: () => [...recentFolders] },
+        windowManager: {
+          openWorkspaceInNewWindow: (folderPath) => openWorkspaceCalls.push(folderPath),
+        },
       },
       requestOpenRecentFolder: (folderPath) => openRecentCalls.push(folderPath),
       clearRecentFolders: async () => { clearRecentCalls++; },
     },
   );
+  appMenu.activate();
 
   function item(label) {
     const find = (entries) => {
@@ -111,6 +116,7 @@ function createMenuHarness(overrides = {}) {
     item,
     values,
     openRecentCalls,
+    openWorkspaceCalls,
     rendererMessages,
     get clearRecentCalls() { return clearRecentCalls; },
   };
@@ -252,8 +258,10 @@ test("native Open Recent exposes folders, dispatches selection and clears histor
   const fixture = createMenuHarness({
     recentFolders: ["/projects/NSH", "/projects/NCE"],
   });
-  fixture.item("/projects/NCE").click();
+  fixture.item("/projects/NCE").submenu[0].click();
   assert.deepEqual(fixture.openRecentCalls, ["/projects/NCE"]);
+  fixture.item("/projects/NCE").submenu[1].click();
+  assert.deepEqual(fixture.openWorkspaceCalls, ["/projects/NCE"]);
   await fixture.item("Clear Recently Opened").click();
   assert.equal(fixture.clearRecentCalls, 1);
 
@@ -278,6 +286,7 @@ test("Window refreshes the native menu only after a persisted keybinding change"
   });
   const window = new Window({
     settings: {
+      getAll: () => ({}),
       set: async (key, value) => {
         savedKeys.push(key);
         return !(key === "keybindings.find" && value === "Mod+P");

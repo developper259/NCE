@@ -118,7 +118,8 @@ test("native application menu is kept only on macOS", () => {
       },
       { process: { platform } },
     );
-    new AppMenu({ webContents: {} }, { app: {} });
+    const menu = new AppMenu({ webContents: {} }, { app: {} });
+    menu.activate();
     return installed;
   }
   const macMenu = exercise("darwin")[0];
@@ -212,23 +213,21 @@ test("native macOS File menu exposes an IPC-backed Auto Save checkbox", () => {
 for (const mode of [
   "not-ready",
   "destroyed",
-  "timeout-cancel",
-  "timeout-force",
+  "timeout",
   "approve",
   "cancel",
 ]) {
   test(`main quit handshake: ${mode}`, async () => {
     let timer,
       closed = 0,
-      sent = 0;
+      sent = 0,
+      nativeDialogs = 0;
     const { Window } = loadMain(
       "dist/ts/Window.js",
       {
         electron: {
           dialog: {
-            showMessageBox: async () => ({
-              response: mode === "timeout-force" ? 0 : 1,
-            }),
+            showMessageBox: async () => { nativeDialogs++; return { response: 0 }; },
           },
         },
       },
@@ -249,49 +248,69 @@ for (const mode of [
         send: () => sent++,
       },
     };
-    assert.equal(win.requestQuit(), true);
+    const request = win.requestQuit();
     if (["not-ready", "destroyed"].includes(mode)) {
+      assert.equal(await request, true);
       assert.equal(closed, 1);
       assert.equal(sent, 0);
       return;
     }
-    assert.equal(win.requestQuit(), false);
+    assert.equal(await win.requestQuit(), false);
     assert.equal(sent, 1);
-    if (mode.startsWith("timeout")) {
+    if (mode === "timeout") {
       timer();
       await new Promise((r) => setImmediate(r));
-      assert.equal(closed, mode === "timeout-force" ? 1 : 0);
+      assert.equal(closed, 0, "an unresponsive renderer leaves its window open");
+      assert.equal(await request, false);
+      assert.equal(win.quitState, "idle");
+      assert.equal(nativeDialogs, 0, "close timeout does not open a blocking native dialog");
+      assert.equal(win.approveQuit(), false, "a late renderer response cannot close the timed-out window");
+    } else if (mode === "approve") {
+      win.approveQuit();
+      assert.equal(await request, true);
+      assert.equal(closed, 1);
     } else {
-      win.clearQuitTimer();
+      win.cancelQuitRequest();
+      assert.equal(await request, false);
       assert.equal(win.quitState, "idle");
     }
   });
 }
 
-test("before-quit does not stop NSH until renderer approves; shutdown runs once", async () => {
+test("application Quit prepares all windows before stopping shared NSH", async () => {
   const app = new EventEmitter();
+  app.getPath = () => "/tmp/nce-main-lifecycle";
   app.getVersion = () => "test";
   app.requestSingleInstanceLock = () => true;
-  let stopped = 0,
-    requests = 0,
-    quits = 0;
+  let stopped = 0, quits = 0, prepared = 0, committed = 0, resolvePrepare;
   app.quit = () => {
     quits++;
     app.emit("before-quit", { preventDefault() {} });
   };
+  class FakeWindowManager {
+    constructor() {
+      this.windows = [{
+        prepareForApplicationQuit() {
+          prepared++;
+          return new Promise((resolve) => { resolvePrepare = resolve; });
+        },
+        cancelPreparedClose() {},
+        commitPreparedClose() { committed++; return Promise.resolve(true); },
+        waitForDisposal() { return Promise.resolve(); },
+      }];
+    }
+    getAllWindows() { return this.windows; }
+    getFocusedWindow() { return this.windows[0] || null; }
+    dispose() {}
+    updateWindowState() {}
+    createEmptyWindow() {}
+  }
+  class FakeSessionStore { async initialize() { return []; } async flush() { return true; } }
+  class FakeManager { async initialize() {} }
+  class FakeIpcRouter { dispose() {} forWindow() { return { handle() {} }; } }
   const { App } = loadMain("dist/ts/App.js", {
-    electron: { app },
-    "./Window": {
-      Window: class {
-        constructor() {
-          this.window = {};
-          this.forceQuit = false;
-        }
-        requestQuit() {
-          requests++;
-        }
-      },
-    },
+    electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
+    "./Window": { Window: class {} },
     "nsh/server": {
       NSHServer: class {
         getPort() {
@@ -302,16 +321,62 @@ test("before-quit does not stop NSH until renderer approves; shutdown runs once"
         }
       },
     },
+    "./manager/IpcRouter": { IpcRouter: FakeIpcRouter },
+    "./manager/WindowManager": { WindowManager: FakeWindowManager },
+    "./manager/WindowSessionStore": { WindowSessionStore: FakeSessionStore },
+    "./manager/SettingsManager": { SettingsManager: FakeManager },
+    "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
+    "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
   });
   const nce = new App();
-  app.emit("before-quit", { preventDefault() {} });
-  assert.equal(requests, 1);
+  let prevented = false;
+  app.emit("before-quit", { preventDefault() { prevented = true; } });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(prevented, true);
+  assert.equal(prepared, 1);
+  assert.equal(committed, 0);
   assert.equal(stopped, 0);
-  nce.window.forceQuit = true;
-  app.emit("before-quit", { preventDefault() {} });
+  resolvePrepare(true);
   await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(committed, 1);
   assert.equal(stopped, 1);
   assert.equal(quits, 1);
+  assert.equal(nce.isQuitting, true);
+});
+
+test("closing the last macOS window does not turn Close Window into app Quit", async () => {
+  const app = new EventEmitter();
+  app.getPath = () => "/tmp/nce-macos-window-close";
+  app.getVersion = () => "test";
+  app.requestSingleInstanceLock = () => true;
+  let quitRequests = 0;
+  class FakeWindowManager {
+    getAllWindows() { return []; }
+    getFocusedWindow() { return null; }
+    createEmptyWindow() {}
+    dispose() {}
+  }
+  class FakeManager { async initialize() {} }
+  class FakeIpcRouter { dispose() {} }
+  class FakeSessionStore { async initialize() { return []; } }
+  const { App } = loadMain("dist/ts/App.js", {
+    electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
+    "./Window": { Window: class {} },
+    "nsh/server": { NSHServer: class {} },
+    "./manager/IpcRouter": { IpcRouter: FakeIpcRouter },
+    "./manager/WindowManager": { WindowManager: FakeWindowManager },
+    "./manager/WindowSessionStore": { WindowSessionStore: FakeSessionStore },
+    "./manager/SettingsManager": { SettingsManager: FakeManager },
+    "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
+    "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
+  }, { process: { platform: "darwin" } });
+  const nce = new App();
+  nce.requestQuitAll = () => { quitRequests++; return Promise.resolve(true); };
+
+  app.emit("window-all-closed");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(quitRequests, 0);
 });
 
 test("main runtime exposes the host process to watcher platform selection", async () => {
