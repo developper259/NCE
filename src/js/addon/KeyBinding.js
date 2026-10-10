@@ -25,6 +25,9 @@ class KeyBinding {
       go_to_line: this.control_go_to_line,
       open_folder: this.control_open_folder,
       new_file: this.control_new_file,
+      new_window: this.control_new_window,
+      open_folder_in_new_window: this.control_open_folder_in_new_window,
+      close_window: this.control_close_window,
       new_terminal: this.control_new_terminal,
       kill_terminal: this.control_kill_terminal,
       kill_all_terminals: this.control_kill_all_terminals,
@@ -135,6 +138,18 @@ class KeyBinding {
 
   control_new_file(s, c, m, a) {
     this.editor.tabManager.createEmptyFile();
+  }
+
+  control_new_window() {
+    return this.editor.api.appCommand("window.new");
+  }
+
+  control_open_folder_in_new_window() {
+    return this.editor.api.appCommand("window.openFolderInNew");
+  }
+
+  control_close_window() {
+    return this.editor.api.closeWindow?.();
   }
 
   async control_new_terminal() {

@@ -5,16 +5,19 @@ import {
   ipcMain,
   nativeTheme,
 } from "electron";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 
 export class ContextMenu {
   window: BrowserWindow;
+  private readonly ipc: IpcHandlerRegistrar;
 
-  constructor(window: BrowserWindow) {
+  constructor(window: BrowserWindow, ipc: IpcHandlerRegistrar = ipcMain as any) {
     this.window = window;
+    this.ipc = ipc;
   }
 
   handleIPC() {
-    ipcMain.handle(
+    this.ipc.handle(
       "Theme:setNativeSource",
       (_event, source: unknown, resolvedTheme: unknown) => {
       if (source !== "system" && source !== "dark" && source !== "light") {
@@ -29,7 +32,7 @@ export class ContextMenu {
       return true;
       },
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "ContextMenu:show",
       async (
         event,

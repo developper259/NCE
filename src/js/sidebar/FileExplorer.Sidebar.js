@@ -333,7 +333,11 @@ class FileExplorer extends Sidebar {
     this.projectName = NCEPath.basename(projectPath) || "Project";
 
     try {
-      await window.api.startWatching(projectPath);
+      const reservedPath = await window.api.startWatching(projectPath);
+      if (typeof reservedPath === "string" && reservedPath) {
+        this.rootPath = reservedPath;
+        this.projectName = NCEPath.basename(reservedPath) || "Project";
+      }
     } catch (error) {
       console.error("Unable to watch workspace:", error);
       await this.invalidateWorkspace();
@@ -915,6 +919,8 @@ class FileExplorer extends Sidebar {
       return false;
     }
 
+    if (await this.editor.api.focusWorkspaceWindow?.(folderPath)) return false;
+
     if (this.rootPath && NCEPath.equals(folderPath, this.rootPath)) {
       await this.editor.api.addRecentFolder?.(folderPath);
       return true;
@@ -971,10 +977,11 @@ class FileExplorer extends Sidebar {
       return false;
     }
 
-    await this.editor.statesManager.loadWorkspaceState(folderPath);
-    this.editor.statesManager.lastWorkspace = folderPath;
+    const activeWorkspacePath = this.rootPath || folderPath;
+    await this.editor.statesManager.loadWorkspaceState(activeWorkspacePath);
+    this.editor.statesManager.lastWorkspace = activeWorkspacePath;
     const stateSaved = await this.editor.statesManager.saveGlobalState();
-    await this.editor.api.addRecentFolder?.(folderPath);
+    await this.editor.api.addRecentFolder?.(activeWorkspacePath);
     return stateSaved !== false;
   }
 

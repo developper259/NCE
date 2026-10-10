@@ -1,4 +1,5 @@
 import { app, ipcMain, type IpcMainInvokeEvent, type WebContents } from "electron";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import {
   accessSync,
   constants as nativeFsConstants,
@@ -25,7 +26,7 @@ type TerminalManagerOptions = {
   getWorkspacePath: () => string | null | undefined;
   getShellSetting: () => unknown;
   owner?: WebContents | null;
-  ipc?: typeof ipcMain;
+  ipc?: IpcHandlerRegistrar;
   spawn?: TerminalSpawn;
   platform?: NodeJS.Platform;
   env?: NodeJS.ProcessEnv;
@@ -221,7 +222,7 @@ export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
   private readonly pendingCreates = new Map<WebContents, number>();
   private owner: WebContents | null;
-  private readonly ipc: typeof ipcMain;
+  private readonly ipc: IpcHandlerRegistrar;
   private readonly spawnPty?: TerminalSpawn;
   private readonly platform: NodeJS.Platform;
   private readonly env: NodeJS.ProcessEnv;
@@ -235,7 +236,7 @@ export class TerminalManager {
 
   constructor(options: TerminalManagerOptions) {
     this.owner = options.owner || null;
-    this.ipc = options.ipc || ipcMain;
+    this.ipc = options.ipc || ipcMain as unknown as IpcHandlerRegistrar;
     this.spawnPty = options.spawn;
     this.platform = options.platform || process.platform;
     this.env = options.env || process.env;

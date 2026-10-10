@@ -2,11 +2,11 @@ import {
   app,
   BrowserWindow,
   clipboard,
-  dialog,
-  ipcMain,
   shell,
+  type WebContents,
 } from "electron";
 import path from "path";
+import { randomUUID } from "node:crypto";
 
 import { FileManager } from "./addon/FileManager";
 import { Watcher } from "./addon/Watcher";
@@ -18,6 +18,8 @@ import { AgentProcessRunner } from "./addon/AgentProcessRunner";
 import { TerminalManager } from "./terminal/TerminalManager";
 import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { App } from "./App";
+import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
+import type { WindowSession } from "./manager/WindowSessionStore";
 
 const TITLEBAR_CONTROLS_HEIGHT = 35;
 const MACOS_TRAFFIC_LIGHT_SIZE = 14;
@@ -26,6 +28,7 @@ const MACOS_TRAFFIC_LIGHT_Y = Math.round(
 );
 const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
 const WINDOW_RELOAD_DELAY_MS = 50;
+const WINDOW_CLOSE_RESPONSE_TIMEOUT_MS = 10_000;
 
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
@@ -47,7 +50,13 @@ export function getWindowChromeConfig(
 }
 
 export class Window {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly ipc: IpcHandlerRegistrar;
+  readonly focusWhenReady: boolean;
   window: InstanceType<typeof BrowserWindow> | null;
+  workspacePath: string | null;
+  preserveSessionOnClose = false;
   fileManager: FileManager | undefined;
   appMenu: AppMenu | undefined;
   watcher: Watcher | undefined;
@@ -60,11 +69,32 @@ export class Window {
   forceQuit: boolean;
   rendererReady: boolean;
   reloadPending: boolean;
-  quitState: "idle" | "waiting-renderer" | "approved";
+  quitState: "idle" | "waiting-renderer" | "prepared" | "approved";
   quitTimer: ReturnType<typeof setTimeout> | null;
-  ipcRegistered: boolean;
+  private quitRequestResolve: ((approved: boolean) => void) | null = null;
+  private prepareQuitOnly = false;
+  private boundsSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private resourceDisposal: Promise<void> = Promise.resolve();
+  private readonly initialSession: WindowSession;
 
-  constructor(app: App) {
+  constructor(
+    app: App,
+    options: {
+      id?: string;
+      session?: WindowSession;
+      ipc?: IpcHandlerRegistrar;
+      focusWhenReady?: boolean;
+    } = {},
+  ) {
+    this.id = options.id || randomUUID();
+    this.initialSession = options.session || {
+      id: randomUUID(), workspacePath: null, bounds: null, maximized: false,
+      rendererState: null, lastActiveAt: Date.now(),
+    };
+    this.sessionId = this.initialSession.id;
+    this.workspacePath = this.initialSession.workspacePath;
+    this.ipc = options.ipc || app?.ipcRouter?.forWindow?.(this.id) || { handle() {} };
+    this.focusWhenReady = options.focusWhenReady !== false;
     this.window = null;
     this.app = app;
     this.forceQuit = false;
@@ -72,7 +102,6 @@ export class Window {
     this.reloadPending = false;
     this.quitState = "idle";
     this.quitTimer = null;
-    this.ipcRegistered = false;
     this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
     this.terminalManager = undefined;
@@ -89,12 +118,12 @@ export class Window {
       : path.join(__dirname, "../..");
     const assetRoot = app.isPackaged ? appRoot : path.join(appRoot, "src");
 
+    const restoreBounds = this.app.windowManager?.getRestoreBounds(this.initialSession.bounds) || null;
     this.window = new BrowserWindow({
-      width: 800,
-      height: 600,
+      ...(restoreBounds || { width: 1100, height: 720 }),
       minWidth: 800,
       minHeight: 600,
-      title: this.app.name,
+      title: this.getWindowTitle(),
       show: false,
       backgroundColor: "#181818",
       ...getWindowChromeConfig(),
@@ -115,22 +144,23 @@ export class Window {
     // whether the custom editor output or a native input currently has focus.
     this.window.webContents.setIgnoreMenuShortcuts(true);
 
-    if (!this.fileManager) this.fileManager = new FileManager(this);
-    if (!this.watcher) this.watcher = new Watcher(this.window);
-    else this.watcher.setWindow(this.window);
-    if (!this.terminalManager) {
-      this.terminalManager = new TerminalManager({
-        getWorkspacePath: () => this.watcher?.getWatchedPath() || null,
-        getShellSetting: () => this.app.settings.get("terminal.shell"),
-      });
-    }
+    this.app.windowManager?.registerBrowserWindow(this, this.window);
+    this.fileManager = new FileManager(this, undefined, this.ipc);
+    this.watcher = new Watcher(this.window, this.ipc, {
+      reserveWorkspace: (projectPath) => this.app.windowManager.reserveWorkspace(this.id, projectPath),
+      releaseWorkspace: (projectPath) => this.app.windowManager.releaseWorkspace(this.id, projectPath),
+    });
+    this.terminalManager = new TerminalManager({
+      getWorkspacePath: () => this.watcher?.getWatchedPath() || null,
+      getShellSetting: () => this.app.settings.get("terminal.shell"),
+      ipc: this.ipc,
+    });
     const terminalOwner = this.window.webContents;
     this.terminalManager.attachOwner(terminalOwner);
     this.watcher.onChange = (filePath) =>
       this.fileManager?.clearFileCache(filePath);
-    if (!this.contextMenu) this.contextMenu = new ContextMenu(this.window);
-    else this.contextMenu.window = this.window;
-    if (!this.workspaceSearch) this.workspaceSearch = new WorkspaceSearch(this);
+    this.contextMenu = new ContextMenu(this.window, this.ipc);
+    this.workspaceSearch = new WorkspaceSearch(this, this.ipc);
     this.watcher.onWorkspaceEvent = (event, filePath, rootPath) =>
       this.workspaceSearch?.workspaceIndex.handleWatcherEvent(
         rootPath,
@@ -159,12 +189,11 @@ export class Window {
       ) return;
       window.webContents.send("workspace-index-stats", stats);
     };
-    if (!this.agentApprovalManager)
-      this.agentApprovalManager = new AgentApprovalManager(this);
-    if (!this.agentProcessRunner)
-      this.agentProcessRunner = new AgentProcessRunner(this);
+    this.agentApprovalManager = new AgentApprovalManager(this, this.ipc);
+    this.agentProcessRunner = new AgentProcessRunner(this, this.ipc);
 
     this.appMenu = new AppMenu(this.window, this);
+    if (this.initialSession.maximized) this.window.maximize();
 
     if (
       !app.isPackaged &&
@@ -177,9 +206,13 @@ export class Window {
       );
     }
     this.window.once("ready-to-show", () => {
-      this.window?.maximize();
       this.window?.show();
+      if (this.focusWhenReady) this.window?.focus();
     });
+
+    this.window.on("resize", () => this.scheduleBoundsSave());
+    this.window.on("move", () => this.scheduleBoundsSave());
+    this.registerIPC();
 
     this.window.webContents.on("console-message", (...args: any[]) => {
       const details =
@@ -216,6 +249,10 @@ export class Window {
         deferProcessDisposal: true,
       });
       this.clearQuitTimer();
+      this.preserveSessionOnClose = true;
+      this.forceQuit = true;
+      this.app.windowManager?.updateWindowState(this);
+      this.window?.close();
     });
     this.window.webContents.on(
       "did-start-navigation",
@@ -258,120 +295,82 @@ export class Window {
       }
 
       event.preventDefault();
-      this.requestQuit();
+      void this.requestQuit();
     });
 
     this.window.on("closed", () => {
-      this.agentApprovalManager?.cancelAll();
-      this.terminalManager?.closeForOwner(terminalOwner);
+      this.clearQuitTimer();
+      this.resourceDisposal = this.disposeWindowServices(terminalOwner);
       this.window = null;
     });
+  }
 
-    if (!this.ipcRegistered) {
-      ipcMain.handle("App:quit", async () => this.requestQuit());
-      ipcMain.handle("App:command", async (_event, command) =>
-        this.executeWindowCommand(command),
-      );
-      ipcMain.handle("Clipboard:readText", async () => clipboard.readText());
-      ipcMain.handle("Clipboard:writeText", async (_event, text) => {
-        clipboard.writeText(String(text ?? ""));
-        return true;
-      });
-      ipcMain.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
-        this.setMenuShortcutsIgnored(ignored),
-      );
-      ipcMain.handle(
-        "App:setActiveFileContext",
-        async (_event, hasActiveFile, canCycleTabs) =>
-          this.setActiveFileContext(hasActiveFile, canCycleTabs),
-      );
-      ipcMain.handle("App:setAutoSaveState", async (_event, enabled) => {
-        if (typeof enabled !== "boolean") return false;
-        const saved = await this.app.settings.set("files.autoSave", enabled);
-        if (!saved) return false;
-        this.appMenu?.setAutoSaveState(enabled);
-        return true;
-      });
-      ipcMain.handle("Settings:getAll", async () => this.app.settings.getAll());
-      ipcMain.handle("Settings:get", async (_event, key) =>
-        typeof key === "string" ? this.app.settings.get(key) : undefined,
-      );
-      ipcMain.handle("Settings:getPath", async () =>
-        this.app.settings.settingsPath,
-      );
-      ipcMain.handle("Settings:set", async (_event, key, value) => {
-        return this.setSetting(key, value);
-      });
-      ipcMain.handle("Terminal:openExternalLink", async (event, rawUrl) => {
-        if (!this.terminalManager?.ownsSender(event.sender)) return false;
-        const url = normalizeTerminalLink(rawUrl);
-        if (!url) return false;
-        try {
-          await shell.openExternal(url);
-          return true;
-        } catch (error) {
-          console.error("[Terminal] Failed to open external link", error);
-          return false;
-        }
-      });
-      ipcMain.handle("RecentFolders:getAll", async () =>
-        this.app.recentFolders.getAll(),
-      );
-      ipcMain.handle("RecentFolders:add", async (_event, folderPath) =>
-        this.addRecentFolder(folderPath),
-      );
-      ipcMain.handle("RecentFolders:remove", async (_event, folderPath) =>
-        this.removeRecentFolder(folderPath),
-      );
-      ipcMain.handle("RecentFolders:clear", async () =>
-        this.clearRecentFolders(),
-      );
-      ipcMain.handle("App:rendererReady", async () => {
-        this.rendererReady = true;
-        return true;
-      });
-      ipcMain.handle("App:approveQuit", async () => {
-        this.clearQuitTimer();
-        this.quitState = "approved";
-        this.forceQuit = true;
-        const owner = this.window?.webContents;
-        if (owner) this.terminalManager?.closeForOwner(owner);
-        this.window?.close();
-        return true;
-      });
-      ipcMain.handle("App:cancelQuit", async () => {
-        this.clearQuitTimer();
-        return true;
-      });
-      ipcMain.handle("NSH:getEndpoint", async () => this.app.nshEndpoint);
-      ipcMain.handle("AgentConversations:status", async () =>
-        this.app.agentConversations?.getStatus() || { available: false, reason: "STORE_ERROR" },
-      );
-      ipcMain.handle("AgentConversations:load", async () =>
-        this.app.agentConversations?.load() || { status: { available: false, reason: "STORE_ERROR" }, activeSessionId: null, sessionIds: [], sessions: [] },
-      );
-      ipcMain.handle("AgentConversations:save", async (_event, snapshot) =>
-        this.app.agentConversations?.save(snapshot) || false,
-      );
-      ipcMain.handle("AgentConversations:delete", async (_event, sessionId, activeId) =>
-        this.app.agentConversations?.delete(sessionId, activeId) || false,
-      );
-      ipcMain.handle("AgentConversations:setActive", async (_event, sessionId) =>
-        this.app.agentConversations?.setActive(sessionId) || false,
-      );
-      ipcMain.handle("AgentConversations:flush", async () =>
-        this.app.agentConversations?.flush() || false,
-      );
+  private registerIPC(): void {
+    this.ipc.handle("App:quit", async () => this.app.requestQuitAll());
+    this.ipc.handle("App:closeWindow", async () => this.requestQuit());
+    this.ipc.handle("App:command", async (_event, command) => this.executeWindowCommand(command));
+    this.ipc.handle("Clipboard:readText", async () => clipboard.readText());
+    this.ipc.handle("Clipboard:writeText", async (_event, text) => {
+      clipboard.writeText(String(text ?? ""));
+      return true;
+    });
+    this.ipc.handle("App:setIgnoreMenuShortcuts", async (_event, ignored) =>
+      this.setMenuShortcutsIgnored(ignored));
+    this.ipc.handle("App:setActiveFileContext", async (_event, hasActiveFile, canCycleTabs) =>
+      this.setActiveFileContext(hasActiveFile, canCycleTabs));
+    this.ipc.handle("App:setAutoSaveState", async (_event, enabled) => {
+      if (typeof enabled !== "boolean") return false;
+      return this.setSetting("files.autoSave", enabled);
+    });
+    this.ipc.handle("Settings:getAll", async () => this.app.settings.getAll());
+    this.ipc.handle("Settings:get", async (_event, key) =>
+      typeof key === "string" ? this.app.settings.get(key) : undefined);
+    this.ipc.handle("Settings:getPath", async () => this.app.settings.settingsPath);
+    this.ipc.handle("Settings:set", async (_event, key, value) => this.setSetting(key, value));
+    this.ipc.handle("Terminal:openExternalLink", async (event, rawUrl) => {
+      if (!this.terminalManager?.ownsSender(event.sender)) return false;
+      const url = normalizeTerminalLink(rawUrl);
+      if (!url) return false;
+      try { await shell.openExternal(url); return true; }
+      catch (error) { console.error("[Terminal] Failed to open external link", error); return false; }
+    });
+    this.ipc.handle("RecentFolders:getAll", async () => this.app.recentFolders.getAll());
+    this.ipc.handle("RecentFolders:add", async (_event, folderPath) => this.addRecentFolder(folderPath));
+    this.ipc.handle("RecentFolders:remove", async (_event, folderPath) => this.removeRecentFolder(folderPath));
+    this.ipc.handle("RecentFolders:clear", async () => this.clearRecentFolders());
+    this.ipc.handle("App:rendererReady", async () => {
+      this.rendererReady = true;
+      return true;
+    });
+    this.ipc.handle("App:approveQuit", async (_event, options) => {
+      return this.approveQuit(options?.prepareOnly === true);
+    });
+    this.ipc.handle("App:cancelQuit", async () => this.cancelQuitRequest());
+    this.ipc.handle("Window:focusWorkspace", async (_event, folderPath) =>
+      this.app.windowManager.focusWorkspace(folderPath, this.id));
+    this.ipc.handle("Window:openWorkspaceInNewWindow", async (_event, folderPath) =>
+      this.app.windowManager.openWorkspaceInNewWindow(folderPath));
+    this.ipc.handle("NSH:getEndpoint", async () => this.app.nshEndpoint);
+    this.ipc.handle("AgentConversations:status", async () =>
+      this.app.agentConversations?.getStatus() || { available: false, reason: "STORE_ERROR" });
+    this.ipc.handle("AgentConversations:load", async () =>
+      this.app.agentConversations?.load() || { status: { available: false, reason: "STORE_ERROR" }, activeSessionId: null, sessionIds: [], sessions: [] });
+    this.ipc.handle("AgentConversations:save", async (_event, snapshot) =>
+      this.app.agentConversations?.save(snapshot) || false);
+    this.ipc.handle("AgentConversations:delete", async (_event, sessionId, activeId) =>
+      this.app.agentConversations?.delete(sessionId, activeId) || false);
+    this.ipc.handle("AgentConversations:setActive", async (_event, sessionId) =>
+      this.app.agentConversations?.setActive(sessionId) || false);
+    this.ipc.handle("AgentConversations:flush", async () =>
+      this.app.agentConversations?.flush() || false);
 
-      this.fileManager.handleIPC();
-      this.watcher.handleIPC();
-      this.contextMenu.handleIPC();
-      this.workspaceSearch.handleIPC();
-      this.agentApprovalManager?.handleIPC();
-      this.agentProcessRunner.handleIPC();
-      this.terminalManager.registerIPC();
-      this.ipcRegistered = true;
-    }
+    this.fileManager?.handleIPC();
+    this.watcher?.handleIPC();
+    this.contextMenu?.handleIPC();
+    this.workspaceSearch?.handleIPC();
+    this.agentApprovalManager?.handleIPC();
+    this.agentProcessRunner?.handleIPC();
+    this.terminalManager?.registerIPC();
   }
 
   async setSetting(key: unknown, value: unknown) {
@@ -384,10 +383,12 @@ export class Window {
     } else if (key.startsWith("keybindings.")) {
       this.appMenu?.refreshKeybindings();
     }
-    this.window?.webContents?.send(
-      "settings-changed",
-      this.app.settings.getAll(),
-    );
+    const settings = this.app.settings.getAll?.();
+    if (typeof this.app.broadcastToWindows === "function") {
+      this.app.broadcastToWindows("settings-changed", settings);
+    } else if (this.window && !this.window.isDestroyed()) {
+      this.window.webContents.send("settings-changed", settings);
+    }
     return true;
   }
 
@@ -397,7 +398,7 @@ export class Window {
     }
     const settings = await this.app.settings.reload();
     if (!settings) return false;
-    this.window?.webContents.send("settings-changed", settings);
+    this.app.broadcastToWindows("settings-changed", settings);
     return true;
   }
 
@@ -421,12 +422,14 @@ export class Window {
 
   refreshRecentFolders() {
     const folders = this.app.recentFolders.getAll();
-    this.appMenu?.refreshKeybindings();
-    this.window?.webContents.send("recent-folders-changed", folders);
+    this.app.broadcastToWindows("recent-folders-changed", folders);
   }
 
   requestOpenRecentFolder(folderPath: string) {
-    this.window?.webContents.send("open-recent-folder-requested", folderPath);
+    void this.app.windowManager.focusWorkspace(folderPath, this.id).then((focused) => {
+      if (!focused && this.window && !this.window.isDestroyed())
+        this.window.webContents.send("open-recent-folder-requested", folderPath);
+    });
   }
 
   setMenuShortcutsIgnored(ignored: unknown) {
@@ -446,6 +449,14 @@ export class Window {
   async executeWindowCommand(command: unknown) {
     if (!this.window || typeof command !== "string") return false;
     switch (command) {
+      case "window.new":
+        return Boolean(this.app.windowManager.createEmptyWindow());
+      case "window.openFolderInNew":
+        return this.app.openFolderInNewWindow();
+      case "window.close":
+        return this.requestQuit();
+      case "window.quit":
+        return this.app.requestQuitAll();
       case "view.fullscreen":
         this.window.setFullScreen(!this.window.isFullScreen());
         return true;
@@ -457,6 +468,51 @@ export class Window {
       default:
         return false;
     }
+  }
+
+  getWindowTitle(): string {
+    const projectName = this.workspacePath ? path.basename(this.workspacePath) : "";
+    return projectName ? `${this.app.name} — ${projectName}` : this.app.name;
+  }
+
+  setWorkspacePath(workspacePath: string | null): void {
+    this.workspacePath = workspacePath;
+    this.window?.setTitle(this.getWindowTitle());
+    this.app.windowSessionStore?.update(this.sessionId, { workspacePath });
+  }
+
+  private scheduleBoundsSave(): void {
+    if (this.boundsSaveTimer) clearTimeout(this.boundsSaveTimer);
+    this.boundsSaveTimer = setTimeout(() => {
+      this.boundsSaveTimer = null;
+      this.app.windowManager?.updateWindowState(this);
+    }, 300);
+  }
+
+  async dispose(): Promise<void> {
+    if (this.boundsSaveTimer) clearTimeout(this.boundsSaveTimer);
+    this.boundsSaveTimer = null;
+    this.clearQuitTimer();
+    const owner = this.window?.webContents;
+    await this.disposeWindowServices(owner);
+  }
+
+  async waitForDisposal(): Promise<void> {
+    const target = this.window;
+    if (!target) return this.resourceDisposal;
+    await new Promise<void>((resolve) => {
+      target.once("closed", () => resolve());
+    });
+    await this.resourceDisposal;
+  }
+
+  private async disposeWindowServices(owner?: WebContents): Promise<void> {
+    this.agentApprovalManager?.cancelAll();
+    this.agentProcessRunner?.dispose();
+    if (owner) this.terminalManager?.closeForOwner(owner);
+    await this.watcher?.dispose();
+    await this.workspaceSearch?.dispose();
+    this.fileManager?.clearFileCache();
   }
 
   reloadWindow() {
@@ -496,45 +552,103 @@ export class Window {
     return true;
   }
 
-  requestQuit() {
-    if (!this.window || this.forceQuit || this.quitState !== "idle")
-      return false;
+  requestQuit(prepareOnly = false): Promise<boolean> {
+    if (this.quitState === "prepared") return Promise.resolve(true);
+    if (!this.window || this.forceQuit || this.quitState !== "idle") return Promise.resolve(false);
+    this.prepareQuitOnly = prepareOnly;
     if (!this.rendererReady || this.window.webContents.isDestroyed()) {
+      if (prepareOnly) {
+        this.quitState = "prepared";
+        return Promise.resolve(true);
+      }
       this.forceQuit = true;
+      this.app.windowManager?.updateWindowState(this);
       this.terminalManager?.closeForOwner(this.window.webContents);
       this.window.close();
-      return true;
+      return Promise.resolve(true);
     }
 
     this.quitState = "waiting-renderer";
-    this.window.webContents.send("Request:saveState");
-    this.quitTimer = setTimeout(() => {
-      this.quitTimer = null;
-      if (this.quitState !== "waiting-renderer" || !this.window) return;
-      dialog
-        .showMessageBox(this.window, {
-          type: "warning",
-          buttons: ["Force Quit", "Cancel"],
-          defaultId: 1,
-          cancelId: 1,
-          message: "NCE is not responding.",
-          detail: "Force quit may lose unsaved changes.",
-        })
-        .then(({ response }) => {
-          if (response === 0 && this.window) {
-            this.forceQuit = true;
-            this.quitState = "approved";
-            this.terminalManager?.closeForOwner(this.window.webContents);
-            this.window.close();
-          } else {
-            this.quitState = "idle";
-          }
-        })
-        .catch(() => {
-          this.quitState = "idle";
-        });
-    }, 2500);
+    return new Promise<boolean>((resolve) => {
+      this.quitRequestResolve = resolve;
+      this.window!.webContents.send("Request:saveState", { prepareOnly });
+      this.quitTimer = setTimeout(() => {
+        this.quitTimer = null;
+        const target = this.window;
+        if (this.quitState !== "waiting-renderer" || !target) return;
+        console.warn("[Window] Renderer did not acknowledge close; keeping the window open.");
+        this.quitState = "idle";
+        this.prepareQuitOnly = false;
+        this.resolveQuitRequest(false);
+      }, WINDOW_CLOSE_RESPONSE_TIMEOUT_MS);
+    });
+  }
+
+  prepareForApplicationQuit(): Promise<boolean> {
+    return this.requestQuit(true);
+  }
+
+  approveQuit(prepareOnly = false): boolean {
+    if (this.quitState !== "waiting-renderer") return false;
+    this.clearQuitTimer();
+    if (prepareOnly || this.prepareQuitOnly) {
+      this.quitState = "prepared";
+      this.resolveQuitRequest(true);
+      return true;
+    }
+    this.finishClose();
     return true;
+  }
+
+  cancelQuitRequest(): boolean {
+    if (this.quitState !== "waiting-renderer") return false;
+    this.clearQuitTimer();
+    this.quitState = "idle";
+    this.resolveQuitRequest(false);
+    return true;
+  }
+
+  commitPreparedClose(): Promise<boolean> {
+    if (this.quitState !== "prepared") return Promise.resolve(false);
+    if (!this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed() || !this.rendererReady) {
+      this.forceQuit = true;
+      this.finishClose();
+      return Promise.resolve(true);
+    }
+    this.quitState = "waiting-renderer";
+    this.prepareQuitOnly = false;
+    return new Promise((resolve) => {
+      this.quitRequestResolve = resolve;
+      this.window!.webContents.send("Request:commitClose");
+      this.quitTimer = setTimeout(() => {
+        if (this.quitState !== "waiting-renderer") return;
+        this.forceQuit = true;
+        this.finishClose();
+      }, 2500);
+    });
+  }
+
+  cancelPreparedClose(): void {
+    if (this.quitState !== "prepared") return;
+    this.quitState = "idle";
+    this.prepareQuitOnly = false;
+  }
+
+  private finishClose(): void {
+    this.clearQuitTimer();
+    this.quitState = "approved";
+    this.forceQuit = true;
+    this.app.windowManager?.updateWindowState(this);
+    const owner = this.window?.webContents;
+    if (owner) this.terminalManager?.closeForOwner(owner);
+    this.window?.close();
+    this.resolveQuitRequest(true);
+  }
+
+  private resolveQuitRequest(approved: boolean): void {
+    const resolve = this.quitRequestResolve;
+    this.quitRequestResolve = null;
+    resolve?.(approved);
   }
 
   clearQuitTimer() {

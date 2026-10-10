@@ -1,4 +1,5 @@
 import { ipcMain } from "electron";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import { promises as fs } from "fs";
 import path from "path";
 import { Window } from "../Window";
@@ -146,6 +147,7 @@ export class WorkspaceSearch {
   private readonly cancelledSearchSessions = new Map<string, number>();
   private readonly maxSearchSessions = 8;
   private readonly searchSessionTtlMs = 5 * 60 * 1000;
+  private readonly ipc: IpcHandlerRegistrar;
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 50000;
@@ -182,8 +184,9 @@ export class WorkspaceSearch {
     ".asar",
   ]);
 
-  constructor(window: Window) {
+  constructor(window: Window, ipc: IpcHandlerRegistrar = ipcMain as any) {
     this.window = window;
+    this.ipc = ipc;
     this.workspaceIndex = new WorkspaceIndex();
   }
 
@@ -195,7 +198,7 @@ export class WorkspaceSearch {
   }
 
   handleIPC() {
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:indexStats",
       async (_event, rootPath: unknown) => {
         if (typeof rootPath !== "string" || !rootPath.trim()) return null;
@@ -204,7 +207,7 @@ export class WorkspaceSearch {
         return this.workspaceIndex.getStats(root);
       },
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:search",
       async (
         _event,
@@ -222,7 +225,7 @@ export class WorkspaceSearch {
         }
       },
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:startStream",
       async (event, rootPath: string, query: string, options: SearchOptions = {}) => {
         const requestId = options?.requestId;
@@ -243,14 +246,14 @@ export class WorkspaceSearch {
         }
       },
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:cancel",
       async (_event, requestId: string) => {
         this.cancelSearch(requestId);
         return true;
       },
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:replace",
       async (
         _event,
@@ -260,7 +263,7 @@ export class WorkspaceSearch {
         options: SearchOptions = {},
       ): Promise<ReplaceResponse> => this.replace(rootPath, query, replacement, options),
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:projectMap",
       async (
         _event,
@@ -272,7 +275,7 @@ export class WorkspaceSearch {
         return this.getProjectMap(rootPath, targetPath, options);
       },
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "WorkspaceSearch:projectFiles",
       async (_event, rootPath: string, options: ProjectFilesOptions = {}) => {
         await this.ensureWorkspaceStorage(rootPath);
@@ -798,6 +801,17 @@ export class WorkspaceSearch {
     }
     await Promise.allSettled(pendingSearches);
     await this.workspaceIndex.release(root);
+  }
+
+  async dispose(): Promise<void> {
+    for (const session of [...this.searchSessions.values()]) {
+      this.cancelSession(session);
+      this.rememberCancelledSearchSession(session.id);
+    }
+    this.searchSessions.clear();
+    this.cancelledRequests.clear();
+    this.cancelledSearchSessions.clear();
+    await this.workspaceIndex.dispose();
   }
 
   getSearchSessionStats(sessionId?: string): {

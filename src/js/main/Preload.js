@@ -5,7 +5,12 @@ contextBridge.exposeInMainWorld("api", {
   agentFileOperation: (root, operation, args) =>
     ipcRenderer.invoke("Agent:fileOperation", root, operation, args),
   quit: () => ipcRenderer.invoke("App:quit"),
+  closeWindow: () => ipcRenderer.invoke("App:closeWindow"),
   appCommand: (command) => ipcRenderer.invoke("App:command", command),
+  focusWorkspaceWindow: (folderPath) =>
+    ipcRenderer.invoke("Window:focusWorkspace", folderPath),
+  openWorkspaceInNewWindow: (folderPath) =>
+    ipcRenderer.invoke("Window:openWorkspaceInNewWindow", folderPath),
   readClipboardText: () => ipcRenderer.invoke("Clipboard:readText"),
   writeClipboardText: (text) => ipcRenderer.invoke("Clipboard:writeText", text),
   setMenuShortcutsIgnored: (ignored) =>
@@ -91,7 +96,7 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("settings-changed", listener);
     return () => ipcRenderer.removeListener("settings-changed", listener);
   },
-  approveQuit: () => ipcRenderer.invoke("App:approveQuit"),
+  approveQuit: (options) => ipcRenderer.invoke("App:approveQuit", options),
   cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
   getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
@@ -292,8 +297,16 @@ contextBridge.exposeInMainWorld("api", {
     return () => ipcRenderer.removeListener("workspace-index-stats", listener);
   },
 
-  onSaveRequest: (callback) =>
-    ipcRenderer.on("Request:saveState", () => callback()),
+  onSaveRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on("Request:saveState", listener);
+    return () => ipcRenderer.removeListener("Request:saveState", listener);
+  },
+  onCommitCloseRequest: (callback) => {
+    const listener = () => callback();
+    ipcRenderer.on("Request:commitClose", listener);
+    return () => ipcRenderer.removeListener("Request:commitClose", listener);
+  },
 
   onLoadState: (callback) =>
     ipcRenderer.on("Request:loadState", (_event, state) => callback(state)),

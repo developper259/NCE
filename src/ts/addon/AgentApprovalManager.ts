@@ -3,6 +3,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { ipcMain } from "electron";
 import type { Window } from "../Window";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 
 export type AgentApprovalDecision = "once" | "workspace" | "cancel";
 
@@ -54,16 +55,19 @@ export class AgentApprovalManager {
   private readonly pending = new Map<string, PendingApproval>();
   private readonly workspaceGrants = new Map<string, Set<string>>();
   private ipcRegistered = false;
+  private readonly ipc: IpcHandlerRegistrar;
 
-  constructor(private readonly window: Window) {}
+  constructor(private readonly window: Window, ipc: IpcHandlerRegistrar = ipcMain as any) {
+    this.ipc = ipc;
+  }
 
   handleIPC() {
     if (this.ipcRegistered) return;
     this.ipcRegistered = true;
-    ipcMain.handle("Agent:respondApproval", async (event, payload: unknown) =>
+    this.ipc.handle("Agent:respondApproval", async (event, payload: unknown) =>
       this.respond(event.sender, payload),
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "Agent:cancelApproval",
       async (_event, approvalId: unknown) =>
         typeof approvalId === "string" && this.cancelApproval(approvalId),

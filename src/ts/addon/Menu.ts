@@ -8,6 +8,7 @@ export class AppMenu {
   window: BrowserWindow;
   WinAPP: Window;
   autoSaveItem: InstanceType<typeof MenuItem> | null = null;
+  private active = false;
   hasActiveFile = false;
   canCycleTabs = false;
 
@@ -28,6 +29,21 @@ export class AppMenu {
     "new-line",
     "delete-line",
   ];
+
+  static installWindowlessMenu(app: Window["app"]): void {
+    if (process.platform !== "darwin") return;
+    const menu = Menu.buildFromTemplate([
+      {
+        label: "NCE",
+        submenu: [
+          { label: "New Window", click: () => app.windowManager.createEmptyWindow() },
+          { type: "separator" },
+          { label: "Quit NCE", click: () => void app.requestQuitAll() },
+        ],
+      },
+    ]);
+    Menu.setApplicationMenu(menu);
+  }
 
   constructor(window: BrowserWindow, WinAPP: Window) {
     this.window = window;
@@ -59,7 +75,17 @@ export class AppMenu {
     );
     this.setFileActionsEnabled(this.hasActiveFile);
     this.setTabCyclingEnabled(this.canCycleTabs);
-    Menu.setApplicationMenu(this.menu);
+    if (this.active) Menu.setApplicationMenu(this.menu);
+  }
+
+  activate(): void {
+    this.active = true;
+    if (process.platform === "darwin" && this.menu)
+      Menu.setApplicationMenu(this.menu);
+  }
+
+  deactivate(): void {
+    this.active = false;
   }
 
   setFileActionsEnabled(enabled: boolean) {
@@ -86,7 +112,16 @@ export class AppMenu {
     return [
       ...folders.map((folderPath: string) => ({
         label: folderPath,
-        click: () => this.WinAPP.requestOpenRecentFolder(folderPath),
+        submenu: [
+          {
+            label: "Open",
+            click: () => this.WinAPP.requestOpenRecentFolder(folderPath),
+          },
+          {
+            label: "Open in New Window",
+            click: () => this.WinAPP.app.windowManager.openWorkspaceInNewWindow(folderPath),
+          },
+        ],
       })),
       { type: "separator" as const },
       {
@@ -130,6 +165,18 @@ export class AppMenu {
         label: "File",
 
         submenu: [
+          {
+            label: "New Window",
+            accelerator: this.getAccelerator("new_window"),
+            click: () => this.WinAPP.executeWindowCommand("window.new"),
+          },
+
+          {
+            label: "Open Folder in New Window...",
+            accelerator: this.getAccelerator("open_folder_in_new_window"),
+            click: () => this.WinAPP.app.openFolderInNewWindow(),
+          },
+
           {
             label: "New File",
 
@@ -218,6 +265,16 @@ export class AppMenu {
             accelerator: this.getAccelerator("close_all_file"),
 
             click: () => this.closeAllFiles(),
+          },
+
+          {
+            type: "separator",
+          },
+
+          {
+            label: "Close Window",
+            accelerator: this.getAccelerator("close_window"),
+            click: () => this.WinAPP.requestQuit(),
           },
 
           {

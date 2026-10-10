@@ -4,6 +4,7 @@ import path from "path";
 import { ipcMain } from "electron";
 import { Window } from "../Window";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 
 export interface AgentProcessRequest {
   strategy: string;
@@ -61,21 +62,24 @@ const STRATEGIES = new Set(Object.keys(STRATEGY_REGISTRY));
 
 export class AgentProcessRunner {
   private readonly active = new Map<string, ChildProcess>();
+  private readonly ipc: IpcHandlerRegistrar;
 
-  constructor(private readonly window: Window) {}
+  constructor(private readonly window: Window, ipc: IpcHandlerRegistrar = ipcMain as any) {
+    this.ipc = ipc;
+  }
 
   handleIPC() {
-    ipcMain.handle("Agent:runProcess", async (_event, request: unknown) =>
+    this.ipc.handle("Agent:runProcess", async (_event, request: unknown) =>
       this.run(request),
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "Agent:cancelProcess",
       async (_event, requestId: unknown) => {
         if (typeof requestId !== "string") return false;
         return this.cancel(requestId);
       },
     );
-    ipcMain.handle("Agent:resolveRuntime", async (_event, request: unknown) =>
+    this.ipc.handle("Agent:resolveRuntime", async (_event, request: unknown) =>
       this.resolveRuntime(request),
     );
   }
@@ -554,5 +558,10 @@ export class AgentProcessRunner {
     if (!child) return approvalCancelled;
     this.killTree(child);
     return true;
+  }
+
+  dispose(): void {
+    for (const requestId of this.active.keys()) this.cancel(requestId);
+    this.active.clear();
   }
 }

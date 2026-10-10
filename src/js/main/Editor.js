@@ -547,7 +547,8 @@ class Editor {
   }
 
   initQuitEvent() {
-    this.api.onSaveRequest(async () => {
+    this.api.onSaveRequest(async (request = {}) => {
+      const prepareOnly = request?.prepareOnly === true;
       try {
         const closed = await this.tabManager.prepareForQuit();
         if (!closed) {
@@ -560,14 +561,31 @@ class Editor {
         ]);
         const saved = await this.statesManager.save();
         if (saved !== false) {
-          const recoveryCleared = this.statesManager.clearRecoverySnapshotsOnQuit
-            ? await this.statesManager.clearRecoverySnapshotsOnQuit()
-            : await this.tabManager.clearRecoverySnapshots?.();
-          if (recoveryCleared !== false) await this.api.approveQuit?.();
-          else await this.api.cancelQuit?.();
+          if (prepareOnly) {
+            await this.api.approveQuit?.({ prepareOnly: true });
+          } else {
+            const recoveryCleared = this.statesManager.clearRecoverySnapshotsOnQuit
+              ? await this.statesManager.clearRecoverySnapshotsOnQuit()
+              : await this.tabManager.clearRecoverySnapshots?.();
+            if (recoveryCleared !== false) await this.api.approveQuit?.();
+            else await this.api.cancelQuit?.();
+          }
         } else await this.api.cancelQuit?.();
       } catch (error) {
         console.error("Failed to prepare quit:", error);
+        await this.api.cancelQuit?.();
+      }
+    });
+
+    this.api.onCommitCloseRequest?.(async () => {
+      try {
+        const recoveryCleared = this.statesManager.clearRecoverySnapshotsOnQuit
+          ? await this.statesManager.clearRecoverySnapshotsOnQuit()
+          : await this.tabManager.clearRecoverySnapshots?.();
+        if (recoveryCleared !== false) await this.api.approveQuit?.();
+        else await this.api.cancelQuit?.();
+      } catch (error) {
+        console.error("Failed to finalize window close:", error);
         await this.api.cancelQuit?.();
       }
     });

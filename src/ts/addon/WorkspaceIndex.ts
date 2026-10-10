@@ -1118,4 +1118,16 @@ export class WorkspaceIndex {
     await removal.catch(() => undefined);
     if (this.writeQueues.get(root) === removal) this.writeQueues.delete(root);
   }
+
+  async dispose(): Promise<void> {
+    const roots = new Set<string>([
+      ...this.snapshots.keys(), ...this.statsByRoot.keys(), ...this.buildQueues.keys(),
+      ...this.writeQueues.keys(), ...this.pendingWatcherEvents.keys(),
+      ...this.reconcileTimers.keys(), ...this.reconcileQueues.keys(),
+      ...this.watcherEventTimers.keys(), ...this.eventFlushQueues.keys(),
+      ...this.staleRemovals.keys(),
+    ]);
+    await Promise.allSettled([...roots].map((root) => this.release(root, { preserveCache: false })));
+    this.onStatsUpdated = null;
+  }
 }

@@ -7,6 +7,7 @@ import {
   safeStorage,
 } from "electron";
 import { Window } from "../Window";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 import { LargeFileStore } from "./LargeFileStore";
 import {
@@ -347,14 +348,17 @@ export class FileManager {
   private unsavedChangeDialogQueue: Promise<void> = Promise.resolve();
   private deletionQueue: Promise<void> = Promise.resolve();
   private pendingDeletionOperations = new Map<string, Promise<FileOperationResult>>();
+  private readonly ipc: IpcHandlerRegistrar;
 
   constructor(
     window: Window,
     trashItem: (targetPath: string) => Promise<void> = (targetPath) =>
       shell.trashItem(targetPath),
+    ipc: IpcHandlerRegistrar = ipcMain as unknown as IpcHandlerRegistrar,
   ) {
     this.window = window;
     this.trashItem = trashItem;
+    this.ipc = ipc;
   }
 
   async agentFileOperation(root: string, operation: string, args: unknown[]) {
@@ -433,99 +437,99 @@ export class FileManager {
   }
 
   handleIPC() {
-    ipcMain.handle("Agent:fileOperation", (_event, root, operation, args) =>
+    this.ipc.handle("Agent:fileOperation", (_event, root, operation, args) =>
       this.agentFileOperation(root, operation, args),
     );
-    ipcMain.handle("FileManager:selectFile", async () => {
+    this.ipc.handle("FileManager:selectFile", async () => {
       return await this.selectFile();
     });
 
-    ipcMain.handle("FileManager:selectFiles", async () => {
+    this.ipc.handle("FileManager:selectFiles", async () => {
       return await this.selectFiles();
     });
 
-    ipcMain.handle("FileManager:selectNewFile", async (event, name) => {
+    this.ipc.handle("FileManager:selectNewFile", async (event, name) => {
       return await this.selectNewFile(name);
     });
 
-    ipcMain.handle("FileManager:getFileContent", async (event, file) => {
+    this.ipc.handle("FileManager:getFileContent", async (event, file) => {
       return await this.getFileContent(file);
     });
 
-    ipcMain.handle("FileManager:readFileForMerge", async (_event, filePath) =>
+    this.ipc.handle("FileManager:readFileForMerge", async (_event, filePath) =>
       this.readFileForMerge(filePath),
     );
 
-    ipcMain.handle("FileManager:saveFile", async (event, path, content, expectedFingerprint) => {
+    this.ipc.handle("FileManager:saveFile", async (event, path, content, expectedFingerprint) => {
       return await this.saveFile(path, content, expectedFingerprint);
     });
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:saveRecoverySnapshot",
       async (_event, root: string | null, snapshot: unknown) =>
         this.saveRecoverySnapshot(root, snapshot),
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:listRecoverySnapshots",
       async (_event, root: string | null) =>
         (await this.getRecoveryStore(root))?.list() || [],
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:readRecoverySnapshot",
       async (_event, root: string | null, id: string) =>
         (await this.getRecoveryStore(root))?.read(id) || null,
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:deleteRecoverySnapshot",
       async (_event, root: string | null, id: string) =>
         (await this.getRecoveryStore(root))?.delete(id) || false,
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:markRecoverySnapshotCommitted",
       async (_event, root: string | null, id: string, editVersion: number, diskFingerprint: string | null) =>
         (await this.getRecoveryStore(root))?.markCommitted(id, editVersion, diskFingerprint) || false,
     );
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:confirmUnsavedChanges",
       async (_event, fileId: string | number, fileName: string) => {
         return await this.confirmUnsavedChanges(fileId, fileName);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:getFolderContent",
       async (event, dirPath: string) => {
         return await this.getFolderContent(dirPath);
       },
     );
 
-    ipcMain.handle("FileManager:selectFolder", async () => {
+    this.ipc.handle("FileManager:selectFolder", async () => {
       return await this.selectFolder();
     });
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:initializeFile",
       async (event, filePath: string) => {
         return await this.initializeFile(filePath);
       },
     );
 
-    ipcMain.handle("FileManager:readImageFile", async (_event, filePath: string, context?: MarkdownImageReadContext) =>
+    this.ipc.handle("FileManager:readImageFile", async (_event, filePath: string, context?: MarkdownImageReadContext) =>
       this.readImageFile(filePath, context),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:getFileChunk",
       async (event, filePath: string, startLine: number, lineCount: number) => {
         return await this.getFileChunk(filePath, startLine, lineCount);
       },
     );
 
-    ipcMain.handle("FileManager:releaseFile", async (_event, filePath: string) => {
+    this.ipc.handle("FileManager:releaseFile", async (_event, filePath: string) => {
       return this.releaseFile(filePath);
     });
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:saveState",
       async (event, stateString: string) => {
         const saved = await this.saveState(stateString);
@@ -536,66 +540,66 @@ export class FileManager {
       },
     );
 
-    ipcMain.handle("FileManager:loadState", async () => {
+    this.ipc.handle("FileManager:loadState", async () => {
       return (await this.loadState()) ?? null;
     });
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:saveWorkspaceState",
       async (_event, workspaceRoot: string, state: object) =>
         this.saveWorkspaceState(workspaceRoot, state),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:loadWorkspaceState",
       async (_event, workspaceRoot: string) =>
         this.loadWorkspaceState(workspaceRoot),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:resolveWorkspaceStatePath",
       async (_event, workspaceRoot: string, relativePath: string) =>
         this.resolveWorkspaceStatePath(workspaceRoot, relativePath),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:getAgentApiKey",
       async (_event, providerId: string) => this.getAgentApiKey(providerId),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:hasAgentApiKey",
       async (_event, providerId: string) => Boolean(await this.getAgentApiKey(providerId)),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:setAgentApiKey",
       async (_event, providerId: string, apiKey: string) =>
         this.setAgentApiKey(providerId, apiKey),
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:rename",
       async (event, oldPath: string, newPath: string) => {
         return await this.renameEntry(oldPath, newPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:moveToTrash",
       async (_event, targetPath: unknown) => {
         return await this.moveToTrash(targetPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:permanentlyDelete",
       async (_event, targetPath: unknown) => {
         return await this.permanentlyDelete(targetPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:createFile",
       async (
         event,
@@ -608,35 +612,35 @@ export class FileManager {
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:createFolder",
       async (event, dirPath: string, folderName: string) => {
         return await this.createFolder(dirPath, folderName);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:copy",
       async (event, sourcePath: string, destPath: string) => {
         return await this.copyEntry(sourcePath, destPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:move",
       async (event, sourcePath: string, destPath: string) => {
         return await this.moveEntry(sourcePath, destPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:duplicate",
       async (event, targetPath: string) => {
         return await this.duplicateEntry(targetPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:revealInExplorer",
       async (event, targetPath: string) => {
         shell.showItemInFolder(targetPath);
@@ -644,14 +648,14 @@ export class FileManager {
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:pathExists",
       async (event, targetPath: string) => {
         return fsSync.existsSync(targetPath);
       },
     );
 
-    ipcMain.handle(
+    this.ipc.handle(
       "FileManager:pathStatus",
       async (_event, targetPath: string) => {
         if (!validPath(targetPath))
@@ -1861,12 +1865,16 @@ export class FileManager {
 
   private async writeState(stateString: string): Promise<boolean> {
     try {
-      const filePath = path.join(app.getPath("userData"), "state.json");
       if (typeof stateString !== "string") return false;
       const state = JSON.parse(stateString);
       if (!state || typeof state !== "object" || Array.isArray(state))
         return false;
       if (state.agent) delete state.agent.apiKeys;
+      const sessionStore = this.window.app?.windowSessionStore;
+      if (sessionStore) {
+        return sessionStore.saveRendererState(this.window.sessionId, JSON.stringify(state));
+      }
+      const filePath = path.join(app.getPath("userData"), "state.json");
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(`${filePath}.tmp`, JSON.stringify(state), "utf-8");
       await fs.rename(`${filePath}.tmp`, filePath);
@@ -1880,6 +1888,10 @@ export class FileManager {
 
   async loadState(): Promise<object | null> {
     try {
+      const sessionStore = this.window.app?.windowSessionStore;
+      if (sessionStore) {
+        return sessionStore.get(this.window.sessionId)?.rendererState || null;
+      }
       const filePath = path.join(app.getPath("userData"), "state.json");
       const content = await fs.readFile(filePath, "utf-8");
       const trimmed = content.trim();

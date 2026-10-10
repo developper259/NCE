@@ -1,4 +1,5 @@
 import { BrowserWindow, ipcMain } from "electron";
+import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import { PollingWatcher } from "./WatcherPolling";
 import { watcherIgnored } from "./WatcherIgnore";
 const chokidar = require("chokidar");
@@ -11,6 +12,11 @@ interface FileChange {
   event: string;
   filePath: string;
   dirPath: string;
+}
+
+interface WorkspaceReservationHooks {
+  reserveWorkspace?: (projectPath: string) => Promise<{ success: boolean; path?: string }>;
+  releaseWorkspace?: (projectPath: string) => void;
 }
 
 export class Watcher {
@@ -34,13 +40,21 @@ export class Watcher {
   private watchGeneration: number = 0;
 
   private reportedWatcherErrors: Set<string> = new Set();
+  private readonly ipc: IpcHandlerRegistrar;
+  private readonly reservation: WorkspaceReservationHooks;
 
   onChange: ((filePath: string) => void) | null = null;
   onWorkspaceEvent: ((event: string, filePath: string, rootPath: string) => void) | null = null;
   onWatcherStop: ((rootPath: string) => void | Promise<void>) | null = null;
 
-  constructor(window: BrowserWindow) {
+  constructor(
+    window: BrowserWindow,
+    ipc: IpcHandlerRegistrar = ipcMain as any,
+    reservation: WorkspaceReservationHooks = {},
+  ) {
     this.window = window;
+    this.ipc = ipc;
+    this.reservation = reservation;
     this.setWindow(window);
   }
 
@@ -74,16 +88,47 @@ export class Watcher {
   }
 
   handleIPC() {
-    ipcMain.handle(
+    this.ipc.handle(
       "Watcher:startWatching",
       async (event, projectPath: string) => {
-        return this.startWatching(projectPath);
+        const previousPath = this.getWatchedPath();
+        const reservation = this.reservation.reserveWorkspace
+          ? await this.reservation.reserveWorkspace(projectPath)
+          : { success: true, path: projectPath };
+        if (!reservation.success || !reservation.path) {
+          const error = new Error("This workspace is already open in another NCE window.");
+          error.name = "WorkspaceAlreadyOpenError";
+          throw error;
+        }
+        if (previousPath && path.resolve(previousPath) !== path.resolve(reservation.path))
+          this.reservation.releaseWorkspace?.(previousPath);
+        try {
+          await this.startWatching(reservation.path);
+          return reservation.path;
+        } catch (error) {
+          this.reservation.releaseWorkspace?.(reservation.path);
+          throw error;
+        }
       },
     );
 
-    ipcMain.handle("Watcher:stopWatching", async () => {
-      return this.stopWatching();
+    this.ipc.handle("Watcher:stopWatching", async () => {
+      const previousPath = this.getWatchedPath();
+      const result = await this.stopWatching();
+      if (previousPath) this.reservation.releaseWorkspace?.(previousPath);
+      return result;
     });
+  }
+
+  async dispose(): Promise<void> {
+    const previousWindow = this.observedWindow as any;
+    if (previousWindow && this.visibilityListener && typeof previousWindow.removeListener === "function") {
+      for (const event of ["show", "hide", "minimize", "restore", "focus", "blur"])
+        previousWindow.removeListener(event, this.visibilityListener);
+    }
+    this.observedWindow = null;
+    this.visibilityListener = null;
+    await this.stopWatching();
   }
 
   async startWatching(projectPath: string): Promise<void> {

@@ -36,6 +36,21 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "new_window",
+    description: "Open a new NCE window",
+    in_editor: false,
+  },
+  {
+    action: "open_folder_in_new_window",
+    description: "Open a folder in a new window",
+    in_editor: false,
+  },
+  {
+    action: "close_window",
+    description: "Close the current window",
+    in_editor: false,
+  },
+  {
     action: "new_terminal",
     description: "Create a new terminal session",
     in_editor: false,

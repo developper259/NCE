@@ -33,6 +33,10 @@ class TitleBar {
         id: "file",
         label: "File",
         items: [
+          ["New Window", "new_window"],
+          ["Open Folder in New Window...", "open_folder_in_new_window"],
+          ["Close Window", "close_window"],
+          null,
           ["New File", "new_file"],
           ["Open File...", "open_file"],
           ["Open Folder...", "open_folder"],
@@ -293,17 +297,55 @@ class TitleBar {
     }
 
     for (const folderPath of this.recentFolders) {
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "nce-titlebar-menu-item nce-titlebar-recent-folder";
-      item.textContent = folderPath;
-      item.title = folderPath;
-      item.addEventListener("mousedown", (event) => event.preventDefault());
-      item.addEventListener("click", () => {
-        this.closeMenus({ restoreFocus: false });
-        this.editor.openRecentFolder(folderPath);
+      const wrapper = document.createElement("div");
+      wrapper.className = "nce-titlebar-submenu-item nce-titlebar-recent-folder-item";
+      const trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "nce-titlebar-menu-item nce-titlebar-recent-folder";
+      trigger.textContent = folderPath;
+      trigger.title = folderPath;
+      trigger.setAttribute("role", "menuitem");
+      trigger.setAttribute("aria-haspopup", "true");
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.tabIndex = -1;
+      const arrow = document.createElement("span");
+      arrow.className = "nce-titlebar-submenu-arrow";
+      arrow.textContent = "›";
+      trigger.appendChild(arrow);
+      const actions = document.createElement("div");
+      actions.className = "nce-titlebar-dropdown nce-titlebar-submenu";
+      actions.setAttribute("role", "menu");
+      actions.hidden = true;
+      for (const [label, open] of [
+        ["Open", () => this.editor.openRecentFolder(folderPath)],
+        ["Open in New Window", () => this.editor.api.openWorkspaceInNewWindow?.(folderPath)],
+      ]) {
+        const action = document.createElement("button");
+        action.type = "button";
+        action.className = "nce-titlebar-menu-item";
+        action.textContent = label;
+        action.tabIndex = -1;
+        action.addEventListener("mousedown", (event) => event.preventDefault());
+        action.addEventListener("click", () => {
+          this.closeMenus({ restoreFocus: false });
+          open();
+        });
+        actions.appendChild(action);
+      }
+      trigger.addEventListener("mouseenter", () => this.openSubmenu(trigger, actions));
+      trigger.addEventListener("mousedown", (event) => event.preventDefault());
+      trigger.addEventListener("click", () => {
+        if (actions.hidden) this.openSubmenu(trigger, actions);
+        else this.closeSubmenu(trigger, actions);
       });
-      submenu.appendChild(item);
+      wrapper.addEventListener("mouseleave", () => {
+        window.setTimeout(() => {
+          if (!wrapper.matches(":hover") && !actions.matches(":hover"))
+            this.closeSubmenu(trigger, actions);
+        }, 120);
+      });
+      wrapper.append(trigger, actions);
+      submenu.appendChild(wrapper);
     }
 
     const separator = document.createElement("div");
@@ -431,13 +473,11 @@ class TitleBar {
     const activeSubmenu = document.activeElement?.closest?.(
       ".nce-titlebar-submenu:not([hidden])",
     );
-    if (activeSubmenu) {
-      return Array.from(activeSubmenu.children).filter(
-        (item) =>
-          item.classList?.contains("nce-titlebar-menu-item") && !item.disabled,
-      );
-    }
-    return Array.from(panel?.children || [])
+    return this.getMenuItems(activeSubmenu || panel);
+  }
+
+  getMenuItems(menu) {
+    return Array.from(menu?.children || [])
       .map((item) =>
         item.classList?.contains("nce-titlebar-submenu-item")
           ? item.querySelector(":scope > .nce-titlebar-menu-item")
@@ -489,16 +529,15 @@ class TitleBar {
     else if (event.key === "ArrowUp") this.moveItemFocus(-1);
     else if (
       event.key === "ArrowRight" &&
-      document.activeElement?.dataset.command === "open_recent_menu"
+      document.activeElement?.getAttribute("aria-haspopup") === "true"
     ) {
       const trigger = document.activeElement;
       const submenu = trigger.nextElementSibling;
+      if (!submenu?.classList?.contains("nce-titlebar-submenu")) return;
       this.openSubmenu(trigger, submenu);
-      const firstItem = submenu.querySelector(
-        ".nce-titlebar-menu-item:not(:disabled)",
-      );
+      const firstItem = this.getMenuItems(submenu)[0];
       firstItem?.focus();
-      if (firstItem) this.activeItemIndex = 0;
+      this.activeItemIndex = 0;
     } else if (
       event.key === "ArrowLeft" &&
       document.activeElement?.closest?.(".nce-titlebar-submenu")
