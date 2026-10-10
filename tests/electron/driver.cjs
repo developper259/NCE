@@ -1959,7 +1959,7 @@ app.whenReady().then(() => {
           }
 
           const workArea = screen.getDisplayMatching(win.getBounds()).workArea;
-          const expandedWidth = Math.min(1050, workArea.width);
+          const expandedWidth = Math.min(1050, workArea.width - 40);
           const baselineWidth = Math.min(900, expandedWidth - 150);
           const shrunkWidth = Math.max(801, baselineWidth - 50);
           assert.ok(
