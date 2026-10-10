@@ -212,13 +212,19 @@ export class Window {
       this.rendererReady = false;
       this.reloadPending = false;
       this.agentApprovalManager?.cancelAll();
-      this.terminalManager?.closeForOwner(terminalOwner);
+      this.terminalManager?.closeForOwner(terminalOwner, {
+        deferProcessDisposal: true,
+      });
       this.clearQuitTimer();
     });
     this.window.webContents.on(
       "did-start-navigation",
       (_event, _url, _inPlace, isMainFrame) => {
-        if (isMainFrame) this.terminalManager?.closeForOwner(terminalOwner);
+        if (isMainFrame) {
+          this.terminalManager?.closeForOwner(terminalOwner, {
+            deferProcessDisposal: true,
+          });
+        }
       },
     );
     this.window.webContents.on("did-finish-load", () => {

@@ -512,10 +512,16 @@ export class TerminalManager {
     return { success: true };
   }
 
-  closeForOwner(owner: WebContents): void {
+  closeForOwner(
+    owner: WebContents,
+    { deferProcessDisposal = false }: { deferProcessDisposal?: boolean } = {},
+  ): void {
     if (owner === this.owner) this.ownerGeneration += 1;
     for (const session of this.sessions.values()) {
-      if (session.owner === owner) this.removeSession(session);
+      if (session.owner !== owner) continue;
+      this.sessions.delete(session.id);
+      if (deferProcessDisposal) setImmediate(() => session.dispose());
+      else session.dispose();
     }
   }
 

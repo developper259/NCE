@@ -498,3 +498,19 @@ test("TerminalManager closes all sessions belonging to a reloaded or destroyed w
   assert.equal(f.ptys[1].child.kills, 1);
   assert.equal(f.manager.write({ sender: f.owner }, second.sessionId, second.workspaceKey, "no").error.code, "SESSION_UNAVAILABLE");
 });
+
+test("window navigation removes PTYs immediately and defers native disposal", async () => {
+  const f = fixture();
+  const created = await create(f);
+  const child = f.ptys[0].child;
+
+  f.manager.closeForOwner(f.owner, { deferProcessDisposal: true });
+
+  assert.equal(f.manager.sessions.size, 0, "the reloading renderer loses access immediately");
+  assert.equal(child.kills, 0, "native process cleanup does not run in the navigation callback");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(child.kills, 1, "native process cleanup runs on the next event-loop turn");
+  assert.equal(f.manager.close(
+    { sender: f.owner }, created.sessionId, created.workspaceKey,
+  ).error.code, "SESSION_UNAVAILABLE");
+});
