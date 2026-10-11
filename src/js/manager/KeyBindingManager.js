@@ -270,10 +270,15 @@ class KeyBindingManager {
     const terminalContext = e.target?.closest?.(
       ".terminal-panel, .bottom-panel-terminal-actions-slot",
     );
+    const hasNoOpenTabs = Array.isArray(this.editor.tabManager?.tabs) &&
+      this.editor.tabManager.tabs.length === 0;
+    const closeWindowWhenNoTabs = hasNoOpenTabs &&
+      ["close_file", "close_all_file"].includes(binding?.action);
     if (
       terminalContext &&
       binding?.in_editor === false &&
-      this.terminalTabActions.has(binding.action)
+      this.terminalTabActions.has(binding.action) &&
+      !closeWindowWhenNoTabs
     ) {
       if (e.repeat && !["next_tab", "previous_tab"].includes(binding.action)) return;
       this.editor.terminalPanel?.handleTabKeybinding?.(binding.action);

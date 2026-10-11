@@ -73,15 +73,23 @@ class KeyBinding {
     const tabs = Array.isArray(tabManager.tabs) ? tabManager.tabs : [];
 
     if (action === "close_file") {
+      if (this.hasNoOpenTabs()) return true;
       return Boolean(
         tabManager.activeTab && tabs.includes(tabManager.activeTab),
       );
     }
-    if (action === "close_all_file") return tabs.length > 0;
+    if (action === "close_all_file") {
+      return tabs.length > 0 || this.hasNoOpenTabs();
+    }
     if (action === "next_tab" || action === "previous_tab")
       return tabManager.canCycleTabs === true;
     if (this.fileActions.has(action)) return Boolean(tabManager.activeFile);
     return true;
+  }
+
+  hasNoOpenTabs() {
+    const tabs = this.editor.tabManager?.tabs;
+    return Array.isArray(tabs) && tabs.length === 0;
   }
 
   exec(key, e) {
@@ -182,11 +190,13 @@ class KeyBinding {
   }
 
   async control_close_file(s, c, m, a) {
+    if (this.hasNoOpenTabs()) return this.control_close_window();
     if (!this.isActionEnabled("close_file")) return false;
     return this.editor.tabManager.closeActiveFile();
   }
 
   async control_close_all_file(s, c, m, a) {
+    if (this.hasNoOpenTabs()) return this.control_close_window();
     if (!this.isActionEnabled("close_all_file")) return false;
     return this.editor.tabManager.closeFiles();
   }
