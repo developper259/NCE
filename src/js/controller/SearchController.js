@@ -10,6 +10,9 @@ class SearchController {
     this.nextButton = null;
     this.closeButton = null;
     this.expandButton = null;
+    this.caseSensitiveButton = null;
+    this.wholeWordButton = null;
+    this.regexButton = null;
     this.replaceInput = null;
     this.replaceContainer = null;
     this.replaceActions = null;
@@ -19,6 +22,9 @@ class SearchController {
     this.searchFastNodes = new WeakMap();
     this.currentIndex = -1;
     this.query = "";
+    this.caseSensitive = false;
+    this.wholeWord = false;
+    this.useRegex = false;
 
     this.isOpen = false;
     this.replaceExpanded = false;
@@ -64,6 +70,31 @@ class SearchController {
       ".search-bar-next",
       this.searchBar,
     );
+    this.caseSensitiveButton = this.editor.domManager.getElement(
+      ".search-bar-case-sensitive",
+      this.searchBar,
+    );
+    this.wholeWordButton = this.editor.domManager.getElement(
+      ".search-bar-whole-word",
+      this.searchBar,
+    );
+    this.regexButton = this.editor.domManager.getElement(
+      ".search-bar-use-regex",
+      this.searchBar,
+    );
+
+    for (const button of [
+      this.caseSensitiveButton,
+      this.wholeWordButton,
+      this.regexButton,
+    ]) {
+      // Keep mouse clicks from moving focus away from the search input.
+      button?.addEventListener?.("mousedown", (event) => event.preventDefault());
+    }
+
+    this.updateOptionButton(this.caseSensitiveButton, this.caseSensitive);
+    this.updateOptionButton(this.wholeWordButton, this.wholeWord);
+    this.updateOptionButton(this.regexButton, this.useRegex);
 
     this.closeButton = this.editor.domManager.getElement(
       ".search-bar-close",
@@ -223,6 +254,37 @@ class SearchController {
     this.close();
   }
 
+  toggleCaseSensitive() {
+    this.caseSensitive = !this.caseSensitive;
+    this.updateOptionButton(this.caseSensitiveButton, this.caseSensitive);
+    this.refreshCurrentSearch();
+  }
+
+  toggleWholeWord() {
+    this.wholeWord = !this.wholeWord;
+    this.updateOptionButton(this.wholeWordButton, this.wholeWord);
+    this.refreshCurrentSearch();
+  }
+
+  toggleRegex() {
+    this.useRegex = !this.useRegex;
+    this.updateOptionButton(this.regexButton, this.useRegex);
+    this.refreshCurrentSearch();
+  }
+
+  updateOptionButton(button, active) {
+    if (!button) return;
+    button.classList?.toggle("search-bar-option-active", active);
+    button.setAttribute?.("aria-pressed", String(active));
+  }
+
+  refreshCurrentSearch() {
+    this.search(this.input?.value || "");
+    this.currentIndex = this.results.length > 0 ? 0 : -1;
+    this.goToResult(true, true);
+    this.saveActiveTabState();
+  }
+
   toggleReplace() {
     this.replaceExpanded = !this.replaceExpanded;
     const expanded = this.replaceExpanded;
@@ -335,9 +397,24 @@ class SearchController {
       return;
     }
 
-    const lines = this.editor.lineController.lines;
+    const wordCharacter = "[\\p{L}\\p{N}\\p{M}\\p{Pc}]";
+    const escapedQuery = this.useRegex
+      ? query
+      : query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const expression = this.wholeWord
+      ? `(?<!${wordCharacter})(?:${escapedQuery})(?!${wordCharacter})`
+      : escapedQuery;
+    const flags = `gu${this.caseSensitive ? "" : "i"}`;
+    let regex;
 
-    const normalizedQuery = query.toLocaleLowerCase();
+    try {
+      regex = new RegExp(expression, flags);
+    } catch {
+      this.updateCounter();
+      return;
+    }
+
+    const lines = this.editor.lineController.lines;
 
     for (let i = 0; i < lines.length; i++) {
       const lineNode = lines[i];
@@ -348,24 +425,18 @@ class SearchController {
 
       if (!text) continue;
 
-      const normalizedText = text.toLocaleLowerCase();
-
-      let start = 0;
-
-      while (start < normalizedText.length) {
-        const index = normalizedText.indexOf(normalizedQuery, start);
-
-        if (index === -1) break;
-
+      regex.lastIndex = 0;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
         this.results.push({
           row: i + 1,
-
-          column: index,
-
-          length: query.length,
+          column: match.index,
+          length: match[0].length,
         });
 
-        start = index + Math.max(query.length, 1);
+        if (match[0].length === 0) {
+          regex.lastIndex = this.advanceRegexIndexSafely(text, match.index);
+        }
       }
     }
 
@@ -380,6 +451,12 @@ class SearchController {
     this.refreshSelectionDOM();
 
     this.updateCounter();
+  }
+
+  advanceRegexIndexSafely(value, utf16Offset) {
+    if (utf16Offset >= value.length) return value.length + 1;
+    const codePoint = value.codePointAt(utf16Offset);
+    return utf16Offset + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1);
   }
 
   next() {

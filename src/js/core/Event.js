@@ -180,7 +180,7 @@ class Events {
     const cl = e.target.classList;
 
     const searchControl = el.closest?.(
-      ".search-bar-previous, .search-bar-next, .search-bar-close, .search-bar-expand, .search-bar-replace-next, .search-bar-replace-all",
+      ".search-bar-previous, .search-bar-next, .search-bar-close, .search-bar-expand, .search-bar-replace-next, .search-bar-replace-all, .search-bar-case-sensitive, .search-bar-whole-word, .search-bar-use-regex",
     );
     if (searchControl) {
       const search = this.editor.searchController;
@@ -191,6 +191,9 @@ class Events {
       else if (searchClasses.contains("search-bar-expand")) search.toggleReplace();
       else if (searchClasses.contains("search-bar-replace-next")) search.replaceNext();
       else if (searchClasses.contains("search-bar-replace-all")) search.replaceAll();
+      else if (searchClasses.contains("search-bar-case-sensitive")) search.toggleCaseSensitive();
+      else if (searchClasses.contains("search-bar-whole-word")) search.toggleWholeWord();
+      else if (searchClasses.contains("search-bar-use-regex")) search.toggleRegex();
     }
 
     // ------- Editor.js ------

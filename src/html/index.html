@@ -84,14 +84,38 @@
             <i class="fi fi-rr-angle-small-down"></i>
           </button>
           <div class="search-bar-input-container">
-            <input
-              class="search-bar-input"
-              type="text"
-              placeholder="Search"
-              autocomplete="off"
-              spellcheck="false"
-            />
-
+            <div class="search-bar-field">
+              <input
+                class="search-bar-input"
+                type="text"
+                placeholder="Search"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <div class="search-bar-options" role="group" aria-label="Search options">
+                <button
+                  class="search-bar-option search-bar-case-sensitive"
+                  type="button"
+                  title="Match Case"
+                  aria-label="Match Case"
+                  aria-pressed="false"
+                >Aa</button>
+                <button
+                  class="search-bar-option search-bar-whole-word"
+                  type="button"
+                  title="Whole Word"
+                  aria-label="Whole Word"
+                  aria-pressed="false"
+                >ab</button>
+                <button
+                  class="search-bar-option search-bar-use-regex"
+                  type="button"
+                  title="Use Regular Expression"
+                  aria-label="Use Regular Expression"
+                  aria-pressed="false"
+                >.*</button>
+              </div>
+            </div>
             <span class="search-bar-counter"></span>
           </div>
           <div class="search-bar-replace-container" hidden>

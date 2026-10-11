@@ -37,7 +37,7 @@
 .editor-search-bar.search-bar-visible.search-bar-expanded {
   display: grid;
   height: 71px;
-  grid-template-columns: auto minmax(210px, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(260px, 1fr) auto auto auto;
   grid-template-rows: 30px 30px;
   column-gap: 0;
   row-gap: 3px;
@@ -106,7 +106,7 @@
 }
 
 .search-bar-replace-input {
-  width: 210px;
+  width: 260px;
   height: 30px;
   box-sizing: border-box;
   padding: 0 8px;
@@ -143,13 +143,20 @@
   height: 30px;
 }
 
+.search-bar-field {
+  position: relative;
+  flex: 0 0 260px;
+  width: 260px;
+  height: 30px;
+}
+
 .search-bar-input {
   box-sizing: border-box;
 
-  width: 210px;
+  width: 100%;
   height: 30px;
 
-  padding: 0 8px;
+  padding: 0 88px 0 8px;
 
   border: 1px solid transparent;
   border-radius: 2px;
@@ -172,8 +179,48 @@
   color: var(--text-tertiary);
 }
 
+.search-bar-options {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.search-bar-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.search-bar-option:hover,
+.search-bar-option.search-bar-option-active {
+  background: var(--bg-hover-alt);
+  color: var(--text-white);
+}
+
+.search-bar-option:focus-visible {
+  outline: 1px solid var(--accent-caret);
+  outline-offset: 1px;
+}
+
 .search-bar-counter {
-  min-width: 42px;
+  min-width: 0;
 
   padding: 0 5px;
 
@@ -291,7 +338,22 @@
     flex: 1;
   }
 
+  .editor-search-bar.search-bar-visible.search-bar-expanded {
+    grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  }
+
+  .search-bar-field {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+
   .search-bar-input {
     width: 100%;
+  }
+
+  .search-bar-replace-input {
+    width: 100%;
+    min-width: 0;
   }
 }
