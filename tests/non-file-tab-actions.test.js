@@ -20,7 +20,10 @@ function createTabActionFixture(types) {
   tabManager.keyBinding = new (loadGlobal(
     "src/js/addon/KeyBinding.js",
     "KeyBinding",
-  ))({ tabManager });
+  ))({
+    tabManager,
+    api: { closeWindow: () => calls.push(["close_window"]) },
+  });
   return { tabs, activeTab, calls, tabManager, keyBinding: tabManager.keyBinding };
 }
 
@@ -158,16 +161,16 @@ test("close shortcuts dispatch to the same active-tab and open-tabs actions", ()
   ]);
 });
 
-test("close actions and TitleBar controls are disabled when no tabs are open", () => {
+test("close shortcuts close the window when no tabs are open", () => {
   const fixture = createTabActionFixture([]);
   const titleBarDisabled = getTitleBarCloseItems(fixture);
 
   fixture.keyBinding.exec({ action: "close_file" }, {});
   fixture.keyBinding.exec({ action: "close_all_file" }, {});
 
-  assert.deepEqual(fixture.calls, []);
-  assert.equal(titleBarDisabled.get("close_file"), true);
-  assert.equal(titleBarDisabled.get("close_all_file"), true);
+  assert.deepEqual(fixture.calls, [["close_window"], ["close_window"]]);
+  assert.equal(titleBarDisabled.get("close_file"), false);
+  assert.equal(titleBarDisabled.get("close_all_file"), false);
   assert.equal(titleBarDisabled.get("save"), true);
   assert.equal(titleBarDisabled.get("unselect_all"), true);
 });
