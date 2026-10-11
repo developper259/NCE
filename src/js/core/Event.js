@@ -35,8 +35,7 @@ class Events {
     this.onVisibilityChange = this.onVisibilityChange.bind(this);
     this.onInput = this.onInput.bind(this);
     this.onKeyDown = this.onKeyDown.bind(this);
-    this.onPointerOver = this.onPointerOver.bind(this);
-    this.onPointerOut = this.onPointerOut.bind(this);
+    this.onPointerMove = this.onPointerMove.bind(this);
     this.onCompositionStart = this.onCompositionStart.bind(this);
     this.onCompositionEnd = this.onCompositionEnd.bind(this);
     this.onContextMenu = this.onContextMenu.bind(this);
@@ -47,8 +46,7 @@ class Events {
 
     addEvent("click", this.onClick);
     addEvent("input", this.onInput);
-    addEvent("pointerover", this.onPointerOver);
-    addEvent("pointerout", this.onPointerOut);
+    addEvent("pointermove", this.onPointerMove);
     document.addEventListener("keydown", this.onKeyDown, true);
     addEvent("compositionstart", this.onCompositionStart);
     addEvent("compositionend", this.onCompositionEnd);
@@ -238,12 +236,8 @@ class Events {
     }
   }
 
-  onPointerOver(event) {
-    this.editor.quickPanel?.handleItemPointerOverEvent?.(event);
-  }
-
-  onPointerOut(event) {
-    this.editor.quickPanel?.handleItemPointerOutEvent?.(event);
+  onPointerMove(event) {
+    this.editor.quickPanel?.handleItemPointerMoveEvent?.(event);
   }
 
   onContextMenu(event) {

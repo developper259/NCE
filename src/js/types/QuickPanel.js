@@ -549,10 +549,12 @@ class QuickPanel {
     return row;
   }
 
-  handleItemPointerOverEvent(event) {
+  handleItemPointerMoveEvent(event) {
     if (!this.session || this.session.mode !== "pick") return false;
+    if (event.pointerType && event.pointerType !== "mouse") return false;
     const row = event.target.closest?.(".quick-panel-list .quick-panel-item");
-    if (!row || !this.list.contains(row) || row.contains(event.relatedTarget)) {
+    if (!row || !this.list.contains(row)) {
+      if (this.hoveredItem) this.clearHoveredItem(this.hoveredItem);
       return false;
     }
     const index = Number(row.dataset.itemIndex);
@@ -561,14 +563,8 @@ class QuickPanel {
     return true;
   }
 
-  handleItemPointerOutEvent(event) {
-    if (!this.session || this.session.mode !== "pick") return false;
-    const row = event.target.closest?.(".quick-panel-list .quick-panel-item");
-    if (!row || !this.list.contains(row) || row.contains(event.relatedTarget)) {
-      return false;
-    }
-    this.clearHoveredItem(row);
-    return true;
+  handleItemPointerOverEvent(event) {
+    return this.handleItemPointerMoveEvent(event);
   }
 
   capitalizeLabel(label) {
