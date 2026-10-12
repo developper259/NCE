@@ -292,6 +292,17 @@ class StatesManager {
           ? tab.searchCurrentIndex : -1,
         selectedLines: tab._selectedLines
           ? Array.from(tab._selectedLines.entries()) : [],
+        multiSelections: Array.isArray(tab._multiSelections) && tab._multiSelections.length > 1
+          ? {
+              primaryId: tab._multiCursorPrimaryId,
+              selections: tab._multiSelections.slice(0, 512).map((selection) => ({
+                id: selection.id,
+                anchor: selection.anchor,
+                active: selection.active,
+                preferredVisualColumn: selection.preferredVisualColumn,
+              })),
+            }
+          : null,
       }];
     });
     const ids = new Set(tabs.map((tab) => tab.id));
@@ -459,6 +470,7 @@ class StatesManager {
         }
       }
     }
+    const multiSelections = this.sanitizeMultiSelections(value.multiSelections);
     seenIds.add(id);
     return {
       id, type, name, path,
@@ -478,6 +490,33 @@ class StatesManager {
       ) || "",
       searchCurrentIndex: this.safeInteger(value.searchCurrentIndex, -1, -1),
       selectedLines,
+      multiSelections,
+    };
+  }
+
+  sanitizeMultiSelections(value) {
+    if (!this.isRecord(value) || !Array.isArray(value.selections)) return null;
+    const seenIds = new Set();
+    const selections = [];
+    for (const candidate of value.selections.slice(0, 512)) {
+      if (!this.isRecord(candidate)) continue;
+      const id = this.safeInteger(candidate.id, -1, 1, 1_000_000);
+      const anchor = this.sanitizePosition(candidate.anchor);
+      const active = this.sanitizePosition(candidate.active);
+      if (id < 1 || seenIds.has(id) || !anchor || !active) continue;
+      seenIds.add(id);
+      selections.push({
+        id,
+        anchor,
+        active,
+        preferredVisualColumn: this.safeInteger(candidate.preferredVisualColumn, -1),
+      });
+    }
+    if (selections.length < 2) return null;
+    const primaryId = this.safeInteger(value.primaryId, -1, 1, 1_000_000);
+    return {
+      primaryId: seenIds.has(primaryId) ? primaryId : selections[0].id,
+      selections,
     };
   }
 
@@ -678,6 +717,7 @@ class StatesManager {
         searchCurrentIndex: Number.isInteger(tab.searchCurrentIndex)
           ? tab.searchCurrentIndex : -1,
         selectedLines: tab.selectedLines,
+        multiSelections: tab.multiSelections,
       }];
     });
     const ids = new Set(tabs.map((tab) => tab.id));
@@ -883,6 +923,20 @@ class StatesManager {
             searchCurrentIndex: Number.isInteger(data.searchCurrentIndex)
               ? data.searchCurrentIndex : -1,
             _selectedLines: new Map(Array.isArray(data.selectedLines) ? data.selectedLines : []),
+            _multiSelections: Array.isArray(data.multiSelections?.selections)
+              ? data.multiSelections.selections.map((selection) => ({
+                  id: selection.id,
+                  anchor: { ...selection.anchor },
+                  active: { ...selection.active },
+                  preferredVisualColumn: selection.preferredVisualColumn >= 0
+                    ? selection.preferredVisualColumn : null,
+                }))
+              : null,
+            _multiCursorPrimaryId: data.multiSelections?.primaryId ?? null,
+            _multiCursorNextId: Array.isArray(data.multiSelections?.selections)
+              ? Math.max(1, ...data.multiSelections.selections.map((selection) => selection.id + 1))
+              : 1,
+            _multiSelectionsNormalized: false,
           });
         } else continue;
         manager.tabs.push(tab);

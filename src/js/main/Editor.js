@@ -20,6 +20,8 @@ class Editor {
     this.output = this.domManager.getElement(".editor-output");
     this.lineNumberOutput = this.domManager.getElement(".line-numbers");
     this.selectOutput = this.domManager.getElement(".editor-select-highlight");
+    this.multiCursorCaretOutput = this.domManager.getElement(".editor-secondary-carets");
+    this.multiCursorSelectionOutput = this.domManager.getElement(".editor-secondary-selections");
     this.searchOutput = this.domManager.getElement(".editor-search-highlight");
 
     this.selected = false;
@@ -101,6 +103,7 @@ class Editor {
     this.lineController = new LineController(this);
     this.selectController = new SelectController(this);
     this.cursorController = new CursorController(this);
+    this.multiCursorController = new MultiCursorController(this);
     this.highlightController = new HighlightController(this);
     this.searchController = new SearchController(this);
     this.smartTypingController = new SmartTypingController(this);

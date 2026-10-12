@@ -134,6 +134,17 @@ class SelectController {
   }
 
   getLogicalSelection() {
+    const multi = this.editor.multiCursorController;
+    const primary = multi?.getPrimarySelection?.();
+    if (primary && multi.isSelected(primary)) {
+      const range = multi.getRange(primary);
+      return {
+        startRow: range.start.row,
+        startColumn: range.start.column,
+        endRow: range.end.row,
+        endColumn: range.end.column,
+      };
+    }
     const range = this.editor.tabManager.activeFile?._selectionRange;
     if (range) {
       return {
@@ -197,6 +208,12 @@ class SelectController {
     } else {
       this.calculSelectMultiLine();
     }
+
+    this.editor.multiCursorController?.setPrimarySelection?.(
+      normalizedStart,
+      normalizedEnd,
+      { render: false },
+    );
 
     if (emitEvent) this.emitSelectionChange();
   }
@@ -420,6 +437,8 @@ class SelectController {
   }
 
   hasActiveSelection() {
+    const multi = this.editor.multiCursorController;
+    if (multi?.getSelections?.().some((item) => multi.isSelected(item))) return true;
     if (this.editor.tabManager.activeFile?._selectionRange) return true;
     return this.selectedLines.size > 0;
   }
@@ -477,6 +496,10 @@ class SelectController {
   unSelectAll({ emitEvent = true } = {}) {
     if (!this.editor.tabManager.activeFile) return;
 
+    this.editor.multiCursorController?.removeSecondaryCursors?.({
+      preservePrimarySelection: false,
+    });
+
     this.containsSelected = "";
     this.selectedLines.clear();
     this.editor.tabManager.activeFile._selectionRange = null;
@@ -493,6 +516,7 @@ class SelectController {
     }
 
     if (emitEvent) this.emitSelectionChange();
+    this.editor.multiCursorController?.refreshOverlays?.();
   }
 
   unSelectLine(index) {
@@ -546,6 +570,11 @@ class SelectController {
       row: index + 1,
       column: lineLengthReal,
     };
+    this.editor.multiCursorController?.setPrimarySelection?.(
+      this.startSelect,
+      this.endSelect,
+      { render: false, preserveLineSelection: true },
+    );
 
     if (cursorChange) {
       if (index !== this.editor.lineController.lines.length - 1) {
@@ -588,6 +617,11 @@ class SelectController {
     };
     this.setLogicalSelectionFromEndpoints();
     this.editor.tabManager.activeFile.containsSelected = "";
+    this.editor.multiCursorController?.setPrimarySelection?.(
+      this.startSelect,
+      this.endSelect,
+      { render: false },
+    );
 
     this.refreshSelectionDOM();
 
@@ -634,6 +668,11 @@ class SelectController {
         column: startReal + lengthReal,
       };
       this.setLogicalSelectionFromEndpoints();
+      this.editor.multiCursorController?.setPrimarySelection?.(
+        this.startSelect,
+        this.endSelect,
+        { render: false },
+      );
 
       if (cursorChange) {
         this.editor.cursorController.setCursorPosition(
@@ -707,7 +746,24 @@ class SelectController {
   mouseDown(event) {
     if (!this.editor.tabManager.activeFile || event.button === 2) return;
 
+    if (event.altKey && this.editor.multiCursorController?.isEligible?.()) {
+      this.stopAutoScroll();
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      this.editor.multiCursorController.addCursorAtClientCoordinates(
+        event.clientX,
+        event.clientY,
+        { toggle: true },
+      );
+      return;
+    }
+
     this.editor.keyBinding.historyX = undefined;
+
+    if (!event.shiftKey && this.editor.multiCursorController?.hasMultipleCursors?.())
+      this.editor.multiCursorController.removeSecondaryCursors({
+        preservePrimarySelection: false,
+      });
 
     // A new unshifted pointer gesture always ends the previous selection.
     // clickCount/HstartSelect remain independent so double/triple click keeps
@@ -854,6 +910,12 @@ class SelectController {
     if (this.startSelect.row === this.endSelect.row)
       this.calculSelectSimpleLine();
     else this.calculSelectMultiLine();
+
+    this.editor.multiCursorController?.setPrimarySelection?.(
+      this.startSelect,
+      this.endSelect,
+      { render: false, preserveSecondary: true },
+    );
 
     this.emitSelectionChange();
   }

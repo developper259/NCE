@@ -5,6 +5,8 @@ class LineController {
     this.outputFast = wrapFastNode(editor.output);
     this.lineNumberFast = wrapFastNode(editor.lineNumberOutput);
     this.selectOutputFast = wrapFastNode(editor.selectOutput);
+    this.secondarySelectionFast = wrapFastNode(editor.multiCursorSelectionOutput);
+    this.secondaryCaretFast = wrapFastNode(editor.multiCursorCaretOutput);
     this.searchOutputFast = wrapFastNode(editor.searchOutput);
 
     this.outputWidth = 0;
@@ -312,11 +314,15 @@ class LineController {
     this.outputFast?.setHeight(height);
     this.lineNumberFast?.setHeight(lineNumberHeight);
     this.selectOutputFast?.setHeight(height);
+    this.secondarySelectionFast?.setHeight(height);
+    this.secondaryCaretFast?.setHeight(height);
     this.searchOutputFast?.setHeight(height);
 
     this.outputFast?.setTransform(transform);
     this.lineNumberFast?.setTransform(transform);
     this.selectOutputFast?.setTransform(transform);
+    this.secondarySelectionFast?.setTransform(transform);
+    this.secondaryCaretFast?.setTransform(transform);
     this.searchOutputFast?.setTransform(transform);
   }
 
@@ -400,6 +406,45 @@ class LineController {
     file._lineLengthCount = this.lines.length;
     file.maxLineLengthDirty = false;
     file.maxLineLength = this.peekMaxLineLength();
+  }
+
+  syncLineLengthsForBatch(groups, previousLineCount) {
+    const file = this.editor.tabManager.activeFile;
+    if (!file || !Array.isArray(groups)) return;
+    const lineCountChanged = groups.some((group) =>
+      group.removed.length !== group.replacementNodes.length,
+    );
+    if (lineCountChanged) {
+      file._logicalLineLengths = null;
+      file._logicalLengthTree = null;
+      file._logicalLengthCount = -1;
+    } else {
+      for (const group of groups)
+        this.syncLogicalLineLengthsForEdit(group.startIndex, group.replacementNodes);
+    }
+
+    const tabWidth = SETTINGS_GET("editor.tabWidth");
+    if (
+      !file._lineLengthRecords || !file._lineLengthHeap ||
+      file.maxLineLengthDirty === true ||
+      file._lineMetricsTabWidth !== tabWidth ||
+      file._lineLengthCount !== previousLineCount
+    ) {
+      file.maxLineLengthDirty = true;
+      file._lineLengthCount = -1;
+      return;
+    }
+
+    for (const group of groups) {
+      const retained = new Set(group.replacementNodes);
+      for (const line of group.removed) {
+        if (!retained.has(line)) this.removeLineLengthRecord(line, file);
+      }
+      for (const line of group.replacementNodes) this.updateLineLengthRecord(line, file);
+    }
+    file._lineLengthCount = this.lines.length;
+    file.maxLineLengthDirty = false;
+    file.maxLineLength = this.peekMaxLineLength(file);
   }
 
   syncLineLengthsForAppend(file, startIndex, appendedLines) {
@@ -1080,6 +1125,7 @@ class LineController {
 
     this.editor.cursorController.updateCaretPosition();
     this.editor.selectController.refreshSelectionDOM();
+    this.editor.multiCursorController?.refreshOverlays?.();
     this.editor.searchController.refreshSelectionDOM();
 
     if (newlyVisibleDocumentIndexes.length > 0)
@@ -1098,6 +1144,7 @@ class LineController {
       this.refreshLineOutput(screenIndex);
     this.editor.cursorController.updateCaretPosition();
     this.editor.selectController.refreshSelectPositions();
+    this.editor.multiCursorController?.refreshOverlays?.();
     this.editor.searchController.refreshSelectionDOM();
   }
 
@@ -1692,6 +1739,7 @@ class LineController {
     this.editor.cursorController.updateCaretPosition();
 
     this.editor.selectController.refreshSelectionDOM();
+    this.editor.multiCursorController?.refreshOverlays?.();
 
     this.editor.searchController.refreshSelectionDOM();
 
@@ -1755,6 +1803,8 @@ class LineController {
 
     this.selectOutputFast?.removeChildren();
     this.selectOutputFast?.setDisplay("none");
+    this.secondarySelectionFast?.setDisplay("none");
+    this.secondaryCaretFast?.setDisplay("none");
     this.searchOutputFast?.removeChildren();
     this.searchOutputFast?.setDisplay("none");
     this.editor.cursorController?.caretFast?.setDisplay("none");
@@ -1769,6 +1819,8 @@ class LineController {
     this.lineNumberFast?.setDisplay("block");
     this.outputFast?.setDisplay("block");
     this.selectOutputFast?.setDisplay("block");
+    this.secondarySelectionFast?.setDisplay("block");
+    this.secondaryCaretFast?.setDisplay("block");
     this.searchOutputFast?.setDisplay("block");
     this.outputFast?.removeClass("editor-load-error-output");
 

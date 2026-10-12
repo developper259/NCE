@@ -16,6 +16,7 @@
   "js/highlight/NSHClient.js",
   "js/controller/HighlightController.js",
   "js/controller/CursorController.js",
+  "js/controller/MultiCursorController.js",
   "js/controller/SearchController.js",
   "js/controller/SmartTypingController.js",
   "js/manager/TabManager.js",

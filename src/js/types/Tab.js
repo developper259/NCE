@@ -137,6 +137,10 @@ class FileNode extends Tab {
     this.HstartSelect = undefined; // historique start select
     this.startSelect = undefined;
     this.endSelect = undefined;
+    this._multiSelections = null;
+    this._multiCursorPrimaryId = null;
+    this._multiCursorNextId = 1;
+    this._multiSelectionsNormalized = true;
 
     // Writer Controller
     this.insertMode = false;
@@ -230,6 +234,18 @@ class FileNode extends Tab {
     this.HstartSelect = file.HstartSelect;
     this.startSelect = file.startSelect;
     this.endSelect = file.endSelect;
+    this._multiSelections = Array.isArray(file._multiSelections)
+      ? file._multiSelections.map((selection) => ({
+          ...selection,
+          anchor: selection.anchor ? { ...selection.anchor } : null,
+          active: selection.active ? { ...selection.active } : null,
+        }))
+      : null;
+    this._multiCursorPrimaryId = file._multiCursorPrimaryId ?? null;
+    this._multiCursorNextId = Number.isSafeInteger(file._multiCursorNextId)
+      ? file._multiCursorNextId
+      : 1;
+    this._multiSelectionsNormalized = file._multiSelectionsNormalized === true;
 
     this.insertMode = file.insertMode;
 

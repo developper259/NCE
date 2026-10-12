@@ -190,9 +190,14 @@ class CursorController {
       }
     }
 
+    if (options.syncMultiCursor !== false)
+      this.editor.multiCursorController?.syncPrimaryFromCursor?.(row, column);
+
     if (!this.editor.isOnInit && options.ensureVisible !== false)
       this.ensureCursorVisible();
     this.updateCaretPosition();
+    if (options.renderMultiCursor !== false)
+      this.editor.multiCursorController?.refreshOverlays?.();
   }
 
   ensureCursorVisible() {
