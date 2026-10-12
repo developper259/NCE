@@ -36,7 +36,9 @@ closes.
 
 Window session metadata and renderer state are stored centrally in the
 versioned, size-limited `userData/window-sessions.json` file. Writes are
-serialized and committed through a temporary file and rename. Legacy
+serialized and committed through a temporary file and rename. Each window
+session keeps its last normal bounds, maximized state, and full screen state so
+those window properties are restored independently. Legacy
 `userData/state.json` is migrated once without removing the source file.
 
 Project UI state remains in each project's `.nce/workspace.json`. Global

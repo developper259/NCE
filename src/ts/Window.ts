@@ -89,7 +89,7 @@ export class Window {
     this.id = options.id || randomUUID();
     this.initialSession = options.session || {
       id: randomUUID(), workspacePath: null, bounds: null, maximized: false,
-      rendererState: null, lastActiveAt: Date.now(),
+      fullScreen: false, rendererState: null, lastActiveAt: Date.now(),
     };
     this.sessionId = this.initialSession.id;
     this.workspacePath = this.initialSession.workspacePath;
@@ -194,6 +194,7 @@ export class Window {
 
     this.appMenu = new AppMenu(this.window, this);
     if (this.initialSession.maximized) this.window.maximize();
+    if (this.initialSession.fullScreen) this.window.setFullScreen(true);
 
     if (
       !app.isPackaged &&
@@ -212,6 +213,8 @@ export class Window {
 
     this.window.on("resize", () => this.scheduleBoundsSave());
     this.window.on("move", () => this.scheduleBoundsSave());
+    this.window.on("enter-full-screen", () => this.scheduleBoundsSave());
+    this.window.on("leave-full-screen", () => this.scheduleBoundsSave());
     this.registerIPC();
 
     this.window.webContents.on("console-message", (...args: any[]) => {

@@ -16,6 +16,7 @@ export interface CreateWindowOptions {
   workspacePath?: string | null;
   bounds?: WindowBounds | null;
   maximized?: boolean;
+  fullScreen?: boolean;
   focus?: boolean;
 }
 
@@ -72,6 +73,7 @@ export class WindowManager {
             height: Math.max(600, Math.min(720, area.height - 64)),
           },
           maximized: options.maximized,
+          fullScreen: options.fullScreen,
         });
       }
       const id = randomUUID();
@@ -306,10 +308,11 @@ export class WindowManager {
     const browserWindow = window.window;
     if (!browserWindow || browserWindow.isDestroyed()) return;
     const maximized = browserWindow.isMaximized();
-    const bounds = maximized || browserWindow.isFullScreen()
+    const fullScreen = browserWindow.isFullScreen();
+    const bounds = maximized || fullScreen
       ? browserWindow.getNormalBounds()
       : browserWindow.getBounds();
-    this.sessions.update(window.sessionId, { bounds, maximized });
+    this.sessions.update(window.sessionId, { bounds, maximized, fullScreen });
   }
 
   getRestoreBounds(bounds: WindowBounds | null): WindowBounds | null {

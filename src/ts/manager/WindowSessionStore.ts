@@ -19,6 +19,7 @@ export interface WindowSession {
   workspacePath: string | null;
   bounds: WindowBounds | null;
   maximized: boolean;
+  fullScreen: boolean;
   rendererState: Record<string, unknown> | null;
   lastActiveAt: number;
 }
@@ -124,6 +125,7 @@ export class WindowSessionStore {
       workspacePath: safeText(input.workspacePath),
       bounds: sanitizeBounds(input.bounds),
       maximized: input.maximized === true,
+      fullScreen: input.fullScreen === true,
       rendererState: sanitizeRendererState(input.rendererState),
       lastActiveAt: Number.isSafeInteger(input.lastActiveAt) && input.lastActiveAt! >= 0
         ? input.lastActiveAt! : Date.now(),
@@ -145,6 +147,8 @@ export class WindowSessionStore {
         ? { bounds: sanitizeBounds(patch.bounds) } : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, "maximized")
         ? { maximized: patch.maximized === true } : {}),
+      ...(Object.prototype.hasOwnProperty.call(patch, "fullScreen")
+        ? { fullScreen: patch.fullScreen === true } : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, "rendererState")
         ? { rendererState: sanitizeRendererState(patch.rendererState) } : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, "lastActiveAt")
@@ -218,6 +222,7 @@ export class WindowSessionStore {
         workspacePath,
         bounds: sanitizeBounds(candidate.bounds),
         maximized: candidate.maximized === true,
+        fullScreen: candidate.fullScreen === true,
         rendererState: state,
         lastActiveAt: Number.isSafeInteger(candidate.lastActiveAt) && candidate.lastActiveAt >= 0
           ? candidate.lastActiveAt : 0,
