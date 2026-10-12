@@ -56,6 +56,166 @@ class SmartTypingController {
     };
   }
 
+  getTypingContexts() {
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    if (selections.length < 2) {
+      const context = this.getTypingContext();
+      return context ? [context] : [];
+    }
+    return selections.map((selection) => {
+      const context = this.getTypingContext();
+      if (!context) return null;
+      const range = multi.getRange(selection);
+      const lineNode = this.editor.lineController.lines[selection.active.row - 1];
+      const line = lineNode?.getText?.() || "";
+      const hasSelection = multi.isSelected(selection);
+      return {
+        ...context,
+        cursorId: selection.id,
+        row: selection.active.row,
+        column: selection.active.column,
+        line,
+        before: selection.active.column > 0 ? line[selection.active.column - 1] : "",
+        after: selection.active.column < line.length ? line[selection.active.column] : "",
+        hasSelection,
+        selectionRange: hasSelection ? {
+          startRow: range.start.row,
+          startColumn: range.start.column,
+          endRow: range.end.row,
+          endColumn: range.end.column,
+        } : null,
+        selection,
+      };
+    }).filter(Boolean);
+  }
+
+  getContextEdit(context, text, options = {}) {
+    const range = context.selectionRange;
+    return {
+      id: context.cursorId,
+      cursorId: context.cursorId,
+      start: range
+        ? { row: range.startRow, column: range.startColumn }
+        : { row: context.row, column: context.column },
+      end: range
+        ? { row: range.endRow, column: range.endColumn }
+        : { row: context.row, column: context.column },
+      text,
+      ...options,
+    };
+  }
+
+  applyMultiEdits(edits, source = "typing") {
+    const file = this.editor.tabManager.activeFile;
+    const result = this.editor.writerController.applyBatchEdits(edits, {
+      source,
+      primaryId: file?._multiCursorPrimaryId,
+      ensureVisible: true,
+    });
+    return result !== null;
+  }
+
+  updateMultiSelections(selections) {
+    const multi = this.editor.multiCursorController;
+    const file = this.editor.tabManager.activeFile;
+    if (!multi?.setSelections?.(selections, {
+      file,
+      primaryId: file?._multiCursorPrimaryId,
+      ensureVisible: true,
+    })) return false;
+    const primary = multi.getPrimarySelection(file);
+    this.editor.cursorController.setCursorPosition(
+      primary.active.row,
+      primary.active.column,
+      { emitEvent: false, syncMultiCursor: false },
+    );
+    this.editor.selectController?.refreshSelectionDOM?.();
+    return true;
+  }
+
+  handleMultiCharacter(character, contexts) {
+    const multi = this.editor.multiCursorController;
+    const edits = [];
+    let allSkippedClosers = true;
+
+    for (const context of contexts) {
+      if (context.hasSelection && this.isOpeningCharacter(character)) {
+        const range = context.selectionRange;
+        const selected = this.editor.writerController.getTextInRange(
+          { row: range.startRow, column: range.startColumn },
+          { row: range.endRow, column: range.endColumn },
+        );
+        edits.push(this.getContextEdit(context, `${character}${selected}${this.getClosingPair(character)}`));
+        allSkippedClosers = false;
+        continue;
+      }
+
+      if (character === "}" && this.getClosingIndentEdit(context)) {
+        edits.push(this.getClosingIndentEdit(context));
+        allSkippedClosers = false;
+        continue;
+      }
+
+      if (this.isClosingCharacter(character) && context.after === character && !context.hasSelection) {
+        const lineNode = this.editor.lineController.lines[context.row - 1];
+        const next = lineNode?.getPositionIndex?.()?.next(context.column) ?? context.column + 1;
+        edits.push({
+          id: context.cursorId,
+          cursorId: context.cursorId,
+          start: { row: context.row, column: context.column },
+          end: { row: context.row, column: next },
+          text: character,
+        });
+        continue;
+      }
+
+      allSkippedClosers = false;
+      if (this.isOpeningCharacter(character) &&
+          (!this.isQuote(character) || this.shouldAutoCloseQuote(context))) {
+        edits.push(this.getContextEdit(
+          context,
+          character + this.getClosingPair(character),
+          { cursorOffset: character.length },
+        ));
+      } else {
+        edits.push(this.getContextEdit(context, character));
+      }
+    }
+
+    if (allSkippedClosers) {
+      const nextSelections = multi.getSelections().map((selection) => {
+        const context = contexts.find((candidate) => candidate.cursorId === selection.id);
+        const lineNode = this.editor.lineController.lines[selection.active.row - 1];
+        const column = lineNode?.getPositionIndex?.()?.next(selection.active.column) ?? selection.active.column + 1;
+        const active = context?.after === character
+          ? { row: selection.active.row, column }
+          : selection.active;
+        return { ...selection, anchor: { ...active }, active: { ...active } };
+      });
+      return this.updateMultiSelections(nextSelections);
+    }
+    return this.applyMultiEdits(edits, "typing");
+  }
+
+  getClosingIndentEdit(context) {
+    if (context.hasSelection || context.column === 0) return null;
+    const beforeCaret = context.line.slice(0, context.column);
+    if (!this.isWhitespaceOnly(beforeCaret)) return null;
+    const startColumn = this.getPreviousIndentColumn(beforeCaret);
+    const endColumn = context.after === "}"
+      ? (this.editor.lineController.lines[context.row - 1]?.getPositionIndex?.()?.next(context.column) ?? context.column + 1)
+      : context.column;
+    return {
+      id: context.cursorId,
+      cursorId: context.cursorId,
+      start: { row: context.row, column: startColumn },
+      end: { row: context.row, column: endColumn },
+      text: "}",
+      cursorOffset: 1,
+    };
+  }
+
   isCompositionEvent(event) {
     return Boolean(event?.isComposing || event?.keyCode === 229);
   }
@@ -92,6 +252,9 @@ class SmartTypingController {
 
     const context = this.getTypingContext();
     if (!context) return false;
+
+    const contexts = this.getTypingContexts();
+    if (contexts.length > 1) return this.handleMultiCharacter(character, contexts);
 
     if (context.hasSelection && this.isOpeningCharacter(character)) {
       return this.wrapSelection(character, context);
@@ -157,6 +320,58 @@ class SmartTypingController {
   handleBackspace(event) {
     if (this.shouldIgnoreCommandEvent(event)) return false;
 
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    if (selections.length > 1) {
+      const contexts = new Map(this.getTypingContexts().map((context) => [context.cursorId, context]));
+      const edits = selections.map((selection) => {
+        const range = multi.getRange(selection);
+        let start = range.start;
+        let end = range.end;
+        if (!multi.isSelected(selection)) {
+          const context = contexts.get(selection.id);
+          if (!context) return null;
+          if (
+            this.isOpeningCharacter(context.before) &&
+            this.getClosingPair(context.before) === context.after
+          ) {
+            const lineNode = this.editor.lineController.lines[context.row - 1];
+            start = {
+              row: context.row,
+              column: lineNode?.getPositionIndex?.()?.previous(context.column) ?? context.column - 1,
+            };
+            end = {
+              row: context.row,
+              column: lineNode?.getPositionIndex?.()?.next(context.column) ?? context.column + 1,
+            };
+          } else {
+            const before = context.line.slice(0, context.column);
+            if (context.column > 0 && this.isWhitespaceOnly(before)) {
+              start = { row: context.row, column: this.getPreviousIndentColumn(before) };
+            } else if (context.column > 0) {
+              const lineNode = this.editor.lineController.lines[context.row - 1];
+              start = {
+                row: context.row,
+                column: lineNode?.getPositionIndex?.()?.previous(context.column) ?? context.column - 1,
+              };
+            } else if (context.row > 1) {
+              const previous = this.editor.lineController.lines[context.row - 2];
+              start = { row: context.row - 1, column: previous?.getText?.().length || 0 };
+            }
+          }
+        }
+        return {
+          id: selection.id,
+          cursorId: selection.id,
+          start,
+          end,
+          text: "",
+        };
+      });
+      if (edits.some((edit) => !edit)) return false;
+      return this.applyMultiEdits(edits, "delete");
+    }
+
     const context = this.getTypingContext();
     if (!context || context.hasSelection) return false;
 
@@ -187,6 +402,15 @@ class SmartTypingController {
 
   handleEnter(event) {
     if (this.shouldIgnoreCommandEvent(event)) return false;
+
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    if (selections.length > 1) {
+      const contexts = this.getTypingContexts();
+      const edits = contexts.map((context) => this.getEnterEdit(context));
+      if (edits.some((edit) => !edit)) return false;
+      return this.applyMultiEdits(edits, "enter");
+    }
 
     const context = this.getTypingContext();
     if (!context) return false;
@@ -257,6 +481,26 @@ class SmartTypingController {
   handleHome(shiftKey = false, event) {
     if (this.shouldIgnoreCommandEvent(event)) return false;
 
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    if (selections.length > 1) {
+      const contexts = new Map(this.getTypingContexts().map((context) => [context.cursorId, context]));
+      const next = selections.map((selection) => {
+        const context = contexts.get(selection.id);
+        if (!context) return selection;
+        const indentationColumn = this.getLineIndentation(context.line).length;
+        const targetColumn = this.isWhitespaceOnly(context.line)
+          ? 0
+          : context.column === indentationColumn ? 0 : indentationColumn;
+        return {
+          ...selection,
+          anchor: shiftKey ? { ...selection.anchor } : { row: context.row, column: targetColumn },
+          active: { row: context.row, column: targetColumn },
+        };
+      });
+      return this.updateMultiSelections(next);
+    }
+
     const context = this.getTypingContext();
     if (!context) return false;
 
@@ -297,6 +541,31 @@ class SmartTypingController {
     const normalizedText = text.replace(/\r\n?/g, "\n");
     const lines = normalizedText.split("\n");
     const commonIndentation = this.getCommonIndentationWidth(lines);
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    if (selections.length > 1) {
+      const normalizedLines = lines.map((line) =>
+        this.isWhitespaceOnly(line) ? "" : this.removeIndentationWidth(line, commonIndentation),
+      );
+      const edits = selections.map((selection) => {
+        const range = multi.getRange(selection);
+        const row = range.start.row;
+        const column = range.start.column;
+        const destinationLine = this.editor.lineController.lines[row - 1]?.getText?.() || "";
+        const destinationIndentation = this.getPasteDestinationIndentation(destinationLine, column);
+        const transformed = normalizedLines.map((line, index) =>
+          index === 0 || line === "" ? line : destinationIndentation + line,
+        ).join("\n");
+        return {
+          id: selection.id,
+          cursorId: selection.id,
+          start: range.start,
+          end: range.end,
+          text: transformed,
+        };
+      });
+      return this.applyMultiEdits(edits, "paste");
+    }
     const insertionRow = context.selectionRange
       ? context.selectionRange.startRow
       : context.row;
@@ -616,6 +885,12 @@ class SmartTypingController {
   handleTab(shiftKey = false, event) {
     if (this.shouldIgnoreCommandEvent(event)) return false;
 
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    if (selections.length > 1) {
+      return this.handleMultiTab(shiftKey, selections);
+    }
+
     const selectedRange = this.getSelectedLineRange();
     if (!selectedRange) return false;
 
@@ -669,5 +944,136 @@ class SmartTypingController {
 
     selectController.setSelection(anchor, focus);
     return true;
+  }
+
+  getEnterEdit(context) {
+    const range = context.selectionRange;
+    if (context.hasSelection && range) {
+      const indentation = this.getLineIndentation(
+        this.editor.lineController.lines[range.startRow - 1]?.getText?.() || "",
+      );
+      return this.getContextEdit(context, `\n${indentation}`, {
+        cursorOffset: 1 + indentation.length,
+      });
+    }
+
+    const indentation = this.getLineIndentation(context.line);
+    const beforeCaret = context.line.slice(0, context.column);
+    const afterCaret = context.line.slice(context.column);
+    const contentBeforeCaret = beforeCaret.slice(indentation.length);
+    if (
+      contentBeforeCaret.trim() === "/**" &&
+      this.isWhitespaceOnly(afterCaret)
+    ) {
+      const middleIndentation = indentation + " ";
+      const text = `\n${middleIndentation}* \n${middleIndentation}*/`;
+      return this.getContextEdit(context, text, {
+        cursorOffset: 1 + middleIndentation.length + 2,
+      });
+    }
+
+    const lineComment = this.getLineCommentContinuation(contentBeforeCaret, afterCaret);
+    if (lineComment === "stop") {
+      const text = `${indentation}\n${indentation}`;
+      return {
+        id: context.cursorId,
+        cursorId: context.cursorId,
+        start: { row: context.row, column: 0 },
+        end: { row: context.row, column: context.line.length },
+        text,
+        cursorOffset: text.length,
+      };
+    }
+    if (lineComment)
+      return this.getContextEdit(context, `\n${indentation}${lineComment}`);
+
+    const blockComment = this.getBlockCommentContinuation(contentBeforeCaret, context.row);
+    if (blockComment)
+      return this.getContextEdit(context, `\n${indentation}${blockComment}`);
+
+    if (this.isBetweenStructuralPair(context.before, context.after)) {
+      const innerIndentation = indentation + this.getIndentUnit();
+      return this.getContextEdit(
+        context,
+        `\n${innerIndentation}\n${indentation}`,
+        { cursorOffset: 1 + innerIndentation.length },
+      );
+    }
+    const nextIndentation = this.shouldIncreaseIndent(beforeCaret)
+      ? indentation + this.getIndentUnit()
+      : indentation;
+    return this.getContextEdit(context, `\n${nextIndentation}`);
+  }
+
+  handleMultiTab(shiftKey, selections) {
+    const multi = this.editor.multiCursorController;
+    const lineRows = new Set();
+    const isMultilineSelection = selections.some((selection) =>
+      multi.isSelected(selection) && multi.getRange(selection).start.row < multi.getRange(selection).end.row,
+    );
+    if (!shiftKey && !isMultilineSelection) {
+      this.editor.writerController.write(this.getIndentUnit());
+      return true;
+    }
+
+    for (const selection of selections) {
+      if (!multi.isSelected(selection)) {
+        if (shiftKey) lineRows.add(selection.active.row);
+        continue;
+      }
+      const range = multi.getRange(selection);
+      if (!shiftKey && range.start.row === range.end.row) continue;
+      let lastRow = range.end.row;
+      if (range.end.column === 0 && lastRow > range.start.row) lastRow--;
+      for (let row = range.start.row; row <= lastRow; row++) lineRows.add(row);
+    }
+    if (!lineRows.size) {
+      if (shiftKey) return true;
+      this.editor.writerController.write(this.getIndentUnit());
+      return true;
+    }
+
+    const lineController = this.editor.lineController;
+    const indentation = this.getIndentUnit();
+    const changes = [];
+    for (const row of [...lineRows].sort((a, b) => a - b)) {
+      const line = lineController.lines[row - 1]?.getText?.();
+      if (typeof line !== "string") return false;
+      if (shiftKey) {
+        const removedLength = this.getUnindentLength(line, indentation);
+        if (removedLength === 0) continue;
+        changes.push({ row, oldText: line, newText: line.slice(removedLength), delta: -removedLength });
+      } else {
+        changes.push({ row, oldText: line, newText: indentation + line, delta: indentation.length });
+      }
+    }
+    if (!changes.length) return true;
+
+    const edits = changes.map((change) => ({
+      start: { row: change.row, column: 0 },
+      end: { row: change.row, column: change.oldText.length },
+      text: change.newText,
+    }));
+    const byRow = new Map(changes.map((change) => [change.row, change]));
+    const resultSelections = selections.map((selection) => {
+      const adjust = (position) => {
+        const change = byRow.get(position.row);
+        if (!change) return { ...position };
+        return { row: position.row, column: Math.max(0, position.column + change.delta) };
+      };
+      return {
+        ...selection,
+        anchor: adjust(selection.anchor),
+        active: adjust(selection.active),
+      };
+    });
+    const file = this.editor.tabManager.activeFile;
+    const result = this.editor.writerController.applyBatchEdits(edits, {
+      source: shiftKey ? "unindent" : "indent",
+      primaryId: file?._multiCursorPrimaryId,
+      resultSelections,
+      ensureVisible: true,
+    });
+    return result !== null;
   }
 }

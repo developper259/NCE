@@ -217,6 +217,30 @@ test("incremental edits queue updateDocument before visible ranges", async () =>
   assert.ok(rangeIndex > updateIndex);
 });
 
+test("incremental NSH applies distant batch updates in adjusted document order", async () => {
+  const { editor, file, h, calls } = setup();
+  file.incrementalEligible = true;
+  file.language = "javascript";
+  h.documentModes.set(file.id, "incremental");
+  h.documentEpochs.set(file.id, 0);
+  editor.highlightController = h;
+  h.nshClient = {
+    async request(type, data) {
+      calls.push({ type, ...data });
+      return { lines: [] };
+    },
+  };
+  h.handleChange({ nshUpdates: [
+    { startLine: 1, deletedLines: 1, insertedLines: ["new-a", "new-b"] },
+    { startLine: 4, deletedLines: 2, insertedLines: ["new-c"] },
+  ] });
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+  const updates = calls.filter((call) => call.type === "updateDocument");
+  assert.deepEqual(updates.map((call) => call.startLine), [1, 5]);
+  assert.deepEqual(updates.map((call) => call.deletedLines), [1, 2]);
+});
+
 test("visible range recovery clamps stale viewport and retries once", async () => {
   const { editor, file, h, calls } = setup();
   file.incrementalEligible = true;

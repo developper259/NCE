@@ -1048,6 +1048,94 @@ app.whenReady().then(() => {
           return true;
         })()`);
         assert.equal(fs.readFileSync(target, "utf8"), "const value = 1;");
+        const multiCursorFileId = await run(`(() => {
+          const file = editor.tabManager.createEmptyFile();
+          return file.id;
+        })()`);
+        await waitForCondition(
+          async () => (await run(`editor.tabManager.activeFile?.id === ${JSON.stringify(multiCursorFileId)} &&
+            editor.tabManager.activeFile.isLoaded &&
+            editor.tabManager.activeFile.lines?.length === 1 &&
+            typeof editor.tabManager.activeFile.lines[0]?.getText === "function" &&
+            editor.lineController.lines[0] === editor.tabManager.activeFile.lines[0]`)) === true,
+          { description: "multi-cursor Electron fixture to finish loading" },
+        );
+        assert.equal(await run(`(() => {
+          const file = editor.tabManager.activeFile;
+          editor.cursorController.setCursorPosition(1, 0);
+          editor.writerController.write("red\\nred\\nred");
+          editor.cursorController.setCursorPosition(1, 3);
+          return file.serializeContent();
+        })()`), "red\nred\nred");
+        for (const row of [2, 3]) {
+          const point = await run(`(() => {
+            const row = ${row};
+            const column = 3;
+            const editor = window.editor;
+            const controller = editor.cursorController;
+            const lines = editor.lineController;
+            const rect = editor.domManager.getOutputRect();
+            const screenRow = lines.getDisplayIndexForCursor(row) - lines.startIndex;
+            const baseX = rect.left + column * editor.letterSize + editor.letterSize * 0.1;
+            const baseY = rect.top + controller.mY + editor.baseY +
+              (screenRow + 0.1) * editor.posY - lines.getScrollOffsetY();
+            for (let dy = -8; dy <= 8; dy++) {
+              for (let dx = -8; dx <= 8; dx++) {
+                const x = baseX + dx;
+                const y = baseY + dy;
+                const position = controller.positionFromClientCoordinates(x, y, true);
+                if (position?.row === row && position.column === column)
+                  return { x, y, position };
+              }
+            }
+            return null;
+          })()`);
+          assert.ok(point, `a visible mouse coordinate maps to row ${row}, column 3`);
+          win.focus();
+          win.webContents.sendInputEvent({
+            type: "mouseDown", x: Math.round(point.x), y: Math.round(point.y),
+            button: "left", modifiers: ["alt"],
+          });
+          win.webContents.sendInputEvent({
+            type: "mouseUp", x: Math.round(point.x), y: Math.round(point.y),
+            button: "left", modifiers: ["alt"],
+          });
+          await waitForCondition(
+            async () => (await run("editor.multiCursorController.getSelections().length")) === row,
+            { description: `Option-click to add the cursor on row ${row}` },
+          );
+        }
+        assert.deepEqual(await run("editor.multiCursorController.getSelections().map(selection => selection.active)"), [
+          { row: 1, column: 3 }, { row: 2, column: 3 }, { row: 3, column: 3 },
+        ]);
+        const multiTyping = await run(`(() => {
+          const handled = editor.smartTypingController.handleCharacter("x", { key: "x" });
+          return {
+            handled,
+            content: editor.tabManager.activeFile.serializeContent().split(String.fromCharCode(10)).join("|"),
+            selections: editor.multiCursorController.getSelections().map(selection => selection.active),
+          };
+        })()`);
+        assert.equal(multiTyping.handled, true);
+        assert.equal(multiTyping.content, "redx|redx|redx", "Smart Typing inserts at all three Electron cursors");
+        assert.equal(await run("editor.historyController.undo()"), true);
+        assert.equal(await run("editor.tabManager.activeFile.serializeContent()"), "red\nred\nred");
+        assert.equal(await run("editor.historyController.redo()"), true);
+        assert.equal(await run("editor.tabManager.activeFile.serializeContent()"), "redx\nredx\nredx");
+        const savedFileId = await run(`editor.tabManager.tabs.find(file => file.path === ${JSON.stringify(target)})?.id`);
+        assert.ok(savedFileId, "the previously saved file remains open while the multi-cursor fixture is active");
+        assert.equal(await run(`(async () => {
+          const manager = editor.tabManager;
+          const fixture = manager.activeFile;
+          await manager.setFocusTab(manager.tabs.find(file => file.id === ${JSON.stringify(savedFileId)}));
+          await manager.setFocusTab(fixture);
+          return editor.multiCursorController.getSelections().length;
+        })()`), 3, "switching tabs restores the fixture's own cursors");
+        assert.equal(await run("editor.historyController.undo()"), true);
+        assert.equal(await run("editor.historyController.undo()"), true);
+        assert.equal(await run("editor.tabManager.activeFile.serializeContent()"), "");
+        assert.equal(await run("editor.tabManager.closeTab(editor.tabManager.activeFile)"), true);
+        await run(`editor.tabManager.setFocusTab(editor.tabManager.tabs.find(file => file.path === ${JSON.stringify(target)}))`);
         if (process.platform === "darwin") {
           await waitForCondition(
             async () =>

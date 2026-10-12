@@ -380,6 +380,41 @@ export class AppMenu {
           },
 
           {
+            id: "add-cursor-above",
+            label: "Add Cursor Above",
+            accelerator: this.getAccelerator("add_cursor_above"),
+            click: () => this.executeKeybinding("add_cursor_above"),
+          },
+
+          {
+            id: "add-cursor-below",
+            label: "Add Cursor Below",
+            accelerator: this.getAccelerator("add_cursor_below"),
+            click: () => this.executeKeybinding("add_cursor_below"),
+          },
+
+          {
+            id: "add-cursor-next-occurrence",
+            label: "Add Cursor at Next Occurrence",
+            accelerator: this.getAccelerator("add_cursor_next_occurrence"),
+            click: () => this.executeKeybinding("add_cursor_next_occurrence"),
+          },
+
+          {
+            id: "select-all-occurrences",
+            label: "Select All Occurrences",
+            accelerator: this.getAccelerator("select_all_occurrences"),
+            click: () => this.executeKeybinding("select_all_occurrences"),
+          },
+
+          {
+            id: "remove-secondary-cursors",
+            label: "Remove Secondary Cursors",
+            accelerator: this.getAccelerator("remove_secondary_cursors"),
+            click: () => this.executeKeybinding("remove_secondary_cursors"),
+          },
+
+          {
             id: "unselect-all",
             label: "Unselect All",
 

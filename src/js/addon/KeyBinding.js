@@ -15,6 +15,11 @@ class KeyBinding {
       "delete_line",
       "select_all",
       "unselect_all",
+      "add_cursor_above",
+      "add_cursor_below",
+      "add_cursor_next_occurrence",
+      "select_all_occurrences",
+      "remove_secondary_cursors",
     ]);
 
     this.func = {
@@ -47,6 +52,11 @@ class KeyBinding {
       reload_window: this.control_reload_window,
       delete_line: this.control_delete_line,
       select_all: this.control_select_all,
+      add_cursor_above: this.control_add_cursor_above,
+      add_cursor_below: this.control_add_cursor_below,
+      add_cursor_next_occurrence: this.control_add_cursor_next_occurrence,
+      select_all_occurrences: this.control_select_all_occurrences,
+      remove_secondary_cursors: this.control_remove_secondary_cursors,
 
       toggle_file_explorer: this.control_toggle_file_explorer,
       toggle_search: this.control_toggle_search,
@@ -210,21 +220,52 @@ class KeyBinding {
   }
 
   async control_copy(s, c, m, a) {
-    if (!document.hasFocus()) return;
-    if (!this.editor.tabManager.activeFile) return;
+    if (!document.hasFocus()) return false;
+    if (!this.editor.tabManager.activeFile) return false;
 
-    let txt = this.editor.selectController.getSelectedText?.() || "";
-
-    if (!txt) {
-      const lineNode =
-        this.editor.lineController.lines[this.editor.cursorController.row - 1];
-      txt = lineNode ? lineNode.getText() : "";
-    }
+    const txt = this.getClipboardText();
     try {
       await navigator.clipboard.writeText(txt);
+      return true;
     } catch (err) {
-      console.error("Erreur lors de la copie : ", err);
+      if (typeof window.api?.writeClipboardText === "function") {
+        try {
+          await window.api.writeClipboardText(txt);
+          return true;
+        } catch (fallbackError) {
+          console.error("Clipboard write failed:", fallbackError);
+        }
+      } else {
+        console.error("Clipboard write failed:", err);
+      }
+      return false;
     }
+  }
+
+  getClipboardText() {
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    const primaryId = this.editor.tabManager.activeFile?._multiCursorPrimaryId;
+    const selectedTexts = [];
+    for (const selection of selections) {
+      if (multi.isSelected(selection)) {
+        selectedTexts.push(multi.getSelectionText(selection));
+      } else if (
+        selection.id === primaryId &&
+        this.editor.selectController.hasActiveSelection?.()
+      ) {
+        selectedTexts.push(this.editor.selectController.getSelectedText?.() || "");
+      }
+    }
+    const nonEmptySelections = selectedTexts.filter((text) => text.length > 0);
+    if (nonEmptySelections.length) return nonEmptySelections.join("\n");
+
+    if (selections.length > 1) {
+      const rows = [...new Set(selections.map((selection) => selection.active.row))].sort((a, b) => a - b);
+      return rows.map((row) => this.editor.lineController.lines[row - 1]?.getText?.() || "").join("\n");
+    }
+    const lineNode = this.editor.lineController.lines[this.editor.cursorController.row - 1];
+    return lineNode ? lineNode.getText() : "";
   }
 
   async control_paste(s, c, m, a) {
@@ -240,15 +281,85 @@ class KeyBinding {
   }
 
   async control_cut(s, c, m, a) {
-    if (!document.hasFocus()) return;
-    if (!this.editor.tabManager.activeFile) return;
+    if (!document.hasFocus()) return false;
+    const file = this.editor.tabManager.activeFile;
+    if (!file) return false;
 
-    let hasSelection = this.editor.selectController.hasActiveSelection?.();
-    await this.control_copy();
+    const multi = this.editor.multiCursorController;
+    const selections = multi?.getSelections?.() || [];
+    const selected = selections.filter((selection) => multi.isSelected(selection));
+    const hasLegacySelection = this.editor.selectController.hasActiveSelection?.();
+    if (!(await this.control_copy())) return false;
 
-    if (hasSelection) {
-      this.key_backspace();
-    } else {
+    if (selected.length) {
+      const edits = selected.map((selection) => {
+        const range = multi.getRange(selection);
+        return {
+          id: selection.id,
+          cursorId: selection.id,
+          start: range.start,
+          end: range.end,
+          text: "",
+        };
+      });
+      return this.editor.writerController.applyBatchEdits(edits, {
+        source: "cut",
+        primaryId: file._multiCursorPrimaryId,
+        ensureVisible: true,
+      }) !== null;
+    }
+
+    if (hasLegacySelection) {
+      const range = this.editor.writerController.getSelectionRange?.();
+      if (range) {
+        return this.editor.writerController.applyBatchEdits([{
+          id: file._multiCursorPrimaryId,
+          cursorId: file._multiCursorPrimaryId,
+          start: range.start,
+          end: range.end,
+          text: "",
+        }], {
+          source: "cut",
+          primaryId: file._multiCursorPrimaryId,
+          ensureVisible: true,
+        }) !== null;
+      }
+      return false;
+    }
+
+    if (selections.length > 1) {
+      const rows = [...new Set(selections.map((selection) => selection.active.row))].sort((a, b) => a - b);
+      const groups = [];
+      for (const row of rows) {
+        const previous = groups[groups.length - 1];
+        if (previous && row === previous.lastRow + 1) previous.lastRow = row;
+        else groups.push({ firstRow: row, lastRow: row });
+      }
+      const lineCount = this.editor.lineController.lines.length;
+      const edits = groups.map(({ firstRow, lastRow }) => {
+        let start = { row: firstRow, column: 0 };
+        let end;
+        if (lastRow < lineCount) {
+          end = { row: lastRow + 1, column: 0 };
+        } else if (firstRow > 1) {
+          const previousLine = this.editor.lineController.lines[firstRow - 2];
+          start = { row: firstRow - 1, column: previousLine?.getText?.().length || 0 };
+          const lastLine = this.editor.lineController.lines[lastRow - 1];
+          end = { row: lastRow, column: lastLine?.getText?.().length || 0 };
+        } else {
+          const lastLine = this.editor.lineController.lines[lastRow - 1];
+          end = { row: lastRow, column: lastLine?.getText?.().length || 0 };
+        }
+        return { start, end, text: "" };
+      });
+      return this.editor.writerController.applyBatchEdits(edits, {
+        source: "cut",
+        primaryId: file._multiCursorPrimaryId,
+        ensureVisible: true,
+      }) !== null;
+    }
+
+    {
       const row = this.editor.cursorController.row;
       const lines = this.editor.lineController.lines;
       const end =
@@ -257,6 +368,7 @@ class KeyBinding {
           : { row, column: lines[row - 1].getText().length };
       this.editor.writerController.deleteRange({ row, column: 0 }, end);
     }
+    return true;
   }
 
   control_undo(s, c, m, a) {
@@ -470,6 +582,26 @@ class KeyBinding {
     this.editor.selectController.selectAll(true);
   }
 
+  control_add_cursor_above() {
+    return this.editor.multiCursorController?.addCursorsVertically?.(-1);
+  }
+
+  control_add_cursor_below() {
+    return this.editor.multiCursorController?.addCursorsVertically?.(1);
+  }
+
+  control_add_cursor_next_occurrence() {
+    return this.editor.multiCursorController?.addNextOccurrence?.();
+  }
+
+  control_select_all_occurrences() {
+    return this.editor.multiCursorController?.selectAllOccurrences?.();
+  }
+
+  control_remove_secondary_cursors() {
+    return this.editor.multiCursorController?.removeSecondaryCursors?.();
+  }
+
   control_toggle_file_explorer(s, c, m, a) {
     if (this.editor.sidebarManager) {
       this.editor.sidebarManager.toggleMenu("file-explorer");
@@ -513,6 +645,13 @@ class KeyBinding {
       return;
     }
 
+    if (this.editor.multiCursorController?.hasMultipleCursors?.()) {
+      this.editor.multiCursorController.removeSecondaryCursors({
+        preservePrimarySelection: true,
+      });
+      return;
+    }
+
     this.editor.selectController.unSelectAll();
   }
 
@@ -548,6 +687,10 @@ class KeyBinding {
   key_delete(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
+
+    if (!m && !a && this.editor.multiCursorController?.hasMultipleCursors?.()) {
+      return this.editor.writerController.deleteForwardAtSelections();
+    }
 
     this.editor.tabManager.activeFile.historyX = undefined;
     const lc = this.editor.lineController;
@@ -593,6 +736,15 @@ class KeyBinding {
   key_backspace(s, c, m, a) {
     if (!this.editor.tabManager.activeFile) return;
     if (this.editor.lineController.lines.length == 0) return;
+
+    if (!m && !a && this.editor.multiCursorController?.hasMultipleCursors?.()) {
+      if (!c && this.editor.smartTypingController?.handleBackspace({
+        ctrlKey: c,
+        metaKey: m,
+        altKey: a,
+      })) return;
+      return this.editor.writerController.deleteBackwardAtSelections({ word: c });
+    }
 
     this.editor.tabManager.activeFile.historyX = undefined;
     const lc = this.editor.lineController;
@@ -673,6 +825,8 @@ class KeyBinding {
   }
 
   key_arrow_up(s, c, m, a) {
+    if (this.editor.multiCursorController?.hasMultipleCursors?.())
+      return this.editor.multiCursorController.moveAll("up", { extend: s });
     if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
       let x = this.editor.cursorController.column;
@@ -724,6 +878,8 @@ class KeyBinding {
   }
 
   key_arrow_down(s, c, m, a) {
+    if (this.editor.multiCursorController?.hasMultipleCursors?.())
+      return this.editor.multiCursorController.moveAll("down", { extend: s });
     if (this.editor.tabManager.activeFile) {
       if (this.editor.lineController.lines.length == 0) return;
       let x = this.editor.cursorController.column;
@@ -778,6 +934,11 @@ class KeyBinding {
   }
 
   key_arrow_left(s, c, m, a) {
+    if (this.editor.multiCursorController?.hasMultipleCursors?.())
+      return this.editor.multiCursorController.moveAll(
+        a ? "left-word" : "left",
+        { extend: s },
+      );
     const lc = this.editor.lineController;
     if (this.editor.tabManager.activeFile) {
       if (lc.lines.length == 0) return;
@@ -828,6 +989,11 @@ class KeyBinding {
   }
 
   key_arrow_right(s, c, m, a) {
+    if (this.editor.multiCursorController?.hasMultipleCursors?.())
+      return this.editor.multiCursorController.moveAll(
+        c || a ? "right-word" : "right",
+        { extend: s },
+      );
     const lc = this.editor.lineController;
     if (this.editor.tabManager.activeFile) {
       if (lc.lines.length == 0) return;
@@ -892,6 +1058,8 @@ class KeyBinding {
   }
 
   key_end(s, c, m, a) {
+    if (this.editor.multiCursorController?.hasMultipleCursors?.())
+      return this.editor.multiCursorController.moveAll("end", { extend: s });
     if (this.editor.lineController.lines.length == 0) return;
     let y = this.editor.cursorController.row;
     const lineNode =

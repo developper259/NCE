@@ -91,6 +91,43 @@ test("workspace snapshots contain relative paths and no Agent scroll position", 
   assert.equal(manager.toWorkspaceRelative("C:\\Work\\A\\src\\a.js", "c:/work/a"), "src/a.js");
 });
 
+test("workspace snapshots persist bounded multi-cursor state independently per file", () => {
+  const { editor, manager } = fixture();
+  const first = new FileNode(editor, 1, "a.js", "/projects/A/src/a.js");
+  const second = new FileNode(editor, 2, "b.js", "/projects/A/src/b.js");
+  first._multiCursorPrimaryId = 7;
+  first._multiSelections = [
+    { id: 7, anchor: { row: 2, column: 3 }, active: { row: 2, column: 3 }, preferredVisualColumn: 3 },
+    { id: 8, anchor: { row: 4, column: 1 }, active: { row: 4, column: 5 }, preferredVisualColumn: 5 },
+  ];
+  second._multiCursorPrimaryId = 12;
+  second._multiSelections = [
+    { id: 12, anchor: { row: 1, column: 0 }, active: { row: 1, column: 0 }, preferredVisualColumn: null },
+    { id: 13, anchor: { row: 3, column: 2 }, active: { row: 3, column: 2 }, preferredVisualColumn: null },
+  ];
+  editor.tabManager.tabs = [first, second];
+  editor.tabManager.activeTab = first;
+
+  const state = manager.getWorkspaceState("/projects/A");
+  const [savedFirst, savedSecond] = state.tabManager.tabs;
+  assert.equal(savedFirst.multiSelections.primaryId, 7);
+  assert.deepEqual(JSON.parse(JSON.stringify(savedFirst.multiSelections.selections)), first._multiSelections);
+  assert.equal(savedSecond.multiSelections.primaryId, 12);
+  assert.notDeepEqual(savedFirst.multiSelections.selections, savedSecond.multiSelections.selections);
+
+  const sanitized = manager.sanitizeWorkspaceState(state);
+  assert.equal(sanitized.tabManager.tabs[0].multiSelections.primaryId, 7);
+  assert.equal(sanitized.tabManager.tabs[1].multiSelections.primaryId, 12);
+  const rejected = manager.sanitizeMultiSelections({
+    primaryId: 1,
+    selections: [
+      { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 0 } },
+      { id: 2, anchor: { row: Number.NaN, column: 0 }, active: { row: 1, column: 0 } },
+    ],
+  });
+  assert.equal(rejected, null);
+});
+
 test("picture tabs serialize minimally and sanitize relative paths and identity", () => {
   const { editor, manager } = fixture();
   const picture = new PictureTab(9, "/projects/A/assets/logo.PNG");

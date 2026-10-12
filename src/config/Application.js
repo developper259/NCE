@@ -130,6 +130,11 @@ const USERCONFIG_KEYBINDING = [
     description: "Select all",
     in_editor: true,
   },
+  { action: "add_cursor_above", description: "Add Cursor Above", in_editor: true },
+  { action: "add_cursor_below", description: "Add Cursor Below", in_editor: true },
+  { action: "add_cursor_next_occurrence", description: "Add Cursor at Next Occurrence", in_editor: true },
+  { action: "select_all_occurrences", description: "Select All Occurrences", in_editor: true },
+  { action: "remove_secondary_cursors", description: "Remove Secondary Cursors", in_editor: true },
   {
     action: "toggle_file_explorer",
     description: "Toggle File Explorer",

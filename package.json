@@ -22,7 +22,8 @@
     "check": "npm run typecheck && npm test",
     "rebuild:native": "electron-rebuild -f -w node-pty && node node_modules/node-pty/scripts/post-install.js",
     "test:electron": "npm run sync-assets && npm run build:main && npm run build:renderer && npm run rebuild:native && node --test tests/electron/smoke.cjs",
-    "test:packaged": "node scripts/check-package.js"
+    "test:packaged": "node scripts/check-package.js",
+    "benchmark:multi-cursor": "node scripts/benchmark-multi-cursor.cjs"
   },
   "author": {
     "name": "Andrea Belvedere",
