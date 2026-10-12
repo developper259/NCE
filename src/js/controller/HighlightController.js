@@ -478,9 +478,11 @@ class HighlightController {
 
   handleChange(change) {
     const file = this.editor.tabManager.activeFile;
-    const update = change?.nshUpdate;
+    const updates = Array.isArray(change?.nshUpdates)
+      ? change.nshUpdates
+      : change?.nshUpdate ? [change.nshUpdate] : [];
     if (!file || file.largeFileMode === true ||
-        this.documentModes.get(file.id) !== "incremental" || !update)
+        this.documentModes.get(file.id) !== "incremental" || updates.length === 0)
       return;
 
     if (!this.canUseIncremental(file)) {
@@ -496,19 +498,25 @@ class HighlightController {
     const revision = this.bumpDocumentRevision(file);
     const epoch = this.documentEpochs.get(file.id);
     this.queueDocumentRequest(file, async () => {
-      const response = await this.nshClient.request("updateDocument", {
-        documentId: this.getDocumentId(file),
-        ...update,
-      });
-      if (
-        this.documentEpochs.get(file.id) !== epoch ||
-        this.documentRevisions.get(file.id) !== revision
-      ) return;
-      this.applyCachedLines(
-        file,
-        response.lines || [],
-        response.changedStartLine || update.startLine,
-      );
+      let lineDelta = 0;
+      for (const update of updates) {
+        const startLine = update.startLine + lineDelta;
+        const response = await this.nshClient.request("updateDocument", {
+          documentId: this.getDocumentId(file),
+          ...update,
+          startLine,
+        });
+        if (
+          this.documentEpochs.get(file.id) !== epoch ||
+          this.documentRevisions.get(file.id) !== revision
+        ) return;
+        this.applyCachedLines(
+          file,
+          response.lines || [],
+          response.changedStartLine || startLine,
+        );
+        lineDelta += update.insertedLines.length - update.deletedLines;
+      }
     }).catch((error) => {
       console.error("[NSH] Document update failed", error);
       return this.recoverDocumentHighlight(file, error);
