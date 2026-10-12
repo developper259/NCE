@@ -120,11 +120,14 @@ class CursorController {
       clientY = Math.max(rect.top, Math.min(clientY, bottom - 1));
     }
     const localX = clientX - rect.left;
-    const localY = clientY - rect.top - this.mY;
-    const scrollOffsetY = this.editor.lineController.getScrollOffsetY();
-    const scrollOffsetXChars = this.editor.lineController.offsetX || 0;
-    const displayIndex = this.yToRow(localY + scrollOffsetY) - 1;
-    const displayRow = this.editor.lineController.getDisplayRow(displayIndex);
+    const lineController = this.editor.lineController;
+    const scrollOffsetY = lineController.getScrollOffsetY();
+    const lineHeight = lineController.getLineHeight() || this.editor.posY;
+    const contentY = clientY - rect.top + scrollOffsetY;
+    const displayIndex = lineHeight > 0
+      ? Math.floor(contentY / lineHeight)
+      : this.yToRow(contentY - this.mY) - 1;
+    const displayRow = lineController.getDisplayRow(displayIndex);
     if (!displayRow) {
       const displayLineCount = this.editor.lineController.getDisplayLineCount();
       const lastDocumentRow = this.editor.lineController.lines.length;
@@ -136,6 +139,7 @@ class CursorController {
     }
     if (displayRow.documentIndex === null) return;
     const targetRow = displayRow.documentIndex + 1;
+    const scrollOffsetXChars = lineController.offsetX || 0;
     const targetViewColumn = this.xToColumn(localX) + scrollOffsetXChars;
     return this.getPosition(targetRow, targetViewColumn);
   }

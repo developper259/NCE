@@ -1,4 +1,12 @@
+@property --nce-caret-blink {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
 .editor {
+  --nce-caret-blink: 1;
+  animation: nce-caret-blink-phase 1.1s steps(2, start) infinite;
   position: absolute;
   bottom: var(--bottombar-height);
   left: var(--sidebar-selector-width);
@@ -117,7 +125,7 @@
   position: absolute;
   z-index: 5;
   pointer-events: none;
-  animation: nce-caret-blink 1.1s steps(2, start) infinite;
+  opacity: var(--nce-caret-blink, 1);
 }
 
 .editor-secondary-caret {
@@ -125,7 +133,7 @@
   width: 2px;
   background-color: var(--accent-caret);
   pointer-events: none;
-  animation: nce-caret-blink 1.1s steps(2, start) infinite;
+  opacity: var(--nce-caret-blink, 1);
 }
 
 .editor-secondary-selection {
@@ -133,8 +141,8 @@
   opacity: 0.82;
 }
 
-@keyframes nce-caret-blink {
-  to { visibility: hidden; }
+@keyframes nce-caret-blink-phase {
+  to { --nce-caret-blink: 0; }
 }
 
 .insert-mode {

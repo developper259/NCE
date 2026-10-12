@@ -705,7 +705,7 @@ class MultiCursorController {
         if (viewColumn < viewportStart || viewColumn > viewportEnd) continue;
         const node = this.getPooledNode(this.caretPool, caretCount++, "editor-secondary-caret", this.caretFastNodes, this.editor.multiCursorCaretOutput);
         const top = cursor.rowToY(position.row) - 4 - lineController.offsetY;
-        const left = cursor.columnToX(viewColumn);
+        const left = cursor.columnToX(viewColumn) + cursor.mpX;
         this.setNodeRect(node, left, top, 2, cursor.mpY);
         continue;
       }
@@ -730,7 +730,7 @@ class MultiCursorController {
         const left = cursor.columnToX(leftColumn + 1);
         const top = cursor.rowToY(row) - 4 - lineController.offsetY;
         const width = Math.max(1, rightColumn - leftColumn) * this.editor.letterSize;
-        this.setNodeRect(node, left, top, width, cursor.mpY);
+        this.setNodeRect(node, left, top, width, cursor.mpY + 4);
       }
     }
     this.hidePool(this.caretPool, caretCount);
