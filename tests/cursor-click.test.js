@@ -27,6 +27,7 @@ function createCursor(text, options = {}) {
     scrollStart * LINE_HEIGHT + scrollOffset;
   lineController.getDisplayLineCount = () =>
     displayRows ? displayRows.length : lineController.lines.length;
+  lineController.getLineHeight = () => LINE_HEIGHT;
   lineController.getDisplayRow = (index) =>
     displayRows
       ? displayRows[index] || null

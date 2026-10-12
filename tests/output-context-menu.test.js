@@ -224,7 +224,7 @@ test("renderer contextmenu routing snapshots the active file context", () => {
   assert.match(source, /document\.addEventListener\("contextmenu", this\.onContextMenu, true\)/);
   assert.match(
     css,
-    /\.editor-caret\s*\{[^}]*pointer-events:\s*none/s,
+    /\.editor-caret\s*,\s*\.editor-secondary-caret\s*\{[^}]*pointer-events:\s*none/s,
   );
   for (const property of ["isFile", "filePath", "rootPath", "selectedText"]) {
     assert.match(source, new RegExp(`${property}:`));

@@ -9,6 +9,7 @@ class CursorController {
     this.mpY = 19; // diff on calcul Y axis
     this.mpX = 10; // diff on calcul X axis
     this.viewPositionCache = null;
+    this.renderedTextIndexCache = new WeakMap();
 
     this.caretFast?.setHeight(this.editor.posY);
     this.caretFast?.setStyle("marginLeft", `${this.mpX}px`);
@@ -60,6 +61,104 @@ class CursorController {
       (viewColumn - 1 - offsetXChars) * this.editor.letterSize +
       1
     );
+  }
+
+  getCaretPosition(row, column) {
+    const lineController = this.editor.lineController;
+    const viewPosition = this.getViewPosition(row, column);
+    const viewColumn = viewPosition.column;
+    let renderedX = null;
+
+    const displayIndex = lineController.getDisplayIndexForCursor(row);
+    const screenIndex = displayIndex - lineController.startIndex;
+    const lineElement = this.editor.output.children?.[screenIndex];
+    const renderMeta = lineElement?.__nceRenderMeta;
+    if (lineElement && renderMeta?.documentIndex === row - 1) {
+      const startVisual = Number.isFinite(renderMeta.startVisual)
+        ? renderMeta.startVisual
+        : lineController.offsetX || 0;
+      const endVisual = Number.isFinite(renderMeta.endVisual)
+        ? renderMeta.endVisual
+        : Number.POSITIVE_INFINITY;
+      const text = lineElement.textContent || "";
+      const visualOffset = Math.trunc(viewColumn - startVisual);
+
+      if (visualOffset >= 0 && viewColumn <= endVisual) {
+        const fontStatus = document.fonts?.status || "";
+        let renderedLine = this.renderedTextIndexCache.get(lineElement);
+        if (
+          !renderedLine || renderedLine.text !== text ||
+          renderedLine.fontStatus !== fontStatus
+        ) {
+          renderedLine = {
+            text,
+            fontStatus,
+            index: typeof TextPositionIndex === "function"
+              ? new TextPositionIndex(text, 1)
+              : null,
+            caretXByTextOffset: new Map(),
+          };
+          this.renderedTextIndexCache.set(lineElement, renderedLine);
+        }
+        const textOffset = renderedLine.index
+          ? renderedLine.index.visualToReal(visualOffset, "nearest")
+          : Math.min(visualOffset, text.length);
+        if (textOffset <= text.length) {
+          const cachedX = renderedLine.caretXByTextOffset.get(textOffset);
+          if (Number.isFinite(cachedX)) {
+            renderedX = this.editor.baseX + cachedX;
+          } else {
+            const walker = document.createTreeWalker(
+              lineElement,
+              typeof NodeFilter === "undefined" ? 4 : NodeFilter.SHOW_TEXT,
+            );
+            let textNode = walker.nextNode();
+            let lastTextNode = null;
+            let remaining = textOffset;
+            while (textNode) {
+              lastTextNode = textNode;
+              const nodeLength = textNode.nodeValue?.length || 0;
+              if (remaining <= nodeLength) break;
+              remaining -= nodeLength;
+              textNode = walker.nextNode();
+            }
+            if (!textNode && lastTextNode) {
+              textNode = lastTextNode;
+              remaining = textNode.nodeValue?.length || 0;
+            }
+            if (textNode) {
+              const range = document.createRange();
+              range.setStart(
+                textNode,
+                Math.min(remaining, textNode.nodeValue?.length || 0),
+              );
+              range.collapse(true);
+              const textRect = range.getBoundingClientRect();
+              const lineRect = lineElement.getBoundingClientRect();
+              if (
+                Number.isFinite(textRect.left) &&
+                Number.isFinite(lineRect.left)
+              ) {
+                const caretX = textRect.left - lineRect.left;
+                renderedLine.caretXByTextOffset.set(textOffset, caretX);
+                renderedX = this.editor.baseX + caretX;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return {
+      left: renderedX === null
+        ? this.columnToX(viewColumn)
+        : renderedX - this.mpX,
+      contentLeft: renderedX === null
+        ? this.columnToX(viewColumn) + this.mpX
+        : renderedX,
+      top: this.rowToY(row) - 4 - lineController.offsetY,
+      viewColumn,
+    };
   }
 
   yToRow(y) {
@@ -257,15 +356,11 @@ class CursorController {
       return;
     }
 
-    const viewPos = this.getViewPosition(this.row, this.column);
-
-    const placeY =
-      this.rowToY(this.row) - 4 - this.editor.lineController.offsetY;
-    const placeX = this.columnToX(viewPos.column);
+    const { left, top } = this.getCaretPosition(this.row, this.column);
 
     this.enable();
-    this.caretFast?.setLeft(placeX);
-    this.caretFast?.setTop(placeY);
+    this.caretFast?.setLeft(left);
+    this.caretFast?.setTop(top);
   }
 
   getViewPosition(row, realColumn) {

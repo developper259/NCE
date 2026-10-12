@@ -696,19 +696,27 @@ class MultiCursorController {
 
     for (const selection of selections) {
       if (selection.id === primaryId) continue;
-      if (!this.isSelected(selection)) {
-        const position = selection.active;
-        const displayIndex = lineController.getDisplayIndexForCursor(position.row);
-        const screenRow = displayIndex - startIndex;
-        if (screenRow < 0 || screenRow >= visibleCount) continue;
-        const viewColumn = cursor.getViewPosition(position.row, position.column).column;
-        if (viewColumn < viewportStart || viewColumn > viewportEnd) continue;
-        const node = this.getPooledNode(this.caretPool, caretCount++, "editor-secondary-caret", this.caretFastNodes, this.editor.multiCursorCaretOutput);
-        const top = cursor.rowToY(position.row) - 4 - lineController.offsetY;
-        const left = cursor.columnToX(viewColumn) + cursor.mpX;
-        this.setNodeRect(node, left, top, 2, cursor.mpY);
-        continue;
+      const position = selection.active;
+      const displayIndex = lineController.getDisplayIndexForCursor(position.row);
+      const screenRow = displayIndex - startIndex;
+      if (screenRow >= 0 && screenRow < visibleCount) {
+        const caretPosition = cursor.getCaretPosition(position.row, position.column);
+        if (
+          caretPosition.viewColumn >= viewportStart &&
+          caretPosition.viewColumn <= viewportEnd
+        ) {
+          const node = this.getPooledNode(this.caretPool, caretCount++, "editor-caret editor-secondary-caret", this.caretFastNodes, this.editor.multiCursorCaretOutput);
+          this.setNodeRect(
+            node,
+            caretPosition.left,
+            caretPosition.top,
+            2,
+            cursor.editor.posY,
+          );
+        }
       }
+      if (!this.isSelected(selection)) continue;
+
       const range = this.getRange(selection);
       const firstDisplay = lineController.getDisplayIndexForCursor(range.start.row);
       const lastDisplay = lineController.getDisplayIndexForCursor(range.end.row);
@@ -727,9 +735,12 @@ class MultiCursorController {
         const rightColumn = Math.min(visualEnd, viewportEnd);
         if (rightColumn < leftColumn || (rightColumn === leftColumn && realStart !== realEnd)) continue;
         const node = this.getPooledNode(this.selectionPool, selectionCount++, "selected editor-secondary-selection", this.selectionFastNodes, this.editor.multiCursorSelectionOutput);
-        const left = cursor.columnToX(leftColumn + 1);
+        const startPosition = cursor.getPosition(row, leftColumn);
+        const endPosition = cursor.getPosition(row, rightColumn);
+        const left = cursor.getCaretPosition(row, startPosition.column).contentLeft;
+        const right = cursor.getCaretPosition(row, endPosition.column).contentLeft;
         const top = cursor.rowToY(row) - 4 - lineController.offsetY;
-        const width = Math.max(1, rightColumn - leftColumn) * this.editor.letterSize;
+        const width = Math.max(1, right - left);
         this.setNodeRect(node, left, top, width, cursor.mpY + 4);
       }
     }
@@ -745,6 +756,9 @@ class MultiCursorController {
       node = document.createElement("div");
       node.className = className;
       node.style.position = "absolute";
+      if (className.split(/\s+/).includes("editor-secondary-caret")) {
+        node.style.marginLeft = `${this.editor.cursorController.mpX}px`;
+      }
       parent.appendChild(node);
       pool.push(node);
     }
