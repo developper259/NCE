@@ -99,6 +99,45 @@ class MultiCursorController {
     ).length > 1;
   }
 
+  getSelectionOverlaySegment(range, displayIndex, viewportStart, viewportEnd) {
+    const lineController = this.editor.lineController;
+    const displayRow = lineController.getDisplayRow(displayIndex);
+    if (!Number.isInteger(displayRow?.documentIndex)) return null;
+
+    const row = displayRow.documentIndex + 1;
+    if (row < range.start.row || row > range.end.row) return null;
+    const file = this.editor.tabManager?.activeFile;
+    const text = file?.lines[row - 1]?.getText?.() || "";
+    const realStart = row === range.start.row ? range.start.column : 0;
+    const realEnd = row === range.end.row ? range.end.column : text.length;
+    const cursor = this.editor.cursorController;
+    const visualStart = cursor.getViewPosition(row, realStart).column;
+    const visualEnd = cursor.getViewPosition(row, realEnd).column;
+    const leftColumn = Math.max(visualStart, viewportStart);
+    const rightColumn = Math.min(
+      Math.max(visualEnd, visualStart + 1),
+      viewportEnd,
+    );
+
+    if (rightColumn <= leftColumn) return null;
+    return { row, leftColumn, rightColumn };
+  }
+
+  setSelectionCornerRadii(node, { topLeft, topRight, bottomLeft, bottomRight }) {
+    const radii = {
+      borderTopLeftRadius: topLeft,
+      borderTopRightRadius: topRight,
+      borderBottomLeftRadius: bottomLeft,
+      borderBottomRightRadius: bottomRight,
+    };
+    const fast = this.selectionFastNodes.get(node);
+    for (const [property, rounded] of Object.entries(radii)) {
+      const value = rounded ? "4px" : "0px";
+      if (fast) fast.setStyle(property, value);
+      else node.style[property] = value;
+    }
+  }
+
   isSelected(selection) {
     return Boolean(selection && compareCursorPositions(selection.anchor, selection.active) !== 0);
   }
@@ -693,6 +732,37 @@ class MultiCursorController {
     let selectionCount = 0;
     const viewportStart = lineController.offsetX || 0;
     const viewportEnd = viewportStart + (lineController.maxCharactersPerLine || Number.MAX_SAFE_INTEGER);
+    const selectionSegments = new Map();
+    const segmentsByDisplayIndex = new Map();
+
+    for (const selection of selections) {
+      if (!this.isSelected(selection)) continue;
+      const range = this.getRange(selection);
+      const firstDisplay = Math.max(
+        startIndex,
+        lineController.getDisplayIndexForCursor(range.start.row),
+      );
+      const lastDisplay = Math.min(
+        endIndex - 1,
+        lineController.getDisplayIndexForCursor(range.end.row),
+      );
+      const segments = [];
+      for (let displayIndex = firstDisplay; displayIndex <= lastDisplay; displayIndex++) {
+        const segment = this.getSelectionOverlaySegment(
+          range,
+          displayIndex,
+          viewportStart,
+          viewportEnd,
+        );
+        if (!segment) continue;
+        segment.displayIndex = displayIndex;
+        segments.push(segment);
+        const rowSegments = segmentsByDisplayIndex.get(displayIndex) || [];
+        rowSegments.push(segment);
+        segmentsByDisplayIndex.set(displayIndex, rowSegments);
+      }
+      selectionSegments.set(selection.id, segments);
+    }
 
     for (const selection of selections) {
       if (selection.id === primaryId) continue;
@@ -717,31 +787,51 @@ class MultiCursorController {
       }
       if (!this.isSelected(selection)) continue;
 
-      const range = this.getRange(selection);
-      const firstDisplay = lineController.getDisplayIndexForCursor(range.start.row);
-      const lastDisplay = lineController.getDisplayIndexForCursor(range.end.row);
-      const first = Math.max(startIndex, firstDisplay);
-      const last = Math.min(endIndex - 1, lastDisplay);
-      for (let displayIndex = first; displayIndex <= last; displayIndex++) {
-        const displayRow = lineController.getDisplayRow(displayIndex);
-        if (!Number.isInteger(displayRow?.documentIndex)) continue;
-        const row = displayRow.documentIndex + 1;
-        const text = file.lines[row - 1]?.getText?.() || "";
-        const realStart = row === range.start.row ? range.start.column : 0;
-        const realEnd = row === range.end.row ? range.end.column : text.length;
-        const visualStart = cursor.getViewPosition(row, realStart).column;
-        const visualEnd = cursor.getViewPosition(row, realEnd).column;
-        const leftColumn = Math.max(visualStart, viewportStart);
-        const rightColumn = Math.min(visualEnd, viewportEnd);
-        if (rightColumn < leftColumn || (rightColumn === leftColumn && realStart !== realEnd)) continue;
+      for (const segment of selectionSegments.get(selection.id) || []) {
+        const { displayIndex, row, leftColumn, rightColumn } = segment;
+        const rowSegments = segmentsByDisplayIndex.get(displayIndex) || [];
+        const previousSegments = segmentsByDisplayIndex.get(displayIndex - 1) || [];
+        const nextSegments = segmentsByDisplayIndex.get(displayIndex + 1) || [];
+        const connectedOnLeft = rowSegments.some((other) =>
+          other !== segment && other.rightColumn === leftColumn,
+        );
+        const connectedOnRight = rowSegments.some((other) =>
+          other !== segment && other.leftColumn === rightColumn,
+        );
+        const topLeftConnected = Boolean(
+          connectedOnLeft || previousSegments.some((previous) =>
+            previous.leftColumn <= leftColumn && previous.rightColumn > leftColumn,
+          ),
+        );
+        const topRightConnected = Boolean(
+          connectedOnRight || previousSegments.some((previous) =>
+            previous.leftColumn < rightColumn && previous.rightColumn >= rightColumn,
+          ),
+        );
+        const bottomLeftConnected = Boolean(
+          connectedOnLeft || nextSegments.some((next) =>
+            next.leftColumn <= leftColumn && next.rightColumn > leftColumn,
+          ),
+        );
+        const bottomRightConnected = Boolean(
+          connectedOnRight || nextSegments.some((next) =>
+            next.leftColumn < rightColumn && next.rightColumn >= rightColumn,
+          ),
+        );
         const node = this.getPooledNode(this.selectionPool, selectionCount++, "selected editor-secondary-selection", this.selectionFastNodes, this.editor.multiCursorSelectionOutput);
         const startPosition = cursor.getPosition(row, leftColumn);
         const endPosition = cursor.getPosition(row, rightColumn);
         const left = cursor.getCaretPosition(row, startPosition.column).contentLeft;
         const right = cursor.getCaretPosition(row, endPosition.column).contentLeft;
         const top = cursor.rowToY(row) - 4 - lineController.offsetY;
-        const width = Math.max(1, right - left);
+        const width = right > left ? right - left : this.editor.letterSize;
         this.setNodeRect(node, left, top, width, cursor.mpY + 4);
+        this.setSelectionCornerRadii(node, {
+          topLeft: !topLeftConnected,
+          topRight: !topRightConnected,
+          bottomLeft: !bottomLeftConnected,
+          bottomRight: !bottomRightConnected,
+        });
       }
     }
     this.hidePool(this.caretPool, caretCount);

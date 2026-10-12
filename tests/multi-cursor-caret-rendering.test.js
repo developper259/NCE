@@ -205,6 +205,93 @@ test("Shift+Arrow keeps the secondary caret visible and aligns its selection", (
   assert.equal(px(selectionOutput.children[0].style.width), 11);
 });
 
+test("multi-line secondary selections round only the exposed corners", () => {
+  const { editor, selectionOutput } = makeMeasuredSetup("abcde\nvwxyz\n12345");
+  setSelections(editor, [
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 0 } },
+    { id: 2, anchor: { row: 1, column: 2 }, active: { row: 3, column: 3 } },
+  ]);
+
+  editor.multiCursorController.refreshOverlays();
+
+  assert.equal(editor.multiCursorController.renderedSelections, 3);
+  const [first, middle, last] = selectionOutput.children;
+  assert.deepEqual(
+    [first.style.borderTopLeftRadius, first.style.borderTopRightRadius,
+      first.style.borderBottomLeftRadius, first.style.borderBottomRightRadius],
+    ["4px", "4px", "0px", "0px"],
+  );
+  assert.deepEqual(
+    [middle.style.borderTopLeftRadius, middle.style.borderTopRightRadius,
+      middle.style.borderBottomLeftRadius, middle.style.borderBottomRightRadius],
+    ["4px", "0px", "0px", "4px"],
+  );
+  assert.deepEqual(
+    [last.style.borderTopLeftRadius, last.style.borderTopRightRadius,
+      last.style.borderBottomLeftRadius, last.style.borderBottomRightRadius],
+    ["0px", "0px", "4px", "4px"],
+  );
+
+  setSelections(editor, [
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 0 } },
+    { id: 2, anchor: { row: 1, column: 1 }, active: { row: 1, column: 3 } },
+  ]);
+  editor.multiCursorController.refreshOverlays();
+
+  assert.deepEqual(
+    [first.style.borderTopLeftRadius, first.style.borderTopRightRadius,
+      first.style.borderBottomLeftRadius, first.style.borderBottomRightRadius],
+    ["4px", "4px", "4px", "4px"],
+  );
+});
+
+test("touching secondary selections have square shared edges", () => {
+  const { editor, selectionOutput } = makeMeasuredSetup();
+  setSelections(editor, [
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 0 } },
+    { id: 2, anchor: { row: 1, column: 1 }, active: { row: 1, column: 3 } },
+    { id: 3, anchor: { row: 1, column: 3 }, active: { row: 1, column: 5 } },
+  ]);
+
+  editor.multiCursorController.refreshOverlays();
+
+  assert.equal(editor.multiCursorController.renderedSelections, 2);
+  const [left, right] = selectionOutput.children;
+  assert.deepEqual(
+    [left.style.borderTopLeftRadius, left.style.borderTopRightRadius,
+      left.style.borderBottomLeftRadius, left.style.borderBottomRightRadius],
+    ["4px", "0px", "4px", "0px"],
+  );
+  assert.deepEqual(
+    [right.style.borderTopLeftRadius, right.style.borderTopRightRadius,
+      right.style.borderBottomLeftRadius, right.style.borderBottomRightRadius],
+    ["0px", "4px", "0px", "4px"],
+  );
+});
+
+test("secondary selections on neighboring rows connect across matching edges", () => {
+  const { editor, selectionOutput } = makeMeasuredSetup("abcde\nvwxyz");
+  setSelections(editor, [
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 0 } },
+    { id: 2, anchor: { row: 1, column: 1 }, active: { row: 1, column: 3 } },
+    { id: 3, anchor: { row: 2, column: 1 }, active: { row: 2, column: 3 } },
+  ]);
+
+  editor.multiCursorController.refreshOverlays();
+
+  const [top, bottom] = selectionOutput.children;
+  assert.deepEqual(
+    [top.style.borderTopLeftRadius, top.style.borderTopRightRadius,
+      top.style.borderBottomLeftRadius, top.style.borderBottomRightRadius],
+    ["4px", "4px", "0px", "0px"],
+  );
+  assert.deepEqual(
+    [bottom.style.borderTopLeftRadius, bottom.style.borderTopRightRadius,
+      bottom.style.borderBottomLeftRadius, bottom.style.borderBottomRightRadius],
+    ["0px", "0px", "4px", "4px"],
+  );
+});
+
 test("secondary caret styling reuses the primary caret rule", () => {
   const stylesheet = fs.readFileSync(path.join(root, "src/css/editor.css"), "utf8");
   assert.match(stylesheet, /\.editor-caret\s*,\s*\.editor-secondary-caret\s*\{/);
