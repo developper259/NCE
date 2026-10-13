@@ -339,7 +339,8 @@ test("AgentSidebar defers runtime setup and uses the current workspace when open
   const editor = {
     api: {
       async loadAgentConversations() { return { status: { available: false } }; },
-      async flushAgentConversations() { flushed++; },
+      async saveAgentConversation() { return false; },
+      async flushAgentConversations() { flushed++; return false; },
     },
     contextMenuManager: { setMenu() {} },
     fileExplorer: { rootPath: null },
@@ -371,6 +372,10 @@ test("AgentSidebar defers runtime setup and uses the current workspace when open
   assert.equal(constructions, 1);
   assert.equal(sidebar.agent, agent);
   assert.equal(contextRoot, "/workspace/after-edits");
+  assert.equal(sidebar.conversationPersistenceAvailable, false);
+  assert.equal(await sidebar.flushAllConversationSaves(), true,
+    "unavailable optional conversation storage does not block application quit");
+  assert.equal(flushed, 0, "unavailable storage is not flushed again during quit");
   assert.equal(agent.provider.id, "provider-custom");
   assert.equal(agent.model, "custom-model");
   assert.equal(editor.tabManager.activeFile.path, "/workspace/after-edits/updated.js");

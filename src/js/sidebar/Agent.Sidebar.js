@@ -75,6 +75,7 @@ class AgentSidebar extends Sidebar {
     this.activeSessionId = null;
     this._sessionCounter = 0;
     this.conversationPersistenceReady = false;
+    this.conversationPersistenceAvailable = false;
     this.conversationSaveTimers = new Map();
     this.conversationSaveQueues = new Map();
     this.conversationPersistencePromise = Promise.resolve();
@@ -321,6 +322,7 @@ class AgentSidebar extends Sidebar {
   async initializeConversationPersistence() {
     try {
       const loaded = await this.editor.api?.loadAgentConversations?.();
+      this.conversationPersistenceAvailable = loaded?.status?.available === true;
       if (loaded?.status?.available && Array.isArray(loaded.sessions) && loaded.sessions.length) {
         const restored = loaded.sessions
           .map((snapshot) => this.rehydratePersistedSession(snapshot))
@@ -337,6 +339,7 @@ class AgentSidebar extends Sidebar {
         }
       }
     } catch (_error) {
+      this.conversationPersistenceAvailable = false;
       console.warn("[NCE Agent Conversations] Restore failed", { code: "STORE_ERROR" });
     } finally {
       this.conversationPersistenceReady = true;
@@ -474,6 +477,7 @@ class AgentSidebar extends Sidebar {
     if (!this._agentInitialized) return true;
     try { await this.conversationPersistencePromise; }
     catch { return false; }
+    if (!this.conversationPersistenceAvailable) return true;
     for (const timer of this.conversationSaveTimers.values()) clearTimeout(timer);
     const ids = [...this.conversationSaveTimers.keys()];
     this.conversationSaveTimers.clear();
