@@ -10,6 +10,16 @@ class CursorController {
     this.mpX = 10; // diff on calcul X axis
     this.viewPositionCache = null;
     this.renderedTextIndexCache = new WeakMap();
+    this.geometryRefreshFrame = null;
+    this.onCaretGeometryChange = () => this.invalidateCaretGeometry();
+    this.fontSet = typeof document !== "undefined" ? document.fonts : null;
+    this.viewport = typeof window !== "undefined" ? window : null;
+    this.visualViewport = this.viewport?.visualViewport || null;
+    this.fontSet?.addEventListener?.("loading", this.onCaretGeometryChange);
+    this.fontSet?.addEventListener?.("loadingdone", this.onCaretGeometryChange);
+    this.fontSet?.addEventListener?.("loadingerror", this.onCaretGeometryChange);
+    this.viewport?.addEventListener?.("resize", this.onCaretGeometryChange);
+    this.visualViewport?.addEventListener?.("resize", this.onCaretGeometryChange);
 
     this.caretFast?.setHeight(this.editor.posY);
     this.caretFast?.setStyle("marginLeft", `${this.mpX}px`);
@@ -45,6 +55,34 @@ class CursorController {
     if (this.editor.cD) {
       this.caretFast?.setDisplay("none");
     }
+  }
+
+  invalidateCaretGeometry() {
+    this.renderedTextIndexCache = new WeakMap();
+    if (this.geometryRefreshFrame !== null ||
+        !this.editor?.tabManager?.activeFile ||
+        typeof requestAnimationFrame !== "function") return;
+    this.geometryRefreshFrame = requestAnimationFrame(() => {
+      this.geometryRefreshFrame = null;
+      if (!this.editor?.tabManager?.activeFile || this.editor.isOnInit) return;
+      this.updateCaretPosition();
+      const multi = this.editor.multiCursorController;
+      if ((this.editor.tabManager.activeFile._multiSelections?.length || 0) > 1 ||
+          multi?.renderedCarets > 0 || multi?.renderedSelections > 0)
+        multi?.refreshOverlays?.();
+    });
+  }
+
+  destroy() {
+    if (this.geometryRefreshFrame !== null &&
+        typeof cancelAnimationFrame === "function")
+      cancelAnimationFrame(this.geometryRefreshFrame);
+    this.geometryRefreshFrame = null;
+    this.fontSet?.removeEventListener?.("loading", this.onCaretGeometryChange);
+    this.fontSet?.removeEventListener?.("loadingdone", this.onCaretGeometryChange);
+    this.fontSet?.removeEventListener?.("loadingerror", this.onCaretGeometryChange);
+    this.viewport?.removeEventListener?.("resize", this.onCaretGeometryChange);
+    this.visualViewport?.removeEventListener?.("resize", this.onCaretGeometryChange);
   }
 
   rowToY(row) {
@@ -84,15 +122,10 @@ class CursorController {
       const visualOffset = Math.trunc(viewColumn - startVisual);
 
       if (visualOffset >= 0 && viewColumn <= endVisual) {
-        const fontStatus = document.fonts?.status || "";
         let renderedLine = this.renderedTextIndexCache.get(lineElement);
-        if (
-          !renderedLine || renderedLine.text !== text ||
-          renderedLine.fontStatus !== fontStatus
-        ) {
+        if (!renderedLine || renderedLine.text !== text) {
           renderedLine = {
             text,
-            fontStatus,
             index: typeof TextPositionIndex === "function"
               ? new TextPositionIndex(text, 1)
               : null,
@@ -302,8 +335,11 @@ class CursorController {
     if (!this.editor.isOnInit && options.ensureVisible !== false)
       this.ensureCursorVisible();
     this.updateCaretPosition();
-    if (options.renderMultiCursor !== false)
-      this.editor.multiCursorController?.refreshOverlays?.();
+    const multi = this.editor.multiCursorController;
+    if (options.renderMultiCursor !== false && multi && (
+      (this.editor.tabManager.activeFile?._multiSelections?.length || 0) > 1 ||
+      multi.renderedCarets > 0 || multi.renderedSelections > 0
+    )) multi.refreshOverlays?.();
   }
 
   ensureCursorVisible() {

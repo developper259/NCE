@@ -46,7 +46,7 @@ async function run() {
       cpu: os.cpus()[0]?.model || "unknown",
       cpuCount: os.cpus().length,
       totalMemoryBytes: os.totalmem(),
-      methodology: "one warmup plus fifteen timed writes per cursor count; fifteen single-cursor typing, Backspace, Enter, and Undo samples; thirty scroll samples measured through the next animation frame; selection setup is flushed through one animation frame before timing, and recovery undo is outside typing measurements",
+      methodology: "one warmup plus fifteen timed writes per cursor count; fifteen single-cursor typing, Backspace, Enter, and Undo samples; fifteen mono-cursor movement samples of 250 setCursorPosition calls each plus an instrumented 100-call normalization/overlay count; thirty scroll samples measured through the next animation frame; selection setup is flushed through one animation frame before timing, and recovery undo is outside typing measurements",
     }, null, 2)}\n`);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

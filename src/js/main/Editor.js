@@ -374,6 +374,7 @@ class Editor {
   }
 
   destroy() {
+    this.cursorController?.destroy?.();
     this.quickPanel?.destroy?.();
     this.fileExplorer?.destroy?.();
     this.searchSidebar?.destroy?.();

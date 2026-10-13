@@ -232,6 +232,71 @@ app.whenReady().then(() => {
               p95Ms: Number(percentile(latenciesMs, 0.95).toFixed(3)),
             });
           }
+          const monoCursorMovement = (() => {
+            const multi = editor.multiCursorController;
+            const movementSamples = 15;
+            const movementWarmups = 1;
+            const movementsPerSample = 250;
+            const movementLatenciesMs = [];
+            let movementColumn = column;
+            const moveMonoCursor = () => {
+              movementColumn = movementColumn === column ? column + 1 : column;
+              editor.cursorController.setCursorPosition(row, movementColumn, {
+                emitEvent: false,
+                ensureVisible: false,
+              });
+            };
+            if (supportsMultiCursor) {
+              multi.setSelections([{
+                id: 1,
+                anchor: { row, column },
+                active: { row, column },
+                preferredVisualColumn: column,
+              }], { file, primaryId: 1, render: false });
+            }
+            editor.cursorController.setCursorPosition(row, column, {
+              emitEvent: false,
+              ensureVisible: false,
+            });
+            for (let iteration = 0; iteration < movementWarmups + movementSamples; iteration++) {
+              const started = performance.now();
+              for (let move = 0; move < movementsPerSample; move++) moveMonoCursor();
+              const perMovementMs = (performance.now() - started) / movementsPerSample;
+              if (iteration >= movementWarmups) movementLatenciesMs.push(perMovementMs);
+            }
+
+            let normalizeSelectionsCalls = null;
+            let overlayRefreshCalls = null;
+            if (supportsMultiCursor) {
+              normalizeSelectionsCalls = 0;
+              overlayRefreshCalls = 0;
+              const normalizeSelections = multi.normalizeSelections;
+              const refreshOverlays = multi.refreshOverlays;
+              multi.normalizeSelections = function (...args) {
+                normalizeSelectionsCalls++;
+                return normalizeSelections.apply(this, args);
+              };
+              multi.refreshOverlays = function (...args) {
+                overlayRefreshCalls++;
+                return refreshOverlays.apply(this, args);
+              };
+              try {
+                for (let move = 0; move < 100; move++) moveMonoCursor();
+              } finally {
+                multi.normalizeSelections = normalizeSelections;
+                multi.refreshOverlays = refreshOverlays;
+              }
+            }
+            return {
+              samples: movementSamples,
+              movementsPerSample,
+              medianMsPerMovement: Number(percentile(movementLatenciesMs, 0.5).toFixed(4)),
+              p95MsPerMovement: Number(percentile(movementLatenciesMs, 0.95).toFixed(4)),
+              profileMovements: supportsMultiCursor ? 100 : null,
+              normalizeSelectionsCalls,
+              overlayRefreshCalls,
+            };
+          })();
           const scrollLatenciesMs = [];
           for (let index = 0; index < 30; index++) {
             const target = index % 2 === 0 ? lineCount - 1 - index : index;
@@ -251,6 +316,7 @@ app.whenReady().then(() => {
             samples,
             operationSamples,
             singleCursorOperations,
+            monoCursorMovement,
             rendererHeapBeforeBytes,
             rendererHeapAfterBytes,
             scrollToP95Ms: Number(percentile(scrollLatenciesMs, 0.95).toFixed(3)),

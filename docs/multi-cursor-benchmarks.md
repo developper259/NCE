@@ -2,8 +2,10 @@
 
 Measurements collected 2026-10-12 on macOS x64, Intel Core i5-5350U at
 1.80 GHz, 4 reported CPU cores, Electron 42.11.2 / Chromium 148.0.7778.280.
-The Electron runs used the pre-multi-cursor base `8cdf86aa9ff466ed2da986e4ba2381c76e8410ba`
-and the audited working tree, in two runs each and in opposite order. Each run
+The historical Electron comparison used the pre-multi-cursor base
+`8cdf86aa9ff466ed2da986e4ba2381c76e8410ba` and the pre-stabilization audited
+tree at `ae9f9b04b652976bda4f06cab49a0fa57786c3fa`, in two runs each and in
+opposite order. Each run
 used 15 samples per operation, a 2,000-line document and one warmup. Cursor
 selection setup was flushed through an animation frame before timing; typing
 recovery undo was outside its timed interval. Scroll latency includes the next
@@ -69,3 +71,39 @@ The Electron runner accepts a built application root as an optional argument,
 which allows a detached baseline worktree to be measured with the same driver.
 The raw JSON outputs are written to stdout; each report includes runtime,
 platform, CPU, sample counts and methodology.
+
+## Final stabilization profile
+
+On 2026-10-12, the same Electron driver measured the base, pre-stabilization
+commit `ae9f9b04b652976bda4f06cab49a0fa57786c3fa`, and final working tree in
+two runs each. It also measured 15 samples of 250 real `setCursorPosition`
+calls and instrumented 100 calls to count multi-cursor normalization and
+overlay refreshes. The movement loop ran inside the renderer without waiting
+for a frame after every call; the separate typing and scroll benchmarks retain
+their frame-flushed methodology.
+
+| App | Mono movement median per call | `normalizeSelections` calls / 100 moves | Overlay refresh calls / 100 moves |
+| --- | ---: | ---: | ---: |
+| Pre-multi-cursor base | 0.0756–0.0776 ms | N/A | N/A |
+| Pre-stabilization branch | 0.1384–0.1420 ms | 100 | 100 |
+| Final stabilization | 0.1240–0.1276 ms | 0 | 0 |
+
+The mono movement median improved by about 10% against the pre-stabilization
+branch in both paired runs. The final renderer still measures about 0.05 ms
+more per movement than the base, which has no multi-cursor controller. This
+removes repeated work but does not eliminate the controller's remaining
+single-cursor cost.
+
+Full typing timings are noisier and do not show a consistent improvement for
+single-cursor operations. Across two runs, median single-cursor typing was
+1.4–1.6 ms on base, 2.3–2.5 ms pre-stabilization, and 2.3 ms after the pass.
+At 500 cursors, median typing was 6.3–6.5 ms before and 5.6–6.1 ms after; at
+1,000 cursors it was 9.0–9.2 ms before and 7.9–9.1 ms after. These ranges
+overlap at the high end, so they are observations rather than a CI guarantee.
+
+The transaction-core benchmark on a 100,000-line fixture measured one-cursor
+typing at 0.108 ms before and 0.113 ms after. At 1,000 cursors the medians were
+59.575 ms and 34.587 ms. Each result used five samples; p95 and heap deltas were
+variable, so the 1,000-cursor median is a signal to reproduce rather than a
+claim of a guaranteed gain. These core measurements omit DOM rendering and do
+not isolate the mono-cursor changes.

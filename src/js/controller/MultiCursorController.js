@@ -73,6 +73,9 @@ class MultiCursorController {
       if (file === this.editor.tabManager?.activeFile) this.syncLegacyPrimary(file);
     }
     const primaryId = file._multiCursorPrimaryId;
+    if (file._multiSelectionsNormalized === true &&
+        file._multiSelections.length === 1 &&
+        file._multiSelections[0]?.id === primaryId) return file._multiSelections;
     if (!file._multiSelections.some((item) => item?.id === primaryId))
       file._multiCursorPrimaryId = file._multiSelections[0]?.id;
     return file._multiSelections;
@@ -301,14 +304,20 @@ class MultiCursorController {
     const file = this.editor.tabManager?.activeFile;
     if (!file) return;
     const existing = this.getPrimarySelection(file);
-    const active = this.normalizePosition(file, { row, column });
-    if (!existing || !active) return;
+    if (!existing) return;
+    const active = { row, column };
     const legacyAnchor = file._selectionRange || file._selectedLines?.size
-      ? file.startSelect || existing.anchor
+      ? file.startSelect || existing.anchor || active
       : active;
-    existing.anchor = { ...legacyAnchor };
-    existing.active = { ...active };
+    if (!existing.anchor) existing.anchor = {};
+    if (!existing.active) existing.active = {};
+    existing.anchor.row = legacyAnchor.row;
+    existing.anchor.column = legacyAnchor.column;
+    existing.active.row = active.row;
+    existing.active.column = active.column;
     existing.preferredVisualColumn = null;
+    if (file._multiSelectionsNormalized === true && file._multiSelections.length === 1)
+      return;
     const normalized = this.normalizeSelections(file, file._multiSelections, existing.id);
     file._multiSelections = normalized.selections;
     file._multiCursorPrimaryId = normalized.primaryId;

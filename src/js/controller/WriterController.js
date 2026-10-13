@@ -542,7 +542,9 @@ class WriterController {
       end.row - 1,
     );
     const newEndings = options.lineEndings === undefined
-      ? Array(replacement.length - 1).fill(file.eol || "\n")
+      ? beforeText === normalizedText
+        ? [...oldEndings]
+        : Array(replacement.length - 1).fill(file.eol || "\n")
       : options.lineEndings;
     if (!Array.isArray(newEndings) ||
         newEndings.length !== replacement.length - 1 ||
@@ -551,8 +553,34 @@ class WriterController {
         )) return null;
     if (beforeText === normalizedText &&
         oldEndings.length === newEndings.length &&
-        oldEndings.every((ending, index) => ending === newEndings[index]))
+        oldEndings.every((ending, index) => ending === newEndings[index])) {
+      const cursorAfter = options.cursor || this.advancePosition(start, text);
+      const multi = this.editor.multiCursorController;
+      const primary = multi?.getPrimarySelection?.(file);
+      if (primary && multi.isSelected?.(primary)) {
+        const result = {
+          ...primary,
+          anchor: { ...cursorAfter },
+          active: { ...cursorAfter },
+          preferredVisualColumn: null,
+        };
+        return this.applySelectionOnly([result], primary.id, file, {
+          ensureVisible: true,
+        });
+      }
+
+      if (selectionBefore) {
+        this.editor.selectController?.unSelectAll?.({ emitEvent: false });
+        this.editor.cursorController.setCursorPosition(
+          cursorAfter.row,
+          cursorAfter.column,
+          { emitEvent: false, syncMultiCursor: false, renderMultiCursor: false },
+        );
+        this.editor.selectController?.refreshSelectionDOM?.();
+        return { row: cursorAfter.row, column: cursorAfter.column };
+      }
       return null;
+    }
 
     const cursorAfter = options.cursor || this.advancePosition(start, text);
     const entry = {
@@ -646,6 +674,45 @@ class WriterController {
     return { row: cursorAfter.row, column: cursorAfter.column };
   }
 
+  applySelectionOnly(selections, primaryId, file, { ensureVisible = true } = {}) {
+    const multi = this.editor.multiCursorController;
+    const current = multi?.getSelections?.(file) || [];
+    const samePosition = (left, right) =>
+      left?.row === right?.row && left?.column === right?.column;
+    const sameSelection = (left, right) => left?.id === right?.id &&
+      samePosition(left.anchor, right.anchor) &&
+      samePosition(left.active, right.active) &&
+      left.preferredVisualColumn === right.preferredVisualColumn;
+    const unchanged = file?._multiCursorPrimaryId === primaryId &&
+      current.length === selections.length &&
+      current.every((selection, index) => sameSelection(selection, selections[index]));
+    if (unchanged) return null;
+
+    if (multi?.setSelections) {
+      if (!multi.setSelections(selections, {
+        file,
+        primaryId,
+        render: false,
+        emitEvent: true,
+      })) return null;
+    }
+    const primary = multi?.getPrimarySelection?.(file);
+    if (!primary) return null;
+    this.editor.cursorController.setCursorPosition(
+      primary.active.row,
+      primary.active.column,
+      {
+        emitEvent: false,
+        ensureVisible,
+        syncMultiCursor: false,
+        renderMultiCursor: false,
+      },
+    );
+    this.editor.selectController?.refreshSelectionDOM?.();
+    multi.refreshOverlays?.();
+    return { row: primary.active.row, column: primary.active.column };
+  }
+
   applyBatchEdits(edits, options = {}) {
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
@@ -707,7 +774,9 @@ class WriterController {
           return null;
         newLineEndings = [...newLineEndings];
       } else {
-        newLineEndings = Array(insertedCount).fill(file.eol || "\n");
+        newLineEndings = beforeText === text
+          ? [...oldLineEndings]
+          : Array(insertedCount).fill(file.eol || "\n");
       }
       normalized.push({
         id: candidate.id ?? cursorId,
@@ -740,7 +809,6 @@ class WriterController {
     const effectiveEdits = new Set(effective);
     // Empty boundary operations remain part of the selection snapshot but are
     // not document edits and must not collide with a neighboring deletion.
-    if (effective.length === 0) return null;
     for (let index = 1; index < effective.length; index++) {
       const previous = effective[index - 1];
       const current = effective[index];
@@ -834,6 +902,10 @@ class WriterController {
       : results[0].id;
     const primaryResult = results.find((selection) => selection.id === primaryIdAfter) ||
       results[0];
+    if (effective.length === 0)
+      return this.applySelectionOnly(results, primaryIdAfter, file, {
+        ensureVisible: options.ensureVisible === true,
+      });
     const historyEdits = effective.map((edit) => ({
       id: edit.id,
       cursorId: edit.cursorId,

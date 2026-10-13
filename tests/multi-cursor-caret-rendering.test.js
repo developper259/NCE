@@ -33,9 +33,33 @@ function makeRenderedLine(text, baseX, documentIndex = 0) {
   };
 }
 
-function makeCursorDocument() {
+function makeEventTarget() {
+  const listeners = new Map();
   return {
-    fonts: { status: "loaded" },
+    addEventListener(type, listener) {
+      const values = listeners.get(type) || new Set();
+      values.add(listener);
+      listeners.set(type, values);
+    },
+    removeEventListener(type, listener) {
+      listeners.get(type)?.delete(listener);
+    },
+    dispatch(type) {
+      for (const listener of listeners.get(type) || []) listener();
+    },
+    listenerCount(type) {
+      return listeners.get(type)?.size || 0;
+    },
+  };
+}
+
+function makeCursorDocument() {
+  const fonts = makeEventTarget();
+  fonts.status = "loaded";
+  const metrics = { scale: 1, measurements: 0 };
+  return {
+    fonts,
+    metrics,
     createTreeWalker(element) {
       let visited = false;
       return {
@@ -54,7 +78,8 @@ function makeCursorDocument() {
         collapse() {},
         getBoundingClientRect() {
           assert.ok(textNode.nodeValue.length >= offset);
-          return { left: 50 + glyphOffsets[offset] };
+          metrics.measurements++;
+          return { left: 50 + glyphOffsets[offset] * metrics.scale };
         },
       };
     },
@@ -93,6 +118,11 @@ function makeMeasuredSetup(text = "abcde") {
     setFocusLine: () => {},
   });
 
+  const cursorDocument = makeCursorDocument();
+  const viewport = makeEventTarget();
+  viewport.visualViewport = makeEventTarget();
+  const animationFrames = new Map();
+  let nextAnimationFrame = 1;
   const Cursor = loadGlobal(
     "src/js/controller/CursorController.js",
     "CursorController",
@@ -100,7 +130,17 @@ function makeMeasuredSetup(text = "abcde") {
       NodeFilter: { SHOW_TEXT: 4 },
       TextPositionIndex,
       SETTINGS_GET: () => 4,
-      document: makeCursorDocument(),
+      document: cursorDocument,
+      window: viewport,
+      requestAnimationFrame(callback) {
+        const id = nextAnimationFrame++;
+        animationFrames.set(id, callback);
+        return id;
+      },
+      cancelAnimationFrame(id) {
+        animationFrames.delete(id);
+      },
+      Events: { CURSOR_CHANGE: "cursor-change" },
       roundX: Math.round,
       roundY: Math.round,
       realColumnToViewColumn: (_value, column) => column,
@@ -126,7 +166,20 @@ function makeMeasuredSetup(text = "abcde") {
   );
   editor.multiCursorController = new MultiCursor(editor);
   editor.selectController.refreshSelectionDOM = () => {};
-  return { editor, file, caretOutput, selectionOutput };
+  return {
+    editor,
+    file,
+    caretOutput,
+    selectionOutput,
+    cursorDocument,
+    viewport,
+    flushAnimationFrames() {
+      const callbacks = [...animationFrames.values()];
+      animationFrames.clear();
+      for (const callback of callbacks) callback();
+    },
+    pendingAnimationFrames: animationFrames,
+  };
 }
 
 function setSelections(editor, selections) {
@@ -186,6 +239,72 @@ test("primary and secondary carets share measured text boundaries and dimensions
   assert.equal(px(secondary.style.height), editor.posY);
   assert.ok(secondary.className.split(/\s+/).includes("editor-caret"));
   assert.ok(secondary.className.split(/\s+/).includes("editor-secondary-caret"));
+});
+
+test("caret geometry cache invalidates on font and viewport metric changes", () => {
+  const { editor, cursorDocument, viewport, flushAnimationFrames,
+    pendingAnimationFrames } = makeMeasuredSetup();
+  const cursor = editor.cursorController;
+
+  assert.equal(cursor.getCaretPosition(1, 2).contentLeft, 69);
+  assert.equal(cursorDocument.metrics.measurements, 1);
+  cursor.getCaretPosition(1, 2);
+  assert.equal(cursorDocument.metrics.measurements, 1);
+
+  cursorDocument.metrics.scale = 2;
+  cursorDocument.fonts.dispatch("loadingdone");
+  assert.equal(cursor.getCaretPosition(1, 2).contentLeft, 88);
+  assert.equal(cursorDocument.metrics.measurements, 2);
+
+  cursorDocument.metrics.scale = 3;
+  viewport.visualViewport.dispatch("resize");
+  assert.equal(cursor.getCaretPosition(1, 2).contentLeft, 107);
+  assert.equal(cursorDocument.metrics.measurements, 3);
+
+  cursorDocument.metrics.scale = 4;
+  viewport.dispatch("resize");
+  assert.equal(cursor.getCaretPosition(1, 2).contentLeft, 126);
+  assert.equal(cursorDocument.metrics.measurements, 4);
+  assert.equal(pendingAnimationFrames.size, 1);
+  flushAnimationFrames();
+  assert.equal(editor.cD.style.display, "block");
+
+  cursor.invalidateCaretGeometry();
+  assert.equal(pendingAnimationFrames.size, 1);
+  cursor.destroy();
+  assert.equal(pendingAnimationFrames.size, 0);
+  assert.equal(cursorDocument.fonts.listenerCount("loading"), 0);
+  assert.equal(cursorDocument.fonts.listenerCount("loadingdone"), 0);
+  assert.equal(cursorDocument.fonts.listenerCount("loadingerror"), 0);
+  assert.equal(viewport.listenerCount("resize"), 0);
+  assert.equal(viewport.visualViewport.listenerCount("resize"), 0);
+});
+
+test("mono cursor movement skips multi-selection normalization and overlay refresh", () => {
+  const { editor } = makeMeasuredSetup();
+  const multi = editor.multiCursorController;
+  let normalizations = 0;
+  let overlayRefreshes = 0;
+  const normalizeSelections = multi.normalizeSelections.bind(multi);
+  multi.normalizeSelections = (...args) => {
+    normalizations++;
+    return normalizeSelections(...args);
+  };
+  multi.refreshOverlays = () => overlayRefreshes++;
+
+  editor.cursorController.setCursorPosition(1, 2);
+
+  assert.equal(normalizations, 0);
+  assert.equal(overlayRefreshes, 0);
+
+  setSelections(editor, [
+    { id: 1, anchor: { row: 1, column: 2 }, active: { row: 1, column: 2 } },
+    { id: 2, anchor: { row: 1, column: 4 }, active: { row: 1, column: 4 } },
+  ]);
+  normalizations = 0;
+  editor.cursorController.setCursorPosition(1, 3);
+  assert.equal(normalizations, 1);
+  assert.equal(overlayRefreshes, 1);
 });
 
 test("Shift+Arrow keeps the secondary caret visible and aligns its selection", () => {

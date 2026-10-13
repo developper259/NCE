@@ -548,6 +548,177 @@ test("all boundary deletions leave text, versions, history and events untouched"
   );
 });
 
+test("replacing a single selection with identical text collapses it without a document event", () => {
+  const { editor, file } = setup("user name");
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 4 } },
+  ], { primaryId: 1, render: false });
+  const beforeEvents = editor.events.calls.filter(({ name }) => name === "change").length;
+
+  assert.deepEqual(plain(editor.writerController.write("user")), { row: 1, column: 4 });
+
+  assert.equal(content(file), "user name");
+  assert.equal(file.editVersion, 0);
+  assert.equal(editor.historyController.getState(file).entries.length, 0);
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [{ anchor: { row: 1, column: 4 }, active: { row: 1, column: 4 } }],
+  );
+  assert.equal(editor.events.calls.filter(({ name }) => name === "change").length, beforeEvents);
+});
+
+test("identical replacements collapse multiple selections without a document edit", () => {
+  const { editor, file } = setup("red red");
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 3 } },
+    { id: 2, anchor: { row: 1, column: 4 }, active: { row: 1, column: 7 } },
+  ], { primaryId: 1, render: false });
+  let refreshes = 0;
+  editor.lineController.refresh = () => refreshes++;
+  const changeEvents = editor.events.calls.filter(({ name }) => name === "change").length;
+
+  assert.deepEqual(plain(editor.writerController.write("red")), { row: 1, column: 3 });
+
+  assert.equal(content(file), "red red");
+  assert.equal(file.editVersion, 0);
+  assert.equal(editor.historyController.getState(file).entries.length, 0);
+  assert.equal(refreshes, 0);
+  assert.equal(editor.events.calls.filter(({ name }) => name === "change").length, changeEvents);
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [
+      { anchor: { row: 1, column: 3 }, active: { row: 1, column: 3 } },
+      { anchor: { row: 1, column: 7 }, active: { row: 1, column: 7 } },
+    ],
+  );
+});
+
+test("identical and effective replacements keep every caret and undo as one transaction", async () => {
+  const { editor, file } = setup("same other");
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 4 } },
+    { id: 2, anchor: { row: 1, column: 5 }, active: { row: 1, column: 10 } },
+  ], { primaryId: 1, render: false });
+
+  assert.deepEqual(plain(editor.writerController.write("same")), { row: 1, column: 4 });
+  assert.equal(content(file), "same same");
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [
+      { anchor: { row: 1, column: 4 }, active: { row: 1, column: 4 } },
+      { anchor: { row: 1, column: 9 }, active: { row: 1, column: 9 } },
+    ],
+  );
+  assert.equal(file.editVersion, 1);
+  assert.equal(editor.historyController.getState(file).entries.length, 1);
+
+  assert.equal(await editor.historyController.undo(), true);
+  assert.equal(content(file), "same other");
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [
+      { anchor: { row: 1, column: 0 }, active: { row: 1, column: 4 } },
+      { anchor: { row: 1, column: 5 }, active: { row: 1, column: 10 } },
+    ],
+  );
+  assert.equal(await editor.historyController.redo(), true);
+  assert.equal(content(file), "same same");
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ active }) => active)),
+    [{ row: 1, column: 4 }, { row: 1, column: 9 }],
+  );
+});
+
+test("adjacent reversed and forward replacements keep caret positions and selection direction", async () => {
+  const { editor, file } = setup("abcdef");
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 3 }, active: { row: 1, column: 0 } },
+    { id: 2, anchor: { row: 1, column: 3 }, active: { row: 1, column: 6 } },
+  ], { primaryId: 1, render: false });
+
+  assert.deepEqual(plain(editor.writerController.write("abc")), { row: 1, column: 3 });
+  assert.equal(content(file), "abcabc");
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [
+      { anchor: { row: 1, column: 3 }, active: { row: 1, column: 3 } },
+      { anchor: { row: 1, column: 6 }, active: { row: 1, column: 6 } },
+    ],
+  );
+  assert.equal(await editor.historyController.undo(), true);
+  assert.equal(content(file), "abcdef");
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [
+      { anchor: { row: 1, column: 3 }, active: { row: 1, column: 0 } },
+      { anchor: { row: 1, column: 3 }, active: { row: 1, column: 6 } },
+    ],
+  );
+});
+
+test("identical Unicode replacement collapses a grapheme selection", () => {
+  const { editor, file } = setup("🙂");
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 1, column: 2 } },
+  ], { primaryId: 1, render: false });
+  const changeEvents = editor.events.calls.filter(({ name }) => name === "change").length;
+
+  assert.deepEqual(plain(editor.writerController.write("🙂")), { row: 1, column: 2 });
+
+  assert.equal(content(file), "🙂");
+  assert.equal(file.editVersion, 0);
+  assert.equal(editor.historyController.getState(file).entries.length, 0);
+  assert.equal(editor.events.calls.filter(({ name }) => name === "change").length, changeEvents);
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [{ anchor: { row: 1, column: 2 }, active: { row: 1, column: 2 } }],
+  );
+});
+
+test("identical multiline replacement preserves CRLF without document history", () => {
+  const { editor, file } = setup("foo\nbar");
+  file.eol = "\n";
+  file.lineEndings = ["\r\n"];
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 2, column: 3 } },
+  ], { primaryId: 1, render: false });
+  const changeEvents = editor.events.calls.filter(({ name }) => name === "change").length;
+
+  assert.deepEqual(plain(editor.writerController.write("foo\nbar")), { row: 2, column: 3 });
+
+  assert.equal(content(file), "foo\nbar");
+  assert.deepEqual(file.lineEndings, ["\r\n"]);
+  assert.equal(file.editVersion, 0);
+  assert.equal(editor.historyController.getState(file).entries.length, 0);
+  assert.equal(editor.events.calls.filter(({ name }) => name === "change").length, changeEvents);
+  assert.deepEqual(
+    plain(editor.multiCursorController.getSelections().map(({ anchor, active }) => ({ anchor, active }))),
+    [{ anchor: { row: 2, column: 3 }, active: { row: 2, column: 3 } }],
+  );
+});
+
+test("mixed multiline identity and changed edits preserve the original CRLF separator", async () => {
+  const { editor, file } = setup("foo\nbar\nkeep");
+  file.eol = "\n";
+  file.lineEndings = ["\r\n", "\r\n"];
+  editor.multiCursorController.setSelections([
+    { id: 1, anchor: { row: 1, column: 0 }, active: { row: 2, column: 3 } },
+    { id: 2, anchor: { row: 3, column: 0 }, active: { row: 3, column: 4 } },
+  ], { primaryId: 1, render: false });
+
+  assert.deepEqual(plain(editor.writerController.write("foo\nbar")), { row: 2, column: 3 });
+
+  assert.equal(content(file), "foo\nbar\nfoo\nbar");
+  assert.deepEqual(file.lineEndings, ["\r\n", "\r\n", "\n"]);
+  assert.equal(file.editVersion, 1);
+  assert.equal(editor.historyController.getState(file).entries.length, 1);
+  assert.equal(await editor.historyController.undo(), true);
+  assert.equal(content(file), "foo\nbar\nkeep");
+  assert.deepEqual(file.lineEndings, ["\r\n", "\r\n"]);
+  assert.equal(await editor.historyController.redo(), true);
+  assert.deepEqual(file.lineEndings, ["\r\n", "\r\n", "\n"]);
+});
+
 test("effective edits that really overlap still reject without changing the document", () => {
   const { editor, file } = setup("ab");
 
