@@ -2804,7 +2804,7 @@ app.whenReady().then(() => {
       } else {
         void nce.requestQuitAll().then(
           (result) => {
-            traceStep(`requestQuitAll resolved: ${result} (${nce.window.quitState})`);
+            traceStep(`requestQuitAll resolved: ${result} (${activeWindow.quitState})`);
             if (!result) app.exit(1);
           },
           (error) => console.error("requestQuitAll failed", error),
