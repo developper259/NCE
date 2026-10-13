@@ -23,6 +23,10 @@ selections with a 512-selection restore limit; live editing supports up to 1024.
   Duplicate carets are removed. A batch that fails validation is rejected
   before changing the document.
 - Batches are limited to 1024 edits and 32 MiB of combined inserted text.
+  Undo history normally stays within 2 MiB and evicts older transactions first;
+  the newest transaction can exceed that budget up to 34 MiB. An edit whose
+  retained undo entry would exceed that per-entry cap is rejected before the
+  document changes.
   Occurrence commands inspect at most 16 MiB and create at most 1024 selections.
   Large-file, diff and incompletely loaded files remain on the existing safe
   paths and do not accept multi-cursor edits.
@@ -37,10 +41,23 @@ detected EOL style.
 
 ## Benchmark
 
-Run `npm run benchmark:multi-cursor`. It reports median and p95 insertion
-latency, plus observed heap deltas, for 2–1000 cursors across 100–100,000-line
-documents. The benchmark prints the Node version, operating system, CPU count,
-sample count and whether explicit garbage collection was available. Set
-`NCE_BENCH_SAMPLES` and `NCE_BENCH_WARMUPS` to change iteration counts. Heap
-deltas are observational and should be compared only under the same runtime and
-machine conditions.
+`npm run benchmark:multi-cursor` measures the transaction core in a simplified
+Node fixture. It reports median and p95 insertion latency and observed heap
+deltas for 1–1000 cursors across 100–100,000-line documents, plus vertical
+cursor addition and occurrence exclusion scenarios. The fixture omits DOM
+rendering and line metrics. It prints the Node version, operating system, CPU
+count, sample count and whether explicit garbage collection was available. Set
+`NCE_BENCH_SAMPLES` and `NCE_BENCH_WARMUPS` to change iteration counts.
+
+`npm run benchmark:multi-cursor:electron` builds and runs the real Electron
+renderer. It records median and p95 typing latency, visible overlay counts,
+pooled DOM nodes, renderer heap when Chromium exposes it, and scroll-call p95.
+Edit samples start after selection setup has been flushed through an animation
+frame; scroll samples include the next frame. Measured baseline and audited
+branch results are in [multi-cursor-benchmarks.md](multi-cursor-benchmarks.md).
+Both reports are machine-specific observations; compare results only under the
+same runtime and hardware conditions.
+
+Caret blinking animates opacity on the primary caret and the shared secondary
+caret layer. It uses no per-caret timers or inherited animated property. Reduced
+motion keeps both caret layers continuously visible.

@@ -33,13 +33,16 @@ function makeFixture(lineCount, cursorCount) {
   editor.lineController.syncLineLengthsForBatch = () => {};
   editor.lineController.refresh = () => {};
   editor.lineController.markDirtyFrom = () => {};
+  editor.cursorController.getViewPosition = (row, column) => ({ row, column });
   const selections = [];
   for (let index = 0; index < cursorCount; index++) {
     const row = cursorCount === 1
       ? Math.max(1, Math.floor(lineCount / 2))
-      : 1 + Math.floor(index * (lineCount - 1) / (cursorCount - 1));
+      : 1 + Math.floor(index / 20);
     const line = file.lines[row - 1].getText();
-    const column = Math.floor(line.length / 2);
+    const column = cursorCount === 1
+      ? Math.floor(line.length / 2)
+      : index % 20;
     selections.push({
       id: index + 1,
       anchor: { row, column },
@@ -60,30 +63,34 @@ function percentile(values, ratio) {
 }
 
 async function run() {
-  const scenarios = [
-    [100, 2], [100, 10],
-    [10_000, 2], [10_000, 10], [10_000, 50], [10_000, 100], [10_000, 500], [10_000, 1_000],
-    [100_000, 2], [100_000, 50], [100_000, 500], [100_000, 1_000],
-  ];
+  const lineCounts = [100, 10_000, 100_000];
+  const cursorCounts = [1, 2, 10, 50, 100, 500, 1000];
+  const scenarios = lineCounts.flatMap((lineCount) =>
+    cursorCounts.map((cursorCount) => [lineCount, cursorCount]),
+  );
   const samples = Number(process.env.NCE_BENCH_SAMPLES) || 5;
   const warmups = Number(process.env.NCE_BENCH_WARMUPS) || 1;
   const results = [];
 
+  const measure = (times, heaps, iteration, start, heapBefore) => {
+    const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+    const heapAfter = process.memoryUsage().heapUsed;
+    if (iteration >= warmups) {
+      times.push(elapsedMs);
+      heaps.push(heapAfter - heapBefore);
+    }
+  };
+
   for (const [lineCount, cursorCount] of scenarios) {
     const timings = [];
-    let heapDelta = 0;
+    const heapDeltas = [];
     for (let iteration = 0; iteration < warmups + samples; iteration++) {
       if (global.gc) global.gc();
       const { editor } = makeFixture(lineCount, cursorCount);
       const heapBefore = process.memoryUsage().heapUsed;
       const start = process.hrtime.bigint();
       editor.writerController.write("x");
-      const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
-      const used = process.memoryUsage().heapUsed;
-      if (iteration >= warmups) {
-        timings.push(elapsedMs);
-        heapDelta += used - heapBefore;
-      }
+      measure(timings, heapDeltas, iteration, start, heapBefore);
     }
     results.push({
       lines: lineCount,
@@ -91,12 +98,65 @@ async function run() {
       samples,
       medianMs: Number(percentile(timings, 0.5).toFixed(3)),
       p95Ms: Number(percentile(timings, 0.95).toFixed(3)),
-      meanHeapDeltaBytes: Math.round(heapDelta / samples),
+      meanHeapDeltaBytes: Math.round(heapDeltas.reduce((sum, value) => sum + value, 0) / samples),
+    });
+  }
+
+  const verticalResults = [];
+  for (const cursorCount of [1, 10, 100, 500, 1000]) {
+    const timings = [];
+    const heapDeltas = [];
+    for (let iteration = 0; iteration < warmups + samples; iteration++) {
+      if (global.gc) global.gc();
+      const { editor } = makeFixture(2_000, cursorCount);
+      const heapBefore = process.memoryUsage().heapUsed;
+      const start = process.hrtime.bigint();
+      editor.multiCursorController.addCursorsVertically(1);
+      measure(timings, heapDeltas, iteration, start, heapBefore);
+    }
+    verticalResults.push({
+      cursorsBefore: cursorCount,
+      samples,
+      medianMs: Number(percentile(timings, 0.5).toFixed(3)),
+      p95Ms: Number(percentile(timings, 0.95).toFixed(3)),
+      meanHeapDeltaBytes: Math.round(heapDeltas.reduce((sum, value) => sum + value, 0) / samples),
+    });
+  }
+
+  const occurrenceResults = [];
+  for (const cursorCount of [1, 10, 100, 500, 1000]) {
+    const timings = [];
+    const heapDeltas = [];
+    for (let iteration = 0; iteration < warmups + samples; iteration++) {
+      if (global.gc) global.gc();
+      const { editor, file } = makeFixture(10_000, cursorCount);
+      const selections = Array.from({ length: cursorCount }, (_, index) => ({
+        id: index + 1,
+        anchor: { row: index + 1, column: 6 },
+        active: { row: index + 1, column: 11 },
+      }));
+      editor.multiCursorController.setSelections(selections, {
+        primaryId: 1,
+        file,
+        render: false,
+      });
+      const heapBefore = process.memoryUsage().heapUsed;
+      const start = process.hrtime.bigint();
+      editor.multiCursorController.findOccurrences("value", { excludeSelections: true });
+      measure(timings, heapDeltas, iteration, start, heapBefore);
+    }
+    occurrenceResults.push({
+      excludedSelections: cursorCount,
+      lines: 10_000,
+      samples,
+      medianMs: Number(percentile(timings, 0.5).toFixed(3)),
+      p95Ms: Number(percentile(timings, 0.95).toFixed(3)),
+      meanHeapDeltaBytes: Math.round(heapDeltas.reduce((sum, value) => sum + value, 0) / samples),
     });
   }
 
   process.stdout.write(`${JSON.stringify({
-    benchmark: "NCE multi-cursor insertion transaction",
+    benchmark: "NCE multi-cursor transaction-core microbenchmarks (fixture omits DOM rendering and line metrics)",
     node: process.version,
     platform: `${process.platform}/${process.arch}`,
     cpus: os.cpus().length,
@@ -104,6 +164,8 @@ async function run() {
     warmups,
     forcedGc: typeof global.gc === "function",
     results,
+    verticalCursorAddition: verticalResults,
+    occurrenceExclusion: occurrenceResults,
   }, null, 2)}\n`);
 }
 

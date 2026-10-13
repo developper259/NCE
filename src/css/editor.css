@@ -90,6 +90,11 @@
   z-index: 5;
 }
 
+.editor-caret,
+.editor-secondary-carets {
+  animation: nce-caret-blink 1.1s steps(2, start) infinite;
+}
+
 .line-numbers {
   float: left;
   position: relative;
@@ -123,6 +128,18 @@
 .editor-secondary-selection {
   background-color: var(--selection-bg);
   opacity: 0.82;
+}
+
+@keyframes nce-caret-blink {
+  50% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .editor-caret,
+  .editor-secondary-carets {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 .insert-mode {

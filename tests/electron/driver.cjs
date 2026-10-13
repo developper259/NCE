@@ -20,7 +20,8 @@ const timer = setTimeout(() => {
   console.error("Electron smoke timed out");
   app.exit(1);
 }, 90000);
-const { App } = require("../../dist/ts/App.js");
+const appRoot = process.env.NCE_BENCH_APP_ROOT || path.resolve(__dirname, "../..");
+const { App } = require(path.join(appRoot, "dist/ts/App.js"));
 const nce = new App();
 function findMenuItem(menu, label) {
   for (const item of menu?.items || []) {
@@ -90,7 +91,7 @@ app.whenReady().then(() => {
           description: "editor session restoration to finish",
         },
       );
-      if (phase !== "write" && phase !== "multiwindow") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -113,6 +114,159 @@ app.whenReady().then(() => {
         await nce.window.executeWindowCommand("view.devtools"),
         false,
       );
+      if (phase === "benchmark") {
+        const benchmarkFileId = await run(`editor.tabManager.createEmptyFile().id`);
+        await waitForCondition(
+          async () => (await run(`editor.tabManager.activeFile?.id === ${JSON.stringify(benchmarkFileId)} &&
+            editor.tabManager.activeFile?.isLoaded === true &&
+            editor.tabManager.activeFile?.lines?.length === 1`)) === true,
+          { description: "benchmark document to finish loading" },
+        );
+        const report = await run(`(async () => {
+          const file = editor.tabManager.activeFile;
+          const lineCount = 2000;
+          const source = Array.from({ length: lineCount }, (_, index) =>
+            \`const value\${String(index).padStart(6, "0")} = \${index};\`,
+          ).join("\\n");
+          editor.cursorController.setCursorPosition(1, 0);
+          if (!editor.writerController.write(source)) throw Error("Could not load benchmark source");
+          editor.historyController.clear(file);
+          editor.historyController.markSaved(file);
+          const supportsMultiCursor = typeof editor.multiCursorController?.setSelections === "function";
+          const cursorCounts = supportsMultiCursor ? [1, 10, 100, 500, 1000] : [1];
+          const warmups = 1;
+          const samples = 15;
+          const percentile = (values, ratio) => {
+            const sorted = [...values].sort((left, right) => left - right);
+            return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
+          };
+          const flushFrame = () => new Promise(resolve => requestAnimationFrame(resolve));
+          const results = [];
+          let rendererHeapBeforeBytes = performance.memory?.usedJSHeapSize ?? null;
+          for (const cursorCount of cursorCounts) {
+            const latenciesMs = [];
+            let renderedCarets = 0;
+            let renderedSelections = 0;
+            for (let iteration = 0; iteration < warmups + samples; iteration++) {
+              const selections = Array.from({ length: cursorCount }, (_, index) => {
+                const row = cursorCount === 1
+                  ? 1
+                  : 1 + Math.floor(index * (lineCount - 1) / (cursorCount - 1));
+                const column = Math.floor(file.lines[row - 1].getText().length / 2);
+                return {
+                  id: index + 1,
+                  anchor: { row, column },
+                  active: { row, column },
+                  preferredVisualColumn: column,
+                };
+              });
+              if (supportsMultiCursor) {
+                editor.multiCursorController.setSelections(selections, {
+                  file,
+                  primaryId: 1,
+                  render: true,
+                });
+              } else {
+                editor.cursorController.setCursorPosition(
+                  selections[0].active.row,
+                  selections[0].active.column,
+                );
+              }
+              await flushFrame();
+              const started = performance.now();
+              if (!editor.writerController.write("x")) throw Error(\`Typing failed at \${cursorCount} cursors\`);
+              const latency = performance.now() - started;
+              renderedCarets = editor.multiCursorController?.renderedCarets || 0;
+              renderedSelections = editor.multiCursorController?.renderedSelections || 0;
+              if (iteration >= warmups) latenciesMs.push(latency);
+              if (!(await editor.historyController.undo())) throw Error("Benchmark undo failed");
+            }
+            results.push({
+              cursors: cursorCount,
+              samples,
+              medianTypingMs: Number(percentile(latenciesMs, 0.5).toFixed(3)),
+              p95TypingMs: Number(percentile(latenciesMs, 0.95).toFixed(3)),
+              visibleSecondaryCarets: renderedCarets,
+              visibleSelectionSegments: renderedSelections,
+              pooledCaretNodes: document.querySelectorAll(".editor-secondary-caret").length,
+              pooledSelectionNodes: document.querySelectorAll(".editor-secondary-selection").length,
+            });
+          }
+          const singleCursorOperations = [];
+          const operationSamples = 15;
+          const row = Math.floor(lineCount / 2);
+          const column = Math.floor(file.lines[row - 1].getText().length / 2);
+          for (const operation of ["typing", "backspace", "enter", "undo"]) {
+            const latenciesMs = [];
+            for (let iteration = 0; iteration < operationSamples; iteration++) {
+              if (supportsMultiCursor) {
+                editor.multiCursorController.setSelections([{
+                  id: 1,
+                  anchor: { row, column },
+                  active: { row, column },
+                  preferredVisualColumn: column,
+                }], { file, primaryId: 1, render: true });
+              }
+              editor.cursorController.setCursorPosition(row, column);
+              await flushFrame();
+              if (operation === "undo") {
+                if (!editor.writerController.write("u")) throw Error("Could not prepare single-cursor undo");
+                await flushFrame();
+                const started = performance.now();
+                if (!(await editor.historyController.undo())) throw Error("Single-cursor undo failed");
+                latenciesMs.push(performance.now() - started);
+                continue;
+              }
+              const started = performance.now();
+              const changed = operation === "backspace"
+                ? editor.writerController.delete(column, row)
+                : editor.writerController.write(operation === "enter" ? "\\n" : "u");
+              if (!changed) throw Error(\`Single-cursor \${operation} failed\`);
+              latenciesMs.push(performance.now() - started);
+              if (!(await editor.historyController.undo())) throw Error(\`Single-cursor \${operation} undo failed\`);
+            }
+            singleCursorOperations.push({
+              operation,
+              samples: operationSamples,
+              medianMs: Number(percentile(latenciesMs, 0.5).toFixed(3)),
+              p95Ms: Number(percentile(latenciesMs, 0.95).toFixed(3)),
+            });
+          }
+          const scrollLatenciesMs = [];
+          for (let index = 0; index < 30; index++) {
+            const target = index % 2 === 0 ? lineCount - 1 - index : index;
+            const started = performance.now();
+            editor.lineController.scrollTo(target);
+            await flushFrame();
+            scrollLatenciesMs.push(performance.now() - started);
+          }
+          const rendererHeapAfterBytes = performance.memory?.usedJSHeapSize ?? null;
+          return {
+            benchmark: supportsMultiCursor
+              ? "NCE Electron renderer single- and multi-cursor editing"
+              : "NCE Electron renderer pre-multi-cursor baseline",
+            supportsMultiCursor,
+            lineCount,
+            warmups,
+            samples,
+            operationSamples,
+            singleCursorOperations,
+            rendererHeapBeforeBytes,
+            rendererHeapAfterBytes,
+            scrollToP95Ms: Number(percentile(scrollLatenciesMs, 0.95).toFixed(3)),
+            results,
+          };
+        })()`);
+        report.electron = process.versions.electron;
+        report.chromium = process.versions.chrome;
+        fs.writeFileSync(
+          path.join(directory, "multi-cursor-benchmark.json"),
+          JSON.stringify(report, null, 2),
+        );
+        fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
+        await nce.requestQuitAll();
+        return;
+      }
       if (phase === "multiwindow") {
         const workspaceAInput = path.join(directory, "multi-window-a");
         const workspaceBInput = path.join(directory, "multi-window-b");
