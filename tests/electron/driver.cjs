@@ -2773,6 +2773,7 @@ app.whenReady().then(() => {
       if (phase === "write") {
         const terminalManager = nce.window.terminalManager;
         win.once("closed", () => {
+          traceStep("native BrowserWindow closed");
           if (terminalManager.sessions.size !== 0) {
             console.error("Terminal PTYs were left alive after the BrowserWindow closed");
             app.exit(1);
@@ -2788,7 +2789,12 @@ app.whenReady().then(() => {
           })();
         });
         win.webContents.forcefullyCrashRenderer();
-      } else void nce.requestQuitAll();
+      } else {
+        void nce.requestQuitAll().then(
+          (result) => traceStep(`requestQuitAll resolved: ${result}`),
+          (error) => console.error("requestQuitAll failed", error),
+        );
+      }
     } catch (error) {
       console.error(error);
       app.exit(1);
