@@ -273,13 +273,25 @@ class tabManager {
   }
 
   async prepareForQuit() {
+    // A tab close already in progress owns that tab's dirty-file decision.
+    // Wait for it before taking the shutdown snapshot so a successful close
+    // cannot leave Quit prompting a second time for a tab that no longer exists.
+    const pendingCloses = [...this.pendingCloseOperations.values()];
+    if (pendingCloses.length) await Promise.all(pendingCloses);
+
     const files = this.tabs.map((tab) => tab.type === "file" ? tab : tab.textTab)
       .filter(Boolean)
       .filter((file, index, allFiles) => allFiles.indexOf(file) === index);
-    await Promise.all(files.flatMap((file) => [
-      file.flushAutoSave?.(),
-      file.flushRecoverySnapshot?.(),
-    ]));
+    try {
+      const flushResults = await Promise.all(files.map(async (file) => {
+        const autoSave = await file.flushAutoSave?.();
+        const recovery = await file.flushRecoverySnapshot?.();
+        return autoSave !== false && (file.isSaved === true || recovery === true);
+      }));
+      if (flushResults.some((success) => !success)) return false;
+    } catch {
+      return false;
+    }
     const dirtyFiles = files
       .filter(
       (file) => !file.isSaved && !(file.isEmpty() && !file.hasPath()),
@@ -293,6 +305,18 @@ class tabManager {
     }
 
     return true;
+  }
+
+  async flushRecoverySnapshots() {
+    const files = this.tabs.map((tab) => tab.type === "file" ? tab : tab.textTab)
+      .filter(Boolean)
+      .filter((file, index, allFiles) => allFiles.indexOf(file) === index);
+    try {
+      const results = await Promise.all(files.map((file) => file.flushRecoverySnapshot?.()));
+      return files.every((file, index) => file.isSaved === true || results[index] === true);
+    } catch {
+      return false;
+    }
   }
 
   async closeFiles({ skipPrepare = false } = {}) {

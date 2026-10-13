@@ -91,13 +91,22 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("recent-folders-changed", listener);
     return () => ipcRenderer.removeListener("recent-folders-changed", listener);
   },
+  onWindowActivityChanged: (callback) => {
+    const listener = (_event, active) => callback(active === true);
+    ipcRenderer.on("Window:activity", listener);
+    return () => ipcRenderer.removeListener("Window:activity", listener);
+  },
   onSettingsChanged: (callback) => {
     const listener = (_event, settings) => callback(settings);
     ipcRenderer.on("settings-changed", listener);
     return () => ipcRenderer.removeListener("settings-changed", listener);
   },
   approveQuit: (options) => ipcRenderer.invoke("App:approveQuit", options),
-  cancelQuit: () => ipcRenderer.invoke("App:cancelQuit"),
+  cancelQuit: (requestId) => ipcRenderer.invoke("App:cancelQuit", requestId),
+  restoreAfterCancelledQuit: (requestId) =>
+    ipcRenderer.invoke("App:restoreAfterCancelledQuit", requestId),
+  failedToRestoreAfterCancelledQuit: (requestId) =>
+    ipcRenderer.invoke("App:failedToRestoreAfterCancelledQuit", requestId),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
   getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
   getAgentConversationStorageStatus: () =>
@@ -303,9 +312,14 @@ contextBridge.exposeInMainWorld("api", {
     return () => ipcRenderer.removeListener("Request:saveState", listener);
   },
   onCommitCloseRequest: (callback) => {
-    const listener = () => callback();
+    const listener = (_event, request) => callback(request);
     ipcRenderer.on("Request:commitClose", listener);
     return () => ipcRenderer.removeListener("Request:commitClose", listener);
+  },
+  onRollbackCloseRequest: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on("Request:rollbackClose", listener);
+    return () => ipcRenderer.removeListener("Request:rollbackClose", listener);
   },
 
   onLoadState: (callback) =>

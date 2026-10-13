@@ -220,7 +220,7 @@ for (const mode of [
   test(`main quit handshake: ${mode}`, async () => {
     let timer,
       closed = 0,
-      sent = 0,
+      sent = [],
       nativeDialogs = 0;
     const { Window } = loadMain(
       "dist/ts/Window.js",
@@ -242,40 +242,80 @@ for (const mode of [
     const win = new Window({});
     win.rendererReady = mode !== "not-ready";
     win.window = {
+      isDestroyed: () => false,
       close: () => closed++,
       webContents: {
         isDestroyed: () => mode === "destroyed",
-        send: () => sent++,
+        send: (...args) => sent.push(args),
       },
     };
     const request = win.requestQuit();
-    if (["not-ready", "destroyed"].includes(mode)) {
+    if (mode === "not-ready") {
+      assert.equal(await request, false);
+      assert.equal(closed, 0);
+      assert.equal(sent.length, 0);
+      return;
+    }
+    if (mode === "destroyed") {
       assert.equal(await request, true);
       assert.equal(closed, 1);
-      assert.equal(sent, 0);
+      assert.equal(sent.length, 0);
       return;
     }
     assert.equal(await win.requestQuit(), false);
-    assert.equal(sent, 1);
+    assert.equal(sent.length, 1);
+    const requestId = sent[0][1].requestId;
     if (mode === "timeout") {
       timer();
       await new Promise((r) => setImmediate(r));
       assert.equal(closed, 0, "an unresponsive renderer leaves its window open");
       assert.equal(await request, false);
-      assert.equal(win.quitState, "idle");
+      assert.equal(win.quitState, "failed");
       assert.equal(nativeDialogs, 0, "close timeout does not open a blocking native dialog");
-      assert.equal(win.approveQuit(), false, "a late renderer response cannot close the timed-out window");
+      assert.equal(win.approveQuit(false, requestId), false, "a late renderer response cannot close the timed-out window");
     } else if (mode === "approve") {
-      win.approveQuit();
+      win.approveQuit(false, requestId);
       assert.equal(await request, true);
       assert.equal(closed, 1);
     } else {
-      win.cancelQuitRequest();
+      win.cancelQuitRequest(requestId);
       assert.equal(await request, false);
       assert.equal(win.quitState, "idle");
     }
   });
 }
+
+test("prepared close timeout fails without destroying a healthy renderer and can restore recovery", async () => {
+  let timer;
+  let closed = 0;
+  const sent = [];
+  const { Window } = loadMain("dist/ts/Window.js", {}, {
+    setTimeout: (callback) => { timer = callback; return 1; },
+    clearTimeout() {},
+  });
+  const win = new Window({});
+  win.rendererReady = true;
+  win.quitState = "prepared";
+  win.window = {
+    isDestroyed: () => false,
+    close: () => { closed++; },
+    webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) },
+  };
+  const commit = win.commitPreparedClose();
+  const commitId = sent[0][1].requestId;
+  timer();
+  assert.equal(await commit, false);
+  assert.equal(closed, 0);
+  assert.equal(win.quitState, "failed");
+  assert.equal(win.approveQuit(false, commitId, true), false, "late commit acknowledgments are ignored");
+
+  const rollback = win.cancelPreparedClose();
+  const rollbackId = sent[1][1].requestId;
+  assert.equal(win.approveQuit(false, rollbackId, false, true), true);
+  assert.equal(await rollback, true);
+  assert.equal(win.quitState, "idle");
+  assert.equal(closed, 0);
+});
 
 test("application Quit prepares all windows before stopping shared NSH", async () => {
   const app = new EventEmitter();
@@ -297,6 +337,8 @@ test("application Quit prepares all windows before stopping shared NSH", async (
         cancelPreparedClose() {},
         commitPreparedClose() { committed++; return Promise.resolve(true); },
         waitForDisposal() { return Promise.resolve(); },
+        canCloseCommittedWindow() { return true; },
+        closeCommittedWindow() {},
       }];
     }
     getAllWindows() { return this.windows; }
@@ -306,7 +348,7 @@ test("application Quit prepares all windows before stopping shared NSH", async (
     createEmptyWindow() {}
   }
   class FakeSessionStore { async initialize() { return []; } async flush() { return true; } }
-  class FakeManager { async initialize() {} }
+  class FakeManager { async initialize() {} async flush() { return true; } }
   class FakeIpcRouter { dispose() {} forWindow() { return { handle() {} }; } }
   const { App } = loadMain("dist/ts/App.js", {
     electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
@@ -343,6 +385,56 @@ test("application Quit prepares all windows before stopping shared NSH", async (
   assert.equal(stopped, 1);
   assert.equal(quits, 1);
   assert.equal(nce.isQuitting, true);
+});
+
+test("global Quit waits for every commit acknowledgment before closing any window", async () => {
+  const app = new EventEmitter();
+  app.getPath = () => "/tmp/nce-global-quit-rollback";
+  app.getVersion = () => "test";
+  app.requestSingleInstanceLock = () => true;
+  app.quit = () => {};
+  let commitCount = 0;
+  let closedCount = 0;
+  let rollbackCount = 0;
+  let stopped = 0;
+  const makeWindow = () => ({
+    preserveSessionOnClose: false,
+    async prepareForApplicationQuit() { return true; },
+    async commitPreparedClose() { commitCount++; return commitCount === 1; },
+    async cancelPreparedClose() { rollbackCount++; return true; },
+    canCloseCommittedWindow() { return true; },
+    closeCommittedWindow() { closedCount++; },
+    async waitForDisposal() {},
+  });
+  const windows = [makeWindow(), makeWindow()];
+  class FakeWindowManager {
+    getAllWindows() { return windows; }
+    getFocusedWindow() { return null; }
+    updateWindowState() {}
+    dispose() {}
+    createEmptyWindow() {}
+  }
+  class FakeSessionStore { async initialize() { return []; } async flush() { return true; } }
+  class FakeManager { async initialize() {} async flush() { return true; } }
+  class FakeIpcRouter { dispose() {} forWindow() { return { handle() {} }; } }
+  const { App } = loadMain("dist/ts/App.js", {
+    electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
+    "./Window": { Window: class {} },
+    "nsh/server": { NSHServer: class { getPort() { return 1; } async stop() { stopped++; } } },
+    "./manager/IpcRouter": { IpcRouter: FakeIpcRouter },
+    "./manager/WindowManager": { WindowManager: FakeWindowManager },
+    "./manager/WindowSessionStore": { WindowSessionStore: FakeSessionStore },
+    "./manager/SettingsManager": { SettingsManager: FakeManager },
+    "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
+    "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
+  });
+  const runtime = new App();
+  assert.equal(await runtime.requestQuitAll(), false);
+  assert.equal(commitCount, 2);
+  assert.equal(rollbackCount, 2);
+  assert.equal(closedCount, 0);
+  assert.equal(stopped, 0);
+  assert.equal(runtime.isQuitting, false);
 });
 
 test("closing the last macOS window does not turn Close Window into app Quit", async () => {
@@ -593,6 +685,116 @@ test("watcher stops and reports a deleted workspace root exactly once", async ()
   assert.equal(watcher.getWatchedPath(), "/new-workspace");
   await watcher.stopWatching();
   assert.equal(closed, 2);
+});
+
+test("workspace watcher transitions roll back startup failures and serialize rapid switches", async () => {
+  const handlers = new Map();
+  const sources = [];
+  let slowStatStarted;
+  let releaseSlowStat;
+  const slowStarted = new Promise((resolve) => { slowStatStarted = resolve; });
+  const slowStat = new Promise((resolve) => { releaseSlowStat = resolve; });
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {},
+    chokidar: { watch: (root) => {
+      const source = new EventEmitter();
+      source.root = root;
+      source.close = async () => {};
+      sources.push(source);
+      return source;
+    } },
+    "node:fs/promises": { stat: async (workspace) => {
+      if (workspace === "/workspace-fail") throw Object.assign(new Error("unavailable"), { code: "ENOENT" });
+      if (workspace === "/workspace-2") {
+        slowStatStarted();
+        return slowStat;
+      }
+      return { isDirectory: () => true };
+    } },
+  }, { process: { platform: "linux" } });
+
+  const owners = new Map();
+  const pending = new Map();
+  let current = null;
+  let version = 0;
+  const ipc = { handle: (channel, callback) => handlers.set(channel, callback) };
+  const watcher = new Watcher({ webContents: { send() {} } }, ipc, {
+    reserveWorkspace: async (workspace) => {
+      const owner = owners.get(workspace);
+      if (owner && owner !== "window-a") return { success: false, existingWindowId: owner };
+      const token = ++version;
+      owners.set(workspace, "window-a");
+      pending.set("window-a", { workspace, token });
+      return { success: true, path: workspace, token };
+    },
+    commitWorkspace: (workspace, previous, token) => {
+      const reservation = pending.get("window-a");
+      if (!reservation || reservation.workspace !== workspace || reservation.token !== token) return false;
+      current = workspace;
+      pending.delete("window-a");
+      if (previous && previous !== workspace) owners.delete(previous);
+      return true;
+    },
+    releaseWorkspace: (workspace, _updateWindow, token) => {
+      const reservation = pending.get("window-a");
+      if (token !== undefined && (!reservation || reservation.token !== token)) return;
+      owners.delete(workspace);
+      if (reservation?.workspace === workspace) pending.delete("window-a");
+      if (current === workspace) current = null;
+    },
+  });
+  watcher.handleIPC();
+  const start = handlers.get("Watcher:startWatching");
+  await start({}, "/workspace-1");
+  assert.equal(current, "/workspace-1");
+  await assert.rejects(start({}, "/workspace-fail"));
+  assert.equal(watcher.getWatchedPath(), "/workspace-1", "a failed transition restores the prior watcher");
+  assert.equal(current, "/workspace-1");
+  assert.deepEqual([...owners.keys()], ["/workspace-1"]);
+
+  const second = start({}, "/workspace-2");
+  await slowStarted;
+  const third = start({}, "/workspace-3");
+  releaseSlowStat({ isDirectory: () => true });
+  await Promise.all([second, third]);
+  assert.equal(watcher.getWatchedPath(), "/workspace-3");
+  assert.equal(current, "/workspace-3");
+  assert.deepEqual([...owners.keys()], ["/workspace-3"]);
+  await handlers.get("Watcher:stopWatching")({});
+  assert.equal(owners.size, 0);
+  assert.equal(sources.length, 4, "failed startup does not leave an extra watcher alive");
+});
+
+test("watcher close failures retain the live watcher and its workspace ownership", async () => {
+  const handlers = new Map();
+  const source = new EventEmitter();
+  let closeAttempts = 0;
+  source.close = async () => {
+    closeAttempts++;
+    if (closeAttempts === 1) throw new Error("watcher close failed");
+  };
+  const released = [];
+  const { Watcher } = loadMain("dist/ts/addon/Watcher.js", {
+    electron: {},
+    chokidar: { watch: () => source },
+    "node:fs/promises": { stat: async () => ({ isDirectory: () => true }) },
+  }, { process: { platform: "linux" } });
+  const watcher = new Watcher({ webContents: { send() {} } }, {
+    handle: (channel, callback) => handlers.set(channel, callback),
+  }, {
+    reserveWorkspace: async (workspace) => ({ success: true, path: workspace, token: 1 }),
+    commitWorkspace: () => true,
+    releaseWorkspace: (...args) => released.push(args),
+  });
+  watcher.handleIPC();
+  await handlers.get("Watcher:startWatching")({}, "/workspace-a");
+  await assert.rejects(handlers.get("Watcher:stopWatching")({}));
+  assert.equal(watcher.isWatching(), true);
+  assert.equal(watcher.getWatchedPath(), "/workspace-a");
+  assert.equal(released.length, 0, "ownership stays held while the watcher remains active");
+  await handlers.get("Watcher:stopWatching")({});
+  assert.equal(watcher.isWatching(), false);
+  assert.equal(released.length, 1);
 });
 
 test("watcher falls back once for recoverable native errors and stays native for a new workspace", async () => {
@@ -857,16 +1059,21 @@ test("API keys use encrypted storage and are removed from editor state", async (
   let available = true;
   const safeStorage = {
     isEncryptionAvailable: () => available,
+    getSelectedStorageBackend: () => "os_crypt",
     encryptString: (s) => Buffer.from(s).map((b) => b ^ 0xa5),
     decryptString: (b) =>
       Buffer.from(b)
         .map((b) => b ^ 0xa5)
         .toString(),
   };
+  const { AgentSecretStore } = loadMain("dist/ts/manager/AgentSecretStore.js", {
+    electron: { safeStorage },
+  });
+  const secrets = new AgentSecretStore(root, safeStorage);
   const { FileManager } = loadMain("dist/ts/addon/FileManager.js", {
     electron: { app: { getPath: () => root }, safeStorage },
   });
-  const manager = new FileManager({});
+  const manager = new FileManager({ app: { agentSecrets: secrets } });
   try {
     assert.equal(await manager.setAgentApiKey("mock", "secret-for-test"), true);
     assert.equal(await manager.getAgentApiKey("mock"), "secret-for-test");

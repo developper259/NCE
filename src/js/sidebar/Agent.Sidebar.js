@@ -390,7 +390,7 @@ class AgentSidebar extends Sidebar {
 
   serializeSessionForPersistence(session) {
     if (!session) return null;
-    session.updatedAt = Date.now();
+    session.updatedAt = Math.max(Date.now(), (Number(session.updatedAt) || 0) + 1);
     return {
       version: 1,
       id: session.id,
@@ -471,8 +471,9 @@ class AgentSidebar extends Sidebar {
   }
 
   async flushAllConversationSaves() {
-    if (!this._agentInitialized) return;
-    await this.conversationPersistencePromise;
+    if (!this._agentInitialized) return true;
+    try { await this.conversationPersistencePromise; }
+    catch { return false; }
     for (const timer of this.conversationSaveTimers.values()) clearTimeout(timer);
     const ids = [...this.conversationSaveTimers.keys()];
     this.conversationSaveTimers.clear();
@@ -485,8 +486,10 @@ class AgentSidebar extends Sidebar {
         this.conversationSaveQueues.set(id, next);
       }
     }
-    await Promise.allSettled([...this.conversationSaveQueues.values()]);
-    await this.editor.api?.flushAgentConversations?.();
+    const results = await Promise.allSettled([...this.conversationSaveQueues.values()]);
+    if (results.some((result) => result.status !== "fulfilled" || result.value === false)) return false;
+    try { return (await this.editor.api?.flushAgentConversations?.()) !== false; }
+    catch { return false; }
   }
 
   handleApprovalRequested(request = {}) {
@@ -1541,7 +1544,7 @@ class AgentSidebar extends Sidebar {
 
   syncAgentWorkTicker() {
     const session = this.getActiveSession();
-    if (!this.isOpen || !session?.isGenerating || !session.workState || session.workState.finishedAt || session.workState.runId !== session.runId) {
+    if (!this.isOpen || this.editor?.windowActive === false || !session?.isGenerating || !session.workState || session.workState.finishedAt || session.workState.runId !== session.runId) {
       this.stopAgentWorkTicker();
       return;
     }

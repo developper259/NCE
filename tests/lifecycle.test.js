@@ -155,6 +155,7 @@ for (const choices of [[], ['save'], ['dontSave'], ['cancel'], ['save', 'dontSav
     const files = Array.from({ length: Math.max(1, choices.length) }, (_, i) => {
       const file = new FileNode(editor, i + 1, `${i}.js`, `/tmp/${i}.js`);
       file.isSaved = !choices.length;
+      file.flushRecoverySnapshot = async () => true;
       file.save = async () => { file.isSaved = true; return true; };
       return file;
     });
@@ -800,9 +801,34 @@ test('concurrent saves are serialized so an older revision cannot win last', asy
 test('Close All is a real close, and Cancel leaves all tabs open', async () => {
   const editor = setup();
   const file = new FileNode(editor, 1, 'a', '/a'); file.isSaved = false;
+  file.flushRecoverySnapshot = async () => true;
   editor.tabManager.files = [file]; editor.tabManager.activeFile = file;
   editor.savePopupManager = { confirmClose: async () => 'cancel' };
   assert.equal(await editor.tabManager.closeFiles(), false); assert.equal(editor.tabManager.files.length, 1);
   editor.savePopupManager.confirmClose = async () => 'dontSave';
   assert.equal(await editor.tabManager.closeFiles(), true); assert.equal(editor.tabManager.files.length, 0);
+});
+
+test('Quit stops before the dirty-file prompt when recovery persistence fails', async () => {
+  const editor = setup();
+  const file = new FileNode(editor, 1, 'a', '/a');
+  file.isSaved = false;
+  file.flushRecoverySnapshot = async () => false;
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+  let callback;
+  let prompted = false;
+  let cancelled = 0;
+  editor.savePopupManager = { confirmClose: async () => { prompted = true; return 'dontSave'; } };
+  editor.api = {
+    onSaveRequest(handler) { callback = handler; },
+    cancelQuit: async () => { cancelled++; },
+    approveQuit: async () => assert.fail('Quit must not be approved'),
+  };
+  editor.statesManager = { save: async () => true };
+  Editor.prototype.initQuitEvent.call(editor);
+  await callback();
+  assert.equal(prompted, false);
+  assert.equal(cancelled, 1);
+  assert.equal(editor.tabManager.files.length, 1);
 });

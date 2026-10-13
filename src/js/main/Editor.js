@@ -31,6 +31,13 @@ class Editor {
     this.letterSize = 10.8; // size of leter     (fs : 20 -> 12, fs : 18 -> 10.8)
 
     this.api = window.api;
+    this.windowActive = document.hasFocus();
+    this.windowActivityUnsubscribe = this.api.onWindowActivityChanged?.((active) => {
+      this.windowActive = active === true;
+      document.documentElement.classList.toggle("nce-window-inactive", !this.windowActive);
+      this.agentSidebar?.syncAgentWorkTicker?.();
+    }) || null;
+    document.documentElement.classList.toggle("nce-window-inactive", !this.windowActive);
 
     this.emptyMenu = new EmptyMenu(this);
 
@@ -371,6 +378,9 @@ class Editor {
   }
 
   destroy() {
+    this.windowActivityUnsubscribe?.();
+    this.windowActivityUnsubscribe = null;
+    document.documentElement.classList.remove("nce-window-inactive");
     this.quickPanel?.destroy?.();
     this.fileExplorer?.destroy?.();
     this.searchSidebar?.destroy?.();
@@ -556,41 +566,62 @@ class Editor {
       try {
         const closed = await this.tabManager.prepareForQuit();
         if (!closed) {
-          await this.api.cancelQuit?.();
+          await this.api.cancelQuit?.(request?.requestId);
           return;
         }
-        await Promise.race([
-          this.agentSidebar?.flushAllConversationSaves?.(),
-          new Promise((resolve) => setTimeout(resolve, 1800)),
-        ]);
+        const conversationsFlushed = await this.agentSidebar?.flushAllConversationSaves?.();
+        if (conversationsFlushed === false) {
+          await this.api.cancelQuit?.(request?.requestId);
+          return;
+        }
         const saved = await this.statesManager.save();
         if (saved !== false) {
           if (prepareOnly) {
-            await this.api.approveQuit?.({ prepareOnly: true });
+            await this.api.approveQuit?.({ prepareOnly: true, requestId: request?.requestId });
           } else {
             const recoveryCleared = this.statesManager.clearRecoverySnapshotsOnQuit
               ? await this.statesManager.clearRecoverySnapshotsOnQuit()
               : await this.tabManager.clearRecoverySnapshots?.();
-            if (recoveryCleared !== false) await this.api.approveQuit?.();
-            else await this.api.cancelQuit?.();
+            if (recoveryCleared !== false) await this.api.approveQuit?.({ requestId: request?.requestId });
+            else await this.api.cancelQuit?.(request?.requestId);
           }
-        } else await this.api.cancelQuit?.();
+        } else await this.api.cancelQuit?.(request?.requestId);
       } catch (error) {
         console.error("Failed to prepare quit:", error);
-        await this.api.cancelQuit?.();
+        await this.api.cancelQuit?.(request?.requestId);
       }
     });
 
-    this.api.onCommitCloseRequest?.(async () => {
+    this.api.onCommitCloseRequest?.(async (request = {}) => {
       try {
+        const saved = await this.statesManager.save();
+        if (saved === false) {
+          await this.api.cancelQuit?.(request?.requestId);
+          return;
+        }
         const recoveryCleared = this.statesManager.clearRecoverySnapshotsOnQuit
           ? await this.statesManager.clearRecoverySnapshotsOnQuit()
           : await this.tabManager.clearRecoverySnapshots?.();
-        if (recoveryCleared !== false) await this.api.approveQuit?.();
-        else await this.api.cancelQuit?.();
+        if (recoveryCleared !== false)
+          await this.api.approveQuit?.({ commit: true, requestId: request?.requestId });
+        else await this.api.cancelQuit?.(request?.requestId);
       } catch (error) {
         console.error("Failed to finalize window close:", error);
-        await this.api.cancelQuit?.();
+        await this.api.cancelQuit?.(request?.requestId);
+      }
+    });
+
+    this.api.onRollbackCloseRequest?.(async (request = {}) => {
+      try {
+        const snapshotsRestored = await this.tabManager.flushRecoverySnapshots();
+        const saved = await this.statesManager.save();
+        if (snapshotsRestored && saved !== false)
+          await this.api.restoreAfterCancelledQuit?.(request?.requestId);
+        else
+          await this.api.failedToRestoreAfterCancelledQuit?.(request?.requestId);
+      } catch (error) {
+        console.error("Failed to restore recovery data after cancelled Quit:", error);
+        await this.api.failedToRestoreAfterCancelledQuit?.(request?.requestId);
       }
     });
   }

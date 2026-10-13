@@ -23,13 +23,13 @@ function fakeSafeStorage({ available = true, backend = "keychain" } = {}) {
   };
 }
 
-function snapshot(id, content = "SUPER_PRIVATE_MESSAGE_123") {
+function snapshot(id, content = "SUPER_PRIVATE_MESSAGE_123", updatedAt = 2) {
   return {
     version: 1,
     id,
     title: "PRIVATE_CONVERSATION_TITLE",
     createdAt: 1,
-    updatedAt: 2,
+    updatedAt,
     apiKey: "sk-private-key-123456",
     messages: [
       { role: "user", content, streaming: true, manualContextItems: [
@@ -135,14 +135,26 @@ test("AgentConversationStore serializes concurrent saves, rejects traversal IDs,
   try {
     assert.equal(await store.save(snapshot("../../agent-secrets.json")), false);
     await Promise.all([
-      store.save(snapshot("session-a", "version A")),
-      store.save(snapshot("session-a", "version B")),
-      store.save(snapshot("session-a", "version C")),
+      store.save(snapshot("session-a", "version A", 2)),
+      store.save(snapshot("session-a", "version B", 3)),
+      store.save(snapshot("session-a", "version C", 4)),
     ]);
     assert.equal((await (await restart()).load()).sessions[0].messages[0].content, "version C");
     assert.equal(await store.delete("session-a"), true);
     assert.equal((await (await restart()).load()).sessions.length, 0);
     assert.equal(await fsp.stat(path.join(store.sessionsRoot, "session-a.enc")).catch(() => null), null);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("AgentConversationStore rejects stale and same-revision conflicting window snapshots", async () => {
+  const { root, store, restart } = await createStore();
+  try {
+    assert.equal(await store.save(snapshot("shared-session", "latest", 20)), true);
+    assert.equal(await store.save(snapshot("shared-session", "stale", 19)), false);
+    assert.equal(await store.save(snapshot("shared-session", "same-revision-conflict", 20)), false);
+    assert.equal((await (await restart()).load()).sessions[0].messages[0].content, "latest");
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
   }
@@ -172,7 +184,7 @@ test("AgentConversationStore preserves the prior encrypted session after an atom
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
-    await assert.rejects(store.save(snapshot("atomic-session", "must not replace")));
+    await assert.rejects(store.save(snapshot("atomic-session", "must not replace", 3)));
     assert.equal(await fsp.readFile(file, "utf8"), previous);
     assert.equal((await (await restart()).load()).sessions[0].messages[0].content, "durable version");
     assert.equal((await fsp.readdir(store.sessionsRoot)).some((name) => name.endsWith(".tmp")), false);
@@ -211,9 +223,9 @@ test("AgentConversationStore does not rewrite the index for each conversation ch
         return typeof value === "function" ? value.bind(target) : value;
       },
     });
-    await store.save(snapshot("checkpoint-session", "first"));
-    await store.save(snapshot("checkpoint-session", "second"));
-    await store.save(snapshot("checkpoint-session", "third"));
+    await store.save(snapshot("checkpoint-session", "first", 2));
+    await store.save(snapshot("checkpoint-session", "second", 3));
+    await store.save(snapshot("checkpoint-session", "third", 4));
     assert.equal(indexWrites, 1);
   } finally {
     await fsp.rm(root, { recursive: true, force: true });

@@ -4,7 +4,6 @@ import {
   shell,
   BrowserWindow,
   ipcMain,
-  safeStorage,
 } from "electron";
 import { Window } from "../Window";
 import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
@@ -348,6 +347,7 @@ export class FileManager {
   private unsavedChangeDialogQueue: Promise<void> = Promise.resolve();
   private deletionQueue: Promise<void> = Promise.resolve();
   private pendingDeletionOperations = new Map<string, Promise<FileOperationResult>>();
+  private legacyCredentialCopyPreserved = false;
   private readonly ipc: IpcHandlerRegistrar;
 
   constructor(
@@ -1874,6 +1874,7 @@ export class FileManager {
       if (sessionStore) {
         return sessionStore.saveRendererState(this.window.sessionId, JSON.stringify(state));
       }
+      if (this.legacyCredentialCopyPreserved) return false;
       const filePath = path.join(app.getPath("userData"), "state.json");
       await fs.mkdir(path.dirname(filePath), { recursive: true });
       await fs.writeFile(`${filePath}.tmp`, JSON.stringify(state), "utf-8");
@@ -1907,14 +1908,20 @@ export class FileManager {
       }
 
       const legacyKeys = (state as any).agent?.apiKeys;
-      if (legacyKeys && typeof legacyKeys === "object") {
-        for (const [providerId, apiKey] of Object.entries(legacyKeys)) {
-          if (typeof apiKey === "string" && apiKey.trim()) {
-            await this.setAgentApiKey(providerId, apiKey);
+      if (legacyKeys !== undefined) {
+        const migrated = await this.window.app?.agentSecrets?.migrateLegacyApiKeys(legacyKeys);
+        if (migrated?.success) {
+          delete (state as any).agent.apiKeys;
+          try { await this.writeLegacyStateAtomically(filePath, state); }
+          catch {
+            console.warn("[File Manager] Secure Agent credential migration completed; legacy state cleanup will retry on next startup");
           }
+        } else {
+          // Keep the original file as the recoverable copy while ensuring keys
+          // never cross the renderer boundary during a storage failure.
+          this.legacyCredentialCopyPreserved = true;
+          delete (state as any).agent.apiKeys;
         }
-        delete (state as any).agent.apiKeys;
-        await fs.writeFile(filePath, JSON.stringify(state), "utf-8");
       }
 
       return state;
@@ -2003,63 +2010,35 @@ export class FileManager {
     }
   }
 
-  private getSecretsPath(): string {
-    return path.join(app.getPath("userData"), "agent-secrets.json");
-  }
-
-  private encryptionAvailable(): boolean {
-    return (
-      safeStorage.isEncryptionAvailable() &&
-      safeStorage.getSelectedStorageBackend?.() !== "basic_text"
-    );
-  }
-
-  private async readAgentSecrets(): Promise<Record<string, string>> {
-    if (!this.encryptionAvailable()) return {};
+  private async writeLegacyStateAtomically(filePath: string, state: object): Promise<void> {
+    const temporaryPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+    let handle: any = null;
     try {
-      const parsed = JSON.parse(
-        await fs.readFile(this.getSecretsPath(), "utf-8"),
-      );
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      handle = await fs.open(temporaryPath, "wx", 0o600);
+      await handle.writeFile(JSON.stringify(state), "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await fs.rename(temporaryPath, filePath);
+      try {
+        const directory = await fs.open(path.dirname(filePath), "r");
+        try { await directory.sync(); } finally { await directory.close(); }
+      } catch {}
+    } finally {
+      try { await handle?.close(); } catch {}
+      try { await fs.unlink(temporaryPath); } catch {}
     }
   }
 
   private async getAgentApiKey(providerId: string): Promise<string> {
-    if (typeof providerId !== "string" || !this.encryptionAvailable())
-      return "";
-    const secrets = await this.readAgentSecrets();
-    try {
-      return safeStorage.decryptString(
-        Buffer.from(secrets[providerId], "base64"),
-      );
-    } catch {
-      return "";
-    }
+    return this.window.app?.agentSecrets?.get(providerId) || "";
   }
 
   private async setAgentApiKey(
     providerId: string,
     apiKey: string,
   ): Promise<boolean> {
-    if (
-      typeof providerId !== "string" ||
-      !/^[a-zA-Z0-9_-]+$/.test(providerId) ||
-      typeof apiKey !== "string" ||
-      !this.encryptionAvailable()
-    )
-      return false;
-    const secrets = await this.readAgentSecrets();
-    if (apiKey) {
-      secrets[providerId] = safeStorage
-        .encryptString(apiKey)
-        .toString("base64");
-    } else {
-      delete secrets[providerId];
-    }
-    await fs.mkdir(path.dirname(this.getSecretsPath()), { recursive: true });
-    await fs.writeFile(this.getSecretsPath(), JSON.stringify(secrets), "utf-8");
-    return true;
+    return this.window.app?.agentSecrets?.set(providerId, apiKey) || false;
   }
 }

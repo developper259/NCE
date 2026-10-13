@@ -15,8 +15,9 @@ interface FileChange {
 }
 
 interface WorkspaceReservationHooks {
-  reserveWorkspace?: (projectPath: string) => Promise<{ success: boolean; path?: string }>;
-  releaseWorkspace?: (projectPath: string) => void;
+  reserveWorkspace?: (projectPath: string) => Promise<{ success: boolean; path?: string; token?: number }>;
+  commitWorkspace?: (projectPath: string, previousPath: string | null, token?: number) => boolean;
+  releaseWorkspace?: (projectPath: string, updateWindow?: boolean, token?: number) => void;
 }
 
 export class Watcher {
@@ -38,6 +39,7 @@ export class Watcher {
   private restarting: boolean = false;
 
   private watchGeneration: number = 0;
+  private workspaceOperationQueue: Promise<void> = Promise.resolve();
 
   private reportedWatcherErrors: Set<string> = new Set();
   private readonly ipc: IpcHandlerRegistrar;
@@ -90,7 +92,7 @@ export class Watcher {
   handleIPC() {
     this.ipc.handle(
       "Watcher:startWatching",
-      async (event, projectPath: string) => {
+      async (_event, projectPath: string) => this.serializeWorkspaceOperation(async () => {
         const previousPath = this.getWatchedPath();
         const reservation = this.reservation.reserveWorkspace
           ? await this.reservation.reserveWorkspace(projectPath)
@@ -100,24 +102,42 @@ export class Watcher {
           error.name = "WorkspaceAlreadyOpenError";
           throw error;
         }
-        if (previousPath && path.resolve(previousPath) !== path.resolve(reservation.path))
-          this.reservation.releaseWorkspace?.(previousPath);
         try {
-          await this.startWatching(reservation.path);
+          await this.startWatchingNow(reservation.path);
+          if (this.reservation.commitWorkspace &&
+              !this.reservation.commitWorkspace(reservation.path, previousPath, reservation.token)) {
+            throw new Error("Workspace transition is no longer current.");
+          }
+          if (!this.reservation.commitWorkspace && previousPath &&
+              path.resolve(previousPath) !== path.resolve(reservation.path))
+            this.reservation.releaseWorkspace?.(previousPath);
           return reservation.path;
         } catch (error) {
-          this.reservation.releaseWorkspace?.(reservation.path);
+          if (previousPath && this.getWatchedPath() === previousPath && this.isWatching()) {
+            this.reservation.releaseWorkspace?.(reservation.path, false, reservation.token);
+            throw error;
+          }
+          try { await this.stopWatchingNow(); } catch {}
+          this.reservation.releaseWorkspace?.(reservation.path, false, reservation.token);
+          if (previousPath && !this.isWindowDestroyed()) {
+            try {
+              await this.startWatchingNow(previousPath);
+            } catch {
+              this.reservation.releaseWorkspace?.(previousPath, true);
+            }
+          }
           throw error;
         }
-      },
+      }),
     );
 
-    this.ipc.handle("Watcher:stopWatching", async () => {
+    this.ipc.handle("Watcher:stopWatching", async () => this.serializeWorkspaceOperation(async () => {
       const previousPath = this.getWatchedPath();
-      const result = await this.stopWatching();
-      if (previousPath) this.reservation.releaseWorkspace?.(previousPath);
+      await this.stopWatchingNow();
+      if (previousPath) this.reservation.releaseWorkspace?.(previousPath, true);
+      const result = true;
       return result;
-    });
+    }));
   }
 
   async dispose(): Promise<void> {
@@ -132,8 +152,12 @@ export class Watcher {
   }
 
   async startWatching(projectPath: string): Promise<void> {
+    return this.serializeWorkspaceOperation(() => this.startWatchingNow(projectPath));
+  }
+
+  private async startWatchingNow(projectPath: string): Promise<void> {
     if (typeof projectPath !== "string" || !projectPath.trim() || projectPath.includes("\0")) return;
-    await this.stopWatching();
+    await this.stopWatchingNow();
 
     const generation = this.watchGeneration;
 
@@ -194,9 +218,11 @@ export class Watcher {
         this.window.webContents.send("file-system-change", [
           { event: "root-deleted", filePath, dirPath },
         ]);
-        void this.stopWatching().catch((error) =>
-          console.error("[Watcher] failed to stop after root deletion:", error),
-        );
+        const deletedRoot = this.watchedPath;
+        void this.serializeWorkspaceOperation(async () => {
+          await this.stopWatchingNow();
+          if (deletedRoot) this.reservation.releaseWorkspace?.(deletedRoot, true);
+        }).catch((error) => console.error("[Watcher] failed to stop after root deletion:", error));
         return;
       }
 
@@ -375,7 +401,13 @@ export class Watcher {
   }
 
   async stopWatching(): Promise<void> {
+    return this.serializeWorkspaceOperation(() => this.stopWatchingNow());
+  }
+
+  private async stopWatchingNow(): Promise<void> {
     const previousRoot = this.watchedPath;
+    const previousGeneration = this.watchGeneration;
+    const previousPolling = this.usePolling;
     this.watchGeneration++;
     this.restarting = false;
     this.usePolling = false;
@@ -396,7 +428,19 @@ export class Watcher {
     const watcher = this.watcher;
     this.watcher = null;
     this.watchedPath = "";
-    if (watcher) await watcher.close();
+    if (watcher) {
+      try {
+        await watcher.close();
+      } catch (error) {
+        if (!this.watcher && this.watchGeneration === previousGeneration + 1) {
+          this.watcher = watcher;
+          this.watchedPath = previousRoot;
+          this.watchGeneration = previousGeneration;
+          this.usePolling = previousPolling;
+        }
+        throw error;
+      }
+    }
     if (previousRoot) {
       try {
         await this.onWatcherStop?.(previousRoot);
@@ -412,5 +456,20 @@ export class Watcher {
 
   getWatchedPath(): string {
     return this.watchedPath;
+  }
+
+  private serializeWorkspaceOperation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.workspaceOperationQueue.then(operation, operation);
+    this.workspaceOperationQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  private isWindowDestroyed(): boolean {
+    const window = this.window as any;
+    try {
+      return typeof window.isDestroyed === "function" && window.isDestroyed();
+    } catch {
+      return true;
+    }
   }
 }
