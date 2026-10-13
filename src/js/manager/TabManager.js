@@ -286,9 +286,26 @@ class tabManager {
       const flushResults = await Promise.all(files.map(async (file) => {
         const autoSave = await file.flushAutoSave?.();
         const recovery = await file.flushRecoverySnapshot?.();
-        return autoSave !== false && (file.isSaved === true || recovery === true);
+        return {
+          file,
+          autoSaveSucceeded: autoSave !== false,
+          recoverySucceeded: file.isSaved === true || recovery === true,
+        };
       }));
-      if (flushResults.some((success) => !success)) return false;
+      const failedFlushes = flushResults.filter((result) =>
+        !result.autoSaveSucceeded || !result.recoverySucceeded,
+      );
+      if (failedFlushes.length) {
+        console.warn("[Quit] File buffers could not be flushed before application quit",
+          failedFlushes.map(({ file, autoSaveSucceeded, recoverySucceeded }) => ({
+            name: file.name,
+            path: file.path,
+            saved: file.isSaved === true,
+            autoSaveSucceeded,
+            recoverySucceeded,
+          })));
+        return false;
+      }
     } catch {
       return false;
     }

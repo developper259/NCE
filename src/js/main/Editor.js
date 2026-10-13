@@ -566,11 +566,13 @@ class Editor {
       try {
         const closed = await this.tabManager.prepareForQuit();
         if (!closed) {
+          console.warn("[Quit] TabManager declined application quit preparation");
           await this.api.cancelQuit?.(request?.requestId);
           return;
         }
         const conversationsFlushed = await this.agentSidebar?.flushAllConversationSaves?.();
         if (conversationsFlushed === false) {
+          console.warn("[Quit] Agent conversations could not be flushed before application quit");
           await this.api.cancelQuit?.(request?.requestId);
           return;
         }
@@ -585,7 +587,10 @@ class Editor {
             if (recoveryCleared !== false) await this.api.approveQuit?.({ requestId: request?.requestId });
             else await this.api.cancelQuit?.(request?.requestId);
           }
-        } else await this.api.cancelQuit?.(request?.requestId);
+        } else {
+          console.warn("[Quit] Editor state could not be saved before application quit");
+          await this.api.cancelQuit?.(request?.requestId);
+        }
       } catch (error) {
         console.error("Failed to prepare quit:", error);
         await this.api.cancelQuit?.(request?.requestId);
