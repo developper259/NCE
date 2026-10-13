@@ -57,6 +57,16 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     await launch('restore');
     await launch('crash');
     await launch('no-nsh');
+    // Geometry checks need a known normal window. Previous smoke phases can
+    // persist a platform-specific maximized state even on headless desktops.
+    const sessionPath = path.join(directory, 'profile', 'window-sessions.json');
+    const sessions = JSON.parse(await fs.readFile(sessionPath, 'utf8'));
+    for (const session of sessions.sessions) {
+      session.maximized = false;
+      session.fullScreen = false;
+      session.bounds = { x: 40, y: 60, width: 900, height: 650 };
+    }
+    await fs.writeFile(sessionPath, JSON.stringify(sessions, null, 2));
     await launch('tabs');
     await launch('multiwindow');
   } finally { await fs.rm(directory, { recursive: true, force: true }); }

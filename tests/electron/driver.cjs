@@ -1434,7 +1434,7 @@ app.whenReady().then(() => {
           await restoreNativeWindowState(`${description}: window to unmaximize`);
           const bounds = win.getBounds();
           const workArea = screen.getDisplayMatching(bounds).workArea;
-          const targetWidth = Math.min(width, workArea.width);
+          const targetWidth = Math.min(width, Math.max(1, workArea.width - 20));
           win.setBounds({ ...bounds, x: workArea.x, width: targetWidth });
           await waitForCondition(
             () => !win.isMaximized() && win.getBounds().width === targetWidth,
@@ -1487,8 +1487,14 @@ app.whenReady().then(() => {
             1400,
             "wide sidebar layout",
           );
+          const sidebarCapacity = wideLayout.mainWidth - 48 - wideLayout.minEditorWidth;
+          const sidebarScale = Math.min(1, sidebarCapacity / (400 + 420));
+          const sidebarLeftTarget = Math.floor(400 * sidebarScale);
+          const sidebarRightTarget = Math.floor(420 * sidebarScale);
+          const sidebarInitialLeft = Math.floor(sidebarLeftTarget * 0.75);
+          const sidebarInitialRight = Math.floor(sidebarRightTarget * (250 / 420));
           assert.ok(
-            wideLayout.mainWidth >= 48 + 400 + 420 + wideLayout.minEditorWidth,
+            sidebarCapacity >= 400,
             `Controlled sidebar test width is insufficient: ${JSON.stringify(wideLayout)}`,
           );
 
@@ -1561,8 +1567,8 @@ app.whenReady().then(() => {
           sidebarManager.closeSidebar("left");
           sidebarManager.closeSidebar("right");
           await nextLayout();
-          sidebarResizer.applyWidth(300, "left");
-          sidebarResizer.applyWidth(250, "right");
+          sidebarResizer.applyWidth(${sidebarInitialLeft}, "left");
+          sidebarResizer.applyWidth(${sidebarInitialRight}, "right");
           await nextLayout();
           const none = snapshot();
 
@@ -1580,11 +1586,11 @@ app.whenReady().then(() => {
           await nextLayout();
           const both = snapshot();
 
-          sidebarResizer.applyWidth(400, "left");
+          sidebarResizer.applyWidth(${sidebarLeftTarget}, "left");
           await nextLayout();
           const resizedLeft = snapshot();
 
-          sidebarResizer.applyWidth(420, "right");
+          sidebarResizer.applyWidth(${sidebarRightTarget}, "right");
           await nextLayout();
           const resizedRight = snapshot();
 
@@ -1630,14 +1636,14 @@ app.whenReady().then(() => {
         }
         assert.equal(sidebarLayoutStates.none.effectiveLeftWidth, 0);
         assert.equal(sidebarLayoutStates.none.effectiveRightWidth, 0);
-        assert.equal(sidebarLayoutStates.left.effectiveLeftWidth, 300);
+        assert.equal(sidebarLayoutStates.left.effectiveLeftWidth, sidebarInitialLeft);
         assert.equal(sidebarLayoutStates.left.effectiveRightWidth, 0);
         assert.equal(sidebarLayoutStates.right.effectiveLeftWidth, 0);
-        assert.equal(sidebarLayoutStates.right.effectiveRightWidth, 250);
-        assert.equal(sidebarLayoutStates.resizedLeft.effectiveLeftWidth, 400);
-        assert.equal(sidebarLayoutStates.resizedLeft.effectiveRightWidth, 250);
-        assert.equal(sidebarLayoutStates.resizedRight.effectiveLeftWidth, 400);
-        assert.equal(sidebarLayoutStates.resizedRight.effectiveRightWidth, 420);
+        assert.equal(sidebarLayoutStates.right.effectiveRightWidth, sidebarInitialRight);
+        assert.equal(sidebarLayoutStates.resizedLeft.effectiveLeftWidth, sidebarLeftTarget);
+        assert.equal(sidebarLayoutStates.resizedLeft.effectiveRightWidth, sidebarInitialRight);
+        assert.equal(sidebarLayoutStates.resizedRight.effectiveLeftWidth, sidebarLeftTarget);
+        assert.equal(sidebarLayoutStates.resizedRight.effectiveRightWidth, sidebarRightTarget);
 
         const narrowViewport = await setSidebarTestWindowWidth(
           800,
@@ -1653,8 +1659,8 @@ app.whenReady().then(() => {
           JSON.stringify(narrowSidebarLayout),
         );
         assert.ok(
-          narrowSidebarLayout.effectiveLeftWidth < 400 ||
-            narrowSidebarLayout.effectiveRightWidth < 420,
+          narrowSidebarLayout.effectiveLeftWidth < sidebarLeftTarget ||
+            narrowSidebarLayout.effectiveRightWidth < sidebarRightTarget,
           JSON.stringify(narrowSidebarLayout),
         );
 
@@ -1685,8 +1691,8 @@ app.whenReady().then(() => {
         ) < 1);
 
         await run(`(async () => {
-          editor.sidebarResizer.applyWidth(400, "left");
-          editor.sidebarResizer.applyWidth(420, "right");
+          editor.sidebarResizer.applyWidth(${sidebarLeftTarget}, "left");
+          editor.sidebarResizer.applyWidth(${sidebarRightTarget}, "right");
           await new Promise(requestAnimationFrame);
           await new Promise(requestAnimationFrame);
         })()`);
@@ -1695,8 +1701,8 @@ app.whenReady().then(() => {
           "sidebars to restore requested widths after window expand",
         );
         assertSidebarLayout(expandedSidebarLayout);
-        assert.equal(expandedSidebarLayout.effectiveLeftWidth, 400);
-        assert.equal(expandedSidebarLayout.effectiveRightWidth, 420);
+        assert.equal(expandedSidebarLayout.effectiveLeftWidth, sidebarLeftTarget);
+        assert.equal(expandedSidebarLayout.effectiveRightWidth, sidebarRightTarget);
 
         const sidebarScreenshotPath = process.env.NCE_SIDEBAR_SCREENSHOT_PATH;
         if (sidebarScreenshotPath) {
@@ -2224,6 +2230,7 @@ app.whenReady().then(() => {
         }
       }
       if (phase === "write") {
+        traceStep("terminal isolation checks started");
         assert.equal(
           await run(`(async () => {
             editor.sidebarManager.openMenu("agent");
@@ -2238,6 +2245,7 @@ app.whenReady().then(() => {
           true,
           "Agent Settings works before and after lazy Agent initialization",
         );
+        traceStep("Agent Settings lazy-load check passed");
         const terminalWorkspaceA = path.join(directory, "terminal-workspace-a");
         const terminalWorkspaceB = path.join(directory, "terminal-workspace-b");
         fs.mkdirSync(terminalWorkspaceA, { recursive: true });
@@ -2254,6 +2262,7 @@ app.whenReady().then(() => {
           true,
           "opening the Bottom Panel loads the lazy terminal view",
         );
+        traceStep("workspace A terminal panel opened");
         await waitForCondition(
           async () => (await run(`(() => {
             const panel = editor.terminalPanel;
@@ -2279,6 +2288,7 @@ app.whenReady().then(() => {
         assert.equal(firstTerminal.cwd, canonicalTerminalWorkspaceA, "new PTYs start in the canonical active workspace root");
         assert.doesNotMatch(firstTerminal.displayLabel, /\(\d+\)$/,
           "the first terminal keeps its unsuffixed label");
+        traceStep("first xterm and PTY initialized");
         const terminalSurfaces = await run(`(() => {
           const themeManager = editor.themeManager;
           const originalPreference = themeManager.getPreference();
@@ -2429,6 +2439,7 @@ app.whenReady().then(() => {
         })()`);
         assert.equal(bottomHoverColor, sidebarHoverColor,
           "the Bottom Panel and sidebar resizers render the same computed hover color");
+        traceStep("terminal layout and styling checks passed");
         await run(`document.querySelector(".sidebar-resizer-left").style.display = window.__ncePreviousSidebarResizerDisplay`);
         const getTerminalText = (id) => `(() => {
           const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)}) ||
@@ -2443,6 +2454,7 @@ app.whenReady().then(() => {
           async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_FIRST")`)) === true,
           { timeout: 10000, description: "first real PTY shell output" },
         );
+        traceStep("first PTY output received");
 
         assert.equal(
           await run("editor.terminalPanel.createTerminal()"),
@@ -2466,6 +2478,7 @@ app.whenReady().then(() => {
           async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_PTY_SECOND")`)) === true,
           { timeout: 10000, description: "second real PTY shell output" },
         );
+        traceStep("both PTY sessions produced independent output");
         assert.equal(await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_SECOND")`), false, "terminal output stays with its session");
 
         await run(`window.__terminalWorkspaceA = new Map(
@@ -2510,6 +2523,7 @@ app.whenReady().then(() => {
         })()`);
         assert.notEqual(workspaceBTerminal.id, firstTerminal.id);
         assert.notEqual(workspaceBTerminal.id, secondTerminal.id);
+        traceStep("workspace B PTY started");
         await run(`window.__terminalWorkspaceB = editor.terminalPanel.sessions.get(${JSON.stringify(workspaceBTerminal.id)}).terminal; true`);
 
         const respawnIds = new Set([workspaceBTerminal.id]);
@@ -2597,6 +2611,7 @@ app.whenReady().then(() => {
           }
         }
         assert.equal(respawnIds.size, 21, "all 20 respawns use distinct PTY IDs");
+        traceStep("20 PTY close and respawn cycles passed");
 
         assert.equal(
           await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
@@ -2690,6 +2705,7 @@ app.whenReady().then(() => {
           editor.bottomPanelManager.getPanelState().visible === true`), true,
         "workspace A is active and its Bottom Panel is visible before persisting");
         assert.equal(await run("editor.fileExplorer.closeProject()"), true, "the terminal smoke test returns to No Workspace without reassigning its live PTY");
+        traceStep("terminal close, switch, and persistence checks passed");
         assert.equal(await run(`(async () => {
           const saved = await window.api.saveRecoverySnapshot(null, {
             untitledId: "electron-smoke-recovery",
@@ -2761,6 +2777,7 @@ app.whenReady().then(() => {
         ), false, "restart does not replay old commands or terminal output");
         assert.equal(await run("editor.fileExplorer.closeProject()"), true,
           "the terminal restore phase returns to No Workspace for the remaining smoke phases");
+        traceStep("terminal restart and restore checks passed");
       }
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "write") {
