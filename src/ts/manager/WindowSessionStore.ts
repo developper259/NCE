@@ -1,11 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import type { AgentSecretStore } from "./AgentSecretStore";
 
 const STORE_VERSION = 1;
 const MAX_SESSIONS = 8;
 const MAX_STORE_BYTES = 32 * 1024 * 1024;
 const MAX_STATE_BYTES = 4 * 1024 * 1024;
+const METADATA_DEBOUNCE_MS = 150;
 
 export interface WindowBounds {
   x: number;
@@ -44,7 +46,7 @@ function sanitizeBounds(value: unknown): WindowBounds | null {
   const { x, y, width, height } = value;
   if (![x, y, width, height].every(Number.isFinite)) return null;
   if (Math.abs(x) > 100_000 || Math.abs(y) > 100_000 ||
-      width < 800 || height < 600 || width > 20_000 || height > 20_000) return null;
+      width < 1 || height < 1 || width > 20_000 || height > 20_000) return null;
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: Math.round(height) };
 }
 
@@ -73,31 +75,90 @@ export class WindowSessionStore {
   private sessions = new Map<string, WindowSession>();
   private lastActiveSessionId: string | null = null;
   private writeQueue: Promise<boolean> = Promise.resolve(true);
+  private writeTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastPersistedContent: string | null = null;
+  private initializePromise: Promise<WindowSession[]> | null = null;
+  private readonly agentSecrets?: Pick<AgentSecretStore, "migrateLegacyApiKeys">;
+  private readonly filesystem: typeof fs;
+  private preserveLegacySessionFile = false;
 
-  constructor(userDataPath: string, platform: NodeJS.Platform = process.platform) {
+  constructor(
+    userDataPath: string,
+    platform: NodeJS.Platform = process.platform,
+    agentSecrets?: Pick<AgentSecretStore, "migrateLegacyApiKeys">,
+    filesystem: typeof fs = fs,
+  ) {
     this.storePath = path.join(userDataPath, "window-sessions.json");
     this.legacyStatePath = path.join(userDataPath, "state.json");
     this.platform = platform;
+    this.agentSecrets = agentSecrets;
+    this.filesystem = filesystem;
   }
 
   async initialize(): Promise<WindowSession[]> {
+    if (this.initializePromise) return this.initializePromise;
+    this.initializePromise = this.initializeState();
+    return this.initializePromise;
+  }
+
+  private async initializeState(): Promise<WindowSession[]> {
     let loaded = false;
+    let rawSnapshot: Record<string, unknown> | null = null;
+    let storedContent: string | null = null;
     try {
-      const content = await fs.readFile(this.storePath, "utf8");
+      const content = await this.filesystem.readFile(this.storePath, "utf8");
+      storedContent = content;
       if (Buffer.byteLength(content, "utf8") <= MAX_STORE_BYTES) {
         const parsed: unknown = JSON.parse(content);
         if (isRecord(parsed) && parsed.version === STORE_VERSION && Array.isArray(parsed.sessions)) {
-          this.loadSnapshot(parsed);
+          rawSnapshot = parsed;
           loaded = true;
+        } else {
+          this.preserveLegacySessionFile = true;
         }
+      } else {
+        this.preserveLegacySessionFile = true;
       }
     } catch (error: any) {
-      if (error?.code !== "ENOENT") console.warn("[Window Sessions] Invalid store; attempting migration", error);
+      if (error?.code !== "ENOENT") {
+        this.preserveLegacySessionFile = true;
+        console.warn("[Window Sessions] Invalid store; attempting migration without replacing the original file");
+      }
     }
 
-    if (!loaded) await this.migrateLegacyState();
+    const legacyState = await this.readLegacyState();
+    const credentialSources = this.findLegacyCredentialSources(rawSnapshot, legacyState);
+    let credentialsMigrated = credentialSources.length === 0;
+    if (credentialSources.length > 0) {
+      const credentials = this.combineLegacyCredentials(credentialSources);
+      if (credentials && this.agentSecrets) {
+        const result = await this.agentSecrets.migrateLegacyApiKeys(credentials);
+        credentialsMigrated = result.success;
+      }
+      if (credentialsMigrated && legacyState && this.hasLegacyApiKeys(legacyState)) {
+        const cleaned = this.cloneRecord(legacyState);
+        this.removeLegacyApiKeys(cleaned);
+        if (!(await this.writeJsonAtomically(this.legacyStatePath, cleaned))) {
+          console.warn("[Window Sessions] Secure credentials saved; legacy state cleanup will retry on next startup");
+        }
+      } else if (!credentialsMigrated && this.snapshotContainsLegacyKeys(rawSnapshot)) {
+        // Its existing session file is the sole recoverable copy. Do not
+        // rewrite it until secure migration can be completed.
+        this.preserveLegacySessionFile = true;
+        console.warn("[Window Sessions] Agent credentials remain in the legacy session file because secure storage is unavailable");
+      } else if (!credentialsMigrated) {
+        console.warn("[Window Sessions] Agent credential migration could not use secure storage; the original state was preserved");
+      }
+    }
+
+    if (loaded && rawSnapshot) this.loadSnapshot(rawSnapshot);
+    else if (legacyState) this.migrateLegacyState(legacyState);
     if (this.sessions.size === 0) this.create({});
-    await this.persist();
+    if (!this.preserveLegacySessionFile) {
+      const content = this.serializeSnapshot();
+      if (storedContent === content) this.lastPersistedContent = content;
+      await this.flush();
+    }
     return this.getAll();
   }
 
@@ -132,7 +193,7 @@ export class WindowSessionStore {
     };
     this.sessions.set(id, session);
     this.lastActiveSessionId = id;
-    void this.persist();
+    this.schedulePersistence();
     return this.clone(session);
   }
 
@@ -156,7 +217,7 @@ export class WindowSessionStore {
           ? patch.lastActiveAt! : current.lastActiveAt } : {}),
     };
     this.sessions.set(id, next);
-    void this.persist();
+    this.schedulePersistence();
     return true;
   }
 
@@ -172,7 +233,7 @@ export class WindowSessionStore {
     if (this.lastActiveSessionId === id) {
       this.lastActiveSessionId = this.getAll()[0]?.id || null;
     }
-    void this.persist();
+    this.schedulePersistence();
     return true;
   }
 
@@ -202,6 +263,9 @@ export class WindowSessionStore {
   }
 
   async flush(): Promise<boolean> {
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = null;
+    if (this.preserveLegacySessionFile) return false;
     return this.persist();
   }
 
@@ -237,46 +301,142 @@ export class WindowSessionStore {
       ? lastActive : sessions[0]?.id || null;
   }
 
-  private async migrateLegacyState(): Promise<void> {
+  private migrateLegacyState(state: Record<string, unknown>): void {
+    const workspacePath = safeText(state.lastWorkspace) ||
+      (isRecord(state.fileExplorer) ? safeText(state.fileExplorer.rootPath) : null);
+    const session: WindowSession = {
+      id: randomUUID(),
+      workspacePath,
+      bounds: null,
+      maximized: false,
+      fullScreen: false,
+      rendererState: sanitizeRendererState(state),
+      lastActiveAt: Date.now(),
+    };
+    this.sessions.set(session.id, session);
+    this.lastActiveSessionId = session.id;
+  }
+
+  private async readLegacyState(): Promise<Record<string, unknown> | null> {
     try {
-      const content = await fs.readFile(this.legacyStatePath, "utf8");
-      if (Buffer.byteLength(content, "utf8") > MAX_STATE_BYTES) return;
-      const state = JSON.parse(content);
-      if (!isRecord(state)) return;
-      const workspacePath = safeText(state.lastWorkspace) ||
-        (isRecord(state.fileExplorer) ? safeText(state.fileExplorer.rootPath) : null);
-      const session = this.create({
-        workspacePath,
-        rendererState: state,
-      });
-      this.lastActiveSessionId = session.id;
+      const content = await this.filesystem.readFile(this.legacyStatePath, "utf8");
+      if (Buffer.byteLength(content, "utf8") > MAX_STATE_BYTES) return null;
+      const state: unknown = JSON.parse(content);
+      return isRecord(state) ? state : null;
     } catch (error: any) {
-      if (error?.code !== "ENOENT") console.warn("[Window Sessions] Legacy state migration failed", error);
+      if (error?.code !== "ENOENT") console.warn("[Window Sessions] Legacy state migration failed; the original file was preserved");
+      return null;
     }
   }
 
-  private persist(): Promise<boolean> {
-    this.writeQueue = this.writeQueue.catch(() => false).then(async () => {
-      const snapshot: SessionSnapshot = {
-        version: STORE_VERSION,
-        lastActiveSessionId: this.lastActiveSessionId,
-        sessions: this.getAll(),
-      };
-      const content = `${JSON.stringify(snapshot, null, 2)}\n`;
-      if (Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES) return false;
-      const temporaryPath = `${this.storePath}.tmp`;
-      try {
-        await fs.mkdir(path.dirname(this.storePath), { recursive: true });
-        await fs.writeFile(temporaryPath, content, "utf8");
-        await fs.rename(temporaryPath, this.storePath);
-        return true;
-      } catch (error) {
-        console.error("[Window Sessions] Failed to save sessions", error);
-        try { await fs.unlink(temporaryPath); } catch {}
-        return false;
+  private findLegacyCredentialSources(
+    snapshot: Record<string, unknown> | null,
+    legacyState: Record<string, unknown> | null,
+  ): unknown[] {
+    const sources: unknown[] = [];
+    if (snapshot && Array.isArray(snapshot.sessions)) {
+      for (const session of snapshot.sessions) {
+        if (isRecord(session) && isRecord(session.rendererState) &&
+            isRecord(session.rendererState.agent) &&
+            Object.prototype.hasOwnProperty.call(session.rendererState.agent, "apiKeys")) {
+          sources.push(session.rendererState.agent.apiKeys);
+        }
       }
-    });
-    return this.writeQueue;
+    }
+    if (legacyState && isRecord(legacyState.agent) &&
+        Object.prototype.hasOwnProperty.call(legacyState.agent, "apiKeys")) {
+      sources.push(legacyState.agent.apiKeys);
+    }
+    return sources;
+  }
+
+  private combineLegacyCredentials(sources: unknown[]): Record<string, string> | null {
+      const combined: Record<string, string> = Object.create(null);
+    for (const source of sources) {
+      if (!isRecord(source)) return null;
+      for (const [provider, credential] of Object.entries(source)) {
+        if (!/^[a-zA-Z0-9_-]{1,128}$/.test(provider) ||
+            ["__proto__", "constructor", "prototype"].includes(provider) ||
+            typeof credential !== "string" || !credential.trim())
+          return null;
+        if (Object.prototype.hasOwnProperty.call(combined, provider) && combined[provider] !== credential)
+          return null;
+        combined[provider] = credential;
+      }
+    }
+    return combined;
+  }
+
+  private snapshotContainsLegacyKeys(snapshot: Record<string, unknown> | null): boolean {
+    return this.findLegacyCredentialSources(snapshot, null).length > 0;
+  }
+
+  private hasLegacyApiKeys(state: Record<string, unknown>): boolean {
+    return isRecord(state.agent) && Object.prototype.hasOwnProperty.call(state.agent, "apiKeys");
+  }
+
+  private removeLegacyApiKeys(state: Record<string, unknown>): void {
+    if (isRecord(state.agent)) delete state.agent.apiKeys;
+  }
+
+  private cloneRecord(value: Record<string, unknown>): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  private async writeJsonAtomically(filePath: string, value: unknown): Promise<boolean> {
+    const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
+    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
+    try {
+      await this.filesystem.mkdir(path.dirname(filePath), { recursive: true });
+      handle = await this.filesystem.open(temporaryPath, "wx", 0o600);
+      await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`, "utf8");
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await this.filesystem.rename(temporaryPath, filePath);
+      try {
+        const directory = await this.filesystem.open(path.dirname(filePath), "r");
+        try { await directory.sync(); } finally { await directory.close(); }
+      } catch {}
+      return true;
+    } catch {
+      return false;
+    } finally {
+      try { await handle?.close(); } catch {}
+      try { await this.filesystem.unlink(temporaryPath); } catch {}
+    }
+  }
+
+  private schedulePersistence(): void {
+    if (this.preserveLegacySessionFile) return;
+    if (this.writeTimer) clearTimeout(this.writeTimer);
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = null;
+      void this.persist();
+    }, METADATA_DEBOUNCE_MS);
+  }
+
+  private persist(): Promise<boolean> {
+    const content = this.serializeSnapshot();
+    if (Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES) return Promise.resolve(false);
+    const queued = this.writeQueue.then(async () => {
+      if (content === this.lastPersistedContent) return true;
+      const saved = await this.writeJsonAtomically(this.storePath, JSON.parse(content));
+      if (saved) this.lastPersistedContent = content;
+      else console.error("[Window Sessions] Failed to save sessions");
+      return saved;
+    }, async () => false);
+    this.writeQueue = queued;
+    return queued;
+  }
+
+  private serializeSnapshot(): string {
+    const snapshot: SessionSnapshot = {
+      version: STORE_VERSION,
+      lastActiveSessionId: this.lastActiveSessionId,
+      sessions: this.getAll(),
+    };
+    return `${JSON.stringify(snapshot, null, 2)}\n`;
   }
 
   private clone(value: WindowSession): WindowSession {

@@ -69,10 +69,17 @@ export class Window {
   forceQuit: boolean;
   rendererReady: boolean;
   reloadPending: boolean;
-  quitState: "idle" | "waiting-renderer" | "prepared" | "approved";
+  quitState: "idle" | "preparing" | "prepared" | "committing" | "committed" |
+    "rolling-back" | "closing" | "closed" | "cancelled" | "failed";
   quitTimer: ReturnType<typeof setTimeout> | null;
   private quitRequestResolve: ((approved: boolean) => void) | null = null;
   private prepareQuitOnly = false;
+  private commitAttempted = false;
+  private activeQuitRequestId: string | null = null;
+  private rendererGone = false;
+  private closed = false;
+  private readonly closedPromise: Promise<void>;
+  private resolveClosed!: () => void;
   private boundsSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private resourceDisposal: Promise<void> = Promise.resolve();
   private readonly initialSession: WindowSession;
@@ -102,6 +109,7 @@ export class Window {
     this.reloadPending = false;
     this.quitState = "idle";
     this.quitTimer = null;
+    this.closedPromise = new Promise((resolve) => { this.resolveClosed = resolve; });
     this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
     this.terminalManager = undefined;
@@ -112,6 +120,7 @@ export class Window {
     this.rendererReady = false;
     this.reloadPending = false;
     this.quitState = "idle";
+    this.rendererGone = false;
 
     const appRoot = app.isPackaged
       ? app.getAppPath()
@@ -121,8 +130,8 @@ export class Window {
     const restoreBounds = this.app.windowManager?.getRestoreBounds(this.initialSession.bounds) || null;
     this.window = new BrowserWindow({
       ...(restoreBounds || { width: 1100, height: 720 }),
-      minWidth: 800,
-      minHeight: 600,
+      minWidth: Math.min(800, restoreBounds?.width || 800),
+      minHeight: Math.min(600, restoreBounds?.height || 600),
       title: this.getWindowTitle(),
       show: false,
       backgroundColor: "#181818",
@@ -136,7 +145,7 @@ export class Window {
 
         contextIsolation: true,
         nodeIntegration: false,
-        backgroundThrottling: false,
+        backgroundThrottling: true,
       },
     });
 
@@ -148,7 +157,10 @@ export class Window {
     this.fileManager = new FileManager(this, undefined, this.ipc);
     this.watcher = new Watcher(this.window, this.ipc, {
       reserveWorkspace: (projectPath) => this.app.windowManager.reserveWorkspace(this.id, projectPath),
-      releaseWorkspace: (projectPath) => this.app.windowManager.releaseWorkspace(this.id, projectPath),
+      commitWorkspace: (projectPath, _previousPath, token) =>
+        this.app.windowManager.commitWorkspace(this.id, projectPath, token),
+      releaseWorkspace: (projectPath, updateWindow, token) =>
+        this.app.windowManager.releaseWorkspace(this.id, projectPath, updateWindow, token),
     });
     this.terminalManager = new TerminalManager({
       getWorkspacePath: () => this.watcher?.getWatchedPath() || null,
@@ -213,6 +225,13 @@ export class Window {
 
     this.window.on("resize", () => this.scheduleBoundsSave());
     this.window.on("move", () => this.scheduleBoundsSave());
+    const reportWindowActivity = (active: boolean) => {
+      const target = this.window;
+      if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+      try { target.webContents.send("Window:activity", active); } catch {}
+    };
+    this.window.on("focus", () => reportWindowActivity(true));
+    this.window.on("blur", () => reportWindowActivity(false));
     this.window.on("enter-full-screen", () => this.scheduleBoundsSave());
     this.window.on("leave-full-screen", () => this.scheduleBoundsSave());
     this.registerIPC();
@@ -246,6 +265,7 @@ export class Window {
     this.window.webContents.on("render-process-gone", (_event, details) => {
       console.error("[Renderer] render-process-gone", details);
       this.rendererReady = false;
+      this.rendererGone = true;
       this.reloadPending = false;
       this.agentApprovalManager?.cancelAll();
       this.terminalManager?.closeForOwner(terminalOwner, {
@@ -253,9 +273,10 @@ export class Window {
       });
       this.clearQuitTimer();
       this.preserveSessionOnClose = true;
-      this.forceQuit = true;
+      this.quitState = "failed";
+      this.resolveQuitRequest(false);
       this.app.windowManager?.updateWindowState(this);
-      this.window?.close();
+      this.forceCloseAfterRendererGone();
     });
     this.window.webContents.on(
       "did-start-navigation",
@@ -303,6 +324,10 @@ export class Window {
 
     this.window.on("closed", () => {
       this.clearQuitTimer();
+      this.closed = true;
+      this.quitState = "closed";
+      this.resolveQuitRequest(false);
+      this.resolveClosed();
       this.resourceDisposal = this.disposeWindowServices(terminalOwner);
       this.window = null;
     });
@@ -346,9 +371,18 @@ export class Window {
       return true;
     });
     this.ipc.handle("App:approveQuit", async (_event, options) => {
-      return this.approveQuit(options?.prepareOnly === true);
+      return this.approveQuit(
+        options?.prepareOnly === true,
+        options?.requestId,
+        options?.commit === true,
+        options?.rollback === true,
+      );
     });
-    this.ipc.handle("App:cancelQuit", async () => this.cancelQuitRequest());
+    this.ipc.handle("App:cancelQuit", async (_event, requestId) => this.cancelQuitRequest(requestId));
+    this.ipc.handle("App:restoreAfterCancelledQuit", async (_event, requestId) =>
+      this.finishRollback(requestId, true));
+    this.ipc.handle("App:failedToRestoreAfterCancelledQuit", async (_event, requestId) =>
+      this.finishRollback(requestId, false));
     this.ipc.handle("Window:focusWorkspace", async (_event, folderPath) =>
       this.app.windowManager.focusWorkspace(folderPath, this.id));
     this.ipc.handle("Window:openWorkspaceInNewWindow", async (_event, folderPath) =>
@@ -505,18 +539,14 @@ export class Window {
   }
 
   async waitForDisposal(): Promise<void> {
-    const target = this.window;
-    if (!target) return this.resourceDisposal;
-    await new Promise<void>((resolve) => {
-      target.once("closed", () => resolve());
-    });
+    if (!this.closed) await this.closedPromise;
     await this.resourceDisposal;
   }
 
   private async disposeWindowServices(owner?: WebContents): Promise<void> {
     this.agentApprovalManager?.cancelAll();
     this.agentProcessRunner?.dispose();
-    if (owner) this.terminalManager?.closeForOwner(owner);
+    if (owner) await this.terminalManager?.closeForOwner(owner);
     await this.watcher?.dispose();
     await this.workspaceSearch?.dispose();
     this.fileManager?.clearFileCache();
@@ -560,44 +590,46 @@ export class Window {
   }
 
   requestQuit(prepareOnly = false): Promise<boolean> {
-    if (this.quitState === "prepared") return Promise.resolve(true);
+    if (prepareOnly && this.quitState === "prepared") return Promise.resolve(true);
+    if (this.quitState === "failed") {
+      this.quitState = "idle";
+      this.activeQuitRequestId = null;
+    }
     if (!this.window || this.forceQuit || this.quitState !== "idle") return Promise.resolve(false);
-    this.prepareQuitOnly = prepareOnly;
-    if (!this.rendererReady || this.window.webContents.isDestroyed()) {
-      if (prepareOnly) {
-        this.quitState = "prepared";
-        return Promise.resolve(true);
-      }
-      this.forceQuit = true;
-      this.app.windowManager?.updateWindowState(this);
-      this.terminalManager?.closeForOwner(this.window.webContents);
-      this.window.close();
+    if (this.rendererGone || this.window.webContents.isDestroyed()) {
+      this.forceCloseAfterRendererGone();
       return Promise.resolve(true);
     }
-
-    this.quitState = "waiting-renderer";
-    return new Promise<boolean>((resolve) => {
-      this.quitRequestResolve = resolve;
-      this.window!.webContents.send("Request:saveState", { prepareOnly });
-      this.quitTimer = setTimeout(() => {
-        this.quitTimer = null;
-        const target = this.window;
-        if (this.quitState !== "waiting-renderer" || !target) return;
-        console.warn("[Window] Renderer did not acknowledge close; keeping the window open.");
-        this.quitState = "idle";
-        this.prepareQuitOnly = false;
-        this.resolveQuitRequest(false);
-      }, WINDOW_CLOSE_RESPONSE_TIMEOUT_MS);
-    });
+    if (!this.rendererReady) return Promise.resolve(false);
+    this.prepareQuitOnly = prepareOnly;
+    this.quitState = "preparing";
+    return this.requestRenderer("Request:saveState", "preparing", { prepareOnly });
   }
 
   prepareForApplicationQuit(): Promise<boolean> {
     return this.requestQuit(true);
   }
 
-  approveQuit(prepareOnly = false): boolean {
-    if (this.quitState !== "waiting-renderer") return false;
+  approveQuit(
+    prepareOnly = false,
+    requestId?: unknown,
+    commit = false,
+    rollback = false,
+  ): boolean {
+    if (!this.isActiveRequest(requestId)) return false;
     this.clearQuitTimer();
+    if (rollback && this.quitState === "rolling-back") {
+      this.quitState = "idle";
+      this.prepareQuitOnly = false;
+      this.resolveQuitRequest(true);
+      return true;
+    }
+    if (commit && this.quitState === "committing") {
+      this.quitState = "committed";
+      this.resolveQuitRequest(true);
+      return true;
+    }
+    if (this.quitState !== "preparing") return false;
     if (prepareOnly || this.prepareQuitOnly) {
       this.quitState = "prepared";
       this.resolveQuitRequest(true);
@@ -607,49 +639,121 @@ export class Window {
     return true;
   }
 
-  cancelQuitRequest(): boolean {
-    if (this.quitState !== "waiting-renderer") return false;
+  cancelQuitRequest(requestId?: unknown): boolean {
+    if (!this.isActiveRequest(requestId)) return false;
     this.clearQuitTimer();
-    this.quitState = "idle";
+    this.quitState = this.quitState === "committing" ? "prepared" : "cancelled";
+    if (this.quitState === "cancelled") this.quitState = "idle";
     this.resolveQuitRequest(false);
     return true;
   }
 
   commitPreparedClose(): Promise<boolean> {
     if (this.quitState !== "prepared") return Promise.resolve(false);
-    if (!this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed() || !this.rendererReady) {
-      this.forceQuit = true;
-      this.finishClose();
+    if (this.rendererGone || !this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed()) {
+      this.preserveSessionOnClose = true;
+      this.forceCloseAfterRendererGone();
       return Promise.resolve(true);
     }
-    this.quitState = "waiting-renderer";
+    if (!this.rendererReady) return Promise.resolve(false);
+    this.quitState = "committing";
+    this.commitAttempted = true;
     this.prepareQuitOnly = false;
-    return new Promise((resolve) => {
-      this.quitRequestResolve = resolve;
-      this.window!.webContents.send("Request:commitClose");
-      this.quitTimer = setTimeout(() => {
-        if (this.quitState !== "waiting-renderer") return;
-        this.forceQuit = true;
-        this.finishClose();
-      }, 2500);
-    });
+    return this.requestRenderer("Request:commitClose", "committing");
   }
 
-  cancelPreparedClose(): void {
-    if (this.quitState !== "prepared") return;
+  closeCommittedWindow(): boolean {
+    if (this.quitState !== "committed" || !this.window || this.window.isDestroyed()) return false;
+    this.forceQuit = true;
+    this.quitState = "closing";
+    return this.closeNativeWindow(true);
+  }
+
+  canCloseCommittedWindow(): boolean {
+    return this.quitState === "committed" && Boolean(this.window && !this.window.isDestroyed());
+  }
+
+  async cancelPreparedClose(): Promise<boolean> {
+    if (!["prepared", "committed", "failed"].includes(this.quitState)) return false;
+    const mustRestoreRecovery = this.commitAttempted;
+    this.commitAttempted = false;
     this.quitState = "idle";
     this.prepareQuitOnly = false;
+    if (!mustRestoreRecovery || !this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed())
+      return true;
+    this.quitState = "rolling-back";
+    return this.requestRenderer("Request:rollbackClose", "rolling-back");
   }
 
   private finishClose(): void {
     this.clearQuitTimer();
-    this.quitState = "approved";
+    this.quitState = "closing";
     this.forceQuit = true;
+    this.resolveQuitRequest(this.closeNativeWindow(true));
+  }
+
+  private closeNativeWindow(forceAfterAcknowledgment = false): boolean {
+    const target = this.window;
+    if (!target || target.isDestroyed()) return this.closed;
     this.app.windowManager?.updateWindowState(this);
-    const owner = this.window?.webContents;
-    if (owner) this.terminalManager?.closeForOwner(owner);
-    this.window?.close();
-    this.resolveQuitRequest(true);
+    try { this.terminalManager?.closeForOwner(target.webContents); } catch {}
+    try { target.close(); }
+    catch {
+      if (forceAfterAcknowledgment) {
+        try { target.destroy(); return true; } catch {}
+      }
+      this.forceQuit = false;
+      this.quitState = "failed";
+      return false;
+    }
+    return true;
+  }
+
+  private forceCloseAfterRendererGone(): void {
+    const target = this.window;
+    if (!target || target.isDestroyed()) return;
+    this.preserveSessionOnClose = true;
+    this.forceQuit = true;
+    this.quitState = "closing";
+    this.closeNativeWindow(true);
+  }
+
+  private requestRenderer(channel: string, expectedState: string, payload: Record<string, unknown> = {}): Promise<boolean> {
+    const target = this.window;
+    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return Promise.resolve(false);
+    const requestId = randomUUID();
+    this.activeQuitRequestId = requestId;
+    return new Promise<boolean>((resolve) => {
+      this.quitRequestResolve = resolve;
+      try {
+        target.webContents.send(channel, { ...payload, requestId });
+      } catch {
+        this.quitState = "failed";
+        this.resolveQuitRequest(false);
+        return;
+      }
+      this.quitTimer = setTimeout(() => {
+        this.quitTimer = null;
+        if (this.quitState !== expectedState || this.activeQuitRequestId !== requestId) return;
+        console.warn("[Window] Renderer did not acknowledge shutdown work; keeping the window open.");
+        this.quitState = "failed";
+        this.prepareQuitOnly = false;
+        this.resolveQuitRequest(false);
+      }, WINDOW_CLOSE_RESPONSE_TIMEOUT_MS);
+    });
+  }
+
+  private isActiveRequest(requestId: unknown): boolean {
+    return typeof requestId === "string" && requestId === this.activeQuitRequestId;
+  }
+
+  private finishRollback(requestId: unknown, success: boolean): boolean {
+    if (!this.isActiveRequest(requestId) || this.quitState !== "rolling-back") return false;
+    this.clearQuitTimer();
+    this.quitState = success ? "idle" : "failed";
+    this.prepareQuitOnly = false;
+    this.resolveQuitRequest(success);
+    return true;
   }
 
   private resolveQuitRequest(approved: boolean): void {
@@ -661,6 +765,5 @@ export class Window {
   clearQuitTimer() {
     if (this.quitTimer) clearTimeout(this.quitTimer);
     this.quitTimer = null;
-    if (!this.forceQuit) this.quitState = "idle";
   }
 }

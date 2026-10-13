@@ -338,9 +338,23 @@ export class AgentConversationStore {
       if (!this.status.available) return false;
       const snapshot = sanitizeAgentConversation(snapshotInput);
       if (!snapshot) return false;
+      const file = path.join(this.sessionsRoot, `${snapshot.id}.enc`);
+      let existing: AgentConversationSnapshot | null = null;
+      try {
+        const stored = await this.readEnvelope(file, AGENT_CONVERSATION_MAX_BYTES, this.aad("session", snapshot.id));
+        existing = sanitizeAgentConversation(JSON.parse(stored));
+        if (!existing || existing.id !== snapshot.id) return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") return false;
+      }
+      if (existing) {
+        if (snapshot.updatedAt < existing.updatedAt) return false;
+        if (snapshot.updatedAt === existing.updatedAt &&
+            JSON.stringify(snapshot) !== JSON.stringify(existing)) return false;
+      }
       const encrypted = this.encrypt(JSON.stringify(snapshot), this.aad("session", snapshot.id));
       if (Buffer.byteLength(encrypted) > AGENT_CONVERSATION_MAX_BYTES) return false;
-      await this.atomicWrite(path.join(this.sessionsRoot, `${snapshot.id}.enc`), encrypted);
+      await this.atomicWrite(file, encrypted);
       let indexChanged = false;
       if (!this.index.sessionIds.includes(snapshot.id)) {
         this.index.sessionIds.push(snapshot.id);

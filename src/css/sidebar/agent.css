@@ -593,6 +593,11 @@
   animation: agent-working-wave 1.5s ease-in-out infinite;
   animation-delay: calc(var(--char-index) * 68ms);
 }
+.nce-window-inactive .agent-sidebar-tab-generating-dot,
+.nce-window-inactive .agent-working-char,
+.nce-window-inactive .agent-sidebar-running-border {
+  animation-play-state: paused;
+}
 @keyframes agent-working-wave {
   0%, 65%, 100% { color: var(--text-tertiary); opacity: .72; }
   28% { color: var(--text-primary); opacity: 1; }

@@ -6,6 +6,7 @@ import { NSHServer } from "nsh/server";
 import { SettingsManager } from "./manager/SettingsManager";
 import { RecentFoldersManager } from "./manager/RecentFoldersManager";
 import { AgentConversationStore } from "./manager/AgentConversationStore";
+import { AgentSecretStore } from "./manager/AgentSecretStore";
 import { IpcRouter } from "./manager/IpcRouter";
 import { WindowManager } from "./manager/WindowManager";
 import { WindowSessionStore } from "./manager/WindowSessionStore";
@@ -31,6 +32,7 @@ export class App {
   settings!: SettingsManager;
   recentFolders!: RecentFoldersManager;
   agentConversations!: AgentConversationStore;
+  agentSecrets!: AgentSecretStore;
   name = "NCE";
   version = getPackageVersion();
   private quitPromise: Promise<boolean> | null = null;
@@ -50,7 +52,8 @@ export class App {
     this.settings = new SettingsManager(userData);
     this.recentFolders = new RecentFoldersManager(userData);
     this.agentConversations = new AgentConversationStore(userData);
-    this.windowSessionStore = new WindowSessionStore(userData);
+    this.agentSecrets = new AgentSecretStore(userData);
+    this.windowSessionStore = new WindowSessionStore(userData, process.platform, this.agentSecrets);
     this.windowManager = new WindowManager(this, this.ipcRouter, this.windowSessionStore);
     this.setupAppEvents();
   }
@@ -154,16 +157,30 @@ export class App {
 
     this.isQuitting = true;
     for (const window of prepared) this.windowManager.updateWindowState(window);
+    const sessionsFlushed = await this.windowSessionStore.flush();
+    const conversationStoreAvailable = this.agentConversations.getStatus?.().available === true;
+    const conversationsFlushed = await this.agentConversations.flush();
+    if (!sessionsFlushed || (conversationStoreAvailable && !conversationsFlushed)) {
+      console.warn("[App] Quit cancelled because required session or Agent data could not be persisted");
+      this.isQuitting = false;
+      for (const window of prepared) await window.cancelPreparedClose();
+      return false;
+    }
     for (const window of prepared) {
       const closed = await window.commitPreparedClose();
       if (!closed) {
         this.isQuitting = false;
-        for (const remaining of prepared) remaining.cancelPreparedClose();
+        for (const remaining of prepared) await remaining.cancelPreparedClose();
         return false;
       }
-      await window.waitForDisposal();
     }
-    await this.windowSessionStore.flush();
+    if (!prepared.every((window) => window.canCloseCommittedWindow())) {
+      this.isQuitting = false;
+      for (const window of prepared) await window.cancelPreparedClose();
+      return false;
+    }
+    for (const window of prepared) window.closeCommittedWindow();
+    for (const window of prepared) await window.waitForDisposal();
     await this.stopNsh();
     app.quit();
     return true;

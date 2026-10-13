@@ -20,16 +20,25 @@ export interface CreateWindowOptions {
   focus?: boolean;
 }
 
-function workspaceComparisonKey(value: string, platform = process.platform): string {
+export function workspaceComparisonKey(value: string, platform = process.platform): string {
   const pathApi = platform === "win32" ? path.win32 : path;
   const normalized = pathApi.resolve(value).normalize("NFC");
   return platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
+}
+
+interface PendingWorkspaceReservation {
+  path: string;
+  key: string;
+  token: number;
 }
 
 export class WindowManager {
   readonly windows = new Map<string, Window>();
   private readonly byWebContents = new Map<WebContents, string>();
   private readonly workspaceOwners = new Map<string, string>();
+  private readonly workspaceAliases = new Map<string, string>();
+  private readonly pendingWorkspaceReservations = new Map<string, PendingWorkspaceReservation>();
+  private readonly workspaceTransitionVersions = new Map<string, number>();
   private activeWindowId: string | null = null;
   private creationIndex = 0;
   private readonly app: App;
@@ -183,7 +192,8 @@ export class WindowManager {
   }
 
   findWindowByWorkspace(folderPath: string): Window | null {
-    const key = workspaceComparisonKey(folderPath);
+    const requestKey = workspaceComparisonKey(folderPath);
+    const key = this.workspaceAliases.get(requestKey) || requestKey;
     const ownerId = this.workspaceOwners.get(key);
     return ownerId ? this.windows.get(ownerId) || null : null;
   }
@@ -197,28 +207,100 @@ export class WindowManager {
     return true;
   }
 
-  async reserveWorkspace(windowId: string, folderPath: unknown): Promise<{ success: boolean; path?: string; existingWindowId?: string }> {
+  async reserveWorkspace(windowId: string, folderPath: unknown): Promise<{ success: boolean; path?: string; existingWindowId?: string; token?: number }> {
     const canonical = await this.validateWorkspace(folderPath);
     if (!canonical) return { success: false };
-    const keys = [workspaceComparisonKey(canonical)];
-    if (typeof folderPath === "string") keys.push(workspaceComparisonKey(folderPath));
-    const ownerId = keys.map((key) => this.workspaceOwners.get(key)).find(Boolean);
+    const key = workspaceComparisonKey(canonical);
+    const requestKey = typeof folderPath === "string" ? workspaceComparisonKey(folderPath) : key;
+    const ownerId = this.workspaceOwners.get(key);
     if (ownerId && ownerId !== windowId) {
       this.focusWindow(ownerId);
       return { success: false, existingWindowId: ownerId };
     }
     const window = this.windows.get(windowId);
-    if (!window) return { success: false };
-    for (const key of keys) this.workspaceOwners.set(key, windowId);
-    window.setWorkspacePath(canonical);
-    return { success: true, path: canonical };
+    if (!window || !window.window || window.window.isDestroyed()) return { success: false };
+    const previousPending = this.pendingWorkspaceReservations.get(windowId);
+    const currentKey = window.workspacePath ? workspaceComparisonKey(window.workspacePath) : null;
+    if (previousPending && previousPending.key !== key && previousPending.key !== currentKey &&
+        this.workspaceOwners.get(previousPending.key) === windowId) {
+      this.workspaceOwners.delete(previousPending.key);
+      for (const [alias, canonical] of this.workspaceAliases) {
+        if (canonical === previousPending.key) this.workspaceAliases.delete(alias);
+      }
+    }
+    const token = (this.workspaceTransitionVersions.get(windowId) || 0) + 1;
+    this.workspaceTransitionVersions.set(windowId, token);
+    this.workspaceOwners.set(key, windowId);
+    this.workspaceAliases.set(requestKey, key);
+    this.pendingWorkspaceReservations.set(windowId, { path: canonical, key, token });
+    return { success: true, path: canonical, token };
   }
 
-  releaseWorkspace(windowId: string, folderPath?: string | null, updateWindow = true): void {
-    for (const [key, owner] of this.workspaceOwners) {
-      if (owner === windowId) this.workspaceOwners.delete(key);
-    }
+  commitWorkspace(windowId: string, folderPath: string, token?: number): boolean {
+    const pending = this.pendingWorkspaceReservations.get(windowId);
+    const requestKey = workspaceComparisonKey(folderPath);
+    const key = this.workspaceAliases.get(requestKey) || requestKey;
     const window = this.windows.get(windowId);
+    if (!pending || !window || pending.key !== key ||
+        (token !== undefined && pending.token !== token) ||
+        this.workspaceTransitionVersions.get(windowId) !== pending.token ||
+        this.workspaceOwners.get(key) !== windowId || !window.window || window.window.isDestroyed())
+      return false;
+
+    const previousKey = window.workspacePath ? workspaceComparisonKey(window.workspacePath) : null;
+    window.setWorkspacePath(pending.path);
+    if (previousKey && previousKey !== key && this.workspaceOwners.get(previousKey) === windowId) {
+      this.workspaceOwners.delete(previousKey);
+      for (const [alias, canonical] of this.workspaceAliases) {
+        if (canonical === previousKey) this.workspaceAliases.delete(alias);
+      }
+    }
+    this.pendingWorkspaceReservations.delete(windowId);
+    return true;
+  }
+
+  releaseWorkspace(
+    windowId: string,
+    folderPath?: string | null,
+    updateWindow = true,
+    token?: number,
+  ): void {
+    const window = this.windows.get(windowId);
+    if (token !== undefined) {
+      const pending = this.pendingWorkspaceReservations.get(windowId);
+      if (!pending || pending.token !== token || this.workspaceTransitionVersions.get(windowId) !== token)
+        return;
+      const currentKey = window?.workspacePath ? workspaceComparisonKey(window.workspacePath) : null;
+      if (pending.key !== currentKey && this.workspaceOwners.get(pending.key) === windowId) {
+        this.workspaceOwners.delete(pending.key);
+        for (const [alias, canonical] of this.workspaceAliases) {
+          if (canonical === pending.key) this.workspaceAliases.delete(alias);
+        }
+      }
+      this.pendingWorkspaceReservations.delete(windowId);
+      return;
+    }
+
+    const requestedKey = folderPath
+      ? this.workspaceAliases.get(workspaceComparisonKey(folderPath)) || workspaceComparisonKey(folderPath)
+      : null;
+    if (requestedKey) {
+      if (this.workspaceOwners.get(requestedKey) === windowId) this.workspaceOwners.delete(requestedKey);
+      for (const [alias, canonical] of this.workspaceAliases) {
+        if (canonical === requestedKey) this.workspaceAliases.delete(alias);
+      }
+      const pending = this.pendingWorkspaceReservations.get(windowId);
+      if (pending?.key === requestedKey) this.pendingWorkspaceReservations.delete(windowId);
+      if (updateWindow && window?.workspacePath &&
+          workspaceComparisonKey(window.workspacePath) === requestedKey) window.setWorkspacePath(null);
+      return;
+    }
+
+    for (const [key, owner] of this.workspaceOwners) if (owner === windowId) this.workspaceOwners.delete(key);
+    for (const [alias, canonical] of this.workspaceAliases) {
+      if (!this.workspaceOwners.has(canonical)) this.workspaceAliases.delete(alias);
+    }
+    this.pendingWorkspaceReservations.delete(windowId);
     if (window && updateWindow) window.setWorkspacePath(null);
   }
 
@@ -258,19 +340,33 @@ export class WindowManager {
     const prepared: Window[] = [];
     for (const window of this.getAllWindows()) {
       if (!(await window.prepareForApplicationQuit())) {
-        for (const earlier of prepared) earlier.cancelPreparedClose();
+        for (const earlier of prepared) await earlier.cancelPreparedClose();
         return false;
       }
       prepared.push(window);
     }
-    for (const window of prepared) {
-      if (preserveSessions) window.preserveSessionOnClose = true;
-      if (!(await window.commitPreparedClose())) {
-        for (const remaining of prepared) remaining.cancelPreparedClose();
+    if (preserveSessions) {
+      for (const window of prepared) {
+        window.preserveSessionOnClose = true;
+        this.updateWindowState(window);
+      }
+      if (!(await this.sessions.flush())) {
+        for (const remaining of prepared) await remaining.cancelPreparedClose();
         return false;
       }
-      await window.waitForDisposal();
     }
+    for (const window of prepared) {
+      if (!(await window.commitPreparedClose())) {
+        for (const remaining of prepared) await remaining.cancelPreparedClose();
+        return false;
+      }
+    }
+    if (!prepared.every((window) => window.canCloseCommittedWindow())) {
+      for (const remaining of prepared) await remaining.cancelPreparedClose();
+      return false;
+    }
+    for (const window of prepared) window.closeCommittedWindow();
+    for (const window of prepared) await window.waitForDisposal();
     return true;
   }
 
@@ -293,15 +389,20 @@ export class WindowManager {
     this.windows.delete(windowId);
     if (sender) this.byWebContents.delete(sender);
     this.ipcRouter.detachWindow(windowId, sender);
-    this.releaseWorkspace(windowId, window?.workspacePath, false);
+    this.workspaceTransitionVersions.set(windowId, (this.workspaceTransitionVersions.get(windowId) || 0) + 1);
+    this.releaseWorkspace(windowId, null, false);
     if (this.activeWindowId === windowId) {
       this.activeWindowId = [...this.windows.keys()].at(-1) || null;
       const active = this.activeWindowId ? this.windows.get(this.activeWindowId) : null;
       if (active) active.appMenu?.activate();
       else AppMenu.installWindowlessMenu(this.app);
     }
-    if (window && !this.app.isQuitting && !window.preserveSessionOnClose)
-      void this.sessions.remove(window.sessionId);
+    if (window && !this.app.isQuitting && !window.preserveSessionOnClose) {
+      this.sessions.remove(window.sessionId);
+      void this.sessions.flush().then((saved) => {
+        if (!saved) console.warn("[Window Manager] Closed window session could not be persisted");
+      });
+    }
   }
 
   updateWindowState(window: Window): void {
@@ -324,6 +425,9 @@ export class WindowManager {
     this.windows.clear();
     this.byWebContents.clear();
     this.workspaceOwners.clear();
+    this.workspaceAliases.clear();
+    this.pendingWorkspaceReservations.clear();
+    this.workspaceTransitionVersions.clear();
     this.activeWindowId = null;
   }
 
@@ -374,14 +478,84 @@ export class WindowManager {
   }
 
   static getRestoreBounds(bounds: WindowBounds | null, platform = process.platform): WindowBounds | null {
-    if (!bounds) return null;
+    if (!bounds) {
+      const area = screen.getPrimaryDisplay().workArea;
+      const width = Math.max(1, Math.min(1100, area.width));
+      const height = Math.max(1, Math.min(720, area.height));
+      return {
+        x: area.x + Math.max(0, Math.min(60, area.width - width)),
+        y: area.y + Math.max(0, Math.min(60, area.height - Math.min(35, height))),
+        width,
+        height,
+      };
+    }
+    if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) ||
+        bounds.width <= 0 || bounds.height <= 0) return null;
     const displays = screen.getAllDisplays();
-    const intersects = displays.some(({ workArea }) =>
-      bounds.x < workArea.x + workArea.width && bounds.x + bounds.width > workArea.x &&
-      bounds.y < workArea.y + workArea.height && bounds.y + bounds.height > workArea.y,
+    const primary = screen.getPrimaryDisplay();
+    const available = displays.length ? displays : [primary];
+    const titleHeight = Math.min(35, bounds.height);
+    const titleRanges: Array<[number, number]> = [];
+    for (const { workArea } of available) {
+      const verticalVisible = Math.min(bounds.y + titleHeight, workArea.y + workArea.height) -
+        Math.max(bounds.y, workArea.y);
+      if (verticalVisible < Math.min(24, titleHeight, workArea.height)) continue;
+      const left = Math.max(bounds.x, workArea.x);
+      const right = Math.min(bounds.x + bounds.width, workArea.x + workArea.width);
+      if (right > left) titleRanges.push([left, right]);
+    }
+    titleRanges.sort((a, b) => a[0] - b[0]);
+    let visibleTitleWidth = 0;
+    let rangeStart = 0;
+    let rangeEnd = 0;
+    for (const [start, end] of titleRanges) {
+      if (rangeEnd <= rangeStart) {
+        rangeStart = start;
+        rangeEnd = end;
+      } else if (start <= rangeEnd) {
+        rangeEnd = Math.max(rangeEnd, end);
+      } else {
+        visibleTitleWidth += rangeEnd - rangeStart;
+        rangeStart = start;
+        rangeEnd = end;
+      }
+    }
+    if (rangeEnd > rangeStart) visibleTitleWidth += rangeEnd - rangeStart;
+    const meaningfulDisplayCount = available.filter(({ workArea }) => {
+      const overlapWidth = Math.max(0, Math.min(bounds.x + bounds.width, workArea.x + workArea.width) -
+        Math.max(bounds.x, workArea.x));
+      const overlapHeight = Math.min(bounds.y + titleHeight, workArea.y + workArea.height) -
+        Math.max(bounds.y, workArea.y);
+      return overlapWidth >= Math.min(100, bounds.width) &&
+        overlapHeight >= Math.min(24, titleHeight, workArea.height);
+    }).length;
+    const oversizedForEveryDisplay = !available.some(({ workArea }) =>
+      bounds.width <= workArea.width && bounds.height <= workArea.height,
     );
-    if (intersects) return bounds;
-    const area = screen.getPrimaryDisplay().workArea;
-    return { x: area.x + 32, y: area.y + 32, width: Math.min(bounds.width, area.width), height: Math.min(bounds.height, area.height) };
+    if (visibleTitleWidth >= Math.min(320, bounds.width) &&
+        (!oversizedForEveryDisplay || meaningfulDisplayCount > 1)) return { ...bounds };
+
+    const intersectionArea = (workArea: Electron.Rectangle) => {
+      const width = Math.max(0, Math.min(bounds.x + bounds.width, workArea.x + workArea.width) -
+        Math.max(bounds.x, workArea.x));
+      const height = Math.max(0, Math.min(bounds.y + bounds.height, workArea.y + workArea.height) -
+        Math.max(bounds.y, workArea.y));
+      return width * height;
+    };
+    const display = available.reduce((best, candidate) =>
+      intersectionArea(candidate.workArea) > intersectionArea(best.workArea) ? candidate : best,
+    available[0]);
+    const area = display?.workArea || primary.workArea;
+    const width = Math.max(1, Math.min(bounds.width, area.width));
+    const height = Math.max(1, Math.min(bounds.height, area.height));
+    const titleVisibleHeight = Math.min(35, height, area.height);
+    const maxX = area.x + area.width - width;
+    const maxY = area.y + area.height - titleVisibleHeight;
+    return {
+      x: Math.max(area.x, Math.min(bounds.x, maxX)),
+      y: Math.max(area.y, Math.min(bounds.y, maxY)),
+      width,
+      height,
+    };
   }
 }
