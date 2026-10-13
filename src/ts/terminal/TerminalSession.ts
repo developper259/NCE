@@ -30,6 +30,10 @@ export class TerminalSession {
   private exitSubscription: IDisposable | null = null;
   private exited = false;
   private disposed = false;
+  private processExited = false;
+  private processExitPromise: Promise<void>;
+  private resolveProcessExit!: () => void;
+  private disposalWait: Promise<boolean> | null = null;
   private pendingExit: { exitCode: number; signal: number | null } | null = null;
   private queue: string[] = [];
   private queuedBytes = 0;
@@ -49,11 +53,15 @@ export class TerminalSession {
     this.owner = owner;
     this.process = process;
     this.logger = logger;
+    this.processExitPromise = new Promise((resolve) => { this.resolveProcessExit = resolve; });
     this.dataSubscription = process.onData((data) => this.enqueue(data));
     this.exitSubscription = process.onExit(({ exitCode, signal }) => {
+      this.processExited = true;
       this.exited = true;
       this.process = null;
+      this.resolveProcessExit();
       this.disposeSubscriptions();
+      if (this.disposed) return;
       this.pendingExit = { exitCode, signal: signal ?? null };
       this.dispatchNext();
     });
@@ -101,7 +109,34 @@ export class TerminalSession {
     this.queue = [];
     this.queuedBytes = 0;
     this.inFlight = null;
-    this.disposeSubscriptions();
+    this.dataSubscription?.dispose();
+    this.dataSubscription = null;
+    if (this.processExited) {
+      this.exitSubscription?.dispose();
+      this.exitSubscription = null;
+    }
+  }
+
+  async disposeAndWait(timeoutMs = 5000): Promise<boolean> {
+    this.dispose();
+    if (this.processExited) return true;
+    if (!this.disposalWait) {
+      this.disposalWait = new Promise((resolve) => {
+        const timer = setTimeout(() => {
+          this.disposeSubscriptions();
+          resolve(false);
+        }, timeoutMs);
+        void this.processExitPromise.then(() => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
+    }
+    return this.disposalWait;
+  }
+
+  whenProcessExited(): Promise<void> {
+    return this.processExitPromise;
   }
 
   private enqueue(data: string): void {

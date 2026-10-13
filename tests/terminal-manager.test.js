@@ -135,13 +135,14 @@ test("TerminalManager supports repeated create, kill, and create without stale s
     ), { success: true });
     assert.equal(child.kills, 1, "each PTY is killed once");
     assert.equal(child.dataListeners.size, 0, "data subscriptions are released");
-    assert.equal(child.exitListeners.size, 0, "late exit callbacks are detached");
+    assert.equal(child.exitListeners.size, 1, "exit callback remains until the PTY confirms termination");
     assert.equal(f.manager.sessions.size, 0, "closed sessions are removed from the manager");
     assert.equal(f.manager.close(
       { sender: f.owner }, created.sessionId, created.workspaceKey,
     ).error.code, "SESSION_UNAVAILABLE");
     assert.equal(child.kills, 1, "a repeated close never kills the same PTY again");
     child.emitExit(0);
+    assert.equal(child.exitListeners.size, 0, "exit callback is detached after process termination");
     assert.equal(f.manager.sessions.size, 0, "a late exit cannot restore a removed session");
   }
   assert.equal(ids.size, 20);
@@ -174,6 +175,7 @@ test("closing an owner cancels pending PTY creation and releases its reservation
   assert.equal((await create(f)).success, true, "the manager remains usable after cancellation");
   f.manager.closeAll();
   assert.equal(f.manager.sessions.size, 0);
+  f.ptys[0].child.emitExit(0);
 });
 
 test("a failed spawn can be retried without a stale ID or pending reservation", async () => {
@@ -197,6 +199,7 @@ test("a failed spawn can be retried without a stale ID or pending reservation", 
   assert.equal(retried.sessionId, f.manager.sessions.keys().next().value);
   assert.equal(f.manager.pendingCreates.size, 0);
   f.manager.closeAll();
+  f.ptys[0].child.emitExit(0);
 });
 
 test("an unusable resolved working directory fails before native spawn", async () => {
@@ -483,7 +486,9 @@ test("TerminalSession stops safely on output overflow, reports exit, and cleans 
   });
   assert.equal(f.manager.write({ sender: f.owner }, next.sessionId, next.workspaceKey, "no" ).error.code, "SESSION_EXITED");
   f.owner.destroyed = true;
-  f.manager.closeForOwner(f.owner);
+  const closing = f.manager.closeForOwner(f.owner);
+  f.ptys[0].child.emitExit(0);
+  await closing;
   assert.equal(nextChild.kills, 0, "an exited process is not killed again");
 });
 
@@ -493,10 +498,47 @@ test("TerminalManager closes all sessions belonging to a reloaded or destroyed w
   const second = await create(f);
   assert.equal(f.manager.close({ sender: f.owner }, first.sessionId, first.workspaceKey).success, true);
   assert.equal(f.ptys[0].child.kills, 1);
-  f.manager.closeForOwner(f.owner);
-  f.manager.closeForOwner(f.owner);
+  const closing = f.manager.closeForOwner(f.owner);
+  f.ptys[0].child.emitExit(0);
+  f.ptys[1].child.emitExit(0);
+  await closing;
   assert.equal(f.ptys[1].child.kills, 1);
   assert.equal(f.manager.write({ sender: f.owner }, second.sessionId, second.workspaceKey, "no").error.code, "SESSION_UNAVAILABLE");
+});
+
+test("closing a window waits for owned PTY processes to exit", async () => {
+  const f = fixture();
+  const created = await create(f);
+  const child = f.ptys[0].child;
+  let closed = false;
+
+  const closing = f.manager.closeForOwner(f.owner).then(() => { closed = true; });
+  await Promise.resolve();
+  assert.equal(child.kills, 1);
+  assert.equal(closed, false, "window cleanup waits for the native PTY exit event");
+  child.emitExit(0);
+  await closing;
+  assert.equal(closed, true);
+  assert.equal(child.exitListeners.size, 0);
+  assert.equal(f.manager.close({ sender: f.owner }, created.sessionId, created.workspaceKey).error.code,
+    "SESSION_UNAVAILABLE");
+});
+
+test("window shutdown also waits for PTYs closed earlier by the renderer", async () => {
+  const f = fixture();
+  const created = await create(f);
+  const child = f.ptys[0].child;
+  assert.equal(f.manager.close(
+    { sender: f.owner }, created.sessionId, created.workspaceKey,
+  ).success, true);
+
+  let closed = false;
+  const closing = f.manager.closeForOwner(f.owner).then(() => { closed = true; });
+  await Promise.resolve();
+  assert.equal(closed, false, "removed sessions stay tracked until their native process exits");
+  child.emitExit(0);
+  await closing;
+  assert.equal(closed, true);
 });
 
 test("window navigation removes PTYs immediately and defers native disposal", async () => {
@@ -504,12 +546,14 @@ test("window navigation removes PTYs immediately and defers native disposal", as
   const created = await create(f);
   const child = f.ptys[0].child;
 
-  f.manager.closeForOwner(f.owner, { deferProcessDisposal: true });
+  const closing = f.manager.closeForOwner(f.owner, { deferProcessDisposal: true });
 
   assert.equal(f.manager.sessions.size, 0, "the reloading renderer loses access immediately");
   assert.equal(child.kills, 0, "native process cleanup does not run in the navigation callback");
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(child.kills, 1, "native process cleanup runs on the next event-loop turn");
+  child.emitExit(0);
+  await closing;
   assert.equal(f.manager.close(
     { sender: f.owner }, created.sessionId, created.workspaceKey,
   ).error.code, "SESSION_UNAVAILABLE");

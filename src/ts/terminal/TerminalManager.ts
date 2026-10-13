@@ -220,6 +220,7 @@ export async function resolveTerminalShell(
 
 export class TerminalManager {
   private readonly sessions = new Map<string, TerminalSession>();
+  private readonly pendingDisposals = new Map<WebContents, Set<TerminalSession>>();
   private readonly pendingCreates = new Map<WebContents, number>();
   private owner: WebContents | null;
   private readonly ipc: IpcHandlerRegistrar;
@@ -516,14 +517,23 @@ export class TerminalManager {
   closeForOwner(
     owner: WebContents,
     { deferProcessDisposal = false }: { deferProcessDisposal?: boolean } = {},
-  ): void {
+  ): Promise<void> {
     if (owner === this.owner) this.ownerGeneration += 1;
+    const disposals = [...(this.pendingDisposals.get(owner) || [])]
+      .map((session) => session.disposeAndWait());
     for (const session of this.sessions.values()) {
       if (session.owner !== owner) continue;
       this.sessions.delete(session.id);
-      if (deferProcessDisposal) setImmediate(() => session.dispose());
-      else session.dispose();
+      disposals.push(this.disposeSession(session, deferProcessDisposal));
     }
+    return Promise.all(disposals).then((results) => {
+      if (results.some((exited) => !exited)) {
+        this.logger.error("[Terminal] A PTY did not exit before its window finished closing.");
+      }
+      const pending = this.pendingDisposals.get(owner);
+      for (const session of [...(pending || [])]) pending?.delete(session);
+      if (pending?.size === 0) this.pendingDisposals.delete(owner);
+    });
   }
 
   closeAll(): void {
@@ -531,8 +541,34 @@ export class TerminalManager {
   }
 
   private removeSession(session: TerminalSession): void {
-    session.dispose();
     this.sessions.delete(session.id);
+    this.trackDisposal(session);
+    session.dispose();
+  }
+
+  private disposeSession(session: TerminalSession, deferProcessDisposal = false): Promise<boolean> {
+    this.trackDisposal(session);
+    if (deferProcessDisposal) {
+      return new Promise((resolve) => {
+        setImmediate(() => { void session.disposeAndWait().then(resolve); });
+      });
+    }
+    return session.disposeAndWait();
+  }
+
+  private trackDisposal(session: TerminalSession): void {
+    let pending = this.pendingDisposals.get(session.owner);
+    if (!pending) {
+      pending = new Set();
+      this.pendingDisposals.set(session.owner, pending);
+    }
+    pending.add(session);
+    void session.whenProcessExited().then(() => {
+      pending?.delete(session);
+      if (pending?.size === 0 && this.pendingDisposals.get(session.owner) === pending) {
+        this.pendingDisposals.delete(session.owner);
+      }
+    });
   }
 
   private failure(code: string, message: string): TerminalCreateResult {

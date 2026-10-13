@@ -543,7 +543,7 @@ export class Window {
   private async disposeWindowServices(owner?: WebContents): Promise<void> {
     this.agentApprovalManager?.cancelAll();
     this.agentProcessRunner?.dispose();
-    if (owner) this.terminalManager?.closeForOwner(owner);
+    if (owner) await this.terminalManager?.closeForOwner(owner);
     await this.watcher?.dispose();
     await this.workspaceSearch?.dispose();
     this.fileManager?.clearFileCache();
