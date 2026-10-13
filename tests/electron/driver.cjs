@@ -2706,29 +2706,19 @@ app.whenReady().then(() => {
         "workspace A is active and its Bottom Panel is visible before persisting");
         assert.equal(await run("editor.fileExplorer.closeProject()"), true, "the terminal smoke test returns to No Workspace without reassigning its live PTY");
         traceStep("terminal close, switch, and persistence checks passed");
-        assert.equal(await run(`(() => {
-          window.__nceSmokeRecoverySnapshotResult = null;
-          window.api.saveRecoverySnapshot(null, {
+        const savedRecoverySnapshot = await nce.window.fileManager.saveRecoverySnapshot(null, {
             untitledId: "electron-smoke-recovery",
             displayName: "recovered.txt",
-            content: "recovered by smoke\\r\\n🙂 end\\n",
+            content: "recovered by smoke\r\n🙂 end\n",
             lineCount: 2,
             editVersion: 1,
-          }).then(result => {
-            window.__nceSmokeRecoverySnapshotResult = result;
-          }).catch(error => {
-            window.__nceSmokeRecoverySnapshotResult = { success: false, reason: String(error) };
           });
-          editor.statesManager.clearRecoverySnapshotsOnQuit = async () => true;
-          return true;
-        })()`), true, "recovery fixture write starts through the renderer API");
-        await waitForCondition(
-          async () => (await run("window.__nceSmokeRecoverySnapshotResult !== null")) === true,
-          { timeout: 10000, description: "renderer recovery snapshot write to finish" },
-        );
-        const savedRecoverySnapshot = await run("window.__nceSmokeRecoverySnapshotResult");
         assert.equal(savedRecoverySnapshot.success, true,
           `recovery fixture persists across the simulated clean quit: ${JSON.stringify(savedRecoverySnapshot)}`);
+        assert.equal(await run(`(() => {
+          editor.statesManager.clearRecoverySnapshotsOnQuit = async () => true;
+          return true;
+        })()`), true, "clean quit preserves the recovery fixture for restart");
         // The remaining long-running PTY is intentionally left for the window-close
         // lifecycle assertion below; closing the renderer must reap it.
       }
