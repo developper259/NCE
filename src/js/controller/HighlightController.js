@@ -145,18 +145,28 @@ class HighlightController {
 
     const documentId = this.getDocumentId(file);
     const epoch = this.documentEpochs.get(file.id);
+    const code = this.getLogicalText(file);
+    const range = this.getVisibleDocumentRange(file);
     this.documentModes.set(file.id, "incremental");
     try {
       await this.queueDocumentRequest(file, async () => {
-        await this.nshClient.request("openDocument", {
-          documentId,
-          language: file.language,
-          code: this.getLogicalText(file),
-        });
-        if (this.documentEpochs.get(file.id) !== epoch) return;
-        const range = this.getVisibleDocumentRange(file);
-        if (range)
-          await this.loadDocumentLines(file, range.startLine, range.endLine);
+        if (this.documentModes.get(file.id) !== "incremental") return;
+        try {
+          await this.nshClient.request("openDocument", {
+            documentId,
+            language: file.language,
+            code,
+          });
+          if (this.documentEpochs.get(file.id) !== epoch) return;
+          if (range)
+            await this.loadDocumentLines(file, range.startLine, range.endLine);
+        } catch (error) {
+          if (this.documentEpochs.get(file.id) === epoch) {
+            this.documentModes.set(file.id, "line");
+            this.reset();
+          }
+          throw error;
+        }
       });
     } catch (error) {
       if (this.documentEpochs.get(file.id) !== epoch) return;
@@ -191,17 +201,68 @@ class HighlightController {
     const epoch = this.documentEpochs.get(file.id);
     if (this.documentModes.get(file.id) !== "incremental") return;
 
+    return this.queueDocumentRequest(file, () =>
+      this.recoverDocumentHighlightInQueue(file, reason, epoch),
+    );
+  }
+
+  async recoverDocumentHighlightInQueue(file, reason, expectedEpoch) {
+    if (
+      !file || this.documentModes.get(file.id) !== "incremental" ||
+      this.documentEpochs.get(file.id) !== expectedEpoch
+    ) return;
+
     console.warn("[NSH] Recovering document highlighting", {
       event: "document_highlight_recovery",
       fileId: file.id,
       reason: reason?.message || String(reason || "unknown"),
     });
 
-    await this.invalidateFile(file);
-    if (this.documentEpochs.get(file.id) === epoch) return;
-
     try {
-      await this.openFile(file);
+      const oldDocumentId = this.documentIds.get(file.id);
+      const code = this.getLogicalText(file);
+      const language = file.language;
+      const revision = this.documentRevisions.get(file.id) || 0;
+      const epoch = expectedEpoch + 1;
+      this.documentEpochs.set(file.id, epoch);
+      this.bumpDocumentRevision(file);
+      this.documentIds.delete(file.id);
+      this.rangeRequests.delete(file.id);
+      this.lastLoadedRanges.delete(file.id);
+      for (const key of this.rangeFailures.keys()) {
+        if (key.startsWith(`${file.id}:`)) this.rangeFailures.delete(key);
+      }
+      if (file.largeFileMode !== true) {
+        for (const line of file.lines) {
+          line.clearTokens();
+          line.setState(null);
+        }
+      }
+      if (oldDocumentId) {
+        try {
+          await this.nshClient.request("closeDocument", {
+            documentId: oldDocumentId,
+          });
+        } catch (closeError) {
+          console.warn("[NSH] Could not close desynchronized document", closeError);
+        }
+      }
+      if (
+        this.documentEpochs.get(file.id) !== epoch ||
+        this.documentModes.get(file.id) !== "incremental"
+      ) return;
+      const documentId = this.getDocumentId(file);
+      await this.nshClient.request("openDocument", {
+        documentId,
+        language,
+        code,
+      });
+      if (this.documentEpochs.get(file.id) !== epoch) return;
+      if ((this.documentRevisions.get(file.id) || 0) === revision + 1) {
+        const range = this.getVisibleDocumentRange(file);
+        if (range)
+          await this.loadDocumentLines(file, range.startLine, range.endLine);
+      }
       if (file === this.editor.tabManager.activeFile) {
         this.editor.lineController.refresh(true);
       }
@@ -237,7 +298,6 @@ class HighlightController {
     }
     this.documentModes.clear();
     this.documentIds.clear();
-    this.documentQueues.clear();
     this.rangeRequests.clear();
     this.lastLoadedRanges.clear();
     this.rangeFailures.clear();
@@ -308,20 +368,29 @@ class HighlightController {
     const epoch = this.documentEpochs.get(file.id);
     try {
       await this.queueDocumentRequest(file, async () => {
-        const response = await this.nshClient.request("updateDocument", {
-          documentId: this.getDocumentId(file),
-          startLine,
-          deletedLines,
-          insertedLines,
-        });
-        if (
-          this.documentEpochs.get(file.id) === epoch &&
-          this.documentRevisions.get(file.id) === revision
-        ) this.applyCachedLines(file, response.lines || [], response.changedStartLine || 0);
+        if (this.documentModes.get(file.id) !== "incremental") return;
+        try {
+          const response = await this.nshClient.request("updateDocument", {
+            documentId: this.getDocumentId(file),
+            startLine,
+            deletedLines,
+            insertedLines,
+          });
+          if (
+            this.documentEpochs.get(file.id) === epoch &&
+            this.documentRevisions.get(file.id) === revision
+          ) this.applyCachedLines(file, response.lines || [], response.changedStartLine ?? 0);
+        } catch (error) {
+          if (this.documentEpochs.get(file.id) === epoch)
+            await this.recoverDocumentHighlightInQueue(file, error, epoch);
+        }
       });
     } catch (error) {
-      if (this.documentEpochs.get(file.id) !== epoch) return;
-      await this.recoverDocumentHighlight(file, error);
+      if (this.documentEpochs.get(file.id) === epoch) {
+        this.documentModes.set(file.id, "line");
+        this.reset();
+        console.error("[NSH] Document synchronization recovery failed", error);
+      }
     }
   }
 
@@ -372,10 +441,8 @@ class HighlightController {
         }
         if (!this.isRangeError(error)) throw error;
         this.rangeFailures.set(failureKey, true);
-        return { recover: error };
+        await this.recoverDocumentHighlightInQueue(file, error, requestEpoch);
       }
-    }).then(async (result) => {
-      if (result?.recover) await this.recoverDocumentHighlight(file, result.recover);
     }).finally(() => {
       if (this.rangeRequests.get(file.id)?.promise === promise) {
         this.rangeRequests.delete(file.id);
@@ -467,7 +534,10 @@ class HighlightController {
     const next = previous
       .catch(() => {})
       .then(() => {
-        if (this.documentEpochs.get(file.id) === epoch) return task();
+        if (
+          this.documentEpochs.get(file.id) === epoch &&
+          this.documentModes.get(file.id) !== "line"
+        ) return task();
       });
     this.documentQueues.set(file.id, next);
     return next.finally(() => {
@@ -497,35 +567,45 @@ class HighlightController {
     }
     const revision = this.bumpDocumentRevision(file);
     const epoch = this.documentEpochs.get(file.id);
+    const documentId = this.getDocumentId(file);
     this.queueDocumentRequest(file, async () => {
+      if (this.documentModes.get(file.id) !== "incremental") return;
       let lineDelta = 0;
-      for (const update of updates) {
-        const startLine = update.startLine + lineDelta;
-        const response = await this.nshClient.request("updateDocument", {
-          documentId: this.getDocumentId(file),
-          ...update,
-          startLine,
-        });
-        if (
-          this.documentEpochs.get(file.id) !== epoch ||
-          this.documentRevisions.get(file.id) !== revision
-        ) return;
-        this.applyCachedLines(
-          file,
-          response.lines || [],
-          response.changedStartLine || startLine,
-        );
-        lineDelta += update.insertedLines.length - update.deletedLines;
+      try {
+        for (const update of updates) {
+          if (
+            this.documentEpochs.get(file.id) !== epoch ||
+            this.documentModes.get(file.id) !== "incremental"
+          ) return;
+          const startLine = update.startLine + lineDelta;
+          const response = await this.nshClient.request("updateDocument", {
+            documentId,
+            ...update,
+            startLine,
+          });
+          if (this.documentEpochs.get(file.id) !== epoch) return;
+          // Revision changes make the returned tokens stale, but never cancel
+          // the remaining document mutations in this accepted transaction.
+          if ((this.documentRevisions.get(file.id) || 0) === revision) {
+            this.applyCachedLines(
+              file,
+              response.lines || [],
+              response.changedStartLine ?? startLine,
+            );
+          }
+          lineDelta += update.insertedLines.length - update.deletedLines;
+        }
+      } catch (error) {
+        if (this.documentEpochs.get(file.id) !== epoch) return;
+        console.error("[NSH] Document update failed", error);
+        await this.recoverDocumentHighlightInQueue(file, error, epoch);
       }
-    }).catch((error) => {
-      console.error("[NSH] Document update failed", error);
-      return this.recoverDocumentHighlight(file, error);
     });
   }
 
   closeFile(file) {
+    if (!file?.id) return Promise.resolve();
     const documentId = this.documentIds.get(file.id);
-    const previous = this.documentQueues.get(file.id) || Promise.resolve();
     this.documentEpochs.set(
       file.id,
       (this.documentEpochs.get(file.id) || 0) + 1,
@@ -533,25 +613,25 @@ class HighlightController {
     this.bumpDocumentRevision(file);
     this.documentModes.delete(file.id);
     this.documentIds.delete(file.id);
-    this.documentQueues.delete(file.id);
     this.rangeRequests.delete(file.id);
     this.lastLoadedRanges.delete(file.id);
     for (const key of this.rangeFailures.keys()) {
       if (key.startsWith(`${file.id}:`)) this.rangeFailures.delete(key);
     }
-    return previous
-      .catch(() => {})
-      .then(() => {
-        if (documentId)
-          return this.nshClient
-            .request("closeDocument", { documentId })
-            .catch(() => {});
-      });
+    return this.queueDocumentRequest(file, async () => {
+      if (documentId)
+        await this.nshClient.request("closeDocument", { documentId });
+    }).catch((error) => {
+      console.warn("[NSH] Could not close document", error);
+    });
   }
 
   closeAllFiles() {
-    for (const fileId of [...this.documentModes.keys()])
-      this.closeFile({ id: fileId });
+    return Promise.all(
+      [...this.documentModes.keys()].map((fileId) =>
+        this.closeFile({ id: fileId }),
+      ),
+    );
   }
 
   splitValidWord(tokenValue) {

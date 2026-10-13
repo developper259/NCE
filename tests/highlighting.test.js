@@ -12,6 +12,36 @@ const Writer = loadGlobal(
     Events: { ON_CHANGE: "change" },
   },
 );
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function enableIncrementalDocument(h, editor, file, lines) {
+  file.lines = lines.map((text) => new LineNode(text));
+  editor.lineController.lines = file.lines;
+  file.incrementalEligible = true;
+  file.language = "javascript";
+  h.documentModes.set(file.id, "incremental");
+  h.documentEpochs.set(file.id, 0);
+  const documentId = h.getDocumentId(file);
+  return documentId;
+}
+
+function applyRemoteUpdate(documents, data) {
+  const document = documents.get(data.documentId);
+  assert.ok(document, `missing NSH document ${data.documentId}`);
+  const lines = document.code.split("\n");
+  lines.splice(data.startLine, data.deletedLines, ...data.insertedLines);
+  document.code = lines.join("\n");
+}
+
 function setup() {
   const calls = [],
     documents = new Map();
@@ -376,6 +406,229 @@ test("successive document replacements keep only the newest visible revision", a
   await h.loadVisibleDocumentLines(file);
   assert.equal(documents.get(h.getDocumentId(file)).code, file.lines.map((line) => line.getText()).join("\n"));
   assert.equal(file.lines[0].getTokens()[0].value, "final 0");
+});
+
+test("stale responses do not cancel later mutations in an accepted NSH batch", async () => {
+  const { editor, file, h, calls, documents } = setup();
+  const originalLines = ["0", "1", "2", "3", "4", "5", "6"];
+  const documentId = enableIncrementalDocument(h, editor, file, originalLines);
+  documents.set(documentId, { code: originalLines.join("\n"), language: "javascript" });
+  const firstStarted = deferred();
+  const releaseFirst = deferred();
+  let updateCount = 0;
+  h.nshClient.request = async (type, data) => {
+    calls.push({ type, ...data });
+    if (type === "updateDocument") {
+      updateCount++;
+      if (updateCount === 1) {
+        firstStarted.resolve();
+        await releaseFirst.promise;
+      }
+      applyRemoteUpdate(documents, data);
+      return { lines: [] };
+    }
+    if (type === "closeDocument") documents.delete(data.documentId);
+    if (type === "openDocument")
+      documents.set(data.documentId, { code: data.code, language: data.language });
+    return {};
+  };
+
+  file.lines = ["A", "A+", "1", "C", "3", "4", "E", "E+", "6"].map(
+    (text) => new LineNode(text),
+  );
+  editor.lineController.lines = file.lines;
+  h.handleChange({ nshUpdates: [
+    { startLine: 0, deletedLines: 1, insertedLines: ["A", "A+"] },
+    { startLine: 2, deletedLines: 1, insertedLines: ["C"] },
+    { startLine: 5, deletedLines: 1, insertedLines: ["E", "E+"] },
+  ] });
+  await firstStarted.promise;
+
+  file.lines = ["A", "B", "1", "C", "3", "4", "E", "E+", "6"].map(
+    (text) => new LineNode(text),
+  );
+  editor.lineController.lines = file.lines;
+  h.handleChange({ nshUpdate: {
+    startLine: 1,
+    deletedLines: 1,
+    insertedLines: ["B"],
+  } });
+  const allQueuedUpdates = h.documentQueues.get(file.id);
+  releaseFirst.resolve();
+  await allQueuedUpdates;
+
+  assert.deepEqual(
+    calls.filter((call) => call.type === "updateDocument").map((call) => call.startLine),
+    [0, 3, 6, 1],
+  );
+  assert.equal(documents.get(documentId).code, file.lines.map((line) => line.getText()).join("\n"));
+});
+
+test("an intermediate NSH mutation failure resynchronizes before queued deltas", async () => {
+  const { editor, file, h, calls, documents } = setup();
+  const oldId = enableIncrementalDocument(h, editor, file, ["before", "middle", "after"]);
+  documents.set(oldId, { code: "before\nmiddle\nafter", language: "javascript" });
+  file.lines = ["new first", "new second", "new third"].map(
+    (text) => new LineNode(text),
+  );
+  editor.lineController.lines = file.lines;
+  let updates = 0;
+  h.nshClient.request = async (type, data) => {
+    calls.push({ type, ...data });
+    if (type === "updateDocument") {
+      updates++;
+      throw new Error("worker lost its document");
+    }
+    if (type === "closeDocument") documents.delete(data.documentId);
+    if (type === "openDocument")
+      documents.set(data.documentId, { code: data.code, language: data.language });
+    return {};
+  };
+
+  h.handleChange({ nshUpdates: [
+    { startLine: 0, deletedLines: 1, insertedLines: ["new first"] },
+    { startLine: 2, deletedLines: 1, insertedLines: ["new third"] },
+  ] });
+  await h.documentQueues.get(file.id);
+
+  const currentId = h.getDocumentId(file);
+  assert.equal(updates, 1);
+  assert.notEqual(currentId, oldId);
+  assert.equal(documents.get(currentId).code, "new first\nnew second\nnew third");
+  assert.equal(h.documentModes.get(file.id), "incremental");
+});
+
+test("closing a file during a batch stops its stale tail and ignores its response", async () => {
+  const { editor, file, h, calls, documents } = setup();
+  const documentId = enableIncrementalDocument(h, editor, file, ["old", "tail"]);
+  documents.set(documentId, { code: "old\ntail", language: "javascript" });
+  file.lines = [new LineNode("new"), new LineNode("tail")];
+  editor.lineController.lines = file.lines;
+  const started = deferred();
+  const release = deferred();
+  let updates = 0;
+  h.nshClient.request = async (type, data) => {
+    calls.push({ type, ...data });
+    if (type === "updateDocument") {
+      updates++;
+      started.resolve();
+      await release.promise;
+      applyRemoteUpdate(documents, data);
+      return { lines: [{ text: "new", tokens: [{ value: "stale" }] }] };
+    }
+    if (type === "closeDocument") documents.delete(data.documentId);
+    return {};
+  };
+
+  h.handleChange({ nshUpdates: [
+    { startLine: 0, deletedLines: 1, insertedLines: ["new"] },
+    { startLine: 1, deletedLines: 1, insertedLines: ["tail changed"] },
+  ] });
+  await started.promise;
+  const closing = h.closeFile(file);
+  release.resolve();
+  await closing;
+
+  assert.equal(updates, 1);
+  assert.equal(documents.has(documentId), false);
+  assert.equal(file.lines[0].getTokens(), null);
+});
+
+test("worker restart serializes a fresh open ahead of later document changes", async () => {
+  const { editor, file, h, calls, documents } = setup();
+  const oldId = enableIncrementalDocument(h, editor, file, ["old", "tail"]);
+  documents.set(oldId, { code: "old\ntail", language: "javascript" });
+  file.lines = [new LineNode("snapshot"), new LineNode("tail")];
+  editor.lineController.lines = file.lines;
+  const updateStarted = deferred();
+  const releaseUpdate = deferred();
+  const reopenStarted = deferred();
+  let updateCount = 0;
+  h.nshClient.request = async (type, data) => {
+    calls.push({ type, ...data });
+    if (type === "updateDocument") {
+      updateCount++;
+      if (updateCount === 1) {
+        updateStarted.resolve();
+        await releaseUpdate.promise;
+        throw new Error("worker restarted");
+      }
+      applyRemoteUpdate(documents, data);
+      return { lines: [] };
+    }
+    if (type === "openDocument") {
+      documents.set(data.documentId, { code: data.code, language: data.language });
+      reopenStarted.resolve();
+    }
+    return {};
+  };
+
+  h.handleChange({ nshUpdate: {
+    startLine: 0, deletedLines: 1, insertedLines: ["snapshot"],
+  } });
+  await updateStarted.promise;
+  documents.clear();
+  h.handleSessionReset();
+  file.lines = [new LineNode("snapshot"), new LineNode("final")];
+  editor.lineController.lines = file.lines;
+  h.handleChange({ nshUpdate: {
+    startLine: 1, deletedLines: 1, insertedLines: ["final"],
+  } });
+  releaseUpdate.resolve();
+  await reopenStarted.promise;
+  await h.documentQueues.get(file.id);
+
+  const currentId = h.getDocumentId(file);
+  assert.notEqual(currentId, oldId);
+  assert.equal(updateCount, 2);
+  assert.equal(documents.get(currentId).code, "snapshot\nfinal");
+  assert.deepEqual(
+    calls.filter((call) => call.type === "openDocument").map((call) => call.code),
+    ["snapshot\ntail"],
+  );
+});
+
+test("parallel document queues let one file update while another NSH request waits", async () => {
+  const { editor, file, h, documents } = setup();
+  const aId = enableIncrementalDocument(h, editor, file, ["a"]);
+  documents.set(aId, { code: "a", language: "javascript" });
+  const b = new FileNode(editor, 2, "b.js", "/b.js");
+  const bId = enableIncrementalDocument(h, editor, b, ["b"]);
+  editor.tabManager.files.push(b);
+  documents.set(bId, { code: "b", language: "javascript" });
+  const aStarted = deferred();
+  const releaseA = deferred();
+  const bCompleted = deferred();
+  h.nshClient.request = async (type, data) => {
+    if (type !== "updateDocument") return {};
+    if (data.documentId === aId) {
+      aStarted.resolve();
+      await releaseA.promise;
+    } else {
+      bCompleted.resolve();
+    }
+    applyRemoteUpdate(documents, data);
+    return { lines: [] };
+  };
+
+  file.lines = [new LineNode("A")];
+  editor.lineController.lines = file.lines;
+  h.handleChange({ nshUpdate: {
+    startLine: 0, deletedLines: 1, insertedLines: ["A"],
+  } });
+  await aStarted.promise;
+  editor.tabManager.activeFile = b;
+  editor.lineController.lines = b.lines;
+  b.lines = [new LineNode("B")];
+  editor.lineController.lines = b.lines;
+  h.handleChange({ nshUpdate: {
+    startLine: 0, deletedLines: 1, insertedLines: ["B"],
+  } });
+  await bCompleted.promise;
+  assert.equal(documents.get(bId).code, "B");
+  releaseA.resolve();
+  await Promise.all([h.documentQueues.get(file.id), h.documentQueues.get(b.id)]);
+  assert.equal(documents.get(aId).code, "A");
 });
 
 test("Agent document synchronization sends only changed lines near the end", async () => {
