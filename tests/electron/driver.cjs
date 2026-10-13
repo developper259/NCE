@@ -2772,6 +2772,18 @@ app.whenReady().then(() => {
       fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
       if (phase === "write") {
         const terminalManager = nce.window.terminalManager;
+        const prepareForQuit = nce.window.prepareForApplicationQuit.bind(nce.window);
+        nce.window.prepareForApplicationQuit = async () => {
+          const result = await prepareForQuit();
+          traceStep(`application quit preparation resolved: ${result} (${nce.window.quitState})`);
+          return result;
+        };
+        const commitPreparedClose = nce.window.commitPreparedClose.bind(nce.window);
+        nce.window.commitPreparedClose = async () => {
+          const result = await commitPreparedClose();
+          traceStep(`application window close commit resolved: ${result} (${nce.window.quitState})`);
+          return result;
+        };
         win.once("closed", () => {
           traceStep("native BrowserWindow closed");
           if (terminalManager.sessions.size !== 0) {
@@ -2791,7 +2803,10 @@ app.whenReady().then(() => {
         win.webContents.forcefullyCrashRenderer();
       } else {
         void nce.requestQuitAll().then(
-          (result) => traceStep(`requestQuitAll resolved: ${result}`),
+          (result) => {
+            traceStep(`requestQuitAll resolved: ${result} (${nce.window.quitState})`);
+            if (!result) app.exit(1);
+          },
           (error) => console.error("requestQuitAll failed", error),
         );
       }
