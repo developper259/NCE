@@ -2,11 +2,12 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const { createEditor, loadGlobal } = require("./helpers/runtime");
 
-const LINE_HEIGHT = 23;
+const DEFAULT_LINE_HEIGHT = 23;
 
 function createCursor(text, options = {}) {
   const { editor, file } = createEditor(text);
   const lineController = editor.lineController;
+  const lineHeight = options.lineHeight || DEFAULT_LINE_HEIGHT;
   const displayRows = options.displayRows || null;
   const scrollStart = options.scrollStart || 0;
   const scrollOffset = options.scrollOffset || 0;
@@ -20,14 +21,18 @@ function createCursor(text, options = {}) {
   };
 
   editor.domManager.getOutputRect = () => outputRect;
+  editor.posY = lineHeight;
   lineController.offsetX = options.offsetX || 0;
   lineController.offsetY = scrollOffset;
   lineController.startIndex = scrollStart;
+  // Mouse Y is measured in viewport-local CSS pixels.  Add the current scroll
+  // offset before converting to a display row, using the same measured height
+  // as the production LineController.
   lineController.getScrollOffsetY = () =>
-    scrollStart * LINE_HEIGHT + scrollOffset;
+    scrollStart * lineHeight + scrollOffset;
   lineController.getDisplayLineCount = () =>
     displayRows ? displayRows.length : lineController.lines.length;
-  lineController.getLineHeight = () => LINE_HEIGHT;
+  lineController.getLineHeight = () => lineHeight;
   lineController.getDisplayRow = (index) =>
     displayRows
       ? displayRows[index] || null
@@ -35,7 +40,7 @@ function createCursor(text, options = {}) {
         ? { documentIndex: index }
         : null;
   lineController.getDisplayIndexForCursor = (row) => row - 1;
-  lineController.getLineTop = (screenRow) => screenRow * LINE_HEIGHT;
+  lineController.getLineTop = (screenRow) => screenRow * lineHeight;
   lineController.getViewportHeight = () => 500;
   lineController.maxViewLines = 20;
   lineController.setFocusLine = () => {};
@@ -57,12 +62,18 @@ function createCursor(text, options = {}) {
   function clickAtScreenRow(screenRow, x = outputRect.left + 20) {
     return cursor.onClick({
       clientX: x,
-      clientY:
-        outputRect.top + cursor.mY + editor.baseY + screenRow * LINE_HEIGHT,
+      clientY: outputRect.top + (screenRow + 0.5) * lineHeight,
     });
   }
 
-  return { clickAtScreenRow, cursor, editor, file };
+  function clickAtLocalY(localY, x = outputRect.left + 20) {
+    return cursor.onClick({
+      clientX: x,
+      clientY: outputRect.top + localY,
+    });
+  }
+
+  return { clickAtLocalY, clickAtScreenRow, cursor, editor, file };
 }
 
 test("clicking below the final line moves to its last column", () => {
@@ -139,4 +150,28 @@ test("clicking below trailing diff rows lands at the last document position", ()
   assert.equal(position.column, 5);
   assert.equal(file.row, 2);
   assert.equal(file.column, 5);
+});
+
+test("mouse mapping uses measured line height and fractional scroll in viewport coordinates", () => {
+  const { clickAtLocalY, file } = createCursor("one\ntwo\nthree\nfour", {
+    lineHeight: 31,
+    scrollStart: 1,
+    scrollOffset: 8.5,
+  });
+
+  // 22 CSS px locally plus the 39.5 px scroll position lands in display row 1.
+  const position = clickAtLocalY(22);
+
+  assert.equal(position.row, 2);
+  assert.equal(file.row, 2);
+});
+
+test("mouse row boundaries use the viewport top edge and the next line height", () => {
+  const { clickAtLocalY } = createCursor("first\nsecond\nthird", {
+    lineHeight: 30,
+  });
+
+  assert.equal(clickAtLocalY(0).row, 1);
+  assert.equal(clickAtLocalY(29.999).row, 1);
+  assert.equal(clickAtLocalY(30).row, 2);
 });

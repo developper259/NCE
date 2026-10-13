@@ -5,6 +5,9 @@ class HistoryController {
     this.isReplaying = false;
     this.maxEntries = 1000;
     this.maxTextBudget = 2 * 1024 * 1024;
+    // Keep the ordinary history bounded while allowing one transaction near
+    // WriterController's 32 MiB batch insertion limit to remain undoable.
+    this.maxSingleEntryTextBudget = 34 * 1024 * 1024;
   }
 
   getState(file = this.editor.tabManager.activeFile) {
@@ -28,6 +31,7 @@ class HistoryController {
     const file = this.editor.tabManager.activeFile;
     const state = this.getState(file);
     if (!state) return;
+    if (!this.canRecordEntry(entry, file, state)) return false;
 
     if (state.index < state.entries.length) {
       for (const removed of state.entries.splice(state.index)) state.textBudget -= this.entrySize(removed);
@@ -56,7 +60,7 @@ class HistoryController {
       }
       this.trim(state);
       this.updateSavedState(file, state);
-      return;
+      return true;
     }
     const canGroup =
       entry.source === "typing" &&
@@ -79,6 +83,28 @@ class HistoryController {
 
     this.trim(state);
     this.updateSavedState(file, state);
+    return true;
+  }
+
+  canRecordEntry(entry, file = this.editor.tabManager.activeFile, state = this.getState(file)) {
+    if (!entry || !state) return false;
+    const previous = state.entries[state.index - 1];
+    let retainedSize = this.entrySize(entry);
+    if (entry.type === "batch" && this.canGroupBatchTyping(previous, entry, state)) {
+      // A grouped batch keeps the original before-text and adds this transaction's
+      // after-text. Summing is conservative because it also counts the repeated
+      // selection snapshots that grouping replaces.
+      retainedSize += this.entrySize(previous);
+    } else if (
+      entry.type !== "batch" && entry.source === "typing" &&
+      previous?.source === "typing" && entry.beforeText === "" &&
+      previous.afterText !== "" && state.index !== state.savedIndex &&
+      previous.start.row === entry.start.row &&
+      previous.start.column + previous.afterText.length === entry.start.column
+    ) {
+      retainedSize += this.entrySize(previous);
+    }
+    return retainedSize <= this.maxSingleEntryTextBudget;
   }
 
   entrySize(entry) {
@@ -101,7 +127,7 @@ class HistoryController {
   trim(state) {
     while (
       state.entries.length > this.maxEntries ||
-      state.textBudget > this.maxTextBudget
+      (state.textBudget > this.maxTextBudget && state.entries.length > 1)
     ) {
       const removed = state.entries.shift();
       state.textBudget -= this.entrySize(removed);

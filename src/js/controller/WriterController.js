@@ -514,14 +514,21 @@ class WriterController {
     )
       return null;
 
-    file.editVersion = (file.editVersion || 0) + 1;
+    const lines = lineController.lines;
+    const isValidPosition = (position) =>
+      position && Number.isSafeInteger(position.row) &&
+      Number.isSafeInteger(position.column) && position.row >= 1 &&
+      position.row <= lines.length && position.column >= 0 &&
+      position.column <= (lines[position.row - 1]?.getText?.().length ?? -1);
+    if (!isValidPosition(start) || !isValidPosition(end) ||
+        this.comparePositions(start, end) > 0) return null;
+
     const beforeText = this.getTextInRange(start, end);
     const cursorBefore = {
       row: this.editor.cursorController.row,
       column: this.editor.cursorController.column,
     };
     const selectionBefore = this.getSelectionRange();
-    const lines = lineController.lines;
     const normalizedText = text.replace(/\r\n/g, "\n");
     const replacement = normalizedText.split("\n");
     text = normalizedText;
@@ -534,9 +541,41 @@ class WriterController {
       start.row - 1,
       end.row - 1,
     );
-    const newEndings =
-      options.lineEndings ||
-      Array(replacement.length - 1).fill(file.eol || "\n");
+    const newEndings = options.lineEndings === undefined
+      ? Array(replacement.length - 1).fill(file.eol || "\n")
+      : options.lineEndings;
+    if (!Array.isArray(newEndings) ||
+        newEndings.length !== replacement.length - 1 ||
+        newEndings.some((ending) =>
+          ending !== "\n" && ending !== "\r\n" && ending !== "\r",
+        )) return null;
+    if (beforeText === normalizedText &&
+        oldEndings.length === newEndings.length &&
+        oldEndings.every((ending, index) => ending === newEndings[index]))
+      return null;
+
+    const cursorAfter = options.cursor || this.advancePosition(start, text);
+    const entry = {
+      start: { ...start },
+      beforeText,
+      beforeLineEndings: [...oldEndings],
+      afterLineEndings: [...newEndings],
+      afterText: text,
+      cursorBefore,
+      cursorAfter: { ...cursorAfter },
+      selectionBefore,
+      selectionAfter: options.selection || null,
+      source: options.source || "edit",
+      timestamp: Date.now(),
+    };
+    const history = this.editor.historyController;
+    if (
+      options.recordHistory !== false &&
+      typeof history?.canRecordEntry === "function" &&
+      !history.canRecordEntry(entry, file)
+    ) return null;
+
+    file.editVersion = (file.editVersion || 0) + 1;
     // Separators within the replaced range belong to that edit; the separator
     // after its last line remains attached to the surviving suffix.
     if (!file.lineEndings) file.lineEndings = [];
@@ -570,7 +609,6 @@ class WriterController {
       file.offsetX = 0;
     }
 
-    const cursorAfter = options.cursor || this.advancePosition(start, text);
     file.row = cursorAfter.row;
     file.column = cursorAfter.column;
     this.editor.selectController.unSelectAll({ emitEvent: false });
@@ -588,21 +626,8 @@ class WriterController {
     );
     if (options.ensureVisible) this.ensureCursorVisible(cursorAfter.row);
 
-    const entry = {
-      start: { ...start },
-      beforeText,
-      beforeLineEndings: oldEndings,
-      afterLineEndings: newEndings,
-      afterText: text,
-      cursorBefore,
-      cursorAfter: { ...cursorAfter },
-      selectionBefore,
-      selectionAfter: options.selection || null,
-      source: options.source || "edit",
-      timestamp: Date.now(),
-    };
     if (options.recordHistory !== false)
-      this.editor.historyController?.record(entry);
+      history?.record(entry);
     this.editor.events.callEvent(Events.ON_CHANGE, {
       action: options.source || "edit",
       beforeText,
@@ -705,9 +730,20 @@ class WriterController {
       left.start.row - right.start.row || left.start.column - right.start.column ||
       left.end.row - right.end.row || left.end.column - right.end.column,
     );
-    for (let index = 1; index < normalized.length; index++) {
-      const previous = normalized[index - 1];
-      const current = normalized[index];
+    const effective = normalized.filter((edit) =>
+      edit.beforeText !== edit.text ||
+      edit.beforeLineEndings.length !== edit.afterLineEndings.length ||
+      edit.beforeLineEndings.some((ending, index) =>
+        ending !== edit.afterLineEndings[index],
+      ),
+    );
+    const effectiveEdits = new Set(effective);
+    // Empty boundary operations remain part of the selection snapshot but are
+    // not document edits and must not collide with a neighboring deletion.
+    if (effective.length === 0) return null;
+    for (let index = 1; index < effective.length; index++) {
+      const previous = effective[index - 1];
+      const current = effective[index];
       const previousCollapsed = previous.start.row === previous.end.row &&
         previous.start.column === previous.end.column;
       const currentCollapsed = current.start.row === current.end.row &&
@@ -731,7 +767,7 @@ class WriterController {
     const primaryIdBefore = file._multiCursorPrimaryId;
     const cursorBefore = { row: file.row, column: file.column };
     const groups = [];
-    for (const edit of normalized) {
+    for (const edit of effective) {
       let group = groups[groups.length - 1];
       if (!group || edit.start.row > group.endRow) {
         group = {
@@ -755,6 +791,89 @@ class WriterController {
       cumulativeLineDelta += plan.replacementTexts.length -
         (group.endRow - group.startRow + 1);
     }
+
+    const placements = new Map();
+    for (const group of groups) {
+      for (const [cursorId, local] of group.plan.placements) {
+        placements.set(cursorId, {
+          row: group.resultStartRow + local.row - 1,
+          column: local.column,
+        });
+      }
+    }
+    for (const edit of normalized) {
+      if (effectiveEdits.has(edit) || edit.cursorId === null) continue;
+      const start = this.mapPositionThroughBatch(edit.start, effective);
+      const cursorOffset = edit.cursorOffset ?? edit.text.length;
+      placements.set(
+        edit.cursorId,
+        this.advancePosition(start, edit.text.slice(0, cursorOffset)),
+      );
+    }
+    const results = options.resultSelections || selectionBefore.map((selection) => {
+      const active = placements.get(selection.id) || this.mapPositionThroughBatch(
+        selection.active,
+        effective,
+      );
+      const anchor = placements.has(selection.id)
+        ? active
+        : this.mapPositionThroughBatch(selection.anchor, effective);
+      return {
+        ...selection,
+        anchor: { ...anchor },
+        active: { ...active },
+        preferredVisualColumn: placements.has(selection.id)
+          ? null
+          : selection.preferredVisualColumn,
+      };
+    });
+    if (!results.length) return null;
+    const requestedPrimaryId = options.resultPrimaryId ?? primaryIdBefore;
+    const primaryIdAfter = results.some((selection) => selection.id === requestedPrimaryId)
+      ? requestedPrimaryId
+      : results[0].id;
+    const primaryResult = results.find((selection) => selection.id === primaryIdAfter) ||
+      results[0];
+    const historyEdits = effective.map((edit) => ({
+      id: edit.id,
+      cursorId: edit.cursorId,
+      start: { ...edit.start },
+      beforeText: edit.beforeText,
+      afterText: edit.text,
+      cursorAtEnd: edit.cursorOffset === null || edit.cursorOffset >= edit.text.length,
+      beforeLineEndings: [...edit.beforeLineEndings],
+      afterLineEndings: [...edit.afterLineEndings],
+    }));
+    const beforeText = effective.map((edit) => edit.beforeText).join("\n");
+    const afterText = effective.map((edit) => edit.text).join("\n");
+    const historyEntry = {
+      type: "batch",
+      edits: historyEdits,
+      selectionsBefore: selectionBefore,
+      selectionsAfter: results.map((selection) => ({
+        id: selection.id,
+        anchor: { ...selection.anchor },
+        active: { ...selection.active },
+        preferredVisualColumn: selection.preferredVisualColumn,
+      })),
+      primaryIdBefore,
+      primaryIdAfter,
+      cursorBefore,
+      cursorAfter: { ...primaryResult.active },
+      source: options.source || "batch",
+      timestamp: Date.now(),
+    };
+    const history = this.editor.historyController;
+    if (
+      options.recordHistory !== false &&
+      typeof history?.canRecordEntry === "function" &&
+      !history.canRecordEntry(historyEntry, file)
+    ) return null;
+    const nshUpdates = groups.map((group) => ({
+      startLine: group.startRow - 1,
+      deletedLines: group.endRow - group.startRow + 1,
+      insertedLines: group.plan.replacementTexts,
+    }));
 
     if ((Number(file.editVersion) || 0) !== capturedEditVersion) return null;
     file.editVersion = capturedEditVersion + 1;
@@ -818,40 +937,12 @@ class WriterController {
         );
     }
 
-    const placements = new Map();
-    for (const group of groups) {
-      for (const [cursorId, local] of group.plan.placements) {
-        placements.set(cursorId, {
-          row: group.resultStartRow + local.row - 1,
-          column: local.column,
-        });
-      }
-    }
-    const results = options.resultSelections || selectionBefore.map((selection) => {
-      const active = placements.get(selection.id) || this.mapPositionThroughBatch(
-        selection.active,
-        normalized,
-      );
-      const anchor = placements.has(selection.id)
-        ? active
-        : this.mapPositionThroughBatch(selection.anchor, normalized);
-      return {
-        ...selection,
-        anchor: { ...anchor },
-        active: { ...active },
-        preferredVisualColumn: placements.has(selection.id)
-          ? null
-          : selection.preferredVisualColumn,
-      };
-    });
-    const primaryIdAfter = options.resultPrimaryId ?? primaryIdBefore;
     multi.setSelections(results, {
       file,
       primaryId: primaryIdAfter,
       render: false,
     });
     const primaryAfter = multi.getPrimarySelection(file);
-    if (!primaryAfter) return null;
     lineController.markDirtyFrom(Math.min(...groups.map((group) => group.startRow - 1)));
     this.editor.cursorController.setCursorPosition(
       primaryAfter.active.row,
@@ -860,43 +951,17 @@ class WriterController {
     );
     if (options.ensureVisible) this.ensureCursorVisible(primaryAfter.active.row);
 
-    const historyEdits = normalized.map((edit) => ({
-      id: edit.id,
-      cursorId: edit.cursorId,
-      start: { ...edit.start },
-      beforeText: edit.beforeText,
-      afterText: edit.text,
-      cursorAtEnd: edit.cursorOffset === null || edit.cursorOffset >= edit.text.length,
-      beforeLineEndings: [...edit.beforeLineEndings],
-      afterLineEndings: [...edit.afterLineEndings],
-    }));
-    const beforeText = normalized.map((edit) => edit.beforeText).join("\n");
-    const afterText = normalized.map((edit) => edit.text).join("\n");
-    const historyEntry = {
-      type: "batch",
-      edits: historyEdits,
-      selectionsBefore: selectionBefore,
-      selectionsAfter: results.map((selection) => ({
+    if (options.recordHistory !== false) {
+      historyEntry.selectionsAfter = multi.getSelections(file).map((selection) => ({
         id: selection.id,
         anchor: { ...selection.anchor },
         active: { ...selection.active },
         preferredVisualColumn: selection.preferredVisualColumn,
-      })),
-      primaryIdBefore,
-      primaryIdAfter,
-      cursorBefore,
-      cursorAfter: { row: primaryAfter.active.row, column: primaryAfter.active.column },
-      source: options.source || "batch",
-      timestamp: Date.now(),
-    };
-    if (options.recordHistory !== false)
-      this.editor.historyController?.record(historyEntry);
-
-    const nshUpdates = groups.map((group) => ({
-      startLine: group.startRow - 1,
-      deletedLines: group.endRow - group.startRow + 1,
-      insertedLines: group.plan.replacementTexts,
-    }));
+      }));
+      historyEntry.primaryIdAfter = file._multiCursorPrimaryId;
+      historyEntry.cursorAfter = { row: primaryAfter.active.row, column: primaryAfter.active.column };
+      history?.record(historyEntry);
+    }
     this.editor.events.callEvent(Events.ON_CHANGE, {
       action: options.source || "batch",
       beforeText,

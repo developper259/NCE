@@ -222,6 +222,9 @@ class CursorController {
     const lineController = this.editor.lineController;
     const scrollOffsetY = lineController.getScrollOffsetY();
     const lineHeight = lineController.getLineHeight() || this.editor.posY;
+    // Mouse coordinates are viewport-local CSS pixels. Add the current vertical
+    // scroll position before mapping through display rows so diff placeholders,
+    // fractional scrolling, and measured font metrics share one coordinate space.
     const contentY = clientY - rect.top + scrollOffsetY;
     const displayIndex = lineHeight > 0
       ? Math.floor(contentY / lineHeight)
