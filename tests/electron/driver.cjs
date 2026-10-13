@@ -2706,6 +2706,7 @@ app.whenReady().then(() => {
         "workspace A is active and its Bottom Panel is visible before persisting");
         assert.equal(await run("editor.fileExplorer.closeProject()"), true, "the terminal smoke test returns to No Workspace without reassigning its live PTY");
         traceStep("terminal close, switch, and persistence checks passed");
+        dialog.showMessageBox = async () => ({ response: 1 });
         traceStep("write phase complete; requesting clean quit");
         // The remaining long-running PTY is intentionally left for the window-close
         // lifecycle assertion below; closing the renderer must reap it.
