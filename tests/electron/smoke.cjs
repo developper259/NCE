@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
+const { DirtyBufferRecoveryStore } = require('../../dist/ts/addon/DirtyBufferRecovery.js');
 test('real Electron: preload, editing, Save As, quit and session restore', { timeout: 240000 }, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-'));
   await fs.writeFile(path.join(directory, '.nce-smoke'), '');
@@ -37,6 +38,16 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].type, 'file');
     assert.equal(state.noWorkspaceState.tabManager.tabs[0].path, path.join(directory, 'smoke.js'));
     assert.equal(state.noWorkspaceState.sidebar.rightActiveMenuId, 'agent');
+    const recoveryStore = new DirtyBufferRecoveryStore(path.join(directory, 'profile'));
+    const recoveryFixture = await recoveryStore.save({
+      identity: 'untitled:electron-smoke-recovery',
+      kind: 'untitled',
+      displayName: 'recovered.txt',
+      content: 'recovered by smoke\r\n🙂 end\n',
+      lineCount: 2,
+      editVersion: 1,
+    });
+    assert.equal(recoveryFixture.success, true, `recovery fixture is persisted: ${JSON.stringify(recoveryFixture)}`);
     const workspaceTerminalState = JSON.parse(await fs.readFile(
       path.join(directory, 'terminal-workspace-a', '.nce', 'workspace.json'), 'utf8',
     ));
