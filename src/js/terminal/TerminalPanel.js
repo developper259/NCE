@@ -350,7 +350,7 @@ export class TerminalPanel {
     if (isCurrent()) this.clearStatus();
 
     const terminal = new this.Terminal({
-      cursorBlink: true,
+      cursorBlink: false,
       fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
       fontSize: 12,
       scrollback: 5000,

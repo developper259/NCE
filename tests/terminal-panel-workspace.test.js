@@ -79,6 +79,77 @@ function record(id, workspaceKey, baseLabel, customLabel = null) {
   };
 }
 
+test("new terminal instances disable cursor blinking and forward each input event once", async () => {
+  const panel = makePanel();
+  const writes = [];
+  let terminalInstance;
+
+  class TerminalStub {
+    constructor(options) {
+      this.options = options;
+      this.cols = 80;
+      this.rows = 24;
+      this.subscriptions = [];
+      terminalInstance = this;
+    }
+    loadAddon() {}
+    open() {}
+    onData(listener) {
+      this.onDataListener = listener;
+      const subscription = { dispose() {} };
+      this.subscriptions.push(subscription);
+      return subscription;
+    }
+    onResize(listener) {
+      this.onResizeListener = listener;
+      const subscription = { dispose() {} };
+      this.subscriptions.push(subscription);
+      return subscription;
+    }
+    focus() {}
+  }
+
+  Object.assign(panel, {
+    Terminal: TerminalStub,
+    FitAddon: class {},
+    WebLinksAddon: class {},
+    view: new ElementStub(),
+    getXtermTheme: () => ({ background: "#101010" }),
+    fitRecord: async () => true,
+    isActive: () => true,
+    recomputeLabels() {},
+    allocateDuplicateIndex: () => null,
+    createBaseLabel: () => "zsh — project",
+    notifyWorkspaceChanged() {},
+  });
+  panel.editor.bottomPanelManager.visible = false;
+  panel.editor.api = {
+    getTerminalWorkspaceScope: async () => ({ workspaceKey: "no-workspace" }),
+    createTerminalSession: async () => ({
+      success: true,
+      sessionId: "session-one",
+      workspaceKey: "no-workspace",
+      shell: "zsh",
+      cwd: "/workspace",
+    }),
+    writeTerminalSession: async (...args) => writes.push(args),
+  };
+  context.document = {
+    activeElement: null,
+    createElement: () => new ElementStub(),
+  };
+
+  const session = await panel.createTerminal({ focus: false, returnRecord: true });
+  assert.equal(session.terminal.options.cursorBlink, false);
+
+  terminalInstance.onDataListener("echo hello world ");
+  await Promise.resolve();
+
+  assert.deepEqual(writes, [
+    ["session-one", "no-workspace", "echo hello world "],
+  ]);
+});
+
 test("runtime tab registries, selection and persisted metadata stay isolated per workspace", () => {
   const panel = makePanel();
   const a = panel.getWorkspaceState("/canonical/a", "/projects/a");
