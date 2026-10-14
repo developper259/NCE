@@ -410,20 +410,12 @@ class FileContextManager {
 
   toProjectRelativePath(filePath, rootPath) {
     if (typeof filePath !== "string") return "";
-    const path = filePath.replace(/\\/g, "/");
-    const root =
-      typeof rootPath === "string"
-        ? rootPath.replace(/\\/g, "/").replace(/\/+$/, "")
-        : "";
-    const normalizedPath = AgentPath.normalize(path);
-    const normalizedRoot = AgentPath.normalize(root);
-    const rootPrefix =
-      normalizedRoot && normalizedPath.startsWith(`${normalizedRoot}/`)
-        ? normalizedRoot
-        : null;
-    return rootPrefix
-      ? normalizedPath.slice(rootPrefix.length + 1)
-      : normalizedPath;
+    const normalizedPath = AgentPath.normalize(filePath);
+    const normalizedRoot = AgentPath.normalize(rootPath);
+    if (normalizedRoot && AgentPath.isInside(normalizedPath, normalizedRoot)) {
+      return AgentPath.relative(normalizedRoot, normalizedPath) || ".";
+    }
+    return normalizedPath;
   }
 }
 

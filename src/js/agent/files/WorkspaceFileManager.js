@@ -2259,19 +2259,25 @@ class WorkspaceFileManager {
   }
 
   resolveWorkspacePath(filePath, rootPath) {
-    if (typeof filePath !== "string" || typeof rootPath !== "string")
+    if (
+      typeof filePath !== "string" ||
+      typeof rootPath !== "string" ||
+      !AgentPath.normalize(rootPath)
+    )
       return null;
 
     const root = AgentPath.normalize(rootPath);
-    const candidate = AgentPath.isAbsolute(filePath)
-      ? AgentPath.normalize(filePath)
-      : AgentPath.normalize(`${root}/${filePath}`);
-    const relative = AgentPath.relative(root, candidate);
-
-    if (!relative || relative === ".") return candidate;
-    if (relative.startsWith("..") || AgentPath.isAbsolute(relative))
-      return null;
-    return candidate;
+    const isAbsolute = AgentPath.isAbsolute(filePath);
+    if (/^[A-Za-z]:(?![\\/])/.test(filePath)) return null;
+    const normalizedInput = AgentPath.normalize(filePath);
+    if (
+      !isAbsolute &&
+      (normalizedInput === ".." || normalizedInput.startsWith("../"))
+    ) return null;
+    const candidate = isAbsolute
+      ? normalizedInput
+      : AgentPath.resolve(root, normalizedInput);
+    return candidate && AgentPath.isInside(candidate, root) ? candidate : null;
   }
 }
 
