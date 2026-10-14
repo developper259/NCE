@@ -779,6 +779,57 @@ test("WorkspaceSearch locates ordered multiline matches with UTF-16 columns", as
   }
 });
 
+test("WorkspaceRegexExecutor advances zero-width matches by Unicode code point", async () => {
+  const executor = new WorkspaceRegexExecutor();
+  const text = "a😀e\u0301";
+  try {
+    assert.deepEqual(await executor.findMatches(/(?:)/gu, text, true, 20), [
+      { index: 0, length: 0 },
+      { index: 1, length: 0 },
+      { index: 3, length: 0 },
+      { index: 4, length: 0 },
+      { index: 5, length: 0 },
+    ]);
+    assert.deepEqual(await executor.findMatches(/(?:)/g, text, true, 20), [
+      { index: 0, length: 0 },
+      { index: 1, length: 0 },
+      { index: 2, length: 0 },
+      { index: 3, length: 0 },
+      { index: 4, length: 0 },
+      { index: 5, length: 0 },
+    ]);
+    assert.deepEqual(await executor.findMatches(/^/gu, "text", true, 10), [
+      { index: 0, length: 0 },
+    ]);
+    assert.deepEqual(await executor.findMatches(/$/gu, "text", true, 10), [
+      { index: 4, length: 0 },
+    ]);
+    assert.deepEqual(await executor.findMatches(/(?=a)/gu, "aba", true, 10), [
+      { index: 0, length: 0 },
+      { index: 2, length: 0 },
+    ]);
+    assert.deepEqual(await executor.findMatches(/(?<=a)/gu, "aba", true, 10), [
+      { index: 1, length: 0 },
+      { index: 3, length: 0 },
+    ]);
+
+    const unicodeReplacement = await executor.replace(/(?:)/gu, text, "|");
+    assert.equal(unicodeReplacement.replacements, 5);
+    assert.equal(unicodeReplacement.content, text.replace(/(?:)/gu, "|"));
+    const codeUnitReplacement = await executor.replace(/(?:)/g, text, "|");
+    assert.equal(codeUnitReplacement.replacements, 6);
+    assert.equal(codeUnitReplacement.content, text.replace(/(?:)/g, "|"));
+
+    const dense = await executor.findMatches(/(?=a)|$/gu, "a".repeat(20_000), true, 20_001);
+    assert.equal(dense.length, 20_001);
+    assert.equal(dense[0].index, 0);
+    assert.equal(dense.at(-1).index, 20_000);
+    assert.equal(dense.every((match) => match.length === 0), true);
+  } finally {
+    await executor.dispose();
+  }
+});
+
 test("WorkspaceRegexExecutor terminates timed out and cancelled regex workers", async () => {
   const executor = new WorkspaceRegexExecutor(800, 4);
   const pathological = /^(a+)+$/gu;

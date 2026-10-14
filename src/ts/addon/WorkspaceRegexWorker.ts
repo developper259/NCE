@@ -18,17 +18,13 @@ interface RegexWorkerMessage {
   request: RegexRequest;
 }
 
-function advanceRegexIndexSafely(value: string, utf16Offset: number): number {
+function advanceRegexIndexSafely(
+  value: string,
+  utf16Offset: number,
+  unicode: boolean,
+): number {
   if (utf16Offset >= value.length) return value.length + 1;
-  if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
-    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-    for (const segment of segmenter.segment(value)) {
-      if (segment.index >= utf16Offset)
-        return segment.index + segment.segment.length;
-      if (segment.index + segment.segment.length > utf16Offset)
-        return segment.index + segment.segment.length;
-    }
-  }
+  if (!unicode) return utf16Offset + 1;
   const codePoint = value.codePointAt(utf16Offset);
   return utf16Offset + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1);
 }
@@ -51,7 +47,7 @@ function collectMatches(
     });
     if (!regex.global) break;
     if (match[0].length === 0)
-      regex.lastIndex = advanceRegexIndexSafely(text, match.index);
+      regex.lastIndex = advanceRegexIndexSafely(text, match.index, regex.unicode);
   }
   regex.lastIndex = 0;
   return matches;
@@ -90,7 +86,7 @@ function countMatches(regex: RegExp, text: string): number {
     count++;
     if (!regex.global) break;
     if (match[0].length === 0)
-      regex.lastIndex = advanceRegexIndexSafely(text, match.index);
+      regex.lastIndex = advanceRegexIndexSafely(text, match.index, regex.unicode);
   }
   regex.lastIndex = 0;
   return count;
