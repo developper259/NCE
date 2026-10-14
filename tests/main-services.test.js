@@ -472,14 +472,18 @@ test("Replace All reports when its candidate file bound stops the operation", as
   }
 });
 
-test("Replace All preserves BOM, CRLF, executable mode, and replace-first behavior", async () => {
+test("Replace All preserves BOM, CRLF, supported permissions, and replace-first behavior", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-metadata-"));
   let search;
   try {
     const filePath = path.join(root, "script.js");
     const original = Buffer.from("\uFEFFNEEDLE needleish needle\r\nsecond needle\r\n", "utf8");
-    await fsp.writeFile(filePath, original, { mode: 0o755 });
-    await fsp.chmod(filePath, 0o755);
+    const supportsPosixExecutableBits = process.platform !== "win32";
+    await fsp.writeFile(filePath, original, {
+      ...(supportsPosixExecutableBits ? { mode: 0o755 } : {}),
+    });
+    if (supportsPosixExecutableBits) await fsp.chmod(filePath, 0o755);
+    const originalMode = (await fsp.stat(filePath)).mode;
     search = new WorkspaceSearch({ window: null });
 
     const first = await search.replace(root, "needle", "changed", {
@@ -493,7 +497,16 @@ test("Replace All preserves BOM, CRLF, executable mode, and replace-first behavi
       await fsp.readFile(filePath, "utf8"),
       "\uFEFFchanged needleish needle\r\nsecond needle\r\n",
     );
-    assert.equal((await fsp.stat(filePath)).mode & 0o111, 0o111);
+    const replacedStats = await fsp.stat(filePath);
+    assert.equal(replacedStats.isFile(), true);
+    assert.equal(
+      replacedStats.mode & 0o222,
+      originalMode & 0o222,
+      "Replace All preserves the file's writable state",
+    );
+    if (supportsPosixExecutableBits) {
+      assert.equal(replacedStats.mode & 0o111, 0o111);
+    }
 
     const all = await search.replace(root, "needle", "done", {
       caseSensitive: false,
