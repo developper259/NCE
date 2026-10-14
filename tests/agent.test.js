@@ -8,6 +8,7 @@ const { FileManager } = require("../dist/ts/addon/FileManager");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch");
 async function flushSearchIndex(search, root) {
   await search.workspaceIndex.flush(root);
+  await search.dispose();
 }
 
 async function setup(fetchMock) {

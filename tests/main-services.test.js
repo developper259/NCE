@@ -15,6 +15,10 @@ const {
   atomicWriteFile,
 } = require("../dist/ts/addon/FileManager.js");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch.js");
+const {
+  WorkspaceRegexExecutor,
+  WorkspaceRegexExecutionError,
+} = require("../dist/ts/addon/WorkspaceRegexExecutor.js");
 const { LARGE_WORKSPACE_MODE_THRESHOLDS } = require("../dist/ts/addon/WorkspaceIndex.js");
 const {
   AgentProcessRunner,
@@ -43,6 +47,7 @@ async function tempWorkspace() {
 async function cleanupSearchWorkspaces(search, ...roots) {
   if (search)
     await Promise.all(roots.map((root) => search.workspaceIndex.flush(root)));
+  if (search) await search.dispose();
   await Promise.all(roots.map((root) => fsp.rm(root, { recursive: true, force: true })));
 }
 
@@ -391,6 +396,150 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
     );
   } finally {
     await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("WorkspaceSearch isolates regex execution and preserves supported matching behavior", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-regex-worker-"));
+  const filePath = path.join(root, "matches.txt");
+  let search;
+  try {
+    await fsp.writeFile(filePath, "foo FOO\nleft\nright\nÉ\nx😀x\n");
+    search = new WorkspaceSearch({ window: null });
+
+    assert.equal((await search.search(root, "foo")).totalMatches, 2);
+    assert.equal((await search.search(root, "fo+", {
+      useRegex: true,
+      caseSensitive: true,
+    })).totalMatches, 1);
+    assert.equal((await search.search(root, "[", { useRegex: true })).totalMatches, 0);
+    const invalidReplacement = await search.replace(root, "[", "unused", {
+      useRegex: true,
+    });
+    assert.equal(invalidReplacement.success, false);
+    assert.equal(invalidReplacement.error, "Invalid regular expression.");
+    const multiline = await search.search(root, "left\\nright", {
+      useRegex: true,
+      caseSensitive: true,
+    });
+    assert.equal(multiline.totalMatches, 1);
+    assert.equal(multiline.results[0].line, 2);
+    assert.equal(multiline.results[0].matchLength, 10);
+    assert.equal((await search.search(root, "é", { caseSensitive: false })).totalMatches, 1);
+    const zeroWidth = await search.search(root, "(?=x)", {
+      useRegex: true,
+      caseSensitive: true,
+    });
+    assert.deepEqual(zeroWidth.results.map((result) => result.column), [0, 3]);
+
+    const [firstWindowSearch, secondWindowSearch] = await Promise.all([
+      search.search(root, "foo", {
+        sessionId: "workspace-search-session-window-one",
+        workspaceGeneration: 1,
+      }),
+      (async () => {
+        const otherRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-window-two-"));
+        await fsp.writeFile(path.join(otherRoot, "only.txt"), "foo\n");
+        const otherSearch = new WorkspaceSearch({ window: null });
+        try {
+          const result = await otherSearch.search(otherRoot, "foo", {
+            sessionId: "workspace-search-session-window-two",
+            workspaceGeneration: 1,
+          });
+          assert.equal(result.totalMatches, 1);
+          return result;
+        } finally {
+          await otherSearch.dispose();
+          await fsp.rm(otherRoot, { recursive: true, force: true });
+        }
+      })(),
+    ]);
+    assert.equal(firstWindowSearch.totalMatches, 2);
+    assert.equal(secondWindowSearch.totalMatches, 1);
+  } finally {
+    if (search) await search.dispose();
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("WorkspaceRegexExecutor terminates timed out and cancelled regex workers", async () => {
+  const executor = new WorkspaceRegexExecutor(800, 4);
+  const pathological = /^(a+)+$/gu;
+  const input = `${"a".repeat(36)}!`;
+  try {
+    assert.deepEqual(await executor.findMatches(/safe/gu, "safe", true, 10), [
+      { index: 0, length: 4 },
+    ]);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const worker = executor.worker;
+      assert.ok(worker?.pid, "regex work must run in a child process");
+      await assert.rejects(
+        executor.findMatches(pathological, input, true, 10),
+        (error) => error instanceof WorkspaceRegexExecutionError && error.code === "TIMEOUT",
+      );
+      await executor.stoppingWorker;
+      assert.ok(
+        worker.exitCode !== null || worker.signalCode !== null,
+        "the timed out process must have exited before another task starts",
+      );
+      assert.equal(executor.worker, null, "the timed out worker must be discarded");
+      assert.deepEqual(await executor.findMatches(/safe/gu, "safe", true, 10), [
+        { index: 0, length: 4 },
+      ]);
+    }
+
+    const controller = new AbortController();
+    let heartbeatCount = 0;
+    const heartbeat = setInterval(() => heartbeatCount++, 10);
+    await executor.findMatches(/ready/gu, "ready", true, 10);
+    const worker = executor.worker;
+    const pending = executor.findMatches(pathological, input, true, 10, controller.signal);
+    const cancelTimer = setTimeout(() => controller.abort(), 30);
+    await assert.rejects(
+      pending,
+      (error) => error instanceof WorkspaceRegexExecutionError && error.code === "ABORTED",
+    );
+    clearTimeout(cancelTimer);
+    clearInterval(heartbeat);
+    assert.ok(heartbeatCount >= 1, "the main event loop must remain responsive during regex work");
+    await executor.stoppingWorker;
+    assert.ok(worker.exitCode !== null || worker.signalCode !== null);
+    assert.equal(executor.worker, null, "the cancelled worker must be discarded");
+  } finally {
+    await executor.dispose();
+  }
+});
+
+test("WorkspaceSearch times out pathological regexes without blocking and protects Replace All", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-pathological-"));
+  let search;
+  let heartbeatCount = 0;
+  let heartbeat;
+  try {
+    await fsp.writeFile(path.join(root, "hostile.txt"), `${"a".repeat(36)}!`);
+    search = new WorkspaceSearch({ window: null });
+    heartbeat = setInterval(() => heartbeatCount++, 10);
+    await assert.rejects(
+      search.search(root, "^(a+)+$", {
+        useRegex: true,
+        forceFilesystemScan: true,
+      }),
+      /exceeded 1500 ms and was terminated/,
+    );
+    assert.ok(heartbeatCount >= 10, "main-process work must continue while the regex worker runs");
+
+    const replacement = await search.replace(root, "^(a+)+$", "changed", {
+      useRegex: true,
+      forceFilesystemScan: true,
+    });
+    assert.equal(replacement.success, false);
+    assert.match(replacement.error, /exceeded 1500 ms and was terminated/);
+
+    assert.equal((await search.search(root, "a", { forceFilesystemScan: true })).totalMatches, 36);
+  } finally {
+    if (heartbeat) clearInterval(heartbeat);
+    if (search) await search.dispose();
+    await fsp.rm(root, { recursive: true, force: true });
   }
 });
 

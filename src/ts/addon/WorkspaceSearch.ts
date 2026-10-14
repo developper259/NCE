@@ -11,6 +11,13 @@ import {
 import {
   isOpenableFileAtPath,
 } from "./OpenableFile";
+import {
+  acquireWorkspaceRegexExecutor,
+  releaseWorkspaceRegexExecutor,
+  WorkspaceRegexExecutionError,
+  WorkspaceRegexExecutor,
+  WorkspaceRegexPattern,
+} from "./WorkspaceRegexExecutor";
 
 interface SearchOptions {
   include?: string;
@@ -79,6 +86,7 @@ interface SearchSession {
   filesRead: number;
   complete: boolean;
   cancelled: boolean;
+  abortController: AbortController;
   promise: Promise<SearchResponse> | null;
   streamEmitter: ((message: SearchStreamMessage) => void) | null;
   streamLimit: number;
@@ -143,11 +151,15 @@ export class WorkspaceSearch {
   window: Window;
   readonly workspaceIndex: WorkspaceIndex;
   private readonly cancelledRequests = new Set<string>();
+  private readonly requestControllers = new Map<string, Set<AbortController>>();
+  private readonly activeControllers = new Set<AbortController>();
   private readonly searchSessions = new Map<string, SearchSession>();
   private readonly cancelledSearchSessions = new Map<string, number>();
   private readonly maxSearchSessions = 8;
   private readonly searchSessionTtlMs = 5 * 60 * 1000;
   private readonly ipc: IpcHandlerRegistrar;
+  private regexExecutor: WorkspaceRegexExecutor | null = null;
+  private disposed = false;
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 50000;
@@ -188,6 +200,32 @@ export class WorkspaceSearch {
     this.window = window;
     this.ipc = ipc;
     this.workspaceIndex = new WorkspaceIndex();
+  }
+
+  private getRegexExecutor(): WorkspaceRegexExecutor {
+    if (!this.regexExecutor)
+      this.regexExecutor = acquireWorkspaceRegexExecutor();
+    return this.regexExecutor;
+  }
+
+  private registerRequestController(
+    requestId: string | undefined,
+    controller: AbortController,
+  ): () => void {
+    this.activeControllers.add(controller);
+    const controllers = typeof requestId === "string" && requestId
+      ? this.requestControllers.get(requestId) || new Set()
+      : null;
+    if (controllers) {
+      controllers.add(controller);
+      this.requestControllers.set(requestId!, controllers);
+    }
+    return () => {
+      this.activeControllers.delete(controller);
+      if (!controllers || !requestId) return;
+      controllers.delete(controller);
+      if (!controllers.size) this.requestControllers.delete(requestId);
+    };
   }
 
   private async ensureWorkspaceStorage(rootPath: string): Promise<void> {
@@ -741,6 +779,7 @@ export class WorkspaceSearch {
   private cancelSession(session: SearchSession): void {
     if (session.cancelled) return;
     session.cancelled = true;
+    session.abortController.abort();
     if (session.streamBatchTimer) clearTimeout(session.streamBatchTimer);
     if (session.streamProgressTimer) clearTimeout(session.streamProgressTimer);
     session.streamBatchTimer = null;
@@ -763,6 +802,8 @@ export class WorkspaceSearch {
 
   cancelSearch(requestId: string): void {
     if (typeof requestId !== "string" || !requestId) return;
+    for (const controller of this.requestControllers.get(requestId) || [])
+      controller.abort();
     const session = this.searchSessions.get(requestId);
     if (session) {
       this.cancelSession(session);
@@ -804,13 +845,22 @@ export class WorkspaceSearch {
   }
 
   async dispose(): Promise<void> {
+    if (this.disposed) return;
+    this.disposed = true;
+    for (const controller of this.activeControllers) controller.abort();
     for (const session of [...this.searchSessions.values()]) {
       this.cancelSession(session);
       this.rememberCancelledSearchSession(session.id);
     }
     this.searchSessions.clear();
+    this.activeControllers.clear();
+    this.requestControllers.clear();
     this.cancelledRequests.clear();
     this.cancelledSearchSessions.clear();
+    if (this.regexExecutor) {
+      await releaseWorkspaceRegexExecutor(this.regexExecutor);
+      this.regexExecutor = null;
+    }
     await this.workspaceIndex.dispose();
   }
 
@@ -915,6 +965,7 @@ export class WorkspaceSearch {
         filesRead: 0,
         complete: false,
         cancelled: false,
+        abortController: new AbortController(),
         promise: null,
         streamEmitter: null,
         streamLimit: 0,
@@ -941,8 +992,20 @@ export class WorkspaceSearch {
         sessionId: undefined,
         requestId: options.requestId,
       };
-      activeSession.promise = this.searchUncached(root, query, scanOptions, activeSession)
+      const unregisterRequest = this.registerRequestController(
+        options.requestId,
+        activeSession.abortController,
+      );
+      activeSession.promise = this.searchUncached(
+        root,
+        query,
+        scanOptions,
+        activeSession,
+        activeSession.abortController.signal,
+      )
         .then((response) => {
+          if (activeSession.abortController.signal.aborted && !activeSession.cancelled)
+            this.cancelSession(activeSession);
           if (!activeSession.cancelled) {
             activeSession.results = response.results;
             activeSession.totalMatches = response.totalMatches;
@@ -951,9 +1014,35 @@ export class WorkspaceSearch {
           }
           return response;
         })
-        .finally(() => { activeSession.promise = null; });
+        .finally(() => {
+          unregisterRequest();
+          activeSession.promise = null;
+        });
     }
-    if (activeSession.promise) await activeSession.promise;
+    if (activeSession.promise) {
+      try {
+        await activeSession.promise;
+      } catch (error) {
+        if (
+          error instanceof WorkspaceRegexExecutionError &&
+          error.code === "ABORTED"
+        ) {
+          if (!activeSession.cancelled) this.cancelSession(activeSession);
+          return this.emptySearchResponse(options);
+        }
+        if (
+          error instanceof WorkspaceRegexExecutionError &&
+          error.code === "INVALID_REGEX"
+        ) {
+          activeSession.results = [];
+          activeSession.totalMatches = 0;
+          activeSession.filesSearched = 0;
+          activeSession.complete = true;
+          return this.emptySearchResponse(options);
+        }
+        throw error;
+      }
+    }
 
     if (activeSession.cancelled) return this.emptySearchResponse(options);
     activeSession.lastAccess = Date.now();
@@ -998,7 +1087,29 @@ export class WorkspaceSearch {
     ) {
       return this.searchWithSession(rootPath, query, options);
     }
-    return this.searchUncached(rootPath, query, options);
+    const controller = new AbortController();
+    const unregisterRequest = this.registerRequestController(
+      options.requestId,
+      controller,
+    );
+    try {
+      return await this.searchUncached(
+        rootPath,
+        query,
+        options,
+        undefined,
+        controller.signal,
+      );
+    } catch (error) {
+      if (
+        error instanceof WorkspaceRegexExecutionError &&
+        (error.code === "ABORTED" || error.code === "INVALID_REGEX")
+      ) return this.emptySearchResponse(options);
+      throw error;
+    } finally {
+      unregisterRequest();
+      if (options.requestId) this.cancelledRequests.delete(options.requestId);
+    }
   }
 
   protected readSearchFile(filePath: string): Promise<Buffer> {
@@ -1010,6 +1121,7 @@ export class WorkspaceSearch {
     query: string,
     options: SearchOptions = {},
     session?: SearchSession,
+    signal?: AbortSignal,
   ): Promise<SearchResponse> {
     const empty: SearchResponse = {
       results: [],
@@ -1078,6 +1190,7 @@ export class WorkspaceSearch {
     const isSearchCancelled = (): boolean =>
       Boolean(
         session?.cancelled ||
+        signal?.aborted ||
         (options.requestId && this.cancelledRequests.has(options.requestId)),
       );
 
@@ -1087,85 +1200,89 @@ export class WorkspaceSearch {
       name: string,
     ): Promise<void> => {
       if (isSearchCancelled() || totalMatches >= maxMatches) return;
+      let buffer: Buffer;
       try {
         const stat = await fs.lstat(fullPath);
         if (!stat.isFile() || stat.isSymbolicLink() || stat.size > this.maxFileSize)
           return;
-
         if (session) session.filesRead++;
-        const buffer = await this.readSearchFile(fullPath);
+        buffer = await this.readSearchFile(fullPath);
         if (session) {
           session.scannedFiles++;
           this.scheduleSearchStreamProgress(session);
         }
-
-        if (this.isBinary(buffer)) return;
-
-        const content = buffer.toString("utf8");
-        filesSearched++;
-        if (session) session.filesSearched = filesSearched;
-        const lines = content.split(/\r?\n/);
-
-        if (useMultilineMatcher) {
-          const matches = matcher(content);
-          const lineStarts = [0];
-          for (let index = 0; index < content.length; index++) {
-            if (content[index] === "\n") lineStarts.push(index + 1);
-          }
-
-          for (const match of matches) {
-            if (isSearchCancelled() || totalMatches >= maxMatches) return;
-            totalMatches++;
-            if (totalMatches <= offset || results.length >= limit) continue;
-            let lineIndex = 0;
-            while (
-              lineIndex + 1 < lineStarts.length &&
-              lineStarts[lineIndex + 1] <= match.index
-            ) lineIndex++;
-            const line = lines[lineIndex] || "";
-            const column = match.index - lineStarts[lineIndex];
-            const previewLength = Math.min(
-              match.length,
-              Math.max(0, line.length - column),
-            );
-            const preview = this.createPreview(line, column, previewLength);
-            this.addSearchResult(results, session, {
-              path: fullPath,
-              relativePath,
-              name,
-              line: lineIndex + 1,
-              column,
-              preview: preview.text,
-              matchStart: preview.matchStart,
-              matchLength: match.length,
-            }, totalMatches);
-          }
-          return;
-        }
-
-        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-          if (isSearchCancelled() || totalMatches >= maxMatches) return;
-          const line = lines[lineIndex];
-          const matches = matcher(line);
-          for (const match of matches) {
-            if (isSearchCancelled()) return;
-            totalMatches++;
-            if (totalMatches <= offset || results.length >= limit) continue;
-            const preview = this.createPreview(line, match.index, match.length);
-            this.addSearchResult(results, session, {
-              path: fullPath,
-              relativePath,
-              name,
-              line: lineIndex + 1,
-              column: match.index,
-              preview: preview.text,
-              matchStart: preview.matchStart,
-              matchLength: match.length,
-            }, totalMatches);
-          }
-        }
       } catch {
         // The file may have disappeared between discovery and content read.
+        return;
+      }
+
+      if (this.isBinary(buffer) || isSearchCancelled()) return;
+      const content = buffer.toString("utf8");
+      filesSearched++;
+      if (session) session.filesSearched = filesSearched;
+      const lines = content.split(/\r?\n/);
+      const matches = await this.getRegexExecutor().findMatches(
+        matcher,
+        content,
+        useMultilineMatcher,
+        maxMatches - totalMatches,
+        signal,
+      );
+
+      if (useMultilineMatcher) {
+        const lineStarts = [0];
+        for (let index = 0; index < content.length; index++) {
+          if (content[index] === "\n") lineStarts.push(index + 1);
+        }
+
+        for (const match of matches) {
+          if (isSearchCancelled() || totalMatches >= maxMatches) return;
+          totalMatches++;
+          if (totalMatches <= offset || results.length >= limit) continue;
+          let lineIndex = 0;
+          while (
+            lineIndex + 1 < lineStarts.length &&
+            lineStarts[lineIndex + 1] <= match.index
+          ) lineIndex++;
+          const line = lines[lineIndex] || "";
+          const column = match.index - lineStarts[lineIndex];
+          const previewLength = Math.min(
+            match.length,
+            Math.max(0, line.length - column),
+          );
+          const preview = this.createPreview(line, column, previewLength);
+          this.addSearchResult(results, session, {
+            path: fullPath,
+            relativePath,
+            name,
+            line: lineIndex + 1,
+            column,
+            preview: preview.text,
+            matchStart: preview.matchStart,
+            matchLength: match.length,
+          }, totalMatches);
+        }
+        return;
+      }
+
+      for (const match of matches) {
+        if (isSearchCancelled() || totalMatches >= maxMatches) return;
+        totalMatches++;
+        if (totalMatches <= offset || results.length >= limit) continue;
+        const lineIndex = Math.max(0, (match.line || 1) - 1);
+        const line = lines[lineIndex] || "";
+        const column = match.column ?? match.index;
+        const preview = this.createPreview(line, column, match.length);
+        this.addSearchResult(results, session, {
+          path: fullPath,
+          relativePath,
+          name,
+          line: lineIndex + 1,
+          column,
+          preview: preview.text,
+          matchStart: preview.matchStart,
+          matchLength: match.length,
+        }, totalMatches);
       }
     };
 
@@ -1257,7 +1374,14 @@ export class WorkspaceSearch {
       return this.searchUncached(root, query, {
         ...options,
         forceFilesystemScan: true,
-      }, session);
+      }, session, signal);
+    }
+
+    if (signal?.aborted) {
+      throw new WorkspaceRegexExecutionError(
+        "ABORTED",
+        "Workspace search was cancelled.",
+      );
     }
 
     return {
@@ -1279,77 +1403,100 @@ export class WorkspaceSearch {
     if (!rootPath || !query || typeof replacement !== "string") {
       return { success: false, filesChanged: 0, replacements: 0, error: "Invalid replacement request." };
     }
+    const controller = new AbortController();
+    const unregisterRequest = this.registerRequestController(
+      options.requestId,
+      controller,
+    );
+    try {
+      const response = await this.search(rootPath, query, {
+        ...options,
+        limit: this.maxReplaceResults,
+        maxMatches: this.maxReplaceResults,
+      });
+      const resultPaths = [...new Set(response.results.map((result) => result.path))];
+      const paths = options.paths?.length
+        ? resultPaths.filter((filePath) => options.paths?.includes(filePath))
+        : resultPaths;
+      const regex = this.createReplacementRegex(
+        query,
+        options,
+        Boolean(options.replaceFirst),
+      );
+      if (!regex) {
+        return { success: false, filesChanged: 0, replacements: 0, error: "Invalid regular expression." };
+      }
+      await this.getRegexExecutor().findMatches(regex, "", true, 1, controller.signal);
 
-    const response = await this.search(rootPath, query, {
-      ...options,
-      limit: this.maxReplaceResults,
-      maxMatches: this.maxReplaceResults,
-    });
-    const resultPaths = [...new Set(response.results.map((result) => result.path))];
-    const paths = options.paths?.length
-      ? resultPaths.filter((filePath) => options.paths?.includes(filePath))
-      : resultPaths;
-    const regex = this.createReplacementRegex(query, options, Boolean(options.replaceFirst));
-    if (!regex) {
-      return { success: false, filesChanged: 0, replacements: 0, error: "Invalid regular expression." };
+      let filesChanged = 0;
+      let replacements = 0;
+      for (const filePath of paths) {
+        if (controller.signal.aborted)
+          throw new WorkspaceRegexExecutionError("ABORTED", "Replacement was cancelled.");
+        const content = await fs.readFile(filePath, "utf8");
+        if (controller.signal.aborted)
+          throw new WorkspaceRegexExecutionError("ABORTED", "Replacement was cancelled.");
+        const result = await this.getRegexExecutor().replace(
+          regex,
+          content,
+          replacement,
+          controller.signal,
+        );
+        if (!result.replacements) continue;
+        const temporary = `${filePath}.nce-replace-${process.pid}-${Date.now()}`;
+        await fs.writeFile(temporary, result.content, "utf8");
+        await fs.rename(temporary, filePath);
+        filesChanged++;
+        replacements += result.replacements;
+      }
+      return { success: true, filesChanged, replacements };
+    } catch (error) {
+      return {
+        success: false,
+        filesChanged: 0,
+        replacements: 0,
+        error: error instanceof WorkspaceRegexExecutionError &&
+            error.code === "INVALID_REGEX"
+          ? "Invalid regular expression."
+          : error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      unregisterRequest();
     }
-
-    let filesChanged = 0;
-    let replacements = 0;
-    for (const filePath of paths) {
-      const content = await fs.readFile(filePath, "utf8");
-      const matches = content.match(regex);
-      if (!matches?.length) continue;
-      const updated = content.replace(regex, replacement);
-      const temporary = `${filePath}.nce-replace-${process.pid}-${Date.now()}`;
-      await fs.writeFile(temporary, updated, "utf8");
-      await fs.rename(temporary, filePath);
-      filesChanged++;
-      replacements += matches.length;
-    }
-    return { success: true, filesChanged, replacements };
   }
 
-  private createReplacementRegex(query: string, options: SearchOptions, replaceFirst = false): RegExp | null {
+  private createReplacementRegex(
+    query: string,
+    options: SearchOptions,
+    replaceFirst = false,
+  ): WorkspaceRegexPattern | null {
     const flags = `${replaceFirst ? "" : "g"}${options.caseSensitive ? "" : "i"}u`;
     const character = "[\\p{L}\\p{N}\\p{M}\\p{Pc}]";
     const prefix = `(?<!${character})`;
     const suffix = `(?!${character})`;
     const source = options.useRegex ? query : query.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
-    try {
-      return new RegExp(options.wholeWord ? `${prefix}(?:${source})${suffix}` : source, flags);
-    } catch {
-      return null;
-    }
+    return {
+      source: options.wholeWord ? `${prefix}(?:${source})${suffix}` : source,
+      flags,
+    };
   }
 
   private createMatcher(
     query: string,
     options: SearchOptions,
-  ):
-    | ((line: string) => {
-        index: number;
-        length: number;
-      }[])
-    | null {
+  ): WorkspaceRegexPattern | null {
     const flags = `${options.caseSensitive ? "g" : "gi"}u`;
     const wordCharacter = "[\\p{L}\\p{N}\\p{M}\\p{Pc}]";
     const wordBoundaryPrefix = `(?<!${wordCharacter})`;
     const wordBoundarySuffix = `(?!${wordCharacter})`;
 
     if (options.useRegex) {
-      try {
-        const regex = new RegExp(
-          options.wholeWord
-            ? `${wordBoundaryPrefix}(?:${query})${wordBoundarySuffix}`
-            : query,
-          flags,
-        );
-
-        return (line) => this.findAllMatches(regex, line);
-      } catch {
-        return null;
-      }
+      return {
+        source: options.wholeWord
+          ? `${wordBoundaryPrefix}(?:${query})${wordBoundarySuffix}`
+          : query,
+        flags,
+      };
     }
 
     const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1358,62 +1505,7 @@ export class WorkspaceSearch {
       ? `${wordBoundaryPrefix}${escaped}${wordBoundarySuffix}`
       : escaped;
 
-    const regex = new RegExp(expression, flags);
-
-    return (line) => this.findAllMatches(regex, line);
-  }
-
-  private findAllMatches(
-    regex: RegExp,
-    line: string,
-  ): {
-    index: number;
-    length: number;
-  }[] {
-    const matches: {
-      index: number;
-      length: number;
-    }[] = [];
-
-    regex.lastIndex = 0;
-
-    let match: RegExpExecArray | null;
-
-    while ((match = regex.exec(line)) !== null) {
-      const value = match[0];
-
-      matches.push({
-        index: match.index,
-        length: value.length,
-      });
-
-      if (value.length === 0) {
-        regex.lastIndex = this.advanceRegexIndexSafely(line, match.index);
-      }
-    }
-
-    regex.lastIndex = 0;
-
-    return matches;
-  }
-
-  private advanceRegexIndexSafely(value: string, utf16Offset: number): number {
-    if (utf16Offset >= value.length) return value.length + 1;
-    if (typeof Intl !== "undefined" && typeof Intl.Segmenter === "function") {
-      const segmenter = new Intl.Segmenter(undefined, {
-        granularity: "grapheme",
-      });
-      for (const segment of segmenter.segment(value)) {
-        if (segment.index >= utf16Offset)
-          return segment.index + segment.segment.length;
-        if (segment.index + segment.segment.length > utf16Offset)
-          return segment.index + segment.segment.length;
-      }
-    }
-    const codePoint = value.codePointAt(utf16Offset);
-    return (
-      utf16Offset + (codePoint !== undefined && codePoint > 0xffff ? 2 : 1)
-    );
+    return { source: expression, flags };
   }
 
   private splitPatterns(value?: string): string[] {
