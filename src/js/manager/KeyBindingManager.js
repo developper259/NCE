@@ -145,12 +145,33 @@ class KeyBindingManager {
     return key + eventKey;
   }
 
-  hasTerminalShortcutModifier(event) {
+  isPrintableKey(key) {
+    return typeof key === "string" && Array.from(key).length === 1;
+  }
+
+  isFunctionShortcut(shortcutKey) {
+    const key = String(shortcutKey || "").split("+").pop()?.toLowerCase();
+    return /^f(?:[1-9]|1\d|2[0-4])$/.test(key || "");
+  }
+
+  canDispatchTerminalShortcut(event, shortcutKey) {
     // Alt can produce regular text in terminal input on many keyboard layouts.
-    return event.ctrlKey || event.metaKey;
+    // Function keys are non-textual and remain usable as configured shortcuts.
+    return event.ctrlKey || event.metaKey || this.isFunctionShortcut(shortcutKey);
   }
 
   bindNativeInput(key, e) {
+    if (e.getModifierState?.("AltGraph")) return false;
+
+    // Printable keys always belong to the focused control unless the user
+    // explicitly presses Control or Command. This keeps configured Space,
+    // Shift+Space, Alt+Space, and single-letter shortcuts from eating text.
+    if (
+      this.isPrintableKey(e.key) &&
+      !e.ctrlKey &&
+      !e.metaKey
+    ) return false;
+
     if (
       [
         "ArrowUp",
@@ -167,8 +188,7 @@ class KeyBindingManager {
         "Tab",
       ].includes(e.key) &&
       !e.ctrlKey &&
-      !e.metaKey &&
-      !e.altKey
+      !e.metaKey
     ) {
       return false;
     }
@@ -282,7 +302,7 @@ class KeyBindingManager {
       ["close_file", "close_all_file"].includes(binding?.action);
     if (
       terminalContext &&
-      this.hasTerminalShortcutModifier(e) &&
+      this.canDispatchTerminalShortcut(e, shortcutKey) &&
       binding?.in_editor === false &&
       this.terminalTabActions.has(binding.action) &&
       !closeWindowWhenNoTabs
@@ -297,7 +317,7 @@ class KeyBindingManager {
     const terminalElement = e.target?.closest?.(".xterm");
     if (terminalElement?.classList?.contains("xterm")) {
       if (
-        this.hasTerminalShortcutModifier(e) &&
+        this.canDispatchTerminalShortcut(e, shortcutKey) &&
         binding?.in_editor === false
       ) {
         if (e.repeat && !["next_tab", "previous_tab"].includes(binding.action)) return;

@@ -76,6 +76,7 @@ function keyboardEvent(target = new HTMLInputElement(), overrides = {}) {
     shiftKey: false,
     altKey: false,
     isComposing: false,
+      getModifierState: () => false,
     defaultPrevented: false,
     propagationStopped: false,
     preventDefault() { this.defaultPrevented = true; },
@@ -226,6 +227,123 @@ test("native input editing shortcuts are handled without reaching the editor", (
   assert.equal(event.propagationStopped, true);
 });
 
+test("printable shortcuts stay as text in native inputs and contenteditable controls", () => {
+  const cases = [
+    { key: " ", shortcut: "Space", shiftKey: false, altKey: false },
+    { key: " ", shortcut: "Shift+Space", shiftKey: true, altKey: false },
+    { key: " ", shortcut: "Alt+Space", shiftKey: false, altKey: true },
+    { key: "a", shortcut: "a", shiftKey: false, altKey: false },
+  ];
+
+  for (const target of [new HTMLInputElement(), new HTMLTextAreaElement()]) {
+    for (const item of cases) {
+      const { manager, calls } = fixture(
+        { action: "open_folder", in_editor: false },
+        {},
+        item.shortcut,
+      );
+      const event = keyboardEvent(target, {
+        key: item.key,
+        metaKey: false,
+        ctrlKey: false,
+        shiftKey: item.shiftKey,
+        altKey: item.altKey,
+      });
+
+      manager.onKey(event);
+
+      assert.deepEqual(calls, [], `${item.shortcut} remains text in a native input`);
+      assert.equal(event.defaultPrevented, false);
+      assert.equal(event.propagationStopped, false);
+    }
+  }
+
+  const editable = new HTMLElement();
+  editable.isContentEditable = true;
+  const { manager, calls } = fixture(
+    { action: "open_folder", in_editor: false },
+    {},
+    "Space",
+  );
+  const event = keyboardEvent(editable, {
+    key: " ",
+    metaKey: false,
+    ctrlKey: false,
+  });
+  manager.onKey(event);
+  assert.deepEqual(calls, []);
+  assert.equal(event.defaultPrevented, false);
+});
+
+test("native controls preserve navigation keys while allowing configured function keys", () => {
+  for (const [key, shortcut, shiftKey] of [
+    ["ArrowUp", "Shift+ArrowUp", true],
+    ["ArrowLeft", "ArrowLeft", false],
+    ["Backspace", "Backspace", false],
+    ["Delete", "Delete", false],
+    ["Enter", "Enter", false],
+    ["Tab", "Tab", false],
+  ]) {
+    const { manager, calls } = fixture(
+      { action: "open_folder", in_editor: false },
+      {},
+      shortcut,
+    );
+    const event = keyboardEvent(new HTMLInputElement(), {
+      key,
+      metaKey: false,
+      ctrlKey: false,
+      shiftKey,
+    });
+
+    manager.onKey(event);
+
+    assert.deepEqual(calls, [], `${shortcut} stays native in a text control`);
+    assert.equal(event.defaultPrevented, false);
+  }
+
+  const functionKey = fixture(
+    { action: "open_command", in_editor: false },
+    {},
+    "F5",
+  );
+  const event = keyboardEvent(new HTMLInputElement(), {
+    key: "F5",
+    metaKey: false,
+    ctrlKey: false,
+  });
+  functionKey.manager.onKey(event);
+  assert.deepEqual(functionKey.calls, ["open_command"]);
+  assert.equal(event.defaultPrevented, true);
+});
+
+test("IME composition and AltGraph text are never dispatched as shortcuts", () => {
+  const composing = fixture({ action: "open_folder", in_editor: false }, {}, "Meta+p");
+  const composingEvent = keyboardEvent(new HTMLInputElement(), {
+    key: "p",
+    isComposing: true,
+  });
+  composing.manager.onKey(composingEvent);
+  assert.deepEqual(composing.calls, []);
+  assert.equal(composingEvent.defaultPrevented, false);
+
+  const altGraph = fixture(
+    { action: "open_folder", in_editor: false },
+    {},
+    "Ctrl+Alt+q",
+  );
+  const altGraphEvent = keyboardEvent(new HTMLInputElement(), {
+    key: "q",
+    metaKey: false,
+    ctrlKey: true,
+    altKey: true,
+    getModifierState: (modifier) => modifier === "AltGraph",
+  });
+  altGraph.manager.onKey(altGraphEvent);
+  assert.deepEqual(altGraph.calls, []);
+  assert.equal(altGraphEvent.defaultPrevented, false);
+});
+
 test("Meta+V pastes into the focused native input through KeyBindingManager", async () => {
   const { manager, calls } = fixture({ action: "paste", in_editor: true });
   const input = new HTMLTextAreaElement();
@@ -317,6 +435,25 @@ test("terminal session shortcuts still run when explicitly modified", () => {
 
   assert.deepEqual(tabActions, ["next_tab"]);
   assert.deepEqual(calls, []);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+});
+
+test("configured function-key shortcuts work from the terminal without modifiers", () => {
+  const { manager, calls } = fixture(
+    { action: "open_command", in_editor: false },
+    {},
+    "F5",
+  );
+  const event = keyboardEvent(terminalTarget(), {
+    key: "F5",
+    metaKey: false,
+    ctrlKey: false,
+  });
+
+  manager.onKey(event);
+
+  assert.deepEqual(calls, ["open_command"]);
   assert.equal(event.defaultPrevented, true);
   assert.equal(event.propagationStopped, true);
 });
