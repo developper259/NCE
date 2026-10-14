@@ -355,7 +355,7 @@ class EditorToolRegistry {
       execute: (args) => this.agent.readFile(args.path, args),
     });
     this.agent.registerTool("get_project_map", {
-      description: `Carte compacte du workspace. maxDepth <= ${this.getLimit("get_project_map", "maxDepth", 20)}, sortie <= ${this.getLimit("get_project_map", "outputCharacters", 4000)} caractères ; réduis path/profondeur si nécessaire.`,
+      description: `Carte compacte du workspace. maxDepth <= ${this.getLimit("get_project_map", "maxDepth", 20)}, inspection de fichiers <= ${this.getLimit("get_project_map", "inspectionBudgetBytes", 16 * 1024 * 1024)} octets, sortie <= ${this.getLimit("get_project_map", "outputCharacters", 4000)} caractères ; réduis path/profondeur si nécessaire.`,
       parameters: {
         type: "object",
         properties: {
@@ -370,6 +370,17 @@ class EditorToolRegistry {
             minimum: 1,
             maximum: this.getLimit("get_project_map", "maxDepth", 20),
             description: "Profondeur maximale de l'arborescence. 6 par défaut.",
+          },
+          inspectionBudgetBytes: {
+            type: "integer",
+            minimum: 0,
+            maximum: this.getLimit(
+              "get_project_map",
+              "inspectionBudgetBytes",
+              16 * 1024 * 1024,
+            ),
+            description:
+              "Budget maximal de lecture de fichiers pour compter les lignes. Le budget configuré est utilisé par défaut.",
           },
         },
       },

@@ -1208,6 +1208,7 @@ class FileKnowledge {
       path: this.normalizePath(path),
       maxDepth: options.maxDepth,
       maxFiles: options.maxFiles,
+      inspectionBudgetBytes: options.inspectionBudgetBytes,
     });
     const cached = this.projectMapCache.get(key);
     if (cached) {

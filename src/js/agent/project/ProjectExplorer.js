@@ -30,14 +30,24 @@ class ProjectExplorer {
     const maxDepth = Number.isInteger(args.maxDepth)
       ? Math.min(args.maxDepth, maxDepthLimit)
       : 6;
+    const inspectionBudgetLimit =
+      this.agent.toolLimits?.get_project_map?.inspectionBudgetBytes ||
+      16 * 1024 * 1024;
+    const inspectionBudgetBytes = Number.isInteger(args.inspectionBudgetBytes)
+      ? Math.min(inspectionBudgetLimit, Math.max(0, args.inspectionBudgetBytes))
+      : inspectionBudgetLimit;
     const cacheDecision = this.agent.fileKnowledge.getProjectMapDecision(
       target,
-      { maxDepth, maxFiles: 1000 },
+      { maxDepth, maxFiles: 1000, inspectionBudgetBytes },
     );
     if (cacheDecision.cached) return cacheDecision.result;
     const map = await this.agent.api.getProjectMap(root, target, {
       maxDepth,
       maxFiles: 1000,
+      inspectionBudgetBytes,
+      ...(typeof args.requestId === "string" && args.requestId
+        ? { requestId: args.requestId }
+        : {}),
     });
     if (!map?.success || !Array.isArray(map.entries)) {
       return (
@@ -62,10 +72,22 @@ class ProjectExplorer {
       truncated: map.truncated === true,
       maxDepth: map.maxDepth,
       maxFiles: map.maxFiles,
+      inspectionBytes: map.inspectionBytes,
+      inspectionBudgetBytes: map.inspectionBudgetBytes,
+      inspectionSkippedFiles: map.inspectionSkippedFiles || 0,
+      inspectionUnavailableFiles: map.inspectionUnavailableFiles || 0,
+      inspectionCacheHits: map.inspectionCacheHits || 0,
+      indexedMetadataHits: map.indexedMetadataHits || 0,
+      indexHit: map.indexHit === true,
+      cancelled: map.cancelled === true,
       tree,
       text: this.agent.formatProjectMapText(rootLabel, tree, map),
     };
-    this.agent.fileKnowledge.recordProjectMap(cacheDecision.key, result);
+    if (
+      result.cancelled !== true &&
+      result.inspectionSkippedFiles === 0 &&
+      result.inspectionUnavailableFiles === 0
+    ) this.agent.fileKnowledge.recordProjectMap(cacheDecision.key, result);
     return result;
   }
 
@@ -92,6 +114,7 @@ class ProjectExplorer {
         language: languageByExtension.get(extension),
         lineCount: Number.isInteger(entry.lineCount) ? entry.lineCount : null,
         binary: entry.binary === true,
+        inspectionStatus: entry.inspectionStatus,
       });
     }
     return enriched;
@@ -188,7 +211,15 @@ class ProjectExplorer {
         }
         const details = node.binary
           ? "binary · lines unavailable"
-          : `${node.language} · ${node.lineCount === null ? "lines unavailable" : `${node.lineCount} ${node.lineCount === 1 ? "line" : "lines"}`}`;
+          : `${node.language} · ${node.lineCount === null
+            ? node.inspectionStatus === "budget-skipped"
+              ? "line count unavailable (inspection budget)"
+              : node.inspectionStatus === "unavailable" || node.inspectionStatus === "symlink-skipped"
+                ? "metadata unavailable"
+                : node.inspectionStatus === "cancelled"
+                  ? "inspection cancelled"
+                  : "lines unavailable"
+            : `${node.lineCount} ${node.lineCount === 1 ? "line" : "lines"}`}`;
         lines.push(`${prefix}${branch}${node.name} [${details}]`);
       });
     };
@@ -198,6 +229,17 @@ class ProjectExplorer {
         `\nMap truncated after ${map.maxFiles} files or depth ${map.maxDepth}. Use path to inspect a narrower directory.`,
       );
     }
+    if (map.inspectionSkippedFiles) {
+      lines.push(
+        `Line counts were skipped for ${map.inspectionSkippedFiles} files after the ${map.inspectionBudgetBytes} byte inspection budget.`,
+      );
+    }
+    if (map.inspectionUnavailableFiles) {
+      lines.push(
+        `Metadata was unavailable for ${map.inspectionUnavailableFiles} files.`,
+      );
+    }
+    if (map.cancelled) lines.push("Project map generation was cancelled.");
     return lines.join("\n");
   }
 

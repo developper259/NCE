@@ -1943,6 +1943,218 @@ test("invalid ASAR stays opaque in explorer, search, and project map", async () 
   }
 });
 
+test("Project Map counts small files exactly and reuses current index metadata and inspections", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-metadata-"));
+  const emptyPath = path.join(root, "empty.txt");
+  const noFinalNewlinePath = path.join(root, "no-final-newline.txt");
+  const finalNewlinePath = path.join(root, "final-newline.txt");
+  const detectedBinaryPath = path.join(root, "detected-binary.txt");
+  const knownBinaryPath = path.join(root, "image.png");
+  const dotPrefixPath = path.join(root, "..notes.txt");
+  const noFinalNewline = "one\ntwo";
+  const finalNewline = "one\ntwo\n";
+  await Promise.all([
+    fsp.writeFile(emptyPath, ""),
+    fsp.writeFile(noFinalNewlinePath, noFinalNewline),
+    fsp.writeFile(finalNewlinePath, finalNewline),
+    fsp.writeFile(detectedBinaryPath, Buffer.from([0, 1, 2])),
+    fsp.writeFile(knownBinaryPath, "opaque"),
+    fsp.writeFile(dotPrefixPath, "named"),
+  ]);
+  const search = new WorkspaceSearch({ window: null });
+  try {
+    await search.workspaceIndex.build(root);
+    const first = await search.getProjectMap(root, root, {
+      inspectionBudgetBytes: 1024,
+    });
+    const byName = new Map(first.entries.map((entry) => [entry.name, entry]));
+
+    assert.equal(first.success, true);
+    assert.equal(first.indexHit, true);
+    assert.equal(first.indexedMetadataHits, 6);
+    assert.equal(byName.get("empty.txt").lineCount, 0);
+    assert.equal(byName.get("no-final-newline.txt").lineCount, 2);
+    assert.equal(byName.get("final-newline.txt").lineCount, 2);
+    assert.equal(byName.get("detected-binary.txt").binary, true);
+    assert.equal(byName.get("detected-binary.txt").lineCount, null);
+    assert.equal(byName.get("image.png").binary, true);
+    assert.equal(byName.get("..notes.txt").lineCount, 1);
+    assert.equal(first.inspectionBytes, noFinalNewline.length + finalNewline.length + 3 + 5);
+
+    const cached = await search.getProjectMap(root, root, {
+      inspectionBudgetBytes: 0,
+    });
+    assert.equal(cached.inspectionBytes, 0);
+    assert.equal(cached.inspectionCacheHits, 6);
+    assert.equal(cached.entries.find((entry) => entry.name === "no-final-newline.txt").lineCount, 2);
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Project Map enforces one total byte budget and leaves large text line counts unknown", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-budget-"));
+  const small = "a\n";
+  await fsp.writeFile(path.join(root, "a-small.txt"), small);
+  await fsp.writeFile(path.join(root, "z-large.txt"), "x\n".repeat(100_000));
+  const search = new WorkspaceSearch({ window: null });
+  try {
+    const map = await search.getProjectMap(root, root, {
+      inspectionBudgetBytes: 5,
+    });
+    const large = map.entries.find((entry) => entry.name === "z-large.txt");
+
+    assert.equal(map.success, true);
+    assert.equal(map.inspectionBytes, 5);
+    assert.ok(map.inspectionBytes <= map.inspectionBudgetBytes);
+    assert.equal(map.inspectionSkippedFiles, 1);
+    assert.equal(large.lineCount, null);
+    assert.equal(large.inspectionStatus, "budget-skipped");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Project Map preserves ordering and ignored, hidden, deep, and symlink directory behavior", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-walk-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-outside-"));
+  let search;
+  try {
+    await fsp.mkdir(path.join(root, ".git"));
+    await fsp.mkdir(path.join(root, "node_modules"));
+    await fsp.mkdir(path.join(root, ".hidden"));
+    await fsp.mkdir(path.join(root, "sub", "deep"), { recursive: true });
+    await fsp.writeFile(path.join(root, ".git", "hidden.txt"), "ignored");
+    await fsp.writeFile(path.join(root, "node_modules", "hidden.txt"), "ignored");
+    await fsp.writeFile(path.join(root, ".hidden", "visible.txt"), "visible");
+    await fsp.writeFile(path.join(root, "sub", "deep", "deep.txt"), "deep");
+    await fsp.writeFile(path.join(outside, "outside.txt"), "outside");
+    try {
+      await fsp.symlink(outside, path.join(root, "linked-outside"), "dir");
+    } catch (error) {
+      if (error.code !== "EPERM" && error.code !== "EACCES") throw error;
+    }
+    search = new WorkspaceSearch({ window: null });
+    const map = await search.getProjectMap(root, root, {
+      maxDepth: 1,
+      inspectionBudgetBytes: 1024,
+    });
+    const paths = map.entries.map((entry) => entry.relativePath);
+
+    assert.equal(map.success, true);
+    assert.equal(map.truncated, true);
+    assert.ok(paths.includes(".hidden"));
+    assert.ok(paths.includes(".hidden/visible.txt") === false);
+    assert.ok(paths.includes("sub"));
+    assert.equal(paths.some((entry) => entry.startsWith(".git/")), false);
+    assert.equal(paths.some((entry) => entry.startsWith("node_modules/")), false);
+    assert.equal(paths.some((entry) => entry.includes("linked-outside")), false);
+    assert.equal(paths.some((entry) => entry.endsWith("deep.txt")), false);
+    assert.equal(map.entries.find((entry) => entry.relativePath === "sub").depth, 1);
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+    await fsp.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("Project Map reports missing and unreadable files and stops after cancellation", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-errors-"));
+  await Promise.all([
+    fsp.writeFile(path.join(root, "a-denied.txt"), "denied"),
+    fsp.writeFile(path.join(root, "b-missing.txt"), "removed"),
+    fsp.writeFile(path.join(root, "c-good.txt"), "ok"),
+  ]);
+  class ErrorProjectMapSearch extends WorkspaceSearch {
+    async openProjectMapFile(filePath, flags) {
+      if (path.basename(filePath) === "a-denied.txt") {
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" });
+      }
+      return super.openProjectMapFile(filePath, flags);
+    }
+    async inspectProjectMapFile(filePath, options) {
+      if (path.basename(filePath) === "b-missing.txt") await fsp.unlink(filePath);
+      return super.inspectProjectMapFile(filePath, options);
+    }
+  }
+  const search = new ErrorProjectMapSearch({ window: null });
+  try {
+    const map = await search.getProjectMap(root, root, {
+      inspectionBudgetBytes: 1024,
+    });
+    const byName = new Map(map.entries.map((entry) => [entry.name, entry]));
+    assert.equal(byName.get("a-denied.txt").lineCount, null);
+    assert.equal(byName.get("a-denied.txt").inspectionStatus, "unavailable");
+    assert.equal(byName.get("b-missing.txt").lineCount, null);
+    assert.equal(byName.get("b-missing.txt").inspectionStatus, "unavailable");
+    assert.equal(byName.get("c-good.txt").lineCount, 1);
+    assert.equal(map.inspectionUnavailableFiles, 2);
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+
+  const cancelRoot = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-cancel-"));
+  await Promise.all([
+    fsp.writeFile(path.join(cancelRoot, "a.txt"), "a"),
+    fsp.writeFile(path.join(cancelRoot, "b.txt"), "b"),
+  ]);
+  class CancelProjectMapSearch extends WorkspaceSearch {
+    async inspectProjectMapFile(filePath, options) {
+      const result = await super.inspectProjectMapFile(filePath, options);
+      if (!this.cancelledOnce) {
+        this.cancelledOnce = true;
+        this.cancelSearch("project-map-cancel");
+      }
+      return result;
+    }
+  }
+  const cancelSearch = new CancelProjectMapSearch({ window: null });
+  try {
+    const map = await cancelSearch.getProjectMap(cancelRoot, cancelRoot, {
+      requestId: "project-map-cancel",
+      inspectionBudgetBytes: 1024,
+    });
+    assert.equal(map.cancelled, true);
+    assert.equal(map.truncated, true);
+    assert.equal(map.files, 1);
+    assert.equal(map.entries.length, 1);
+  } finally {
+    await cleanupSearchWorkspaces(cancelSearch, cancelRoot);
+  }
+});
+
+test("Project Map IPC keeps a cancellation received during workspace setup", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-ipc-cancel-"));
+  await fsp.writeFile(path.join(root, "file.txt"), "content");
+  const handlers = new Map();
+  const search = new WorkspaceSearch({ window: null }, {
+    handle: (channel, handler) => handlers.set(channel, handler),
+  });
+  let finishStorageSetup;
+  const storageSetup = new Promise((resolve) => {
+    finishStorageSetup = resolve;
+  });
+  search.ensureWorkspaceStorage = () => storageSetup;
+  search.handleIPC();
+  try {
+    const mapPromise = handlers.get("WorkspaceSearch:projectMap")(
+      {},
+      root,
+      root,
+      { requestId: "project-map-cancel-during-setup" },
+    );
+    await handlers.get("WorkspaceSearch:cancel")(
+      {},
+      "project-map-cancel-during-setup",
+    );
+    finishStorageSetup();
+    const map = await mapPromise;
+    assert.equal(map.cancelled, true);
+    assert.equal(map.entries.length, 0);
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
 test("FileManager classifies normal folder entries from Dirents without per-entry stats", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-dirents-"));
   const folderPath = path.join(root, "folder");

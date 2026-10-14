@@ -6,8 +6,10 @@ import { Window } from "../Window";
 import { atomicWriteFile } from "./FileManager";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 import {
+  compareWorkspaceIndexPaths,
   WORKSPACE_INDEX_IGNORED_DIRECTORIES,
   WorkspaceIndex,
+  type WorkspaceIndexEntry,
 } from "./WorkspaceIndex";
 import {
   isOpenableFileAtPath,
@@ -128,6 +130,40 @@ interface ReplacementCandidate {
 interface ProjectMapOptions {
   maxDepth?: number;
   maxFiles?: number;
+  inspectionBudgetBytes?: number;
+  requestId?: string;
+}
+
+const DEFAULT_PROJECT_MAP_INSPECTION_BYTES = 16 * 1024 * 1024;
+const MAX_PROJECT_MAP_INSPECTION_BYTES = 64 * 1024 * 1024;
+const PROJECT_MAP_BINARY_SAMPLE_BYTES = 8 * 1024;
+const PROJECT_MAP_INSPECTION_BUFFER_BYTES = 64 * 1024;
+
+type ProjectMapInspectionStatus =
+  | "exact"
+  | "binary"
+  | "budget-skipped"
+  | "unavailable"
+  | "symlink-skipped"
+  | "cancelled";
+
+interface ProjectMapInspection {
+  binary: boolean;
+  lineCount: number | null;
+  inspectionStatus: ProjectMapInspectionStatus;
+  bytesRead: number;
+  cacheHit: boolean;
+}
+
+interface ProjectMapInspectionCacheEntry {
+  dev: number;
+  ino: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  binary: boolean;
+  lineCount: number | null;
+  inspectionStatus: "exact" | "binary";
 }
 
 interface ProjectMapEntry {
@@ -138,6 +174,7 @@ interface ProjectMapEntry {
   depth: number;
   lineCount: number | null;
   binary: boolean;
+  inspectionStatus?: ProjectMapInspectionStatus;
 }
 
 interface ProjectMapResponse {
@@ -149,6 +186,14 @@ interface ProjectMapResponse {
   truncated: boolean;
   maxDepth: number;
   maxFiles: number;
+  inspectionBytes: number;
+  inspectionBudgetBytes: number;
+  inspectionSkippedFiles: number;
+  inspectionUnavailableFiles: number;
+  inspectionCacheHits: number;
+  indexedMetadataHits: number;
+  indexHit: boolean;
+  cancelled: boolean;
   error?: { code: string; message: string };
 }
 
@@ -182,6 +227,11 @@ export class WorkspaceSearch {
   private readonly ipc: IpcHandlerRegistrar;
   private regexExecutor: WorkspaceRegexExecutor | null = null;
   private disposed = false;
+  private readonly projectMapInspectionCache = new Map<
+    string,
+    ProjectMapInspectionCacheEntry
+  >();
+  private readonly maxProjectMapInspectionCacheEntries = 5000;
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 50000;
@@ -331,8 +381,14 @@ export class WorkspaceSearch {
         targetPath: string,
         options: ProjectMapOptions = {},
       ) => {
-        await this.ensureWorkspaceStorage(rootPath);
-        return this.getProjectMap(rootPath, targetPath, options);
+        const requestId = options?.requestId;
+        if (requestId) this.cancelledRequests.delete(requestId);
+        try {
+          await this.ensureWorkspaceStorage(rootPath);
+          return await this.getProjectMap(rootPath, targetPath, options);
+        } finally {
+          if (requestId) this.cancelledRequests.delete(requestId);
+        }
       },
     );
     this.ipc.handle(
@@ -455,18 +511,58 @@ export class WorkspaceSearch {
     options: ProjectMapOptions = {},
   ): Promise<ProjectMapResponse> {
     options = options && typeof options === "object" ? options : {};
+    const requestId = typeof options.requestId === "string" && options.requestId
+      ? options.requestId
+      : undefined;
+    try {
+      return await this.buildProjectMap(rootPath, targetPath, options);
+    } finally {
+      if (requestId) this.cancelledRequests.delete(requestId);
+    }
+  }
+
+  private async buildProjectMap(
+    rootPath: string,
+    targetPath: string,
+    options: ProjectMapOptions,
+  ): Promise<ProjectMapResponse> {
     rootPath = typeof rootPath === "string" ? rootPath : "";
     targetPath = typeof targetPath === "string" ? targetPath : "";
+    const requestedDepth = Number.isFinite(options.maxDepth)
+      ? Math.floor(options.maxDepth!)
+      : 6;
+    const requestedFiles = Number.isFinite(options.maxFiles)
+      ? Math.floor(options.maxFiles!)
+      : 1000;
+    const requestedInspectionBytes = Number.isFinite(options.inspectionBudgetBytes)
+      ? Math.floor(options.inspectionBudgetBytes!)
+      : DEFAULT_PROJECT_MAP_INSPECTION_BYTES;
     const maxDepth = Math.min(
       20,
-      Math.max(1, Math.floor(options.maxDepth ?? 6)),
+      Math.max(1, requestedDepth),
     );
     const maxFiles = Math.min(
       5000,
-      Math.max(1, Math.floor(options.maxFiles ?? 1000)),
+      Math.max(1, requestedFiles),
+    );
+    const inspectionBudgetBytes = Math.min(
+      MAX_PROJECT_MAP_INSPECTION_BYTES,
+      Math.max(0, requestedInspectionBytes),
     );
     const root = path.resolve(rootPath || "");
     const target = path.resolve(targetPath || root);
+    const requestId = typeof options.requestId === "string" && options.requestId
+      ? options.requestId
+      : undefined;
+    const isCancelled = (): boolean =>
+      Boolean(requestId && this.cancelledRequests.has(requestId));
+    let inspectionBytes = 0;
+    let inspectionSkippedFiles = 0;
+    let inspectionUnavailableFiles = 0;
+    let inspectionCacheHits = 0;
+    let indexedMetadataHits = 0;
+    let indexHit = false;
+    let cancelled = false;
     const empty = (code: string, message: string): ProjectMapResponse => ({
       success: false,
       root: "",
@@ -476,13 +572,23 @@ export class WorkspaceSearch {
       truncated: false,
       maxDepth,
       maxFiles,
+      inspectionBytes,
+      inspectionBudgetBytes,
+      inspectionSkippedFiles,
+      inspectionUnavailableFiles,
+      inspectionCacheHits,
+      indexedMetadataHits,
+      indexHit,
+      cancelled,
       error: { code, message },
     });
     if (!rootPath || !this.isPathInside(root, target)) {
       return empty("INVALID_PATH", "Le chemin doit rester dans le workspace.");
     }
+    let realRoot: string;
+    let realTarget: string;
     try {
-      const [realRoot, realTarget] = await Promise.all([
+      [realRoot, realTarget] = await Promise.all([
         fs.realpath(root),
         fs.realpath(target),
       ]);
@@ -505,11 +611,27 @@ export class WorkspaceSearch {
       );
     }
 
+    // The index supplies current size/mtime metadata for inspection caching;
+    // filesystem traversal remains responsible for directory entries and
+    // empty directories, and symlinked targets fall back to that traversal.
+    const targetRelativeFromRoot = path.relative(root, target);
+    const expectedRealTarget = path.resolve(realRoot, targetRelativeFromRoot);
+    const indexSnapshot = path.resolve(expectedRealTarget) === path.resolve(realTarget)
+      ? await this.workspaceIndex.load(root, { freshness: "require-current" })
+      : null;
+    indexHit = Boolean(indexSnapshot);
+
     const entries: ProjectMapEntry[] = [];
+    const inspectionBuffer = Buffer.allocUnsafe(PROJECT_MAP_INSPECTION_BUFFER_BYTES);
     let files = 0;
     let directories = 0;
     let truncated = false;
     const walk = async (directory: string, depth: number): Promise<void> => {
+      if (isCancelled()) {
+        cancelled = true;
+        truncated = true;
+        return;
+      }
       let children;
       try {
         children = await fs.readdir(directory, { withFileTypes: true });
@@ -522,6 +644,11 @@ export class WorkspaceSearch {
         return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
       });
       for (const child of children) {
+        if (isCancelled()) {
+          cancelled = true;
+          truncated = true;
+          return;
+        }
         if (files >= maxFiles) {
           truncated = true;
           return;
@@ -554,7 +681,24 @@ export class WorkspaceSearch {
           continue;
         }
         if (!child.isFile()) continue;
-        const inspection = await this.inspectProjectMapFile(absolutePath);
+        const indexedMetadata = indexSnapshot
+          ? this.findProjectMapIndexMetadata(indexSnapshot.entries, workspacePath)
+          : undefined;
+        const inspection = await this.inspectProjectMapFile(absolutePath, {
+          authorizedRoot: realRoot,
+          remainingBytes: Math.max(0, inspectionBudgetBytes - inspectionBytes),
+          buffer: inspectionBuffer,
+          indexedMetadata,
+          isCancelled,
+        });
+        inspectionBytes += inspection.bytesRead;
+        if (inspection.cacheHit) inspectionCacheHits += 1;
+        if (indexedMetadata && inspection.indexMetadataMatched) indexedMetadataHits += 1;
+        if (inspection.inspectionStatus === "budget-skipped") inspectionSkippedFiles += 1;
+        if (
+          inspection.inspectionStatus === "unavailable" ||
+          inspection.inspectionStatus === "symlink-skipped"
+        ) inspectionUnavailableFiles += 1;
         files += 1;
         entries.push({
           name: child.name,
@@ -564,7 +708,13 @@ export class WorkspaceSearch {
           depth,
           lineCount: inspection.lineCount,
           binary: inspection.binary,
+          inspectionStatus: inspection.inspectionStatus,
         });
+        if (isCancelled() || inspection.inspectionStatus === "cancelled") {
+          cancelled = true;
+          truncated = true;
+          return;
+        }
       }
     };
     await walk(target, 1);
@@ -577,6 +727,14 @@ export class WorkspaceSearch {
       truncated,
       maxDepth,
       maxFiles,
+      inspectionBytes,
+      inspectionBudgetBytes,
+      inspectionSkippedFiles,
+      inspectionUnavailableFiles,
+      inspectionCacheHits,
+      indexedMetadataHits,
+      indexHit,
+      cancelled,
     };
   }
 
@@ -584,47 +742,249 @@ export class WorkspaceSearch {
     const relative = path.relative(root, candidate);
     return (
       relative === "" ||
-      (!relative.startsWith("..") && !path.isAbsolute(relative))
+      (
+        relative !== ".." &&
+        !relative.startsWith(`..${path.sep}`) &&
+        !path.isAbsolute(relative)
+      )
     );
   }
 
-  private async inspectProjectMapFile(
-    filePath: string,
-  ): Promise<{ binary: boolean; lineCount: number | null }> {
-    if (this.binaryExtensions.has(path.extname(filePath).toLowerCase())) {
-      return { binary: true, lineCount: null };
+  private findProjectMapIndexMetadata(
+    entries: WorkspaceIndexEntry[],
+    relativePath: string,
+  ): WorkspaceIndexEntry | undefined {
+    let low = 0;
+    let high = entries.length - 1;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const comparison = compareWorkspaceIndexPaths(
+        entries[middle].relativePath,
+        relativePath,
+      );
+      if (comparison === 0) return entries[middle];
+      if (comparison < 0) low = middle + 1;
+      else high = middle - 1;
     }
+    return undefined;
+  }
+
+  protected async openProjectMapFile(filePath: string, flags: number) {
+    return fs.open(filePath, flags);
+  }
+
+  private rememberProjectMapInspection(
+    filePath: string,
+    stats: Stats,
+    inspection: ProjectMapInspection,
+  ): void {
+    if (
+      inspection.inspectionStatus !== "exact" &&
+      inspection.inspectionStatus !== "binary"
+    ) return;
+    const key = path.resolve(filePath);
+    this.projectMapInspectionCache.delete(key);
+    this.projectMapInspectionCache.set(key, {
+      dev: stats.dev,
+      ino: stats.ino,
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      ctimeMs: stats.ctimeMs,
+      binary: inspection.binary,
+      lineCount: inspection.lineCount,
+      inspectionStatus: inspection.inspectionStatus,
+    });
+    while (this.projectMapInspectionCache.size > this.maxProjectMapInspectionCacheEntries) {
+      const oldestPath = this.projectMapInspectionCache.keys().next().value;
+      if (!oldestPath) break;
+      this.projectMapInspectionCache.delete(oldestPath);
+    }
+  }
+
+  protected async inspectProjectMapFile(
+    filePath: string,
+    options: {
+      authorizedRoot: string;
+      remainingBytes: number;
+      buffer: Buffer;
+      indexedMetadata?: WorkspaceIndexEntry;
+      isCancelled: () => boolean;
+    },
+  ): Promise<ProjectMapInspection & { indexMetadataMatched: boolean }> {
+    const unavailable = (
+      status: "unavailable" | "symlink-skipped" | "cancelled" | "budget-skipped",
+      bytesRead = 0,
+      indexMetadataMatched = false,
+    ) => ({
+      binary: false,
+      lineCount: null,
+      inspectionStatus: status,
+      bytesRead,
+      cacheHit: false,
+      indexMetadataMatched,
+    });
+    if (options.isCancelled()) return unavailable("cancelled");
+
     let handle;
+    let position = 0;
     try {
-      handle = await fs.open(filePath, "r");
-      const buffer = Buffer.allocUnsafe(64 * 1024);
-      let position = 0;
+      const lexicalStats = await fs.lstat(filePath);
+      if (lexicalStats.isSymbolicLink()) return unavailable("symlink-skipped");
+      if (!lexicalStats.isFile()) return unavailable("unavailable");
+      const realPath = await fs.realpath(filePath);
+      if (!this.isPathInside(options.authorizedRoot, realPath))
+        return unavailable("symlink-skipped");
+      const realStats = await fs.stat(realPath);
+      if (
+        !realStats.isFile() ||
+        realStats.dev !== lexicalStats.dev ||
+        realStats.ino !== lexicalStats.ino
+      ) return unavailable("unavailable");
+
+      const indexMetadataMatched = Boolean(
+        options.indexedMetadata &&
+        options.indexedMetadata.size === lexicalStats.size &&
+        options.indexedMetadata.mtimeMs === lexicalStats.mtimeMs,
+      );
+      const cacheKey = path.resolve(filePath);
+      const cached = this.projectMapInspectionCache.get(cacheKey);
+      if (
+        cached &&
+        cached.dev === lexicalStats.dev &&
+        cached.ino === lexicalStats.ino &&
+        cached.size === lexicalStats.size &&
+        cached.mtimeMs === lexicalStats.mtimeMs &&
+        cached.ctimeMs === lexicalStats.ctimeMs &&
+        (!options.indexedMetadata || indexMetadataMatched)
+      ) {
+        this.projectMapInspectionCache.delete(cacheKey);
+        this.projectMapInspectionCache.set(cacheKey, cached);
+        return {
+          binary: cached.binary,
+          lineCount: cached.lineCount,
+          inspectionStatus: cached.inspectionStatus,
+          bytesRead: 0,
+          cacheHit: true,
+          indexMetadataMatched,
+        };
+      }
+
+      if (this.binaryExtensions.has(path.extname(filePath).toLowerCase())) {
+        const inspection: ProjectMapInspection = {
+          binary: true,
+          lineCount: null,
+          inspectionStatus: "binary",
+          bytesRead: 0,
+          cacheHit: false,
+        };
+        this.rememberProjectMapInspection(filePath, lexicalStats, inspection);
+        return { ...inspection, indexMetadataMatched };
+      }
+
+      if (lexicalStats.size > 0 && options.remainingBytes <= 0)
+        return unavailable("budget-skipped", 0, indexMetadataMatched);
+
+      const noFollow = typeof fsConstants.O_NOFOLLOW === "number"
+        ? fsConstants.O_NOFOLLOW
+        : 0;
+      handle = await this.openProjectMapFile(
+        filePath,
+        fsConstants.O_RDONLY | noFollow,
+      );
+      const openedStats = await handle.stat();
+      if (
+        !openedStats.isFile() ||
+        openedStats.dev !== lexicalStats.dev ||
+        openedStats.ino !== lexicalStats.ino
+      ) return unavailable("unavailable", 0, indexMetadataMatched);
+      const openedPath = await fs.realpath(filePath);
+      if (!this.isPathInside(options.authorizedRoot, openedPath))
+        return unavailable("symlink-skipped", 0, indexMetadataMatched);
+      const openedRealStats = await fs.stat(openedPath);
+      if (
+        openedRealStats.dev !== openedStats.dev ||
+        openedRealStats.ino !== openedStats.ino
+      ) return unavailable("unavailable", 0, indexMetadataMatched);
+
+      const bytesToInspect = Math.min(lexicalStats.size, options.remainingBytes);
       let lineFeeds = 0;
       let lastByte: number | null = null;
-      let binary = false;
-      while (true) {
+      let foundBinaryMarker = false;
+      while (position < bytesToInspect) {
+        if (options.isCancelled()) return unavailable("cancelled", position, indexMetadataMatched);
+        const beforeSampleEnd = position < PROJECT_MAP_BINARY_SAMPLE_BYTES;
+        const sampleRemaining = beforeSampleEnd
+          ? PROJECT_MAP_BINARY_SAMPLE_BYTES - position
+          : options.buffer.length;
+        const readLength = Math.min(
+          options.buffer.length,
+          sampleRemaining,
+          bytesToInspect - position,
+        );
         const { bytesRead } = await handle.read(
-          buffer,
+          options.buffer,
           0,
-          buffer.length,
+          readLength,
           position,
         );
-        if (bytesRead === 0) break;
-        const sampleLimit = Math.min(bytesRead, Math.max(0, 8192 - position));
+        if (!bytesRead) break;
         for (let index = 0; index < bytesRead; index += 1) {
-          if (index < sampleLimit && buffer[index] === 0) binary = true;
-          if (buffer[index] === 10) lineFeeds += 1;
+          if (
+            position + index < PROJECT_MAP_BINARY_SAMPLE_BYTES &&
+            options.buffer[index] === 0
+          ) foundBinaryMarker = true;
+          if (options.buffer[index] === 10) lineFeeds += 1;
         }
-        if (binary) return { binary: true, lineCount: null };
         position += bytesRead;
-        lastByte = buffer[bytesRead - 1];
+        lastByte = options.buffer[bytesRead - 1];
+        if (foundBinaryMarker) break;
       }
-      return {
+
+      const afterStats = await handle.stat();
+      if (
+        afterStats.dev !== openedStats.dev ||
+        afterStats.ino !== openedStats.ino ||
+        afterStats.size !== openedStats.size ||
+        afterStats.mtimeMs !== openedStats.mtimeMs ||
+        afterStats.ctimeMs !== openedStats.ctimeMs
+      ) return unavailable("unavailable", position, indexMetadataMatched);
+      if (foundBinaryMarker) {
+        const inspection: ProjectMapInspection = {
+          binary: true,
+          lineCount: null,
+          inspectionStatus: "binary",
+          bytesRead: position,
+          cacheHit: false,
+        };
+        this.rememberProjectMapInspection(filePath, afterStats, inspection);
+        return { ...inspection, indexMetadataMatched };
+      }
+      if (options.isCancelled())
+        return unavailable("cancelled", position, indexMetadataMatched);
+      if (position !== openedStats.size) {
+        const budgetLimited = bytesToInspect < openedStats.size;
+        return unavailable(
+          budgetLimited ? "budget-skipped" : "unavailable",
+          position,
+          indexMetadataMatched,
+        );
+      }
+      const inspection: ProjectMapInspection = {
         binary: false,
-        lineCount: position === 0 ? 0 : lineFeeds + (lastByte === 10 ? 0 : 1),
+        lineCount: openedStats.size === 0
+          ? 0
+          : lineFeeds + (lastByte === 10 ? 0 : 1),
+        inspectionStatus: "exact",
+        bytesRead: position,
+        cacheHit: false,
       };
-    } catch {
-      return { binary: false, lineCount: null };
+      this.rememberProjectMapInspection(filePath, afterStats, inspection);
+      return { ...inspection, indexMetadataMatched };
+    } catch (error: any) {
+      return unavailable(
+        options.isCancelled() ? "cancelled" : "unavailable",
+        position,
+      );
     } finally {
       await handle?.close();
     }
