@@ -99,6 +99,46 @@ test("workspace search preserves leading and trailing query whitespace", async (
   assert.equal(calls[0][1], "  hello  ");
 });
 
+test("Replace All reports partial results and identifies unsaved editor buffers", async () => {
+  let replaceCall;
+  const editor = {
+    fileExplorer: { rootPath: "/workspace" },
+    tabManager: {
+      tabs: [
+        { path: "/workspace/dirty.js", isSaved: false },
+        { path: "/workspace/saved.js", isSaved: true },
+      ],
+    },
+    api: {
+      async replaceInFiles(...args) {
+        replaceCall = args;
+        return {
+          success: false,
+          filesChanged: 1,
+          replacements: 4,
+          skippedFiles: [{ path: "dirty.js", code: "DIRTY_EDITOR_BUFFER" }],
+          conflictedFiles: [],
+          failedFiles: [],
+          cancelled: false,
+        };
+      },
+      async searchInFiles() {
+        return { results: [], totalMatches: 0, filesSearched: 0, offset: 0 };
+      },
+    },
+  };
+  const sidebar = new SearchSidebar(editor);
+  sidebar.isOpen = true;
+  sidebar.query = "needle";
+  sidebar.replaceInput = { value: "changed" };
+
+  await sidebar.replaceInFiles();
+
+  assert.deepEqual(replaceCall[3].dirtyPaths, ["/workspace/dirty.js"]);
+  assert.match(sidebar.replacementSummary, /4 replacements in 1 file/);
+  assert.match(sidebar.replacementSummary, /DIRTY_EDITOR_BUFFER/);
+});
+
 test("workspace search treats a whitespace-only query as empty without rewriting it", async () => {
   const { sidebar, calls } = createSearchSidebar();
   sidebar.query = "   ";

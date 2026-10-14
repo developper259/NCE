@@ -399,6 +399,261 @@ test("WorkspaceSearch searches recursively while ignoring node_modules", async (
   }
 });
 
+test("Replace All scans every matching file beyond the search preview limit", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-complete-"));
+  let search;
+  try {
+    const included = path.join(root, "selected");
+    await fsp.mkdir(included);
+    for (let index = 0; index < 30; index += 1) {
+      await fsp.writeFile(
+        path.join(included, `match-${index}.txt`),
+        "needle ".repeat(400),
+      );
+    }
+    await fsp.mkdir(path.join(included, "skip"));
+    await fsp.writeFile(path.join(included, "skip", "ignored.txt"), "needle\n");
+    await fsp.writeFile(path.join(root, "outside.txt"), "needle\n");
+    search = new WorkspaceSearch({ window: null });
+
+    const result = await search.replace(root, "needle", "changed", {
+      include: "selected/**/*.txt",
+      exclude: "selected/skip/**",
+      caseSensitive: false,
+      wholeWord: true,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.replacements, 12000);
+    assert.equal(result.filesChanged, 30);
+    assert.equal(result.filesScanned, 30);
+    assert.equal(result.filesMatched, 30);
+    assert.equal(
+      (await fsp.readFile(path.join(included, "match-0.txt"), "utf8"))
+        .startsWith("changed changed"),
+      true,
+    );
+    assert.equal(
+      await fsp.readFile(path.join(included, "skip", "ignored.txt"), "utf8"),
+      "needle\n",
+    );
+    assert.equal(await fsp.readFile(path.join(root, "outside.txt"), "utf8"), "needle\n");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Replace All reports when its candidate file bound stops the operation", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-file-limit-"));
+  let search;
+  try {
+    for (const name of ["a.txt", "b.txt", "c.txt"]) {
+      await fsp.writeFile(path.join(root, name), "needle\n");
+    }
+    class BoundedReplacementSearch extends WorkspaceSearch {
+      constructor(window) {
+        super(window);
+        this.maxReplaceCandidates = 1;
+      }
+    }
+    search = new BoundedReplacementSearch({ window: null });
+
+    const result = await search.replace(root, "needle", "changed");
+
+    assert.equal(result.success, false);
+    assert.equal(result.filesChanged, 1);
+    assert.equal(result.failedFiles[0].path, "b.txt");
+    assert.equal(result.failedFiles[0].code, "REPLACE_FILE_LIMIT_REACHED");
+    assert.match(result.error, /remaining files were not processed/);
+    assert.equal(await fsp.readFile(path.join(root, "a.txt"), "utf8"), "changed\n");
+    assert.equal(await fsp.readFile(path.join(root, "b.txt"), "utf8"), "needle\n");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Replace All preserves BOM, CRLF, executable mode, and replace-first behavior", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-metadata-"));
+  let search;
+  try {
+    const filePath = path.join(root, "script.js");
+    const original = Buffer.from("\uFEFFNEEDLE needleish needle\r\nsecond needle\r\n", "utf8");
+    await fsp.writeFile(filePath, original, { mode: 0o755 });
+    await fsp.chmod(filePath, 0o755);
+    search = new WorkspaceSearch({ window: null });
+
+    const first = await search.replace(root, "needle", "changed", {
+      caseSensitive: false,
+      wholeWord: true,
+      replaceFirst: true,
+    });
+    assert.equal(first.success, true);
+    assert.equal(first.replacements, 1);
+    assert.equal(
+      await fsp.readFile(filePath, "utf8"),
+      "\uFEFFchanged needleish needle\r\nsecond needle\r\n",
+    );
+    assert.equal((await fsp.stat(filePath)).mode & 0o111, 0o111);
+
+    const all = await search.replace(root, "needle", "done", {
+      caseSensitive: false,
+      wholeWord: true,
+      useRegex: true,
+    });
+    assert.equal(all.success, true);
+    assert.equal(all.replacements, 2);
+    assert.equal(await fsp.readFile(filePath, "utf8"), "\uFEFFchanged needleish done\r\nsecond done\r\n");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Replace All reports dirty buffers, read-only files, and escaping symlinks", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-skips-"));
+  const outside = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-outside-"));
+  let search;
+  try {
+    const dirtyPath = path.join(root, "dirty.txt");
+    const readOnlyPath = path.join(root, "read-only.txt");
+    const outsidePath = path.join(outside, "outside.txt");
+    await fsp.writeFile(dirtyPath, "needle\n");
+    await fsp.writeFile(readOnlyPath, "needle\n", { mode: 0o444 });
+    await fsp.chmod(readOnlyPath, 0o444);
+    await fsp.writeFile(outsidePath, "needle\n");
+    await fsp.symlink(outsidePath, path.join(root, "linked.txt"));
+    search = new WorkspaceSearch({ window: null });
+
+    const result = await search.replace(root, "needle", "changed", {
+      dirtyPaths: [dirtyPath],
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.replacements, 0);
+    assert.deepEqual(
+      result.skippedFiles.map((issue) => issue.code).sort(),
+      ["DIRTY_EDITOR_BUFFER", "READ_ONLY_FILE", "SYMLINK_SKIPPED"],
+    );
+    assert.equal(await fsp.readFile(dirtyPath, "utf8"), "needle\n");
+    assert.equal(await fsp.readFile(readOnlyPath, "utf8"), "needle\n");
+    assert.equal(await fsp.readFile(outsidePath, "utf8"), "needle\n");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+    await fsp.rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("Replace All reports concurrent changes, deletions, and partial write failures", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-partial-"));
+  let search;
+  try {
+    const changedPath = path.join(root, "changed.txt");
+    const deletedPath = path.join(root, "deleted.txt");
+    const failedPath = path.join(root, "failed.txt");
+    const successfulPath = path.join(root, "success.txt");
+    await fsp.writeFile(changedPath, "needle\n");
+    await fsp.writeFile(deletedPath, "needle\n");
+    await fsp.writeFile(failedPath, "needle\n");
+    await fsp.writeFile(successfulPath, "needle\n");
+    class PartialFailureSearch extends WorkspaceSearch {
+      async writeReplacementFile(filePath, content, fingerprint) {
+        if (filePath === changedPath) {
+          await fsp.writeFile(filePath, "external edit\n");
+        }
+        if (filePath === deletedPath) {
+          await fsp.unlink(filePath);
+        }
+        if (filePath === failedPath) {
+          throw Object.assign(new Error("simulated disk full"), { code: "ENOSPC" });
+        }
+        return super.writeReplacementFile(filePath, content, fingerprint);
+      }
+    }
+    search = new PartialFailureSearch({ window: null });
+
+    const result = await search.replace(root, "needle", "changed");
+
+    assert.equal(result.success, false);
+    assert.equal(result.filesChanged, 1);
+    assert.equal(result.replacements, 1);
+    assert.equal(result.conflictedFiles.length, 2);
+    assert.equal(result.failedFiles.length, 1);
+    assert.equal(result.conflictedFiles[0].code, "FILE_CHANGED_ON_DISK");
+    assert.equal(result.conflictedFiles[1].code, "FILE_CHANGED_ON_DISK");
+    assert.equal(result.failedFiles[0].code, "ENOSPC");
+    assert.equal(await fsp.readFile(changedPath, "utf8"), "external edit\n");
+    assert.equal(await fsp.readFile(successfulPath, "utf8"), "changed\n");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Replace All cancellation preserves completed files and reports cancellation", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-cancel-"));
+  let search;
+  let allowRead;
+  let notifyRead;
+  const readStarted = new Promise((resolve) => { notifyRead = resolve; });
+  const readGate = new Promise((resolve) => { allowRead = resolve; });
+  try {
+    await fsp.writeFile(path.join(root, "a.txt"), "needle\n");
+    await fsp.writeFile(path.join(root, "b.txt"), "needle\n");
+    class DelayedReplacementSearch extends WorkspaceSearch {
+      async readReplacementSnapshot(filePath) {
+        const snapshot = await super.readReplacementSnapshot(filePath);
+        if (path.basename(filePath) === "a.txt") {
+          notifyRead();
+          await readGate;
+        }
+        return snapshot;
+      }
+    }
+    search = new DelayedReplacementSearch({ window: null });
+    const requestId = "replace-cancel-during-read";
+    const replacing = search.replace(root, "needle", "changed", { requestId });
+    await readStarted;
+    search.cancelSearch(requestId);
+    allowRead();
+    const result = await replacing;
+
+    assert.equal(result.success, false);
+    assert.equal(result.cancelled, true);
+    assert.equal(result.filesChanged, 0);
+    assert.equal(await fsp.readFile(path.join(root, "a.txt"), "utf8"), "needle\n");
+    assert.equal(await fsp.readFile(path.join(root, "b.txt"), "utf8"), "needle\n");
+  } finally {
+    allowRead?.();
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
+test("Replace All retains completed per-file commits when cancelled between files", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-replace-partial-cancel-"));
+  let search;
+  const requestId = "replace-cancel-between-files";
+  try {
+    await fsp.writeFile(path.join(root, "a.txt"), "needle\n");
+    await fsp.writeFile(path.join(root, "b.txt"), "needle\n");
+    class CancelAfterFirstFileSearch extends WorkspaceSearch {
+      async writeReplacementFile(filePath, content, fingerprint) {
+        await super.writeReplacementFile(filePath, content, fingerprint);
+        if (path.basename(filePath) === "a.txt") this.cancelSearch(requestId);
+      }
+    }
+    search = new CancelAfterFirstFileSearch({ window: null });
+
+    const result = await search.replace(root, "needle", "changed", { requestId });
+
+    assert.equal(result.success, false);
+    assert.equal(result.cancelled, true);
+    assert.equal(result.filesChanged, 1);
+    assert.equal(result.replacements, 1);
+    assert.equal(await fsp.readFile(path.join(root, "a.txt"), "utf8"), "changed\n");
+    assert.equal(await fsp.readFile(path.join(root, "b.txt"), "utf8"), "needle\n");
+  } finally {
+    await cleanupSearchWorkspaces(search, root);
+  }
+});
+
 test("WorkspaceSearch isolates regex execution and preserves supported matching behavior", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-regex-worker-"));
   const filePath = path.join(root, "matches.txt");

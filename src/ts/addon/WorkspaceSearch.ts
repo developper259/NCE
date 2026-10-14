@@ -1,8 +1,9 @@
 import { ipcMain } from "electron";
 import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
-import { promises as fs } from "fs";
+import { constants as fsConstants, promises as fs, type Stats } from "fs";
 import path from "path";
 import { Window } from "../Window";
+import { atomicWriteFile } from "./FileManager";
 import { NceWorkspaceStorage } from "./NceWorkspaceStorage";
 import {
   WORKSPACE_INDEX_IGNORED_DIRECTORIES,
@@ -32,6 +33,7 @@ interface SearchOptions {
   sessionId?: string;
   workspaceGeneration?: number;
   paths?: string[];
+  dirtyPaths?: string[];
   replaceFirst?: boolean;
   ignoreHiddenDirectories?: boolean;
   forceFilesystemScan?: boolean;
@@ -96,11 +98,31 @@ interface SearchSession {
   streamProgressTimer: ReturnType<typeof setTimeout> | null;
 }
 
+/** Files commit atomically and independently; a later failure does not roll back earlier files. */
 interface ReplaceResponse {
   success: boolean;
   filesChanged: number;
   replacements: number;
+  filesScanned: number;
+  filesMatched: number;
+  skippedFiles: ReplaceFileIssue[];
+  conflictedFiles: ReplaceFileIssue[];
+  failedFiles: ReplaceFileIssue[];
+  cancelled: boolean;
   error?: string;
+}
+
+interface ReplaceFileIssue {
+  path: string;
+  code: string;
+  message: string;
+}
+
+interface ReplacementCandidate {
+  filePath: string;
+  relativePath: string;
+  name: string;
+  issue?: ReplaceFileIssue;
 }
 
 interface ProjectMapOptions {
@@ -163,7 +185,7 @@ export class WorkspaceSearch {
 
   private readonly maxFileSize = 5 * 1024 * 1024;
   private readonly maxResults = 50000;
-  private readonly maxReplaceResults = 10000;
+  private readonly maxReplaceCandidates = 50000;
   private readonly binaryExtensions = new Set([
     ".png",
     ".jpg",
@@ -1400,69 +1422,449 @@ export class WorkspaceSearch {
     replacement: string,
     options: SearchOptions = {},
   ): Promise<ReplaceResponse> {
-    if (!rootPath || !query || typeof replacement !== "string") {
-      return { success: false, filesChanged: 0, replacements: 0, error: "Invalid replacement request." };
+    options = options && typeof options === "object" ? options : {};
+    const response: ReplaceResponse = {
+      success: false,
+      filesChanged: 0,
+      replacements: 0,
+      filesScanned: 0,
+      filesMatched: 0,
+      skippedFiles: [],
+      conflictedFiles: [],
+      failedFiles: [],
+      cancelled: false,
+    };
+    if (
+      typeof rootPath !== "string" || !rootPath.trim() ||
+      typeof query !== "string" || !query ||
+      typeof replacement !== "string"
+    ) {
+      return { ...response, error: "Invalid replacement request." };
     }
+    const root = path.resolve(rootPath);
+    if (options.requestId) this.cancelledRequests.delete(options.requestId);
     const controller = new AbortController();
     const unregisterRequest = this.registerRequestController(
       options.requestId,
       controller,
     );
     try {
-      const response = await this.search(rootPath, query, {
-        ...options,
-        limit: this.maxReplaceResults,
-        maxMatches: this.maxReplaceResults,
-      });
-      const resultPaths = [...new Set(response.results.map((result) => result.path))];
-      const paths = options.paths?.length
-        ? resultPaths.filter((filePath) => options.paths?.includes(filePath))
-        : resultPaths;
+      const rootStats = await fs.stat(root);
+      if (!rootStats.isDirectory()) {
+        return { ...response, error: "The workspace is not a directory." };
+      }
+      const rootRealPath = await fs.realpath(root);
+      const dirtyPaths = new Set(
+        (Array.isArray(options.dirtyPaths) ? options.dirtyPaths : [])
+          .filter((value): value is string => typeof value === "string")
+          .map((value) => path.resolve(root, value)),
+      );
       const regex = this.createReplacementRegex(
         query,
         options,
         Boolean(options.replaceFirst),
       );
       if (!regex) {
-        return { success: false, filesChanged: 0, replacements: 0, error: "Invalid regular expression." };
+        return { ...response, error: "Invalid regular expression." };
       }
       await this.getRegexExecutor().findMatches(regex, "", true, 1, controller.signal);
 
-      let filesChanged = 0;
-      let replacements = 0;
-      for (const filePath of paths) {
-        if (controller.signal.aborted)
-          throw new WorkspaceRegexExecutionError("ABORTED", "Replacement was cancelled.");
-        const content = await fs.readFile(filePath, "utf8");
-        if (controller.signal.aborted)
-          throw new WorkspaceRegexExecutionError("ABORTED", "Replacement was cancelled.");
-        const result = await this.getRegexExecutor().replace(
-          regex,
-          content,
-          replacement,
-          controller.signal,
-        );
-        if (!result.replacements) continue;
-        const temporary = `${filePath}.nce-replace-${process.pid}-${Date.now()}`;
-        await fs.writeFile(temporary, result.content, "utf8");
-        await fs.rename(temporary, filePath);
-        filesChanged++;
-        replacements += result.replacements;
+      let candidatesProcessed = 0;
+      for await (const candidate of this.iterateReplacementCandidates(
+        root,
+        options,
+        controller,
+      )) {
+        if (this.replacementIsCancelled(controller, options.requestId)) {
+          response.cancelled = true;
+          break;
+        }
+        if (candidatesProcessed >= this.maxReplaceCandidates) {
+          response.failedFiles.push({
+            path: candidate.relativePath,
+            code: "REPLACE_FILE_LIMIT_REACHED",
+            message: `Replace All stopped after ${this.maxReplaceCandidates} files to keep the operation bounded.`,
+          });
+          response.error = "Replace All stopped at its file limit; remaining files were not processed.";
+          break;
+        }
+        candidatesProcessed++;
+        if (candidate.issue) {
+          if (candidate.issue.code === "SYMLINK_SKIPPED") {
+            response.skippedFiles.push(candidate.issue);
+          } else {
+            response.failedFiles.push(candidate.issue);
+          }
+          continue;
+        }
+        if (dirtyPaths.has(path.resolve(candidate.filePath))) {
+          response.skippedFiles.push({
+            path: candidate.relativePath,
+            code: "DIRTY_EDITOR_BUFFER",
+            message: "The file has unsaved editor changes and was not replaced.",
+          });
+          continue;
+        }
+
+        let snapshot: { buffer: Buffer; stats: Stats };
+        try {
+          const linkStats = await fs.lstat(candidate.filePath);
+          if (linkStats.isSymbolicLink()) {
+            response.skippedFiles.push({
+              path: candidate.relativePath,
+              code: "SYMLINK_SKIPPED",
+              message: "Symbolic links are not replaced.",
+            });
+            continue;
+          }
+          if (!linkStats.isFile()) continue;
+          if (!this.isPathInside(rootRealPath, await fs.realpath(candidate.filePath))) {
+            response.skippedFiles.push({
+              path: candidate.relativePath,
+              code: "PATH_OUTSIDE_WORKSPACE",
+              message: "The file resolves outside the workspace.",
+            });
+            continue;
+          }
+          if (linkStats.size > this.maxFileSize) {
+            response.skippedFiles.push({
+              path: candidate.relativePath,
+              code: "FILE_TOO_LARGE",
+              message: `The file exceeds the ${this.maxFileSize} byte replacement limit.`,
+            });
+            continue;
+          }
+          if ((linkStats.mode & 0o222) === 0) {
+            response.skippedFiles.push({
+              path: candidate.relativePath,
+              code: "READ_ONLY_FILE",
+              message: "The file has no write permission bits.",
+            });
+            continue;
+          }
+          if (this.binaryExtensions.has(path.extname(candidate.name).toLowerCase())) {
+            response.skippedFiles.push({
+              path: candidate.relativePath,
+              code: "BINARY_FILE",
+              message: "Binary files are not replaced.",
+            });
+            continue;
+          }
+          snapshot = await this.readReplacementSnapshot(candidate.filePath);
+          await this.validateReplacementTarget(
+            rootRealPath,
+            candidate.filePath,
+            snapshot.stats,
+          );
+        } catch (error) {
+          const issue = this.toReplacementIssue(candidate, error);
+          if (["FILE_TOO_LARGE", "PATH_OUTSIDE_WORKSPACE"].includes(issue.code)) {
+            response.skippedFiles.push(issue);
+          } else if (["ENOENT", "ELOOP", "FILE_CHANGED_ON_DISK"].includes(issue.code)) {
+            response.conflictedFiles.push(issue);
+          } else {
+            response.failedFiles.push(issue);
+          }
+          continue;
+        }
+
+        if (this.isBinary(snapshot.buffer)) {
+          response.skippedFiles.push({
+            path: candidate.relativePath,
+            code: "BINARY_FILE",
+            message: "Binary files are not replaced.",
+          });
+          continue;
+        }
+        const content = snapshot.buffer.toString("utf8");
+        if (!Buffer.from(content, "utf8").equals(snapshot.buffer)) {
+          response.skippedFiles.push({
+            path: candidate.relativePath,
+            code: "INVALID_TEXT_ENCODING",
+            message: "The file is not valid UTF-8 text.",
+          });
+          continue;
+        }
+        response.filesScanned++;
+
+        try {
+          const result = await this.getRegexExecutor().replace(
+            regex,
+            content,
+            replacement,
+            controller.signal,
+          );
+          if (this.replacementIsCancelled(controller, options.requestId)) {
+            response.cancelled = true;
+            break;
+          }
+          if (!result.replacements) continue;
+          response.filesMatched++;
+          await this.validateReplacementTarget(
+            rootRealPath,
+            candidate.filePath,
+            snapshot.stats,
+          );
+          await this.writeReplacementFile(
+            candidate.filePath,
+            result.content,
+            this.getReplacementFingerprint(snapshot.stats),
+          );
+          response.filesChanged++;
+          response.replacements += result.replacements;
+          if (this.replacementIsCancelled(controller, options.requestId)) {
+            response.cancelled = true;
+            break;
+          }
+        } catch (error) {
+          const issue = this.toReplacementIssue(candidate, error);
+          if (issue.code === "ABORTED") {
+            response.cancelled = true;
+            break;
+          }
+          if (error instanceof WorkspaceRegexExecutionError && !response.error) {
+            response.error = error.message;
+          }
+          if (["ENOENT", "ELOOP", "FILE_CHANGED_ON_DISK", "PATH_OUTSIDE_WORKSPACE"].includes(issue.code)) {
+            response.conflictedFiles.push(issue);
+          } else {
+            response.failedFiles.push(issue);
+          }
+        }
       }
-      return { success: true, filesChanged, replacements };
+      response.cancelled ||= this.replacementIsCancelled(controller, options.requestId);
+      response.success = !response.cancelled &&
+        response.skippedFiles.length === 0 &&
+        response.conflictedFiles.length === 0 &&
+        response.failedFiles.length === 0;
+      return response;
     } catch (error) {
       return {
-        success: false,
-        filesChanged: 0,
-        replacements: 0,
+        ...response,
         error: error instanceof WorkspaceRegexExecutionError &&
             error.code === "INVALID_REGEX"
           ? "Invalid regular expression."
-          : error instanceof Error ? error.message : String(error),
+          : error instanceof WorkspaceRegexExecutionError && error.code === "ABORTED"
+            ? undefined
+            : error instanceof Error ? error.message : String(error),
+        cancelled: error instanceof WorkspaceRegexExecutionError && error.code === "ABORTED" || response.cancelled,
       };
     } finally {
       unregisterRequest();
+      if (options.requestId) this.cancelledRequests.delete(options.requestId);
     }
+  }
+
+  private replacementIsCancelled(
+    controller: AbortController,
+    requestId?: string,
+  ): boolean {
+    return controller.signal.aborted || Boolean(
+      requestId && this.cancelledRequests.has(requestId),
+    );
+  }
+
+  private async *iterateReplacementCandidates(
+    root: string,
+    options: SearchOptions,
+    controller: AbortController,
+  ): AsyncGenerator<ReplacementCandidate> {
+    const includePatterns = this.splitPatterns(options.include);
+    const excludePatterns = this.splitPatterns(options.exclude);
+    const selectedPaths = Array.isArray(options.paths) && options.paths.length > 0
+      ? new Set(options.paths
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => path.resolve(root, value)))
+      : null;
+    const requestId = options.requestId;
+
+    const shouldInclude = (relativePath: string, absolutePath: string): boolean =>
+      (!selectedPaths || selectedPaths.has(absolutePath)) &&
+      !this.matchesAny(relativePath, excludePatterns) &&
+      (includePatterns.length === 0 || this.matchesAny(relativePath, includePatterns));
+
+    const walk = async function* (
+      search: WorkspaceSearch,
+      directory: string,
+    ): AsyncGenerator<ReplacementCandidate> {
+      if (search.replacementIsCancelled(controller, requestId)) return;
+      let entries;
+      try {
+        entries = await fs.readdir(directory, { withFileTypes: true });
+      } catch (error: any) {
+        const relativePath = search.normalizeRelative(path.relative(root, directory)) || ".";
+        yield {
+          filePath: directory,
+          relativePath,
+          name: path.basename(directory) || directory,
+          issue: {
+            path: relativePath,
+            code: error?.code === "ENOENT" ? "DIRECTORY_CHANGED" : "DIRECTORY_READ_FAILED",
+            message: error?.message || "The directory could not be read.",
+          },
+        };
+        return;
+      }
+      entries.sort((left, right) => left.name.localeCompare(right.name));
+      for (const entry of entries) {
+        if (search.replacementIsCancelled(controller, requestId)) return;
+        const filePath = path.join(directory, entry.name);
+        const relativePath = search.normalizeRelative(path.relative(root, filePath));
+        if (entry.isSymbolicLink()) {
+          if (shouldInclude(relativePath, filePath)) {
+            yield {
+              filePath,
+              relativePath,
+              name: entry.name,
+              issue: {
+                path: relativePath,
+                code: "SYMLINK_SKIPPED",
+                message: "Symbolic links are not replaced.",
+              },
+            };
+          }
+          continue;
+        }
+        if (entry.isDirectory()) {
+          if (
+            WORKSPACE_INDEX_IGNORED_DIRECTORIES.has(entry.name) ||
+            (options.ignoreHiddenDirectories && entry.name.startsWith(".")) ||
+            search.matchesAny(relativePath, excludePatterns)
+          ) continue;
+          yield* walk(search, filePath);
+          continue;
+        }
+        if (!entry.isFile() || path.extname(entry.name).toLowerCase() === ".asar")
+          continue;
+        if (shouldInclude(relativePath, filePath)) {
+          yield { filePath, relativePath, name: entry.name };
+        }
+      }
+    };
+
+    yield* walk(this, root);
+  }
+
+  private getReplacementFingerprint(stats: Stats): string {
+    return `nonsymlink:${[
+      stats.dev,
+      stats.ino,
+      stats.size,
+      stats.mtimeMs,
+      stats.ctimeMs,
+    ].join(":")}`;
+  }
+
+  protected async readReplacementSnapshot(
+    filePath: string,
+  ): Promise<{ buffer: Buffer; stats: Stats }> {
+    const noFollow = typeof fsConstants.O_NOFOLLOW === "number"
+      ? fsConstants.O_NOFOLLOW
+      : 0;
+    const handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow);
+    try {
+      const before = await handle.stat();
+      if (!before.isFile()) {
+        throw Object.assign(new Error("The target is not a regular file."), {
+          code: "NOT_A_REGULAR_FILE",
+        });
+      }
+      if (before.size > this.maxFileSize) {
+        throw Object.assign(new Error("The file exceeds the replacement size limit."), {
+          code: "FILE_TOO_LARGE",
+        });
+      }
+      const bytes = Buffer.allocUnsafe(
+        Math.min(this.maxFileSize + 1, before.size + 1),
+      );
+      let bytesRead = 0;
+      while (bytesRead < bytes.length) {
+        const result = await handle.read(
+          bytes,
+          bytesRead,
+          bytes.length - bytesRead,
+          bytesRead,
+        );
+        if (result.bytesRead === 0) break;
+        bytesRead += result.bytesRead;
+      }
+      const after = await handle.stat();
+      if (
+        before.dev !== after.dev || before.ino !== after.ino ||
+        before.size !== after.size || before.mtimeMs !== after.mtimeMs ||
+        before.ctimeMs !== after.ctimeMs || bytesRead !== after.size
+      ) {
+        throw Object.assign(new Error("The file changed while it was read."), {
+          code: "FILE_CHANGED_ON_DISK",
+        });
+      }
+      return { buffer: Buffer.from(bytes.subarray(0, bytesRead)), stats: after };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  private async validateReplacementTarget(
+    rootRealPath: string,
+    candidatePath: string,
+    stats: Stats,
+  ): Promise<void> {
+    const current = await fs.lstat(candidatePath);
+    if (
+      current.isSymbolicLink() || !current.isFile() ||
+      current.dev !== stats.dev || current.ino !== stats.ino ||
+      current.size !== stats.size || current.mtimeMs !== stats.mtimeMs ||
+      current.ctimeMs !== stats.ctimeMs
+    ) {
+      throw Object.assign(new Error("The file changed during replacement."), {
+        code: "FILE_CHANGED_ON_DISK",
+      });
+    }
+    const realPath = await fs.realpath(candidatePath);
+    if (!this.isPathInside(rootRealPath, realPath)) {
+      throw Object.assign(new Error("The file resolves outside the workspace."), {
+        code: "PATH_OUTSIDE_WORKSPACE",
+      });
+    }
+  }
+
+  protected async writeReplacementFile(
+    filePath: string,
+    content: string,
+    expectedFingerprint: string,
+  ): Promise<void> {
+    const fileManager = this.window?.fileManager;
+    const saveFile = fileManager?.saveFile;
+    if (typeof saveFile === "function") {
+      const savedPath = await saveFile.call(
+        fileManager,
+        filePath,
+        content,
+        expectedFingerprint,
+      );
+      if (
+        typeof savedPath !== "string" ||
+        path.resolve(savedPath) !== path.resolve(filePath)
+      ) {
+        throw Object.assign(new Error("The replacement could not be persisted."), {
+          code: "SAVE_FAILED",
+        });
+      }
+      return;
+    }
+    await atomicWriteFile(filePath, content, fs, expectedFingerprint);
+  }
+
+  private toReplacementIssue(
+    candidate: ReplacementCandidate,
+    error: unknown,
+  ): ReplaceFileIssue {
+    const source = error as NodeJS.ErrnoException;
+    return {
+      path: candidate.relativePath,
+      code: source?.code || "REPLACEMENT_FAILED",
+      message: source?.message || String(error),
+    };
   }
 
   private createReplacementRegex(
@@ -1509,7 +1911,7 @@ export class WorkspaceSearch {
   }
 
   private splitPatterns(value?: string): string[] {
-    if (!value) {
+    if (typeof value !== "string" || !value) {
       return [];
     }
 

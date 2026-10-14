@@ -19,6 +19,7 @@ import {
   looksBinary,
   MAX_IMAGE_FILE_SIZE,
 } from "./OpenableFile";
+import type { Stats } from "fs";
 export { MAX_IMAGE_FILE_SIZE } from "./OpenableFile";
 const fs = require("fs").promises;
 const fsSync = require("fs");
@@ -56,6 +57,23 @@ export const LARGE_FILE_MODE_THRESHOLD = 20 * 1024 * 1024;
 export const MAX_TEXT_FILE_SIZE = LARGE_FILE_MODE_THRESHOLD;
 const RETRYABLE_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
 const RENAME_RETRY_DELAYS_MS = [0, 20, 50, 100];
+const NO_SYMLINK_FINGERPRINT_PREFIX = "nonsymlink:";
+
+function matchesExpectedDiskFingerprint(stats: Stats, expected: string): boolean {
+  const value = expected.startsWith(NO_SYMLINK_FINGERPRINT_PREFIX)
+    ? expected.slice(NO_SYMLINK_FINGERPRINT_PREFIX.length)
+    : expected;
+  const parts = value.split(":");
+  if (parts.length === 2) {
+    return `${stats.size}:${stats.mtimeMs}` === value;
+  }
+  if (parts.length === 5) {
+    return [stats.dev, stats.ino, stats.size, stats.mtimeMs, stats.ctimeMs]
+      .join(":") === value;
+  }
+  return false;
+}
+
 export interface MarkdownImageReadContext {
   sourcePath: string;
   workspaceRoot?: string | null;
@@ -171,16 +189,23 @@ export async function atomicWriteFile(
   let targetExisted = false;
   let targetIsSymbolicLink = false;
   let originalMode: number | undefined;
+  const rejectSymlinks =
+    expectedFingerprint?.startsWith(NO_SYMLINK_FINGERPRINT_PREFIX) === true;
   try {
     try {
       targetIsSymbolicLink = (await operations.lstat(filePath)).isSymbolicLink();
     } catch (error: any) {
       if (error?.code !== "ENOENT") throw error;
     }
+    if (rejectSymlinks && targetIsSymbolicLink) {
+      throw Object.assign(new Error("File changed on disk"), {
+        code: "FILE_CHANGED_ON_DISK",
+      });
+    }
     try {
       const stats = await operations.stat(filePath);
       targetExisted = true;
-      originalMode = stats.mode;
+      originalMode = stats.mode & 0o7777;
     } catch (error: any) {
       if (error?.code !== "ENOENT") throw error;
     }
@@ -192,12 +217,29 @@ export async function atomicWriteFile(
     } finally {
       await handle.close();
     }
+    if (targetExisted && originalMode !== undefined && operations.chmod) {
+      await operations.chmod(temporaryPath, originalMode);
+    }
 
     let renameError: any = null;
     for (const delayMs of RENAME_RETRY_DELAYS_MS) {
       if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
       try {
         if (expectedFingerprint !== undefined) {
+          if (rejectSymlinks) {
+            let currentLink: any;
+            try { currentLink = await operations.lstat(filePath); }
+            catch {
+              throw Object.assign(new Error("File changed on disk"), {
+                code: "FILE_CHANGED_ON_DISK",
+              });
+            }
+            if (currentLink.isSymbolicLink()) {
+              throw Object.assign(new Error("File changed on disk"), {
+                code: "FILE_CHANGED_ON_DISK",
+              });
+            }
+          }
           let current: any;
           try { current = await operations.stat(filePath); }
           catch {
@@ -205,7 +247,7 @@ export async function atomicWriteFile(
               code: "FILE_CHANGED_ON_DISK",
             });
           }
-          if (`${current.size}:${current.mtimeMs}` !== expectedFingerprint)
+          if (!matchesExpectedDiskFingerprint(current, expectedFingerprint))
             throw Object.assign(new Error("File changed on disk"), {
               code: "FILE_CHANGED_ON_DISK",
             });
@@ -830,19 +872,18 @@ export class FileManager {
           throw Object.assign(new Error("Invalid expected disk fingerprint"), {
             code: "INVALID_FINGERPRINT",
           });
-        let currentFingerprint: string;
         try {
           const current = await fs.stat(filePath);
-          currentFingerprint = `${current.size}:${current.mtimeMs}`;
+          if (!matchesExpectedDiskFingerprint(current, expectedFingerprint)) {
+            throw Object.assign(new Error("File changed on disk"), {
+              code: "FILE_CHANGED_ON_DISK",
+            });
+          }
         } catch {
           throw Object.assign(new Error("File changed on disk"), {
             code: "FILE_CHANGED_ON_DISK",
           });
         }
-        if (currentFingerprint !== expectedFingerprint)
-          throw Object.assign(new Error("File changed on disk"), {
-            code: "FILE_CHANGED_ON_DISK",
-          });
       } else {
         await fs.mkdir(dir, {
           recursive: true,

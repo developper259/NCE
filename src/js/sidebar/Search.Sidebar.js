@@ -52,6 +52,8 @@ class SearchSidebar extends Sidebar {
     this.activeSearchStreamUnsubscribe = null;
     this.filesScanned = 0;
     this.isReplacing = false;
+    this.replaceRequestSequence = 0;
+    this.replacementSummary = null;
     this.replaceExpanded = false;
     this.resultOpenController = null;
   }
@@ -223,6 +225,7 @@ class SearchSidebar extends Sidebar {
       this.query = input.value;
       this.include = include.value;
       this.exclude = exclude.value;
+      this.replacementSummary = null;
 
       clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => this.runSearch(), 180);
@@ -243,6 +246,7 @@ class SearchSidebar extends Sidebar {
 
       input.value = "";
       this.query = "";
+      this.replacementSummary = null;
       this.clearResults();
       this.refresh();
     });
@@ -349,17 +353,52 @@ class SearchSidebar extends Sidebar {
   async replaceInFiles() {
     if (this.isReplacing || !this.query || !this.replaceInput?.value || !this.editor.api.replaceInFiles) return;
     this.isReplacing = true;
+    const requestId = `workspace-replace-${this.workspaceGeneration}-${++this.replaceRequestSequence}`;
+    const dirtyPaths = (this.editor.tabManager?.tabs || [])
+      .map((tab) => tab?.textTab || tab)
+      .filter((file) => file?.isSaved === false && typeof file.path === "string")
+      .map((file) => file.path);
     try {
-      const result = await this.editor.api.replaceInFiles(this.editor.fileExplorer.rootPath, this.query, this.replaceInput.value, {
-        include: this.include,
-        exclude: this.exclude,
-        caseSensitive: this.caseSensitive,
-        wholeWord: this.wholeWord,
-        useRegex: this.useRegex,
-        ignoreHiddenDirectories: true,
-      });
-      if (!result?.success) console.error("Workspace replacement failed:", result?.error);
+      const result = await this.editor.api.replaceInFiles(
+        this.editor.fileExplorer.rootPath,
+        this.query,
+        this.replaceInput.value,
+        {
+          include: this.include,
+          exclude: this.exclude,
+          caseSensitive: this.caseSensitive,
+          wholeWord: this.wholeWord,
+          useRegex: this.useRegex,
+          ignoreHiddenDirectories: true,
+          dirtyPaths,
+          requestId,
+        },
+      );
+      const skipped = result?.skippedFiles?.length || 0;
+      const conflicted = result?.conflictedFiles?.length || 0;
+      const failed = result?.failedFiles?.length || 0;
+      const state = result?.cancelled ? "cancelled" : result?.success ? "complete" : "incomplete";
+      const filesChanged = result?.filesChanged || 0;
+      this.replacementSummary = `Replace All ${state}: ${result?.replacements || 0} replacements in ${filesChanged} file${filesChanged === 1 ? "" : "s"} · ${skipped} skipped · ${conflicted} conflicts · ${failed} failures`;
+      const issues = [
+        ...(result?.skippedFiles || []),
+        ...(result?.conflictedFiles || []),
+        ...(result?.failedFiles || []),
+      ];
+      if (issues.length) {
+        const samples = issues.slice(0, 3).map((issue) => `${issue.path} (${issue.code})`);
+        this.replacementSummary += ` · ${samples.join(", ")}${issues.length > samples.length ? ", …" : ""}`;
+        console.warn("Workspace replacement report:", result);
+      }
+      if (!result?.success && result?.error) {
+        this.replacementSummary += ` · ${result.error}`;
+        console.error("Workspace replacement failed:", result.error);
+      }
       await this.runSearch();
+    } catch (error) {
+      this.replacementSummary = `Replace All failed: ${error?.message || String(error)}`;
+      console.error("Workspace replacement failed:", error);
+      this.refresh();
     } finally {
       this.isReplacing = false;
     }
@@ -661,11 +700,13 @@ class SearchSidebar extends Sidebar {
     clearTimeout(this.searchTimer);
     this.workspaceGeneration++;
     this.searchGeneration++;
+    this.replacementSummary = null;
     this.clearResults();
     this.refresh();
   }
 
   getSummaryText() {
+    if (this.replacementSummary) return this.replacementSummary;
     if (this.isSearching) {
       return `Searching… · ${this.filesScanned} files scanned · ${this.totalMatches} matches`;
     }
