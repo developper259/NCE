@@ -147,6 +147,8 @@ export class WorkspaceIndex {
   private readonly rootRevisions = new Map<string, number>();
   private readonly buildQueues = new Map<string, Promise<void>>();
   private readonly writeQueues = new Map<string, Promise<void>>();
+  private readonly pendingWriteSnapshots = new Map<string, WorkspaceIndexSnapshot>();
+  private readonly persistenceFailures = new Map<string, Error>();
   private readonly activeBuildTokens = new Map<string, object>();
   private readonly pendingWatcherEvents = new Map<
     string,
@@ -162,6 +164,7 @@ export class WorkspaceIndex {
     ReturnType<typeof setTimeout>
   >();
   private readonly reconcileQueues = new Map<string, Promise<void>>();
+  private readonly reconcileFailures = new Map<string, Error>();
   private readonly reconcileAgainRoots = new Set<string>();
   private readonly reconcileBaselines = new Map<string, WorkspaceIndexSnapshot>();
   private readonly staleRemovals = new Map<string, Promise<void>>();
@@ -174,7 +177,10 @@ export class WorkspaceIndex {
     received: 0,
     batches: 0,
     persistedWrites: 0,
+    serializedSnapshots: 0,
     reconciliations: 0,
+    incrementalEntriesVisited: 0,
+    incrementalEntriesSorted: 0,
   };
   private activeFileProbes = 0;
   private probeConcurrencyMax = 0;
@@ -230,12 +236,15 @@ export class WorkspaceIndex {
       needsReconcileRoots: this.needsReconcileRoots.size,
       buildQueues: this.buildQueues.size,
       writeQueues: this.writeQueues.size,
+      pendingWriteSnapshots: this.pendingWriteSnapshots.size,
+      persistenceFailures: this.persistenceFailures.size,
       activeBuildTokens: this.activeBuildTokens.size,
       pendingWatcherRoots: this.pendingWatcherEvents.size,
       watcherEventTimers: this.watcherEventTimers.size,
       eventFlushQueues: this.eventFlushQueues.size,
       reconcileTimers: this.reconcileTimers.size,
       reconcileQueues: this.reconcileQueues.size,
+      reconcileFailures: this.reconcileFailures.size,
       reconcileAgainRoots: this.reconcileAgainRoots.size,
       reconcileBaselines: this.reconcileBaselines.size,
       staleRemovals: this.staleRemovals.size,
@@ -492,33 +501,69 @@ export class WorkspaceIndex {
   }
 
   private queueWrite(snapshot: WorkspaceIndexSnapshot): Promise<void> {
-    const storage = new NceWorkspaceStorage(snapshot.root);
-    const target = storage.getCachePath(WORKSPACE_INDEX_CACHE_FILE);
-    const previous = this.writeQueues.get(snapshot.root) || Promise.resolve();
-    const write = previous.catch(() => undefined).then(async () => {
-      await storage.ensureStructure();
-      await fs.mkdir(path.dirname(target), { recursive: true });
-      const temporary = `${target}.${process.pid}.${Date.now()}.${Math.random()
-        .toString(16).slice(2)}.tmp`;
-      try {
-        const serialized = JSON.stringify(snapshot);
-        if (Buffer.byteLength(serialized, "utf8") > MAX_WORKSPACE_INDEX_BYTES)
-          throw new Error("Workspace index exceeds the size limit.");
-        await fs.writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600 });
-        await fs.rename(temporary, target);
-        this.coalescedWatcherEvents.persistedWrites += 1;
-      } catch (error) {
-        await fs.rm(temporary, { force: true }).catch(() => undefined);
-        throw error;
+    const root = snapshot.root;
+    this.pendingWriteSnapshots.set(root, snapshot);
+    const active = this.writeQueues.get(root);
+    if (active) {
+      return active.then(
+        () => this.pendingWriteSnapshots.has(root)
+          ? this.startQueuedWrites(root) : undefined,
+        (error) => this.pendingWriteSnapshots.has(root)
+          ? this.startQueuedWrites(root) : Promise.reject(error),
+      );
+    }
+    return this.startQueuedWrites(root);
+  }
+
+  private startQueuedWrites(root: string): Promise<void> {
+    const active = this.writeQueues.get(root);
+    if (active) return active;
+    const write = Promise.resolve().then(async () => {
+      while (this.pendingWriteSnapshots.has(root)) {
+        const snapshot = this.pendingWriteSnapshots.get(root)!;
+        this.pendingWriteSnapshots.delete(root);
+        try {
+          await this.persistSnapshot(snapshot);
+        } catch (error) {
+          // A newer full snapshot supersedes a failed write of an older one.
+          if (this.pendingWriteSnapshots.has(root)) continue;
+          this.pendingWriteSnapshots.set(root, snapshot);
+          this.persistenceFailures.set(root, error instanceof Error
+            ? error : new Error(String(error)));
+          throw error;
+        }
       }
     });
-    this.writeQueues.set(snapshot.root, write);
+    this.writeQueues.set(root, write);
     const cleanup = () => {
-      if (this.writeQueues.get(snapshot.root) === write)
-        this.writeQueues.delete(snapshot.root);
+      if (this.writeQueues.get(root) === write)
+        this.writeQueues.delete(root);
     };
     void write.then(cleanup, cleanup);
     return write;
+  }
+
+  private async persistSnapshot(snapshot: WorkspaceIndexSnapshot): Promise<void> {
+    const storage = new NceWorkspaceStorage(snapshot.root);
+    const target = storage.getCachePath(WORKSPACE_INDEX_CACHE_FILE);
+    await storage.ensureStructure();
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    if (this.pendingWriteSnapshots.has(snapshot.root)) return;
+    const temporary = `${target}.${process.pid}.${Date.now()}.${Math.random()
+      .toString(16).slice(2)}.tmp`;
+    try {
+      const serialized = JSON.stringify(snapshot);
+      this.coalescedWatcherEvents.serializedSnapshots += 1;
+      if (Buffer.byteLength(serialized, "utf8") > MAX_WORKSPACE_INDEX_BYTES)
+        throw new Error("Workspace index exceeds the size limit.");
+      await fs.writeFile(temporary, serialized, { encoding: "utf8", mode: 0o600 });
+      await fs.rename(temporary, target);
+      this.coalescedWatcherEvents.persistedWrites += 1;
+      this.persistenceFailures.delete(snapshot.root);
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   primeFromScan(rootPath: string, entries: WorkspaceIndexEntry[]): boolean {
@@ -527,6 +572,7 @@ export class WorkspaceIndex {
       void this.invalidate(rootPath);
       return false;
     }
+    this.activeBuildTokens.delete(snapshot.root);
     this.invalidRoots.delete(snapshot.root);
     this.needsReconcileRoots.delete(snapshot.root);
     this.remember(snapshot);
@@ -642,12 +688,17 @@ export class WorkspaceIndex {
       const events = this.pendingWatcherEvents.get(root);
       if (!events?.size) {
         this.pendingWatcherEvents.delete(root);
-        await this.eventFlushQueues.get(root)?.catch(() => undefined);
-        if (!this.pendingWatcherEvents.get(root)?.size) {
-          await this.staleRemovals.get(root)?.catch(() => undefined);
-          return;
-        }
-        continue;
+        const activeFlush = this.eventFlushQueues.get(root);
+        await activeFlush?.catch(() => undefined);
+        if (this.pendingWatcherEvents.get(root)?.size ||
+            this.eventFlushQueues.get(root) !== activeFlush) continue;
+        await this.staleRemovals.get(root)?.catch(() => undefined);
+        if (this.pendingWatcherEvents.get(root)?.size ||
+            this.eventFlushQueues.get(root) !== activeFlush) continue;
+        const pendingTimer = this.watcherEventTimers.get(root);
+        if (pendingTimer) clearTimeout(pendingTimer);
+        this.watcherEventTimers.delete(root);
+        return;
       }
       this.pendingWatcherEvents.delete(root);
       const previous = this.eventFlushQueues.get(root) || Promise.resolve();
@@ -664,6 +715,97 @@ export class WorkspaceIndex {
       if (this.eventFlushQueues.get(root) === flush)
         this.eventFlushQueues.delete(root);
     }
+  }
+
+  private requeueWatcherEvents(root: string, events: PendingWatcherEvent[]): void {
+    if (this.invalidRoots.has(root)) {
+      this.markStaleAndScheduleReconcile(root);
+      return;
+    }
+    let pending = this.pendingWatcherEvents.get(root);
+    if (!pending) {
+      pending = new Map();
+      this.pendingWatcherEvents.set(root, pending);
+    }
+    for (const event of events) {
+      // Preserve any later event already queued for the same path.
+      if (!pending.has(event.relativePath)) pending.set(event.relativePath, event);
+    }
+    if (pending.size > MAX_WORKSPACE_INDEX_ENTRIES) {
+      this.pendingWatcherEvents.delete(root);
+      this.markStaleAndScheduleReconcile(root);
+      return;
+    }
+    if (!this.eventFlushQueues.has(root) && !this.watcherEventTimers.has(root)) {
+      this.watcherEventTimers.set(root, setTimeout(() => {
+        this.watcherEventTimers.delete(root);
+        void this.flushEvents(root);
+      }, this.getWatcherDebounceMs(root)));
+    }
+  }
+
+  private mergeWatcherEntries(
+    snapshot: WorkspaceIndexSnapshot,
+    replacements: Map<string, WorkspaceIndexEntry | null>,
+    removedDirectories: Set<string>,
+  ): WorkspaceIndexEntry[] {
+    const insertions = [...replacements.values()]
+      .filter((entry): entry is WorkspaceIndexEntry => entry !== null)
+      .sort((left, right) => compareWorkspaceIndexPaths(
+        left.relativePath,
+        right.relativePath,
+      ));
+    this.coalescedWatcherEvents.incrementalEntriesVisited += snapshot.entries.length;
+    this.coalescedWatcherEvents.incrementalEntriesSorted += insertions.length;
+
+    const isInsideRemovedDirectory = (relativePath: string): boolean => {
+      for (
+        let separatorIndex = relativePath.indexOf("/");
+        separatorIndex !== -1;
+        separatorIndex = relativePath.indexOf("/", separatorIndex + 1)
+      ) {
+        if (removedDirectories.has(relativePath.slice(0, separatorIndex))
+            && !replacements.has(relativePath)) return true;
+      }
+      return false;
+    };
+
+    const merged: WorkspaceIndexEntry[] = [];
+    let existingIndex = 0;
+    let insertionIndex = 0;
+    while (existingIndex < snapshot.entries.length || insertionIndex < insertions.length) {
+      const existing = snapshot.entries[existingIndex];
+      const insertion = insertions[insertionIndex];
+      if (!existing) {
+        merged.push(insertion);
+        insertionIndex += 1;
+        continue;
+      }
+      if (!insertion) {
+        if (!replacements.has(existing.relativePath) &&
+            !isInsideRemovedDirectory(existing.relativePath)) merged.push(existing);
+        existingIndex += 1;
+        continue;
+      }
+
+      const comparison = compareWorkspaceIndexPaths(
+        existing.relativePath,
+        insertion.relativePath,
+      );
+      if (comparison < 0) {
+        if (!replacements.has(existing.relativePath) &&
+            !isInsideRemovedDirectory(existing.relativePath)) merged.push(existing);
+        existingIndex += 1;
+      } else if (comparison > 0) {
+        merged.push(insertion);
+        insertionIndex += 1;
+      } else {
+        merged.push(insertion);
+        existingIndex += 1;
+        insertionIndex += 1;
+      }
+    }
+    return merged;
   }
 
   private async applyWatcherEvents(
@@ -685,22 +827,18 @@ export class WorkspaceIndex {
 
     await this.reconcileQueues.get(root)?.catch(() => undefined);
     await this.buildQueues.get(root)?.catch(() => undefined);
+    const baseRevision = this.getRevision(root);
     const snapshot = this.snapshots.get(root) || await this.load(root);
     if (!snapshot) {
       this.markStaleAndScheduleReconcile(root);
       return;
     }
 
-    const entries = new Map(snapshot.entries.map((entry) => [entry.relativePath, entry]));
-    const directoryRemovals = events.filter(({ event }) => event === "unlinkDir");
-    for (const removal of directoryRemovals) {
-      const prefix = `${removal.relativePath}/`;
-      for (const relativePath of entries.keys()) {
-        if (relativePath.startsWith(prefix)) entries.delete(relativePath);
-      }
-    }
+    const replacements = new Map<string, WorkspaceIndexEntry | null>();
+    const removedDirectories = new Set<string>();
     for (const change of events) {
-      if (change.event === "unlink") entries.delete(change.relativePath);
+      if (change.event === "unlinkDir") removedDirectories.add(change.relativePath);
+      else if (change.event === "unlink") replacements.set(change.relativePath, null);
     }
 
     for (const change of events) {
@@ -708,10 +846,10 @@ export class WorkspaceIndex {
       try {
         const stats = await fs.lstat(change.filePath);
         if (!stats.isFile() || stats.isSymbolicLink()) {
-          entries.delete(change.relativePath);
+          replacements.set(change.relativePath, null);
           continue;
         }
-        entries.set(change.relativePath, {
+        const entry = this.normalizeEntry({
           relativePath: change.relativePath,
           name: path.posix.basename(change.relativePath),
           extension: path.extname(change.relativePath).toLowerCase(),
@@ -720,23 +858,33 @@ export class WorkspaceIndex {
           type: "file",
           openable: await isOpenableFileAtPath(change.filePath, stats.size),
         });
+        if (!entry) {
+          this.markStaleAndScheduleReconcile(root);
+          return;
+        }
+        replacements.set(change.relativePath, entry);
       } catch (error: any) {
-        if (error?.code === "ENOENT") entries.delete(change.relativePath);
+        if (error?.code === "ENOENT") replacements.set(change.relativePath, null);
         else {
           this.markStaleAndScheduleReconcile(root);
           return;
         }
       }
     }
-    if (entries.size > MAX_WORKSPACE_INDEX_ENTRIES) {
+    if (this.getRevision(root) !== baseRevision) {
+      this.requeueWatcherEvents(root, events);
+      return;
+    }
+    const entries = this.mergeWatcherEntries(snapshot, replacements, removedDirectories);
+    if (entries.length > MAX_WORKSPACE_INDEX_ENTRIES) {
       this.markStaleAndScheduleReconcile(root);
       return;
     }
-    const updated = this.createSnapshot(root, [...entries.values()]);
-    if (!updated) {
-      this.markStaleAndScheduleReconcile(root);
-      return;
-    }
+    const updated: WorkspaceIndexSnapshot = {
+      ...snapshot,
+      generatedAt: Date.now(),
+      entries,
+    };
     this.remember(updated);
     try {
       await this.queueWrite(updated);
@@ -747,6 +895,7 @@ export class WorkspaceIndex {
 
   private markStaleAndScheduleReconcile(root: string): void {
     this.markStale(root);
+    this.reconcileFailures.delete(root);
     const previousTimer = this.reconcileTimers.get(root);
     if (previousTimer) clearTimeout(previousTimer);
     this.reconcileTimers.set(root, setTimeout(() => {
@@ -792,23 +941,33 @@ export class WorkspaceIndex {
     const task = Promise.resolve().then(async () => {
       await this.staleRemovals.get(root)?.catch(() => undefined);
       await this.buildQueues.get(root)?.catch(() => undefined);
-      if (!force && !this.invalidRoots.has(root) && await this.load(root)) return;
+      if (!force && !this.invalidRoots.has(root) && await this.load(root)) {
+        this.reconcileFailures.delete(root);
+        return;
+      }
       this.coalescedWatcherEvents.reconciliations += 1;
       const previousSnapshot = this.snapshots.get(root) ||
         this.reconcileBaselines.get(root) || null;
       const snapshot = await this.build(root);
       if (snapshot) {
         this.reconcileBaselines.delete(root);
+        this.reconcileFailures.delete(root);
         this.onReconciled?.(
           root,
           this.getChangedDirectories(previousSnapshot, snapshot),
         );
+      } else {
+        this.rememberReconcileFailure(root, new Error(
+          "Workspace index reconciliation did not produce a complete snapshot.",
+        ));
       }
     });
     this.reconcileQueues.set(root, task);
     try {
       await task;
     } catch (error: any) {
+      this.rememberReconcileFailure(root, error instanceof Error
+        ? error : new Error(String(error)));
       console.warn("[NCE Workspace Index] Unable to reconcile index", {
         root,
         error: error?.message || String(error),
@@ -822,6 +981,16 @@ export class WorkspaceIndex {
           void this.reconcile(root);
         }, this.getWatcherDebounceMs(root)));
       }
+    }
+  }
+
+  private rememberReconcileFailure(root: string, error: Error): void {
+    this.reconcileFailures.delete(root);
+    this.reconcileFailures.set(root, error);
+    while (this.reconcileFailures.size > this.maxTransientWorkspaces) {
+      const oldestRoot = this.reconcileFailures.keys().next().value;
+      if (!oldestRoot) break;
+      this.reconcileFailures.delete(oldestRoot);
     }
   }
 
@@ -881,6 +1050,9 @@ export class WorkspaceIndex {
     if (typeof rootPath !== "string" || !rootPath.trim()) return null;
     const root = path.resolve(rootPath);
     const token = {};
+    const startingRevision = this.rootRevisions.get(root) || 0;
+    const isCurrentBuild = () => this.activeBuildTokens.get(root) === token &&
+      (this.rootRevisions.get(root) || 0) === startingRevision;
     this.activeBuildTokens.set(root, token);
     try {
       let rootStats;
@@ -899,7 +1071,7 @@ export class WorkspaceIndex {
       let truncated = false;
       let incomplete = false;
       const walk = async (directory: string): Promise<void> => {
-        if (truncated || this.activeBuildTokens.get(root) !== token) return;
+        if (truncated || !isCurrentBuild()) return;
         let children;
         try {
           children = await fs.readdir(directory, { withFileTypes: true });
@@ -909,7 +1081,7 @@ export class WorkspaceIndex {
         }
         children.sort((left, right) => left.name.localeCompare(right.name));
         for (const child of children) {
-          if (truncated || this.activeBuildTokens.get(root) !== token) return;
+          if (truncated || !isCurrentBuild()) return;
           if (child.isSymbolicLink()) continue;
           const absolutePath = path.join(directory, child.name);
           if (child.isDirectory()) {
@@ -932,13 +1104,13 @@ export class WorkspaceIndex {
         }
       };
       await walk(root);
-      if (this.activeBuildTokens.get(root) !== token) return null;
+      if (!isCurrentBuild()) return null;
 
       const probedEntries: Array<WorkspaceIndexEntry | null> =
         Array.from({ length: candidates.length }, () => null);
       let nextCandidate = 0;
       const probe = async (): Promise<void> => {
-        while (this.activeBuildTokens.get(root) === token) {
+        while (isCurrentBuild()) {
           const candidateIndex = nextCandidate++;
           if (candidateIndex >= candidates.length) return;
           const candidate = candidates[candidateIndex];
@@ -949,13 +1121,13 @@ export class WorkspaceIndex {
           );
           try {
             const stats = await fs.lstat(candidate.absolutePath);
-            if (this.activeBuildTokens.get(root) !== token) return;
+            if (!isCurrentBuild()) return;
             if (!stats.isFile() || stats.isSymbolicLink()) continue;
             const openable = await isOpenableFileAtPath(
               candidate.absolutePath,
               stats.size,
             );
-            if (this.activeBuildTokens.get(root) !== token) return;
+            if (!isCurrentBuild()) return;
             probedEntries[candidateIndex] = {
               relativePath: candidate.relativePath,
               name: candidate.name,
@@ -977,7 +1149,7 @@ export class WorkspaceIndex {
         { length: Math.min(concurrency, candidates.length) },
         () => probe(),
       ));
-      if (this.activeBuildTokens.get(root) !== token) return null;
+      if (!isCurrentBuild()) return null;
       if (truncated || incomplete) {
         await this.invalidate(root);
         return null;
@@ -991,6 +1163,7 @@ export class WorkspaceIndex {
       this.needsReconcileRoots.delete(root);
       this.remember(snapshot);
       this.bumpRevision(root);
+      const committedRevision = this.rootRevisions.get(root) || 0;
       try {
         await this.queueWrite(snapshot);
       } catch (error: any) {
@@ -999,7 +1172,8 @@ export class WorkspaceIndex {
           error: error?.message || String(error),
         });
       }
-      if (this.activeBuildTokens.get(root) !== token) return null;
+      if (this.activeBuildTokens.get(root) !== token ||
+          (this.rootRevisions.get(root) || 0) !== committedRevision) return null;
       return snapshot;
     } finally {
       if (this.activeBuildTokens.get(root) === token)
@@ -1022,15 +1196,26 @@ export class WorkspaceIndex {
       await this.reconcileQueues.get(root)?.catch(() => undefined);
       await this.staleRemovals.get(root)?.catch(() => undefined);
       await this.buildQueues.get(root)?.catch(() => undefined);
-      await this.writeQueues.get(root)?.catch(() => undefined);
+      await this.writeQueues.get(root);
+      if (this.pendingWriteSnapshots.has(root) && !this.writeQueues.has(root))
+        await this.startQueuedWrites(root);
+      const failure = this.persistenceFailures.get(root);
+      if (failure) throw failure;
+      const reconcileFailure = this.reconcileFailures.get(root);
+      if (reconcileFailure) throw reconcileFailure;
+      if (this.reconcileBaselines.has(root))
+        throw new Error("Workspace index reconciliation did not complete.");
       return;
     }
     const roots = new Set([
       ...this.buildQueues.keys(),
       ...this.writeQueues.keys(),
+      ...this.pendingWriteSnapshots.keys(),
+      ...this.persistenceFailures.keys(),
       ...this.pendingWatcherEvents.keys(),
       ...this.reconcileTimers.keys(),
       ...this.reconcileQueues.keys(),
+      ...this.reconcileFailures.keys(),
       ...this.staleRemovals.keys(),
     ]);
     await Promise.all([...roots].map((root) => this.flush(root)));
@@ -1070,11 +1255,14 @@ export class WorkspaceIndex {
     this.pendingWatcherEvents.delete(root);
     this.eventFlushQueues.delete(root);
     this.reconcileQueues.delete(root);
+    this.reconcileFailures.delete(root);
     this.reconcileAgainRoots.delete(root);
     this.reconcileBaselines.delete(root);
     this.staleRemovals.delete(root);
     this.buildQueues.delete(root);
     this.writeQueues.delete(root);
+    this.pendingWriteSnapshots.delete(root);
+    this.persistenceFailures.delete(root);
     this.activeBuildTokens.delete(root);
 
     let rootExists = preserveCache;
@@ -1097,8 +1285,10 @@ export class WorkspaceIndex {
     const root = path.resolve(rootPath);
     this.activeBuildTokens.delete(root);
     this.bumpRevision(root);
+    this.pendingWriteSnapshots.delete(root);
     this.rememberInvalidRoot(root);
     this.needsReconcileRoots.delete(root);
+    this.reconcileFailures.delete(root);
     this.snapshots.delete(root);
     const previousStats = this.statsByRoot.get(root);
     if (previousStats) {
@@ -1115,7 +1305,13 @@ export class WorkspaceIndex {
       fs.rm(target, { force: true }),
     );
     this.writeQueues.set(root, removal);
-    await removal.catch(() => undefined);
+    try {
+      await removal;
+      this.persistenceFailures.delete(root);
+    } catch (error) {
+      this.persistenceFailures.set(root, error instanceof Error
+        ? error : new Error(String(error)));
+    }
     if (this.writeQueues.get(root) === removal) this.writeQueues.delete(root);
   }
 
@@ -1123,7 +1319,9 @@ export class WorkspaceIndex {
     const roots = new Set<string>([
       ...this.snapshots.keys(), ...this.statsByRoot.keys(), ...this.buildQueues.keys(),
       ...this.writeQueues.keys(), ...this.pendingWatcherEvents.keys(),
+      ...this.pendingWriteSnapshots.keys(), ...this.persistenceFailures.keys(),
       ...this.reconcileTimers.keys(), ...this.reconcileQueues.keys(),
+      ...this.reconcileFailures.keys(),
       ...this.watcherEventTimers.keys(), ...this.eventFlushQueues.keys(),
       ...this.staleRemovals.keys(),
     ]);

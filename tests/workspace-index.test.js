@@ -654,6 +654,218 @@ test("WorkspaceIndex bounds cache-load reconciliation state across many roots", 
   }
 });
 
+test("WorkspaceIndex incrementally merges one watcher change at 100, 5k, and 25k entries", async () => {
+  const index = new WorkspaceIndex();
+  for (const fileCount of [100, 5_000, 25_000]) {
+    const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-delta-size-"));
+    try {
+      const entries = Array.from({ length: fileCount }, (_, entryIndex) => {
+        const name = `file-${String(entryIndex).padStart(5, "0")}.txt`;
+        return {
+          relativePath: name,
+          name,
+          extension: ".txt",
+          size: 4,
+          mtimeMs: 1,
+          type: "file",
+          openable: true,
+        };
+      });
+      assert.equal(index.primeFromScan(root, entries), true);
+      await index.flush(root);
+      const before = index.getDiagnostics();
+
+      const addedPath = path.join(root, "z-added.txt");
+      await fsp.writeFile(addedPath, "added");
+      index.handleWatcherEvent(root, "add", addedPath);
+      await index.flush(root);
+
+      const after = index.getDiagnostics();
+      const snapshot = await index.load(root);
+      assert.equal(snapshot.entries.length, fileCount + 1);
+      assert.equal(snapshot.entries.at(-1).relativePath, "z-added.txt");
+      assert.equal(after.incrementalEntriesVisited - before.incrementalEntriesVisited, fileCount);
+      assert.equal(after.incrementalEntriesSorted - before.incrementalEntriesSorted, 1);
+      assert.equal(after.persistedWrites - before.persistedWrites, 1);
+      assert.equal(after.serializedSnapshots - before.serializedSnapshots, 1);
+    } finally {
+      await fsp.rm(root, { recursive: true, force: true });
+      await index.release(root, { preserveCache: false });
+    }
+  }
+});
+
+test("WorkspaceIndex coalesces queued full snapshot writes to the newest state", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-write-coalesce-"));
+  const index = new WorkspaceIndex();
+  const originalWriteFile = fsp.writeFile;
+  let notifyWrite;
+  const writeStarted = new Promise((resolve) => { notifyWrite = resolve; });
+  let releaseWrite;
+  const writeGate = new Promise((resolve) => { releaseWrite = resolve; });
+  let blockFirstWrite = true;
+  const entry = (name) => ({
+    relativePath: name,
+    name,
+    extension: ".txt",
+    size: 1,
+    mtimeMs: 1,
+    type: "file",
+    openable: true,
+  });
+  try {
+    const before = index.getDiagnostics();
+    fsp.writeFile = async (...args) => {
+      if (blockFirstWrite && String(args[0]).endsWith(".tmp")) {
+        blockFirstWrite = false;
+        notifyWrite();
+        await writeGate;
+      }
+      return originalWriteFile.apply(fsp, args);
+    };
+
+    assert.equal(index.primeFromScan(root, [entry("base.txt")]), true);
+    await writeStarted;
+    for (let update = 0; update < 12; update += 1) {
+      assert.equal(index.primeFromScan(root, [entry("base.txt"), entry(`next-${update}.txt`)]), true);
+    }
+    releaseWrite();
+    await index.flush(root);
+
+    const after = index.getDiagnostics();
+    assert.equal(after.serializedSnapshots - before.serializedSnapshots, 2);
+    assert.equal(after.persistedWrites - before.persistedWrites, 2);
+    const persisted = JSON.parse(await fsp.readFile(index.getCacheFilePath(root), "utf8"));
+    assert.deepEqual(persisted.entries.map((candidate) => candidate.relativePath), [
+      "base.txt",
+      "next-11.txt",
+    ]);
+  } finally {
+    releaseWrite();
+    fsp.writeFile = originalWriteFile;
+    await fsp.rm(root, { recursive: true, force: true });
+    await index.release(root, { preserveCache: false });
+  }
+});
+
+test("WorkspaceIndex flush reports a failed cache write and retries retained latest state", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-flush-failure-"));
+  const index = new WorkspaceIndex();
+  const originalWriteFile = fsp.writeFile;
+  let failWrite = true;
+  try {
+    fsp.writeFile = async (...args) => {
+      if (failWrite && String(args[0]).endsWith(".tmp")) {
+        throw Object.assign(new Error("injected cache write failure"), { code: "EIO" });
+      }
+      return originalWriteFile.apply(fsp, args);
+    };
+    assert.equal(index.primeFromScan(root, [{
+      relativePath: "current.txt",
+      name: "current.txt",
+      extension: ".txt",
+      size: 7,
+      mtimeMs: 1,
+      type: "file",
+      openable: true,
+    }]), true);
+    await assert.rejects(index.flush(root), { code: "EIO" });
+    assert.equal(index.getLifecycleStats().pendingWriteSnapshots, 1);
+
+    failWrite = false;
+    await index.flush(root);
+    const persisted = JSON.parse(await fsp.readFile(index.getCacheFilePath(root), "utf8"));
+    assert.deepEqual(persisted.entries.map((entry) => entry.relativePath), ["current.txt"]);
+    assert.equal(index.getLifecycleStats().pendingWriteSnapshots, 0);
+    assert.equal(index.getLifecycleStats().persistenceFailures, 0);
+  } finally {
+    fsp.writeFile = originalWriteFile;
+    await fsp.rm(root, { recursive: true, force: true });
+    await index.release(root, { preserveCache: false });
+  }
+});
+
+test("WorkspaceIndex flush reports a failed full reconciliation and succeeds after retry", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-reconcile-failure-"));
+  const index = new WorkspaceIndex();
+  const originalReaddir = fsp.readdir;
+  let failRead = true;
+  try {
+    await fsp.writeFile(path.join(root, "current.txt"), "current");
+    assert.ok(await index.build(root));
+    await index.flush(root);
+    fsp.readdir = async (...args) => {
+      if (failRead && path.resolve(String(args[0])) === path.resolve(root)) {
+        throw Object.assign(new Error("injected directory read failure"), { code: "EACCES" });
+      }
+      return originalReaddir.apply(fsp, args);
+    };
+
+    index.handleWatcherEvent(root, "rename", path.join(root, "current.txt"));
+    await assert.rejects(index.flush(root), /reconciliation/);
+    assert.equal(index.getLifecycleStats().reconcileFailures, 1);
+
+    failRead = false;
+    index.scheduleReconcile(root, true);
+    await index.flush(root);
+    assert.deepEqual((await index.load(root)).entries.map((entry) => entry.relativePath), [
+      "current.txt",
+    ]);
+    assert.equal(index.getLifecycleStats().reconcileFailures, 0);
+  } finally {
+    fsp.readdir = originalReaddir;
+    await fsp.rm(root, { recursive: true, force: true });
+    await index.release(root, { preserveCache: false });
+  }
+});
+
+test("WorkspaceIndex rejects a build that overlaps a watcher update and applies the delta", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-build-event-"));
+  const originalOpen = fsp.open;
+  let notifyOpen;
+  const firstOpen = new Promise((resolve) => { notifyOpen = resolve; });
+  let releaseOpen;
+  const openGate = new Promise((resolve) => { releaseOpen = resolve; });
+  let blockFirstOpen = true;
+  try {
+    for (let index = 0; index < 12; index += 1) {
+      await fsp.writeFile(path.join(root, `file-${String(index).padStart(2, "0")}.txt`), "old");
+    }
+    const index = new WorkspaceIndex();
+    assert.ok(await index.build(root));
+    await index.flush(root);
+
+    fsp.open = async (...args) => {
+      if (blockFirstOpen) {
+        blockFirstOpen = false;
+        notifyOpen();
+        await openGate;
+      }
+      return originalOpen.apply(fsp, args);
+    };
+    const building = index.build(root);
+    await firstOpen;
+    const changedPath = path.join(root, "file-00.txt");
+    await fsp.writeFile(changedPath, "latest content");
+    index.handleWatcherEvent(root, "change", changedPath);
+    releaseOpen();
+    assert.equal(await building, null);
+
+    fsp.open = originalOpen;
+    await index.flush(root);
+    const snapshot = await index.load(root);
+    assert.equal(snapshot.entries.find((entry) => entry.relativePath === "file-00.txt").size,
+      Buffer.byteLength("latest content"));
+    const persisted = JSON.parse(await fsp.readFile(index.getCacheFilePath(root), "utf8"));
+    assert.equal(persisted.entries.find((entry) => entry.relativePath === "file-00.txt").size,
+      Buffer.byteLength("latest content"));
+  } finally {
+    releaseOpen();
+    fsp.open = originalOpen;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("WorkspaceIndex coalesces adds, non-openable changes, deletes, directory deletes, and rename pairs", async () => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-workspace-index-events-"));
   const write = async (relativePath, content) => {
