@@ -76,6 +76,7 @@ export class DirtyBufferRecoveryStore {
   private readonly operations: FileOperations;
   private readonly now: () => number;
   private queue: Promise<unknown> = Promise.resolve();
+  private lastSavedTimestamp = 0;
 
   constructor(
     root: string,
@@ -290,12 +291,8 @@ export class DirtyBufferRecoveryStore {
           console.warn("[NCE Recovery] Ignoring an invalid untitled recovery record.");
           return;
         }
-        // Expire only fully validated stale snapshots. A corrupt record with
-        // an old timestamp is still preserved because its contents may matter.
-        if (now - Number(parsed.timestamp) > MAX_RECOVERY_AGE_MS) {
-          await this.operations.rm(target, { force: true });
-          return;
-        }
+        // Expiration is handled by prune(), after a replacement snapshot is
+        // durable. A corrupt record with an old timestamp is preserved too.
         const record = parsed as unknown as DirtyBufferRecoveryRecord;
         const marker = commitMarkers.get(id);
         if (marker && record.editVersion <= marker.editVersion) {
@@ -311,10 +308,12 @@ export class DirtyBufferRecoveryStore {
         console.warn("[NCE Recovery] Could not read a recovery record; it was preserved.");
       }
     }));
-    return records.sort((a, b) => b.timestamp - a.timestamp);
+    return records.sort((a, b) =>
+      (b.timestamp - a.timestamp) || a.id.localeCompare(b.id),
+    );
   }
 
-  private async prune(records: DirtyBufferRecoveryRecord[], incomingBytes = 0, replacingId?: string): Promise<DirtyBufferRecoveryRecord[]> {
+  private async prune(records: DirtyBufferRecoveryRecord[]): Promise<DirtyBufferRecoveryRecord[]> {
     const now = this.now();
     let retained = records.filter((record) => {
       const fresh = now - record.timestamp <= MAX_RECOVERY_AGE_MS;
@@ -328,13 +327,13 @@ export class DirtyBufferRecoveryStore {
         } catch { /* The marker keeps undeletable committed snapshots hidden. */ }
       }
     }
-    const measureTotal = () => retained
-      .filter((record) => record.id !== replacingId)
-      .reduce((total, record) => total + Buffer.byteLength(JSON.stringify(record), "utf8"), 0);
-    const incomingCount = incomingBytes > 0 ? 1 : 0;
-    while (retained.filter((record) => record.id !== replacingId).length + incomingCount > MAX_RECOVERY_SNAPSHOTS ||
-        measureTotal() + incomingBytes > MAX_RECOVERY_TOTAL_BYTES) {
-      const oldest = [...retained].reverse().find((record) => record.id !== replacingId);
+    const measureTotal = () => retained.reduce(
+      (total, record) => total + Buffer.byteLength(JSON.stringify(record), "utf8"),
+      0,
+    );
+    while (retained.length > MAX_RECOVERY_SNAPSHOTS ||
+        measureTotal() > MAX_RECOVERY_TOTAL_BYTES) {
+      const oldest = retained.at(-1);
       if (!oldest) break;
       retained = retained.filter((record) => record.id !== oldest.id);
       await this.operations.rm(this.recordPath(oldest.id), { force: true });
@@ -351,22 +350,12 @@ export class DirtyBufferRecoveryStore {
         return { success: false, reason: error?.code || "INVALID_SNAPSHOT" };
       }
       const id = crypto.createHash("sha256").update(input.identity).digest("hex");
-      const record: DirtyBufferRecoveryRecord = {
-        ...input,
-        schemaVersion: DIRTY_BUFFER_RECOVERY_VERSION,
-        id,
-        timestamp: this.now(),
-      };
-      const serialized = JSON.stringify(record);
-      const bytes = Buffer.byteLength(serialized, "utf8");
-      if (bytes > MAX_RECOVERY_TOTAL_BYTES)
-        return { success: false, reason: "RECOVERY_SNAPSHOT_TOO_LARGE" };
       try {
         await this.ensureDirectory();
         const records = await this.readRecords();
-        await this.prune(records, bytes, id);
         const target = this.recordPath(id);
-        const knownRecord = records.some((candidate) => candidate.id === id);
+        const existingRecord = records.find((candidate) => candidate.id === id);
+        const knownRecord = Boolean(existingRecord);
         if (!knownRecord) {
           try {
             await this.operations.lstat(target);
@@ -376,6 +365,37 @@ export class DirtyBufferRecoveryStore {
           } catch (error: any) {
             if (error?.code !== "ENOENT") throw error;
           }
+        }
+        const latestSavedTimestamp = records.reduce(
+          (latest, candidate) => Math.max(latest, candidate.timestamp),
+          this.lastSavedTimestamp,
+        );
+        // Preserve save order when several snapshots arrive in one clock tick.
+        const timestamp = Math.max(this.now(), latestSavedTimestamp + 1);
+        const record: DirtyBufferRecoveryRecord = {
+          ...input,
+          schemaVersion: DIRTY_BUFFER_RECOVERY_VERSION,
+          id,
+          timestamp,
+        };
+        const serialized = JSON.stringify(record);
+        const bytes = Buffer.byteLength(serialized, "utf8");
+        if (bytes > MAX_RECOVERY_TOTAL_BYTES)
+          return { success: false, reason: "RECOVERY_SNAPSHOT_TOO_LARGE" };
+        const currentBytes = records.reduce(
+          (total, candidate) => total + Buffer.byteLength(JSON.stringify(candidate), "utf8"),
+          0,
+        );
+        const projectedCount = records.length + (knownRecord ? 0 : 1);
+        const projectedBytes = currentBytes - (existingRecord
+          ? Buffer.byteLength(JSON.stringify(existingRecord), "utf8") : 0) + bytes;
+        const alreadyOverLimit = records.length > MAX_RECOVERY_SNAPSHOTS ||
+          currentBytes > MAX_RECOVERY_TOTAL_BYTES;
+        // A prior cleanup may have been interrupted after a durable save. Do
+        // not let another unique save grow that bounded temporary overage.
+        if (alreadyOverLimit &&
+            (projectedCount > records.length || projectedBytes > currentBytes)) {
+          return { success: false, reason: "RECOVERY_RETENTION_PENDING" };
         }
         const temporary = `${target}.${process.pid}.${crypto.randomBytes(8).toString("hex")}.tmp`;
         try {
@@ -392,9 +412,32 @@ export class DirtyBufferRecoveryStore {
             try { await directory.sync(); }
             finally { await directory.close(); }
           } catch { /* directory fsync is not available on every platform */ }
+          this.lastSavedTimestamp = timestamp;
         } catch (error) {
           await this.operations.rm(temporary, { force: true }).catch(() => undefined);
           throw error;
+        }
+
+        // A committed marker describes the previous snapshot. Clear it only
+        // after its replacement is durably renamed into place.
+        try {
+          await this.operations.rm(this.commitMarkerPath(id), { force: true });
+        } catch (error: any) {
+          console.warn("[NCE Recovery] Snapshot is saved, but retention cleanup is pending.", {
+            code: error?.code || "RECOVERY_RETENTION_PENDING",
+          });
+          return { success: true, id, reason: "RECOVERY_RETENTION_PENDING" };
+        }
+
+        try {
+          // Retention runs only after the new snapshot is committed, so a
+          // write failure cannot destroy older recoverable contents.
+          await this.prune(await this.readRecords());
+        } catch (error: any) {
+          console.warn("[NCE Recovery] Snapshot is saved, but retention cleanup is pending.", {
+            code: error?.code || "RECOVERY_RETENTION_PENDING",
+          });
+          return { success: true, id, reason: "RECOVERY_RETENTION_PENDING" };
         }
         return { success: true, id };
       } catch (error: any) {

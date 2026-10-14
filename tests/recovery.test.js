@@ -357,6 +357,138 @@ test("failed atomic replacement retains the previous recovery snapshot", async (
   }
 });
 
+test("failed writes do not prune older recovery snapshots before the new snapshot commits", async () => {
+  const root = await temporaryRoot();
+  try {
+    let now = 1_800_000_000_000;
+    const store = new DirtyBufferRecoveryStore(root, { now: () => now++ });
+    const savedIds = [];
+    for (let index = 0; index < MAX_RECOVERY_SNAPSHOTS; index++) {
+      const saved = await store.save(snapshot({ identity: `untitled:retained-${index}` }));
+      assert.equal(saved.success, true);
+      savedIds.push(saved.id);
+    }
+
+    let failure = "disk-full";
+    const operations = Object.create(fsp);
+    operations.open = async (...args) => {
+      if (failure === "disk-full") {
+        throw Object.assign(new Error("injected disk full"), { code: "ENOSPC" });
+      }
+      return fsp.open(...args);
+    };
+    operations.rename = async (...args) => {
+      if (failure === "rename") {
+        throw Object.assign(new Error("injected rename failure"), { code: "EIO" });
+      }
+      return fsp.rename(...args);
+    };
+    const failingStore = new DirtyBufferRecoveryStore(root, {
+      operations,
+      now: () => now++,
+    });
+    const incoming = snapshot({ identity: "untitled:incoming" });
+
+    assert.equal((await failingStore.save(incoming)).reason, "ENOSPC");
+    failure = "rename";
+    assert.equal((await failingStore.save(incoming)).reason, "EIO");
+    assert.equal((await failingStore.save(snapshot({
+      identity: "untitled:oversized-incoming",
+      content: "x".repeat(MAX_RECOVERY_SNAPSHOT_BYTES + 1),
+    }))).reason, "RECOVERY_SNAPSHOT_TOO_LARGE");
+    for (const id of savedIds) assert.ok(await store.read(id));
+    assert.equal((await store.list()).length, MAX_RECOVERY_SNAPSHOTS);
+
+    failure = null;
+    const committed = await failingStore.save(incoming);
+    assert.equal(committed.success, true);
+    assert.equal((await store.list()).length, MAX_RECOVERY_SNAPSHOTS);
+    assert.equal(await store.read(savedIds[0]), null);
+    for (const id of savedIds.slice(1)) assert.ok(await store.read(id));
+    assert.equal((await store.read(committed.id)).content, incoming.content);
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a restart completes retention cleanup after the new snapshot is durable", async () => {
+  const root = await temporaryRoot();
+  try {
+    let now = 1_800_000_000_000;
+    const normalStore = new DirtyBufferRecoveryStore(root, { now: () => now++ });
+    const savedIds = [];
+    for (let index = 0; index < MAX_RECOVERY_SNAPSHOTS; index++) {
+      const saved = await normalStore.save(snapshot({ identity: `untitled:restart-${index}` }));
+      assert.equal(saved.success, true);
+      savedIds.push(saved.id);
+    }
+
+    let failOldestDelete = true;
+    const operations = Object.create(fsp);
+    operations.rm = async (target, options) => {
+      if (failOldestDelete && target.endsWith(`${savedIds[0]}.json`)) {
+        failOldestDelete = false;
+        throw Object.assign(new Error("injected cleanup interruption"), { code: "EIO" });
+      }
+      return fsp.rm(target, options);
+    };
+    const interruptedStore = new DirtyBufferRecoveryStore(root, {
+      operations,
+      now: () => now++,
+    });
+    const incoming = await interruptedStore.save(snapshot({ identity: "untitled:after-commit" }));
+    assert.equal(incoming.success, true);
+    assert.equal(incoming.reason, "RECOVERY_RETENTION_PENDING");
+    assert.equal((await normalStore.read(incoming.id)).content, "first\r\nsecond\n");
+
+    const restarted = new DirtyBufferRecoveryStore(root, { now: () => now++ });
+    assert.equal((await restarted.list()).length, MAX_RECOVERY_SNAPSHOTS);
+    assert.equal(await restarted.read(savedIds[0]), null);
+    assert.equal((await restarted.read(incoming.id)).content, "first\r\nsecond\n");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("concurrent recovery saves are serialized and keep every committed buffer", async () => {
+  const root = await temporaryRoot();
+  try {
+    const store = new DirtyBufferRecoveryStore(root);
+    const inputs = Array.from({ length: 12 }, (_, index) => snapshot({
+      identity: `untitled:concurrent-${index}`,
+      content: `content-${index}`,
+    }));
+    const results = await Promise.all(inputs.map((input) => store.save(input)));
+    assert.equal(results.every((result) => result.success), true);
+    assert.equal((await store.list()).length, inputs.length);
+    for (let index = 0; index < results.length; index++) {
+      assert.equal((await store.read(results[index].id)).content, inputs[index].content);
+    }
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("recovery retention keeps the newest saves when the wall clock timestamp ties", async () => {
+  const root = await temporaryRoot();
+  try {
+    const timestamp = 1_800_000_000_000;
+    const store = new DirtyBufferRecoveryStore(root, { now: () => timestamp });
+    const inputs = Array.from({ length: MAX_RECOVERY_SNAPSHOTS + 1 }, (_, index) =>
+      snapshot({ identity: `untitled:tie-${String(index).padStart(2, "0")}` }),
+    ).reverse();
+    const results = await Promise.all(inputs.map((input) => store.save(input)));
+    assert.equal(results.every((result) => result.success), true);
+    const expectedIds = inputs.slice(1).map((input) => require("node:crypto")
+      .createHash("sha256").update(input.identity).digest("hex")).sort();
+    const retainedIds = (await store.list()).map((record) => record.id).sort();
+    assert.equal(retainedIds.length, MAX_RECOVERY_SNAPSHOTS);
+    assert.deepEqual(retainedIds, expectedIds.slice(0, MAX_RECOVERY_SNAPSHOTS));
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("a rapid edit burst emits one latest recovery snapshot and restore preserves line endings", async () => {
   const { editor } = createEditor();
   const writes = [];
