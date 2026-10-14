@@ -1448,6 +1448,8 @@ class AgentRunner {
             : await this.agent.executeToolCall(call, {
                 sessionId: this.agent.currentSessionId,
                 runId,
+                signal: controller.signal,
+                workspaceRoot: runConfig.workspaceRoot,
               });
           this.agent.assertRunActive(runId, controller);
           const toolMessageIndex = this.agent.messages.length;

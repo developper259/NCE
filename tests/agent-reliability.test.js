@@ -742,20 +742,285 @@ test("workspace mutation lane serializes conflicting operations", async () => {
   assert.equal(agent.runChangeTracker.current.pendingToolCalls.size, 0);
 });
 
-test("a new run is not deadlocked by an abandoned mutation lane", async () => {
+test("a new run waits for an old mutation to finish even after cancellation", async () => {
   const agent = createAgent(editor());
   agent.runId = 1;
   agent.runChangeTracker.beginRun(1, "/workspace");
-  const releaseOld = await agent.toolExecutor.acquireMutationLane({ runId: 1 });
+  const oldController = new AbortController();
+  const releaseOld = await agent.toolExecutor.acquireMutationLane({
+    runId: 1,
+    signal: oldController.signal,
+    workspaceRoot: "/workspace",
+  });
   agent.runChangeTracker.setRunStatus("aborted", 1);
+  oldController.abort();
   agent.runId = 2;
   agent.runChangeTracker.beginRun(2, "/workspace");
-  const started = Date.now();
-  const releaseNew = await agent.toolExecutor.acquireMutationLane({ runId: 2 });
-  assert.ok(Date.now() - started < 1000);
+  let newLaneAcquired = false;
+  const newLanePromise = agent.toolExecutor
+    .acquireMutationLane({ runId: 2, workspaceRoot: "/workspace" })
+    .then((release) => {
+      newLaneAcquired = true;
+      return release;
+    });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(newLaneAcquired, false);
   assert.equal(agent.getMutationGuardError(1)?.code, "RUN_ABORTED");
-  releaseNew();
+
   releaseOld();
+  const releaseNew = await newLanePromise;
+  assert.equal(newLaneAcquired, true);
+  let thirdLaneAcquired = false;
+  const thirdLanePromise = agent.toolExecutor
+    .acquireMutationLane({ runId: 2, workspaceRoot: "/workspace" })
+    .then((release) => {
+      thirdLaneAcquired = true;
+      return release;
+    });
+  releaseOld();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(thirdLaneAcquired, false);
+  releaseNew();
+  const releaseThird = await thirdLanePromise;
+  releaseThird();
+});
+
+test("cancelling a queued mutation removes it without releasing the active owner", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  const releaseActive = await agent.toolExecutor.acquireMutationLane({
+    runId: 1,
+    workspaceRoot: "/workspace",
+  });
+  const queuedController = new AbortController();
+  const queued = agent.toolExecutor.acquireMutationLane({
+    runId: 1,
+    signal: queuedController.signal,
+    workspaceRoot: "/workspace",
+  });
+  queuedController.abort();
+  await assert.rejects(queued, { code: "RUN_ABORTED" });
+
+  agent.runId = 2;
+  let restartedRunAcquired = false;
+  const restartedRun = agent.toolExecutor
+    .acquireMutationLane({ runId: 2, workspaceRoot: "/workspace" })
+    .then((release) => {
+      restartedRunAcquired = true;
+      return release;
+    });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(restartedRunAcquired, false);
+  releaseActive();
+  const releaseRestartedRun = await restartedRun;
+  assert.equal(restartedRunAcquired, true);
+  releaseRestartedRun();
+});
+
+test("a restarted run waits until an old write that ignores cancellation completes", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  agent.runChangeTracker.beginRun(1, "/workspace");
+  const oldController = new AbortController();
+  let activeWrites = 0;
+  let peakWrites = 0;
+  let finishOldWrite;
+  let oldWriteStarted;
+  const oldStarted = new Promise((resolve) => {
+    oldWriteStarted = resolve;
+  });
+  agent.registerTool("modify_file", {
+    readOnly: false,
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" }, run: { type: "integer" } },
+    },
+    async execute(args) {
+      activeWrites += 1;
+      peakWrites = Math.max(peakWrites, activeWrites);
+      if (args.run === 1) {
+        oldWriteStarted();
+        await new Promise((resolve) => {
+          finishOldWrite = resolve;
+        });
+      }
+      activeWrites -= 1;
+      return { success: true };
+    },
+  });
+
+  const oldWrite = agent.executeToolCall(
+    call("modify_file", { path: "shared.js", run: 1 }, "old-write"),
+    { runId: 1, signal: oldController.signal, workspaceRoot: "/workspace" },
+  );
+  await oldStarted;
+  oldController.abort();
+  agent.runChangeTracker.setRunStatus("aborted", 1);
+  agent.runId = 2;
+  agent.stopRequested = false;
+  agent.abortController = new AbortController();
+  agent.executedToolCalls = new Map();
+  const restartedRunToolCalls = agent.executedToolCalls;
+  agent.runChangeTracker.beginRun(2, "/workspace");
+  let newWriteStarted = false;
+  const newWrite = agent
+    .executeToolCall(
+      call("modify_file", { path: "shared.js", run: 2 }, "new-write"),
+      {
+        runId: 2,
+        signal: agent.abortController.signal,
+        workspaceRoot: "/workspace",
+      },
+    )
+    .then((result) => {
+      newWriteStarted = true;
+      return result;
+    });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(newWriteStarted, false);
+  assert.equal(activeWrites, 1);
+
+  finishOldWrite();
+  assert.equal((await oldWrite).success, true);
+  assert.equal((await newWrite).success, true);
+  assert.equal(peakWrites, 1);
+  assert.equal(restartedRunToolCalls.has("new-write"), true);
+  assert.equal(restartedRunToolCalls.has("old-write"), false);
+});
+
+test("mutations to different files in one workspace can proceed concurrently", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  let activeWrites = 0;
+  let peakWrites = 0;
+  let finishWrites;
+  let bothWritesStarted;
+  const bothStarted = new Promise((resolve) => {
+    bothWritesStarted = resolve;
+  });
+  const writesFinished = new Promise((resolve) => {
+    finishWrites = resolve;
+  });
+  agent.registerTool("modify_file", {
+    readOnly: false,
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+    },
+    async execute() {
+      activeWrites += 1;
+      peakWrites = Math.max(peakWrites, activeWrites);
+      if (activeWrites === 2) bothWritesStarted();
+      await writesFinished;
+      activeWrites -= 1;
+      return { success: true };
+    },
+  });
+  const first = agent.executeToolCall(
+    call("modify_file", { path: "a.js" }, "modify-a"),
+    { runId: 1, workspaceRoot: "/workspace" },
+  );
+  const second = agent.executeToolCall(
+    call("modify_file", { path: "b.js" }, "modify-b"),
+    { runId: 1, workspaceRoot: "/workspace" },
+  );
+  await bothStarted;
+  assert.equal(peakWrites, 2);
+  finishWrites();
+  const results = await Promise.all([first, second]);
+  assert.equal(results.every((result) => result.success), true);
+});
+
+test("concurrent duplicate mutation calls execute once", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  agent.runChangeTracker.beginRun(1, "/workspace");
+  let executions = 0;
+  let finishMutation;
+  let mutationStarted;
+  const started = new Promise((resolve) => {
+    mutationStarted = resolve;
+  });
+  agent.registerTool("modify_file", {
+    readOnly: false,
+    parameters: {
+      type: "object",
+      properties: { path: { type: "string" } },
+    },
+    async execute() {
+      executions += 1;
+      mutationStarted();
+      await new Promise((resolve) => {
+        finishMutation = resolve;
+      });
+      return { success: true };
+    },
+  });
+  const duplicate = call("modify_file", { path: "same.js" }, "duplicate-id");
+  const first = agent.executeToolCall(duplicate, { runId: 1 });
+  await started;
+  const second = agent.executeToolCall(duplicate, { runId: 1 });
+  const conflictingDuplicate = agent.executeToolCall(
+    call("modify_file", { path: "other.js" }, "duplicate-id"),
+    { runId: 1 },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(executions, 1);
+  finishMutation();
+  const results = await Promise.all([first, second, conflictingDuplicate]);
+  assert.equal(results[0].success, true);
+  assert.equal(results[1].success, true);
+  assert.equal(results[2].error.code, "TOOL_CALL_ID_CONFLICT");
+  assert.equal(executions, 1);
+});
+
+test("read-only tool calls remain concurrent", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  let active = 0;
+  let peak = 0;
+  agent.registerTool("read", {
+    readOnly: true,
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return { success: true };
+    },
+  });
+  await Promise.all([
+    agent.executeToolCall(call("read", {}, "read-a"), { runId: 1 }),
+    agent.executeToolCall(call("read", {}, "read-b"), { runId: 1 }),
+  ]);
+  assert.equal(peak, 2);
+});
+
+test("a failed mutation releases its lane for the next operation", async () => {
+  const agent = createAgent(editor());
+  agent.runId = 1;
+  let executions = 0;
+  agent.registerTool("mutation", {
+    readOnly: false,
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      executions += 1;
+      if (executions === 1) throw new Error("partial write failed");
+      return { success: true };
+    },
+  });
+  const failed = await agent.executeToolCall(
+    call("mutation", {}, "failed-write"),
+    { runId: 1 },
+  );
+  const recovered = await agent.executeToolCall(
+    call("mutation", {}, "recovery-write"),
+    { runId: 1 },
+  );
+  assert.equal(failed.success, false);
+  assert.equal(recovered.success, true);
+  assert.equal(executions, 2);
 });
 
 test("failure identities are path-specific and reread resolves only matching concurrency failures", () => {

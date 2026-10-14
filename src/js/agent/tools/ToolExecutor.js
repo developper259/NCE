@@ -1,8 +1,8 @@
 class ToolExecutor {
   constructor(agent) {
     this.agent = agent;
-    this.mutationTail = Promise.resolve();
-    this.mutationTailRunId = null;
+    this.mutationLanes = new Map();
+    this.toolExecutionSequence = 0;
   }
 
   stableStringify(value) {
@@ -30,46 +30,184 @@ class ToolExecutor {
     return `${executionContext.runId ?? this.agent.runId}:${call?.function?.name || ""}:${this.stableStringify(args)}`;
   }
 
-  async acquireMutationLane(executionContext = {}) {
-    let release;
-    const previous = this.mutationTail;
-    const previousRunId = this.mutationTailRunId;
-    const requestedRunId = executionContext.runId ?? this.agent.runId;
-    this.mutationTail = new Promise((resolve) => {
-      release = resolve;
+  async acquireMutationLane(executionContext = {}, toolCall = {}) {
+    const runId = executionContext.runId ?? this.agent.runId;
+    const signal =
+      executionContext.signal ??
+      (runId === this.agent.runId
+        ? this.agent.abortController?.signal
+        : null);
+    const workspaceRoot =
+      executionContext.workspaceRoot ??
+      (runId === this.agent.runId
+        ? this.agent.runConfig?.workspaceRoot
+        : null) ??
+      this.agent.editor?.fileExplorer?.rootPath;
+    const workspaceKey =
+      AgentPath.comparisonKey(workspaceRoot || "") || "default";
+    let lane = this.mutationLanes.get(workspaceKey);
+    if (!lane) {
+      lane = { active: new Set(), queue: [] };
+      this.mutationLanes.set(workspaceKey, lane);
+    }
+    const resourceKeys = this.getMutationResourceKeys(
+      toolCall.name,
+      toolCall.call,
+      workspaceRoot,
+    );
+
+    return new Promise((resolve, reject) => {
+      const entry = {
+        executionContext,
+        runId,
+        signal,
+        resourceKeys,
+        resolve,
+        reject,
+      };
+      entry.onAbort = () => {
+        const index = lane.queue.indexOf(entry);
+        if (index < 0) return;
+        lane.queue.splice(index, 1);
+        reject(this.createRunAbortedError());
+        this.pumpMutationLane(workspaceKey, lane);
+      };
+      if (signal?.aborted) {
+        reject(this.createRunAbortedError());
+        this.cleanupMutationLane(workspaceKey, lane);
+        return;
+      }
+      signal?.addEventListener("abort", entry.onAbort, { once: true });
+      lane.queue.push(entry);
+      this.pumpMutationLane(workspaceKey, lane);
     });
-    this.mutationTailRunId = requestedRunId;
-    if (previousRunId !== null && previousRunId !== requestedRunId) {
-      const timeoutMs = 250;
-      let timeout;
-      await Promise.race([
-        previous,
-        new Promise((resolve) => {
-          timeout = setTimeout(resolve, timeoutMs);
-        }),
-      ]).finally(() => clearTimeout(timeout));
-    } else {
-      await previous;
+  }
+
+  getMutationResourceKeys(toolName, call, workspaceRoot) {
+    const fileScopedTools = [
+      "create_file",
+      "write_file_chunk",
+      "modify_file",
+      "delete_file",
+    ];
+    if (!fileScopedTools.includes(toolName)) return ["*"];
+    let args;
+    try {
+      args = this.agent.parseCanonicalToolArguments(call?.function?.arguments);
+    } catch {
+      return ["*"];
     }
-    if (
-      this.agent.stopRequested ||
-      (executionContext.runId !== undefined &&
-        executionContext.runId !== this.agent.runId)
-    ) {
-      release();
-      throw Object.assign(new Error("Le run Agent n'est plus actif."), {
-        code: "RUN_ABORTED",
-      });
+    if (typeof args?.path !== "string" || !args.path.trim()) return ["*"];
+    const filePath = AgentPath.isAbsolute(args.path)
+      ? AgentPath.normalize(args.path)
+      : AgentPath.resolve(workspaceRoot || "", args.path);
+    const fileKey = AgentPath.comparisonKey(filePath);
+    const resourceKeys = fileKey ? [`file:${fileKey}`] : ["*"];
+    if (typeof call?.id === "string" && call.id) {
+      resourceKeys.push(`call:${call.id}`);
     }
-    return release;
+    return resourceKeys;
+  }
+
+  mutationResourcesConflict(left, right) {
+    return (
+      left.includes("*") ||
+      right.includes("*") ||
+      left.some((resource) => right.includes(resource))
+    );
+  }
+
+  createRunAbortedError() {
+    return Object.assign(new Error("Le run Agent n'est plus actif."), {
+      code: "RUN_ABORTED",
+    });
+  }
+
+  isMutationRequestStale(entry) {
+    return (
+      entry.signal?.aborted ||
+      (entry.executionContext.runId !== undefined &&
+        entry.executionContext.runId !== this.agent.runId) ||
+      (entry.runId === this.agent.runId && this.agent.stopRequested)
+    );
+  }
+
+  pumpMutationLane(workspaceKey, lane) {
+    while (true) {
+      let granted = false;
+      for (let index = 0; index < lane.queue.length; index += 1) {
+        const entry = lane.queue[index];
+        const conflictsWithActive = [...lane.active].some((active) =>
+          this.mutationResourcesConflict(
+            active.resourceKeys,
+            entry.resourceKeys,
+          ),
+        );
+        const conflictsWithEarlierRequest = lane.queue
+          .slice(0, index)
+          .some((earlier) =>
+            this.mutationResourcesConflict(
+              earlier.resourceKeys,
+              entry.resourceKeys,
+            ),
+          );
+        if (conflictsWithActive || conflictsWithEarlierRequest) continue;
+
+        lane.queue.splice(index, 1);
+        entry.signal?.removeEventListener("abort", entry.onAbort);
+        if (this.isMutationRequestStale(entry)) {
+          entry.reject(this.createRunAbortedError());
+          granted = true;
+          break;
+        }
+
+        lane.active.add(entry);
+        let released = false;
+        entry.resolve(() => {
+          if (released) return;
+          released = true;
+          if (!lane.active.delete(entry)) return;
+          this.pumpMutationLane(workspaceKey, lane);
+        });
+        granted = true;
+        break;
+      }
+      if (!granted) break;
+    }
+    this.cleanupMutationLane(workspaceKey, lane);
+  }
+
+  cleanupMutationLane(workspaceKey, lane) {
+    if (lane.active.size === 0 && lane.queue.length === 0) {
+      if (this.mutationLanes.get(workspaceKey) === lane) {
+        this.mutationLanes.delete(workspaceKey);
+      }
+    }
   }
 
   async executeToolCall(call, executionContext = {}) {
     const name = call?.function?.name;
     const toolCallId = typeof call?.id === "string" ? call.id : "";
+    const runId = executionContext.runId ?? this.agent.runId;
+    executionContext = {
+      ...executionContext,
+      runId,
+      signal:
+        executionContext.signal ??
+        (runId === this.agent.runId
+          ? this.agent.abortController?.signal
+          : null),
+      workspaceRoot:
+        executionContext.workspaceRoot ??
+        (runId === this.agent.runId
+          ? this.agent.runConfig?.workspaceRoot
+          : null) ??
+        this.agent.editor?.fileExplorer?.rootPath,
+    };
+    const executedToolCalls = this.agent.executedToolCalls;
     const identity = this.getCallIdentity(call, executionContext);
     const cached = toolCallId
-      ? this.agent.executedToolCalls.get(toolCallId)
+      ? executedToolCalls.get(toolCallId)
       : null;
     if (cached) {
       if (cached.executionIdentity === identity) return cached;
@@ -86,15 +224,19 @@ class ToolExecutor {
       });
     }
 
-    const runId = executionContext.runId ?? this.agent.runId;
-    const pendingIdentity = `${toolCallId || "anonymous"}:${identity}`;
+    const pendingIdentity = `${++this.toolExecutionSequence}:${
+      toolCallId || "anonymous"
+    }:${identity}`;
     this.agent.runChangeTracker?.markPending?.(pendingIdentity, runId);
     let releaseMutation = null;
     try {
       const tool = this.agent.getTool(name);
       if (tool && (!tool.readOnly || tool.serializesWithMutations === true)) {
         try {
-          releaseMutation = await this.acquireMutationLane(executionContext);
+          releaseMutation = await this.acquireMutationLane(executionContext, {
+            name,
+            call,
+          });
         } catch (error) {
           return this.attachMeta(name, {
             success: false,
@@ -105,12 +247,29 @@ class ToolExecutor {
           });
         }
       }
+      if (toolCallId) {
+        const completedCall = executedToolCalls.get(toolCallId);
+        if (completedCall) {
+          if (completedCall.executionIdentity === identity) return completedCall;
+          return this.attachMeta(name, {
+            success: false,
+            error: {
+              code: "TOOL_CALL_ID_CONFLICT",
+              message:
+                "Le même identifiant tool a été réutilisé avec un appel différent.",
+              category: "protocol",
+              recoverable: true,
+              retryStrategy: "replan",
+            },
+          });
+        }
+      }
       const toolResult = await this.executeToolCallInternal(
         call,
         executionContext,
       );
       if (toolCallId) {
-        this.agent.executedToolCalls.set(toolCallId, {
+        executedToolCalls.set(toolCallId, {
           ...toolResult,
           executionIdentity: identity,
         });
@@ -740,7 +899,8 @@ class ToolExecutor {
       if (
         executionContext.runId !== undefined &&
         (this.agent.stopRequested ||
-          executionContext.runId !== this.agent.runId)
+          executionContext.runId !== this.agent.runId ||
+          executionContext.signal?.aborted)
       ) {
         return this.attachMeta(name, {
           success: false,
@@ -863,7 +1023,7 @@ class ToolExecutor {
       const rawResult = await tool.execute(normalizedArgs, {
         editor: this.agent.editor,
         agent: this.agent,
-        signal: this.agent.abortController?.signal,
+        signal: executionContext.signal,
       });
       if (rawResult?.success !== false) {
         this.agent.fileKnowledge.observeWrite(name, normalizedArgs, rawResult);
