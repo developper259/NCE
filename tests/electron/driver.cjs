@@ -1207,6 +1207,10 @@ app.whenReady().then(() => {
         );
         assert.equal(await run("window.__nceCheckboxChangeCount"), 4);
         await run("editor.fileExplorer.deleteDialogDeleteButton.focus()");
+        await waitForCondition(
+          async () => (await run("document.activeElement === editor.fileExplorer.deleteDialogDeleteButton")) === true,
+          { description: "Delete dialog focus on the destructive action" },
+        );
         sendKeyboardKey("Enter");
         await waitForCondition(
           async () => (await run("window.__deleteConfirmationResult?.confirmed === true")) === true,
