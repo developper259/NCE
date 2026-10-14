@@ -39,6 +39,15 @@ export async function buildRendererScript(bundle = "core") {
   const paths = await rendererScriptPaths(bundle);
   const chunks = [];
 
+  if (bundle === "agent") {
+    const parserPath = path.join(
+      projectRoot,
+      "node_modules/acorn/dist/acorn.js",
+    );
+    const parserSource = await fs.readFile(parserPath, "utf8");
+    chunks.push(`;\n/* acorn/dist/acorn.js */\n${parserSource}\n`);
+  }
+
   for (const file of paths) {
     const sourcePath = path.resolve(sourceRoot, file);
     const relativePath = path.relative(sourceRoot, sourcePath);

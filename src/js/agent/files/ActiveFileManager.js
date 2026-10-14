@@ -653,7 +653,13 @@ class ActiveFileManager {
       const lineController = editor?.lineController;
       const file = editor?.tabManager?.activeFile;
       if (file?.largeFileMode === true)
-        return { valid: true, error: null, skipped: true, fileName: file.path || file.name };
+        return {
+          valid: true,
+          error: null,
+          skipped: true,
+          reason: "LARGE_FILE_MODE",
+          fileName: file.path || file.name,
+        };
       const source =
         typeof lineController?.getContent === "function"
           ? lineController.getContent()
@@ -664,13 +670,95 @@ class ActiveFileManager {
       const fileName = file?.path || file?.name || "";
       const extension = fileName.split(".").pop()?.toLowerCase() || "";
       const language = String(file?.language || "").toLowerCase();
+      const isTypeScript =
+        ["typescript", "ts", "tsx", "typescriptreact"].includes(language) ||
+        ["ts", "tsx"].includes(extension);
+      const isJsx =
+        ["jsx", "javascriptreact"].includes(language) || extension === "jsx";
+      if (isTypeScript || isJsx) {
+        return {
+          valid: true,
+          error: null,
+          skipped: true,
+          reason: isTypeScript ? "UNSUPPORTED_TYPESCRIPT" : "UNSUPPORTED_JSX",
+          fileName,
+        };
+      }
       const isJavaScript =
-        ["javascript", "js", "jsx", "mjs", "cjs"].includes(language) ||
-        ["js", "jsx", "mjs", "cjs"].includes(extension);
+        ["javascript", "js", "mjs", "cjs"].includes(language) ||
+        ["js", "mjs", "cjs"].includes(extension);
       if (!isJavaScript) {
         return { valid: true, error: null };
       }
-      new Function(`"use strict";\n${source}`);
+
+      if (source.length > 1_000_000) {
+        return {
+          valid: true,
+          error: null,
+          skipped: true,
+          reason: "SOURCE_TOO_LARGE",
+          fileName,
+        };
+      }
+      const parser = typeof window !== "undefined" ? window.acorn : null;
+      if (typeof parser?.parse !== "function") {
+        return {
+          valid: true,
+          error: null,
+          skipped: true,
+          reason: "PARSER_UNAVAILABLE",
+          fileName,
+        };
+      }
+
+      const explicitFormat = [
+        file?.moduleMode,
+        file?.moduleFormat,
+        file?.packageType,
+        editor?.fileExplorer?.moduleMode,
+        editor?.fileExplorer?.moduleFormat,
+        editor?.fileExplorer?.packageType,
+      ]
+        .find((value) => typeof value === "string")
+        ?.toLowerCase();
+      const moduleFormat = ["module", "esm", "esmodule"].includes(explicitFormat)
+        ? "module"
+        : ["commonjs", "cjs", "script"].includes(explicitFormat)
+          ? "commonjs"
+          : extension === "mjs"
+            ? "module"
+            : extension === "cjs"
+              ? "commonjs"
+              : null;
+      const parseModes = moduleFormat
+        ? [moduleFormat]
+        : ["module", "commonjs"];
+      const parseErrors = [];
+      let parsedModes = 0;
+      for (const mode of parseModes) {
+        try {
+          parser.parse(source, {
+            ecmaVersion: "latest",
+            sourceType: mode === "module" ? "module" : "script",
+            allowReturnOutsideFunction: mode === "commonjs",
+          });
+          parsedModes += 1;
+        } catch (error) {
+          parseErrors.push(error);
+        }
+      }
+      if (parsedModes > 0 && !moduleFormat && parsedModes !== parseModes.length) {
+        return {
+          valid: true,
+          error: null,
+          skipped: true,
+          reason: "MODULE_FORMAT_UNDETERMINED",
+          fileName,
+        };
+      }
+      if (parsedModes === 0) {
+        throw parseErrors[0] || new Error("Unable to parse JavaScript source.");
+      }
       return { valid: true, error: null, fileName };
     } catch (error) {
       return {
