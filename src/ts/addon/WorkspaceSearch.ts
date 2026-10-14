@@ -1257,11 +1257,13 @@ export class WorkspaceSearch {
           if (content[index] === "\n") lineStarts.push(index + 1);
         }
 
+        // Worker matches are yielded in increasing UTF-16 offset order, so a
+        // single cursor locates all of them in O(lines + matches).
+        let lineIndex = 0;
         for (const match of matches) {
           if (isSearchCancelled() || totalMatches >= maxMatches) return;
           totalMatches++;
           if (totalMatches <= offset || results.length >= limit) continue;
-          let lineIndex = 0;
           while (
             lineIndex + 1 < lineStarts.length &&
             lineStarts[lineIndex + 1] <= match.index

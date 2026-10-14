@@ -717,6 +717,68 @@ test("WorkspaceSearch isolates regex execution and preserves supported matching 
   }
 });
 
+test("WorkspaceSearch locates ordered multiline matches with UTF-16 columns", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-search-multiline-location-"));
+  const positioned = "start foo foo\r\n\r\nπ🙂 prefix foo\r\nlast foo";
+  let search;
+  try {
+    await fsp.writeFile(path.join(root, "positions.txt"), positioned);
+    await fsp.writeFile(
+      path.join(root, "dense.txt"),
+      Array.from({ length: 8_000 }, () => "needle").join("\n"),
+    );
+    search = new WorkspaceSearch({ window: null });
+
+    const result = await search.search(root, "foo[\\s\\S]?", {
+      useRegex: true,
+      caseSensitive: true,
+      limit: 20,
+    });
+    assert.equal(result.totalMatches, 4);
+    assert.deepEqual(result.results.map(({ line, column, matchLength }) => ({
+      line,
+      column,
+      matchLength,
+    })), [
+      { line: 1, column: 6, matchLength: 4 },
+      { line: 1, column: 10, matchLength: 4 },
+      { line: 3, column: 11, matchLength: 4 },
+      { line: 4, column: 5, matchLength: 3 },
+    ]);
+    assert.ok(result.results[0].preview.includes("foo"));
+
+    const spanning = await search.search(root, "start[\\s\\S]*?π", {
+      useRegex: true,
+      caseSensitive: true,
+    });
+    assert.equal(spanning.totalMatches, 1);
+    assert.equal(spanning.results[0].line, 1);
+    assert.equal(spanning.results[0].column, 0);
+
+    const eof = await search.search(root, "(?<=last foo)(?=$)[\\s\\S]?", {
+      useRegex: true,
+      caseSensitive: true,
+    });
+    assert.equal(eof.totalMatches, 1);
+    assert.equal(eof.results[0].line, 4);
+    assert.equal(eof.results[0].column, "last foo".length);
+    assert.equal(eof.results[0].matchLength, 0);
+
+    const dense = await search.search(root, "needle[\\s\\S]?", {
+      useRegex: true,
+      caseSensitive: true,
+      limit: 8_000,
+    });
+    assert.equal(dense.totalMatches, 8_000);
+    assert.equal(dense.results[0].line, 1);
+    assert.equal(dense.results.at(-1).line, 8_000);
+    assert.equal(dense.results.at(-1).column, 0);
+  } finally {
+    if (search) await search.dispose();
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("WorkspaceRegexExecutor terminates timed out and cancelled regex workers", async () => {
   const executor = new WorkspaceRegexExecutor(800, 4);
   const pathological = /^(a+)+$/gu;
