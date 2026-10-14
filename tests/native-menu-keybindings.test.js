@@ -133,6 +133,10 @@ test("NCE shortcuts convert to Electron accelerators through one normalizer", ()
     "CommandOrControl+Alt+X",
   );
   assert.equal(toElectronAccelerator("Ctrl+Alt+X"), "Control+Alt+X");
+  assert.equal(toElectronAccelerator("Space"), undefined);
+  assert.equal(toElectronAccelerator("Shift+Space"), undefined);
+  assert.equal(toElectronAccelerator("Alt+Space"), undefined);
+  assert.equal(toElectronAccelerator("Ctrl+Space"), "Control+Space");
   assert.equal(toElectronAccelerator("Mod+^", "darwin"), undefined);
   assert.equal(
     toElectronAccelerator("Mod+^", "win32"),
@@ -141,6 +145,26 @@ test("NCE shortcuts convert to Electron accelerators through one normalizer", ()
   assert.equal(toElectronAccelerator("Mod+Shift+¨"), undefined);
   assert.equal(toElectronAccelerator("Hyper+X"), undefined);
   assert.equal(toElectronAccelerator(null), undefined);
+});
+
+test("native menu does not install Space or Shift+Space as app accelerators", () => {
+  const { appMenu, item, values } = createMenuHarness({
+    "keybindings.open_folder": "Space",
+  });
+
+  assert.equal(item("Open Folder...").accelerator, undefined);
+
+  values.set("keybindings.open_folder", "Shift+Space");
+  appMenu.refreshKeybindings();
+  assert.equal(item("Open Folder...").accelerator, undefined);
+
+  values.set("keybindings.open_folder", "Mod+Shift+O");
+  appMenu.refreshKeybindings();
+  assert.equal(
+    item("Open Folder...").accelerator,
+    "CommandOrControl+Shift+O",
+    "explicit app shortcuts with Command/Control remain native accelerators",
+  );
 });
 
 test("Ctrl+Tab tab cycling accelerators stay explicit across platforms", () => {

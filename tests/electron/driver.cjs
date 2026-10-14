@@ -2617,6 +2617,7 @@ app.whenReady().then(() => {
               colors: [panel, view, instance, xterm, viewport, screen]
                 .map(element => getComputedStyle(element).backgroundColor),
               themedBackground: record.terminal.options.theme.background,
+              cursorBlink: record.terminal.options.cursorBlink,
               themeToken: getComputedStyle(document.documentElement)
                 .getPropertyValue("--bg-secondary").trim(),
               rects: [view, instance, xterm, viewport].map(element => {
@@ -2640,6 +2641,8 @@ app.whenReady().then(() => {
             `${theme} theme gives the terminal surface, xterm, viewport, and screen one background`);
           assert.equal(result.themedBackground, result.themeToken,
             `${theme} xterm canvas theme uses the NCE surface token`);
+          assert.equal(result.cursorBlink, false,
+            `${theme} terminal cursor stays fixed`);
           for (const rect of result.rects.slice(1)) {
             assert.ok(Math.abs(rect.width - result.rects[0].width) <= 1,
               `${theme} xterm viewport spans the terminal content width`);
@@ -2761,6 +2764,67 @@ app.whenReady().then(() => {
             buffer.getLine(index)?.translateToString(true) || "",
           ).join("\\n") : "";
         })()`;
+        assert.equal(await run(`(() => {
+          const primary = getComputedStyle(editor.cD);
+          const secondary = getComputedStyle(editor.multiCursorCaretOutput);
+          return primary.animationName === "none" &&
+            secondary.animationName === "none" &&
+            primary.opacity === "1" && secondary.opacity === "1";
+        })()`), true, "primary and secondary editor carets stay visible without animation");
+
+        const previousOpenFolderShortcut = await run('SETTINGS_GET("keybindings.open_folder")');
+        assert.deepEqual(
+          await run('SETTINGS_SET("keybindings.open_folder", "Space")'),
+          { success: true },
+          "the Space shortcut can be configured for regression coverage",
+        );
+        if (process.platform === "darwin") {
+          assert.equal(
+            findMenuItem(nce.window.appMenu.menu, "Open Folder...")?.accelerator == null,
+            true,
+            "a native menu accelerator never captures unmodified Space",
+          );
+        }
+        const originalShowOpenDialog = dialog.showOpenDialog;
+        let openFolderDialogCalls = 0;
+        dialog.showOpenDialog = async () => {
+          openFolderDialogCalls++;
+          return { canceled: true, filePaths: [] };
+        };
+        try {
+          await run(`editor.terminalPanel.getActiveSession().terminal.focus()`);
+          win.focus();
+          const command = "echo NCE_SPACE_INPUT_HELLO NCE_SPACE_INPUT_WORLD";
+          await run(`(() => {
+            const terminal = editor.terminalPanel.getActiveSession().terminal;
+            window.__nceTerminalInput = [];
+            window.__nceTerminalInputSubscription = terminal.onData(data =>
+              window.__nceTerminalInput.push(data),
+            );
+          })()`);
+          await win.webContents.insertText(command);
+          await waitForCondition(
+            async () => (await run('window.__nceTerminalInput.join("")')) === command,
+            { timeout: 5000, description: "xterm to emit the exact typed command once" },
+          );
+          assert.equal(
+            await run('window.__nceTerminalInput.join("")'),
+            command,
+            "xterm forwards the command's spaces once to the PTY input stream",
+          );
+          await win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
+          await win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+          await waitForCondition(
+            async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_SPACE_INPUT_HELLO NCE_SPACE_INPUT_WORLD")`)) === true,
+            { timeout: 10000, description: "typed terminal command with spaces to reach the PTY" },
+          );
+          assert.equal(openFolderDialogCalls, 0,
+            "Space in terminal input never opens the folder picker");
+        } finally {
+          await run("window.__nceTerminalInputSubscription?.dispose(); delete window.__nceTerminalInputSubscription; delete window.__nceTerminalInput");
+          dialog.showOpenDialog = originalShowOpenDialog;
+          await run(`SETTINGS_SET("keybindings.open_folder", ${JSON.stringify(previousOpenFolderShortcut)})`);
+        }
         await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).workspaceKey, ${JSON.stringify("echo NCE_PTY_FIRST\r")})`);
         await waitForCondition(
           async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_FIRST")`)) === true,

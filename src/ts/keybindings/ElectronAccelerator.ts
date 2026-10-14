@@ -71,6 +71,13 @@ export function toElectronAccelerator(
   const key = parts.pop();
   if (!key) return undefined;
   if (parts.some((part) => !ELECTRON_MODIFIERS[part])) return undefined;
+  // Native menu accelerators run before renderer focus routing. Require
+  // Control/Command so text, Option/Alt input, and Shift+text remain available
+  // to focused inputs, especially terminal sessions.
+  const hasPrimaryModifier = parts.some((part) =>
+    ["commandorcontrol", "meta", "ctrl"].includes(part),
+  );
+  if (!hasPrimaryModifier) return undefined;
   if (platform === "darwin" && MACOS_DEAD_KEYS.has(key)) return undefined;
 
   const electronKey = formatElectronKey(key);

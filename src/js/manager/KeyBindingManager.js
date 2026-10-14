@@ -137,11 +137,17 @@ class KeyBindingManager {
   getShortcutKey(eventKey, e) {
     let key = "";
     if (["Control", "Meta", "Shift", "Alt"].includes(eventKey)) return eventKey;
+    if (eventKey === " ") eventKey = "Space";
     if (e.ctrlKey) key += "Ctrl+";
     if (e.metaKey) key += "Meta+";
     if (e.shiftKey) key += "Shift+";
     if (e.altKey) key += "Alt+";
     return key + eventKey;
+  }
+
+  hasTerminalShortcutModifier(event) {
+    // Alt can produce regular text in terminal input on many keyboard layouts.
+    return event.ctrlKey || event.metaKey;
   }
 
   bindNativeInput(key, e) {
@@ -276,6 +282,7 @@ class KeyBindingManager {
       ["close_file", "close_all_file"].includes(binding?.action);
     if (
       terminalContext &&
+      this.hasTerminalShortcutModifier(e) &&
       binding?.in_editor === false &&
       this.terminalTabActions.has(binding.action) &&
       !closeWindowWhenNoTabs
@@ -289,7 +296,10 @@ class KeyBindingManager {
 
     const terminalElement = e.target?.closest?.(".xterm");
     if (terminalElement?.classList?.contains("xterm")) {
-      if (binding?.in_editor === false) {
+      if (
+        this.hasTerminalShortcutModifier(e) &&
+        binding?.in_editor === false
+      ) {
         if (e.repeat && !["next_tab", "previous_tab"].includes(binding.action)) return;
         this.editor.keyBinding.exec(binding, e);
         e.preventDefault();

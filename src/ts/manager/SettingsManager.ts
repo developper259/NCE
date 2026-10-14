@@ -148,6 +148,7 @@ function isValidKeybinding(value: unknown): value is string {
       "enter",
       "escape",
       "insert",
+      "space",
       "pageup",
       "pagedown",
     ].includes(key)

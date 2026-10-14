@@ -84,6 +84,18 @@ function keyboardEvent(target = new HTMLInputElement(), overrides = {}) {
   };
 }
 
+function terminalTarget() {
+  const xterm = { classList: { contains: (name) => name === "xterm" } };
+  return {
+    closest(selector) {
+      if (selector === ".terminal-panel, .bottom-panel-terminal-actions-slot")
+        return this;
+      if (selector === ".xterm") return xterm;
+      return null;
+    },
+  };
+}
+
 test("global shortcuts work from an input when no file is open", () => {
   const { manager, calls } = fixture({ action: "quick_open", in_editor: false });
   const event = keyboardEvent();
@@ -241,6 +253,72 @@ test("terminal focus leaves Ctrl+C, Ctrl+V and ordinary keys to xterm", () => {
     assert.deepEqual(calls, [], `${action} must stay in xterm`);
     assert.equal(event.defaultPrevented, false);
   }
+});
+
+test("Space, Shift+Space and repeated spaces stay with terminal input", () => {
+  for (const [key, shiftKey, shortcut] of [
+    [" ", false, "Space"],
+    [" ", true, "Shift+Space"],
+  ]) {
+    const { manager, calls } = fixture(
+      { action: "open_folder", in_editor: false },
+      {},
+      shortcut,
+    );
+    for (let repeat = 0; repeat < 3; repeat++) {
+      const event = keyboardEvent(terminalTarget(), {
+        key,
+        shiftKey,
+        metaKey: false,
+        repeat: repeat > 0,
+      });
+      manager.onKey(event);
+      assert.equal(event.defaultPrevented, false);
+      assert.equal(event.propagationStopped, false);
+    }
+    assert.deepEqual(calls, [], `${shortcut} must not open a folder in xterm`);
+  }
+});
+
+test("terminal printable characters and shell navigation keys reach xterm", () => {
+  for (const key of ["e", "Backspace", "Enter", "Tab", "ArrowLeft", "ArrowUp"]) {
+    const { manager, calls } = fixture(
+      { action: "open_folder", in_editor: false },
+      {},
+      "Ctrl+Shift+O",
+    );
+    const event = keyboardEvent(terminalTarget(), {
+      key,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+    });
+    manager.onKey(event);
+    assert.deepEqual(calls, [], `${key} must remain terminal input`);
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(event.propagationStopped, false);
+  }
+});
+
+test("terminal session shortcuts still run when explicitly modified", () => {
+  const tabActions = [];
+  const { manager, calls } = fixture(
+    { action: "next_tab", in_editor: false },
+    { terminalPanel: { handleTabKeybinding(action) { tabActions.push(action); } } },
+    "Ctrl+Tab",
+  );
+  const event = keyboardEvent(terminalTarget(), {
+    key: "Tab",
+    ctrlKey: true,
+    metaKey: false,
+  });
+
+  manager.onKey(event);
+
+  assert.deepEqual(tabActions, ["next_tab"]);
+  assert.deepEqual(calls, []);
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
 });
 
 test("terminal focus still dispatches configured global commands and Toggle Terminal", () => {
