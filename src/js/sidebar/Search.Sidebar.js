@@ -148,7 +148,12 @@ class SearchSidebar extends Sidebar {
     const replaceInput = document.createElement("input");
     replaceInput.type = "text";
     replaceInput.className = "search-sidebar-replace-input";
-    replaceInput.placeholder = "Replace";
+    replaceInput.placeholder = "Replace (empty deletes matches)";
+    replaceInput.title = "Replacement text; leave empty to delete matches";
+    replaceInput.setAttribute(
+      "aria-label",
+      "Replacement text; empty deletes matches",
+    );
     replaceInput.autocomplete = "off";
     replaceInput.spellcheck = false;
     this.replaceInput = replaceInput;
@@ -351,7 +356,18 @@ class SearchSidebar extends Sidebar {
   }
 
   async replaceInFiles() {
-    if (this.isReplacing || !this.query || !this.replaceInput?.value || !this.editor.api.replaceInFiles) return;
+    const rootPath = this.editor.fileExplorer?.rootPath;
+    const replacementInput = this.replaceInput;
+    if (
+      this.isReplacing ||
+      typeof this.query !== "string" ||
+      !this.query ||
+      typeof rootPath !== "string" ||
+      !rootPath.trim() ||
+      !replacementInput ||
+      typeof replacementInput.value !== "string" ||
+      typeof this.editor.api?.replaceInFiles !== "function"
+    ) return;
     this.isReplacing = true;
     const requestId = `workspace-replace-${this.workspaceGeneration}-${++this.replaceRequestSequence}`;
     const dirtyPaths = (this.editor.tabManager?.tabs || [])
@@ -360,9 +376,9 @@ class SearchSidebar extends Sidebar {
       .map((file) => file.path);
     try {
       const result = await this.editor.api.replaceInFiles(
-        this.editor.fileExplorer.rootPath,
+        rootPath,
         this.query,
-        this.replaceInput.value,
+        replacementInput.value,
         {
           include: this.include,
           exclude: this.exclude,

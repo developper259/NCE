@@ -43,6 +43,40 @@ function createSearchSidebar() {
   return { sidebar, calls };
 }
 
+function createReplacementSidebar({ replaceInFiles, searchInFiles, rootPath = "/workspace" } = {}) {
+  const replacements = [];
+  const searches = [];
+  const sidebar = new SearchSidebar({
+    fileExplorer: { rootPath },
+    api: {
+      async replaceInFiles(...args) {
+        replacements.push(args);
+        return replaceInFiles ? replaceInFiles(...args) : {
+          success: true,
+          filesChanged: 0,
+          replacements: 0,
+          skippedFiles: [],
+          conflictedFiles: [],
+          failedFiles: [],
+        };
+      },
+      async searchInFiles(...args) {
+        searches.push(args);
+        return searchInFiles ? searchInFiles(...args) : {
+          results: [],
+          totalMatches: 0,
+          filesSearched: 0,
+          offset: 0,
+        };
+      },
+    },
+  });
+  sidebar.isOpen = true;
+  sidebar.query = "foo";
+  sidebar.replaceInput = { value: "bar" };
+  return { sidebar, replacements, searches };
+}
+
 function createNavigationSidebar({ openFileWithPath, waitForLineLoaded } = {}) {
   const calls = { opened: [], waits: [], scrolls: [], positions: [], carets: 0 };
   const file = { type: "file", path: "/workspace/result.js" };
@@ -137,6 +171,106 @@ test("Replace All reports partial results and identifies unsaved editor buffers"
   assert.deepEqual(replaceCall[3].dirtyPaths, ["/workspace/dirty.js"]);
   assert.match(sidebar.replacementSummary, /4 replacements in 1 file/);
   assert.match(sidebar.replacementSummary, /DIRTY_EDITOR_BUFFER/);
+});
+
+test("Replace All accepts empty literal and regex replacements across files and refreshes search", async () => {
+  for (const { query, useRegex } of [
+    { query: "foo", useRegex: false },
+    { query: "f.o", useRegex: true },
+  ]) {
+    const { sidebar, replacements, searches } = createReplacementSidebar({
+      async replaceInFiles() {
+        return {
+          success: true,
+          filesChanged: 2,
+          replacements: 5,
+          skippedFiles: [],
+          conflictedFiles: [],
+          failedFiles: [],
+        };
+      },
+    });
+    sidebar.query = query;
+    sidebar.useRegex = useRegex;
+    sidebar.replaceInput.value = "";
+
+    await sidebar.replaceInFiles();
+
+    assert.equal(replacements.length, 1);
+    assert.equal(replacements[0][1], query);
+    assert.equal(replacements[0][2], "");
+    assert.equal(replacements[0][3].useRegex, useRegex);
+    assert.equal(sidebar.replacementSummary, "Replace All complete: 5 replacements in 2 files · 0 skipped · 0 conflicts · 0 failures");
+    assert.equal(searches.length, 1, "search results refresh after the replacement");
+    assert.equal(sidebar.isReplacing, false);
+  }
+});
+
+test("Replace All rejects missing query, unavailable replacement control, and invalid workspace", async () => {
+  const cases = [
+    ({ sidebar }) => { sidebar.query = ""; },
+    ({ sidebar }) => { sidebar.replaceInput = null; },
+    ({ sidebar }) => { sidebar.replaceInput = { value: null }; },
+    ({ sidebar }) => { sidebar.editor.fileExplorer.rootPath = "  "; },
+  ];
+  for (const configure of cases) {
+    const fixture = createReplacementSidebar();
+    configure(fixture);
+    await fixture.sidebar.replaceInFiles();
+    assert.equal(fixture.replacements.length, 0);
+  }
+});
+
+test("Replace All reports invalid regex failure and refreshes without repeating replacement", async () => {
+  const { sidebar, replacements, searches } = createReplacementSidebar({
+    async replaceInFiles() {
+      return {
+        success: false,
+        error: "Invalid regular expression.",
+        filesChanged: 0,
+        replacements: 0,
+        skippedFiles: [],
+        conflictedFiles: [],
+        failedFiles: [],
+      };
+    },
+  });
+  sidebar.query = "[";
+  sidebar.useRegex = true;
+  sidebar.replaceInput.value = "";
+
+  await sidebar.replaceInFiles();
+
+  assert.equal(replacements.length, 1);
+  assert.equal(replacements[0][3].useRegex, true);
+  assert.match(sidebar.replacementSummary, /Replace All incomplete/);
+  assert.match(sidebar.replacementSummary, /Invalid regular expression/);
+  assert.equal(searches.length, 1);
+});
+
+test("Replace All ignores a concurrent duplicate request", async () => {
+  let finishReplacement;
+  const replacementResult = new Promise((resolve) => { finishReplacement = resolve; });
+  const { sidebar, replacements, searches } = createReplacementSidebar({
+    replaceInFiles: () => replacementResult,
+  });
+  sidebar.replaceInput.value = "";
+
+  const first = sidebar.replaceInFiles();
+  await Promise.resolve();
+  await sidebar.replaceInFiles();
+  finishReplacement({
+    success: true,
+    filesChanged: 1,
+    replacements: 1,
+    skippedFiles: [],
+    conflictedFiles: [],
+    failedFiles: [],
+  });
+  await first;
+
+  assert.equal(replacements.length, 1);
+  assert.equal(searches.length, 1);
 });
 
 test("workspace search treats a whitespace-only query as empty without rewriting it", async () => {
