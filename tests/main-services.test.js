@@ -1916,11 +1916,12 @@ test("FileManager classifies normal folder entries from Dirents without per-entr
   }
 });
 
-test("FileManager preserves listing failure behavior for an unreadable opaque entry", async (t) => {
+test("FileManager skips unreadable opaque entries and retains healthy folder items", async (t) => {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-dirents-error-"));
   const target = path.join(root, "target.txt");
   const link = path.join(root, "linked.txt");
   await fsp.writeFile(target, "x");
+  await fsp.writeFile(path.join(root, "healthy.txt"), "healthy");
   try {
     await fsp.symlink(target, link);
   } catch (error) {
@@ -1933,24 +1934,141 @@ test("FileManager preserves listing failure behavior for an unreadable opaque en
   }
 
   const originalLoad = Module._load;
-  const originalConsoleError = console.error;
-  const loggedErrors = [];
+  const originalConsoleWarn = console.warn;
+  const loggedWarnings = [];
   Module._load = function (request, parent, isMain) {
     if (request === "original-fs") {
-      return { promises: { stat: async () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); } } };
+      return {
+        promises: {
+          async stat(filePath) {
+            if (path.resolve(filePath) === path.resolve(link)) {
+              throw Object.assign(new Error("denied"), { code: "EACCES" });
+            }
+            return fsp.stat(filePath);
+          },
+        },
+      };
     }
     return Reflect.apply(originalLoad, this, arguments);
   };
-  console.error = (...args) => loggedErrors.push(args);
+  console.warn = (...args) => loggedWarnings.push(args);
   try {
     const items = await new FileManager({}).getFolderContent(root);
-    assert.deepEqual(items, []);
-    assert.equal(loggedErrors.length, 1);
-    assert.equal(loggedErrors[0][1].code, "EACCES");
+    assert.deepEqual(items.map((item) => item.name), ["healthy.txt", "target.txt"]);
+    assert.equal(loggedWarnings.length, 1);
+    assert.equal(loggedWarnings[0][1].path, link);
+    assert.equal(loggedWarnings[0][1].code, "EACCES");
   } finally {
     Module._load = originalLoad;
+    console.warn = originalConsoleWarn;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("FileManager omits broken symlinks and entries removed between enumeration and stat", async (t) => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-dirents-race-"));
+  const target = path.join(root, "target.txt");
+  const link = path.join(root, "linked.txt");
+  const brokenLink = path.join(root, "broken.txt");
+  await fsp.writeFile(target, "target");
+  await fsp.writeFile(path.join(root, "healthy.txt"), "healthy");
+  try {
+    await fsp.symlink(target, link);
+    await fsp.symlink(path.join(root, "missing.txt"), brokenLink);
+  } catch (error) {
+    await fsp.rm(root, { recursive: true, force: true });
+    if (new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) {
+      t.skip("symbolic links are unavailable on this platform");
+      return;
+    }
+    throw error;
+  }
+
+  const originalLoad = Module._load;
+  const originalReaddir = fsModule.promises.readdir;
+  let didRemoveLink = false;
+  Module._load = function (request, parent, isMain) {
+    if (request === "original-fs") return { promises: { stat: (filePath) => fsp.stat(filePath) } };
+    return Reflect.apply(originalLoad, this, arguments);
+  };
+  fsModule.promises.readdir = async function (dirPath, options) {
+    const entries = await Reflect.apply(originalReaddir, this, [dirPath, options]);
+    if (path.resolve(dirPath) === path.resolve(root) && !didRemoveLink) {
+      didRemoveLink = true;
+      await fsp.unlink(link);
+    }
+    return entries;
+  };
+  try {
+    const items = await new FileManager({}).getFolderContent(root);
+    assert.deepEqual(items.map((item) => item.name), ["healthy.txt", "target.txt"]);
+  } finally {
+    fsModule.promises.readdir = originalReaddir;
+    Module._load = originalLoad;
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("FileManager handles empty folders and directory-level read errors", async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-dirents-empty-"));
+  const originalReaddir = fsModule.promises.readdir;
+  const originalConsoleError = console.error;
+  const loggedErrors = [];
+  try {
+    const manager = new FileManager({});
+    assert.deepEqual(await manager.getFolderContent(root), []);
+    fsModule.promises.readdir = async () => {
+      throw Object.assign(new Error("directory denied"), { code: "EACCES" });
+    };
+    console.error = (...args) => loggedErrors.push(args);
+    assert.deepEqual(await manager.getFolderContent(root), []);
+    assert.equal(loggedErrors.length, 1);
+    assert.match(loggedErrors[0][0], /lecture du dossier/);
+  } finally {
+    fsModule.promises.readdir = originalReaddir;
     console.error = originalConsoleError;
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("FileManager bounds entry classification concurrency in a very large folder", async () => {
+  const root = path.join(os.tmpdir(), "nce-dirents-large");
+  const originalReaddir = fsModule.promises.readdir;
+  const originalLoad = Module._load;
+  let activeStats = 0;
+  let peakStats = 0;
+  const entries = Array.from({ length: 5000 }, (_, index) => ({
+    name: `opaque-${String(index).padStart(5, "0")}`,
+    isDirectory: () => false,
+    isFile: () => false,
+  }));
+  fsModule.promises.readdir = async () => entries;
+  Module._load = function (request, parent, isMain) {
+    if (request === "original-fs") {
+      return {
+        promises: {
+          async stat() {
+            activeStats++;
+            peakStats = Math.max(peakStats, activeStats);
+            await Promise.resolve();
+            activeStats--;
+            return { isDirectory: () => false };
+          },
+        },
+      };
+    }
+    return Reflect.apply(originalLoad, this, arguments);
+  };
+  try {
+    const items = await new FileManager({}).getFolderContent(root);
+    assert.equal(items.length, 5000);
+    assert.equal(items[0].name, "opaque-00000");
+    assert.equal(items.at(-1).name, "opaque-04999");
+    assert.ok(peakStats > 1);
+    assert.ok(peakStats <= 32);
+  } finally {
+    fsModule.promises.readdir = originalReaddir;
+    Module._load = originalLoad;
   }
 });
 

@@ -58,6 +58,7 @@ export const MAX_TEXT_FILE_SIZE = LARGE_FILE_MODE_THRESHOLD;
 const RETRYABLE_RENAME_ERRORS = new Set(["EPERM", "EACCES", "EBUSY"]);
 const RENAME_RETRY_DELAYS_MS = [0, 20, 50, 100];
 const NO_SYMLINK_FINGERPRINT_PREFIX = "nonsymlink:";
+const MAX_FOLDER_ENTRY_CLASSIFIERS = 32;
 
 function matchesExpectedDiskFingerprint(stats: Stats, expected: string): boolean {
   const value = expected.startsWith(NO_SYMLINK_FINGERPRINT_PREFIX)
@@ -1071,31 +1072,47 @@ export class FileManager {
     if (!dirPath) return [];
     try {
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
+      const items: Array<FileItem | null> = Array(entries.length).fill(null);
+      let nextEntryIndex = 0;
+      const workerCount = Math.min(MAX_FOLDER_ENTRY_CLASSIFIERS, entries.length);
+      await Promise.all(
+        Array.from({ length: workerCount }, async () => {
+          while (nextEntryIndex < entries.length) {
+            const index = nextEntryIndex++;
+            const entry = entries[index];
+            const name = typeof entry === "string" ? entry : entry?.name;
+            if (typeof name !== "string" || !name) continue;
+            const fullPath = path.join(dirPath, name);
+            try {
+              let isDirectory = entry?.isDirectory?.() === true;
+              const isRegularFile = entry?.isFile?.() === true;
 
-      const items = await Promise.all(
-        entries.map(async (entry: any): Promise<FileItem> => {
-          const name = typeof entry === "string" ? entry : entry.name;
-          const fullPath = path.join(dirPath, name);
-          let isDirectory = entry?.isDirectory?.() === true;
-          const isRegularFile = entry?.isFile?.() === true;
+              // Dirents classify regular entries without a stat. Symlinks and
+              // opaque entries are followed by the existing archive-aware stat.
+              if (!isDirectory && !isRegularFile) {
+                const stats = await statOpaqueEntry(fullPath);
+                isDirectory = stats.isDirectory();
+              }
 
-          // Dirents classify regular files and directories without a stat.
-          // Symlinks and special/opaque entries retain the previous stat path
-          // so links to directories and entries with unknown types keep their type.
-          if (!isDirectory && !isRegularFile) {
-            const stats = await statOpaqueEntry(fullPath);
-            isDirectory = stats.isDirectory();
+              items[index] = {
+                name,
+                path: fullPath,
+                type: isDirectory ? "folder" : "file",
+              };
+            } catch (error: any) {
+              if (error?.code !== "ENOENT") {
+                console.warn("Skipping an unreadable file explorer entry:", {
+                  path: fullPath,
+                  code: error?.code || "ENTRY_CLASSIFICATION_FAILED",
+                  message: error?.message || String(error),
+                });
+              }
+            }
           }
-
-          return {
-            name,
-            path: fullPath,
-            type: isDirectory ? "folder" : "file",
-          };
         }),
       );
 
-      return items.sort((a, b) => {
+      return items.filter((item): item is FileItem => item !== null).sort((a, b) => {
         if (a.type === b.type) {
           return a.name.localeCompare(b.name);
         }
