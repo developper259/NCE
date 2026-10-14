@@ -415,7 +415,6 @@ test("secondary caret styling reuses the primary caret rule", () => {
   const stylesheet = fs.readFileSync(path.join(root, "src/css/editor.css"), "utf8");
   assert.match(stylesheet, /\.editor-caret\s*,\s*\.editor-secondary-caret\s*\{/);
   assert.match(stylesheet, /.editor-caret\s*,\s*\.editor-secondary-caret\s*\{[^}]*width:\s*2px/s);
-  assert.match(stylesheet, /\.editor-caret\s*,\s*\.editor-secondary-carets\s*\{[^}]*animation:\s*nce-caret-blink/s);
-  assert.match(stylesheet, /@media\s*\(prefers-reduced-motion:\s*reduce\)[^{]*\{[^}]*\.editor-secondary-carets[^}]*animation:\s*none/s);
-  assert.doesNotMatch(stylesheet, /--nce-caret-blink/);
+  assert.match(stylesheet, /\.editor-caret\s*,\s*\.editor-secondary-caret\s*\{[^}]*background-color:\s*var\(--accent-caret\)/s);
+  assert.doesNotMatch(stylesheet, /nce-caret-blink|animation[^;]*caret|caret[^}]*animation/i);
 });
