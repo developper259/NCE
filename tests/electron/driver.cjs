@@ -2791,9 +2791,66 @@ app.whenReady().then(() => {
           openFolderDialogCalls++;
           return { canceled: true, filePaths: [] };
         };
+        const terminalManager = nce.window.terminalManager;
+        const terminalSession = terminalManager?.sessions?.get(firstTerminal.id);
+        assert.ok(terminalSession, "the main process owns the active PTY session");
+        const ptyInputData = [];
+        const ptyOutputData = [];
+        const originalTerminalWrite = terminalManager.write;
+        const originalTerminalEnqueue = terminalSession.enqueue;
+        let terminalStage = "terminal focus";
+        terminalManager.write = function (event, sessionId, workspaceKey, data) {
+          if (sessionId === firstTerminal.id && typeof data === "string")
+            ptyInputData.push(data);
+          return originalTerminalWrite.call(this, event, sessionId, workspaceKey, data);
+        };
+        terminalSession.enqueue = function (data) {
+          if (typeof data === "string") ptyOutputData.push(data);
+          return originalTerminalEnqueue.call(this, data);
+        };
+        const terminalDiagnostics = async () => {
+          const renderer = await run(`(() => {
+            const record = editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)});
+            const active = document.activeElement;
+            return {
+              documentFocused: document.hasFocus(),
+              activeElement: active ? {
+                tag: active.tagName,
+                className: typeof active.className === "string" ? active.className : "",
+                insideTerminal: Boolean(active.closest?.(".xterm")),
+              } : null,
+              terminalFocused: Boolean(record?.terminal?._core?.coreService?.isFocused),
+              xtermInput: window.__nceTerminalInput || [],
+              buffer: ${getTerminalText(firstTerminal.id)},
+            };
+          })()`).catch(error => ({ rendererError: String(error) }));
+          return {
+            stage: terminalStage,
+            shell: firstTerminal.shell,
+            renderer,
+            ptyInput: ptyInputData,
+            ptyOutput: ptyOutputData,
+            openFolderDialogCalls,
+          };
+        };
+        const waitForTerminalCondition = async (condition, options) => {
+          terminalStage = options.description;
+          try {
+            await waitForCondition(condition, options);
+          } catch (error) {
+            const diagnostics = await terminalDiagnostics();
+            throw new Error(`${error.message}\nTerminal diagnostics: ${JSON.stringify(diagnostics)}`, {
+              cause: error,
+            });
+          }
+        };
         try {
           await run(`editor.terminalPanel.getActiveSession().terminal.focus()`);
           win.focus();
+          await waitForTerminalCondition(
+            async () => (await run(`${getTerminalText(firstTerminal.id)}.trim().length > 0`)) === true,
+            { timeout: 10000, description: "the selected shell to render its initial prompt" },
+          );
           const command = "echo NCE_SPACE_INPUT_HELLO NCE_SPACE_INPUT_WORLD";
           await run(`(() => {
             const terminal = editor.terminalPanel.getActiveSession().terminal;
@@ -2802,8 +2859,9 @@ app.whenReady().then(() => {
               window.__nceTerminalInput.push(data),
             );
           })()`);
+          terminalStage = "xterm keyboard input";
           await win.webContents.insertText(command);
-          await waitForCondition(
+          await waitForTerminalCondition(
             async () => (await run('window.__nceTerminalInput.join("")')) === command,
             { timeout: 5000, description: "xterm to emit the exact typed command once" },
           );
@@ -2812,16 +2870,39 @@ app.whenReady().then(() => {
             command,
             "xterm forwards the command's spaces once to the PTY input stream",
           );
+          await waitForTerminalCondition(
+            async () => ptyInputData.join("") === command,
+            { timeout: 5000, description: "the exact xterm input to reach the main-process PTY" },
+          );
+          const outputStart = ptyOutputData.length;
+          terminalStage = "command Enter key";
           await win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
           await win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
-          await waitForCondition(
-            async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_SPACE_INPUT_HELLO NCE_SPACE_INPUT_WORLD")`)) === true,
-            { timeout: 10000, description: "typed terminal command with spaces to reach the PTY" },
+          await waitForTerminalCondition(
+            async () => {
+              const output = ptyOutputData.slice(outputStart).join("");
+              return output.includes("NCE_SPACE_INPUT_HELLO") &&
+                output.includes("NCE_SPACE_INPUT_WORLD");
+            },
+            { timeout: 10000, description: "the shell to execute the command and return both output markers" },
           );
+          const output = ptyOutputData.slice(outputStart).join("");
+          assert.ok(output.includes("NCE_SPACE_INPUT_HELLO"),
+            "the PTY output contains the first shell-independent marker");
+          assert.ok(output.includes("NCE_SPACE_INPUT_WORLD"),
+            "the PTY output contains the second shell-independent marker");
+          await waitForTerminalCondition(
+            async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_SPACE_INPUT_HELLO") && ${getTerminalText(firstTerminal.id)}.includes("NCE_SPACE_INPUT_WORLD")`)) === true,
+            { timeout: 5000, description: "xterm to render both PTY output markers" },
+          );
+          assert.equal(ptyInputData.join(""), `${command}\r`,
+            "the PTY receives the exact command and Enter exactly once");
           assert.equal(openFolderDialogCalls, 0,
             "Space in terminal input never opens the folder picker");
         } finally {
           await run("window.__nceTerminalInputSubscription?.dispose(); delete window.__nceTerminalInputSubscription; delete window.__nceTerminalInput");
+          terminalManager.write = originalTerminalWrite;
+          terminalSession.enqueue = originalTerminalEnqueue;
           dialog.showOpenDialog = originalShowOpenDialog;
           await run(`SETTINGS_SET("keybindings.open_folder", ${JSON.stringify(previousOpenFolderShortcut)})`);
         }
