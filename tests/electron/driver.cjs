@@ -2798,6 +2798,17 @@ app.whenReady().then(() => {
         })()`;
         const getLastNonEmptyTerminalLine = (id) =>
           `(() => ${getTerminalText(id)}.split("\\n").map(line => line.trim()).filter(Boolean).at(-1) || "")()`;
+        const getTerminalCursorState = (id) => `(() => {
+          const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)}) ||
+            window.__terminalWorkspaceARecords?.get(${JSON.stringify(id)});
+          const buffer = record?.terminal.buffer.active;
+          if (!buffer) return { row: -1, text: "" };
+          const row = buffer.baseY + buffer.cursorY;
+          return {
+            row,
+            text: buffer.getLine(row)?.translateToString(true) || "",
+          };
+        })()`;
         assert.equal(await run(`(() => {
           const primary = getComputedStyle(editor.cD);
           const secondary = getComputedStyle(editor.multiCursorCaretOutput);
@@ -2970,6 +2981,24 @@ app.whenReady().then(() => {
               { timeout: 5000, description: `${description} to reach the PTY` },
             );
           };
+          const interruptAndWaitForFreshShellLine = async (expectedInput, description) => {
+            const cursorBeforeInterrupt = await run(
+              getTerminalCursorState(firstTerminal.id),
+            );
+            pressTerminalInterrupt();
+            await waitForTypedInput(expectedInput, description);
+            await waitForTerminalCondition(
+              async () => {
+                const cursor = await run(getTerminalCursorState(firstTerminal.id));
+                return cursor.row > cursorBeforeInterrupt.row &&
+                  cursor.text.trim().length > 0;
+              },
+              {
+                timeout: 10000,
+                description: description + " to render the next shell input line",
+              },
+            );
+          };
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
@@ -3003,8 +3032,10 @@ app.whenReady().then(() => {
           await run("editor.terminalPanel.getActiveSession().terminal.clearSelection()");
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0");
-          pressTerminalInterrupt();
-          await waitForTypedInput("\u0003", "Ctrl+C to discard the selected test command");
+          await interruptAndWaitForFreshShellLine(
+            "\u0003",
+            "Ctrl+C to discard the selected test command",
+          );
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
 
@@ -3020,8 +3051,10 @@ app.whenReady().then(() => {
           );
           assert.equal(openFolderDialogCalls, 0,
             "ordinary and held Space never open the folder picker");
-          pressTerminalInterrupt();
-          await waitForTypedInput("     \u0003", "Ctrl+C to clear the terminal input line");
+          await interruptAndWaitForFreshShellLine(
+            "     \u0003",
+            "Ctrl+C to clear the terminal input line",
+          );
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
@@ -3042,8 +3075,10 @@ app.whenReady().then(() => {
             assert.ok(specialKeys.includes(key), `the real ${key} keydown reaches the terminal`);
           assert.equal(openFolderDialogCalls, 0,
             "ordinary, special, navigation, and Tab input never opens the folder picker");
-          pressTerminalInterrupt();
-          await waitForTypedInput(`${specialInput}\u0003`, "Ctrl+C to clear the terminal navigation input");
+          await interruptAndWaitForFreshShellLine(
+            `${specialInput}\u0003`,
+            "Ctrl+C to clear the terminal navigation input",
+          );
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
@@ -3148,10 +3183,9 @@ app.whenReady().then(() => {
           );
           assert.equal(ptyInputData.join(""), pastedInput,
             "the PTY receives the same paste bytes that xterm emitted");
-          pressTerminalInterrupt();
-          await waitForTerminalCondition(
-            async () => ptyInputData.join("") === `${pastedInput}\u0003`,
-            { timeout: 5000, description: "Ctrl+C after terminal paste to interrupt the shell line" },
+          await interruptAndWaitForFreshShellLine(
+            `${pastedInput}\u0003`,
+            "Ctrl+C after terminal paste to interrupt the shell line",
           );
           traceStep("configured terminal Select All, Copy, Cut and Paste shortcuts passed");
 
