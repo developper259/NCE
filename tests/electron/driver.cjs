@@ -2819,14 +2819,19 @@ app.whenReady().then(() => {
                 className: typeof active.className === "string" ? active.className : "",
                 insideTerminal: Boolean(active.closest?.(".xterm")),
               } : null,
-              terminalFocused: Boolean(record?.terminal?._core?.coreService?.isFocused),
+              terminalFocused: Boolean(
+                active?.classList?.contains("xterm-helper-textarea"),
+              ),
               xtermInput: window.__nceTerminalInput || [],
+              keyboardEvents: window.__nceTerminalKeyEvents || [],
               buffer: ${getTerminalText(firstTerminal.id)},
             };
           })()`).catch(error => ({ rendererError: String(error) }));
           return {
             stage: terminalStage,
             shell: firstTerminal.shell,
+            windowFocused: win.isFocused(),
+            webContentsFocused: win.webContents.isFocused(),
             renderer,
             ptyInput: ptyInputData,
             ptyOutput: ptyOutputData,
@@ -2851,24 +2856,127 @@ app.whenReady().then(() => {
             async () => (await run(`${getTerminalText(firstTerminal.id)}.trim().length > 0`)) === true,
             { timeout: 10000, description: "the selected shell to render its initial prompt" },
           );
-          const command = "echo NCE_SPACE_INPUT_HELLO NCE_SPACE_INPUT_WORLD";
           await run(`(() => {
             const terminal = editor.terminalPanel.getActiveSession().terminal;
             window.__nceTerminalInput = [];
+            window.__nceTerminalKeyEvents = [];
             window.__nceTerminalInputSubscription = terminal.onData(data =>
               window.__nceTerminalInput.push(data),
             );
+            window.__nceTerminalKeyProbe = event => {
+              if (!event.target?.closest?.(".xterm")) return;
+              window.__nceTerminalKeyEvents.push({
+                key: event.key,
+                repeat: event.repeat,
+                shift: event.shiftKey,
+                prevented: event.defaultPrevented,
+              });
+            };
+            document.addEventListener("keydown", window.__nceTerminalKeyProbe, true);
           })()`);
-          terminalStage = "xterm keyboard input";
-          await win.webContents.insertText(command);
+          await waitForTerminalCondition(
+            async () => (await run('Boolean(document.activeElement?.closest?.(".xterm"))')) === true,
+            { timeout: 5000, description: "xterm to own keyboard focus" },
+          );
+          const sendPhysicalKey = (keyCode, { char, modifiers = [], repeats = 0 } = {}) => {
+            win.webContents.sendInputEvent({ type: "keyDown", keyCode, modifiers });
+            if (char !== undefined)
+              win.webContents.sendInputEvent({ type: "char", keyCode: char, modifiers });
+            for (let index = 0; index < repeats; index++) {
+              const repeatedModifiers = [...modifiers, "isautorepeat"];
+              win.webContents.sendInputEvent({
+                type: "keyDown",
+                keyCode,
+                modifiers: repeatedModifiers,
+              });
+              if (char !== undefined)
+                win.webContents.sendInputEvent({
+                  type: "char",
+                  keyCode: char,
+                  modifiers: repeatedModifiers,
+                });
+            }
+            win.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
+          };
+          const typePhysicalText = (value) => {
+            for (const character of value) {
+              if (character === " ") {
+                sendPhysicalKey("Space", { char: " " });
+                continue;
+              }
+              const shifted = "!@#$%^&*()_+{}|:\"<>?~".includes(character);
+              const keyCode = /^[a-z]$/i.test(character)
+                ? character.toUpperCase()
+                : character;
+              sendPhysicalKey(keyCode, {
+                char: character,
+                modifiers: shifted ? ["shift"] : [],
+              });
+            }
+          };
+          const pressTerminalInterrupt = () =>
+            sendPhysicalKey("C", { modifiers: ["control"] });
+          const waitForTypedInput = async (expected, description) => {
+            await waitForTerminalCondition(
+              async () => (await run('window.__nceTerminalInput.join("")')) === expected,
+              { timeout: 5000, description },
+            );
+            await waitForTerminalCondition(
+              async () => ptyInputData.join("") === expected,
+              { timeout: 5000, description: `${description} to reach the PTY` },
+            );
+          };
+
+          terminalStage = "Space, Shift+Space, and held Space key events";
+          sendPhysicalKey("Space", { char: " " });
+          sendPhysicalKey("Space", { char: " ", modifiers: ["shift"] });
+          sendPhysicalKey("Space", { char: " ", repeats: 2 });
+          await waitForTypedInput("     ", "xterm to emit five physical space key events once");
+          assert.equal(
+            await run('window.__nceTerminalKeyEvents.some(event => event.key === " " && event.repeat)'),
+            true,
+            "holding Space produces a repeated keyboard event",
+          );
+          assert.equal(openFolderDialogCalls, 0,
+            "ordinary and held Space never open the folder picker");
+          pressTerminalInterrupt();
+          await waitForTypedInput("     \u0003", "Ctrl+C to clear the terminal input line");
+
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
+          terminalStage = "printable characters, Backspace, navigation, and Tab";
+          typePhysicalText("nce_special_!?");
+          sendPhysicalKey("Backspace");
+          sendPhysicalKey("Left");
+          sendPhysicalKey("Right");
+          sendPhysicalKey("Up");
+          sendPhysicalKey("Down");
+          sendPhysicalKey("Home");
+          sendPhysicalKey("End");
+          sendPhysicalKey("Tab");
+          const specialInput = "nce_special_!?\u001b[D\u001b[C\u001b[A\u001b[B\u001b[H\u001b[F\t";
+          await waitForTypedInput(specialInput, "xterm to forward ordinary, special, editing, and navigation keys once");
+          const specialKeys = await run('window.__nceTerminalKeyEvents.map(event => event.key)');
+          for (const key of ["n", "_", "!", "?", "Backspace", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Tab"])
+            assert.ok(specialKeys.includes(key), `the real ${key} keydown reaches the terminal`);
+          assert.equal(openFolderDialogCalls, 0,
+            "ordinary, special, navigation, and Tab input never opens the folder picker");
+          pressTerminalInterrupt();
+          await waitForTypedInput(`${specialInput}\u0003`, "Ctrl+C to clear the terminal navigation input");
+
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
+          const command = "echo nce_space_input_hello  nce_space_input_world";
+          terminalStage = "physical command text containing consecutive spaces";
+          typePhysicalText(command);
           await waitForTerminalCondition(
             async () => (await run('window.__nceTerminalInput.join("")')) === command,
-            { timeout: 5000, description: "xterm to emit the exact typed command once" },
+            { timeout: 5000, description: "xterm to emit the exact physically typed command once" },
           );
           assert.equal(
             await run('window.__nceTerminalInput.join("")'),
             command,
-            "xterm forwards the command's spaces once to the PTY input stream",
+            "xterm forwards both consecutive command spaces once to the PTY input stream",
           );
           await waitForTerminalCondition(
             async () => ptyInputData.join("") === command,
@@ -2876,31 +2984,44 @@ app.whenReady().then(() => {
           );
           const outputStart = ptyOutputData.length;
           terminalStage = "command Enter key";
-          await win.webContents.sendInputEvent({ type: "keyDown", keyCode: "Enter" });
-          await win.webContents.sendInputEvent({ type: "keyUp", keyCode: "Enter" });
+          sendPhysicalKey("Enter");
           await waitForTerminalCondition(
             async () => {
               const output = ptyOutputData.slice(outputStart).join("");
-              return output.includes("NCE_SPACE_INPUT_HELLO") &&
-                output.includes("NCE_SPACE_INPUT_WORLD");
+              return output.includes("nce_space_input_hello") &&
+                output.includes("nce_space_input_world");
             },
             { timeout: 10000, description: "the shell to execute the command and return both output markers" },
           );
           const output = ptyOutputData.slice(outputStart).join("");
-          assert.ok(output.includes("NCE_SPACE_INPUT_HELLO"),
+          assert.ok(output.includes("nce_space_input_hello"),
             "the PTY output contains the first shell-independent marker");
-          assert.ok(output.includes("NCE_SPACE_INPUT_WORLD"),
+          assert.ok(output.includes("nce_space_input_world"),
             "the PTY output contains the second shell-independent marker");
           await waitForTerminalCondition(
-            async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_SPACE_INPUT_HELLO") && ${getTerminalText(firstTerminal.id)}.includes("NCE_SPACE_INPUT_WORLD")`)) === true,
+            async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("nce_space_input_hello") && ${getTerminalText(firstTerminal.id)}.includes("nce_space_input_world")`)) === true,
             { timeout: 5000, description: "xterm to render both PTY output markers" },
           );
           assert.equal(ptyInputData.join(""), `${command}\r`,
             "the PTY receives the exact command and Enter exactly once");
           assert.equal(openFolderDialogCalls, 0,
             "Space in terminal input never opens the folder picker");
+
+          await run(`SETTINGS_SET("keybindings.open_folder", "Ctrl+Shift+O")`);
+          terminalStage = "explicit Ctrl+Shift+O shortcut from terminal focus";
+          sendPhysicalKey("O", { modifiers: ["control", "shift"] });
+          await waitForTerminalCondition(
+            async () => openFolderDialogCalls === 1,
+            { timeout: 5000, description: "the explicit modified Open Folder shortcut to run once" },
+          );
         } finally {
-          await run("window.__nceTerminalInputSubscription?.dispose(); delete window.__nceTerminalInputSubscription; delete window.__nceTerminalInput");
+          await run(`window.__nceTerminalInputSubscription?.dispose();
+            if (window.__nceTerminalKeyProbe)
+              document.removeEventListener("keydown", window.__nceTerminalKeyProbe, true);
+            delete window.__nceTerminalKeyProbe;
+            delete window.__nceTerminalInputSubscription;
+            delete window.__nceTerminalKeyEvents;
+            delete window.__nceTerminalInput`);
           terminalManager.write = originalTerminalWrite;
           terminalSession.enqueue = originalTerminalEnqueue;
           dialog.showOpenDialog = originalShowOpenDialog;
@@ -2936,7 +3057,14 @@ app.whenReady().then(() => {
           { timeout: 10000, description: "second real PTY shell output" },
         );
         traceStep("both PTY sessions produced independent output");
-        assert.equal(await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_SECOND")`), false, "terminal output stays with its session");
+        const firstTerminalOutputAfterSecond = await run(
+          getTerminalText(firstTerminal.id),
+        );
+        assert.equal(
+          firstTerminalOutputAfterSecond.includes("NCE_PTY_SECOND"),
+          false,
+          `terminal output stays with its session (first=${firstTerminal.id}, second=${secondTerminal.id}; first buffer=${JSON.stringify(firstTerminalOutputAfterSecond)})`,
+        );
 
         await run(`window.__terminalWorkspaceA = new Map(
           [...editor.terminalPanel.sessions].map(([id, record]) => [id, record.terminal]),
