@@ -133,10 +133,25 @@ test("NCE shortcuts convert to Electron accelerators through one normalizer", ()
     "CommandOrControl+Alt+X",
   );
   assert.equal(toElectronAccelerator("Ctrl+Alt+X"), "Control+Alt+X");
+  assert.equal(toElectronAccelerator("Mod+,", "darwin"), "CommandOrControl+,");
   assert.equal(toElectronAccelerator("Space"), undefined);
   assert.equal(toElectronAccelerator("Shift+Space"), undefined);
   assert.equal(toElectronAccelerator("Alt+Space"), undefined);
-  assert.equal(toElectronAccelerator("Ctrl+Space"), "Control+Space");
+  assert.equal(toElectronAccelerator("Ctrl+Space", "win32"), "Control+Space");
+  for (const platform of ["darwin", "win32", "linux"]) {
+    assert.equal(toElectronAccelerator("F5", platform), "F5");
+    assert.equal(toElectronAccelerator("F12", platform), "F12");
+    assert.equal(toElectronAccelerator("Shift+F5", platform), "Shift+F5");
+    assert.equal(toElectronAccelerator("Mod+Shift+F5", platform), "CommandOrControl+Shift+F5");
+    assert.equal(toElectronAccelerator("A", platform), undefined);
+    assert.equal(toElectronAccelerator("Shift+Space", platform), undefined);
+  }
+  assert.equal(toElectronAccelerator("Mod+Space", "darwin"), undefined);
+  assert.equal(toElectronAccelerator("Ctrl+Space", "darwin"), undefined);
+  assert.equal(toElectronAccelerator("Mod+Tab", "darwin"), undefined);
+  assert.equal(toElectronAccelerator("Alt+F4", "win32"), undefined);
+  assert.equal(toElectronAccelerator("Ctrl+Alt+Delete", "win32"), undefined);
+  assert.equal(toElectronAccelerator("Ctrl+Alt+F3", "linux"), undefined);
   assert.equal(toElectronAccelerator("Mod+^", "darwin"), undefined);
   assert.equal(
     toElectronAccelerator("Mod+^", "win32"),

@@ -112,46 +112,56 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isValidKeybinding(value: unknown): value is string {
+const KEYBINDING_NAMED_KEYS = new Set([
+  "arrowup",
+  "arrowdown",
+  "arrowleft",
+  "arrowright",
+  "home",
+  "end",
+  "tab",
+  "delete",
+  "backspace",
+  "enter",
+  "escape",
+  "insert",
+  "space",
+  "pageup",
+  "pagedown",
+  "capslock",
+  "numlock",
+  "scrolllock",
+  "printscreen",
+]);
+const KEYBINDING_PUNCTUATION = new Set(")!@#$%^&*(:;=<,_->.?/~`{][|\\}\"".split(""));
+const KEYBINDING_MODIFIERS = new Set([
+  "mod",
+  "cmd",
+  "command",
+  "meta",
+  "ctrl",
+  "control",
+  "shift",
+  "alt",
+  "option",
+]);
+
+export function isValidKeybinding(value: unknown): value is string {
   if (typeof value !== "string" || !value.trim() || value.length > 128) {
     return false;
   }
 
   const parts = value.split("+").map((part) => part.trim());
   const key = parts.pop()?.toLowerCase() || "";
-  const modifiers = new Set([
-    "mod",
-    "cmd",
-    "command",
-    "meta",
-    "ctrl",
-    "control",
-    "shift",
-    "alt",
-    "option",
-  ]);
-  if (parts.some((part) => !modifiers.has(part.toLowerCase()))) return false;
+  if (!key || parts.some((part) => !KEYBINDING_MODIFIERS.has(part.toLowerCase()))) {
+    return false;
+  }
 
   return (
     /^[a-z0-9]$/.test(key) ||
     /^f(?:[1-9]|1[0-9]|2[0-4])$/.test(key) ||
-    [
-      "arrowup",
-      "arrowdown",
-      "arrowleft",
-      "arrowright",
-      "home",
-      "end",
-      "tab",
-      "delete",
-      "backspace",
-      "enter",
-      "escape",
-      "insert",
-      "space",
-      "pageup",
-      "pagedown",
-    ].includes(key)
+    KEYBINDING_NAMED_KEYS.has(key) ||
+    (Array.from(key).length === 1 && KEYBINDING_PUNCTUATION.has(key))
   );
 }
 

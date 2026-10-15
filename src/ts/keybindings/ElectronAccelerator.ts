@@ -1,4 +1,7 @@
-import { normalizeKeybinding } from "../manager/SettingsManager";
+import {
+  isValidKeybinding,
+  normalizeKeybinding,
+} from "../manager/SettingsManager";
 
 const ELECTRON_MODIFIERS: Readonly<Record<string, string>> = Object.freeze({
   commandorcontrol: "CommandOrControl",
@@ -6,7 +9,6 @@ const ELECTRON_MODIFIERS: Readonly<Record<string, string>> = Object.freeze({
   ctrl: "Control",
   alt: "Alt",
   shift: "Shift",
-  super: "Super",
 });
 
 const MODIFIER_ORDER = [
@@ -15,7 +17,6 @@ const MODIFIER_ORDER = [
   "ctrl",
   "alt",
   "shift",
-  "super",
 ];
 
 const ELECTRON_KEYS: Readonly<Record<string, string>> = Object.freeze({
@@ -58,7 +59,7 @@ export function toElectronAccelerator(
   shortcut: string | null | undefined,
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
-  if (!shortcut || !String(shortcut).trim()) return undefined;
+  if (!isValidKeybinding(shortcut)) return undefined;
 
   const electronShortcut = String(shortcut)
     .split("+")
@@ -71,14 +72,38 @@ export function toElectronAccelerator(
   const key = parts.pop();
   if (!key) return undefined;
   if (parts.some((part) => !ELECTRON_MODIFIERS[part])) return undefined;
-  // Native menu accelerators run before renderer focus routing. Require
-  // Control/Command so text, Option/Alt input, and Shift+text remain available
-  // to focused inputs, especially terminal sessions.
+  // Native menu accelerators run before renderer focus routing. Printable
+  // keys require an explicit primary modifier; function keys are safe without
+  // one and remain useful for app actions such as F5 and F12.
   const hasPrimaryModifier = parts.some((part) =>
     ["commandorcontrol", "meta", "ctrl"].includes(part),
   );
-  if (!hasPrimaryModifier) return undefined;
+  if (!hasPrimaryModifier && !/^f(?:[1-9]|1\d|2[0-4])$/.test(key)) {
+    return undefined;
+  }
   if (platform === "darwin" && MACOS_DEAD_KEYS.has(key)) return undefined;
+
+  const effectiveModifiers = new Set(parts.map((part) =>
+    part === "commandorcontrol"
+      ? platform === "darwin" ? "meta" : "ctrl"
+      : part,
+  ));
+  const has = (...modifiers: string[]) =>
+    modifiers.every((modifier) => effectiveModifiers.has(modifier));
+  if (
+    (platform === "darwin" &&
+      ((key === "space" && (has("meta") || has("ctrl"))) ||
+        (key === "tab" && has("meta")) ||
+        (key === "escape" && has("meta", "alt")))) ||
+    (platform === "win32" &&
+      ((key === "f4" && has("alt")) ||
+        (key === "delete" && has("ctrl", "alt")) ||
+        (["l", "tab", "d"].includes(key) && has("meta")))) ||
+    (platform === "linux" &&
+      /^f(?:[1-9]|1[0-2])$/.test(key) && has("ctrl", "alt"))
+  ) {
+    return undefined;
+  }
 
   const electronKey = formatElectronKey(key);
   if (!electronKey) return undefined;

@@ -339,6 +339,7 @@ test("keybindings are validated, merged and persisted as settings", async () => 
     assert.equal(manager.get("keybindings.save"), "Mod+Alt+S");
     assert.equal(manager.get("keybindings.quick_open"), "Mod+P");
     assert.equal(await manager.set("keybindings.quick_open", "Mod+K"), true);
+    assert.equal(await manager.set("keybindings.open_settings", "Mod+,"), true);
     assert.equal(await manager.set("keybindings.open_folder", "Space"), true);
     const restarted = new SettingsManager(root);
     await restarted.initialize();
@@ -531,6 +532,36 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   assert.equal(get("files.autoSave"), false);
   assert.equal(get("files.confirmMoveToTrash"), true);
   assert.equal(get("files.confirmPermanentDelete"), true);
+});
+
+test("renderer keybinding validation accepts supported punctuation and F keys", async () => {
+  const application = await fs.readFile(
+    path.join(__dirname, "../src/config/Application.js"),
+    "utf8",
+  );
+  const settings = await fs.readFile(
+    path.join(__dirname, "../src/config/Settings.js"),
+    "utf8",
+  );
+  const writes = [];
+  const context = {
+    window: { api: { setSetting: async (...args) => { writes.push(args); return true; } } },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    `${application}\n${settings}\nthis.api = [SETTINGS_INITIALIZE, SETTINGS_GET, SETTINGS_SET, SETTINGS_VALIDATE_KEYBINDING];`,
+    context,
+  );
+  const [initialize, get, set, validate] = context.api;
+
+  initialize({ keybindings: { quick_open: "Mod+NotAKey" } });
+  assert.equal(get("keybindings.quick_open"), "Mod+P");
+  assert.equal(validate("open_settings", "Mod+,").valid, true);
+  assert.equal(validate("save", "Mod+F12").valid, true);
+  assert.equal(validate("save", "Mod+NotAKey").invalid, true);
+  assert.equal((await set("keybindings.open_settings", "Mod+,"))?.success, true);
+  assert.equal(get("keybindings.open_settings"), "Mod+,");
+  assert.equal(JSON.stringify(writes), JSON.stringify([["keybindings.open_settings", "Mod+,"]]));
 });
 
 test("renderer settings migrate legacy ordinary confirmation without changing permanent confirmation", () => {

@@ -85,7 +85,10 @@ const SETTINGS_UI = Object.freeze([
 const SETTINGS_CATEGORY_META = Object.freeze({
   Editor: { description: "Configure editor appearance and behavior." },
   Files: { description: "Configure file and save behavior." },
-  Shortcuts: { description: "Configure keyboard shortcuts." },
+  Shortcuts: {
+    description:
+      "Text fields and the terminal keep printable keys. Use Ctrl/Cmd combinations or F1–F24 for global shortcuts.",
+  },
   Agent: { description: "Configure AI models and providers." },
   Terminal: { description: "Configure the integrated system terminal." },
 });
@@ -1121,10 +1124,14 @@ class SettingsView {
     this._hideShortcutError(container);
     const errorEl = document.createElement("div");
     errorEl.className = "setting-shortcut-error";
-    const formattedShortcut = this._formatShortcutDisplay(
-      error.conflictRawShortcut || error.conflictShortcut,
-    );
-    errorEl.textContent = `${formattedShortcut} is already assigned to ${error.conflictLabel}.`;
+    if (error.invalid) {
+      errorEl.textContent = "This keyboard shortcut is not supported.";
+    } else {
+      const formattedShortcut = this._formatShortcutDisplay(
+        error.conflictRawShortcut || error.conflictShortcut,
+      );
+      errorEl.textContent = `${formattedShortcut} is already assigned to ${error.conflictLabel}.`;
+    }
     container.appendChild(errorEl);
   }
 

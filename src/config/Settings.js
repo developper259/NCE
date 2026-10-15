@@ -76,6 +76,55 @@ let RENDERER_SETTINGS = {
   keybindings: { ...DEFAULT_RENDERER_SETTINGS.keybindings },
 };
 
+const RENDERER_KEYBINDING_MODIFIERS = new Set([
+  "mod",
+  "cmd",
+  "command",
+  "meta",
+  "ctrl",
+  "control",
+  "shift",
+  "alt",
+  "option",
+]);
+const RENDERER_KEYBINDING_NAMED_KEYS = new Set([
+  "arrowup",
+  "arrowdown",
+  "arrowleft",
+  "arrowright",
+  "home",
+  "end",
+  "tab",
+  "delete",
+  "backspace",
+  "enter",
+  "escape",
+  "insert",
+  "space",
+  "pageup",
+  "pagedown",
+  "capslock",
+  "numlock",
+  "scrolllock",
+  "printscreen",
+]);
+const RENDERER_KEYBINDING_PUNCTUATION = new Set(")!@#$%^&*(:;=<,_->.?/~`{][|\\}\"".split(""));
+
+function SETTINGS_IS_VALID_KEYBINDING(value) {
+  if (typeof value !== "string" || !value.trim() || value.length > 128) {
+    return false;
+  }
+  const parts = value.split("+").map((part) => part.trim());
+  const key = parts.pop()?.toLowerCase() || "";
+  if (!key || parts.some((part) => !RENDERER_KEYBINDING_MODIFIERS.has(part.toLowerCase()))) {
+    return false;
+  }
+  return /^[a-z0-9]$/.test(key) ||
+    /^f(?:[1-9]|1[0-9]|2[0-4])$/.test(key) ||
+    RENDERER_KEYBINDING_NAMED_KEYS.has(key) ||
+    (Array.from(key).length === 1 && RENDERER_KEYBINDING_PUNCTUATION.has(key));
+}
+
 function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
     ui: {
@@ -146,9 +195,7 @@ function SETTINGS_INITIALIZE(settings) {
         action,
         settings?.keybindings?.[action] === null
           ? null
-          : typeof settings?.keybindings?.[action] === "string" &&
-              settings.keybindings[action].trim() &&
-              settings.keybindings[action].length <= 128
+          : SETTINGS_IS_VALID_KEYBINDING(settings?.keybindings?.[action])
             ? settings.keybindings[action]
             : shortcut,
       ]),
@@ -168,19 +215,15 @@ function SETTINGS_GET(key) {
 }
 
 function SETTINGS_VALIDATE_KEYBINDING(action, shortcut) {
-  if (
-    shortcut === null ||
-    shortcut === undefined ||
-    String(shortcut).trim() === ""
-  ) {
+  if (shortcut === null || shortcut === undefined) {
     return { valid: true };
+  }
+
+  if (!SETTINGS_IS_VALID_KEYBINDING(shortcut)) {
+    return { valid: false, invalid: true };
   }
 
   const normalized = CONFIG_KEYBINDING_NORMALIZE(shortcut);
-  if (!normalized) {
-    return { valid: true };
-  }
-
   for (const [otherAction, otherShortcut] of Object.entries(
     RENDERER_SETTINGS.keybindings || {},
   )) {
