@@ -62,12 +62,29 @@
       "target": "nsis",
       "icon": "assets/logo/NCE/dark-logo.ico"
     },
+    "nsis": {
+      "perMachine": false,
+      "include": "build/installer.nsh"
+    },
     "mac": {
       "target": [
         "dmg",
         "zip"
       ],
-      "icon": "assets/logo/NCE/dark-logo.icns"
+      "icon": "assets/logo/NCE/dark-logo.icns",
+      "extendInfo": {
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "NCE Document",
+            "CFBundleTypeRole": "Editor",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "public.data",
+              "public.content"
+            ]
+          }
+        ]
+      }
     },
     "linux": {
       "target": [
@@ -76,7 +93,24 @@
       ],
       "icon": "assets/logo/NCE/dark-logo.png",
       "category": "Development",
-      "syncDesktopName": true
+      "syncDesktopName": true,
+      "mimeTypes": [
+        "application/octet-stream",
+        "application/json",
+        "application/xml",
+        "image/gif",
+        "image/jpeg",
+        "image/png",
+        "image/svg+xml",
+        "image/webp",
+        "inode/directory",
+        "text/markdown",
+        "text/plain",
+        "text/x-c",
+        "text/x-c++",
+        "text/x-python",
+        "text/javascript"
+      ]
     }
   },
   "devDependencies": {

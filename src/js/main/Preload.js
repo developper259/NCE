@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   platform: process.platform,
@@ -108,6 +108,26 @@ contextBridge.exposeInMainWorld("api", {
   failedToRestoreAfterCancelledQuit: (requestId) =>
     ipcRenderer.invoke("App:failedToRestoreAfterCancelledQuit", requestId),
   rendererReady: () => ipcRenderer.invoke("App:rendererReady"),
+  getPathForDroppedFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
+  },
+  openDroppedFiles: (paths) => ipcRenderer.invoke("ExternalOpen:drop", paths),
+  acknowledgeExternalOpen: (requestId, result) =>
+    ipcRenderer.invoke("ExternalOpen:ack", requestId, result),
+  onExternalFilesRequested: (callback) => {
+    const listener = (_event, request) => callback(request);
+    ipcRenderer.on("ExternalOpen:files", listener);
+    return () => ipcRenderer.removeListener("ExternalOpen:files", listener);
+  },
+  onExternalOpenResult: (callback) => {
+    const listener = (_event, result) => callback(result);
+    ipcRenderer.on("ExternalOpen:result", listener);
+    return () => ipcRenderer.removeListener("ExternalOpen:result", listener);
+  },
   getNshEndpoint: () => ipcRenderer.invoke("NSH:getEndpoint"),
   getAgentConversationStorageStatus: () =>
     ipcRenderer.invoke("AgentConversations:status"),

@@ -21,6 +21,7 @@ import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { App } from "./App";
 import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
 import type { WindowSession } from "./manager/WindowSessionStore";
+import type { DeliveredFileResult, ExternalOpenResult } from "./manager/ExternalOpenCoordinator";
 
 const TITLEBAR_CONTROLS_HEIGHT = 35;
 const MACOS_TRAFFIC_LIGHT_SIZE = 14;
@@ -30,6 +31,7 @@ const MACOS_TRAFFIC_LIGHT_Y = Math.round(
 const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
 const WINDOW_RELOAD_DELAY_MS = 50;
 const WINDOW_CLOSE_RESPONSE_TIMEOUT_MS = 10_000;
+const EXTERNAL_OPEN_ACK_TIMEOUT_MS = 5 * 60_000;
 const AGENT_MODEL_ENDPOINTS: Record<
   string,
   { urls: string[]; requiresApiKey: boolean }
@@ -105,6 +107,13 @@ export class Window {
   private boundsSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private resourceDisposal: Promise<void> = Promise.resolve();
   private readonly initialSession: WindowSession;
+  private readonly pendingExternalOpenDeliveries = new Map<string, {
+    paths: string[];
+    sent: boolean;
+    timer: ReturnType<typeof setTimeout>;
+    resolve: (result: DeliveredFileResult) => void;
+  }>();
+  private readonly pendingExternalOpenResults: ExternalOpenResult[] = [];
 
   constructor(
     app: App,
@@ -288,6 +297,7 @@ export class Window {
       console.error("[Renderer] render-process-gone", details);
       this.rendererReady = false;
       this.rendererGone = true;
+      this.failPendingExternalOpenDeliveries("The editor closed before confirming these files.");
       this.reloadPending = false;
       this.agentApprovalManager?.cancelAll();
       this.terminalManager?.closeForOwner(terminalOwner, {
@@ -304,6 +314,8 @@ export class Window {
       "did-start-navigation",
       (_event, _url, _inPlace, isMainFrame) => {
         if (isMainFrame) {
+          this.rendererReady = false;
+          for (const delivery of this.pendingExternalOpenDeliveries.values()) delivery.sent = false;
           this.terminalManager?.closeForOwner(terminalOwner, {
             deferProcessDisposal: true,
           });
@@ -348,6 +360,7 @@ export class Window {
       this.clearQuitTimer();
       this.closed = true;
       this.quitState = "closed";
+      this.failPendingExternalOpenDeliveries("The target NCE window was closed before the files were opened.");
       this.resolveQuitRequest(false);
       this.resolveClosed();
       this.resourceDisposal = this.disposeWindowServices(terminalOwner);
@@ -390,8 +403,24 @@ export class Window {
     this.ipc.handle("RecentFolders:clear", async () => this.clearRecentFolders());
     this.ipc.handle("App:rendererReady", async () => {
       this.rendererReady = true;
+      this.flushExternalOpenDeliveries();
+      this.flushExternalOpenResults();
       return true;
     });
+    this.ipc.handle("ExternalOpen:drop", async (event, paths) => {
+      const target = this.app.windowManager.getWindowByWebContents(event.sender);
+      if (!target || target !== this || !this.window || this.window.isDestroyed()) {
+        return {
+          success: false,
+          openedFiles: 0,
+          openedFolders: 0,
+          failures: [{ path: "", code: "WINDOW_UNAVAILABLE", message: "The drop target window is no longer available." }],
+        } satisfies ExternalOpenResult;
+      }
+      return this.app.externalOpenCoordinator.enqueueDrop(paths, target);
+    });
+    this.ipc.handle("ExternalOpen:ack", async (_event, requestId, rawResult) =>
+      this.acknowledgeExternalOpen(requestId, rawResult));
     this.ipc.handle("App:approveQuit", async (_event, options) => {
       return this.approveQuit(
         options?.prepareOnly === true,
@@ -434,6 +463,128 @@ export class Window {
     this.agentApprovalManager?.handleIPC();
     this.agentProcessRunner?.handleIPC();
     this.terminalManager?.registerIPC();
+  }
+
+  deliverExternalFiles(paths: string[]): Promise<DeliveredFileResult> {
+    const target = this.window;
+    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) {
+      return Promise.resolve({
+        openedPaths: [],
+        failures: paths.map((filePath) => ({
+          path: filePath,
+          message: "The target NCE window is no longer available.",
+        })),
+      });
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.settleExternalOpenDelivery(requestId, {
+          openedPaths: [],
+          failures: paths.map((filePath) => ({
+            path: filePath,
+            message: "The editor did not confirm that this file was opened.",
+          })),
+        });
+      }, EXTERNAL_OPEN_ACK_TIMEOUT_MS);
+      this.pendingExternalOpenDeliveries.set(requestId, {
+        paths: [...paths],
+        sent: false,
+        timer,
+        resolve,
+      });
+      this.flushExternalOpenDeliveries();
+    });
+  }
+
+  notifyExternalOpenResult(result: ExternalOpenResult): void {
+    const target = this.window;
+    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+    if (!this.rendererReady) {
+      if (this.pendingExternalOpenResults.length >= 8) this.pendingExternalOpenResults.shift();
+      this.pendingExternalOpenResults.push(result);
+      return;
+    }
+    try { target.webContents.send("ExternalOpen:result", result); }
+    catch (error) { console.warn("[External Open] Failed to report open result", error); }
+  }
+
+  private flushExternalOpenResults(): void {
+    const target = this.window;
+    if (!this.rendererReady || !target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+    const results = this.pendingExternalOpenResults.splice(0);
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      try { target.webContents.send("ExternalOpen:result", result); }
+      catch (error) {
+        console.warn("[External Open] Failed to report queued open result", error);
+        this.pendingExternalOpenResults.unshift(...results.slice(index));
+        break;
+      }
+    }
+  }
+
+  private flushExternalOpenDeliveries(): void {
+    const target = this.window;
+    if (!this.rendererReady || !target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+    for (const [requestId, delivery] of this.pendingExternalOpenDeliveries) {
+      if (delivery.sent) continue;
+      try {
+        target.webContents.send("ExternalOpen:files", { requestId, paths: delivery.paths });
+        delivery.sent = true;
+      } catch (error) {
+        console.warn("[External Open] Failed to send files to renderer", error);
+      }
+    }
+  }
+
+  private acknowledgeExternalOpen(requestId: unknown, rawResult: unknown): boolean {
+    if (typeof requestId !== "string") return false;
+    const delivery = this.pendingExternalOpenDeliveries.get(requestId);
+    if (!delivery) return false;
+    const payload = rawResult && typeof rawResult === "object" ? rawResult as Record<string, unknown> : {};
+    const openedCandidates = Array.isArray(payload.openedPaths)
+      ? payload.openedPaths.filter((value): value is string => typeof value === "string")
+      : [];
+    const failureCandidates = Array.isArray(payload.failures)
+      ? payload.failures.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const item = value as Record<string, unknown>;
+        return typeof item.path === "string" && typeof item.message === "string"
+          ? [{ path: item.path, message: item.message }]
+          : [];
+      })
+      : [];
+    const openedSet = new Set(openedCandidates);
+    const failuresByPath = new Map(failureCandidates.map((item) => [item.path, item.message]));
+    const openedPaths: string[] = [];
+    const failures: Array<{ path: string; message: string }> = [];
+    for (const filePath of delivery.paths) {
+      if (openedSet.has(filePath)) openedPaths.push(filePath);
+      else failures.push({
+        path: filePath,
+        message: failuresByPath.get(filePath) || "The editor did not confirm that this file was opened.",
+      });
+    }
+    this.settleExternalOpenDelivery(requestId, { openedPaths, failures });
+    return true;
+  }
+
+  private settleExternalOpenDelivery(requestId: string, result: DeliveredFileResult): void {
+    const delivery = this.pendingExternalOpenDeliveries.get(requestId);
+    if (!delivery) return;
+    clearTimeout(delivery.timer);
+    this.pendingExternalOpenDeliveries.delete(requestId);
+    delivery.resolve(result);
+  }
+
+  private failPendingExternalOpenDeliveries(message: string): void {
+    for (const [requestId, delivery] of this.pendingExternalOpenDeliveries) {
+      this.settleExternalOpenDelivery(requestId, {
+        openedPaths: [],
+        failures: delivery.paths.map((filePath) => ({ path: filePath, message })),
+      });
+    }
   }
 
   private async requestAgentModel(
@@ -707,6 +858,8 @@ export class Window {
   }
 
   async dispose(): Promise<void> {
+    this.failPendingExternalOpenDeliveries("NCE closed before confirming these files.");
+    this.pendingExternalOpenResults.length = 0;
     if (this.boundsSaveTimer) clearTimeout(this.boundsSaveTimer);
     this.boundsSaveTimer = null;
     this.clearQuitTimer();

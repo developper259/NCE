@@ -35,3 +35,58 @@ body {
 .box-right {
   border-right: 1px solid var(--border-primary);
 }
+
+.nce-external-drop-overlay {
+  position: fixed;
+  inset: 8px;
+  z-index: 2147483000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent-primary);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent-primary) 8%, transparent);
+  pointer-events: none;
+}
+
+.nce-external-drop-overlay.nce-external-drop-visible {
+  display: flex;
+}
+
+.nce-external-drop-card {
+  display: flex;
+  max-width: min(560px, calc(100vw - 48px));
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 20px;
+  border: 1px solid var(--border-accent);
+  border-radius: 6px;
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 28px var(--shadow-color);
+  color: var(--text-primary);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.nce-external-drop-title {
+  color: var(--text-white);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.nce-external-drop-details {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.nce-external-drop-result .nce-external-drop-card {
+  border-color: var(--accent-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nce-external-drop-overlay,
+  .nce-external-drop-card {
+    animation: none !important;
+    transition: none !important;
+  }
+}

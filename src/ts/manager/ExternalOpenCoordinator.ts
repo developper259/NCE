@@ -1,0 +1,307 @@
+import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import path from "node:path";
+import type { Window } from "../Window";
+import type { WindowManager } from "./WindowManager";
+
+export const MAX_EXTERNAL_OPEN_PATHS = 64;
+const MAX_QUEUED_EXTERNAL_OPEN_BATCHES = 64;
+const MAX_EXTERNAL_PATH_LENGTH = 32_768;
+
+export interface ExternalOpenFailure {
+  path: string;
+  code: string;
+  message: string;
+}
+
+export interface ExternalOpenResult {
+  success: boolean;
+  openedFiles: number;
+  openedFolders: number;
+  failures: ExternalOpenFailure[];
+}
+
+export interface DeliveredFileResult {
+  openedPaths: string[];
+  failures: Array<{ path: string; message: string }>;
+}
+
+interface ClassifiedPath {
+  path: string;
+  kind: "file" | "directory";
+}
+
+interface QueuedRequest {
+  paths: unknown;
+  cwd: string;
+  target: Window | null;
+  targetCaptured: boolean;
+  requireAbsolute: boolean;
+  resolve: (result: ExternalOpenResult) => void;
+}
+
+function failed(pathValue: unknown, code: string, message: string): ExternalOpenFailure {
+  return {
+    path: typeof pathValue === "string" ? pathValue.slice(0, MAX_EXTERNAL_PATH_LENGTH) : "",
+    code,
+    message,
+  };
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
+}
+
+function getPathApi(platform = process.platform) {
+  return platform === "win32" ? path.win32 : path;
+}
+
+function pathComparisonKey(value: string, platform = process.platform): string {
+  const api = getPathApi(platform);
+  const normalized = api.normalize(value).normalize("NFC");
+  return platform === "win32" ? normalized.toLocaleLowerCase("en-US") : normalized;
+}
+
+function isPathCandidate(value: string, platform: NodeJS.Platform): boolean {
+  if (!value || value.length > MAX_EXTERNAL_PATH_LENGTH || value.includes("\0")) return false;
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(value)) return false;
+  if (platform === "win32") return path.win32.isAbsolute(value);
+  return path.isAbsolute(value);
+}
+
+export class ExternalOpenCoordinator {
+  private readonly windowManager: WindowManager;
+  private readonly platform: NodeJS.Platform;
+  private readonly queue: QueuedRequest[] = [];
+  private started = false;
+  private processing = false;
+  private disposed = false;
+
+  constructor(windowManager: WindowManager, platform = process.platform) {
+    this.windowManager = windowManager;
+    this.platform = platform;
+  }
+
+  /** Hold startup/system opens until session and renderer restoration has completed. */
+  start(): void {
+    if (this.disposed) return;
+    this.started = true;
+    void this.processQueue();
+  }
+
+  enqueueSystemPaths(paths: unknown, cwd = process.cwd()): Promise<ExternalOpenResult> {
+    return this.enqueue({
+      paths,
+      cwd,
+      target: null,
+      targetCaptured: false,
+      requireAbsolute: false,
+    });
+  }
+
+  /** The target is captured from the actual IPC sender before any async work. */
+  enqueueDrop(paths: unknown, target: Window): Promise<ExternalOpenResult> {
+    return this.enqueue({
+      paths,
+      cwd: process.cwd(),
+      target,
+      targetCaptured: true,
+      requireAbsolute: true,
+    });
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.started = false;
+    const message = "NCE is shutting down before this request could be processed.";
+    for (const request of this.queue.splice(0)) {
+      request.resolve(this.result([failed("", "APP_CLOSING", message)]));
+    }
+  }
+
+  private enqueue(options: Omit<QueuedRequest, "resolve">): Promise<ExternalOpenResult> {
+    if (this.disposed) {
+      return Promise.resolve(this.result([
+        failed("", "APP_CLOSING", "NCE is shutting down."),
+      ]));
+    }
+    if (this.queue.length >= MAX_QUEUED_EXTERNAL_OPEN_BATCHES) {
+      return Promise.resolve(this.result([
+        failed("", "QUEUE_FULL", "Too many external open requests are waiting."),
+      ]));
+    }
+    return new Promise((resolve) => {
+      this.queue.push({ ...options, resolve });
+      if (this.started) void this.processQueue();
+    });
+  }
+
+  private async processQueue(): Promise<void> {
+    if (this.processing || !this.started || this.disposed) return;
+    this.processing = true;
+    try {
+      while (this.queue.length && this.started && !this.disposed) {
+        const request = this.queue.shift()!;
+        let result: ExternalOpenResult;
+        try {
+          result = await this.processRequest(request);
+        } catch (error) {
+          console.error("[External Open] Request failed", error);
+          result = this.result([
+            failed("", "OPEN_FAILED", "NCE could not process this open request."),
+          ]);
+        }
+        request.resolve(result);
+      }
+    } finally {
+      this.processing = false;
+      if (this.queue.length && this.started && !this.disposed) void this.processQueue();
+    }
+  }
+
+  private async processRequest(request: QueuedRequest): Promise<ExternalOpenResult> {
+    const classified = await this.classify(request.paths, request.cwd, request.requireAbsolute);
+    const failures = [...classified.failures];
+    if (classified.entries.length === 0) {
+      if (!request.targetCaptured) {
+        const focused = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0] || null;
+        const current = this.isLiveWindow(focused)
+          ? focused
+          : failures.length ? this.windowManager.createEmptyWindow() : null;
+        if (this.isLiveWindow(current)) {
+          this.windowManager.focusWindow(current.id);
+          if (failures.length) current.notifyExternalOpenResult(this.result(failures));
+        }
+      }
+      return this.result(failures);
+    }
+
+    let target = request.target;
+    if (!request.targetCaptured) {
+      target = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0] || null;
+      if (!this.isLiveWindow(target)) target = null;
+      if (!target) target = this.windowManager.createEmptyWindow();
+    }
+    if (!this.isLiveWindow(target)) {
+      for (const entry of classified.entries) {
+        failures.push(failed(entry.path, "WINDOW_UNAVAILABLE", "The target NCE window is no longer available."));
+      }
+      return this.result(failures);
+    }
+
+    this.windowManager.focusWindow(target.id);
+    const files = classified.entries.filter((entry) => entry.kind === "file");
+    const folders = classified.entries.filter((entry) => entry.kind === "directory");
+    let openedFiles = 0;
+    let openedFolders = 0;
+
+    if (files.length) {
+      try {
+        const delivery: DeliveredFileResult = await target.deliverExternalFiles(
+          files.map((entry) => entry.path),
+        );
+        openedFiles += delivery.openedPaths.length;
+        for (const item of delivery.failures) {
+          failures.push(failed(item.path, "FILE_OPEN_FAILED", item.message || "The file could not be opened."));
+        }
+      } catch (error: unknown) {
+        const message = errorMessage(error, "The target window could not open the files.");
+        for (const entry of files) failures.push(failed(entry.path, "FILE_OPEN_FAILED", message));
+      }
+    }
+
+    // Workspace openings are deliberately serialized through WindowManager so its
+    // duplicate-workspace and eight-window limit checks remain authoritative.
+    for (const entry of folders) {
+      try {
+        if (await this.windowManager.openWorkspaceInNewWindow(entry.path)) openedFolders += 1;
+        else failures.push(failed(entry.path, "FOLDER_OPEN_FAILED", "The folder could not be opened in a new NCE window."));
+      } catch (error: unknown) {
+        failures.push(failed(entry.path, "FOLDER_OPEN_FAILED", errorMessage(error, "The folder could not be opened.")));
+      }
+    }
+
+    const result = this.result(failures, openedFiles, openedFolders);
+    if (!request.targetCaptured && failures.length) target.notifyExternalOpenResult(result);
+    return result;
+  }
+
+  private async classify(
+    rawPaths: unknown,
+    cwd: string,
+    requireAbsolute: boolean,
+  ): Promise<{ entries: ClassifiedPath[]; failures: ExternalOpenFailure[] }> {
+    if (!Array.isArray(rawPaths)) {
+      return { entries: [], failures: [failed("", "INVALID_REQUEST", "Expected a list of file or folder paths.")] };
+    }
+    if (rawPaths.length > MAX_EXTERNAL_OPEN_PATHS) {
+      return {
+        entries: [],
+        failures: [failed("", "TOO_MANY_PATHS", `A single request can contain at most ${MAX_EXTERNAL_OPEN_PATHS} paths.`)],
+      };
+    }
+
+    const entries: ClassifiedPath[] = [];
+    const failures: ExternalOpenFailure[] = [];
+    const seen = new Set<string>();
+    const api = getPathApi(this.platform);
+    for (const rawPath of rawPaths) {
+      if (typeof rawPath !== "string" || !rawPath.trim() || rawPath !== rawPath.trim()) {
+        failures.push(failed(rawPath, "INVALID_PATH", "The path is empty or invalid."));
+        continue;
+      }
+      if (rawPath.length > MAX_EXTERNAL_PATH_LENGTH || rawPath.includes("\0") ||
+          /^[a-z][a-z\d+.-]*:\/\//i.test(rawPath)) {
+        failures.push(failed(rawPath, "INVALID_PATH", "The path is not a valid local file system path."));
+        continue;
+      }
+      if (requireAbsolute && !isPathCandidate(rawPath, this.platform)) {
+        failures.push(failed(rawPath, "INVALID_PATH", "Dropped items must provide an absolute local path."));
+        continue;
+      }
+
+      const resolvedPath = api.resolve(cwd, rawPath);
+      try {
+        const canonicalPath = await fs.realpath(resolvedPath);
+        const stats = await fs.stat(canonicalPath);
+        if (!stats.isFile() && !stats.isDirectory()) {
+          failures.push(failed(rawPath, "UNSUPPORTED_PATH", "Only regular files and folders can be opened."));
+          continue;
+        }
+        await fs.access(canonicalPath, fsConstants.R_OK | (stats.isDirectory() ? fsConstants.X_OK : 0));
+        const key = pathComparisonKey(canonicalPath, this.platform);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        entries.push({ path: canonicalPath, kind: stats.isDirectory() ? "directory" : "file" });
+      } catch (error: unknown) {
+        const fileSystemCode = (error as NodeJS.ErrnoException)?.code;
+        const code = fileSystemCode === "EACCES" || fileSystemCode === "EPERM" ? "ACCESS_DENIED" :
+          fileSystemCode === "ENOENT" || fileSystemCode === "ENOTDIR" ? "PATH_NOT_FOUND" : "INVALID_PATH";
+        const message = code === "ACCESS_DENIED"
+          ? "NCE does not have permission to access this path."
+          : code === "PATH_NOT_FOUND"
+            ? "This file or folder no longer exists."
+            : "NCE could not validate this path.";
+        failures.push(failed(rawPath, code, message));
+      }
+    }
+    return { entries, failures };
+  }
+
+  private isLiveWindow(window: Window | null): window is Window {
+    return Boolean(window?.window && !window.window.isDestroyed() && !window.window.webContents.isDestroyed());
+  }
+
+  private result(
+    failures: ExternalOpenFailure[],
+    openedFiles = 0,
+    openedFolders = 0,
+  ): ExternalOpenResult {
+    return {
+      success: failures.length === 0,
+      openedFiles,
+      openedFolders,
+      failures,
+    };
+  }
+}

@@ -44,6 +44,7 @@ class Editor {
     this.emptyMenu = new EmptyMenu(this);
 
     this.tabManager = new tabManager(this);
+    this.externalFileDropController = new ExternalFileDropController(this);
     this.keyBindingManager = new KeyBindingManager(this);
     this.scrollerManager = new ScrollerManager(this);
     this.sidebarManager = new SidebarManager(this);
@@ -150,21 +151,14 @@ class Editor {
     this.api.onSettingsChanged?.((settings) =>
       this.applySettingsSnapshot(settings),
     );
-    this.initLoadState();
     const rendererReadyMeasure = this.performanceMetrics?.begin("startup.rendererReady");
-    const rendererReady = this.api.rendererReady?.();
-    if (rendererReady && typeof rendererReady.then === "function") {
-      Promise.resolve(rendererReady).then(() => {
-        this.performanceMetrics?.end(rendererReadyMeasure);
-        this.performanceMetrics?.mark("startup.renderer.ready");
-      }).catch((error) => {
-        this.performanceMetrics?.end(rendererReadyMeasure);
-        console.error("[Startup] rendererReady failed", error);
-      });
-    } else {
+    Promise.resolve(this.initLoadState()).then(() => this.api.rendererReady?.()).then(() => {
       this.performanceMetrics?.end(rendererReadyMeasure);
       this.performanceMetrics?.mark("startup.renderer.ready");
-    }
+    }).catch((error) => {
+      this.performanceMetrics?.end(rendererReadyMeasure);
+      console.error("[Startup] rendererReady failed", error);
+    });
   }
 
   refreshAll({ renderSidebarContent = true } = {}) {
@@ -383,6 +377,7 @@ class Editor {
   destroy() {
     this.windowActivityUnsubscribe?.();
     this.windowActivityUnsubscribe = null;
+    this.externalFileDropController?.destroy?.();
     document.documentElement.classList.remove("nce-window-inactive");
     this.cursorController?.destroy?.();
     this.quickPanel?.destroy?.();
@@ -637,34 +632,44 @@ class Editor {
 
   initLoadState() {
     let loaded = false;
+    let resolveRestoration;
+    const restoration = new Promise((resolve) => { resolveRestoration = resolve; });
     const apply = async (state) => {
       if (loaded) return;
-      if (!state) {
-        await this.statesManager?.offerDirtyBufferRecovery?.(null);
-        if (this.isOnInit)
-          this.events.callEvent(Events.ON_LOADED, {
-            isStateLoaded: false,
-          });
-        return;
-      }
       loaded = true;
-      await this.statesManager.loadStates(state);
-      if (this.isOnInit)
-        this.events.callEvent(Events.ON_LOADED, {
-          isStateLoaded: true,
-        });
+      try {
+        if (!state) {
+          await this.statesManager?.offerDirtyBufferRecovery?.(null);
+          if (this.isOnInit)
+            this.events.callEvent(Events.ON_LOADED, { isStateLoaded: false });
+          return;
+        }
+        await this.statesManager.loadStates(state);
+        if (this.isOnInit)
+          this.events.callEvent(Events.ON_LOADED, { isStateLoaded: true });
+      } catch (error) {
+        console.error("[Startup] state restore failed", error);
+        if (this.isOnInit)
+          this.events.callEvent(Events.ON_LOADED, { isStateLoaded: false });
+      } finally {
+        resolveRestoration();
+      }
     };
 
-    this.api.onLoadState(apply);
+    this.api.onLoadState?.(apply);
     this.api
       .loadEditorState()
       .then(apply)
       .catch((error) => {
+        if (loaded) return;
+        loaded = true;
         console.error("[Startup] state restore failed", error);
         if (this.isOnInit) {
           this.events.callEvent(Events.ON_LOADED, { isStateLoaded: false });
         }
+        resolveRestoration();
       });
+    return restoration;
   }
 }
 

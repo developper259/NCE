@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { URL, fileURLToPath } from "node:url";
 import { Window } from "./Window";
 import { NSHServer } from "nsh/server";
 import { SettingsManager } from "./manager/SettingsManager";
@@ -10,6 +11,75 @@ import { AgentSecretStore } from "./manager/AgentSecretStore";
 import { IpcRouter } from "./manager/IpcRouter";
 import { WindowManager } from "./manager/WindowManager";
 import { WindowSessionStore } from "./manager/WindowSessionStore";
+import { ExternalOpenCoordinator } from "./manager/ExternalOpenCoordinator";
+
+const SWITCHES_WITH_VALUES = new Set([
+  "--app",
+  "--class",
+  "--disk-cache-dir",
+  "--host-rules",
+  "--inspect",
+  "--inspect-brk",
+  "--lang",
+  "--log-file",
+  "--proxy-bypass-list",
+  "--proxy-server",
+  "--remote-debugging-port",
+  "--user-data-dir",
+]);
+
+function currentWorkingDirectory(): string {
+  return typeof process.cwd === "function" ? process.cwd() : ".";
+}
+
+function externalPathArguments(
+  args: unknown,
+  cwd = currentWorkingDirectory(),
+  platform = process.platform,
+): string[] {
+  if (!Array.isArray(args)) return [];
+  const output: string[] = [];
+  let skipNext = false;
+  let afterSeparator = false;
+  const pathApi = platform === "win32" ? path.win32 : path;
+  const appPath = typeof app.getAppPath === "function" ? pathApi.resolve(app.getAppPath()) : "";
+  const executablePath = typeof process.execPath === "string"
+    ? pathApi.resolve(process.execPath)
+    : "";
+  for (const value of args) {
+    if (typeof value !== "string" || !value) continue;
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (!afterSeparator && value === "--") {
+      afterSeparator = true;
+      continue;
+    }
+    if (!afterSeparator && value.startsWith("-")) {
+      const [flag, inlineValue] = value.split("=", 2);
+      if (!inlineValue && SWITCHES_WITH_VALUES.has(flag)) skipNext = true;
+      continue;
+    }
+    let filePath = value;
+    if (/^file:/i.test(value)) {
+      try {
+        const url = new URL(value);
+        if (url.protocol !== "file:" || url.search || url.hash) continue;
+        filePath = fileURLToPath(url);
+      } catch {
+        continue;
+      }
+    } else if (/^[a-z][a-z\d+.-]*:/i.test(value) &&
+        !(platform === "win32" && /^[a-z]:[\\/]/i.test(value))) {
+      continue;
+    }
+    const resolved = pathApi.resolve(cwd, filePath);
+    if ((appPath && resolved === appPath) || (executablePath && resolved === executablePath)) continue;
+    output.push(filePath);
+  }
+  return output;
+}
 
 function getPackageVersion() {
   try {
@@ -33,11 +103,19 @@ export class App {
   recentFolders!: RecentFoldersManager;
   agentConversations!: AgentConversationStore;
   agentSecrets!: AgentSecretStore;
+  externalOpenCoordinator!: ExternalOpenCoordinator;
   name = "NCE";
   version = getPackageVersion();
   private quitPromise: Promise<boolean> | null = null;
+  private readonly earlyOpenFilePaths: string[] = [];
 
   constructor() {
+    // macOS can deliver document opens before Electron emits `ready`.
+    app.on("open-file", (event, filePath) => {
+      event.preventDefault();
+      this.receiveOpenFilePath(filePath);
+    });
+
     const gotTheLock = app.requestSingleInstanceLock();
     if (!gotTheLock) {
       this.ipcRouter = new IpcRouter();
@@ -55,7 +133,28 @@ export class App {
     this.agentSecrets = new AgentSecretStore(userData);
     this.windowSessionStore = new WindowSessionStore(userData, process.platform, this.agentSecrets);
     this.windowManager = new WindowManager(this, this.ipcRouter, this.windowSessionStore);
+    this.externalOpenCoordinator = new ExternalOpenCoordinator(this.windowManager);
+    const startupArgStart = app.isPackaged ? 1 : 2;
+    const argv = Array.isArray(process.argv) ? process.argv : [];
+    const startupPaths = process.env?.NCE_DISABLE_EXTERNAL_STARTUP_PATHS === "1"
+      ? []
+      : externalPathArguments(argv.slice(startupArgStart));
+    if (startupPaths.length) {
+      void this.externalOpenCoordinator.enqueueSystemPaths(startupPaths, currentWorkingDirectory());
+    }
+    for (const filePath of this.earlyOpenFilePaths.splice(0)) {
+      void this.externalOpenCoordinator.enqueueSystemPaths([filePath], currentWorkingDirectory());
+    }
     this.setupAppEvents();
+  }
+
+  private receiveOpenFilePath(filePath: unknown): void {
+    if (typeof filePath !== "string") return;
+    if (this.externalOpenCoordinator) {
+      void this.externalOpenCoordinator.enqueueSystemPaths([filePath], currentWorkingDirectory());
+    } else {
+      this.earlyOpenFilePaths.push(filePath);
+    }
   }
 
   /** Compatibility accessor for older main-process call sites. */
@@ -71,6 +170,7 @@ export class App {
       await this.windowSessionStore.initialize();
       await this.startNsh();
       await this.windowManager.restoreSessions();
+      this.externalOpenCoordinator.start();
     });
 
     app.on("before-quit", (event) => {
@@ -91,13 +191,18 @@ export class App {
       }
     });
 
-    app.on("second-instance", (_event, argv) => {
+    app.on("second-instance", (_event, argv, workingDirectory) => {
       void (async () => {
-        for (const argument of argv.slice(1)) {
-          if (!path.isAbsolute(argument) || argument.startsWith("--")) continue;
-          const folder = await this.windowManager.resolveWorkspacePath(argument);
-          if (!folder) continue;
-          await this.windowManager.openWorkspaceInNewWindow(folder);
+        const cwd = typeof workingDirectory === "string" && workingDirectory
+          ? workingDirectory
+          : currentWorkingDirectory();
+        const paths = externalPathArguments(
+          Array.isArray(argv) ? argv.slice(app.isPackaged ? 1 : 2) : [],
+          cwd,
+        );
+        if (paths.length) {
+          const result = await this.externalOpenCoordinator.enqueueSystemPaths(paths, cwd);
+          if (result.failures.length) console.warn("[External Open] Some second-instance paths could not be opened", result.failures);
           return;
         }
         const focused = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0];
@@ -107,6 +212,7 @@ export class App {
     });
 
     app.on("will-quit", () => {
+      this.externalOpenCoordinator?.dispose();
       this.ipcRouter.dispose();
       this.windowManager.dispose();
     });

@@ -37,6 +37,7 @@
   "js/addon/TitleBar.js",
   "js/addon/KeyBinding.js",
   "js/main/FeatureLoader.js",
+  "js/addon/ExternalFileDropController.js",
   "js/addon/EmptyMenu.js",
   "js/addon/SidebarResizer.js",
   "js/addon/FileLoader.js",

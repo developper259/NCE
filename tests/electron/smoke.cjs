@@ -11,6 +11,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
   async function launch(phase) {
     await new Promise((resolve, reject) => {
       const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+      env.NCE_DISABLE_EXTERNAL_STARTUP_PATHS = '1';
       const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
       let log = '';
       child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
@@ -25,6 +26,10 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     }
   }
   try {
+    if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') {
+      await launch('multiwindow');
+      return;
+    }
     await launch('write');
     const sessionStore = JSON.parse(await fs.readFile(
       path.join(directory, 'profile', 'window-sessions.json'), 'utf8',

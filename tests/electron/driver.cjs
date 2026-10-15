@@ -393,6 +393,98 @@ app.whenReady().then(() => {
           runB("editor.tabManager.tabs.map(tab => tab.path)"),
         ]), [[fileA], [fileB]]);
 
+        const workspaceCInput = path.join(directory, "multi-window-c");
+        fs.mkdirSync(workspaceCInput, { recursive: true });
+        const workspaceC = await fs.promises.realpath(workspaceCInput);
+        assert.equal(await nce.windowManager.openWorkspaceInNewWindow(workspaceCInput), true);
+        let windowC = null;
+        await waitForCondition(async () => {
+          windowC = nce.windowManager.findWindowByWorkspace(workspaceC);
+          if (!windowC?.window || !windowC.rendererReady) return false;
+          return windowC.window.webContents.executeJavaScript(
+            `editor.isOnInit === false && editor.fileExplorer.rootPath === ${JSON.stringify(workspaceC)}`,
+          );
+        }, { timeout: 15000, description: "Window C renderer and workspace restoration" });
+        const runC = code => windowC.window.webContents.executeJavaScript(code);
+
+        const externalFile = path.join(directory, "external drop é with spaces.js");
+        const externalFileTwo = path.join(directory, "external drop two.js");
+        fs.writeFileSync(externalFile, "const external = 'disk';\n", "utf8");
+        fs.writeFileSync(externalFileTwo, "const externalTwo = true;\n", "utf8");
+        const externalFilePath = await fs.promises.realpath(externalFile);
+        const externalFileTwoPath = await fs.promises.realpath(externalFileTwo);
+        const dropResult = await runB(
+          `window.api.openDroppedFiles(${JSON.stringify([externalFile, externalFileTwo, externalFile])})`,
+        );
+        assert.equal(dropResult.success, true);
+        assert.equal(dropResult.openedFiles, 2, "unique files open once and repeated paths resolve to one tab");
+        await waitForCondition(
+          async () => (await runB(`editor.tabManager.tabs.filter(tab => [${JSON.stringify(externalFilePath)}, ${JSON.stringify(externalFileTwoPath)}].includes(tab.path)).length`)) === 2,
+          { timeout: 10000, description: "external files delivered to the receiving window" },
+        );
+        assert.deepEqual(await Promise.all([
+          runA("editor.tabManager.tabs.map(tab => tab.path)"),
+          runB("editor.tabManager.tabs.map(tab => tab.path)"),
+          runC("editor.tabManager.tabs.map(tab => tab.path)"),
+          runB("editor.fileExplorer.rootPath"),
+        ]), [
+          [fileA],
+          [fileB, externalFilePath, externalFileTwoPath],
+          [],
+          workspaceB,
+        ], "the real IPC sender owns the file drop and its workspace is unchanged");
+
+        const dirtyContents = "const external = 'unsaved';";
+        assert.equal(await runB(`(() => {
+          const file = editor.tabManager.getFileByPath(${JSON.stringify(externalFilePath)});
+          file.lines[0].setText(${JSON.stringify(dirtyContents)});
+          file.isSaved = false;
+          return file.serializeContent();
+        })()`), `${dirtyContents}\n`);
+        const redropResult = await runB(
+          `window.api.openDroppedFiles(${JSON.stringify([externalFilePath])})`,
+        );
+        assert.equal(redropResult.openedFiles, 1);
+        assert.equal(await runB(`(() => {
+          const tabs = editor.tabManager.tabs.filter(tab => tab.path === ${JSON.stringify(externalFilePath)});
+          return tabs.length === 1 && tabs[0].isSaved === false &&
+            tabs[0].serializeContent() === ${JSON.stringify(`${dirtyContents}\n`)};
+        })()`), true, "redropping an open file focuses its unsaved buffer without reloading disk contents");
+        await runB(`(() => {
+          editor.tabManager.getFileByPath(${JSON.stringify(externalFilePath)}).isSaved = true;
+          return true;
+        })()`);
+
+        const droppedWorkspaceInput = path.join(directory, "dropped-folder");
+        fs.mkdirSync(droppedWorkspaceInput, { recursive: true });
+        const droppedWorkspace = await fs.promises.realpath(droppedWorkspaceInput);
+        const mixedDropResult = await runB(
+          `window.api.openDroppedFiles(${JSON.stringify([externalFilePath, droppedWorkspaceInput])})`,
+        );
+        assert.equal(mixedDropResult.openedFiles, 1);
+        assert.equal(mixedDropResult.openedFolders, 1);
+        let droppedWorkspaceWindow = null;
+        await waitForCondition(() => {
+          droppedWorkspaceWindow = nce.windowManager.findWindowByWorkspace(droppedWorkspace);
+          return Boolean(droppedWorkspaceWindow?.window && droppedWorkspaceWindow.rendererReady);
+        }, { timeout: 15000, description: "dropped folder to open in its own workspace window" });
+        assert.equal(await runB("editor.fileExplorer.rootPath"), workspaceB,
+          "dropping a folder does not replace the receiving window workspace");
+        assert.deepEqual(await droppedWorkspaceWindow.window.webContents.executeJavaScript(
+          "editor.tabManager.tabs.map(tab => tab.path)",
+        ), [], "mixed drops keep their files out of folder windows");
+        await droppedWorkspaceWindow.requestQuit();
+        await droppedWorkspaceWindow.waitForDisposal();
+        await windowC.requestQuit();
+        await windowC.waitForDisposal();
+
+        if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === "1") {
+          fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
+          traceStep("external file and folder routing checks passed");
+          assert.equal(await nce.requestQuitAll(), true, "external open smoke windows quit cleanly");
+          return;
+        }
+
         const initialAutoSave = await runA("window.api.getSetting('files.autoSave')");
         await runB(`(() => {
           window.__multiWindowSettingsChange = new Promise(resolve => {
@@ -2896,6 +2988,7 @@ app.whenReady().then(() => {
         };
         try {
           await run(`editor.terminalPanel.getActiveSession().terminal.focus()`);
+          if (process.platform === "darwin") app.focus({ steal: true });
           win.focus();
           await waitForTerminalCondition(
             async () => (await run(`${getTerminalText(firstTerminal.id)}.trim().length > 0`)) === true,
