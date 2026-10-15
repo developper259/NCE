@@ -42,7 +42,7 @@ class ExternalFileDropController {
     details.textContent = "Folders open in a new window.";
     card.append(title, details);
     overlay.append(card);
-    document.body.append(overlay);
+    this.editor.mainSection.append(overlay);
     return overlay;
   }
 
@@ -138,10 +138,55 @@ class ExternalFileDropController {
 
   showOverlay() {
     if (this.destroyed || !this.overlay) return;
+    this.updateOverlayBounds();
     clearTimeout(this.statusTimer);
     this.statusTimer = null;
     this.overlay.classList.remove("nce-external-drop-result");
     this.overlay.classList.add("nce-external-drop-visible");
+  }
+
+  updateOverlayBounds() {
+    const container = this.editor.mainSection;
+    if (!container || !this.overlay) return;
+    const containerRect = container.getBoundingClientRect();
+    if (!containerRect.width || !containerRect.height) return;
+
+    const rootStyle = getComputedStyle(document.documentElement);
+    const bottomBarHeight = Number.parseFloat(rootStyle.getPropertyValue("--bottombar-height")) || 0;
+    const bottomPanelHeight = Number.parseFloat(rootStyle.getPropertyValue("--bottom-panel-height")) || 0;
+    const overlayTop = containerRect.top;
+    const overlayBottom = containerRect.bottom - bottomBarHeight - bottomPanelHeight;
+    const intersectsOverlayVertically = (rect) => rect.bottom > overlayTop && rect.top < overlayBottom;
+
+    const selector = container.querySelector(".sidebar-tab-selector");
+    const selectorRect = selector?.getBoundingClientRect();
+    let left = selectorRect ? Math.max(0, selectorRect.right - containerRect.left) : 0;
+    let right = 0;
+
+    const leftSidebarRect = container.querySelector(".sidebar-left")?.getBoundingClientRect();
+    if (
+      leftSidebarRect &&
+      intersectsOverlayVertically(leftSidebarRect) &&
+      leftSidebarRect.right > containerRect.left + left &&
+      leftSidebarRect.left < containerRect.right - right
+    ) {
+      left = Math.max(left, leftSidebarRect.right - containerRect.left + 2);
+    }
+
+    const rightSidebarRect = container.querySelector(".sidebar-right")?.getBoundingClientRect();
+    if (
+      rightSidebarRect &&
+      intersectsOverlayVertically(rightSidebarRect) &&
+      rightSidebarRect.left < containerRect.right - right &&
+      rightSidebarRect.right > containerRect.left + left
+    ) {
+      right = Math.max(right, containerRect.right - rightSidebarRect.left + 2);
+    }
+
+    left = Math.min(containerRect.width, Math.max(0, left));
+    right = Math.min(containerRect.width - left, Math.max(0, right));
+    this.overlay.style.left = `${left}px`;
+    this.overlay.style.right = `${right}px`;
   }
 
   hideOverlay() {
@@ -152,21 +197,15 @@ class ExternalFileDropController {
 
   showResult(result) {
     const failures = Array.isArray(result?.failures) ? result.failures : [];
-    const opened = (Number(result?.openedFiles) || 0) + (Number(result?.openedFolders) || 0);
-    if (!failures.length) {
-      if (opened) this.showStatus(`${opened} item${opened === 1 ? "" : "s"} opened.`);
-      return;
-    }
+    if (!failures.length) return;
     const firstFailure = failures[0];
     const detail = typeof firstFailure?.message === "string" ? firstFailure.message : "Some items could not be opened.";
-    const text = opened
-      ? `${opened} item${opened === 1 ? "" : "s"} opened. ${failures.length} could not be opened: ${detail}`
-      : `Could not open ${failures.length} item${failures.length === 1 ? "" : "s"}: ${detail}`;
-    this.showStatus(text);
+    this.showStatus(`Could not open ${failures.length} item${failures.length === 1 ? "" : "s"}: ${detail}`);
   }
 
   showStatus(message) {
     if (this.destroyed || !this.overlay) return;
+    this.updateOverlayBounds();
     const title = this.overlay.querySelector(".nce-external-drop-title");
     const details = this.overlay.querySelector(".nce-external-drop-details");
     if (title) title.textContent = message;

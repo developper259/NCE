@@ -37,9 +37,9 @@ body {
 }
 
 .nce-external-drop-overlay {
-  position: fixed;
-  inset: 8px;
-  z-index: 2147483000;
+  position: absolute;
+  inset: 0 0 calc(var(--bottombar-height) + var(--bottom-panel-height, 0px)) var(--sidebar-selector-width);
+  z-index: 14;
   display: none;
   align-items: center;
   justify-content: center;
@@ -55,7 +55,7 @@ body {
 
 .nce-external-drop-card {
   display: flex;
-  max-width: min(560px, calc(100vw - 48px));
+  max-width: min(560px, calc(100% - 48px));
   flex-direction: column;
   gap: 6px;
   padding: 14px 20px;
