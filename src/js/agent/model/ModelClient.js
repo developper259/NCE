@@ -188,6 +188,140 @@ class ModelClient {
     return headers;
   }
 
+  buildResponsesPayload(payload) {
+    const input = [];
+    for (const message of payload.messages || []) {
+      if (message?.role === "tool" && typeof message.tool_call_id === "string") {
+        const output = typeof message.content === "string"
+          ? message.content
+          : JSON.stringify(message.content ?? "");
+        input.push({
+          type: "function_call_output",
+          call_id: message.tool_call_id,
+          output,
+        });
+        continue;
+      }
+
+      if (message?.role === "assistant" && Array.isArray(message.tool_calls)) {
+        if (message.content) input.push({ role: "assistant", content: message.content });
+        for (const toolCall of message.tool_calls) {
+          const args = toolCall?.function?.arguments;
+          input.push({
+            type: "function_call",
+            call_id: toolCall?.id,
+            name: toolCall?.function?.name,
+            arguments: typeof args === "string" ? args : JSON.stringify(args ?? {}),
+          });
+        }
+        continue;
+      }
+
+      if (message && typeof message.role === "string") {
+        input.push({ role: message.role, content: message.content ?? "" });
+      }
+    }
+
+    const responsePayload = {
+      model: payload.model,
+      input,
+      stream: false,
+      max_output_tokens: payload.max_tokens,
+    };
+    if (Array.isArray(payload.tools)) {
+      responsePayload.tools = payload.tools.map((tool) => {
+        const fn = tool?.function || {};
+        return {
+          type: "function",
+          name: fn.name,
+          description: fn.description,
+          parameters: fn.parameters,
+          ...(typeof fn.strict === "boolean" ? { strict: fn.strict } : {}),
+        };
+      });
+    }
+    if (payload.tool_choice !== undefined) {
+      const choice = payload.tool_choice;
+      responsePayload.tool_choice = choice && typeof choice === "object" &&
+        choice.type === "function"
+        ? { type: "function", name: choice.function?.name }
+        : choice;
+    }
+    return responsePayload;
+  }
+
+  normalizeResponsesResult(result) {
+    if (!result || !Array.isArray(result.output)) return result;
+    if (result.status === "failed") {
+      const providerError = result.error || {};
+      throw Object.assign(
+        new Error(providerError.message || "Le provider a échoué la requête."),
+        {
+          status: providerError.status,
+          code: providerError.code,
+          body: result,
+        },
+      );
+    }
+    const text = [];
+    const reasoning = [];
+    const toolCalls = [];
+    for (const item of result.output) {
+      if (item?.type === "function_call") {
+        toolCalls.push({
+          id: item.call_id || item.id,
+          type: "function",
+          function: {
+            name: item.name,
+            arguments: typeof item.arguments === "string"
+              ? item.arguments
+              : JSON.stringify(item.arguments ?? {}),
+          },
+        });
+      } else if (item?.type === "message" && Array.isArray(item.content)) {
+        for (const part of item.content) {
+          if (typeof part?.text === "string" &&
+              ["output_text", "text", "refusal"].includes(part.type)) {
+            text.push(part.text);
+          } else if (typeof part?.refusal === "string") {
+            text.push(part.refusal);
+          }
+        }
+      } else if (item?.type === "reasoning" && Array.isArray(item.summary)) {
+        reasoning.push(...item.summary
+          .map((part) => part?.text)
+          .filter((value) => typeof value === "string"));
+      }
+    }
+    if (text.length === 0 && typeof result.output_text === "string")
+      text.push(result.output_text);
+
+    const message = {
+      role: "assistant",
+      content: text.join("") || null,
+      ...(reasoning.length ? { reasoning: reasoning.join("\n") } : {}),
+      ...(toolCalls.length ? { tool_calls: toolCalls } : {}),
+    };
+    const finishReason = result.status === "incomplete"
+      ? "length"
+      : toolCalls.length
+        ? "tool_calls"
+        : "stop";
+    const usage = result.usage && typeof result.usage === "object"
+      ? {
+          ...result.usage,
+          prompt_tokens: result.usage.input_tokens ?? result.usage.prompt_tokens,
+          completion_tokens: result.usage.output_tokens ?? result.usage.completion_tokens,
+          total_tokens: result.usage.total_tokens,
+        }
+      : result.usage;
+    return {
+      ...result,
+      choices: [{ message, finish_reason: finishReason }],
+      ...(usage ? { usage } : {}),
+    };
+  }
+
   getHeaderValue(response, name) {
     const headers = response?.headers;
     if (!headers) return null;
@@ -537,6 +671,13 @@ class ModelClient {
       Math.min(responseBudget.effectiveMaxOutputTokens, contextAllowance),
     );
     config.effectiveMaxOutputTokens = payload.max_tokens;
+    const apiFormat = config.modelConfig?.apiFormat || provider.apiFormat || "chat-completions";
+    const requestEndpoint = apiFormat === "responses"
+      ? provider.responsesBaseURL || provider.baseURL
+      : provider.baseURL;
+    const requestPayload = apiFormat === "responses"
+      ? this.buildResponsesPayload(payload)
+      : payload;
     this.agent.lastContextMetrics = {
       ...(this.agent.lastContextMetrics || {}),
       messageTokens,
@@ -582,25 +723,46 @@ class ModelClient {
 
     const timeoutController = new AbortController();
     const timeout = setTimeout(() => timeoutController.abort(), 60000);
+    const signal =
+      controller?.signal && typeof AbortSignal?.any === "function"
+        ? AbortSignal.any([controller.signal, timeoutController.signal])
+        : timeoutController.signal;
+    let cancelAgentRequest = null;
 
     try {
       if (typeof this.agent.api?.aiChat === "function") {
+        if (signal.aborted) throw this.agent.abortError();
+        cancelAgentRequest = () => {
+          try {
+            const cancellation =
+              this.agent.api.cancelAgentModelRequest?.(requestId);
+            cancellation?.catch?.(() => {});
+          } catch {}
+        };
+        signal.addEventListener("abort", cancelAgentRequest, { once: true });
         const result = await this.agent.api.aiChat({
           provider: sanitizedProvider,
-          payload,
+          endpoint: requestEndpoint,
+          apiFormat,
+          payload: requestPayload,
           sessionId,
+          requestId,
         });
+        if (signal.aborted) throw this.agent.abortError();
         const unwrapped = this.agent.unwrapModelTransportResult(result);
-        this.recordPreviousOutputUsage(unwrapped);
+        const normalized = apiFormat === "responses"
+          ? this.normalizeResponsesResult(unwrapped)
+          : unwrapped;
+        this.recordPreviousOutputUsage(normalized);
         this.emitModelRequestEnd(
           requestId,
           currentAttempt,
           config,
           "success",
-          unwrapped,
+          normalized,
           requestStartTime,
         );
-        return this.agent.recordModelPromptUsage(unwrapped, {
+        return this.agent.recordModelPromptUsage(normalized, {
           sessionId,
           runId: config.runId,
           requestId,
@@ -609,20 +771,25 @@ class ModelClient {
       if (typeof this.agent.api?.requestAI === "function") {
         const result = await this.agent.api.requestAI({
           provider: sanitizedProvider,
-          payload,
+          endpoint: requestEndpoint,
+          apiFormat,
+          payload: requestPayload,
           sessionId,
         });
         const unwrapped = this.agent.unwrapModelTransportResult(result);
-        this.recordPreviousOutputUsage(unwrapped);
+        const normalized = apiFormat === "responses"
+          ? this.normalizeResponsesResult(unwrapped)
+          : unwrapped;
+        this.recordPreviousOutputUsage(normalized);
         this.emitModelRequestEnd(
           requestId,
           currentAttempt,
           config,
           "success",
-          unwrapped,
+          normalized,
           requestStartTime,
         );
-        return this.agent.recordModelPromptUsage(unwrapped, {
+        return this.agent.recordModelPromptUsage(normalized, {
           sessionId,
           runId: config.runId,
           requestId,
@@ -634,15 +801,11 @@ class ModelClient {
         apiKey: provider.apiKey,
         sessionId,
       });
-      const url = `${provider.baseURL.replace(/\/+$/, "")}`;
-      const signal =
-        controller?.signal && typeof AbortSignal?.any === "function"
-          ? AbortSignal.any([controller.signal, timeoutController.signal])
-          : timeoutController.signal;
+      const url = `${requestEndpoint.replace(/\/+$/, "")}`;
       const response = await fetch(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(payload),
+        body: JSON.stringify(requestPayload),
         signal,
       });
 
@@ -664,16 +827,19 @@ class ModelClient {
       }
 
       const result = await response.json();
-      this.recordPreviousOutputUsage(result);
+      const normalized = apiFormat === "responses"
+        ? this.normalizeResponsesResult(result)
+        : result;
+      this.recordPreviousOutputUsage(normalized);
       this.emitModelRequestEnd(
         requestId,
         currentAttempt,
         config,
         "success",
-        result,
+        normalized,
         requestStartTime,
       );
-      return this.agent.recordModelPromptUsage(result, {
+      return this.agent.recordModelPromptUsage(normalized, {
         sessionId,
         runId: config.runId,
         requestId,
@@ -705,6 +871,8 @@ class ModelClient {
       }
       throw error;
     } finally {
+      if (cancelAgentRequest)
+        signal.removeEventListener("abort", cancelAgentRequest);
       clearTimeout(timeout);
     }
   }

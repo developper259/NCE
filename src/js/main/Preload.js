@@ -216,6 +216,9 @@ contextBridge.exposeInMainWorld("api", {
 
   setAgentApiKey: (providerId, apiKey) =>
     ipcRenderer.invoke("FileManager:setAgentApiKey", providerId, apiKey),
+  aiChat: (request) => ipcRenderer.invoke("Agent:aiChat", request),
+  cancelAgentModelRequest: (requestId) =>
+    ipcRenderer.invoke("Agent:cancelModelRequest", requestId),
 
   startWatching: (projectPath) =>
     ipcRenderer.invoke("Watcher:startWatching", projectPath),

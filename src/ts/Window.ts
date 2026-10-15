@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   clipboard,
   shell,
+  type IpcMainInvokeEvent,
   type WebContents,
 } from "electron";
 import path from "path";
@@ -29,6 +30,26 @@ const MACOS_TRAFFIC_LIGHT_Y = Math.round(
 const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
 const WINDOW_RELOAD_DELAY_MS = 50;
 const WINDOW_CLOSE_RESPONSE_TIMEOUT_MS = 10_000;
+const AGENT_MODEL_ENDPOINTS: Record<
+  string,
+  { urls: string[]; requiresApiKey: boolean }
+> = {
+  modalQwen: {
+    urls: ["https://trolleur-belvedere--nce-coder-serve.modal.run/v1/chat/completions"],
+    requiresApiKey: false,
+  },
+  opencode: {
+    urls: [
+      "https://opencode.ai/zen/go/v1/chat/completions",
+      "https://opencode.ai/zen/go/v1/responses",
+    ],
+    requiresApiKey: true,
+  },
+  openrouter: {
+    urls: ["https://openrouter.ai/api/v1/chat/completions"],
+    requiresApiKey: true,
+  },
+};
 
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
@@ -65,6 +86,7 @@ export class Window {
   agentApprovalManager: AgentApprovalManager | undefined;
   agentProcessRunner: AgentProcessRunner | undefined;
   terminalManager: TerminalManager | undefined;
+  private readonly activeAgentModelRequests = new Map<string, AbortController>();
   app: App;
   forceQuit: boolean;
   rendererReady: boolean;
@@ -400,6 +422,10 @@ export class Window {
       this.app.agentConversations?.setActive(sessionId) || false);
     this.ipc.handle("AgentConversations:flush", async () =>
       this.app.agentConversations?.flush() || false);
+    this.ipc.handle("Agent:aiChat", async (event, request) =>
+      this.requestAgentModel(event, request));
+    this.ipc.handle("Agent:cancelModelRequest", async (event, requestId) =>
+      this.cancelAgentModelRequest(event, requestId));
 
     this.fileManager?.handleIPC();
     this.watcher?.handleIPC();
@@ -408,6 +434,156 @@ export class Window {
     this.agentApprovalManager?.handleIPC();
     this.agentProcessRunner?.handleIPC();
     this.terminalManager?.registerIPC();
+  }
+
+  private async requestAgentModel(
+    event: IpcMainInvokeEvent,
+    request: unknown,
+  ): Promise<unknown> {
+    const failure = (message: string, code: string, status?: number) => ({
+      success: false,
+      ...(status ? { status } : {}),
+      error: { message, code },
+    });
+    if (!request || typeof request !== "object" || Array.isArray(request)) {
+      return failure("Invalid Agent model request.", "INVALID_REQUEST");
+    }
+    const input = request as Record<string, unknown>;
+    const provider = input.provider;
+    if (!provider || typeof provider !== "object" || Array.isArray(provider)) {
+      return failure("Invalid Agent model provider.", "INVALID_PROVIDER");
+    }
+    const providerConfig = provider as Record<string, unknown>;
+    const providerId = providerConfig.id;
+    const endpoint = typeof providerId === "string"
+      ? AGENT_MODEL_ENDPOINTS[providerId]
+      : undefined;
+    const requestedEndpoint = input.endpoint;
+    const configuredEndpoint = input.apiFormat === "responses"
+      ? providerConfig.responsesBaseURL || providerConfig.baseURL
+      : providerConfig.baseURL;
+    if (typeof providerId !== "string" || !endpoint ||
+        !endpoint.urls.includes(String(providerConfig.baseURL)) ||
+        typeof requestedEndpoint !== "string" ||
+        !endpoint.urls.includes(requestedEndpoint) ||
+        configuredEndpoint !== requestedEndpoint ||
+        (input.apiFormat !== "responses" && input.apiFormat !== "chat-completions")) {
+      return failure("The Agent model provider is not allowed.", "INVALID_PROVIDER");
+    }
+    if (!input.payload || typeof input.payload !== "object" || Array.isArray(input.payload)) {
+      return failure("Invalid Agent model payload.", "INVALID_REQUEST");
+    }
+    if (typeof input.requestId !== "string" ||
+        input.requestId.length < 1 || input.requestId.length > 256) {
+      return failure("Invalid Agent model request ID.", "INVALID_REQUEST");
+    }
+
+    const requestKey = `${event.sender.id}:${input.requestId}`;
+    if (this.activeAgentModelRequests.has(requestKey)) {
+      return failure("Duplicate Agent model request ID.", "INVALID_REQUEST");
+    }
+    const controller = new AbortController();
+    this.activeAgentModelRequests.set(requestKey, controller);
+    const onSenderDestroyed = () => controller.abort();
+    event.sender.once("destroyed", onSenderDestroyed);
+    const timeout = setTimeout(() => controller.abort(), 65_000);
+
+    try {
+      const apiKey = await this.app.agentSecrets?.get(providerId) || "";
+      if (endpoint.requiresApiKey && !apiKey) {
+        return failure("The provider API key is not configured.", "AUTH_ERROR", 401);
+      }
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "User-Agent": providerId === "opencode"
+          ? "nce-agent/0.1.0"
+          : "nce-agent/0.0.1",
+      };
+      const requestHeaders = providerConfig.requestHeaders;
+      if (requestHeaders && typeof requestHeaders === "object" && !Array.isArray(requestHeaders)) {
+        for (const [name, value] of Object.entries(requestHeaders)) {
+          if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name) ||
+              ["authorization", "content-type", "host", "content-length"].includes(name.toLowerCase()) ||
+              (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") ||
+              /[\r\n]/.test(String(value))) continue;
+          headers[name] = String(value);
+        }
+      }
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+      const sessionHeader = providerConfig.sessionHeader;
+      if (typeof sessionHeader === "string" &&
+          /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(sessionHeader) &&
+          typeof input.sessionId === "string" && input.sessionId.length > 0 &&
+          input.sessionId.length <= 256 && !/[\r\n]/.test(input.sessionId)) {
+        headers[sessionHeader] = input.sessionId;
+      }
+
+      const response = await fetch(requestedEndpoint, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(input.payload),
+        signal: controller.signal,
+      });
+      const responseText = await response.text();
+      let body: unknown = responseText;
+      try {
+        body = responseText ? JSON.parse(responseText) : null;
+      } catch {}
+
+      const responseHeaders: Record<string, string> = {};
+      response.headers.forEach((value, name) => {
+        responseHeaders[name] = value;
+      });
+      const responseInfo = {
+        status: response.status,
+        headers: responseHeaders,
+      };
+      if (!response.ok) {
+        const providerError = body && typeof body === "object" && "error" in body
+          ? (body as Record<string, unknown>).error
+          : body;
+        return {
+          success: false,
+          status: response.status,
+          error: providerError || {
+            message: `Model request failed (${response.status})`,
+          },
+          body,
+          response: responseInfo,
+        };
+      }
+      return body;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code || "")
+        : "NETWORK_ERROR";
+      return {
+        success: false,
+        error: { message, code: code || "NETWORK_ERROR" },
+      };
+    } finally {
+      clearTimeout(timeout);
+      event.sender.removeListener("destroyed", onSenderDestroyed);
+      this.activeAgentModelRequests.delete(requestKey);
+    }
+  }
+
+  private cancelAgentModelRequest(
+    event: IpcMainInvokeEvent,
+    requestId: unknown,
+  ): boolean {
+    if (typeof requestId !== "string" || requestId.length < 1 || requestId.length > 256) {
+      return false;
+    }
+    const controller = this.activeAgentModelRequests.get(
+      `${event.sender.id}:${requestId}`,
+    );
+    if (!controller) return false;
+    controller.abort();
+    return true;
   }
 
   async setSetting(key: unknown, value: unknown) {

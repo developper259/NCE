@@ -26,6 +26,7 @@ const AgentProviderCatalog = {
       id: "opencode",
       name: "OpenCode Go",
       baseURL: "https://opencode.ai/zen/go/v1/chat/completions",
+      responsesBaseURL: "https://opencode.ai/zen/go/v1/responses",
 
       requiresApiKey: true,
       supportsTools: true,
@@ -39,19 +40,21 @@ const AgentProviderCatalog = {
 
       defaultModel: "kimi-k2.7-code",
 
-      fallbackModels: ["glm-5.3-flash", "kimi-k3", "deepseek-v4.1-flash"],
+      fallbackModels: ["gpt-6-luna", "kimi-k3", "deepseek-v4.1-flash"],
 
       models: {
         "kimi-k2.7-code": {
           id: "kimi-k2.7-code",
           name: "Kimi K2.7 Code",
+          apiFormat: "chat-completions",
           contextWindow: 262144,
           maxOutputTokens: 32768,
         },
 
-        "glm-5.3-flash": {
-          id: "glm-5.3-flash",
-          name: "GLM-5.3 Flash",
+        "gpt-6-luna": {
+          id: "gpt-6-luna",
+          name: "GPT 6 luna",
+          apiFormat: "responses",
           contextWindow: 1000000,
           maxOutputTokens: 131072,
         },
@@ -59,6 +62,7 @@ const AgentProviderCatalog = {
         "kimi-k3": {
           id: "kimi-k3",
           name: "Kimi K3",
+          apiFormat: "chat-completions",
           contextWindow: 1048576,
           maxOutputTokens: 131072,
         },
@@ -66,6 +70,7 @@ const AgentProviderCatalog = {
         "deepseek-v4.1-flash": {
           id: "deepseek-v4.1-flash",
           name: "DeepSeek V4.1 Flash",
+          apiFormat: "chat-completions",
           contextWindow: 1048576,
           maxOutputTokens: 131072,
         },
