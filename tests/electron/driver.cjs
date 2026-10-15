@@ -3004,7 +3004,7 @@ app.whenReady().then(() => {
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0");
           pressTerminalInterrupt();
-          await waitForTypedInput("nce_shift_arrow\u0003", "Ctrl+C to discard the selected test command");
+          await waitForTypedInput("\u0003", "Ctrl+C to discard the selected test command");
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
 
