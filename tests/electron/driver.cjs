@@ -3058,30 +3058,6 @@ app.whenReady().then(() => {
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
-          terminalStage = "printable characters, Backspace, navigation, and Tab";
-          await typePhysicalText("nce_special_!?");
-          sendPhysicalKey("Backspace");
-          sendPhysicalKey("Left");
-          sendPhysicalKey("Right");
-          sendPhysicalKey("Up");
-          sendPhysicalKey("Down");
-          sendPhysicalKey("Home");
-          sendPhysicalKey("End");
-          sendPhysicalKey("Tab");
-          const specialInput = "nce_special_!?\u001b[D\u001b[C\u001b[A\u001b[B\u001b[H\u001b[F\t";
-          await waitForTypedInput(specialInput, "xterm to forward ordinary, special, editing, and navigation keys once");
-          const specialKeys = await run('window.__nceTerminalKeyEvents.map(event => event.key)');
-          for (const key of ["n", "_", "!", "?", "Backspace", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Tab"])
-            assert.ok(specialKeys.includes(key), `the real ${key} keydown reaches the terminal`);
-          assert.equal(openFolderDialogCalls, 0,
-            "ordinary, special, navigation, and Tab input never opens the folder picker");
-          await interruptAndWaitForFreshShellLine(
-            `${specialInput}\u0003`,
-            "Ctrl+C to clear the terminal navigation input",
-          );
-
-          ptyInputData.length = 0;
-          await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
           const command = 'echo "nce_space_input_hello  nce_space_input_world"';
           terminalStage = "physical command text containing consecutive spaces";
           await typePhysicalText(command);
@@ -3188,6 +3164,28 @@ app.whenReady().then(() => {
             "Ctrl+C after terminal paste to interrupt the shell line",
           );
           traceStep("configured terminal Select All, Copy, Cut and Paste shortcuts passed");
+
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
+          terminalStage = "printable characters, Backspace, navigation, and Tab";
+          await typePhysicalText("nce_special_!?");
+          sendPhysicalKey("Backspace");
+          sendPhysicalKey("Left");
+          sendPhysicalKey("Right");
+          sendPhysicalKey("Up");
+          sendPhysicalKey("Down");
+          sendPhysicalKey("Home");
+          sendPhysicalKey("End");
+          sendPhysicalKey("Tab");
+          const specialInput = "nce_special_!?\u001b[D\u001b[C\u001b[A\u001b[B\u001b[H\u001b[F\t";
+          await waitForTypedInput(specialInput, "xterm to forward ordinary, special, editing, and navigation keys once");
+          const specialKeys = await run('window.__nceTerminalKeyEvents.map(event => event.key)');
+          for (const key of ["n", "_", "!", "?", "Backspace", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Tab"])
+            assert.ok(specialKeys.includes(key), `the real ${key} keydown reaches the terminal`);
+          assert.equal(openFolderDialogCalls, 0,
+            "ordinary, special, navigation, and Tab input never opens the folder picker");
+          pressTerminalInterrupt();
+          await waitForTypedInput(`${specialInput}\u0003`, "Ctrl+C to interrupt the shell navigation input");
 
           await run(`SETTINGS_SET("keybindings.open_folder", "Ctrl+Shift+O")`);
           terminalStage = "explicit Ctrl+Shift+O shortcut from terminal focus";
