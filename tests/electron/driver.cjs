@@ -2048,15 +2048,42 @@ app.whenReady().then(() => {
           await restoreSidebarTestWindow();
         }
 
-        const thumbCenterOffset = tabScrollState.thumbWidth / 2;
-        const dragY = Math.round(tabScrollState.thumbTop + tabScrollState.thumbHeight / 2);
-        const thumbCenterX = Math.round(tabScrollState.thumbLeft + thumbCenterOffset);
+        const tabThumb = await run(`(() => {
+          const scroller = editor.tabManager.tabScroller.hScroller;
+          const rect = scroller.itemOBJ.getBoundingClientRect();
+          return {
+            active: scroller.active,
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            visible: rect.width > 0 && rect.height > 0,
+          };
+        })()`);
+        assert.equal(tabThumb.active, true);
+        assert.equal(tabThumb.visible, true,
+          "the tab thumb is measured after restoring the window layout");
+        const dragY = Math.round(tabThumb.top + tabThumb.height / 2);
+        const thumbCenterX = Math.round(tabThumb.left + tabThumb.width / 2);
+        if (process.platform === "darwin") app.focus({ steal: true });
         win.focus();
+        await waitForCondition(
+          () => win.isFocused() && win.webContents.isFocused(),
+          { description: "the Electron window to own pointer focus before the tab thumb drag" },
+        );
         win.webContents.sendInputEvent({
           type: "mouseMove",
           x: thumbCenterX,
           y: dragY,
         });
+        await waitForCondition(
+          async () =>
+            (await run("editor.tabManager.tabScroller.hScroller.itemOBJ.matches(':hover')")) === true,
+          {
+            timeout: 3000,
+            description: "the tab thumb to receive pointer hover after the window layout is restored",
+          },
+        );
         win.webContents.sendInputEvent({
           type: "mouseDown",
           x: thumbCenterX,
