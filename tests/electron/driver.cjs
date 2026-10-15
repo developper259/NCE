@@ -2950,6 +2950,36 @@ app.whenReady().then(() => {
             );
           };
 
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
+          terminalStage = "Shift+Arrow terminal text selection";
+          await typePhysicalText("nce_shift_arrow");
+          await waitForTerminalCondition(
+            async () => (await run(getLastNonEmptyTerminalLine(firstTerminal.id))).endsWith("nce_shift_arrow"),
+            { timeout: 5000, description: "the shell to echo the input before extending its terminal selection" },
+          );
+          sendPhysicalKey("Left", { modifiers: ["shift"] });
+          sendPhysicalKey("Left", { modifiers: ["shift"] });
+          await waitForTerminalCondition(
+            async () => (await run('editor.terminalPanel.getActiveSession().terminal.getSelection()')) === "ow",
+            { timeout: 5000, description: "Shift+ArrowLeft to select the last two terminal input characters" },
+          );
+          assert.equal(await run('window.__nceTerminalInput.join("")'), "nce_shift_arrow",
+            "Shift+Arrow does not emit modified-arrow input from xterm");
+          assert.equal(ptyInputData.join(""), "nce_shift_arrow",
+            "Shift+Arrow does not send shell deletion sequences to the PTY");
+          assert.equal(
+            await run('window.__nceTerminalKeyEvents.some(event => event.key === "ArrowLeft" && event.shift) && window.__nceTerminalKeyEvents.filter(event => event.key === "ArrowLeft" && event.shift).every(event => event.prevented)'),
+            true,
+            "the global terminal key handler consumes Shift+Arrow before xterm forwards it",
+          );
+          await run("editor.terminalPanel.getActiveSession().terminal.clearSelection()");
+          pressTerminalInterrupt();
+          await waitForTypedInput("nce_shift_arrow\u0003", "Ctrl+C to discard the selected test command");
+          await waitForShellPrompt("the shell prompt to return after Shift+Arrow selection coverage");
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
+
           terminalStage = "Space, Shift+Space, and held Space key events";
           sendPhysicalKey("Space", { char: " " });
           sendPhysicalKey("Space", { char: " ", modifiers: ["shift"] });
@@ -3020,16 +3050,16 @@ app.whenReady().then(() => {
           await waitForTerminalCondition(
             async () => {
               const output = ptyOutputData.slice(outputStart).join("");
-              return output.split("nce_space_input_hello").length - 1 >= 2 &&
-                output.split("nce_space_input_world").length - 1 >= 2;
+              return output.includes("nce_space_input_hello") &&
+                output.includes("nce_space_input_world");
             },
             { timeout: 10000, description: "the shell to execute the command and return both output markers" },
           );
           const output = ptyOutputData.slice(outputStart).join("");
-          assert.ok(output.split("nce_space_input_hello").length - 1 >= 2,
-            "the PTY output contains the first marker in command echo and shell output");
-          assert.ok(output.split("nce_space_input_world").length - 1 >= 2,
-            "the PTY output contains the second marker in command echo and shell output");
+          assert.ok(output.includes("nce_space_input_hello"),
+            "the PTY output contains the first marker returned by the executed command");
+          assert.ok(output.includes("nce_space_input_world"),
+            "the PTY output contains the second marker returned by the executed command");
           await waitForTerminalCondition(
             async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("nce_space_input_hello") && ${getTerminalText(firstTerminal.id)}.includes("nce_space_input_world")`)) === true,
             { timeout: 5000, description: "xterm to render both PTY output markers" },

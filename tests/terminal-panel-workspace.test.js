@@ -122,6 +122,42 @@ test("terminal edit shortcuts copy, cut, paste, and select terminal content", as
   assert.equal(panel.handleKeybinding("copy"), false);
 });
 
+test("Shift+Arrow extends terminal buffer selection without sending shell keys", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const selections = [];
+  let clearCalls = 0;
+  const activeBuffer = {
+    baseY: 0,
+    cursorY: 1,
+    cursorX: 5,
+    length: 4,
+    wrapPending: false,
+  };
+  const terminalRecord = record("terminal-shift-selection", "no-workspace", "zsh");
+  terminalRecord.terminal = {
+    cols: 8,
+    buffer: { active: activeBuffer },
+    select(...args) { selections.push(args); },
+    clearSelection() { clearCalls++; },
+  };
+  state.sessions.set(terminalRecord.id, terminalRecord);
+  state.activeSessionId = terminalRecord.id;
+
+  assert.equal(panel.handleShiftArrow("ArrowLeft"), true);
+  assert.deepEqual(selections.at(-1), [4, 1, 1]);
+  assert.equal(panel.handleShiftArrow("ArrowLeft"), true);
+  assert.deepEqual(selections.at(-1), [3, 1, 2]);
+  assert.equal(panel.handleShiftArrow("ArrowRight"), true);
+  assert.deepEqual(selections.at(-1), [4, 1, 1]);
+
+  panel.resetKeyboardSelection();
+  assert.equal(panel.handleShiftArrow("ArrowUp"), true);
+  assert.deepEqual(selections.at(-1), [5, 0, 8]);
+  assert.equal(panel.handleShiftArrow("ArrowDown"), true);
+  assert.equal(clearCalls, 1);
+});
+
 test("new terminal instances disable cursor blinking and forward each input event once", async () => {
   const panel = makePanel();
   const writes = [];

@@ -55,6 +55,7 @@ export class TerminalPanel {
       void this.runAction(action);
     };
     this.onOutsidePointerDown = (event) => {
+      if (event.target?.closest?.(".xterm")) this.resetKeyboardSelection();
       if (!this.actionsContainer?.contains(event.target))
         this.closeActionsMenu();
     };
@@ -383,6 +384,7 @@ export class TerminalPanel {
       terminal,
       fitAddon,
       webLinksAddon,
+      keyboardSelection: null,
       wrapper: document.createElement("div"),
       cols: 0,
       rows: 0,
@@ -400,6 +402,7 @@ export class TerminalPanel {
     terminal.open(record.wrapper);
     record.subscriptions.push(terminal.onData((data) => {
       if (!record.id || record.exited || record.disposed || !this.isActive(record)) return;
+      record.keyboardSelection = null;
       void this.editor.api.writeTerminalSession(record.id, record.workspaceKey, data).catch((error) =>
         console.error("[Terminal] Failed to write PTY input", error),
       );
@@ -598,6 +601,7 @@ export class TerminalPanel {
       );
       return;
     }
+    record.keyboardSelection = null;
     record.terminal.write(payload.data, () => {
       void this.editor.api.acknowledgeTerminalOutput(
         payload.sessionId, record.workspaceKey, payload.sequence,
@@ -911,7 +915,10 @@ export class TerminalPanel {
   async runAction(action) {
     const record = this.getActiveSession();
     if (!record || !this.isActive(record)) return false;
-    if (action === "select-all") record.terminal.selectAll();
+    if (action === "select-all") {
+      record.keyboardSelection = null;
+      record.terminal.selectAll();
+    }
     else if (action === "clear") record.terminal.clear();
     else if (action === "copy" || action === "cut") {
       const selection = record.terminal.getSelection();
@@ -954,6 +961,55 @@ export class TerminalPanel {
     }
 
     return false;
+  }
+
+  handleShiftArrow(key) {
+    const record = this.getActiveSession();
+    const terminal = record?.terminal;
+    const buffer = terminal?.buffer?.active;
+    const columns = terminal?.cols;
+    const rows = buffer?.length;
+    if (
+      !record || !this.isActive(record) ||
+      !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(key) ||
+      !Number.isInteger(columns) || columns < 1 ||
+      !Number.isInteger(rows) || rows < 1 ||
+      !Number.isInteger(buffer.cursorX) || !Number.isInteger(buffer.cursorY) ||
+      typeof terminal.select !== "function"
+    ) return false;
+
+    const maxOffset = rows * columns;
+    let selection = record.keyboardSelection;
+    if (selection?.columns !== columns || selection?.buffer !== buffer) {
+      const baseY = Number.isInteger(buffer.baseY) ? buffer.baseY : 0;
+      const row = Math.max(0, Math.min(rows - 1, baseY + buffer.cursorY));
+      const column = Math.max(0, Math.min(columns - 1, buffer.cursorX));
+      const offset = row * columns + column;
+      selection = { anchor: offset, active: offset, columns, buffer };
+    }
+
+    let active = selection.active;
+    if (key === "ArrowLeft") active--;
+    else if (key === "ArrowRight") active++;
+    else if (key === "ArrowUp") active -= columns;
+    else active += columns;
+    active = Math.max(0, Math.min(maxOffset, active));
+
+    record.keyboardSelection = { ...selection, active };
+    if (active === selection.anchor) {
+      terminal.clearSelection?.();
+    } else {
+      const start = Math.min(selection.anchor, active);
+      terminal.select(start % columns, Math.floor(start / columns), Math.abs(active - selection.anchor));
+    }
+    return true;
+  }
+
+  resetKeyboardSelection() {
+    const record = this.getActiveSession();
+    if (!record) return false;
+    record.keyboardSelection = null;
+    return true;
   }
 
   scheduleFit({ focus = false } = {}) {

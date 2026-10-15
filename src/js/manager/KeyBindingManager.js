@@ -337,6 +337,22 @@ class KeyBindingManager {
     const terminalElement = e.target?.closest?.(".xterm");
     if (terminalElement?.classList?.contains("xterm")) {
       if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(eventKey)
+      ) {
+        if (this.editor.terminalPanel?.handleShiftArrow?.(eventKey)) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
+      if (!["Shift", "Control", "Meta", "Alt"].includes(eventKey))
+        this.editor.terminalPanel?.resetKeyboardSelection?.();
+
+      if (
         this.canDispatchTerminalShortcut(e, shortcutKey) &&
         this.terminalEditActions.has(binding?.action)
       ) {

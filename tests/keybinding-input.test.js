@@ -410,6 +410,41 @@ test("terminal edit shortcuts dispatch to xterm and ordinary keys stay terminal 
   assert.equal(interrupt.defaultPrevented, false, "Ctrl+C without a selection remains a shell interrupt");
 });
 
+test("Shift+Arrow selects terminal output while unmodified arrows remain shell input", () => {
+  const calls = [];
+  const terminalPanel = {
+    handleShiftArrow(key) { calls.push(["select", key]); return true; },
+    resetKeyboardSelection() { calls.push(["reset"]); },
+  };
+  const { manager } = fixture(
+    { action: "move_left", in_editor: false },
+    { terminalPanel },
+  );
+  const shifted = keyboardEvent(terminalTarget(), {
+    key: "ArrowLeft",
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: true,
+  });
+
+  manager.onKey(shifted);
+
+  assert.deepEqual(calls, [["select", "ArrowLeft"]]);
+  assert.equal(shifted.defaultPrevented, true);
+  assert.equal(shifted.propagationStopped, true);
+
+  const ordinary = keyboardEvent(terminalTarget(), {
+    key: "ArrowLeft",
+    metaKey: false,
+    ctrlKey: false,
+  });
+  manager.onKey(ordinary);
+
+  assert.deepEqual(calls, [["select", "ArrowLeft"], ["reset"]]);
+  assert.equal(ordinary.defaultPrevented, false);
+  assert.equal(ordinary.propagationStopped, false);
+});
+
 test("native menu edit actions stay scoped to a focused terminal", () => {
   const terminalActions = [];
   const { manager, calls } = fixture(
