@@ -2996,16 +2996,24 @@ app.whenReady().then(() => {
             async () => (await run('editor.terminalPanel.getActiveSession().terminal.getSelection()')) === "ow",
             { timeout: 5000, description: "Shift+ArrowLeft to select the last two terminal input characters" },
           );
-          assert.equal(await run('window.__nceTerminalInput.join("")'), "nce_shift_arrow",
-            "Shift+Arrow does not emit modified-arrow input from xterm");
-          assert.equal(ptyInputData.join(""), "nce_shift_arrow",
-            "Shift+Arrow does not send shell deletion sequences to the PTY");
+          const shiftedArrowInput = "nce_shift_arrow\u001b[D\u001b[D";
+          await waitForTerminalCondition(
+            async () => (await run('window.__nceTerminalInput.join("")')) === shiftedArrowInput &&
+              ptyInputData.join("") === shiftedArrowInput,
+            { timeout: 5000, description: "plain left arrows to reach the PTY and move the shell caret" },
+          );
+          assert.equal(await run('window.__nceTerminalInput.join("")'), shiftedArrowInput,
+            "Shift+Arrow sends plain arrow input without the Shift modifier");
+          assert.equal(ptyInputData.join(""), shiftedArrowInput,
+            "Shift+Arrow moves the shell caret without sending deletion sequences");
           assert.equal(
             await run('window.__nceTerminalKeyEvents.some(event => event.key === "ArrowLeft" && event.shift) && window.__nceTerminalKeyEvents.filter(event => event.key === "ArrowLeft" && event.shift).every(event => event.prevented)'),
             true,
             "the global terminal key handler consumes Shift+Arrow before xterm forwards it",
           );
           await run("editor.terminalPanel.getActiveSession().terminal.clearSelection()");
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0");
           pressTerminalInterrupt();
           await waitForTypedInput("nce_shift_arrow\u0003", "Ctrl+C to discard the selected test command");
           await waitForShellPrompt("the shell prompt to return after Shift+Arrow selection coverage");

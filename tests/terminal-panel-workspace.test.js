@@ -122,10 +122,11 @@ test("terminal edit shortcuts copy, cut, paste, and select terminal content", as
   assert.equal(panel.handleKeybinding("copy"), false);
 });
 
-test("Shift+Arrow extends terminal buffer selection without sending shell keys", () => {
+test("Shift+Arrow extends terminal selection and sends plain arrows to move the shell caret", () => {
   const panel = makePanel();
   const state = panel.currentState;
   const selections = [];
+  const inputs = [];
   let clearCalls = 0;
   const activeBuffer = {
     baseY: 0,
@@ -137,9 +138,11 @@ test("Shift+Arrow extends terminal buffer selection without sending shell keys",
   const terminalRecord = record("terminal-shift-selection", "no-workspace", "zsh");
   terminalRecord.terminal = {
     cols: 8,
+    modes: { applicationCursorKeysMode: false },
     buffer: { active: activeBuffer },
     select(...args) { selections.push(args); },
     clearSelection() { clearCalls++; },
+    input(data) { inputs.push(data); },
   };
   state.sessions.set(terminalRecord.id, terminalRecord);
   state.activeSessionId = terminalRecord.id;
@@ -156,6 +159,7 @@ test("Shift+Arrow extends terminal buffer selection without sending shell keys",
   assert.deepEqual(selections.at(-1), [5, 0, 8]);
   assert.equal(panel.handleShiftArrow("ArrowDown"), true);
   assert.equal(clearCalls, 1);
+  assert.deepEqual(inputs, ["\u001b[D", "\u001b[D", "\u001b[C", "\u001b[A", "\u001b[B"]);
 });
 
 test("new terminal instances disable cursor blinking and forward each input event once", async () => {

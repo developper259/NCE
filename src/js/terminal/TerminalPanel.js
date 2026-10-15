@@ -601,8 +601,12 @@ export class TerminalPanel {
       );
       return;
     }
-    record.keyboardSelection = null;
+    const hasPendingCaretMove = record.keyboardSelection?.pendingCaretMoves > 0;
+    if (!hasPendingCaretMove) record.keyboardSelection = null;
     record.terminal.write(payload.data, () => {
+      const selection = record.keyboardSelection;
+      if (selection?.pendingCaretMoves > 0)
+        this.syncKeyboardSelectionToCursor(record);
       void this.editor.api.acknowledgeTerminalOutput(
         payload.sessionId, record.workspaceKey, payload.sequence,
       ).catch((error) => console.error("[Terminal] Failed to acknowledge PTY output", error));
@@ -995,13 +999,53 @@ export class TerminalPanel {
     else active += columns;
     active = Math.max(0, Math.min(maxOffset, active));
 
-    record.keyboardSelection = { ...selection, active };
+    const arrowData = {
+      ArrowLeft: terminal.modes?.applicationCursorKeysMode ? "\u001bOD" : "\u001b[D",
+      ArrowRight: terminal.modes?.applicationCursorKeysMode ? "\u001bOC" : "\u001b[C",
+      ArrowUp: terminal.modes?.applicationCursorKeysMode ? "\u001bOA" : "\u001b[A",
+      ArrowDown: terminal.modes?.applicationCursorKeysMode ? "\u001bOB" : "\u001b[B",
+    }[key];
+    // Shift is used for xterm's visual selection. Send the matching plain arrow
+    // to the PTY as well, so the shell's editing caret follows the selection.
+    terminal.input?.(arrowData);
+    record.keyboardSelection = {
+      ...selection,
+      active,
+      pendingCaretMoves: (selection.pendingCaretMoves || 0) + 1,
+    };
+    this.applyKeyboardSelection(record, record.keyboardSelection);
+    return true;
+  }
+
+  applyKeyboardSelection(record, selection) {
+    const { terminal } = record;
+    const { anchor, active, columns } = selection;
     if (active === selection.anchor) {
       terminal.clearSelection?.();
     } else {
-      const start = Math.min(selection.anchor, active);
+      const start = Math.min(anchor, active);
       terminal.select(start % columns, Math.floor(start / columns), Math.abs(active - selection.anchor));
     }
+  }
+
+  syncKeyboardSelectionToCursor(record) {
+    const selection = record.keyboardSelection;
+    const buffer = record.terminal?.buffer?.active;
+    if (!selection || selection.buffer !== buffer || selection.pendingCaretMoves < 1) return false;
+
+    const rows = buffer.length;
+    if (!Number.isInteger(rows) || rows < 1 ||
+        !Number.isInteger(buffer.cursorX) || !Number.isInteger(buffer.cursorY)) return false;
+    const baseY = Number.isInteger(buffer.baseY) ? buffer.baseY : 0;
+    const row = Math.max(0, Math.min(rows - 1, baseY + buffer.cursorY));
+    const column = Math.max(0, Math.min(selection.columns - 1, buffer.cursorX));
+    const active = Math.max(0, Math.min(rows * selection.columns, row * selection.columns + column));
+    record.keyboardSelection = {
+      ...selection,
+      active,
+      pendingCaretMoves: selection.pendingCaretMoves - 1,
+    };
+    this.applyKeyboardSelection(record, record.keyboardSelection);
     return true;
   }
 
