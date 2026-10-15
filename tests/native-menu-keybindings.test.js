@@ -14,6 +14,7 @@ function createMenuHarness(overrides = {}) {
   const openRecentCalls = [];
   const openWorkspaceCalls = [];
   const rendererMessages = [];
+  const rendererScripts = [];
   let clearRecentCalls = 0;
 
   class Menu {
@@ -81,7 +82,13 @@ function createMenuHarness(overrides = {}) {
     { process: { platform: "darwin" } },
   );
   const appMenu = new AppMenu(
-    { webContents: { send: (...args) => rendererMessages.push(args) } },
+    { webContents: {
+      send: (...args) => rendererMessages.push(args),
+      executeJavaScript: async (script) => {
+        rendererScripts.push(script);
+        return false;
+      },
+    } },
     {
       app: {
         settings: { get: (key) => values.get(key) },
@@ -118,6 +125,7 @@ function createMenuHarness(overrides = {}) {
     openRecentCalls,
     openWorkspaceCalls,
     rendererMessages,
+    rendererScripts,
     get clearRecentCalls() { return clearRecentCalls; },
   };
 }
@@ -208,6 +216,24 @@ test("native menu actions are routed back through the renderer keybinding manage
     ["keybinding-action-requested", "save_as", {}],
     ["keybinding-action-requested", "open_settings", {}],
   ]);
+});
+
+test("native edit menu actions defer xterm textareas to terminal keybindings", async () => {
+  const { appMenu, rendererMessages, rendererScripts } = createMenuHarness();
+
+  for (const action of ["undo", "redo", "cut", "copy", "selectAll", "paste"]) {
+    await appMenu.editAction(action);
+  }
+
+  assert.deepEqual(
+    rendererMessages.map(([, action]) => action),
+    ["undo", "redo", "cut", "copy", "select_all", "paste"],
+  );
+  assert.ok(rendererScripts.length >= 7, "the menu checks both edit and paste paths");
+  assert.ok(
+    rendererScripts.every((script) => script.includes('closest?.(".xterm")')),
+    "native menu scripts detect xterm before handling its helper textarea as a regular input",
+  );
 });
 
 test("native menu rebuilds from current keybindings and preserves static items", () => {

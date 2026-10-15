@@ -913,7 +913,7 @@ export class TerminalPanel {
     if (!record || !this.isActive(record)) return false;
     if (action === "select-all") record.terminal.selectAll();
     else if (action === "clear") record.terminal.clear();
-    else if (action === "copy") {
+    else if (action === "copy" || action === "cut") {
       const selection = record.terminal.getSelection();
       if (selection) {
         try { await this.editor.api.writeClipboardText(selection); }
@@ -929,6 +929,31 @@ export class TerminalPanel {
     }
     if (this.isActive(record)) record.terminal.focus();
     return true;
+  }
+
+  handleKeybinding(action) {
+    const record = this.getActiveSession();
+    if (!record || !this.isActive(record)) return false;
+
+    if (action === "copy" || action === "cut") {
+      // Terminal output cannot be removed. Cut copies the selection while
+      // preserving the scrollback buffer.
+      if (!record.terminal.getSelection()) return false;
+      void this.runAction(action);
+      return true;
+    }
+
+    if (action === "paste") {
+      void this.runAction(action);
+      return true;
+    }
+
+    if (action === "select_all") {
+      void this.runAction("select-all");
+      return true;
+    }
+
+    return false;
   }
 
   scheduleFit({ focus = false } = {}) {

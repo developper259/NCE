@@ -79,6 +79,49 @@ function record(id, workspaceKey, baseLabel, customLabel = null) {
   };
 }
 
+test("terminal edit shortcuts copy, cut, paste, and select terminal content", async () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const clipboardWrites = [];
+  const pasted = [];
+  let selectedText = "selected terminal output";
+  let selectAllCalls = 0;
+  const terminalRecord = record("terminal-edit-shortcuts", "no-workspace", "zsh");
+  terminalRecord.terminal = {
+    output: "terminal output remains unchanged",
+    getSelection: () => selectedText,
+    selectAll() { selectAllCalls++; },
+    paste(text) { pasted.push(text); },
+    focus() {},
+  };
+  state.sessions.set(terminalRecord.id, terminalRecord);
+  state.activeSessionId = terminalRecord.id;
+  panel.editor.api.writeClipboardText = async (text) => clipboardWrites.push(text);
+  panel.editor.api.readClipboardText = async () => "clipboard paste";
+
+  assert.equal(panel.handleKeybinding("copy"), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(clipboardWrites, ["selected terminal output"]);
+
+  assert.equal(panel.handleKeybinding("cut"), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(clipboardWrites, [
+    "selected terminal output",
+    "selected terminal output",
+  ]);
+  assert.equal(terminalRecord.terminal.output, "terminal output remains unchanged");
+
+  assert.equal(panel.handleKeybinding("paste"), true);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(pasted, ["clipboard paste"]);
+
+  assert.equal(panel.handleKeybinding("select_all"), true);
+  assert.equal(selectAllCalls, 1);
+
+  selectedText = "";
+  assert.equal(panel.handleKeybinding("copy"), false);
+});
+
 test("new terminal instances disable cursor blinking and forward each input event once", async () => {
   const panel = makePanel();
   const writes = [];

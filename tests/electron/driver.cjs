@@ -1,4 +1,4 @@
-const { app, dialog, screen, session } = require("electron");
+const { app, clipboard, dialog, screen, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
@@ -2764,6 +2764,8 @@ app.whenReady().then(() => {
             buffer.getLine(index)?.translateToString(true) || "",
           ).join("\\n") : "";
         })()`;
+        const getLastNonEmptyTerminalLine = (id) =>
+          `(() => ${getTerminalText(id)}.split("\\n").map(line => line.trim()).filter(Boolean).at(-1) || "")()`;
         assert.equal(await run(`(() => {
           const primary = getComputedStyle(editor.cD);
           const secondary = getComputedStyle(editor.multiCursorCaretOutput);
@@ -2856,6 +2858,17 @@ app.whenReady().then(() => {
             async () => (await run(`${getTerminalText(firstTerminal.id)}.trim().length > 0`)) === true,
             { timeout: 10000, description: "the selected shell to render its initial prompt" },
           );
+          const initialShellPrompt = await run(
+            getLastNonEmptyTerminalLine(firstTerminal.id),
+          );
+          assert.ok(initialShellPrompt, "the shell has a visible prompt before keyboard input");
+          const waitForShellPrompt = (description) =>
+            waitForTerminalCondition(
+              async () =>
+                (await run(getLastNonEmptyTerminalLine(firstTerminal.id))) ===
+                initialShellPrompt,
+              { timeout: 10000, description },
+            );
           await run(`(() => {
             const terminal = editor.terminalPanel.getActiveSession().terminal;
             window.__nceTerminalInput = [];
@@ -2898,20 +2911,30 @@ app.whenReady().then(() => {
             }
             win.webContents.sendInputEvent({ type: "keyUp", keyCode, modifiers });
           };
-          const typePhysicalText = (value) => {
+          const typePhysicalText = async (value) => {
+            let expected = "";
             for (const character of value) {
               if (character === " ") {
                 sendPhysicalKey("Space", { char: " " });
-                continue;
+              } else {
+                const shifted = "!@#$%^&*()_+{}|:\"<>?~".includes(character);
+                const keyCode = /^[a-z]$/i.test(character)
+                  ? character.toUpperCase()
+                  : character;
+                sendPhysicalKey(keyCode, {
+                  char: character,
+                  modifiers: shifted ? ["shift"] : [],
+                });
               }
-              const shifted = "!@#$%^&*()_+{}|:\"<>?~".includes(character);
-              const keyCode = /^[a-z]$/i.test(character)
-                ? character.toUpperCase()
-                : character;
-              sendPhysicalKey(keyCode, {
-                char: character,
-                modifiers: shifted ? ["shift"] : [],
-              });
+              expected += character;
+              await waitForTerminalCondition(
+                async () => (await run('window.__nceTerminalInput.join("")')) === expected,
+                { timeout: 5000, description: `physical ${JSON.stringify(character)} key to reach xterm` },
+              );
+              await waitForTerminalCondition(
+                async () => ptyInputData.join("") === expected,
+                { timeout: 5000, description: `physical ${JSON.stringify(character)} key to reach the PTY` },
+              );
             }
           };
           const pressTerminalInterrupt = () =>
@@ -2941,11 +2964,12 @@ app.whenReady().then(() => {
             "ordinary and held Space never open the folder picker");
           pressTerminalInterrupt();
           await waitForTypedInput("     \u0003", "Ctrl+C to clear the terminal input line");
+          await waitForShellPrompt("the shell prompt to return after the empty Ctrl+C");
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
           terminalStage = "printable characters, Backspace, navigation, and Tab";
-          typePhysicalText("nce_special_!?");
+          await typePhysicalText("nce_special_!?");
           sendPhysicalKey("Backspace");
           sendPhysicalKey("Left");
           sendPhysicalKey("Right");
@@ -2963,12 +2987,13 @@ app.whenReady().then(() => {
             "ordinary, special, navigation, and Tab input never opens the folder picker");
           pressTerminalInterrupt();
           await waitForTypedInput(`${specialInput}\u0003`, "Ctrl+C to clear the terminal navigation input");
+          await waitForShellPrompt("the shell prompt to return after navigation input");
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
           const command = "echo nce_space_input_hello  nce_space_input_world";
           terminalStage = "physical command text containing consecutive spaces";
-          typePhysicalText(command);
+          await typePhysicalText(command);
           await waitForTerminalCondition(
             async () => (await run('window.__nceTerminalInput.join("")')) === command,
             { timeout: 5000, description: "xterm to emit the exact physically typed command once" },
@@ -2982,22 +3007,29 @@ app.whenReady().then(() => {
             async () => ptyInputData.join("") === command,
             { timeout: 5000, description: "the exact xterm input to reach the main-process PTY" },
           );
+          await waitForTerminalCondition(
+            async () => {
+              const lastLine = await run(getLastNonEmptyTerminalLine(firstTerminal.id));
+              return lastLine.endsWith(command);
+            },
+            { timeout: 5000, description: "the shell to render the full typed command before Enter" },
+          );
           const outputStart = ptyOutputData.length;
           terminalStage = "command Enter key";
           sendPhysicalKey("Enter");
           await waitForTerminalCondition(
             async () => {
               const output = ptyOutputData.slice(outputStart).join("");
-              return output.includes("nce_space_input_hello") &&
-                output.includes("nce_space_input_world");
+              return output.split("nce_space_input_hello").length - 1 >= 2 &&
+                output.split("nce_space_input_world").length - 1 >= 2;
             },
             { timeout: 10000, description: "the shell to execute the command and return both output markers" },
           );
           const output = ptyOutputData.slice(outputStart).join("");
-          assert.ok(output.includes("nce_space_input_hello"),
-            "the PTY output contains the first shell-independent marker");
-          assert.ok(output.includes("nce_space_input_world"),
-            "the PTY output contains the second shell-independent marker");
+          assert.ok(output.split("nce_space_input_hello").length - 1 >= 2,
+            "the PTY output contains the first marker in command echo and shell output");
+          assert.ok(output.split("nce_space_input_world").length - 1 >= 2,
+            "the PTY output contains the second marker in command echo and shell output");
           await waitForTerminalCondition(
             async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("nce_space_input_hello") && ${getTerminalText(firstTerminal.id)}.includes("nce_space_input_world")`)) === true,
             { timeout: 5000, description: "xterm to render both PTY output markers" },
@@ -3006,6 +3038,65 @@ app.whenReady().then(() => {
             "the PTY receives the exact command and Enter exactly once");
           assert.equal(openFolderDialogCalls, 0,
             "Space in terminal input never opens the folder picker");
+
+          const platformModifier = process.platform === "darwin" ? "meta" : "control";
+          const pressConfiguredShortcut = (key) =>
+            sendPhysicalKey(key, { modifiers: [platformModifier] });
+          const terminalRecord = `editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)})`;
+          terminalStage = "configured Select All, Copy, and Cut shortcuts in xterm";
+          await run(`${terminalRecord}.terminal.clearSelection(); ${terminalRecord}.terminal.selectAll()`);
+          pressConfiguredShortcut("A");
+          await waitForTerminalCondition(
+            async () => (await run(`Boolean(${terminalRecord}.terminal.getSelection())`)) === true,
+            { timeout: 5000, description: "the configured Select All shortcut to select terminal output" },
+          );
+          clipboard.clear();
+          pressConfiguredShortcut("C");
+          await waitForTerminalCondition(
+            async () => clipboard.readText().includes("nce_space_input_hello"),
+            { timeout: 5000, description: "the configured Copy shortcut to copy selected terminal output" },
+          );
+          assert.ok(clipboard.readText().includes("nce_space_input_world"),
+            "Copy places the selected terminal text on the system clipboard");
+          const terminalBufferBeforeCut = await run(getTerminalText(firstTerminal.id));
+          clipboard.clear();
+          pressConfiguredShortcut("X");
+          await waitForTerminalCondition(
+            async () => clipboard.readText().includes("nce_space_input_hello") &&
+              clipboard.readText().includes("nce_space_input_world"),
+            { timeout: 5000, description: "the configured Cut shortcut to copy selected terminal output" },
+          );
+          assert.equal(await run(getTerminalText(firstTerminal.id)), terminalBufferBeforeCut,
+            "Cut copies terminal output without deleting scrollback");
+
+          terminalStage = "configured Paste shortcut in xterm";
+          clipboard.writeText("nce_clipboard_paste");
+          ptyInputData.length = 0;
+          await run("window.__nceTerminalInput.length = 0");
+          pressConfiguredShortcut("V");
+          await waitForTerminalCondition(
+            async () => {
+              const input = await run('window.__nceTerminalInput.join("")');
+              return input.includes("nce_clipboard_paste") &&
+                input.split("nce_clipboard_paste").length === 2;
+            },
+            { timeout: 5000, description: "the configured Paste shortcut to send clipboard text through xterm once" },
+          );
+          const pastedInput = await run('window.__nceTerminalInput.join("")');
+          await waitForTerminalCondition(
+            async () => ptyInputData.join("").includes("nce_clipboard_paste") &&
+              ptyInputData.join("").split("nce_clipboard_paste").length === 2,
+            { timeout: 5000, description: "the exact configured paste data to reach the PTY once" },
+          );
+          assert.equal(ptyInputData.join(""), pastedInput,
+            "the PTY receives the same paste bytes that xterm emitted");
+          pressTerminalInterrupt();
+          await waitForTerminalCondition(
+            async () => ptyInputData.join("") === `${pastedInput}\u0003`,
+            { timeout: 5000, description: "Ctrl+C after terminal paste to interrupt the shell line" },
+          );
+          await waitForShellPrompt("the shell prompt to return after pasted input is interrupted");
+          traceStep("configured terminal Select All, Copy, Cut and Paste shortcuts passed");
 
           await run(`SETTINGS_SET("keybindings.open_folder", "Ctrl+Shift+O")`);
           terminalStage = "explicit Ctrl+Shift+O shortcut from terminal focus";

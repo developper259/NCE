@@ -646,6 +646,12 @@ export class AppMenu {
           element instanceof HTMLElement &&
           element.isContentEditable;
 
+        const isTerminal = Boolean(element?.closest?.(".xterm"));
+
+        if (isTerminal) {
+          return false;
+        }
+
         const nativeInput =
           isInput ||
           isTextarea ||
@@ -818,6 +824,10 @@ export class AppMenu {
         const isEditable =
           element instanceof HTMLElement &&
           element.isContentEditable;
+
+        if (element?.closest?.(".xterm")) {
+          return false;
+        }
 
         if (
           !isInput &&

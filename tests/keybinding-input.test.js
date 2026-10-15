@@ -42,6 +42,7 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
       addEvent() {},
       document: {
         hasFocus: () => true,
+        activeElement: options.activeElement || null,
         querySelector: () => null,
         execCommand: () => options.execCommandResult !== false,
       },
@@ -357,9 +358,28 @@ test("Meta+V pastes into the focused native input through KeyBindingManager", as
   assert.equal(event.defaultPrevented, true);
 });
 
-test("terminal focus leaves Ctrl+C, Ctrl+V and ordinary keys to xterm", () => {
-  for (const [action, key] of [["copy", "c"], ["paste", "v"], ["editor_action", "ArrowUp"]]) {
-    const { manager, calls } = fixture({ action, in_editor: true }, {}, `Ctrl+${key}`);
+test("terminal edit shortcuts dispatch to xterm and ordinary keys stay terminal input", () => {
+  for (const [action, key] of [
+    ["copy", "c"],
+    ["cut", "x"],
+    ["paste", "v"],
+    ["select_all", "a"],
+  ]) {
+    const terminalActions = [];
+    const activeElement = terminalTarget();
+    const { manager, calls } = fixture(
+      { action, in_editor: true },
+      {
+        activeElement,
+        terminalPanel: {
+          handleKeybinding(terminalAction) {
+            terminalActions.push(terminalAction);
+            return true;
+          },
+        },
+      },
+      `Ctrl+${key}`,
+    );
     const event = keyboardEvent({ closest: (selector) => selector === ".xterm"
       ? { classList: { contains: (name) => name === "xterm" } }
       : null }, {
@@ -368,9 +388,43 @@ test("terminal focus leaves Ctrl+C, Ctrl+V and ordinary keys to xterm", () => {
       metaKey: false,
     });
     manager.onKey(event);
-    assert.deepEqual(calls, [], `${action} must stay in xterm`);
-    assert.equal(event.defaultPrevented, false);
+    assert.deepEqual(terminalActions, [action]);
+    assert.deepEqual(calls, [], `${action} must not run against the editor`);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(event.propagationStopped, true);
   }
+
+  const terminalActions = [];
+  const { manager } = fixture(
+    { action: "copy", in_editor: true },
+    { terminalPanel: { handleKeybinding(action) { terminalActions.push(action); return false; } } },
+    "Ctrl+c",
+  );
+  const interrupt = keyboardEvent(terminalTarget(), {
+    key: "c",
+    ctrlKey: true,
+    metaKey: false,
+  });
+  manager.onKey(interrupt);
+  assert.deepEqual(terminalActions, ["copy"]);
+  assert.equal(interrupt.defaultPrevented, false, "Ctrl+C without a selection remains a shell interrupt");
+});
+
+test("native menu edit actions stay scoped to a focused terminal", () => {
+  const terminalActions = [];
+  const { manager, calls } = fixture(
+    { action: "undo", in_editor: true },
+    {
+      activeElement: terminalTarget(),
+      terminalPanel: {
+        handleKeybinding(action) { terminalActions.push(action); return false; },
+      },
+    },
+  );
+
+  assert.equal(manager.executeAction("undo"), true);
+  assert.deepEqual(terminalActions, ["undo"]);
+  assert.deepEqual(calls, [], "Undo must not alter the file behind the terminal");
 });
 
 test("Space, Shift+Space and repeated spaces stay with terminal input", () => {

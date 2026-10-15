@@ -10,6 +10,14 @@ class KeyBindingManager {
       "next_tab",
       "previous_tab",
     ]);
+    this.terminalEditActions = new Set([
+      "copy",
+      "cut",
+      "paste",
+      "select_all",
+      "undo",
+      "redo",
+    ]);
   }
 
   isNativeInputTarget(target) {
@@ -266,6 +274,18 @@ class KeyBindingManager {
   }
 
   executeAction(action, modifiers = {}) {
+    const activeTerminal = document.activeElement?.closest?.(".xterm");
+    if (
+      activeTerminal?.classList?.contains("xterm") &&
+      this.terminalEditActions.has(action)
+    ) {
+      // Native menu clicks have no keyboard event to route. Keep edit actions
+      // scoped to the focused terminal instead of applying them to the file
+      // behind it.
+      this.editor.terminalPanel?.handleKeybinding?.(action);
+      return true;
+    }
+
     const item = CONFIG_KEYBINDING_GET_ACTION(action);
     if (!item) return false;
 
@@ -316,6 +336,19 @@ class KeyBindingManager {
 
     const terminalElement = e.target?.closest?.(".xterm");
     if (terminalElement?.classList?.contains("xterm")) {
+      if (
+        this.canDispatchTerminalShortcut(e, shortcutKey) &&
+        this.terminalEditActions.has(binding?.action)
+      ) {
+        const handled = this.editor.terminalPanel?.handleKeybinding?.(
+          binding.action,
+        );
+        if (handled) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+        return;
+      }
       if (
         this.canDispatchTerminalShortcut(e, shortcutKey) &&
         binding?.in_editor === false
