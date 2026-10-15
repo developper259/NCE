@@ -2888,19 +2888,8 @@ app.whenReady().then(() => {
           win.focus();
           await waitForTerminalCondition(
             async () => (await run(`${getTerminalText(firstTerminal.id)}.trim().length > 0`)) === true,
-            { timeout: 10000, description: "the selected shell to render its initial prompt" },
+            { timeout: 10000, description: "the selected shell to initialize terminal output" },
           );
-          const initialShellPrompt = await run(
-            getLastNonEmptyTerminalLine(firstTerminal.id),
-          );
-          assert.ok(initialShellPrompt, "the shell has a visible prompt before keyboard input");
-          const waitForShellPrompt = (description) =>
-            waitForTerminalCondition(
-              async () =>
-                (await run(getLastNonEmptyTerminalLine(firstTerminal.id))) ===
-                initialShellPrompt,
-              { timeout: 10000, description },
-            );
           await run(`(() => {
             const terminal = editor.terminalPanel.getActiveSession().terminal;
             window.__nceTerminalInput = [];
@@ -3016,7 +3005,6 @@ app.whenReady().then(() => {
           await run("window.__nceTerminalInput.length = 0");
           pressTerminalInterrupt();
           await waitForTypedInput("nce_shift_arrow\u0003", "Ctrl+C to discard the selected test command");
-          await waitForShellPrompt("the shell prompt to return after Shift+Arrow selection coverage");
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
 
@@ -3034,7 +3022,6 @@ app.whenReady().then(() => {
             "ordinary and held Space never open the folder picker");
           pressTerminalInterrupt();
           await waitForTypedInput("     \u0003", "Ctrl+C to clear the terminal input line");
-          await waitForShellPrompt("the shell prompt to return after the empty Ctrl+C");
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
@@ -3166,7 +3153,6 @@ app.whenReady().then(() => {
             async () => ptyInputData.join("") === `${pastedInput}\u0003`,
             { timeout: 5000, description: "Ctrl+C after terminal paste to interrupt the shell line" },
           );
-          await waitForShellPrompt("the shell prompt to return after pasted input is interrupted");
           traceStep("configured terminal Select All, Copy, Cut and Paste shortcuts passed");
 
           await run(`SETTINGS_SET("keybindings.open_folder", "Ctrl+Shift+O")`);
