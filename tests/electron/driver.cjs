@@ -2760,9 +2760,14 @@ app.whenReady().then(() => {
           const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)}) ||
             window.__terminalWorkspaceARecords?.get(${JSON.stringify(id)});
           const buffer = record?.terminal.buffer.active;
-          return buffer ? Array.from({ length: buffer.length }, (_, index) =>
-            buffer.getLine(index)?.translateToString(true) || "",
-          ).join("\\n") : "";
+          if (!buffer) return "";
+          let text = "";
+          for (let index = 0; index < buffer.length; index++) {
+            const line = buffer.getLine(index);
+            if (index > 0 && !line?.isWrapped) text += "\\n";
+            text += line?.translateToString(true) || "";
+          }
+          return text;
         })()`;
         const getLastNonEmptyTerminalLine = (id) =>
           `(() => ${getTerminalText(id)}.split("\\n").map(line => line.trim()).filter(Boolean).at(-1) || "")()`;
@@ -3017,11 +3022,10 @@ app.whenReady().then(() => {
             "ordinary, special, navigation, and Tab input never opens the folder picker");
           pressTerminalInterrupt();
           await waitForTypedInput(`${specialInput}\u0003`, "Ctrl+C to clear the terminal navigation input");
-          await waitForShellPrompt("the shell prompt to return after navigation input");
 
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0; window.__nceTerminalKeyEvents.length = 0");
-          const command = "echo nce_space_input_hello  nce_space_input_world";
+          const command = 'echo "nce_space_input_hello  nce_space_input_world"';
           terminalStage = "physical command text containing consecutive spaces";
           await typePhysicalText(command);
           await waitForTerminalCondition(
@@ -3060,6 +3064,8 @@ app.whenReady().then(() => {
             "the PTY output contains the first marker returned by the executed command");
           assert.ok(output.includes("nce_space_input_world"),
             "the PTY output contains the second marker returned by the executed command");
+          assert.ok(output.includes("nce_space_input_hello  nce_space_input_world"),
+            "the shell preserves consecutive spaces in its output across supported shells");
           await waitForTerminalCondition(
             async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("nce_space_input_hello") && ${getTerminalText(firstTerminal.id)}.includes("nce_space_input_world")`)) === true,
             { timeout: 5000, description: "xterm to render both PTY output markers" },
