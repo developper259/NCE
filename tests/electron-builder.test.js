@@ -18,6 +18,7 @@ test("electron-builder keeps production dependency collection without rebuilding
 test("Windows NSIS offers per-user Open with NCE entries and removes only its own registry keys", () => {
   const nsis = packageJson.build.nsis;
   const installer = fs.readFileSync(path.join(__dirname, "../build/installer.nsh"), "utf8");
+  const ci = fs.readFileSync(path.join(__dirname, "../.github/workflows/ci.yml"), "utf8");
   assert.equal(packageJson.build.win.target, "nsis");
   assert.notEqual(nsis.oneClick, false, "retain electron-builder's existing one-click installer mode");
   assert.equal(nsis.perMachine, false);
@@ -29,14 +30,27 @@ test("Windows NSIS offers per-user Open with NCE entries and removes only its ow
   assert.equal((installer.match(/DeleteRegKey HKCU/g) || []).length, 2);
   assert.doesNotMatch(installer, /cmd\.exe/i);
   assert.equal(packageJson.build.fileAssociations, undefined, "NCE does not claim default file associations");
+  assert.match(packageJson.scripts["test:nsis-install"], /test-nsis-install\.ps1/);
+  assert.match(ci, /npm run build -- --win nsis/);
+  assert.match(ci, /npm run test:nsis-install/);
+  const installSmoke = fs.readFileSync(path.join(__dirname, "../scripts/test-nsis-install.ps1"), "utf8");
+  assert.match(installSmoke, /upgrade path/);
+  assert.match(installSmoke, /NCE\.UnrelatedSmokeEntry/);
 });
 
 test("macOS declares an alternate document handler without claiming default ownership", () => {
   const documentTypes = packageJson.build.mac.extendInfo.CFBundleDocumentTypes;
   assert.ok(documentTypes.length > 0);
-  assert.ok(documentTypes.every((type) => type.CFBundleTypeRole === "Editor"));
   assert.ok(documentTypes.every((type) => type.LSHandlerRank === "Alternate"));
-  assert.ok(documentTypes.some((type) => type.LSItemContentTypes.includes("public.data")));
+  assert.ok(documentTypes.some((type) =>
+    type.CFBundleTypeRole === "Editor" && type.LSItemContentTypes.includes("public.data")));
+  const folderType = documentTypes.find((type) => type.LSItemContentTypes.includes("public.folder"));
+  assert.deepEqual(folderType, {
+    CFBundleTypeName: "NCE Folder",
+    CFBundleTypeRole: "Viewer",
+    LSHandlerRank: "Alternate",
+    LSItemContentTypes: ["public.folder"],
+  });
   assert.equal(packageJson.build.mac.fileAssociations, undefined);
 });
 

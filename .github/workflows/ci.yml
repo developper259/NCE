@@ -21,9 +21,18 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
-      - run: npm run dist
+      - if: runner.os == 'Windows'
+        name: Build Windows NSIS installer
+        run: npm run build -- --win nsis
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - if: runner.os != 'Windows'
+        run: npm run dist
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - if: runner.os == 'Windows'
+        name: Install, upgrade and uninstall NSIS package
+        run: npm run test:nsis-install
       - run: npm run test:packaged
       - if: runner.os == 'Linux'
         name: Configure Electron Chromium sandbox

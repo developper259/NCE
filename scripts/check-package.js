@@ -1,15 +1,27 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const assert = require('node:assert/strict');
 const asar = require('@electron/asar');
 const postcss = require('postcss');
 const { normalizeArchivePath, toAsarLookupPath } = require('./archive-paths');
+const packageJson = require('../package.json');
 function find(directory) {
   if (!fs.existsSync(directory)) return [];
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
     const file = path.join(directory, entry.name);
     return entry.isDirectory() ? find(file) : entry.name === 'app.asar' ? [file] : [];
   });
+}
+function findMacAppBundles(directory, bundles = []) {
+  if (!fs.existsSync(directory)) return bundles;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(directory, entry.name);
+    if (entry.name === `${packageJson.productName}.app`) bundles.push(file);
+    else findMacAppBundles(file, bundles);
+  }
+  return bundles;
 }
 const archives = find(path.resolve(__dirname, '../release'));
 assert.ok(archives.length, 'No packaged app.asar found; run npm run dist first');
@@ -124,6 +136,20 @@ for (const archive of archives) {
       0,
       `${archive}: node-pty spawn-helper is not executable`,
     );
+    const appBundles = findMacAppBundles(path.resolve(__dirname, '../release'));
+    assert.ok(appBundles.length, 'No NCE.app found to inspect its generated Info.plist');
+    for (const bundle of appBundles) {
+      const infoPlistPath = path.join(bundle, 'Contents', 'Info.plist');
+      const infoPlist = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', infoPlistPath], {
+        encoding: 'utf8',
+      }));
+      const documentTypes = infoPlist.CFBundleDocumentTypes || [];
+      assert.ok(documentTypes.some(type =>
+        type.CFBundleTypeRole === 'Viewer' &&
+        type.LSHandlerRank === 'Alternate' &&
+        type.LSItemContentTypes?.includes('public.folder')),
+      `${bundle}: generated Info.plist does not advertise NCE as an alternate folder handler`);
+    }
   }
   if (process.platform === 'win32') {
     assert.ok([...unpackedFiles].some(file =>
