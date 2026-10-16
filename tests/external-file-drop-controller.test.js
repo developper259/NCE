@@ -10,13 +10,22 @@ class FakeClassList {
 }
 
 class FakeElement {
-  constructor() {
+  constructor(rect = {
+    left: 0,
+    top: 0,
+    right: 1200,
+    bottom: 800,
+    width: 1200,
+    height: 800,
+  }, onLayoutRead = () => {}) {
     this.children = [];
     this.classList = new FakeClassList();
     this.style = {};
     this.attributes = new Map();
     this.textContent = "";
     this.removed = false;
+    this.rect = rect;
+    this.onLayoutRead = onLayoutRead;
   }
   append(...children) { this.children.push(...children); }
   setAttribute(name, value) { this.attributes.set(name, value); }
@@ -30,14 +39,23 @@ class FakeElement {
     return null;
   }
   remove() { this.removed = true; }
-  getBoundingClientRect() { throw new Error("drag handling must not measure layout"); }
+  getBoundingClientRect() {
+    this.onLayoutRead();
+    return this.rect;
+  }
 }
 
 function createControllerHarness() {
   const listeners = new Map();
   const timers = new Map();
   const clearedTimers = [];
+  const layout = { reads: 0 };
   let nextTimerId = 0;
+  const createLayoutElement = (className, rect) => {
+    const element = new FakeElement(rect, () => { layout.reads += 1; });
+    element.className = className;
+    return element;
+  };
   const fakeWindow = {
     addEventListener: (name, callback) => listeners.set(name, callback),
     removeEventListener: (name) => listeners.delete(name),
@@ -65,8 +83,26 @@ function createControllerHarness() {
   );
   const openedDrops = [];
   const acknowledgements = [];
+  const mainSection = createLayoutElement("main-section", {
+    left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800,
+  });
+  const sidebarLeft = createLayoutElement("sidebar-left", {
+    left: 49, top: 0, right: 280, bottom: 780, width: 231, height: 780,
+  });
+  const fileManagerOBJ = createLayoutElement("file-manager", {
+    left: 49, top: 0, right: 1200, bottom: 38, width: 1151, height: 38,
+  });
+  const editorOBJ = createLayoutElement("editor", {
+    left: 49, top: 38, right: 1200, bottom: 780, width: 1151, height: 742,
+  });
+  const sidebarRight = createLayoutElement("sidebar-right", {
+    left: 1000, top: 0, right: 1200, bottom: 780, width: 200, height: 780,
+  });
+  mainSection.append(sidebarLeft, fileManagerOBJ, editorOBJ, sidebarRight);
   const editor = {
-    editorOBJ: new FakeElement(),
+    mainSection,
+    editorOBJ,
+    fileManagerOBJ,
     api: {
       getPathForDroppedFile: (file) => file.path,
       openDroppedFiles: async (paths) => {
@@ -80,6 +116,7 @@ function createControllerHarness() {
   return {
     controller: new Controller(editor),
     editor,
+    layout,
     openedDrops,
     acknowledgements,
     listeners,
@@ -89,7 +126,11 @@ function createControllerHarness() {
 }
 
 function makeFileTransfer(files) {
-  return { types: ["Files"], items: files.map(() => ({ kind: "file" })), files };
+  return {
+    types: ["Files"],
+    items: files.map((file) => ({ kind: "file", type: file.type || "text/plain" })),
+    files,
+  };
 }
 
 test("a mixed drop sends readable paths and invalid items through the same result channel", async () => {
@@ -112,22 +153,24 @@ test("a mixed drop sends readable paths and invalid items through the same resul
   assert.equal(JSON.stringify(openedDrops), JSON.stringify([["/tmp/valid.js", ""]]));
   assert.equal(controller.state, "error");
   assert.match(controller.overlay.querySelector(".nce-external-drop-title").textContent, /Could not open/);
-  assert.equal(editor.editorOBJ.children[0], controller.overlay);
+  assert.equal(editor.mainSection.children.at(-1), controller.overlay);
   controller.destroy();
 });
 
 test("dragover avoids layout reads and an expired error timer cannot hide a new drag", () => {
   const harness = createControllerHarness();
-  const { controller, timers, clearedTimers, listeners } = harness;
+  const { controller, timers, clearedTimers, listeners, layout } = harness;
   const transfer = makeFileTransfer([{ path: "/tmp/a.js" }]);
   controller.showStatus("Old failure");
   const staleTimer = controller.statusTimer;
   const staleCallback = timers.get(staleTimer).callback;
 
   controller.handleDragEnter({ dataTransfer: transfer });
+  const layoutReadsAfterDragEnter = layout.reads;
   const dragOver = { dataTransfer: transfer, preventDefault() {} };
   for (let index = 0; index < 1000; index++) controller.handleDragOver(dragOver);
 
+  assert.equal(layout.reads, layoutReadsAfterDragEnter, "dragover events do not read layout");
   assert.equal(controller.state, "dragging");
   assert.ok(clearedTimers.includes(staleTimer));
   assert.equal(controller.overlay.classList.contains("nce-external-drop-visible"), true);
