@@ -31,7 +31,12 @@ const MACOS_TRAFFIC_LIGHT_Y = Math.round(
 const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
 const WINDOW_RELOAD_DELAY_MS = 50;
 const WINDOW_CLOSE_RESPONSE_TIMEOUT_MS = 10_000;
-const EXTERNAL_OPEN_ACK_TIMEOUT_MS = 5 * 60_000;
+export const EXTERNAL_OPEN_TIMEOUTS_MS = Object.freeze({
+  rendererReady: 90_000,
+  acknowledgement: 120_000,
+});
+const EXTERNAL_OPEN_MAX_LIFETIME_MS =
+  EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady + EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement;
 const AGENT_MODEL_ENDPOINTS: Record<
   string,
   { urls: string[]; requiresApiKey: boolean }
@@ -110,6 +115,8 @@ export class Window {
   private readonly pendingExternalOpenDeliveries = new Map<string, {
     paths: string[];
     sent: boolean;
+    attempt: number;
+    expiresAt: number;
     timer: ReturnType<typeof setTimeout>;
     resolve: (result: DeliveredFileResult) => void;
   }>();
@@ -315,7 +322,14 @@ export class Window {
       (_event, _url, _inPlace, isMainFrame) => {
         if (isMainFrame) {
           this.rendererReady = false;
-          for (const delivery of this.pendingExternalOpenDeliveries.values()) delivery.sent = false;
+          for (const [requestId, delivery] of this.pendingExternalOpenDeliveries) {
+            delivery.sent = false;
+            this.setExternalOpenDeliveryTimeout(
+              requestId,
+              delivery,
+              EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady,
+            );
+          }
           this.terminalManager?.closeForOwner(terminalOwner, {
             deferProcessDisposal: true,
           });
@@ -419,8 +433,8 @@ export class Window {
       }
       return this.app.externalOpenCoordinator.enqueueDrop(paths, target);
     });
-    this.ipc.handle("ExternalOpen:ack", async (_event, requestId, rawResult) =>
-      this.acknowledgeExternalOpen(requestId, rawResult));
+    this.ipc.handle("ExternalOpen:ack", async (_event, requestId, attempt, rawResult) =>
+      this.acknowledgeExternalOpen(requestId, attempt, rawResult));
     this.ipc.handle("App:approveQuit", async (_event, options) => {
       return this.approveQuit(
         options?.prepareOnly === true,
@@ -478,18 +492,19 @@ export class Window {
     }
     const requestId = randomUUID();
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.settleExternalOpenDelivery(requestId, {
-          openedPaths: [],
-          failures: paths.map((filePath) => ({
-            path: filePath,
-            message: "The editor did not confirm that this file was opened.",
-          })),
-        });
-      }, EXTERNAL_OPEN_ACK_TIMEOUT_MS);
+      const expiresAt = Date.now() + EXTERNAL_OPEN_MAX_LIFETIME_MS;
+      const timeoutMs = this.rendererReady
+        ? EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement
+        : EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady;
+      const timer = setTimeout(
+        () => this.expireExternalOpenDelivery(requestId),
+        Math.min(timeoutMs, expiresAt - Date.now()),
+      );
       this.pendingExternalOpenDeliveries.set(requestId, {
         paths: [...paths],
         sent: false,
+        attempt: 0,
+        expiresAt,
         timer,
         resolve,
       });
@@ -530,18 +545,28 @@ export class Window {
     for (const [requestId, delivery] of this.pendingExternalOpenDeliveries) {
       if (delivery.sent) continue;
       try {
-        target.webContents.send("ExternalOpen:files", { requestId, paths: delivery.paths });
+        delivery.attempt += 1;
+        target.webContents.send("ExternalOpen:files", {
+          requestId,
+          attempt: delivery.attempt,
+          paths: delivery.paths,
+        });
         delivery.sent = true;
+        this.setExternalOpenDeliveryTimeout(
+          requestId,
+          delivery,
+          EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement,
+        );
       } catch (error) {
         console.warn("[External Open] Failed to send files to renderer", error);
       }
     }
   }
 
-  private acknowledgeExternalOpen(requestId: unknown, rawResult: unknown): boolean {
-    if (typeof requestId !== "string") return false;
+  private acknowledgeExternalOpen(requestId: unknown, attempt: unknown, rawResult: unknown): boolean {
+    if (typeof requestId !== "string" || !Number.isSafeInteger(attempt)) return false;
     const delivery = this.pendingExternalOpenDeliveries.get(requestId);
-    if (!delivery) return false;
+    if (!delivery || attempt !== delivery.attempt || !delivery.sent) return false;
     const payload = rawResult && typeof rawResult === "object" ? rawResult as Record<string, unknown> : {};
     const openedCandidates = Array.isArray(payload.openedPaths)
       ? payload.openedPaths.filter((value): value is string => typeof value === "string")
@@ -576,6 +601,35 @@ export class Window {
     clearTimeout(delivery.timer);
     this.pendingExternalOpenDeliveries.delete(requestId);
     delivery.resolve(result);
+  }
+
+  private setExternalOpenDeliveryTimeout(
+    requestId: string,
+    delivery: { expiresAt: number; timer: ReturnType<typeof setTimeout> },
+    timeoutMs: number,
+  ): void {
+    clearTimeout(delivery.timer);
+    const remainingMs = delivery.expiresAt - Date.now();
+    if (remainingMs <= 0) {
+      this.expireExternalOpenDelivery(requestId);
+      return;
+    }
+    delivery.timer = setTimeout(
+      () => this.expireExternalOpenDelivery(requestId),
+      Math.min(timeoutMs, remainingMs),
+    );
+  }
+
+  private expireExternalOpenDelivery(requestId: string): void {
+    const delivery = this.pendingExternalOpenDeliveries.get(requestId);
+    if (!delivery) return;
+    this.settleExternalOpenDelivery(requestId, {
+      openedPaths: [],
+      failures: delivery.paths.map((filePath) => ({
+        path: filePath,
+        message: "The editor did not confirm that this file was opened.",
+      })),
+    });
   }
 
   private failPendingExternalOpenDeliveries(message: string): void {

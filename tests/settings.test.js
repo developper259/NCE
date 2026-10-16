@@ -473,7 +473,7 @@ test("startup initializes settings before NSH and BrowserWindow creation", async
   );
   const initialize = app.indexOf("await this.settings.initialize()");
   const syntaxServer = app.indexOf("await this.startNsh()", initialize);
-  const window = app.indexOf("await this.windowManager.restoreSessions()", syntaxServer);
+  const window = app.indexOf("await this.windowManager.restoreSessions({", syntaxServer);
   assert.ok(
     initialize !== -1 && initialize < syntaxServer && syntaxServer < window,
   );

@@ -38,7 +38,10 @@ interface QueuedRequest {
   targetCaptured: boolean;
   requireAbsolute: boolean;
   resolve: (result: ExternalOpenResult) => void;
+  settled: boolean;
 }
+
+const STARTUP_QUEUE_KEY = "system-startup";
 
 function failed(pathValue: unknown, code: string, message: string): ExternalOpenFailure {
   return {
@@ -72,9 +75,12 @@ function isPathCandidate(value: string, platform: NodeJS.Platform): boolean {
 export class ExternalOpenCoordinator {
   private readonly windowManager: WindowManager;
   private readonly platform: NodeJS.Platform;
-  private readonly queue: QueuedRequest[] = [];
+  private readonly waitingForStart: QueuedRequest[] = [];
+  private readonly requestChains = new Map<string, Promise<void>>();
+  private readonly pendingRequests = new Set<QueuedRequest>();
+  private pendingRequestCount = 0;
+  private startupTarget: Window | null = null;
   private started = false;
-  private processing = false;
   private disposed = false;
 
   constructor(windowManager: WindowManager, platform = process.platform) {
@@ -86,15 +92,28 @@ export class ExternalOpenCoordinator {
   start(): void {
     if (this.disposed) return;
     this.started = true;
-    void this.processQueue();
+    this.startupTarget = this.findAvailableSystemTarget();
+    const requests = this.waitingForStart.splice(0);
+    for (const request of requests) {
+      if (!request.targetCaptured && this.startupTarget) {
+        request.target = this.startupTarget;
+        request.targetCaptured = true;
+      }
+      this.dispatch(request);
+    }
+  }
+
+  hasPendingSystemRequests(): boolean {
+    return [...this.pendingRequests].some((request) => !request.requireAbsolute);
   }
 
   enqueueSystemPaths(paths: unknown, cwd = process.cwd()): Promise<ExternalOpenResult> {
+    const target = this.findAvailableSystemTarget();
     return this.enqueue({
       paths,
       cwd,
-      target: null,
-      targetCaptured: false,
+      target,
+      targetCaptured: target !== null,
       requireAbsolute: false,
     });
   }
@@ -114,61 +133,63 @@ export class ExternalOpenCoordinator {
     this.disposed = true;
     this.started = false;
     const message = "NCE is shutting down before this request could be processed.";
-    for (const request of this.queue.splice(0)) {
-      request.resolve(this.result([failed("", "APP_CLOSING", message)]));
-    }
+    this.waitingForStart.length = 0;
+    for (const request of this.pendingRequests) this.settle(request, this.closingResult(message));
   }
 
-  private enqueue(options: Omit<QueuedRequest, "resolve">): Promise<ExternalOpenResult> {
+  private enqueue(options: Omit<QueuedRequest, "resolve" | "settled">): Promise<ExternalOpenResult> {
     if (this.disposed) {
       return Promise.resolve(this.result([
         failed("", "APP_CLOSING", "NCE is shutting down."),
       ]));
     }
-    if (this.queue.length >= MAX_QUEUED_EXTERNAL_OPEN_BATCHES) {
+    if (this.pendingRequestCount >= MAX_QUEUED_EXTERNAL_OPEN_BATCHES) {
       return Promise.resolve(this.result([
         failed("", "QUEUE_FULL", "Too many external open requests are waiting."),
       ]));
     }
     return new Promise((resolve) => {
-      this.queue.push({ ...options, resolve });
-      if (this.started) void this.processQueue();
+      const request: QueuedRequest = { ...options, resolve, settled: false };
+      this.pendingRequestCount += 1;
+      this.pendingRequests.add(request);
+      if (this.started) this.dispatch(request);
+      else this.waitingForStart.push(request);
     });
   }
 
-  private async processQueue(): Promise<void> {
-    if (this.processing || !this.started || this.disposed) return;
-    this.processing = true;
-    try {
-      while (this.queue.length && this.started && !this.disposed) {
-        const request = this.queue.shift()!;
-        let result: ExternalOpenResult;
-        try {
-          result = await this.processRequest(request);
-        } catch (error) {
-          console.error("[External Open] Request failed", error);
-          result = this.result([
-            failed("", "OPEN_FAILED", "NCE could not process this open request."),
-          ]);
-        }
-        request.resolve(result);
+  private dispatch(request: QueuedRequest): void {
+    const key = request.target?.id || STARTUP_QUEUE_KEY;
+    const previous = this.requestChains.get(key) || Promise.resolve();
+    let chain!: Promise<void>;
+    chain = previous.catch(() => undefined).then(async () => {
+      if (this.disposed) {
+        this.settle(request, this.closingResult("NCE is shutting down."));
+        return;
       }
-    } finally {
-      this.processing = false;
-      if (this.queue.length && this.started && !this.disposed) void this.processQueue();
-    }
+      try {
+        this.settle(request, await this.processRequest(request));
+      } catch (error) {
+        console.error("[External Open] Request failed", error);
+        this.settle(request, this.result([
+          failed("", "OPEN_FAILED", "NCE could not process this open request."),
+        ]));
+      }
+    }).finally(() => {
+      if (this.requestChains.get(key) === chain) this.requestChains.delete(key);
+    });
+    this.requestChains.set(key, chain);
   }
 
   private async processRequest(request: QueuedRequest): Promise<ExternalOpenResult> {
     const classified = await this.classify(request.paths, request.cwd, request.requireAbsolute);
     const failures = [...classified.failures];
     if (classified.entries.length === 0) {
-      if (!request.targetCaptured) {
-        const focused = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0] || null;
-        const current = this.isLiveWindow(focused)
-          ? focused
-          : failures.length ? this.windowManager.createEmptyWindow() : null;
+      if (!request.requireAbsolute) {
+        const current = this.isLiveWindow(request.target)
+          ? request.target
+          : this.findAvailableSystemTarget() || (failures.length ? this.windowManager.createEmptyWindow() : null);
         if (this.isLiveWindow(current)) {
+          this.adoptStartupTarget(current);
           this.windowManager.focusWindow(current.id);
           if (failures.length) current.notifyExternalOpenResult(this.result(failures));
         }
@@ -176,37 +197,36 @@ export class ExternalOpenCoordinator {
       return this.result(failures);
     }
 
-    let target = request.target;
-    if (!request.targetCaptured) {
-      target = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0] || null;
-      if (!this.isLiveWindow(target)) target = null;
-      if (!target) target = this.windowManager.createEmptyWindow();
-    }
-    if (!this.isLiveWindow(target)) {
-      for (const entry of classified.entries) {
-        failures.push(failed(entry.path, "WINDOW_UNAVAILABLE", "The target NCE window is no longer available."));
-      }
-      return this.result(failures);
-    }
-
-    this.windowManager.focusWindow(target.id);
     const files = classified.entries.filter((entry) => entry.kind === "file");
     const folders = classified.entries.filter((entry) => entry.kind === "directory");
     let openedFiles = 0;
     let openedFolders = 0;
 
     if (files.length) {
-      try {
-        const delivery: DeliveredFileResult = await target.deliverExternalFiles(
-          files.map((entry) => entry.path),
-        );
-        openedFiles += delivery.openedPaths.length;
-        for (const item of delivery.failures) {
-          failures.push(failed(item.path, "FILE_OPEN_FAILED", item.message || "The file could not be opened."));
+      let target = request.target;
+      if (!this.isLiveWindow(target) && !request.requireAbsolute) {
+        target = this.findAvailableSystemTarget() || this.windowManager.createEmptyWindow();
+        if (this.isLiveWindow(target)) this.adoptStartupTarget(target);
+      }
+      if (!this.isLiveWindow(target)) {
+        for (const entry of files) {
+          failures.push(failed(entry.path, "WINDOW_UNAVAILABLE", "The target NCE window is no longer available."));
         }
-      } catch (error: unknown) {
-        const message = errorMessage(error, "The target window could not open the files.");
-        for (const entry of files) failures.push(failed(entry.path, "FILE_OPEN_FAILED", message));
+      } else {
+        this.windowManager.focusWindow(target.id);
+        try {
+          const delivery: DeliveredFileResult = await target.deliverExternalFiles(
+            files.map((entry) => entry.path),
+          );
+          openedFiles += delivery.openedPaths.length;
+          for (const item of delivery.failures) {
+            failures.push(failed(item.path, "FILE_OPEN_FAILED", item.message || "The file could not be opened."));
+          }
+        } catch (error: unknown) {
+          const message = errorMessage(error, "The target window could not open the files.");
+          for (const entry of files) failures.push(failed(entry.path, "FILE_OPEN_FAILED", message));
+        }
+        if (!request.targetCaptured) this.adoptStartupTarget(target);
       }
     }
 
@@ -222,7 +242,14 @@ export class ExternalOpenCoordinator {
     }
 
     const result = this.result(failures, openedFiles, openedFolders);
-    if (!request.targetCaptured && failures.length) target.notifyExternalOpenResult(result);
+    const notificationTarget = this.isLiveWindow(request.target)
+      ? request.target
+      : this.isLiveWindow(this.startupTarget)
+        ? this.startupTarget
+        : this.findAvailableSystemTarget();
+    if (!request.requireAbsolute && failures.length && this.isLiveWindow(notificationTarget)) {
+      notificationTarget.notifyExternalOpenResult(result);
+    }
     return result;
   }
 
@@ -246,7 +273,7 @@ export class ExternalOpenCoordinator {
     const seen = new Set<string>();
     const api = getPathApi(this.platform);
     for (const rawPath of rawPaths) {
-      if (typeof rawPath !== "string" || !rawPath.trim() || rawPath !== rawPath.trim()) {
+      if (typeof rawPath !== "string" || rawPath.length === 0) {
         failures.push(failed(rawPath, "INVALID_PATH", "The path is empty or invalid."));
         continue;
       }
@@ -290,6 +317,31 @@ export class ExternalOpenCoordinator {
 
   private isLiveWindow(window: Window | null): window is Window {
     return Boolean(window?.window && !window.window.isDestroyed() && !window.window.webContents.isDestroyed());
+  }
+
+  private findAvailableSystemTarget(): Window | null {
+    const focused = this.windowManager.getFocusedWindow();
+    if (this.isLiveWindow(focused)) return focused;
+    return this.windowManager.getAllWindows().find((window) => this.isLiveWindow(window)) || null;
+  }
+
+  private adoptStartupTarget(window: Window): void {
+    if (!this.isLiveWindow(window)) return;
+    this.startupTarget = window;
+    const startupChain = this.requestChains.get(STARTUP_QUEUE_KEY);
+    if (startupChain) this.requestChains.set(window.id, startupChain);
+  }
+
+  private settle(request: QueuedRequest, result: ExternalOpenResult): void {
+    if (request.settled) return;
+    request.settled = true;
+    this.pendingRequestCount = Math.max(0, this.pendingRequestCount - 1);
+    this.pendingRequests.delete(request);
+    request.resolve(result);
+  }
+
+  private closingResult(message: string): ExternalOpenResult {
+    return this.result([failed("", "APP_CLOSING", message)]);
   }
 
   private result(

@@ -120,7 +120,7 @@ export class WindowManager {
     }
   }
 
-  async restoreSessions(): Promise<void> {
+  async restoreSessions({ createEmptyWindow = true }: { createEmptyWindow?: boolean } = {}): Promise<void> {
     const sessions = this.sessions.getAll().slice(0, MAX_NCE_WINDOWS);
     for (let index = 0; index < sessions.length; index++) {
       const session = sessions[index];
@@ -144,7 +144,7 @@ export class WindowManager {
         await new Promise((resolve) => setTimeout(resolve, WINDOW_RESTORE_STAGGER_MS));
       }
     }
-    if (this.windows.size === 0) this.createEmptyWindow();
+    if (this.windows.size === 0 && createEmptyWindow) this.createEmptyWindow();
     const lastActiveId = this.sessions.getLastActiveSessionId();
     const lastActive = [...this.windows.values()].find((window) => window.sessionId === lastActiveId);
     if (lastActive) lastActive.window?.focus();

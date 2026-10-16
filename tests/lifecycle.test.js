@@ -395,6 +395,32 @@ test('openFileWithPath resolves after the selected file has its initial content'
   assert.equal(opened.lines[0].getText(), 'text');
 });
 
+test('reopening an already-open external file reuses its tab and keeps unsaved edits', async () => {
+  const editor = setup();
+  editor.api = {
+    initializeFile: async () => ({
+      success: true,
+      totalLines: 1,
+      size: 4,
+      maxLineLength: 4,
+      incrementalEligible: true,
+    }),
+    getFileChunk: async () => ({ success: true, lines: ['disk'] }),
+  };
+
+  await editor.tabManager.openFileWithPath('/workspace/file.js');
+  const original = editor.tabManager.activeTab;
+  original.lines[0].setText('local unsaved edit');
+  original.setIsSaved(false);
+
+  await editor.tabManager.openFileWithPath('/workspace/file.js');
+
+  assert.equal(editor.tabManager.activeTab, original);
+  assert.equal(editor.tabManager.files.filter((file) => file.path === original.path).length, 1);
+  assert.equal(original.lines[0].getText(), 'local unsaved edit');
+  assert.equal(original.isSaved, false);
+});
+
 test('TabManager notifies active-tab waiters and supports listener cleanup', async () => {
   const editor = setup();
   const seen = [];

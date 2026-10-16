@@ -69,6 +69,35 @@ function makeWindowManager(windows = [], { limit = 8 } = {}) {
   return manager;
 }
 
+function loadWindowWithTimers() {
+  const timers = new Map();
+  const clearedTimers = [];
+  let nextTimerId = 0;
+  const { Window, EXTERNAL_OPEN_TIMEOUTS_MS } = loadMain("dist/ts/Window.js", {
+    electron: { app: {}, BrowserWindow: class {}, clipboard: {}, shell: {} },
+    "./addon/FileManager": { FileManager: class {} },
+    "./addon/Watcher": { Watcher: class {} },
+    "./addon/Menu": { AppMenu: class {} },
+    "./addon/ContextMenu": { ContextMenu: class {} },
+    "./addon/WorkspaceSearch": { WorkspaceSearch: class {} },
+    "./addon/AgentApprovalManager": { AgentApprovalManager: class {} },
+    "./addon/AgentProcessRunner": { AgentProcessRunner: class {} },
+    "./terminal/TerminalManager": { TerminalManager: class {} },
+    "./terminal/TerminalTypes": { normalizeTerminalLink: (value) => value },
+  }, {
+    setTimeout(callback, delay) {
+      const id = ++nextTimerId;
+      timers.set(id, { callback, delay });
+      return id;
+    },
+    clearTimeout(id) {
+      clearedTimers.push(id);
+      timers.delete(id);
+    },
+  });
+  return { Window, EXTERNAL_OPEN_TIMEOUTS_MS, timers, clearedTimers };
+}
+
 async function makeFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-external-open-é-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -139,6 +168,63 @@ test("system opens wait for restore, choose the focused window once, and process
   coordinator.dispose();
 });
 
+test("a blocked window does not block other windows, while each window retains request order", async (t) => {
+  const { root } = await makeFixture(t);
+  const paths = ["a-first.js", "a-second.js", "b.js", "c.js"].map((name) => path.join(root, name));
+  await Promise.all(paths.map((filePath) => fs.writeFile(filePath, filePath)));
+  let releaseA;
+  const blockedA = new Promise((resolve) => { releaseA = resolve; });
+  const windowA = makeWindow("a", { deliver: () => blockedA });
+  const windowB = makeWindow("b");
+  const windowC = makeWindow("c");
+  const manager = makeWindowManager([windowA, windowB, windowC]);
+  const coordinator = new ExternalOpenCoordinator(manager);
+
+  const firstA = coordinator.enqueueSystemPaths([paths[0]], root);
+  const secondA = coordinator.enqueueSystemPaths([paths[1]], root);
+  manager.focusWindow(windowB.id);
+  const requestB = coordinator.enqueueSystemPaths([paths[2]], root);
+  manager.focusWindow(windowC.id);
+  const requestC = coordinator.enqueueSystemPaths([paths[3]], root);
+  coordinator.start();
+
+  const fastResults = await Promise.race([
+    Promise.all([requestB, requestC]),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("independent windows were blocked")), 250)),
+  ]);
+  assert.deepEqual(fastResults.map((result) => result.openedFiles), [1, 1]);
+  assert.deepEqual(windowB.state.deliveries, [[await fs.realpath(paths[2])]]);
+  assert.deepEqual(windowC.state.deliveries, [[await fs.realpath(paths[3])]]);
+  assert.deepEqual(windowA.state.deliveries, [[await fs.realpath(paths[0])]]);
+
+  releaseA({ openedPaths: [await fs.realpath(paths[0])], failures: [] });
+  assert.equal((await firstA).openedFiles, 1);
+  assert.equal((await secondA).openedFiles, 1);
+  assert.deepEqual(windowA.state.deliveries, [
+    [await fs.realpath(paths[0])],
+    [await fs.realpath(paths[1])],
+  ]);
+  coordinator.dispose();
+});
+
+test("system routing captures the receiving focus before path validation changes focus", async (t) => {
+  const { root } = await makeFixture(t);
+  const file = path.join(root, "focused-at-receipt.js");
+  await fs.writeFile(file, "captured");
+  const windowA = makeWindow("a");
+  const windowB = makeWindow("b");
+  const manager = makeWindowManager([windowA, windowB]);
+  const coordinator = new ExternalOpenCoordinator(manager);
+  coordinator.start();
+
+  const request = coordinator.enqueueSystemPaths([file], root);
+  manager.focusWindow(windowB.id);
+  assert.equal((await request).openedFiles, 1);
+  assert.deepEqual(windowA.state.deliveries, [[await fs.realpath(file)]]);
+  assert.deepEqual(windowB.state.deliveries, []);
+  coordinator.dispose();
+});
+
 test("system directory requests reuse an open workspace and respect the window limit", async (t) => {
   const { root, folder } = await makeFixture(t);
   const otherFolder = path.join(root, "autre-projet");
@@ -166,6 +252,71 @@ test("system directory requests reuse an open workspace and respect the window l
   assert.equal(limitedManager.getAllWindows().length, 8);
   coordinator.dispose();
   limitedCoordinator.dispose();
+});
+
+test("cold system opens create only the windows needed for files and workspaces", async (t) => {
+  const { root, folder } = await makeFixture(t);
+  const secondFolder = path.join(root, "second workspace");
+  const file = path.join(root, "cold file.js");
+  await Promise.all([fs.mkdir(secondFolder), fs.writeFile(file, "cold")]);
+
+  const folderManager = makeWindowManager();
+  const folderCoordinator = new ExternalOpenCoordinator(folderManager);
+  folderCoordinator.start();
+  const folders = await folderCoordinator.enqueueSystemPaths([folder, secondFolder], root);
+  assert.equal(folders.openedFolders, 2);
+  assert.equal(folderManager.getAllWindows().length, 2, "folder-only start has no additional blank window");
+  assert.deepEqual(folderManager.getAllWindows().map((window) => window.workspacePath), [
+    await fs.realpath(folder),
+    await fs.realpath(secondFolder),
+  ]);
+  folderCoordinator.dispose();
+
+  const mixedManager = makeWindowManager();
+  const mixedCoordinator = new ExternalOpenCoordinator(mixedManager);
+  mixedCoordinator.start();
+  const mixed = await mixedCoordinator.enqueueSystemPaths([file, folder], root);
+  assert.equal(mixed.openedFiles, 1);
+  assert.equal(mixed.openedFolders, 1);
+  assert.equal(mixedManager.getAllWindows().length, 2,
+    "mixed start creates one file target and one workspace window");
+  assert.deepEqual(mixedManager.getAllWindows().map((window) => window.state.deliveries), [
+    [[await fs.realpath(file)]],
+    [],
+  ]);
+  mixedCoordinator.dispose();
+});
+
+test("concurrent folder requests preserve workspace uniqueness and the eight-window limit", async (t) => {
+  const { root, folder } = await makeFixture(t);
+  const secondFolder = path.join(root, "second concurrent workspace");
+  await fs.mkdir(secondFolder);
+  const first = makeWindow("first");
+  const second = makeWindow("second");
+  const duplicateManager = makeWindowManager([first, second]);
+  const duplicateCoordinator = new ExternalOpenCoordinator(duplicateManager);
+  duplicateCoordinator.start();
+  const firstDuplicate = duplicateCoordinator.enqueueSystemPaths([folder], root);
+  duplicateManager.focusWindow(second.id);
+  const secondDuplicate = duplicateCoordinator.enqueueSystemPaths([folder], root);
+  const canonicalFolder = await fs.realpath(folder);
+  const duplicateResults = await Promise.all([firstDuplicate, secondDuplicate]);
+  assert.deepEqual(duplicateResults.map((result) => result.openedFolders), [1, 1]);
+  assert.equal(duplicateManager.getAllWindows().filter((window) =>
+    window.workspacePath === canonicalFolder).length, 1);
+  duplicateCoordinator.dispose();
+
+  const fullManager = makeWindowManager(Array.from({ length: 7 }, (_, index) => makeWindow(`limit-${index}`)));
+  const fullCoordinator = new ExternalOpenCoordinator(fullManager);
+  fullCoordinator.start();
+  const openA = fullCoordinator.enqueueSystemPaths([folder], root);
+  fullManager.focusWindow("limit-1");
+  const openB = fullCoordinator.enqueueSystemPaths([secondFolder], root);
+  const limitedResults = await Promise.all([openA, openB]);
+  assert.equal(fullManager.getAllWindows().length, 8);
+  assert.equal(limitedResults.reduce((count, result) => count + result.openedFolders, 0), 1);
+  assert.equal(limitedResults.reduce((count, result) => count + result.failures.length, 0), 1);
+  fullCoordinator.dispose();
 });
 
 test("a captured drop target that closes while queued is never rerouted to another window", async (t) => {
@@ -201,15 +352,117 @@ test("invalid arguments and oversized batches fail without opening a window", as
   coordinator.dispose();
 });
 
+test("POSIX paths preserve significant leading and trailing whitespace and deduplicate symlinks", { skip: process.platform === "win32" }, async (t) => {
+  const { root } = await makeFixture(t);
+  const leadingSpace = path.join(root, " leading.js");
+  const trailingSpace = path.join(root, "trailing.js ");
+  const whitespaceName = path.join(root, "   ");
+  const alias = path.join(root, "trailing-alias.js");
+  await Promise.all([
+    fs.writeFile(leadingSpace, "leading"),
+    fs.writeFile(trailingSpace, "trailing"),
+    fs.writeFile(whitespaceName, "spaces"),
+  ]);
+  await fs.symlink(trailingSpace, alias);
+  const target = makeWindow("target");
+  const manager = makeWindowManager([target]);
+  const coordinator = new ExternalOpenCoordinator(manager);
+  coordinator.start();
+
+  const result = await coordinator.enqueueSystemPaths(
+    [leadingSpace, trailingSpace, whitespaceName, alias],
+    root,
+  );
+  assert.equal(result.openedFiles, 3);
+  assert.deepEqual(target.state.deliveries, [[
+    await fs.realpath(leadingSpace),
+    await fs.realpath(trailingSpace),
+    await fs.realpath(whitespaceName),
+  ]]);
+  coordinator.dispose();
+});
+
+test("renderer reload attempts reject stale ACKs and a late ACK after timeout is ignored", async () => {
+  const { Window, EXTERNAL_OPEN_TIMEOUTS_MS, timers, clearedTimers } = loadWindowWithTimers();
+  assert.equal(JSON.stringify(EXTERNAL_OPEN_TIMEOUTS_MS), JSON.stringify({
+    rendererReady: 90_000,
+    acknowledgement: 120_000,
+  }));
+  const window = new Window({});
+  const sent = [];
+  window.window = {
+    isDestroyed: () => false,
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel, payload) => sent.push({ channel, payload }),
+    },
+  };
+  window.rendererReady = true;
+
+  const deliveryResult = window.deliverExternalFiles(["/tmp/file.js"]);
+  const firstMessage = sent[0].payload;
+  assert.equal(firstMessage.attempt, 1);
+  const delivery = window.pendingExternalOpenDeliveries.get(firstMessage.requestId);
+  delivery.sent = false;
+  window.setExternalOpenDeliveryTimeout(
+    firstMessage.requestId,
+    delivery,
+    EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady,
+  );
+  window.flushExternalOpenDeliveries();
+  const secondMessage = sent[1].payload;
+  assert.equal(secondMessage.requestId, firstMessage.requestId);
+  assert.equal(secondMessage.attempt, 2);
+  assert.equal(window.acknowledgeExternalOpen(firstMessage.requestId, 1, {
+    openedPaths: ["/tmp/file.js"],
+  }), false, "an ACK from before reload cannot settle the current delivery attempt");
+  assert.equal(window.acknowledgeExternalOpen(secondMessage.requestId, 2, {
+    openedPaths: ["/tmp/file.js"],
+  }), true);
+  assert.equal(window.acknowledgeExternalOpen(secondMessage.requestId, 2, {
+    openedPaths: ["/tmp/file.js"],
+  }), false, "a consumed ACK is not accepted twice");
+  assert.equal(JSON.stringify(await deliveryResult), JSON.stringify({
+    openedPaths: ["/tmp/file.js"],
+    failures: [],
+  }));
+  assert.equal(window.pendingExternalOpenDeliveries.size, 0);
+  assert.equal(timers.size, 0);
+  assert.ok(clearedTimers.length >= 2);
+
+  const lateResult = window.deliverExternalFiles(["/tmp/slow.js"]);
+  const lateMessage = sent.at(-1).payload;
+  const activeTimer = [...timers.keys()].at(-1);
+  timers.get(activeTimer).callback();
+  assert.equal(JSON.stringify(await lateResult), JSON.stringify({
+    openedPaths: [],
+    failures: [{
+      path: "/tmp/slow.js",
+      message: "The editor did not confirm that this file was opened.",
+    }],
+  }));
+  assert.equal(window.acknowledgeExternalOpen(lateMessage.requestId, lateMessage.attempt, {
+    openedPaths: ["/tmp/slow.js"],
+  }), false, "a late ACK after expiry cannot reopen or resettle the delivery");
+  assert.equal(window.pendingExternalOpenDeliveries.size, 0);
+  assert.equal(timers.size, 0);
+});
+
 test("App captures macOS open-file before the lock and queues startup and second-instance paths", async (t) => {
   const { root, file, folder } = await makeFixture(t);
   const startupFile = path.join(root, "startup file.js");
   const startupUriFile = path.join(root, "fichier URI été.js");
+  const inspectFile = path.join(root, "after-inspect.js");
+  const equalsFlagFile = path.join(root, "after-empty-flag-value.js");
+  const leadingDashFolder = path.join(root, "-leading-folder");
   const secondFile = path.join(root, "second instance.js");
   await Promise.all([
     fs.writeFile(startupFile, "startup"),
     fs.writeFile(startupUriFile, "startup URI"),
+    fs.writeFile(inspectFile, "after inspect"),
+    fs.writeFile(equalsFlagFile, "after equals option"),
     fs.writeFile(secondFile, "second"),
+    fs.mkdir(leadingDashFolder),
   ]);
   const app = new EventEmitter();
   app.isPackaged = true;
@@ -233,12 +486,13 @@ test("App captures macOS open-file before the lock and queues startup and second
       return Promise.resolve({ success: true, openedFiles: 0, openedFolders: 0, failures: [] });
     }
     enqueueDrop() { throw new Error("not expected in this App test"); }
+    hasPendingSystemRequests() { return this.requests.length > 0; }
     start() { calls.push(["start"]); }
     dispose() {}
   }
   class FakeWindowManager {
     constructor() { this.windows = []; }
-    async restoreSessions() { calls.push(["restore"]); }
+    async restoreSessions(options) { calls.push(["restore", options]); }
     getAllWindows() { return this.windows; }
     getFocusedWindow() { return null; }
     createEmptyWindow() { calls.push(["create-empty"]); }
@@ -254,7 +508,11 @@ test("App captures macOS open-file before the lock and queues startup and second
     execPath: "/fake/NCE",
     env: {},
     cwd: () => root,
-    argv: ["/fake/NCE", startupFile, "--user-data-dir", root, "--enable-logging", folder, pathToFileURL(startupUriFile).href, "https://example.test/file"],
+    argv: [
+      "/fake/NCE", startupFile, "--user-data-dir", root, "--enable-logging", folder,
+      pathToFileURL(startupUriFile).href, "https://example.test/file", "--inspect", inspectFile,
+      "--user-data-dir=", equalsFlagFile, "--", "-leading-folder",
+    ],
   };
   const { App } = loadMain("dist/ts/App.js", {
     electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
@@ -273,7 +531,7 @@ test("App captures macOS open-file before the lock and queues startup and second
   const runtime = new App();
   assert.equal(lockOpenFilePrevented, true);
   assert.deepEqual(runtime.externalOpenCoordinator.requests.slice(0, 2), [
-    { paths: [startupFile, folder, startupUriFile], cwd: root },
+    { paths: [startupFile, folder, startupUriFile, inspectFile, equalsFlagFile, "-leading-folder"], cwd: root },
     { paths: [file], cwd: root },
   ], "startup flags and their values are filtered while early document opens are retained");
 
@@ -286,6 +544,8 @@ test("App captures macOS open-file before the lock and queues startup and second
   await new Promise((resolve) => setImmediate(resolve));
   assert.ok(calls.findIndex(([step]) => step === "start") > calls.findIndex(([step]) => step === "restore"),
     "external path delivery starts after session restoration");
+  assert.equal(JSON.stringify(calls.find(([step]) => step === "restore")[1]), JSON.stringify({ createEmptyWindow: false }),
+    "startup paths suppress the empty fallback window while the coordinator restores sessions first");
 
   const secondWorkingDirectory = path.join(root, "working directory");
   const secondFolder = path.join(root, "second folder");
@@ -305,4 +565,15 @@ test("App captures macOS open-file before the lock and queues startup and second
     paths: [secondFile],
     cwd: secondWorkingDirectory,
   }, "development second-instance requests omit the Electron entry script");
+
+  mockProcess.platform = "win32";
+  app.isPackaged = true;
+  const windowsCwd = String.raw`C:\Project`;
+  const windowsFile = String.raw`C:\Project\file with spaces.js`;
+  const uncFile = String.raw`\\server\share\file.js`;
+  app.emit("second-instance", {}, [String.raw`C:\Program Files\NCE.exe`, windowsFile, uncFile], windowsCwd);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(runtime.externalOpenCoordinator.requests.at(-1), {
+    paths: [windowsFile, uncFile], cwd: windowsCwd,
+  }, "Windows drive and UNC paths remain filesystem paths instead of URL schemes");
 });

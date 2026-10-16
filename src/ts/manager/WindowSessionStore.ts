@@ -153,7 +153,6 @@ export class WindowSessionStore {
 
     if (loaded && rawSnapshot) this.loadSnapshot(rawSnapshot);
     else if (legacyState) this.migrateLegacyState(legacyState);
-    if (this.sessions.size === 0) this.create({});
     if (!this.preserveLegacySessionFile) {
       const content = this.serializeSnapshot();
       if (storedContent === content) this.lastPersistedContent = content;

@@ -15,17 +15,30 @@ import { ExternalOpenCoordinator } from "./manager/ExternalOpenCoordinator";
 
 const SWITCHES_WITH_VALUES = new Set([
   "--app",
+  "--auth-negotiate-delegate-whitelist",
+  "--auth-server-whitelist",
   "--class",
   "--disk-cache-dir",
+  "--disk-cache-size",
+  "--dns-result-order",
+  "--force-fieldtrials",
   "--host-rules",
-  "--inspect",
-  "--inspect-brk",
+  "--host-resolver-rules",
+  "--ignore-connections-limit",
+  "--js-flags",
   "--lang",
   "--log-file",
+  "--log-level",
+  "--log-net-log",
+  "--proxy-pac-url",
   "--proxy-bypass-list",
   "--proxy-server",
   "--remote-debugging-port",
   "--user-data-dir",
+  "--v",
+  "--vmodule",
+  "--xdg-portal-required-version",
+  "--diagnostic-dir",
 ]);
 
 function currentWorkingDirectory(): string {
@@ -57,8 +70,9 @@ function externalPathArguments(
       continue;
     }
     if (!afterSeparator && value.startsWith("-")) {
-      const [flag, inlineValue] = value.split("=", 2);
-      if (!inlineValue && SWITCHES_WITH_VALUES.has(flag)) skipNext = true;
+      const separatorIndex = value.indexOf("=");
+      const flag = separatorIndex === -1 ? value : value.slice(0, separatorIndex);
+      if (separatorIndex === -1 && SWITCHES_WITH_VALUES.has(flag)) skipNext = true;
       continue;
     }
     let filePath = value;
@@ -169,7 +183,9 @@ export class App {
       await this.agentConversations.initialize();
       await this.windowSessionStore.initialize();
       await this.startNsh();
-      await this.windowManager.restoreSessions();
+      await this.windowManager.restoreSessions({
+        createEmptyWindow: !this.externalOpenCoordinator.hasPendingSystemRequests(),
+      });
       this.externalOpenCoordinator.start();
     });
 

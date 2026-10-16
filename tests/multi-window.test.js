@@ -263,9 +263,25 @@ test("corrupt legacy JSON is preserved without leaking a parse error or secret i
   try {
     const sessions = new WindowSessionStore(root);
     const restored = await sessions.initialize();
-    assert.equal(restored[0].rendererState, null);
+    assert.equal(restored.length, 0, "corrupt legacy state does not synthesize a disposable window session");
+    assert.equal(sessions.getAll().length, 0);
     assert.equal(await fs.readFile(path.join(root, "state.json"), "utf8"), corrupt);
     assert.equal(warnings.flat().join(" ").includes("recoverable-secret"), false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a fresh session store leaves the initial window decision to WindowManager", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-empty-session-store-"));
+  const { WindowSessionStore } = loadMain("dist/ts/manager/WindowSessionStore.js");
+  try {
+    const sessions = new WindowSessionStore(root);
+    assert.equal(JSON.stringify(await sessions.initialize()), "[]");
+    assert.equal(JSON.stringify(sessions.getAll()), "[]");
+    const snapshot = JSON.parse(await fs.readFile(sessions.storePath, "utf8"));
+    assert.equal(snapshot.version, 1);
+    assert.deepEqual(snapshot.sessions, [], "initializing an empty profile does not persist a phantom window session");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -282,8 +298,8 @@ test("window-session metadata coalesces focus writes and flushes the newest orde
   const { WindowSessionStore } = loadMain("dist/ts/manager/WindowSessionStore.js");
   try {
     const store = new WindowSessionStore(root, process.platform, undefined, countedFs);
-    const initial = await store.initialize();
-    const ids = [initial[0].id];
+    await store.initialize();
+    const ids = [store.create({}).id];
     for (let index = 1; index < 8; index++) ids.push(store.create({}).id);
     for (let index = 0; index < 500; index++) store.markActive(ids[index % ids.length]);
     assert.equal(await store.flush(), true);
@@ -318,7 +334,9 @@ test("failed session replacement is observable and a later flush safely retries"
   const { WindowSessionStore } = loadMain("dist/ts/manager/WindowSessionStore.js");
   try {
     const store = new WindowSessionStore(root, process.platform, undefined, retryFs);
-    const [session] = await store.initialize();
+    await store.initialize();
+    const session = store.create({});
+    assert.equal(await store.flush(), true);
     const initialFile = await fs.readFile(store.storePath, "utf8");
     failRename = true;
     store.update(session.id, { lastActiveAt: session.lastActiveAt + 100 });
@@ -462,6 +480,14 @@ test("WindowManager creates independent windows, focuses workspace duplicates, a
   const app = { isQuitting: false };
   const router = { forWindow: () => ({}), attachWindow() {}, detachWindow() {} };
   const manager = new WindowManager(app, router, sessions);
+  app.windowManager = manager;
+
+  const startupManager = new WindowManager(app, router, new FakeSessionStore());
+  app.windowManager = startupManager;
+  await startupManager.restoreSessions({ createEmptyWindow: false });
+  assert.equal(startupManager.getAllWindows().length, 0,
+    "a startup with external paths can defer creating the empty fallback window");
+  startupManager.dispose();
   app.windowManager = manager;
 
   const a = manager.createEmptyWindow();
