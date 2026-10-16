@@ -38,7 +38,7 @@ body {
 
 .nce-external-drop-overlay {
   position: absolute;
-  inset: 0;
+  inset: 0 0 calc(var(--bottombar-height) + var(--bottom-panel-height, 0px)) var(--sidebar-selector-width);
   z-index: 14;
   display: none;
   align-items: center;

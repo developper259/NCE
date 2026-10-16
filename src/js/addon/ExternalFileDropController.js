@@ -4,6 +4,7 @@ class ExternalFileDropController {
     this.api = editor.api;
     this.dragDepth = 0;
     this.state = "hidden";
+    this.overlayKind = "file";
     this.dragOperationId = 0;
     this.statusTimer = null;
     this.statusGeneration = 0;
@@ -47,11 +48,85 @@ class ExternalFileDropController {
     title.textContent = "Drop files to open";
     const details = document.createElement("span");
     details.className = "nce-external-drop-details";
-    details.textContent = "Folders open in a new window.";
+    details.textContent = "Files open in this window.";
     card.append(title, details);
     overlay.append(card);
-    this.editor.editorOBJ.append(overlay);
+    this.editor.mainSection.append(overlay);
     return overlay;
+  }
+
+  getDroppedItemKind(dataTransfer, canReadEntries = false) {
+    for (const item of Array.from(dataTransfer?.items || [])) {
+      if (item?.kind !== "file") continue;
+      const type = String(item.type || "").toLowerCase();
+      if (type === "inode/directory" || type === "application/x-directory") {
+        return "directory";
+      }
+      if (canReadEntries) {
+        try {
+          const entry = item.webkitGetAsEntry?.();
+          if (entry?.isDirectory) return "directory";
+          if (entry?.isFile) return "file";
+        } catch {}
+      }
+      if (!type || type === "application/octet-stream") {
+        // Chromium hides the entry until drop; native folders often have no MIME type.
+        return canReadEntries ? "unknown" : "directory";
+      }
+      return "file";
+    }
+    return "unknown";
+  }
+
+  updateOverlayCopy(kind, force = false) {
+    const overlayKind = ["directory", "file", "unknown"].includes(kind) ? kind : "unknown";
+    if (!force && overlayKind === this.overlayKind) return;
+    this.overlayKind = overlayKind;
+    const title = this.overlay?.querySelector(".nce-external-drop-title");
+    const details = this.overlay?.querySelector(".nce-external-drop-details");
+    const copy = this.overlayKind === "directory"
+      ? { title: "Drop folders to open", details: "Folders open in a new window." }
+      : this.overlayKind === "file"
+        ? { title: "Drop files to open", details: "Files open in this window." }
+        : { title: "Drop item to open", details: "" };
+    if (title && title.textContent !== copy.title) title.textContent = copy.title;
+    if (details && details.textContent !== copy.details) details.textContent = copy.details;
+  }
+
+  updateOverlayBounds() {
+    const container = this.editor.mainSection;
+    const fileManager = this.editor.fileManagerOBJ;
+    const editor = this.editor.editorOBJ;
+    if (!container || !editor || !this.overlay) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const editorRect = editor.getBoundingClientRect();
+    const fileManagerRect = fileManager?.getBoundingClientRect();
+    if (!containerRect.width || !containerRect.height || !editorRect.height) return;
+
+    const overlayTop = fileManagerRect?.height ? fileManagerRect.top : editorRect.top;
+    const intersectsOverlayVertically = (rect) =>
+      rect.bottom > overlayTop && rect.top < editorRect.bottom;
+
+    let left = Math.max(0, editorRect.left - containerRect.left);
+    let right = Math.max(0, containerRect.right - editorRect.right);
+
+    const leftSidebarRect = container.querySelector(".sidebar-left")?.getBoundingClientRect();
+    if (leftSidebarRect && intersectsOverlayVertically(leftSidebarRect)) {
+      left = Math.max(left, leftSidebarRect.right - containerRect.left + 2);
+    }
+
+    const rightSidebarRect = container.querySelector(".sidebar-right")?.getBoundingClientRect();
+    if (rightSidebarRect && intersectsOverlayVertically(rightSidebarRect)) {
+      right = Math.max(right, containerRect.right - rightSidebarRect.left + 2);
+    }
+
+    left = Math.min(containerRect.width, Math.max(0, left));
+    right = Math.min(containerRect.width - left, Math.max(0, right));
+    this.overlay.style.top = `${Math.max(0, overlayTop - containerRect.top)}px`;
+    this.overlay.style.bottom = `${Math.max(0, containerRect.bottom - editorRect.bottom)}px`;
+    this.overlay.style.left = `${left}px`;
+    this.overlay.style.right = `${right}px`;
   }
 
   isSystemFileDrag(dataTransfer) {
@@ -77,14 +152,14 @@ class ExternalFileDropController {
   handleDragEnter(event) {
     if (!this.isSystemFileDrag(event.dataTransfer)) return;
     this.dragDepth += 1;
-    if (this.state !== "dragging") this.showOverlay();
+    this.showOverlay(event.dataTransfer);
   }
 
   handleDragOver(event) {
     if (!this.isSystemFileDrag(event.dataTransfer)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-    if (this.state !== "dragging") this.showOverlay();
+    this.showOverlay(event.dataTransfer);
   }
 
   handleDragLeave(event) {
@@ -98,6 +173,8 @@ class ExternalFileDropController {
 
   handleDrop(event) {
     if (!this.isSystemFileDrag(event.dataTransfer)) return;
+    const kind = this.getDroppedItemKind(event.dataTransfer, true);
+    this.updateOverlayCopy(kind);
     const paths = this.getFilePaths(event.dataTransfer);
     // Consume only real file drops. Text, links and NCE's internal drag payloads
     // continue through the application's existing handlers.
@@ -109,7 +186,7 @@ class ExternalFileDropController {
     this.hideOverlay();
     Promise.resolve(this.api.openDroppedFiles?.(paths)).then(
       (result) => {
-        if (operationId === this.dragOperationId) this.showResult(result);
+        if (operationId === this.dragOperationId) this.showDropResult(result);
       },
       (error) => {
         console.error("[External Open] Drop request failed", error);
@@ -150,9 +227,11 @@ class ExternalFileDropController {
     }
   }
 
-  showOverlay() {
+  showOverlay(dataTransfer) {
     if (this.destroyed || !this.overlay) return;
+    this.updateOverlayCopy(this.getDroppedItemKind(dataTransfer));
     if (this.state === "dragging") return;
+    this.updateOverlayBounds();
     this.dragOperationId += 1;
     this.clearStatusTimer();
     this.resetStatusContent();
@@ -178,8 +257,32 @@ class ExternalFileDropController {
     this.showStatus(`Could not open ${failures.length} item${failures.length === 1 ? "" : "s"}: ${detail}`);
   }
 
+  showDropResult(result) {
+    const failures = Array.isArray(result?.failures) ? result.failures : [];
+    if (failures.length) {
+      this.showResult(result);
+      return;
+    }
+    const openedFiles = Number(result?.openedFiles) || 0;
+    const openedFolders = Number(result?.openedFolders) || 0;
+    if (openedFolders > 0 && openedFiles === 0) {
+      this.showStatus(
+        openedFolders === 1
+          ? "Folder opened in a new window."
+          : "Folders opened in new windows.",
+      );
+    } else if (openedFiles > 0 && openedFolders === 0) {
+      this.showStatus(
+        openedFiles === 1
+          ? "File opened in this window."
+          : "Files opened in this window.",
+      );
+    }
+  }
+
   showStatus(message) {
     if (this.destroyed || !this.overlay) return;
+    this.updateOverlayBounds();
     const title = this.overlay.querySelector(".nce-external-drop-title");
     const details = this.overlay.querySelector(".nce-external-drop-details");
     if (title) title.textContent = message;
@@ -202,10 +305,7 @@ class ExternalFileDropController {
   }
 
   resetStatusContent() {
-    const title = this.overlay?.querySelector(".nce-external-drop-title");
-    const details = this.overlay?.querySelector(".nce-external-drop-details");
-    if (title) title.textContent = "Drop files to open";
-    if (details) details.textContent = "Folders open in a new window.";
+    this.updateOverlayCopy(this.overlayKind, true);
   }
 
   destroy() {
