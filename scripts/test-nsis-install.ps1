@@ -11,7 +11,7 @@ $folderMenu = 'Registry::HKEY_CURRENT_USER\Software\Classes\Directory\shell\NCE.
 $unrelatedMenu = 'Registry::HKEY_CURRENT_USER\Software\Classes\*\shell\NCE.UnrelatedSmokeEntry'
 $menus = @($fileMenu, $folderMenu)
 
-New-Item -LiteralPath $unrelatedMenu -Force | Out-Null
+New-Item -Path $unrelatedMenu -Force | Out-Null
 
 function Invoke-Installer([string] $path, [string[]] $arguments) {
   $process = Start-Process -FilePath $path -ArgumentList $arguments -Wait -PassThru
