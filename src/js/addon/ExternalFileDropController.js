@@ -3,7 +3,10 @@ class ExternalFileDropController {
     this.editor = editor;
     this.api = editor.api;
     this.dragDepth = 0;
+    this.state = "hidden";
+    this.dragOperationId = 0;
     this.statusTimer = null;
+    this.statusGeneration = 0;
     this.destroyed = false;
     this.overlay = this.createOverlay();
 
@@ -12,11 +15,16 @@ class ExternalFileDropController {
     this.onDragLeave = this.handleDragLeave.bind(this);
     this.onDrop = this.handleDrop.bind(this);
     this.onWindowBlur = () => {
-      this.dragDepth = 0;
+      this.dragOperationId += 1;
       this.hideOverlay();
     };
     this.onUnload = this.destroy.bind(this);
-    this.onExternalFiles = (request) => { void this.openExternalFiles(request); };
+    this.externalFileOpenQueue = Promise.resolve();
+    this.onExternalFiles = (request) => {
+      this.externalFileOpenQueue = this.externalFileOpenQueue
+        .then(() => this.openExternalFiles(request))
+        .catch((error) => console.error("[External Open] Delivery failed", error));
+    };
     this.onExternalResult = (result) => this.showResult(result);
     window.addEventListener("dragenter", this.onDragEnter, true);
     window.addEventListener("dragover", this.onDragOver, true);
@@ -42,7 +50,7 @@ class ExternalFileDropController {
     details.textContent = "Folders open in a new window.";
     card.append(title, details);
     overlay.append(card);
-    this.editor.mainSection.append(overlay);
+    this.editor.editorOBJ.append(overlay);
     return overlay;
   }
 
@@ -69,14 +77,14 @@ class ExternalFileDropController {
   handleDragEnter(event) {
     if (!this.isSystemFileDrag(event.dataTransfer)) return;
     this.dragDepth += 1;
-    this.showOverlay();
+    if (this.state !== "dragging") this.showOverlay();
   }
 
   handleDragOver(event) {
     if (!this.isSystemFileDrag(event.dataTransfer)) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
-    this.showOverlay();
+    if (this.state !== "dragging") this.showOverlay();
   }
 
   handleDragLeave(event) {
@@ -84,6 +92,7 @@ class ExternalFileDropController {
     const target = event.relatedTarget;
     if (target?.nodeType && document.documentElement.contains(target)) return;
     this.dragDepth = 0;
+    this.dragOperationId += 1;
     this.hideOverlay();
   }
 
@@ -95,17 +104,18 @@ class ExternalFileDropController {
     if (!Array.from(event.dataTransfer?.files || []).length) return;
     event.preventDefault();
     event.stopPropagation();
+    const operationId = this.dragOperationId;
     this.dragDepth = 0;
     this.hideOverlay();
-    if (!paths.length || paths.some((filePath) => !filePath)) {
-      this.showStatus("NCE could not read the path of one or more dropped items.");
-      return;
-    }
     Promise.resolve(this.api.openDroppedFiles?.(paths)).then(
-      (result) => this.showResult(result),
+      (result) => {
+        if (operationId === this.dragOperationId) this.showResult(result);
+      },
       (error) => {
         console.error("[External Open] Drop request failed", error);
-        this.showStatus("NCE could not process the dropped items.");
+        if (operationId === this.dragOperationId) {
+          this.showStatus("NCE could not process the dropped items.");
+        }
       },
     );
   }
@@ -130,7 +140,11 @@ class ExternalFileDropController {
       }
     }
     try {
-      await this.api.acknowledgeExternalOpen?.(request.requestId, { openedPaths, failures });
+      await this.api.acknowledgeExternalOpen?.(
+        request.requestId,
+        request.attempt,
+        { openedPaths, failures },
+      );
     } catch (error) {
       console.error("[External Open] Failed to acknowledge opened files", error);
     }
@@ -138,61 +152,22 @@ class ExternalFileDropController {
 
   showOverlay() {
     if (this.destroyed || !this.overlay) return;
-    this.updateOverlayBounds();
-    clearTimeout(this.statusTimer);
-    this.statusTimer = null;
+    if (this.state === "dragging") return;
+    this.dragOperationId += 1;
+    this.clearStatusTimer();
+    this.resetStatusContent();
+    this.state = "dragging";
     this.overlay.classList.remove("nce-external-drop-result");
     this.overlay.classList.add("nce-external-drop-visible");
-  }
-
-  updateOverlayBounds() {
-    const container = this.editor.mainSection;
-    if (!container || !this.overlay) return;
-    const containerRect = container.getBoundingClientRect();
-    if (!containerRect.width || !containerRect.height) return;
-
-    const rootStyle = getComputedStyle(document.documentElement);
-    const bottomBarHeight = Number.parseFloat(rootStyle.getPropertyValue("--bottombar-height")) || 0;
-    const bottomPanelHeight = Number.parseFloat(rootStyle.getPropertyValue("--bottom-panel-height")) || 0;
-    const overlayTop = containerRect.top;
-    const overlayBottom = containerRect.bottom - bottomBarHeight - bottomPanelHeight;
-    const intersectsOverlayVertically = (rect) => rect.bottom > overlayTop && rect.top < overlayBottom;
-
-    const selector = container.querySelector(".sidebar-tab-selector");
-    const selectorRect = selector?.getBoundingClientRect();
-    let left = selectorRect ? Math.max(0, selectorRect.right - containerRect.left) : 0;
-    let right = 0;
-
-    const leftSidebarRect = container.querySelector(".sidebar-left")?.getBoundingClientRect();
-    if (
-      leftSidebarRect &&
-      intersectsOverlayVertically(leftSidebarRect) &&
-      leftSidebarRect.right > containerRect.left + left &&
-      leftSidebarRect.left < containerRect.right - right
-    ) {
-      left = Math.max(left, leftSidebarRect.right - containerRect.left + 2);
-    }
-
-    const rightSidebarRect = container.querySelector(".sidebar-right")?.getBoundingClientRect();
-    if (
-      rightSidebarRect &&
-      intersectsOverlayVertically(rightSidebarRect) &&
-      rightSidebarRect.left < containerRect.right - right &&
-      rightSidebarRect.right > containerRect.left + left
-    ) {
-      right = Math.max(right, containerRect.right - rightSidebarRect.left + 2);
-    }
-
-    left = Math.min(containerRect.width, Math.max(0, left));
-    right = Math.min(containerRect.width - left, Math.max(0, right));
-    this.overlay.style.left = `${left}px`;
-    this.overlay.style.right = `${right}px`;
   }
 
   hideOverlay() {
     this.dragDepth = 0;
     if (!this.overlay) return;
+    this.clearStatusTimer();
+    this.state = "hidden";
     this.overlay.classList.remove("nce-external-drop-visible", "nce-external-drop-result");
+    this.resetStatusContent();
   }
 
   showResult(result) {
@@ -205,25 +180,40 @@ class ExternalFileDropController {
 
   showStatus(message) {
     if (this.destroyed || !this.overlay) return;
-    this.updateOverlayBounds();
     const title = this.overlay.querySelector(".nce-external-drop-title");
     const details = this.overlay.querySelector(".nce-external-drop-details");
     if (title) title.textContent = message;
     if (details) details.textContent = "";
+    this.state = "error";
     this.overlay.classList.add("nce-external-drop-visible", "nce-external-drop-result");
-    clearTimeout(this.statusTimer);
+    this.clearStatusTimer();
+    const generation = this.statusGeneration;
     this.statusTimer = setTimeout(() => {
+      if (generation !== this.statusGeneration) return;
       this.statusTimer = null;
       this.hideOverlay();
-      if (title) title.textContent = "Drop files to open";
-      if (details) details.textContent = "Folders open in a new window.";
     }, 3500);
+  }
+
+  clearStatusTimer() {
+    this.statusGeneration += 1;
+    clearTimeout(this.statusTimer);
+    this.statusTimer = null;
+  }
+
+  resetStatusContent() {
+    const title = this.overlay?.querySelector(".nce-external-drop-title");
+    const details = this.overlay?.querySelector(".nce-external-drop-details");
+    if (title) title.textContent = "Drop files to open";
+    if (details) details.textContent = "Folders open in a new window.";
   }
 
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    clearTimeout(this.statusTimer);
+    this.state = "hidden";
+    this.dragDepth = 0;
+    this.clearStatusTimer();
     window.removeEventListener("dragenter", this.onDragEnter, true);
     window.removeEventListener("dragover", this.onDragOver, true);
     window.removeEventListener("dragleave", this.onDragLeave, true);
