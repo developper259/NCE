@@ -3122,7 +3122,11 @@ app.whenReady().then(() => {
             true,
             "the global terminal key handler consumes Shift+Arrow before xterm forwards it",
           );
-          await run("editor.terminalPanel.getActiveSession().terminal.clearSelection()");
+          await run(`(() => {
+            editor.terminalPanel.resetKeyboardSelection?.();
+            editor.terminalPanel.getActiveSession().terminal.clearSelection();
+            return true;
+          })()`);
           ptyInputData.length = 0;
           await run("window.__nceTerminalInput.length = 0");
           await interruptAndWaitForFreshShellLine(
