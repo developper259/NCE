@@ -199,7 +199,12 @@ class ExternalFileDropController {
     const paths = this.getFilePaths(event.dataTransfer);
     // Consume only real file drops. Text, links and NCE's internal drag payloads
     // continue through the application's existing handlers.
-    if (!Array.from(event.dataTransfer?.files || []).length) return;
+    if (!Array.from(event.dataTransfer?.files || []).length) {
+      this.dragDepth = 0;
+      this.dragOperationId += 1;
+      this.hideOverlay();
+      return;
+    }
     event.preventDefault();
     event.stopPropagation();
     const operationId = this.dragOperationId;

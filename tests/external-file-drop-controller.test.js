@@ -188,6 +188,26 @@ test("dragover avoids layout reads and an expired error timer cannot hide a new 
   assert.equal(listeners.size, 0);
 });
 
+test("a file-typed drop with no files clears the overlay without consuming the event", () => {
+  const { controller } = createControllerHarness();
+  const transfer = { types: ["Files"], items: [], files: [] };
+  controller.handleDragEnter({ dataTransfer: transfer });
+  assert.equal(controller.state, "dragging");
+
+  const event = {
+    dataTransfer: transfer,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+  controller.handleDrop(event);
+
+  assert.equal(controller.state, "hidden");
+  assert.equal(controller.overlay.classList.contains("nce-external-drop-visible"), false);
+  assert.equal(event.prevented, undefined, "empty file transfers keep their existing handlers");
+  assert.equal(event.stopped, undefined);
+  controller.destroy();
+});
+
 test("external-open acknowledgements carry the current delivery attempt and report progress", async () => {
   const harness = createControllerHarness();
   const { controller, editor, acknowledgements, progressReports } = harness;
