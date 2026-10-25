@@ -18,6 +18,7 @@ class FakeElement {
     width: 1200,
     height: 800,
   }, onLayoutRead = () => {}) {
+    this.nodeType = 1;
     this.children = [];
     this.classList = new FakeClassList();
     this.style = {};
@@ -57,12 +58,20 @@ function createControllerHarness() {
     return element;
   };
   const fakeWindow = {
-    addEventListener: (name, callback) => listeners.set(name, callback),
-    removeEventListener: (name) => listeners.delete(name),
+    addEventListener(name, callback) {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name).add(callback);
+    },
+    removeEventListener(name, callback) {
+      const callbacks = listeners.get(name);
+      if (!callbacks) return;
+      callbacks.delete(callback);
+      if (callbacks.size === 0) listeners.delete(name);
+    },
   };
   const fakeDocument = {
     createElement: () => new FakeElement(),
-    documentElement: { contains: () => false },
+    documentElement: { contains: (candidate) => candidate?.nodeType === 1 },
   };
   const Controller = loadGlobal(
     "src/js/addon/ExternalFileDropController.js",
@@ -186,6 +195,20 @@ test("dragover avoids layout reads and an expired error timer cannot hide a new 
   controller.destroy();
   assert.equal(controller.state, "hidden");
   assert.equal(listeners.size, 0);
+});
+
+test("dragleave keeps the overlay while the pointer moves within the document", () => {
+  const { controller } = createControllerHarness();
+  const transfer = makeFileTransfer([{ path: "/tmp/a.js" }]);
+  controller.handleDragEnter({ dataTransfer: transfer });
+  assert.equal(controller.state, "dragging");
+
+  controller.handleDragLeave({ relatedTarget: new FakeElement() });
+  assert.equal(controller.state, "dragging", "moving between document elements is not leaving the window");
+
+  controller.handleDragLeave({ relatedTarget: { nodeType: 3 } });
+  assert.equal(controller.state, "hidden", "leaving the document hides the overlay");
+  controller.destroy();
 });
 
 test("a file-typed drop with no files clears the overlay without consuming the event", () => {

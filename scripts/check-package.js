@@ -144,11 +144,14 @@ for (const archive of archives) {
         encoding: 'utf8',
       }));
       const documentTypes = infoPlist.CFBundleDocumentTypes || [];
-      assert.ok(documentTypes.some(type =>
-        type.CFBundleTypeRole === 'Viewer' &&
+      const advertises = (role, contentType) => documentTypes.some(type =>
+        type.CFBundleTypeRole === role &&
         type.LSHandlerRank === 'Alternate' &&
-        type.LSItemContentTypes?.includes('public.folder')),
-      `${bundle}: generated Info.plist does not advertise NCE as an alternate folder handler`);
+        type.LSItemContentTypes?.includes(contentType));
+      assert.ok(advertises('Editor', 'public.data'),
+        `${bundle}: generated Info.plist does not advertise NCE as an alternate file handler`);
+      assert.ok(advertises('Viewer', 'public.folder'),
+        `${bundle}: generated Info.plist does not advertise NCE as an alternate folder handler`);
     }
   }
   if (process.platform === 'win32') {

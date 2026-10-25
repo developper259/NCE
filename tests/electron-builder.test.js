@@ -20,11 +20,13 @@ test("Windows NSIS offers per-user Open with NCE entries and removes only its ow
   const installer = fs.readFileSync(path.join(__dirname, "../build/installer.nsh"), "utf8");
   const ci = fs.readFileSync(path.join(__dirname, "../.github/workflows/ci.yml"), "utf8");
   assert.equal(packageJson.build.win.target, "nsis");
-  assert.notEqual(nsis.oneClick, false, "retain electron-builder's existing one-click installer mode");
+  assert.equal(nsis.oneClick, true, "retain electron-builder's one-click installer mode");
   assert.equal(nsis.perMachine, false);
   assert.equal(nsis.include, "build/installer.nsh");
   assert.match(installer, /Software\\Classes\\\*\\shell\\NCE\.OpenWith/);
   assert.match(installer, /Software\\Classes\\Directory\\shell\\NCE\.OpenWith/);
+  assert.equal((installer.match(/"MultiSelectModel" "Player"/g) || []).length, 2,
+    "both verbs accept multi-selection instead of the shell's single-document default");
   assert.match(installer, /\$\{APP_EXECUTABLE_FILENAME\}.*%1/);
   assert.match(installer, /!macro customUnInstall/);
   assert.equal((installer.match(/DeleteRegKey HKCU/g) || []).length, 2);

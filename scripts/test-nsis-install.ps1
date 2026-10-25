@@ -11,7 +11,8 @@ $folderMenu = 'Registry::HKEY_CURRENT_USER\Software\Classes\Directory\shell\NCE.
 $unrelatedMenu = 'Registry::HKEY_CURRENT_USER\Software\Classes\*\shell\NCE.UnrelatedSmokeEntry'
 $menus = @($fileMenu, $folderMenu)
 
-New-Item -Path $unrelatedMenu -Force | Out-Null
+$unrelatedMenuKey = 'Software\Classes\*\shell\NCE.UnrelatedSmokeEntry'
+[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($unrelatedMenuKey) | Out-Null
 
 function Invoke-Installer([string] $path, [string[]] $arguments) {
   $process = Start-Process -FilePath $path -ArgumentList $arguments -Wait -PassThru
@@ -23,6 +24,8 @@ function Assert-MenuEntries {
     if (-not (Test-Path -LiteralPath $menu)) { throw "Missing context menu key: $menu" }
     $label = (Get-Item -LiteralPath $menu).GetValue('')
     if ($label -ne 'Open with NCE') { throw "Unexpected menu label '$label' at $menu." }
+    $multiSelect = (Get-Item -LiteralPath $menu).GetValue('MultiSelectModel')
+    if ($multiSelect -ne 'Player') { throw "Unexpected MultiSelectModel '$multiSelect' at $menu." }
     $commandKey = Join-Path $menu 'command'
     $command = (Get-Item -LiteralPath $commandKey).GetValue('')
     if ($command -notmatch '^".*NCE\.exe" "%1"$') { throw "Unexpected open command: $command" }
@@ -49,4 +52,4 @@ foreach ($menu in $menus) {
 if (-not (Test-Path -LiteralPath $unrelatedMenu)) {
   throw 'Uninstall removed an unrelated context menu entry.'
 }
-Remove-Item -LiteralPath $unrelatedMenu -Recurse -Force
+[Microsoft.Win32.Registry]::CurrentUser.DeleteSubKeyTree($unrelatedMenuKey)
