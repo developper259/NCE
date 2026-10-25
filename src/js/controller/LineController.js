@@ -1117,7 +1117,7 @@ class LineController {
     }
 
     if (delta !== 0) {
-      this.refreshNumberLines(false);
+      this.refreshNumberLines(false, previousStartIndex);
     }
 
     this.editor.cursorController.updateCaretPosition();
@@ -1328,7 +1328,7 @@ class LineController {
     else this.editor.output.replaceChildren(fragment);
   }
 
-  refreshNumberLines(updateWidth = true) {
+  refreshNumberLines(updateWidth = true, previousStartIndex = null) {
     if (!this.editor.tabManager.activeFile) {
       return;
     }
@@ -1363,31 +1363,74 @@ class LineController {
       else this.editor.lineNumberOutput.appendChild(fragment);
     }
 
+    const delta = Number.isInteger(previousStartIndex)
+      ? this.startIndex - previousStartIndex
+      : 0;
+    const reuseRows = diff === 0 && delta !== 0 && Math.abs(delta) < targetCount;
+
+    if (reuseRows) {
+      this.shiftNumberLineRows(delta);
+    }
+
+    children = this.editor.lineNumberOutput.children;
+
     for (let i = 0; i < children.length; i++) {
-      const span = children[i];
-
-      const displayIndex = this.startIndex + i;
-      const displayRow = this.getDisplayRow(displayIndex);
-
-      const spanFast = this.getFastNode(span);
-      spanFast?.setTextContent(
-        displayRow?.documentIndex === null
-          ? ""
-          : displayRow
-            ? displayRow.documentIndex + 1
-            : "",
+      const enteringRow = reuseRows &&
+        (delta > 0 ? i >= children.length - delta : i < -delta);
+      this.syncNumberLineRow(
+        children[i],
+        i,
+        this.startIndex + i,
+        !reuseRows || enteringRow,
       );
-
-      const lineNumber = displayRow?.documentIndex === null
-        ? ""
-        : (displayRow?.documentIndex ?? "");
-      spanFast?.setDataset("line", lineNumber);
-      spanFast?.setDataset("displayLine", displayIndex);
-      spanFast?.setTop(this.getLineTop(i));
-      spanFast?.toggleClass("line-selected", displayRow?.documentIndex === this.index - 1);
     }
 
     if (updateWidth) this.updateLineNumberWidth();
+  }
+
+  shiftNumberLineRows(delta) {
+    const output = this.editor.lineNumberOutput;
+
+    if (delta > 0) {
+      for (let index = 0; index < delta; index++) {
+        const first = output.firstElementChild;
+        if (!first) break;
+        output.appendChild(first);
+      }
+      return;
+    }
+
+    for (let index = 0; index < -delta; index++) {
+      const last = output.lastElementChild;
+      const first = output.firstElementChild;
+      if (!last || !first) break;
+      output.insertBefore(last, first);
+    }
+  }
+
+  syncNumberLineRow(span, screenIndex, displayIndex, updateText = true) {
+    const spanFast = this.getFastNode(span);
+    if (!spanFast) return;
+
+    spanFast.setTop(this.getLineTop(screenIndex));
+    spanFast.setDataset("displayLine", displayIndex);
+
+    if (!updateText) return;
+
+    const displayRow = this.getDisplayRow(displayIndex);
+    spanFast.setTextContent(
+      displayRow?.documentIndex === null
+        ? ""
+        : displayRow
+          ? displayRow.documentIndex + 1
+          : "",
+    );
+
+    const lineNumber = displayRow?.documentIndex === null
+      ? ""
+      : (displayRow?.documentIndex ?? "");
+    spanFast.setDataset("line", lineNumber);
+    spanFast.toggleClass("line-selected", displayRow?.documentIndex === this.index - 1);
   }
 
   initNumberLines() {
@@ -1417,27 +1460,7 @@ class LineController {
     spanFast.addClass("line-el");
     spanFast.addClass("editor-el");
 
-    const displayRow = this.getDisplayRow(dataIndex);
-
-    if (displayRow?.documentIndex === this.index - 1) {
-      spanFast.addClass("line-selected");
-    }
-
-    spanFast.setTop(this.getLineTop(screenIndex));
-
-    spanFast.setTextContent(
-      displayRow?.documentIndex === null
-        ? ""
-        : displayRow
-          ? displayRow.documentIndex + 1
-          : "",
-    );
-
-    const lineNumber = displayRow?.documentIndex === null
-      ? ""
-      : (displayRow?.documentIndex ?? "");
-    spanFast.setDataset("line", lineNumber);
-    spanFast.setDataset("displayLine", dataIndex);
+    this.syncNumberLineRow(span, screenIndex, dataIndex);
 
     return span;
   }

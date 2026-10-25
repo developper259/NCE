@@ -28,6 +28,7 @@ class SearchController {
 
     this.isOpen = false;
     this.replaceExpanded = false;
+    this.searchDOMVisible = false;
 
     this.init();
   }
@@ -541,26 +542,28 @@ class SearchController {
 
     this.currentIndex = -1;
 
-    if (this.editor.searchOutput) {
-      for (const node of this.editor.searchOutput.children || []) {
-        const fastNode = this.getSearchFastNode(node);
-        if (fastNode) fastNode.setDisplay("none");
-        else node.style.display = "none";
-      }
-    }
+    this.hideSearchDOM();
 
     this.updateCounter();
+  }
+
+  hideSearchDOM() {
+    if (!this.searchDOMVisible) return;
+
+    for (const node of this.editor.searchOutput?.children || []) {
+      const fastNode = this.getSearchFastNode(node);
+      if (fastNode) fastNode.setDisplay("none");
+      else node.style.display = "none";
+    }
+
+    this.searchDOMVisible = false;
   }
 
   refreshSelectionDOM() {
     if (!this.editor.searchOutput) return;
 
     if (!this.isOpen || this.results.length === 0) {
-      for (const node of this.editor.searchOutput.children || []) {
-        const fastNode = this.getSearchFastNode(node);
-        if (fastNode) fastNode.setDisplay("none");
-        else node.style.display = "none";
-      }
+      this.hideSearchDOM();
       return;
     }
 
@@ -663,6 +666,8 @@ class SearchController {
       }
       div.__nceSearchMeta = meta;
     }
+
+    this.searchDOMVisible = visibleResults.length > 0;
   }
 
   updateCounter() {

@@ -5,6 +5,7 @@ class SelectController {
     this.selectionAutoScrollFrame = null;
     this.dragClientPosition = null;
     this.selectionFastNodes = new WeakMap();
+    this.selectionDOMVisible = false;
     this.initEventListeners();
   }
 
@@ -221,6 +222,11 @@ class SelectController {
   refreshSelectionDOM() {
     if (!this.editor.tabManager.activeFile || !this.editor.selectOutput) return;
 
+    if (!this.hasActiveSelection()) {
+      if (this.selectionDOMVisible) this.hideSelectionDOM();
+      return;
+    }
+
     const cursor = this.editor.cursorController;
     const lc = this.editor.lineController;
     const difY = 4;
@@ -246,6 +252,8 @@ class SelectController {
     }
 
     const currentDOMNodes = this.editor.selectOutput.children;
+
+    if (visibleSelections.length === 0 && !this.selectionDOMVisible) return;
 
     const totalLoopLength = Math.max(
       visibleSelections.length,
@@ -369,6 +377,19 @@ class SelectController {
         }
       }
     }
+
+    this.selectionDOMVisible = visibleSelections.length > 0;
+  }
+
+  hideSelectionDOM() {
+    const currentDOMNodes = this.editor.selectOutput?.children;
+    if (!currentDOMNodes) return;
+
+    for (let i = 0; i < currentDOMNodes.length; i++) {
+      this.setSelectionNodeDisplay(currentDOMNodes[i], "none");
+    }
+
+    this.selectionDOMVisible = false;
   }
 
   refreshSelectPositions() {
@@ -507,13 +528,7 @@ class SelectController {
     this.startSelect = undefined;
     this.endSelect = undefined;
 
-    if (this.editor.selectOutput) {
-      const currentDOMNodes = this.editor.selectOutput.children;
-
-      for (let i = 0; i < currentDOMNodes.length; i++) {
-        this.setSelectionNodeDisplay(currentDOMNodes[i], "none");
-      }
-    }
+    this.hideSelectionDOM();
 
     if (emitEvent) this.emitSelectionChange();
     this.editor.multiCursorController?.refreshOverlays?.();

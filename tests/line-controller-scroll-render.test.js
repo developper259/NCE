@@ -64,9 +64,10 @@ function makeController(lineCount = 12, visibleRows = 4) {
   };
   controller.getLineTop = (screenIndex) => screenIndex * 20;
   controller.applyOutputTransform = () => {};
-  controller.refreshNumberLines = (updateWidth) => {
+  controller.refreshNumberLines = (updateWidth, previousStartIndex) => {
     controller.numberRefreshes += 1;
     controller.numberWidthUpdated = updateWidth;
+    controller.numberPreviousStartIndex = previousStartIndex;
   };
   controller.updateLineNumberWidth = () => { controller.widthRefreshes += 1; };
   controller.numberRefreshes = 0;
@@ -214,8 +215,72 @@ test("one-line vertical scroll reuses unchanged highlighted rows and rebuilds on
   assert.equal(output.children[3].dataset.line, "4");
   assert.deepEqual(output.children.map((row) => row.top), [0, 20, 40, 60]);
   assert.equal(controller.numberWidthUpdated, false);
+  assert.equal(controller.numberPreviousStartIndex, 0);
   assert.equal(controller.widthRefreshes, 0);
   assert.deepEqual(scrolledHighlightIndexes, []);
+});
+
+test("vertical scroll rotates the gutter and rewrites only the entering row", () => {
+  const { controller, file } = makeController();
+  const spans = Array.from({ length: 4 }, (_, index) => ({
+    children: [],
+    dataset: {},
+    textContent: String(index + 1),
+    top: index * 20,
+    textWrites: 0,
+    classes: new Set(),
+  }));
+  const gutter = {
+    children: spans,
+    get firstElementChild() { return this.children[0] || null; },
+    get lastElementChild() { return this.children.at(-1) || null; },
+    appendChild(node) {
+      const existing = this.children.indexOf(node);
+      if (existing >= 0) this.children.splice(existing, 1);
+      this.children.push(node);
+      return node;
+    },
+    insertBefore(node, reference) {
+      const existing = this.children.indexOf(node);
+      if (existing >= 0) this.children.splice(existing, 1);
+      const index = this.children.indexOf(reference);
+      this.children.splice(index < 0 ? this.children.length : index, 0, node);
+      return node;
+    },
+  };
+  controller.editor.lineNumberOutput = gutter;
+  controller.getFastNode = (node) => ({
+    setTop(value) { node.top = value; },
+    setDataset(name, value) { node.dataset[name] = String(value); },
+    setTextContent(value) {
+      node.textContent = String(value);
+      node.textWrites += 1;
+    },
+    toggleClass(name, force) {
+      if (force) node.classes.add(name);
+      else node.classes.delete(name);
+    },
+  });
+  controller.getViewNumberLines = () => 4;
+  controller.getLineTop = (screenIndex) => screenIndex * 20;
+  controller.refreshNumberLines = LineController.prototype.refreshNumberLines;
+  file.index = 5;
+
+  file.startIndex = 1;
+  controller.refreshNumberLines(false, 0);
+
+  assert.deepEqual(gutter.children.map((span) => span.textContent), ["2", "3", "4", "5"]);
+  assert.deepEqual(gutter.children.map((span) => span.top), [0, 20, 40, 60]);
+  assert.deepEqual(gutter.children.map((span) => span.dataset.displayLine), ["1", "2", "3", "4"]);
+  assert.deepEqual(gutter.children.map((span) => span.textWrites), [0, 0, 0, 1]);
+  assert.ok(gutter.children[3].classes.has("line-selected"));
+
+  gutter.children.forEach((span) => { span.textWrites = 0; });
+  file.startIndex = 2;
+  controller.refreshNumberLines(false);
+
+  assert.deepEqual(gutter.children.map((span) => span.textContent), ["3", "4", "5", "6"]);
+  assert.deepEqual(gutter.children.map((span) => span.textWrites), [1, 1, 1, 1]);
 });
 
 test("text, token, line identity, and horizontal slice changes invalidate the row content", () => {

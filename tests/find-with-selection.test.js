@@ -67,6 +67,28 @@ function createSearchFixture(text, inputValue, selectedText, searchOutput = { re
   return { editor, input, search };
 }
 
+test("closed search hides rendered matches once and then skips the DOM", () => {
+  const nodes = [{ style: {} }];
+  let childReads = 0;
+  const searchOutput = {};
+  Object.defineProperty(searchOutput, "children", {
+    get() {
+      childReads += 1;
+      return nodes;
+    },
+  });
+  const { search } = createSearchFixture("a\nb", "a", "", searchOutput);
+  search.searchDOMVisible = true;
+  search.isOpen = false;
+
+  search.refreshSelectionDOM();
+  assert.equal(nodes[0].style.display, "none");
+  assert.equal(search.searchDOMVisible, false);
+
+  search.refreshSelectionDOM();
+  assert.equal(childReads, 1);
+});
+
 test("Find prefills with single-line selection when useSelection is true", () => {
   const { search, input } = createSearchFixture("const userName = getUserName();", "old", "userName", null);
 

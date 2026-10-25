@@ -581,6 +581,35 @@ test("Select All stores one logical range and renders only viewport-clipped rect
   assert.equal(select.getSelectedText().length, 1_000_000);
 });
 
+test("selection DOM refresh is a no-op once an empty selection is hidden", () => {
+  const SelectController = loadGlobal(
+    "src/js/controller/SelectController.js",
+    "SelectController",
+    { Events: { ON_SELECT: "select" } },
+  );
+  const node = element();
+  const editor = {
+    tabManager: {
+      activeFile: { _selectedLines: new Map(), _selectionRange: null },
+    },
+    selectOutput: { children: [node] },
+    lineController: {
+      startIndex: 0,
+      getDisplayRow() { throw new Error("idle selection must not scan visible rows"); },
+    },
+  };
+  const select = Object.create(SelectController.prototype);
+  select.editor = editor;
+  select.selectionFastNodes = new WeakMap();
+  select.selectionDOMVisible = true;
+
+  select.refreshSelectionDOM();
+  assert.equal(node.style.display, "none");
+  assert.equal(select.selectionDOMVisible, false);
+
+  select.refreshSelectionDOM();
+});
+
 test("drag selections keep one logical range and materialize text only on demand", () => {
   const SelectController = loadGlobal(
     "src/js/controller/SelectController.js",
