@@ -582,7 +582,8 @@ test("progress cannot extend a delivery that is waiting for a renderer reload", 
 });
 
 test("path classification probes the filesystem concurrently without reordering deliveries", async () => {
-  const paths = Array.from({ length: 32 }, (_, index) => `/tmp/nce-classification-${index}.js`);
+  const paths = Array.from({ length: 32 }, (_, index) =>
+    path.join(os.tmpdir(), `nce-classification-${process.pid}-${index}.js`));
   let active = 0;
   let maxActive = 0;
   const { ExternalOpenCoordinator: ConcurrentCoordinator } = loadMain(
