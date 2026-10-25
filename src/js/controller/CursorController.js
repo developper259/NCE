@@ -88,7 +88,8 @@ class CursorController {
   rowToY(row) {
     const lc = this.editor.lineController;
     const displayIndex = lc.getDisplayIndexForCursor(row);
-    const screenRow = displayIndex - lc.startIndex;
+    const renderStartIndex = lc.renderStartIndex ?? lc.startIndex ?? 0;
+    const screenRow = displayIndex - renderStartIndex;
     return lc.getLineTop(screenRow) + 4;
   }
 
@@ -108,7 +109,8 @@ class CursorController {
     let renderedX = null;
 
     const displayIndex = lineController.getDisplayIndexForCursor(row);
-    const screenIndex = displayIndex - lineController.startIndex;
+    const renderStartIndex = lineController.renderStartIndex ?? lineController.startIndex ?? 0;
+    const screenIndex = displayIndex - renderStartIndex;
     const lineElement = this.editor.output.children?.[screenIndex];
     const renderMeta = lineElement?.__nceRenderMeta;
     if (lineElement && renderMeta?.documentIndex === row - 1) {
@@ -347,9 +349,12 @@ class CursorController {
     if (!lc?.outputScroller || !this.editor.tabManager.activeFile) return false;
 
     const displayIndex = lc.getDisplayIndexForCursor(this.row);
-    if (displayIndex < lc.startIndex) {
+    const lineHeight = lc.getLineHeight?.() ?? this.editor.posY;
+    const top = (displayIndex - lc.startIndex) * lineHeight - (lc.offsetY || 0);
+    const viewportHeight = lc.getViewportHeight?.() ?? 0;
+    if (top < 0) {
       lc.scrollTo(displayIndex);
-    } else if (displayIndex >= lc.startIndex + lc.maxViewLines) {
+    } else if (top + lineHeight > viewportHeight) {
       lc.scrollTo(displayIndex - lc.maxViewLines + 1);
     }
 
@@ -375,11 +380,9 @@ class CursorController {
   isRowVisible(row) {
     const lc = this.editor.lineController;
     const displayIndex = lc.getDisplayIndexForCursor(row);
-    const screenRow = displayIndex - lc.startIndex;
-    if (screenRow < 0 || screenRow >= lc.maxViewLines) return false;
-
-    const top = lc.getLineTop(screenRow) - lc.offsetY;
-    const bottom = top + this.editor.posY;
+    const lineHeight = lc.getLineHeight?.() || this.editor.posY;
+    const top = (displayIndex - lc.startIndex) * lineHeight - lc.offsetY;
+    const bottom = top + lineHeight;
     const viewport = lc.getViewportHeight();
     return bottom > 0 && top < viewport;
   }

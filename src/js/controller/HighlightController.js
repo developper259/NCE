@@ -501,7 +501,8 @@ class HighlightController {
     );
     if (lineController.startIndex !== displayStart) {
       lineController.startIndex = displayStart;
-      this.editor.lineController.offsetY = 0;
+      lineController.offsetY = 0;
+      lineController.resetRenderWindow?.();
     }
     if (endLine <= startLine) return null;
     return { startLine, endLine };

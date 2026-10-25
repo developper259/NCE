@@ -245,10 +245,15 @@ class OutputScroller {
         this.lineController.startIndex !== 0 ||
         this.lineController.offsetY !== 0
       ) {
+        const previousStartIndex = this.lineController.startIndex;
         this.resetScroll();
-        this.lineController.markDirtyAll();
-        this.lineController.refreshOutput();
-        this.lineController.refreshNumberLines();
+        if (typeof this.lineController.refreshForVerticalScroll === "function") {
+          this.lineController.refreshForVerticalScroll(previousStartIndex);
+        } else {
+          this.lineController.markDirtyAll();
+          this.lineController.refreshOutput();
+          this.lineController.refreshNumberLines();
+        }
         this.editor.cursorController.updateCaretPosition();
         this.editor.selectController.refreshSelectPositions();
       }
@@ -279,6 +284,7 @@ class OutputScroller {
   resetScroll() {
     this.lineController.startIndex = 0;
     this.lineController.offsetY = 0;
+    this.lineController.resetRenderWindow?.();
     if (this.vScroller) this.vScroller.setScrollRatio(0);
     this.applyScrollTransform();
   }
@@ -450,6 +456,7 @@ class OutputScroller {
 
     let verticalChanged = false;
     let horizontalChanged = false;
+    const previousStartIndex = this.lineController.startIndex;
 
     const hasDisplayIndex =
       displayIndex !== undefined && displayIndex !== null && !isNaN(displayIndex);
@@ -494,6 +501,16 @@ class OutputScroller {
 
     if (verticalChanged) {
       this.vScroller.setScrollRatio(this.getVerticalScrollRatioFromState());
+      if (typeof this.lineController.refreshForVerticalScroll === "function") {
+        this.lineController.refreshForVerticalScroll(previousStartIndex);
+        this.lineController.updateLineNumberWidth?.();
+      } else {
+        this.lineController.markDirtyAll?.();
+        this.lineController.refreshOutput?.();
+        this.lineController.refreshNumberLines?.();
+        this.applyScrollTransform();
+      }
+    } else {
       this.applyScrollTransform();
     }
 
@@ -518,10 +535,6 @@ class OutputScroller {
         }
         return;
       }
-      this.editor.highlightController.lineNodes.clear();
-      this.lineController.markDirtyAll();
-      this.lineController.refreshOutput();
-      this.lineController.refreshNumberLines();
 
       this.vScroller.refresh();
       this.hScroller.refresh();

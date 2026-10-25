@@ -237,7 +237,7 @@ class SelectController {
       ? lc.getDisplayLineCount()
       : lc.lines.length;
     const visibleRows = Math.max(0, Math.min(
-      lc.renderedLineCount || lc.maxViewLines || displayLineCount,
+      (lc.maxViewLines || lc.renderedLineCount || displayLineCount) + 1,
       displayLineCount - startIndex,
     ));
     for (let screenIndex = 0; screenIndex < visibleRows; screenIndex++) {

@@ -303,21 +303,25 @@ test("Output transform layers skip repeated height and transform mutations", () 
   });
   const layers = [createElement(), createElement(), createElement(), createElement()];
   const controller = Object.create(LineController.prototype);
+  const lines = Array.from({ length: 100 }, () => ({ getText: () => "" }));
   controller.editor = {
     output: layers[0], lineNumberOutput: layers[1], selectOutput: layers[2], searchOutput: layers[3],
     posY: 22,
     domManager: { getLineHeight: () => 22 },
-    tabManager: { activeFile: { offsetY: 4 } },
+    tabManager: { activeFile: { offsetY: 4, lines } },
   };
   ["outputFast", "lineNumberFast", "selectOutputFast", "searchOutputFast"]
     .forEach((property, index) => { controller[property] = new FastDOMNode(layers[index]); });
   controller.outputHeight = 198;
   controller.offsetY = 4;
 
+  const expectedRows = controller.maxViewLines + controller.getRenderBufferLines() * 2;
+  const expectedHeight = expectedRows * controller.getLineHeight();
+
   controller.applyOutputTransform();
   controller.applyOutputTransform();
   for (const [index, layer] of layers.entries()) {
-    assert.equal(layer.style.height, index === 1 ? "219px" : "220px");
+    assert.equal(layer.style.height, index === 1 ? `${expectedHeight - 1}px` : `${expectedHeight}px`);
     assert.equal(layer.style.transform, "translate(0px, -4px)");
     assert.equal(layer.styleWrites.get("height"), 1);
     assert.equal(layer.styleWrites.get("transform"), 1);

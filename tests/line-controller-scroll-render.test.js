@@ -9,7 +9,7 @@ const LineController = loadGlobal(
   { OutputScroller: class {}, SETTINGS_GET: () => 4 },
 );
 
-function makeController(lineCount = 12, visibleRows = 4) {
+function makeController(lineCount = 12, visibleRows = 4, scrollBufferLines = 0) {
   const lines = Array.from({ length: lineCount }, (_, index) => {
     const line = new LineNode(`const value${index} = ${index};`);
     line.setTokens([{ value: line.getText(), type: "source" }]);
@@ -54,7 +54,8 @@ function makeController(lineCount = 12, visibleRows = 4) {
   controller.marginChars = 10;
   controller.offsetX = 0;
   controller.renderGeneration = 1;
-  Object.defineProperty(controller, "renderedLineCount", { value: visibleRows });
+  controller.scrollBufferLines = scrollBufferLines;
+  Object.defineProperty(controller, "maxViewLines", { value: visibleRows });
   Object.defineProperty(controller, "maxCharactersPerLine", { value: 90 });
   controller.getDisplayRow = (displayIndex) => {
     const line = lines[displayIndex];
@@ -103,7 +104,7 @@ function makeController(lineCount = 12, visibleRows = 4) {
     },
   });
   controller.createLineOBJ = (slice, screenIndex) => {
-    const documentIndex = file.startIndex + screenIndex;
+    const documentIndex = controller.renderStartIndex + screenIndex;
     const node = {
       dataset: {},
       children: [],
@@ -144,7 +145,8 @@ function makeController(lineCount = 12, visibleRows = 4) {
     output.children.push(node);
     editor.highlightController.setLineNode(displayIndex, node);
   }
-  for (let index = 0; index < visibleRows; index += 1) addRow(index);
+  const initialRowCount = Math.min(lineCount, visibleRows + scrollBufferLines * 2);
+  for (let index = 0; index < initialRowCount; index += 1) addRow(index);
 
   return { controller, editor, file, lines, output, scrolledHighlightIndexes };
 }
@@ -321,5 +323,53 @@ test("repeated down and up scroll keeps the row pool bounded", () => {
     controller.refreshForVerticalScroll(beforeUp);
     assert.equal(output.children.length, 4);
     assert.equal(new Set(output.children).size, 4);
+  }
+});
+
+test("scrolling inside the render buffer reuses every row without rebuilding", () => {
+  const { controller, file, output, scrolledHighlightIndexes } = makeController(40, 4, 8);
+  const originalRows = output.children.slice();
+
+  assert.equal(controller.renderedLineCount, 20);
+  assert.equal(output.children.length, 20);
+  assert.equal(controller.renderStartIndex, 0);
+
+  for (const startIndex of [1, 4, 7]) {
+    file.startIndex = startIndex;
+    controller.refreshForVerticalScroll(startIndex - 1);
+  }
+
+  assert.equal(controller.renderStartIndex, 0);
+  assert.deepEqual(controller.rowsCreated, []);
+  assert.equal(controller.slicesCreated, 0);
+  assert.equal(controller.initCalls, 0);
+  assert.equal(output.children.length, 20);
+  originalRows.forEach((row, index) => assert.equal(output.children[index], row));
+  assert.deepEqual(scrolledHighlightIndexes, []);
+});
+
+test("crossing the render window boundary rebuilds only the entering rows", () => {
+  const { controller, file, output } = makeController(40, 4, 8);
+  const originalRows = output.children.slice();
+
+  file.startIndex = 16;
+  controller.refreshForVerticalScroll(15);
+
+  assert.equal(controller.renderStartIndex, 8);
+  assert.equal(controller.renderedLineCount, 20);
+  assert.equal(controller.initCalls, 0);
+  assert.deepEqual(controller.rowsCreated, [20, 21, 22, 23, 24, 25, 26, 27]);
+  assert.equal(controller.slicesCreated, 8);
+  assert.equal(output.children.length, 20);
+  assert.deepEqual(
+    output.children.map((row) => row.top),
+    Array.from({ length: 20 }, (_, index) => index * 20),
+  );
+  assert.deepEqual(
+    output.children.map((row) => row.dataset.displayLine),
+    Array.from({ length: 20 }, (_, index) => String(index + 8)),
+  );
+  for (let index = 0; index < 12; index += 1) {
+    assert.equal(output.children[index], originalRows[index + 8]);
   }
 });

@@ -847,7 +847,13 @@ class MultiCursorController {
       return;
     }
     const startIndex = lineController.startIndex || 0;
-    const visibleCount = lineController.renderedLineCount || lineController.maxViewLines || 0;
+    const viewportLines = Number.isFinite(lineController.maxViewLines)
+      ? lineController.maxViewLines
+      : (lineController.renderedLineCount || 0);
+    const visibleCount = Math.min(
+      viewportLines + 1,
+      lineController.getDisplayLineCount() - startIndex,
+    );
     const endIndex = Math.min(lineController.getDisplayLineCount(), startIndex + visibleCount);
     let caretCount = 0;
     let selectionCount = 0;
@@ -942,8 +948,7 @@ class MultiCursorController {
       if (selection.id === primaryId) continue;
       const position = selection.active;
       const displayIndex = lineController.getDisplayIndexForCursor(position.row);
-      const screenRow = displayIndex - startIndex;
-      if (screenRow >= 0 && screenRow < visibleCount) {
+      if (displayIndex >= startIndex && displayIndex < endIndex) {
         const caretPosition = getCaretPosition(position.row, position.column);
         if (
           caretPosition.viewColumn >= viewportStart &&
@@ -992,7 +997,7 @@ class MultiCursorController {
         const endPosition = cursor.getPosition(row, rightColumn);
         const left = getCaretPosition(row, startPosition.column).contentLeft;
         const right = getCaretPosition(row, endPosition.column).contentLeft;
-        const top = cursor.rowToY(row) - 4 - lineController.offsetY;
+        const top = cursor.rowToY(row) - 4;
         const width = right > left ? right - left : this.editor.letterSize;
         selectionRects.push({
           left,

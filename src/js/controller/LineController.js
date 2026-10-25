@@ -1,3 +1,5 @@
+const OUTPUT_SCROLL_BUFFER_LINES = 8;
+
 class LineController {
   constructor(editor) {
     this.editor = editor;
@@ -19,6 +21,9 @@ class LineController {
     this.diffMetricsTabWidth = null;
     this.indexedDiffRows = null;
     this.renderGeneration = 0;
+    this.scrollBufferLines = OUTPUT_SCROLL_BUFFER_LINES;
+    this._renderStartIndex = null;
+    this._renderedLineCount = null;
 
     this.marginChars = 10;
     this.marginLines = 3;
@@ -216,8 +221,60 @@ class LineController {
     );
   }
 
+  get renderStartIndex() {
+    return this._renderStartIndex ?? this.getRenderWindow().start;
+  }
+
   get renderedLineCount() {
-    return this.maxViewLines + 1;
+    return this._renderedLineCount ?? this.getRenderWindow().count;
+  }
+
+  getScrollViewportLines() {
+    const maxViewLines = this.maxViewLines;
+    if (Number.isFinite(maxViewLines) && maxViewLines > 0) {
+      return Math.max(1, maxViewLines);
+    }
+    return Number.isFinite(this._renderedLineCount) && this._renderedLineCount > 0
+      ? this._renderedLineCount
+      : 1;
+  }
+
+  getRenderBufferLines() {
+    return Number.isFinite(this.scrollBufferLines)
+      ? Math.max(0, this.scrollBufferLines)
+      : OUTPUT_SCROLL_BUFFER_LINES;
+  }
+
+  getRenderWindow(visibleStart = this.startIndex) {
+    const total = this.getDisplayLineCount();
+    if (total <= 0) return { start: 0, count: 0 };
+
+    const buffer = this.getRenderBufferLines();
+    const viewport = this.getScrollViewportLines();
+    const count = Math.max(1, Math.min(total, viewport + buffer * 2));
+    const maxStart = Math.max(0, total - count);
+    const chunk = Math.max(1, buffer);
+    const desired = Math.max(0, visibleStart - buffer);
+    const start = Math.max(
+      0,
+      Math.min(Math.floor(desired / chunk) * chunk, maxStart),
+    );
+
+    return { start, count };
+  }
+
+  updateRenderWindow(visibleStart = this.startIndex) {
+    const next = this.getRenderWindow(visibleStart);
+
+    this._renderStartIndex = next.start;
+    this._renderedLineCount = next.count;
+
+    return next;
+  }
+
+  resetRenderWindow() {
+    this._renderStartIndex = null;
+    this._renderedLineCount = null;
   }
 
   get maxCharacters() {
@@ -236,9 +293,8 @@ class LineController {
   }
 
   getLineHeight() {
-    const measuredHeight = this.editor.domManager
-      ? this.editor.domManager.getLineHeight()
-      : this.editor.posY;
+    const measuredHeight = this.editor.domManager?.getLineHeight?.() ??
+      this.editor.posY;
 
     return Number.isFinite(measuredHeight) && measuredHeight > 0
       ? measuredHeight
@@ -291,7 +347,8 @@ class LineController {
     return lineHeight * screenIndex;
   }
   getOutputTransform() {
-    const y = -this.offsetY;
+    const lineHeight = this.getLineHeight();
+    const y = (this.renderStartIndex - this.startIndex) * lineHeight - this.offsetY;
 
     return `translate(0px, ${y}px)`;
   }
@@ -779,7 +836,7 @@ class LineController {
       return 0;
     }
 
-    const visibleLines = this.getDisplayLineCount() - this.startIndex;
+    const visibleLines = this.getDisplayLineCount() - this.renderStartIndex;
 
     return Math.max(0, Math.min(visibleLines, this.renderedLineCount));
   }
@@ -915,11 +972,12 @@ class LineController {
 
     this.setTotalLines(this.lines.length);
 
-    const start = Math.max(dataIndex, this.startIndex);
+    const renderStartIndex = this.renderStartIndex;
+    const start = Math.max(dataIndex, renderStartIndex);
 
     const end = Math.min(
       this.lines.length,
-      this.startIndex + this.renderedLineCount,
+      renderStartIndex + this.renderedLineCount,
     );
 
     for (let i = start; i < end; i++) {
@@ -980,14 +1038,15 @@ class LineController {
       return;
     }
 
-    // Only visible rows can produce DOM work. Avoid indexOf across the entire
+    // Only rendered rows can produce DOM work. Avoid indexOf across the entire
     // file for each dirty line when editing near the end of a large document.
+    const renderStartIndex = this.renderStartIndex;
     const end = Math.min(
       this.getDisplayLineCount(),
-      this.startIndex + this.renderedLineCount,
+      renderStartIndex + this.renderedLineCount,
     );
     for (
-      let displayIndex = this.startIndex;
+      let displayIndex = renderStartIndex;
       displayIndex < end;
       displayIndex++
     ) {
@@ -995,13 +1054,13 @@ class LineController {
         ? this.diffRows[displayIndex]?.documentIndex
         : displayIndex;
       if (this.dirtyLines.has(this.lines[documentIndex])) {
-        this.refreshLineOutput(displayIndex - this.startIndex);
+        this.refreshLineOutput(displayIndex - renderStartIndex);
       }
     }
 
     const firstEmptyIndex = Math.max(
       0,
-      this.getDisplayLineCount() - this.startIndex,
+      this.getDisplayLineCount() - renderStartIndex,
     );
 
     const outputLength = this.editor.output.children.length;
@@ -1058,16 +1117,33 @@ class LineController {
       return;
     }
 
-    this.applyOutputTransform();
-    const delta = this.startIndex - previousStartIndex;
+    if (this._renderStartIndex == null) {
+      const prior = this.getRenderWindow(
+        Number.isInteger(previousStartIndex)
+          ? previousStartIndex
+          : this.startIndex,
+      );
+      this._renderStartIndex = prior.start;
+      this._renderedLineCount = prior.count;
+    }
+
+    const previousRenderStart = this.renderStartIndex;
+    const previousRenderCount = this.renderedLineCount;
+    const renderWindow = this.updateRenderWindow();
+    const delta = renderWindow.start - previousRenderStart;
     const children = this.editor.output.children;
     const rowCount = this.renderedLineCount;
     const newlyVisibleDocumentIndexes = [];
 
-    if (delta !== 0 && (children.length !== rowCount || Math.abs(delta) >= rowCount)) {
+    if (
+      delta !== 0 &&
+      (children.length !== rowCount ||
+        previousRenderCount !== rowCount ||
+        Math.abs(delta) >= rowCount)
+    ) {
       this.initLineOutput();
       for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
-        const displayRow = this.getDisplayRow(this.startIndex + screenIndex);
+        const displayRow = this.getDisplayRow(this.renderStartIndex + screenIndex);
         if (Number.isInteger(displayRow?.documentIndex))
           newlyVisibleDocumentIndexes.push(displayRow.documentIndex);
       }
@@ -1089,14 +1165,10 @@ class LineController {
 
       this.editor.highlightController.lineNodes.clear();
       for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
-        const displayIndex = this.startIndex + screenIndex;
+        const displayIndex = this.renderStartIndex + screenIndex;
         const displayRow = this.getDisplayRow(displayIndex);
         const child = this.editor.output.children[screenIndex];
         if (!child) continue;
-
-        const childFast = this.getFastNode(child);
-        childFast?.setTop(this.getLineTop(screenIndex));
-        childFast?.setDataset("displayLine", displayIndex);
 
         if (!displayRow || !this.isLineOutputCurrent(child, displayRow)) {
           this.refreshLineOutput(screenIndex);
@@ -1107,6 +1179,11 @@ class LineController {
           );
         }
 
+        const row = this.editor.output.children[screenIndex];
+        const rowFast = this.getFastNode(row);
+        rowFast?.setTop(this.getLineTop(screenIndex));
+        rowFast?.setDataset("displayLine", displayIndex);
+
         if (Number.isInteger(displayRow?.documentIndex)) {
           const lineNode = this.lines[displayRow.documentIndex];
           if (lineNode && lineNode.getTokens() === null &&
@@ -1116,8 +1193,10 @@ class LineController {
       }
     }
 
+    this.applyOutputTransform();
+
     if (delta !== 0) {
-      this.refreshNumberLines(false, previousStartIndex);
+      this.refreshNumberLines(false, previousRenderStart);
     }
 
     this.editor.cursorController.updateCaretPosition();
@@ -1134,7 +1213,7 @@ class LineController {
   refreshHorizontalViewport() {
     const visibleCount = Math.min(
       this.renderedLineCount,
-      this.getDisplayLineCount() - this.startIndex,
+      this.getDisplayLineCount() - this.renderStartIndex,
       this.editor.output?.children?.length || 0,
     );
     for (let screenIndex = 0; screenIndex < visibleCount; screenIndex++)
@@ -1150,7 +1229,7 @@ class LineController {
       return;
     }
 
-    const displayIndex = this.startIndex + screenIndex;
+    const displayIndex = this.renderStartIndex + screenIndex;
     const displayRow = this.getDisplayRow(displayIndex);
 
     const child = this.editor.output.children[screenIndex];
@@ -1250,6 +1329,8 @@ class LineController {
       return;
     }
 
+    this.resetRenderWindow();
+    this.updateRenderWindow();
     this.renderGeneration += 1;
 
     const fragment = document.createDocumentFragment();
@@ -1273,7 +1354,7 @@ class LineController {
     }
 
     for (let i = 0; i < this.renderedLineCount; i++) {
-      const displayIndex = this.startIndex + i;
+      const displayIndex = this.renderStartIndex + i;
       const displayRow = this.getDisplayRow(displayIndex);
 
       let lineOBJ;
@@ -1328,7 +1409,7 @@ class LineController {
     else this.editor.output.replaceChildren(fragment);
   }
 
-  refreshNumberLines(updateWidth = true, previousStartIndex = null) {
+  refreshNumberLines(updateWidth = true, previousRenderStart = null) {
     if (!this.editor.tabManager.activeFile) {
       return;
     }
@@ -1353,7 +1434,7 @@ class LineController {
 
         const lNode = this.createNumberLineOBJ(
           screenIndex,
-          this.startIndex + screenIndex,
+          this.renderStartIndex + screenIndex,
         );
 
         fragment.appendChild(lNode);
@@ -1363,8 +1444,8 @@ class LineController {
       else this.editor.lineNumberOutput.appendChild(fragment);
     }
 
-    const delta = Number.isInteger(previousStartIndex)
-      ? this.startIndex - previousStartIndex
+    const delta = Number.isInteger(previousRenderStart)
+      ? this.renderStartIndex - previousRenderStart
       : 0;
     const reuseRows = diff === 0 && delta !== 0 && Math.abs(delta) < targetCount;
 
@@ -1380,7 +1461,7 @@ class LineController {
       this.syncNumberLineRow(
         children[i],
         i,
-        this.startIndex + i,
+        this.renderStartIndex + i,
         !reuseRows || enteringRow,
       );
     }
@@ -1443,7 +1524,7 @@ class LineController {
     const l = this.getViewNumberLines();
 
     for (let i = 0; i < l; i++) {
-      const lNode = this.createNumberLineOBJ(i, this.startIndex + i);
+      const lNode = this.createNumberLineOBJ(i, this.renderStartIndex + i);
 
       fragment.appendChild(lNode);
     }
@@ -1568,7 +1649,7 @@ class LineController {
   }
 
   createLineOBJ(slicedLine, screenIndex) {
-    const displayIndex = this.startIndex + screenIndex;
+    const displayIndex = this.renderStartIndex + screenIndex;
     const displayRow = this.getDisplayRow(displayIndex);
     const lineNode =
       displayRow?.documentIndex === null
@@ -1677,7 +1758,7 @@ class LineController {
 
   getLineNumberOBJ(dataIndex) {
     const screenIndex =
-      this.getDisplayIndexForDocument(dataIndex) - this.startIndex;
+      this.getDisplayIndexForDocument(dataIndex) - this.renderStartIndex;
 
     if (
       screenIndex >= 0 &&
@@ -1734,16 +1815,19 @@ class LineController {
 
     // The model may have shrunk since the last frame. Clamp before choosing
     // dirty rows so the DOM is always projected from the current viewport.
+    let needsInit = forcedInit;
     if (this.outputScroller.clampScrollState()) {
       this.editor.highlightController.lineNodes.clear();
+      this.resetRenderWindow();
       this.markDirtyAll();
+      needsInit = true;
     }
 
     if (this.index !== this.editor.cursorController.row) {
       this.index = this.editor.cursorController.row;
     }
 
-    if (forcedInit) {
+    if (needsInit) {
       this.initLineOutput();
     } else {
       this.refreshOutput();

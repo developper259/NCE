@@ -155,28 +155,47 @@ test("fractional vertical scroll keeps the rendered layers covering the viewport
   };
   controller.outputHeight = 100;
 
-  assert.equal(controller.renderedLineCount, 6);
-  assert.equal(controller.getRenderedLayerHeight(), 120);
+  const lineHeight = controller.getLineHeight();
+  const buffer = controller.getRenderBufferLines();
+  const expectedCount = Math.min(
+    file.lines.length,
+    controller.maxViewLines + buffer * 2,
+  );
+  assert.equal(buffer, 8);
+  assert.equal(controller.renderedLineCount, expectedCount);
+  assert.equal(controller.getRenderedLayerHeight(), expectedCount * lineHeight);
+  assert.ok(expectedCount * lineHeight >= controller.getViewportHeight() + lineHeight);
 
   for (const offsetY of [0, 5, 10, 19]) {
     controller.offsetY = offsetY;
     controller.applyOutputTransform();
 
-    const lastSlotBottom =
-      controller.renderedLineCount * controller.getLineHeight() - offsetY;
+    const transformY =
+      (controller.renderStartIndex - controller.startIndex) * lineHeight - offsetY;
+    const lastSlotBottom = controller.renderedLineCount * lineHeight + transformY;
     assert.ok(lastSlotBottom >= controller.getViewportHeight());
 
     for (const [name, layer] of Object.entries(layers)) {
-      assert.equal(layer.style.height, name === "lineNumberOutput" ? "119px" : "120px");
-      assert.equal(layer.style.transform, `translate(0px, ${-offsetY}px)`);
+      assert.equal(
+        layer.style.height,
+        name === "lineNumberOutput"
+          ? `${expectedCount * lineHeight - 1}px`
+          : `${expectedCount * lineHeight}px`,
+      );
+      assert.equal(layer.style.transform, `translate(0px, ${transformY}px)`);
     }
   }
 
   controller.startIndex = 11;
   controller.offsetY = 0;
   controller.applyOutputTransform();
-  assert.equal(controller.editor.output.style.transform, "translate(0px, 0px)");
-  assert.equal(controller.getRenderedLayerHeight(), 120);
+  const transformY =
+    (controller.renderStartIndex - controller.startIndex) * lineHeight;
+  assert.equal(
+    controller.editor.output.style.transform,
+    `translate(0px, ${transformY}px)`,
+  );
+  assert.equal(controller.getRenderedLayerHeight(), expectedCount * lineHeight);
 });
 
 test("scrollTo uses zero-based display rows and converts horizontal-only cursor rows", () => {

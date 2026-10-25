@@ -570,15 +570,18 @@ class SearchController {
     const cursor = this.editor.cursorController;
     const lc = this.editor.lineController;
     const visibleResults = [];
+    const renderStartIndex = lc.renderStartIndex || 0;
+    const visibleStart = Math.max(0, lc.startIndex - renderStartIndex);
     const visibleLineCount = Math.max(0, Math.min(
-      lc.renderedLineCount || lc.maxViewLines || 1,
+      (lc.maxViewLines || lc.renderedLineCount || 1) + 1,
       lc.getDisplayLineCount() - lc.startIndex,
     ));
     const viewportStart = lc.offsetX || 0;
     const viewportEnd = viewportStart + lc.maxCharactersPerLine;
 
-    for (let screenIndex = 0; screenIndex < visibleLineCount; screenIndex++) {
-      const displayRow = lc.getDisplayRow(lc.startIndex + screenIndex);
+    for (let offset = 0; offset < visibleLineCount; offset++) {
+      const screenIndex = visibleStart + offset;
+      const displayRow = lc.getDisplayRow(renderStartIndex + screenIndex);
       if (!displayRow || displayRow.documentIndex === null) continue;
       const row = displayRow.documentIndex + 1;
       const lineNode = lc.lines[displayRow.documentIndex];
