@@ -2159,20 +2159,24 @@ app.whenReady().then(() => {
         const thumbCenterX = Math.round(tabThumb.left + tabThumb.width / 2);
         if (process.platform === "darwin") app.focus({ steal: true });
         win.focus();
+        win.webContents.focus();
         await waitForCondition(
           () => win.isFocused() && win.webContents.isFocused(),
           { description: "the Electron window to own pointer focus before the tab thumb drag" },
         );
-        win.webContents.sendInputEvent({
-          type: "mouseMove",
-          x: thumbCenterX,
-          y: dragY,
-        });
+        let hoverAttempt = 0;
         await waitForCondition(
-          async () =>
-            (await run("editor.tabManager.tabScroller.hScroller.itemOBJ.matches(':hover')")) === true,
+          async () => {
+            win.webContents.sendInputEvent({
+              type: "mouseMove",
+              x: thumbCenterX + (hoverAttempt++ % 2),
+              y: dragY,
+            });
+            return (await run("editor.tabManager.tabScroller.hScroller.itemOBJ.matches(':hover')")) === true;
+          },
           {
             timeout: 3000,
+            interval: 50,
             description: "the tab thumb to receive pointer hover after the window layout is restored",
           },
         );
