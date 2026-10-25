@@ -404,7 +404,7 @@ test("renderer reload attempts reject stale ACKs and a late ACK after timeout is
   assert.equal(firstMessage.attempt, 1);
   const delivery = window.pendingExternalOpenDeliveries.get(firstMessage.requestId);
   delivery.sent = false;
-  window.setExternalOpenDeliveryTimeout(
+  window.armExternalOpenDeliveryTimeout(
     firstMessage.requestId,
     delivery,
     EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady,
@@ -446,6 +446,66 @@ test("renderer reload attempts reject stale ACKs and a late ACK after timeout is
   }), false, "a late ACK after expiry cannot reopen or resettle the delivery");
   assert.equal(window.pendingExternalOpenDeliveries.size, 0);
   assert.equal(timers.size, 0);
+});
+
+test("renderer progress re-arms the acknowledgement deadline until the batch completes", async () => {
+  const { Window, timers, clearedTimers } = loadWindowWithTimers();
+  const sent = [];
+  const window = new Window({});
+  window.window = {
+    isDestroyed: () => false,
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel, payload) => sent.push({ channel, payload }),
+    },
+  };
+  window.rendererReady = true;
+
+  const result = window.deliverExternalFiles(["/tmp/one.js", "/tmp/two.js"]);
+  const message = sent[0].payload;
+  const initialTimer = [...timers.keys()].at(-1);
+  assert.equal(window.noteExternalOpenProgress(message.requestId, message.attempt), true);
+  assert.ok(clearedTimers.includes(initialTimer), "progress clears the pending inactivity timer");
+  const progressTimer = [...timers.keys()].at(-1);
+  assert.notEqual(progressTimer, initialTimer, "progress arms a fresh inactivity timer");
+  assert.equal(window.noteExternalOpenProgress(message.requestId, message.attempt + 1), false,
+    "a stale delivery attempt cannot extend the deadline");
+  assert.equal(window.noteExternalOpenProgress("unknown-delivery", message.attempt), false);
+  assert.equal(window.acknowledgeExternalOpen(message.requestId, message.attempt, {
+    openedPaths: ["/tmp/one.js", "/tmp/two.js"],
+  }), true);
+  assert.equal(window.noteExternalOpenProgress(message.requestId, message.attempt), false,
+    "a settled delivery ignores late progress");
+  assert.equal(timers.size, 0);
+  assert.equal(JSON.stringify(await result), JSON.stringify({
+    openedPaths: ["/tmp/one.js", "/tmp/two.js"],
+    failures: [],
+  }));
+});
+
+test("progress cannot extend a delivery that is waiting for a renderer reload", async () => {
+  const { Window, timers } = loadWindowWithTimers();
+  const sent = [];
+  const window = new Window({});
+  window.window = {
+    isDestroyed: () => false,
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel, payload) => sent.push({ channel, payload }),
+    },
+  };
+  window.rendererReady = true;
+
+  const result = window.deliverExternalFiles(["/tmp/reload.js"]);
+  const message = sent[0].payload;
+  const delivery = window.pendingExternalOpenDeliveries.get(message.requestId);
+  delivery.sent = false;
+  assert.equal(window.noteExternalOpenProgress(message.requestId, message.attempt), false,
+    "progress from an obsolete attempt cannot revive a delivery that must be resent");
+  delivery.sent = true;
+  window.acknowledgeExternalOpen(message.requestId, message.attempt, { openedPaths: ["/tmp/reload.js"] });
+  assert.equal((await result).openedPaths[0], "/tmp/reload.js");
+  assert.equal(timers.size, 0, "the acknowledged delivery leaves no timer behind");
 });
 
 test("App captures macOS open-file before the lock and queues startup and second-instance paths", async (t) => {

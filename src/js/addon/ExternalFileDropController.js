@@ -204,6 +204,7 @@ class ExternalFileDropController {
     for (const filePath of request.paths) {
       if (typeof filePath !== "string") {
         failures.push({ path: "", message: "NCE received an invalid file path." });
+        await this.reportExternalOpenProgress(request.requestId, request.attempt);
         continue;
       }
       try {
@@ -215,6 +216,7 @@ class ExternalFileDropController {
         failures.push({ path: filePath, message });
         console.warn("[External Open] Failed to open file", filePath, error);
       }
+      await this.reportExternalOpenProgress(request.requestId, request.attempt);
     }
     try {
       await this.api.acknowledgeExternalOpen?.(
@@ -224,6 +226,14 @@ class ExternalFileDropController {
       );
     } catch (error) {
       console.error("[External Open] Failed to acknowledge opened files", error);
+    }
+  }
+
+  async reportExternalOpenProgress(requestId, attempt) {
+    try {
+      await this.api.reportExternalOpenProgress?.(requestId, attempt);
+    } catch (error) {
+      console.warn("[External Open] Failed to report delivery progress", error);
     }
   }
 

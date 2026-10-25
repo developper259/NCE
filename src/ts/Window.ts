@@ -35,8 +35,6 @@ export const EXTERNAL_OPEN_TIMEOUTS_MS = Object.freeze({
   rendererReady: 90_000,
   acknowledgement: 120_000,
 });
-const EXTERNAL_OPEN_MAX_LIFETIME_MS =
-  EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady + EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement;
 const AGENT_MODEL_ENDPOINTS: Record<
   string,
   { urls: string[]; requiresApiKey: boolean }
@@ -117,7 +115,6 @@ export class Window {
     paths: string[];
     sent: boolean;
     attempt: number;
-    expiresAt: number;
     timer: ReturnType<typeof setTimeout>;
     resolve: (result: DeliveredFileResult) => void;
   }>();
@@ -325,7 +322,7 @@ export class Window {
           this.rendererReady = false;
           for (const [requestId, delivery] of this.pendingExternalOpenDeliveries) {
             delivery.sent = false;
-            this.setExternalOpenDeliveryTimeout(
+            this.armExternalOpenDeliveryTimeout(
               requestId,
               delivery,
               EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady,
@@ -436,6 +433,8 @@ export class Window {
     });
     this.ipc.handle("ExternalOpen:ack", async (_event, requestId, attempt, rawResult) =>
       this.acknowledgeExternalOpen(requestId, attempt, rawResult));
+    this.ipc.handle("ExternalOpen:progress", async (_event, requestId, attempt) =>
+      this.noteExternalOpenProgress(requestId, attempt));
     this.ipc.handle("App:approveQuit", async (_event, options) => {
       return this.approveQuit(
         options?.prepareOnly === true,
@@ -493,19 +492,17 @@ export class Window {
     }
     const requestId = randomUUID();
     return new Promise((resolve) => {
-      const expiresAt = Date.now() + EXTERNAL_OPEN_MAX_LIFETIME_MS;
       const timeoutMs = this.rendererReady
         ? EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement
         : EXTERNAL_OPEN_TIMEOUTS_MS.rendererReady;
       const timer = setTimeout(
         () => this.expireExternalOpenDelivery(requestId),
-        Math.min(timeoutMs, expiresAt - Date.now()),
+        timeoutMs,
       );
       this.pendingExternalOpenDeliveries.set(requestId, {
         paths: [...paths],
         sent: false,
         attempt: 0,
-        expiresAt,
         timer,
         resolve,
       });
@@ -553,7 +550,7 @@ export class Window {
           paths: delivery.paths,
         });
         delivery.sent = true;
-        this.setExternalOpenDeliveryTimeout(
+        this.armExternalOpenDeliveryTimeout(
           requestId,
           delivery,
           EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement,
@@ -562,6 +559,18 @@ export class Window {
         console.warn("[External Open] Failed to send files to renderer", error);
       }
     }
+  }
+
+  private noteExternalOpenProgress(requestId: unknown, attempt: unknown): boolean {
+    if (typeof requestId !== "string" || !Number.isSafeInteger(attempt)) return false;
+    const delivery = this.pendingExternalOpenDeliveries.get(requestId);
+    if (!delivery || attempt !== delivery.attempt || !delivery.sent) return false;
+    this.armExternalOpenDeliveryTimeout(
+      requestId,
+      delivery,
+      EXTERNAL_OPEN_TIMEOUTS_MS.acknowledgement,
+    );
+    return true;
   }
 
   private acknowledgeExternalOpen(requestId: unknown, attempt: unknown, rawResult: unknown): boolean {
@@ -604,20 +613,19 @@ export class Window {
     delivery.resolve(result);
   }
 
-  private setExternalOpenDeliveryTimeout(
+  /**
+   * Each acknowledgement or progress report re-arms an inactivity timeout, so a
+   * large but steadily progressing batch is never mistaken for a stalled one.
+   */
+  private armExternalOpenDeliveryTimeout(
     requestId: string,
-    delivery: { expiresAt: number; timer: ReturnType<typeof setTimeout> },
+    delivery: { timer: ReturnType<typeof setTimeout> },
     timeoutMs: number,
   ): void {
     clearTimeout(delivery.timer);
-    const remainingMs = delivery.expiresAt - Date.now();
-    if (remainingMs <= 0) {
-      this.expireExternalOpenDelivery(requestId);
-      return;
-    }
     delivery.timer = setTimeout(
       () => this.expireExternalOpenDelivery(requestId),
-      Math.min(timeoutMs, remainingMs),
+      timeoutMs,
     );
   }
 

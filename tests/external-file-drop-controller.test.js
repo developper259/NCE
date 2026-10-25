@@ -83,6 +83,7 @@ function createControllerHarness() {
   );
   const openedDrops = [];
   const acknowledgements = [];
+  const progressReports = [];
   const mainSection = createLayoutElement("main-section", {
     left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800,
   });
@@ -110,6 +111,7 @@ function createControllerHarness() {
         return { success: false, failures: [{ path: "", message: "Path unavailable." }] };
       },
       acknowledgeExternalOpen: async (...args) => acknowledgements.push(args),
+      reportExternalOpenProgress: async (...args) => progressReports.push(args),
     },
     tabManager: { openFileWithPath: async () => ({}) },
   };
@@ -119,6 +121,7 @@ function createControllerHarness() {
     layout,
     openedDrops,
     acknowledgements,
+    progressReports,
     listeners,
     timers,
     clearedTimers,
@@ -185,9 +188,9 @@ test("dragover avoids layout reads and an expired error timer cannot hide a new 
   assert.equal(listeners.size, 0);
 });
 
-test("external-open acknowledgements carry the current delivery attempt", async () => {
+test("external-open acknowledgements carry the current delivery attempt and report progress", async () => {
   const harness = createControllerHarness();
-  const { controller, editor, acknowledgements } = harness;
+  const { controller, editor, acknowledgements, progressReports } = harness;
   const opened = [];
   editor.tabManager.openFileWithPath = async (filePath) => { opened.push(filePath); return {}; };
 
@@ -198,10 +201,33 @@ test("external-open acknowledgements carry the current delivery attempt", async 
   });
 
   assert.deepEqual(opened, ["/tmp/one.js", "/tmp/two.js"]);
+  assert.deepEqual(progressReports, [
+    ["delivery-1", 2],
+    ["delivery-1", 2],
+  ], "each completed file keeps the main-process acknowledgement deadline alive");
   assert.equal(JSON.stringify(acknowledgements), JSON.stringify([["delivery-1", 2, {
     openedPaths: ["/tmp/one.js", "/tmp/two.js"],
     failures: [],
   }]]));
+  controller.destroy();
+});
+
+test("invalid external paths still report progress before the final acknowledgement", async () => {
+  const harness = createControllerHarness();
+  const { controller, acknowledgements, progressReports } = harness;
+
+  await controller.openExternalFiles({
+    requestId: "delivery-invalid",
+    attempt: 1,
+    paths: [42, "/tmp/valid.js"],
+  });
+
+  assert.deepEqual(progressReports, [
+    ["delivery-invalid", 1],
+    ["delivery-invalid", 1],
+  ]);
+  assert.equal(acknowledgements.length, 1);
+  assert.equal(acknowledgements[0][2].failures[0].path, "");
   controller.destroy();
 });
 

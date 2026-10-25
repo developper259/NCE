@@ -118,6 +118,8 @@ contextBridge.exposeInMainWorld("api", {
   openDroppedFiles: (paths) => ipcRenderer.invoke("ExternalOpen:drop", paths),
   acknowledgeExternalOpen: (requestId, attempt, result) =>
     ipcRenderer.invoke("ExternalOpen:ack", requestId, attempt, result),
+  reportExternalOpenProgress: (requestId, attempt) =>
+    ipcRenderer.invoke("ExternalOpen:progress", requestId, attempt),
   onExternalFilesRequested: (callback) => {
     const listener = (_event, request) => callback(request);
     ipcRenderer.on("ExternalOpen:files", listener);
