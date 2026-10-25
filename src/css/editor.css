@@ -42,6 +42,15 @@
   white-space: nowrap;
 }
 
+.editor-output,
+.line-numbers,
+.editor-select-highlight,
+.editor-secondary-selections,
+.editor-secondary-carets,
+.editor-search-highlight {
+  will-change: transform;
+}
+
 .editor-load-error {
   position: absolute;
   inset: 0;
