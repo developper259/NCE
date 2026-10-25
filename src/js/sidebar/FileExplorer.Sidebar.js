@@ -15,6 +15,8 @@ class FileExplorer extends Sidebar {
     this.pendingScrollTop = 0;
     this.visibleRows = [];
     this.visibleRowByPath = new Map();
+    this.virtualRowStart = -1;
+    this.virtualRowCount = 0;
     this.shell = null;
     this.projectHeader = null;
     this.projectArrow = null;
@@ -692,21 +694,89 @@ class FileExplorer extends Sidebar {
     return rows;
   }
 
-  renderVirtualRows(startIndex, count) {
+  renderVirtualRows(startIndex, count, force = false) {
     if (!this.treeLayer) return;
+
+    const previousStart = this.virtualRowStart;
+    const previousCount = this.virtualRowCount;
+    const delta = startIndex - previousStart;
+    const canShift = !force &&
+      previousCount === count &&
+      previousStart >= 0 &&
+      delta !== 0 &&
+      Math.abs(delta) < count &&
+      this.treeLayer.children.length === count;
+
+    if (canShift) {
+      this.shiftVirtualRows(delta, startIndex, count);
+    } else {
+      this.replaceVirtualRows(startIndex, count);
+    }
+
+    this.virtualRowStart = startIndex;
+    this.virtualRowCount = count;
+  }
+
+  replaceVirtualRows(startIndex, count) {
     const domManager = this.editor.domManager;
     const fragment = domManager.createFragment();
     for (let index = startIndex; index < startIndex + count; index++) {
       const row = this.visibleRows[index];
       if (!row) break;
-      if (this.editingState?.target === row.file) {
-        this.renderEditableRow(row.file, row.depth, fragment);
-      } else {
-        fragment.appendChild(this.createFileRow(row.file, row.depth));
-      }
+      fragment.appendChild(this.createVirtualRowNode(row));
     }
     if (this.treeLayerFast) this.treeLayerFast.replaceChildren(fragment);
     else domManager.replaceChildren(this.treeLayer, fragment);
+  }
+
+  shiftVirtualRows(delta, startIndex, count) {
+    const layer = this.treeLayer;
+
+    if (delta > 0) {
+      for (let index = 0; index < delta; index++) {
+        const first = layer.firstElementChild;
+        if (!first) break;
+        layer.appendChild(first);
+      }
+      for (let screenIndex = count - delta; screenIndex < count; screenIndex++) {
+        this.replaceVirtualRow(startIndex + screenIndex, screenIndex);
+      }
+      return;
+    }
+
+    for (let index = 0; index < -delta; index++) {
+      const last = layer.lastElementChild;
+      const first = layer.firstElementChild;
+      if (!last || !first) break;
+      layer.insertBefore(last, first);
+    }
+    for (let screenIndex = 0; screenIndex < -delta; screenIndex++) {
+      this.replaceVirtualRow(startIndex + screenIndex, screenIndex);
+    }
+  }
+
+  replaceVirtualRow(displayIndex, screenIndex) {
+    const row = this.visibleRows[displayIndex];
+    const current = this.treeLayer.children[screenIndex];
+
+    if (!row) {
+      current?.remove();
+      return;
+    }
+
+    const next = this.createVirtualRowNode(row);
+    if (current) current.replaceWith(next);
+    else this.treeLayer.appendChild(next);
+  }
+
+  createVirtualRowNode(row) {
+    if (this.editingState?.target !== row.file) {
+      return this.createFileRow(row.file, row.depth);
+    }
+
+    const fragment = this.editor.domManager.createFragment();
+    this.renderEditableRow(row.file, row.depth, fragment);
+    return fragment.firstChild;
   }
 
   renderNoFolderState() {

@@ -22,7 +22,7 @@ function fixture(height, total = 10000) {
   const explorer = {
     constructor: { ROW_HEIGHT: 22 },
     visibleRows: Array.from({ length: total }, (_, index) => ({ file: { path: String(index) }, depth: 0 })),
-    renderVirtualRows(start, count) { rendered.push({ start, count }); },
+    renderVirtualRows(start, count, force = false) { rendered.push({ start, count, force }); },
   };
   const editor = {
     sidebarManager: {},
@@ -54,7 +54,7 @@ test("render window follows viewport height, including a fractional row", () => 
     const item = fixture(height, 20000);
     assert.equal(item.scroller.maxViewRows, visible);
     assert.equal(item.scroller.renderedRowCount, rendered);
-    assert.deepEqual(item.rendered.at(-1), { start: 0, count: rendered });
+    assert.deepEqual(item.rendered.at(-1), { start: 0, count: rendered, force: false });
   }
 });
 
@@ -65,6 +65,7 @@ test("scroll ratio, pixel fraction, collapse clamp and resize preserve a valid w
   assert.equal(item.scroller.startIndex, 1);
   assert.equal(item.scroller.offsetY, 11);
   assert.equal(item.layer.style.transform, "translate3d(0, -11px, 0)");
+  assert.equal(item.rendered.at(-1).force, false);
   const writesAfterScroll = item.transformWrites();
   item.scroller.update();
   assert.equal(item.transformWrites(), writesAfterScroll);
@@ -81,6 +82,7 @@ test("scroll ratio, pixel fraction, collapse clamp and resize preserve a valid w
   assert.equal(item.scroller.startIndex, 0);
   assert.equal(item.scroller.scrollTop, 0);
   assert.equal(item.rendered.at(-1).count, 3);
+  assert.equal(item.rendered.at(-1).force, true);
   item.explorer.visibleRows.length = 10000;
   item.setHeight(880);
   item.scroller.refresh();
@@ -94,6 +96,92 @@ test("scroll ratio, pixel fraction, collapse clamp and resize preserve a valid w
   assert.equal(item.scroller.startIndex, 9979);
   assert.equal(item.scroller.offsetY, 12);
   assert.equal(item.rendered.at(-1).count, 21);
+});
+
+test("virtual rows shift with the window and replace only entering rows", () => {
+  class Sidebar {}
+  const FileExplorer = loadGlobal("src/js/sidebar/FileExplorer.Sidebar.js", "FileExplorer", {
+    Sidebar, FileOperations: class {}, window: { api: {} },
+  });
+  const layer = {
+    children: [],
+    get firstElementChild() { return this.children[0] || null; },
+    get lastElementChild() { return this.children.at(-1) || null; },
+    appendChild(node) {
+      const index = this.children.indexOf(node);
+      if (index >= 0) this.children.splice(index, 1);
+      this.children.push(node);
+      return node;
+    },
+    insertBefore(node, reference) {
+      const index = this.children.indexOf(node);
+      if (index >= 0) this.children.splice(index, 1);
+      const referenceIndex = this.children.indexOf(reference);
+      this.children.splice(referenceIndex < 0 ? this.children.length : referenceIndex, 0, node);
+      return node;
+    },
+  };
+  const created = [];
+  const explorer = Object.create(FileExplorer.prototype);
+  Object.assign(explorer, {
+    visibleRows: Array.from({ length: 6 }, (_, index) => ({
+      file: { name: String(index), type: "file", path: String(index) },
+      depth: 0,
+    })),
+    virtualRowStart: -1,
+    virtualRowCount: 0,
+    editingState: null,
+    treeLayer: layer,
+    treeLayerFast: null,
+  });
+  explorer.editor = {
+    domManager: {
+      createFragment() {
+        const fragment = {
+          children: [],
+          appendChild(node) { this.children.push(node); return node; },
+          get firstChild() { return this.children[0] || null; },
+        };
+        return fragment;
+      },
+      replaceChildren(target, fragment) { target.children = fragment.children.slice(); },
+    },
+  };
+  explorer.createFileRow = (file) => {
+    created.push(file.path);
+    const node = {
+      path: file.path,
+      replaceWith(next) {
+        const index = layer.children.indexOf(node);
+        if (index >= 0) layer.children[index] = next;
+      },
+    };
+    return node;
+  };
+
+  explorer.renderVirtualRows(0, 3);
+  const initial = layer.children.slice();
+  assert.deepEqual(initial.map((node) => node.path), ["0", "1", "2"]);
+  assert.deepEqual(created, ["0", "1", "2"]);
+
+  created.length = 0;
+  explorer.renderVirtualRows(1, 3);
+  assert.deepEqual(layer.children.map((node) => node.path), ["1", "2", "3"]);
+  assert.deepEqual(created, ["3"]);
+  assert.equal(layer.children[0], initial[1]);
+  assert.equal(layer.children[1], initial[2]);
+
+  created.length = 0;
+  explorer.renderVirtualRows(0, 3);
+  assert.deepEqual(layer.children.map((node) => node.path), ["0", "1", "2"]);
+  assert.deepEqual(created, ["0"]);
+  assert.equal(layer.children[1], initial[1]);
+  assert.equal(layer.children[2], initial[2]);
+
+  created.length = 0;
+  explorer.renderVirtualRows(2, 3, true);
+  assert.deepEqual(layer.children.map((node) => node.path), ["2", "3", "4"]);
+  assert.deepEqual(created, ["2", "3", "4"]);
 });
 
 test("flattened tree excludes closed descendants and collapsed project", () => {

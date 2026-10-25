@@ -139,8 +139,9 @@ class FileExplorerScroller {
     this.startIndex = Math.floor(clamped / this.rowHeight);
     this.offsetY = clamped - this.startIndex * this.rowHeight;
     const count = Math.min(this.renderedRowCount, this.totalVisibleRows - this.startIndex);
-    if (this.renderedStart !== this.startIndex || this.renderedCount !== count || this.forceRows) {
-      this.explorer.renderVirtualRows(this.startIndex, count);
+    const forceRows = this.forceRows === true;
+    if (this.renderedStart !== this.startIndex || this.renderedCount !== count || forceRows) {
+      this.explorer.renderVirtualRows(this.startIndex, count, forceRows);
       this.renderedStart = this.startIndex;
       this.renderedCount = count;
       this.forceRows = false;
