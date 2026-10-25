@@ -291,6 +291,20 @@ test("cold system opens create only the windows needed for files and workspaces"
   mixedCoordinator.dispose();
 });
 
+test("adopted startup request chains are released with the window they routed to", async (t) => {
+  const { file } = await makeFixture(t);
+  const manager = makeWindowManager();
+  const coordinator = new ExternalOpenCoordinator(manager);
+  const request = coordinator.enqueueSystemPaths([file]);
+  coordinator.start();
+  assert.equal((await request).openedFiles, 1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(coordinator.requestChains.size, 0,
+    "a settled startup chain does not stay keyed to the window it adopted");
+  coordinator.dispose();
+});
+
 test("concurrent folder requests preserve workspace uniqueness and the eight-window limit", async (t) => {
   const { root, folder } = await makeFixture(t);
   const secondFolder = path.join(root, "second concurrent workspace");

@@ -139,6 +139,7 @@ export class ExternalOpenCoordinator {
     const message = "NCE is shutting down before this request could be processed.";
     this.waitingForStart.length = 0;
     this.pendingStartupNotifications.length = 0;
+    this.requestChains.clear();
     for (const request of this.pendingRequests) this.settle(request, this.closingResult(message));
   }
 
@@ -366,7 +367,15 @@ export class ExternalOpenCoordinator {
     if (!this.isLiveWindow(window)) return;
     this.startupTarget = window;
     const startupChain = this.requestChains.get(STARTUP_QUEUE_KEY);
-    if (startupChain) this.requestChains.set(window.id, startupChain);
+    if (!startupChain || this.requestChains.has(window.id)) return;
+    this.requestChains.set(window.id, startupChain);
+    // The copied entry serializes requests issued during startup, but it must not
+    // outlive the chain once the window has no newer request to wait for.
+    void startupChain.finally(() => {
+      if (this.requestChains.get(window.id) === startupChain) {
+        this.requestChains.delete(window.id);
+      }
+    });
   }
 
   private settle(request: QueuedRequest, result: ExternalOpenResult): void {
