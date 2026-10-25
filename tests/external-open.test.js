@@ -352,6 +352,59 @@ test("invalid arguments and oversized batches fail without opening a window", as
   coordinator.dispose();
 });
 
+test("system queue overflow is reported once a startup window becomes available", async (t) => {
+  const { root, file } = await makeFixture(t);
+  const manager = makeWindowManager();
+  const coordinator = new ExternalOpenCoordinator(manager);
+  const accepted = [];
+  for (let index = 0; index < 64; index++) {
+    accepted.push(coordinator.enqueueSystemPaths(["https://example.test/file"]));
+  }
+  const overflow = await coordinator.enqueueSystemPaths([file]);
+  assert.equal(overflow.failures[0].code, "QUEUE_FULL");
+  coordinator.start();
+  await Promise.all(accepted);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const window = manager.getAllWindows()[0];
+  assert.ok(window, "startup creates a window for the queued requests");
+  assert.ok(
+    window.state.notices.some((result) =>
+      result.failures.some((failure) => failure.code === "QUEUE_FULL")),
+    "the dropped request is surfaced instead of disappearing silently",
+  );
+  coordinator.dispose();
+});
+
+test("drop queue overflow returns to the renderer without a duplicate window notification", async (t) => {
+  const { file } = await makeFixture(t);
+  const target = makeWindow("drop-target");
+  const manager = makeWindowManager([target]);
+  const coordinator = new ExternalOpenCoordinator(manager);
+  coordinator.start();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  target.deliverExternalFiles = async (paths) => {
+    await gate;
+    return { openedPaths: [...paths], failures: [] };
+  };
+
+  const accepted = [];
+  for (let index = 0; index < 64; index++) {
+    accepted.push(coordinator.enqueueDrop([file], target));
+  }
+  const overflow = await coordinator.enqueueDrop([file], target);
+  assert.equal(overflow.failures[0].code, "QUEUE_FULL");
+  assert.equal(target.state.notices.length, 0,
+    "drop failures are reported through the renderer response, not a second notification");
+
+  release();
+  const results = await Promise.all(accepted);
+  assert.ok(results.every((result) => result.openedFiles === 1));
+  assert.equal(target.state.notices.length, 0);
+  coordinator.dispose();
+});
+
 test("POSIX paths preserve significant leading and trailing whitespace and deduplicate symlinks", { skip: process.platform === "win32" }, async (t) => {
   const { root } = await makeFixture(t);
   const leadingSpace = path.join(root, " leading.js");

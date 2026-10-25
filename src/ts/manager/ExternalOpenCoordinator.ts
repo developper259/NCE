@@ -6,6 +6,7 @@ import type { WindowManager } from "./WindowManager";
 
 export const MAX_EXTERNAL_OPEN_PATHS = 64;
 const MAX_QUEUED_EXTERNAL_OPEN_BATCHES = 64;
+const MAX_PENDING_STARTUP_NOTIFICATIONS = 8;
 const MAX_EXTERNAL_PATH_LENGTH = 32_768;
 
 export interface ExternalOpenFailure {
@@ -78,6 +79,7 @@ export class ExternalOpenCoordinator {
   private readonly waitingForStart: QueuedRequest[] = [];
   private readonly requestChains = new Map<string, Promise<void>>();
   private readonly pendingRequests = new Set<QueuedRequest>();
+  private readonly pendingStartupNotifications: ExternalOpenResult[] = [];
   private pendingRequestCount = 0;
   private startupTarget: Window | null = null;
   private started = false;
@@ -93,6 +95,7 @@ export class ExternalOpenCoordinator {
     if (this.disposed) return;
     this.started = true;
     this.startupTarget = this.findAvailableSystemTarget();
+    this.flushPendingStartupNotifications();
     const requests = this.waitingForStart.splice(0);
     for (const request of requests) {
       if (!request.targetCaptured && this.startupTarget) {
@@ -134,6 +137,7 @@ export class ExternalOpenCoordinator {
     this.started = false;
     const message = "NCE is shutting down before this request could be processed.";
     this.waitingForStart.length = 0;
+    this.pendingStartupNotifications.length = 0;
     for (const request of this.pendingRequests) this.settle(request, this.closingResult(message));
   }
 
@@ -144,9 +148,11 @@ export class ExternalOpenCoordinator {
       ]));
     }
     if (this.pendingRequestCount >= MAX_QUEUED_EXTERNAL_OPEN_BATCHES) {
-      return Promise.resolve(this.result([
+      const result = this.result([
         failed("", "QUEUE_FULL", "Too many external open requests are waiting."),
-      ]));
+      ]);
+      if (!options.requireAbsolute) this.reportSystemFailure(result);
+      return Promise.resolve(result);
     }
     return new Promise((resolve) => {
       const request: QueuedRequest = { ...options, resolve, settled: false };
@@ -194,6 +200,7 @@ export class ExternalOpenCoordinator {
           if (failures.length) current.notifyExternalOpenResult(this.result(failures));
         }
       }
+      this.flushPendingStartupNotifications();
       return this.result(failures);
     }
 
@@ -250,7 +257,29 @@ export class ExternalOpenCoordinator {
     if (!request.requireAbsolute && failures.length && this.isLiveWindow(notificationTarget)) {
       notificationTarget.notifyExternalOpenResult(result);
     }
+    this.flushPendingStartupNotifications();
     return result;
+  }
+
+  private reportSystemFailure(result: ExternalOpenResult): void {
+    const target = this.findAvailableSystemTarget();
+    if (this.isLiveWindow(target)) {
+      target.notifyExternalOpenResult(result);
+      return;
+    }
+    if (this.pendingStartupNotifications.length >= MAX_PENDING_STARTUP_NOTIFICATIONS) {
+      this.pendingStartupNotifications.shift();
+    }
+    this.pendingStartupNotifications.push(result);
+  }
+
+  private flushPendingStartupNotifications(): void {
+    if (this.pendingStartupNotifications.length === 0) return;
+    const target = this.findAvailableSystemTarget();
+    if (!this.isLiveWindow(target)) return;
+    for (const result of this.pendingStartupNotifications.splice(0)) {
+      target.notifyExternalOpenResult(result);
+    }
   }
 
   private async classify(

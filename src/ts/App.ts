@@ -154,18 +154,32 @@ export class App {
       ? []
       : externalPathArguments(argv.slice(startupArgStart));
     if (startupPaths.length) {
-      void this.externalOpenCoordinator.enqueueSystemPaths(startupPaths, currentWorkingDirectory());
+      this.enqueueSystemPaths(startupPaths, currentWorkingDirectory());
     }
     for (const filePath of this.earlyOpenFilePaths.splice(0)) {
-      void this.externalOpenCoordinator.enqueueSystemPaths([filePath], currentWorkingDirectory());
+      this.enqueueSystemPaths([filePath], currentWorkingDirectory());
     }
     this.setupAppEvents();
+  }
+
+  private enqueueSystemPaths(paths: string[], cwd: string): void {
+    void this.externalOpenCoordinator
+      .enqueueSystemPaths(paths, cwd)
+      .then((result) => {
+        if (result.failures.length) {
+          console.warn(
+            "[External Open] Some requested paths could not be opened",
+            result.failures,
+          );
+        }
+      })
+      .catch((error) => console.error("[External Open] Request failed", error));
   }
 
   private receiveOpenFilePath(filePath: unknown): void {
     if (typeof filePath !== "string") return;
     if (this.externalOpenCoordinator) {
-      void this.externalOpenCoordinator.enqueueSystemPaths([filePath], currentWorkingDirectory());
+      this.enqueueSystemPaths([filePath], currentWorkingDirectory());
     } else {
       this.earlyOpenFilePaths.push(filePath);
     }
@@ -208,23 +222,20 @@ export class App {
     });
 
     app.on("second-instance", (_event, argv, workingDirectory) => {
-      void (async () => {
-        const cwd = typeof workingDirectory === "string" && workingDirectory
-          ? workingDirectory
-          : currentWorkingDirectory();
-        const paths = externalPathArguments(
-          Array.isArray(argv) ? argv.slice(app.isPackaged ? 1 : 2) : [],
-          cwd,
-        );
-        if (paths.length) {
-          const result = await this.externalOpenCoordinator.enqueueSystemPaths(paths, cwd);
-          if (result.failures.length) console.warn("[External Open] Some second-instance paths could not be opened", result.failures);
-          return;
-        }
-        const focused = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0];
-        if (focused) this.windowManager.focusWindow(focused.id);
-        else this.windowManager.createEmptyWindow();
-      })();
+      const cwd = typeof workingDirectory === "string" && workingDirectory
+        ? workingDirectory
+        : currentWorkingDirectory();
+      const paths = externalPathArguments(
+        Array.isArray(argv) ? argv.slice(app.isPackaged ? 1 : 2) : [],
+        cwd,
+      );
+      if (paths.length) {
+        this.enqueueSystemPaths(paths, cwd);
+        return;
+      }
+      const focused = this.windowManager.getFocusedWindow() || this.windowManager.getAllWindows()[0];
+      if (focused) this.windowManager.focusWindow(focused.id);
+      else this.windowManager.createEmptyWindow();
     });
 
     app.on("will-quit", () => {
