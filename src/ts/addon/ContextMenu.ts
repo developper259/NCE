@@ -6,6 +6,7 @@ import {
   nativeTheme,
 } from "electron";
 import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
+import { TITLEBAR_OVERLAY_THEME } from "../manager/TitleBarTheme";
 
 export class ContextMenu {
   window: BrowserWindow;
@@ -25,10 +26,7 @@ export class ContextMenu {
       }
       nativeTheme.themeSource = source;
       const theme = resolvedTheme === "light" ? "light" : "dark";
-      this.window.setTitleBarOverlay?.({
-        color: theme === "light" ? "#f5f6f8" : "#181818",
-        symbolColor: theme === "light" ? "#59636f" : "#b8b8b8",
-      });
+      this.window.setTitleBarOverlay?.(TITLEBAR_OVERLAY_THEME[theme]);
       return true;
       },
     );

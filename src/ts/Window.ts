@@ -20,6 +20,7 @@ import { TerminalManager } from "./terminal/TerminalManager";
 import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { App } from "./App";
 import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
+import { TITLEBAR_OVERLAY_THEME } from "./manager/TitleBarTheme";
 import type { WindowSession } from "./manager/WindowSessionStore";
 import type { DeliveredFileResult, ExternalOpenResult } from "./manager/ExternalOpenCoordinator";
 
@@ -68,8 +69,7 @@ export function getWindowChromeConfig(
   return {
     titleBarStyle: "hidden" as const,
     titleBarOverlay: {
-      color: "#181818",
-      symbolColor: "#b8b8b8",
+      ...TITLEBAR_OVERLAY_THEME.dark,
       height: TITLEBAR_CONTROLS_HEIGHT,
     },
   };

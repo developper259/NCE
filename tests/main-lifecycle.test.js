@@ -96,6 +96,54 @@ test("window chrome is integrated without forced fullscreen on every platform", 
   assert.equal("fullscreen" in windows, false);
 });
 
+test("native titlebar controls share the workbench background palette", async () => {
+  const css = await fs.readFile(
+    path.join(__dirname, "..", "src/css/var.css"),
+    "utf8",
+  );
+  const darkBlock = css.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1];
+  const lightBlock = css.match(
+    /:root\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/,
+  )?.[1];
+  const backgroundColor = (block) =>
+    block?.match(/--bg-workbench:\s*(#[0-9a-f]{6})/i)?.[1];
+  const darkColor = backgroundColor(darkBlock);
+  const lightColor = backgroundColor(lightBlock);
+  assert.ok(darkColor);
+  assert.ok(lightColor);
+
+  const { getWindowChromeConfig } = loadMain("dist/ts/Window.js", {
+    electron: {},
+    "./addon/FileManager": { FileManager: class {} },
+    "./addon/Watcher": { Watcher: class {} },
+    "./addon/Menu": { AppMenu: class {} },
+    "./addon/ContextMenu": { ContextMenu: class {} },
+    "./addon/WorkspaceSearch": { WorkspaceSearch: class {} },
+    "./App": { App: class {} },
+  });
+  const windows = getWindowChromeConfig("win32");
+  const linux = getWindowChromeConfig("linux");
+  assert.equal(windows.titleBarOverlay.color, darkColor);
+  assert.equal(linux.titleBarOverlay.color, darkColor);
+
+  const { ContextMenu } = loadMain("dist/ts/addon/ContextMenu.js", {
+    electron: { nativeTheme: {} },
+  });
+  const overlays = [];
+  const handlers = new Map();
+  new ContextMenu(
+    { setTitleBarOverlay: (options) => overlays.push(options) },
+    { handle: (channel, handler) => handlers.set(channel, handler) },
+  ).handleIPC();
+  const setNativeSource = handlers.get("Theme:setNativeSource");
+  assert.equal(typeof setNativeSource, "function");
+  assert.equal(setNativeSource(null, "invalid", "light"), false);
+  assert.equal(setNativeSource(null, "system", "light"), true);
+  assert.equal(overlays.at(-1).color, lightColor);
+  assert.equal(setNativeSource(null, "system", "dark"), true);
+  assert.equal(overlays.at(-1).color, darkColor);
+});
+
 test("native application menu is kept only on macOS", () => {
   function exercise(platform) {
     const installed = [];
