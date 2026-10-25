@@ -448,6 +448,36 @@ class Scroller {
     const maxScroll = dimension - itemSize;
     if (maxScroll <= 0) return;
 
+    const ratioDelta = this.getWheelRatioDelta(
+      delta,
+      e,
+      dimension,
+      isVertical,
+    );
+
+    this.targetScrollRatio = Math.max(
+      0,
+      Math.min(this.targetScrollRatio + ratioDelta, 1),
+    );
+    this.scheduleScrollRender();
+  }
+
+  getWheelRatioDelta(delta, event, dimension, isVertical) {
+    const itemSpan = this.nbItem > 0 ? this.nbItem * this.heightByItem : 0;
+    const contentRange = itemSpan > dimension ? itemSpan - dimension : 0;
+
+    if (contentRange > 0) {
+      const mode = Number(event?.deltaMode) || 0;
+      const lineSize = isVertical ? this.heightByItem : 1;
+      const pixels = mode === 1
+        ? delta * (lineSize > 0 ? lineSize : 1)
+        : mode === 2
+          ? delta * dimension
+          : delta;
+
+      return pixels / contentRange;
+    }
+
     let dynamicStrength = this.strength;
     if (this.nbItem > 0) {
       if (this.nbItem < 50) {
@@ -459,14 +489,7 @@ class Scroller {
       }
     }
 
-    this.targetScrollRatio = Math.max(
-      0,
-      Math.min(
-        this.targetScrollRatio + (delta * dynamicStrength) / dimension,
-        1,
-      ),
-    );
-    this.scheduleScrollRender();
+    return (delta * dynamicStrength) / dimension;
   }
 
   getIntervalItem() {
