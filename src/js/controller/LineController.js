@@ -250,12 +250,8 @@ class LineController {
   }
 
   getViewportHeight() {
-    const horizontalScroller = this.outputScroller?.hScroller;
-    const horizontalHeight = horizontalScroller?.calcIsActive()
-      ? horizontalScroller.scrollerOBJ?.clientHeight ||
-        horizontalScroller.scrollerOBJ?.offsetHeight ||
-        10
-      : 0;
+    const horizontalHeight =
+      this.outputScroller?.getHorizontalScrollbarHeight?.() || 0;
 
     return Math.max(0, this.outputHeight - horizontalHeight);
   }
@@ -667,6 +663,7 @@ class LineController {
     this.syncDimensions();
 
     if (this.outputScroller) {
+      this.outputScroller.measureHorizontalScrollbarHeight?.();
       this.outputScroller.clampScrollState();
     }
 

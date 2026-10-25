@@ -9,6 +9,7 @@ class OutputScroller {
     this.marginLines = 3;
     this.pendingHorizontalColumns = 0;
     this.horizontalWheelFrame = null;
+    this.horizontalBarHeight = 0;
   }
 
   setLineController(lineController) {
@@ -123,6 +124,20 @@ class OutputScroller {
     this.hScroller.onScroll = (scrollRatio) => {
       this.applyHorizontalScrollFromRatio(scrollRatio);
     };
+
+    this.measureHorizontalScrollbarHeight();
+  }
+
+  measureHorizontalScrollbarHeight() {
+    const node = this.hScroller?.scrollerOBJ;
+    const height = node ? node.clientHeight || node.offsetHeight || 0 : 0;
+    this.horizontalBarHeight = height;
+    return height;
+  }
+
+  getHorizontalScrollbarHeight() {
+    if (!this.hScroller?.calcIsActive()) return 0;
+    return this.horizontalBarHeight || 10;
   }
 
   destroy() {
@@ -142,6 +157,7 @@ class OutputScroller {
     }
     this.vScroller = null;
     this.hScroller = null;
+    this.horizontalBarHeight = 0;
     this.lineController = null;
   }
 

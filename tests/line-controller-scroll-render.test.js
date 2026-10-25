@@ -164,6 +164,40 @@ test("window resize defers output thumb refresh to the shared scroller pass", ()
   assert.equal(calls[2][1].deferScrollerRefresh, true);
 });
 
+test("window resize refreshes the cached horizontal bar height before clamping", () => {
+  const { controller } = makeController();
+  const calls = [];
+  controller.editor.isOnRefresh = true;
+  controller.syncDimensions = () => calls.push("dimensions");
+  controller.outputScroller = {
+    measureHorizontalScrollbarHeight() { calls.push("measure bar"); },
+    clampScrollState() { calls.push("clamp"); },
+  };
+
+  controller.resize({ deferScrollerRefresh: true });
+
+  assert.deepEqual(calls, ["dimensions", "measure bar", "clamp"]);
+});
+
+test("viewport height never reads horizontal scroller layout", () => {
+  const { controller } = makeController();
+  controller.outputHeight = 100;
+  controller.outputScroller = {
+    getHorizontalScrollbarHeight: () => 14,
+    hScroller: {
+      calcIsActive() { throw new Error("viewport math must use the cached bar state"); },
+      scrollerOBJ: {
+        get clientHeight() { throw new Error("viewport math must not measure the bar"); },
+      },
+    },
+  };
+
+  assert.equal(controller.getViewportHeight(), 86);
+
+  controller.outputScroller = {};
+  assert.equal(controller.getViewportHeight(), 100);
+});
+
 test("one-line vertical scroll reuses unchanged highlighted rows and rebuilds only the entering row", () => {
   const { controller, file, output, scrolledHighlightIndexes } = makeController();
   const originalRows = output.children.slice();

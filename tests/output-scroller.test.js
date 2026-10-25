@@ -70,6 +70,29 @@ test("thumb ratio maps to the full horizontal range and refreshes only visible r
   assert.ok(!calls.some((call) => ["highlight", "selection", "search", "caret"].includes(call)));
 });
 
+test("horizontal scrollbar height is measured once and cached for viewport math", () => {
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller");
+  const scroller = Object.create(OutputScroller.prototype);
+  let layoutReads = 0;
+  const bar = {
+    get clientHeight() { layoutReads += 1; return 14; },
+    get offsetHeight() { layoutReads += 1; return 14; },
+  };
+  let active = true;
+  scroller.hScroller = { scrollerOBJ: bar, calcIsActive: () => active };
+  scroller.horizontalBarHeight = 0;
+
+  assert.equal(scroller.measureHorizontalScrollbarHeight(), 14);
+  for (let index = 0; index < 20; index++) {
+    assert.equal(scroller.getHorizontalScrollbarHeight(), 14);
+  }
+  assert.equal(layoutReads, 1);
+
+  active = false;
+  assert.equal(scroller.getHorizontalScrollbarHeight(), 0);
+  assert.equal(layoutReads, 1);
+});
+
 test("vertical thumb scroll uses the focused row refresh path", () => {
   const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller");
   const calls = [];
