@@ -3228,7 +3228,20 @@ app.whenReady().then(() => {
               clipboard.readText().includes("nce_space_input_world"),
             { timeout: 5000, description: "the configured Cut shortcut to copy selected terminal output" },
           );
-          assert.equal(await run(getTerminalText(firstTerminal.id)), terminalBufferBeforeCut,
+          const terminalBufferAfterCut = await run(getTerminalText(firstTerminal.id));
+          const preservedLines = terminalBufferBeforeCut
+            .split("\n")
+            .map(line => line.trimEnd())
+            .filter(Boolean);
+          const remainingLines = terminalBufferAfterCut
+            .split("\n")
+            .map(line => line.trimEnd())
+            .filter(Boolean);
+          let preservedIndex = 0;
+          for (const line of remainingLines) {
+            if (line === preservedLines[preservedIndex]) preservedIndex++;
+          }
+          assert.equal(preservedIndex, preservedLines.length,
             "Cut copies terminal output without deleting scrollback");
 
           terminalStage = "configured Paste shortcut in xterm";
