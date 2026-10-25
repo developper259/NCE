@@ -581,6 +581,39 @@ test("progress cannot extend a delivery that is waiting for a renderer reload", 
   assert.equal(timers.size, 0, "the acknowledged delivery leaves no timer behind");
 });
 
+test("path classification probes the filesystem concurrently without reordering deliveries", async () => {
+  const paths = Array.from({ length: 32 }, (_, index) => `/tmp/nce-classification-${index}.js`);
+  let active = 0;
+  let maxActive = 0;
+  const { ExternalOpenCoordinator: ConcurrentCoordinator } = loadMain(
+    "dist/ts/manager/ExternalOpenCoordinator.js",
+    {
+      "node:fs/promises": {
+        async realpath(value) {
+          active += 1;
+          maxActive = Math.max(maxActive, active);
+          await new Promise((resolve) => setTimeout(resolve, 2));
+          active -= 1;
+          return value;
+        },
+        async stat() { return { isFile: () => true, isDirectory: () => false }; },
+        async access() {},
+      },
+      "node:fs": { constants: { R_OK: 4, X_OK: 1 } },
+    },
+  );
+  const target = makeWindow("classification-target");
+  const coordinator = new ConcurrentCoordinator(makeWindowManager([target]));
+  coordinator.start();
+  const result = await coordinator.enqueueDrop(paths, target);
+
+  assert.equal(result.openedFiles, paths.length);
+  assert.deepEqual(target.state.deliveries[0], paths);
+  assert.ok(maxActive <= 8, `classification issued ${maxActive} concurrent filesystem probes`);
+  assert.ok(maxActive > 1, "independent paths are not validated serially");
+  coordinator.dispose();
+});
+
 test("App captures macOS open-file before the lock and queues startup and second-instance paths", async (t) => {
   const { root, file, folder } = await makeFixture(t);
   const startupFile = path.join(root, "startup file.js");

@@ -2,12 +2,14 @@ import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import type { Window } from "../Window";
+import { mapWithConcurrency } from "../util/Concurrency";
 import type { WindowManager } from "./WindowManager";
 
 export const MAX_EXTERNAL_OPEN_PATHS = 64;
 const MAX_QUEUED_EXTERNAL_OPEN_BATCHES = 64;
 const MAX_PENDING_STARTUP_NOTIFICATIONS = 8;
 const MAX_EXTERNAL_PATH_LENGTH = 32_768;
+const CLASSIFICATION_CONCURRENCY = 8;
 
 export interface ExternalOpenFailure {
   path: string;
@@ -306,10 +308,8 @@ export class ExternalOpenCoordinator {
       };
     }
 
-    const entries: ClassifiedPath[] = [];
     const failures: ExternalOpenFailure[] = [];
-    const seen = new Set<string>();
-    const api = getPathApi(this.platform);
+    const candidates: string[] = [];
     for (const rawPath of rawPaths) {
       if (typeof rawPath !== "string" || rawPath.length === 0) {
         failures.push(failed(rawPath, "INVALID_PATH", "The path is empty or invalid."));
@@ -324,33 +324,60 @@ export class ExternalOpenCoordinator {
         failures.push(failed(rawPath, "INVALID_PATH", "Dropped items must provide an absolute local path."));
         continue;
       }
+      candidates.push(rawPath);
+    }
 
-      const resolvedPath = api.resolve(cwd, rawPath);
-      try {
-        const canonicalPath = await fs.realpath(resolvedPath);
-        const stats = await fs.stat(canonicalPath);
-        if (!stats.isFile() && !stats.isDirectory()) {
-          failures.push(failed(rawPath, "UNSUPPORTED_PATH", "Only regular files and folders can be opened."));
-          continue;
-        }
-        await fs.access(canonicalPath, fsConstants.R_OK | (stats.isDirectory() ? fsConstants.X_OK : 0));
-        const key = pathComparisonKey(canonicalPath, this.platform);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        entries.push({ path: canonicalPath, kind: stats.isDirectory() ? "directory" : "file" });
-      } catch (error: unknown) {
-        const fileSystemCode = (error as NodeJS.ErrnoException)?.code;
-        const code = fileSystemCode === "EACCES" || fileSystemCode === "EPERM" ? "ACCESS_DENIED" :
-          fileSystemCode === "ENOENT" || fileSystemCode === "ENOTDIR" ? "PATH_NOT_FOUND" : "INVALID_PATH";
-        const message = code === "ACCESS_DENIED"
-          ? "NCE does not have permission to access this path."
-          : code === "PATH_NOT_FOUND"
-            ? "This file or folder no longer exists."
-            : "NCE could not validate this path.";
-        failures.push(failed(rawPath, code, message));
+    const api = getPathApi(this.platform);
+    const outcomes = await mapWithConcurrency(
+      candidates,
+      CLASSIFICATION_CONCURRENCY,
+      (rawPath) => this.classifyPath(rawPath, cwd, api),
+    );
+    const entries: ClassifiedPath[] = [];
+    const seen = new Set<string>();
+    for (const outcome of outcomes) {
+      if (outcome.failure) {
+        failures.push(outcome.failure);
+        continue;
       }
+      const entry = outcome.entry!;
+      const key = pathComparisonKey(entry.path, this.platform);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      entries.push(entry);
     }
     return { entries, failures };
+  }
+
+  private async classifyPath(
+    rawPath: string,
+    cwd: string,
+    api: typeof path,
+  ): Promise<{ entry?: ClassifiedPath; failure?: ExternalOpenFailure }> {
+    const resolvedPath = api.resolve(cwd, rawPath);
+    try {
+      const canonicalPath = await fs.realpath(resolvedPath);
+      const stats = await fs.stat(canonicalPath);
+      if (!stats.isFile() && !stats.isDirectory()) {
+        return {
+          failure: failed(rawPath, "UNSUPPORTED_PATH", "Only regular files and folders can be opened."),
+        };
+      }
+      await fs.access(canonicalPath, fsConstants.R_OK | (stats.isDirectory() ? fsConstants.X_OK : 0));
+      return {
+        entry: { path: canonicalPath, kind: stats.isDirectory() ? "directory" : "file" },
+      };
+    } catch (error: unknown) {
+      const fileSystemCode = (error as NodeJS.ErrnoException)?.code;
+      const code = fileSystemCode === "EACCES" || fileSystemCode === "EPERM" ? "ACCESS_DENIED" :
+        fileSystemCode === "ENOENT" || fileSystemCode === "ENOTDIR" ? "PATH_NOT_FOUND" : "INVALID_PATH";
+      const message = code === "ACCESS_DENIED"
+        ? "NCE does not have permission to access this path."
+        : code === "PATH_NOT_FOUND"
+          ? "This file or folder no longer exists."
+          : "NCE could not validate this path.";
+      return { failure: failed(rawPath, code, message) };
+    }
   }
 
   private isLiveWindow(window: Window | null): window is Window {
