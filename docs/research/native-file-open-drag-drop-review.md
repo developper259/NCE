@@ -25,7 +25,7 @@ All five findings and the actionable test/packaging observations were fixed afte
 | NSIS multi-selection | Fixed | Both verbs set `MultiSelectModel=Player`, and the Windows smoke test validates it; unrelated registry setup now uses `CreateSubKey`. | `aa61fcc` |
 | Test quality 4–5, remaining bottlenecks | Accepted | Electron/NSIS smoke coverage stays layered because the OS shell layer is platform-only; serial renderer file opening and folder creation are deliberate to preserve tab order, workspace uniqueness and the window limit. | — |
 
-Verification after the fixes: `npm run typecheck`, `npm run build:main`, and the full `npm test` suite (1181 tests, all passing). `test:electron` and `test:nsis-install` still require a display/native rebuild and Windows respectively, so they were not rerun here.
+Verification after the fixes: `npm run typecheck`, `npm run build:main`, the full `npm test` suite (1181 tests, all passing), and `npm run test:packaged` against the existing macOS bundle (both alternate handlers present). `test:electron` and `test:nsis-install` still require a display/native rebuild and Windows respectively, so they were not rerun here.
 
 ## Executive summary
 
