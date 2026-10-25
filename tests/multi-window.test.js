@@ -553,6 +553,10 @@ test("WindowManager creates independent windows, focuses workspace duplicates, a
     assert.equal(manager.commitWorkspace(other.id, root, rootReservation.token), true);
     const count = manager.getAllWindows().length;
     assert.equal(await manager.openWorkspaceInNewWindow(root), true);
+    const reopened = await manager.openWorkspaceInNewWindowWithOutcome(root);
+    assert.equal(reopened.opened, true);
+    assert.equal(reopened.focused, true,
+      "reusing a workspace reports that its window was focused, not recreated");
     assert.equal(manager.getAllWindows().length, count);
 
     const otherBrowserWindow = other.window;

@@ -231,6 +231,31 @@ test("invalid external paths still report progress before the final acknowledgem
   controller.destroy();
 });
 
+test("drop status reports mixed targets and distinguishes new windows from reused folders", () => {
+  const { controller } = createControllerHarness();
+  const title = controller.overlay.querySelector(".nce-external-drop-title");
+
+  controller.showDropResult({
+    openedFiles: 2,
+    openedFolders: 1,
+    focusedFolders: 1,
+    failures: [],
+  });
+  assert.equal(
+    title.textContent,
+    "2 files opened in this window. 1 folder opened in new window. 1 folder focused in an existing window.",
+  );
+
+  controller.showDropResult({
+    openedFiles: 0,
+    openedFolders: 0,
+    focusedFolders: 1,
+    failures: [],
+  });
+  assert.equal(title.textContent, "1 folder focused in an existing window.");
+  controller.destroy();
+});
+
 test("renderer deliveries stay ordered across retries of the same file", async () => {
   const harness = createControllerHarness();
   const { controller, editor, acknowledgements } = harness;

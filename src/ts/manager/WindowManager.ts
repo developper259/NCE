@@ -20,6 +20,11 @@ export interface CreateWindowOptions {
   focus?: boolean;
 }
 
+export interface WorkspaceOpenOutcome {
+  opened: boolean;
+  focused: boolean;
+}
+
 export function workspaceComparisonKey(value: string, platform = process.platform): string {
   const pathApi = platform === "win32" ? path.win32 : path;
   const normalized = pathApi.resolve(value).normalize("NFC");
@@ -151,6 +156,11 @@ export class WindowManager {
   }
 
   async openWorkspaceInNewWindow(folderPath: unknown): Promise<boolean> {
+    const outcome = await this.openWorkspaceInNewWindowWithOutcome(folderPath);
+    return outcome.opened;
+  }
+
+  async openWorkspaceInNewWindowWithOutcome(folderPath: unknown): Promise<WorkspaceOpenOutcome> {
     const canonical = await this.validateWorkspace(folderPath);
     if (!canonical) {
       const focused = this.getFocusedWindow()?.window || BrowserWindow.getFocusedWindow();
@@ -162,12 +172,12 @@ export class WindowManager {
       };
       if (focused) await dialog.showMessageBox(focused, options);
       else await dialog.showMessageBox(options);
-      return false;
+      return { opened: false, focused: false };
     }
     const existing = this.findWindowByWorkspace(canonical);
     if (existing) {
       this.focusWindow(existing.id);
-      return true;
+      return { opened: true, focused: true };
     }
     if (this.windows.size >= MAX_NCE_WINDOWS) {
       const parent = this.getFocusedWindow()?.window || BrowserWindow.getFocusedWindow();
@@ -179,16 +189,16 @@ export class WindowManager {
       };
       if (parent) await dialog.showMessageBox(parent, options);
       else await dialog.showMessageBox(options);
-      return false;
+      return { opened: false, focused: false };
     }
     const created = this.createWindow({ workspacePath: canonical, focus: true });
     if (!created) {
       await this.showWindowCreationError();
-      return false;
+      return { opened: false, focused: false };
     }
     const added = await this.app.recentFolders?.add(canonical);
     if (added) this.app.broadcastToWindows("recent-folders-changed", this.app.recentFolders.getAll());
-    return true;
+    return { opened: true, focused: false };
   }
 
   findWindowByWorkspace(folderPath: string): Window | null {

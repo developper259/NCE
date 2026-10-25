@@ -1,3 +1,24 @@
+function describeOpenedItems(result) {
+  const files = Number(result?.openedFiles) || 0;
+  const folders = Number(result?.openedFolders) || 0;
+  const focusedFolders = Number(result?.focusedFolders) || 0;
+  const parts = [];
+  if (files > 0) {
+    parts.push(`${files} file${files === 1 ? "" : "s"} opened in this window`);
+  }
+  if (folders > 0) {
+    parts.push(
+      `${folders} folder${folders === 1 ? "" : "s"} opened in new window${folders === 1 ? "" : "s"}`,
+    );
+  }
+  if (focusedFolders > 0) {
+    parts.push(
+      `${focusedFolders} folder${focusedFolders === 1 ? "" : "s"} focused in an existing window`,
+    );
+  }
+  return parts.length ? `${parts.join(". ")}.` : "";
+}
+
 class ExternalFileDropController {
   constructor(editor) {
     this.editor = editor;
@@ -273,21 +294,8 @@ class ExternalFileDropController {
       this.showResult(result);
       return;
     }
-    const openedFiles = Number(result?.openedFiles) || 0;
-    const openedFolders = Number(result?.openedFolders) || 0;
-    if (openedFolders > 0 && openedFiles === 0) {
-      this.showStatus(
-        openedFolders === 1
-          ? "Folder opened in a new window."
-          : "Folders opened in new windows.",
-      );
-    } else if (openedFiles > 0 && openedFolders === 0) {
-      this.showStatus(
-        openedFiles === 1
-          ? "File opened in this window."
-          : "Files opened in this window.",
-      );
-    }
+    const message = describeOpenedItems(result);
+    if (message) this.showStatus(message);
   }
 
   showStatus(message) {

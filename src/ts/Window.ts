@@ -426,6 +426,7 @@ export class Window {
           success: false,
           openedFiles: 0,
           openedFolders: 0,
+          focusedFolders: 0,
           failures: [{ path: "", code: "WINDOW_UNAVAILABLE", message: "The drop target window is no longer available." }],
         } satisfies ExternalOpenResult;
       }

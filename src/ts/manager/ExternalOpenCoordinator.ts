@@ -19,6 +19,7 @@ export interface ExternalOpenResult {
   success: boolean;
   openedFiles: number;
   openedFolders: number;
+  focusedFolders: number;
   failures: ExternalOpenFailure[];
 }
 
@@ -208,6 +209,7 @@ export class ExternalOpenCoordinator {
     const folders = classified.entries.filter((entry) => entry.kind === "directory");
     let openedFiles = 0;
     let openedFolders = 0;
+    let focusedFolders = 0;
 
     if (files.length) {
       let target = request.target;
@@ -241,14 +243,20 @@ export class ExternalOpenCoordinator {
     // duplicate-workspace and eight-window limit checks remain authoritative.
     for (const entry of folders) {
       try {
-        if (await this.windowManager.openWorkspaceInNewWindow(entry.path)) openedFolders += 1;
-        else failures.push(failed(entry.path, "FOLDER_OPEN_FAILED", "The folder could not be opened in a new NCE window."));
+        const outcome = await this.windowManager.openWorkspaceInNewWindowWithOutcome(entry.path);
+        if (!outcome.opened) {
+          failures.push(failed(entry.path, "FOLDER_OPEN_FAILED", "The folder could not be opened in a new NCE window."));
+        } else if (outcome.focused) {
+          focusedFolders += 1;
+        } else {
+          openedFolders += 1;
+        }
       } catch (error: unknown) {
         failures.push(failed(entry.path, "FOLDER_OPEN_FAILED", errorMessage(error, "The folder could not be opened.")));
       }
     }
 
-    const result = this.result(failures, openedFiles, openedFolders);
+    const result = this.result(failures, openedFiles, openedFolders, focusedFolders);
     const notificationTarget = this.isLiveWindow(request.target)
       ? request.target
       : this.isLiveWindow(this.startupTarget)
@@ -377,11 +385,13 @@ export class ExternalOpenCoordinator {
     failures: ExternalOpenFailure[],
     openedFiles = 0,
     openedFolders = 0,
+    focusedFolders = 0,
   ): ExternalOpenResult {
     return {
       success: failures.length === 0,
       openedFiles,
       openedFolders,
+      focusedFolders,
       failures,
     };
   }

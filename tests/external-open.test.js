@@ -52,18 +52,21 @@ function makeWindowManager(windows = [], { limit = 8 } = {}) {
       return window;
     },
     async openWorkspaceInNewWindow(folderPath) {
+      return (await manager.openWorkspaceInNewWindowWithOutcome(folderPath)).opened;
+    },
+    async openWorkspaceInNewWindowWithOutcome(folderPath) {
       openedFolders.push(folderPath);
       const existing = [...byId.values()].find((window) => window.workspacePath === folderPath);
       if (existing) {
         activeId = existing.id;
-        return true;
+        return { opened: true, focused: true };
       }
-      if (byId.size >= limit) return false;
+      if (byId.size >= limit) return { opened: false, focused: false };
       const window = makeWindow(`folder-${byId.size}`);
       window.workspacePath = folderPath;
       byId.set(window.id, window);
       activeId = window.id;
-      return true;
+      return { opened: true, focused: false };
     },
   };
   return manager;
@@ -236,7 +239,8 @@ test("system directory requests reuse an open workspace and respect the window l
   coordinator.start();
 
   const result = await coordinator.enqueueSystemPaths([folder, otherFolder, otherFolder]);
-  assert.equal(result.openedFolders, 2);
+  assert.equal(result.openedFolders, 1);
+  assert.equal(result.focusedFolders, 1, "the folder that was already open is reported as focused, not reopened");
   assert.equal(result.failures.length, 0);
   assert.equal(manager.getAllWindows().length, 2, "duplicate folder input opens only one new workspace window");
   assert.deepEqual(manager.openedFolders, [await fs.realpath(folder), await fs.realpath(otherFolder)]);
@@ -301,7 +305,9 @@ test("concurrent folder requests preserve workspace uniqueness and the eight-win
   const secondDuplicate = duplicateCoordinator.enqueueSystemPaths([folder], root);
   const canonicalFolder = await fs.realpath(folder);
   const duplicateResults = await Promise.all([firstDuplicate, secondDuplicate]);
-  assert.deepEqual(duplicateResults.map((result) => result.openedFolders), [1, 1]);
+  assert.equal(duplicateResults.reduce((count, result) => count + result.openedFolders, 0), 1);
+  assert.equal(duplicateResults.reduce((count, result) => count + result.focusedFolders, 0), 1,
+    "the second concurrent request focuses the workspace created by the first one");
   assert.equal(duplicateManager.getAllWindows().filter((window) =>
     window.workspacePath === canonicalFolder).length, 1);
   duplicateCoordinator.dispose();
