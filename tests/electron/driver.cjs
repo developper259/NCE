@@ -1673,6 +1673,54 @@ app.whenReady().then(() => {
         for (const width of Object.values(gutterSidebarWidths)) {
           assert.ok(Math.abs(width - fullGutterState.layerWidth) <= 0.5);
         }
+        const emptyLineCaretPath = path.join(directory, "empty-line-caret.js");
+        fs.writeFileSync(
+          emptyLineCaretPath,
+          "const first = 1;\n\nconst third = 3;\n",
+        );
+        const emptyLineCaret = await run(`(async () => {
+          const manager = editor.tabManager;
+          const File = window.__gutterSmokeOriginalFile.constructor;
+          const file = new File(
+            editor,
+            manager.getNextID(),
+            "empty-line-caret.js",
+            ${JSON.stringify(emptyLineCaretPath)},
+          );
+          await manager.openFile(file);
+          editor.cursorController.setCursorPosition(2, 0);
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+          const line = editor.output.children[1];
+          const caretRect = editor.cD.getBoundingClientRect();
+          const outputRect = editor.output.getBoundingClientRect();
+          const gutterRect = document.querySelector(".line-numbers").getBoundingClientRect();
+          const state = {
+            lineText: line?.textContent,
+            display: getComputedStyle(editor.cD).display,
+            opacity: getComputedStyle(editor.cD).opacity,
+            caretLeft: caretRect.left,
+            outputLeft: outputRect.left,
+            gutterRight: gutterRect.right,
+            row: file.row,
+            column: file.column,
+          };
+          await manager.closeFile(file.id);
+          return state;
+        })()`);
+        assert.equal(emptyLineCaret.lineText, "");
+        assert.equal(emptyLineCaret.row, 2);
+        assert.equal(emptyLineCaret.column, 0);
+        assert.equal(emptyLineCaret.display, "block");
+        assert.equal(emptyLineCaret.opacity, "1");
+        assert.ok(
+          emptyLineCaret.caretLeft >= emptyLineCaret.gutterRight,
+          `Empty-line caret is hidden under the gutter: ${JSON.stringify(emptyLineCaret)}`,
+        );
+        assert.ok(
+          Math.abs(emptyLineCaret.caretLeft - emptyLineCaret.outputLeft) <= 1,
+          `Empty-line caret is not at the text origin: ${JSON.stringify(emptyLineCaret)}`,
+        );
         const tabScrollState = await run(`(async () => {
           const manager = editor.tabManager;
           let file = manager.activeFile;

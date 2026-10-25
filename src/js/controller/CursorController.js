@@ -151,13 +151,13 @@ class CursorController {
             while (textNode) {
               lastTextNode = textNode;
               const nodeLength = textNode.nodeValue?.length || 0;
-              if (remaining <= nodeLength) break;
+              if (nodeLength > 0 && remaining <= nodeLength) break;
               remaining -= nodeLength;
               textNode = walker.nextNode();
             }
-            if (!textNode && lastTextNode) {
+            if (!textNode && lastTextNode && (lastTextNode.nodeValue?.length || 0) > 0) {
               textNode = lastTextNode;
-              remaining = textNode.nodeValue?.length || 0;
+              remaining = textNode.nodeValue.length;
             }
             if (textNode) {
               const range = document.createRange();
@@ -182,13 +182,13 @@ class CursorController {
       }
     }
 
+    const contentLeft = renderedX === null
+      ? this.columnToX(viewColumn + 1) - 1
+      : renderedX;
+
     return {
-      left: renderedX === null
-        ? this.columnToX(viewColumn)
-        : renderedX - this.mpX,
-      contentLeft: renderedX === null
-        ? this.columnToX(viewColumn) + this.mpX
-        : renderedX,
+      left: contentLeft - this.mpX,
+      contentLeft,
       top: this.rowToY(row) - 4 - lineController.offsetY,
       viewColumn,
     };

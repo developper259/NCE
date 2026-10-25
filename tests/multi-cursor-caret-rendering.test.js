@@ -79,6 +79,8 @@ function makeCursorDocument() {
         getBoundingClientRect() {
           assert.ok(textNode.nodeValue.length >= offset);
           metrics.measurements++;
+          if (textNode.nodeValue.length === 0)
+            return { left: 0, top: 0, width: 0, height: 0 };
           return { left: 50 + glyphOffsets[offset] * metrics.scale };
         },
       };
@@ -208,6 +210,22 @@ test("Option-click maps the clicked visual row to the same document row", () => 
   assert.equal(secondary.anchor.column, secondary.active.column);
   assert.equal(primary.active.row, 1);
   assert.equal(primary.active.column, 0);
+});
+
+test("caret at the start of an empty line stays at the text origin", () => {
+  const { editor } = makeMeasuredSetup("");
+
+  const position = editor.cursorController.getCaretPosition(1, 0);
+
+  assert.equal(position.contentLeft, editor.baseX);
+  assert.equal(position.left + editor.cursorController.mpX, editor.baseX);
+
+  editor.cursorController.updateCaretPosition();
+  assert.equal(editor.cD.style.display, "block");
+  assert.equal(
+    px(editor.cD.style.left) + px(editor.cD.style.marginLeft),
+    editor.baseX,
+  );
 });
 
 test("primary and secondary carets share measured text boundaries and dimensions", () => {
