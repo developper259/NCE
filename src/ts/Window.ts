@@ -104,6 +104,7 @@ export class Window {
   private quitRequestResolve: ((approved: boolean) => void) | null = null;
   private prepareQuitOnly = false;
   private commitAttempted = false;
+  private rendererCommitSkipped = false;
   private activeQuitRequestId: string | null = null;
   private rendererGone = false;
   private closed = false;
@@ -983,10 +984,28 @@ export class Window {
       this.forceCloseAfterRendererGone();
       return Promise.resolve(true);
     }
-    if (!this.rendererReady) return Promise.resolve(false);
+    if (!this.rendererReady) {
+      return Promise.resolve(this.closeBeforeRendererReady(prepareOnly));
+    }
+    this.rendererCommitSkipped = false;
     this.prepareQuitOnly = prepareOnly;
     this.quitState = "preparing";
     return this.requestRenderer("Request:saveState", "preparing", { prepareOnly });
+  }
+
+  /**
+   * The renderer has not finished its startup restoration, so it cannot own a
+   * newer session state than the one already persisted. Preserve that state and
+   * skip the renderer handshake instead of silently refusing the close.
+   */
+  private closeBeforeRendererReady(prepareOnly: boolean): boolean {
+    this.preserveSessionOnClose = true;
+    this.rendererCommitSkipped = true;
+    if (prepareOnly) {
+      this.quitState = "prepared";
+      return true;
+    }
+    return this.finishClose();
   }
 
   prepareForApplicationQuit(): Promise<boolean> {
@@ -1038,7 +1057,15 @@ export class Window {
       this.forceCloseAfterRendererGone();
       return Promise.resolve(true);
     }
-    if (!this.rendererReady) return Promise.resolve(false);
+    if (this.rendererCommitSkipped) {
+      this.preserveSessionOnClose = true;
+      return Promise.resolve(true);
+    }
+    if (!this.rendererReady) {
+      this.preserveSessionOnClose = true;
+      this.rendererCommitSkipped = true;
+      return Promise.resolve(true);
+    }
     this.quitState = "committing";
     this.commitAttempted = true;
     this.prepareQuitOnly = false;
@@ -1046,20 +1073,37 @@ export class Window {
   }
 
   closeCommittedWindow(): boolean {
-    if (this.quitState !== "committed" || !this.window || this.window.isDestroyed()) return false;
+    const closeSkippedCommit =
+      this.rendererCommitSkipped && this.quitState === "prepared";
+    if (
+      (this.quitState !== "committed" && !closeSkippedCommit) ||
+      !this.window ||
+      this.window.isDestroyed()
+    ) {
+      return false;
+    }
     this.forceQuit = true;
     this.quitState = "closing";
     return this.closeNativeWindow(true);
   }
 
   canCloseCommittedWindow(): boolean {
-    return this.quitState === "committed" && Boolean(this.window && !this.window.isDestroyed());
+    const closeSkippedCommit =
+      this.rendererCommitSkipped && this.quitState === "prepared";
+    return (
+      (this.quitState === "committed" || closeSkippedCommit) &&
+      Boolean(this.window && !this.window.isDestroyed())
+    );
   }
 
   async cancelPreparedClose(): Promise<boolean> {
     if (!["prepared", "committed", "failed"].includes(this.quitState)) return false;
     const mustRestoreRecovery = this.commitAttempted;
     this.commitAttempted = false;
+    if (this.rendererCommitSkipped) {
+      this.rendererCommitSkipped = false;
+      this.preserveSessionOnClose = false;
+    }
     this.quitState = "idle";
     this.prepareQuitOnly = false;
     if (!mustRestoreRecovery || !this.window || this.window.isDestroyed() || this.window.webContents.isDestroyed())
@@ -1068,11 +1112,13 @@ export class Window {
     return this.requestRenderer("Request:rollbackClose", "rolling-back");
   }
 
-  private finishClose(): void {
+  private finishClose(): boolean {
     this.clearQuitTimer();
     this.quitState = "closing";
     this.forceQuit = true;
-    this.resolveQuitRequest(this.closeNativeWindow(true));
+    const closed = this.closeNativeWindow(true);
+    this.resolveQuitRequest(closed);
+    return closed;
   }
 
   private closeNativeWindow(forceAfterAcknowledgment = false): boolean {

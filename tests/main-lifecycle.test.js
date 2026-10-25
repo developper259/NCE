@@ -251,9 +251,10 @@ for (const mode of [
     };
     const request = win.requestQuit();
     if (mode === "not-ready") {
-      assert.equal(await request, false);
-      assert.equal(closed, 0);
-      assert.equal(sent.length, 0);
+      assert.equal(await request, true);
+      assert.equal(closed, 1, "startup close does not wait for renderer state restoration");
+      assert.equal(sent.length, 0, "startup close skips the renderer save handshake");
+      assert.equal(win.preserveSessionOnClose, true, "the persisted session is kept for the next launch");
       return;
     }
     if (mode === "destroyed") {
@@ -284,6 +285,45 @@ for (const mode of [
     }
   });
 }
+
+test("application quit skips the renderer handshake while startup restoration is incomplete", async () => {
+  let closed = 0;
+  const sent = [];
+  const { Window } = loadMain("dist/ts/Window.js", { electron: { dialog: {} } });
+  const win = new Window({});
+  win.rendererReady = false;
+  win.window = {
+    isDestroyed: () => false,
+    close: () => { closed++; },
+    webContents: { isDestroyed: () => false, send: (...args) => sent.push(args) },
+  };
+
+  assert.equal(await win.prepareForApplicationQuit(), true);
+  assert.equal(win.quitState, "prepared");
+  assert.equal(win.preserveSessionOnClose, true);
+  assert.equal(sent.length, 0, "the still-restoring renderer receives no save request");
+  assert.equal(await win.commitPreparedClose(), true);
+  assert.equal(win.canCloseCommittedWindow(), true);
+  assert.equal(win.closeCommittedWindow(), true);
+  assert.equal(closed, 1);
+});
+
+test("a cancelled startup close restores the normal session-removal policy", async () => {
+  const { Window } = loadMain("dist/ts/Window.js", { electron: { dialog: {} } });
+  const win = new Window({});
+  win.rendererReady = false;
+  win.window = {
+    isDestroyed: () => false,
+    close: () => {},
+    webContents: { isDestroyed: () => false, send: () => {} },
+  };
+
+  assert.equal(await win.prepareForApplicationQuit(), true);
+  assert.equal(win.preserveSessionOnClose, true);
+  assert.equal(await win.cancelPreparedClose(), true);
+  assert.equal(win.preserveSessionOnClose, false);
+  assert.equal(win.quitState, "idle");
+});
 
 test("prepared close timeout fails without destroying a healthy renderer and can restore recovery", async () => {
   let timer;
