@@ -1,4 +1,4 @@
-const OUTPUT_SCROLL_BUFFER_LINES = 8;
+const OUTPUT_SCROLL_BUFFER_LINES = 4;
 
 class LineController {
   constructor(editor) {

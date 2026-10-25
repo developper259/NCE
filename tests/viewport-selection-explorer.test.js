@@ -161,7 +161,7 @@ test("fractional vertical scroll keeps the rendered layers covering the viewport
     file.lines.length,
     controller.maxViewLines + buffer * 2,
   );
-  assert.equal(buffer, 8);
+  assert.equal(buffer, 4);
   assert.equal(controller.renderedLineCount, expectedCount);
   assert.equal(controller.getRenderedLayerHeight(), expectedCount * lineHeight);
   assert.ok(expectedCount * lineHeight >= controller.getViewportHeight() + lineHeight);
