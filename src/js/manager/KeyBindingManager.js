@@ -58,6 +58,14 @@ class KeyBindingManager {
     );
   }
 
+  isTerminalContext(target) {
+    return Boolean(
+      target?.closest?.(
+        ".terminal-panel, .bottom-panel-terminal-actions-slot",
+      ),
+    );
+  }
+
   async copyNativeSelection() {
     const selection = window.getSelection?.();
     const text = selection?.toString?.() || "";
@@ -274,7 +282,8 @@ class KeyBindingManager {
   }
 
   executeAction(action, modifiers = {}) {
-    const activeTerminal = document.activeElement?.closest?.(".xterm");
+    const activeElement = document.activeElement;
+    const activeTerminal = activeElement?.closest?.(".xterm");
     if (
       activeTerminal?.classList?.contains("xterm") &&
       this.terminalEditActions.has(action)
@@ -284,6 +293,15 @@ class KeyBindingManager {
       // behind it.
       this.editor.terminalPanel?.handleKeybinding?.(action);
       return true;
+    }
+
+    if (
+      this.terminalTabActions.has(action) &&
+      this.isTerminalContext(activeElement)
+    ) {
+      const handled =
+        this.editor.terminalPanel?.handleTabKeybinding?.(action);
+      if (handled !== false) return true;
     }
 
     const item = CONFIG_KEYBINDING_GET_ACTION(action);
@@ -313,19 +331,12 @@ class KeyBindingManager {
       ? CONFIG_KEYBINDING_GET_KEY(shortcutKey)
       : null;
 
-    const terminalContext = e.target?.closest?.(
-      ".terminal-panel, .bottom-panel-terminal-actions-slot",
-    );
-    const hasNoOpenTabs = Array.isArray(this.editor.tabManager?.tabs) &&
-      this.editor.tabManager.tabs.length === 0;
-    const closeWindowWhenNoTabs = hasNoOpenTabs &&
-      ["close_file", "close_all_file"].includes(binding?.action);
+    const terminalContext = this.isTerminalContext(e.target);
     if (
       terminalContext &&
       this.canDispatchTerminalShortcut(e, shortcutKey) &&
       binding?.in_editor === false &&
-      this.terminalTabActions.has(binding.action) &&
-      !closeWindowWhenNoTabs
+      this.terminalTabActions.has(binding.action)
     ) {
       if (e.repeat && !["next_tab", "previous_tab"].includes(binding.action)) return;
       this.editor.terminalPanel?.handleTabKeybinding?.(binding.action);

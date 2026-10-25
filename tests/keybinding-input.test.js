@@ -60,7 +60,7 @@ function fixture(binding, options = {}, mappedShortcut = "Meta+p") {
   );
   const editor = {
     selected: false,
-    tabManager: { activeFile: null },
+    tabManager: { activeFile: null, tabs: options.tabs },
     terminalPanel: options.terminalPanel || null,
     keyBinding: { exec(item) { calls.push(item.action); } },
   };
@@ -599,4 +599,84 @@ test("terminal focus routes tab management shortcuts to terminal sessions", () =
     assert.equal(event.defaultPrevented, true);
     assert.equal(event.propagationStopped, true);
   }
+});
+
+test("terminal focus closes a session instead of the window without file tabs", () => {
+  const terminalCalls = [];
+  const { manager, calls } = fixture(
+    { action: "close_file", in_editor: false },
+    {
+      tabs: [],
+      terminalPanel: {
+        handleTabKeybinding(action) {
+          terminalCalls.push(action);
+          return true;
+        },
+      },
+    },
+    "Ctrl+w",
+  );
+  const event = keyboardEvent(terminalTarget(), {
+    key: "w",
+    ctrlKey: true,
+    metaKey: false,
+  });
+
+  manager.onKey(event);
+
+  assert.deepEqual(terminalCalls, ["close_file"]);
+  assert.deepEqual(calls, [], "Mod+W must not close the window while the terminal is focused");
+  assert.equal(event.defaultPrevented, true);
+  assert.equal(event.propagationStopped, true);
+});
+
+test("native menu tab actions follow the focused terminal", () => {
+  for (const action of [
+    "new_file",
+    "new_terminal",
+    "close_file",
+    "close_all_file",
+    "next_tab",
+    "previous_tab",
+  ]) {
+    const terminalCalls = [];
+    const { manager, calls } = fixture(
+      { action, in_editor: false },
+      {
+        tabs: [],
+        activeElement: terminalTarget(),
+        terminalPanel: {
+          handleTabKeybinding(terminalAction) {
+            terminalCalls.push(terminalAction);
+            return true;
+          },
+        },
+      },
+    );
+
+    assert.equal(manager.executeAction(action), true);
+    assert.deepEqual(terminalCalls, [action]);
+    assert.deepEqual(calls, [], `${action} must stay scoped to the terminal`);
+  }
+});
+
+test("native menu tab actions fall back to the editor outside the terminal", () => {
+  const terminalCalls = [];
+  const { manager, calls } = fixture(
+    { action: "close_file", in_editor: false },
+    {
+      tabs: [],
+      activeElement: new HTMLElement(),
+      terminalPanel: {
+        handleTabKeybinding(action) {
+          terminalCalls.push(action);
+          return true;
+        },
+      },
+    },
+  );
+
+  assert.equal(manager.executeAction("close_file"), true);
+  assert.deepEqual(terminalCalls, []);
+  assert.deepEqual(calls, ["close_file"]);
 });
