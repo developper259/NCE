@@ -309,7 +309,9 @@ export class AgentProcessRunner {
   ): string {
     return [runtime.executable, ...runtime.prefix, ...args]
       .map((value) =>
-        /[\s"']/.test(value) ? `"${value.replace(/"/g, '\\"')}"` : value,
+        /[\s"'\\]/.test(value)
+          ? `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`
+          : value,
       )
       .join(" ");
   }

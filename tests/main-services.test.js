@@ -1574,6 +1574,19 @@ test("AgentProcessRunner preserves the complete large validation stream", async 
   }
 });
 
+test("AgentProcessRunner escapes backslashes and quotes in command previews", () => {
+  const runner = new AgentProcessRunner({ agentApprovalManager: null });
+  const preview = runner.commandPreview(
+    { executable: "node", prefix: ["--test"] },
+    ["dir with \\backslash", 'say "hello"', "trailing\\", "plain"],
+  );
+
+  assert.equal(
+    preview,
+    'node --test "dir with \\\\backslash" "say \\"hello\\"" "trailing\\\\" plain',
+  );
+});
+
 test("Quick Open project listing is recursive, relative, and uses workspace ignores", async () => {
   const root = await tempWorkspace();
   try {
