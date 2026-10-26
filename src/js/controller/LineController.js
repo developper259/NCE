@@ -24,6 +24,7 @@ class LineController {
     this.scrollBufferLines = OUTPUT_SCROLL_BUFFER_LINES;
     this._renderStartIndex = null;
     this._renderedLineCount = null;
+    this._renderWindowTotalLines = null;
 
     this.marginChars = 10;
     this.marginLines = 3;
@@ -222,11 +223,17 @@ class LineController {
   }
 
   get renderStartIndex() {
-    return this._renderStartIndex ?? this.getRenderWindow().start;
+    if (this._renderStartIndex == null ||
+        this._renderWindowTotalLines !== this.getDisplayLineCount())
+      return this.getRenderWindow().start;
+    return this._renderStartIndex;
   }
 
   get renderedLineCount() {
-    return this._renderedLineCount ?? this.getRenderWindow().count;
+    if (this._renderedLineCount == null ||
+        this._renderWindowTotalLines !== this.getDisplayLineCount())
+      return this.getRenderWindow().count;
+    return this._renderedLineCount;
   }
 
   getScrollViewportLines() {
@@ -268,6 +275,7 @@ class LineController {
 
     this._renderStartIndex = next.start;
     this._renderedLineCount = next.count;
+    this._renderWindowTotalLines = this.getDisplayLineCount();
 
     return next;
   }
@@ -275,6 +283,7 @@ class LineController {
   resetRenderWindow() {
     this._renderStartIndex = null;
     this._renderedLineCount = null;
+    this._renderWindowTotalLines = null;
   }
 
   get maxCharacters() {
@@ -791,6 +800,24 @@ class LineController {
       ? Math.max(file.lines.length, expectedTotalLines)
       : file.lines.length;
     file.syntaxMetrics = null;
+    if (file === this.editor.tabManager?.activeFile)
+      this.syncRenderWindowToContent();
+  }
+
+  syncRenderWindowToContent() {
+    if (this._renderStartIndex == null) return;
+    const previousStart = this._renderStartIndex;
+    const previousCount = this._renderedLineCount;
+    const next = this.updateRenderWindow();
+    if (next.start === previousStart && next.count === previousCount) return;
+
+    this.initLineOutput();
+    this.refreshNumberLines();
+    this.applyOutputTransform();
+    this.editor.cursorController?.updateCaretPosition?.();
+    this.editor.selectController?.refreshSelectionDOM?.();
+    this.editor.multiCursorController?.refreshOverlays?.();
+    this.editor.searchController?.refreshSelectionDOM?.();
   }
 
   getContent() {
@@ -1125,6 +1152,7 @@ class LineController {
       );
       this._renderStartIndex = prior.start;
       this._renderedLineCount = prior.count;
+      this._renderWindowTotalLines = this.getDisplayLineCount();
     }
 
     const previousRenderStart = this.renderStartIndex;
@@ -1821,6 +1849,17 @@ class LineController {
       this.resetRenderWindow();
       this.markDirtyAll();
       needsInit = true;
+    } else if (!needsInit) {
+      // The document can grow or shrink without a scroll event. Recompute the
+      // render window so the rendered rows keep covering the viewport.
+      const previousStart = this._renderStartIndex;
+      const previousCount = this._renderedLineCount;
+      const next = this.updateRenderWindow();
+      if (next.start !== previousStart || next.count !== previousCount) {
+        this.editor.highlightController.lineNodes.clear();
+        this.dirtyLines.clear();
+        needsInit = true;
+      }
     }
 
     if (this.index !== this.editor.cursorController.row) {

@@ -46,6 +46,9 @@ function makeController(lineCount = 12, visibleRows = 4, scrollBufferLines = 0) 
       lineNodes: new Map(),
       setLineNode(index, node) { this.lineNodes.set(index, node); },
       refreshForVerticalScroll(indexes) { scrolledHighlightIndexes.push(indexes); },
+      refresh() {},
+      markDirtyAll() {},
+      markDirtyFrom() {},
     },
   };
   const controller = Object.create(LineController.prototype);
@@ -54,6 +57,7 @@ function makeController(lineCount = 12, visibleRows = 4, scrollBufferLines = 0) 
   controller.marginChars = 10;
   controller.offsetX = 0;
   controller.renderGeneration = 1;
+  controller.dirtyLines = new Set();
   controller.scrollBufferLines = scrollBufferLines;
   Object.defineProperty(controller, "maxViewLines", { value: visibleRows });
   Object.defineProperty(controller, "maxCharactersPerLine", { value: 90 });
@@ -372,4 +376,46 @@ test("crossing the render window boundary rebuilds only the entering rows", () =
   for (let index = 0; index < 12; index += 1) {
     assert.equal(output.children[index], originalRows[index + 8]);
   }
+});
+
+test("refresh rebuilds the render window when the document grows", () => {
+  const { controller, file, output } = makeController(1, 4, 0);
+  controller.outputScroller = {
+    clampScrollState: () => false,
+    updateNbItem() {},
+    refresh() {},
+  };
+  controller.applyScrollTransform = () => {};
+  controller.updateRenderWindow();
+  assert.equal(controller.renderedLineCount, 1);
+  assert.equal(output.children.length, 1);
+
+  for (let index = 1; index < 6; index += 1) {
+    file.lines.push(new LineNode(`line ${index}`));
+  }
+
+  controller.initLineOutput = () => {
+    controller.initCalls += 1;
+    output.children = [];
+    const count = controller.renderedLineCount;
+    for (let screenIndex = 0; screenIndex < count; screenIndex += 1) {
+      const displayIndex = controller.renderStartIndex + screenIndex;
+      output.children.push({
+        dataset: { line: String(displayIndex), displayLine: String(displayIndex) },
+        children: [],
+        parent: output,
+        top: screenIndex * 20,
+      });
+    }
+  };
+
+  controller.refresh();
+
+  assert.equal(controller.initCalls, 1);
+  assert.equal(controller.renderedLineCount, 4);
+  assert.equal(output.children.length, 4);
+  assert.deepEqual(
+    output.children.map((row) => row.dataset.displayLine),
+    ["0", "1", "2", "3"],
+  );
 });
