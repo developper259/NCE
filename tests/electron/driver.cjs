@@ -2940,8 +2940,11 @@ app.whenReady().then(() => {
           }
           return text;
         })()`;
-        const getLastNonEmptyTerminalLine = (id) =>
-          `(() => ${getTerminalText(id)}.split("\\n").map(line => line.trim()).filter(Boolean).at(-1) || "")()`;
+        const readTerminalText = (id) => run(getTerminalText(id));
+        const getLastNonEmptyTerminalLine = async (id) => {
+          const text = await readTerminalText(id);
+          return text.split("\n").map((line) => line.trim()).filter(Boolean).at(-1) || "";
+        };
         const getTerminalCursorState = (id) => `(() => {
           const record = editor.terminalPanel.sessions.get(${JSON.stringify(id)}) ||
             window.__terminalWorkspaceARecords?.get(${JSON.stringify(id)});
@@ -2999,7 +3002,6 @@ app.whenReady().then(() => {
         };
         const terminalDiagnostics = async () => {
           const renderer = await run(`(() => {
-            const record = editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)});
             const active = document.activeElement;
             return {
               documentFocused: document.hasFocus(),
@@ -3013,9 +3015,10 @@ app.whenReady().then(() => {
               ),
               xtermInput: window.__nceTerminalInput || [],
               keyboardEvents: window.__nceTerminalKeyEvents || [],
-              buffer: ${getTerminalText(firstTerminal.id)},
             };
           })()`).catch(error => ({ rendererError: String(error) }));
+          renderer.buffer = await readTerminalText(firstTerminal.id)
+            .catch(error => String(error));
           return {
             stage: terminalStage,
             shell: firstTerminal.shell,
@@ -3043,7 +3046,7 @@ app.whenReady().then(() => {
           if (process.platform === "darwin") app.focus({ steal: true });
           win.focus();
           await waitForTerminalCondition(
-            async () => (await run(`${getTerminalText(firstTerminal.id)}.trim().length > 0`)) === true,
+            async () => (await readTerminalText(firstTerminal.id)).trim().length > 0,
             { timeout: 10000, description: "the selected shell to initialize terminal output" },
           );
           await run(`(() => {
@@ -3150,7 +3153,7 @@ app.whenReady().then(() => {
           terminalStage = "Shift+Arrow terminal text selection";
           await typePhysicalText("nce_shift_arrow");
           await waitForTerminalCondition(
-            async () => (await run(getLastNonEmptyTerminalLine(firstTerminal.id))).endsWith("nce_shift_arrow"),
+            async () => (await getLastNonEmptyTerminalLine(firstTerminal.id)).endsWith("nce_shift_arrow"),
             { timeout: 5000, description: "the shell to echo the input before extending its terminal selection" },
           );
           sendPhysicalKey("Left", { modifiers: ["shift"] });
@@ -3225,7 +3228,7 @@ app.whenReady().then(() => {
           );
           await waitForTerminalCondition(
             async () => {
-              const lastLine = await run(getLastNonEmptyTerminalLine(firstTerminal.id));
+              const lastLine = await getLastNonEmptyTerminalLine(firstTerminal.id);
               return lastLine.endsWith(command);
             },
             { timeout: 5000, description: "the shell to render the full typed command before Enter" },
@@ -3249,7 +3252,11 @@ app.whenReady().then(() => {
           assert.ok(output.includes("nce_space_input_hello  nce_space_input_world"),
             "the shell preserves consecutive spaces in its output across supported shells");
           await waitForTerminalCondition(
-            async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("nce_space_input_hello") && ${getTerminalText(firstTerminal.id)}.includes("nce_space_input_world")`)) === true,
+            async () => {
+              const text = await readTerminalText(firstTerminal.id);
+              return text.includes("nce_space_input_hello") &&
+                text.includes("nce_space_input_world");
+            },
             { timeout: 5000, description: "xterm to render both PTY output markers" },
           );
           assert.equal(ptyInputData.join(""), `${command}\r`,
@@ -3371,7 +3378,7 @@ app.whenReady().then(() => {
         }
         await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(firstTerminal.id)}).workspaceKey, ${JSON.stringify("echo NCE_PTY_FIRST\r")})`);
         await waitForCondition(
-          async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_PTY_FIRST")`)) === true,
+          async () => (await readTerminalText(firstTerminal.id)).includes("NCE_PTY_FIRST"),
           { timeout: 10000, description: "first real PTY shell output" },
         );
         traceStep("first PTY output received");
@@ -3395,7 +3402,7 @@ app.whenReady().then(() => {
         ], "adding a duplicate leaves the primary unchanged and suffixes only the new tab");
         await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(secondTerminal.id)}).workspaceKey, ${JSON.stringify("echo NCE_PTY_SECOND\r")})`);
         await waitForCondition(
-          async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_PTY_SECOND")`)) === true,
+          async () => (await readTerminalText(secondTerminal.id)).includes("NCE_PTY_SECOND"),
           { timeout: 10000, description: "second real PTY shell output" },
         );
         traceStep("both PTY sessions produced independent output");
@@ -3526,7 +3533,7 @@ app.whenReady().then(() => {
             ${JSON.stringify(`echo ${marker}\r`)}
           )`);
           await waitForCondition(
-            async () => (await run(`${getTerminalText(workspaceBTerminal.id)}.includes(${JSON.stringify(marker)})`)) === true,
+            async () => (await readTerminalText(workspaceBTerminal.id)).includes(marker),
             { timeout: 10000, description: `cycle ${index} receives real shell stdout` },
           );
           await run(`window.__terminalWorkspaceB = editor.terminalPanel.sessions.get(${JSON.stringify(workspaceBTerminal.id)}).terminal; true`);
@@ -3563,7 +3570,7 @@ app.whenReady().then(() => {
           window.__terminalWorkspaceB`), true, "workspace B reuses its original xterm instance");
         await run(`window.api.writeTerminalSession(${JSON.stringify(firstTerminal.id)}, ${JSON.stringify(firstTerminal.workspaceKey || "")}, ${JSON.stringify("echo NCE_HIDDEN_WORKSPACE_OUTPUT\r")})`);
         await waitForCondition(
-          async () => (await run(`${getTerminalText(firstTerminal.id)}.includes("NCE_HIDDEN_WORKSPACE_OUTPUT")`)) === true,
+          async () => (await readTerminalText(firstTerminal.id)).includes("NCE_HIDDEN_WORKSPACE_OUTPUT"),
           { timeout: 10000, description: "workspace A PTY output while workspace B is active" },
         );
         assert.equal(await run("editor.terminalPanel.sessions.size === 1"), true, "background A output cannot add a tab to B");
@@ -3599,7 +3606,7 @@ app.whenReady().then(() => {
         const longCommand = 'node -e "console.log(\'NCE_LONG_PROCESS_READY\');setTimeout(()=>{},30000)"\r';
         await run(`window.api.writeTerminalSession(${JSON.stringify(secondTerminal.id)}, editor.terminalPanel.sessions.get(${JSON.stringify(secondTerminal.id)}).workspaceKey, ${JSON.stringify(longCommand)})`);
         await waitForCondition(
-          async () => (await run(`${getTerminalText(secondTerminal.id)}.includes("NCE_LONG_PROCESS_READY")`)) === true,
+          async () => (await readTerminalText(secondTerminal.id)).includes("NCE_LONG_PROCESS_READY"),
           { timeout: 10000, description: "long-running terminal process startup" },
         );
         await run("editor.bottomPanelManager.closePanel()");
