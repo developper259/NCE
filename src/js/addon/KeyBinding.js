@@ -463,6 +463,7 @@ class KeyBinding {
         id: `recent:${item.id}`,
         recentCommandId: item.id,
         section: "Recently Used",
+        hiddenOnSearch: true,
       }));
     const items = recentlyUsedItems.concat(
       allActions.map((item, index) => ({

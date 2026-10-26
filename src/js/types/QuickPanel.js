@@ -327,7 +327,7 @@ class QuickPanel {
 
     const query = this.session.query.trim().toLowerCase();
     const filterItems = this.session.options.filterItems;
-    const filtered = typeof filterItems === "function"
+    let filtered = typeof filterItems === "function"
       ? filterItems(this.session.items, query)
       : this.session.items.filter((item) => {
           if (!query) return true;
@@ -335,6 +335,7 @@ class QuickPanel {
             ...(Array.isArray(item.keywords) ? item.keywords : [])]
             .filter(Boolean).join(" ").toLowerCase().includes(query);
         });
+    if (query) filtered = filtered.filter((item) => !item.hiddenOnSearch);
     const configuredLimit = this.session.options.renderLimit;
     const limit = configuredLimit
       ? Math.max(1, Math.floor(configuredLimit))

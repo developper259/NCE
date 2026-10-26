@@ -834,3 +834,37 @@ test("QuickPanel close suspends work, reopen resumes it, and explicit renderLimi
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(panel.listLayer.children.length, 0);
 });
+
+test("QuickPanel hides recently used items and their section while searching", async () => {
+  const env = makeEnvironment();
+  const QuickPanel = loadGlobal("src/js/types/QuickPanel.js", "QuickPanel", {
+    document: env.document,
+    window: env.window,
+    QuickPanelScroller,
+  });
+  const panel = new QuickPanel(env.editor);
+  const items = [
+    { id: "recent:a", label: "Alpha", section: "Recently Used", hiddenOnSearch: true },
+    { id: "a", label: "Alpha", separatorBefore: true },
+    { id: "b", label: "Beta" },
+  ];
+  panel.open({ id: "command-palette", mode: "pick", items, transitionDuration: 1 });
+  await new Promise((resolve) => setImmediate(resolve));
+  env.flushFrames();
+
+  assert.deepEqual(panel.session.visibleItems.map((item) => item.id), ["recent:a", "a", "b"]);
+  assert.ok(panel.resultsScroller.entries.some(
+    (entry) => entry.type === "section" && entry.section === "Recently Used",
+  ));
+
+  panel.input.value = "alp";
+  panel.handleInput();
+  env.flushFrames();
+  assert.deepEqual(panel.session.visibleItems.map((item) => item.id), ["a"]);
+  assert.equal(panel.resultsScroller.entries.some((entry) => entry.type === "section"), false);
+
+  panel.input.value = "";
+  panel.handleInput();
+  env.flushFrames();
+  assert.deepEqual(panel.session.visibleItems.map((item) => item.id), ["recent:a", "a", "b"]);
+});
