@@ -248,3 +248,42 @@ test("language selector exposes technology logos with a neutral fallback", async
   assert.equal(options.items.find((item) => item.id === "json").icon,
     "fi fi-rr-code-simple quick-panel-language-logo");
 });
+
+test("language selector waits for the language change before refreshing", async () => {
+  const title = { innerText: "javascript" };
+  const elements = new Map([
+    [".bottomBar-cursorPos", {}], [".bottomBar-cursor-status", { style: {} }],
+    [".bottomBar-file-status", { style: {}, querySelector: () => ({ innerText: "" }) }],
+    ["#language", { querySelector: () => title }],
+    ["#config-space", { querySelector: () => ({ innerText: "" }) }],
+  ]);
+  let options;
+  let finishChange;
+  const activeFile = { language: "javascript" };
+  const editor = {
+    tabManager: { activeFile },
+    highlightController: {
+      getSupportedLanguage: async () => ["javascript", "typescript"],
+      changeLanguage(file, language) {
+        return new Promise((resolve) => {
+          finishChange = () => {
+            file.language = language;
+            resolve();
+          };
+        });
+      },
+    },
+    quickPanel: { open(value) { options = value; } },
+  };
+  const BottomBar = loadGlobal("src/js/addon/BottomBar.js", "BottomBar", {
+    getElement: (selector) => elements.get(selector), SETTINGS_GET: () => 2,
+  });
+  const bar = new BottomBar(editor);
+  await bar.openLanguage();
+
+  const accepted = options.onAccept({ data: "typescript" });
+  assert.equal(title.innerText, "javascript");
+  finishChange();
+  await accepted;
+  assert.equal(title.innerText, "typescript");
+});

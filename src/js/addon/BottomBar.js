@@ -95,8 +95,8 @@ class BottomBar {
       placeholder: "Select Language",
       selectedId: String(file.language || "plaintext").toLowerCase(),
       items,
-      onAccept: (item) => {
-        this.editor.highlightController.changeLanguage(file, item.data);
+      onAccept: async (item) => {
+        await this.editor.highlightController.changeLanguage(file, item.data);
         this.refreshLanguage();
       },
     });
