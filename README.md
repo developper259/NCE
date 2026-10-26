@@ -28,56 +28,110 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 
 NCE also includes a deeply integrated AI coding agent designed to work directly with the editor, workspace, files and project tooling.
 
-**Current version**: **0.0.1-beta.3**
+**Current version**: **0.0.1-beta.4**
 
-## Beta 3 highlights
+## Beta 4 highlights
 
-- Major AI Agent reliability and architecture improvements
-- Safer and more reliable multi-file editing
-- Manual context support for files, folders and selections
-- Integrated project test detection and test execution
-- Improved file revision tracking and stale edit recovery
-- Better large-file writing and automatic recovery
-- Improved tool calling, JSON recovery and model error handling
-- Improved Agent permissions and approval flows
-- Better context management and response budgeting
-- Persistent Agent conversations and workspace state
-- Improved Agent activity timeline and change review
-- Compact reasoning viewer with reasoning history and copy support
-- Per-model visibility controls and provider API key management
-- Customizable sidebars with context menus for panels and Agent conversations
-- New light theme and system theme support
-- Improved Settings, Search, Sidebars and context menus
-- Numerous editor, keybinding, rendering and workspace-state fixes
+- Integrated multi-session terminal with workspace-scoped sessions and a new extensible bottom panel
+- Multi-cursor editing with atomic edits, dedicated commands and optimized rendering
+- Isolated multi-window support with per-window state, including fullscreen
+- Image and Markdown preview tabs with a view type selector
+- Large file mode replacing the previous file size limit, plus automatic large workspace mode
+- Persistent workspace file index powering Quick Open, search and the File Explorer
+- Major startup, rendering and scrolling performance work, with lazy-loaded features and virtualized lists
+- Built-in runtime performance dashboard
+- Crash recovery with automatic restoration of unsaved buffers
+- Safer file handling: external changes merged with local edits and removals sent to the system Trash
+- Progressive workspace search with current-file options and a safe, complete Replace All
+- Native file and folder opening, including drag and drop onto the editor
+- Horizontal tab scrolling and tab cycling
+- New reusable checkbox and anchored dropdown components in Settings
+- Smaller Electron package with trimmed assets
+- Numerous Agent, keybinding, editor and cross-platform packaging fixes
 
 ## Features
 
+### Editor
+
 - Fast custom editing engine
+- Multi-cursor editing with multiple selections
 - Virtualized vertical and horizontal rendering for large documents
 - Syntax highlighting powered by [NSH](https://github.com/developper259/NSH)
-- Multiple file tabs and a dedicated Settings tab
-- File Explorer with create, rename, copy, move, duplicate and delete operations
-- Recursive workspace search with include/exclude filters
-- Persistent recent workspaces with Open Recent
-- Find in file with selection prefill
-- Quick Open (Mod+P)
-- Go to Line (Mod+G)
-- Command Palette (Mod+Shift+P)
-- Searchable settings with persistent category and scroll position
-- Per-model visibility controls and provider API key management
-- Configurable keyboard shortcuts
 - Undo & Redo
 - Smart typing and automatic pairs
 - Smart indentation
-- Customizable sidebar panels
-- Native macOS menu and integrated Windows/Linux title bar menu
-- Auto Save
 - Cut, copy and paste
+- Large file mode for opening very large files
+- Local NSH failure fallback so the editor remains usable without highlighting
+
+### Tabs and Views
+
+- Multiple file tabs with horizontal scrolling and tab cycling
+- Dedicated Settings tab
+- Image preview tab for png, jpeg and other image files
+- Markdown preview tab
+- Tab type picker and "change view type" action for switching between views
+
+### Workspace and Files
+
+- File Explorer with create, rename, copy, move, duplicate and delete operations
+- Virtualized File Explorer with a persistent tree
+- Removals sent to the system Trash by default, with optional permanent delete
+- Configurable confirmations for file and non-empty folder removal
+- Persistent workspace file index, kept up to date by the file watcher
+- Automatic large workspace mode for very large projects
+- Persistent recent workspaces with Open Recent
+- Multi-window support with isolated windows and per-window state
+- Native opening of files and folders from the system
+- Drag and drop files and folders onto the editor to open them
 - Session restoration for workspaces, tabs, cursor, selection and scroll position
+- Crash recovery that restores unsaved buffers automatically
+- Merge of external file changes with local edits
+- Auto Save with coalesced writes
 - Safe dirty-file flows for close, quit, reload and workspace switching
 - Atomic file saves with large, binary and invalid UTF-8 file protection
+
+### Search and Navigation
+
+- Recursive workspace search with include/exclude filters
+- Progressive, streamed and virtualized search results
+- Complete and safe workspace Replace All, including empty replacements
+- Find in file with selection prefill and current-file search options
+- Quick Open (Mod+P) served from the workspace index
+- Go to Line (Mod+G)
+- Command Palette (Mod+Shift+P)
+- Recently used items in the quick panel
+
+### Terminal
+
+- Integrated terminal built on xterm and a native PTY
+- Multiple terminal sessions with stable names and session management
+- Sessions and panel state persisted per workspace
+- Extensible bottom panel manager
+- Clipboard shortcuts and Shift+Arrow text selection in the terminal
+
+### AI Agent
+
 - Integrated AI coding agent with project-aware tools, testing and multi-file editing
-- Local NSH failure fallback so the editor remains usable without highlighting
+- Persistent Agent conversations with windowed rendering for long histories
+- Manual context for files, folders and selections
+- Safe handling of concurrent Agent runs
+- Per-model visibility controls and provider API key management
+
+### Customization and Settings
+
+- Searchable settings with persistent category and scroll position
+- Configurable keyboard shortcuts
+- Configurable Open Recent window behavior
+- Customizable sidebar panels
+- Light, dark and system themes
+- Native macOS menu and integrated Windows/Linux title bar menu
+
+### Performance and Reliability
+
+- Lazy initialization of heavy features and a split renderer bundle for faster startup
+- Centralized scroller management and per-frame layout batching
+- Built-in runtime performance dashboard
 - Cross-platform desktop support
 
 ## Getting Started
@@ -136,7 +190,7 @@ Build artifacts are generated in `release/`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.3**
+Current version: **0.0.1-beta.4**
 
 ## License
 
