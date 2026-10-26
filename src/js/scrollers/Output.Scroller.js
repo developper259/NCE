@@ -380,6 +380,9 @@ class OutputScroller {
   restoreScroll() {
     if (!this.editor.tabManager.activeFile) return;
 
+    this.vScroller.refreshMetrics();
+    this.hScroller.refreshMetrics();
+
     this.vScroller.nbItem = this.getTotalScrollLines();
 
     this.clampScrollState();

@@ -148,6 +148,62 @@ test("vertical thumb scroll uses the focused row refresh path", () => {
   assert.notEqual(lineController.startIndex, 7);
 });
 
+test("restoreScroll re-measures scrollers after a hidden preview", () => {
+  const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller");
+  let visible = false;
+  const calls = [];
+  const makeScroller = (name) => ({
+    id: name,
+    nbItem: 0,
+    scrollRatio: 0,
+    scrollerOBJHeight: 626,
+    itemOBJHeight: 20,
+    readThumbMetrics: () => ({ maxScroll: 606 }),
+    writeThumbPosition() {},
+    setScrollRatio(value) { this.scrollRatio = value; },
+    calcIsActive: () => true,
+    refreshMetrics() {
+      calls.push(`${name}:metrics`);
+      this.scrollerOBJHeight = visible ? 626 : 0;
+    },
+    refresh() { calls.push(`${name}:refresh`); },
+  });
+  const scroller = Object.create(OutputScroller.prototype);
+  scroller.editor = {
+    tabManager: { activeFile: {} },
+    letterSize: 10,
+    scrollerManager: { activateScroller() {}, refreshScroller() {} },
+  };
+  scroller.lineController = {
+    startIndex: 0,
+    offsetY: 0,
+    offsetX: 0,
+    maxLineLength: 40,
+    maxLines: 27,
+    outputWidth: 100,
+    getDisplayLineCount: () => 1999,
+    getBottomScrollMargin: () => 3,
+    getLineHeight: () => 20,
+    applyOutputTransform() {},
+  };
+  scroller.vScroller = makeScroller("vertical");
+  scroller.hScroller = makeScroller("horizontal");
+  scroller.getVisibleHorizontalWidth = () => 100;
+  scroller.marginChars = 10;
+
+  scroller.vScroller.refreshMetrics();
+  scroller.hScroller.refreshMetrics();
+  assert.equal(scroller.vScroller.scrollerOBJHeight, 0);
+  calls.length = 0;
+
+  visible = true;
+  scroller.restoreScroll();
+
+  assert.deepEqual(calls.slice(0, 2), ["vertical:metrics", "horizontal:metrics"]);
+  assert.equal(scroller.vScroller.scrollerOBJHeight, 626);
+  assert.equal(scroller.hScroller.scrollerOBJHeight, 626);
+});
+
 test("layout refresh updates output scroll state and leaves thumb reads to one manager pass", () => {
   const OutputScroller = loadGlobal("src/js/scrollers/Output.Scroller.js", "OutputScroller");
   const refreshed = [];
