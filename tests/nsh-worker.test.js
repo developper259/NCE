@@ -36,11 +36,18 @@ test('real NSH server over local WebSocket: JS/TS/C++ tokens and reopened text',
   const port = await server.start();
   const socket = new WebSocket(`ws://127.0.0.1:${port}`);
   const pending = new Map(); let id = 0;
-  socket.on('message', data => { const response = JSON.parse(data); pending.get(response.id)?.(response); pending.delete(response.id); });
+  socket.on('message', data => {
+    const response = JSON.parse(data);
+    if (!response || typeof response.id !== 'string') return;
+    const entry = pending.get(response.id);
+    if (!entry) return;
+    pending.delete(response.id);
+    entry.resolve(response);
+  });
   await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
   async function request(requestType, args = {}) {
     const requestId = String(++id);
-    const result = new Promise(resolve => pending.set(requestId, resolve));
+    const result = new Promise(resolve => pending.set(requestId, { resolve }));
     socket.send(JSON.stringify({ id: requestId, requestType, ...args }));
     const response = await result; assert.equal(response.success, true, response.error); return response;
   }

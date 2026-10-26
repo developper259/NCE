@@ -845,7 +845,8 @@ test("WorkspaceRegexExecutor advances zero-width matches by Unicode code point",
 
 test("WorkspaceRegexExecutor terminates timed out and cancelled regex workers", async () => {
   const executor = new WorkspaceRegexExecutor(800, 4);
-  const pathological = /^(a+)+$/gu;
+  // Deliberately catastrophic; the executor forwards it to a killable worker.
+  const pathological = { source: "^(a+)+$", flags: "gu" };
   const input = `${"a".repeat(36)}!`;
   try {
     assert.deepEqual(await executor.findMatches(/safe/gu, "safe", true, 10), [
