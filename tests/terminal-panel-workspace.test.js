@@ -17,6 +17,7 @@ class ElementStub {
     this.attributes = new Map();
     this.listeners = new Map();
     this.classList = { toggle() {} };
+    this.dataset = {};
     this.hidden = false;
   }
   setAttribute(name, value) { this.attributes.set(name, value); }
@@ -76,6 +77,16 @@ function record(id, workspaceKey, baseLabel, customLabel = null) {
     exited: false,
     disposed: false,
     wrapper: { hidden: false },
+  };
+}
+
+function contextMenuEvent(target) {
+  return {
+    target,
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
   };
 }
 
@@ -423,6 +434,8 @@ test("session tab manager is shown only when at least two sessions are open", ()
   assert.equal(panel.tabsElement.hidden, false);
   assert.equal(panel.tabsList.hidden, false);
   assert.equal(panel.tabsList.children.length, 2);
+  assert.equal(panel.tabsList.children[0].dataset.sessionId, "only-session");
+  assert.equal(panel.tabsList.children[1].dataset.sessionId, "second-session");
   assert.equal(panel.tabsList.children[0].children[0].attributes.get("aria-selected"), "true");
 
   let activation = null;
@@ -531,4 +544,183 @@ test("only the active workspace can close one of its terminal sessions", async (
   assert.equal(a.sessions.has("pty-a"), true);
   assert.equal(b.sessions.size, 0);
   assert.equal(panel.editor.bottomPanelManager.closePanelCalls, 1);
+});
+
+test("terminal sessions only resolve inside the active workspace", () => {
+  const panel = makePanel();
+  const local = record("local", "no-workspace", "zsh");
+  const remote = record("remote", "/other", "zsh");
+  panel.currentState.sessions.set(local.id, local);
+  panel.currentState.sessions.set(remote.id, remote);
+
+  assert.equal(panel.getSession("local"), local);
+  assert.equal(panel.getSession("remote"), null);
+  assert.equal(panel.getSession("missing"), null);
+  assert.equal(panel.getSession(null), null);
+  assert.equal(panel.getSession(undefined), null);
+});
+
+test("closing other terminals keeps the requested session active", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const closed = [];
+  for (const id of ["one", "two", "three"]) {
+    state.sessions.set(id, record(id, state.workspaceKey, "zsh"));
+  }
+  panel.activateSession = (id) => {
+    state.activeSessionId = id;
+    return true;
+  };
+  panel.closeSession = (id) => {
+    closed.push(id);
+    return Promise.resolve(true);
+  };
+
+  assert.equal(panel.closeOtherSessions("two"), true);
+  assert.equal(state.activeSessionId, "two");
+  assert.deepEqual(closed, ["one", "three"]);
+  assert.equal(panel.closeOtherSessions("missing"), false);
+  assert.deepEqual(closed, ["one", "three"]);
+});
+
+test("right-clicking a terminal tab opens the tab menu for that session", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const session = record("one", state.workspaceKey, "zsh");
+  state.sessions.set(session.id, session);
+  state.activeSessionId = session.id;
+  const opened = [];
+  let closedMenus = 0;
+  const tab = { dataset: { sessionId: "one" } };
+  const target = {
+    closest(selector) { return selector === ".terminal-tab" ? tab : null; },
+  };
+  panel.tabsList = { contains: (node) => node === target || node === tab };
+  panel.view = { contains: () => false };
+  panel.actionsContainer = { contains: () => false };
+  panel.editor.contextMenuManager = {
+    openContextMenu(...args) { opened.push(args); },
+  };
+  panel.closeActionsMenu = () => { closedMenus++; };
+
+  const event = contextMenuEvent(target);
+  assert.equal(panel.handleContextMenu(event), true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(opened)),
+    [["terminal-tab", { id: "one" }]],
+  );
+  assert.equal(event.prevented, true);
+  assert.equal(event.stopped, true);
+  assert.equal(closedMenus, 1);
+});
+
+test("right-clicking terminal output opens the terminal menu for the active session", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const session = record("one", state.workspaceKey, "zsh");
+  state.sessions.set(session.id, session);
+  state.activeSessionId = session.id;
+  const opened = [];
+  const target = { closest: () => null };
+  panel.tabsList = { contains: () => false };
+  panel.view = { contains: (node) => node === target };
+  panel.actionsContainer = { contains: () => false };
+  panel.editor.contextMenuManager = {
+    openContextMenu(...args) { opened.push(args); },
+  };
+  panel.closeActionsMenu = () => {};
+
+  const event = contextMenuEvent(target);
+  assert.equal(panel.handleContextMenu(event), true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(opened)),
+    [["terminal", { id: "one" }]],
+  );
+  assert.equal(event.prevented, true);
+
+  state.activeSessionId = null;
+  assert.equal(panel.handleContextMenu(contextMenuEvent(target)), true);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(opened.at(-1))),
+    ["terminal", { id: null }],
+  );
+});
+
+test("terminal context menus ignore controls, unknown tabs and foreign workspaces", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  state.sessions.set("local", record("local", state.workspaceKey, "zsh"));
+  const opened = [];
+  panel.editor.contextMenuManager = {
+    openContextMenu(...args) { opened.push(args); },
+  };
+  panel.closeActionsMenu = () => {};
+  const actionTarget = { closest: () => null };
+  panel.actionsContainer = { contains: (node) => node === actionTarget };
+  panel.tabsList = { contains: () => false };
+  panel.view = { contains: () => false };
+
+  const actionEvent = contextMenuEvent(actionTarget);
+  assert.equal(panel.handleContextMenu(actionEvent), false);
+  assert.equal(actionEvent.prevented, false);
+
+  const outsideEvent = contextMenuEvent({ closest: () => null });
+  assert.equal(panel.handleContextMenu(outsideEvent), false);
+  assert.equal(outsideEvent.prevented, false);
+
+  const remoteTab = { dataset: { sessionId: "remote" } };
+  const remoteTarget = {
+    closest(selector) { return selector === ".terminal-tab" ? remoteTab : null; },
+  };
+  panel.tabsList = {
+    contains: (node) => node === remoteTarget || node === remoteTab,
+  };
+  const remoteEvent = contextMenuEvent(remoteTarget);
+  assert.equal(panel.handleContextMenu(remoteEvent), false);
+  assert.equal(remoteEvent.prevented, false);
+
+  const renameInput = {
+    closest(selector) {
+      if (selector.includes("input")) return renameInput;
+      if (selector === ".terminal-tab") return remoteTab;
+      return null;
+    },
+  };
+  panel.tabsList = {
+    contains: (node) => node === renameInput || node === remoteTab,
+  };
+  const renameEvent = contextMenuEvent(renameInput);
+  assert.equal(panel.handleContextMenu(renameEvent), false);
+  assert.equal(renameEvent.prevented, false);
+  assert.deepEqual(opened, []);
+});
+
+test("renaming a terminal from its context menu resolves the current tab button", () => {
+  const panel = makePanel();
+  const state = panel.currentState;
+  const session = record("one", state.workspaceKey, "zsh — project");
+  state.sessions.set(session.id, session);
+  const input = {
+    dataset: {},
+    value: "",
+    addEventListener() {},
+    focus() {},
+    select() {},
+    setAttribute() {},
+  };
+  const button = {
+    replacedWith: null,
+    replaceWith(node) { this.replacedWith = node; },
+  };
+  let selector = null;
+  panel.tabsList = {
+    querySelector(value) { selector = value; return button; },
+  };
+  context.document = { createElement: () => input };
+
+  assert.equal(panel.renameSession("one"), true);
+  assert.equal(selector, "#terminal-tab-one");
+  assert.equal(button.replacedWith, input);
+  assert.equal(input.value, "zsh — project");
+  assert.equal(panel.renameSession("missing"), false);
 });

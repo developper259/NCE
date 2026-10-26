@@ -246,6 +246,7 @@ class Events {
   onContextMenu(event) {
     const target = event.target;
     if (this.editor.quickPanel?.handleContextMenu?.(event)) return;
+    if (this.editor.terminalPanel?.handleContextMenu?.(event)) return;
 
     const input = target.closest?.(
       "input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='file']), textarea, select, [contenteditable='true'], [contenteditable='']",

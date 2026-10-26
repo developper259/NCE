@@ -142,6 +142,51 @@ test("Events routes input, tab, and editor context menus from one root listener"
   assert.equal(outputEvent.stopped, true);
 });
 
+test("Events lets the terminal panel claim its context menus before generic inputs", () => {
+  const document = createEventTarget();
+  const window = createEventTarget();
+  const calls = [];
+  const terminalTarget = {
+    closest(selector) {
+      return selector.includes("textarea") ? terminalTarget : null;
+    },
+  };
+  const editor = {
+    terminalPanel: {
+      handleContextMenu(event) {
+        calls.push(["terminal", event.target]);
+        event.preventDefault();
+        event.stopPropagation();
+        return true;
+      },
+    },
+    contextMenuManager: {
+      openContextMenu(...args) {
+        calls.push(["menu", ...args]);
+      },
+    },
+  };
+  const Events = loadGlobal("src/js/core/Event.js", "Events", {
+    document,
+    window,
+    requestAnimationFrame(callback) { callback(); },
+  });
+  const events = new Events(editor);
+  const event = {
+    target: terminalTarget,
+    prevented: false,
+    stopped: false,
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+
+  events.onContextMenu(event);
+
+  assert.deepEqual(calls, [["terminal", terminalTarget]]);
+  assert.equal(event.prevented, true);
+  assert.equal(event.stopped, true);
+});
+
 test("Events delegates search actions before the editor click handler", () => {
   const calls = [];
   const closeButton = {

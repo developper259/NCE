@@ -77,6 +77,14 @@ class Editor {
     this.contextMenuManager.setMenu("output", buildOutputContextMenu(this));
     this.contextMenuManager.setMenu("input", buildInputContextMenu(this));
     this.contextMenuManager.setMenu(
+      "terminal",
+      buildTerminalContextMenu(this),
+    );
+    this.contextMenuManager.setMenu(
+      "terminal-tab",
+      buildTerminalTabContextMenu(this),
+    );
+    this.contextMenuManager.setMenu(
       "empty-menu",
       buildEmptyMenuContextMenu(this),
     );

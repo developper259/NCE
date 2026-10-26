@@ -641,6 +641,24 @@ export class TerminalPanel {
     return this.getActiveSessionFor(this.currentState);
   }
 
+  getSession(id) {
+    if (id === undefined || id === null) return null;
+    const record = this.currentState.sessions.get(id);
+    return record && !record.disposed && record.workspaceKey === this.currentWorkspaceKey
+      ? record : null;
+  }
+
+  closeOtherSessions(id) {
+    const state = this.currentState;
+    if (!this.getSession(id)) return false;
+    if (state.activeSessionId !== id && !this.activateSession(id, { focus: false }))
+      return false;
+    for (const sessionId of [...state.sessions.keys()]) {
+      if (sessionId !== id) void this.closeSession(sessionId);
+    }
+    return true;
+  }
+
   isActive(record) {
     return !this.destroyed && record.workspaceKey === this.currentWorkspaceKey &&
       this.currentState.activeSessionId === record.id &&
@@ -793,6 +811,44 @@ export class TerminalPanel {
     this.errorStatus = null;
   }
 
+  handleContextMenu(event) {
+    const target = event?.target;
+    if (!target || this.actionsContainer?.contains?.(target)) return false;
+    // Keep native input menus available inside the terminal, including tab renaming.
+    if (target.closest?.(
+      "input, textarea, select, [contenteditable='true'], [contenteditable='']",
+    )) return false;
+    if (this.tabsList?.contains?.(target) === true)
+      return this.openTabContextMenu(event);
+    if (this.view?.contains?.(target) === true)
+      return this.openViewContextMenu(event);
+    return false;
+  }
+
+  openTabContextMenu(event) {
+    const tab = event?.target?.closest?.(".terminal-tab");
+    if (!tab || (this.tabsList && this.tabsList.contains(tab) !== true)) return false;
+    const id = tab.dataset?.sessionId;
+    if (!this.getSession(id)) return false;
+    if (!this.editor.contextMenuManager?.openContextMenu) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeActionsMenu();
+    this.editor.contextMenuManager.openContextMenu("terminal-tab", { id });
+    return true;
+  }
+
+  openViewContextMenu(event) {
+    if (!this.editor.contextMenuManager?.openContextMenu) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeActionsMenu();
+    this.editor.contextMenuManager.openContextMenu("terminal", {
+      id: this.getActiveSession()?.id ?? null,
+    });
+    return true;
+  }
+
   renderTabs() {
     if (!this.tabsList) return;
     const state = this.currentState;
@@ -804,6 +860,7 @@ export class TerminalPanel {
     for (const [id, record] of showTabManager ? records : []) {
       const tab = document.createElement("div");
       tab.className = "terminal-tab";
+      tab.dataset.sessionId = String(id);
       tab.classList.toggle("is-active", id === state.activeSessionId);
       tab.setAttribute("role", "presentation");
       const activate = document.createElement("button");
@@ -872,14 +929,18 @@ export class TerminalPanel {
     this.tabsList?.querySelectorAll?.('[role="tab"]')?.[next]?.focus?.();
   }
 
-  renameSession(id, button) {
-    const record = this.currentState.sessions.get(id);
-    if (!record || record.disposed || record.workspaceKey !== this.currentWorkspaceKey) return;
+  renameSession(id, button = null) {
+    const record = this.getSession(id);
+    if (!record) return false;
+    const target = button || this.tabsList?.querySelector?.(
+      `#terminal-tab-${this.domSafeId(id)}`,
+    );
+    if (!target) return false;
     const input = document.createElement("input");
     input.className = "terminal-tab-rename";
     input.value = record.customLabel || record.baseLabel;
     input.setAttribute("aria-label", "Terminal name");
-    button.replaceWith(input);
+    target.replaceWith(input);
     input.focus();
     input.select();
     const finish = (save) => {
@@ -900,6 +961,7 @@ export class TerminalPanel {
       if (event.key === "Escape") finish(false);
     });
     input.addEventListener("blur", () => finish(true), { once: true });
+    return true;
   }
 
   toggleActionsMenu() {
