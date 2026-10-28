@@ -398,7 +398,11 @@ export class Window {
     this.ipc.handle("App:quit", async () => this.app.requestQuitAll());
     this.ipc.handle("App:closeWindow", async () => this.requestQuit());
     this.ipc.handle("App:command", async (_event, command) => this.executeWindowCommand(command));
-    this.ipc.handle("Clipboard:readText", async () => clipboard.readText());
+    this.ipc.handle("Clipboard:readText", async () => {
+      if (!this.window || this.window.isDestroyed() || !this.window.isFocused())
+        return "";
+      return clipboard.readText();
+    });
     this.ipc.handle("Clipboard:writeText", async (_event, text) => {
       clipboard.writeText(String(text ?? ""));
       return true;
