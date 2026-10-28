@@ -94,6 +94,27 @@ test("macOS and Windows releases do not require signing credentials", () => {
   assert.doesNotMatch(releaseWorkflow, /^\s*if:.*secrets\./m);
 });
 
+test("afterPack flips fuses on each platform's packaged executable", () => {
+  const { resolveExecutable } = require("../scripts/after-pack.js");
+  const appOutDir = path.join("/release", "out");
+  const base = {
+    appOutDir,
+    packager: { appInfo: { productFilename: "NCE" }, executableName: "nce" },
+  };
+  assert.equal(
+    resolveExecutable({ ...base, electronPlatformName: "linux" }),
+    path.join(appOutDir, "nce"),
+  );
+  assert.equal(
+    resolveExecutable({ ...base, electronPlatformName: "darwin" }),
+    path.join(appOutDir, "NCE.app", "Contents", "MacOS", "NCE"),
+  );
+  assert.equal(
+    resolveExecutable({ ...base, electronPlatformName: "win32" }),
+    path.join(appOutDir, "NCE.exe"),
+  );
+});
+
 test("Windows NSIS offers per-user Open with NCE entries and removes only its own registry keys", () => {
   const nsis = packageJson.build.nsis;
   const installer = fs.readFileSync(path.join(__dirname, "../build/installer.nsh"), "utf8");

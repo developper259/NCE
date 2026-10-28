@@ -5,14 +5,18 @@ const {
   FuseV1Options,
 } = require("@electron/fuses");
 
-module.exports = async function afterPack(context) {
+function resolveExecutable(context) {
   const productName = context.packager.appInfo.productFilename;
-  const executable = context.electronPlatformName === "darwin"
-    ? path.join(context.appOutDir, `${productName}.app`, "Contents", "MacOS", productName)
-    : context.electronPlatformName === "win32"
-      ? path.join(context.appOutDir, `${productName}.exe`)
-      : path.join(context.appOutDir, productName);
-  await flipFuses(executable, {
+  if (context.electronPlatformName === "darwin")
+    return path.join(context.appOutDir, `${productName}.app`, "Contents", "MacOS", productName);
+  if (context.electronPlatformName === "win32")
+    return path.join(context.appOutDir, `${productName}.exe`);
+  // LinuxPackager lowercases the sanitized product name for its executable.
+  return path.join(context.appOutDir, context.packager.executableName);
+}
+
+async function afterPack(context) {
+  await flipFuses(resolveExecutable(context), {
     version: FuseVersion.V1,
     [FuseV1Options.RunAsNode]: false,
     [FuseV1Options.EnableCookieEncryption]: true,
@@ -20,4 +24,7 @@ module.exports = async function afterPack(context) {
     [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
     [FuseV1Options.OnlyLoadAppFromAsar]: true,
   });
-};
+}
+
+module.exports = afterPack;
+module.exports.resolveExecutable = resolveExecutable;

@@ -16,6 +16,14 @@ app.disableHardwareAcceleration();
 const target = path.join(directory, "smoke.js");
 dialog.showSaveDialog = async () => ({ canceled: false, filePath: target });
 dialog.showMessageBox = async () => ({ response: 2 });
+let pendingFolderSelection = null;
+dialog.showOpenDialog = async (_window, options = {}) => {
+  if (!options?.properties?.includes("openDirectory") || !pendingFolderSelection)
+    return { canceled: true, filePaths: [] };
+  const filePaths = [pendingFolderSelection];
+  pendingFolderSelection = null;
+  return { canceled: false, filePaths };
+};
 const timer = setTimeout(() => {
   console.error("Electron smoke timed out");
   app.exit(1);
@@ -58,6 +66,16 @@ app.whenReady().then(() => {
             { cause: error },
           );
         }
+      };
+      // Workspace ownership is granted by the native folder dialog, so smoke
+      // switches must go through it instead of handing paths to the watcher.
+      const selectWorkspace = async (folderPath) => {
+        pendingFolderSelection = folderPath;
+        return run("editor.fileExplorer.selectFolder()");
+      };
+      const authorizeWorkspace = async (folderPath) => {
+        pendingFolderSelection = folderPath;
+        return run("window.api.selectFolder()");
       };
       assert.equal(
         await run(
@@ -352,7 +370,7 @@ app.whenReady().then(() => {
 
         const initialWindow = nce.windowManager.getAllWindows().find(candidate => candidate.window === win);
         assert.ok(initialWindow, "the initial BrowserWindow is registered");
-        assert.equal(await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(workspaceAInput)})`), true);
+        assert.equal(await selectWorkspace(workspaceAInput), true);
         await waitForCondition(
           async () => (await run(`editor.fileExplorer.rootPath === ${JSON.stringify(workspaceA)}`)) === true,
           { timeout: 10000, description: "Window A to open its workspace" },
@@ -2736,7 +2754,7 @@ app.whenReady().then(() => {
         const canonicalTerminalWorkspaceA = await fs.promises.realpath(terminalWorkspaceA);
         const canonicalTerminalWorkspaceB = await fs.promises.realpath(terminalWorkspaceB);
         assert.equal(
-          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
+          await selectWorkspace(terminalWorkspaceA),
           true,
           "the terminal isolation smoke test opens workspace A through the real switch flow",
         );
@@ -3418,6 +3436,7 @@ app.whenReady().then(() => {
         await run(`window.__terminalWorkspaceA = new Map(
           [...editor.terminalPanel.sessions].map(([id, record]) => [id, record.terminal]),
         ); window.__terminalWorkspaceARecords = new Map(editor.terminalPanel.sessions); true`);
+        assert.equal(await authorizeWorkspace(terminalWorkspaceB), terminalWorkspaceB);
         const cancelledSwitch = await run(`(async () => {
           const tabs = editor.tabManager;
           const prepare = tabs.prepareForQuit;
@@ -3439,7 +3458,7 @@ app.whenReady().then(() => {
         "a canceled switch preserves A's terminal tabs and live sessions");
         dialog.showMessageBox = async () => ({ response: 1 });
         assert.equal(
-          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceB)})`),
+          await selectWorkspace(terminalWorkspaceB),
           true,
           "workspace A can switch to workspace B while both A PTYs remain live",
         );
@@ -3548,7 +3567,7 @@ app.whenReady().then(() => {
         traceStep("20 PTY close and respawn cycles passed");
 
         assert.equal(
-          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
+          await selectWorkspace(terminalWorkspaceA),
           true,
           "returning to workspace A restores its workspace state",
         );
@@ -3560,7 +3579,7 @@ app.whenReady().then(() => {
         assert.equal(await run(`editor.terminalPanel.activeSessionId === ${JSON.stringify(secondTerminal.id)}`), true, "workspace A restores its selected terminal");
 
         assert.equal(
-          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceB)})`),
+          await selectWorkspace(terminalWorkspaceB),
           true,
           "workspace B can be restored after switching back to A",
         );
@@ -3575,7 +3594,7 @@ app.whenReady().then(() => {
         );
         assert.equal(await run("editor.terminalPanel.sessions.size === 1"), true, "background A output cannot add a tab to B");
         assert.equal(
-          await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`),
+          await selectWorkspace(terminalWorkspaceA),
           true,
         );
 
@@ -3672,7 +3691,7 @@ app.whenReady().then(() => {
         const previousTerminalIds = JSON.parse(fs.readFileSync(
           path.join(directory, "terminal-previous-ids.json"), "utf8",
         ));
-        assert.equal(await run(`editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(terminalWorkspaceA)})`), true,
+        assert.equal(await selectWorkspace(terminalWorkspaceA), true,
           "workspace switching restores terminal metadata from disk");
         await waitForCondition(
           async () => (await run(`editor.terminalPanel?.sessions?.size === 2 &&
