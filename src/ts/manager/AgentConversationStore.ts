@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { safeStorage } from "electron";
 
 export const AGENT_CONVERSATION_MAX_BYTES = 8 * 1024 * 1024;
+const MAX_TOTAL_LOAD_BYTES = 64 * 1024 * 1024;
 const MAX_INDEX_BYTES = 64 * 1024;
 const MAX_SESSIONS = 256;
 const MAX_MESSAGES = 10_000;
@@ -314,9 +315,20 @@ export class AgentConversationStore {
     await this.operationQueue.catch(() => undefined);
     if (!this.status.available) return { status: this.getStatus(), activeSessionId: null, sessionIds: [], sessions: [] };
     const sessions: AgentConversationSnapshot[] = [];
+    let loadedBytes = 0;
+    let budgetReached = false;
     for (const id of this.index.sessionIds) {
+      if (loadedBytes >= MAX_TOTAL_LOAD_BYTES) {
+        budgetReached = true;
+        console.warn("[NCE Agent Conversations] Total load budget reached; older sessions are deferred", {
+          loadedSessions: sessions.length,
+          totalSessions: this.index.sessionIds.length,
+        });
+        break;
+      }
       try {
         const text = await this.readEnvelope(path.join(this.sessionsRoot, `${id}.enc`), AGENT_CONVERSATION_MAX_BYTES, this.aad("session", id));
+        loadedBytes += Buffer.byteLength(text, "utf8");
         const snapshot = sanitizeAgentConversation(JSON.parse(text));
         if (snapshot?.id === id) sessions.push(snapshot);
       } catch (error: any) {
@@ -325,7 +337,7 @@ export class AgentConversationStore {
     }
     const validIds = sessions.map((session) => session.id);
     const activeSessionId = validIds.includes(this.index.activeSessionId || "") ? this.index.activeSessionId : validIds[0] || null;
-    if (validIds.length !== this.index.sessionIds.length || validIds.some((id, index) => id !== this.index.sessionIds[index])) {
+    if (!budgetReached && (validIds.length !== this.index.sessionIds.length || validIds.some((id, index) => id !== this.index.sessionIds[index]))) {
       this.index.sessionIds = validIds;
       this.index.activeSessionId = activeSessionId;
       await this.saveIndex().catch(() => undefined);

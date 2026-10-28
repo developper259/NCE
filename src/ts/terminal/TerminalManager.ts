@@ -119,6 +119,8 @@ function spawnFailureMessage(code: string): string {
       return "The terminal helper is missing. Reinstall or rebuild NCE, then try again.";
     case "PTY_RESOURCE_EXHAUSTED":
       return "The system cannot allocate another terminal right now. Close unused terminals and retry.";
+    case "SHELL_NOT_ALLOWED":
+      return "The configured terminal shell cannot be inside the workspace.";
     default:
       return "The terminal process could not be started. Review the diagnostic log and retry.";
   }
@@ -323,6 +325,21 @@ export class TerminalManager {
         fs: this.fsApi,
       });
       shellPath = shell.path;
+      if (workspacePath) {
+        try {
+          const [realShell, realWorkspace] = await Promise.all([
+            this.fsApi.realpath(shell.path),
+            this.fsApi.realpath(workspacePath),
+          ]);
+          const relative = path.relative(realWorkspace, realShell);
+          if (relative && !relative.startsWith(`..${path.sep}`) &&
+              !path.isAbsolute(relative))
+            return this.failure(
+              "SHELL_NOT_ALLOWED",
+              spawnFailureMessage("SHELL_NOT_ALLOWED"),
+            );
+        } catch {}
+      }
       if (!this.isOwner(event.sender) || ownerGeneration !== this.ownerGeneration)
         return this.failure("CREATE_CANCELLED", "Terminal creation was cancelled.");
       // `workspacePath` and its canonical key were captured before any await.
@@ -447,12 +464,8 @@ export class TerminalManager {
         if ((await this.fsApi.stat(real)).isDirectory()) {
           workspacePath = real;
           cwd = real;
-        } else {
-          cwd = await this.resolveHomeDirectory();
         }
-      } catch {
-        cwd = await this.resolveHomeDirectory();
-      }
+      } catch {}
       return {
         workspaceKey: workspaceKeyFor(workspacePath, this.platform),
         workspacePath: requested,

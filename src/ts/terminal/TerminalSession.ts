@@ -40,6 +40,7 @@ export class TerminalSession {
   private sequence = 1;
   private inFlight: { sequence: number; bytes: number } | null = null;
   private paused = false;
+  private ackTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     id: string,
@@ -94,6 +95,7 @@ export class TerminalSession {
   acknowledge(sequence: number): boolean {
     if (this.disposed || !this.inFlight || this.inFlight.sequence !== sequence) return false;
     this.inFlight = null;
+    this.clearAckTimer();
     if (this.paused && this.queuedBytes < terminalLimits.outputResumeBytes) {
       this.paused = false;
       try { this.process?.resume(); } catch {}
@@ -109,6 +111,7 @@ export class TerminalSession {
     this.queue = [];
     this.queuedBytes = 0;
     this.inFlight = null;
+    this.clearAckTimer();
     this.dataSubscription?.dispose();
     this.dataSubscription = null;
     if (this.processExited) {
@@ -187,19 +190,73 @@ export class TerminalSession {
     this.queuedBytes -= bytes;
     const sequence = this.sequence++;
     this.inFlight = { sequence, bytes };
-    this.send("Terminal:output", {
+    this.armAckTimer(sequence);
+    const delivered = this.send("Terminal:output", {
       sessionId: this.id,
       workspaceKey: this.workspaceKey,
       sequence,
       data,
     } satisfies TerminalOutputMessage);
+    if (!delivered) {
+      this.inFlight = null;
+      this.clearAckTimer();
+      this.exited = true;
+      this.queue = [];
+      this.queuedBytes = 0;
+      this.stopProcess();
+    }
+  }
+
+  private armAckTimer(sequence: number): void {
+    this.clearAckTimer();
+    this.ackTimer = setTimeout(() => {
+      this.ackTimer = null;
+      if (!this.inFlight || this.inFlight.sequence !== sequence) return;
+      this.inFlight = null;
+      this.send("Terminal:error", {
+        sessionId: this.id,
+        workspaceKey: this.workspaceKey,
+        error: {
+          code: "OUTPUT_ACK_TIMEOUT",
+          message: "Terminal output delivery stalled; the process was stopped.",
+        },
+      });
+      this.exited = true;
+      this.queue = [];
+      this.queuedBytes = 0;
+      this.stopProcess();
+    }, terminalLimits.outputAckTimeoutMs);
+    this.ackTimer.unref?.();
+  }
+
+  private clearAckTimer(): void {
+    if (!this.ackTimer) return;
+    clearTimeout(this.ackTimer);
+    this.ackTimer = null;
   }
 
   private stopProcess(): void {
     if (this.exited && !this.process) return;
     this.exited = true;
-    try { this.process?.kill(); } catch {}
+    this.clearAckTimer();
+    const processHandle = this.process;
     this.process = null;
+    if (!processHandle) return;
+    if (process.platform === "win32") {
+      try { processHandle.kill(); } catch {}
+      return;
+    }
+    const pid = Number.isInteger(processHandle.pid) ? processHandle.pid : null;
+    const signal = (name: "SIGHUP" | "SIGKILL") => {
+      if (pid) {
+        try { process.kill(-pid, name); return; } catch {}
+      }
+      try { processHandle.kill(name); } catch {}
+    };
+    signal("SIGHUP");
+    const timer = setTimeout(() => signal("SIGKILL"), 750);
+    timer.unref?.();
+    void this.processExitPromise.finally(() => clearTimeout(timer));
   }
 
   private disposeSubscriptions(): void {
@@ -209,9 +266,14 @@ export class TerminalSession {
     this.exitSubscription = null;
   }
 
-  private send(channel: string, payload: unknown): void {
-    if (this.owner.isDestroyed()) return;
-    try { this.owner.send(channel, payload); }
-    catch (error) { this.logger.error("[Terminal] Failed to send PTY event", error); }
+  private send(channel: string, payload: unknown): boolean {
+    if (this.owner.isDestroyed()) return false;
+    try {
+      this.owner.send(channel, payload);
+      return true;
+    } catch (error) {
+      this.logger.error("[Terminal] Failed to send PTY event", error);
+      return false;
+    }
   }
 }

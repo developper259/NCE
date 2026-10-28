@@ -53,7 +53,7 @@ class FakePty {
   }
 }
 
-function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn, logger = { error() {} }, platform = "linux" } = {}) {
+function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn, logger = { error() {} }, platform = "linux", shell = "/configured shell/Terminal" } = {}) {
   let activeWorkspace = workspace;
   const owner = new FakeWebContents();
   const attacker = new FakeWebContents();
@@ -69,12 +69,12 @@ function fixture({ workspace = "/workspace with accents/é", access = async () =
     env: { PATH: "/bin", SHELL: "/test shell/zsh", HOME: "/home/test" },
     homeDir: "/home/test",
     getWorkspacePath: () => activeWorkspace,
-    getShellSetting: () => "/configured shell/Terminal",
+    getShellSetting: () => shell,
     fs: fakeFs,
     logger,
-    spawn: spawn || ((shell, args, options) => {
+    spawn: spawn || ((shellPath, args, options) => {
       const child = new FakePty();
-      ptys.push({ shell, args, options, child });
+      ptys.push({ shell: shellPath, args, options, child });
       return child;
     }),
   });
@@ -202,6 +202,14 @@ test("a failed spawn can be retried without a stale ID or pending reservation", 
   f.ptys[0].child.emitExit(0);
 });
 
+test("a shell controlled by the workspace is rejected", async () => {
+  const f = fixture({ workspace: "/workspace", shell: "/workspace/evil-shell" });
+  const result = await create(f);
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, "SHELL_NOT_ALLOWED");
+  assert.equal(f.ptys.length, 0);
+});
+
 test("an unusable resolved working directory fails before native spawn", async () => {
   const f = fixture({ workspace: "/workspace that disappeared" });
   f.fakeFs.stat = async () => ({ isDirectory: () => false });
@@ -305,7 +313,7 @@ test("terminal links allow only explicit safe web protocols", () => {
   ]) assert.equal(normalizeTerminalLink(value), null, String(value));
 });
 
-test("TerminalManager verifies the workspace directory and falls back to home", async () => {
+test("TerminalManager rejects a workspace directory that disappeared", async () => {
   const f = fixture({ workspace: "/deleted-workspace" });
   f.fakeFs.realpath = async (value) => {
     if (value === "/deleted-workspace") return value;
@@ -313,8 +321,9 @@ test("TerminalManager verifies the workspace directory and falls back to home", 
   };
   f.fakeFs.stat = async (value) => ({ isDirectory: () => value !== "/deleted-workspace" });
   const result = await create(f);
-  assert.equal(result.success, true);
-  assert.equal(f.ptys[0].options.cwd, "/home/test");
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, "INVALID_CWD");
+  assert.equal(f.ptys.length, 0);
 });
 
 test("terminal sessions retain an immutable canonical workspace owner across switches", async () => {

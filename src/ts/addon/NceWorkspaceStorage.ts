@@ -260,4 +260,65 @@ export class NceWorkspaceStorage {
       }),
     );
   }
+
+  async enforceTempQuota(maxBytes: number, keepRunId?: string): Promise<void> {
+    if (!Number.isFinite(maxBytes) || maxBytes <= 0) return;
+    let entries: import("fs").Dirent[];
+    try {
+      entries = await fs.readdir(this.tempRoot, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    const candidates: Array<{ path: string; size: number; mtimeMs: number }> = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name === "recovery" ||
+          (keepRunId && entry.name === keepRunId))
+        continue;
+      const candidate = path.join(this.tempRoot, entry.name);
+      try {
+        const stats = await fs.lstat(candidate);
+        if (stats.isSymbolicLink()) {
+          await fs.rm(candidate, { force: true });
+          continue;
+        }
+        candidates.push({
+          path: candidate,
+          size: await this.directorySize(candidate),
+          mtimeMs: stats.mtimeMs,
+        });
+      } catch {
+        /* best-effort quota enforcement */
+      }
+    }
+    let total = candidates.reduce((sum, candidate) => sum + candidate.size, 0);
+    candidates.sort((left, right) => left.mtimeMs - right.mtimeMs);
+    for (const candidate of candidates) {
+      if (total <= maxBytes) break;
+      try {
+        await fs.rm(candidate.path, { recursive: true, force: true });
+        total -= candidate.size;
+      } catch {
+        /* best-effort quota enforcement */
+      }
+    }
+  }
+
+  private async directorySize(directory: string, depth = 0): Promise<number> {
+    if (depth > 8) return 0;
+    let total = 0;
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const target = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) total += await this.directorySize(target, depth + 1);
+      else if (entry.isFile()) {
+        try {
+          total += (await fs.stat(target)).size;
+        } catch {
+          /* best-effort size accounting */
+        }
+      }
+    }
+    return total;
+  }
 }

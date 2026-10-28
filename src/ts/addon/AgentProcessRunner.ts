@@ -44,6 +44,7 @@ const MAX_TIMEOUT_MS = 300000;
 const MAX_OUTPUT_CHARACTERS = 50000;
 const DEFAULT_STORED_OUTPUT_CHARACTERS = 5 * 1024 * 1024;
 const MAX_STORED_OUTPUT_CHARACTERS = 50 * 1024 * 1024;
+const MAX_WORKSPACE_TEMP_BYTES = 256 * 1024 * 1024;
 const STRATEGY_REGISTRY = {
   "npm-test": { runtime: "npm", command: "package-test" },
   "pnpm-test": { runtime: "pnpm", command: "package-test" },
@@ -368,7 +369,9 @@ export class AgentProcessRunner {
       );
     }
     try {
-      await new NceWorkspaceStorage(root).ensureStructure();
+      const storage = new NceWorkspaceStorage(root);
+      await storage.ensureStructure();
+      await storage.enforceTempQuota(MAX_WORKSPACE_TEMP_BYTES);
     } catch {}
     try {
       if (
@@ -444,6 +447,23 @@ export class AgentProcessRunner {
         "EXECUTION_CANCELLED",
         "Code execution was cancelled by the user.",
       );
+    try {
+      if (
+        !(await this.realInside(projectRoot, root)) ||
+        !(await this.realInside(cwd, root)) ||
+        (target && !(await this.realInside(target, root))) ||
+        !(await fs.stat(cwd)).isDirectory()
+      )
+        return this.invalid(
+          "WORKSPACE_CHANGED",
+          "The validation target changed before it could start.",
+        );
+    } catch {
+      return this.invalid(
+        "INVALID_TARGET",
+        "The process target does not exist inside the workspace.",
+      );
+    }
     const started = Date.now();
     return new Promise((resolve) => {
       let stdout = "";
