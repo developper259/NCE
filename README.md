@@ -192,6 +192,15 @@ npm run dist
 
 Build artifacts are generated in `release/`.
 
+### Release signing
+
+Tagged releases require signing credentials:
+
+- macOS: `CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`.
+- Windows: `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`.
+
+The workflow fails before building when the platform certificate is missing, verifies the produced signature, and runs an automated PTY smoke test against the packaged `app.asar`. Unsigned artifacts are never published.
+
 ## Status
 
 NCE is currently in beta and under active development.
