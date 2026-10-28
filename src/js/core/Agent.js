@@ -1247,6 +1247,13 @@ class Agent {
       baseConfig.provider?.apiKey
     ) {
       provider.apiKey = baseConfig.provider.apiKey;
+    } else if (
+      !provider.apiKey &&
+      !provider.apiKeyConfigured &&
+      providerId === baseConfig.providerId &&
+      baseConfig.provider?.apiKeyConfigured
+    ) {
+      provider.apiKeyConfigured = true;
     }
     return {
       ...baseConfig,
@@ -1260,7 +1267,11 @@ class Agent {
   }
   isCompatibleFallback(candidate, classified, currentConfig) {
     if (!candidate?.provider?.baseURL || !candidate?.model) return false;
-    if (candidate.provider.requiresApiKey && !candidate.provider.apiKey) {
+    if (
+      candidate.provider.requiresApiKey &&
+      !candidate.provider.apiKey &&
+      !candidate.provider.apiKeyConfigured
+    ) {
       return false;
     }
     if (this.getOpenAITools().length && candidate.supportsTools === false) {

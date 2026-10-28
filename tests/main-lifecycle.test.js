@@ -1164,7 +1164,8 @@ test("API keys use encrypted storage and are removed from editor state", async (
   const manager = new FileManager({ app: { agentSecrets: secrets } });
   try {
     assert.equal(await manager.setAgentApiKey("mock", "secret-for-test"), true);
-    assert.equal(await manager.getAgentApiKey("mock"), "secret-for-test");
+    assert.equal(await secrets.get("mock"), "secret-for-test");
+    assert.equal(await secrets.has("mock"), true);
     assert.ok(
       !(
         await fs.readFile(path.join(root, "agent-secrets.json"), "utf8")
@@ -1180,7 +1181,7 @@ test("API keys use encrypted storage and are removed from editor state", async (
     );
     available = false;
     assert.equal(await manager.setAgentApiKey("mock", "new"), false);
-    assert.equal(await manager.getAgentApiKey("mock"), "");
+    assert.equal(await secrets.get("mock"), "");
     await fs.writeFile(path.join(root, "state.json"), "{broken");
     const originalError = console.error; console.error = () => {};
     try { assert.equal(await manager.loadState(), null); }

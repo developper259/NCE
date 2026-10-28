@@ -231,8 +231,6 @@ contextBridge.exposeInMainWorld("api", {
       relativePath,
     ),
 
-  getAgentApiKey: (providerId) =>
-    ipcRenderer.invoke("FileManager:getAgentApiKey", providerId),
   hasAgentApiKey: (providerId) =>
     ipcRenderer.invoke("FileManager:hasAgentApiKey", providerId),
 

@@ -46,6 +46,12 @@ export class AgentSecretStore {
     }
   }
 
+  async has(providerId: string): Promise<boolean> {
+    if (!this.isValidProviderId(providerId) || !this.encryptionAvailable()) return false;
+    const records = await this.readRecords();
+    return Boolean(records?.[providerId]);
+  }
+
   async set(providerId: string, apiKey: string): Promise<boolean> {
     if (!this.isValidProviderId(providerId) || typeof apiKey !== "string" ||
         !this.encryptionAvailable()) return false;

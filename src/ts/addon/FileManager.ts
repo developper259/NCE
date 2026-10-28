@@ -607,13 +607,9 @@ export class FileManager {
     );
 
     this.ipc.handle(
-      "FileManager:getAgentApiKey",
-      async (_event, providerId: string) => this.getAgentApiKey(providerId),
-    );
-
-    this.ipc.handle(
       "FileManager:hasAgentApiKey",
-      async (_event, providerId: string) => Boolean(await this.getAgentApiKey(providerId)),
+      async (_event, providerId: string) =>
+        Boolean(await this.window.app?.agentSecrets?.has?.(providerId)),
     );
 
     this.ipc.handle(
@@ -950,10 +946,14 @@ export class FileManager {
     } else {
       return null;
     }
-    const userDataRoot = path.resolve(app.getPath("userData"));
-    if (path.resolve(requestedRoot) !== userDataRoot &&
-        !(await this.canAccessPath(requestedRoot, { requireDirectory: true })))
+    const userDataRoot = typeof app?.getPath === "function"
+      ? path.resolve(app.getPath("userData"))
+      : null;
+    if (userDataRoot && path.resolve(requestedRoot) === userDataRoot) {
+      // The application's private recovery area is main-controlled.
+    } else if (!(await this.canAccessPath(requestedRoot, { requireDirectory: true }))) {
       return null;
+    }
     let root: string;
     try {
       root = await fs.realpath(requestedRoot);
@@ -2165,10 +2165,6 @@ export class FileManager {
       try { await handle?.close(); } catch {}
       try { await fs.unlink(temporaryPath); } catch {}
     }
-  }
-
-  private async getAgentApiKey(providerId: string): Promise<string> {
-    return this.window.app?.agentSecrets?.get(providerId) || "";
   }
 
   private async setAgentApiKey(

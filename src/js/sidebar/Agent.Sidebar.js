@@ -273,10 +273,7 @@ class AgentSidebar extends Sidebar {
       const resolved = AgentAI.resolve(agentId, providerId, modelId);
       return {
         ...resolved,
-        provider: {
-          ...resolved.provider,
-          apiKey: this.apiKeys.get(resolved.provider.id) || null,
-        },
+        provider: this.providerWithApiKeyState(resolved.provider),
       };
     });
 
@@ -289,6 +286,15 @@ class AgentSidebar extends Sidebar {
     return this.agent;
   }
 
+  providerWithApiKeyState(provider) {
+    if (!provider || typeof provider !== "object") return provider;
+    return {
+      ...provider,
+      apiKey: null,
+      apiKeyConfigured: Boolean(this.apiKeys.get(provider.id)),
+    };
+  }
+
   applyAgentConfiguration() {
     if (!this.agent) return false;
     const provider = AgentAI.getProvider(this.currentProviderId);
@@ -298,10 +304,7 @@ class AgentSidebar extends Sidebar {
       this.currentProviderId,
       this.currentModel || provider.defaultModel,
     );
-    this.agent.setProvider({
-      ...resolved.provider,
-      apiKey: this.apiKeys.get(resolved.provider.id) || null,
-    });
+    this.agent.setProvider(this.providerWithApiKeyState(resolved.provider));
     this.agent.setModel(resolved.model || this.currentModel || provider.defaultModel);
     this.agent.setConfig(resolved);
     this.agent.setSystemPrompt(resolved.systemPrompt);
@@ -309,10 +312,10 @@ class AgentSidebar extends Sidebar {
   }
 
   async loadStoredApiKeys() {
-    if (typeof this.editor.api?.getAgentApiKey !== "function") return;
+    if (typeof this.editor.api?.hasAgentApiKey !== "function") return;
     for (const provider of AgentAI.getProviders()) {
-      const apiKey = await this.editor.api.getAgentApiKey(provider.id);
-      if (apiKey) this.apiKeys.set(provider.id, apiKey);
+      const configured = await this.editor.api.hasAgentApiKey(provider.id);
+      if (configured) this.apiKeys.set(provider.id, true);
       else this.apiKeys.delete(provider.id);
     }
     this.applyAgentConfiguration();
@@ -781,11 +784,11 @@ class AgentSidebar extends Sidebar {
   async refreshProviderApiKey(providerId) {
     const provider = AgentAI.getProvider(providerId);
     if (!provider) return false;
-    const apiKey = await this.editor.api.getAgentApiKey?.(provider.id);
-    if (apiKey) this.apiKeys.set(provider.id, apiKey);
+    const configured = await this.editor.api.hasAgentApiKey?.(provider.id);
+    if (configured) this.apiKeys.set(provider.id, true);
     else this.apiKeys.delete(provider.id);
     if (this.currentProviderId === provider.id && this.agent) {
-      this.agent.setProvider({ ...provider, apiKey: apiKey || null });
+      this.agent.setProvider(this.providerWithApiKeyState(provider));
     }
     return true;
   }
@@ -804,14 +807,9 @@ class AgentSidebar extends Sidebar {
     }
 
     if (state.apiKeys && typeof state.apiKeys === "object") {
-      for (const [providerId, apiKey] of Object.entries(state.apiKeys)) {
-        if (
-          typeof providerId === "string" &&
-          typeof apiKey === "string" &&
-          apiKey.trim()
-        ) {
-          this.apiKeys.set(providerId, apiKey);
-        }
+      for (const providerId of Object.keys(state.apiKeys)) {
+        if (typeof providerId === "string" && providerId.trim())
+          this.apiKeys.set(providerId, true);
       }
     }
 
@@ -2257,10 +2255,9 @@ class AgentSidebar extends Sidebar {
           this.currentModel = m.id;
           this.currentProviderId = m.providerId;
 
-          this.agent.setProvider({
-            ...AgentAI.getProvider(m.providerId),
-            apiKey: this.apiKeys.get(m.providerId) || null,
-          });
+          this.agent.setProvider(
+            this.providerWithApiKeyState(AgentAI.getProvider(m.providerId)),
+          );
           this.agent.setModel(m.id);
           const resolved = AgentAI.resolve(
             this.currentAgentId,
@@ -4478,7 +4475,7 @@ class AgentSidebar extends Sidebar {
 
     this.apiKeys.delete(provider.id);
     if (this.currentProviderId === provider.id) {
-      this.agent.setProvider({ ...provider, apiKey: null });
+      this.agent.setProvider(this.providerWithApiKeyState(provider));
     }
     try {
       await this.editor.api.setAgentApiKey?.(provider.id, "");
@@ -4492,9 +4489,9 @@ class AgentSidebar extends Sidebar {
     });
     if (!apiKey) return "";
 
-    this.apiKeys.set(provider.id, apiKey);
+    this.apiKeys.set(provider.id, true);
     if (this.currentProviderId === provider.id) {
-      this.agent.setProvider({ ...provider, apiKey });
+      this.agent.setProvider(this.providerWithApiKeyState(provider));
     }
     try {
       await this.editor.api.setAgentApiKey?.(provider.id, apiKey);
@@ -4930,11 +4927,8 @@ class AgentSidebar extends Sidebar {
     if (provider?.requiresApiKey && !this.apiKeys.get(provider.id)) {
       const apiKey = await this.requestApiKey(provider);
       if (!apiKey) return;
-      this.apiKeys.set(provider.id, apiKey);
-      this.agent.setProvider({
-        ...provider,
-        apiKey,
-      });
+      this.apiKeys.set(provider.id, true);
+      this.agent.setProvider(this.providerWithApiKeyState(provider));
       await this.editor.api.setAgentApiKey?.(provider.id, apiKey);
     }
 
