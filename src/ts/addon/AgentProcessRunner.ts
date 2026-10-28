@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from "child_process";
-import { promises as fs, mkdirSync, writeFileSync, appendFileSync } from "fs";
+import { promises as fs, constants as fsConstants, mkdirSync, writeFileSync, appendFileSync } from "fs";
 import path from "path";
 import { ipcMain } from "electron";
 import { Window } from "../Window";
@@ -152,41 +152,37 @@ export class AgentProcessRunner {
 
   private async executableExists(candidate: string): Promise<boolean> {
     try {
-      await fs.access(candidate);
+      const stats = await fs.stat(candidate);
+      if (!stats.isFile()) return false;
+      await fs.access(
+        candidate,
+        process.platform === "win32" ? fsConstants.F_OK : fsConstants.X_OK,
+      );
       return true;
     } catch {
       return false;
     }
   }
 
-  private async runtimeAvailable(
-    executable: string,
-    prefix: string[],
-  ): Promise<boolean> {
-    return new Promise((resolve) => {
-      const probe = spawn(executable, [...prefix, "--version"], {
-        shell: false,
-        windowsHide: true,
-      });
-      let settled = false;
-      const finish = (available: boolean) => {
-        if (settled) return;
-        settled = true;
-        resolve(available);
-      };
-      const timer = setTimeout(() => {
-        probe.kill();
-        finish(false);
-      }, 2000);
-      probe.once("error", () => {
-        clearTimeout(timer);
-        finish(false);
-      });
-      probe.once("close", (code) => {
-        clearTimeout(timer);
-        finish(code === 0);
-      });
-    });
+  private async executableOnPath(name: string): Promise<boolean> {
+    if (!name || name.includes("\0")) return false;
+    const pathApi = process.platform === "win32" ? path.win32 : path.posix;
+    if (pathApi.isAbsolute(name) || name.includes("/") || name.includes("\\"))
+      return this.executableExists(name);
+    const directories = (process.env.PATH || "")
+      .split(path.delimiter)
+      .filter(Boolean);
+    const extensions = process.platform === "win32"
+      ? (process.env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+      : [""];
+    const suffixes = process.platform === "win32" && pathApi.extname(name)
+      ? [""]
+      : extensions;
+    for (const directory of directories)
+      for (const extension of suffixes)
+        if (await this.executableExists(pathApi.join(directory, `${name}${extension}`)))
+          return true;
+    return false;
   }
 
   private executableName(name: string): string {
@@ -215,20 +211,17 @@ export class AgentProcessRunner {
           ];
     if (definition.runtime === "python") {
       for (const candidate of pythonCandidates)
-        if (
-          (await this.executableExists(candidate)) &&
-          (await this.runtimeAvailable(candidate, []))
-        )
+        if (await this.executableExists(candidate))
           return { executable: candidate, prefix: [] };
       for (const name of process.platform === "win32"
         ? ["python", "python3", "py"]
         : ["python3", "python"])
-        if (await this.runtimeAvailable(name, name === "py" ? ["-3"] : []))
+        if (await this.executableOnPath(name))
           return { executable: name, prefix: name === "py" ? ["-3"] : [] };
       return null;
     }
     const name = this.executableName(definition.runtime);
-    return (await this.runtimeAvailable(name, []))
+    return (await this.executableOnPath(name))
       ? { executable: name, prefix: [] }
       : null;
   }
@@ -243,7 +236,17 @@ export class AgentProcessRunner {
       typeof input.projectRoot !== "string"
     )
       return { available: false, code: "INVALID_REQUEST" };
-    const runtime = await this.findRuntime(input.strategy, input.projectRoot);
+    const activeRoot = this.window.watcher?.getWatchedPath?.();
+    if (typeof activeRoot !== "string" || !activeRoot.trim())
+      return { available: false, code: "NO_ACTIVE_WORKSPACE" };
+    const projectRoot = path.resolve(input.projectRoot);
+    try {
+      if (!(await this.realInside(projectRoot, path.resolve(activeRoot))))
+        return { available: false, code: "OUTSIDE_WORKSPACE" };
+    } catch {
+      return { available: false, code: "INVALID_TARGET" };
+    }
+    const runtime = await this.findRuntime(input.strategy, projectRoot);
     return runtime
       ? { available: true, executable: runtime.executable }
       : { available: false, code: "RUNTIME_UNAVAILABLE" };
@@ -260,18 +263,26 @@ export class AgentProcessRunner {
       killer.unref();
       return;
     }
-    try {
-      process.kill(-child.pid, "SIGTERM");
-    } catch {
-      child.kill("SIGTERM");
-    }
-    setTimeout(() => {
+    const pid = child.pid;
+    const signalGroup = (signal: NodeJS.Signals) => {
       try {
-        process.kill(-child.pid!, "SIGKILL");
+        process.kill(-pid, signal);
       } catch {
-        /* process already exited */
+        try { child.kill(signal); } catch { /* process already exited */ }
       }
-    }, 750).unref();
+    };
+    signalGroup("SIGTERM");
+    const force = () => signalGroup("SIGKILL");
+    if (child.exitCode !== null || child.signalCode !== null) {
+      force();
+      return;
+    }
+    const timer = setTimeout(force, 750);
+    timer.unref();
+    child.once("exit", () => {
+      clearTimeout(timer);
+      force();
+    });
   }
 
   private command(
@@ -335,6 +346,28 @@ export class AgentProcessRunner {
     const projectRoot = path.resolve(input.projectRoot);
     const cwd = path.resolve(input.cwd);
     const target = input.target ? path.resolve(input.target) : null;
+    const activeRoot = this.window.watcher?.getWatchedPath?.();
+    if (typeof activeRoot !== "string" || !activeRoot.trim())
+      return this.invalid(
+        "NO_ACTIVE_WORKSPACE",
+        "Open a workspace before running a validation.",
+      );
+    try {
+      const [activeReal, rootReal] = await Promise.all([
+        fs.realpath(activeRoot),
+        fs.realpath(root),
+      ]);
+      if (path.resolve(activeReal) !== path.resolve(rootReal))
+        return this.invalid(
+          "WORKSPACE_CHANGED",
+          "The validation target does not belong to the active workspace.",
+        );
+    } catch {
+      return this.invalid(
+        "WORKSPACE_CHANGED",
+        "The active workspace is unavailable.",
+      );
+    }
     try {
       await new NceWorkspaceStorage(root).ensureStructure();
     } catch {}
@@ -400,7 +433,7 @@ export class AgentProcessRunner {
       runId: input.runId,
       sessionId: input.sessionId,
       title: "Allow code execution?",
-      message: "The agent wants to run a validation.",
+      message: `The agent wants to run a validation in ${root} (working directory: ${cwd}).`,
       preview: {
         type: "command",
         value: this.commandPreview(runtime, args),

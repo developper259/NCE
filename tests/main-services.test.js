@@ -1553,6 +1553,7 @@ test("AgentProcessRunner preserves the complete large validation stream", async 
   );
   try {
     const runner = new AgentProcessRunner({
+      watcher: { getWatchedPath: () => root },
       agentApprovalManager: {
         request: async () => ({ decision: "allow" }),
       },
@@ -1586,6 +1587,58 @@ test("AgentProcessRunner escapes backslashes and quotes in command previews", ()
     preview,
     'node --test "dir with \\\\backslash" "say \\"hello\\"" "trailing\\\\" plain',
   );
+});
+
+test("AgentProcessRunner detects project runtimes without executing them", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-runtime-probe-"));
+  const marker = path.join(root, "probe-executed");
+  const python = path.join(root, ".venv", "bin", "python");
+  try {
+    await fsp.mkdir(path.dirname(python), { recursive: true });
+    await fsp.writeFile(
+      python,
+      `#!/bin/sh\necho executed > ${JSON.stringify(marker)}\necho Python 3.0\n`,
+    );
+    await fsp.chmod(python, 0o755);
+    const runner = new AgentProcessRunner({
+      watcher: { getWatchedPath: () => root },
+      agentApprovalManager: null,
+    });
+    const runtime = await runner.resolveRuntime({
+      strategy: "python-unittest",
+      projectRoot: root,
+    });
+    assert.equal(runtime.available, true);
+    assert.equal(runtime.executable, python);
+    await assert.rejects(fsp.stat(marker), { code: "ENOENT" });
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("AgentProcessRunner refuses a validation outside the active workspace", async () => {
+  const active = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-active-root-"));
+  const other = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-other-root-"));
+  try {
+    const runner = new AgentProcessRunner({
+      watcher: { getWatchedPath: () => active },
+      agentApprovalManager: null,
+    });
+    const result = await runner.run({
+      strategy: "node-script",
+      workspaceRoot: other,
+      projectRoot: other,
+      cwd: other,
+      target: path.join(other, "script.js"),
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.error.code, "WORKSPACE_CHANGED");
+  } finally {
+    await fsp.rm(active, { recursive: true, force: true });
+    await fsp.rm(other, { recursive: true, force: true });
+  }
 });
 
 test("Quick Open project listing is recursive, relative, and uses workspace ignores", async () => {

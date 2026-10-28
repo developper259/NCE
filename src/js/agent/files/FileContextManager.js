@@ -1,4 +1,6 @@
 class FileContextManager {
+  static MAX_TEXT_MATCHES = 10_000;
+
   constructor(agent) {
     this.agent = agent;
   }
@@ -164,30 +166,42 @@ class FileContextManager {
     const findMatches = (haystack, needle) => {
       const matches = [];
       let cursor = 0;
+      let truncated = false;
       while (cursor <= haystack.length - needle.length) {
         const index = haystack.indexOf(needle, cursor);
         if (index === -1) break;
+        if (matches.length >= FileContextManager.MAX_TEXT_MATCHES) {
+          truncated = true;
+          break;
+        }
         matches.push(index);
         cursor = index + needle.length;
       }
-      return matches;
+      return { matches, truncated };
     };
+    const ambiguous = (occurrences) => ({
+      status: "ambiguous",
+      occurrences,
+      truncated: true,
+    });
 
-    const exactMatches = findMatches(source, search);
+    const exact = findMatches(source, search);
     const hasCarriageReturns = source.includes("\r") || search.includes("\r");
-    if (exactMatches.length === 1 && !hasCarriageReturns) {
+    if (exact.truncated)
+      return ambiguous(FileContextManager.MAX_TEXT_MATCHES);
+    if (exact.matches.length === 1 && !hasCarriageReturns) {
       return {
         status: "unique",
-        startIndex: exactMatches[0],
-        endIndex: exactMatches[0] + search.length,
+        startIndex: exact.matches[0],
+        endIndex: exact.matches[0] + search.length,
         match: "exact",
       };
     }
-    if (exactMatches.length > 1) {
+    if (exact.matches.length > 1) {
       return this.agent.selectMatchNearLine(
         source,
         search,
-        exactMatches,
+        exact.matches,
         nearLine,
       );
     }
@@ -195,33 +209,35 @@ class FileContextManager {
     const normalizedSource =
       this.agent.normalizeLineEndingsWithBoundaries(source);
     const normalizedSearch = search.replace(/\r\n?|\n/g, "\n");
-    const normalizedMatches = findMatches(
+    const normalized = findMatches(
       normalizedSource.normalized,
       normalizedSearch,
     );
-    if (normalizedMatches.length > 1) {
+    if (normalized.truncated)
+      return ambiguous(FileContextManager.MAX_TEXT_MATCHES);
+    if (normalized.matches.length > 1) {
       return this.agent.selectMatchNearLine(
         source,
         search,
-        normalizedMatches.map((index) => normalizedSource.boundaries[index]),
+        normalized.matches.map((index) => normalizedSource.boundaries[index]),
         nearLine,
         normalizedSearch.length,
-        normalizedMatches.map(
+        normalized.matches.map(
           (index) =>
             normalizedSource.boundaries[index + normalizedSearch.length],
         ),
       );
     }
-    if (exactMatches.length === 1) {
+    if (exact.matches.length === 1) {
       return {
         status: "unique",
-        startIndex: exactMatches[0],
-        endIndex: exactMatches[0] + search.length,
+        startIndex: exact.matches[0],
+        endIndex: exact.matches[0] + search.length,
         match: "exact",
       };
     }
-    if (normalizedMatches.length === 1) {
-      const start = normalizedMatches[0];
+    if (normalized.matches.length === 1) {
+      const start = normalized.matches[0];
       const end = start + normalizedSearch.length;
       return {
         status: "unique",
@@ -241,16 +257,27 @@ class FileContextManager {
     matchLength,
     endIndexes = [],
   ) {
-    const occurrences = matches.map((startIndex) => ({
+    const lines = new Array(matches.length);
+    let line = 1;
+    let cursor = 0;
+    for (let index = 0; index < matches.length; index++) {
+      const target = matches[index];
+      while (cursor < target) {
+        if (source.charCodeAt(cursor) === 10) line += 1;
+        cursor += 1;
+      }
+      lines[index] = line;
+    }
+    const occurrences = matches.map((startIndex, index) => ({
       startIndex,
-      line: source.slice(0, startIndex).split(/\r?\n/).length,
+      line: lines[index],
     }));
     const validNearLine = Number.isInteger(nearLine) && nearLine > 0;
     if (!validNearLine) {
       return {
         status: "ambiguous",
         occurrences: occurrences.length,
-        nearestLines: occurrences.map((item) => item.line),
+        nearestLines: occurrences.slice(0, 100).map((item) => item.line),
       };
     }
     const ranked = occurrences
@@ -263,7 +290,7 @@ class FileContextManager {
       return {
         status: "ambiguous",
         occurrences: occurrences.length,
-        nearestLines: ranked.map((item) => item.line),
+        nearestLines: ranked.slice(0, 100).map((item) => item.line),
       };
     }
     const selected = ranked[0];

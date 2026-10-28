@@ -885,6 +885,27 @@ class ToolExecutor {
 
     const permissions =
       this.agent.runConfig?.permissions ?? this.agent.permissions;
+    if (permissions !== "code" && tool.codeOnly) {
+      return this.attachMeta(name, {
+        success: false,
+        error: {
+          code: "TOOL_NOT_ALLOWED",
+          message: `L'outil ${name} n'est pas autorisé dans ce mode.`,
+        },
+      });
+    }
+    if (typeof this.agent.getAvailableTools === "function") {
+      const available = this.agent.getAvailableTools();
+      if (!available.some((candidate) => candidate.name === name)) {
+        return this.attachMeta(name, {
+          success: false,
+          error: {
+            code: "TOOL_NOT_ALLOWED",
+            message: `L'outil ${name} n'est pas disponible dans cet environnement.`,
+          },
+        });
+      }
+    }
     if (permissions === "read" && !tool.readOnly) {
       return this.attachMeta(name, {
         success: false,
@@ -895,7 +916,7 @@ class ToolExecutor {
       });
     }
 
-    if (!tool.readOnly) {
+    if (!tool.readOnly || tool.executesCode) {
       if (
         executionContext.runId !== undefined &&
         (this.agent.stopRequested ||
@@ -914,7 +935,7 @@ class ToolExecutor {
       const currentRoot = this.agent.editor?.fileExplorer?.rootPath;
       if (
         typeof expectedRoot === "string" &&
-        AgentPath.normalize(expectedRoot) !== AgentPath.normalize(currentRoot)
+        (!currentRoot || !AgentPath.samePath(expectedRoot, currentRoot))
       ) {
         return this.attachMeta(name, {
           success: false,

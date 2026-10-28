@@ -600,6 +600,27 @@ test("Agent exposes the minimal public tool surface for read and code modes", as
   }
 });
 
+test("read mode rejects codeOnly tools even when a tool call is forged", async () => {
+  const { root, agent } = await setup();
+  try {
+    agent.setConfig({ permissions: "read" });
+    let executed = false;
+    agent.getTool("run_tests").execute = () => {
+      executed = true;
+      return { success: true };
+    };
+    const result = await agent.executeToolCall({
+      id: "forged-run-tests",
+      function: { name: "run_tests", arguments: "{}" },
+    });
+    assert.equal(result.success, false);
+    assert.equal(result.error.code, "TOOL_NOT_ALLOWED");
+    assert.equal(executed, false);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("run_tests executes a detected runner and keeps red tests as validation output", async () => {
   const { root, agent, editor } = await setup();
   try {

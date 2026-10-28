@@ -41,6 +41,7 @@ class TestResultNormalizer {
           status !== "MULTIPLE_PROJECTS" &&
           status !== "RUNTIME_UNAVAILABLE" &&
           status !== "EXECUTION_CANCELLED" &&
+          status !== "WORKSPACE_CHANGED" &&
           status !== "DEPENDENCIES_UNAVAILABLE",
         available,
         passed: status === "PASSED",

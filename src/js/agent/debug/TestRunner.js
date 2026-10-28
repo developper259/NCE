@@ -67,6 +67,18 @@ class TestRunner {
         detection,
         this.agent.toolLimits?.run_tests?.outputCharacters,
       );
+    const root = this.agent.editor?.fileExplorer?.rootPath;
+    const expectedRoot = this.agent.runConfig?.workspaceRoot;
+    if (
+      typeof expectedRoot === "string" &&
+      (!root || !this.agent.samePath(expectedRoot, root))
+    ) {
+      return TestResultNormalizer.normalize(
+        null,
+        { ...detection, status: "WORKSPACE_CHANGED" },
+        this.agent.toolLimits?.run_tests?.outputCharacters,
+      );
+    }
     const dirty = await this.dirtyPaths(detection);
     if (dirty.length)
       return TestResultNormalizer.normalize(
@@ -74,7 +86,6 @@ class TestRunner {
         { ...detection, status: "UNSAVED_CHANGES", dirtyPaths: dirty },
         this.agent.toolLimits?.run_tests?.outputCharacters,
       );
-    const root = this.agent.editor?.fileExplorer?.rootPath;
     const limits = this.agent.toolLimits?.run_tests || {};
     const requestId = `${this.agent.runId || 0}:run-tests:${++this.requestCounter}`;
     this.agent.activeTestRequestId = requestId;
