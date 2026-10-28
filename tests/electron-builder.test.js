@@ -73,7 +73,7 @@ test("release builds enable fuses, signature checks and pinned actions", () => {
     "utf8",
   );
   assert.match(releaseWorkflow, /Verify tag matches package version/);
-  assert.match(releaseWorkflow, /Require signing credentials/);
+  assert.match(releaseWorkflow, /Require Windows signing credentials/);
   assert.match(releaseWorkflow, /NCE_REQUIRE_MAC_ARCHS/);
   assert.match(releaseWorkflow, /verify-signing\.js/);
   for (const workflow of [
@@ -84,6 +84,30 @@ test("release builds enable fuses, signature checks and pinned actions", () => {
       assert.match(line, /@[0-9a-f]{40}(?:\s|$)/, line);
     }
   }
+});
+
+test("macOS releases do not require Apple credentials while Windows signatures remain mandatory", () => {
+  const releaseWorkflow = fs.readFileSync(
+    path.join(__dirname, "../.github/workflows/release-build.yml"),
+    "utf8",
+  );
+  const macBuildStep = releaseWorkflow
+    .split(/^      - /m)
+    .find((step) => /^\s*run: npm run build:mac$/m.test(step));
+  assert.ok(macBuildStep);
+  assert.match(macBuildStep, /CSC_IDENTITY_AUTO_DISCOVERY: 'false'/);
+  assert.doesNotMatch(releaseWorkflow, /\b(?:MAC_CERT|APPLE_[A-Z_]+)\b/);
+  assert.doesNotMatch(releaseWorkflow, /secrets\.CSC_(?:LINK|KEY_PASSWORD)\b/);
+  assert.match(
+    releaseWorkflow,
+    /name: Require Windows signing credentials\n\s+if: runner\.os == 'Windows'/,
+  );
+  assert.match(releaseWorkflow, /WIN_CSC_LINK is required/);
+  assert.match(
+    releaseWorkflow,
+    /name: Verify Windows release signatures\n\s+if: runner\.os == 'Windows'\n\s+run: node scripts\/verify-signing\.js/,
+  );
+  assert.doesNotMatch(releaseWorkflow, /^\s*if:.*secrets\./m);
 });
 
 test("Windows NSIS offers per-user Open with NCE entries and removes only its own registry keys", () => {
