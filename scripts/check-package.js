@@ -30,6 +30,10 @@ function lipoArchitectures(file) {
     .sort();
 }
 const releaseRoot = path.resolve(__dirname, '..', process.argv[2] || 'release');
+const requiredMacArchs = String(process.env.NCE_REQUIRE_MAC_ARCHS || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
 const archives = find(releaseRoot);
 assert.ok(archives.length, 'No packaged app.asar found; run npm run dist first');
 for (const archive of archives) {
@@ -38,6 +42,11 @@ for (const archive of archives) {
     [...files].some(file => file.startsWith('node_modules/node-pty/prebuilds/')),
     false,
     `${archive}: platform prebuilds should not be duplicated in the package`,
+  );
+  assert.equal(
+    [...files].some(file => file.startsWith('node_modules/node-pty/bin/')),
+    false,
+    `${archive}: unused node-pty/bin binaries should not be packaged`,
   );
   for (const file of [
     'dist/main.js',
@@ -145,6 +154,7 @@ for (const archive of archives) {
     );
     const appBundles = findMacAppBundles(releaseRoot);
     assert.ok(appBundles.length, 'No NCE.app found to inspect its generated Info.plist');
+    const foundMacArchs = new Set();
     for (const bundle of appBundles) {
       const appExecutable = path.join(bundle, 'Contents', 'MacOS', packageJson.productName);
       const nativeRelease = path.join(
@@ -158,6 +168,7 @@ for (const archive of archives) {
         'Release',
       );
       const appArchitectures = lipoArchitectures(appExecutable);
+      for (const arch of appArchitectures) foundMacArchs.add(arch);
       for (const nativeFile of ['pty.node', 'spawn-helper']) {
         assert.deepEqual(
           lipoArchitectures(path.join(nativeRelease, nativeFile)),
@@ -178,6 +189,11 @@ for (const archive of archives) {
         `${bundle}: generated Info.plist does not advertise NCE as an alternate file handler`);
       assert.ok(advertises('Viewer', 'public.folder'),
         `${bundle}: generated Info.plist does not advertise NCE as an alternate folder handler`);
+    }
+    for (const arch of requiredMacArchs) {
+      const expected = arch === 'x64' ? 'x86_64' : arch;
+      assert.equal(foundMacArchs.has(expected), true,
+        `release: expected a macOS ${arch} bundle`);
     }
   }
   if (process.platform === 'win32') {

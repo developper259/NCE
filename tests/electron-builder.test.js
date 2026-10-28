@@ -40,6 +40,52 @@ test("native modules are rebuilt for each macOS architecture before packaging", 
   assert.doesNotMatch(releaseWorkflow, /--mac --x64 --arm64/);
 });
 
+test("release builds enable fuses, signature checks and pinned actions", () => {
+  assert.equal(packageJson.build.afterPack, "scripts/after-pack.js");
+  assert.ok(packageJson.build.files.includes("!node_modules/node-pty/bin/**/*"));
+  const afterPack = fs.readFileSync(
+    path.join(__dirname, "../scripts/after-pack.js"),
+    "utf8",
+  );
+  assert.match(afterPack, /flipFuses/);
+  assert.match(afterPack, /RunAsNode\]: false/);
+  assert.match(afterPack, /OnlyLoadAppFromAsar\]: true/);
+
+  assert.match(packageJson.scripts["test:packaged"], /check-package\.js/);
+  assert.match(packageJson.scripts["test:packaged"], /smoke-packaged\.js/);
+  const checkPackage = fs.readFileSync(
+    path.join(__dirname, "../scripts/check-package.js"),
+    "utf8",
+  );
+  assert.match(checkPackage, /NCE_REQUIRE_MAC_ARCHS/);
+  assert.match(checkPackage, /node-pty\/bin/);
+
+  const verifySigning = fs.readFileSync(
+    path.join(__dirname, "../scripts/verify-signing.js"),
+    "utf8",
+  );
+  assert.match(verifySigning, /codesign/);
+  assert.match(verifySigning, /spctl/);
+  assert.match(verifySigning, /Get-AuthenticodeSignature/);
+
+  const releaseWorkflow = fs.readFileSync(
+    path.join(__dirname, "../.github/workflows/release-build.yml"),
+    "utf8",
+  );
+  assert.match(releaseWorkflow, /Verify tag matches package version/);
+  assert.match(releaseWorkflow, /Require signing credentials/);
+  assert.match(releaseWorkflow, /NCE_REQUIRE_MAC_ARCHS/);
+  assert.match(releaseWorkflow, /verify-signing\.js/);
+  for (const workflow of [
+    fs.readFileSync(path.join(__dirname, "../.github/workflows/ci.yml"), "utf8"),
+    releaseWorkflow,
+  ]) {
+    for (const line of workflow.split("\n").filter((value) => value.includes("uses:"))) {
+      assert.match(line, /@[0-9a-f]{40}(?:\s|$)/, line);
+    }
+  }
+});
+
 test("Windows NSIS offers per-user Open with NCE entries and removes only its own registry keys", () => {
   const nsis = packageJson.build.nsis;
   const installer = fs.readFileSync(path.join(__dirname, "../build/installer.nsh"), "utf8");

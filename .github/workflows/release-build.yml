@@ -13,25 +13,56 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          node -e "const version=require('./package.json').version; const tag=process.env.GITHUB_REF_NAME.replace(/^v/,''); if (tag!==version){ console.error('Tag '+process.env.GITHUB_REF_NAME+' does not match package version '+version); process.exit(1); }"
+      - name: Require signing credentials
+        if: runner.os == 'macOS' || runner.os == 'Windows'
+        shell: bash
+        env:
+          MAC_CERT: ${{ secrets.CSC_LINK }}
+          WIN_CERT: ${{ secrets.WIN_CSC_LINK }}
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ] && [ -z "$MAC_CERT" ]; then
+            echo "CSC_LINK is required to publish signed macOS builds." >&2
+            exit 1
+          fi
+          if [ "$RUNNER_OS" = "Windows" ] && [ -z "$WIN_CERT" ]; then
+            echo "WIN_CSC_LINK is required to publish signed Windows builds." >&2
+            exit 1
+          fi
       - run: npm run check
       - name: Build Windows / Linux
         if: runner.os != 'macOS'
         run: npm run build
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.WIN_CSC_LINK != '' }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Build macOS x64 + arm64
         if: runner.os == 'macOS'
         run: npm run build:mac
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ secrets.CSC_LINK != '' }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       - run: npm run test:packaged
-      - uses: actions/upload-artifact@v4
+        env:
+          NCE_REQUIRE_MAC_ARCHS: ${{ runner.os == 'macOS' && 'x64,arm64' || '' }}
+      - name: Verify release signatures
+        if: ${{ secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '' }}
+        run: node scripts/verify-signing.js
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: NCE-${{ runner.os }}
           if-no-files-found: error
@@ -47,8 +78,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           path: artifacts
           merge-multiple: true

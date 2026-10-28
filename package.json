@@ -25,7 +25,7 @@
     "check": "npm run typecheck && npm test",
     "rebuild:native": "node scripts/rebuild-native.js",
     "test:electron": "npm run sync-assets && npm run build:main && npm run build:renderer && npm run rebuild:native && node --test tests/electron/smoke.cjs",
-    "test:packaged": "node scripts/check-package.js",
+    "test:packaged": "node scripts/check-package.js && node scripts/smoke-packaged.js",
     "test:nsis-install": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test-nsis-install.ps1",
     "benchmark:multi-cursor": "node scripts/benchmark-multi-cursor.cjs",
     "benchmark:multi-cursor:electron": "npm run sync-assets && npm run build:main && npm run build:renderer && npm run rebuild:native && node scripts/benchmark-multi-cursor-electron.cjs"
@@ -37,7 +37,7 @@
   "license": "ISC",
   "dependencies": {
     "chokidar": "^5.0.0",
-    "markdown-it": "^15.0.0",
+    "markdown-it": "^15.0.3",
     "node-pty": "1.2.0-beta.15",
     "nsh": "github:developper259/NSH#4b5d48f341e06595cf04c80b77382f5a9a587ff9"
   },
@@ -51,6 +51,7 @@
       "dist/**/*",
       "assets/logo/NCE/dark-logo.png",
       "!node_modules/node-pty/prebuilds/**/*",
+      "!node_modules/node-pty/bin/**/*",
       "package.json",
       {
         "from": "src/js/main/",
@@ -60,7 +61,10 @@
         ]
       }
     ],
-    "asarUnpack": ["node_modules/node-pty/build/Release/**/*"],
+    "asarUnpack": [
+      "node_modules/node-pty/build/Release/**/*"
+    ],
+    "afterPack": "scripts/after-pack.js",
     "npmRebuild": false,
     "win": {
       "target": "nsis",
@@ -127,16 +131,17 @@
     }
   },
   "devDependencies": {
+    "@electron/fuses": "^2.1.3",
     "@electron/rebuild": "^4.2.1",
     "@flaticon/flaticon-uicons": "^3.3.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
     "@xterm/xterm": "^6.0.0",
     "acorn": "^8.19.0",
-    "electron": "^42.4.1",
+    "electron": "^42.11.18",
     "electron-builder": "^26.15.3",
     "postcss": "8.5.28",
     "typescript": "^5.2.2",
-    "vite": "^8.3.2"
+    "vite": "^8.3.5"
   }
 }
