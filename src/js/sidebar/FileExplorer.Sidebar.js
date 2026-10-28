@@ -129,10 +129,15 @@ class FileExplorer extends Sidebar {
 
     this.editor.quickOpen?.invalidate(this.rootPath);
 
-    if (changes.some((change) => change.event === "root-deleted")) {
+    const rootDeleted = changes.some((change) =>
+      change.event === "root-deleted" &&
+      NCEPath.equals(change.filePath, this.rootPath),
+    );
+    if (rootDeleted) {
       await this.invalidateWorkspace();
       return;
     }
+    changes = changes.filter((change) => change.event !== "root-deleted");
 
     const directoryPaths = new Set();
     for (const change of changes) {
@@ -255,9 +260,9 @@ class FileExplorer extends Sidebar {
           ? await this.fileOperations.pathStatus(rootPath)
           : status;
       if (!finalStatus?.exists) {
-        if (finalStatus?.code === "SOURCE_NOT_FOUND") {
+        if (finalStatus?.code === "SOURCE_NOT_FOUND" && rootPath === this.rootPath) {
           await this.invalidateWorkspace();
-        } else {
+        } else if (finalStatus?.code !== "SOURCE_NOT_FOUND") {
           console.error(
             "Unable to verify workspace after refresh:",
             finalStatus,
@@ -286,6 +291,7 @@ class FileExplorer extends Sidebar {
       if (expandedPaths.size > 0) {
         await this.restoreExpandedFolders(newFiles, expandedPaths);
       }
+      if (rootPath !== this.rootPath) return false;
 
       this.files = newFiles;
       this.isLoaded = true;
@@ -1896,6 +1902,16 @@ class FileExplorer extends Sidebar {
           : null;
       let workingCopy;
       if (sourceFile?.isLoaded && !sourceFile.loadError) {
+        if (sourceFile.loadingState?.status === "loading") {
+          try {
+            await this.editor.fileLoader.waitForFileLoaded(sourceFile);
+          } catch {
+            alert(
+              "The open working copy is not fully loaded and cannot be copied safely.",
+            );
+            return;
+          }
+        }
         if (typeof sourceFile.serializeContent !== "function") {
           alert("The open working copy cannot be copied safely.");
           return;

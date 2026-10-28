@@ -536,6 +536,8 @@ class SearchSidebar extends Sidebar {
       this.clearResults();
       this.refresh();
     } finally {
+      if (this.activeSearchResolve)
+        this.finishActiveSearchStream({ type: "cancelled" });
       metrics?.end(searchMeasure);
       if (searchGeneration === this.searchGeneration) {
         if (this.activeRequestId === requestId) this.activeRequestId = null;

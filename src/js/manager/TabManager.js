@@ -365,15 +365,22 @@ class tabManager {
   }
 
   async prepareFilesForDeletion(deletedPath) {
-    const dirtyFiles = this.files.filter(
-      (file) =>
-        file.path && NCEPath.isInside(file.path, deletedPath) && !file.isSaved,
-    );
+    const dirtyFiles = [];
+    for (const tab of this.tabs) {
+      const file = tab?.type === TAB_TYPES.FILE
+        ? tab
+        : tab?.type === "markdown"
+          ? tab.textTab
+          : null;
+      if (file?.path && NCEPath.isInside(file.path, deletedPath) && !file.isSaved)
+        dirtyFiles.push(file);
+    }
     for (const file of dirtyFiles) {
       const choice = await this.editor.savePopupManager.confirmClose(file.id);
       if (choice === "cancel") return false;
       if (choice === "save") {
-        if (this.activeFile?.id !== file.id) await this.setFocusFile(file);
+        if (this.files.includes(file) && this.activeFile?.id !== file.id)
+          await this.setFocusFile(file);
         try {
           const saved = await this.saveFileOnce(file);
           if (saved === false || !file.isSaved) return false;

@@ -270,9 +270,11 @@ class KeyBinding {
 
   async control_paste(s, c, m, a) {
     if (!document.hasFocus()) return;
-    if (!this.editor.tabManager.activeFile) return;
+    const target = this.editor.tabManager.activeFile;
+    if (!target) return;
     try {
       const text = await navigator.clipboard.readText();
+      if (this.editor.tabManager.activeFile !== target) return;
       const handled = this.editor.smartTypingController?.handlePaste(text);
       if (!handled) this.editor.writerController.write(text);
     } catch (err) {
@@ -289,45 +291,35 @@ class KeyBinding {
     const selections = multi?.getSelections?.() || [];
     const selected = selections.filter((selection) => multi.isSelected(selection));
     const hasLegacySelection = this.editor.selectController.hasActiveSelection?.();
-    if (!(await this.control_copy())) return false;
-
+    let plan;
     if (selected.length) {
-      const edits = selected.map((selection) => {
-        const range = multi.getRange(selection);
-        return {
-          id: selection.id,
-          cursorId: selection.id,
-          start: range.start,
-          end: range.end,
-          text: "",
-        };
-      });
-      return this.editor.writerController.applyBatchEdits(edits, {
-        source: "cut",
-        primaryId: file._multiCursorPrimaryId,
-        ensureVisible: true,
-      }) !== null;
-    }
-
-    if (hasLegacySelection) {
+      plan = {
+        kind: "batch",
+        edits: selected.map((selection) => {
+          const range = multi.getRange(selection);
+          return {
+            id: selection.id,
+            cursorId: selection.id,
+            start: range.start,
+            end: range.end,
+            text: "",
+          };
+        }),
+      };
+    } else if (hasLegacySelection) {
       const range = this.editor.writerController.getSelectionRange?.();
-      if (range) {
-        return this.editor.writerController.applyBatchEdits([{
+      if (!range) return false;
+      plan = {
+        kind: "batch",
+        edits: [{
           id: file._multiCursorPrimaryId,
           cursorId: file._multiCursorPrimaryId,
           start: range.start,
           end: range.end,
           text: "",
-        }], {
-          source: "cut",
-          primaryId: file._multiCursorPrimaryId,
-          ensureVisible: true,
-        }) !== null;
-      }
-      return false;
-    }
-
-    if (selections.length > 1) {
+        }],
+      };
+    } else if (selections.length > 1) {
       const rows = [...new Set(selections.map((selection) => selection.active.row))].sort((a, b) => a - b);
       const groups = [];
       for (const row of rows) {
@@ -336,38 +328,47 @@ class KeyBinding {
         else groups.push({ firstRow: row, lastRow: row });
       }
       const lineCount = this.editor.lineController.lines.length;
-      const edits = groups.map(({ firstRow, lastRow }) => {
-        let start = { row: firstRow, column: 0 };
-        let end;
-        if (lastRow < lineCount) {
-          end = { row: lastRow + 1, column: 0 };
-        } else if (firstRow > 1) {
-          const previousLine = this.editor.lineController.lines[firstRow - 2];
-          start = { row: firstRow - 1, column: previousLine?.getText?.().length || 0 };
-          const lastLine = this.editor.lineController.lines[lastRow - 1];
-          end = { row: lastRow, column: lastLine?.getText?.().length || 0 };
-        } else {
-          const lastLine = this.editor.lineController.lines[lastRow - 1];
-          end = { row: lastRow, column: lastLine?.getText?.().length || 0 };
-        }
-        return { start, end, text: "" };
-      });
-      return this.editor.writerController.applyBatchEdits(edits, {
+      plan = {
+        kind: "batch",
+        edits: groups.map(({ firstRow, lastRow }) => {
+          let start = { row: firstRow, column: 0 };
+          let end;
+          if (lastRow < lineCount) {
+            end = { row: lastRow + 1, column: 0 };
+          } else if (firstRow > 1) {
+            const previousLine = this.editor.lineController.lines[firstRow - 2];
+            start = { row: firstRow - 1, column: previousLine?.getText?.().length || 0 };
+            const lastLine = this.editor.lineController.lines[lastRow - 1];
+            end = { row: lastRow, column: lastLine?.getText?.().length || 0 };
+          } else {
+            const lastLine = this.editor.lineController.lines[lastRow - 1];
+            end = { row: lastRow, column: lastLine?.getText?.().length || 0 };
+          }
+          return { start, end, text: "" };
+        }),
+      };
+    } else {
+      const row = this.editor.cursorController.row;
+      const lines = this.editor.lineController.lines;
+      plan = {
+        kind: "line",
+        start: { row, column: 0 },
+        end: row < lines.length
+          ? { row: row + 1, column: 0 }
+          : { row, column: lines[row - 1].getText().length },
+      };
+    }
+
+    if (!(await this.control_copy())) return false;
+    if (this.editor.tabManager.activeFile !== file) return false;
+    if (plan.kind === "batch") {
+      return this.editor.writerController.applyBatchEdits(plan.edits, {
         source: "cut",
         primaryId: file._multiCursorPrimaryId,
         ensureVisible: true,
       }) !== null;
     }
-
-    {
-      const row = this.editor.cursorController.row;
-      const lines = this.editor.lineController.lines;
-      const end =
-        row < lines.length
-          ? { row: row + 1, column: 0 }
-          : { row, column: lines[row - 1].getText().length };
-      this.editor.writerController.deleteRange({ row, column: 0 }, end);
-    }
+    this.editor.writerController.deleteRange(plan.start, plan.end);
     return true;
   }
 
