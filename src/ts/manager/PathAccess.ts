@@ -25,7 +25,15 @@ export class PathAccess {
   constructor(
     private readonly getWorkspaceRoot: () => string | null | undefined,
     private readonly platform: NodeJS.Platform = process.platform,
-  ) {}
+    authorizedFiles: readonly string[] = [],
+  ) {
+    // Stored grants are canonical; resolving symlinks again could authorize a different target.
+    for (const file of authorizedFiles) this.files.add(comparable(file, this.platform));
+  }
+
+  getAuthorizedFiles(): string[] {
+    return [...new Set([...this.files, ...this.targets])];
+  }
 
   trustRootSync(value: unknown): string | null {
     if (typeof value !== "string" || !value.trim() || value.includes("\0")) return null;

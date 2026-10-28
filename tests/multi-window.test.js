@@ -122,6 +122,34 @@ test("window sessions migrate state.json once and serialize independent window s
   }
 });
 
+test("window sessions validate stored file grants without trusting renderer paths", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-session-grants-"));
+  const { WindowSessionStore } = loadMain("dist/ts/manager/WindowSessionStore.js");
+  try {
+    const approved = path.join(root, "approved.txt");
+    const denied = path.join(root, "denied.txt");
+    await fs.writeFile(path.join(root, "window-sessions.json"), JSON.stringify({
+      version: 1,
+      sessions: [
+        { id: "existing", authorizedFiles: [approved, approved, null, 3, "relative.txt", "\u0000", "x".repeat(4097)] },
+        { id: "older", rendererState: { authorizedFiles: [denied] } },
+      ],
+    }));
+    const store = new WindowSessionStore(root);
+    await store.initialize();
+    assert.deepEqual(Array.from(store.get("existing").authorizedFiles), [approved]);
+    assert.deepEqual(Array.from(store.get("older").authorizedFiles), []);
+    assert.equal(await store.saveRendererState("older", JSON.stringify({
+      authorizedFiles: [denied],
+      lastWorkspace: root,
+    })), true);
+    assert.deepEqual(Array.from(store.get("older").authorizedFiles), []);
+    assert.equal(store.get("older").workspacePath, null);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("legacy credential migration is idempotent, preserves secure conflicts, and sanitizes old session files", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-agent-key-migration-"));
   const safeStorage = makeSafeStorage();

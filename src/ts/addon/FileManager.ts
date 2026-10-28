@@ -2002,7 +2002,11 @@ export class FileManager {
       if (state.agent) delete state.agent.apiKeys;
       const sessionStore = this.window.app?.windowSessionStore;
       if (sessionStore) {
-        return sessionStore.saveRendererState(this.window.sessionId, JSON.stringify(state));
+        return sessionStore.saveRendererState(
+          this.window.sessionId,
+          JSON.stringify(state),
+          this.window.pathAccess.getAuthorizedFiles(),
+        );
       }
       if (this.legacyCredentialCopyPreserved) return false;
       const filePath = path.join(app.getPath("userData"), "state.json");

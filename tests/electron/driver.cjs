@@ -17,12 +17,19 @@ const target = path.join(directory, "smoke.js");
 dialog.showSaveDialog = async () => ({ canceled: false, filePath: target });
 dialog.showMessageBox = async () => ({ response: 2 });
 let pendingFolderSelection = null;
+let pendingFileSelection = null;
 dialog.showOpenDialog = async (_window, options = {}) => {
-  if (!options?.properties?.includes("openDirectory") || !pendingFolderSelection)
-    return { canceled: true, filePaths: [] };
-  const filePaths = [pendingFolderSelection];
-  pendingFolderSelection = null;
-  return { canceled: false, filePaths };
+  if (options?.properties?.includes("openFile") && pendingFileSelection) {
+    const filePaths = [pendingFileSelection];
+    pendingFileSelection = null;
+    return { canceled: false, filePaths };
+  }
+  if (options?.properties?.includes("openDirectory") && pendingFolderSelection) {
+    const filePaths = [pendingFolderSelection];
+    pendingFolderSelection = null;
+    return { canceled: false, filePaths };
+  }
+  return { canceled: true, filePaths: [] };
 };
 const timer = setTimeout(() => {
   console.error("Electron smoke timed out");
@@ -76,6 +83,10 @@ app.whenReady().then(() => {
       const authorizeWorkspace = async (folderPath) => {
         pendingFolderSelection = folderPath;
         return run("window.api.selectFolder()");
+      };
+      const authorizeFile = async (filePath) => {
+        pendingFileSelection = filePath;
+        return run("window.api.selectFile()");
       };
       assert.equal(
         await run(
@@ -431,6 +442,23 @@ app.whenReady().then(() => {
         fs.writeFileSync(externalFileTwo, "const externalTwo = true;\n", "utf8");
         const externalFilePath = await fs.promises.realpath(externalFile);
         const externalFileTwoPath = await fs.promises.realpath(externalFileTwo);
+        const previousMessageBox = dialog.showMessageBox;
+        let dropResponse = 1;
+        dialog.showMessageBox = async (targetWindow, options) => {
+          if (options?.message !== "Open dropped items?")
+            return previousMessageBox(targetWindow, options);
+          assert.equal(targetWindow, windowB.window, "drop confirmation belongs to the receiving window");
+          return { response: dropResponse };
+        };
+        const cancelledDrop = await runB(
+          `window.api.openDroppedFiles(${JSON.stringify([externalFile])})`,
+        );
+        assert.equal(cancelledDrop.success, false);
+        assert.equal(cancelledDrop.openedFiles, 0);
+        assert.equal(await windowB.pathAccess.isAuthorized(externalFilePath), false,
+          "cancelling a drop does not grant access to its files");
+        assert.deepEqual(await runB("editor.tabManager.tabs.map(tab => tab.path)"), [fileB]);
+        dropResponse = 0;
         const dropResult = await runB(
           `window.api.openDroppedFiles(${JSON.stringify([externalFile, externalFileTwo, externalFile])})`,
         );
@@ -481,6 +509,7 @@ app.whenReady().then(() => {
         );
         assert.equal(mixedDropResult.openedFiles, 1);
         assert.equal(mixedDropResult.openedFolders, 1);
+        dialog.showMessageBox = previousMessageBox;
         let droppedWorkspaceWindow = null;
         await waitForCondition(() => {
           droppedWorkspaceWindow = nce.windowManager.findWindowByWorkspace(droppedWorkspace);
@@ -723,7 +752,12 @@ app.whenReady().then(() => {
         assert.equal(workspaceHeader.longName.overflow, "ellipsis");
         assert.equal(workspaceHeader.longName.whiteSpace, "nowrap");
         traceStep("workspace header checks passed");
+        if (process.platform === "darwin") app.focus({ steal: true });
         win.focus();
+        win.webContents.focus();
+        await waitForCondition(() => win.isFocused(), {
+          description: "window focus before workspace header mouse input",
+        });
         const moveMouseTo = (rect) => win.webContents.sendInputEvent({
           type: "mouseMove",
           x: Math.round(rect.x + rect.width / 2),
@@ -766,9 +800,11 @@ app.whenReady().then(() => {
           prevented: true,
         });
 
-        moveMouseTo(workspaceHeader.outside);
         await waitForCondition(
-          async () => (await run("!editor.fileExplorer.projectHeader.matches(':hover')")) === true,
+          async () => {
+            moveMouseTo(workspaceHeader.outside);
+            return (await run("!editor.fileExplorer.projectHeader.matches(':hover')")) === true;
+          },
           { description: "pointer to leave the workspace header" },
         );
         const workspaceNameRestingColor = await run(
@@ -777,9 +813,12 @@ app.whenReady().then(() => {
         const headerRestingBackground = await run(
           "getComputedStyle(editor.fileExplorer.projectHeader).backgroundColor",
         );
-        moveMouseTo(workspaceHeader.title);
         await waitForCondition(
-          async () => (await run("editor.fileExplorer.projectTitle.matches(':hover')")) === true,
+          async () => {
+            moveMouseTo(workspaceHeader.title);
+            return (await run(`editor.fileExplorer.projectTitle.matches(':hover') &&
+              getComputedStyle(editor.fileExplorer.projectTitle).color !== ${JSON.stringify(workspaceNameRestingColor)}`)) === true;
+          },
           { description: "pointer to hover the workspace name" },
         );
         assert.notEqual(
@@ -792,9 +831,12 @@ app.whenReady().then(() => {
           headerRestingBackground,
           "hover does not draw a box across the workspace header",
         );
-        moveMouseTo(workspaceHeader.arrow);
         await waitForCondition(
-          async () => (await run("!editor.fileExplorer.projectTitle.matches(':hover')")) === true,
+          async () => {
+            moveMouseTo(workspaceHeader.arrow);
+            return (await run(`!editor.fileExplorer.projectTitle.matches(':hover') &&
+              getComputedStyle(editor.fileExplorer.projectTitle).color === ${JSON.stringify(workspaceNameRestingColor)}`)) === true;
+          },
           { description: "pointer to leave the workspace name" },
         );
         assert.equal(
@@ -1502,6 +1544,7 @@ app.whenReady().then(() => {
           gutterSmokePath,
           Array.from({ length: 12000 }, () => gutterSmokeLine).join("\n"),
         );
+        assert.equal(await authorizeFile(gutterSmokePath), gutterSmokePath);
         await waitForCondition(
           async () =>
             (await run("!editor.tabManager.activeFile || editor.tabManager.activeFile.isLoaded")) === true,
@@ -1696,6 +1739,7 @@ app.whenReady().then(() => {
           emptyLineCaretPath,
           "const first = 1;\n\nconst third = 3;\n",
         );
+        assert.equal(await authorizeFile(emptyLineCaretPath), emptyLineCaretPath);
         const emptyLineCaret = await run(`(async () => {
           const manager = editor.tabManager;
           const File = window.__gutterSmokeOriginalFile.constructor;

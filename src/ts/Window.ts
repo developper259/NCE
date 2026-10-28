@@ -135,7 +135,7 @@ export class Window {
     this.id = options.id || randomUUID();
     this.initialSession = options.session || {
       id: randomUUID(), workspacePath: null, bounds: null, maximized: false,
-      fullScreen: false, rendererState: null, lastActiveAt: Date.now(),
+      fullScreen: false, rendererState: null, authorizedFiles: [], lastActiveAt: Date.now(),
     };
     this.sessionId = this.initialSession.id;
     this.workspacePath = this.initialSession.workspacePath;
@@ -154,6 +154,8 @@ export class Window {
     this.terminalManager = undefined;
     this.pathAccess = new PathAccess(
       () => this.watcher?.getWatchedPath?.() || this.workspacePath,
+      process.platform,
+      this.initialSession.authorizedFiles,
     );
     if (this.initialSession.workspacePath)
       this.pathAccess.trustRootSync(this.initialSession.workspacePath);

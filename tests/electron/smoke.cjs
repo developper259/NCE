@@ -9,11 +9,11 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-'));
   await fs.writeFile(path.join(directory, '.nce-smoke'), '');
   async function launch(phase) {
+    let log = '';
     await new Promise((resolve, reject) => {
       const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
       env.NCE_DISABLE_EXTERNAL_STARTUP_PATHS = '1';
       const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-      let log = '';
       child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
       const timer = setTimeout(() => { child.kill('SIGKILL'); }, 90000);
       child.once('error', err => { clearTimeout(timer); reject(err); });

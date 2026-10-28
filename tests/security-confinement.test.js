@@ -5,6 +5,8 @@ const path = require("node:path");
 const test = require("node:test");
 
 const { PathAccess } = require("../dist/ts/manager/PathAccess.js");
+const { WindowSessionStore } = require("../dist/ts/manager/WindowSessionStore.js");
+const { Window } = require("../dist/ts/Window.js");
 const { FileManager } = require("../dist/ts/addon/FileManager.js");
 const { NceWorkspaceStorage } = require("../dist/ts/addon/NceWorkspaceStorage.js");
 const { WorkspaceSearch } = require("../dist/ts/addon/WorkspaceSearch.js");
@@ -89,6 +91,81 @@ test("FileManager only reads and writes authorized workspace paths", async () =>
   } finally {
     await fs.rm(root, { recursive: true, force: true });
     await fs.rm(outside, { recursive: true, force: true });
+  }
+});
+
+for (const saveAs of [false, true]) {
+  test(`session restart restores only main-approved external files (${saveAs ? "Save As" : "open"})`, async () => {
+    const root = await tempRoot("nce-file-session-");
+    try {
+      const target = path.join(root, "external.js");
+      const denied = path.join(root, "denied.js");
+      const content = "const value = 1;";
+      await fs.writeFile(denied, "not authorized");
+      if (!saveAs) await fs.writeFile(target, content);
+      const store = new WindowSessionStore(path.join(root, "profile"));
+      await store.initialize();
+      const session = store.create();
+      const other = store.create();
+      const window = new Window({ windowSessionStore: store }, { session });
+      window.reloadSettingsFromDisk = async () => false;
+      const manager = new FileManager(window, async () => {}, { handle() {} });
+      assert.equal(await window.pathAccess.isAuthorized(target, { allowMissing: true }), false);
+      await window.pathAccess.authorizeFile(target, { allowMissing: saveAs });
+      if (saveAs) assert.equal(await manager.saveFile(target, content), target);
+      const state = {
+        version: 2,
+        lastWorkspace: null,
+        authorizedFiles: [denied],
+        noWorkspaceState: { tabManager: { tabs: [
+          { id: 1, type: "file", path: target },
+          { id: 2, type: "file", path: denied },
+        ] } },
+      };
+      assert.equal(await manager.saveState(JSON.stringify(state)), true);
+      await store.flush();
+
+      const reopened = new WindowSessionStore(path.join(root, "profile"));
+      await reopened.initialize();
+      const restored = new Window({ windowSessionStore: reopened }, { session: reopened.get(session.id) });
+      const reader = new FileManager(restored, async () => {}, { handle() {} });
+      assert.deepEqual(await reader.loadState(), state);
+      assert.equal((await reader.initializeFile(target)).success, true);
+      assert.deepEqual(await reader.getFileContent([target, denied]), { [target]: content });
+      assert.equal((await reader.initializeFile(denied)).errorCode, "OUTSIDE_WORKSPACE");
+      assert.equal(await reader.saveFile(path.join(root, "unapproved.js"), content), undefined);
+      assert.equal(await reader.saveState(JSON.stringify(state)), true);
+      assert.deepEqual(reopened.get(session.id).authorizedFiles, window.pathAccess.getAuthorizedFiles());
+      const otherWindow = new Window({ windowSessionStore: reopened }, { session: reopened.get(other.id) });
+      assert.equal(await otherWindow.pathAccess.isAuthorized(target), false);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("restored file grants do not follow a replaced file symlink", {
+  skip: process.platform === "win32",
+}, async () => {
+  const root = await tempRoot("nce-file-grant-link-");
+  try {
+    const target = path.join(root, "approved.txt");
+    const denied = path.join(root, "denied.txt");
+    await fs.writeFile(target, "approved");
+    await fs.writeFile(denied, "denied");
+    const access = new PathAccess(() => null);
+    await access.authorizeFile(target);
+    const grants = access.getAuthorizedFiles();
+    await fs.unlink(target);
+    await fs.symlink(denied, target);
+    const restored = new PathAccess(() => null, process.platform, grants);
+    assert.equal(await restored.isAuthorized(target), false);
+    assert.equal(await restored.isAuthorized(denied), false);
+    await fs.unlink(target);
+    await fs.writeFile(target, "approved again");
+    assert.equal(await restored.isAuthorized(target), true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
   }
 });
 

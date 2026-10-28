@@ -23,6 +23,7 @@ export interface WindowSession {
   maximized: boolean;
   fullScreen: boolean;
   rendererState: Record<string, unknown> | null;
+  authorizedFiles: string[];
   lastActiveAt: number;
 }
 
@@ -39,6 +40,12 @@ function isRecord(value: unknown): value is Record<string, any> {
 function safeText(value: unknown, limit = 4096): string | null {
   return typeof value === "string" && value.trim() && value.length <= limit &&
     !value.includes("\0") ? value : null;
+}
+
+function sanitizeAuthorizedFiles(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((file): file is string =>
+    Boolean(safeText(file)) && path.isAbsolute(file)))];
 }
 
 function sanitizeBounds(value: unknown): WindowBounds | null {
@@ -187,6 +194,7 @@ export class WindowSessionStore {
       maximized: input.maximized === true,
       fullScreen: input.fullScreen === true,
       rendererState: sanitizeRendererState(input.rendererState),
+      authorizedFiles: sanitizeAuthorizedFiles(input.authorizedFiles),
       lastActiveAt: Number.isSafeInteger(input.lastActiveAt) && input.lastActiveAt! >= 0
         ? input.lastActiveAt! : Date.now(),
     };
@@ -211,6 +219,8 @@ export class WindowSessionStore {
         ? { fullScreen: patch.fullScreen === true } : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, "rendererState")
         ? { rendererState: sanitizeRendererState(patch.rendererState) } : {}),
+      ...(Object.prototype.hasOwnProperty.call(patch, "authorizedFiles")
+        ? { authorizedFiles: sanitizeAuthorizedFiles(patch.authorizedFiles) } : {}),
       ...(Object.prototype.hasOwnProperty.call(patch, "lastActiveAt")
         ? { lastActiveAt: Number.isSafeInteger(patch.lastActiveAt) && patch.lastActiveAt! >= 0
           ? patch.lastActiveAt! : current.lastActiveAt } : {}),
@@ -245,7 +255,7 @@ export class WindowSessionStore {
     return null;
   }
 
-  saveRendererState(id: string, rawState: string): Promise<boolean> {
+  saveRendererState(id: string, rawState: string, authorizedFiles: readonly string[] = []): Promise<boolean> {
     if (typeof rawState !== "string" || Buffer.byteLength(rawState, "utf8") > MAX_STATE_BYTES) {
       return Promise.resolve(false);
     }
@@ -255,9 +265,12 @@ export class WindowSessionStore {
     const sanitized = sanitizeRendererState(parsed);
     const current = this.sessions.get(id);
     if (!sanitized || !current) return Promise.resolve(false);
-    // Workspace ownership is established by the main-process watcher; a
-    // renderer-provided path must never become an auto-restored workspace.
-    this.sessions.set(id, { ...current, rendererState: sanitized });
+    // Restored access comes from main-process grants, never from paths in renderer state.
+    this.sessions.set(id, {
+      ...current,
+      rendererState: sanitized,
+      authorizedFiles: sanitizeAuthorizedFiles(authorizedFiles),
+    });
     return this.persist();
   }
 
@@ -287,6 +300,7 @@ export class WindowSessionStore {
         maximized: candidate.maximized === true,
         fullScreen: candidate.fullScreen === true,
         rendererState: state,
+        authorizedFiles: sanitizeAuthorizedFiles(candidate.authorizedFiles),
         lastActiveAt: Number.isSafeInteger(candidate.lastActiveAt) && candidate.lastActiveAt >= 0
           ? candidate.lastActiveAt : 0,
       };
@@ -310,6 +324,7 @@ export class WindowSessionStore {
       maximized: false,
       fullScreen: false,
       rendererState: sanitizeRendererState(state),
+      authorizedFiles: [],
       lastActiveAt: Date.now(),
     };
     this.sessions.set(session.id, session);
