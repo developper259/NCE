@@ -23,7 +23,14 @@ function findMacAppBundles(directory, bundles = []) {
   }
   return bundles;
 }
-const archives = find(path.resolve(__dirname, '../release'));
+function lipoArchitectures(file) {
+  return execFileSync('lipo', ['-archs', file], { encoding: 'utf8' })
+    .trim()
+    .split(/\s+/)
+    .sort();
+}
+const releaseRoot = path.resolve(__dirname, '..', process.argv[2] || 'release');
+const archives = find(releaseRoot);
 assert.ok(archives.length, 'No packaged app.asar found; run npm run dist first');
 for (const archive of archives) {
   const files = new Set(asar.listPackage(archive).map(normalizeArchivePath));
@@ -136,9 +143,28 @@ for (const archive of archives) {
       0,
       `${archive}: node-pty spawn-helper is not executable`,
     );
-    const appBundles = findMacAppBundles(path.resolve(__dirname, '../release'));
+    const appBundles = findMacAppBundles(releaseRoot);
     assert.ok(appBundles.length, 'No NCE.app found to inspect its generated Info.plist');
     for (const bundle of appBundles) {
+      const appExecutable = path.join(bundle, 'Contents', 'MacOS', packageJson.productName);
+      const nativeRelease = path.join(
+        bundle,
+        'Contents',
+        'Resources',
+        'app.asar.unpacked',
+        'node_modules',
+        'node-pty',
+        'build',
+        'Release',
+      );
+      const appArchitectures = lipoArchitectures(appExecutable);
+      for (const nativeFile of ['pty.node', 'spawn-helper']) {
+        assert.deepEqual(
+          lipoArchitectures(path.join(nativeRelease, nativeFile)),
+          appArchitectures,
+          `${bundle}: node-pty ${nativeFile} architecture must match ${packageJson.productName}`,
+        );
+      }
       const infoPlistPath = path.join(bundle, 'Contents', 'Info.plist');
       const infoPlist = JSON.parse(execFileSync('plutil', ['-convert', 'json', '-o', '-', infoPlistPath], {
         encoding: 'utf8',

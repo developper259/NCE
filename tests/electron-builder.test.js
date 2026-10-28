@@ -4,7 +4,7 @@ const path = require("node:path");
 const packageJson = require("../package.json");
 const test = require("node:test");
 
-test("electron-builder keeps production dependency collection without rebuilding prepared native modules", () => {
+test("native modules are rebuilt for each macOS architecture before packaging", () => {
   assert.equal(packageJson.build.npmRebuild, false);
   assert.equal(packageJson.build.beforeBuild, undefined);
 
@@ -13,6 +13,31 @@ test("electron-builder keeps production dependency collection without rebuilding
     assert.match(script, /npm run rebuild:native/);
     assert.match(script, /electron-builder|tests\/electron\/smoke\.cjs/);
   }
+  assert.match(packageJson.scripts["rebuild:native"], /scripts\/rebuild-native\.js/);
+  const macBuild = packageJson.scripts["build:mac"];
+  assert.match(macBuild, /npm run package:mac:x64/);
+  assert.match(macBuild, /npm run package:mac:arm64/);
+  for (const arch of ["x64", "arm64"]) {
+    assert.match(
+      packageJson.scripts[`package:mac:${arch}`],
+      new RegExp(`rebuild-native\\.js --arch=${arch} && electron-builder --mac --${arch}`),
+    );
+  }
+
+  const rebuildScript = fs.readFileSync(
+    path.join(__dirname, "../scripts/rebuild-native.js"),
+    "utf8",
+  );
+  assert.match(rebuildScript, /npm_config_arch/);
+  assert.match(rebuildScript, /--arch/);
+  assert.match(rebuildScript, /post-install\.js/);
+
+  const releaseWorkflow = fs.readFileSync(
+    path.join(__dirname, "../.github/workflows/release-build.yml"),
+    "utf8",
+  );
+  assert.match(releaseWorkflow, /npm run build:mac/);
+  assert.doesNotMatch(releaseWorkflow, /--mac --x64 --arm64/);
 });
 
 test("Windows NSIS offers per-user Open with NCE entries and removes only its own registry keys", () => {
@@ -54,6 +79,12 @@ test("macOS declares an alternate document handler without claiming default owne
     LSItemContentTypes: ["public.folder"],
   });
   assert.equal(packageJson.build.mac.fileAssociations, undefined);
+  const checkPackage = fs.readFileSync(
+    path.join(__dirname, "../scripts/check-package.js"),
+    "utf8",
+  );
+  assert.match(checkPackage, /lipo/);
+  assert.match(checkPackage, /architecture must match/);
 });
 
 test("Linux AppImage and DEB desktop entries advertise Open with handlers without selecting defaults", () => {

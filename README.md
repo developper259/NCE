@@ -178,6 +178,12 @@ Create a production build:
 npm run build
 ```
 
+Build both macOS architectures (Intel and Apple Silicon):
+
+```bash
+npm run build:mac
+```
+
 Create an unpacked build:
 
 ```bash
