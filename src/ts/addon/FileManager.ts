@@ -21,6 +21,7 @@ import {
 } from "./OpenableFile";
 import type { Stats } from "fs";
 export { MAX_IMAGE_FILE_SIZE } from "./OpenableFile";
+const MAX_FILE_CONTENT_BYTES = 16 * 1024 * 1024;
 const fs = require("fs").promises;
 const fsSync = require("fs");
 const path = require("path");
@@ -749,7 +750,9 @@ export class FileManager {
       return undefined;
     }
 
-    return result.filePaths[0];
+    const filePath = result.filePaths[0];
+    await this.window.pathAccess?.authorizeFile?.(filePath);
+    return filePath;
   }
 
   async selectFiles(): Promise<string[] | undefined> {
@@ -763,6 +766,8 @@ export class FileManager {
       return undefined;
     }
 
+    await Promise.all(result.filePaths.map((filePath) =>
+      this.window.pathAccess?.authorizeFile?.(filePath)));
     return result.filePaths;
   }
 
@@ -779,7 +784,19 @@ export class FileManager {
       return undefined;
     }
 
-    return result.filePath || undefined;
+    const filePath = result.filePath || undefined;
+    if (filePath)
+      await this.window.pathAccess?.authorizeFile?.(filePath, { allowMissing: true });
+    return filePath;
+  }
+
+  private async canAccessPath(
+    value: unknown,
+    options: { allowMissing?: boolean; requireDirectory?: boolean; requireFile?: boolean } = {},
+  ): Promise<boolean> {
+    const access = this.window?.pathAccess;
+    if (!access?.isAuthorized) return true;
+    return access.isAuthorized(value, options);
   }
 
   async getFileContent(file: string[]): Promise<{} | undefined> {
@@ -791,6 +808,12 @@ export class FileManager {
     for (const filePath of file) {
       if (isAsarPath(filePath)) continue;
       try {
+        if (!(await this.canAccessPath(filePath, { requireFile: true }))) continue;
+        const stats = await fs.stat(filePath);
+        if (!stats.isFile() || stats.size > MAX_FILE_CONTENT_BYTES) {
+          console.error(`Refusing to read an oversized or special file: ${filePath}`);
+          continue;
+        }
         const content = await fs.readFile(filePath, "utf-8");
         fileContents[filePath] = content;
       } catch (error) {
@@ -810,6 +833,8 @@ export class FileManager {
     const maximumBytes = 1024 * 1024;
     if (!validPath(filePath) || !path.isAbsolute(filePath) || isAsarPath(filePath))
       return { success: false, reason: "invalid-path" };
+    if (!(await this.canAccessPath(filePath, { requireFile: true })))
+      return { success: false, reason: "outside-workspace" };
     let handle: any = null;
     try {
       handle = await fs.open(filePath, "r");
@@ -862,6 +887,10 @@ export class FileManager {
     expectedFingerprint?: unknown,
   ): Promise<string | undefined> {
     if (!validPath(filePath) || typeof content !== "string") {
+      return undefined;
+    }
+    if (!(await this.canAccessPath(filePath, { allowMissing: true }))) {
+      console.error("Refusing to save a file outside the authorized workspace.");
       return undefined;
     }
     let ownWriteToken: symbol | null = null;
@@ -921,6 +950,10 @@ export class FileManager {
     } else {
       return null;
     }
+    const userDataRoot = path.resolve(app.getPath("userData"));
+    if (path.resolve(requestedRoot) !== userDataRoot &&
+        !(await this.canAccessPath(requestedRoot, { requireDirectory: true })))
+      return null;
     let root: string;
     try {
       root = await fs.realpath(requestedRoot);
@@ -1070,6 +1103,8 @@ export class FileManager {
 
   async getFolderContent(dirPath: string): Promise<FileItem[]> {
     if (!dirPath) return [];
+    if (!(await this.canAccessPath(dirPath, { requireDirectory: true })))
+      return [];
     try {
       const entries = await fs.readdir(dirPath, { withFileTypes: true });
       const items: Array<FileItem | null> = Array(entries.length).fill(null);
@@ -1139,6 +1174,7 @@ export class FileManager {
       return undefined;
     }
 
+    await this.window.pathAccess?.authorizeRoot?.(filePaths[0]);
     return filePaths[0];
   }
 
@@ -1169,6 +1205,14 @@ export class FileManager {
           success: false,
           code: "INVALID_NAME",
           error: "Invalid file name.",
+        };
+      }
+      if (!(await this.canAccessPath(oldPath)) ||
+          !(await this.canAccessPath(newPath, { allowMissing: true }))) {
+        return {
+          success: false,
+          code: "OUTSIDE_WORKSPACE",
+          error: "The path must remain inside the authorized workspace.",
         };
       }
       const sourceStats = await fs.stat(oldPath);
@@ -1560,6 +1604,8 @@ export class FileManager {
       typeof overwrite !== "boolean"
     )
       return invalidPath();
+    if (!(await this.canAccessPath(dirPath, { requireDirectory: true })))
+      return { success: false, code: "OUTSIDE_WORKSPACE", error: "The folder must remain inside the authorized workspace." };
     const fullPath = path.join(dirPath, fileName);
     try {
       if (fsSync.existsSync(fullPath) && !overwrite) {
@@ -1597,6 +1643,8 @@ export class FileManager {
     folderName: string,
   ): Promise<FileOperationResult> {
     if (!validPath(dirPath) || !validName(folderName)) return invalidPath();
+    if (!(await this.canAccessPath(dirPath, { requireDirectory: true })))
+      return { success: false, code: "OUTSIDE_WORKSPACE", error: "The folder must remain inside the authorized workspace." };
     const fullPath = path.join(dirPath, folderName);
     try {
       if (fsSync.existsSync(fullPath)) {
@@ -1618,6 +1666,9 @@ export class FileManager {
     destPath: string,
   ): Promise<FileOperationResult> {
     if (!validPath(sourcePath) || !validPath(destPath)) return invalidPath();
+    if (!(await this.canAccessPath(sourcePath)) ||
+        !(await this.canAccessPath(destPath, { allowMissing: true })))
+      return { success: false, code: "OUTSIDE_WORKSPACE", error: "The path must remain inside the authorized workspace." };
     if (fsSync.existsSync(destPath))
       return { success: false, code: "DESTINATION_EXISTS" };
     try {
@@ -1639,6 +1690,9 @@ export class FileManager {
     destPath: string,
   ): Promise<FileOperationResult> {
     if (!validPath(sourcePath) || !validPath(destPath)) return invalidPath();
+    if (!(await this.canAccessPath(sourcePath)) ||
+        !(await this.canAccessPath(destPath, { allowMissing: true })))
+      return { success: false, code: "OUTSIDE_WORKSPACE", error: "The path must remain inside the authorized workspace." };
     if (fsSync.existsSync(destPath))
       return { success: false, code: "DESTINATION_EXISTS" };
     try {
@@ -1677,6 +1731,8 @@ export class FileManager {
       path.resolve(targetPath) === path.parse(path.resolve(targetPath)).root
     )
       return invalidPath();
+    if (!(await this.canAccessPath(targetPath)))
+      return { success: false, code: "OUTSIDE_WORKSPACE", error: "The path must remain inside the authorized workspace." };
     try {
       const dir = path.dirname(targetPath);
       const ext = path.extname(targetPath);
@@ -1715,6 +1771,8 @@ export class FileManager {
         return { success: false, totalLines: 0, errorCode: "INVALID_PATH" };
       if (isAsarPath(filePath))
         return { success: false, totalLines: 0, errorCode: "BINARY_FILE" };
+      if (!(await this.canAccessPath(filePath, { requireFile: true })))
+        return { success: false, totalLines: 0, errorCode: "OUTSIDE_WORKSPACE" };
       // Reloads replace the old snapshot and cancel any index still being built.
       this.clearFileCache(filePath);
       const stats = await fs.stat(filePath);
@@ -1801,13 +1859,23 @@ export class FileManager {
       if (!resolved) return { success: false, code: "OUTSIDE_WORKSPACE" };
       const pathApi = pathImplementation(resolved.sourcePath);
       try {
-        const [realRoot, realSource, realImage] = await Promise.all([
-          fs.realpath(resolved.workspaceRoot),
-          fs.realpath(resolved.sourcePath),
-          fs.realpath(resolved.imagePath),
-        ]);
-        if (!isPathInside(realRoot, realSource, pathApi) ||
-            !isPathInside(realRoot, realImage, pathApi))
+        const realSource = await fs.realpath(resolved.sourcePath);
+        if (!(await this.canAccessPath(realSource, { requireFile: true })))
+          return { success: false, code: "OUTSIDE_WORKSPACE" };
+        const realImage = await fs.realpath(resolved.imagePath);
+        const sourceRoot = pathApi.dirname(realSource);
+        const watchedRoot = this.window.watcher?.getWatchedPath?.();
+        const contextRoot = resolved.workspaceRoot
+          ? await fs.realpath(resolved.workspaceRoot).catch(() => null)
+          : null;
+        const insideContextRoot = Boolean(
+          contextRoot &&
+          isPathInside(contextRoot, realImage, pathApi) &&
+          await this.canAccessPath(contextRoot, { requireDirectory: true }),
+        );
+        if (!isPathInside(sourceRoot, realImage, pathApi) &&
+            !insideContextRoot &&
+            !(typeof watchedRoot === "string" && isPathInside(watchedRoot, realImage, pathApi)))
           return { success: false, code: "OUTSIDE_WORKSPACE" };
         imagePath = realImage;
       } catch (error: any) {
@@ -1817,6 +1885,8 @@ export class FileManager {
             ? "SOURCE_NOT_FOUND" : "IMAGE_READ_FAILED",
         };
       }
+    } else if (!(await this.canAccessPath(filePath, { requireFile: true }))) {
+      return { success: false, code: "OUTSIDE_WORKSPACE" };
     }
     const mimeType = IMAGE_MIME_TYPES[path.extname(imagePath).toLowerCase()];
     if (!mimeType) return { success: false, code: "UNSUPPORTED_IMAGE" };
@@ -1857,6 +1927,8 @@ export class FileManager {
         lineCount < 0
       )
         return { success: false, lines: [] };
+      if (!(await this.canAccessPath(filePath, { requireFile: true })))
+        return { success: false, lines: [], errorCode: "OUTSIDE_WORKSPACE" };
       const safeStartLine = startLine;
       const safeLineCount = lineCount;
       if (this.largeFileStore.has(filePath))
@@ -1996,6 +2068,8 @@ export class FileManager {
   ): Promise<boolean> {
     if (!validPath(workspaceRoot) || !state || typeof state !== "object")
       return false;
+    if (!(await this.canAccessPath(workspaceRoot, { requireDirectory: true })))
+      return false;
     const key = path.resolve(workspaceRoot);
     const previous =
       this.workspaceStateSaveQueues.get(key) || Promise.resolve(true);
@@ -2027,6 +2101,8 @@ export class FileManager {
 
   async loadWorkspaceState(workspaceRoot: string): Promise<object | null> {
     if (!validPath(workspaceRoot)) return null;
+    if (!(await this.canAccessPath(workspaceRoot, { requireDirectory: true })))
+      return null;
     return new NceWorkspaceStorage(workspaceRoot).readWorkspaceState<object>();
   }
 
@@ -2041,6 +2117,8 @@ export class FileManager {
       /^(?:[A-Za-z]:|\\\\|\/|~|file:)/i.test(relativePath) ||
       relativePath.includes("\0")
     )
+      return null;
+    if (!(await this.canAccessPath(workspaceRoot, { requireDirectory: true })))
       return null;
     try {
       const root = await fs.realpath(workspaceRoot);

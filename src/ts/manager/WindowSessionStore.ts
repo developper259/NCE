@@ -252,19 +252,19 @@ export class WindowSessionStore {
     let parsed: unknown;
     try { parsed = JSON.parse(rawState); } catch { return Promise.resolve(false); }
     if (!isRecord(parsed)) return Promise.resolve(false);
-    const lastWorkspace = safeText(parsed.lastWorkspace) ||
-      (isRecord(parsed.fileExplorer) ? safeText(parsed.fileExplorer.rootPath) : null);
     const sanitized = sanitizeRendererState(parsed);
     const current = this.sessions.get(id);
     if (!sanitized || !current) return Promise.resolve(false);
-    this.sessions.set(id, { ...current, rendererState: sanitized, workspacePath: lastWorkspace });
+    // Workspace ownership is established by the main-process watcher; a
+    // renderer-provided path must never become an auto-restored workspace.
+    this.sessions.set(id, { ...current, rendererState: sanitized });
     return this.persist();
   }
 
   async flush(): Promise<boolean> {
     if (this.writeTimer) clearTimeout(this.writeTimer);
     this.writeTimer = null;
-    if (this.preserveLegacySessionFile) return false;
+    if (this.preserveLegacySessionFile) return true;
     return this.persist();
   }
 
@@ -416,6 +416,7 @@ export class WindowSessionStore {
   }
 
   private persist(): Promise<boolean> {
+    if (this.preserveLegacySessionFile) return Promise.resolve(true);
     const content = this.serializeSnapshot();
     if (Buffer.byteLength(content, "utf8") > MAX_STORE_BYTES) return Promise.resolve(false);
     const queued = this.writeQueue.then(async () => {

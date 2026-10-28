@@ -270,53 +270,61 @@ export class App {
   }
 
   async requestQuitAll(): Promise<boolean> {
-    if (this.isQuitting) return true;
     if (this.quitPromise) return this.quitPromise;
+    if (this.isQuitting) return true;
     this.quitPromise = this.performQuitAll().finally(() => { this.quitPromise = null; });
     return this.quitPromise;
   }
 
   private async performQuitAll(): Promise<boolean> {
+    this.isQuitting = true;
     const windows = this.windowManager.getAllWindows();
     const prepared: Window[] = [];
-    for (const window of windows) {
-      const approved = await window.prepareForApplicationQuit();
-      if (!approved) {
-        for (const preparedWindow of prepared) preparedWindow.cancelPreparedClose();
-        return false;
+    try {
+      for (const window of windows) {
+        const approved = await window.prepareForApplicationQuit();
+        if (!approved) {
+          for (const preparedWindow of prepared) preparedWindow.cancelPreparedClose();
+          this.isQuitting = false;
+          return false;
+        }
+        prepared.push(window);
       }
-      prepared.push(window);
-    }
 
-    this.isQuitting = true;
-    for (const window of prepared) this.windowManager.updateWindowState(window);
-    const sessionsFlushed = await this.windowSessionStore.flush();
-    const conversationStoreAvailable = this.agentConversations.getStatus?.().available === true;
-    const conversationsFlushed = await this.agentConversations.flush();
-    if (!sessionsFlushed || (conversationStoreAvailable && !conversationsFlushed)) {
-      console.warn("[App] Quit cancelled because required session or Agent data could not be persisted");
-      this.isQuitting = false;
-      for (const window of prepared) await window.cancelPreparedClose();
-      return false;
-    }
-    for (const window of prepared) {
-      const closed = await window.commitPreparedClose();
-      if (!closed) {
+      for (const window of prepared) this.windowManager.updateWindowState(window);
+      const sessionsFlushed = await this.windowSessionStore.flush();
+      const conversationStoreAvailable = this.agentConversations.getStatus?.().available === true;
+      const conversationsFlushed = await this.agentConversations.flush();
+      if (!sessionsFlushed || (conversationStoreAvailable && !conversationsFlushed)) {
+        console.warn("[App] Quit cancelled because required session or Agent data could not be persisted");
         this.isQuitting = false;
-        for (const remaining of prepared) await remaining.cancelPreparedClose();
+        for (const window of prepared) await window.cancelPreparedClose();
         return false;
       }
-    }
-    if (!prepared.every((window) => window.canCloseCommittedWindow())) {
+      for (const window of prepared) {
+        const closed = await window.commitPreparedClose();
+        if (!closed) {
+          this.isQuitting = false;
+          for (const remaining of prepared) await remaining.cancelPreparedClose();
+          return false;
+        }
+      }
+      if (!prepared.every((window) => window.canCloseCommittedWindow())) {
+        this.isQuitting = false;
+        for (const window of prepared) await window.cancelPreparedClose();
+        return false;
+      }
+      for (const window of prepared) window.closeCommittedWindow();
+      for (const window of prepared) await window.waitForDisposal();
+      await this.stopNsh();
+      app.quit();
+      return true;
+    } catch (error) {
+      console.error("[App] Quit failed", error);
       this.isQuitting = false;
       for (const window of prepared) await window.cancelPreparedClose();
       return false;
     }
-    for (const window of prepared) window.closeCommittedWindow();
-    for (const window of prepared) await window.waitForDisposal();
-    await this.stopNsh();
-    app.quit();
-    return true;
   }
 
   async startNsh() {

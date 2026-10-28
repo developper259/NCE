@@ -7,6 +7,7 @@ const path = require("path");
 const fs = require("node:fs/promises");
 
 const fsSync = require("node:fs");
+const MAX_PENDING_EVENTS = 4096;
 
 interface FileChange {
   event: string;
@@ -18,6 +19,7 @@ interface WorkspaceReservationHooks {
   reserveWorkspace?: (projectPath: string) => Promise<{ success: boolean; path?: string; token?: number }>;
   commitWorkspace?: (projectPath: string, previousPath: string | null, token?: number) => boolean;
   releaseWorkspace?: (projectPath: string, updateWindow?: boolean, token?: number) => void;
+  isWorkspaceAllowed?: (projectPath: string) => Promise<boolean>;
 }
 
 export class Watcher {
@@ -157,6 +159,12 @@ export class Watcher {
 
   private async startWatchingNow(projectPath: string): Promise<void> {
     if (typeof projectPath !== "string" || !projectPath.trim() || projectPath.includes("\0")) return;
+    if (this.reservation.isWorkspaceAllowed &&
+        !(await this.reservation.isWorkspaceAllowed(projectPath))) {
+      const error: any = new Error("This folder is not authorized for this window.");
+      error.code = "WORKSPACE_NOT_AUTHORIZED";
+      throw error;
+    }
     await this.stopWatchingNow();
 
     const generation = this.watchGeneration;
@@ -186,6 +194,7 @@ export class Watcher {
       ignored: watcherIgnored,
       persistent: true,
       ignoreInitial: true,
+      followSymlinks: false,
 
       usePolling: this.usePolling,
       interval: 400,
@@ -215,9 +224,15 @@ export class Watcher {
         event === "unlinkDir" &&
         path.resolve(filePath) === path.resolve(this.watchedPath)
       ) {
-        this.window.webContents.send("file-system-change", [
-          { event: "root-deleted", filePath, dirPath },
-        ]);
+        if (this.window.webContents.isDestroyed?.() !== true) {
+          try {
+            this.window.webContents.send("file-system-change", [
+              { event: "root-deleted", filePath, dirPath },
+            ]);
+          } catch (error) {
+            console.warn("[Watcher] Failed to report deleted workspace root", error);
+          }
+        }
         const deletedRoot = this.watchedPath;
         void this.serializeWorkspaceOperation(async () => {
           await this.stopWatchingNow();
@@ -379,6 +394,10 @@ export class Watcher {
       dirPath,
     });
 
+    if (this.pendingEvents.size >= MAX_PENDING_EVENTS) {
+      this.flushEvents();
+      return;
+    }
     if (this.flushTimeout) {
       clearTimeout(this.flushTimeout);
     }
@@ -387,7 +406,10 @@ export class Watcher {
   }
 
   private flushEvents() {
-    this.flushTimeout = null;
+    if (this.flushTimeout) {
+      clearTimeout(this.flushTimeout);
+      this.flushTimeout = null;
+    }
 
     if (this.pendingEvents.size === 0) {
       return;
@@ -397,7 +419,12 @@ export class Watcher {
 
     this.pendingEvents.clear();
 
-    this.window.webContents.send("file-system-change", changes);
+    if (this.window.webContents.isDestroyed?.() === true) return;
+    try {
+      this.window.webContents.send("file-system-change", changes);
+    } catch (error) {
+      console.warn("[Watcher] Failed to deliver file-system changes", error);
+    }
   }
 
   async stopWatching(): Promise<void> {

@@ -1,5 +1,5 @@
 import { spawn, ChildProcess } from "child_process";
-import { promises as fs, constants as fsConstants, mkdirSync, writeFileSync, appendFileSync } from "fs";
+import { promises as fs, constants as fsConstants, writeFileSync, appendFileSync } from "fs";
 import path from "path";
 import { ipcMain } from "electron";
 import { Window } from "../Window";
@@ -105,10 +105,9 @@ export class AgentProcessRunner {
   ) {
     const storage = new NceWorkspaceStorage(workspaceRoot);
     const safeRunId = String(runId || "").replace(/[^A-Za-z0-9._-]/g, "_");
-    const root = storage.getRunTempRoot(safeRunId);
+    const root = storage.ensureRunTempRoot(safeRunId);
     const outputPath = path.join(root, "run-tests.log");
     void storage.cleanupTemp(7 * 24 * 60 * 60 * 1000, safeRunId);
-    mkdirSync(root, { recursive: true });
     writeFileSync(outputPath, "", "utf8");
     return {
       outputPath,

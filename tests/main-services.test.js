@@ -2206,7 +2206,9 @@ test("Project Map IPC keeps a cancellation received during workspace setup", asy
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), "nce-project-map-ipc-cancel-"));
   await fsp.writeFile(path.join(root, "file.txt"), "content");
   const handlers = new Map();
-  const search = new WorkspaceSearch({ window: null }, {
+  const search = new WorkspaceSearch({
+    watcher: { getWatchedPath: () => root },
+  }, {
     handle: (channel, handler) => handlers.set(channel, handler),
   });
   let finishStorageSetup;

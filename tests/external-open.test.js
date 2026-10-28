@@ -8,6 +8,13 @@ const { EventEmitter } = require("node:events");
 const { loadMain } = require("./helpers/main-runtime");
 const { ExternalOpenCoordinator, MAX_EXTERNAL_OPEN_PATHS } = require("../dist/ts/manager/ExternalOpenCoordinator.js");
 
+async function waitForDelivery(sent, index = 0) {
+  for (let attempt = 0; attempt < 100 && sent.length <= index; attempt++)
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.ok(sent.length > index, "expected an external open delivery");
+  return sent[index].payload;
+}
+
 function makeWindow(id, { deliver } = {}) {
   const state = { destroyed: false, deliveries: [], notices: [] };
   const window = {
@@ -473,7 +480,7 @@ test("renderer reload attempts reject stale ACKs and a late ACK after timeout is
   window.rendererReady = true;
 
   const deliveryResult = window.deliverExternalFiles(["/tmp/file.js"]);
-  const firstMessage = sent[0].payload;
+  const firstMessage = await waitForDelivery(sent);
   assert.equal(firstMessage.attempt, 1);
   const delivery = window.pendingExternalOpenDeliveries.get(firstMessage.requestId);
   delivery.sent = false;
@@ -503,8 +510,9 @@ test("renderer reload attempts reject stale ACKs and a late ACK after timeout is
   assert.equal(timers.size, 0);
   assert.ok(clearedTimers.length >= 2);
 
+  const lateIndex = sent.length;
   const lateResult = window.deliverExternalFiles(["/tmp/slow.js"]);
-  const lateMessage = sent.at(-1).payload;
+  const lateMessage = await waitForDelivery(sent, lateIndex);
   const activeTimer = [...timers.keys()].at(-1);
   timers.get(activeTimer).callback();
   assert.equal(JSON.stringify(await lateResult), JSON.stringify({
@@ -535,7 +543,7 @@ test("renderer progress re-arms the acknowledgement deadline until the batch com
   window.rendererReady = true;
 
   const result = window.deliverExternalFiles(["/tmp/one.js", "/tmp/two.js"]);
-  const message = sent[0].payload;
+  const message = await waitForDelivery(sent);
   const initialTimer = [...timers.keys()].at(-1);
   assert.equal(window.noteExternalOpenProgress(message.requestId, message.attempt), true);
   assert.ok(clearedTimers.includes(initialTimer), "progress clears the pending inactivity timer");
@@ -570,7 +578,7 @@ test("progress cannot extend a delivery that is waiting for a renderer reload", 
   window.rendererReady = true;
 
   const result = window.deliverExternalFiles(["/tmp/reload.js"]);
-  const message = sent[0].payload;
+  const message = await waitForDelivery(sent);
   const delivery = window.pendingExternalOpenDeliveries.get(message.requestId);
   delivery.sent = false;
   assert.equal(window.noteExternalOpenProgress(message.requestId, message.attempt), false,

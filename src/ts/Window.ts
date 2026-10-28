@@ -2,6 +2,7 @@ import {
   app,
   BrowserWindow,
   clipboard,
+  dialog,
   shell,
   type IpcMainInvokeEvent,
   type WebContents,
@@ -20,6 +21,7 @@ import { TerminalManager } from "./terminal/TerminalManager";
 import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { App } from "./App";
 import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
+import { PathAccess } from "./manager/PathAccess";
 import { TITLEBAR_OVERLAY_THEME } from "./manager/TitleBarTheme";
 import type { WindowSession } from "./manager/WindowSessionStore";
 import type { DeliveredFileResult, ExternalOpenResult } from "./manager/ExternalOpenCoordinator";
@@ -91,6 +93,7 @@ export class Window {
   agentApprovalManager: AgentApprovalManager | undefined;
   agentProcessRunner: AgentProcessRunner | undefined;
   terminalManager: TerminalManager | undefined;
+  readonly pathAccess: PathAccess;
   private readonly activeAgentModelRequests = new Map<string, AbortController>();
   app: App;
   forceQuit: boolean;
@@ -149,6 +152,15 @@ export class Window {
     this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
     this.terminalManager = undefined;
+    this.pathAccess = new PathAccess(
+      () => this.watcher?.getWatchedPath?.() || this.workspacePath,
+    );
+    if (this.initialSession.workspacePath)
+      this.pathAccess.trustRootSync(this.initialSession.workspacePath);
+    for (const folder of this.app.recentFolders?.getAll?.() || [])
+      this.pathAccess.trustRootSync(folder);
+    if (this.app.settings?.settingsPath)
+      void this.pathAccess.authorizeFile(this.app.settings.settingsPath);
   }
 
   create() {
@@ -197,6 +209,8 @@ export class Window {
         this.app.windowManager.commitWorkspace(this.id, projectPath, token),
       releaseWorkspace: (projectPath, updateWindow, token) =>
         this.app.windowManager.releaseWorkspace(this.id, projectPath, updateWindow, token),
+      isWorkspaceAllowed: (projectPath) =>
+        this.pathAccess.isAuthorized(projectPath, { requireDirectory: true }),
     });
     this.terminalManager = new TerminalManager({
       getWorkspacePath: () => this.watcher?.getWatchedPath() || null,
@@ -410,7 +424,11 @@ export class Window {
       catch (error) { console.error("[Terminal] Failed to open external link", error); return false; }
     });
     this.ipc.handle("RecentFolders:getAll", async () => this.app.recentFolders.getAll());
-    this.ipc.handle("RecentFolders:add", async (_event, folderPath) => this.addRecentFolder(folderPath));
+    this.ipc.handle("RecentFolders:add", async (_event, folderPath) => {
+      if (!(await this.pathAccess.isAuthorized(folderPath, { requireDirectory: true })))
+        return false;
+      return this.addRecentFolder(folderPath);
+    });
     this.ipc.handle("RecentFolders:remove", async (_event, folderPath) => this.removeRecentFolder(folderPath));
     this.ipc.handle("RecentFolders:clear", async () => this.clearRecentFolders());
     this.ipc.handle("App:rendererReady", async () => {
@@ -430,7 +448,17 @@ export class Window {
           failures: [{ path: "", code: "WINDOW_UNAVAILABLE", message: "The drop target window is no longer available." }],
         } satisfies ExternalOpenResult;
       }
-      return this.app.externalOpenCoordinator.enqueueDrop(paths, target);
+      const authorized = await this.confirmDroppedPaths(paths);
+      if (!authorized) {
+        return {
+          success: false,
+          openedFiles: 0,
+          openedFolders: 0,
+          focusedFolders: 0,
+          failures: [],
+        } satisfies ExternalOpenResult;
+      }
+      return this.app.externalOpenCoordinator.enqueueDrop(authorized, target);
     });
     this.ipc.handle("ExternalOpen:ack", async (_event, requestId, attempt, rawResult) =>
       this.acknowledgeExternalOpen(requestId, attempt, rawResult));
@@ -451,8 +479,11 @@ export class Window {
       this.finishRollback(requestId, false));
     this.ipc.handle("Window:focusWorkspace", async (_event, folderPath) =>
       this.app.windowManager.focusWorkspace(folderPath, this.id));
-    this.ipc.handle("Window:openWorkspaceInNewWindow", async (_event, folderPath) =>
-      this.app.windowManager.openWorkspaceInNewWindow(folderPath));
+    this.ipc.handle("Window:openWorkspaceInNewWindow", async (_event, folderPath) => {
+      if (!(await this.pathAccess.isAuthorized(folderPath, { requireDirectory: true })))
+        return false;
+      return this.app.windowManager.openWorkspaceInNewWindow(folderPath);
+    });
     this.ipc.handle("NSH:getEndpoint", async () => this.app.nshEndpoint);
     this.ipc.handle("AgentConversations:status", async () =>
       this.app.agentConversations?.getStatus() || { available: false, reason: "STORE_ERROR" });
@@ -480,9 +511,38 @@ export class Window {
     this.terminalManager?.registerIPC();
   }
 
-  deliverExternalFiles(paths: string[]): Promise<DeliveredFileResult> {
-    const target = this.window;
-    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) {
+  private async confirmDroppedPaths(paths: unknown): Promise<string[] | null> {
+    if (!Array.isArray(paths)) return null;
+    const candidates = paths.filter((value): value is string =>
+      typeof value === "string" && Boolean(value.trim()) && !value.includes("\0"));
+    if (!candidates.length) return [];
+    const dialogApi = dialog as typeof dialog | undefined;
+    if (this.window && typeof dialogApi?.showMessageBox === "function") {
+      const visible = candidates.slice(0, 8).join("\n");
+      const more = candidates.length > 8
+        ? `\n… ${candidates.length - 8} more`
+        : "";
+      const result = await dialogApi.showMessageBox(this.window, {
+        type: "question",
+        buttons: ["Open", "Cancel"],
+        defaultId: 0,
+        cancelId: 1,
+        message: "Open dropped items?",
+        detail: `${visible}${more}`,
+      });
+      if (result?.response !== 0) return null;
+    }
+    const authorized: string[] = [];
+    for (const candidate of candidates)
+      if (await this.pathAccess.authorizeExternal(candidate))
+        authorized.push(candidate);
+    return authorized;
+  }
+
+  async deliverExternalFiles(paths: string[]): Promise<DeliveredFileResult> {
+    await Promise.all(paths.map((filePath) =>
+      this.pathAccess.authorizeExternal(filePath)));
+    const target = this.window;    if (!target || target.isDestroyed() || target.webContents.isDestroyed()) {
       return Promise.resolve({
         openedPaths: [],
         failures: paths.map((filePath) => ({
@@ -939,8 +999,8 @@ export class Window {
   private async disposeWindowServices(owner?: WebContents): Promise<void> {
     this.agentApprovalManager?.cancelAll();
     this.agentProcessRunner?.dispose();
-    if (owner) await this.terminalManager?.closeForOwner(owner);
     await this.watcher?.dispose();
+    if (owner) await this.terminalManager?.closeForOwner(owner);
     await this.workspaceSearch?.dispose();
     this.fileManager?.clearFileCache();
   }

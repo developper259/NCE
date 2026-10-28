@@ -1,4 +1,4 @@
-import { promises as fs } from "fs";
+import { promises as fs, lstatSync, mkdirSync } from "fs";
 import path from "path";
 
 const NCE_DIRECTORY = ".nce";
@@ -44,9 +44,29 @@ export class NceWorkspaceStorage {
     return candidate;
   }
 
+  private async ensureDirectory(directory: string): Promise<void> {
+    try {
+      const stats = await fs.lstat(directory);
+      if (stats.isSymbolicLink() || !stats.isDirectory())
+        throw new Error("Workspace storage must use real directories.");
+      return;
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    try {
+      await fs.mkdir(directory);
+    } catch (error: any) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    const stats = await fs.lstat(directory);
+    if (stats.isSymbolicLink() || !stats.isDirectory())
+      throw new Error("Workspace storage must use real directories.");
+  }
+
   async ensureStructure(): Promise<void> {
-    await fs.mkdir(this.cacheRoot, { recursive: true });
-    await fs.mkdir(this.tempRoot, { recursive: true });
+    await this.ensureDirectory(this.nceRoot);
+    await this.ensureDirectory(this.cacheRoot);
+    await this.ensureDirectory(this.tempRoot);
     const ignorePath = path.join(this.nceRoot, ".gitignore");
     try {
       await fs.access(ignorePath);
@@ -78,7 +98,13 @@ export class NceWorkspaceStorage {
 
   async readWorkspaceState<T>(): Promise<T | null> {
     try {
-      const stats = await fs.stat(this.workspaceStatePath);
+      const stats = await fs.lstat(this.workspaceStatePath);
+      if (stats.isSymbolicLink() || !stats.isFile()) {
+        console.warn("[NCE Workspace State] Refusing a non-regular state file", {
+          root: this.workspaceRoot,
+        });
+        return null;
+      }
       if (stats.size > MAX_WORKSPACE_STATE_BYTES) {
         console.warn("[NCE Workspace State] State exceeds size limit", {
           root: this.workspaceRoot,
@@ -112,19 +138,76 @@ export class NceWorkspaceStorage {
     return this.getTempPath(safeId);
   }
 
+  ensureRunTempRoot(runId: string): string {
+    const target = this.getRunTempRoot(runId);
+    const ensure = (directory: string) => {
+      try {
+        const stats = lstatSync(directory);
+        if (stats.isSymbolicLink() || !stats.isDirectory())
+          throw new Error("Run storage must use real directories.");
+        return;
+      } catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      mkdirSync(directory);
+      const stats = lstatSync(directory);
+      if (stats.isSymbolicLink() || !stats.isDirectory())
+        throw new Error("Run storage must use real directories.");
+    };
+    ensure(this.tempRoot);
+    ensure(target);
+    return target;
+  }
+
   async writeCacheText(relativePath: string, content: string): Promise<string> {
     await this.ensureStructure();
     const target = this.getCachePath(relativePath);
-    await fs.mkdir(path.dirname(target), { recursive: true });
+    await this.ensureSafeRelativeDirectory(path.dirname(target), this.cacheRoot);
+    await this.assertSafeTarget(target, this.cacheRoot);
     await fs.writeFile(target, String(content), "utf8");
     return target;
   }
 
   async readCacheText(relativePath: string): Promise<string | null> {
     try {
-      return await fs.readFile(this.getCachePath(relativePath), "utf8");
+      const target = this.getCachePath(relativePath);
+      await this.assertSafeTarget(target, this.cacheRoot);
+      return await fs.readFile(target, "utf8");
     } catch {
       return null;
+    }
+  }
+
+  private async ensureSafeRelativeDirectory(directory: string, root: string): Promise<void> {
+    const relative = path.relative(root, directory);
+    if (relative.startsWith("..") || path.isAbsolute(relative))
+      throw new Error("Storage path escapes its root.");
+    let current = root;
+    for (const segment of relative.split(path.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      try {
+        const stats = await fs.lstat(current);
+        if (stats.isSymbolicLink() || !stats.isDirectory())
+          throw new Error("Storage directories must not be symbolic links.");
+      } catch (error: any) {
+        if (error?.code !== "ENOENT") throw error;
+        await fs.mkdir(current);
+      }
+    }
+  }
+
+  private async assertSafeTarget(target: string, root: string): Promise<void> {
+    const realRoot = await fs.realpath(root);
+    const realParent = await fs.realpath(path.dirname(target));
+    const relative = path.relative(realRoot, realParent);
+    if (relative.startsWith("..") || path.isAbsolute(relative))
+      throw new Error("Storage path escapes its real root.");
+    try {
+      const stats = await fs.lstat(target);
+      if (stats.isSymbolicLink())
+        throw new Error("Storage targets must not be symbolic links.");
+    } catch (error: any) {
+      if (error?.code !== "ENOENT") throw error;
     }
   }
 
@@ -132,7 +215,8 @@ export class NceWorkspaceStorage {
     await this.ensureStructure();
     const target = this.getCachePath(relativePath);
     const temporary = `${target}.${process.pid}.${Date.now()}.tmp`;
-    await fs.mkdir(path.dirname(target), { recursive: true });
+    await this.ensureSafeRelativeDirectory(path.dirname(target), this.cacheRoot);
+    await this.assertSafeTarget(target, this.cacheRoot);
     await fs.writeFile(temporary, JSON.stringify(value), "utf8");
     await fs.rename(temporary, target);
     return target;
@@ -140,9 +224,9 @@ export class NceWorkspaceStorage {
 
   async readCacheJson<T>(relativePath: string): Promise<T | null> {
     try {
-      return JSON.parse(
-        await fs.readFile(this.getCachePath(relativePath), "utf8"),
-      ) as T;
+      const target = this.getCachePath(relativePath);
+      await this.assertSafeTarget(target, this.cacheRoot);
+      return JSON.parse(await fs.readFile(target, "utf8")) as T;
     } catch {
       return null;
     }

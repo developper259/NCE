@@ -57,6 +57,7 @@ export class WindowManager {
   }
 
   createEmptyWindow(focus = true): Window | null {
+    if (this.app.isQuitting) return null;
     if (this.windows.size >= MAX_NCE_WINDOWS) {
       void this.showWindowLimitMessage();
       return null;
@@ -67,6 +68,7 @@ export class WindowManager {
   }
 
   createWindow(options: CreateWindowOptions = {}): Window | null {
+    if (this.app.isQuitting) return null;
     if (this.windows.size >= MAX_NCE_WINDOWS) return null;
     let session = options.session || null;
     let createdWindow: Window | null = null;

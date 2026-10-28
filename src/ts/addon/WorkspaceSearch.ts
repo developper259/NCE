@@ -307,12 +307,44 @@ export class WorkspaceSearch {
     } catch {}
   }
 
+  private activeWorkspaceRoot(): string | null {
+    const root = this.window?.watcher?.getWatchedPath?.();
+    return typeof root === "string" && root.trim() ? path.resolve(root) : null;
+  }
+
+  private async isActiveWorkspaceRoot(value: unknown): Promise<boolean> {
+    const active = this.activeWorkspaceRoot();
+    if (!active || typeof value !== "string" || !value.trim() || value.includes("\0"))
+      return false;
+    try {
+      return path.resolve(await fs.realpath(value)) ===
+        path.resolve(await fs.realpath(active));
+    } catch {
+      return false;
+    }
+  }
+
+  private inactiveReplaceResponse(): ReplaceResponse {
+    return {
+      success: false,
+      filesChanged: 0,
+      replacements: 0,
+      filesScanned: 0,
+      filesMatched: 0,
+      skippedFiles: [],
+      conflictedFiles: [],
+      failedFiles: [],
+      cancelled: false,
+      error: "The requested workspace is not active.",
+    };
+  }
+
   handleIPC() {
     this.ipc.handle(
       "WorkspaceSearch:indexStats",
       async (_event, rootPath: unknown) => {
-        if (typeof rootPath !== "string" || !rootPath.trim()) return null;
-        const root = path.resolve(rootPath);
+        if (!(await this.isActiveWorkspaceRoot(rootPath))) return null;
+        const root = path.resolve(rootPath as string);
         this.workspaceIndex.scheduleBuild(root);
         return this.workspaceIndex.getStats(root);
       },
@@ -327,6 +359,8 @@ export class WorkspaceSearch {
       ) => {
         const requestId = options?.requestId;
         if (requestId) this.cancelledRequests.delete(requestId);
+        if (!(await this.isActiveWorkspaceRoot(rootPath)))
+          return this.emptySearchResponse(options);
         await this.ensureWorkspaceStorage(rootPath);
         try {
           return await this.search(rootPath, query, options);
@@ -340,6 +374,8 @@ export class WorkspaceSearch {
       async (event, rootPath: string, query: string, options: SearchOptions = {}) => {
         const requestId = options?.requestId;
         if (requestId) this.cancelledRequests.delete(requestId);
+        if (!(await this.isActiveWorkspaceRoot(rootPath)))
+          return { success: false, error: "The requested workspace is not active." };
         await this.ensureWorkspaceStorage(rootPath);
         try {
           return this.startSearchStream(
@@ -371,7 +407,11 @@ export class WorkspaceSearch {
         query: string,
         replacement: string,
         options: SearchOptions = {},
-      ): Promise<ReplaceResponse> => this.replace(rootPath, query, replacement, options),
+      ): Promise<ReplaceResponse> => {
+        if (!(await this.isActiveWorkspaceRoot(rootPath)))
+          return this.inactiveReplaceResponse();
+        return this.replace(rootPath, query, replacement, options);
+      },
     );
     this.ipc.handle(
       "WorkspaceSearch:projectMap",
@@ -383,6 +423,29 @@ export class WorkspaceSearch {
       ) => {
         const requestId = options?.requestId;
         if (requestId) this.cancelledRequests.delete(requestId);
+        if (!(await this.isActiveWorkspaceRoot(rootPath)))
+          return {
+            success: false,
+            root: "",
+            entries: [],
+            files: 0,
+            directories: 0,
+            truncated: false,
+            maxDepth: 0,
+            maxFiles: 0,
+            inspectionBytes: 0,
+            inspectionBudgetBytes: 0,
+            inspectionSkippedFiles: 0,
+            inspectionUnavailableFiles: 0,
+            inspectionCacheHits: 0,
+            indexedMetadataHits: 0,
+            indexHit: false,
+            cancelled: false,
+            error: {
+              code: "WORKSPACE_NOT_ACTIVE",
+              message: "The requested workspace is not active.",
+            },
+          };
         try {
           await this.ensureWorkspaceStorage(rootPath);
           return await this.getProjectMap(rootPath, targetPath, options);
@@ -394,6 +457,17 @@ export class WorkspaceSearch {
     this.ipc.handle(
       "WorkspaceSearch:projectFiles",
       async (_event, rootPath: string, options: ProjectFilesOptions = {}) => {
+        if (!(await this.isActiveWorkspaceRoot(rootPath)))
+          return {
+            success: false,
+            entries: [],
+            indexHit: false,
+            filesProbed: 0,
+            error: {
+              code: "WORKSPACE_NOT_ACTIVE",
+              message: "The requested workspace is not active.",
+            },
+          };
         await this.ensureWorkspaceStorage(rootPath);
         return this.listProjectFiles(rootPath, options);
       },
