@@ -40,7 +40,7 @@ test("native modules are rebuilt for each macOS architecture before packaging", 
   assert.doesNotMatch(releaseWorkflow, /--mac --x64 --arm64/);
 });
 
-test("release builds enable fuses, signature checks and pinned actions", () => {
+test("release builds enable fuses, package checks and pinned actions", () => {
   assert.equal(packageJson.build.afterPack, "scripts/after-pack.js");
   assert.ok(packageJson.build.files.includes("!node_modules/node-pty/bin/**/*"));
   const afterPack = fs.readFileSync(
@@ -60,22 +60,12 @@ test("release builds enable fuses, signature checks and pinned actions", () => {
   assert.match(checkPackage, /NCE_REQUIRE_MAC_ARCHS/);
   assert.match(checkPackage, /node-pty\/bin/);
 
-  const verifySigning = fs.readFileSync(
-    path.join(__dirname, "../scripts/verify-signing.js"),
-    "utf8",
-  );
-  assert.match(verifySigning, /codesign/);
-  assert.match(verifySigning, /spctl/);
-  assert.match(verifySigning, /Get-AuthenticodeSignature/);
-
   const releaseWorkflow = fs.readFileSync(
     path.join(__dirname, "../.github/workflows/release-build.yml"),
     "utf8",
   );
   assert.match(releaseWorkflow, /Verify tag matches package version/);
-  assert.match(releaseWorkflow, /Require Windows signing credentials/);
   assert.match(releaseWorkflow, /NCE_REQUIRE_MAC_ARCHS/);
-  assert.match(releaseWorkflow, /verify-signing\.js/);
   for (const workflow of [
     fs.readFileSync(path.join(__dirname, "../.github/workflows/ci.yml"), "utf8"),
     releaseWorkflow,
@@ -86,27 +76,21 @@ test("release builds enable fuses, signature checks and pinned actions", () => {
   }
 });
 
-test("macOS releases do not require Apple credentials while Windows signatures remain mandatory", () => {
+test("macOS and Windows releases do not require signing credentials", () => {
   const releaseWorkflow = fs.readFileSync(
     path.join(__dirname, "../.github/workflows/release-build.yml"),
     "utf8",
   );
-  const macBuildStep = releaseWorkflow
-    .split(/^      - /m)
-    .find((step) => /^\s*run: npm run build:mac$/m.test(step));
-  assert.ok(macBuildStep);
-  assert.match(macBuildStep, /CSC_IDENTITY_AUTO_DISCOVERY: 'false'/);
-  assert.doesNotMatch(releaseWorkflow, /\b(?:MAC_CERT|APPLE_[A-Z_]+)\b/);
-  assert.doesNotMatch(releaseWorkflow, /secrets\.CSC_(?:LINK|KEY_PASSWORD)\b/);
-  assert.match(
-    releaseWorkflow,
-    /name: Require Windows signing credentials\n\s+if: runner\.os == 'Windows'/,
-  );
-  assert.match(releaseWorkflow, /WIN_CSC_LINK is required/);
-  assert.match(
-    releaseWorkflow,
-    /name: Verify Windows release signatures\n\s+if: runner\.os == 'Windows'\n\s+run: node scripts\/verify-signing\.js/,
-  );
+  const steps = releaseWorkflow.split(/^      - /m);
+  for (const command of ["npm run build", "npm run build:mac"]) {
+    const buildStep = steps.find((step) =>
+      step.split("\n").some((line) => line.trim() === `run: ${command}`));
+    assert.ok(buildStep, command);
+    assert.match(buildStep, /CSC_IDENTITY_AUTO_DISCOVERY: 'false'/);
+  }
+  assert.doesNotMatch(releaseWorkflow, /\b(?:MAC_CERT|WIN_CERT|APPLE_[A-Z_]+)\b/);
+  assert.doesNotMatch(releaseWorkflow, /\b(?:WIN_)?CSC_(?:LINK|KEY_PASSWORD)\b/);
+  assert.doesNotMatch(releaseWorkflow, /Require .*signing credentials|verify-signing\.js/);
   assert.doesNotMatch(releaseWorkflow, /^\s*if:.*secrets\./m);
 });
 

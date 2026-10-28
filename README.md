@@ -196,7 +196,7 @@ Build artifacts are generated in `release/`.
 
 macOS releases are built without an Apple Developer certificate or notarization. No Apple signing credentials are required; Gatekeeper may block the downloaded app.
 
-Windows releases require `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD`. The workflow fails before building when the Windows certificate is missing and verifies the produced Windows signature.
+Windows releases are built without code signing. No Windows signing credentials are required; SmartScreen may warn about or block the downloaded installer.
 
 All platforms run an automated PTY smoke test against the packaged `app.asar`.
 
