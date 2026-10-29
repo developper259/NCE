@@ -269,8 +269,15 @@ export class GitManager {
   async getStatus(): Promise<GitResult<{ status: GitStatus }>> {
     const context = await this.resolveContext();
     if ("failure" in context) return context.failure;
+    const scope = comparable(context.root, this.platform) === comparable(context.workspace, this.platform)
+      ? "."
+      : path.relative(context.root, context.workspace).split(path.sep).join("/");
+    // NCE's own workspace state must never appear as user changes.
     const result = await this.runGit(
-      ["status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all"],
+      [
+        "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all",
+        "--", `:(literal)${scope}`, ":(exclude,glob)**/.nce/**",
+      ],
       { cwd: context.root },
     );
     if (!result.ok) return result.failure;

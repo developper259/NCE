@@ -53,6 +53,12 @@
   --menu-hover: var(--bg-hover);
   --menu-check: #d0d0d0;
 
+  /* Git status accents */
+  --git-added: #6fce97;
+  --git-deleted: #e5808a;
+  --git-modified: #d7ba7d;
+  --git-conflict: #e5a45a;
+
   --scroller-size: 15px;
 
   --output-height: calc(90% - 18px);
@@ -97,4 +103,10 @@
   --shadow-color: rgba(25, 35, 45, 0.22);
   --unsaved-indicator: #222b35;
   --menu-check: #0067b8;
+
+  /* Git status accents */
+  --git-added: #1a7f37;
+  --git-deleted: #c93c47;
+  --git-modified: #8f6400;
+  --git-conflict: #b45309;
 }

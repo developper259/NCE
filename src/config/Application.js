@@ -197,6 +197,12 @@ USERCONFIG_SIDEBAR_MENUS = [
     icon: "fi fi-rr-search",
     position: "left",
   },
+  {
+    id: "git",
+    title: "Source Control",
+    icon: "fi fi-rr-code-branch",
+    position: "left",
+  },
 ];
 
 USERCONFIG_FILE_ICONS = {

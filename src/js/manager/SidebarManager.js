@@ -630,8 +630,10 @@ class SidebarManager {
       if (menu.position === "left") {
         const explorerActive = menu.id === "file-explorer";
         const searchActive = menu.id === "search";
+        const gitActive = menu.id === "git";
         container.classList.toggle("file-explorer-mode", explorerActive);
         container.classList.toggle("search-sidebar-mode", searchActive);
+        container.classList.toggle("git-sidebar-mode", gitActive);
         if (explorerActive) {
           container.scrollTop = 0;
           this.leftScroller?.suspend();

@@ -3,6 +3,7 @@ const TAB_TYPES = Object.freeze({
   SETTINGS: "settings",
   PICTURE: "picture",
   MARKDOWN: "markdown",
+  GIT_DIFF: "git-diff",
 });
 const AUTO_SAVE_DEBOUNCE_MS = 180;
 const RECOVERY_SNAPSHOT_DEBOUNCE_MS = 120;
@@ -59,6 +60,22 @@ class MarkdownTab extends Tab {
     this.path = path;
     this.diskFingerprint = null;
     this.textTab = null;
+  }
+}
+
+class GitDiffTab extends Tab {
+  constructor(id, { filePath, relativePath, staged, statusKind, originalPath = null }) {
+    super(id, TAB_TYPES.GIT_DIFF, GitDiffTab.displayName(filePath, staged));
+    this.filePath = filePath;
+    this.relativePath = relativePath;
+    this.staged = staged === true;
+    this.statusKind = statusKind || "modified";
+    this.originalPath = originalPath;
+  }
+
+  static displayName(filePath, staged) {
+    const base = NCEPath.basename(filePath);
+    return `${base} (${staged ? "Index" : "Working Tree"})`;
   }
 }
 
@@ -932,6 +949,7 @@ class FileNode extends Tab {
       this.editor.historyController?.markSaved(this);
       await this.clearRecoverySnapshot({ committed: true, editVersion: version }).catch(() => false);
       this.editor.tabManager.refresh();
+      this.editor.gitSidebar?.noteEditorSave?.();
       return { saved: true, result: saved };
     } catch (error) {
       this.reportSaveError(error);
@@ -968,6 +986,7 @@ class FileNode extends Tab {
         await this.clearRecoverySnapshot({ committed: true, editVersion: version }).catch(() => false);
       }
       this.editor.tabManager.refresh();
+      this.editor.gitSidebar?.noteEditorSave?.();
       return true;
     } catch (error) {
       this.reportSaveError(error);
@@ -1029,6 +1048,7 @@ class FileNode extends Tab {
     if (this === this.editor.tabManager.activeFile)
       this.editor.fileExplorer?.setActiveFile(this.path);
     this.editor.tabManager.refresh();
+    this.editor.gitSidebar?.noteEditorSave?.();
     return true;
   }
 

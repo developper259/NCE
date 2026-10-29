@@ -362,6 +362,7 @@ class FileExplorer extends Sidebar {
       rootPath: this.rootPath,
       projectName: this.projectName,
     });
+    this.editor.gitSidebar?.handleWorkspaceChanged?.(this.rootPath);
     return true;
   }
 
@@ -401,6 +402,7 @@ class FileExplorer extends Sidebar {
         projectName: previousProjectName,
       });
     }
+    this.editor.gitSidebar?.handleWorkspaceChanged?.("");
   }
 
   async loadFolderContent(folderPath) {
@@ -455,6 +457,7 @@ class FileExplorer extends Sidebar {
         projectName: previousProjectName,
       });
     }
+    this.editor.gitSidebar?.handleWorkspaceChanged?.("");
     if (!switching) {
       await this.editor.statesManager.restoreNoWorkspaceState(
         this.editor.statesManager.noWorkspaceState,

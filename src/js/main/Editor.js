@@ -96,10 +96,12 @@ class Editor {
 
     this.fileExplorer = new FileExplorer(this);
     this.searchSidebar = new SearchSidebar(this);
+    this.gitSidebar = new GitSidebar(this);
     this.agentSidebar = new LazyAgentSidebar(this);
 
     this.sidebarManager.registerMenu(this.fileExplorer);
     this.sidebarManager.registerMenu(this.searchSidebar);
+    this.sidebarManager.registerMenu(this.gitSidebar);
     this.sidebarManager.registerMenu(this.agentSidebar);
     this.contextMenuManager.setMenu(
       "sidebar-selector-empty",
@@ -112,6 +114,14 @@ class Editor {
     this.contextMenuManager.setMenu(
       "sidebar-title",
       buildSidebarTitleContextMenu(this.sidebarManager),
+    );
+    this.contextMenuManager.setMenu(
+      "git-file",
+      buildGitFileContextMenu(this),
+    );
+    this.contextMenuManager.setMenu(
+      "git-header",
+      buildGitHeaderContextMenu(this),
     );
 
     this.writerController = new WriterController(this);
@@ -134,6 +144,7 @@ class Editor {
     this._settingsView = null;
     this._pictureView = null;
     this._markdownView = null;
+    this._gitDiffView = null;
     this._performanceDashboard = null;
 
     this.writerController.insertMode = true;
@@ -335,6 +346,11 @@ class Editor {
     return this._markdownView;
   }
 
+  getGitDiffView() {
+    if (!this._gitDiffView) this._gitDiffView = new GitDiffView(this);
+    return this._gitDiffView;
+  }
+
   getPerformanceDashboard() {
     if (!this._performanceDashboard)
       this._performanceDashboard = new PerformanceDashboard(this);
@@ -391,10 +407,12 @@ class Editor {
     this.quickPanel?.destroy?.();
     this.fileExplorer?.destroy?.();
     this.searchSidebar?.destroy?.();
+    this.gitSidebar?.destroy?.();
     this.agentSidebar?.destroy?.();
     this._settingsView?.destroy?.();
     this._pictureView?.destroy?.();
     this._markdownView?.destroy?.();
+    this._gitDiffView?.destroy?.();
     this._performanceDashboard?.destroy?.();
     this.bottomPanelManager?.destroy?.();
     this.tabManager?.destroy?.();
@@ -426,20 +444,24 @@ class Editor {
     const settingsActive = type === TAB_TYPES.SETTINGS;
     const pictureActive = type === TAB_TYPES.PICTURE;
     const markdownActive = type === TAB_TYPES.MARKDOWN;
+    const gitDiffActive = type === TAB_TYPES.GIT_DIFF;
     this.editorOBJ.classList.toggle("editor-settings-active", settingsActive);
     this.editorOBJ.classList.toggle("editor-picture-active", pictureActive);
     this.editorOBJ.classList.toggle("editor-markdown-active", markdownActive);
+    this.editorOBJ.classList.toggle("editor-git-diff-active", gitDiffActive);
     this.bottomBar?.setSettingsActive?.(settingsActive);
     if (settingsActive) {
       this.getSettingsView().show();
       this._pictureView?.hide();
       this._markdownView?.hide();
+      this._gitDiffView?.hide();
       this.bottomBar?.hide();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (pictureActive) {
       this._settingsView?.hide();
       this._markdownView?.hide();
+      this._gitDiffView?.hide();
       this.getPictureView().show(this.tabManager.activeTab);
       this.bottomBar?.showImagePreview();
       this.cursorController?.disable();
@@ -447,6 +469,7 @@ class Editor {
     } else if (markdownActive) {
       this._settingsView?.hide();
       this._pictureView?.hide();
+      this._gitDiffView?.hide();
       const activeTab = this.tabManager.activeTab;
       if (typeof MarkdownView !== "undefined") {
         this.getMarkdownView().show(activeTab);
@@ -459,10 +482,19 @@ class Editor {
       this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);
+    } else if (gitDiffActive) {
+      this._settingsView?.hide();
+      this._pictureView?.hide();
+      this._markdownView?.hide();
+      this.getGitDiffView().show(this.tabManager.activeTab);
+      this.bottomBar?.hide();
+      this.cursorController?.disable();
+      this.setSelected(false);
     } else {
       this._settingsView?.hide();
       this._pictureView?.hide();
       this._markdownView?.hide();
+      this._gitDiffView?.hide();
       if (this.tabManager.activeFile) this.bottomBar?.show();
     }
   }

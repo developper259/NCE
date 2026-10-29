@@ -118,6 +118,7 @@ test("GitManager resolves a workspace inside a repository subfolder", { skip: gi
   const nested = path.join(root, "packages", "app");
   await fs.mkdir(nested, { recursive: true });
   await fs.writeFile(path.join(nested, "nested.txt"), "nested\n");
+  await fs.writeFile(path.join(root, "outside-workspace.txt"), "root change\n");
   // The authorization boundary is the workspace, but Git may report a parent root.
   const manager = managerFor(nested);
   try {
@@ -127,7 +128,35 @@ test("GitManager resolves a workspace inside a repository subfolder", { skip: gi
     assert.equal(staged.path, path.join("packages", "app", "nested.txt").split(path.sep).join("/"));
     const status = await manager.getStatus();
     assert.equal(status.success, true);
+    assert.equal(status.status.entries.length, 1, "status stays scoped to the workspace");
     assert.equal(status.status.entries[0].path, "packages/app/nested.txt");
+    assert.equal((await manager.stageFile(path.join(root, "outside-workspace.txt"))).code, "INVALID_PATH");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager hides NCE's own workspace state from the status", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  await fs.mkdir(path.join(root, ".nce"), { recursive: true });
+  await fs.writeFile(path.join(root, ".nce", ".gitignore"), "*\n");
+  await fs.writeFile(path.join(root, "visible.txt"), "visible\n");
+  await fs.mkdir(path.join(root, "packages", "app", ".nce"), { recursive: true });
+  await fs.writeFile(path.join(root, "packages", "app", ".nce", "workspace.json"), "{}\n");
+  const manager = managerFor(root);
+  try {
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.deepEqual(status.status.entries.map(entry => entry.path), ["visible.txt"]);
+    const nested = managerFor(path.join(root, "packages", "app"));
+    try {
+      const scoped = await nested.getStatus();
+      assert.equal(scoped.success, true);
+      assert.deepEqual(scoped.status.entries, []);
+    } finally {
+      nested.dispose();
+    }
   } finally {
     manager.dispose();
     await removeAll(root);

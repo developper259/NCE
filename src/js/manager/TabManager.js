@@ -221,6 +221,33 @@ class tabManager {
     return tab;
   }
 
+  async openGitDiff(options) {
+    const filePath = options?.filePath;
+    if (typeof filePath !== "string" || !filePath) return null;
+    const staged = options.staged === true;
+    let tab = this.tabs.find((candidate) =>
+      candidate.type === TAB_TYPES.GIT_DIFF &&
+      candidate.staged === staged &&
+      NCEPath.equals(candidate.filePath, filePath));
+    if (tab) {
+      tab.relativePath = options.relativePath || tab.relativePath;
+      tab.statusKind = options.statusKind || tab.statusKind;
+      tab.originalPath = options.originalPath ?? null;
+      tab.name = GitDiffTab.displayName(filePath, staged);
+    } else {
+      tab = new GitDiffTab(this.getNextID(), {
+        filePath,
+        relativePath: options.relativePath,
+        staged,
+        statusKind: options.statusKind,
+        originalPath: options.originalPath,
+      });
+      this.tabs.push(tab);
+    }
+    await this.setFocusTab(tab);
+    return tab;
+  }
+
   async openFiles(files, isSetFocusFile = true, forceText = false) {
     if (files.length === 0) return;
     let lastAddedFile = null;
@@ -514,6 +541,7 @@ class tabManager {
     const closedLastTab = this.tabs.length === 0;
     if (tab.type === TAB_TYPES.PICTURE) this.editor._pictureView?.close?.(tab);
     if (tab.type === "markdown") this.editor._markdownView?.close?.(tab);
+    if (tab.type === TAB_TYPES.GIT_DIFF) this.editor._gitDiffView?.close?.(tab);
     if (closedLastTab) {
       this.activeTab = null;
       this.editor.fileExplorer.activeFilePath = null;

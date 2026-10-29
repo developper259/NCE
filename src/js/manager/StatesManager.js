@@ -259,6 +259,7 @@ class StatesManager {
     const tabs = manager.tabs.flatMap((tab) => {
       if (tab.type === TAB_TYPES.SETTINGS)
         return [{ id: tab.id, type: TAB_TYPES.SETTINGS }];
+      if (tab.type === TAB_TYPES.GIT_DIFF) return [];
       if (tab.type === TAB_TYPES.PICTURE) {
         const serializedPath = root === undefined ? tab.path
           : root ? this.toWorkspaceRelative(tab.path, root) : tab.path || null;
