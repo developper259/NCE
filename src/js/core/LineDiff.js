@@ -1,5 +1,5 @@
 const LineDiff = {
-  MAX_EDIT_DISTANCE: 2000,
+  MAX_EDIT_DISTANCE: 1200,
 
   splitLines(content) {
     if (typeof content !== "string" || content === "") return [];
@@ -32,19 +32,29 @@ const LineDiff = {
     const before = beforeLines.slice(prefixLength, beforeLines.length - suffixLength);
     const after = afterLines.slice(prefixLength, afterLines.length - suffixLength);
     const maxD = LineDiff.MAX_EDIT_DISTANCE;
-    let frontier = new Map([[0, 0]]);
+    const size = 2 * maxD + 3;
+    const offset = maxD + 1;
+    const frontier = new Int32Array(size);
+    frontier.fill(-1);
+    frontier[offset] = 0;
+    // trace[d] stores the distance d-1 frontier for k in [-(d-1), d-1].
     const trace = [];
     let solution = null;
     for (let distance = 0; distance <= maxD && solution === null; distance += 1) {
-      trace.push(new Map(frontier));
+      if (distance > 0) {
+        const previous = new Int32Array(distance);
+        for (let k = -(distance - 1), index = 0; k <= distance - 1; k += 2, index += 1)
+          previous[index] = Math.max(0, frontier[offset + k]);
+        trace[distance] = previous;
+      }
       for (let k = -distance; k <= distance; k += 2) {
+        const index = offset + k;
         const down =
           k === -distance ||
           (k !== distance &&
-            (frontier.get(k - 1) || 0) < (frontier.get(k + 1) || 0));
-        let x = down
-          ? frontier.get(k + 1) || 0
-          : (frontier.get(k - 1) || 0) + 1;
+            (frontier[index - 1] || 0) < (frontier[index + 1] || 0));
+        let x = down ? frontier[index + 1] || 0 : (frontier[index - 1] || 0) + 1;
+        if (x < 0) x = 0;
         let y = x - k;
         while (
           x < before.length &&
@@ -54,7 +64,7 @@ const LineDiff = {
           x += 1;
           y += 1;
         }
-        frontier.set(k, x);
+        frontier[index] = x;
         if (x >= before.length && y >= after.length) {
           solution = distance;
           break;
@@ -77,13 +87,17 @@ const LineDiff = {
       const reversed = [];
       for (let distance = solution; distance > 0; distance -= 1) {
         const previous = trace[distance];
+        const readPrevious = (k) => {
+          const index = (k + distance - 1) / 2;
+          return index >= 0 && index < previous.length ? previous[index] : 0;
+        };
         const k = x - y;
         const down =
           k === -distance ||
           (k !== distance &&
-            (previous.get(k - 1) || 0) < (previous.get(k + 1) || 0));
+            readPrevious(k - 1) < readPrevious(k + 1));
         const previousK = down ? k + 1 : k - 1;
-        const previousX = previous.get(previousK) || 0;
+        const previousX = readPrevious(previousK);
         const previousY = previousX - previousK;
         while (x > previousX && y > previousY) {
           reversed.push({ type: "equal", text: before[x - 1] });

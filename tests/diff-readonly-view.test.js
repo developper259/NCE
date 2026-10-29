@@ -23,6 +23,14 @@ const SelectController = loadGlobal(
   "SelectController",
   { addEvent() {} },
 );
+const MultiCursorController = loadGlobal(
+  "src/js/controller/MultiCursorController.js",
+  "MultiCursorController",
+);
+const LineController = loadGlobal(
+  "src/js/controller/LineController.js",
+  "LineController",
+);
 
 function createCursorController(activeFile) {
   const displays = [];
@@ -123,4 +131,57 @@ test("Diff focus styling dims context and accents changed lines with theme token
   assert.match(editorCss, /\.editor-git-diff-active \.line-number-removed::after\s*\{[\s\S]*?content:\s*"−"/);
   assert.doesNotMatch(editorCss, /\.editor-git-diff-active \.line-unchanged\s*\{[^}]*color:/s,
     "syntax colors must not be replaced for context lines");
+});
+
+
+test("Keyboard multi-cursor actions are refused in a diff view", () => {
+  const file = { isDiffView: true, type: undefined };
+  const multi = new MultiCursorController({
+    tabManager: { activeFile: file },
+  });
+  assert.equal(multi.isEligible(file), false);
+  assert.equal(multi.addCursor({ row: 1, column: 0 }), false);
+  assert.equal(multi.addCursorAtClientCoordinates(10, 10), false);
+  assert.equal(multi.addCursorsVertically(1), false);
+  assert.equal(multi.addNextOccurrence(), false);
+  assert.equal(multi.selectAllOccurrences(), false);
+  assert.equal(multi.renderedCarets, 0);
+});
+
+test("Diff display indexes are mapped once per diffRows model", () => {
+  const controller = Object.create(LineController.prototype);
+  controller.diffDisplayIndexRows = null;
+  controller.diffDisplayIndexMap = null;
+  const rows = [
+    { type: "unchanged", documentIndex: 0 },
+    { type: "removed", documentIndex: null },
+    { type: "added", documentIndex: 1 },
+    { type: "unchanged", documentIndex: 2 },
+  ];
+  controller.editor = { tabManager: { activeFile: { diffRows: rows } } };
+  assert.equal(controller.getDisplayIndexForDocument(1), 2);
+  assert.equal(controller.getDisplayIndexForDocument(9), 9);
+  const mappedRows = controller.diffDisplayIndexRows;
+  controller.getDisplayIndexForDocument(2);
+  assert.equal(controller.diffDisplayIndexRows, mappedRows, "the index is cached per model");
+  controller.editor.tabManager.activeFile.diffRows =
+    [{ type: "added", documentIndex: 0 }, { type: "unchanged", documentIndex: 1 }];
+  assert.equal(controller.getDisplayIndexForDocument(1), 1);
+  assert.notEqual(controller.diffDisplayIndexRows, mappedRows, "a new model rebuilds the index");
+});
+
+test("LineController mutators are inert on a diff buffer", () => {
+  const controller = Object.create(LineController.prototype);
+  let touched = false;
+  controller.editor = {
+    tabManager: { activeFile: { isDiffView: true } },
+    lineController: {},
+  };
+  Object.defineProperty(controller, "lines", {
+    get() { touched = true; return []; },
+  });
+  assert.equal(controller.addLine("x", 0), undefined);
+  assert.equal(controller.changeLine("x", 0), undefined);
+  assert.equal(controller.supLine(0), undefined);
+  assert.equal(touched, false);
 });

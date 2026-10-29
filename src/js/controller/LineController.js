@@ -18,6 +18,8 @@ class LineController {
     this.diffSegmentOffsetCache = new WeakMap();
     this.diffRowPositionIndexes = new WeakMap();
     this.diffMaxLineLength = 0;
+    this.diffDisplayIndexRows = null;
+    this.diffDisplayIndexMap = null;
     this.diffMetricsTabWidth = null;
     this.indexedDiffRows = null;
     this.renderGeneration = 0;
@@ -69,10 +71,16 @@ class LineController {
 
   getDisplayIndexForDocument(documentIndex) {
     if (!this.diffRows?.length) return documentIndex;
-    const displayIndex = this.diffRows.findIndex(
-      (row) => row.documentIndex === documentIndex,
-    );
-    return displayIndex >= 0 ? displayIndex : documentIndex;
+    if (this.diffDisplayIndexRows !== this.diffRows) {
+      this.diffDisplayIndexRows = this.diffRows;
+      this.diffDisplayIndexMap = new Map();
+      for (let index = 0; index < this.diffRows.length; index += 1) {
+        const row = this.diffRows[index];
+        if (Number.isInteger(row?.documentIndex))
+          this.diffDisplayIndexMap.set(row.documentIndex, index);
+      }
+    }
+    return this.diffDisplayIndexMap?.get(documentIndex) ?? documentIndex;
   }
 
   getDisplayIndexForCursor(documentRow) {
@@ -891,6 +899,8 @@ class LineController {
       this.editor.tabManager.activeFile.diffRows = null;
     }
     this.diffMaxLineLength = 0;
+    this.diffDisplayIndexRows = null;
+    this.diffDisplayIndexMap = null;
     this.diffMetricsTabWidth = null;
     this.indexedDiffRows = null;
   }
@@ -941,6 +951,7 @@ class LineController {
   }
 
   addLine(txt, index) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return;
     const line = new LineNode(txt);
     this.lines.splice(index, 0, line);
     this.syncLineLengthsForEdit(index, [], [line]);
@@ -949,6 +960,7 @@ class LineController {
   }
 
   changeLine(txt, index) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return;
     if (index >= 0 && index < this.lines.length) {
       const line = this.lines[index];
       line.setText(txt);
@@ -959,6 +971,7 @@ class LineController {
   }
 
   supLine(index) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return;
     if (index >= 0 && index < this.lines.length) {
       const [removed] = this.lines.splice(index, 1);
       this.syncLineLengthsForEdit(index, [removed], []);

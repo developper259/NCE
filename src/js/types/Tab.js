@@ -1133,7 +1133,7 @@ class FileNode extends Tab {
   }
 
   keepDiff() {
-    if (this.largeFileMode) return;
+    if (this.isDiffView || this.largeFileMode) return;
     this.diffSnapshot = null;
     this.diffActive = false;
     this.diffRows = null;
@@ -1142,7 +1142,7 @@ class FileNode extends Tab {
   }
 
   undoDiff() {
-    if (this.largeFileMode) return;
+    if (this.isDiffView || this.largeFileMode) return;
     if (this.diffSnapshot === null) return;
     const lineController = this.editor.lineController;
     lineController.loadContent(this.diffSnapshot);

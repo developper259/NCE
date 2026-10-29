@@ -18,12 +18,16 @@ class MultiCursorController {
     this.renderedSelections = 0;
   }
 
+  isReadOnlyView(file = this.editor.tabManager?.activeFile) {
+    return file?.isDiffView === true;
+  }
+
   isEligible(file = this.editor.tabManager?.activeFile) {
     return Boolean(
       file && (file.type === undefined || file.type === "file") &&
       !file.loadError && file.largeFileMode !== true &&
       (!file.loadingState || file.loadingState.status === "loaded") &&
-      file.diffActive !== true,
+      file.diffActive !== true && !this.isReadOnlyView(file),
     );
   }
 
@@ -362,6 +366,7 @@ class MultiCursorController {
   }
 
   addCursor(position, { toggle = false, ensureVisible = false } = {}) {
+    if (this.isReadOnlyView()) return false;
     const file = this.editor.tabManager?.activeFile;
     if (!this.isEligible(file)) return false;
     const active = this.normalizePosition(file, position);
@@ -396,6 +401,7 @@ class MultiCursorController {
   }
 
   addCursorAtClientCoordinates(clientX, clientY, options = {}) {
+    if (this.isReadOnlyView()) return false;
     const position = this.editor.cursorController?.positionFromClientCoordinates?.(
       clientX,
       clientY,
@@ -406,6 +412,7 @@ class MultiCursorController {
   }
 
   addCursorsVertically(delta) {
+    if (this.isReadOnlyView()) return false;
     const file = this.editor.tabManager?.activeFile;
     if (!this.isEligible(file) || !Number.isInteger(delta) || Math.abs(delta) !== 1)
       return false;
@@ -736,6 +743,7 @@ class MultiCursorController {
   }
 
   addNextOccurrence() {
+    if (this.isReadOnlyView()) return false;
     const file = this.editor.tabManager?.activeFile;
     const primary = this.getPrimarySelection(file);
     if (this.getSelections(file).length >= MULTI_CURSOR_LIMIT) return false;
@@ -799,6 +807,7 @@ class MultiCursorController {
   }
 
   selectAllOccurrences() {
+    if (this.isReadOnlyView()) return false;
     const file = this.editor.tabManager?.activeFile;
     const primary = this.getPrimarySelection(file);
     const query = this.getOccurrenceQuery(primary);

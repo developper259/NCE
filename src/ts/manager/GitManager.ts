@@ -1,8 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import path from "node:path";
 import type { PathAccess } from "./PathAccess";
 import type { IpcHandlerRegistrar } from "./IpcRouter";
+import { GitTaskQueue } from "./GitTaskQueue";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const VERSION_TIMEOUT_MS = 5_000;
@@ -13,7 +14,6 @@ const MAX_UNTRACKED_PREVIEW_BYTES = 64 * 1024;
 const MAX_COMMIT_MESSAGE_LENGTH = 10_000;
 const MAX_DETAIL_LENGTH = 2_000;
 const MAX_VERSION_BYTES = 4 * 1024 * 1024;
-const BINARY_SAMPLE_BYTES = 8000;
 const DEFAULT_LOG_LIMIT = 50;
 const MAX_LOG_LIMIT = 200;
 
@@ -29,6 +29,7 @@ export type GitErrorCode =
   | "GIT_IDENTITY_MISSING"
   | "GIT_HOOK_FAILED"
   | "GIT_COMMAND_FAILED"
+  | "GIT_OUTPUT_LIMIT"
   | "GIT_TIMEOUT"
   | "OPERATION_CANCELLED";
 
@@ -36,7 +37,6 @@ export interface GitFailure {
   success: false;
   code: GitErrorCode;
   error: string;
-  details?: string;
 }
 
 export type GitResult<T> = ({ success: true } & T) | GitFailure;
@@ -121,6 +121,7 @@ interface GitManagerOptions {
   gitPath?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
+  maxConcurrentCommands?: number;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -135,6 +136,7 @@ interface GitRunFailure {
   failure: GitFailure;
   outputLimit: boolean;
   exitCode?: number;
+  stderr?: string;
 }
 
 type GitRunOutcome = { ok: true; output: GitCommandOutput } | GitRunFailure;
@@ -152,17 +154,8 @@ interface RepositoryContext {
   root: string;
 }
 
-function failure(
-  code: GitErrorCode,
-  error: string,
-  details?: string,
-): GitFailure {
-  return {
-    success: false,
-    code,
-    error,
-    ...(details ? { details: details.slice(0, MAX_DETAIL_LENGTH) } : {}),
-  };
+function failure(code: GitErrorCode, error: string): GitFailure {
+  return { success: false, code, error };
 }
 
 function validPathValue(value: unknown): value is string {
@@ -195,6 +188,9 @@ export class GitManager {
   private readonly extraEnv?: NodeJS.ProcessEnv;
   private readonly platform: NodeJS.Platform = process.platform;
   private readonly children = new Set<ChildProcess>();
+  private readonly commandQueue: GitTaskQueue;
+  private readonly mutationQueue = new GitTaskQueue(1);
+  private readonly statusRequests = new Map<string, Promise<GitResult<{ status: GitStatus }>>>();
   private disposed = false;
 
   constructor(options: GitManagerOptions) {
@@ -204,6 +200,7 @@ export class GitManager {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
     this.extraEnv = options.env;
+    this.commandQueue = new GitTaskQueue(options.maxConcurrentCommands ?? 2);
   }
 
   handleIPC(ipc: IpcHandlerRegistrar): void {
@@ -232,9 +229,7 @@ export class GitManager {
 
   dispose(): void {
     this.disposed = true;
-    for (const child of this.children) {
-      try { child.kill("SIGKILL"); } catch {}
-    }
+    for (const child of this.children) this.killProcessTree(child, "SIGKILL");
     this.children.clear();
   }
 
@@ -284,17 +279,27 @@ export class GitManager {
     return { success: true, root: context.root };
   }
 
-  async getStatus(): Promise<GitResult<{ status: GitStatus }>> {
+  getStatus(): Promise<GitResult<{ status: GitStatus }>> {
+    const key = this.getWorkspaceRoot() || "";
+    const existing = this.statusRequests.get(key);
+    if (existing) return existing;
+    let request: Promise<GitResult<{ status: GitStatus }>>;
+    request = this.getStatusNow().finally(() => {
+      if (this.statusRequests.get(key) === request)
+        this.statusRequests.delete(key);
+    });
+    this.statusRequests.set(key, request);
+    return request;
+  }
+
+  private async getStatusNow(): Promise<GitResult<{ status: GitStatus }>> {
     const context = await this.resolveContext();
     if ("failure" in context) return context.failure;
-    const scope = comparable(context.root, this.platform) === comparable(context.workspace, this.platform)
-      ? "."
-      : path.relative(context.root, context.workspace).split(path.sep).join("/");
     // NCE's own workspace state must never appear as user changes.
     const result = await this.runGit(
       [
         "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all",
-        "--", `:(literal)${scope}`, ":(exclude,glob)**/.nce/**",
+        "--", ...this.scopePathspecs(context),
       ],
       { cwd: context.root },
     );
@@ -303,7 +308,7 @@ export class GitManager {
     try {
       status = this.parseStatus(result.output.stdout);
     } catch (error: any) {
-      return failure("GIT_COMMAND_FAILED", "Unable to parse the Git status output.", String(error?.message || error));
+      return failure("GIT_COMMAND_FAILED", "Unable to parse the Git status output.");
     }
     const state = await this.readOperationState(context.root);
     return { success: true, status: { ...status, ...state } };
@@ -417,6 +422,11 @@ export class GitManager {
     const originalPath = this.sanitizeRepositoryPath(options.originalPath);
     if (options.originalPath != null && !originalPath)
       return failure("INVALID_PATH", "The original file path is invalid.");
+    if (originalPath) {
+      const originalAbsolute = path.resolve(root, originalPath);
+      if (!isInside(target.workspace, originalAbsolute, this.platform))
+        return failure("INVALID_PATH", "The original file must remain inside the authorized workspace.");
+    }
     const tracked = await this.runGit(
       ["ls-files", "-z", "--", relativePath],
       { cwd: root, literalPaths: true },
@@ -470,12 +480,19 @@ export class GitManager {
 
   private sanitizeRepositoryPath(value: unknown): string | null {
     if (typeof value !== "string" || !value || value.includes("\0")) return null;
-    const normalized = value.replace(/\\/g, "/");
-    if (normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) return null;
-    const segments = normalized.split("/");
+    if (value.startsWith("/") || /^[a-zA-Z]:/.test(value)) return null;
+    const segments = value.split("/");
     if (segments.some((segment) => !segment || segment === "." || segment === ".."))
       return null;
+    if (segments.some((segment) => this.isNceStateSegment(segment)))
+      return null;
     return segments.join("/");
+  }
+
+  private isNceStateSegment(segment: string): boolean {
+    return this.platform === "win32"
+      ? segment.toLowerCase() === ".nce"
+      : segment === ".nce";
   }
 
   private async readBlobVersion(
@@ -495,18 +512,25 @@ export class GitManager {
   private async readWorkingVersion(
     absolutePath: string,
   ): Promise<{ content: string; binary: boolean; tooLarge: boolean; missing: boolean } | { failure: GitFailure }> {
+    const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0);
+    let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
     try {
-      const stats = await fs.stat(absolutePath);
+      handle = await fs.open(absolutePath, flags);
+      const stats = await handle.stat();
       if (!stats.isFile()) return { content: "", binary: false, tooLarge: false, missing: true };
       if (stats.size > MAX_VERSION_BYTES)
         return { content: "", binary: false, tooLarge: true, missing: false };
-      return this.decodeVersion(await fs.readFile(absolutePath));
+      return this.decodeVersion(await handle.readFile());
     } catch (error: any) {
       if (error?.code === "ENOENT")
         return { content: "", binary: false, tooLarge: false, missing: true };
+      if (error?.code === "ELOOP")
+        return { failure: failure("INVALID_PATH", "The file changed into a symbolic link.") };
       if (error?.code === "EACCES" || error?.code === "EPERM")
         return { failure: failure("PERMISSION_DENIED", "The file cannot be read.") };
       return { failure: failure("GIT_COMMAND_FAILED", "The file cannot be read.") };
+    } finally {
+      await handle?.close().catch(() => undefined);
     }
   }
 
@@ -518,7 +542,7 @@ export class GitManager {
   } {
     if (buffer.length > MAX_VERSION_BYTES)
       return { content: "", binary: false, tooLarge: true, missing: false };
-    const binary = buffer.subarray(0, BINARY_SAMPLE_BYTES).includes(0);
+    const binary = buffer.includes(0);
     return {
       content: binary ? "" : buffer.toString("utf8"),
       binary,
@@ -534,7 +558,10 @@ export class GitManager {
     const context = await this.resolveContext();
     if ("failure" in context) return context.failure;
     const result = await this.runGit(
-      ["diff", "--numstat", "-z", ...(staged ? ["--cached"] : [])],
+      [
+        "diff", "--numstat", "-z", ...(staged ? ["--cached"] : []),
+        "--", ...this.scopePathspecs(context),
+      ],
       { cwd: context.root, maxOutputBytes: MAX_DIFF_OUTPUT_BYTES },
     );
     if (!result.ok) return result.failure;
@@ -545,11 +572,15 @@ export class GitManager {
         files: this.parseNumstat(result.output.stdout),
       };
     } catch (error: any) {
-      return failure("GIT_COMMAND_FAILED", "Unable to parse the Git diff summary.", String(error?.message || error));
+      return failure("GIT_COMMAND_FAILED", "Unable to parse the Git diff summary.");
     }
   }
 
-  async stageFile(filePath: unknown): Promise<GitResult<{ path: string }>> {
+  stageFile(filePath: unknown): Promise<GitResult<{ path: string }>> {
+    return this.mutationQueue.run(() => this.stageFileNow(filePath));
+  }
+
+  private async stageFileNow(filePath: unknown): Promise<GitResult<{ path: string }>> {
     const target = await this.resolveFile(filePath);
     if ("failure" in target) return target.failure;
     const result = await this.runGit(
@@ -560,7 +591,11 @@ export class GitManager {
     return { success: true, path: target.relativePath };
   }
 
-  async unstageFile(filePath: unknown): Promise<GitResult<{ path: string }>> {
+  unstageFile(filePath: unknown): Promise<GitResult<{ path: string }>> {
+    return this.mutationQueue.run(() => this.unstageFileNow(filePath));
+  }
+
+  private async unstageFileNow(filePath: unknown): Promise<GitResult<{ path: string }>> {
     const target = await this.resolveFile(filePath);
     if ("failure" in target) return target.failure;
     const head = await this.hasHeadCommit(target.root);
@@ -588,7 +623,11 @@ export class GitManager {
     return { success: true, path: target.relativePath };
   }
 
-  async commit(message: unknown): Promise<GitResult<{ hash: string; summary: string }>> {
+  commit(message: unknown): Promise<GitResult<{ hash: string; summary: string }>> {
+    return this.mutationQueue.run(() => this.commitNow(message));
+  }
+
+  private async commitNow(message: unknown): Promise<GitResult<{ hash: string; summary: string }>> {
     if (typeof message !== "string")
       return failure("INVALID_ARGUMENT", "The commit message must be a string.");
     if (!validPathValue(message))
@@ -597,23 +636,24 @@ export class GitManager {
       return failure("INVALID_ARGUMENT", "The commit message is too long.");
     const context = await this.resolveContext();
     if ("failure" in context) return context.failure;
+    const pathspecs = this.scopePathspecs(context);
     const staged = await this.runGit(
-      ["diff", "--cached", "--quiet"],
+      ["diff", "--cached", "--quiet", "--", ...pathspecs],
       { cwd: context.root, allowExitCodes: [0, 1] },
     );
     if (!staged.ok) return staged.failure;
     if (staged.output.code === 0)
       return failure("NOTHING_TO_COMMIT", "There are no staged changes to commit.");
     const result = await this.runGit(
-      ["commit", "-m", message],
+      ["commit", "-m", message, "--", ...pathspecs],
       { cwd: context.root },
     );
     if (!result.ok) {
-      const stderr = result.failure.details || "";
+      const stderr = result.stderr || "";
       if (/Please tell me who you are|auto-detect email address|empty ident name/i.test(stderr))
-        return failure("GIT_IDENTITY_MISSING", "Git needs an author name and email before it can commit.", stderr);
+        return failure("GIT_IDENTITY_MISSING", "Git needs an author name and email before it can commit.");
       if (result.exitCode === 1 || /hook/i.test(stderr))
-        return failure("GIT_HOOK_FAILED", "A Git hook rejected the commit.", stderr);
+        return failure("GIT_HOOK_FAILED", "A Git hook rejected the commit.");
       return result.failure;
     }
     const head = await this.runGit(["rev-parse", "HEAD"], { cwd: context.root });
@@ -705,6 +745,13 @@ export class GitManager {
     return { success: true, commits, limit, skip };
   }
 
+  private scopePathspecs(context: RepositoryContext): string[] {
+    const scope = comparable(context.root, this.platform) === comparable(context.workspace, this.platform)
+      ? "."
+      : path.relative(context.root, context.workspace).split(path.sep).join("/");
+    return [`:(literal)${scope}`, ":(exclude,glob)**/.nce/**"];
+  }
+
   private async resolveContext(): Promise<RepositoryContext | { failure: GitFailure }> {
     if (this.disposed)
       return { failure: failure("OPERATION_CANCELLED", "The Git manager was disposed.") };
@@ -732,7 +779,7 @@ export class GitManager {
     if (toplevel.output.code !== 0) {
       const stderr = toplevel.output.stderr.toString("utf8");
       if (/dubious ownership/i.test(stderr))
-        return { failure: failure("PERMISSION_DENIED", "Git refuses this repository because of its ownership.", stderr.trim()) };
+        return { failure: failure("PERMISSION_DENIED", "Git refuses this repository because of its ownership.") };
       return { failure: failure("NOT_A_REPOSITORY", "The workspace is not inside a Git repository.") };
     }
     const root = toplevel.output.stdout.toString("utf8").trim();
@@ -768,6 +815,8 @@ export class GitManager {
       .join("/");
     if (!relativePath)
       return { failure: failure("INVALID_PATH", "The repository root is not a file.") };
+    if (relativePath.split("/").some((segment) => this.isNceStateSegment(segment)))
+      return { failure: failure("INVALID_PATH", "NCE workspace state cannot be used as a file.") };
     return { ...context, absolutePath, relativePath };
   }
 
@@ -992,21 +1041,58 @@ export class GitManager {
     return value;
   }
 
-  private async runGit(args: string[], options: GitRunOptions): Promise<GitRunOutcome> {
+  private runGit(args: string[], options: GitRunOptions): Promise<GitRunOutcome> {
+    return this.commandQueue.run(() => this.runGitCommand(args, options));
+  }
+
+  private buildGitEnvironment(literalPaths: boolean): NodeJS.ProcessEnv {
+    // Never inherit repository/object/config redirections from the launch environment.
+    const env: NodeJS.ProcessEnv = {};
+    for (const [key, value] of Object.entries(process.env)) {
+      if (!key.startsWith("GIT_") && value !== undefined) env[key] = value;
+    }
+    Object.assign(env, this.extraEnv);
+    for (const key of [
+      "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+      "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+      "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM", "GIT_PREFIX",
+    ]) delete env[key];
+    env.LC_ALL = "C";
+    env.GIT_TERMINAL_PROMPT = "0";
+    env.GIT_OPTIONAL_LOCKS = "0";
+    if (literalPaths) env.GIT_LITERAL_PATHSPECS = "1";
+    else delete env.GIT_LITERAL_PATHSPECS;
+    return env;
+  }
+
+  private killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
+    if (!child.pid) return;
+    if (this.platform === "win32") {
+      try { child.kill(signal); } catch {}
+      if (signal === "SIGKILL") {
+        try {
+          const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+            windowsHide: true,
+            stdio: "ignore",
+          });
+          killer.on("error", () => {});
+          killer.unref();
+        } catch {}
+      }
+      return;
+    }
+    try { process.kill(-child.pid, signal); }
+    catch { try { child.kill(signal); } catch {} }
+  }
+
+  private async runGitCommand(args: string[], options: GitRunOptions): Promise<GitRunOutcome> {
     if (this.disposed)
       return {
         ok: false,
         failure: failure("OPERATION_CANCELLED", "The Git manager was disposed."),
         outputLimit: false,
       };
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...this.extraEnv,
-      LC_ALL: "C",
-      GIT_TERMINAL_PROMPT: "0",
-      GIT_OPTIONAL_LOCKS: "0",
-    };
-    if (options.literalPaths) env.GIT_LITERAL_PATHSPECS = "1";
+    const env = this.buildGitEnvironment(options.literalPaths === true);
     let child: ChildProcess;
     try {
       child = spawn(this.gitPath, args, {
@@ -1014,12 +1100,13 @@ export class GitManager {
         env,
         shell: false,
         windowsHide: true,
+        detached: this.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
       });
-    } catch (error: any) {
+    } catch {
       return {
         ok: false,
-        failure: failure("GIT_COMMAND_FAILED", "Git could not be started.", String(error?.message || error)),
+        failure: failure("GIT_COMMAND_FAILED", "Git could not be started."),
         outputLimit: false,
       };
     }
@@ -1033,22 +1120,43 @@ export class GitManager {
       let settled = false;
       let timedOut = false;
       let outputLimit = false;
-      const timer = setTimeout(() => {
-        timedOut = true;
-        try { child.kill("SIGKILL"); } catch {}
-      }, timeoutMs);
+      let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
       const finish = (outcome: GitRunOutcome) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
         this.children.delete(child);
         resolve(outcome);
       };
+      const stopChild = (signal: NodeJS.Signals) => {
+        this.killProcessTree(child, signal);
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+      };
+      const timer = setTimeout(() => {
+        timedOut = true;
+        this.killProcessTree(child, "SIGTERM");
+        forceKillTimer = setTimeout(() => {
+          stopChild("SIGKILL");
+          finish({
+            ok: false,
+            failure: failure("GIT_TIMEOUT", "The Git command timed out."),
+            outputLimit: false,
+          });
+        }, 250);
+      }, timeoutMs);
       const collect = (target: Buffer[], chunk: Buffer) => {
+        if (settled) return;
         total += chunk.length;
         if (total > maxOutputBytes) {
           outputLimit = true;
-          try { child.kill("SIGKILL"); } catch {}
+          stopChild("SIGKILL");
+          finish({
+            ok: false,
+            failure: failure("GIT_OUTPUT_LIMIT", "The Git command produced too much output."),
+            outputLimit: true,
+          });
           return;
         }
         target.push(chunk);
@@ -1074,7 +1182,7 @@ export class GitManager {
         }
         finish({
           ok: false,
-          failure: failure("GIT_COMMAND_FAILED", "Git could not be started.", error.message),
+          failure: failure("GIT_COMMAND_FAILED", "Git could not be started."),
           outputLimit: false,
         });
       });
@@ -1098,7 +1206,7 @@ export class GitManager {
         if (outputLimit) {
           finish({
             ok: false,
-            failure: failure("GIT_COMMAND_FAILED", "The Git command produced too much output."),
+            failure: failure("GIT_OUTPUT_LIMIT", "The Git command produced too much output."),
             outputLimit: true,
           });
           return;
@@ -1112,13 +1220,10 @@ export class GitManager {
         if (!allowed.includes(output.code)) {
           finish({
             ok: false,
-            failure: failure(
-              "GIT_COMMAND_FAILED",
-              "The Git command failed.",
-              trimmedDetail(output),
-            ),
+            failure: failure("GIT_COMMAND_FAILED", "The Git command failed."),
             outputLimit: false,
             exitCode: output.code,
+            stderr: trimmedDetail(output),
           });
           return;
         }

@@ -113,10 +113,14 @@ function createSidebar(options = {}) {
         },
         async stageFile(filePath) {
           calls.stage.push(filePath);
-          return options.stageResult || { success: true, path: filePath };
+          return typeof options.stageResult === "function"
+            ? options.stageResult(filePath)
+            : options.stageResult || { success: true, path: filePath };
         },
         async getFileVersions(filePath, versionOptions) {
           calls.versions.push([filePath, versionOptions]);
+          if (typeof options.versionsResult === "function")
+            return options.versionsResult(filePath, versionOptions);
           return options.versionsResult || {
             success: true,
             path: filePath,
@@ -147,6 +151,7 @@ function createSidebar(options = {}) {
       },
     },
     tabManager: {
+      tabs: [],
       async openGitDiff(options) {
         calls.openDiff.push(options);
         return { type: "git-diff" };
@@ -524,6 +529,156 @@ test("Git context menus expose only implemented Git actions", () => {
   const header = builders.buildGitHeaderContextMenu(editor)({ sidebar });
   assert.deepEqual(Object.keys(header), ["refresh", "copyBranch"]);
   sidebar.destroy();
+});
+
+
+
+test("GitSidebar keeps failures out of diff tabs and reports them inline", async () => {
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    versionsResult: { success: false, code: "GIT_NOT_FOUND", error: "missing git" },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.openDiff(modifiedEntry, false), null);
+    assert.equal(calls.openDiff.length, 0);
+    assert.match(sidebar.getCommitStatusText(), /Git is not installed/);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar drops a diff that resolves after a workspace switch", async () => {
+  const pending = deferred();
+  const { sidebar, editor, calls } = createSidebar({
+    entries: [modifiedEntry],
+    versionsResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openDiff(modifiedEntry, false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    editor.fileExplorer.rootPath = "/workspace-b";
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    pending.resolve({
+      success: true,
+      oldContent: "a\n",
+      newContent: "b\n",
+      binary: false,
+      tooLarge: false,
+      untracked: false,
+      deleted: false,
+    });
+    assert.equal(await opening, null);
+    assert.equal(calls.openDiff.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores stage results from a previous workspace", async () => {
+  const pending = deferred();
+  const { sidebar, editor, calls } = createSidebar({
+    entries: [modifiedEntry],
+    stageResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const staging = sidebar.toggleStage(modifiedEntry, false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    editor.fileExplorer.rootPath = "/workspace-b";
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    pending.resolve({ success: true, path: "/workspace/src/app.js" });
+    assert.equal(await staging, false);
+    assert.doesNotMatch(sidebar.getCommitStatusText(), /Staged src\/app\.js/);
+    assert.equal(calls.unstage.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar keeps one commit draft per workspace", async () => {
+  const { sidebar, editor, calls } = createSidebar({ entries: [stagedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.commitMessage = "message for workspace A";
+    editor.fileExplorer.rootPath = "/workspace-b";
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    assert.equal(sidebar.commitMessage, "");
+    sidebar.commitMessage = "message for workspace B";
+    editor.fileExplorer.rootPath = "/workspace";
+    sidebar.handleWorkspaceChanged("/workspace");
+    assert.equal(sidebar.commitMessage, "message for workspace A");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await sidebar.refresh({ reason: "manual" });
+    assert.equal(await sidebar.commitChanges(), true);
+    assert.equal(sidebar.commitDrafts.has("/workspace"), false);
+    assert.deepEqual(calls.commit, ["message for workspace A"]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar disables commit on stale data and caches sections", async () => {
+  const { sidebar } = createSidebar({ entries: [stagedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.commitMessage = "fix";
+    assert.equal(sidebar.canCommit(), true);
+    assert.equal(sidebar.getSections(), sidebar.getSections());
+    sidebar.stale = true;
+    assert.equal(sidebar.canCommit(), false);
+    sidebar.stale = false;
+    assert.equal(sidebar.canCommit(), true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar preserves POSIX backslashes in file names", () => {
+  assert.equal(
+    GitSidebar.resolveAbsolutePath("/workspace", "a\\b.txt"),
+    "/workspace/a\\b.txt",
+  );
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(GitSidebar.splitPath("dir/a\\b.txt"))),
+    { name: "a\\b.txt", dir: "dir" },
+  );
+});
+
+test("GitSidebar refreshes open diff tabs without stealing focus", async () => {
+  const { sidebar, editor, calls } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const tab = {
+      type: "git-diff",
+      filePath: "/workspace/src/app.js",
+      relativePath: "src/app.js",
+      staged: false,
+      statusKind: "modified",
+      originalPath: null,
+    };
+    editor.tabManager.tabs = [tab];
+    await sidebar.refreshDiffTabs();
+    assert.equal(calls.openDiff.length, 1);
+    assert.equal(calls.openDiff[0].focus, false);
+    assert.equal(calls.versions.length >= 1, true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar explains output limits without offering a useless retry", async () => {
+  const { sidebar } = createSidebar({ entries: [] });
+  try {
+    sidebar.workspaceRoot = "/workspace";
+    sidebar.applyStatusError({ code: "GIT_OUTPUT_LIMIT", error: "too much" });
+    assert.equal(sidebar.status, null);
+    assert.equal(sidebar.error.code, "GIT_OUTPUT_LIMIT");
+    assert.match(sidebar.getStateMessage(), /Too many changes/);
+  } finally {
+    sidebar.destroy();
+  }
 });
 
 test("Git UI is wired into the renderer manifest and editor", () => {

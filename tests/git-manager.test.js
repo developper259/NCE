@@ -616,10 +616,9 @@ test("GitManager exposes only named Git channels through the preload", () => {
   assert.match(preload, /git:\s*\{/);
   for (const channel of [
     "Git:isAvailable", "Git:version", "Git:repository", "Git:isRepository",
-    "Git:repositoryRoot", "Git:status", "Git:diff", "Git:diffSummary",
-    "Git:fileVersions",
+    "Git:repositoryRoot", "Git:status", "Git:diff", "Git:fileVersions",
     "Git:stage", "Git:unstage", "Git:commit", "Git:branches",
-    "Git:currentBranch", "Git:log",
+    "Git:currentBranch",
   ]) {
     assert.match(preload, new RegExp(`"${channel}"`), `preload exposes ${channel}`);
     assert.match(managerSource, new RegExp(`"${channel}"`), `GitManager registers ${channel}`);
@@ -652,6 +651,199 @@ test("GitManager times out and cancels Git processes", { skip: posixSkip }, asyn
   } finally {
     timed.dispose();
     cancelled.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager confines getFileVersions originalPath to the workspace", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const nested = path.join(root, "packages", "app");
+  await fs.mkdir(nested, { recursive: true });
+  await fs.writeFile(path.join(root, "secret-root.txt"), "ROOT SECRET\n");
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fixtures"]);
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v2\n");
+  git(root, ["add", "--", "packages/app/inside.txt"]);
+  const manager = managerFor(nested);
+  try {
+    const escaped = await manager.getFileVersions(path.join(nested, "inside.txt"), {
+      staged: true,
+      originalPath: "secret-root.txt",
+    });
+    assert.equal(escaped.code, "INVALID_PATH");
+    const inside = await manager.getFileVersions(path.join(nested, "inside.txt"), {
+      staged: true,
+      originalPath: "packages/app/inside.txt",
+    });
+    assert.equal(inside.success, true);
+    assert.equal(inside.oldContent, "inside\n");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager refuses NCE state files and commits only the workspace scope", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const nested = path.join(root, "sub");
+  await fs.mkdir(path.join(root, ".nce"), { recursive: true });
+  await fs.mkdir(nested, { recursive: true });
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v1\n");
+  await fs.writeFile(path.join(root, "outside.txt"), "outside v1\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fixtures"]);
+
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v2\n");
+  await fs.writeFile(path.join(root, "outside.txt"), "outside v2\n");
+  await fs.writeFile(path.join(root, ".nce", "workspace.json"), '{"secret":true}\n');
+  git(root, ["add", "-A"]);
+  git(root, ["add", "-f", ".nce/workspace.json"]);
+
+  const manager = managerFor(nested);
+  try {
+    assert.equal((await manager.stageFile(path.join(root, ".nce", "workspace.json"))).code, "INVALID_PATH");
+    assert.equal((await manager.getFileVersions(path.join(root, ".nce", "workspace.json"))).code, "INVALID_PATH");
+
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.deepEqual(status.status.entries.map((entry) => entry.path), ["sub/inside.txt"]);
+
+    const commit = await manager.commit("scoped commit");
+    assert.equal(commit.success, true);
+    const committed = git(root, ["show", "--pretty=format:", "--name-only", "HEAD"])
+      .trim().split("\n").filter(Boolean);
+    assert.deepEqual(committed, ["sub/inside.txt"]);
+    const stillStaged = git(root, ["diff", "--cached", "--name-only"])
+      .trim().split("\n").filter(Boolean).sort();
+    assert.deepEqual(stillStaged, [".nce/workspace.json", "outside.txt"]);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager scrubs inherited GIT_ environment redirections", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const other = await createRepository();
+  const marker = path.join(path.dirname(root), `hook-marker-${process.pid}`);
+  const hooks = path.join(path.dirname(root), `hooks-${process.pid}`);
+  await fs.mkdir(hooks, { recursive: true });
+  await fs.writeFile(path.join(hooks, "pre-commit"), `#!/bin/sh\necho x > ${JSON.stringify(marker)}\n`, { mode: 0o755 });
+  await fs.writeFile(path.join(root, "tracked.txt"), "changed\n");
+  const saved = {};
+  const injected = {
+    GIT_DIR: path.join(other, ".git"),
+    GIT_WORK_TREE: other,
+    GIT_INDEX_FILE: path.join(path.dirname(root), `alt-index-${process.pid}`),
+    GIT_LITERAL_PATHSPECS: "1",
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "core.hooksPath",
+    GIT_CONFIG_VALUE_0: hooks,
+  };
+  for (const [key, value] of Object.entries(injected)) {
+    saved[key] = process.env[key];
+    process.env[key] = value;
+  }
+  const manager = managerFor(root);
+  try {
+    const repository = await manager.getRepository();
+    assert.equal(repository.success, true);
+    assert.equal(repository.repository.root, await fs.realpath(root));
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.equal(status.status.entries.some((entry) => entry.path === "tracked.txt" && entry.worktree === "M"), true);
+    assert.equal((await manager.stageFile(path.join(root, "tracked.txt"))).success, true);
+    const commit = await manager.commit("scrubbed environment");
+    assert.equal(commit.success, true);
+    assert.equal(fsSync.existsSync(marker), false, "inherited core.hooksPath must not execute");
+  } finally {
+    manager.dispose();
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    await removeAll(root, other, hooks);
+    await fs.rm(marker, { force: true }).catch(() => {});
+  }
+});
+
+test("GitManager scans the whole bounded buffer for binary content", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const target = path.join(root, "late.bin");
+  const before = Buffer.alloc(9000, 0x61);
+  before[8500] = 0;
+  await fs.writeFile(target, before);
+  git(root, ["add", "late.bin"]);
+  git(root, ["commit", "-q", "-m", "binary fixture"]);
+  const after = Buffer.from(before);
+  after[10] = 0x62;
+  await fs.writeFile(target, after);
+  const manager = managerFor(root);
+  try {
+    const versions = await manager.getFileVersions(target);
+    assert.equal(versions.success, true);
+    assert.equal(versions.binary, true);
+    assert.equal(versions.newContent, "");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager reports a dedicated output-limit error", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const longName = "untracked-".padEnd(180, "x");
+  for (let index = 0; index < 60; index += 1)
+    await fs.writeFile(path.join(root, `${longName}-${index}.txt`), "x");
+  const manager = managerFor(root, { maxOutputBytes: 4096 });
+  try {
+    const status = await manager.getStatus();
+    assert.equal(status.success, false);
+    assert.equal(status.code, "GIT_OUTPUT_LIMIT");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager fails fast when a hook outlives the timeout", { skip: posixSkip }, async () => {
+  const root = await createRepository();
+  const hook = path.join(root, ".git", "hooks", "pre-commit");
+  await fs.writeFile(hook, "#!/bin/sh\nsleep 5\n");
+  await fs.chmod(hook, 0o755);
+  await fs.writeFile(path.join(root, "tracked.txt"), "hooked\n");
+  git(root, ["add", "--", "tracked.txt"]);
+  const manager = managerFor(root, { timeoutMs: 300 });
+  try {
+    const started = Date.now();
+    const commit = await manager.commit("timeout");
+    const elapsed = Date.now() - started;
+    assert.equal(commit.code, "GIT_TIMEOUT");
+    assert.ok(elapsed < 2500, `timeout waited ${elapsed}ms for the hook`);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager scopes diff summaries to the workspace", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const nested = path.join(root, "sub");
+  await fs.mkdir(nested, { recursive: true });
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v1\n");
+  await fs.writeFile(path.join(root, "outside.txt"), "outside v1\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fixtures"]);
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v2\n");
+  await fs.writeFile(path.join(root, "outside.txt"), "outside v2\n");
+  const manager = managerFor(nested);
+  try {
+    const summary = await manager.getDiffSummary();
+    assert.equal(summary.success, true);
+    assert.deepEqual(summary.files.map((file) => file.path), ["sub/inside.txt"]);
+  } finally {
+    manager.dispose();
     await removeAll(root);
   }
 });

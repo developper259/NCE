@@ -1,3 +1,5 @@
+const MAX_GIT_DIFF_TABS = 8;
+
 class tabManager {
   constructor(e) {
     this.editor = e;
@@ -226,6 +228,7 @@ class tabManager {
     const filePath = options?.filePath;
     if (typeof filePath !== "string" || !filePath) return null;
     const staged = options.staged === true;
+    const focus = options.focus !== false;
     const textTab = await buildGitDiffBuffer(this.editor, options);
     let tab = this.tabs.find((candidate) =>
       candidate.type === TAB_TYPES.GIT_DIFF &&
@@ -240,6 +243,11 @@ class tabManager {
       tab.originalPath = options.originalPath ?? null;
       tab.name = GitDiffTab.displayName(filePath, staged);
     } else {
+      const diffTabs = this.tabs.filter((candidate) => candidate.type === TAB_TYPES.GIT_DIFF);
+      if (diffTabs.length >= MAX_GIT_DIFF_TABS) {
+        const oldest = diffTabs.find((candidate) => candidate !== this.activeTab);
+        if (oldest) await this.closeTab(oldest);
+      }
       tab = new GitDiffTab(this.getNextID(), {
         filePath,
         relativePath: options.relativePath,
@@ -250,7 +258,15 @@ class tabManager {
       tab.textTab = textTab;
       this.tabs.push(tab);
     }
-    await this.setFocusTab(tab);
+    if (focus) {
+      await this.setFocusTab(tab);
+    } else if (this.activeTab === tab && tab.textTab === textTab) {
+      await this.editor.highlightController?.openFile?.(textTab);
+      this.editor.lineController?.markDirtyAll?.();
+      this.editor.refreshAll?.();
+      this.editor.refreshMainContent?.();
+      this.refresh();
+    }
     return tab;
   }
 
@@ -689,6 +705,7 @@ class tabManager {
         { ensureVisible: true },
       );
       this.editor.cursorController.disable();
+      this.editor.multiCursorController?.refreshOverlays?.();
       if (!this.editor.isOnInit) this.editor.refreshAll();
       this.editor.refreshMainContent?.();
       this.refresh();

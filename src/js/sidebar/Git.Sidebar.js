@@ -2,9 +2,8 @@ class GitSidebar extends Sidebar {
   static resolveAbsolutePath(root, relativePath) {
     if (typeof root !== "string" || !root.trim()) return null;
     if (typeof relativePath !== "string" || !relativePath.trim()) return null;
-    const normalized = relativePath.replace(/\\/g, "/");
-    if (normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) return null;
-    const segments = normalized.split("/");
+    if (relativePath.startsWith("/") || /^[a-zA-Z]:/.test(relativePath)) return null;
+    const segments = relativePath.split("/");
     if (segments.some((segment) => !segment || segment === "." || segment === ".."))
       return null;
     return `${root.trim().replace(/[\\/]+$/, "")}/${segments.join("/")}`;
@@ -22,6 +21,8 @@ class GitSidebar extends Sidebar {
       return "Git cannot access this repository.";
     if (code === "GIT_TIMEOUT")
       return "Git did not respond in time.";
+    if (code === "GIT_OUTPUT_LIMIT")
+      return "Too many changes to display. Reduce untracked files or use the terminal.";
     return result?.error || "Git status could not be read.";
   }
 
@@ -42,7 +43,7 @@ class GitSidebar extends Sidebar {
   }
 
   static splitPath(relativePath) {
-    const normalized = String(relativePath || "").replace(/\\/g, "/");
+    const normalized = String(relativePath || "");
     const index = normalized.lastIndexOf("/");
     if (index < 0) return { name: normalized, dir: "" };
     return { name: normalized.slice(index + 1), dir: normalized.slice(0, index) };
@@ -70,6 +71,11 @@ class GitSidebar extends Sidebar {
     );
 
     this.workspaceRoot = "";
+    this.workspaceGeneration = 0;
+    this.commitDrafts = new Map();
+    this.sectionsCacheStatus = null;
+    this.sectionsCache = null;
+    this.diffRefreshInFlight = new Set();
     this.status = null;
     this.error = null;
     this.stale = false;
@@ -318,11 +324,15 @@ class GitSidebar extends Sidebar {
     const message = this.getStateMessage();
     this.stateElement.hidden = !message;
     this.stateText.textContent = message;
-    this.stateRetry.hidden = !(this.error && this.error.code !== "GIT_NOT_FOUND");
+    this.stateRetry.hidden = !(this.error &&
+      this.error.code !== "GIT_NOT_FOUND" &&
+      this.error.code !== "GIT_OUTPUT_LIMIT");
     this.stateRetry.disabled = this.loading;
   }
 
   getSections() {
+    if (this.sectionsCacheStatus === this.status && this.sectionsCache)
+      return this.sectionsCache;
     const entries = this.status?.entries || [];
     const staged = entries.filter((entry) =>
       entry.conflicted !== true && entry.index !== null && entry.index !== undefined);
@@ -330,7 +340,9 @@ class GitSidebar extends Sidebar {
       entry.conflicted === true ||
       entry.worktree !== null && entry.worktree !== undefined ||
       entry.kind === "untracked");
-    return { staged, changes };
+    this.sectionsCacheStatus = this.status;
+    this.sectionsCache = { staged, changes };
+    return this.sectionsCache;
   }
 
   stagedCount() {
@@ -342,7 +354,8 @@ class GitSidebar extends Sidebar {
       this.stagedCount() > 0 &&
       this.commitMessage.trim().length > 0 &&
       !this.committing &&
-      !this.loading;
+      !this.loading &&
+      !this.stale;
   }
 
   createListItem(item) {
@@ -362,6 +375,7 @@ class GitSidebar extends Sidebar {
     const collapsed = this.collapsed[item.section] === true;
     header.setAttribute("aria-expanded", String(!collapsed));
     header.dataset.section = item.section;
+    header.dataset.gitFocusKey = `section:${item.section}`;
 
     const arrow = document.createElement("i");
     arrow.className = `fi ${collapsed ? "fi-rr-angle-small-right" : "fi-rr-angle-small-down"}`;
@@ -398,6 +412,8 @@ class GitSidebar extends Sidebar {
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     const relativePath = entry.path;
+    row.dataset.path = relativePath;
+    row.dataset.gitFocusKey = `entry:${relativePath}`;
     const parts = GitSidebar.splitPath(relativePath);
     row.setAttribute(
       "aria-label",
@@ -521,11 +537,43 @@ class GitSidebar extends Sidebar {
 
   renderList() {
     if (!this.fileScroller) return;
+    const focusKey = this.captureListFocusKey();
     const { staged, changes } = this.getSections();
     this.fileScroller.setItems(this.buildListItems(staged, changes), {
       resetScroll: this.listResetPending,
     });
     this.listResetPending = false;
+    if (focusKey) this.restoreListFocus(focusKey);
+  }
+
+  captureListFocusKey() {
+    if (typeof document === "undefined") return null;
+    const active = document.activeElement;
+    const row = active?.closest?.(".git-file-row, .git-section-header");
+    if (!row || !this.container?.contains?.(row)) return null;
+    return row.dataset?.gitFocusKey || null;
+  }
+
+  restoreListFocus(focusKey) {
+    const focusRow = (remaining) => {
+      if (this.destroyed) return;
+      const active = typeof document !== "undefined" ? document.activeElement : null;
+      if (active && active !== document.body) return;
+      const rows = this.container?.querySelectorAll?.(".git-file-row, .git-section-header") || [];
+      for (const row of rows) {
+        if (row.dataset?.gitFocusKey !== focusKey) continue;
+        row.focus?.({ preventScroll: true });
+        return;
+      }
+      if (remaining > 0) {
+        if (typeof requestAnimationFrame === "function")
+          requestAnimationFrame(() => focusRow(remaining - 1));
+        else setTimeout(() => focusRow(remaining - 1), 16);
+      }
+    };
+    if (typeof requestAnimationFrame === "function")
+      requestAnimationFrame(() => focusRow(8));
+    else setTimeout(() => focusRow(8), 0);
   }
 
   getBranchName() {
@@ -571,6 +619,8 @@ class GitSidebar extends Sidebar {
       return false;
     }
     if (this.operationPaths.has(entry.path)) return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
     this.operationPaths.add(entry.path);
     this.actionError = "";
     this.notice = "";
@@ -585,6 +635,9 @@ class GitSidebar extends Sidebar {
       result = null;
     }
     this.operationPaths.delete(entry.path);
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot))
+      return false;
     if (result?.success === true) {
       this.notice = staged ? `Unstaged ${entry.path}` : `Staged ${entry.path}`;
     } else {
@@ -603,30 +656,46 @@ class GitSidebar extends Sidebar {
     }
     const key = `${staged ? "staged" : "worktree"}:${entry.path}`;
     if (this.diffLoadingPaths.has(key)) return null;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
     this.diffLoadingPaths.add(key);
     this.clearTransientMessages();
     this.notice = "Loading diff…";
     this.updateCommitControls();
-    let versions = null;
     try {
-      versions = await this.editor.api.git.getFileVersions(filePath, {
+      let versions = null;
+      try {
+        versions = await this.editor.api.git.getFileVersions(filePath, {
+          staged: staged === true,
+          originalPath: entry.originalPath || null,
+        });
+      } catch {
+        versions = null;
+      }
+      if (this.destroyed ||
+          workspaceGeneration !== this.workspaceGeneration ||
+          !NCEPath.equals(workspaceRoot, this.workspaceRoot) ||
+          !NCEPath.equals(workspaceRoot, this.editor.fileExplorer?.rootPath || ""))
+        return null;
+      if (!versions || versions.success !== true) {
+        this.actionError = versions
+          ? GitSidebar.describeError(versions)
+          : "The diff could not be loaded.";
+        return null;
+      }
+      return (await this.editor.tabManager?.openGitDiff?.({
+        filePath,
+        relativePath: entry.path,
         staged: staged === true,
+        statusKind: entry.kind,
         originalPath: entry.originalPath || null,
-      });
-    } catch {
-      versions = null;
+        versions,
+      })) || null;
+    } finally {
+      this.diffLoadingPaths.delete(key);
+      if (this.notice === "Loading diff…") this.notice = "";
+      this.updateCommitControls();
     }
-    this.diffLoadingPaths.delete(key);
-    this.notice = "";
-    this.updateCommitControls();
-    return (await this.editor.tabManager?.openGitDiff?.({
-      filePath,
-      relativePath: entry.path,
-      staged: staged === true,
-      statusKind: entry.kind,
-      originalPath: entry.originalPath || null,
-      versions,
-    })) || null;
   }
 
   async openEntryFile(entry) {
@@ -638,6 +707,8 @@ class GitSidebar extends Sidebar {
   async commitChanges() {
     if (!this.canCommit()) return false;
     const message = this.commitMessage.trim();
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
     this.committing = true;
     this.commitError = "";
     this.actionError = "";
@@ -650,7 +721,13 @@ class GitSidebar extends Sidebar {
       result = null;
     }
     this.committing = false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.updateView();
+      return false;
+    }
     if (result?.success === true) {
+      this.commitDrafts.delete(workspaceRoot);
       this.commitMessage = "";
       if (this.commitInput) this.commitInput.value = "";
       this.notice = `Committed ${String(result.hash || "").slice(0, 7)}`;
@@ -712,6 +789,59 @@ class GitSidebar extends Sidebar {
       this.listResetPending = true;
     this.renderList();
     this.updateView();
+    if (reason === "stage" || reason === "commit" || reason === "manual")
+      void this.refreshDiffTabs();
+  }
+
+  async refreshDiffTabs() {
+    const manager = this.editor.tabManager;
+    if (!manager?.tabs || this.destroyed) return;
+    const workspaceRoot = this.editor.fileExplorer?.rootPath || "";
+    if (!workspaceRoot) return;
+    const workspaceGeneration = this.workspaceGeneration;
+    const tabs = manager.tabs.filter((tab) =>
+      tab.type === "git-diff" && this.isPathInWorkspace(tab.filePath, workspaceRoot));
+    for (const tab of tabs) {
+      if (this.diffRefreshInFlight.has(tab)) continue;
+      this.diffRefreshInFlight.add(tab);
+      try {
+        let versions = null;
+        try {
+          versions = await this.editor.api.git.getFileVersions(tab.filePath, {
+            staged: tab.staged === true,
+            originalPath: tab.originalPath || null,
+          });
+        } catch {
+          versions = null;
+        }
+        if (this.destroyed ||
+            workspaceGeneration !== this.workspaceGeneration ||
+            !NCEPath.equals(workspaceRoot, this.editor.fileExplorer?.rootPath || ""))
+          return;
+        if (!versions || versions.success !== true) continue;
+        await manager.openGitDiff?.({
+          filePath: tab.filePath,
+          relativePath: tab.relativePath,
+          staged: tab.staged === true,
+          statusKind: tab.statusKind,
+          originalPath: tab.originalPath || null,
+          versions,
+          focus: false,
+        });
+      } catch {
+        // A stale tab keeps its previous content; the next refresh retries.
+      } finally {
+        this.diffRefreshInFlight.delete(tab);
+      }
+    }
+  }
+
+  isPathInWorkspace(filePath, root = this.editor.fileExplorer?.rootPath) {
+    if (typeof filePath !== "string" || typeof root !== "string" || !root)
+      return false;
+    const base = root.replace(/[\\/]+$/, "");
+    return filePath === base || filePath.startsWith(`${base}/`) ||
+      filePath.startsWith(`${base}\\`);
   }
 
   applyStatusError(result) {
@@ -719,7 +849,8 @@ class GitSidebar extends Sidebar {
     const terminal = code === "GIT_NOT_FOUND" ||
       code === "NOT_A_REPOSITORY" ||
       code === "REPOSITORY_NOT_FOUND" ||
-      code === "PERMISSION_DENIED";
+      code === "PERMISSION_DENIED" ||
+      code === "GIT_OUTPUT_LIMIT";
     this.error = {
       code: code || "GIT_COMMAND_FAILED",
       message: GitSidebar.describeError(result),
@@ -733,19 +864,23 @@ class GitSidebar extends Sidebar {
   }
 
   applyWorkspace(root) {
+    if (this.workspaceRoot && this.commitMessage.trim())
+      this.commitDrafts.set(this.workspaceRoot, this.commitMessage);
     this.workspaceRoot = root;
+    this.workspaceGeneration++;
     this.generation++;
     this.status = null;
     this.error = null;
     this.stale = false;
     this.loading = false;
-    this.commitMessage = "";
+    this.commitMessage = root ? this.commitDrafts.get(root) || "" : "";
     this.commitError = "";
     this.actionError = "";
     this.notice = "";
     this.operationPaths.clear();
+    this.diffRefreshInFlight.clear();
     this.listResetPending = true;
-    if (this.commitInput) this.commitInput.value = "";
+    if (this.commitInput) this.commitInput.value = this.commitMessage;
     this.renderList();
     this.updateView();
   }

@@ -66,14 +66,11 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.invoke("Git:diff", filePath, options),
     getFileVersions: (filePath, options) =>
       ipcRenderer.invoke("Git:fileVersions", filePath, options),
-    getDiffSummary: (options) =>
-      ipcRenderer.invoke("Git:diffSummary", options),
     stageFile: (filePath) => ipcRenderer.invoke("Git:stage", filePath),
     unstageFile: (filePath) => ipcRenderer.invoke("Git:unstage", filePath),
     commit: (message) => ipcRenderer.invoke("Git:commit", message),
     getBranches: () => ipcRenderer.invoke("Git:branches"),
     getCurrentBranch: () => ipcRenderer.invoke("Git:currentBranch"),
-    getLog: (options) => ipcRenderer.invoke("Git:log", options),
   },
   getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),
   addRecentFolder: (folderPath) =>
