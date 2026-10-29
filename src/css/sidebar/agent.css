@@ -1983,3 +1983,139 @@
     font-size: 12px;
   }
 }
+
+/* Lazy Agent loading shell */
+.agent-lazy-shell {
+  overflow: hidden;
+}
+
+.agent-lazy-tabs {
+  gap: 6px;
+}
+
+.agent-lazy-tab {
+  min-width: 74px;
+  pointer-events: none;
+}
+
+.agent-lazy-add {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-hover-alt);
+}
+
+.agent-lazy-messages {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 10px 12px 8px;
+  overflow: hidden;
+}
+
+.agent-lazy-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 84%;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg-secondary);
+}
+
+.agent-lazy-bubble-agent {
+  align-self: flex-start;
+}
+
+.agent-lazy-bubble-user {
+  align-self: flex-end;
+  width: 64%;
+  background: var(--bg-tertiary);
+}
+
+.agent-lazy-line {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    var(--bg-hover-alt) 20%,
+    var(--bg-active) 38%,
+    var(--bg-hover-alt) 56%
+  );
+  background-size: 250% 100%;
+  animation: agent-lazy-shimmer 1.5s ease-in-out infinite;
+}
+
+.agent-lazy-line-long {
+  width: 100%;
+}
+
+.agent-lazy-line-medium {
+  width: 68%;
+}
+
+.agent-lazy-line-short {
+  width: 42%;
+}
+
+.agent-lazy-line-tab {
+  width: 42px;
+  height: 7px;
+}
+
+.agent-lazy-input {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 10px 10px 8px;
+}
+
+.agent-lazy-input-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.agent-lazy-toolbar {
+  align-items: center;
+  gap: 8px;
+}
+
+.agent-lazy-chip {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--bg-hover-alt);
+}
+
+.agent-lazy-send {
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  border-radius: 4px;
+  background: var(--bg-hover-alt);
+}
+
+.agent-lazy-shell .agent-state-row {
+  align-self: stretch;
+  margin: 10px 0;
+}
+
+@keyframes agent-lazy-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -80% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-lazy-line {
+    animation: none;
+    opacity: 0.7;
+  }
+}
