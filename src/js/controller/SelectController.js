@@ -765,6 +765,7 @@ class SelectController {
       this.stopAutoScroll();
       event.preventDefault?.();
       event.stopPropagation?.();
+      if (this.editor.tabManager.activeFile.isDiffView) return;
       this.editor.multiCursorController.addCursorAtClientCoordinates(
         event.clientX,
         event.clientY,

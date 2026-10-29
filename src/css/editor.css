@@ -204,6 +204,22 @@
   width: 100%;
 }
 
+.editor-git-diff-active .line-unchanged {
+  opacity: var(--diff-focus-context-opacity);
+}
+
+.editor-git-diff-active .line-added {
+  opacity: 1;
+  background: var(--diff-focus-added-bg);
+  box-shadow: inset 2px 0 0 var(--git-added);
+}
+
+.editor-git-diff-active .line-removed {
+  opacity: 1;
+  background: var(--diff-focus-removed-bg);
+  box-shadow: inset 2px 0 0 var(--git-deleted);
+}
+
 .editor-git-diff-active .line-el {
   right: 24px;
 }

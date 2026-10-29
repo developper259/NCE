@@ -45,7 +45,15 @@ class CursorController {
     }
   }
 
+  isReadOnlyDiffView() {
+    return this.editor.tabManager?.activeFile?.isDiffView === true;
+  }
+
   enable() {
+    if (this.isReadOnlyDiffView()) {
+      this.disable();
+      return;
+    }
     if (this.editor.cD) {
       this.caretFast?.setDisplay("block");
     }
@@ -389,6 +397,11 @@ class CursorController {
 
   updateCaretPosition() {
     if (!this.editor.tabManager.activeFile) {
+      this.disable();
+      return;
+    }
+
+    if (this.isReadOnlyDiffView()) {
       this.disable();
       return;
     }

@@ -70,6 +70,9 @@
   --diff-segment-added-text: #a7f3d0;
   --diff-segment-removed-bg: rgba(224, 108, 117, 0.18);
   --diff-segment-removed-text: #fecaca;
+  --diff-focus-context-opacity: 0.72;
+  --diff-focus-added-bg: rgba(95, 191, 127, 0.16);
+  --diff-focus-removed-bg: rgba(224, 108, 117, 0.14);
 
   /* Semantic UI states */
   --state-info: var(--accent-primary);
@@ -138,4 +141,7 @@
   --diff-segment-added-text: #0f5132;
   --diff-segment-removed-bg: rgba(201, 60, 71, 0.12);
   --diff-segment-removed-text: #842029;
+  --diff-focus-context-opacity: 0.68;
+  --diff-focus-added-bg: rgba(26, 127, 55, 0.12);
+  --diff-focus-removed-bg: rgba(201, 60, 71, 0.1);
 }

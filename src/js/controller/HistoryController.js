@@ -188,6 +188,7 @@ class HistoryController {
 
   async undo() {
     const file = this.editor.tabManager.activeFile;
+    if (file?.isDiffView) return false;
     const state = this.getState(file);
     if (!state || state.index === 0) return false;
     const entry = state.entries[state.index - 1];
@@ -199,6 +200,7 @@ class HistoryController {
 
   async redo() {
     const file = this.editor.tabManager.activeFile;
+    if (file?.isDiffView) return false;
     const state = this.getState(file);
     if (!state || state.index >= state.entries.length) return false;
     const entry = state.entries[state.index];

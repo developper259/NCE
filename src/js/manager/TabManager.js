@@ -688,6 +688,7 @@ class tabManager {
         file.column || 0,
         { ensureVisible: true },
       );
+      this.editor.cursorController.disable();
       if (!this.editor.isOnInit) this.editor.refreshAll();
       this.editor.refreshMainContent?.();
       this.refresh();
