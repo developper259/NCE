@@ -58,6 +58,28 @@ async function createStore(options) {
   } };
 }
 
+test("AgentConversationStore keeps epoch timestamps and accepts repeated saves", async () => {
+  const { root, store } = await createStore();
+  try {
+    const now = Date.now();
+    const first = snapshot("session-epoch", "first version", now);
+    first.createdAt = now;
+    assert.equal(await store.save(first), true);
+    const second = snapshot("session-epoch", "second version", now + 5);
+    second.createdAt = now;
+    assert.equal(await store.save(second), true, "a newer epoch timestamp must be accepted");
+    const loaded = await store.load();
+    const session = loaded.sessions.find((entry) => entry.id === "session-epoch");
+    assert.equal(session.messages[0].content, "second version");
+    assert.ok(session.updatedAt >= now, "stored timestamps must keep epoch precision");
+    const stale = snapshot("session-epoch", "stale version", now + 1);
+    stale.createdAt = now;
+    assert.equal(await store.save(stale), false, "older timestamps must still be rejected");
+  } finally {
+    await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("AgentConversationStore encrypts global conversation snapshots and restores runtime-safe data", async () => {
   const { root, store, restart } = await createStore();
   try {

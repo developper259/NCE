@@ -71,6 +71,11 @@
   --diff-segment-removed-bg: rgba(224, 108, 117, 0.18);
   --diff-segment-removed-text: #fecaca;
 
+  /* Semantic UI states */
+  --state-info: var(--accent-primary);
+  --state-warning: var(--git-conflict);
+  --state-error: var(--git-deleted);
+
   --scroller-size: 15px;
 
   --output-height: calc(90% - 18px);

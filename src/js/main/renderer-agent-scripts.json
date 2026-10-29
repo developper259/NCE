@@ -26,6 +26,7 @@
   "js/agent/events/AgentEventBus.js",
   "js/core/Agent.js",
   "js/agent/context/ManualContextManager.js",
+  "js/agent/AgentStatePresenter.js",
   "js/sidebar/Agent.Sidebar.js",
   "js/contextMenu/AgentMessage.ContextMenu.js",
   "js/contextMenu/AgentConversation.ContextMenu.js",

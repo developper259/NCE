@@ -49,6 +49,7 @@ class FakeElement {
 }
 
 const source = fs.readFileSync(path.join(__dirname, "../src/js/sidebar/Agent.Sidebar.js"), "utf8");
+const presenterSource = fs.readFileSync(path.join(__dirname, "../src/js/agent/AgentStatePresenter.js"), "utf8");
 const css = fs.readFileSync(path.join(__dirname, "../src/css/sidebar/agent.css"), "utf8");
 const clearedIntervals = [];
 const context = {
@@ -57,7 +58,7 @@ const context = {
   setInterval: (callback, delay) => ({ callback, delay, id: Math.random() }),
   clearInterval: (timer) => clearedIntervals.push(timer),
 };
-vm.runInNewContext(`${source}\nglobalThis.AgentSidebar = AgentSidebar; globalThis.formatAgentWorkDuration = formatAgentWorkDuration;`, context);
+vm.runInNewContext(`${presenterSource}\nglobalThis.AgentStatePresenter = AgentStatePresenter;\n${source}\nglobalThis.AgentSidebar = AgentSidebar; globalThis.formatAgentWorkDuration = formatAgentWorkDuration;`, context);
 const { AgentSidebar } = context;
 
 function createSidebar(session) {
@@ -221,8 +222,9 @@ test("a run with no observed activity keeps its completed working row", () => {
   const sidebar = createSidebar(session);
   sidebar.messagesElement = new FakeElement("div");
   sidebar.startAgentWork(session, 7);
-  assert.equal(sidebar.messagesElement.children.length, 1);
+  assert.equal(sidebar.messagesElement.children.length, 2);
   assert.equal(sidebar.messagesElement.children[0].children[0].children[0].className, "agent-working-word");
+  assert.match(sidebar.messagesElement.children[1].className, /agent-state-row-thinking/);
   sidebar.finishActivityGroup({ sessionId: session.id, runId: 7 }, "success");
   assert.equal(sidebar.messagesElement.children.length, 1);
   assert.equal(sidebar.messagesElement.children[0].children[0].children[0].textContent, "Worked for");

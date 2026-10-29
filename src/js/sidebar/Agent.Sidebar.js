@@ -76,6 +76,10 @@ class AgentSidebar extends Sidebar {
     this._sessionCounter = 0;
     this.conversationPersistenceReady = false;
     this.conversationPersistenceAvailable = false;
+    this.conversationLoadError = null;
+    this.conversationLoadRetrying = false;
+    this.stateCardSequence = 0;
+    this.thinkingStateRow = null;
     this.conversationSaveTimers = new Map();
     this.conversationSaveQueues = new Map();
     this.conversationPersistencePromise = Promise.resolve();
@@ -220,6 +224,10 @@ class AgentSidebar extends Sidebar {
           if (runSession.id === this.activeSessionId) this.refresh();
         }
         if (runSession.id === this.activeSessionId) this.renderManualContext();
+        const contextLabels = descriptors
+          .map((item) => item.relativePath || item.label)
+          .filter(Boolean)
+          .slice(0, 8);
         try {
           let workspaceVersion;
           let snapshot;
@@ -228,13 +236,24 @@ class AgentSidebar extends Sidebar {
             snapshot = await this.manualContextManager.resolveSessionContext(runSession, descriptors);
             if (workspaceVersion === this.manualContextManager.workspaceVersion) break;
           }
-          runSession.manualContextSnapshot = workspaceVersion === this.manualContextManager.workspaceVersion
-            ? snapshot
-            : { source: "user-selected", budgetTokens: 0, items: [],
-              instruction: "Manual context unavailable because the workspace changed." };
+          const workspaceChanged = workspaceVersion !== this.manualContextManager.workspaceVersion;
+          runSession.manualContextSnapshot = workspaceChanged
+            ? { source: "user-selected", budgetTokens: 0, items: [],
+              instruction: "Manual context unavailable because the workspace changed." }
+            : snapshot;
+          if (workspaceChanged && message) {
+            message.contextWarning = { reason: "WORKSPACE_CHANGED", labels: contextLabels };
+            this.scheduleConversationSave(runSession);
+            if (runSession.id === this.activeSessionId) this.refresh();
+          }
         } catch (_error) {
           runSession.manualContextSnapshot = { source: "user-selected", budgetTokens: 0,
             items: [], instruction: "Manual context could not be resolved; use project tools if needed." };
+          if (message) {
+            message.contextWarning = { reason: "CONTEXT_RESOLVE_FAILED", labels: contextLabels };
+            this.scheduleConversationSave(runSession);
+            if (runSession.id === this.activeSessionId) this.refresh();
+          }
         }
       }
       return { manualContext: runSession.manualContextSnapshot };
@@ -323,34 +342,64 @@ class AgentSidebar extends Sidebar {
   }
 
   async initializeConversationPersistence() {
+    await this.loadConversationStore();
+    this.conversationPersistenceReady = true;
+    const session = this.getActiveSession();
+    if (session) {
+      this.scheduleConversationSave(session, true);
+      Promise.resolve(this.editor.api?.setActiveAgentConversation?.(session.id)).catch(() => {});
+    }
+  }
+
+  async loadConversationStore() {
+    const previousActiveId = this.activeSessionId;
     try {
       const loaded = await this.editor.api?.loadAgentConversations?.();
-      this.conversationPersistenceAvailable = loaded?.status?.available === true;
-      if (loaded?.status?.available && Array.isArray(loaded.sessions) && loaded.sessions.length) {
+      const status = loaded?.status || {};
+      if (status.available !== true) {
+        this.conversationPersistenceAvailable = false;
+        this.conversationLoadError = { reason: status.reason || "STORE_ERROR" };
+        return false;
+      }
+      this.conversationPersistenceAvailable = true;
+      this.conversationLoadError = null;
+      if (Array.isArray(loaded.sessions) && loaded.sessions.length) {
         const restored = loaded.sessions
           .map((snapshot) => this.rehydratePersistedSession(snapshot))
           .filter(Boolean);
         if (restored.length) {
+          const requestedId = typeof loaded.activeSessionId === "string"
+            ? loaded.activeSessionId : null;
           this.sessions = restored;
-          this.activeSessionId = restored.some((session) => session.id === loaded.activeSessionId)
-            ? loaded.activeSessionId
-            : restored[0].id;
+          this.activeSessionId = restored.some((session) => session.id === previousActiveId)
+            ? previousActiveId
+            : restored.some((session) => session.id === requestedId)
+              ? requestedId
+              : restored[0].id;
           this.refresh();
           this.scrollToBottomAfterRestore = true;
           this.scheduleRestoredBottomScroll();
           this.updateSessionInfoPopover();
         }
       }
+      return true;
     } catch (_error) {
       this.conversationPersistenceAvailable = false;
+      this.conversationLoadError = { reason: "STORE_ERROR" };
       console.warn("[NCE Agent Conversations] Restore failed", { code: "STORE_ERROR" });
+      return false;
+    }
+  }
+
+  async retryConversationLoad() {
+    if (this.conversationLoadRetrying) return false;
+    this.conversationLoadRetrying = true;
+    this.refresh();
+    try {
+      return await this.loadConversationStore();
     } finally {
-      this.conversationPersistenceReady = true;
-      const session = this.getActiveSession();
-      if (session) {
-        this.scheduleConversationSave(session, true);
-        Promise.resolve(this.editor.api?.setActiveAgentConversation?.(session.id)).catch(() => {});
-      }
+      this.conversationLoadRetrying = false;
+      this.refresh();
     }
   }
 
@@ -406,11 +455,22 @@ class AgentSidebar extends Sidebar {
       messages: (session.messages || []).map((message) => {
         if (!message || typeof message !== "object") return null;
         const snapshot = {};
-        for (const key of ["id", "role", "type", "content", "timestamp", "runId", "status", "startedAt", "finishedAt", "durationMs", "collapsed", "streaming", "hasErrors"]) {
+        for (const key of ["id", "role", "type", "content", "timestamp", "runId", "status", "startedAt", "finishedAt", "durationMs", "collapsed", "streaming", "hasErrors", "errorCode", "errorCategory"]) {
           if (typeof message[key] === "string" || typeof message[key] === "number" || typeof message[key] === "boolean") snapshot[key] = message[key];
         }
         if (Array.isArray(message.manualContextItems)) {
           snapshot.manualContextItems = this.sanitizeManualContextItems(message.manualContextItems);
+        }
+        if (message.errorInfo && typeof message.errorInfo === "object") {
+          snapshot.errorInfo = AgentStatePresenter.normalizeError(message.errorInfo);
+        }
+        if (message.contextWarning && typeof message.contextWarning === "object") {
+          snapshot.contextWarning = {
+            reason: String(message.contextWarning.reason || ""),
+            labels: Array.isArray(message.contextWarning.labels)
+              ? message.contextWarning.labels.filter((label) => typeof label === "string").slice(0, 8)
+              : [],
+          };
         }
         if (Array.isArray(message.items)) {
           snapshot.items = message.items.map((item) => {
@@ -1132,6 +1192,7 @@ class AgentSidebar extends Sidebar {
     if (activePath) item.activePath = activePath;
     group.items.push(item);
     Object.assign(item, this.describeActivityItem(item));
+    this.removeThinkingState();
     this.activityItems.set(itemId, {
       group,
       item,
@@ -1396,6 +1457,7 @@ class AgentSidebar extends Sidebar {
     if (!session || !Number.isInteger(runId)) return;
     const shouldScroll = this.captureConversationFollow(session);
     this.stopAgentWorkTicker();
+    this.removeThinkingState();
     session.workState = { runId, startedAt: Date.now(), finishedAt: null, status: "running" };
     // Give every user prompt its own work row, even when the run produces no
     // tool activity. Creating it now keeps it directly after the prompt in
@@ -1409,6 +1471,7 @@ class AgentSidebar extends Sidebar {
       if (this.messagesElement) {
         this.renderConversationMessageIfVisible(session, group, shouldScroll);
       }
+      if (!(group.items || []).length) this.renderThinkingState(session);
       if (shouldScroll) this.scrollMessagesToBottom();
       this.syncAgentWorkTicker();
     }
@@ -1428,6 +1491,7 @@ class AgentSidebar extends Sidebar {
     }
     if (session.id === this.activeSessionId) {
       this.stopAgentWorkTicker();
+      this.removeThinkingState();
       const refs = this.workLogElements.get(session);
       if (group) this.updateWorkHeader(session, group);
       else refs?.row?.remove();
@@ -1480,21 +1544,19 @@ class AgentSidebar extends Sidebar {
     return header;
   }
 
-  renderTemporaryWorkHeader(session) {
+  renderThinkingState(session) {
     if (!this.messagesElement || !session || session.id !== this.activeSessionId || !session.isGenerating) return;
-    const existingGroup = this.getActivityGroup(session, session.runId);
-    if (existingGroup) return;
-    const existing = this.workLogElements.get(session);
-    if (existing?.row?.isConnected) return;
-    const row = document.createElement("div");
-    row.className = "agent-work-log agent-work-log-pending";
+    if (this.thinkingStateRow?.isConnected) return;
+    const row = this.createAgentStateRow(AgentStatePresenter.createThinkingState());
+    row.classList.add("agent-state-row-thinking");
     row._agentConversationSession = session;
-    const header = this.createWorkHeader(session);
-    row.appendChild(header);
-    const refs = this.workLogElements.get(session);
-    refs.row = row;
+    this.thinkingStateRow = row;
     this.messagesElement.appendChild(row);
-    this.syncAgentWorkTicker();
+  }
+
+  removeThinkingState() {
+    this.thinkingStateRow?.remove?.();
+    this.thinkingStateRow = null;
   }
 
   updateWorkHeader(session, group = null, now = Date.now()) {
@@ -2503,9 +2565,33 @@ class AgentSidebar extends Sidebar {
 
   createConversationMessageRow(session, message, index) {
     const isActivity = message?.role === "activity" || message?.type === "activity";
+    if (
+      !isActivity &&
+      message?.role === "agent" &&
+      (message.hasErrors === true || message.status === "error")
+    ) {
+      const errorRow = this.createErrorStateRow(session, message);
+      errorRow.classList.add("agent-state-row-message");
+      errorRow.dataset.agentMessageIndex = String(index);
+      errorRow._agentConversationMessage = message;
+      errorRow._agentConversationSession = session;
+      return errorRow;
+    }
     const row = isActivity
       ? this.createActivityElement(message)
       : this.createMessageElement(message);
+    if (!isActivity && message?.contextWarning) {
+      const stack = document.createElement("div");
+      stack.className = "agent-message-stack";
+      stack.append(
+        row,
+        this.createAgentStateRow(this.contextStateSpec(message.contextWarning)),
+      );
+      stack.dataset.agentMessageIndex = String(index);
+      stack._agentConversationMessage = message;
+      stack._agentConversationSession = session;
+      return stack;
+    }
     if (!row.dataset) row.dataset = {};
     row.dataset.agentMessageIndex = String(index);
     row._agentConversationMessage = message;
@@ -2735,6 +2821,7 @@ class AgentSidebar extends Sidebar {
 
   renderMessages(container) {
     this.stopAgentWorkTicker();
+    this.thinkingStateRow = null;
     for (const child of [...(container.children || [])])
       this.releaseConversationMessageRow(child);
     container.replaceChildren();
@@ -2744,7 +2831,13 @@ class AgentSidebar extends Sidebar {
     this.renderedMessageSessionId = session?.id || null;
 
     if (!session || (session.messages.length === 0 && !session.isGenerating)) {
-      container.appendChild(this.createEmptyState());
+      if (this.conversationLoadError) {
+        container.appendChild(this.createAgentStateRow(this.conversationStateSpec(), {
+          retry: () => this.retryConversationLoad(),
+        }));
+      } else {
+        container.appendChild(this.createEmptyState());
+      }
       this.updateReasoningControl(session);
       return;
     }
@@ -2761,20 +2854,20 @@ class AgentSidebar extends Sidebar {
       container.appendChild(controls.older);
     }
 
-    let currentRunHasActivity = false;
+    let currentRunActivityItems = 0;
     for (const message of session.messages) {
       if (
         (message?.role === "activity" || message?.type === "activity") &&
         message.runId === session.runId
-      ) currentRunHasActivity = true;
+      ) currentRunActivityItems += (message.items || []).length;
     }
     for (let index = state.start; index < state.end; index += 1) {
       const row = this.createConversationMessageRow(session, entries[index], index);
       container.appendChild(row);
     }
 
-    if (session.isGenerating && session.workState?.runId === session.runId && !currentRunHasActivity)
-      this.renderTemporaryWorkHeader(session);
+    if (session.isGenerating && session.workState?.runId === session.runId && currentRunActivityItems === 0)
+      this.renderThinkingState(session);
 
     if (session.queue && session.queue.length > 0) {
       session.queue.forEach((queuedContent, index) => {
@@ -3195,6 +3288,214 @@ class AgentSidebar extends Sidebar {
       const workRefs = this.workLogElements.get(session);
       if (workRefs) workRefs.group = group;
       this.updateWorkHeader(session, group);
+    }
+  }
+
+  createAgentStateCard(spec, handlers = {}) {
+    const card = document.createElement("div");
+    card.className = `agent-state-card agent-state-${spec.variant || "info"}`;
+    card.setAttribute("role", spec.live === "assertive" ? "alert" : "status");
+    card.setAttribute("aria-live", spec.live || "polite");
+
+    const icon = document.createElement("div");
+    icon.className = "agent-state-icon";
+    icon.setAttribute("aria-hidden", "true");
+    const iconElement = document.createElement("i");
+    iconElement.className = spec.icon || AgentStatePresenter.ICONS.loading;
+    icon.appendChild(iconElement);
+
+    const copy = document.createElement("div");
+    copy.className = "agent-state-copy";
+
+    const title = document.createElement("div");
+    title.className = "agent-state-title";
+    title.textContent = spec.title || "";
+    copy.appendChild(title);
+
+    if (spec.description) {
+      const description = document.createElement("div");
+      description.className = "agent-state-description";
+      description.textContent = spec.description;
+      copy.appendChild(description);
+    }
+    if (spec.hint) {
+      const hint = document.createElement("div");
+      hint.className = "agent-state-hint";
+      hint.textContent = spec.hint;
+      copy.appendChild(hint);
+    }
+
+    const actions = (spec.actions || []).filter((action) =>
+      action && action.id && typeof handlers[action.id] === "function");
+    if (actions.length) {
+      const actionRow = document.createElement("div");
+      actionRow.className = "agent-state-actions";
+      for (const action of actions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "agent-state-button";
+        if (action.primary) button.classList.add("agent-state-button-primary");
+        button.disabled = action.disabled === true;
+        button.setAttribute("aria-label", action.label);
+        if (action.icon) {
+          const buttonIcon = document.createElement("i");
+          buttonIcon.className = action.icon;
+          buttonIcon.setAttribute("aria-hidden", "true");
+          button.appendChild(buttonIcon);
+        }
+        const label = document.createElement("span");
+        label.textContent = action.label;
+        button.appendChild(label);
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (button.disabled) return;
+          Promise.resolve(handlers[action.id]()).catch(() => {});
+        });
+        actionRow.appendChild(button);
+      }
+      copy.appendChild(actionRow);
+    }
+
+    if (Array.isArray(spec.details) && spec.details.length)
+      this.appendAgentStateDetails(copy, spec.details);
+    card.append(icon, copy);
+    return card;
+  }
+
+  appendAgentStateDetails(container, details) {
+    const detailsId = `agent-state-details-${++this.stateCardSequence}`;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "agent-state-details-toggle";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.setAttribute("aria-controls", detailsId);
+    toggle.textContent = "Voir les détails";
+
+    const region = document.createElement("div");
+    region.className = "agent-state-details";
+    region.id = detailsId;
+    region.hidden = true;
+    for (const detail of details) {
+      const line = document.createElement("div");
+      line.className = "agent-state-detail-line";
+      const label = document.createElement("span");
+      label.className = "agent-state-detail-label";
+      label.textContent = `${detail.label}: `;
+      const value = document.createElement("span");
+      value.className = "agent-state-detail-value";
+      value.textContent = String(detail.value ?? "");
+      line.append(label, value);
+      region.appendChild(line);
+    }
+    toggle.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const expanded = toggle.getAttribute("aria-expanded") === "true";
+      toggle.setAttribute("aria-expanded", String(!expanded));
+      toggle.textContent = expanded ? "Voir les détails" : "Masquer les détails";
+      region.hidden = expanded;
+    });
+    container.append(toggle, region);
+  }
+
+  createAgentStateRow(spec, handlers = {}) {
+    const row = document.createElement("div");
+    row.className = "agent-state-row";
+    row.appendChild(this.createAgentStateCard(spec, handlers));
+    return row;
+  }
+
+  conversationStateSpec() {
+    return AgentStatePresenter.classifyConversationError({
+      reason: this.conversationLoadError?.reason || "STORE_ERROR",
+      retrying: this.conversationLoadRetrying === true,
+    });
+  }
+
+  contextStateSpec(warning) {
+    return AgentStatePresenter.classifyContextError({
+      reason: warning?.reason || "",
+      labels: Array.isArray(warning?.labels) ? warning.labels.slice(0, 8) : [],
+    });
+  }
+
+  canRetryFailedRun(session, message) {
+    const index = Array.isArray(session?.messages)
+      ? session.messages.indexOf(message) : -1;
+    if (index < 0) return false;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      if (session.messages[cursor]?.role === "user") return true;
+    }
+    return false;
+  }
+
+  createErrorStateRow(session, message) {
+    const provider = typeof AgentAI !== "undefined"
+      ? AgentAI.getProvider(this.currentProviderId) : null;
+    const info = message.errorInfo || AgentStatePresenter.normalizeError(
+      { userMessage: message.content },
+      { providerName: provider?.name || provider?.id || "" },
+    );
+    const spec = AgentStatePresenter.classifyRequestError(info, {
+      canRetry: this.canRetryFailedRun(session, message),
+      retrying: session?.isRetrying === true,
+      providerRequiresKey: provider?.requiresApiKey === true,
+    });
+    return this.createAgentStateRow(spec, {
+      retry: () => this.retryFailedMessage(session, message),
+      configure: () => this.configureProviderAndRetry(session, message),
+    });
+  }
+
+  async configureProviderAndRetry(session, message) {
+    if (session?.isRetrying || session?.isGenerating) return false;
+    const provider = typeof AgentAI !== "undefined"
+      ? AgentAI.getProvider(this.currentProviderId) : null;
+    if (!provider) return false;
+    session.isRetrying = true;
+    this.refresh();
+    try {
+      const apiKey = await this.requestApiKey(provider);
+      if (!apiKey) return false;
+      this.apiKeys.set(provider.id, true);
+      this.agent?.setProvider?.(this.providerWithApiKeyState(provider));
+      await this.editor.api?.setAgentApiKey?.(provider.id, apiKey);
+      return await this.retryFailedMessage(session, message);
+    } catch (error) {
+      console.warn("[NCE Agent] Provider configuration failed", { code: "CONFIG_FAILED" });
+      return false;
+    } finally {
+      session.isRetrying = false;
+      this.refresh();
+    }
+  }
+
+  async retryFailedMessage(session, message) {
+    if (!session || session.isGenerating || session.isRetrying) return false;
+    const index = Array.isArray(session.messages)
+      ? session.messages.indexOf(message) : -1;
+    if (index < 0) return false;
+    let userMessage = null;
+    for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+      if (session.messages[cursor]?.role === "user") {
+        userMessage = session.messages[cursor];
+        break;
+      }
+    }
+    const content = typeof userMessage?.content === "string" ? userMessage.content : "";
+    if (!content.trim()) return false;
+    session.isRetrying = true;
+    this.refresh();
+    try {
+      const runId = message.runId;
+      const isRetryError = (entry) => entry && entry.runId === runId &&
+        (entry.hasErrors === true || entry.status === "error");
+      session.messages = session.messages.filter((entry) => !isRetryError(entry));
+      session.segments = (session.segments || []).filter((entry) => !isRetryError(entry));
+      await this.sendMessage(content, session.id, { replay: true });
+      return true;
+    } finally {
+      session.isRetrying = false;
+      this.refresh();
     }
   }
 
@@ -3620,6 +3921,7 @@ class AgentSidebar extends Sidebar {
     message.timestamp ||= this.formatTime();
     message.streaming = true;
     session.streamingMessage = message;
+    if ((message.content || "").trim()) this.removeThinkingState();
     this.scheduleConversationSave(session);
     const refs = this.messageElements.get(message);
     if (!refs?.row?.isConnected) {
@@ -4913,7 +5215,7 @@ class AgentSidebar extends Sidebar {
     this.refresh();
   }
 
-  async sendMessage(content, sessionId = this.activeSessionId) {
+  async sendMessage(content, sessionId = this.activeSessionId, options = {}) {
     this.ensureInitialized();
     await Promise.all([
       this.conversationPersistencePromise,
@@ -4936,30 +5238,34 @@ class AgentSidebar extends Sidebar {
       .filter((m) => m && (m.role === "user" || m.role === "agent"))
       .filter((m) => {
         const text = typeof m.content === "string" ? m.content : "";
-        return !text.startsWith("❌") && !text.startsWith("🚫");
+        return m.hasErrors !== true && m.status !== "error" &&
+          !text.startsWith("❌") && !text.startsWith("🚫");
       })
       .map((m) => ({
         role: m.role === "agent" ? "assistant" : "user",
         content: typeof m.content === "string" ? m.content : "",
       }));
 
-    const userMessage = {
-      role: "user",
-      content,
-      timestamp: this.formatTime(),
-    };
-    session.messages.push(userMessage);
-    if (session.id === this.activeSessionId)
-      this.showLatestConversation(session, true);
-    session.pendingManualContextMessage = userMessage;
-    session.usage.userMessages += 1;
+    const replay = options?.replay === true;
+    if (!replay) {
+      const userMessage = {
+        role: "user",
+        content,
+        timestamp: this.formatTime(),
+      };
+      session.messages.push(userMessage);
+      if (session.id === this.activeSessionId)
+        this.showLatestConversation(session, true);
+      session.pendingManualContextMessage = userMessage;
+      session.usage.userMessages += 1;
+      this.renameSessionFromContent(session, content);
+    }
     session.usage.runs += 1;
     this.updateSessionInfoPopover();
 
-    this.renameSessionFromContent(session, content);
     this.scheduleConversationSave(session, true);
 
-    if (session.id === this.activeSessionId) {
+    if (!replay && session.id === this.activeSessionId) {
       session.draft = "";
     }
     session.isGenerating = true;
@@ -5031,16 +5337,26 @@ class AgentSidebar extends Sidebar {
           { segmentId: `${session.runId}:terminal-error` },
         );
         errorMessage.role = "agent";
+        const errorInfo = AgentStatePresenter.normalizeError(error, {
+          providerName: provider?.name || provider?.id || "",
+        });
         errorMessage.content =
-          error?.userMessage ||
-          error?.message ||
+          errorInfo.userMessage ||
           "La requête vers le modèle a échoué.";
         errorMessage.timestamp = this.formatTime();
         errorMessage.streaming = false;
         errorMessage.hasErrors = true;
         errorMessage.status = "error";
+        errorMessage.errorInfo = errorInfo;
+        errorMessage.errorCode = errorInfo.code || null;
+        errorMessage.errorCategory = errorInfo.category || null;
+        if (session.id === this.activeSessionId) {
+          this.removeThinkingState();
+          this.renderConversationMessageIfVisible(session, errorMessage, true);
+        }
       }
     } finally {
+      this.removeThinkingState();
       const completedRunId = session.runId;
       if (Number.isInteger(completedRunId)) {
         const activityContext = {
@@ -5056,7 +5372,8 @@ class AgentSidebar extends Sidebar {
       session.streamingMessage = null;
       for (const segment of session.segments || []) {
         if (segment?.runId !== completedRunId) continue;
-        segment.status = "complete";
+        if (segment.hasErrors !== true && segment.status !== "error")
+          segment.status = "complete";
         if (segment.type === "assistant" || segment.type === "reasoning") {
           segment.streaming = false;
         }

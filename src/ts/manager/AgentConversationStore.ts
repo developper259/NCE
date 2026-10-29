@@ -63,6 +63,15 @@ function safeNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+// Epoch milliseconds exceed the counters' cap, so timestamps need their own bound.
+const MAX_TIMESTAMP = 8_640_000_000_000_000;
+
+function safeTimestamp(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.min(Math.floor(value), MAX_TIMESTAMP)
+    : undefined;
+}
+
 function copyAllowed(source: Record<string, any>, keys: readonly string[], itemLimit = MAX_ITEMS) {
   const output: Record<string, any> = {};
   for (const key of keys) {
@@ -152,8 +161,8 @@ export function sanitizeAgentConversation(value: unknown): AgentConversationSnap
     version: 1,
     id: value.id,
     title: boundedText(value.title, 512) || "New chat",
-    createdAt: safeNumber(value.createdAt) || Date.now(),
-    updatedAt: safeNumber(value.updatedAt) || Date.now(),
+    createdAt: safeTimestamp(value.createdAt) ?? Date.now(),
+    updatedAt: safeTimestamp(value.updatedAt) ?? Date.now(),
     messages,
     usage,
   };
