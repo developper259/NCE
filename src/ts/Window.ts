@@ -22,6 +22,7 @@ import { normalizeTerminalLink } from "./terminal/TerminalTypes";
 import { App } from "./App";
 import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
 import { PathAccess } from "./manager/PathAccess";
+import { GitManager } from "./manager/GitManager";
 import { TITLEBAR_OVERLAY_THEME } from "./manager/TitleBarTheme";
 import type { WindowSession } from "./manager/WindowSessionStore";
 import type { DeliveredFileResult, ExternalOpenResult } from "./manager/ExternalOpenCoordinator";
@@ -93,6 +94,7 @@ export class Window {
   agentApprovalManager: AgentApprovalManager | undefined;
   agentProcessRunner: AgentProcessRunner | undefined;
   terminalManager: TerminalManager | undefined;
+  gitManager: GitManager | undefined;
   readonly pathAccess: PathAccess;
   private readonly activeAgentModelRequests = new Map<string, AbortController>();
   app: App;
@@ -152,6 +154,7 @@ export class Window {
     this.agentApprovalManager = undefined;
     this.agentProcessRunner = undefined;
     this.terminalManager = undefined;
+    this.gitManager = undefined;
     this.pathAccess = new PathAccess(
       () => this.watcher?.getWatchedPath?.() || this.workspacePath,
       process.platform,
@@ -221,6 +224,10 @@ export class Window {
     });
     const terminalOwner = this.window.webContents;
     this.terminalManager.attachOwner(terminalOwner);
+    this.gitManager = new GitManager({
+      getWorkspaceRoot: () => this.watcher?.getWatchedPath?.() || this.workspacePath,
+      pathAccess: this.pathAccess,
+    });
     this.watcher.onChange = (filePath) =>
       this.fileManager?.clearFileCache(filePath);
     this.contextMenu = new ContextMenu(this.window, this.ipc);
@@ -515,6 +522,7 @@ export class Window {
     this.agentApprovalManager?.handleIPC();
     this.agentProcessRunner?.handleIPC();
     this.terminalManager?.registerIPC();
+    this.gitManager?.handleIPC(this.ipc);
   }
 
   private async confirmDroppedPaths(paths: unknown): Promise<string[] | null> {
@@ -1005,6 +1013,7 @@ export class Window {
   private async disposeWindowServices(owner?: WebContents): Promise<void> {
     this.agentApprovalManager?.cancelAll();
     this.agentProcessRunner?.dispose();
+    this.gitManager?.dispose();
     await this.watcher?.dispose();
     if (owner) await this.terminalManager?.closeForOwner(owner);
     await this.workspaceSearch?.dispose();
