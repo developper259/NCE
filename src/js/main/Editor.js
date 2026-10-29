@@ -144,7 +144,6 @@ class Editor {
     this._settingsView = null;
     this._pictureView = null;
     this._markdownView = null;
-    this._gitDiffView = null;
     this._performanceDashboard = null;
 
     this.writerController.insertMode = true;
@@ -346,11 +345,6 @@ class Editor {
     return this._markdownView;
   }
 
-  getGitDiffView() {
-    if (!this._gitDiffView) this._gitDiffView = new GitDiffView(this);
-    return this._gitDiffView;
-  }
-
   getPerformanceDashboard() {
     if (!this._performanceDashboard)
       this._performanceDashboard = new PerformanceDashboard(this);
@@ -412,7 +406,6 @@ class Editor {
     this._settingsView?.destroy?.();
     this._pictureView?.destroy?.();
     this._markdownView?.destroy?.();
-    this._gitDiffView?.destroy?.();
     this._performanceDashboard?.destroy?.();
     this.bottomPanelManager?.destroy?.();
     this.tabManager?.destroy?.();
@@ -454,14 +447,12 @@ class Editor {
       this.getSettingsView().show();
       this._pictureView?.hide();
       this._markdownView?.hide();
-      this._gitDiffView?.hide();
       this.bottomBar?.hide();
       this.cursorController?.disable();
       this.setSelected(false);
     } else if (pictureActive) {
       this._settingsView?.hide();
       this._markdownView?.hide();
-      this._gitDiffView?.hide();
       this.getPictureView().show(this.tabManager.activeTab);
       this.bottomBar?.showImagePreview();
       this.cursorController?.disable();
@@ -469,7 +460,6 @@ class Editor {
     } else if (markdownActive) {
       this._settingsView?.hide();
       this._pictureView?.hide();
-      this._gitDiffView?.hide();
       const activeTab = this.tabManager.activeTab;
       if (typeof MarkdownView !== "undefined") {
         this.getMarkdownView().show(activeTab);
@@ -482,20 +472,12 @@ class Editor {
       this.bottomBar?.showMarkdownPreview();
       this.cursorController?.disable();
       this.setSelected(false);
-    } else if (gitDiffActive) {
-      this._settingsView?.hide();
-      this._pictureView?.hide();
-      this._markdownView?.hide();
-      this.getGitDiffView().show(this.tabManager.activeTab);
-      this.bottomBar?.hide();
-      this.cursorController?.disable();
-      this.setSelected(false);
     } else {
       this._settingsView?.hide();
       this._pictureView?.hide();
       this._markdownView?.hide();
-      this._gitDiffView?.hide();
-      if (this.tabManager.activeFile) this.bottomBar?.show();
+      if (gitDiffActive) this.bottomBar?.hide();
+      else if (this.tabManager.activeFile) this.bottomBar?.show();
     }
   }
 

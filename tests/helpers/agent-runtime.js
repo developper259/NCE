@@ -47,7 +47,8 @@ function createAgent(
     ),
   ];
   const files = rendererScripts.filter(
-    (file) => file.startsWith("config/") || /^js\/(?:agent\/|core\/Agent\.js$)/.test(file),
+    (file) => file.startsWith("config/") ||
+      /^js\/(?:agent\/|core\/(?:Agent|LineDiff)\.js$)/.test(file),
   );
   for (const file of files)
     vm.runInContext(

@@ -12,6 +12,8 @@ const MAX_DIFF_FILE_BYTES = 1024 * 1024;
 const MAX_UNTRACKED_PREVIEW_BYTES = 64 * 1024;
 const MAX_COMMIT_MESSAGE_LENGTH = 10_000;
 const MAX_DETAIL_LENGTH = 2_000;
+const MAX_VERSION_BYTES = 4 * 1024 * 1024;
+const BINARY_SAMPLE_BYTES = 8000;
 const DEFAULT_LOG_LIMIT = 50;
 const MAX_LOG_LIMIT = 200;
 
@@ -87,6 +89,17 @@ export interface GitDiff {
   preview?: string;
   added?: number | null;
   deleted?: number | null;
+}
+
+export interface GitFileVersions {
+  path: string;
+  staged: boolean;
+  oldContent: string;
+  newContent: string;
+  binary: boolean;
+  tooLarge: boolean;
+  untracked: boolean;
+  deleted: boolean;
 }
 
 export interface GitBranchInfo {
@@ -202,6 +215,11 @@ export class GitManager {
     ipc.handle("Git:status", async () => this.getStatus());
     ipc.handle("Git:diff", async (_event, filePath, options) =>
       this.getDiff(filePath, { staged: options?.staged === true }));
+    ipc.handle("Git:fileVersions", async (_event, filePath, options) =>
+      this.getFileVersions(filePath, {
+        staged: options?.staged === true,
+        originalPath: options?.originalPath,
+      }));
     ipc.handle("Git:diffSummary", async (_event, options) =>
       this.getDiffSummary({ staged: options?.staged === true }));
     ipc.handle("Git:stage", async (_event, filePath) => this.stageFile(filePath));
@@ -385,6 +403,127 @@ export class GitManager {
       patch: text,
       added: summary.added,
       deleted: summary.deleted,
+    };
+  }
+
+  async getFileVersions(
+    filePath: unknown,
+    options: { staged?: boolean; originalPath?: unknown } = {},
+  ): Promise<GitResult<GitFileVersions>> {
+    const staged = options.staged === true;
+    const target = await this.resolveFile(filePath);
+    if ("failure" in target) return target.failure;
+    const { root, relativePath, absolutePath } = target;
+    const originalPath = this.sanitizeRepositoryPath(options.originalPath);
+    if (options.originalPath != null && !originalPath)
+      return failure("INVALID_PATH", "The original file path is invalid.");
+    const tracked = await this.runGit(
+      ["ls-files", "-z", "--", relativePath],
+      { cwd: root, literalPaths: true },
+    );
+    if (!tracked.ok) return tracked.failure;
+    const isTracked = tracked.output.stdout.length > 0;
+    const empty = { content: "", binary: false, tooLarge: false, missing: false };
+    let oldVersion = empty;
+    let newVersion = empty;
+    let untracked = false;
+    let deleted = false;
+    if (staged) {
+      const reference = await this.readBlobVersion(root, `HEAD:${originalPath || relativePath}`);
+      if ("failure" in reference) return reference.failure;
+      oldVersion = reference;
+      if (isTracked) {
+        const index = await this.readBlobVersion(root, `:${relativePath}`);
+        if ("failure" in index) return index.failure;
+        newVersion = index;
+        deleted = index.missing;
+      } else {
+        untracked = true;
+      }
+    } else {
+      const working = await this.readWorkingVersion(absolutePath);
+      if ("failure" in working) return working.failure;
+      newVersion = working;
+      deleted = working.missing;
+      if (isTracked) {
+        const index = await this.readBlobVersion(root, `:${relativePath}`);
+        if ("failure" in index) return index.failure;
+        oldVersion = index;
+      } else {
+        untracked = true;
+      }
+    }
+    const binary = oldVersion.binary || newVersion.binary;
+    const tooLarge = oldVersion.tooLarge || newVersion.tooLarge;
+    return {
+      success: true,
+      path: relativePath,
+      staged,
+      oldContent: binary || tooLarge ? "" : oldVersion.content,
+      newContent: binary || tooLarge ? "" : newVersion.content,
+      binary,
+      tooLarge,
+      untracked,
+      deleted,
+    };
+  }
+
+  private sanitizeRepositoryPath(value: unknown): string | null {
+    if (typeof value !== "string" || !value || value.includes("\0")) return null;
+    const normalized = value.replace(/\\/g, "/");
+    if (normalized.startsWith("/") || /^[a-zA-Z]:/.test(normalized)) return null;
+    const segments = normalized.split("/");
+    if (segments.some((segment) => !segment || segment === "." || segment === ".."))
+      return null;
+    return segments.join("/");
+  }
+
+  private async readBlobVersion(
+    root: string,
+    spec: string,
+  ): Promise<{ content: string; binary: boolean; tooLarge: boolean; missing: boolean } | { failure: GitFailure }> {
+    const result = await this.runGit(
+      ["show", spec],
+      { cwd: root, maxOutputBytes: MAX_VERSION_BYTES + 1, allowExitCodes: [0, 128] },
+    );
+    if (!result.ok) return { failure: result.failure };
+    if (result.output.code !== 0)
+      return { content: "", binary: false, tooLarge: false, missing: true };
+    return this.decodeVersion(result.output.stdout);
+  }
+
+  private async readWorkingVersion(
+    absolutePath: string,
+  ): Promise<{ content: string; binary: boolean; tooLarge: boolean; missing: boolean } | { failure: GitFailure }> {
+    try {
+      const stats = await fs.stat(absolutePath);
+      if (!stats.isFile()) return { content: "", binary: false, tooLarge: false, missing: true };
+      if (stats.size > MAX_VERSION_BYTES)
+        return { content: "", binary: false, tooLarge: true, missing: false };
+      return this.decodeVersion(await fs.readFile(absolutePath));
+    } catch (error: any) {
+      if (error?.code === "ENOENT")
+        return { content: "", binary: false, tooLarge: false, missing: true };
+      if (error?.code === "EACCES" || error?.code === "EPERM")
+        return { failure: failure("PERMISSION_DENIED", "The file cannot be read.") };
+      return { failure: failure("GIT_COMMAND_FAILED", "The file cannot be read.") };
+    }
+  }
+
+  private decodeVersion(buffer: Buffer): {
+    content: string;
+    binary: boolean;
+    tooLarge: boolean;
+    missing: boolean;
+  } {
+    if (buffer.length > MAX_VERSION_BYTES)
+      return { content: "", binary: false, tooLarge: true, missing: false };
+    const binary = buffer.subarray(0, BINARY_SAMPLE_BYTES).includes(0);
+    return {
+      content: binary ? "" : buffer.toString("utf8"),
+      binary,
+      tooLarge: false,
+      missing: false,
     };
   }
 

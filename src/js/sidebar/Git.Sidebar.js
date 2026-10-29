@@ -80,6 +80,7 @@ class GitSidebar extends Sidebar {
     this.actionError = "";
     this.notice = "";
     this.operationPaths = new Set();
+    this.diffLoadingPaths = new Set();
     this.generation = 0;
     this.refreshTimer = null;
     this.listResetPending = true;
@@ -600,13 +601,32 @@ class GitSidebar extends Sidebar {
       this.setActionError("This change is outside the workspace.");
       return null;
     }
-    return this.editor.tabManager?.openGitDiff?.({
+    const key = `${staged ? "staged" : "worktree"}:${entry.path}`;
+    if (this.diffLoadingPaths.has(key)) return null;
+    this.diffLoadingPaths.add(key);
+    this.clearTransientMessages();
+    this.notice = "Loading diff…";
+    this.updateCommitControls();
+    let versions = null;
+    try {
+      versions = await this.editor.api.git.getFileVersions(filePath, {
+        staged: staged === true,
+        originalPath: entry.originalPath || null,
+      });
+    } catch {
+      versions = null;
+    }
+    this.diffLoadingPaths.delete(key);
+    this.notice = "";
+    this.updateCommitControls();
+    return (await this.editor.tabManager?.openGitDiff?.({
       filePath,
       relativePath: entry.path,
       staged: staged === true,
       statusKind: entry.kind,
       originalPath: entry.originalPath || null,
-    }) || null;
+      versions,
+    })) || null;
   }
 
   async openEntryFile(entry) {

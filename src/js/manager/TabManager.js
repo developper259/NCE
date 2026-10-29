@@ -44,10 +44,11 @@ class tabManager {
     this.tabs = files;
   }
   get activeFile() {
-    return this.activeTab?.type === TAB_TYPES.FILE &&
-      this.tabs.includes(this.activeTab)
-      ? this.activeTab
-      : null;
+    const tab = this.activeTab;
+    if (!tab || !this.tabs.includes(tab)) return null;
+    if (tab.type === TAB_TYPES.FILE) return tab;
+    if (tab.type === TAB_TYPES.GIT_DIFF) return tab.textTab || null;
+    return null;
   }
   set activeFile(file) {
     this.activeTab = file?.type === TAB_TYPES.FILE ? file : null;
@@ -62,7 +63,7 @@ class tabManager {
     if (typeof setActiveFileContext !== "function") return false;
 
     const context = {
-      hasActiveFile: Boolean(this.activeFile),
+      hasActiveFile: Boolean(this.activeFile) && this.activeTab?.type === TAB_TYPES.FILE,
       canCycleTabs: this.canCycleTabs,
     };
     if (this.lastNativeTabContext &&
@@ -225,11 +226,15 @@ class tabManager {
     const filePath = options?.filePath;
     if (typeof filePath !== "string" || !filePath) return null;
     const staged = options.staged === true;
+    const textTab = await buildGitDiffBuffer(this.editor, options);
     let tab = this.tabs.find((candidate) =>
       candidate.type === TAB_TYPES.GIT_DIFF &&
       candidate.staged === staged &&
       NCEPath.equals(candidate.filePath, filePath));
     if (tab) {
+      if (tab.textTab && tab.textTab !== textTab)
+        await this.editor.highlightController?.closeFile?.(tab.textTab);
+      tab.textTab = textTab;
       tab.relativePath = options.relativePath || tab.relativePath;
       tab.statusKind = options.statusKind || tab.statusKind;
       tab.originalPath = options.originalPath ?? null;
@@ -242,6 +247,7 @@ class tabManager {
         statusKind: options.statusKind,
         originalPath: options.originalPath,
       });
+      tab.textTab = textTab;
       this.tabs.push(tab);
     }
     await this.setFocusTab(tab);
@@ -541,7 +547,10 @@ class tabManager {
     const closedLastTab = this.tabs.length === 0;
     if (tab.type === TAB_TYPES.PICTURE) this.editor._pictureView?.close?.(tab);
     if (tab.type === "markdown") this.editor._markdownView?.close?.(tab);
-    if (tab.type === TAB_TYPES.GIT_DIFF) this.editor._gitDiffView?.close?.(tab);
+    if (tab.type === TAB_TYPES.GIT_DIFF) {
+      await this.editor.highlightController?.closeFile?.(tab.textTab);
+      tab.textTab = null;
+    }
     if (closedLastTab) {
       this.activeTab = null;
       this.editor.fileExplorer.activeFilePath = null;
@@ -665,6 +674,25 @@ class tabManager {
     this.activeTab = tab;
     this.notifyActiveTabChange(tab);
     this.syncNativeTabContext();
+    if (tab.type === TAB_TYPES.GIT_DIFF) {
+      const file = tab.textTab;
+      if (!file) return;
+      this.editor.fileExplorer?.setActiveFile?.(null);
+      this.editor.searchController?.close?.();
+      this.editor.lineController.dirtyLines.clear();
+      this.editor.highlightController.dirtyLines.clear();
+      if (!file.loadError) await this.editor.highlightController.openFile(file);
+      if (focusGeneration !== this.focusGeneration) return;
+      this.editor.cursorController.setCursorPosition(
+        file.row || 1,
+        file.column || 0,
+        { ensureVisible: true },
+      );
+      if (!this.editor.isOnInit) this.editor.refreshAll();
+      this.editor.refreshMainContent?.();
+      this.refresh();
+      return;
+    }
     if (tab.type !== TAB_TYPES.FILE) {
       this.editor.fileExplorer?.setActiveFile?.(
         ["picture", "markdown"].includes(tab.type) ? tab.path : null,

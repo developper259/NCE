@@ -59,6 +59,18 @@
   --git-modified: #d7ba7d;
   --git-conflict: #e5a45a;
 
+  /* Git diff surfaces */
+  --diff-added-bg: rgba(95, 191, 127, 0.12);
+  --diff-added-border: rgba(95, 191, 127, 0.22);
+  --diff-removed-bg: rgba(224, 108, 117, 0.1);
+  --diff-removed-border: rgba(224, 108, 117, 0.2);
+  --diff-modified-bg: rgba(215, 186, 125, 0.08);
+  --diff-modified-border: rgba(215, 186, 125, 0.16);
+  --diff-segment-added-bg: rgba(95, 191, 127, 0.22);
+  --diff-segment-added-text: #a7f3d0;
+  --diff-segment-removed-bg: rgba(224, 108, 117, 0.18);
+  --diff-segment-removed-text: #fecaca;
+
   --scroller-size: 15px;
 
   --output-height: calc(90% - 18px);
@@ -109,4 +121,16 @@
   --git-deleted: #c93c47;
   --git-modified: #8f6400;
   --git-conflict: #b45309;
+
+  /* Git diff surfaces */
+  --diff-added-bg: rgba(26, 127, 55, 0.1);
+  --diff-added-border: rgba(26, 127, 55, 0.22);
+  --diff-removed-bg: rgba(201, 60, 71, 0.08);
+  --diff-removed-border: rgba(201, 60, 71, 0.2);
+  --diff-modified-bg: rgba(143, 100, 0, 0.06);
+  --diff-modified-border: rgba(143, 100, 0, 0.16);
+  --diff-segment-added-bg: rgba(26, 127, 55, 0.14);
+  --diff-segment-added-text: #0f5132;
+  --diff-segment-removed-bg: rgba(201, 60, 71, 0.12);
+  --diff-segment-removed-text: #842029;
 }

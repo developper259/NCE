@@ -64,6 +64,8 @@ contextBridge.exposeInMainWorld("api", {
     getStatus: () => ipcRenderer.invoke("Git:status"),
     getDiff: (filePath, options) =>
       ipcRenderer.invoke("Git:diff", filePath, options),
+    getFileVersions: (filePath, options) =>
+      ipcRenderer.invoke("Git:fileVersions", filePath, options),
     getDiffSummary: (options) =>
       ipcRenderer.invoke("Git:diffSummary", options),
     stageFile: (filePath) => ipcRenderer.invoke("Git:stage", filePath),

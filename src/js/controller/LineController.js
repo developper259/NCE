@@ -1373,7 +1373,11 @@ class LineController {
           ? "Binary file can't be opened"
           : loadError.code === "FILE_TOO_LARGE"
             ? "File is too large to be opened"
-            : "File can't be opened";
+            : loadError.code === "GIT_DIFF_EMPTY"
+              ? "No differences to show"
+              : loadError.code === "GIT_DIFF_ERROR"
+                ? "Git diff can't be shown"
+                : "File can't be opened";
       fragment.appendChild(message);
       if (this.outputFast) this.outputFast.replaceChildren(fragment);
       else this.editor.output.replaceChildren(fragment);
@@ -1527,13 +1531,18 @@ class LineController {
     if (!updateText) return;
 
     const displayRow = this.getDisplayRow(displayIndex);
-    spanFast.setTextContent(
-      displayRow?.documentIndex === null
-        ? ""
-        : displayRow
-          ? displayRow.documentIndex + 1
-          : "",
-    );
+    const number = displayRow
+      ? Number.isInteger(displayRow.newLineNumber)
+        ? displayRow.newLineNumber
+        : Number.isInteger(displayRow.oldLineNumber)
+          ? displayRow.oldLineNumber
+          : displayRow.documentIndex === null
+            ? ""
+            : displayRow.documentIndex + 1
+      : "";
+    spanFast.setTextContent(number);
+    spanFast.toggleClass("line-number-added", displayRow?.type === "added");
+    spanFast.toggleClass("line-number-removed", displayRow?.type === "removed");
 
     const lineNumber = displayRow?.documentIndex === null
       ? ""
@@ -1596,7 +1605,9 @@ class LineController {
 
     // Line numbers use the editor's real monospace character metric. Keep
     // the CSS right offset (10px) plus a small breathing gap in the gutter.
-    return Math.max(50, Math.ceil(maxDigits * characterWidth) + 15);
+    // Diff views reserve an extra column for the +/- change markers.
+    const markerExtra = file?.isDiffView === true ? 14 : 0;
+    return Math.max(50, Math.ceil(maxDigits * characterWidth) + 15 + markerExtra);
   }
 
   updateLineNumberWidth() {
@@ -1685,7 +1696,8 @@ class LineController {
         : this.lines[displayRow?.documentIndex];
     const displayText = slicedLine?.displayText ?? slicedLine?.text ?? displayRow?.text ?? "";
     const diffSegments =
-      displayRow?.type === "removed"
+      displayRow?.type === "removed" &&
+      this.editor.tabManager.activeFile?.isDiffView !== true
         ? [{ type: "removed", text: displayText }]
         : this.getVisibleDiffSegments(lineNode?.diffSegments, slicedLine);
     const diffState = displayRow?.type || null;

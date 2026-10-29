@@ -186,18 +186,45 @@
 }
 
 .line-added {
-  background: rgba(34, 197, 94, 0.14);
-  box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.18);
+  background: var(--diff-added-bg);
+  box-shadow: inset 0 0 0 1px var(--diff-added-border);
 }
 
 .line-removed {
-  background: rgba(239, 68, 68, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(239, 68, 68, 0.18);
+  background: var(--diff-removed-bg);
+  box-shadow: inset 0 0 0 1px var(--diff-removed-border);
 }
 
 .line-modified {
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.15);
+  background: var(--diff-modified-bg);
+  box-shadow: inset 0 0 0 1px var(--diff-modified-border);
+}
+
+.editor-git-diff-active .line {
+  width: 100%;
+}
+
+.editor-git-diff-active .line-el {
+  right: 24px;
+}
+
+.editor-git-diff-active .line-el::after {
+  position: absolute;
+  top: 0;
+  right: -12px;
+  width: 12px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.editor-git-diff-active .line-number-added::after {
+  color: var(--git-added);
+  content: "+";
+}
+
+.editor-git-diff-active .line-number-removed::after {
+  color: var(--git-deleted);
+  content: "−";
 }
 
 .diff-segment {
@@ -206,11 +233,11 @@
 }
 
 .diff-added {
-  background: rgba(34, 197, 94, 0.22);
-  color: #a7f3d0;
+  background: var(--diff-segment-added-bg);
+  color: var(--diff-segment-added-text);
 }
 
 .diff-removed {
-  background: rgba(239, 68, 68, 0.18);
-  color: #fecaca;
+  background: var(--diff-segment-removed-bg);
+  color: var(--diff-segment-removed-text);
 }

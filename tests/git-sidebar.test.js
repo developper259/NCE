@@ -92,6 +92,7 @@ function createSidebar(options = {}) {
     clipboard: [],
     openDiff: [],
     openFile: [],
+    versions: [],
     menus: [],
     unsubscribed: false,
   };
@@ -113,6 +114,20 @@ function createSidebar(options = {}) {
         async stageFile(filePath) {
           calls.stage.push(filePath);
           return options.stageResult || { success: true, path: filePath };
+        },
+        async getFileVersions(filePath, versionOptions) {
+          calls.versions.push([filePath, versionOptions]);
+          return options.versionsResult || {
+            success: true,
+            path: filePath,
+            staged: versionOptions?.staged === true,
+            oldContent: "old\n",
+            newContent: "new\n",
+            binary: false,
+            tooLarge: false,
+            untracked: false,
+            deleted: false,
+          };
         },
         async unstageFile(filePath) {
           calls.unstage.push(filePath);
@@ -412,13 +427,17 @@ test("GitSidebar opens staged or unstaged diffs and file context menus", async (
   try {
     await sidebar.refresh({ reason: "open" });
     await sidebar.openDiff(entry, true);
-    assert.deepEqual(JSON.parse(JSON.stringify(calls.openDiff[0])), {
-      filePath: "/workspace/src/app.js",
-      relativePath: "src/app.js",
-      staged: true,
-      statusKind: "modified",
-      originalPath: null,
-    });
+    const openCall = JSON.parse(JSON.stringify(calls.openDiff[0]));
+    assert.equal(openCall.filePath, "/workspace/src/app.js");
+    assert.equal(openCall.relativePath, "src/app.js");
+    assert.equal(openCall.staged, true);
+    assert.equal(openCall.statusKind, "modified");
+    assert.equal(openCall.originalPath, null);
+    assert.equal(openCall.versions.success, true);
+    assert.deepEqual(JSON.parse(JSON.stringify(calls.versions[0])), [
+      "/workspace/src/app.js",
+      { staged: true, originalPath: null },
+    ]);
     await sidebar.openDiff(entry, false);
     assert.equal(calls.openDiff[1].staged, false);
     sidebar.openFileContextMenu(entry, false);
@@ -517,18 +536,20 @@ test("Git UI is wired into the renderer manifest and editor", () => {
   const tabTypes = fs.readFileSync(path.join(root, "src/js/types/Tab.js"), "utf8");
   const states = fs.readFileSync(path.join(root, "src/js/manager/StatesManager.js"), "utf8");
   const index = (script) => manifest.indexOf(script);
-  assert.ok(index("js/view/GitDiffView.js") >= 0);
+  assert.ok(index("js/core/LineDiff.js") >= 0);
+  assert.ok(index("js/core/GitDiffBuffer.js") >= 0);
   assert.ok(index("js/sidebar/Git.Sidebar.js") >= 0);
   assert.ok(index("js/contextMenu/GitFile.ContextMenu.js") >= 0);
   assert.ok(index("js/sidebar/Git.Sidebar.js") < index("js/main/Editor.js"));
   assert.ok(index("js/contextMenu/GitFile.ContextMenu.js") < index("js/main/Editor.js"));
+  assert.equal(index("js/view/GitDiffView.js"), -1);
   assert.match(editor, /new GitSidebar\(this\)/);
   assert.match(editor, /this\.sidebarManager\.registerMenu\(this\.gitSidebar\)/);
   assert.match(editor, /buildGitFileContextMenu\(this\)/);
   assert.match(editor, /TAB_TYPES\.GIT_DIFF/);
-  assert.match(editor, /getGitDiffView\(\)/);
-  assert.match(html, /git-diff-view-host/);
-  assert.match(html, /\.\.\/css\/gitDiffView\.css/);
+  assert.match(editor, /editor-git-diff-active/);
+  assert.doesNotMatch(html, /git-diff-view-host/);
+  assert.doesNotMatch(html, /gitDiffView\.css/);
   assert.match(html, /\.\.\/css\/sidebar\/git\.css/);
   assert.match(tabTypes, /GIT_DIFF:\s*"git-diff"/);
   assert.match(tabTypes, /class GitDiffTab extends Tab/);

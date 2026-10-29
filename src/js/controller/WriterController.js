@@ -252,6 +252,7 @@ class WriterController {
 
   write(txt) {
     if (!this.editor.tabManager.activeFile || txt === undefined) return;
+    if (this.editor.tabManager.activeFile.isDiffView) return;
     this.editor.keyBinding.historyX = undefined;
     const multi = this.editor.multiCursorController;
     const multiSelections = multi?.getSelections?.() || [];
@@ -470,6 +471,7 @@ class WriterController {
   }
 
   mutateLineRange(startIndex, oldCount, replacementTexts, edit = null) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     const lines = this.editor.lineController.lines;
     const existing = lines.slice(startIndex, startIndex + oldCount);
     const reuseCount = Math.min(existing.length, replacementTexts.length);
@@ -504,6 +506,7 @@ class WriterController {
 
   applyRangeEdit(start, end, text, options = {}) {
     const file = this.editor.tabManager.activeFile;
+    if (file?.isDiffView) return null;
     const lineController = this.editor.lineController;
     if (
       !file ||
@@ -714,6 +717,7 @@ class WriterController {
   }
 
   applyBatchEdits(edits, options = {}) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     const file = this.editor.tabManager.activeFile;
     const lineController = this.editor.lineController;
     const multi = this.editor.multiCursorController;
@@ -1156,6 +1160,7 @@ class WriterController {
   }
 
   deleteBackwardAtSelections({ word = false } = {}) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     const multi = this.editor.multiCursorController;
     const selections = multi?.getSelections?.() || [];
     if (selections.length < 2) return null;
@@ -1192,6 +1197,7 @@ class WriterController {
   }
 
   deleteForwardAtSelections() {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     const multi = this.editor.multiCursorController;
     const selections = multi?.getSelections?.() || [];
     if (selections.length < 2) return null;
@@ -1241,6 +1247,7 @@ class WriterController {
   }
 
   delete(column, row) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     if (
       !this.editor.tabManager.activeFile ||
       this.editor.lineController.lines.length === 0
@@ -1270,6 +1277,7 @@ class WriterController {
   }
 
   deleteWord(column, row) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     if (
       !this.editor.tabManager.activeFile ||
       this.editor.lineController.lines.length === 0
@@ -1283,6 +1291,7 @@ class WriterController {
   }
 
   deleteSelection() {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     const selectCtrl = this.editor.selectController;
     const cursor = this.editor.cursorController;
 
@@ -1306,6 +1315,7 @@ class WriterController {
   }
 
   deleteRange(start, end) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     if (!this.editor.tabManager.activeFile) return;
     const lc = this.editor.lineController;
     if (!lc || lc.lines.length === 0) return;
@@ -1313,6 +1323,7 @@ class WriterController {
   }
 
   replaceRange(text, startLine, startColumn, endLine, endColumn, options = {}) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     const lines = this.editor.lineController.lines;
     if (!lines.length) return null;
     const startRow = Math.min(
@@ -1340,6 +1351,7 @@ class WriterController {
   }
 
   insertTextAt(text, row, column) {
+    if (this.editor.tabManager.activeFile?.isDiffView) return null;
     if (
       !this.editor.tabManager.activeFile ||
       this.editor.lineController.lines.length === 0

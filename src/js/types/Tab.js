@@ -71,6 +71,7 @@ class GitDiffTab extends Tab {
     this.staged = staged === true;
     this.statusKind = statusKind || "modified";
     this.originalPath = originalPath;
+    this.textTab = null;
   }
 
   static displayName(filePath, staged) {
@@ -95,6 +96,7 @@ class FileNode extends Tab {
     this.path = path;
     this.searchReplaceValue = "";
     this.searchCurrentIndex = -1;
+    this.isDiffView = false;
 
     this.isSaved = true;
     this.deletedFromDisk = false;
@@ -382,6 +384,7 @@ class FileNode extends Tab {
   }
 
   async mergeExternalChanges() {
+    if (this.isDiffView) return { merged: false, reason: "read-only-diff" };
     if (this.externalMergePromise) return this.externalMergePromise;
     let mergePromise;
     mergePromise = this.runExternalMerge().finally(() => {
@@ -525,6 +528,7 @@ class FileNode extends Tab {
   }
 
   save() {
+    if (this.isDiffView) return Promise.resolve(false);
     this.cancelAutoSave();
     return this.enqueueSaveOperation(() => this.performSave());
   }
@@ -576,7 +580,7 @@ class FileNode extends Tab {
   }
 
   scheduleRecoverySnapshot() {
-    if (this.recoveryDisposed || this.isSaved === true ||
+    if (this.isDiffView || this.recoveryDisposed || this.isSaved === true ||
         this.largeFileMode === true || typeof this.editor.api?.saveRecoverySnapshot !== "function") {
       this.cancelRecoveryTimer();
       return false;
@@ -958,6 +962,7 @@ class FileNode extends Tab {
   }
 
   async performSave() {
+    if (this.isDiffView) return false;
     if (this.loadError) {
       this.reportSaveError(this.loadError);
       return false;
@@ -995,6 +1000,7 @@ class FileNode extends Tab {
   }
 
   saveAs() {
+    if (this.isDiffView) return Promise.resolve(false);
     this.cancelAutoSave();
     this.saveQueue = this.saveQueue
       .catch(() => false)
@@ -1003,6 +1009,7 @@ class FileNode extends Tab {
   }
 
   async performSaveAs() {
+    if (this.isDiffView) return false;
     if (this.loadError) {
       this.reportSaveError(this.loadError);
       return false;
@@ -1053,6 +1060,7 @@ class FileNode extends Tab {
   }
 
   async selectFileToSave() {
+    if (this.isDiffView) return false;
     return this.saveAs();
   }
 
@@ -1073,6 +1081,10 @@ class FileNode extends Tab {
   }
 
   setIsSaved(value) {
+    if (this.isDiffView) {
+      this.isSaved = true;
+      return;
+    }
     this.isSaved = value;
     if (value === false) {
       this.scheduleRecoverySnapshot();
@@ -1096,6 +1108,7 @@ class FileNode extends Tab {
 
   shouldPersistChanges() {
     return (
+      !this.isDiffView &&
       !this.largeFileMode &&
       this.autoSave === true &&
       Boolean(this.path) &&

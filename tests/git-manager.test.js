@@ -163,6 +163,107 @@ test("GitManager hides NCE's own workspace state from the status", { skip: gitSk
   }
 });
 
+test("GitManager returns staged and working versions separately", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const tracked = path.join(root, "tracked.txt");
+  await fs.writeFile(tracked, "v2\n");
+  git(root, ["add", "--", "tracked.txt"]);
+  await fs.writeFile(tracked, "v3\n");
+  const manager = managerFor(root);
+  try {
+    const unstaged = await manager.getFileVersions(tracked);
+    assert.equal(unstaged.success, true);
+    assert.deepEqual(
+      [unstaged.oldContent, unstaged.newContent, unstaged.staged, unstaged.untracked, unstaged.deleted],
+      ["v2\n", "v3\n", false, false, false],
+    );
+    const staged = await manager.getFileVersions(tracked, { staged: true });
+    assert.equal(staged.success, true);
+    assert.deepEqual([staged.oldContent, staged.newContent], ["initial\n", "v2\n"]);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager reports untracked, deleted, binary, and oversized versions", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    const untrackedPath = path.join(root, "new.txt");
+    await fs.writeFile(untrackedPath, "fresh\n");
+    const untracked = await manager.getFileVersions(untrackedPath);
+    assert.equal(untracked.untracked, true);
+    assert.deepEqual([untracked.oldContent, untracked.newContent], ["", "fresh\n"]);
+
+    const gone = path.join(root, "gone.txt");
+    await fs.writeFile(gone, "gone\n");
+    git(root, ["add", "--", "gone.txt"]);
+    git(root, ["commit", "-q", "-m", "gone fixture"]);
+    await fs.rm(gone);
+    const deleted = await manager.getFileVersions(gone);
+    assert.equal(deleted.deleted, true);
+    assert.deepEqual([deleted.oldContent, deleted.newContent], ["gone\n", ""]);
+
+    const binary = path.join(root, "image.bin");
+    await fs.writeFile(binary, Buffer.from([0, 1, 2, 3]));
+    git(root, ["add", "--", "image.bin"]);
+    git(root, ["commit", "-q", "-m", "binary fixture"]);
+    await fs.writeFile(binary, Buffer.from([0, 9, 9]));
+    const binaryVersions = await manager.getFileVersions(binary);
+    assert.equal(binaryVersions.binary, true);
+    assert.equal(binaryVersions.oldContent, "");
+
+    const large = path.join(root, "large.txt");
+    await fs.writeFile(large, Buffer.alloc(4 * 1024 * 1024 + 1, "a"));
+    const largeVersions = await manager.getFileVersions(large);
+    assert.equal(largeVersions.tooLarge, true);
+    assert.equal(largeVersions.newContent, "");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager resolves rename originals and unborn references", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  await fs.writeFile(path.join(root, "old name.txt"), "rename me\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "rename fixture"]);
+  git(root, ["mv", "old name.txt", "new name.txt"]);
+  const manager = managerFor(root);
+  try {
+    const renamed = await manager.getFileVersions(path.join(root, "new name.txt"), {
+      staged: true,
+      originalPath: "old name.txt",
+    });
+    assert.equal(renamed.success, true);
+    assert.deepEqual([renamed.oldContent, renamed.newContent], ["rename me\n", "rename me\n"]);
+    const invalid = await manager.getFileVersions(path.join(root, "new name.txt"), {
+      staged: true,
+      originalPath: "../escape.txt",
+    });
+    assert.equal(invalid.code, "INVALID_PATH");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+
+  const unborn = await createRepository({ commits: 0 });
+  const unbornManager = managerFor(unborn);
+  try {
+    const file = path.join(unborn, "first.txt");
+    await fs.writeFile(file, "first\n");
+    git(unborn, ["add", "--", "first.txt"]);
+    const versions = await unbornManager.getFileVersions(file, { staged: true });
+    assert.equal(versions.success, true);
+    assert.deepEqual([versions.oldContent, versions.newContent], ["", "first\n"]);
+  } finally {
+    unbornManager.dispose();
+    await removeAll(unborn);
+  }
+});
+
 test("GitManager handles repositories without an initial commit", { skip: gitSkip }, async () => {
   const root = await createRepository({ commits: 0 });
   const manager = managerFor(root);
@@ -516,6 +617,7 @@ test("GitManager exposes only named Git channels through the preload", () => {
   for (const channel of [
     "Git:isAvailable", "Git:version", "Git:repository", "Git:isRepository",
     "Git:repositoryRoot", "Git:status", "Git:diff", "Git:diffSummary",
+    "Git:fileVersions",
     "Git:stage", "Git:unstage", "Git:commit", "Git:branches",
     "Git:currentBranch", "Git:log",
   ]) {
