@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { fork, ChildProcess } from "node:child_process";
+import { forkWorker, type WorkerProcess } from "./WorkerProcess";
 import {
   FOREGROUND_INTERVALS,
   BACKGROUND_INTERVALS,
@@ -9,17 +9,17 @@ import {
 const path = require("node:path");
 
 export class PollingWatcher extends EventEmitter {
-  private child: ChildProcess | null = null;
-  private candidate: ChildProcess | null = null;
+  private child: WorkerProcess | null = null;
+  private candidate: WorkerProcess | null = null;
   private candidateForeground = true;
   private activeForeground: boolean;
   private desiredForeground: boolean;
   private initialReady = false;
   private closing: Promise<void> | null = null;
   private transitionTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly closingWorkers = new WeakMap<ChildProcess, Promise<void>>();
-  private readonly intentionallyClosing = new WeakSet<ChildProcess>();
-  private readonly transitionEvents = new Map<string, Set<ChildProcess>>();
+  private readonly closingWorkers = new WeakMap<WorkerProcess, Promise<void>>();
+  private readonly intentionallyClosing = new WeakSet<WorkerProcess>();
+  private readonly transitionEvents = new Map<string, Set<WorkerProcess>>();
   private readonly projectPath: string;
 
   constructor(projectPath: string, foreground = true) {
@@ -30,19 +30,17 @@ export class PollingWatcher extends EventEmitter {
     this.child = this.createWorker(projectPath, foreground);
   }
 
-  private createWorker(projectPath: string, foreground: boolean): ChildProcess {
-    const env = { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
-    const child = fork(
+  private createWorker(projectPath: string, foreground: boolean): WorkerProcess {
+    const child = forkWorker(
       path.join(__dirname, "WatcherPollingWorker.js"),
       [projectPath, foreground ? "foreground" : "background"],
-      { execPath: process.execPath, env, stdio: ["ignore", "ignore", "ignore", "ipc"] },
     );
     this.attachWorker(child);
     return child;
   }
 
-  private attachWorker(child: ChildProcess): void {
-    child.on("message", (message: any) => {
+  private attachWorker(child: WorkerProcess): void {
+    child.onMessage((message: any) => {
       if (child !== this.child && child !== this.candidate) return;
       if (message?.type === "ready") {
         if (child === this.child) {
@@ -76,11 +74,11 @@ export class PollingWatcher extends EventEmitter {
         else this.emit("error", error);
       }
     });
-    child.on("error", (error) => {
+    child.onError((error) => {
       if (child === this.candidate) this.failCandidate(child, error);
       else if (child === this.child) this.emit("error", error);
     });
-    child.on("exit", (code, signal) => {
+    child.onExit((code, signal) => {
       const wasClosing = this.intentionallyClosing.has(child) || Boolean(this.closing);
       if (child === this.candidate) {
         this.candidate = null;
@@ -143,7 +141,7 @@ export class PollingWatcher extends EventEmitter {
     }, graceMs);
   }
 
-  private failCandidate(child: ChildProcess, error: Error): void {
+  private failCandidate(child: WorkerProcess, error: Error): void {
     if (this.candidate !== child) return;
     this.candidate = null;
     this.transitionEvents.clear();
@@ -158,21 +156,20 @@ export class PollingWatcher extends EventEmitter {
     this.transitionTimer = null;
   }
 
-  private closeWorker(child: ChildProcess): Promise<void> {
+  private closeWorker(child: WorkerProcess): Promise<void> {
     const existing = this.closingWorkers.get(child);
     if (existing) return existing;
     this.intentionallyClosing.add(child);
     const closing = new Promise<void>((resolve) => {
       const timer = setTimeout(() => {
-        child.kill("SIGTERM");
+        child.kill();
         resolve();
       }, 2000);
-      child.once("exit", () => {
+      child.onExit(() => {
         clearTimeout(timer);
         resolve();
       });
-      if (child.connected) child.send({ type: "close" });
-      else child.kill("SIGTERM");
+      child.postMessage({ type: "close" }, () => child.kill());
     });
     this.closingWorkers.set(child, closing);
     return closing;
@@ -194,7 +191,7 @@ export class PollingWatcher extends EventEmitter {
   close(): Promise<void> {
     if (this.closing) return this.closing;
     this.clearTransitionTimer();
-    const workers = [...new Set([this.child, this.candidate].filter(Boolean) as ChildProcess[])];
+    const workers = [...new Set([this.child, this.candidate].filter(Boolean) as WorkerProcess[])];
     this.child = null;
     this.candidate = null;
     this.transitionEvents.clear();

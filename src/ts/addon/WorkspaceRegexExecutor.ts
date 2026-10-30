@@ -1,5 +1,5 @@
-import { fork, ChildProcess } from "node:child_process";
 import path from "node:path";
+import { forkWorker, type WorkerProcess } from "./WorkerProcess";
 
 export interface WorkspaceRegexMatch {
   index: number;
@@ -78,13 +78,13 @@ const MAX_QUEUED_REGEX_TASKS = 32;
  * can never hold up Electron's main event loop indefinitely.
  */
 export class WorkspaceRegexExecutor {
-  private worker: ChildProcess | null = null;
+  private worker: WorkerProcess | null = null;
   private activeTask: RegexTask<unknown> | null = null;
   private readonly queue: RegexTask<unknown>[] = [];
   private nextTaskId = 1;
   private pumping = false;
   private stoppingWorker: Promise<void> | null = null;
-  private readonly readyWorkers = new WeakSet<ChildProcess>();
+  private readonly readyWorkers = new WeakSet<WorkerProcess>();
   private disposed = false;
 
   constructor(
@@ -205,18 +205,10 @@ export class WorkspaceRegexExecutor {
     }
   }
 
-  private createWorker(): ChildProcess {
-    const worker = fork(
-      path.join(__dirname, "WorkspaceRegexWorker.js"),
-      [],
-      {
-        execPath: process.execPath,
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-        stdio: ["ignore", "ignore", "ignore", "ipc"],
-      },
-    );
+  private createWorker(): WorkerProcess {
+    const worker = forkWorker(path.join(__dirname, "WorkspaceRegexWorker.js"));
     this.worker = worker;
-    worker.on("message", (message: RegexWorkerResponse) => {
+    worker.onMessage((message: RegexWorkerResponse) => {
       if (this.worker !== worker) return;
       if (message?.type === "ready") {
         this.readyWorkers.add(worker);
@@ -243,10 +235,10 @@ export class WorkspaceRegexExecutor {
       }
       this.pumpQueue();
     });
-    worker.on("error", (error) => {
+    worker.onError((error) => {
       this.handleWorkerFailure(worker, error);
     });
-    worker.on("exit", (code, signal) => {
+    worker.onExit((code, signal) => {
       if (this.worker !== worker) return;
       this.handleWorkerFailure(
         worker,
@@ -256,7 +248,7 @@ export class WorkspaceRegexExecutor {
     return worker;
   }
 
-  private handleWorkerFailure(worker: ChildProcess, error: Error): void {
+  private handleWorkerFailure(worker: WorkerProcess, error: Error): void {
     if (this.worker !== worker) return;
     this.worker = null;
     const task = this.activeTask;
@@ -276,7 +268,7 @@ export class WorkspaceRegexExecutor {
     });
   }
 
-  private dispatchTask(worker: ChildProcess, task: RegexTask<unknown>): void {
+  private dispatchTask(worker: WorkerProcess, task: RegexTask<unknown>): void {
     if (this.worker !== worker || this.activeTask !== task) return;
     task.timeout = setTimeout(() => {
       if (this.activeTask !== task) return;
@@ -286,7 +278,7 @@ export class WorkspaceRegexExecutor {
       ), true);
     }, this.timeoutMs);
     try {
-      worker.send({ type: "execute", id: task.id, request: task.request }, (error) => {
+      worker.postMessage({ type: "execute", id: task.id, request: task.request }, (error) => {
         if (error && this.activeTask === task)
           this.failActiveTask(new WorkspaceRegexExecutionError(
             "WORKER_ERROR",
@@ -346,18 +338,18 @@ export class WorkspaceRegexExecutor {
     return stopped;
   }
 
-  private terminateWorker(worker: ChildProcess): Promise<void> {
+  private terminateWorker(worker: WorkerProcess): Promise<void> {
     return new Promise<void>((resolve) => {
-      if (
-        worker.exitCode !== null ||
-        worker.signalCode !== null ||
-        worker.pid === undefined
-      ) {
+      if (worker.exited) {
         resolve();
         return;
       }
-      worker.once("exit", () => resolve());
-      worker.kill("SIGTERM");
+      let unsubscribe = () => {};
+      unsubscribe = worker.onExit(() => {
+        unsubscribe();
+        resolve();
+      });
+      worker.kill();
     });
   }
 

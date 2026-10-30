@@ -1,6 +1,7 @@
 import type {
   WorkspaceRegexMatch,
 } from "./WorkspaceRegexExecutor";
+import { onParentMessage, sendToParent } from "./WorkerParentPort";
 
 interface RegexRequest {
   operation: "find" | "replace";
@@ -92,7 +93,7 @@ function countMatches(regex: RegExp, text: string): number {
   return count;
 }
 
-process.on("message", (message: RegexWorkerMessage) => {
+onParentMessage((message: RegexWorkerMessage) => {
   if (message?.type !== "execute" || !Number.isSafeInteger(message.id)) return;
   try {
     const { request } = message;
@@ -104,7 +105,7 @@ process.on("message", (message: RegexWorkerMessage) => {
     ) throw new Error("Invalid regex work request.");
 
     if (request.operation === "find") {
-      process.send?.({
+      sendToParent({
         id: message.id,
         success: true,
         matches: findMatches(request),
@@ -116,7 +117,7 @@ process.on("message", (message: RegexWorkerMessage) => {
       const regex = new RegExp(request.source, request.flags);
       const replacements = countMatches(regex, request.text);
       const content = request.text.replace(regex, request.replacement);
-      process.send?.({
+      sendToParent({
         id: message.id,
         success: true,
         content,
@@ -127,7 +128,7 @@ process.on("message", (message: RegexWorkerMessage) => {
 
     throw new Error("Unsupported regex work operation.");
   } catch (error) {
-    process.send?.({
+    sendToParent({
       id: message.id,
       success: false,
       error: {
@@ -139,4 +140,4 @@ process.on("message", (message: RegexWorkerMessage) => {
 });
 
 process.on("disconnect", () => process.exit(0));
-process.send?.({ type: "ready" });
+sendToParent({ type: "ready" });

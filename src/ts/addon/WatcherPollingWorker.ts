@@ -5,6 +5,7 @@ const {
   BACKGROUND_INTERVALS,
   WRITE_SETTLE_MS,
 } = require("./WatcherPollingConfig");
+const { onParentMessage, sendToParent } = require("./WorkerParentPort");
 const projectPath = process.argv[2];
 const foreground = process.argv[3] !== "background";
 const { interval, binaryInterval } = foreground ? FOREGROUND_INTERVALS : BACKGROUND_INTERVALS;
@@ -28,11 +29,11 @@ watcher.on("all", (event: string, filePath: string, stats: any) => {
   const signature = stats
     ? `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}`
     : null;
-  process.send?.({ type: "all", event, filePath, signature });
+  sendToParent({ type: "all", event, filePath, signature });
 });
 
 watcher.on("error", (error: any) => {
-  process.send?.({
+  sendToParent({
     type: "error",
     error: {
       message: String(error?.message || error),
@@ -41,7 +42,7 @@ watcher.on("error", (error: any) => {
     },
   });
 });
-watcher.on("ready", () => process.send?.({
+watcher.on("ready", () => sendToParent({
   type: "ready",
   foreground,
   interval,
@@ -56,7 +57,7 @@ const close = async () => {
   process.exit(0);
 };
 
-process.on("message", (message: any) => {
+onParentMessage((message: any) => {
   if (message?.type === "close") void close();
 });
 process.on("disconnect", () => void close());
