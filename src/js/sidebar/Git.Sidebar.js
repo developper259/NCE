@@ -21,6 +21,8 @@ class GitSidebar extends Sidebar {
       return "Git cannot access this repository.";
     if (code === "GIT_TIMEOUT")
       return "Git did not respond in time.";
+    if (code === "GIT_INDEX_LOCKED")
+      return "Git is already running in this repository, or a previous operation was interrupted. Wait for it to finish, then retry.";
     if (code === "GIT_OUTPUT_LIMIT")
       return "Too many changes to display. Reduce untracked files or use the terminal.";
     return result?.error || "Git status could not be read.";

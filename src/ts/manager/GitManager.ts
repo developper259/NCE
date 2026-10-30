@@ -4,6 +4,7 @@ import path from "node:path";
 import type { PathAccess } from "./PathAccess";
 import type { IpcHandlerRegistrar } from "./IpcRouter";
 import { GitTaskQueue } from "./GitTaskQueue";
+import { classifyGitFailure, killProcessTree, resolveGitExecutable } from "./GitProcess";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const VERSION_TIMEOUT_MS = 5_000;
@@ -29,6 +30,7 @@ export type GitErrorCode =
   | "GIT_IDENTITY_MISSING"
   | "GIT_HOOK_FAILED"
   | "GIT_COMMAND_FAILED"
+  | "GIT_INDEX_LOCKED"
   | "GIT_OUTPUT_LIMIT"
   | "GIT_TIMEOUT"
   | "OPERATION_CANCELLED";
@@ -123,6 +125,7 @@ interface GitManagerOptions {
   maxOutputBytes?: number;
   maxConcurrentCommands?: number;
   env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
 }
 
 interface GitCommandOutput {
@@ -182,24 +185,26 @@ function trimmedDetail(output: GitCommandOutput): string | undefined {
 export class GitManager {
   private readonly getWorkspaceRoot: () => string | null | undefined;
   private readonly pathAccess?: Pick<PathAccess, "isAuthorized">;
-  private readonly gitPath: string;
+  private readonly explicitGitPath?: string;
   private readonly timeoutMs: number;
   private readonly maxOutputBytes: number;
   private readonly extraEnv?: NodeJS.ProcessEnv;
-  private readonly platform: NodeJS.Platform = process.platform;
+  private readonly platform: NodeJS.Platform;
   private readonly children = new Set<ChildProcess>();
   private readonly commandQueue: GitTaskQueue;
   private readonly mutationQueue = new GitTaskQueue(1);
   private readonly statusRequests = new Map<string, Promise<GitResult<{ status: GitStatus }>>>();
+  private gitExecutable: Promise<string> | null = null;
   private disposed = false;
 
   constructor(options: GitManagerOptions) {
     this.getWorkspaceRoot = options.getWorkspaceRoot;
     this.pathAccess = options.pathAccess;
-    this.gitPath = options.gitPath || "git";
+    this.explicitGitPath = options.gitPath || undefined;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
     this.extraEnv = options.env;
+    this.platform = options.platform ?? process.platform;
     this.commandQueue = new GitTaskQueue(options.maxConcurrentCommands ?? 2);
   }
 
@@ -229,7 +234,7 @@ export class GitManager {
 
   dispose(): void {
     this.disposed = true;
-    for (const child of this.children) this.killProcessTree(child, "SIGKILL");
+    for (const child of this.children) killProcessTree(child, "SIGKILL", this.platform);
     this.children.clear();
   }
 
@@ -1045,6 +1050,14 @@ export class GitManager {
     return this.commandQueue.run(() => this.runGitCommand(args, options));
   }
 
+  private resolveGitPath(): Promise<string> {
+    this.gitExecutable ??= resolveGitExecutable({
+      platform: this.platform,
+      explicit: this.explicitGitPath,
+    });
+    return this.gitExecutable;
+  }
+
   private buildGitEnvironment(literalPaths: boolean): NodeJS.ProcessEnv {
     // Never inherit repository/object/config redirections from the launch environment.
     const env: NodeJS.ProcessEnv = {};
@@ -1065,27 +1078,14 @@ export class GitManager {
     return env;
   }
 
-  private killProcessTree(child: ChildProcess, signal: NodeJS.Signals): void {
-    if (!child.pid) return;
-    if (this.platform === "win32") {
-      try { child.kill(signal); } catch {}
-      if (signal === "SIGKILL") {
-        try {
-          const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
-            windowsHide: true,
-            stdio: "ignore",
-          });
-          killer.on("error", () => {});
-          killer.unref();
-        } catch {}
-      }
-      return;
-    }
-    try { process.kill(-child.pid, signal); }
-    catch { try { child.kill(signal); } catch {} }
-  }
-
   private async runGitCommand(args: string[], options: GitRunOptions): Promise<GitRunOutcome> {
+    if (this.disposed)
+      return {
+        ok: false,
+        failure: failure("OPERATION_CANCELLED", "The Git manager was disposed."),
+        outputLimit: false,
+      };
+    const executable = await this.resolveGitPath();
     if (this.disposed)
       return {
         ok: false,
@@ -1095,7 +1095,7 @@ export class GitManager {
     const env = this.buildGitEnvironment(options.literalPaths === true);
     let child: ChildProcess;
     try {
-      child = spawn(this.gitPath, args, {
+      child = spawn(executable, args, {
         cwd: options.cwd,
         env,
         shell: false,
@@ -1130,13 +1130,13 @@ export class GitManager {
         resolve(outcome);
       };
       const stopChild = (signal: NodeJS.Signals) => {
-        this.killProcessTree(child, signal);
+        killProcessTree(child, signal, this.platform);
         child.stdout?.destroy();
         child.stderr?.destroy();
       };
       const timer = setTimeout(() => {
         timedOut = true;
-        this.killProcessTree(child, "SIGTERM");
+        killProcessTree(child, "SIGTERM", this.platform);
         forceKillTimer = setTimeout(() => {
           stopChild("SIGKILL");
           finish({
@@ -1218,12 +1218,14 @@ export class GitManager {
         };
         const allowed = options.allowExitCodes ?? [0];
         if (!allowed.includes(output.code)) {
+          const detail = trimmedDetail(output);
+          const classified = classifyGitFailure(detail);
           finish({
             ok: false,
-            failure: failure("GIT_COMMAND_FAILED", "The Git command failed."),
+            failure: failure(classified.code, classified.message),
             outputLimit: false,
             exitCode: output.code,
-            stderr: trimmedDetail(output),
+            stderr: detail,
           });
           return;
         }

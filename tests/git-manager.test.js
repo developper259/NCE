@@ -7,6 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { GitManager } = require("../dist/ts/manager/GitManager.js");
+const { trustedGitCandidates } = require("../dist/ts/manager/GitProcess.js");
 const { PathAccess } = require("../dist/ts/manager/PathAccess.js");
 
 let gitAvailable = true;
@@ -110,6 +111,59 @@ test("GitManager reports missing Git, bare folders, and removed workspaces", { s
     withoutGit.dispose();
     plainManager.dispose();
     await removeAll(root, plain, missing);
+  }
+});
+
+test("GitManager runs a trusted Git binary without relying on PATH", {
+  skip: !gitAvailable
+    ? gitSkip
+    : !trustedGitCandidates(process.platform).some((candidate) => {
+        try { return fsSync.statSync(candidate).isFile(); } catch { return false; }
+      }) && "No trusted Git install was found",
+}, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root, { env: { ...isolatedEnv, PATH: "", Path: "" } });
+  try {
+    assert.equal(await manager.isGitAvailable(), true);
+    assert.equal((await manager.getGitVersion()).success, true);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager reports a concurrent index.lock without deleting it", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  const lock = path.join(root, ".git", "index.lock");
+  try {
+    await fs.writeFile(lock, "");
+    const staged = await manager.stageFile(path.join(root, "tracked.txt"));
+    assert.equal(staged.success, false);
+    assert.equal(staged.code, "GIT_INDEX_LOCKED");
+    assert.match(staged.error, /already running/i);
+    assert.equal(fsSync.existsSync(lock), true, "the foreign lock is preserved");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager applies case-insensitive .nce protection on Windows", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  await fs.mkdir(path.join(root, ".NCE"), { recursive: true });
+  await fs.writeFile(path.join(root, ".NCE", "state.txt"), "state\n");
+  const windows = managerFor(root, { platform: "win32" });
+  const posix = managerFor(root, { platform: "darwin" });
+  try {
+    const blocked = await windows.stageFile(path.join(root, ".NCE", "state.txt"));
+    assert.equal(blocked.code, "INVALID_PATH");
+    const staged = await posix.stageFile(path.join(root, ".NCE", "state.txt"));
+    assert.equal(staged.success, true, "POSIX keeps .nce case-sensitive");
+  } finally {
+    windows.dispose();
+    posix.dispose();
+    await removeAll(root);
   }
 });
 

@@ -426,6 +426,17 @@ test("GitSidebar resolves file paths without allowing traversal", () => {
   );
 });
 
+test("GitSidebar explains a concurrent Git operation", () => {
+  assert.match(
+    GitSidebar.describeError({
+      success: false,
+      code: "GIT_INDEX_LOCKED",
+      error: "Git is already running in this repository, or a previous operation was interrupted. Wait for it to finish, then retry.",
+    }),
+    /already running/i,
+  );
+});
+
 test("GitSidebar opens staged or unstaged diffs and file context menus", async () => {
   const entry = makeEntry("src/app.js", { index: "M", worktree: "M" });
   const { sidebar, calls } = createSidebar({ entries: [entry] });
