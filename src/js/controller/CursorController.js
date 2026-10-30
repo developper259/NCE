@@ -96,9 +96,14 @@ class CursorController {
   rowToY(row) {
     const lc = this.editor.lineController;
     const displayIndex = lc.getDisplayIndexForCursor(row);
-    const renderStartIndex = lc.renderStartIndex ?? lc.startIndex ?? 0;
+    const startIndex = lc.startIndex ?? 0;
+    const renderStartIndex = lc.renderStartIndex ?? startIndex;
     const screenRow = displayIndex - renderStartIndex;
-    return lc.getLineTop(screenRow) + 4;
+    // Rendered rows live in the overscan window, which the output layer
+    // translates by (renderStartIndex - startIndex) * lineHeight. Carets and
+    // selection overlays sit outside that layer and must include the shift.
+    const windowOffset = (renderStartIndex - startIndex) * lc.getLineHeight();
+    return windowOffset + lc.getLineTop(screenRow) + 4;
   }
 
   columnToX(viewColumn) {

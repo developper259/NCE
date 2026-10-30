@@ -25,6 +25,12 @@ function createCursor(text, options = {}) {
   lineController.offsetX = options.offsetX || 0;
   lineController.offsetY = scrollOffset;
   lineController.startIndex = scrollStart;
+  if (options.renderStart !== undefined) {
+    Object.defineProperty(lineController, "renderStartIndex", {
+      configurable: true,
+      get: () => options.renderStart,
+    });
+  }
   // Mouse Y is measured in viewport-local CSS pixels.  Add the current scroll
   // offset before converting to a display row, using the same measured height
   // as the production LineController.
@@ -109,6 +115,25 @@ test("clicking below the final line works after vertical scrolling", () => {
   assert.equal(position.column, 5);
   assert.equal(file.row, 4);
   assert.equal(file.column, 5);
+});
+
+test("caret geometry includes the overscan window offset", () => {
+  const lineHeight = 23;
+  const { cursor } = createCursor("one\ntwo\nthree\nfour", {
+    scrollStart: 2,
+    scrollOffset: 4,
+    renderStart: 0,
+    lineHeight,
+  });
+
+  // Row 4 is screen row 3 of a window that starts two rows above startIndex.
+  assert.equal(cursor.rowToY(4), (0 - 2) * lineHeight + 3 * lineHeight + 4);
+  const position = cursor.getCaretPosition(4, 0);
+  assert.equal(
+    position.top,
+    (0 - 2) * lineHeight + 3 * lineHeight - 4,
+    "the caret follows the translated overscan window",
+  );
 });
 
 test("clicking below an empty document stays on its single empty line", () => {
