@@ -14,6 +14,10 @@
 
 ---
 
+<p align="center">
+  <img src="./assets/screenshots/editor-overview.png" alt="NCE editor showing the file explorer, a TypeScript tab, the integrated terminal and the Agent sidebar" width="100%">
+</p>
+
 ## About
 
 **NCE (NDL Code Editor)** is a lightweight desktop code editor built from the ground up with a strong focus on:
