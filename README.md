@@ -28,26 +28,16 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 
 NCE also includes a deeply integrated AI coding agent designed to work directly with the editor, workspace, files and project tooling.
 
-**Current version**: **0.0.1-beta.4**
+**Current version**: **0.0.1-beta.5**
 
-## Beta 4 highlights
+## Beta 5 highlights
 
-- Integrated multi-session terminal with workspace-scoped sessions and a new extensible bottom panel
-- Multi-cursor editing with atomic edits, dedicated commands and optimized rendering
-- Isolated multi-window support with per-window state, including fullscreen
-- Image and Markdown preview tabs with a view type selector
-- Large file mode replacing the previous file size limit, plus automatic large workspace mode
-- Persistent workspace file index powering Quick Open, search and the File Explorer
-- Major startup, rendering and scrolling performance work, with lazy-loaded features and virtualized lists
-- Built-in runtime performance dashboard
-- Crash recovery with automatic restoration of unsaved buffers
-- Safer file handling: external changes merged with local edits and removals sent to the system Trash
-- Progressive workspace search with current-file options and a safe, complete Replace All
-- Native file and folder opening, including drag and drop onto the editor
-- Horizontal tab scrolling and tab cycling
-- New reusable checkbox and anchored dropdown components in Settings
-- Smaller Electron package with trimmed assets
-- Numerous Agent, keybinding, editor and cross-platform packaging fixes
+- Source Control sidebar with status, staging, unstaging and workspace-scoped commits
+- Native read-only diff view rendered in editor tabs, with syntax colors and virtualized scrolling
+- Hardened Git execution: bounded command queue, single-flight status, scrubbed environment, process-group timeouts, trusted Git resolution and explicit `index.lock` reporting
+- Agent sidebar loading, empty and failure states with real retry and lazy ghost-shell placeholders
+- Typed Myers line diff with a bounded fallback, capped and auto-refreshed diff tabs
+- Per-architecture node-pty packaging verified with `lipo`, fixing the beta 4 Intel terminal
 
 ## Features
 
@@ -204,7 +194,7 @@ All platforms run an automated PTY smoke test against the packaged `app.asar`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.4**
+Current version: **0.0.1-beta.5**
 
 ## License
 
