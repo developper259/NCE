@@ -954,8 +954,8 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
   const modes = [];
   watcher.on("all", (event, filePath) => events.push([event, filePath]));
   watcher.on("mode", (mode) => modes.push(mode));
-  const waitForEvent = async (predicate) => {
-    const deadline = Date.now() + 4000;
+  const waitForEvent = async (predicate, timeoutMs = 4000) => {
+    const deadline = Date.now() + timeoutMs;
     while (!events.some(predicate) && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
@@ -996,6 +996,7 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
     await fs.writeFile(transition, "const transition = 1;\n");
     const backgroundMode = await backgroundModePromise;
     assert.deepEqual([backgroundMode.interval, backgroundMode.binaryInterval], [2000, 5000]);
+    await waitForEvent(([event, filePath]) => event === "change" && filePath === transition, 8000);
     assert.equal(events.filter(([event, filePath]) => event === "change" && filePath === transition).length, changesBeforeBackgroundTransition + 1);
 
     const foregroundModePromise = waitForMode(true, modes.length);
@@ -1004,6 +1005,7 @@ test("polling ignores malformed ASAR files and continues reporting ordinary chan
     await fs.writeFile(transition, "const transition = 2;\n");
     const foregroundMode = await foregroundModePromise;
     assert.deepEqual([foregroundMode.interval, foregroundMode.binaryInterval], [400, 1000]);
+    await waitForEvent(([event, filePath]) => event === "change" && filePath === transition, 8000);
     assert.equal(events.filter(([event, filePath]) => event === "change" && filePath === transition).length, changesBeforeForegroundTransition + 1);
 
     await fs.writeFile(path.join(ignoredDirectory, "ignored.js"), "ignored\n");

@@ -1,9 +1,13 @@
 const chokidar = require("chokidar");
 const { watcherIgnored } = require("./WatcherIgnore");
+const {
+  FOREGROUND_INTERVALS,
+  BACKGROUND_INTERVALS,
+  WRITE_SETTLE_MS,
+} = require("./WatcherPollingConfig");
 const projectPath = process.argv[2];
 const foreground = process.argv[3] !== "background";
-const interval = foreground ? 400 : 2000;
-const binaryInterval = foreground ? 1000 : 5000;
+const { interval, binaryInterval } = foreground ? FOREGROUND_INTERVALS : BACKGROUND_INTERVALS;
 
 if (!projectPath) process.exit(1);
 
@@ -15,7 +19,7 @@ const watcher = chokidar.watch(projectPath, {
   interval,
   binaryInterval,
   awaitWriteFinish: {
-    stabilityThreshold: 300,
+    stabilityThreshold: WRITE_SETTLE_MS,
     pollInterval: 100,
   },
 });

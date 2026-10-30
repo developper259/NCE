@@ -1,9 +1,12 @@
 import { EventEmitter } from "node:events";
 import { fork, ChildProcess } from "node:child_process";
+import {
+  FOREGROUND_INTERVALS,
+  BACKGROUND_INTERVALS,
+  WRITE_SETTLE_MS,
+  TRANSITION_MARGIN_MS,
+} from "./WatcherPollingConfig";
 const path = require("node:path");
-
-const FOREGROUND_INTERVALS = { interval: 400, binaryInterval: 1000 } as const;
-const BACKGROUND_INTERVALS = { interval: 2000, binaryInterval: 5000 } as const;
 
 export class PollingWatcher extends EventEmitter {
   private child: ChildProcess | null = null;
@@ -120,9 +123,11 @@ export class PollingWatcher extends EventEmitter {
 
   private scheduleTransition(): void {
     if (this.closing || !this.candidate || !this.child || this.transitionTimer) return;
-    const graceMs = this.activeForeground
+    // The previous worker must still get one poll, let the change settle, and
+    // deliver it over IPC before it is closed; a bare interval lost events.
+    const graceMs = (this.activeForeground
       ? FOREGROUND_INTERVALS.interval
-      : BACKGROUND_INTERVALS.interval;
+      : BACKGROUND_INTERVALS.interval) + WRITE_SETTLE_MS + TRANSITION_MARGIN_MS;
     const candidate = this.candidate;
     this.transitionTimer = setTimeout(() => {
       this.transitionTimer = null;
