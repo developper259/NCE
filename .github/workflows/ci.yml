@@ -44,7 +44,7 @@ jobs:
           test "$(stat -c '%U:%G %a' node_modules/electron/dist/chrome-sandbox)" = "root:root 4755"
       - if: runner.os == 'Linux'
         name: Electron smoke
-        run: xvfb-run -a npm run test:electron
+        run: xvfb-run -a node scripts/run-tests-ci.cjs test:electron
       - if: runner.os != 'Linux'
         name: Electron smoke
-        run: npm run test:electron
+        run: node scripts/run-tests-ci.cjs test:electron

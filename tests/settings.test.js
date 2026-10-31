@@ -596,3 +596,27 @@ test("renderer settings roll back a preference when its write rejects", async ()
   assert.equal(await set("files.confirmPermanentDelete", false), false);
   assert.equal(get("files.confirmPermanentDelete"), true);
 });
+
+test("default shortcuts never collide under either primary modifier", () => {
+  const normalize = (shortcut, primary) => shortcut
+    .split("+")
+    .map((part) => {
+      const value = part.trim().toLowerCase();
+      return value === "mod" ? primary : value;
+    })
+    .sort()
+    .join("+");
+  for (const primary of ["ctrl", "meta"]) {
+    const seen = new Map();
+    for (const [action, shortcut] of Object.entries(DEFAULT_KEYBINDINGS)) {
+      if (!shortcut) continue;
+      const key = normalize(shortcut, primary);
+      assert.equal(
+        seen.has(key),
+        false,
+        `${action} collides with ${seen.get(key)} on ${primary}: ${shortcut}`,
+      );
+      seen.set(key, action);
+    }
+  }
+});
