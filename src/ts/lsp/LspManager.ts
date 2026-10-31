@@ -100,9 +100,19 @@ function isInside(root: string, candidate: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
+const LSP_ERROR_CODES = new Set<LspErrorCode>([
+  "LSP_DISABLED", "LSP_UNSUPPORTED_LANGUAGE", "LSP_SERVER_NOT_FOUND",
+  "LSP_SERVER_START_FAILED", "LSP_INITIALIZE_FAILED", "LSP_SERVER_UNAVAILABLE",
+  "LSP_TIMEOUT", "LSP_REQUEST_FAILED", "LSP_INVALID_ARGUMENT", "LSP_INVALID_PATH",
+  "LSP_DOCUMENT_NOT_OPEN", "LSP_NO_PROVIDER",
+]);
+
 function toFailure(error: unknown): LspFailure {
   if (error instanceof LspManagerError) return failure(error.code, error.message);
   const message = error instanceof Error ? error.message : String(error);
+  const code = (error as { code?: unknown })?.code;
+  if (typeof code === "string" && LSP_ERROR_CODES.has(code as LspErrorCode))
+    return failure(code as LspErrorCode, message);
   const name = error instanceof Error ? error.name : "";
   if (name === "JsonRpcTimeoutError") return failure("LSP_TIMEOUT", message);
   if (name === "JsonRpcCancelledError") return failure("LSP_REQUEST_FAILED", message);

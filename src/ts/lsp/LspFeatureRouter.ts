@@ -61,11 +61,19 @@ function workspaceEditFrom(value: unknown, source: string): LspWorkspaceEdit | n
   if (!object) return null;
   const files = new Map<string, LspWorkspaceFileEdit>();
   const add = (uriValue: unknown, editsValue: unknown, versionValue?: unknown) => {
-    if (typeof uriValue !== "string") return;
-    const filePath = uriToPath(uriValue);
-    if (!filePath) return;
     const edits = normalizeTextEdits(editsValue);
     if (!edits.length) return;
+    if (typeof uriValue !== "string") {
+      const error: any = new Error("The language server returned an edit without a document URI.");
+      error.code = "LSP_INVALID_PATH";
+      throw error;
+    }
+    const filePath = uriToPath(uriValue);
+    if (!filePath) {
+      const error: any = new Error("The language server returned an edit for an unsupported document URI.");
+      error.code = "LSP_INVALID_PATH";
+      throw error;
+    }
     const existing = files.get(filePath);
     const version = Number.isSafeInteger(versionValue) ? Number(versionValue) : null;
     if (existing) {
