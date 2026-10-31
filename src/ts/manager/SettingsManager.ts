@@ -91,7 +91,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
     lsp_rename: "F2",
     lsp_code_action: "Mod+.",
     lsp_format_document: "Alt+Shift+F",
-    lsp_document_symbols: "Ctrl+Shift+O",
+    lsp_document_symbols: "Ctrl+Alt+O",
     lsp_workspace_symbols: "Mod+T",
     lsp_show_problems: "Mod+Shift+M",
   });

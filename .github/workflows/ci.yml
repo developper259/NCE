@@ -20,7 +20,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+      - run: node scripts/run-tests-ci.cjs test
       - if: runner.os == 'Windows'
         name: Build Windows NSIS installer
         run: npm run build -- --win nsis

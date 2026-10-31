@@ -211,9 +211,10 @@ test("LSP text utilities preserve UTF-16 positions across CRLF and emoji", () =>
     { range: { start: { line: 0, character: 0 }, end: { line: 0, character: 4 } }, newText: "x" },
     { range: { start: { line: 0, character: 2 }, end: { line: 0, character: 5 } }, newText: "y" },
   ]));
-  const uri = pathToUri("/tmp/a file.ts");
+  const spacedFile = path.join(os.tmpdir(), "a file.ts");
+  const uri = pathToUri(spacedFile);
   assert.match(uri, /^file:\/\//);
-  assert.equal(uriToPath(uri), "/tmp/a file.ts");
+  assert.equal(uriToPath(uri), spacedFile);
 });
 
 test("server registry maps NSH languages and resolves project roots", async () => {
@@ -232,7 +233,10 @@ test("server registry maps NSH languages and resolves project roots", async () =
   const source = path.join(project, "index.ts");
   await fs.writeFile(source, "const value = 1;\n");
   const definition = typescriptServers.find((server) => server.id === "typescript-language-server");
-  assert.equal(await resolveServerRoot(definition, source, workspace), project);
+  assert.equal(
+    await resolveServerRoot(definition, await fs.realpath(source), workspace),
+    await fs.realpath(project),
+  );
   assert.equal(
     await resolveServerRoot(definition, path.join(workspace, "other.ts"), workspace),
     workspace,

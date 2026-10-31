@@ -101,7 +101,7 @@ Nothing is installed or downloaded. The document still opens and edits normally.
 | Rename symbol | `F2` |
 | Code actions | `Mod+.` |
 | Format document or selection | `Alt+Shift+F` |
-| Document symbols | `Ctrl+Shift+O` |
+| Document symbols | `Ctrl+Alt+O` |
 | Workspace symbols | `Mod+T` |
 | Show Problems | `Mod+Shift+M` |
 
