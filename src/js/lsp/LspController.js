@@ -312,6 +312,7 @@ class LspController {
 
   handleReset() {
     this.documents.clear();
+    this.unsupported.clear();
     this.diagnosticsByPath.clear();
     this.diagnosticsDocuments = [];
     this.completionWidget.hide();

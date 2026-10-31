@@ -121,6 +121,7 @@ Hover, signature help, declaration, implementation and type definition are avail
 - Server-initiated `workspace/applyEdit` requests are answered with `applied: false`; all edits are applied in the renderer through the editor history.
 - Snippet placeholders are not expanded; completion inserts plain text.
 - Semantic tokens, code lenses, inlay hints, call hierarchy, document links and workspace-symbol resolution are not surfaced in the UI.
+- Dynamic capability registrations are accepted but features are routed from the static capabilities returned by `initialize`; progress notifications are ignored.
 - Diagnostics are rendered as inline range highlights and the Problems panel, not as gutter icons.
 - Files in large-file mode are intentionally not synchronized.
 
