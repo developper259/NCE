@@ -93,6 +93,7 @@ test("valid settings persist across manager restarts and set writes JSON", async
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       terminal: { shell: "" },
+      lsp: { enabled: true, servers: {} },
       keybindings: DEFAULT_KEYBINDINGS,
     });
   } finally {
@@ -243,6 +244,7 @@ test("missing known defaults are merged while unknown properties survive", async
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       terminal: { shell: "" },
+      lsp: { enabled: true, servers: {} },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     const disk = await readSettings(root);
@@ -275,6 +277,7 @@ test("queued concurrent writes leave a complete latest settings document", async
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
       terminal: { shell: "" },
+      lsp: { enabled: true, servers: {} },
       keybindings: DEFAULT_KEYBINDINGS,
     });
     assert.equal(await manager.set("editor.tabWidth", 17), false);

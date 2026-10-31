@@ -23,6 +23,7 @@ import { App } from "./App";
 import type { IpcHandlerRegistrar } from "./manager/IpcRouter";
 import { PathAccess } from "./manager/PathAccess";
 import { GitManager } from "./manager/GitManager";
+import { LspManager } from "./lsp/LspManager";
 import { TITLEBAR_OVERLAY_THEME } from "./manager/TitleBarTheme";
 import type { WindowSession } from "./manager/WindowSessionStore";
 import type { DeliveredFileResult, ExternalOpenResult } from "./manager/ExternalOpenCoordinator";
@@ -95,6 +96,7 @@ export class Window {
   agentProcessRunner: AgentProcessRunner | undefined;
   terminalManager: TerminalManager | undefined;
   gitManager: GitManager | undefined;
+  lspManager: LspManager | undefined;
   readonly pathAccess: PathAccess;
   private readonly activeAgentModelRequests = new Map<string, AbortController>();
   app: App;
@@ -228,6 +230,24 @@ export class Window {
       getWorkspaceRoot: () => this.watcher?.getWatchedPath?.() || this.workspacePath,
       pathAccess: this.pathAccess,
     });
+    this.lspManager = new LspManager({
+      getWorkspaceRoot: () => this.watcher?.getWatchedPath?.() || this.workspacePath,
+      pathAccess: this.pathAccess,
+      getSettings: () => this.app.settings?.getAll?.().lsp,
+      getTabSize: () => Number(this.app.settings?.get("editor.tabWidth")) || 2,
+      send: (channel, payload) => {
+        const target = this.window;
+        if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+        try {
+          target.webContents.send(channel, payload);
+        } catch {
+          // The renderer may be navigating or gone; the next renderer will resync.
+        }
+      },
+      onLog: (serverKey, level, message) => {
+        if (level === "error") console.warn(`[LSP ${serverKey}] ${message}`);
+      },
+    });
     this.watcher.onChange = (filePath) =>
       this.fileManager?.clearFileCache(filePath);
     this.contextMenu = new ContextMenu(this.window, this.ipc);
@@ -328,6 +348,7 @@ export class Window {
       this.failPendingExternalOpenDeliveries("The editor closed before confirming these files.");
       this.reloadPending = false;
       this.agentApprovalManager?.cancelAll();
+      void this.lspManager?.handleWorkspaceChanged();
       this.terminalManager?.closeForOwner(terminalOwner, {
         deferProcessDisposal: true,
       });
@@ -354,6 +375,7 @@ export class Window {
           this.terminalManager?.closeForOwner(terminalOwner, {
             deferProcessDisposal: true,
           });
+          void this.lspManager?.handleWorkspaceChanged();
         }
       },
     );
@@ -523,6 +545,7 @@ export class Window {
     this.agentProcessRunner?.handleIPC();
     this.terminalManager?.registerIPC();
     this.gitManager?.handleIPC(this.ipc);
+    this.lspManager?.handleIPC(this.ipc);
   }
 
   private async confirmDroppedPaths(paths: unknown): Promise<string[] | null> {
@@ -885,6 +908,11 @@ export class Window {
     } else if (key.startsWith("keybindings.")) {
       this.appMenu?.refreshKeybindings();
     }
+    if (key.startsWith("lsp.")) {
+      for (const window of this.app.windowManager?.getAllWindows?.() || []) {
+        void window.lspManager?.refreshSettings();
+      }
+    }
     const settings = this.app.settings.getAll?.();
     if (typeof this.app.broadcastToWindows === "function") {
       this.app.broadcastToWindows("settings-changed", settings);
@@ -901,6 +929,9 @@ export class Window {
     const settings = await this.app.settings.reload();
     if (!settings) return false;
     this.app.broadcastToWindows("settings-changed", settings);
+    for (const window of this.app.windowManager?.getAllWindows?.() || []) {
+      void window.lspManager?.refreshSettings();
+    }
     return true;
   }
 
@@ -982,9 +1013,11 @@ export class Window {
   }
 
   setWorkspacePath(workspacePath: string | null): void {
+    const changed = this.workspacePath !== workspacePath;
     this.workspacePath = workspacePath;
     this.window?.setTitle(this.getWindowTitle());
     this.app.windowSessionStore?.update(this.sessionId, { workspacePath });
+    if (changed) void this.lspManager?.handleWorkspaceChanged();
   }
 
   private scheduleBoundsSave(): void {
@@ -1014,6 +1047,7 @@ export class Window {
     this.agentApprovalManager?.cancelAll();
     this.agentProcessRunner?.dispose();
     this.gitManager?.dispose();
+    await this.lspManager?.dispose();
     await this.watcher?.dispose();
     if (owner) await this.terminalManager?.closeForOwner(owner);
     await this.workspaceSearch?.dispose();

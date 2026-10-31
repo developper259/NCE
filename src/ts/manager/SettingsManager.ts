@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { LspServerConfiguration } from "../lsp/LspTypes";
+import { DEFAULT_LSP_SETTINGS, isValidLspServers, sanitizeLspSettings } from "../lsp/LspSettings";
 
 export interface Settings {
   ui: {
-    settingsCategory: "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal";
+    settingsCategory:
+      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Language Servers";
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
@@ -16,6 +19,10 @@ export interface Settings {
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
   terminal: { shell: string };
+  lsp: {
+    enabled: boolean;
+    servers: Record<string, LspServerConfiguration>;
+  };
   keybindings: Record<string, string | null>;
 }
 
@@ -73,6 +80,20 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
     move_to_line_start: "Home",
     move_to_line_end: "End",
     toggle_insert_mode: "Insert",
+    lsp_completion: "Ctrl+Space",
+    lsp_hover: null,
+    lsp_signature_help: null,
+    lsp_definition: "F12",
+    lsp_declaration: null,
+    lsp_implementation: null,
+    lsp_type_definition: null,
+    lsp_references: "Shift+F12",
+    lsp_rename: "F2",
+    lsp_code_action: "Mod+.",
+    lsp_format_document: "Alt+Shift+F",
+    lsp_document_symbols: "Ctrl+Shift+O",
+    lsp_workspace_symbols: "Mod+T",
+    lsp_show_problems: "Mod+Shift+M",
   });
 
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
@@ -87,6 +108,10 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
   terminal: { shell: "" },
+  lsp: Object.freeze({
+    enabled: DEFAULT_LSP_SETTINGS.enabled,
+    servers: Object.freeze({}) as Record<string, LspServerConfiguration>,
+  }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
@@ -101,6 +126,8 @@ const KNOWN_KEYS = new Set([
   "appearance.theme",
   "agent.hiddenModels",
   "terminal.shell",
+  "lsp.enabled",
+  "lsp.servers",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
 ]);
 
@@ -269,6 +296,10 @@ export class SettingsManager {
         hiddenModels: [...this.settings.agent.hiddenModels],
       },
       terminal: { shell: this.settings.terminal.shell },
+      lsp: {
+        enabled: this.settings.lsp.enabled,
+        servers: JSON.parse(JSON.stringify(this.settings.lsp.servers)),
+      },
       keybindings: Object.fromEntries(
         Object.keys(DEFAULT_KEYBINDINGS).map((action) => [
           action,
@@ -363,6 +394,7 @@ export class SettingsManager {
     if (!isObject(merged.appearance)) merged.appearance = {};
     if (!isObject(merged.agent)) merged.agent = {};
     if (!isObject(merged.terminal)) merged.terminal = {};
+    if (!isObject(merged.lsp)) merged.lsp = {};
     if (!isObject(merged.keybindings)) merged.keybindings = {};
     merged.ui.settingsCategory = this.isValid(
       "ui.settingsCategory",
@@ -429,6 +461,13 @@ export class SettingsManager {
     merged.terminal.shell = this.isValid("terminal.shell", merged.terminal.shell)
       ? merged.terminal.shell.trim()
       : fallback.terminal.shell;
+    const normalizedLsp = sanitizeLspSettings(merged.lsp);
+    merged.lsp = this.isValid("lsp.enabled", normalizedLsp.enabled)
+      ? normalizedLsp
+      : {
+          enabled: fallback.lsp.enabled,
+          servers: sanitizeLspSettings(fallback.lsp).servers,
+        };
 
     const legacySaveShortcut = merged.keybindings.save;
     const legacySaveAsShortcuts = [
@@ -490,7 +529,8 @@ export class SettingsManager {
 
   private isValid(key: string, value: unknown): boolean {
     if (key === "ui.settingsCategory") {
-      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal"].includes(String(value));
+      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Servers"]
+        .includes(String(value));
     }
     if (key === "ui.settingsScrollTop") {
       return Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= 1_000_000;
@@ -528,6 +568,12 @@ export class SettingsManager {
     }
     if (key === "terminal.shell") {
       return typeof value === "string" && value.length <= 512 && !value.includes("\0");
+    }
+    if (key === "lsp.enabled") {
+      return typeof value === "boolean";
+    }
+    if (key === "lsp.servers") {
+      return isValidLspServers(value);
     }
     if (key.startsWith("keybindings.") && KNOWN_KEYS.has(key)) {
       if (value === null) return true;
