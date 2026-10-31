@@ -104,6 +104,12 @@ NCE also includes a deeply integrated AI coding agent designed to work directly 
 - Extensible bottom panel manager
 - Clipboard shortcuts and Shift+Arrow text selection in the terminal
 
+### Language Servers
+
+- Multi-server LSP client with diagnostics, completion, hover, navigation, rename, code actions, formatting and symbols
+- Declarative server registry; installed executables are detected, never downloaded or installed
+- Per-server enablement, custom executable paths and a Problems panel
+
 ### AI Agent
 
 - Integrated AI coding agent with project-aware tools, testing and multi-file editing
@@ -151,6 +157,8 @@ npm start
 ```
 
 ## Development
+
+Language server architecture, configuration and tests are documented in [docs/lsp.md](docs/lsp.md).
 
 Run the test suite:
 
