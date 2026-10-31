@@ -73,6 +73,14 @@ const SETTINGS_UI = Object.freeze([
     control: "agent",
   },
   {
+    key: "lsp.enabled",
+    category: "Language Servers",
+    label: "Enable Language Servers",
+    description: "Run installed language servers for diagnostics and language features.",
+    keywords: ["lsp", "language", "server", "diagnostics", "completion", "intellisense"],
+    control: "checkbox",
+  },
+  {
     key: "terminal.shell",
     category: "Terminal",
     label: "Shell",
@@ -91,6 +99,10 @@ const SETTINGS_CATEGORY_META = Object.freeze({
   },
   Agent: { description: "Configure AI models and providers." },
   Terminal: { description: "Configure the integrated system terminal." },
+  "Language Servers": {
+    description:
+      "Configure installed language servers. NCE detects executables but never installs or downloads them.",
+  },
 });
 
 class SettingsView {
@@ -329,6 +341,14 @@ class SettingsView {
       );
       if (category === "Agent") {
         section.appendChild(this.createAgentSettings());
+      } else if (category === "Language Servers") {
+        const panel = document.createElement("div");
+        panel.className = "settings-panel";
+        for (const setting of categorySettings) {
+          panel.appendChild(this.createRow(setting));
+        }
+        section.appendChild(panel);
+        section.appendChild(this.createLanguageServersSettings());
       } else {
         const panel = document.createElement("div");
         panel.className = "settings-panel";
@@ -388,6 +408,137 @@ class SettingsView {
     controlWrap.appendChild(control);
     row.append(text, controlWrap);
     return row;
+  }
+
+  createLanguageServersSettings() {
+    const container = document.createElement("div");
+    container.className = "lsp-settings-content";
+    const note = document.createElement("p");
+    note.className = "lsp-settings-note";
+    note.textContent = "Language servers are external executables that run with your user permissions. "
+      + "Configure an absolute path if a server is installed outside PATH. "
+      + "NCE does not download, install, update or remove servers.";
+    container.appendChild(note);
+    const list = document.createElement("div");
+    list.className = "lsp-settings-list";
+    list.setAttribute("role", "list");
+    container.appendChild(list);
+    const loading = document.createElement("p");
+    loading.className = "settings-empty";
+    loading.textContent = "Detecting language servers…";
+    list.appendChild(loading);
+
+    const api = window.api?.lsp;
+    if (!api?.getStatus) {
+      loading.textContent = "Language servers are unavailable in this window.";
+      return container;
+    }
+    const render = (status) => {
+      list.replaceChildren();
+      const servers = Array.isArray(status?.servers) ? status.servers : [];
+      if (!servers.length) {
+        loading.textContent = "No language servers are registered.";
+        list.appendChild(loading);
+        return;
+      }
+      for (const server of servers) {
+        const row = document.createElement("div");
+        row.className = "lsp-settings-row";
+        row.dataset.serverId = server.id;
+        row.setAttribute("role", "listitem");
+        const main = document.createElement("div");
+        main.className = "lsp-settings-main";
+        const title = document.createElement("label");
+        title.className = "lsp-settings-title";
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = server.enabled === true;
+        checkbox.dataset.serverEnabled = server.id;
+        checkbox.addEventListener("change", () => {
+          void this.updateLspServer(server.id, { enabled: checkbox.checked });
+        });
+        const name = document.createElement("span");
+        name.textContent = server.name;
+        title.append(checkbox, name);
+        const description = document.createElement("p");
+        description.className = "lsp-settings-description";
+        description.textContent = server.description;
+        const state = document.createElement("p");
+        state.className = "lsp-settings-state";
+        const session = (status.sessions || []).find((entry) => entry.serverId === server.id);
+        if (session?.error) {
+          state.textContent = session.error;
+          state.classList.add("is-error");
+        } else if (server.available) {
+          state.textContent = `Executable: ${server.executable}`;
+          state.classList.add("is-available");
+        } else {
+          state.textContent = server.error || "Executable not found.";
+          state.classList.add("is-missing");
+        }
+        if (session?.state === "ready") {
+          state.textContent += ` · ready${session.documents ? ` · ${session.documents} document${session.documents === 1 ? "" : "s"}` : ""}`;
+        } else if (session?.state && session.state !== "stopped") {
+          state.textContent += ` · ${session.state}`;
+        }
+        main.append(title, description, state);
+        row.appendChild(main);
+
+        const actions = document.createElement("div");
+        actions.className = "lsp-settings-actions";
+        const pathInput = document.createElement("input");
+        pathInput.type = "text";
+        pathInput.className = "lsp-settings-path";
+        pathInput.placeholder = "Executable path (optional)";
+        pathInput.value = (SETTINGS_GET("lsp.servers") || {})[server.id]?.path || "";
+        pathInput.dataset.serverPath = server.id;
+        pathInput.addEventListener("change", () => {
+          void this.updateLspServer(server.id, { path: pathInput.value.trim() });
+        });
+        const restart = document.createElement("button");
+        restart.type = "button";
+        restart.className = "settings-button lsp-settings-restart";
+        restart.textContent = "Restart";
+        restart.disabled = !server.available;
+        restart.addEventListener("click", async () => {
+          restart.disabled = true;
+          await api.restartServer?.({ serverId: server.id });
+          setTimeout(() => void refresh(), 200);
+        });
+        actions.append(pathInput, restart);
+        row.appendChild(actions);
+        list.appendChild(row);
+      }
+    };
+    const refresh = async () => {
+      try {
+        const status = await api.getStatus();
+        if (status?.success) render(status);
+        else loading.textContent = "Language server status is unavailable.";
+      } catch {
+        loading.textContent = "Language server status is unavailable.";
+      }
+    };
+    void refresh();
+    this.refreshLanguageServerStatus = refresh;
+    return container;
+  }
+
+  async updateLspServer(serverId, patch) {
+    const current = JSON.parse(JSON.stringify(SETTINGS_GET("lsp.servers") || {}));
+    const entry = { ...(current[serverId] || {}) };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === "" || value === undefined || value === null) delete entry[key];
+      else entry[key] = value;
+    }
+    if (Object.keys(entry).length) current[serverId] = entry;
+    else delete current[serverId];
+    const saved = await SETTINGS_SET("lsp.servers", current);
+    if (saved) {
+      this.editor.lspController?.refreshStatus?.();
+      setTimeout(() => void this.refreshLanguageServerStatus?.(), 250);
+    }
+    return saved;
   }
 
   createAgentSettings() {

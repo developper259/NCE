@@ -49,6 +49,20 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
   move_to_line_start: "Home",
   move_to_line_end: "End",
   toggle_insert_mode: "Insert",
+  lsp_completion: "Ctrl+Space",
+  lsp_hover: null,
+  lsp_signature_help: null,
+  lsp_definition: "F12",
+  lsp_declaration: null,
+  lsp_implementation: null,
+  lsp_type_definition: null,
+  lsp_references: "Shift+F12",
+  lsp_rename: "F2",
+  lsp_code_action: "Mod+.",
+  lsp_format_document: "Alt+Shift+F",
+  lsp_document_symbols: "Ctrl+Shift+O",
+  lsp_workspace_symbols: "Mod+T",
+  lsp_show_problems: "Mod+Shift+M",
 });
 
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
@@ -63,6 +77,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
   terminal: Object.freeze({ shell: "" }),
+  lsp: Object.freeze({ enabled: true, servers: Object.freeze({}) }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
 
@@ -73,6 +88,7 @@ let RENDERER_SETTINGS = {
   appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
   agent: { hiddenModels: [] },
   terminal: { ...DEFAULT_RENDERER_SETTINGS.terminal },
+  lsp: { enabled: true, servers: {} },
   keybindings: { ...DEFAULT_RENDERER_SETTINGS.keybindings },
 };
 
@@ -125,11 +141,34 @@ function SETTINGS_IS_VALID_KEYBINDING(value) {
     (Array.from(key).length === 1 && RENDERER_KEYBINDING_PUNCTUATION.has(key));
 }
 
+function SETTINGS_SANITIZE_LSP_SERVERS(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const servers = {};
+  for (const [id, configuration] of Object.entries(value)) {
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) continue;
+    if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)) continue;
+    const entry = {};
+    if (typeof configuration.enabled === "boolean") entry.enabled = configuration.enabled;
+    if (typeof configuration.path === "string" &&
+        configuration.path.length <= 2048 &&
+        !configuration.path.includes("\0"))
+      entry.path = configuration.path;
+    if (Array.isArray(configuration.args) &&
+        configuration.args.length <= 32 &&
+        configuration.args.every((argument) =>
+          typeof argument === "string" && argument.length <= 1024 && !argument.includes("\0")))
+      entry.args = [...configuration.args];
+    servers[id] = entry;
+  }
+  return servers;
+}
+
 function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
     ui: {
       settingsCategory:
-        ["Editor", "Files", "Shortcuts", "Agent", "Terminal"].includes(settings?.ui?.settingsCategory)
+        ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Servers"]
+          .includes(settings?.ui?.settingsCategory)
           ? settings.ui.settingsCategory
           : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,
       settingsScrollTop:
@@ -189,6 +228,12 @@ function SETTINGS_INITIALIZE(settings) {
         !settings.terminal.shell.includes("\0")
         ? settings.terminal.shell
         : DEFAULT_RENDERER_SETTINGS.terminal.shell,
+    },
+    lsp: {
+      enabled: typeof settings?.lsp?.enabled === "boolean"
+        ? settings.lsp.enabled
+        : DEFAULT_RENDERER_SETTINGS.lsp.enabled,
+      servers: SETTINGS_SANITIZE_LSP_SERVERS(settings?.lsp?.servers),
     },
     keybindings: Object.fromEntries(
       Object.entries(DEFAULT_KEYBINDINGS).map(([action, shortcut]) => [
@@ -272,6 +317,17 @@ async function SETTINGS_SET(key, value) {
     const validation = SETTINGS_VALIDATE_KEYBINDING(property, value);
     if (!validation.valid) {
       return { success: false, error: validation };
+    }
+  }
+
+  if (section === "lsp") {
+    if (property === "enabled" && typeof value !== "boolean") return false;
+    if (property === "servers") {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      if (Object.keys(value).length > 64) return false;
+      for (const id of Object.keys(value)) {
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)) return false;
+      }
     }
   }
 

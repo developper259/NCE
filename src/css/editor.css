@@ -47,7 +47,8 @@
 .editor-select-highlight,
 .editor-secondary-selections,
 .editor-secondary-carets,
-.editor-search-highlight {
+.editor-search-highlight,
+.editor-diagnostics {
   will-change: transform;
 }
 

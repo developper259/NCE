@@ -174,6 +174,7 @@ class tabManager {
     }
 
     if (changed) {
+      this.editor.lspController?.handleRenamedPaths?.(oldPath, newPath);
       this.editor.fileExplorer.setActiveFile(
         this.activeFile?.path || (["picture", "markdown"].includes(this.activeTab?.type) ? this.activeTab.path : null),
       );
@@ -183,6 +184,7 @@ class tabManager {
 
   markFileAsDeleted(path) {
     if (!path) return;
+    this.editor.lspController?.handleDeletedPath?.(path);
     let changed = false;
 
     for (const tab of this.tabs.filter((candidate) => ["picture", "markdown"].includes(candidate.type))) {

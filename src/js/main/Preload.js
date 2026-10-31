@@ -72,6 +72,46 @@ contextBridge.exposeInMainWorld("api", {
     getBranches: () => ipcRenderer.invoke("Git:branches"),
     getCurrentBranch: () => ipcRenderer.invoke("Git:currentBranch"),
   },
+  lsp: {
+    getStatus: () => ipcRenderer.invoke("Lsp:status"),
+    openDocument: (payload) => ipcRenderer.invoke("Lsp:openDocument", payload),
+    changeDocument: (payload) => ipcRenderer.invoke("Lsp:changeDocument", payload),
+    saveDocument: (payload) => ipcRenderer.invoke("Lsp:saveDocument", payload),
+    closeDocument: (payload) => ipcRenderer.invoke("Lsp:closeDocument", payload),
+    completion: (payload) => ipcRenderer.invoke("Lsp:completion", payload),
+    resolveCompletion: (payload) => ipcRenderer.invoke("Lsp:resolveCompletion", payload),
+    hover: (payload) => ipcRenderer.invoke("Lsp:hover", payload),
+    definition: (payload) => ipcRenderer.invoke("Lsp:definition", payload),
+    declaration: (payload) => ipcRenderer.invoke("Lsp:declaration", payload),
+    implementation: (payload) => ipcRenderer.invoke("Lsp:implementation", payload),
+    typeDefinition: (payload) => ipcRenderer.invoke("Lsp:typeDefinition", payload),
+    references: (payload) => ipcRenderer.invoke("Lsp:references", payload),
+    prepareRename: (payload) => ipcRenderer.invoke("Lsp:prepareRename", payload),
+    rename: (payload) => ipcRenderer.invoke("Lsp:rename", payload),
+    codeActions: (payload) => ipcRenderer.invoke("Lsp:codeActions", payload),
+    resolveCodeAction: (payload) => ipcRenderer.invoke("Lsp:resolveCodeAction", payload),
+    executeCodeAction: (payload) => ipcRenderer.invoke("Lsp:executeCodeAction", payload),
+    format: (payload) => ipcRenderer.invoke("Lsp:format", payload),
+    documentSymbols: (payload) => ipcRenderer.invoke("Lsp:documentSymbols", payload),
+    workspaceSymbols: (payload) => ipcRenderer.invoke("Lsp:workspaceSymbols", payload),
+    signatureHelp: (payload) => ipcRenderer.invoke("Lsp:signatureHelp", payload),
+    restartServer: (payload) => ipcRenderer.invoke("Lsp:restartServer", payload),
+    onDiagnostics: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Lsp:diagnostics", listener);
+      return () => ipcRenderer.removeListener("Lsp:diagnostics", listener);
+    },
+    onStatus: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Lsp:status", listener);
+      return () => ipcRenderer.removeListener("Lsp:status", listener);
+    },
+    onReset: (callback) => {
+      const listener = () => callback();
+      ipcRenderer.on("Lsp:reset", listener);
+      return () => ipcRenderer.removeListener("Lsp:reset", listener);
+    },
+  },
   getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),
   addRecentFolder: (folderPath) =>
     ipcRenderer.invoke("RecentFolders:add", folderPath),

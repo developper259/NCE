@@ -23,6 +23,7 @@ class Editor {
     this.multiCursorCaretOutput = this.domManager.getElement(".editor-secondary-carets");
     this.multiCursorSelectionOutput = this.domManager.getElement(".editor-secondary-selections");
     this.searchOutput = this.domManager.getElement(".editor-search-highlight");
+    this.diagnosticsOutput = this.domManager.getElement(".editor-diagnostics");
 
     this.selected = false;
     this.isActive = false;
@@ -137,6 +138,7 @@ class Editor {
     this.events = new Events(this);
     this.events.init();
     this.keyBinding = new KeyBinding(this);
+    this.lspController = new LspController(this);
     this.savePopupManager = new SavePopup(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
     this.titleBar = new TitleBar(this);
@@ -276,6 +278,8 @@ class Editor {
     this._settingsView?.sync?.("files.openRecentIn");
     this._settingsView?.sync?.("terminal.shell");
     this._settingsView?.sync?.("agent.hiddenModels");
+    this._settingsView?.sync?.("lsp.enabled");
+    this.lspController?.refreshStatus?.();
     void this.refreshSettingsJsonTab();
   }
 
@@ -395,6 +399,7 @@ class Editor {
   destroy() {
     this.windowActivityUnsubscribe?.();
     this.windowActivityUnsubscribe = null;
+    this.lspController?.destroy?.();
     this.externalFileDropController?.destroy?.();
     document.documentElement.classList.remove("nce-window-inactive");
     this.cursorController?.destroy?.();

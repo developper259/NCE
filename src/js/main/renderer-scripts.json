@@ -73,5 +73,10 @@
   "js/contextMenu/Terminal.ContextMenu.js",
   "config/Application.js",
   "js/view/PerformanceDashboard.js",
+  "js/lsp/LspPositions.js",
+  "js/lsp/LspPopover.js",
+  "js/lsp/LspCompletionWidget.js",
+  "js/lsp/ProblemsPanel.js",
+  "js/lsp/LspController.js",
   "js/main/Editor.js"
 ]

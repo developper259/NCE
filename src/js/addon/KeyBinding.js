@@ -63,6 +63,21 @@ class KeyBinding {
       toggle_agent: this.control_toggle_agent,
       toggle_terminal: this.control_toggle_terminal,
 
+      lsp_completion: this.control_lsp_completion,
+      lsp_hover: this.control_lsp_hover,
+      lsp_signature_help: this.control_lsp_signature_help,
+      lsp_definition: this.control_lsp_definition,
+      lsp_declaration: this.control_lsp_declaration,
+      lsp_implementation: this.control_lsp_implementation,
+      lsp_type_definition: this.control_lsp_type_definition,
+      lsp_references: this.control_lsp_references,
+      lsp_rename: this.control_lsp_rename,
+      lsp_code_action: this.control_lsp_code_action,
+      lsp_format_document: this.control_lsp_format_document,
+      lsp_document_symbols: this.control_lsp_document_symbols,
+      lsp_workspace_symbols: this.control_lsp_workspace_symbols,
+      lsp_show_problems: this.control_lsp_show_problems,
+
       Escape: this.key_escape,
       Tab: this.key_tab,
       Delete: this.key_delete,
@@ -558,6 +573,23 @@ class KeyBinding {
   }
 
   getActionLabel(action) {
+    const labels = {
+      lsp_completion: "Language Server: Trigger Completion",
+      lsp_hover: "Language Server: Show Hover",
+      lsp_signature_help: "Language Server: Signature Help",
+      lsp_definition: "Language Server: Go to Definition",
+      lsp_declaration: "Language Server: Go to Declaration",
+      lsp_implementation: "Language Server: Go to Implementation",
+      lsp_type_definition: "Language Server: Go to Type Definition",
+      lsp_references: "Language Server: Find References",
+      lsp_rename: "Language Server: Rename Symbol",
+      lsp_code_action: "Language Server: Show Code Actions",
+      lsp_format_document: "Language Server: Format Document",
+      lsp_document_symbols: "Language Server: Document Symbols",
+      lsp_workspace_symbols: "Language Server: Workspace Symbols",
+      lsp_show_problems: "Language Server: Show Problems",
+    };
+    if (labels[action]) return labels[action];
     if (action === "open_settings") return "Open Settings (UI)";
     return action
       .split("_")
@@ -602,6 +634,62 @@ class KeyBinding {
 
   control_remove_secondary_cursors() {
     return this.editor.multiCursorController?.removeSecondaryCursors?.();
+  }
+
+  control_lsp_completion() {
+    return this.editor.lspController?.requestCompletion?.(1);
+  }
+
+  control_lsp_hover() {
+    return this.editor.lspController?.hover?.();
+  }
+
+  control_lsp_signature_help() {
+    return this.editor.lspController?.signatureHelp?.();
+  }
+
+  control_lsp_definition() {
+    return this.editor.lspController?.definition?.();
+  }
+
+  control_lsp_declaration() {
+    return this.editor.lspController?.declaration?.();
+  }
+
+  control_lsp_implementation() {
+    return this.editor.lspController?.implementation?.();
+  }
+
+  control_lsp_type_definition() {
+    return this.editor.lspController?.typeDefinition?.();
+  }
+
+  control_lsp_references() {
+    return this.editor.lspController?.references?.();
+  }
+
+  control_lsp_rename() {
+    return this.editor.lspController?.rename?.();
+  }
+
+  control_lsp_code_action() {
+    return this.editor.lspController?.codeActions?.();
+  }
+
+  control_lsp_format_document() {
+    return this.editor.lspController?.formatDocument?.();
+  }
+
+  control_lsp_document_symbols() {
+    return this.editor.lspController?.documentSymbols?.();
+  }
+
+  control_lsp_workspace_symbols() {
+    return this.editor.lspController?.workspaceSymbols?.();
+  }
+
+  control_lsp_show_problems() {
+    return this.editor.lspController?.showProblems?.();
   }
 
   control_toggle_file_explorer(s, c, m, a) {

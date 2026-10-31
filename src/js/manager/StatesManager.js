@@ -143,7 +143,9 @@ class StatesManager {
     return {
       visible: value.visible === true,
       height,
-      activePanelId: value.activePanelId === "terminal" ? "terminal" : null,
+      activePanelId: ["terminal", "problems"].includes(value.activePanelId)
+        ? value.activePanelId
+        : null,
       terminal: { version: 1, activeTabIndex, tabs },
     };
   }

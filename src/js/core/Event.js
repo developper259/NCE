@@ -117,6 +117,7 @@ class Events {
     // ------- File.js ------
     if (this.editor.tabManager.activeFile)
       this.editor.tabManager.activeFile.onChange();
+    this.editor.lspController?.handleChange?.(arg);
     if (typeof this.editor.titleBar?.refreshDocumentTitle === "function") {
       this.editor.titleBar.refreshDocumentTitle();
     } else {
@@ -146,16 +147,19 @@ class Events {
     bottomBar.refresh?.();
   }
   onSave(arg) {
+    this.editor.lspController?.handleSavedFile?.(arg?.file || this.editor.tabManager.activeFile);
     this.editor.statesManager.save();
     this.editor.titleBar?.refresh();
   }
   onOpenFile(arg) {
     const file = arg?.activeFile || this.editor.tabManager.activeFile;
     if (file) this.editor.highlightController?.openFile(file);
+    this.editor.lspController?.handleOpenFile?.(arg);
     this.editor.statesManager.save();
     this.editor.titleBar?.refresh();
   }
   onCloseFile(arg) {
+    this.editor.lspController?.handleCloseFile?.(arg);
     if (arg?.file) this.editor.highlightController?.closeFile(arg.file);
     else this.editor.highlightController?.closeAllFiles();
     this.editor.statesManager.save();
@@ -170,6 +174,7 @@ class Events {
   onLoaded(arg) {
     this.editor.isOnInit = false;
     this.editor.commitStartupState();
+    this.editor.lspController?.handleEditorLoaded?.();
   }
 
   // DOM Event

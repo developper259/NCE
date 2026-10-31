@@ -954,6 +954,7 @@ class FileNode extends Tab {
       await this.clearRecoverySnapshot({ committed: true, editVersion: version }).catch(() => false);
       this.editor.tabManager.refresh();
       this.editor.gitSidebar?.noteEditorSave?.();
+      this.editor.lspController?.handleSavedFile?.(this);
       return { saved: true, result: saved };
     } catch (error) {
       this.reportSaveError(error);
@@ -992,6 +993,7 @@ class FileNode extends Tab {
       }
       this.editor.tabManager.refresh();
       this.editor.gitSidebar?.noteEditorSave?.();
+      this.editor.lspController?.handleSavedFile?.(this);
       return true;
     } catch (error) {
       this.reportSaveError(error);

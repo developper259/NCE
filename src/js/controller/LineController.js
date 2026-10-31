@@ -10,6 +10,7 @@ class LineController {
     this.secondarySelectionFast = wrapFastNode(editor.multiCursorSelectionOutput);
     this.secondaryCaretFast = wrapFastNode(editor.multiCursorCaretOutput);
     this.searchOutputFast = wrapFastNode(editor.searchOutput);
+    this.diagnosticsOutputFast = wrapFastNode(editor.diagnosticsOutput);
 
     this.outputWidth = 0;
     this.outputHeight = 0;
@@ -387,6 +388,7 @@ class LineController {
     this.secondarySelectionFast?.setHeight(height);
     this.secondaryCaretFast?.setHeight(height);
     this.searchOutputFast?.setHeight(height);
+    this.diagnosticsOutputFast?.setHeight(height);
 
     this.outputFast?.setTransform(transform);
     this.lineNumberFast?.setTransform(transform);
@@ -394,6 +396,7 @@ class LineController {
     this.secondarySelectionFast?.setTransform(transform);
     this.secondaryCaretFast?.setTransform(transform);
     this.searchOutputFast?.setTransform(transform);
+    this.diagnosticsOutputFast?.setTransform(transform);
   }
 
   isSized() {
@@ -826,6 +829,7 @@ class LineController {
     this.editor.selectController?.refreshSelectionDOM?.();
     this.editor.multiCursorController?.refreshOverlays?.();
     this.editor.searchController?.refreshSelectionDOM?.();
+    this.editor.lspController?.refreshDiagnosticsOverlay?.();
   }
 
   getContent() {
@@ -1244,6 +1248,7 @@ class LineController {
     this.editor.selectController.refreshSelectionDOM();
     this.editor.multiCursorController?.refreshOverlays?.();
     this.editor.searchController.refreshSelectionDOM();
+    this.editor.lspController?.refreshDiagnosticsOverlay?.();
 
     if (newlyVisibleDocumentIndexes.length > 0)
       this.editor.highlightController.refreshForVerticalScroll(
@@ -1263,6 +1268,7 @@ class LineController {
     this.editor.selectController.refreshSelectPositions();
     this.editor.multiCursorController?.refreshOverlays?.();
     this.editor.searchController.refreshSelectionDOM();
+    this.editor.lspController?.refreshDiagnosticsOverlay?.();
   }
 
   refreshLineOutput(screenIndex) {
@@ -1910,6 +1916,7 @@ class LineController {
     this.editor.multiCursorController?.refreshOverlays?.();
 
     this.editor.searchController.refreshSelectionDOM();
+    this.editor.lspController?.refreshDiagnosticsOverlay?.();
 
     this.editor.highlightController.refresh();
   }
