@@ -96,14 +96,21 @@ class CursorController {
   rowToY(row) {
     const lc = this.editor.lineController;
     const displayIndex = lc.getDisplayIndexForCursor(row);
+    const renderStartIndex = lc.renderStartIndex ?? lc.startIndex ?? 0;
+    const screenRow = displayIndex - renderStartIndex;
+    // Layer-local Y for overlays that receive the output transform
+    // (selection, secondary carets, search).
+    return lc.getLineTop(screenRow) + 4;
+  }
+
+  rowToViewportY(row) {
+    const lc = this.editor.lineController;
     const startIndex = lc.startIndex ?? 0;
     const renderStartIndex = lc.renderStartIndex ?? startIndex;
-    const screenRow = displayIndex - renderStartIndex;
-    // Rendered rows live in the overscan window, which the output layer
-    // translates by (renderStartIndex - startIndex) * lineHeight. Carets and
-    // selection overlays sit outside that layer and must include the shift.
     const windowOffset = (renderStartIndex - startIndex) * lc.getLineHeight();
-    return windowOffset + lc.getLineTop(screenRow) + 4;
+    // The primary caret lives outside the translated layers, so it needs the
+    // overscan window shift and the fractional scroll offset applied here.
+    return this.rowToY(row) + windowOffset - (lc.offsetY || 0);
   }
 
   columnToX(viewColumn) {
@@ -204,7 +211,7 @@ class CursorController {
     return {
       left: contentLeft - this.mpX,
       contentLeft,
-      top: this.rowToY(row) - 4 - lineController.offsetY,
+      top: this.rowToViewportY(row) - 4,
       viewColumn,
     };
   }

@@ -965,7 +965,8 @@ class MultiCursorController {
         ) {
           caretRects.push({
             left: caretPosition.left,
-            top: caretPosition.top,
+            // Secondary carets render inside the translated caret layer.
+            top: cursor.rowToY(position.row) - 4,
             width: 2,
             height: cursor.editor.posY,
           });

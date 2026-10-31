@@ -117,7 +117,7 @@ test("clicking below the final line works after vertical scrolling", () => {
   assert.equal(file.column, 5);
 });
 
-test("caret geometry includes the overscan window offset", () => {
+test("caret viewport geometry includes the overscan window offset", () => {
   const lineHeight = 23;
   const { cursor } = createCursor("one\ntwo\nthree\nfour", {
     scrollStart: 2,
@@ -126,12 +126,17 @@ test("caret geometry includes the overscan window offset", () => {
     lineHeight,
   });
 
-  // Row 4 is screen row 3 of a window that starts two rows above startIndex.
-  assert.equal(cursor.rowToY(4), (0 - 2) * lineHeight + 3 * lineHeight + 4);
+  // Overlays inside the translated layers stay local to the render window.
+  assert.equal(cursor.rowToY(4), 3 * lineHeight + 4);
+  // The primary caret lives outside them and includes the window shift.
+  assert.equal(
+    cursor.rowToViewportY(4),
+    3 * lineHeight + 4 + (0 - 2) * lineHeight - 4,
+  );
   const position = cursor.getCaretPosition(4, 0);
   assert.equal(
     position.top,
-    (0 - 2) * lineHeight + 3 * lineHeight - 4,
+    3 * lineHeight + (0 - 2) * lineHeight - 4,
     "the caret follows the translated overscan window",
   );
 });
