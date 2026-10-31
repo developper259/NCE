@@ -4,7 +4,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname, "..");
 const script = process.argv[2] || "test";
 const isWindows = process.platform === "win32";
-const child = spawn(isWindows ? "npm.cmd" : "npm", [script], {
+const child = spawn(isWindows ? "npm.cmd" : "npm", ["run", script], {
   cwd: root,
   env: process.env,
   shell: isWindows,
