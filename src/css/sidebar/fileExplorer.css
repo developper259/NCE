@@ -379,7 +379,7 @@
   width: 100%;
   margin-top: 15px;
   padding: 6px 12px;
-  background-color: var(--accent-primary);
+  background-color: var(--accent-fill);
   color: var(--text-white);
   border: none;
   border-radius: 2px;
@@ -390,11 +390,11 @@
 }
 
 .open-folder-btn:hover {
-  background-color: var(--border-accent);
+  background-color: var(--accent-fill-hover);
 }
 
 .open-folder-btn:active {
-  background-color: var(--border-active);
+  background-color: var(--accent-fill-active);
 }
 
 .file-item.editing {

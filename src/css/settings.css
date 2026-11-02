@@ -128,7 +128,7 @@
 .setting-toggle input { position: absolute; opacity: 0; }
 .setting-toggle span { display: block; width: 100%; height: 100%; box-sizing: border-box; border: 1px solid var(--border-secondary); border-radius: 10px; background: var(--bg-secondary); cursor: pointer; }
 .setting-toggle span::after { display: block; width: 12px; height: 12px; margin: 2px; border-radius: 50%; background: var(--text-secondary); content: ""; transition: transform 120ms ease; }
-.setting-toggle input:checked + span { border-color: var(--accent-primary); background: var(--accent-primary); }
+.setting-toggle input:checked + span { border-color: var(--accent-fill); background: var(--accent-fill); }
 .setting-toggle input:checked + span::after { transform: translateX(16px); background: var(--text-white); }
 .settings-empty { margin: 0; color: var(--text-tertiary); font-size: 13px; }
 .agent-settings-content { min-width: 0; }
