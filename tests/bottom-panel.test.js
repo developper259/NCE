@@ -226,6 +226,17 @@ test("Terminal clips its layers and hides the native scrollbar without hiding xt
   );
 });
 
+test("editor overlays do not duplicate the border above the bottom panel", () => {
+  const html = read("src/html/index.html");
+  for (const host of ["settings-view-host", "picture-view-host", "markdown-view-host"]) {
+    const tag = html.match(new RegExp(`<div class="[^"]*${host}[^"]*"`))?.[0] || "";
+    assert.ok(tag, `${host} is present`);
+    assert.doesNotMatch(tag, /box-bottom/, `${host} must not add a second bottom border`);
+  }
+  const panel = read("src/css/bottomPanel.css").match(/\.bottom-panel\s*\{([^}]+)\}/)?.[1] || "";
+  assert.match(panel, /border-top:\s*1px solid var\(--border-primary\)/);
+});
+
 test("Bottom Panel resizer keeps pointer capture through drag and releases it on completion", () => {
   const { manager, calls } = createManagerHarness();
   manager.visible = true;
