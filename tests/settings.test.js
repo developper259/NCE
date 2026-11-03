@@ -668,3 +668,24 @@ test("Language Manager settings use the shared design and a single warning color
   assert.doesNotMatch(lspCss, /lsp-settings-state\.is-error/);
   assert.match(lspCss, /\.lsp-settings-state\.is-missing\s*\{[^}]*var\(--state-warning\)/);
 });
+
+test("Set path prefills the configured executable path", async () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {
+    SETTINGS_GET: (key) => key === "lsp.servers"
+      ? { "typescript-language-server": { path: "/custom/ts-server" } }
+      : undefined,
+  });
+  const view = Object.create(SettingsView.prototype);
+  let options = null;
+  view.editor = { quickPanel: { open: (value) => { options = value; } } };
+  const pending = view.requestLspServerPath({
+    id: "typescript-language-server",
+    name: "TypeScript Language Server",
+  });
+  assert.equal(options.mode, "input");
+  assert.equal(options.value, "/custom/ts-server");
+  assert.match(options.title, /TypeScript Language Server/);
+  options.onAccept(" /next/server ");
+  assert.equal(await pending, "/next/server");
+});

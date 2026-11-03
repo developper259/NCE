@@ -496,19 +496,6 @@ class SettingsView {
     const actions = document.createElement("div");
     actions.className = "settings-row-control lsp-settings-actions";
 
-    const toggle = document.createElement("label");
-    toggle.className = "setting-toggle";
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.checked = server.enabled === true;
-    input.setAttribute("aria-label", `Enable ${this.languageLabel(server)}`);
-    const track = document.createElement("span");
-    track.setAttribute("aria-hidden", "true");
-    input.addEventListener("change", () => {
-      void this.updateLspServer(server.id, { enabled: input.checked });
-    });
-    toggle.append(input, track);
-
     const setPath = document.createElement("button");
     setPath.type = "button";
     setPath.className = "settings-action-button";
@@ -519,18 +506,18 @@ class SettingsView {
       await this.updateLspServer(server.id, { path: value });
     });
 
-    const restart = document.createElement("button");
-    restart.type = "button";
-    restart.className = "settings-action-button";
-    restart.textContent = "Restart";
-    restart.disabled = !server.available;
-    restart.addEventListener("click", async () => {
-      restart.disabled = true;
-      await window.api?.lsp?.restartServer?.({ serverId: server.id });
-      setTimeout(() => void this.refreshLanguageServerStatus?.(), 200);
+    const enabled = server.enabled === true;
+    const toggleEnabled = document.createElement("button");
+    toggleEnabled.type = "button";
+    toggleEnabled.className = "settings-action-button";
+    toggleEnabled.textContent = enabled ? "Disable" : "Enable";
+    toggleEnabled.disabled = !enabled && server.available !== true;
+    toggleEnabled.addEventListener("click", async () => {
+      toggleEnabled.disabled = true;
+      await this.updateLspServer(server.id, { enabled: !enabled });
     });
 
-    actions.append(toggle, setPath, restart);
+    actions.append(setPath, toggleEnabled);
     row.append(main, actions);
     return row;
   }

@@ -297,13 +297,28 @@ module.exports = async function exerciseUI() {
     languageRow?.querySelector('.settings-row-label')?.textContent === 'JavaScript / TypeScript',
     'Language row uses the language title',
   );
-  check(Boolean(languageRow?.querySelector('.setting-toggle input')), 'Language row uses the standard toggle');
+  check(!languageRow?.querySelector('.setting-toggle input'), 'Language row has no on/off checkbox');
   check(
     !languageRow?.querySelector('.lsp-settings-path') &&
       !languageRow?.querySelector('input[type="text"]'),
     'Language row has no executable path input',
   );
   check(!settingsView.content.querySelector('.lsp-settings-state.is-error'), 'No red language state remains');
+  const lspStatus = await window.api.lsp.getStatus();
+  const lspServers = new Map((lspStatus?.servers || []).map((server) => [server.id, server]));
+  for (const row of Array.from(settingsView.content.querySelectorAll('[data-server-id]'))) {
+    const server = lspServers.get(row.dataset.serverId);
+    if (!server) continue;
+    const stateButton = Array.from(row.querySelectorAll('button'))
+      .find((button) => button.textContent === 'Enable' || button.textContent === 'Disable');
+    check(Boolean(stateButton), 'Language row exposes an enable/disable button');
+    if (server.enabled) {
+      check(stateButton.textContent === 'Disable' && stateButton.disabled === false, 'Enabled languages offer Disable');
+    } else {
+      check(stateButton.textContent === 'Enable', 'Disabled languages offer Enable');
+      check(stateButton.disabled === !server.available, 'Enable is unavailable without a detected path');
+    }
+  }
   const setPathButton = Array.from(languageRow?.querySelectorAll('button') || [])
     .find((button) => button.textContent === 'Set path');
   check(Boolean(setPathButton), 'Language row exposes a Set path button');

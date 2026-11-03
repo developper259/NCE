@@ -58,7 +58,7 @@ Adding a server means adding one declarative entry; the transport, document stor
 
 ## Configuration
 
-Settings → **Language Manager** exposes per-language enablement, availability, a Set path action, startup error and a restart action, plus a global enable switch. Persistent values live in `settings.json`:
+Settings → **Language Manager** exposes per-language enable/disable buttons, availability, a Set path action and a startup error, plus a global enable switch. Persistent values live in `settings.json`:
 
 ```json
 {
