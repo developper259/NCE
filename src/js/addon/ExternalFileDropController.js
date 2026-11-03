@@ -1,32 +1,3 @@
-function describeOpenedItems(result) {
-  const files = Number(result?.openedFiles) || 0;
-  const folders = Number(result?.openedFolders) || 0;
-  const inTargetFolders = Array.isArray(result?.openInTargetFolders)
-    ? result.openInTargetFolders.length
-    : 0;
-  const focusedFolders = Number(result?.focusedFolders) || 0;
-  const parts = [];
-  if (files > 0) {
-    parts.push(`${files} file${files === 1 ? "" : "s"} opened in this window`);
-  }
-  if (inTargetFolders > 0) {
-    parts.push(
-      `${inTargetFolders} folder${inTargetFolders === 1 ? "" : "s"} opened in this window`,
-    );
-  }
-  if (folders > 0) {
-    parts.push(
-      `${folders} folder${folders === 1 ? "" : "s"} opened in new window${folders === 1 ? "" : "s"}`,
-    );
-  }
-  if (focusedFolders > 0) {
-    parts.push(
-      `${focusedFolders} folder${focusedFolders === 1 ? "" : "s"} focused in an existing window`,
-    );
-  }
-  return parts.length ? `${parts.join(". ")}.` : "";
-}
-
 class ExternalFileDropController {
   constructor(editor) {
     this.editor = editor;
@@ -257,7 +228,7 @@ class ExternalFileDropController {
       }
       if (operationId !== this.dragOperationId) return;
     }
-    this.showDropResult(result);
+    this.showResult(result);
   }
 
   async openExternalFiles(request) {
@@ -328,16 +299,6 @@ class ExternalFileDropController {
     const firstFailure = failures[0];
     const detail = typeof firstFailure?.message === "string" ? firstFailure.message : "Some items could not be opened.";
     this.showStatus(`Could not open ${failures.length} item${failures.length === 1 ? "" : "s"}: ${detail}`);
-  }
-
-  showDropResult(result) {
-    const failures = Array.isArray(result?.failures) ? result.failures : [];
-    if (failures.length) {
-      this.showResult(result);
-      return;
-    }
-    const message = describeOpenedItems(result);
-    if (message) this.showStatus(message);
   }
 
   showStatus(message) {
