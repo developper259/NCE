@@ -241,6 +241,7 @@
   border-top: 0;
 }
 
+.main-section > .sidebar-tab-selector,
 .main-section > .sidebar-left {
   border-left: 0;
 }

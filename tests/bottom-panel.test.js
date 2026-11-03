@@ -237,6 +237,18 @@ test("editor overlays do not duplicate the border above the bottom panel", () =>
   assert.match(panel, /border-top:\s*1px solid var\(--border-primary\)/);
 });
 
+test("sidebar selector does not duplicate the window left border", () => {
+  const css = read("src/css/titlebar.css");
+  assert.match(
+    css,
+    /\.main-section > \.sidebar-tab-selector,\s*\.main-section > \.sidebar-left\s*\{[^}]*border-left:\s*0/s,
+  );
+  const html = read("src/html/index.html");
+  const selector = html.match(/<div class="[^"]*sidebar-tab-selector[^"]*"/)?.[0] || "";
+  assert.ok(selector, "sidebar selector is present");
+  assert.doesNotMatch(selector, /box-left/, "sidebar selector must not reintroduce box-left");
+});
+
 test("Bottom Panel resizer keeps pointer capture through drag and releases it on completion", () => {
   const { manager, calls } = createManagerHarness();
   manager.visible = true;
