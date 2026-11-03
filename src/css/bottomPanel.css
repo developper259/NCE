@@ -40,17 +40,6 @@
   background: var(--bg-primary);
 }
 
-.bottom-panel-title {
-  flex: 0 0 auto;
-  margin: 0;
-  color: var(--text-primary);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1;
-  cursor: default;
-  user-select: none;
-}
-
 .bottom-panel-views,
 .bottom-panel-actions,
 .bottom-panel-terminal-actions-slot {
@@ -410,6 +399,7 @@
   inset: 0;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: var(--terminal-surface);
 }
 
@@ -422,7 +412,37 @@
   height: 100%;
   padding: 7px 10px;
   box-sizing: border-box;
+  overflow: hidden;
   background: var(--terminal-surface);
+}
+
+.terminal-instance .xterm-screen {
+  overflow: hidden;
+}
+
+.terminal-instance .xterm .xterm-viewport {
+  overflow: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.terminal-instance .xterm .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+.terminal-panel,
+.terminal-panel * {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.terminal-panel::-webkit-scrollbar,
+.terminal-panel *::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .terminal-instance .xterm .xterm-viewport,
@@ -465,10 +485,6 @@
     gap: 6px;
     padding-right: 5px;
     padding-left: 8px;
-  }
-
-  .bottom-panel-title {
-    font-size: 11px;
   }
 
   .bottom-panel-actions {

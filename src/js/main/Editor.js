@@ -277,6 +277,7 @@ class Editor {
     this._settingsView?.sync?.("files.confirmPermanentDelete");
     this._settingsView?.sync?.("files.openRecentIn");
     this._settingsView?.sync?.("terminal.shell");
+    this._settingsView?.sync?.("terminal.args");
     this._settingsView?.sync?.("agent.hiddenModels");
     this._settingsView?.sync?.("lsp.enabled");
     this.lspController?.refreshStatus?.();

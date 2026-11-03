@@ -18,7 +18,7 @@ export interface Settings {
   };
   appearance: { theme: ThemePreference };
   agent: { hiddenModels: string[] };
-  terminal: { shell: string };
+  terminal: { shell: string; args: string };
   lsp: {
     enabled: boolean;
     servers: Record<string, LspServerConfiguration>;
@@ -107,7 +107,7 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   }),
   appearance: Object.freeze({ theme: "system" as ThemePreference }),
   agent: { hiddenModels: [] as string[] },
-  terminal: { shell: "" },
+  terminal: { shell: "", args: "" },
   lsp: Object.freeze({
     enabled: DEFAULT_LSP_SETTINGS.enabled,
     servers: Object.freeze({}) as Record<string, LspServerConfiguration>,
@@ -126,6 +126,7 @@ const KNOWN_KEYS = new Set([
   "appearance.theme",
   "agent.hiddenModels",
   "terminal.shell",
+  "terminal.args",
   "lsp.enabled",
   "lsp.servers",
   ...Object.keys(DEFAULT_KEYBINDINGS).map((action) => `keybindings.${action}`),
@@ -295,7 +296,10 @@ export class SettingsManager {
       agent: {
         hiddenModels: [...this.settings.agent.hiddenModels],
       },
-      terminal: { shell: this.settings.terminal.shell },
+      terminal: {
+        shell: this.settings.terminal.shell,
+        args: this.settings.terminal.args,
+      },
       lsp: {
         enabled: this.settings.lsp.enabled,
         servers: JSON.parse(JSON.stringify(this.settings.lsp.servers)),
@@ -461,6 +465,9 @@ export class SettingsManager {
     merged.terminal.shell = this.isValid("terminal.shell", merged.terminal.shell)
       ? merged.terminal.shell.trim()
       : fallback.terminal.shell;
+    merged.terminal.args = this.isValid("terminal.args", merged.terminal.args)
+      ? merged.terminal.args.trim()
+      : fallback.terminal.args;
     const normalizedLsp = sanitizeLspSettings(merged.lsp);
     merged.lsp = this.isValid("lsp.enabled", normalizedLsp.enabled)
       ? normalizedLsp
@@ -568,6 +575,9 @@ export class SettingsManager {
     }
     if (key === "terminal.shell") {
       return typeof value === "string" && value.length <= 512 && !value.includes("\0");
+    }
+    if (key === "terminal.args") {
+      return typeof value === "string" && value.length <= 4096 && !value.includes("\0");
     }
     if (key === "lsp.enabled") {
       return typeof value === "boolean";

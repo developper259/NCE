@@ -1164,11 +1164,30 @@ export class TerminalPanel {
 
   getXtermTheme() {
     const style = getComputedStyle(document.documentElement);
+    const read = (name, fallback) =>
+      style.getPropertyValue(name).trim() || fallback;
     return {
-      background: style.getPropertyValue("--terminal-surface").trim(),
-      foreground: style.getPropertyValue("--text-primary").trim(),
-      cursor: style.getPropertyValue("--text-primary").trim(),
-      selectionBackground: style.getPropertyValue("--selection-bg").trim(),
+      background: read("--terminal-surface", "#1e1e1e"),
+      foreground: read("--text-primary", "#d0d0d0"),
+      cursor: read("--text-primary", "#d0d0d0"),
+      cursorAccent: read("--terminal-surface", "#1e1e1e"),
+      selectionBackground: read("--selection-bg", "rgba(255, 255, 255, 0.1)"),
+      black: read("--terminal-ansi-black", "#000000"),
+      red: read("--terminal-ansi-red", "#cd3131"),
+      green: read("--terminal-ansi-green", "#0dbc79"),
+      yellow: read("--terminal-ansi-yellow", "#e5e510"),
+      blue: read("--terminal-ansi-blue", "#2472c8"),
+      magenta: read("--terminal-ansi-magenta", "#bc3fbc"),
+      cyan: read("--terminal-ansi-cyan", "#11a8cd"),
+      white: read("--terminal-ansi-white", "#e5e5e5"),
+      brightBlack: read("--terminal-ansi-bright-black", "#666666"),
+      brightRed: read("--terminal-ansi-bright-red", "#f14c4c"),
+      brightGreen: read("--terminal-ansi-bright-green", "#23d18b"),
+      brightYellow: read("--terminal-ansi-bright-yellow", "#f5f543"),
+      brightBlue: read("--terminal-ansi-bright-blue", "#3b8eea"),
+      brightMagenta: read("--terminal-ansi-bright-magenta", "#d670d6"),
+      brightCyan: read("--terminal-ansi-bright-cyan", "#29b8db"),
+      brightWhite: read("--terminal-ansi-bright-white", "#ffffff"),
     };
   }
 

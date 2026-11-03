@@ -221,6 +221,7 @@ export class Window {
     this.terminalManager = new TerminalManager({
       getWorkspacePath: () => this.watcher?.getWatchedPath() || null,
       getShellSetting: () => this.app.settings.get("terminal.shell"),
+      getShellArgsSetting: () => this.app.settings.get("terminal.args"),
       ipc: this.ipc,
     });
     const terminalOwner = this.window.webContents;

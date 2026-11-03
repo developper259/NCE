@@ -88,6 +88,14 @@ const SETTINGS_UI = Object.freeze([
     keywords: ["shell", "terminal", "powershell", "zsh", "bash", "cmd"],
     control: "text",
   },
+  {
+    key: "terminal.args",
+    category: "Terminal",
+    label: "Shell Arguments",
+    description: "Arguments passed to the shell for new terminal sessions. Quote values that contain spaces. PowerShell prompt colors are neutralized automatically unless you supply -Command or -File.",
+    keywords: ["args", "arguments", "shell", "terminal", "powershell", "cmd", "flags"],
+    control: "text",
+  },
 ]);
 
 const SETTINGS_CATEGORY_META = Object.freeze({
@@ -1039,6 +1047,12 @@ class SettingsView {
       input.autocomplete = "off";
       input.spellcheck = false;
     }
+    if (setting.key === "terminal.args") {
+      input.placeholder = "-NoLogo -NoExit";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.classList.add("setting-input-wide");
+    }
     input.addEventListener("change", async () => {
       const previous = String(SETTINGS_GET(setting.key) || "");
       const value = input.value.trim();
@@ -1292,8 +1306,9 @@ class SettingsView {
   }
 
   sync(key) {
-    if (key === "terminal.shell") {
-      const input = this.host?.querySelector("#setting-terminal-shell");
+    if (key === "terminal.shell" || key === "terminal.args") {
+      const id = `setting-${key.replace(/\./g, "-")}`;
+      const input = this.host?.querySelector(`#${id}`);
       if (input && document.activeElement !== input)
         input.value = String(SETTINGS_GET(key) || "");
       return;

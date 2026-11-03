@@ -30,6 +30,8 @@ export const terminalLimits = Object.freeze({
   maxSessions: 8,
   maxDimension: 1000,
   maxWriteBytes: 64 * 1024,
+  maxShellArgs: 128,
+  maxShellArgsBytes: 16 * 1024,
   outputChunkBytes: 32 * 1024,
   outputPauseBytes: 1024 * 1024,
   outputResumeBytes: 512 * 1024,

@@ -41,18 +41,31 @@ test("terminal shell preference and Terminal category validate and persist", asy
     const manager = new SettingsManager(root);
     await manager.initialize();
     assert.equal(manager.get("terminal.shell"), "");
+    assert.equal(manager.get("terminal.args"), "");
     assert.equal(manager.get("keybindings.toggle_terminal"), "Mod+J");
     assert.equal(await manager.set("terminal.shell", "/path with spaces/zsh"), true);
+    assert.equal(await manager.set("terminal.args", "-NoLogo -NoExit -Command \"echo ready\""), true);
     assert.equal(await manager.set("ui.settingsCategory", "Terminal"), true);
     assert.equal(await manager.set("terminal.shell", "bad\0shell"), false);
     assert.equal(await manager.set("terminal.shell", "x".repeat(513)), false);
     assert.equal(await manager.set("terminal.shell", null), false);
+    assert.equal(await manager.set("terminal.args", "bad\0args"), false);
+    assert.equal(await manager.set("terminal.args", "x".repeat(4097)), false);
+    assert.equal(await manager.set("terminal.args", null), false);
 
     const restarted = new SettingsManager(root);
     await restarted.initialize();
     assert.equal(restarted.get("terminal.shell"), "/path with spaces/zsh");
+    assert.equal(
+      restarted.get("terminal.args"),
+      "-NoLogo -NoExit -Command \"echo ready\"",
+    );
     assert.equal(restarted.get("ui.settingsCategory"), "Terminal");
     assert.equal((await readSettings(root)).terminal.shell, "/path with spaces/zsh");
+    assert.equal(
+      (await readSettings(root)).terminal.args,
+      "-NoLogo -NoExit -Command \"echo ready\"",
+    );
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -92,7 +105,7 @@ test("valid settings persist across manager restarts and set writes JSON", async
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
-      terminal: { shell: "" },
+      terminal: { shell: "", args: "" },
       lsp: { enabled: true, servers: {} },
       keybindings: DEFAULT_KEYBINDINGS,
     });
@@ -243,7 +256,7 @@ test("missing known defaults are merged while unknown properties survive", async
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
-      terminal: { shell: "" },
+      terminal: { shell: "", args: "" },
       lsp: { enabled: true, servers: {} },
       keybindings: DEFAULT_KEYBINDINGS,
     });
@@ -276,7 +289,7 @@ test("queued concurrent writes leave a complete latest settings document", async
       },
       appearance: { theme: "system" },
       agent: { hiddenModels: [] },
-      terminal: { shell: "" },
+      terminal: { shell: "", args: "" },
       lsp: { enabled: true, servers: {} },
       keybindings: DEFAULT_KEYBINDINGS,
     });
@@ -505,11 +518,13 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   initialize({
     editor: { tabWidth: 5 },
     files: { autoSave: true },
+    terminal: { args: "-NoLogo -NoExit" },
     keybindings: { save: "Mod+Alt+S", quick_open: "Mod+K" },
   });
   assert.equal(get("editor.tabWidth"), 5);
   assert.equal(get("files.autoSave"), true);
   assert.equal(get("files.confirmMoveToTrash"), true);
+  assert.equal(get("terminal.args"), "-NoLogo -NoExit");
   assert.equal(get("keybindings.save"), "Mod+Alt+S");
   assert.deepEqual(
     bindings.map((binding) => binding.key),
@@ -521,6 +536,8 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   assert.equal(get("files.confirmMoveToTrash"), false);
   assert.equal(await set("files.confirmPermanentDelete", false), true);
   assert.equal(get("files.confirmPermanentDelete"), false);
+  assert.equal(await set("terminal.args", "bad\0args"), false);
+  assert.equal(await set("terminal.args", "x".repeat(4097)), false);
   assert.deepEqual(writes, [
     ["editor.tabWidth", 3],
     ["files.confirmMoveToTrash", false],
@@ -530,11 +547,12 @@ test("renderer settings validate their cache and persist through explicit IPC", 
     autoSave: "yes",
     confirmMoveToTrash: "no",
     confirmPermanentDelete: "no",
-  } });
+  }, terminal: { args: "x".repeat(4097) } });
   assert.equal(get("editor.tabWidth"), 2);
   assert.equal(get("files.autoSave"), false);
   assert.equal(get("files.confirmMoveToTrash"), true);
   assert.equal(get("files.confirmPermanentDelete"), true);
+  assert.equal(get("terminal.args"), "");
 });
 
 test("renderer keybinding validation accepts supported punctuation and F keys", async () => {

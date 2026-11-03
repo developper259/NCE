@@ -2,8 +2,11 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
   TerminalManager,
+  POWERSHELL_PROMPT_NEUTRALIZE_COMMAND,
   classifyPtySpawnFailure,
   inspectPtySpawnHelper,
+  neutralizePowerShellPromptArgs,
+  parseTerminalShellArgs,
   resolveTerminalShell,
 } = require("../dist/ts/terminal/TerminalManager.js");
 const { normalizeTerminalLink, terminalLimits } = require("../dist/ts/terminal/TerminalTypes.js");
@@ -53,7 +56,7 @@ class FakePty {
   }
 }
 
-function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn, logger = { error() {} }, platform = "linux", shell = "/configured shell/Terminal" } = {}) {
+function fixture({ workspace = "/workspace with accents/é", access = async () => {}, spawn, logger = { error() {} }, platform = "linux", shell = "/configured shell/Terminal", args = "" } = {}) {
   let activeWorkspace = workspace;
   const owner = new FakeWebContents();
   const attacker = new FakeWebContents();
@@ -70,6 +73,7 @@ function fixture({ workspace = "/workspace with accents/é", access = async () =
     homeDir: "/home/test",
     getWorkspacePath: () => activeWorkspace,
     getShellSetting: () => shell,
+    getShellArgsSetting: () => args,
     fs: fakeFs,
     logger,
     spawn: spawn || ((shellPath, args, options) => {
@@ -118,6 +122,84 @@ test("TerminalManager validates creation and starts a real PTY in the verified w
   assert.equal((await f.manager.create({ sender: f.attacker }, { cols: 100, rows: 32 })).error.code, "UNAUTHORIZED");
   assert.equal((await f.manager.create({ sender: f.owner }, { cols: 1, rows: 32 })).error.code, "INVALID_SIZE");
   assert.equal(f.ptys.length, 1);
+});
+
+test("Terminal shell arguments parse quotes and escapes without invoking a shell", () => {
+  assert.deepEqual(parseTerminalShellArgs(undefined), []);
+  assert.deepEqual(parseTerminalShellArgs(null), []);
+  assert.deepEqual(parseTerminalShellArgs(""), []);
+  assert.deepEqual(parseTerminalShellArgs("   "), []);
+  assert.deepEqual(parseTerminalShellArgs("-NoLogo -NoExit"), ["-NoLogo", "-NoExit"]);
+  assert.deepEqual(
+    parseTerminalShellArgs('-Command "echo hello world"'),
+    ["-Command", "echo hello world"],
+  );
+  assert.deepEqual(parseTerminalShellArgs("'one two' three"), ["one two", "three"]);
+  assert.deepEqual(parseTerminalShellArgs("one\\ two"), ["one two"]);
+  assert.deepEqual(parseTerminalShellArgs('"say \\"hi\\""'), ['say "hi"']);
+  assert.deepEqual(parseTerminalShellArgs("'a\\b'"), ["a\\b"]);
+  assert.deepEqual(parseTerminalShellArgs('""'), [""]);
+  assert.deepEqual(parseTerminalShellArgs("a\\\\b"), ["a\\b"]);
+  assert.equal(parseTerminalShellArgs("bad\0args"), null);
+  assert.equal(parseTerminalShellArgs("x".repeat(terminalLimits.maxShellArgsBytes + 1)), null);
+  assert.equal(
+    parseTerminalShellArgs(Array.from({ length: terminalLimits.maxShellArgs + 1 }, () => "x").join(" ")),
+    null,
+  );
+});
+
+test("TerminalManager appends the configured shell arguments to any shell", async () => {
+  const f = fixture({ args: '-NoLogo -NoExit -Command "echo ready"' });
+  const result = await create(f);
+  assert.equal(result.success, true);
+  assert.equal(f.ptys.length, 1);
+  assert.equal(f.ptys[0].shell, "/configured shell/Terminal");
+  assert.deepEqual(f.ptys[0].args, ["-NoLogo", "-NoExit", "-Command", "echo ready"]);
+});
+
+test("TerminalManager rejects invalid shell arguments before spawning", async () => {
+  const f = fixture({ args: "bad\0args" });
+  const result = await create(f);
+  assert.equal(result.success, false);
+  assert.equal(result.error.code, "INVALID_SHELL_ARGS");
+  assert.equal(f.ptys.length, 0);
+  assert.equal(f.manager.sessions.size, 0);
+  assert.equal(f.manager.pendingCreates.size, 0);
+});
+
+test("PowerShell terminals automatically neutralize PSReadLine colors", async () => {
+  const f = fixture({ platform: "linux", shell: "/usr/bin/pwsh", args: "-NoLogo" });
+  const result = await create(f);
+  assert.equal(result.success, true);
+  assert.deepEqual(f.ptys[0].args, [
+    "-NoLogo",
+    "-NoExit",
+    "-Command",
+    POWERSHELL_PROMPT_NEUTRALIZE_COMMAND,
+  ]);
+
+  assert.deepEqual(neutralizePowerShellPromptArgs("powershell.exe", []), [
+    "-NoExit",
+    "-Command",
+    POWERSHELL_PROMPT_NEUTRALIZE_COMMAND,
+  ]);
+  assert.deepEqual(
+    neutralizePowerShellPromptArgs("PowerShell.EXE", ["-NoExit", "-NoLogo"]),
+    ["-NoExit", "-NoLogo", "-Command", POWERSHELL_PROMPT_NEUTRALIZE_COMMAND],
+  );
+  assert.deepEqual(neutralizePowerShellPromptArgs("bash", []), []);
+  assert.deepEqual(neutralizePowerShellPromptArgs("cmd.exe", []), []);
+});
+
+test("a user-provided PowerShell startup command disables automatic neutralization", async () => {
+  const f = fixture({ platform: "linux", shell: "/usr/bin/pwsh", args: '-NoExit -Command "Write-Host custom"' });
+  const result = await create(f);
+  assert.equal(result.success, true);
+  assert.deepEqual(f.ptys[0].args, ["-NoExit", "-Command", "Write-Host custom"]);
+
+  for (const args of [["-c", "Write-Host custom"], ["-EncodedCommand", "AAAA"], ["-File", "init.ps1"]]) {
+    assert.deepEqual(neutralizePowerShellPromptArgs("pwsh", args), args);
+  }
 });
 
 test("TerminalManager supports repeated create, kill, and create without stale sessions", async () => {

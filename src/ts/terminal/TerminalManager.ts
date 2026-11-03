@@ -25,6 +25,7 @@ type TerminalSpawn = typeof import("node-pty").spawn;
 type TerminalManagerOptions = {
   getWorkspacePath: () => string | null | undefined;
   getShellSetting: () => unknown;
+  getShellArgsSetting?: () => unknown;
   owner?: WebContents | null;
   ipc?: IpcHandlerRegistrar;
   spawn?: TerminalSpawn;
@@ -187,6 +188,127 @@ async function executablePath(
   return null;
 }
 
+/**
+ * Parses the shell argument setting without invoking a shell. Spaces separate
+ * arguments; single or double quotes group them, and backslash escapes the
+ * next quote, backslash or whitespace character.
+ */
+export function parseTerminalShellArgs(value: unknown): string[] | null {
+  if (value === undefined || value === null || value === "") return [];
+  if (typeof value !== "string" || value.includes("\0") ||
+      Buffer.byteLength(value, "utf8") > terminalLimits.maxShellArgsBytes) {
+    return null;
+  }
+
+  const args: string[] = [];
+  let current = "";
+  let quote: "'" | '"' | null = null;
+  let hasToken = false;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (quote) {
+      if (character === quote) {
+        quote = null;
+        continue;
+      }
+      if (quote === '"' && character === "\\" && index + 1 < value.length) {
+        const next = value[index + 1];
+        if (next === '"' || next === "\\") {
+          current += next;
+          index += 1;
+          continue;
+        }
+      }
+      current += character;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      hasToken = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (hasToken) {
+        args.push(current);
+        current = "";
+        hasToken = false;
+      }
+      continue;
+    }
+    if (character === "\\" && index + 1 < value.length) {
+      const next = value[index + 1];
+      if (/\s/.test(next) || next === '"' || next === "'" || next === "\\") {
+        current += next;
+        hasToken = true;
+        index += 1;
+        continue;
+      }
+    }
+    current += character;
+    hasToken = true;
+  }
+
+  if (hasToken) args.push(current);
+  return args.length > terminalLimits.maxShellArgs ? null : args;
+}
+
+/**
+ * Keeps PowerShell's PSReadLine syntax highlighting from overriding the NCE
+ * terminal palette. `[39m` restores the theme's default foreground color.
+ * The command is failure-tolerant so a missing or unsupported PSReadLine
+ * installation still leaves an interactive shell.
+ */
+export const POWERSHELL_PROMPT_NEUTRALIZE_COMMAND =
+  "try { Set-PSReadLineOption -Colors @{ Command = ([char]27 + '[39m'); Default = ([char]27 + '[39m') } } catch {}";
+
+const POWERSHELL_SHELL_NAMES = new Set(["powershell", "pwsh"]);
+
+export function isPowerShellShell(name: unknown): boolean {
+  if (typeof name !== "string") return false;
+  return POWERSHELL_SHELL_NAMES.has(
+    name.trim().toLowerCase().replace(/\.exe$/, ""),
+  );
+}
+
+function powerShellOptionName(arg: string): string {
+  return /^[-/]/.test(arg) ? arg.replace(/^[-/]+/, "").toLowerCase() : "";
+}
+
+function requestsPowerShellScript(args: readonly string[]): boolean {
+  return args.some((arg) => {
+    const option = powerShellOptionName(arg);
+    if (!option) return false;
+    return ["c", "command", "e", "ec", "encodedcommand", "f", "file"].some(
+      (flag) => option === flag || (option.length >= 2 && flag.startsWith(option)),
+    );
+  });
+}
+
+function hasPowerShellNoExit(args: readonly string[]): boolean {
+  return args.some((arg) => {
+    const option = powerShellOptionName(arg);
+    return option.length >= 3 && "noexit".startsWith(option);
+  });
+}
+
+/**
+ * Adds an interactive, palette-neutralizing command to PowerShell launches.
+ * A user-provided `-Command`, `-EncodedCommand` or `-File` argument is left
+ * untouched because it already owns the shell's startup command.
+ */
+export function neutralizePowerShellPromptArgs(
+  shellName: string,
+  args: readonly string[],
+): string[] {
+  const next = [...args];
+  if (!isPowerShellShell(shellName) || requestsPowerShellScript(next))
+    return next;
+  if (!hasPowerShellNoExit(next)) next.push("-NoExit");
+  next.push("-Command", POWERSHELL_PROMPT_NEUTRALIZE_COMMAND);
+  return next;
+}
+
 export async function resolveTerminalShell(
   configured: unknown,
   options: {
@@ -234,6 +356,7 @@ export class TerminalManager {
   private readonly logger: Pick<Console, "error">;
   private readonly getWorkspacePath: TerminalManagerOptions["getWorkspacePath"];
   private readonly getShellSetting: TerminalManagerOptions["getShellSetting"];
+  private readonly getShellArgsSetting?: TerminalManagerOptions["getShellArgsSetting"];
   private ipcRegistered = false;
   private ownerGeneration = 0;
 
@@ -248,6 +371,7 @@ export class TerminalManager {
     this.logger = options.logger || console;
     this.getWorkspacePath = options.getWorkspacePath;
     this.getShellSetting = options.getShellSetting;
+    this.getShellArgsSetting = options.getShellArgsSetting;
   }
 
   attachOwner(owner: WebContents): void {
@@ -325,6 +449,13 @@ export class TerminalManager {
         fs: this.fsApi,
       });
       shellPath = shell.path;
+      const shellArgs = parseTerminalShellArgs(this.getShellArgsSetting?.());
+      if (!shellArgs)
+        return this.failure("INVALID_SHELL_ARGS", "Invalid terminal shell arguments.");
+      const spawnArgs = neutralizePowerShellPromptArgs(shell.name, [
+        ...shell.args,
+        ...shellArgs,
+      ]);
       if (workspacePath) {
         try {
           const [realShell, realWorkspace] = await Promise.all([
@@ -375,7 +506,7 @@ export class TerminalManager {
         }
         return this.failure(code, spawnFailureMessage(code));
       }
-      const child = spawnPty(shell.path, shell.args, {
+      const child = spawnPty(shell.path, spawnArgs, {
         name: "xterm-256color",
         cols,
         rows,

@@ -168,13 +168,13 @@ test("restored panel state is validated and does not restore a PTY session", () 
   assert.equal(manager.panels.get("terminal").view, null);
 });
 
-test("Bottom Panel UI keeps its title static and only exposes multi-view navigation", () => {
+test("Bottom Panel removes the redundant title and only exposes multi-view navigation", () => {
   const html = read("src/html/index.html");
   assert.match(html, /class="bottom-panel-views" role="tablist"/);
   const header = html.match(/<header class="bottom-panel-header">([\s\S]*?)<\/header>/)?.[1] || "";
-  const title = header.match(/<h2 class="bottom-panel-title" id="bottom-panel-title">Terminal<\/h2>/)?.[0];
-  assert.ok(title, "Terminal is rendered as a semantic heading");
-  assert.doesNotMatch(title, /<button|role=|tabindex=|aria-selected=/i);
+  assert.doesNotMatch(header, /bottom-panel-title|<h2/i);
+  assert.equal(header.replace(/<[^>]*>/g, "").trim(), "", "the header has no static label");
+  assert.doesNotMatch(read("src/css/bottomPanel.css"), /bottom-panel-title/);
   assert.match(html, /class="bottom-panel-views" role="tablist"[^>]*hidden><\/nav>/);
   assert.match(read("src/js/manager/BottomPanelManager.js"), /panels\.length > 1/);
   assert.match(html, /class="[^"]*bottom-panel-kill[^"]*"[^>]*aria-label="Kill Active Terminal"/);
@@ -184,7 +184,11 @@ test("Bottom Panel UI keeps its title static and only exposes multi-view navigat
   assert.match(sessionStrip, /background:\s*var\(--terminal-surface\)/);
   assert.doesNotMatch(sessionStrip, /border-bottom/);
   assert.match(terminalCss, /\.terminal-tab:hover\s*\{[^}]*background:\s*var\(--bg-hover\)/s);
-  assert.match(read("src/js/terminal/TerminalPanel.js"), /getPropertyValue\("--terminal-surface"\)/);
+  assert.match(read("src/js/terminal/TerminalPanel.js"), /read\("--terminal-surface"/);
+  assert.match(read("src/js/terminal/TerminalPanel.js"), /read\("--terminal-ansi-bright-white"/);
+  const terminalCssVars = read("src/css/var.css");
+  assert.match(terminalCssVars, /--terminal-ansi-red:/);
+  assert.match(terminalCssVars, /:root\[data-theme="light"\][\s\S]*--terminal-ansi-bright-red:/);
   assert.doesNotMatch(html, /bottom-panel-maximize|Maximize Bottom Panel|Restore Bottom Panel/);
   assert.match(read("src/css/bottomPanel.css"), /prefers-reduced-motion:\s*reduce/);
   assert.match(html, /class="nce-panel-resizer bottom-panel-resize-handle"/);
@@ -194,6 +198,32 @@ test("Bottom Panel UI keeps its title static and only exposes multi-view navigat
   assert.match(sharedResizerCss, /\.nce-panel-resizer:hover\s*\{[^}]*background-color:\s*var\(--border-accent\)/s);
   assert.match(sharedResizerCss, /\.sidebar-resizer\s*\{[^}]*width:\s*4px/s);
   assert.match(read("src/css/bottomPanel.css"), /\.bottom-panel-resize-handle\s*\{[^}]*height:\s*4px/s);
+});
+
+test("Terminal clips its layers and hides the native scrollbar without hiding xterm's overlay scroller", () => {
+  const css = read("src/css/bottomPanel.css");
+  const viewport = css.match(/\.terminal-instance \.xterm \.xterm-viewport\s*\{([^}]+)\}/)?.[1] || "";
+  assert.match(viewport, /overflow:\s*hidden/);
+  assert.match(viewport, /scrollbar-width:\s*none/);
+  assert.match(viewport, /-ms-overflow-style:\s*none/);
+  assert.match(
+    css,
+    /\.terminal-instance \.xterm \.xterm-viewport::-webkit-scrollbar\s*\{[^}]*display:\s*none/s,
+  );
+  assert.match(css, /\.terminal-panel\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.terminal-view\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.terminal-instance\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.terminal-instance \.xterm\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(css, /\.terminal-panel \*\s*\{[^}]*scrollbar-width:\s*none/s);
+  assert.match(
+    css,
+    /\.terminal-panel \*::-webkit-scrollbar\s*\{[^}]*display:\s*none/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /\.xterm-scrollable-element[^{]*\.scrollbar[^{]*\{[^}]*display:\s*none/s,
+    "xterm's overlay scroller must stay visible",
+  );
 });
 
 test("Bottom Panel resizer keeps pointer capture through drag and releases it on completion", () => {

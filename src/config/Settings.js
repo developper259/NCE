@@ -76,7 +76,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   }),
   appearance: Object.freeze({ theme: "system" }),
   agent: Object.freeze({ hiddenModels: [] }),
-  terminal: Object.freeze({ shell: "" }),
+  terminal: Object.freeze({ shell: "", args: "" }),
   lsp: Object.freeze({ enabled: true, servers: Object.freeze({}) }),
   keybindings: DEFAULT_KEYBINDINGS,
 });
@@ -228,6 +228,11 @@ function SETTINGS_INITIALIZE(settings) {
         !settings.terminal.shell.includes("\0")
         ? settings.terminal.shell
         : DEFAULT_RENDERER_SETTINGS.terminal.shell,
+      args: typeof settings?.terminal?.args === "string" &&
+        settings.terminal.args.length <= 4096 &&
+        !settings.terminal.args.includes("\0")
+        ? settings.terminal.args
+        : DEFAULT_RENDERER_SETTINGS.terminal.args,
     },
     lsp: {
       enabled: typeof settings?.lsp?.enabled === "boolean"
@@ -333,6 +338,17 @@ async function SETTINGS_SET(key, value) {
 
   if (section === "appearance" && property === "theme") {
     if (value !== "system" && value !== "dark" && value !== "light") {
+      return false;
+    }
+  }
+
+  if (section === "terminal") {
+    if (property === "shell" &&
+        (typeof value !== "string" || value.length > 512 || value.includes("\0"))) {
+      return false;
+    }
+    if (property === "args" &&
+        (typeof value !== "string" || value.length > 4096 || value.includes("\0"))) {
       return false;
     }
   }

@@ -489,10 +489,16 @@ class BottomPanelManager {
       this.terminalActionsSlot.hidden = active?.id !== "terminal";
     if (this.contentElement && active) {
       const panels = [...this.panels.values()];
-      const labelId = panels.length > 1
-        ? `bottom-panel-view-${active.id}`
-        : "bottom-panel-title";
-      this.contentElement.setAttribute("aria-labelledby", labelId);
+      if (panels.length > 1) {
+        this.contentElement.removeAttribute("aria-label");
+        this.contentElement.setAttribute(
+          "aria-labelledby",
+          `bottom-panel-view-${active.id}`,
+        );
+      } else {
+        this.contentElement.removeAttribute("aria-labelledby");
+        this.contentElement.setAttribute("aria-label", active.title);
+      }
     }
     if (this.toggleButton) {
       this.toggleButton.hidden = false;
