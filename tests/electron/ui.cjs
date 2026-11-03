@@ -222,6 +222,25 @@ module.exports = async function exerciseUI() {
   check(!completionWidget.isVisible, 'Quick panel takes over completion keys');
   check(panel.session?.selectedIndex === 1, 'Quick panel still handles arrow navigation');
   panel.close();
+  completionWidget.show({
+    items: [],
+    prefix: '',
+    session: { file: editor.tabManager.activeFile },
+    anchorRect: null,
+  });
+  check(
+    completionWidget.element.querySelector('.lsp-completion-empty')?.textContent === 'No suggestions',
+    'Empty completion menu shows No suggestions',
+  );
+  check(
+    completionWidget.handleKeyDown({ key: 'Enter', preventDefault() {}, stopPropagation() {} }) === false,
+    'Empty completion leaves Enter to the editor',
+  );
+  check(
+    completionWidget.handleKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {} }) === true,
+    'Empty completion Escape closes the list',
+  );
+  check(!completionWidget.isVisible, 'Empty completion list is closed after Escape');
   for (const id of ['file-explorer', 'search', 'agent']) {
     const menu = editor.sidebarManager.menus.get(id);
     check(Boolean(menu), `Sidebar registration: ${id}`);

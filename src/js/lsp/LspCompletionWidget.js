@@ -128,6 +128,13 @@ class LspCompletionWidget {
 
   handleKeyDown(event) {
     if (!this.isVisible) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.hide();
+      return true;
+    }
+    if (!this.visibleItems.length) return false;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       event.stopPropagation();
@@ -150,12 +157,6 @@ class LspCompletionWidget {
       event.preventDefault();
       event.stopPropagation();
       this.acceptSelected();
-      return true;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      event.stopPropagation();
-      this.hide();
       return true;
     }
     return false;

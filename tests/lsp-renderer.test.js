@@ -369,3 +369,48 @@ test("quick panel ownership pauses completion key handling", () => {
   controller.handleKeyDown({ key: "ArrowDown", preventDefault() {}, stopPropagation() {} });
   assert.equal(handled, 1);
 });
+
+test("empty completion opens the suggestion menu without notifying", async () => {
+  const LspPositions = loadGlobal("src/js/lsp/LspPositions.js", "LspPositions");
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", { LspPositions });
+  const file = {
+    id: 8,
+    path: "/ws/main.ts",
+    row: 1,
+    column: 0,
+    editVersion: 0,
+    lines: makeFile("").lines,
+  };
+  let shown = null;
+  const notifications = [];
+  const controller = Object.create(LspController.prototype);
+  controller.editor = { tabManager: { activeFile: file }, cD: null };
+  controller.api = { completion: async () => ({ success: true, items: [] }) };
+  controller.documents = new Map([[file.id, { path: file.path }]]);
+  controller.requestToken = 0;
+  controller.completionWidget = { show: (options) => { shown = options; }, isVisible: true };
+  controller.notify = (message, level) => notifications.push([level, message]);
+
+  const result = await controller.requestCompletion(1);
+
+  assert.equal(result.success, true);
+  assert.equal(shown.items.length, 0);
+  assert.equal(shown.session.record.path, file.path);
+  assert.deepEqual(notifications, []);
+});
+
+test("empty completion leaves editor keys untouched", () => {
+  const LspCompletionWidget = loadGlobal("src/js/lsp/LspCompletionWidget.js", "LspCompletionWidget");
+  const widget = Object.create(LspCompletionWidget.prototype);
+  widget.element = { hidden: false };
+  widget.visibleItems = [];
+  let hidden = 0;
+  widget.hide = () => { hidden += 1; };
+  const event = () => ({ preventDefault() {}, stopPropagation() {} });
+
+  for (const key of ["ArrowDown", "ArrowUp", "Enter", "Tab"]) {
+    assert.equal(widget.handleKeyDown({ key, ...event() }), false, `${key} falls through`);
+  }
+  assert.equal(widget.handleKeyDown({ key: "Escape", ...event() }), true);
+  assert.equal(hidden, 1);
+});

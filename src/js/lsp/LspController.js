@@ -573,10 +573,7 @@ class LspController {
       if (result?.code !== "LSP_NO_PROVIDER") this.notify(result?.error || "Completion failed.", "error");
       return null;
     }
-    if (!Array.isArray(result.items) || !result.items.length) {
-      this.notify("No suggestions.", "info");
-      return null;
-    }
+    const items = Array.isArray(result.items) ? result.items : [];
     const anchor = this.editor.cD?.getBoundingClientRect?.();
     this.completionSession = {
       token,
@@ -585,11 +582,11 @@ class LspController {
       row: file.row,
       column: file.column,
       editVersion: file.editVersion,
-      items: result.items,
+      items,
       triggerColumn: file.column,
     };
     this.completionWidget.show({
-      items: result.items,
+      items,
       prefix: "",
       session: this.completionSession,
       anchorRect: anchor,
