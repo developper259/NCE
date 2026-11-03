@@ -484,3 +484,13 @@ test("completion details resolve only for supporting servers", async () => {
   assert.deepEqual(resolved, []);
   assert.equal(renders, 1);
 });
+
+test("hover is requested on demand only", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src/js/lsp/LspController.js"),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /addEventListener\("pointermove"/);
+  assert.doesNotMatch(source, /requestHoverAt|handlePointerMove/);
+  assert.match(source, /async hover\(\)/);
+});

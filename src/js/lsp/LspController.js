@@ -14,9 +14,7 @@ class LspController {
     this.completionWidget = new LspCompletionWidget(editor);
     this.hoverPopover = new LspPopover(editor, "lsp-popover lsp-hover");
     this.signaturePopover = new LspPopover(editor, "lsp-popover lsp-signature");
-    this.hoverTimer = null;
     this.hoverToken = 0;
-    this.lastHoverKey = "";
     this.requestToken = 0;
     this.completionSession = null;
     this.autoCompletionTimer = null;
@@ -28,7 +26,6 @@ class LspController {
     this.markdownLoadPromise = null;
     this.disposed = false;
     this.unsubscribe = [];
-    this.pointerMoveHandler = (event) => this.handlePointerMove(event);
     this.pointerLeaveHandler = () => this.hideHover();
     this.pointerDownHandler = (event) => {
       if (this.completionWidget.isVisible &&
@@ -66,7 +63,6 @@ class LspController {
       });
       if (typeof unsubscribe === "function") this.unsubscribe.push(unsubscribe);
     }
-    editor.editorOBJ?.addEventListener("pointermove", this.pointerMoveHandler);
     editor.editorOBJ?.addEventListener("pointerleave", this.pointerLeaveHandler);
     editor.editorOBJ?.addEventListener("wheel", this.wheelHandler, { passive: true });
     document.addEventListener("pointerdown", this.pointerDownHandler, true);
@@ -111,15 +107,12 @@ class LspController {
     for (const unsubscribe of this.unsubscribe.splice(0)) {
       try { unsubscribe(); } catch {}
     }
-    if (this.hoverTimer) clearTimeout(this.hoverTimer);
-    this.hoverTimer = null;
     if (this.signatureTimer) clearTimeout(this.signatureTimer);
     this.signatureTimer = null;
     if (this.overlayFrame !== null && typeof cancelAnimationFrame === "function") {
       cancelAnimationFrame(this.overlayFrame);
       this.overlayFrame = null;
     }
-    this.editor.editorOBJ?.removeEventListener("pointermove", this.pointerMoveHandler);
     this.editor.editorOBJ?.removeEventListener("pointerleave", this.pointerLeaveHandler);
     this.editor.editorOBJ?.removeEventListener("wheel", this.wheelHandler);
     document.removeEventListener("pointerdown", this.pointerDownHandler, true);
@@ -782,57 +775,6 @@ class LspController {
       if (!this.markdownRenderer) this.markdownRenderer = new MarkdownRenderer();
       this.markdownRenderer.render(String(markdown || ""), container, { mode: "strict" });
     } catch {}
-  }
-
-  handlePointerMove(event) {
-    if (!this.api || this.completionWidget.isVisible) return;
-    if (event.target?.closest?.(".sidebar-left, .sidebar-right, .bottom-panel")) {
-      this.hideHover();
-      return;
-    }
-    const position = this.editor.cursorController.positionFromClientCoordinates(
-      event.clientX,
-      event.clientY,
-      true,
-    );
-    if (!position) {
-      this.hideHover();
-      return;
-    }
-    const file = this.editor.tabManager?.activeFile;
-    const key = file ? `${file.id}:${position.row}:${position.column}:${file.editVersion}` : "";
-    if (key === this.lastHoverKey) return;
-    this.lastHoverKey = key;
-    if (this.hoverTimer) clearTimeout(this.hoverTimer);
-    this.hoverTimer = setTimeout(() => {
-      this.hoverTimer = null;
-      const context = this.getActiveContext();
-      if (!context) return;
-      const targetPosition = LspPositions.position(position.row, position.column);
-      void this.requestHoverAt(context, targetPosition, event.clientX, event.clientY);
-    }, 350);
-  }
-
-  async requestHoverAt(context, position, clientX, clientY) {
-    const { file, record } = context;
-    const token = ++this.hoverToken;
-    let result = null;
-    try {
-      result = await this.api.hover({ path: record.path, position });
-    } catch {
-      return;
-    }
-    if (token !== this.hoverToken || this.editor.tabManager?.activeFile !== file) return;
-    if (!result?.success || !result.hover?.contents) {
-      this.hideHover();
-      return;
-    }
-    const content = document.createElement("div");
-    content.className = "lsp-hover-content";
-    content.textContent = String(result.hover.contents || "");
-    this.hoverPopover.setContent(content);
-    this.hoverPopover.showAt(clientX, clientY, { width: 460, align: "left" });
-    void this.upgradeHoverMarkdown(content, result.hover.contents, token);
   }
 
   hideHover() {
