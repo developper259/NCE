@@ -88,11 +88,12 @@
 .sidebar-tab-icon.active::before {
   content: "";
   position: absolute;
-  left: 0;
+  /* Overlap the selector's 1px left border so the bar touches the outer edge. */
+  left: -1px;
   top: 0;
   bottom: 0;
   width: 2px;
-  background-color: var(--border-active);
+  background-color: var(--accent-fill);
 }
 
 .sidebar-left,

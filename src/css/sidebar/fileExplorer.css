@@ -397,6 +397,20 @@
   background-color: var(--accent-fill-active);
 }
 
+/* A large accent fill reads darker than the thin selector bar, so shift the
+   button one step lighter in light mode to match its perceived color. */
+:root[data-theme="light"] .open-folder-btn {
+  background-color: #66b0ff;
+}
+
+:root[data-theme="light"] .open-folder-btn:hover {
+  background-color: #5aa9ff;
+}
+
+:root[data-theme="light"] .open-folder-btn:active {
+  background-color: #4da3ff;
+}
+
 .file-item.editing {
   padding-left: calc(var(--depth) * 14px + 4px);
 }
