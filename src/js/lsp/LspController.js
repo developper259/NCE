@@ -382,17 +382,6 @@ class LspController {
   updateProblemsStatus() {
     if (!this.problemsPanel) return;
     const parts = [];
-    if (this.status) {
-      const enabled = this.status.enabled !== false;
-      const servers = this.status.servers || [];
-      const ready = (this.status.sessions || []).filter((session) => session.state === "ready").length;
-      const unavailable = servers.filter((server) => server.enabled && !server.available).length;
-      if (!enabled) parts.push("Language servers disabled");
-      else {
-        parts.push(`${ready} server${ready === 1 ? "" : "s"} ready`);
-        if (unavailable) parts.push(`${unavailable} unavailable`);
-      }
-    }
     for (const progress of this.progressByServer.values()) {
       const label = progress.message || progress.title;
       if (!label) continue;

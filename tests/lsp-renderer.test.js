@@ -494,3 +494,23 @@ test("hover is requested on demand only", () => {
   assert.doesNotMatch(source, /requestHoverAt|handlePointerMove/);
   assert.match(source, /async hover\(\)/);
 });
+
+test("Problems status shows progress without server readiness", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  const statuses = [];
+  controller.problemsPanel = { setServerStatus: (text) => statuses.push(text) };
+  controller.status = {
+    enabled: true,
+    servers: [{ enabled: true, available: false }, { enabled: true, available: true }],
+    sessions: [{ state: "ready" }],
+  };
+  controller.progressByServer = new Map([
+    ["typescript-language-server::/ws", { title: "", message: "analysis", percentage: 50 }],
+  ]);
+  controller.updateProblemsStatus();
+  assert.deepEqual(statuses, ["analysis (50%)"]);
+  controller.progressByServer.clear();
+  controller.updateProblemsStatus();
+  assert.deepEqual(statuses, ["analysis (50%)", ""]);
+});

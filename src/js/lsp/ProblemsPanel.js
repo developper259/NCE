@@ -94,8 +94,7 @@ class ProblemsPanel {
       const relative = root && entry.path.startsWith(root)
         ? entry.path.slice(root.length).replace(/^[\\/]/, "")
         : entry.path;
-      const source = diagnostic.serverName || diagnostic.source || "LSP";
-      meta.textContent = `${relative}:${start.line + 1}:${start.character + 1} · ${source}`;
+      meta.textContent = `${relative}:${start.line + 1}:${start.character + 1}`;
       row.append(icon, message, meta);
       this.list.appendChild(row);
     }

@@ -253,6 +253,25 @@ module.exports = async function exerciseUI() {
     'Empty completion Escape closes the list',
   );
   check(!completionWidget.isVisible, 'Empty completion list is closed after Escape');
+  const problemsPanel = new ProblemsPanel(editor, editor.lspController);
+  problemsPanel.render([{
+    path: `${editor.fileExplorer.rootPath}/main.ts`,
+    uri: 'file:///main.ts',
+    diagnostics: [{
+      severity: 1,
+      message: 'Type error',
+      source: 'typescript',
+      serverName: 'typescript-language-server',
+      range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
+    }],
+  }]);
+  const problemMeta = problemsPanel.list.querySelector('.problem-meta')?.textContent || '';
+  check(
+    problemMeta.endsWith(':1:1') && !problemMeta.includes('typescript'),
+    'Problems hide the language server name',
+  );
+  check(problemsPanel.summary.textContent.startsWith('1 error'), 'Problems summary counts errors');
+  problemsPanel.destroy();
   for (const id of ['file-explorer', 'search', 'agent']) {
     const menu = editor.sidebarManager.menus.get(id);
     check(Boolean(menu), `Sidebar registration: ${id}`);
