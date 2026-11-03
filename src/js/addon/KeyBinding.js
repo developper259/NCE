@@ -462,6 +462,7 @@ class KeyBinding {
       (item) =>
         item.action !== "open_command" &&
         item.action !== "escape" &&
+        item.palette !== false &&
         item.in_editor === false &&
         this.isActionEnabled(item.action),
     ).map((item) => ({

@@ -415,9 +415,9 @@ test("tab and titlebar propagate the active file context to both menus", () => {
   );
 });
 
-test("the command palette exposes and dispatches language server actions", () => {
+test("the command palette exposes only the useful language server actions", () => {
   const bindings = applicationBindings();
-  const expected = [
+  const registered = [
     ["lsp_completion", "Language Server: Trigger Completion"],
     ["lsp_signature_help", "Language Server: Signature Help"],
     ["lsp_hover", "Language Server: Show Hover"],
@@ -437,11 +437,15 @@ test("the command palette exposes and dispatches language server actions", () =>
     bindings
       .filter((binding) => binding.action.startsWith("lsp_"))
       .map((binding) => [binding.action, binding.label]),
-    expected,
+    registered,
   );
-  for (const [action] of expected) {
+  const excluded = ["lsp_completion", "lsp_signature_help", "lsp_hover"];
+  const expected = registered.filter(([action]) => !excluded.includes(action));
+  for (const [action] of registered) {
     const binding = bindings.find((item) => item.action === action);
     assert.equal(binding.in_editor, false, `${action} is palette-dispatchable`);
+    if (excluded.includes(action)) assert.equal(binding.palette, false);
+    else assert.notEqual(binding.palette, false);
   }
 
   let panelOptions;
@@ -475,6 +479,9 @@ test("the command palette exposes and dispatches language server actions", () =>
     Array.from(items, (item) => item.id),
     expected.map(([action]) => action),
   );
+  for (const action of excluded) {
+    assert.equal(items.some((item) => item.id === action), false, `${action} stays out of the palette`);
+  }
   assert.equal(
     items.find((item) => item.id === "lsp_format_document").shortcut,
     "Alt+Shift+F",
@@ -491,4 +498,10 @@ test("the command palette exposes and dispatches language server actions", () =>
     items.find((item) => item.id === "lsp_show_problems"),
   );
   assert.deepEqual(calls, ["formatDocument", "showProblems"]);
+
+  const keybindingSource = fs.readFileSync(
+    path.join(__dirname, "..", "src/js/addon/KeyBinding.js"),
+    "utf8",
+  );
+  assert.match(keybindingSource, /item\.palette !== false/);
 });

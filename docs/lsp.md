@@ -84,7 +84,7 @@ Nothing is installed or downloaded. The document still opens and edits normally.
 ## Feature policies
 
 - **Completion**: merged across capable servers, de-duplicated by label/kind/detail; the selected item is resolved before insertion. Items can provide `textEdit`, `insertText` and additional edits. Server-advertised trigger characters (static or dynamically registered) drive automatic requests. Resolvable items show the containing class for methods or the value type for variables on the right.
-- **Hover / signature help**: first provider by configured priority, cancellation on cursor/document changes. Hover is shown on demand through the command palette or its shortcut, never automatically when the pointer rests on a word. Markdown hover content is rendered through the existing strict Markdown renderer.
+- **Hover / signature help**: first provider by configured priority, cancellation on cursor/document changes. Both are shown on demand through their shortcuts, never automatically when the pointer rests on a word. Markdown hover content is rendered through the existing strict Markdown renderer.
 - **Definition, declaration, implementation, type definition, references**: merged and de-duplicated across servers; multiple results open a picker; targets outside authorized files are rejected.
 - **Rename and formatting**: a single deterministic provider (highest priority). Workspace edits are version-checked and confined to authorized paths. Text edits, creates, renames and deletes from a workspace edit are applied through the editor and file-management APIs; `.nce` state is always rejected.
 - **Code actions**: aggregated with their source; resolved and executed through opaque main-process tokens so the renderer cannot inject arbitrary server commands.
@@ -109,7 +109,7 @@ Nothing is installed or downloaded. The document still opens and edits normally.
 | Workspace symbols | `Mod+T` |
 | Show Problems | `Mod+Shift+M` |
 
-All fourteen language-server commands are also available from the Command Palette (`Mod+Shift+P`). Their shortcuts, including the commands without a default (hover, signature help, declaration, implementation, type definition), can be rebound in Settings → Shortcuts.
+Navigation, rename, code action, formatting, symbol and Problems commands are available from the Command Palette (`Mod+Shift+P`); completion, hover and signature help stay out of it because they are inline popups. Every language-server shortcut, including the commands without a default (hover, signature help, declaration, implementation, type definition), can be rebound in Settings → Shortcuts.
 
 ## Security
 

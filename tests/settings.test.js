@@ -445,6 +445,10 @@ test("every configurable renderer shortcut has a persisted default", async () =>
     assert.ok(binding, `${action} must be registered for shortcut dispatch`);
     assert.equal(binding.in_editor, false, `${action} must be available outside the editor`);
   }
+  for (const action of ["lsp_completion", "lsp_hover", "lsp_signature_help"]) {
+    const binding = context.bindings.find((item) => item.action === action);
+    assert.equal(binding.palette, false, `${action} must stay out of the command palette`);
+  }
 });
 
 test("settings remain IPC-scoped and session state contains no preferences", async () => {

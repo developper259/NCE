@@ -172,16 +172,19 @@ const USERCONFIG_KEYBINDING = [
   },
   {
     action: "lsp_completion",
+    palette: false,
     label: "Language Server: Trigger Completion",
     in_editor: false,
   },
   {
     action: "lsp_signature_help",
+    palette: false,
     label: "Language Server: Signature Help",
     in_editor: false,
   },
   {
     action: "lsp_hover",
+    palette: false,
     label: "Language Server: Show Hover",
     in_editor: false,
   },

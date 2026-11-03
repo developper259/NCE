@@ -180,7 +180,10 @@ module.exports = async function exerciseUI() {
   editor.keyBinding.control_open_command();
   const paletteItems = Array.from(panel.session.options.items || []);
   const lspPaletteItems = paletteItems.filter((item) => String(item.id).startsWith('lsp_'));
-  check(lspPaletteItems.length === 14, 'Command palette exposes 14 language server actions');
+  check(lspPaletteItems.length === 11, 'Command palette exposes 11 language server actions');
+  for (const action of ['lsp_completion', 'lsp_hover', 'lsp_signature_help']) {
+    check(!lspPaletteItems.some((item) => item.id === action), `${action} stays out of the palette`);
+  }
   check(
     lspPaletteItems.some((item) => item.id === 'lsp_format_document' && item.label === 'Language Server: Format Document'),
     'Format Document palette command',
