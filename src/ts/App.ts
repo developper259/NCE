@@ -4,6 +4,7 @@ import path from "node:path";
 import { URL, fileURLToPath } from "node:url";
 import { Window } from "./Window";
 import { NSHServer } from "nsh/server";
+import { createNSHServerOptions } from "./nsh/NSHServerOptions";
 import { SettingsManager } from "./manager/SettingsManager";
 import { RecentFoldersManager } from "./manager/RecentFoldersManager";
 import { AgentConversationStore } from "./manager/AgentConversationStore";
@@ -133,13 +134,13 @@ export class App {
     const gotTheLock = app.requestSingleInstanceLock();
     if (!gotTheLock) {
       this.ipcRouter = new IpcRouter();
-      this.nsh = new NSHServer({ host: "127.0.0.1", port: 0 });
+      this.nsh = new NSHServer(createNSHServerOptions());
       app.quit();
       return;
     }
 
     this.ipcRouter = new IpcRouter();
-    this.nsh = new NSHServer({ host: "127.0.0.1", port: 0 });
+    this.nsh = new NSHServer(createNSHServerOptions());
     const userData = app.getPath("userData");
     this.settings = new SettingsManager(userData);
     this.recentFolders = new RecentFoldersManager(userData);
