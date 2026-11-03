@@ -528,25 +528,31 @@ app.whenReady().then(() => {
           `window.api.openDroppedFiles(${JSON.stringify([emptyDropWorkspaceInput])})`,
         );
         assert.equal(emptyDropResult.success, true);
-        assert.equal(emptyDropResult.openedFolders, 1);
+        assert.equal(emptyDropResult.openedFolders, 0,
+          "no extra window is requested for a folder dropped into an empty window");
+        assert.deepEqual(emptyDropResult.openInTargetFolders, [emptyDropWorkspace],
+          "the drop result targets the existing empty window");
         assert.equal(emptyWindow.workspacePath, null,
-          "the receiving empty window does not adopt the dropped folder");
+          "the main process leaves workspace switching to the renderer");
+        const windowCountBeforeSwitch = nce.windowManager.getAllWindows().length;
         assert.equal(
-          await emptyWindow.window.webContents.executeJavaScript("editor.fileExplorer.rootPath"),
-          "",
-          "a folder dropped into an empty window never replaces that window workspace",
+          await emptyWindow.window.webContents.executeJavaScript(
+            `editor.fileExplorer.requestWorkspaceSwitch(${JSON.stringify(emptyDropWorkspace)})`,
+          ),
+          true,
+          "the empty window opens the dropped folder through its explorer",
         );
-        let emptyDropWindow = null;
         await waitForCondition(async () => {
-          emptyDropWindow = nce.windowManager.findWindowByWorkspace(emptyDropWorkspace);
-          if (!emptyDropWindow?.window || !emptyDropWindow.rendererReady) return false;
-          return emptyDropWindow.window.webContents.executeJavaScript(
+          if (!emptyWindow.window || !emptyWindow.rendererReady) return false;
+          return emptyWindow.window.webContents.executeJavaScript(
             `editor.isOnInit === false && editor.fileExplorer.rootPath === ${JSON.stringify(emptyDropWorkspace)}`,
           );
-        }, { timeout: 15000, description: "dropped folder to open in a new window when the target has no workspace" });
-        assert.notEqual(emptyDropWindow.id, emptyWindow.id);
-        await emptyDropWindow.requestQuit();
-        await emptyDropWindow.waitForDisposal();
+        }, { timeout: 15000, description: "dropped folder to open in the existing empty window" });
+        assert.equal(nce.windowManager.getAllWindows().length, windowCountBeforeSwitch,
+          "the existing window is reused instead of creating another workspace window");
+        assert.equal(nce.windowManager.findWindowByWorkspace(emptyDropWorkspace)?.id, emptyWindow.id,
+          "the dropped folder belongs to the existing empty window");
+        assert.equal(emptyWindow.workspacePath, emptyDropWorkspace);
         await emptyWindow.requestQuit();
         await emptyWindow.waitForDisposal();
 

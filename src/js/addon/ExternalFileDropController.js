@@ -1,10 +1,18 @@
 function describeOpenedItems(result) {
   const files = Number(result?.openedFiles) || 0;
   const folders = Number(result?.openedFolders) || 0;
+  const inTargetFolders = Array.isArray(result?.openInTargetFolders)
+    ? result.openInTargetFolders.length
+    : 0;
   const focusedFolders = Number(result?.focusedFolders) || 0;
   const parts = [];
   if (files > 0) {
     parts.push(`${files} file${files === 1 ? "" : "s"} opened in this window`);
+  }
+  if (inTargetFolders > 0) {
+    parts.push(
+      `${inTargetFolders} folder${inTargetFolders === 1 ? "" : "s"} opened in this window`,
+    );
   }
   if (folders > 0) {
     parts.push(
@@ -106,7 +114,10 @@ class ExternalFileDropController {
     const title = this.overlay?.querySelector(".nce-external-drop-title");
     const details = this.overlay?.querySelector(".nce-external-drop-details");
     const copy = this.overlayKind === "directory"
-      ? { title: "Drop folders to open", details: "Folders open in a new window." }
+      ? {
+          title: "Drop folders to open",
+          details: "Folders open here when this window is empty, otherwise in a new window.",
+        }
       : this.overlayKind === "file"
         ? { title: "Drop files to open", details: "Files open in this window." }
         : { title: "Drop item to open", details: "" };
@@ -211,9 +222,7 @@ class ExternalFileDropController {
     this.dragDepth = 0;
     this.hideOverlay();
     Promise.resolve(this.api.openDroppedFiles?.(paths)).then(
-      (result) => {
-        if (operationId === this.dragOperationId) this.showDropResult(result);
-      },
+      (result) => this.applyDropResult(result, operationId),
       (error) => {
         console.error("[External Open] Drop request failed", error);
         if (operationId === this.dragOperationId) {
@@ -221,6 +230,34 @@ class ExternalFileDropController {
         }
       },
     );
+  }
+
+  async applyDropResult(result, operationId) {
+    if (operationId !== this.dragOperationId) return;
+    const inTargetFolders = Array.isArray(result?.openInTargetFolders)
+      ? result.openInTargetFolders
+      : [];
+    if (inTargetFolders.length) {
+      try {
+        const opened = await this.editor.fileExplorer?.requestWorkspaceSwitch?.(
+          inTargetFolders[0],
+        );
+        if (!opened) {
+          if (operationId === this.dragOperationId) {
+            this.showStatus("NCE could not open the dropped folder.");
+          }
+          return;
+        }
+      } catch (error) {
+        console.error("[External Open] Could not open the dropped folder", error);
+        if (operationId === this.dragOperationId) {
+          this.showStatus("NCE could not open the dropped folder.");
+        }
+        return;
+      }
+      if (operationId !== this.dragOperationId) return;
+    }
+    this.showDropResult(result);
   }
 
   async openExternalFiles(request) {

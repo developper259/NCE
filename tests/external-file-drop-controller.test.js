@@ -93,6 +93,7 @@ function createControllerHarness() {
   const openedDrops = [];
   const acknowledgements = [];
   const progressReports = [];
+  const workspaceSwitches = [];
   const mainSection = createLayoutElement("main-section", {
     left: 0, top: 0, right: 1200, bottom: 800, width: 1200, height: 800,
   });
@@ -123,6 +124,12 @@ function createControllerHarness() {
       reportExternalOpenProgress: async (...args) => progressReports.push(args),
     },
     tabManager: { openFileWithPath: async () => ({}) },
+    fileExplorer: {
+      requestWorkspaceSwitch: async (folderPath) => {
+        workspaceSwitches.push(folderPath);
+        return true;
+      },
+    },
   };
   return {
     controller: new Controller(editor),
@@ -131,6 +138,7 @@ function createControllerHarness() {
     openedDrops,
     acknowledgements,
     progressReports,
+    workspaceSwitches,
     listeners,
     timers,
     clearedTimers,
@@ -281,12 +289,13 @@ test("drop status reports mixed targets and distinguishes new windows from reuse
   controller.showDropResult({
     openedFiles: 2,
     openedFolders: 1,
+    openInTargetFolders: ["/tmp/empty-window-folder"],
     focusedFolders: 1,
     failures: [],
   });
   assert.equal(
     title.textContent,
-    "2 files opened in this window. 1 folder opened in new window. 1 folder focused in an existing window.",
+    "2 files opened in this window. 1 folder opened in this window. 1 folder opened in new window. 1 folder focused in an existing window.",
   );
 
   controller.showDropResult({
@@ -296,6 +305,33 @@ test("drop status reports mixed targets and distinguishes new windows from reuse
     failures: [],
   });
   assert.equal(title.textContent, "1 folder focused in an existing window.");
+  controller.destroy();
+});
+
+test("a folder routed to the empty receiving window opens through the explorer", async () => {
+  const harness = createControllerHarness();
+  const { controller, editor, workspaceSwitches } = harness;
+  const title = controller.overlay.querySelector(".nce-external-drop-title");
+  editor.api.openDroppedFiles = async () => ({
+    success: true,
+    openedFiles: 0,
+    openedFolders: 0,
+    focusedFolders: 0,
+    openInTargetFolders: ["/tmp/empty-window-folder"],
+    failures: [],
+  });
+  const event = {
+    dataTransfer: makeFileTransfer([{ path: "/tmp/empty-window-folder" }]),
+    preventDefault() { this.prevented = true; },
+    stopPropagation() { this.stopped = true; },
+  };
+
+  controller.handleDrop(event);
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(workspaceSwitches, ["/tmp/empty-window-folder"]);
+  assert.equal(title.textContent, "1 folder opened in this window.");
   controller.destroy();
 });
 

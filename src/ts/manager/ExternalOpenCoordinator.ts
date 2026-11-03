@@ -22,6 +22,12 @@ export interface ExternalOpenResult {
   openedFiles: number;
   openedFolders: number;
   focusedFolders: number;
+  /**
+   * Folders the renderer should open in the receiving window. Main selects at
+   * most one folder for an empty drop target; the renderer owns workspace
+   * switching and state persistence.
+   */
+  openInTargetFolders?: string[];
   failures: ExternalOpenFailure[];
 }
 
@@ -41,6 +47,7 @@ interface QueuedRequest {
   target: Window | null;
   targetCaptured: boolean;
   requireAbsolute: boolean;
+  openInTargetWhenEmpty: boolean;
   resolve: (result: ExternalOpenResult) => void;
   settled: boolean;
 }
@@ -121,6 +128,7 @@ export class ExternalOpenCoordinator {
       target,
       targetCaptured: target !== null,
       requireAbsolute: false,
+      openInTargetWhenEmpty: false,
     });
   }
 
@@ -132,6 +140,9 @@ export class ExternalOpenCoordinator {
       target,
       targetCaptured: true,
       requireAbsolute: true,
+      // A drop into an empty window opens its folder there; a window that
+      // already owns a workspace keeps it and opens the folder elsewhere.
+      openInTargetWhenEmpty: true,
     });
   }
 
@@ -213,6 +224,13 @@ export class ExternalOpenCoordinator {
     let openedFiles = 0;
     let openedFolders = 0;
     let focusedFolders = 0;
+    const openInTargetFolders: string[] = [];
+    let canOpenFolderInTarget = Boolean(
+      request.openInTargetWhenEmpty &&
+      files.length === 0 &&
+      this.isLiveWindow(request.target) &&
+      !request.target.workspacePath,
+    );
 
     if (files.length) {
       let target = request.target;
@@ -246,6 +264,17 @@ export class ExternalOpenCoordinator {
     // duplicate-workspace and eight-window limit checks remain authoritative.
     for (const entry of folders) {
       try {
+        if (canOpenFolderInTarget) {
+          const existing = this.windowManager.findWindowByWorkspace(entry.path);
+          if (existing) {
+            this.windowManager.focusWindow(existing.id);
+            focusedFolders += 1;
+          } else {
+            openInTargetFolders.push(entry.path);
+            canOpenFolderInTarget = false;
+          }
+          continue;
+        }
         const outcome = await this.windowManager.openWorkspaceInNewWindowWithOutcome(entry.path);
         if (!outcome.opened) {
           failures.push(failed(entry.path, "FOLDER_OPEN_FAILED", "The folder could not be opened in a new NCE window."));
@@ -259,7 +288,13 @@ export class ExternalOpenCoordinator {
       }
     }
 
-    const result = this.result(failures, openedFiles, openedFolders, focusedFolders);
+    const result = this.result(
+      failures,
+      openedFiles,
+      openedFolders,
+      focusedFolders,
+      openInTargetFolders,
+    );
     const notificationTarget = this.isLiveWindow(request.target)
       ? request.target
       : this.isLiveWindow(this.startupTarget)
@@ -422,12 +457,14 @@ export class ExternalOpenCoordinator {
     openedFiles = 0,
     openedFolders = 0,
     focusedFolders = 0,
+    openInTargetFolders: string[] = [],
   ): ExternalOpenResult {
     return {
       success: failures.length === 0,
       openedFiles,
       openedFolders,
       focusedFolders,
+      ...(openInTargetFolders.length ? { openInTargetFolders } : {}),
       failures,
     };
   }

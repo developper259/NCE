@@ -45,6 +45,9 @@ function makeWindowManager(windows = [], { limit = 8 } = {}) {
     focusedIds,
     getFocusedWindow: () => byId.get(activeId) || null,
     getAllWindows: () => [...byId.values()],
+    findWindowByWorkspace(folderPath) {
+      return [...byId.values()].find((window) => window.workspacePath === folderPath) || null;
+    },
     focusWindow(id) {
       if (!byId.has(id)) return false;
       activeId = id;
@@ -150,7 +153,7 @@ test("native drop routes files to its captured WebContents window and folders th
   coordinator.dispose();
 });
 
-test("a folder dropped into a window with no workspace opens in a new window", async (t) => {
+test("a folder dropped into a window with no workspace opens in that window", async (t) => {
   const { folder } = await makeFixture(t);
   const target = makeWindow("empty-drop-target");
   const manager = makeWindowManager([target]);
@@ -160,15 +163,34 @@ test("a folder dropped into a window with no workspace opens in a new window", a
   const result = await coordinator.enqueueDrop([folder], target);
   const canonicalFolder = await fs.realpath(folder);
   assert.equal(result.success, true);
-  assert.equal(result.openedFolders, 1);
+  assert.equal(result.openedFolders, 0, "no extra workspace window is created");
   assert.equal(result.focusedFolders, 0);
+  assert.deepEqual(result.openInTargetFolders, [canonicalFolder],
+    "the renderer is asked to open the folder in the receiving window");
   assert.equal(target.workspacePath ?? null, null,
-    "the receiving window does not adopt the dropped folder");
+    "main leaves workspace switching to the renderer");
   assert.deepEqual(target.state.deliveries, []);
-  const windows = manager.getAllWindows();
-  assert.equal(windows.length, 2, "the folder gets its own window next to the empty one");
-  assert.notEqual(windows[1].id, target.id);
-  assert.equal(windows[1].workspacePath, canonicalFolder);
+  assert.deepEqual(manager.getAllWindows().map((window) => window.id), [target.id]);
+  coordinator.dispose();
+});
+
+test("a folder dropped into a window with a workspace still opens in a new window", async (t) => {
+  const { folder, root } = await makeFixture(t);
+  const target = makeWindow("occupied-drop-target");
+  target.workspacePath = await fs.realpath(root);
+  const manager = makeWindowManager([target]);
+  const coordinator = new ExternalOpenCoordinator(manager);
+  coordinator.start();
+
+  const result = await coordinator.enqueueDrop([folder], target);
+  const canonicalFolder = await fs.realpath(folder);
+  assert.equal(result.success, true);
+  assert.equal(result.openedFolders, 1);
+  assert.equal(result.openInTargetFolders, undefined);
+  assert.deepEqual(manager.openedFolders, [canonicalFolder]);
+  assert.equal(target.workspacePath, await fs.realpath(root),
+    "the receiving window keeps its workspace");
+  assert.equal(manager.getAllWindows().length, 2);
   coordinator.dispose();
 });
 
