@@ -167,7 +167,7 @@ function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
     ui: {
       settingsCategory:
-        ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Servers"]
+        ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Manager"]
           .includes(settings?.ui?.settingsCategory)
           ? settings.ui.settingsCategory
           : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,

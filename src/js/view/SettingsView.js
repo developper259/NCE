@@ -74,7 +74,7 @@ const SETTINGS_UI = Object.freeze([
   },
   {
     key: "lsp.enabled",
-    category: "Language Servers",
+    category: "Language Manager",
     label: "Enable Language Servers",
     description: "Run installed language servers for diagnostics and language features.",
     keywords: ["lsp", "language", "server", "diagnostics", "completion", "intellisense"],
@@ -107,10 +107,6 @@ const SETTINGS_CATEGORY_META = Object.freeze({
   },
   Agent: { description: "Configure AI models and providers." },
   Terminal: { description: "Configure the integrated system terminal." },
-  "Language Servers": {
-    description:
-      "Configure installed language servers. NCE detects executables but never installs or downloads them.",
-  },
 });
 
 class SettingsView {
@@ -349,14 +345,14 @@ class SettingsView {
       );
       if (category === "Agent") {
         section.appendChild(this.createAgentSettings());
-      } else if (category === "Language Servers") {
+      } else if (category === "Language Manager") {
         const panel = document.createElement("div");
         panel.className = "settings-panel";
         for (const setting of categorySettings) {
           panel.appendChild(this.createRow(setting));
         }
+        panel.appendChild(this.createLanguageServersSettings());
         section.appendChild(panel);
-        section.appendChild(this.createLanguageServersSettings());
       } else {
         const panel = document.createElement("div");
         panel.className = "settings-panel";
@@ -377,12 +373,14 @@ class SettingsView {
     const title = document.createElement("h1");
     title.className = "settings-page-title";
     title.textContent = category;
-    const description = document.createElement("p");
-    description.className = "settings-page-description";
-    description.textContent =
-      SETTINGS_CATEGORY_META[category]?.description ||
-      `Configure ${category.toLowerCase()} settings.`;
-    header.append(title, description);
+    const descriptionText = SETTINGS_CATEGORY_META[category]?.description;
+    header.append(title);
+    if (descriptionText) {
+      const description = document.createElement("p");
+      description.className = "settings-page-description";
+      description.textContent = descriptionText;
+      header.append(description);
+    }
     return header;
   }
 
@@ -419,117 +417,164 @@ class SettingsView {
   }
 
   createLanguageServersSettings() {
-    const container = document.createElement("div");
-    container.className = "lsp-settings-content";
-    const note = document.createElement("p");
-    note.className = "lsp-settings-note";
-    note.textContent = "Language servers are external executables that run with your user permissions. "
-      + "Configure an absolute path if a server is installed outside PATH. "
-      + "NCE does not download, install, update or remove servers.";
-    container.appendChild(note);
     const list = document.createElement("div");
     list.className = "lsp-settings-list";
     list.setAttribute("role", "list");
-    container.appendChild(list);
-    const loading = document.createElement("p");
-    loading.className = "settings-empty";
-    loading.textContent = "Detecting language servers…";
-    list.appendChild(loading);
+    const showMessage = (text) => {
+      list.replaceChildren();
+      const row = document.createElement("div");
+      row.className = "settings-panel-row";
+      const message = document.createElement("p");
+      message.className = "settings-empty";
+      message.textContent = text;
+      row.appendChild(message);
+      list.appendChild(row);
+    };
+    showMessage("Detecting language servers…");
 
     const api = window.api?.lsp;
     if (!api?.getStatus) {
-      loading.textContent = "Language servers are unavailable in this window.";
-      return container;
+      showMessage("Language servers are unavailable in this window.");
+      return list;
     }
     const render = (status) => {
-      list.replaceChildren();
       const servers = Array.isArray(status?.servers) ? status.servers : [];
       if (!servers.length) {
-        loading.textContent = "No language servers are registered.";
-        list.appendChild(loading);
+        showMessage("No language servers are registered.");
         return;
       }
+      list.replaceChildren();
       for (const server of servers) {
-        const row = document.createElement("div");
-        row.className = "lsp-settings-row";
-        row.dataset.serverId = server.id;
-        row.setAttribute("role", "listitem");
-        const main = document.createElement("div");
-        main.className = "lsp-settings-main";
-        const title = document.createElement("label");
-        title.className = "lsp-settings-title";
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = server.enabled === true;
-        checkbox.dataset.serverEnabled = server.id;
-        checkbox.addEventListener("change", () => {
-          void this.updateLspServer(server.id, { enabled: checkbox.checked });
-        });
-        const name = document.createElement("span");
-        name.textContent = server.name;
-        title.append(checkbox, name);
-        const description = document.createElement("p");
-        description.className = "lsp-settings-description";
-        description.textContent = server.description;
-        const state = document.createElement("p");
-        state.className = "lsp-settings-state";
-        const session = (status.sessions || []).find((entry) => entry.serverId === server.id);
-        if (session?.error) {
-          state.textContent = session.error;
-          state.classList.add("is-error");
-        } else if (server.available) {
-          state.textContent = `Executable: ${server.executable}`;
-          state.classList.add("is-available");
-        } else {
-          state.textContent = server.error || "Executable not found.";
-          state.classList.add("is-missing");
-        }
-        if (session?.state === "ready") {
-          state.textContent += ` · ready${session.documents ? ` · ${session.documents} document${session.documents === 1 ? "" : "s"}` : ""}`;
-        } else if (session?.state && session.state !== "stopped") {
-          state.textContent += ` · ${session.state}`;
-        }
-        main.append(title, description, state);
-        row.appendChild(main);
-
-        const actions = document.createElement("div");
-        actions.className = "lsp-settings-actions";
-        const pathInput = document.createElement("input");
-        pathInput.type = "text";
-        pathInput.className = "lsp-settings-path";
-        pathInput.placeholder = "Executable path (optional)";
-        pathInput.value = (SETTINGS_GET("lsp.servers") || {})[server.id]?.path || "";
-        pathInput.dataset.serverPath = server.id;
-        pathInput.addEventListener("change", () => {
-          void this.updateLspServer(server.id, { path: pathInput.value.trim() });
-        });
-        const restart = document.createElement("button");
-        restart.type = "button";
-        restart.className = "settings-button lsp-settings-restart";
-        restart.textContent = "Restart";
-        restart.disabled = !server.available;
-        restart.addEventListener("click", async () => {
-          restart.disabled = true;
-          await api.restartServer?.({ serverId: server.id });
-          setTimeout(() => void refresh(), 200);
-        });
-        actions.append(pathInput, restart);
-        row.appendChild(actions);
-        list.appendChild(row);
+        list.appendChild(this.createLanguageServerRow(server, status));
       }
     };
     const refresh = async () => {
       try {
         const status = await api.getStatus();
         if (status?.success) render(status);
-        else loading.textContent = "Language server status is unavailable.";
+        else showMessage("Language server status is unavailable.");
       } catch {
-        loading.textContent = "Language server status is unavailable.";
+        showMessage("Language server status is unavailable.");
       }
     };
     void refresh();
     this.refreshLanguageServerStatus = refresh;
-    return container;
+    return list;
+  }
+
+  createLanguageServerRow(server, status) {
+    const row = document.createElement("div");
+    row.className = "settings-panel-row";
+    row.dataset.serverId = server.id;
+    row.setAttribute("role", "listitem");
+
+    const main = document.createElement("div");
+    main.className = "settings-row-main";
+    const title = document.createElement("span");
+    title.className = "settings-row-label";
+    title.textContent = this.languageLabel(server);
+    const description = document.createElement("p");
+    description.className = "setting-description";
+    description.textContent = server.description;
+    const session = (status.sessions || []).find((entry) => entry.serverId === server.id);
+    const state = document.createElement("p");
+    state.className = "lsp-settings-state";
+    if (server.available) {
+      state.textContent = `Executable: ${server.executable}`;
+      state.classList.add("is-available");
+      if (session?.state === "ready") {
+        state.textContent += ` · ready${session.documents ? ` · ${session.documents} document${session.documents === 1 ? "" : "s"}` : ""}`;
+      } else if (session?.state && session.state !== "stopped") {
+        state.textContent += ` · ${session.state}`;
+      }
+    } else {
+      state.textContent = session?.error || server.error || `${server.name} not detected.`;
+      state.classList.add("is-missing");
+    }
+    main.append(title, description, state);
+
+    const actions = document.createElement("div");
+    actions.className = "settings-row-control lsp-settings-actions";
+
+    const toggle = document.createElement("label");
+    toggle.className = "setting-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = server.enabled === true;
+    input.setAttribute("aria-label", `Enable ${this.languageLabel(server)}`);
+    const track = document.createElement("span");
+    track.setAttribute("aria-hidden", "true");
+    input.addEventListener("change", () => {
+      void this.updateLspServer(server.id, { enabled: input.checked });
+    });
+    toggle.append(input, track);
+
+    const setPath = document.createElement("button");
+    setPath.type = "button";
+    setPath.className = "settings-action-button";
+    setPath.textContent = "Set path";
+    setPath.addEventListener("click", async () => {
+      const value = await this.requestLspServerPath(server);
+      if (value === null) return;
+      await this.updateLspServer(server.id, { path: value });
+    });
+
+    const restart = document.createElement("button");
+    restart.type = "button";
+    restart.className = "settings-action-button";
+    restart.textContent = "Restart";
+    restart.disabled = !server.available;
+    restart.addEventListener("click", async () => {
+      restart.disabled = true;
+      await window.api?.lsp?.restartServer?.({ serverId: server.id });
+      setTimeout(() => void this.refreshLanguageServerStatus?.(), 200);
+    });
+
+    actions.append(toggle, setPath, restart);
+    row.append(main, actions);
+    return row;
+  }
+
+  requestLspServerPath(server) {
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel) return Promise.resolve(null);
+    const current = (SETTINGS_GET("lsp.servers") || {})[server.id]?.path || "";
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      quickPanel.open({
+        id: "lsp-server-path",
+        mode: "input",
+        title: `Set ${server.name} path`,
+        placeholder: "Absolute executable path, empty for PATH detection",
+        value: current,
+        onAccept: (value) => finish(String(value ?? "").trim()),
+        onCancel: () => finish(null),
+      });
+    });
+  }
+
+  languageLabel(server) {
+    const names = {
+      javascript: "JavaScript",
+      typescript: "TypeScript",
+      python: "Python",
+      c: "C",
+      cpp: "C++",
+      html: "HTML",
+      css: "CSS",
+      json: "JSON",
+      yaml: "YAML",
+      php: "PHP",
+      java: "Java",
+      xml: "XML",
+    };
+    const labels = (server.languages || []).map((language) => names[language] || language);
+    return labels.length ? labels.join(" / ") : server.name;
   }
 
   async updateLspServer(serverId, patch) {

@@ -156,10 +156,14 @@
 .agent-provider-inline-status { margin-left: auto; }
 .agent-provider-status[data-configured="true"] { color: var(--accent-primary); }
 .agent-provider-key-actions { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.settings-action-button,
 .agent-provider-key-actions button,
 .agent-provider-remove { padding: 6px 9px; border: 1px solid var(--border-secondary); border-radius: 3px; background: var(--bg-secondary); color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer; }
+.settings-action-button:hover,
 .agent-provider-key-actions button:hover,
 .agent-provider-remove:hover { border-color: var(--accent-primary); background: var(--bg-hover-alt); }
+.settings-action-button:disabled { opacity: 0.45; cursor: default; }
+.settings-action-button:disabled:hover { border-color: var(--border-secondary); background: var(--bg-secondary); }
 .agent-provider-remove { margin: 0; color: var(--text-tertiary); }
 .agent-provider-error { grid-column: 1 / -1; margin: 6px 0 0; color: var(--error, #d66); font-size: 12px; }
 .agent-settings-security { max-width: 620px; margin: 14px 0 0; color: var(--text-tertiary); font-size: 11px; line-height: 1.5; }

@@ -260,50 +260,8 @@
   font-size: 12px;
 }
 
-.lsp-settings-content {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.lsp-settings-note {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-
 .lsp-settings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lsp-settings-row {
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 10px 12px;
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-}
-
-.lsp-settings-main {
-  min-width: 0;
-}
-
-.lsp-settings-title {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-weight: 600;
-}
-
-.lsp-settings-description {
-  margin: 4px 0 0;
-  color: var(--text-secondary);
-  font-size: 12px;
+  display: contents;
 }
 
 .lsp-settings-state {
@@ -311,10 +269,6 @@
   color: var(--text-tertiary);
   font-size: 11px;
   word-break: break-all;
-}
-
-.lsp-settings-state.is-error {
-  color: var(--state-error);
 }
 
 .lsp-settings-state.is-missing {
@@ -329,15 +283,6 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-shrink: 0;
-}
-
-.lsp-settings-path {
-  width: 260px;
-  padding: 4px 8px;
-  border: 1px solid var(--border-primary);
-  border-radius: 6px;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }

@@ -273,6 +273,50 @@ module.exports = async function exerciseUI() {
     problemMeta.endsWith(':1:1') && !problemMeta.includes('typescript'),
     'Problems hide the language server name',
   );
+  const settingsView = editor.getSettingsView();
+  check(settingsView.openCategory('Language Manager') === true, 'Language Manager settings category opens');
+  const settingsCategories = Array.from(
+    settingsView.nav.querySelectorAll('.settings-nav-item'),
+    (node) => node.textContent,
+  );
+  check(
+    settingsCategories.includes('Language Manager') && !settingsCategories.includes('Language Servers'),
+    'Language Servers category is renamed',
+  );
+  check(!settingsView.content.querySelector('.settings-page-description'), 'Language Manager has no subtitle');
+  check(!settingsView.content.querySelector('.lsp-settings-note'), 'Language Manager has no explanatory note');
+  const languageRowDeadline = Date.now() + 5000;
+  while (
+    !settingsView.content.querySelector('[data-server-id="typescript-language-server"]') &&
+    Date.now() < languageRowDeadline
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  const languageRow = settingsView.content.querySelector('[data-server-id="typescript-language-server"]');
+  check(
+    languageRow?.querySelector('.settings-row-label')?.textContent === 'JavaScript / TypeScript',
+    'Language row uses the language title',
+  );
+  check(Boolean(languageRow?.querySelector('.setting-toggle input')), 'Language row uses the standard toggle');
+  check(
+    !languageRow?.querySelector('.lsp-settings-path') &&
+      !languageRow?.querySelector('input[type="text"]'),
+    'Language row has no executable path input',
+  );
+  check(!settingsView.content.querySelector('.lsp-settings-state.is-error'), 'No red language state remains');
+  const setPathButton = Array.from(languageRow?.querySelectorAll('button') || [])
+    .find((button) => button.textContent === 'Set path');
+  check(Boolean(setPathButton), 'Language row exposes a Set path button');
+  setPathButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  check(editor.quickPanel.isOpen('lsp-server-path'), 'Set path opens the quick panel input');
+  check(
+    String(editor.quickPanel.title.textContent).includes('TypeScript Language Server'),
+    'Set path prompt names the language server',
+  );
+  editor.quickPanel.close();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  check(!editor.quickPanel.isOpen('lsp-server-path'), 'Set path prompt closes');
   check(problemsPanel.summary.textContent.startsWith('1 error'), 'Problems summary counts errors');
   problemsPanel.destroy();
   await editor.bottomPanelManager.openPanel('problems');

@@ -6,7 +6,7 @@ import { DEFAULT_LSP_SETTINGS, isValidLspServers, sanitizeLspSettings } from "..
 export interface Settings {
   ui: {
     settingsCategory:
-      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Language Servers";
+      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Language Manager";
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
@@ -536,7 +536,7 @@ export class SettingsManager {
 
   private isValid(key: string, value: unknown): boolean {
     if (key === "ui.settingsCategory") {
-      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Servers"]
+      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Manager"]
         .includes(String(value));
     }
     if (key === "ui.settingsScrollTop") {

@@ -651,3 +651,20 @@ test("default shortcuts never collide under either primary modifier", () => {
     }
   }
 });
+
+test("Language Manager settings use the shared design and a single warning color", async () => {
+  const settingsView = await fs.readFile(
+    path.join(__dirname, "../src/js/view/SettingsView.js"),
+    "utf8",
+  );
+  const lspCss = await fs.readFile(path.join(__dirname, "../src/css/lsp.css"), "utf8");
+  assert.match(settingsView, /category: "Language Manager"/);
+  assert.doesNotMatch(settingsView, /category: "Language Servers"/);
+  assert.match(settingsView, /settings-action-button/);
+  assert.match(settingsView, /requestLspServerPath/);
+  assert.match(settingsView, /languageLabel\(server\)/);
+  assert.doesNotMatch(settingsView, /lsp-settings-note/);
+  assert.doesNotMatch(settingsView, /lsp-settings-path/);
+  assert.doesNotMatch(lspCss, /lsp-settings-state\.is-error/);
+  assert.match(lspCss, /\.lsp-settings-state\.is-missing\s*\{[^}]*var\(--state-warning\)/);
+});
