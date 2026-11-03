@@ -272,6 +272,12 @@ module.exports = async function exerciseUI() {
   );
   check(problemsPanel.summary.textContent.startsWith('1 error'), 'Problems summary counts errors');
   problemsPanel.destroy();
+  await editor.bottomPanelManager.openPanel('problems');
+  check(
+    editor.bottomPanelManager.killButton.hidden === true,
+    'Problems tab hides the delete button',
+  );
+  editor.bottomPanelManager.closePanel();
   for (const id of ['file-explorer', 'search', 'agent']) {
     const menu = editor.sidebarManager.menus.get(id);
     check(Boolean(menu), `Sidebar registration: ${id}`);

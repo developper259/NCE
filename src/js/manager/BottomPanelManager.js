@@ -483,8 +483,11 @@ class BottomPanelManager {
       }
     }
     if (this.newButton) this.newButton.hidden = typeof active?.onNew !== "function";
-    if (this.killButton) this.killButton.disabled =
-      typeof active?.onKill !== "function" || active.canKill?.() === false;
+    if (this.killButton) {
+      const killable = typeof active?.onKill === "function" && active.canKill?.() !== false;
+      this.killButton.hidden = !killable;
+      this.killButton.disabled = !killable;
+    }
     if (this.terminalActionsSlot)
       this.terminalActionsSlot.hidden = active?.id !== "terminal";
     if (this.contentElement && active) {

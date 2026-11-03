@@ -154,6 +154,10 @@
   display: none;
 }
 
+.bottom-panel-kill[hidden] {
+  display: none;
+}
+
 .bottom-panel-terminal-actions-slot[hidden] {
   display: none;
 }

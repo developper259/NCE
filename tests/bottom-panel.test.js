@@ -326,3 +326,46 @@ test("Bottom Panel reduces editor and sidebar bounds above the BottomBar", () =>
   assert.match(read("src/css/bottomPanel.css"), /bottom:\s*var\(--bottombar-height\)/);
   assert.match(read("src/css/bottomBar.css"), /z-index:\s*5/);
 });
+
+test("the kill control only appears for killable panels", () => {
+  const BottomPanelManager = loadGlobal("src/js/manager/BottomPanelManager.js", "BottomPanelManager", {
+    document: { createElement: () => ({ addEventListener() {} }) },
+    window: {},
+  });
+  const killButton = new ElementStub();
+  const manager = Object.assign(Object.create(BottomPanelManager.prototype), {
+    panels: new Map(),
+    activePanelId: "problems",
+    visible: true,
+    height: 250,
+    preferredHeight: 250,
+    viewNavigation: null,
+    newButton: null,
+    killButton,
+    terminalActionsSlot: null,
+    contentElement: null,
+    toggleButton: null,
+    resizeHandle: null,
+  });
+  manager.registerPanel({ id: "problems", title: "Problems", createView() {} });
+  manager.syncControls();
+  assert.equal(killButton.hidden, true);
+  assert.equal(killButton.disabled, true);
+
+  manager.panels.set("terminal", {
+    id: "terminal",
+    title: "Terminal",
+    createView() {},
+    onKill() {},
+    canKill: () => true,
+  });
+  manager.activePanelId = "terminal";
+  manager.syncControls();
+  assert.equal(killButton.hidden, false);
+  assert.equal(killButton.disabled, false);
+
+  manager.panels.get("terminal").canKill = () => false;
+  manager.syncControls();
+  assert.equal(killButton.hidden, true);
+  assert.equal(killButton.disabled, true);
+});
