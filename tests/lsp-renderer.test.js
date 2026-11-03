@@ -89,6 +89,180 @@ test("word ranges respect Unicode letters and punctuation", () => {
   });
 });
 
+test("renderer applies workspace resource operations through file APIs", async () => {
+  const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", { NCEPath });
+  const calls = [];
+  const controller = Object.create(LspController.prototype);
+  controller.notify = (message, level) => calls.push(["notify", level, message]);
+  controller.editor = {
+    api: {
+      async createFile(...args) { calls.push(["create", ...args]); return { success: true }; },
+      async renameEntry(...args) { calls.push(["rename", ...args]); return { success: true }; },
+      async moveToTrash(...args) { calls.push(["delete", ...args]); return { success: true }; },
+    },
+    tabManager: {
+      async updateFilePath(...args) { calls.push(["rename-tab", ...args]); },
+      markFileAsDeleted(...args) { calls.push(["delete-tab", ...args]); },
+    },
+  };
+  assert.equal(await controller.applyResourceOperations({
+    resources: [
+      { kind: "create", path: "/ws/created.ts", uri: "file:///ws/created.ts" },
+      { kind: "rename", path: "/ws/renamed.ts", uri: "file:///ws/renamed.ts", oldPath: "/ws/main.ts", oldUri: "file:///ws/main.ts" },
+      { kind: "delete", path: "/ws/old.ts", uri: "file:///ws/old.ts" },
+    ],
+  }), true);
+  assert.deepEqual(plain(calls), [
+    ["create", "/ws", "created.ts", "", false],
+    ["rename", "/ws/main.ts", "/ws/renamed.ts"],
+    ["rename-tab", "/ws/main.ts", "/ws/renamed.ts"],
+    ["delete", "/ws/old.ts"],
+    ["delete-tab", "/ws/old.ts"],
+  ]);
+  controller.editor.api.createFile = async () => ({
+    success: false,
+    code: "PERMISSION_DENIED",
+    error: "denied",
+  });
+  assert.equal(await controller.applyResourceOperations({
+    resources: [{ kind: "create", path: "/ws/blocked.ts", uri: "file:///ws/blocked.ts" }],
+  }), false);
+  assert.deepEqual(calls.at(-1), ["notify", "error", "denied"]);
+});
+
+test("renderer derives completion and signature trigger characters from session status", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  controller.status = {
+    sessions: [
+      {
+        state: "ready",
+        capabilities: {
+          completionTriggerCharacters: [".", "<"],
+          signatureHelpTriggerCharacters: ["(", ","],
+        },
+      },
+      {
+        state: "failed",
+        capabilities: {
+          completionTriggerCharacters: ["ignored"],
+          signatureHelpTriggerCharacters: ["ignored"],
+        },
+      },
+    ],
+  };
+  assert.deepEqual(plain(controller.getTriggerCharacters("completion")), [".", "<"]);
+  assert.deepEqual(plain(controller.getTriggerCharacters("signature")), ["(", ","]);
+  controller.status = { sessions: [] };
+  assert.deepEqual(plain(controller.getTriggerCharacters("completion")), ["."]);
+});
+
+test("typed trigger characters dispatch without throwing on ready sessions", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const file = { id: 1, path: "/ws/main.ts", lines: makeFile("main").lines };
+  const scheduled = [];
+  const controller = Object.create(LspController.prototype);
+  controller.status = {
+    sessions: [{
+      state: "ready",
+      capabilities: {
+        completionTriggerCharacters: ["."],
+        signatureHelpTriggerCharacters: ["("],
+      },
+    }],
+  };
+  controller.editor = { tabManager: { activeFile: file } };
+  controller.documents = new Map([[file.id, { path: file.path }]]);
+  controller.completionWidget = { isVisible: false };
+  controller.queueChange = () => {};
+  controller.scheduleAutoCompletion = (_file, character) => scheduled.push(["completion", character]);
+  controller.scheduleSignatureHelp = () => scheduled.push(["signature"]);
+  controller.hideHover = () => {};
+  controller.handleChange({ afterText: ".", beforeText: "" });
+  controller.handleChange({ afterText: "(", beforeText: "" });
+  controller.handleChange({ afterText: "x", beforeText: "" });
+  assert.deepEqual(scheduled, [["completion", "."], ["signature"]]);
+});
+
+test("workspace edits wait for file loading and skip identical text", async () => {
+  const LspPositions = loadGlobal("src/js/lsp/LspPositions.js", "LspPositions");
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", { LspPositions });
+  const events = [];
+  const file = {
+    id: 1,
+    path: "/ws/main.ts",
+    lines: ["const value = 1;", ""].map((text) => ({ getText: () => text })),
+    loadingState: { status: "loading" },
+  };
+  const editor = {
+    tabManager: {
+      activeFile: null,
+      tabs: [],
+      get files() {
+        return this.tabs;
+      },
+      async openFileWithPath() {
+        events.push("open");
+        editor.tabManager.tabs.push(file);
+        return file;
+      },
+      async setFocusTab(target) {
+        events.push("focus");
+        editor.tabManager.activeFile = target;
+      },
+    },
+    fileLoader: {
+      async waitForFileLoaded(target) {
+        events.push(["loaded", target.loadingState?.status]);
+        target.loadingState = { status: "loaded" };
+      },
+    },
+    writerController: {
+      applyRangeEdit(start, end, text, options) {
+        events.push(["edit", start.column, end.column, text, options.source]);
+        const current = file.lines[start.row - 1].getText();
+        const next = current.slice(0, start.column) + text + current.slice(end.column);
+        file.lines[start.row - 1] = { getText: () => next };
+        return { row: start.row, column: start.column + text.length };
+      },
+    },
+  };
+  const controller = Object.create(LspController.prototype);
+  controller.editor = editor;
+  controller.documents = new Map();
+  controller.editQueue = Promise.resolve(true);
+  controller.notify = (message, level) => events.push(["notify", level, message]);
+  assert.equal(await controller.applyWorkspaceEditNow({
+    files: [{
+      path: file.path,
+      edits: [{
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 16 } },
+        newText: "const value = 1;",
+      }],
+    }],
+  }), true);
+  assert.deepEqual(events, [
+    "open",
+    "focus",
+    ["loaded", "loading"],
+  ]);
+  assert.equal(await controller.applyWorkspaceEditNow({
+    files: [{
+      path: file.path,
+      edits: [{
+        range: { start: { line: 0, character: 6 }, end: { line: 0, character: 11 } },
+        newText: "answer",
+      }],
+    }],
+  }), true);
+  assert.deepEqual(events.slice(-2), [
+    ["loaded", "loaded"],
+    ["edit", 6, 11, "answer", "lsp.edit"],
+  ]);
+  assert.equal(file.lines[0].getText(), "const answer = 1;");
+});
+
 test("renderer bundles and preload expose the LSP integration", () => {
   const manifest = JSON.parse(fs.readFileSync(
     path.join(__dirname, "..", "src/js/main/renderer-scripts.json"),
@@ -116,10 +290,13 @@ test("renderer bundles and preload expose the LSP integration", () => {
     "Lsp:closeDocument", "Lsp:completion", "Lsp:hover", "Lsp:definition",
     "Lsp:references", "Lsp:rename", "Lsp:codeActions", "Lsp:format",
     "Lsp:documentSymbols", "Lsp:workspaceSymbols", "Lsp:signatureHelp",
-    "Lsp:restartServer", "Lsp:resolveCompletion",
+    "Lsp:restartServer", "Lsp:resolveCompletion", "Lsp:applyEditResult",
   ]) assert.match(preload, new RegExp(`"${channel}"`), `preload exposes ${channel}`);
   assert.match(preload, /ipcRenderer\.removeListener\("Lsp:diagnostics"/);
   assert.match(preload, /ipcRenderer\.removeListener\("Lsp:status"/);
+  assert.match(preload, /ipcRenderer\.removeListener\("Lsp:applyEditRequest"/);
+  assert.match(preload, /ipcRenderer\.removeListener\("Lsp:progress"/);
+  assert.match(preload, /ipcRenderer\.removeListener\("Lsp:message"/);
   const editor = fs.readFileSync(
     path.join(__dirname, "..", "src/js/main/Editor.js"),
     "utf8",

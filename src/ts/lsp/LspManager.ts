@@ -132,6 +132,10 @@ export class LspManager {
   private readonly resolutions = new Map<string, Promise<LspExecutableResolution>>();
   private readonly actionTokens = new Map<string, CachedAction>();
   private readonly completionTokens = new Map<string, CachedCompletion>();
+  private readonly pendingApplyEdits = new Map<string, {
+    resolve: (result: { applied: boolean; failureReason?: string }) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   private generation = 0;
   private statusSequence = 0;
   private disposed = false;
@@ -166,6 +170,7 @@ export class LspManager {
     ipc.handle("Lsp:workspaceSymbols", async (_event, payload) => this.workspaceSymbols(payload));
     ipc.handle("Lsp:signatureHelp", async (_event, payload) => this.signatureHelp(payload));
     ipc.handle("Lsp:restartServer", async (_event, payload) => this.restartServer(payload));
+    ipc.handle("Lsp:applyEditResult", async (_event, payload) => this.finishApplyEdit(payload));
   }
 
   /** Called when the workspace changes; every session belongs to one workspace. */
@@ -179,6 +184,7 @@ export class LspManager {
     this.attempts.clear();
     this.actionTokens.clear();
     this.completionTokens.clear();
+    this.rejectPendingApplyEdits("The language workspace changed.");
     this.documents.clear();
     this.diagnostics.clearAll();
     await Promise.allSettled(sessions.map((session) => session.stop()));
@@ -199,6 +205,7 @@ export class LspManager {
     this.attempts.clear();
     this.actionTokens.clear();
     this.completionTokens.clear();
+    this.rejectPendingApplyEdits("The language workspace changed.");
     this.documents.clear();
     this.diagnostics.clearAll();
     await Promise.allSettled(sessions.map((session) => session.stop()));
@@ -219,6 +226,7 @@ export class LspManager {
     this.attempts.clear();
     this.actionTokens.clear();
     this.completionTokens.clear();
+    this.rejectPendingApplyEdits("The language workspace changed.");
     this.documents.clear();
     this.diagnostics.clearAll();
     await Promise.allSettled(sessions.map((session) => session.stop()));
@@ -712,6 +720,27 @@ export class LspManager {
     }
   }
 
+  handleFileSystemEvent(event: string, filePath: string): void {
+    if (this.disposed || typeof filePath !== "string" || !path.isAbsolute(filePath)) return;
+    if (this.isNceStatePath(filePath)) return;
+    const type = event === "add" || event === "addDir" ? 1
+      : event === "change" ? 2
+        : event === "unlink" || event === "unlinkDir" || event === "root-deleted" ? 3
+          : 0;
+    if (!type) return;
+    let uri: string;
+    try {
+      uri = pathToUri(filePath);
+    } catch {
+      return;
+    }
+    for (const session of this.sessions.values()) {
+      if (session.state !== "ready") continue;
+      if (!isInside(session.root, filePath)) continue;
+      session.notifyWatchedFileChanges([{ uri, type: type as 1 | 2 | 3 }]);
+    }
+  }
+
   async getStatus(): Promise<LspResult<LspStatusSnapshot>> {
     try {
       const settings = this.settings();
@@ -751,6 +780,7 @@ export class LspManager {
             completion: false, hover: false, definition: false, references: false,
             rename: false, codeAction: false, formatting: false, rangeFormatting: false,
             documentSymbols: false, workspaceSymbols: false, signatureHelp: false,
+            completionTriggerCharacters: [], signatureHelpTriggerCharacters: [],
           },
         });
       }
@@ -789,6 +819,8 @@ export class LspManager {
         documentSymbols: capabilities.documentSymbols,
         workspaceSymbols: capabilities.workspaceSymbols,
         signatureHelp: capabilities.signatureHelp,
+        completionTriggerCharacters: [...capabilities.completionTriggerCharacters],
+        signatureHelpTriggerCharacters: [...capabilities.signatureHelpTriggerCharacters],
       },
     };
   }
@@ -897,10 +929,17 @@ export class LspManager {
         onLog: (serverKey, level, message) => {
           this.options.onLog?.(serverKey, level, message);
         },
+        onProgress: (serverKey, progress) => {
+          this.options.send?.("Lsp:progress", { serverId: serverKey, ...progress });
+        },
+        onMessage: (serverKey, type, message) => {
+          this.options.send?.("Lsp:message", { serverId: serverKey, type, message });
+        },
       },
       env: this.options.env,
       platform: this.options.platform,
       requestTimeoutMs: this.options.requestTimeoutMs,
+      applyWorkspaceEdit: (edit) => this.applyServerWorkspaceEdit(edit, definition.id),
     });
     this.sessions.set(key, session);
     this.diagnostics.setServerName(key, definition.name);
@@ -1081,6 +1120,8 @@ export class LspManager {
   ): Promise<{ path: string; workspace: string }> {
     if (typeof value !== "string" || !value.trim() || value.includes("\0") || !path.isAbsolute(value))
       throw new LspManagerError("LSP_INVALID_PATH", "A valid absolute file path is required.");
+    if (this.isNceStatePath(value))
+      throw new LspManagerError("LSP_INVALID_PATH", "NCE workspace state cannot be edited.");
     const workspace = await this.getWorkspace();
     if (!workspace)
       throw new LspManagerError("LSP_SERVER_UNAVAILABLE", "Open a workspace before using language servers.");
@@ -1126,14 +1167,72 @@ export class LspManager {
     }
   }
 
+  private isNceStatePath(value: string): boolean {
+    const portable = (this.options.platform ?? process.platform) === "win32";
+    return value.split(/[\\/]/).some((segment) =>
+      portable ? segment.toLowerCase() === ".nce" : segment === ".nce");
+  }
+
   private async sanitizeWorkspaceEdit(edit: LspWorkspaceEdit | null): Promise<LspWorkspaceEdit | null> {
-    if (!edit || !edit.files.length) return null;
-    if (edit.files.length > MAX_WORKSPACE_FILES)
+    if (!edit || (!edit.files.length && !(edit.resources || []).length)) return null;
+    const rawResources = edit.resources || [];
+    if (edit.files.length > MAX_WORKSPACE_FILES || rawResources.length > MAX_WORKSPACE_FILES)
       throw new LspManagerError("LSP_REQUEST_FAILED", "The server returned too many files to edit.");
+    const createdTargets = new Set<string>();
+    for (const resource of rawResources) {
+      if (resource.kind === "create" || resource.kind === "rename")
+        createdTargets.add(path.resolve(resource.path));
+    }
+    const resources: import("./LspTypes").LspWorkspaceResourceOperation[] = [];
+    for (const resource of rawResources) {
+      const options = resource.options
+        ? {
+            ...(resource.options.overwrite === true ? { overwrite: true } : {}),
+            ...(resource.options.ignoreIfExists === true ? { ignoreIfExists: true } : {}),
+            ...(resource.options.recursive === true ? { recursive: true } : {}),
+          }
+        : undefined;
+      if (resource.kind === "create") {
+        const target = await this.authorizeFile(resource.path, { allowMissing: true });
+        resources.push({
+          kind: "create",
+          path: target.path,
+          uri: pathToUri(target.path),
+          ...(options && Object.keys(options).length ? { options } : {}),
+        });
+        continue;
+      }
+      if (resource.kind === "rename") {
+        const previous = await this.authorizeFile(resource.oldPath, { requireFile: true });
+        const target = await this.authorizeFile(resource.path, { allowMissing: true });
+        if (previous.path === target.path)
+          throw new LspManagerError("LSP_REQUEST_FAILED", "The rename source and target are identical.");
+        resources.push({
+          kind: "rename",
+          path: target.path,
+          uri: pathToUri(target.path),
+          oldPath: previous.path,
+          oldUri: pathToUri(previous.path),
+          ...(options && Object.keys(options).length ? { options } : {}),
+        });
+        continue;
+      }
+      const target = await this.authorizeFile(resource.path, { requireFile: true });
+      resources.push({
+        kind: "delete",
+        path: target.path,
+        uri: pathToUri(target.path),
+        ...(options && Object.keys(options).length ? { options } : {}),
+      });
+    }
     const files: LspWorkspaceFileEdit[] = [];
     let editCount = 0;
     for (const file of edit.files) {
-      const target = await this.authorizeFile(file.path, { requireFile: true });
+      const created = createdTargets.has(path.resolve(file.path));
+      const target = await this.authorizeFile(file.path, {
+        allowMissing: created,
+        requireFile: !created,
+      });
       const edits = Array.isArray(file.edits) ? file.edits : [];
       for (const change of edits) {
         if (!validateRange(change.range) || typeof change.newText !== "string")
@@ -1156,7 +1255,11 @@ export class LspManager {
         edits,
       });
     }
-    return { source: edit.source, files };
+    return {
+      source: edit.source,
+      files,
+      ...(resources.length ? { resources } : {}),
+    };
   }
 
   private actionToken(id: unknown): CachedAction {
@@ -1236,6 +1339,63 @@ export class LspManager {
       }
       return { ...location, path: resolved, authorized };
     }));
+  }
+
+  private async applyServerWorkspaceEdit(
+    rawEdit: unknown,
+    serverId: string,
+  ): Promise<{ applied: boolean; failureReason?: string }> {
+    const edit = this.router.normalizeWorkspaceEdit(rawEdit, serverId);
+    if (!edit) return { applied: false, failureReason: "The server did not provide any editable change." };
+    let sanitized: LspWorkspaceEdit | null = null;
+    try {
+      sanitized = await this.sanitizeWorkspaceEdit(edit);
+    } catch (error) {
+      return {
+        applied: false,
+        failureReason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if (!sanitized || !this.options.send)
+      return { applied: false, failureReason: "No renderer is available to apply the edit." };
+    const id = randomUUID();
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingApplyEdits.delete(id);
+        resolve({ applied: false, failureReason: "The editor did not respond in time." });
+      }, 10_000);
+      this.pendingApplyEdits.set(id, { resolve, timer });
+      this.options.send?.("Lsp:applyEditRequest", { id, edit: sanitized });
+    });
+  }
+
+  private finishApplyEdit(payload: unknown): LspEmptyResult {
+    const input = asObject(payload);
+    const id = input?.id;
+    if (typeof id !== "string")
+      return failure("LSP_INVALID_ARGUMENT", "Unknown workspace edit request.");
+    const pending = this.pendingApplyEdits.get(id);
+    if (!pending) return failure("LSP_INVALID_ARGUMENT", "This workspace edit request expired.");
+    this.pendingApplyEdits.delete(id);
+    clearTimeout(pending.timer);
+    const applied = input?.applied === true;
+    pending.resolve({
+      applied,
+      ...(applied ? {} : {
+        failureReason: typeof input?.failureReason === "string"
+          ? input.failureReason.slice(0, 512)
+          : "The editor rejected the workspace edit.",
+      }),
+    });
+    return { success: true };
+  }
+
+  private rejectPendingApplyEdits(reason: string): void {
+    for (const [id, pending] of this.pendingApplyEdits) {
+      clearTimeout(pending.timer);
+      pending.resolve({ applied: false, failureReason: reason });
+      this.pendingApplyEdits.delete(id);
+    }
   }
 
   private emitDiagnostics(): void {

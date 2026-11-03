@@ -252,12 +252,14 @@ export class Window {
       this.fileManager?.clearFileCache(filePath);
     this.contextMenu = new ContextMenu(this.window, this.ipc);
     this.workspaceSearch = new WorkspaceSearch(this, this.ipc);
-    this.watcher.onWorkspaceEvent = (event, filePath, rootPath) =>
+    this.watcher.onWorkspaceEvent = (event, filePath, rootPath) => {
       this.workspaceSearch?.workspaceIndex.handleWatcherEvent(
         rootPath,
         event,
         filePath,
       );
+      this.lspManager?.handleFileSystemEvent(event, filePath);
+    };
     this.watcher.onWatcherStop = (rootPath) =>
       this.workspaceSearch?.releaseWorkspace(rootPath);
     this.workspaceSearch.workspaceIndex.onReconciled = (rootPath, changedDirectories) => {

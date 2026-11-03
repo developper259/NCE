@@ -27,7 +27,7 @@ starting → initializing → ready → stopping → stopped
                      ↘ failed (reported, no restart loop)
 ```
 
-`initialize` advertises only supported client capabilities (UTF-16 positions, incremental sync, no snippets, no server-initiated applyEdit). `shutdown` is requested with a short timeout, then `exit` is sent and the process tree is terminated. Crashes reject pending requests and clear that server's diagnostics; the other servers remain unaffected.
+`initialize` advertises only supported client capabilities (UTF-16 positions, incremental sync, no snippets, dynamic feature registrations). `shutdown` is requested with a short timeout, then `exit` is sent and the process tree is terminated. Crashes reject pending requests and clear that server's diagnostics; the other servers remain unaffected.
 
 ## Document synchronization
 
@@ -83,13 +83,17 @@ Nothing is installed or downloaded. The document still opens and edits normally.
 
 ## Feature policies
 
-- **Completion**: merged across capable servers, de-duplicated by label/kind/detail; the selected item is resolved before insertion. Items can provide `textEdit`, `insertText` and additional edits.
-- **Hover / signature help**: first provider by configured priority, cancellation on cursor/document changes.
+- **Completion**: merged across capable servers, de-duplicated by label/kind/detail; the selected item is resolved before insertion. Items can provide `textEdit`, `insertText` and additional edits. Server-advertised trigger characters (static or dynamically registered) drive automatic requests.
+- **Hover / signature help**: first provider by configured priority, cancellation on cursor/document changes. Markdown hover content is rendered through the existing strict Markdown renderer.
 - **Definition, declaration, implementation, type definition, references**: merged and de-duplicated across servers; multiple results open a picker; targets outside authorized files are rejected.
-- **Rename and formatting**: a single deterministic provider (highest priority). Workspace edits are version-checked and confined to authorized existing files; resource operations (create/rename/delete) are explicitly rejected.
+- **Rename and formatting**: a single deterministic provider (highest priority). Workspace edits are version-checked and confined to authorized paths. Text edits, creates, renames and deletes from a workspace edit are applied through the editor and file-management APIs; `.nce` state is always rejected.
 - **Code actions**: aggregated with their source; resolved and executed through opaque main-process tokens so the renderer cannot inject arbitrary server commands.
 - **Document symbols / workspace symbols**: merged across capable servers.
 - **Diagnostics**: always aggregated.
+- **Server-initiated edits**: `workspace/applyEdit` is sanitized in the main process, applied through the renderer's editor history, and acknowledged back to the server with the real outcome.
+- **Dynamic capabilities**: `client/registerCapability` and `client/unregisterCapability` update routing and completion/signature trigger characters.
+- **Progress**: work-done progress notifications are surfaced in the Problems panel server status.
+- **Watched files**: servers that dynamically register `workspace/didChangeWatchedFiles` receive the workspace watcher events.
 
 ## Keyboard shortcuts
 
@@ -118,10 +122,10 @@ Hover, signature help, declaration, implementation and type definition are avail
 ## Current limits
 
 - No Runtime Manager: no download, install, update or uninstall.
-- Server-initiated `workspace/applyEdit` requests are answered with `applied: false`; all edits are applied in the renderer through the editor history.
 - Snippet placeholders are not expanded; completion inserts plain text.
 - Semantic tokens, code lenses, inlay hints, call hierarchy, document links and workspace-symbol resolution are not surfaced in the UI.
-- Dynamic capability registrations are accepted but features are routed from the static capabilities returned by `initialize`; progress notifications are ignored.
+- Progress is displayed as status text, without a dedicated progress bar.
+- Watched-file notifications are forwarded without per-registration glob filtering; servers receive all workspace create/change/delete events.
 - Diagnostics are rendered as inline range highlights and the Problems panel, not as gutter icons.
 - Files in large-file mode are intentionally not synchronized.
 
@@ -129,6 +133,6 @@ Hover, signature help, declaration, implementation and type definition are avail
 
 - `tests/lsp-core.test.js`: framing (fragmented, grouped, UTF-8, malformed, oversized), timeouts, cancellation, server requests, UTF-16 positions, registry/root detection, settings validation, diagnostics isolation and stale versions, document store.
 - `tests/lsp-integration.test.js`: a real fake LSP server over stdio; multi-server aggregation, shared sessions, incremental sync, merged completion/hover/navigation/references, rename/formatting/code actions/symbols, version-checked edits, missing executables, crashing servers, server-initiated requests and payload validation.
-- `tests/lsp-renderer.test.js`: renderer positions/change payloads, bundle manifest and preload contract.
+- `tests/lsp-renderer.test.js`: renderer positions/change payloads, trigger characters, bundle manifest and preload contract.
 
 Run `npm test` (or the three files above) and `npm run typecheck`.

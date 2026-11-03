@@ -3,6 +3,8 @@ const mode = process.argv[3] || "normal";
 const documents = new Map();
 let lastDocumentUri = null;
 let clientResponses = {};
+let workspaceUri = null;
+let watchedEvents = [];
 let input = Buffer.alloc(0);
 
 function send(message) {
@@ -19,6 +21,11 @@ function range(line = 0, endLine = 0) {
 }
 
 function capabilities() {
+  if (mode === "dynamic") {
+    return {
+      textDocumentSync: { openClose: true, change: 2, save: { includeText: true } },
+    };
+  }
   return {
     textDocumentSync: { openClose: true, change: 2, save: { includeText: true } },
     completionProvider: { triggerCharacters: ["."], resolveProvider: true },
@@ -99,6 +106,7 @@ function handleRequest(message) {
       send({ jsonrpc: "2.0", id, error: { code: -32000, message: "initialize refused" } });
       return;
     }
+    workspaceUri = params.rootUri || null;
     send({
       jsonrpc: "2.0",
       id,
@@ -161,7 +169,7 @@ function handleRequest(message) {
       result: {
         contents: {
           kind: "markdown",
-          value: `**${serverId}** hover v${document.version} len${document.text.length} cfg=${JSON.stringify(clientResponses)}`,
+          value: `**${serverId}** hover v${document.version} len${document.text.length} watched:${watchedEvents.length} cfg=${JSON.stringify(clientResponses)}`,
         },
       },
     });
@@ -200,6 +208,30 @@ function handleRequest(message) {
     return;
   }
   if (method === "textDocument/rename") {
+    if (mode === "resource-edit" && workspaceUri) {
+      const created = `${workspaceUri}/created.ts`;
+      const renamed = `${workspaceUri}/renamed.ts`;
+      const removed = `${workspaceUri}/old.ts`;
+      send({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          documentChanges: [
+            { kind: "create", uri: created, options: { overwrite: false } },
+            { kind: "rename", oldUri: params.textDocument.uri, uri: renamed },
+            { kind: "delete", uri: removed },
+            {
+              textDocument: { uri: created, version: null },
+              edits: [{
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+                newText: "created by server\n",
+              }],
+            },
+          ],
+        },
+      });
+      return;
+    }
     send({
       jsonrpc: "2.0",
       id,
@@ -329,6 +361,30 @@ function handleNotification(message) {
     documents.set(uri, { uri, text, version });
     lastDocumentUri = uri;
     publishDiagnostics(uri, version);
+    if (mode === "apply-edit") {
+      send({
+        jsonrpc: "2.0",
+        id: "apply-server-edit",
+        method: "workspace/applyEdit",
+        params: {
+          label: `${serverId} edit`,
+          edit: {
+            changes: {
+              [uri]: [{
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
+                newText: `server-${serverId}\n`,
+              }],
+            },
+          },
+        },
+      });
+    }
+    if (mode === "progress") {
+      send({ jsonrpc: "2.0", method: "window/showMessage", params: { type: 2, message: `${serverId} message` } });
+      send({ jsonrpc: "2.0", method: "$/progress", params: { token: "token-1", value: { kind: "begin", title: `${serverId} analysis` } } });
+      send({ jsonrpc: "2.0", method: "$/progress", params: { token: "token-1", value: { kind: "report", message: "half", percentage: 50 } } });
+      send({ jsonrpc: "2.0", method: "$/progress", params: { token: "token-1", value: { kind: "end" } } });
+    }
     return;
   }
   if (method === "textDocument/didChange") {
@@ -343,6 +399,27 @@ function handleNotification(message) {
   if (method === "textDocument/didSave") {
     const document = documents.get(params.textDocument.uri);
     if (document && typeof params.text === "string") document.text = params.text;
+    return;
+  }
+  if (method === "initialized" && mode === "dynamic") {
+    send({
+      jsonrpc: "2.0",
+      id: "register-1",
+      method: "client/registerCapability",
+      params: {
+        registrations: [
+          { id: "completion", method: "textDocument/completion", registerOptions: { resolveProvider: true, triggerCharacters: ["."] } },
+          { id: "hover", method: "textDocument/hover" },
+          { id: "definition", method: "textDocument/definition" },
+          { id: "signature", method: "textDocument/signatureHelp", registerOptions: { triggerCharacters: ["("] } },
+          { id: "watched", method: "workspace/didChangeWatchedFiles", registerOptions: { watchers: [{ glob: "**/*.ts" }] } },
+        ],
+      },
+    });
+    return;
+  }
+  if (method === "workspace/didChangeWatchedFiles") {
+    watchedEvents.push(...(Array.isArray(params?.changes) ? params.changes : []));
     return;
   }
   if (method === "textDocument/didClose") {
@@ -364,6 +441,14 @@ function handleMessage(message) {
   }
   if (message.id === "server-unknown") {
     clientResponses.unknown = message.error?.code;
+    return;
+  }
+  if (message.id === "apply-server-edit") {
+    clientResponses.applyEdit = message.result || message.error;
+    return;
+  }
+  if (message.id === "register-1") {
+    clientResponses.registration = message.result || message.error;
   }
 }
 

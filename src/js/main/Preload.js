@@ -96,6 +96,7 @@ contextBridge.exposeInMainWorld("api", {
     workspaceSymbols: (payload) => ipcRenderer.invoke("Lsp:workspaceSymbols", payload),
     signatureHelp: (payload) => ipcRenderer.invoke("Lsp:signatureHelp", payload),
     restartServer: (payload) => ipcRenderer.invoke("Lsp:restartServer", payload),
+    applyEditResult: (payload) => ipcRenderer.invoke("Lsp:applyEditResult", payload),
     onDiagnostics: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on("Lsp:diagnostics", listener);
@@ -110,6 +111,21 @@ contextBridge.exposeInMainWorld("api", {
       const listener = () => callback();
       ipcRenderer.on("Lsp:reset", listener);
       return () => ipcRenderer.removeListener("Lsp:reset", listener);
+    },
+    onApplyEditRequest: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Lsp:applyEditRequest", listener);
+      return () => ipcRenderer.removeListener("Lsp:applyEditRequest", listener);
+    },
+    onProgress: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Lsp:progress", listener);
+      return () => ipcRenderer.removeListener("Lsp:progress", listener);
+    },
+    onMessage: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Lsp:message", listener);
+      return () => ipcRenderer.removeListener("Lsp:message", listener);
     },
   },
   getRecentFolders: () => ipcRenderer.invoke("RecentFolders:getAll"),

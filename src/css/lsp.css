@@ -60,6 +60,41 @@
   font-weight: 600;
 }
 
+.lsp-hover-content p,
+.lsp-hover-content ul,
+.lsp-hover-content ol {
+  margin: 0 0 6px;
+}
+
+.lsp-hover-content p:last-child,
+.lsp-hover-content ul:last-child,
+.lsp-hover-content ol:last-child {
+  margin-bottom: 0;
+}
+
+.lsp-hover-content code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--bg-primary);
+}
+
+.lsp-hover-content pre {
+  margin: 6px 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.lsp-hover-content pre code {
+  padding: 0;
+  background: transparent;
+}
+
+.lsp-hover-content a {
+  color: var(--accent-primary);
+}
+
 .lsp-signature-documentation {
   margin-top: 4px;
   color: var(--text-secondary);

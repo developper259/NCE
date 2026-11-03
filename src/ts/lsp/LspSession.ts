@@ -37,6 +37,7 @@ export interface LspSessionCapabilities {
   documentSymbols: boolean;
   workspaceSymbols: boolean;
   signatureHelp: boolean;
+  signatureHelpTriggerCharacters: string[];
 }
 
 export interface LspSessionEvents {
@@ -48,6 +49,14 @@ export interface LspSessionEvents {
     diagnostics: LspDiagnostic[],
   ) => void;
   onLog: (serverKey: string, level: "info" | "warn" | "error", message: string) => void;
+  onMessage?: (serverKey: string, type: number, message: string) => void;
+  onProgress?: (serverKey: string, progress: {
+    token: string | number;
+    kind: string;
+    title?: string;
+    message?: string;
+    percentage?: number;
+  }) => void;
 }
 
 export interface LspServerSessionLike {
@@ -88,6 +97,7 @@ const EMPTY_CAPABILITIES: LspSessionCapabilities = {
   documentSymbols: false,
   workspaceSymbols: false,
   signatureHelp: false,
+  signatureHelpTriggerCharacters: [],
 };
 
 function asObject(value: unknown): Record<string, any> | null {
@@ -109,6 +119,7 @@ function normalizeCapabilities(source: Record<string, any>): LspSessionCapabilit
   const completion = asObject(source.completionProvider);
   const rename = asObject(source.renameProvider);
   const codeAction = asObject(source.codeActionProvider);
+  const signatureHelp = asObject(source.signatureHelpProvider);
   return {
     syncKind: syncKind === 2 ? 2 : syncKind === 1 ? 1 : 0,
     saveIncludeText: Boolean(asObject(syncObject?.save)?.includeText),
@@ -133,6 +144,10 @@ function normalizeCapabilities(source: Record<string, any>): LspSessionCapabilit
     documentSymbols: supports(source.documentSymbolProvider),
     workspaceSymbols: supports(source.workspaceSymbolProvider),
     signatureHelp: supports(source.signatureHelpProvider),
+    signatureHelpTriggerCharacters: signatureHelp && Array.isArray(signatureHelp.triggerCharacters)
+      ? signatureHelp.triggerCharacters.filter((value: unknown): value is string =>
+          typeof value === "string" && value.length <= 8).slice(0, 16)
+      : [],
   };
 }
 
@@ -179,6 +194,7 @@ export interface LspSessionOptions {
   platform?: NodeJS.Platform;
   initializationOptions?: Record<string, unknown>;
   requestTimeoutMs?: number;
+  applyWorkspaceEdit?: (edit: unknown) => Promise<{ applied: boolean; failureReason?: string }>;
 }
 
 export class LspSession implements LspServerSessionLike {
@@ -198,6 +214,8 @@ export class LspSession implements LspServerSessionLike {
   private connection: JsonRpcConnection | null = null;
   private readyResolvers: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   private startupSettled = false;
+  private staticCapabilities: LspSessionCapabilities = { ...EMPTY_CAPABILITIES };
+  private readonly dynamicRegistrations = new Map<string, { method: string; options: Record<string, any> | null }>();
   private readonly logs: string[] = [];
   private stopping: Promise<void> | null = null;
   private readonly openDocuments = new Set<string>();
@@ -406,6 +424,14 @@ export class LspSession implements LspServerSessionLike {
     this.connection.notify(method, params);
   }
 
+  notifyWatchedFileChanges(changes: Array<{ uri: string; type: 1 | 2 | 3 }>): void {
+    if (!changes.length) return;
+    const registered = [...this.dynamicRegistrations.values()]
+      .some((registration) => registration.method === "workspace/didChangeWatchedFiles");
+    if (!registered) return;
+    this.notify("workspace/didChangeWatchedFiles", { changes });
+  }
+
   private async initialize(): Promise<void> {
     const workspaceUri = pathToUri(this.root);
     const result = await this.connection!.request<any>("initialize", {
@@ -417,15 +443,20 @@ export class LspSession implements LspServerSessionLike {
       capabilities: {
         workspace: {
           applyEdit: true,
-          workspaceEdit: { documentChanges: false },
+          workspaceEdit: {
+            documentChanges: true,
+            resourceOperations: ["create", "rename", "delete"],
+            failureHandling: "abort",
+          },
           workspaceFolders: true,
           configuration: true,
-          didChangeWatchedFiles: { dynamicRegistration: false },
+          didChangeWatchedFiles: { dynamicRegistration: true },
+          symbol: { dynamicRegistration: true },
         },
         textDocument: {
           synchronization: { dynamicRegistration: false, willSave: false, didSave: true },
           completion: {
-            dynamicRegistration: false,
+            dynamicRegistration: true,
             contextSupport: true,
             completionItem: {
               snippetSupport: false,
@@ -434,15 +465,15 @@ export class LspSession implements LspServerSessionLike {
               resolveSupport: { properties: ["documentation", "detail", "additionalTextEdits"] },
             },
           },
-          hover: { dynamicRegistration: false, contentFormat: ["markdown", "plaintext"] },
-          definition: { dynamicRegistration: false, linkSupport: false },
-          declaration: { dynamicRegistration: false, linkSupport: false },
-          implementation: { dynamicRegistration: false, linkSupport: false },
-          typeDefinition: { dynamicRegistration: false, linkSupport: false },
-          references: { dynamicRegistration: false },
-          rename: { dynamicRegistration: false, prepareSupport: true, honorsChangeAnnotations: false },
+          hover: { dynamicRegistration: true, contentFormat: ["markdown", "plaintext"] },
+          definition: { dynamicRegistration: true, linkSupport: false },
+          declaration: { dynamicRegistration: true, linkSupport: false },
+          implementation: { dynamicRegistration: true, linkSupport: false },
+          typeDefinition: { dynamicRegistration: true, linkSupport: false },
+          references: { dynamicRegistration: true },
+          rename: { dynamicRegistration: true, prepareSupport: true, honorsChangeAnnotations: false },
           codeAction: {
-            dynamicRegistration: false,
+            dynamicRegistration: true,
             isPreferredSupport: true,
             resolveSupport: { properties: ["edit", "command"] },
             codeActionLiteralSupport: {
@@ -454,11 +485,11 @@ export class LspSession implements LspServerSessionLike {
               },
             },
           },
-          formatting: { dynamicRegistration: false },
-          rangeFormatting: { dynamicRegistration: false },
-          documentSymbol: { dynamicRegistration: false, hierarchicalDocumentSymbolSupport: false },
+          formatting: { dynamicRegistration: true },
+          rangeFormatting: { dynamicRegistration: true },
+          documentSymbol: { dynamicRegistration: true, hierarchicalDocumentSymbolSupport: false },
           signatureHelp: {
-            dynamicRegistration: false,
+            dynamicRegistration: true,
             contextSupport: true,
             signatureInformation: {
               documentationFormat: ["markdown", "plaintext"],
@@ -482,6 +513,7 @@ export class LspSession implements LspServerSessionLike {
       throw new Error(`Unsupported position encoding: ${capabilities.positionEncoding}`);
     this.capabilitiesRaw = capabilities;
     this.capabilities = normalizeCapabilities(capabilities);
+    this.staticCapabilities = { ...this.capabilities };
     this.notify("initialized", {});
   }
 
@@ -501,27 +533,126 @@ export class LspSession implements LspServerSessionLike {
     }
     if (method === "window/showMessage") {
       const payload = asObject(params);
-      if (typeof payload?.message === "string")
-        this.log(payload?.type === 1 ? "error" : payload?.type === 2 ? "warn" : "info", payload.message);
+      if (typeof payload?.message === "string") {
+        const type = Number(payload?.type) || 3;
+        this.log(type === 1 ? "error" : type === 2 ? "warn" : "info", payload.message);
+        this.options.events.onMessage?.(this.key, type, payload.message.slice(0, 4_096));
+      }
       return;
     }
-    if (method === "$/progress" || method === "telemetry/event") return;
+    if (method === "$/progress") {
+      const payload = asObject(params);
+      const value = asObject(payload?.value);
+      const token = payload?.token;
+      if (!payload || !value || typeof value.kind !== "string" ||
+          (typeof token !== "string" && typeof token !== "number")) return;
+      this.options.events.onProgress?.(this.key, {
+        token,
+        kind: value.kind,
+        ...(typeof value.title === "string" ? { title: value.title } : {}),
+        ...(typeof value.message === "string" ? { message: value.message } : {}),
+        ...(typeof value.percentage === "number" ? { percentage: value.percentage } : {}),
+      });
+      return;
+    }
+    if (method === "telemetry/event") return;
+  }
+
+  private registerCapabilities(value: unknown): void {
+    if (!Array.isArray(value)) return;
+    for (const entry of value) {
+      const registration = asObject(entry);
+      if (!registration || typeof registration.id !== "string" ||
+          typeof registration.method !== "string") continue;
+      this.dynamicRegistrations.set(registration.id, {
+        method: registration.method,
+        options: asObject(registration.registerOptions),
+      });
+    }
+    this.applyDynamicRegistrations();
+  }
+
+  private unregisterCapabilities(value: unknown): void {
+    if (!Array.isArray(value)) return;
+    for (const entry of value) {
+      const registration = asObject(entry);
+      if (!registration || typeof registration.id !== "string") continue;
+      this.dynamicRegistrations.delete(registration.id);
+    }
+    this.applyDynamicRegistrations();
+  }
+
+  private applyDynamicRegistrations(): void {
+    const capabilities: LspSessionCapabilities = {
+      ...this.staticCapabilities,
+      signatureHelpTriggerCharacters: [...this.staticCapabilities.signatureHelpTriggerCharacters],
+    };
+    for (const registration of this.dynamicRegistrations.values()) {
+      const options = registration.options;
+      switch (registration.method) {
+        case "textDocument/completion":
+          capabilities.completion = true;
+          if (options?.resolveProvider === true) capabilities.completionResolve = true;
+          if (options && Array.isArray(options.triggerCharacters)) {
+            capabilities.completionTriggerCharacters = options.triggerCharacters
+              .filter((value: unknown): value is string =>
+                typeof value === "string" && value.length <= 8).slice(0, 16);
+          }
+          break;
+        case "textDocument/hover": capabilities.hover = true; break;
+        case "textDocument/definition": capabilities.definition = true; break;
+        case "textDocument/declaration": capabilities.declaration = true; break;
+        case "textDocument/implementation": capabilities.implementation = true; break;
+        case "textDocument/typeDefinition": capabilities.typeDefinition = true; break;
+        case "textDocument/references": capabilities.references = true; break;
+        case "textDocument/rename": capabilities.rename = true; break;
+        case "textDocument/codeAction": capabilities.codeAction = true; break;
+        case "textDocument/formatting": capabilities.formatting = true; break;
+        case "textDocument/rangeFormatting": capabilities.rangeFormatting = true; break;
+        case "textDocument/documentSymbol": capabilities.documentSymbols = true; break;
+        case "textDocument/signatureHelp":
+          capabilities.signatureHelp = true;
+          if (options && Array.isArray(options.triggerCharacters)) {
+            capabilities.signatureHelpTriggerCharacters = options.triggerCharacters
+              .filter((value: unknown): value is string =>
+                typeof value === "string" && value.length <= 8).slice(0, 16);
+          }
+          break;
+        case "workspace/symbol": capabilities.workspaceSymbols = true; break;
+        default: break;
+      }
+    }
+    this.capabilities = capabilities;
+    this.emitStatus();
   }
 
   private async handleServerRequest(method: string, params: unknown): Promise<unknown> {
     if (method === "workspace/configuration") {
       const items = asObject(params)?.items;
-      return Array.isArray(items) ? items.map(() => null) : [];
+      if (!Array.isArray(items)) return [];
+      const settings = this.options.initializationOptions ??
+        this.definition.initializationOptions ?? {};
+      return items.map(() => settings);
     }
     if (method === "workspace/workspaceFolders") {
       return [{ uri: pathToUri(this.root), name: path.basename(this.root) || this.root }];
     }
     if (method === "workspace/applyEdit") {
-      return { applied: false, failureReason: "NCE applies workspace edits in the editor renderer." };
+      const edit = asObject(params)?.edit;
+      if (!this.options.applyWorkspaceEdit)
+        return { applied: false, failureReason: "NCE cannot apply workspace edits from this server." };
+      return this.options.applyWorkspaceEdit(edit);
+    }
+    if (method === "client/registerCapability") {
+      this.registerCapabilities(asObject(params)?.registrations);
+      return null;
+    }
+    if (method === "client/unregisterCapability") {
+      const payload = asObject(params);
+      this.unregisterCapabilities(payload?.unregisterations ?? payload?.unregistrations);
+      return null;
     }
     if (
-      method === "client/registerCapability" ||
-      method === "client/unregisterCapability" ||
       method === "window/workDoneProgress/create" ||
       method === "workspace/semanticTokens/refresh" ||
       method === "workspace/codeLens/refresh" ||

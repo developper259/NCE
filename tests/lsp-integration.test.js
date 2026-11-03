@@ -25,7 +25,7 @@ async function waitFor(read, timeoutMs = 15_000) {
 }
 
 function createManager(workspace, options = {}) {
-  const events = { diagnostics: [], statuses: [], resets: 0 };
+  const events = { diagnostics: [], statuses: [], resets: 0, applyEditRequests: [], progress: [], messages: [] };
   const servers = {
     "typescript-language-server": {
       enabled: options.typescript !== false,
@@ -50,11 +50,26 @@ function createManager(workspace, options = {}) {
       if (channel === "Lsp:diagnostics") events.diagnostics.push(payload);
       else if (channel === "Lsp:status") events.statuses.push(payload);
       else if (channel === "Lsp:reset") events.resets += 1;
+      else if (channel === "Lsp:applyEditRequest") events.applyEditRequests.push(payload);
+      else if (channel === "Lsp:progress") events.progress.push(payload);
+      else if (channel === "Lsp:message") events.messages.push(payload);
     },
     requestTimeoutMs: options.requestTimeoutMs || 4_000,
     maxDocumentBytes: options.maxDocumentBytes,
   });
   return { manager, events };
+}
+
+function createIpcRegistrar() {
+  const handlers = new Map();
+  return {
+    handle(channel, listener) { handlers.set(channel, listener); },
+    invoke(channel, payload) {
+      const handler = handlers.get(channel);
+      if (!handler) throw new Error(`Missing IPC handler ${channel}`);
+      return handler(null, payload);
+    },
+  };
 }
 
 async function createWorkspace() {
@@ -93,6 +108,10 @@ test("LSP manager runs several servers for one document and routes features", { 
     });
     assert.equal(ready.servers.find((server) => server.id === "typescript-language-server").available, true);
     assert.equal(ready.sessions.every((session) => session.documents === 1), true);
+    const readySession = ready.sessions.find((session) =>
+      session.serverId === "typescript-language-server");
+    assert.deepEqual(readySession.capabilities.completionTriggerCharacters, ["."]);
+    assert.deepEqual(readySession.capabilities.signatureHelpTriggerCharacters, ["("]);
 
     const diagnostics = await waitFor(() => {
       const latest = latestDiagnostics(events, documentPath);
@@ -333,6 +352,168 @@ test("one crashing server keeps the other session and its diagnostics alive", { 
   }
 });
 
+test("resource operations in workspace edits are sanitized for the renderer", { timeout: 30_000 }, async () => {
+  const workspace = await createWorkspace();
+  await fs.writeFile(path.join(workspace, "old.ts"), "old\n");
+  const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
+  const { manager } = createManager(workspace, {
+    eslint: false,
+    typescriptMode: "resource-edit",
+  });
+  try {
+    assert.equal((await manager.openDocument({
+      path: documentPath,
+      text: "const value = 1;\n",
+    })).success, true);
+    await waitFor(async () => {
+      const status = await manager.getStatus();
+      return status.success && status.sessions.some((session) => session.state === "ready");
+    });
+    const renamed = await manager.rename({
+      path: documentPath,
+      position: { line: 0, character: 0 },
+      newName: "renamed",
+    });
+    assert.equal(renamed.success, true);
+    assert.equal(renamed.edit.resources.length, 3);
+    assert.deepEqual(renamed.edit.resources.map((resource) => resource.kind), ["create", "rename", "delete"]);
+    assert.equal(renamed.edit.resources[0].path.endsWith("created.ts"), true);
+    assert.equal(renamed.edit.resources[1].oldPath, documentPath);
+    assert.equal(renamed.edit.resources[2].path, await fs.realpath(path.join(workspace, "old.ts")));
+    assert.equal(renamed.edit.files.length, 1);
+    assert.equal(renamed.edit.files[0].edits[0].newText, "created by server\n");
+    assert.equal(renamed.edit.files[0].version, null);
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("NCE workspace state is never synchronized or edited", { timeout: 20_000 }, async () => {
+  const workspace = await createWorkspace();
+  await fs.mkdir(path.join(workspace, ".nce"), { recursive: true });
+  await fs.writeFile(path.join(workspace, ".nce", "state.ts"), "const state = 1;\n");
+  const { manager } = createManager(workspace, { eslint: false });
+  try {
+    const opened = await manager.openDocument({
+      path: path.join(workspace, ".nce", "state.ts"),
+      text: "const state = 1;\n",
+    });
+    assert.equal(opened.success, false);
+    assert.equal(opened.code, "LSP_INVALID_PATH");
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("dynamic registrations enable features for servers without static capabilities", { timeout: 30_000 }, async () => {
+  const workspace = await createWorkspace();
+  const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
+  const { manager } = createManager(workspace, {
+    eslint: false,
+    typescriptMode: "dynamic",
+  });
+  try {
+    assert.equal((await manager.openDocument({
+      path: documentPath,
+      text: "const value = 1;\n",
+    })).success, true);
+    const status = await waitFor(async () => {
+      const current = await manager.getStatus();
+      const session = current.success && current.sessions.find((entry) =>
+        entry.serverId === "typescript-language-server" && entry.state === "ready");
+      return session?.capabilities.completion === true ? current : null;
+    });
+    const session = status.sessions.find((entry) =>
+      entry.serverId === "typescript-language-server");
+    assert.equal(session.capabilities.hover, true);
+    assert.equal(session.capabilities.definition, true);
+    assert.equal(session.capabilities.signatureHelp, true);
+    assert.deepEqual(session.capabilities.completionTriggerCharacters, ["."]);
+    assert.deepEqual(session.capabilities.signatureHelpTriggerCharacters, ["("]);
+    const completion = await manager.completion({
+      path: documentPath,
+      position: { line: 0, character: 0 },
+    });
+    assert.equal(completion.success, true);
+    assert.equal(completion.items.length >= 2, true);
+    const signature = await manager.signatureHelp({
+      path: documentPath,
+      position: { line: 0, character: 0 },
+    });
+    assert.equal(signature.success, true);
+    manager.handleFileSystemEvent("change", documentPath);
+    const watched = await waitFor(async () => {
+      const value = await manager.hover({ path: documentPath, position: { line: 0, character: 0 } });
+      return value.success && /watched:1/.test(value.hover.contents) ? value : null;
+    });
+    assert.match(watched.hover.contents, /watched:1/);
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("server-initiated workspace edits round-trip through the renderer", { timeout: 30_000 }, async () => {
+  const workspace = await createWorkspace();
+  const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
+  const { manager, events } = createManager(workspace, {
+    eslint: false,
+    typescriptMode: "apply-edit",
+  });
+  const ipc = createIpcRegistrar();
+  manager.handleIPC(ipc);
+  try {
+    assert.equal((await manager.openDocument({
+      path: documentPath,
+      text: "const value = 1;\n",
+    })).success, true);
+    const request = await waitFor(() => events.applyEditRequests[0]);
+    assert.equal(request.edit.files.length, 1);
+    assert.equal(request.edit.files[0].path, documentPath);
+    assert.equal(request.edit.files[0].edits[0].newText, "server-typescript-language-server\n");
+    const result = await ipc.invoke("Lsp:applyEditResult", {
+      id: request.id,
+      applied: true,
+    });
+    assert.equal(result.success, true);
+    const hover = await waitFor(async () => {
+      const value = await manager.hover({ path: documentPath, position: { line: 0, character: 0 } });
+      return value.success && /"applied":true/.test(value.hover.contents) ? value : null;
+    });
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("progress notifications reach the renderer", { timeout: 30_000 }, async () => {
+  const workspace = await createWorkspace();
+  const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
+  const { manager, events } = createManager(workspace, {
+    eslint: false,
+    typescriptMode: "progress",
+  });
+  try {
+    assert.equal((await manager.openDocument({
+      path: documentPath,
+      text: "const value = 1;\n",
+    })).success, true);
+    await waitFor(() => events.progress.some((entry) => entry.kind === "end"));
+    assert.deepEqual(events.progress.map((entry) => entry.kind), ["begin", "report", "end"]);
+    assert.equal(events.progress[0].title, "typescript-language-server analysis");
+    assert.equal(events.progress[1].percentage, 50);
+    assert.equal(events.progress[0].serverId.startsWith("typescript-language-server::"), true);
+    await waitFor(() => events.messages.length > 0);
+    assert.equal(events.messages[0].type, 2);
+    assert.equal(events.messages[0].message, "typescript-language-server message");
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("settings changes reset sessions and respect disabled servers", { timeout: 30_000 }, async () => {
   const workspace = await createWorkspace();
   const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
@@ -393,7 +574,7 @@ test("LSP manager answers server-initiated requests and validates payloads", { t
     });
     const hover = await waitFor(async () => {
       const result = await manager.hover({ path: documentPath, position: { line: 0, character: 0 } });
-      return result.success && result.hover && /\[null\]/.test(result.hover.contents) &&
+      return result.success && result.hover && /\[\{\}\]/.test(result.hover.contents) &&
         /-32601/.test(result.hover.contents) ? result : null;
     });
     assert.equal(hover.success, true);

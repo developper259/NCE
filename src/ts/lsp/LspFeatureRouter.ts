@@ -60,6 +60,7 @@ function workspaceEditFrom(value: unknown, source: string): LspWorkspaceEdit | n
   const object = asObject(value);
   if (!object) return null;
   const files = new Map<string, LspWorkspaceFileEdit>();
+  const resources: import("./LspTypes").LspWorkspaceResourceOperation[] = [];
   const add = (uriValue: unknown, editsValue: unknown, versionValue?: unknown) => {
     const edits = normalizeTextEdits(editsValue);
     if (!edits.length) return;
@@ -92,14 +93,57 @@ function workspaceEditFrom(value: unknown, source: string): LspWorkspaceEdit | n
     for (const entry of object.documentChanges) {
       const change = asObject(entry);
       if (!change) continue;
-      if (change.kind === "create" || change.kind === "rename" || change.kind === "delete")
-        throw new Error("Resource operations in workspace edits are not supported.");
+      if (change.kind === "create" || change.kind === "rename" || change.kind === "delete") {
+        const resolveUri = (value: unknown): string => {
+          if (typeof value !== "string" || !uriToPath(value)) {
+            const error: any = new Error("The language server returned an invalid resource URI.");
+            error.code = "LSP_INVALID_PATH";
+            throw error;
+          }
+          return value;
+        };
+        const options = asObject(change.options);
+        const resourceOptions = options
+          ? {
+              ...(typeof options.overwrite === "boolean" ? { overwrite: options.overwrite } : {}),
+              ...(typeof options.ignoreIfExists === "boolean"
+                ? { ignoreIfExists: options.ignoreIfExists }
+                : {}),
+              ...(typeof options.recursive === "boolean" ? { recursive: options.recursive } : {}),
+            }
+          : undefined;
+        if (change.kind === "rename") {
+          const oldUri = resolveUri(change.oldUri);
+          const uri = resolveUri(change.uri);
+          resources.push({
+            kind: "rename",
+            uri,
+            path: uriToPath(uri)!,
+            oldUri,
+            oldPath: uriToPath(oldUri)!,
+            options: resourceOptions,
+          });
+        } else {
+          const uri = resolveUri(change.uri);
+          resources.push({
+            kind: change.kind,
+            uri,
+            path: uriToPath(uri)!,
+            options: resourceOptions,
+          });
+        }
+        continue;
+      }
       const textDocument = asObject(change.textDocument);
       add(textDocument?.uri, change.edits, textDocument?.version);
     }
   }
-  if (!files.size) return null;
-  return { files: [...files.values()], source };
+  if (!files.size && !resources.length) return null;
+  return {
+    files: [...files.values()],
+    ...(resources.length ? { resources } : {}),
+    source,
+  };
 }
 
 function capabilitiesFor(route: LspRoute, feature: keyof LspSession["capabilities"]): boolean {

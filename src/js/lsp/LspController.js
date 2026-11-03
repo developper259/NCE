@@ -20,7 +20,12 @@ class LspController {
     this.requestToken = 0;
     this.completionSession = null;
     this.autoCompletionTimer = null;
+    this.signatureTimer = null;
     this.unsupported = new Map();
+    this.editQueue = Promise.resolve(true);
+    this.progressByServer = new Map();
+    this.markdownRenderer = null;
+    this.markdownLoadPromise = null;
     this.disposed = false;
     this.unsubscribe = [];
     this.pointerMoveHandler = (event) => this.handlePointerMove(event);
@@ -28,6 +33,11 @@ class LspController {
     this.wheelHandler = () => this.hideTransientUi();
     this.keyDownHandler = (event) => {
       if (this.completionWidget.isVisible && this.completionWidget.handleKeyDown(event)) return;
+      if (event.key === "Escape" && (this.hoverPopover.isVisible || this.signaturePopover.isVisible)) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.hideTransientUi();
+      }
     };
 
     this.registerProblemsPanel();
@@ -44,6 +54,13 @@ class LspController {
     subscribe(() => this.api.onDiagnostics((payload) => this.handleDiagnostics(payload)));
     subscribe(() => this.api.onStatus((payload) => this.handleStatus(payload)));
     subscribe(() => this.api.onReset(() => this.handleReset()));
+    subscribe(() => this.api.onApplyEditRequest?.((payload) => this.handleApplyEditRequest(payload)));
+    subscribe(() => this.api.onProgress?.((payload) => this.handleProgress(payload)));
+    subscribe(() => this.api.onMessage?.((payload) => {
+      if (typeof payload?.message !== "string") return;
+      const level = payload.type === 1 ? "error" : payload.type === 2 ? "warning" : "info";
+      this.notify(payload.message, level);
+    }));
     if (typeof editor.tabManager?.onActiveTabChange === "function") {
       const unsubscribe = editor.tabManager.onActiveTabChange(() => {
         this.ensureActiveDocument();
@@ -83,6 +100,8 @@ class LspController {
     }
     if (this.hoverTimer) clearTimeout(this.hoverTimer);
     this.hoverTimer = null;
+    if (this.signatureTimer) clearTimeout(this.signatureTimer);
+    this.signatureTimer = null;
     if (this.overlayFrame !== null && typeof cancelAnimationFrame === "function") {
       cancelAnimationFrame(this.overlayFrame);
       this.overlayFrame = null;
@@ -141,8 +160,14 @@ class LspController {
     }
     this.queueChange(file, record, payload);
     const afterText = typeof payload?.afterText === "string" ? payload.afterText : "";
-    if (!payload?.batch && afterText.endsWith(".")) {
-      this.scheduleAutoCompletion(file);
+    const typedCharacter = payload?.batch ? "" : afterText.slice(-1);
+    if (typedCharacter) {
+      if (this.getTriggerCharacters("completion").includes(typedCharacter)) {
+        this.scheduleAutoCompletion(file, typedCharacter);
+      }
+      if (this.getTriggerCharacters("signature").includes(typedCharacter)) {
+        this.scheduleSignatureHelp(file);
+      }
     }
     this.hideHover();
   }
@@ -313,6 +338,7 @@ class LspController {
   handleReset() {
     this.documents.clear();
     this.unsupported.clear();
+    this.progressByServer.clear();
     this.diagnosticsByPath.clear();
     this.diagnosticsDocuments = [];
     this.completionWidget.hide();
@@ -332,17 +358,40 @@ class LspController {
     } catch {}
   }
 
-  updateProblemsStatus() {
-    if (!this.problemsPanel || !this.status) return;
-    const enabled = this.status.enabled !== false;
-    const servers = this.status.servers || [];
-    const ready = (this.status.sessions || []).filter((session) => session.state === "ready").length;
-    const unavailable = servers.filter((server) => server.enabled && !server.available).length;
-    const parts = [];
-    if (!enabled) parts.push("Language servers disabled");
+  handleProgress(payload) {
+    const serverId = payload?.serverId;
+    if (typeof serverId !== "string" || typeof payload?.kind !== "string") return;
+    if (payload.kind === "end") this.progressByServer.delete(serverId);
     else {
-      parts.push(`${ready} server${ready === 1 ? "" : "s"} ready`);
-      if (unavailable) parts.push(`${unavailable} unavailable`);
+      this.progressByServer.set(serverId, {
+        title: payload.title || "",
+        message: payload.message || "",
+        percentage: Number.isFinite(payload.percentage) ? payload.percentage : null,
+      });
+    }
+    this.updateProblemsStatus();
+  }
+
+  updateProblemsStatus() {
+    if (!this.problemsPanel) return;
+    const parts = [];
+    if (this.status) {
+      const enabled = this.status.enabled !== false;
+      const servers = this.status.servers || [];
+      const ready = (this.status.sessions || []).filter((session) => session.state === "ready").length;
+      const unavailable = servers.filter((server) => server.enabled && !server.available).length;
+      if (!enabled) parts.push("Language servers disabled");
+      else {
+        parts.push(`${ready} server${ready === 1 ? "" : "s"} ready`);
+        if (unavailable) parts.push(`${unavailable} unavailable`);
+      }
+    }
+    for (const progress of this.progressByServer.values()) {
+      const label = progress.message || progress.title;
+      if (!label) continue;
+      parts.push(progress.percentage === null
+        ? label
+        : `${label} (${Math.round(progress.percentage)}%)`);
     }
     this.problemsPanel.setServerStatus(parts.join(" · "));
   }
@@ -483,6 +532,8 @@ class LspController {
     const context = this.getActiveContext();
     if (!context) return null;
     const { file, record } = context;
+    const requestRow = file.row;
+    const requestColumn = file.column;
     const token = ++this.requestToken;
     let result = null;
     try {
@@ -497,6 +548,7 @@ class LspController {
       return null;
     }
     if (token !== this.requestToken || this.editor.tabManager?.activeFile !== file) return null;
+    if (file.row !== requestRow || file.column < requestColumn) return null;
     if (!result?.success) {
       if (result?.code !== "LSP_NO_PROVIDER") this.notify(result?.error || "Completion failed.", "error");
       return null;
@@ -588,13 +640,37 @@ class LspController {
     this.completionSession = null;
   }
 
-  scheduleAutoCompletion(file) {
+  getTriggerCharacters(kind) {
+    const triggers = new Set();
+    for (const session of this.status?.sessions || []) {
+      if (session.state !== "ready") continue;
+      const capabilities = session.capabilities || {};
+      const values = kind === "completion"
+        ? capabilities.completionTriggerCharacters
+        : capabilities.signatureHelpTriggerCharacters;
+      for (const value of values || []) triggers.add(value);
+    }
+    if (kind === "completion" && triggers.size === 0) triggers.add(".");
+    return [...triggers];
+  }
+
+  scheduleAutoCompletion(file, triggerCharacter = undefined) {
     clearTimeout(this.autoCompletionTimer);
     this.autoCompletionTimer = setTimeout(() => {
       this.autoCompletionTimer = null;
       if (this.editor.tabManager?.activeFile !== file) return;
-      void this.requestCompletion(2, ".");
+      void this.requestCompletion(2, triggerCharacter);
     }, 40);
+  }
+
+  scheduleSignatureHelp(file) {
+    clearTimeout(this.signatureTimer);
+    this.signatureTimer = setTimeout(() => {
+      this.signatureTimer = null;
+      if (this.editor.tabManager?.activeFile !== file) return;
+      if (this.signaturePopover.isVisible) return;
+      void this.signatureHelp();
+    }, 80);
   }
 
   async hover() {
@@ -624,16 +700,34 @@ class LspController {
     }
     if (!result.hover?.contents) return null;
     const anchor = this.editor.cD?.getBoundingClientRect?.();
-    this.renderHover(result.hover, anchor);
+    this.renderHover(result.hover, anchor, token);
     return result.hover;
   }
 
-  renderHover(hover, anchorRect) {
+  renderHover(hover, anchorRect, token = this.hoverToken) {
     const content = document.createElement("div");
     content.className = "lsp-hover-content";
     content.textContent = String(hover.contents || "");
     this.hoverPopover.setContent(content);
     if (anchorRect) this.hoverPopover.showAt(anchorRect.right, anchorRect.bottom, { width: 480, align: "left" });
+    void this.upgradeHoverMarkdown(content, hover.contents, token);
+  }
+
+  async upgradeHoverMarkdown(container, markdown, token) {
+    if (typeof ensureMarkdownBundle !== "function") return;
+    try {
+      if (!this.markdownLoadPromise) {
+        this.markdownLoadPromise = ensureMarkdownBundle().catch(() => {
+          this.markdownLoadPromise = null;
+          return null;
+        });
+      }
+      await this.markdownLoadPromise;
+      if (token !== this.hoverToken || !this.hoverPopover.isVisible) return;
+      if (typeof MarkdownRenderer === "undefined") return;
+      if (!this.markdownRenderer) this.markdownRenderer = new MarkdownRenderer();
+      this.markdownRenderer.render(String(markdown || ""), container, { mode: "strict" });
+    } catch {}
   }
 
   handlePointerMove(event) {
@@ -684,6 +778,7 @@ class LspController {
     content.textContent = String(result.hover.contents || "");
     this.hoverPopover.setContent(content);
     this.hoverPopover.showAt(clientX, clientY, { width: 460, align: "left" });
+    void this.upgradeHoverMarkdown(content, result.hover.contents, token);
   }
 
   hideHover() {
@@ -1123,11 +1218,85 @@ class LspController {
     return this.editor.bottomPanelManager?.openPanel?.("problems") || false;
   }
 
-  async applyWorkspaceEdit(edit) {
-    if (!edit || !Array.isArray(edit.files) || !edit.files.length) return false;
+  applyWorkspaceEdit(edit) {
+    const run = this.editQueue
+      .catch(() => false)
+      .then(() => this.applyWorkspaceEditNow(edit));
+    this.editQueue = run.catch(() => false);
+    return run;
+  }
+
+  async handleApplyEditRequest(payload) {
+    if (!payload || typeof payload.id !== "string") return;
+    let applied = false;
+    let failureReason = "The editor rejected the workspace edit.";
+    try {
+      applied = await this.applyWorkspaceEdit(payload.edit);
+    } catch (error) {
+      failureReason = String(error && error.message || error);
+    }
+    try {
+      await this.api.applyEditResult({
+        id: payload.id,
+        applied,
+        ...(applied ? {} : { failureReason }),
+      });
+    } catch {}
+  }
+
+  async applyResourceOperations(edit) {
+    const resources = Array.isArray(edit?.resources) ? edit.resources : [];
+    for (const resource of resources) {
+      if (!resource || typeof resource.path !== "string") return false;
+      if (resource.kind === "create") {
+        const result = await this.editor.api.createFile(
+          NCEPath.dirname(resource.path),
+          NCEPath.basename(resource.path),
+          "",
+          resource.options?.overwrite === true,
+        );
+        if (!result?.success) {
+          if (resource.options?.ignoreIfExists === true &&
+              result?.code === "FILE_ALREADY_EXISTS") continue;
+          this.notify(result?.error || "The language server could not create a file.", "error");
+          return false;
+        }
+        continue;
+      }
+      if (resource.kind === "rename") {
+        if (typeof resource.oldPath !== "string") return false;
+        const result = await this.editor.api.renameEntry(resource.oldPath, resource.path);
+        if (!result?.success) {
+          if (resource.options?.ignoreIfExists === true &&
+              result?.code === "TARGET_EXISTS") continue;
+          this.notify(result?.error || "The language server could not rename a file.", "error");
+          return false;
+        }
+        await this.editor.tabManager?.updateFilePath?.(resource.oldPath, resource.path);
+        continue;
+      }
+      if (resource.kind === "delete") {
+        const result = await this.editor.api.moveToTrash(resource.path);
+        if (!result?.success) {
+          this.notify(result?.error || "The language server could not delete a file.", "error");
+          return false;
+        }
+        this.editor.tabManager?.markFileAsDeleted?.(resource.path);
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  async applyWorkspaceEditNow(edit) {
+    const files = Array.isArray(edit?.files) ? edit.files : [];
+    const resources = Array.isArray(edit?.resources) ? edit.resources : [];
+    if (!files.length && !resources.length) return false;
     const originalActive = this.editor.tabManager?.activeFile || null;
     try {
-      for (const fileEdit of edit.files) {
+      if (!(await this.applyResourceOperations(edit))) return false;
+      for (const fileEdit of files) {
         if (!fileEdit || !Array.isArray(fileEdit.edits) || !fileEdit.edits.length) continue;
         let file = this.findOpenFileForEdit(fileEdit.path);
         if (!file) {
@@ -1138,6 +1307,11 @@ class LspController {
           return false;
         }
         if (this.editor.tabManager.activeFile !== file) await this.editor.tabManager.setFocusTab(file);
+        if (this.editor.tabManager.activeFile !== file) {
+          this.notify(`Unable to focus ${fileEdit.path} for editing.`, "error");
+          return false;
+        }
+        await this.editor.fileLoader?.waitForFileLoaded?.(file);
         const edits = [...fileEdit.edits].sort((left, right) =>
           right.range.start.line - left.range.start.line ||
           right.range.start.character - left.range.start.character);
@@ -1148,6 +1322,7 @@ class LspController {
           const endLine = file.lines[range.end.row - 1]?.getText?.() || "";
           range.start.column = Math.min(range.start.column, startLine.length);
           range.end.column = Math.min(range.end.column, endLine.length);
+          if (this.rangeText(file, range) === (change.newText ?? "").replace(/\r\n/g, "\n")) continue;
           const applied = this.editor.writerController.applyRangeEdit(
             range.start,
             range.end,
@@ -1170,6 +1345,17 @@ class LspController {
       this.notify("A language server edit could not be applied.", "error");
       return false;
     }
+  }
+
+  rangeText(file, range) {
+    const lines = file.lines
+      .slice(range.start.row - 1, range.end.row)
+      .map((line) => line?.getText?.() ?? "");
+    if (lines.length === 1)
+      return lines[0].slice(range.start.column, range.end.column);
+    lines[0] = lines[0].slice(range.start.column);
+    lines[lines.length - 1] = lines[lines.length - 1].slice(0, range.end.column);
+    return lines.join("\n");
   }
 
   findOpenFileForEdit(path) {

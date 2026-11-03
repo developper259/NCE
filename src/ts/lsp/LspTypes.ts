@@ -98,6 +98,8 @@ export interface LspServerSessionView {
     documentSymbols: boolean;
     workspaceSymbols: boolean;
     signatureHelp: boolean;
+    completionTriggerCharacters: string[];
+    signatureHelpTriggerCharacters: string[];
   };
 }
 
@@ -155,8 +157,22 @@ export interface LspWorkspaceFileEdit {
   edits: LspTextEdit[];
 }
 
+export interface LspWorkspaceResourceOperation {
+  kind: "create" | "rename" | "delete";
+  path: string;
+  uri: string;
+  oldPath?: string;
+  oldUri?: string;
+  options?: {
+    overwrite?: boolean;
+    ignoreIfExists?: boolean;
+    recursive?: boolean;
+  };
+}
+
 export interface LspWorkspaceEdit {
   files: LspWorkspaceFileEdit[];
+  resources?: LspWorkspaceResourceOperation[];
   source: string;
 }
 
