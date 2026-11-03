@@ -424,7 +424,16 @@ test("completion annotations show a method class or a value type", () => {
   assert.equal(describe({ detail: "(function) greet(): void", kind: 3 }), "");
   assert.equal(describe({ detail: "(property) Greeter.count: number", kind: 10 }), "number");
   assert.equal(describe({ detail: "const flag: boolean", kind: 6 }), "boolean");
-  assert.equal(describe({ detail: "const obj: { a: string; b: number }", kind: 6 }), "{ a: string; b: number }");
+  assert.equal(describe({ detail: "const obj: { a: string; b: number }", kind: 6 }), "object");
+  assert.equal(
+    describe({ detail: "var AbortController: { new (): AbortController; prototype: AbortController; }", kind: 6 }),
+    "AbortController",
+  );
+  assert.equal(
+    describe({ detail: "var Audio: new (src?: string | undefined) => HTMLAudioElement", kind: 6 }),
+    "HTMLAudioElement",
+  );
+  assert.equal(describe({ detail: "var Array: ArrayConstructor", kind: 6 }), "ArrayConstructor");
   assert.equal(describe({ detail: null, kind: 6 }), "");
   assert.equal(describe({}), "");
 });

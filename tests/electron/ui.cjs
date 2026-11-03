@@ -195,6 +195,7 @@ module.exports = async function exerciseUI() {
     items: [
       { label: 'Alpha', detail: '(method) Greeter.greet(value: string): boolean', source: 'typescript-language-server' },
       { label: 'Beta', detail: 'const flag: boolean', source: 'eslint-language-server' },
+      { label: 'Delta', detail: 'var AbortController: { new (): AbortController; prototype: AbortController; }', source: 'eslint-language-server' },
       { label: 'Gamma', detail: null, source: 'eslint-language-server' },
     ],
     prefix: '',
@@ -207,9 +208,10 @@ module.exports = async function exerciseUI() {
     (node) => node.textContent,
   );
   check(
-    completionAnnotations.length === 2 &&
+    completionAnnotations.length === 3 &&
       completionAnnotations[0] === 'Greeter' &&
-      completionAnnotations[1] === 'boolean',
+      completionAnnotations[1] === 'boolean' &&
+      completionAnnotations[2] === 'AbortController',
     'Completion methods show their class and variables their type',
   );
   check(!completionWidget.element.querySelector('.lsp-completion-source'), 'Completion hides the server name');

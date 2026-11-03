@@ -128,7 +128,16 @@ class LspCompletionWidget {
     }
     const colon = detail.indexOf(": ");
     if (colon < 0) return "";
-    return detail.slice(colon + 2).replace(/\s+/g, " ").trim().slice(0, 120);
+    return this.summarizeType(detail.slice(colon + 2));
+  }
+
+  summarizeType(type) {
+    const compact = String(type || "").replace(/\s+/g, " ").trim();
+    if (!compact) return "";
+    const constructed = /\bnew\s*\([^)]*\)\s*(?::|=>)\s*([^;]+)/.exec(compact);
+    if (constructed) return constructed[1].trim();
+    if (compact.startsWith("{")) return "object";
+    return compact.slice(0, 60);
   }
 
   scrollSelectedIntoView() {
