@@ -2,7 +2,6 @@ import {
   app,
   BrowserWindow,
   clipboard,
-  dialog,
   shell,
   type IpcMainInvokeEvent,
   type WebContents,
@@ -483,7 +482,7 @@ export class Window {
           failures: [{ path: "", code: "WINDOW_UNAVAILABLE", message: "The drop target window is no longer available." }],
         } satisfies ExternalOpenResult;
       }
-      const authorized = await this.confirmDroppedPaths(paths);
+      const authorized = await this.authorizeDroppedPaths(paths);
       if (!authorized) {
         return {
           success: false,
@@ -548,27 +547,11 @@ export class Window {
     this.lspManager?.handleIPC(this.ipc);
   }
 
-  private async confirmDroppedPaths(paths: unknown): Promise<string[] | null> {
+  private async authorizeDroppedPaths(paths: unknown): Promise<string[] | null> {
     if (!Array.isArray(paths)) return null;
     const candidates = paths.filter((value): value is string =>
       typeof value === "string" && Boolean(value.trim()) && !value.includes("\0"));
     if (!candidates.length) return [];
-    const dialogApi = dialog as typeof dialog | undefined;
-    if (this.window && typeof dialogApi?.showMessageBox === "function") {
-      const visible = candidates.slice(0, 8).join("\n");
-      const more = candidates.length > 8
-        ? `\n… ${candidates.length - 8} more`
-        : "";
-      const result = await dialogApi.showMessageBox(this.window, {
-        type: "question",
-        buttons: ["Open", "Cancel"],
-        defaultId: 0,
-        cancelId: 1,
-        message: "Open dropped items?",
-        detail: `${visible}${more}`,
-      });
-      if (result?.response !== 0) return null;
-    }
     const authorized: string[] = [];
     for (const candidate of candidates)
       if (await this.pathAccess.authorizeExternal(candidate))

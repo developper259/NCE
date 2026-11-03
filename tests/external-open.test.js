@@ -150,6 +150,28 @@ test("native drop routes files to its captured WebContents window and folders th
   coordinator.dispose();
 });
 
+test("a folder dropped into a window with no workspace opens in a new window", async (t) => {
+  const { folder } = await makeFixture(t);
+  const target = makeWindow("empty-drop-target");
+  const manager = makeWindowManager([target]);
+  const coordinator = new ExternalOpenCoordinator(manager);
+  coordinator.start();
+
+  const result = await coordinator.enqueueDrop([folder], target);
+  const canonicalFolder = await fs.realpath(folder);
+  assert.equal(result.success, true);
+  assert.equal(result.openedFolders, 1);
+  assert.equal(result.focusedFolders, 0);
+  assert.equal(target.workspacePath ?? null, null,
+    "the receiving window does not adopt the dropped folder");
+  assert.deepEqual(target.state.deliveries, []);
+  const windows = manager.getAllWindows();
+  assert.equal(windows.length, 2, "the folder gets its own window next to the empty one");
+  assert.notEqual(windows[1].id, target.id);
+  assert.equal(windows[1].workspacePath, canonicalFolder);
+  coordinator.dispose();
+});
+
 test("system opens wait for restore, choose the focused window once, and process batches in order", async (t) => {
   const { root } = await makeFixture(t);
   const first = path.join(root, "first.txt");

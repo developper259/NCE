@@ -442,28 +442,13 @@ app.whenReady().then(() => {
         fs.writeFileSync(externalFileTwo, "const externalTwo = true;\n", "utf8");
         const externalFilePath = await fs.promises.realpath(externalFile);
         const externalFileTwoPath = await fs.promises.realpath(externalFileTwo);
-        const previousMessageBox = dialog.showMessageBox;
-        let dropResponse = 1;
-        dialog.showMessageBox = async (targetWindow, options) => {
-          if (options?.message !== "Open dropped items?")
-            return previousMessageBox(targetWindow, options);
-          assert.equal(targetWindow, windowB.window, "drop confirmation belongs to the receiving window");
-          return { response: dropResponse };
-        };
-        const cancelledDrop = await runB(
-          `window.api.openDroppedFiles(${JSON.stringify([externalFile])})`,
-        );
-        assert.equal(cancelledDrop.success, false);
-        assert.equal(cancelledDrop.openedFiles, 0);
-        assert.equal(await windowB.pathAccess.isAuthorized(externalFilePath), false,
-          "cancelling a drop does not grant access to its files");
-        assert.deepEqual(await runB("editor.tabManager.tabs.map(tab => tab.path)"), [fileB]);
-        dropResponse = 0;
         const dropResult = await runB(
           `window.api.openDroppedFiles(${JSON.stringify([externalFile, externalFileTwo, externalFile])})`,
         );
         assert.equal(dropResult.success, true);
         assert.equal(dropResult.openedFiles, 2, "unique files open once and repeated paths resolve to one tab");
+        assert.equal(await windowB.pathAccess.isAuthorized(externalFilePath), true,
+          "a drop immediately grants access to the files it opens");
         await waitForCondition(
           async () => (await runB(`editor.tabManager.tabs.filter(tab => [${JSON.stringify(externalFilePath)}, ${JSON.stringify(externalFileTwoPath)}].includes(tab.path)).length`)) === 2,
           { timeout: 10000, description: "external files delivered to the receiving window" },
@@ -509,7 +494,6 @@ app.whenReady().then(() => {
         );
         assert.equal(mixedDropResult.openedFiles, 1);
         assert.equal(mixedDropResult.openedFolders, 1);
-        dialog.showMessageBox = previousMessageBox;
         let droppedWorkspaceWindow = null;
         await waitForCondition(() => {
           droppedWorkspaceWindow = nce.windowManager.findWindowByWorkspace(droppedWorkspace);
@@ -524,6 +508,47 @@ app.whenReady().then(() => {
         await droppedWorkspaceWindow.waitForDisposal();
         await windowC.requestQuit();
         await windowC.waitForDisposal();
+
+        traceStep("folder drop into an empty window");
+        const emptyWindow = nce.windowManager.createEmptyWindow();
+        assert.ok(emptyWindow, "an empty window can be created for drop routing");
+        await waitForCondition(() => Boolean(emptyWindow.window && emptyWindow.rendererReady), {
+          timeout: 15000,
+          description: "empty drop target renderer ready",
+        });
+        assert.equal(
+          await emptyWindow.window.webContents.executeJavaScript("editor.fileExplorer.rootPath"),
+          "",
+          "the drop target starts without a workspace",
+        );
+        const emptyDropWorkspaceInput = path.join(directory, "empty-window-drop");
+        fs.mkdirSync(emptyDropWorkspaceInput, { recursive: true });
+        const emptyDropWorkspace = await fs.promises.realpath(emptyDropWorkspaceInput);
+        const emptyDropResult = await emptyWindow.window.webContents.executeJavaScript(
+          `window.api.openDroppedFiles(${JSON.stringify([emptyDropWorkspaceInput])})`,
+        );
+        assert.equal(emptyDropResult.success, true);
+        assert.equal(emptyDropResult.openedFolders, 1);
+        assert.equal(emptyWindow.workspacePath, null,
+          "the receiving empty window does not adopt the dropped folder");
+        assert.equal(
+          await emptyWindow.window.webContents.executeJavaScript("editor.fileExplorer.rootPath"),
+          "",
+          "a folder dropped into an empty window never replaces that window workspace",
+        );
+        let emptyDropWindow = null;
+        await waitForCondition(async () => {
+          emptyDropWindow = nce.windowManager.findWindowByWorkspace(emptyDropWorkspace);
+          if (!emptyDropWindow?.window || !emptyDropWindow.rendererReady) return false;
+          return emptyDropWindow.window.webContents.executeJavaScript(
+            `editor.isOnInit === false && editor.fileExplorer.rootPath === ${JSON.stringify(emptyDropWorkspace)}`,
+          );
+        }, { timeout: 15000, description: "dropped folder to open in a new window when the target has no workspace" });
+        assert.notEqual(emptyDropWindow.id, emptyWindow.id);
+        await emptyDropWindow.requestQuit();
+        await emptyDropWindow.waitForDisposal();
+        await emptyWindow.requestQuit();
+        await emptyWindow.waitForDisposal();
 
         if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === "1") {
           fs.writeFileSync(path.join(directory, `${phase}.ok`), "ok");
