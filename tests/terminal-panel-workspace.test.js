@@ -8,8 +8,9 @@ const root = path.resolve(__dirname, "..");
 const source = fs.readFileSync(path.join(root, "src/js/terminal/TerminalPanel.js"), "utf8")
   .replace(/^export class TerminalPanel/m, "class TerminalPanel");
 const context = vm.createContext({ console, Map, Set, Promise, URL, setTimeout, clearTimeout });
-vm.runInContext(`${source}\nthis.TerminalPanel = TerminalPanel;`, context);
+vm.runInContext(`${source}\nthis.TerminalPanel = TerminalPanel; this.TerminalScroller = TerminalScroller;`, context);
 const TerminalPanel = context.TerminalPanel;
+const TerminalScroller = context.TerminalScroller;
 
 class ElementStub {
   constructor() {
@@ -89,6 +90,81 @@ function contextMenuEvent(target) {
     stopPropagation() { this.stopped = true; },
   };
 }
+
+function terminalScrollerHarness({ baseY = 50, viewportY = 50, length = 100, rows = 24 } = {}) {
+  const created = [];
+  const manager = {
+    VERTICAL_TYPE: 0,
+    createScroller(host, type, isBody, options = {}) {
+      const scroller = {
+        host,
+        type,
+        isBody,
+        options,
+        ratio: null,
+        refreshes: 0,
+        _destroyed: false,
+        setScrollRatio(value) { this.ratio = value; },
+        refresh() { this.refreshes += 1; },
+        destroy() { this._destroyed = true; },
+      };
+      created.push(scroller);
+      return scroller;
+    },
+    addScroller(scroller) { this.added = scroller; },
+    refreshScroller(scroller) { scroller.refresh(); return true; },
+    invalidateScroller(scroller) { scroller.refresh(); return true; },
+    destroyScroller(scroller) { scroller.destroy(); },
+  };
+  const record = {
+    disposed: false,
+    terminal: {
+      rows,
+      scrolledTo: null,
+      scrollToLine(line) { this.scrolledTo = line; },
+      buffer: { active: { baseY, viewportY, length } },
+    },
+  };
+  const editor = { scrollerManager: manager, domManager: {} };
+  const host = { className: "terminal-view" };
+  const scroller = new TerminalScroller(editor, host, () => record);
+  return { created: created[0], host, manager, record, scroller };
+}
+
+test("terminal scroller mirrors xterm scrollback from the terminal view host", () => {
+  const harness = terminalScrollerHarness();
+
+  assert.equal(harness.created.host, harness.host);
+  assert.equal(harness.created.type, harness.manager.VERTICAL_TYPE);
+  assert.equal(harness.created.options.disableWheel, true);
+  assert.equal(harness.manager.added, harness.created);
+
+  harness.scroller.refresh();
+  assert.equal(harness.created.ratio, 1);
+  assert.equal(harness.scroller.getScrollInfo().max, 50);
+
+  assert.equal(harness.created.calcIsActive(), true);
+  assert.equal(harness.created.calculProp(), 24);
+
+  harness.created.onScroll(0.25);
+  assert.equal(harness.record.terminal.scrolledTo, 13);
+
+  harness.record.terminal.buffer.active.viewportY = 0;
+  harness.scroller.refresh();
+  assert.equal(harness.created.ratio, 0);
+
+  harness.record.terminal.buffer.active.baseY = 0;
+  assert.equal(harness.created.calcIsActive(), false);
+});
+
+test("terminal scroller recreates after the terminal view is detached", () => {
+  const harness = terminalScrollerHarness();
+  harness.created.destroy();
+
+  assert.equal(harness.scroller.isDestroyed(), true);
+  assert.equal(harness.scroller.refresh(), false);
+  assert.equal(harness.scroller.scheduleRefresh(), false);
+});
 
 test("terminal edit shortcuts copy, cut, paste, and select terminal content", async () => {
   const panel = makePanel();
@@ -196,6 +272,18 @@ test("new terminal instances disable cursor blinking and forward each input even
     }
     onResize(listener) {
       this.onResizeListener = listener;
+      const subscription = { dispose() {} };
+      this.subscriptions.push(subscription);
+      return subscription;
+    }
+    onScroll(listener) {
+      this.onScrollListener = listener;
+      const subscription = { dispose() {} };
+      this.subscriptions.push(subscription);
+      return subscription;
+    }
+    onWriteParsed(listener) {
+      this.onWriteParsedListener = listener;
       const subscription = { dispose() {} };
       this.subscriptions.push(subscription);
       return subscription;

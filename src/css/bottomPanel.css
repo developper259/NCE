@@ -420,6 +420,10 @@
   overflow: hidden;
 }
 
+.terminal-instance .xterm .xterm-scrollable-element > .scrollbar {
+  display: none;
+}
+
 .terminal-instance .xterm .xterm-viewport {
   overflow: hidden;
   scrollbar-width: none;

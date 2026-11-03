@@ -4,6 +4,7 @@ class Scroller {
   constructor(e, options = {}) {
     this.editor = e;
     this.compact = options.compact === true;
+    this.disableWheel = options.disableWheel === true;
     this.id = 0;
     this.manager = null;
     this._destroyed = false;
@@ -291,8 +292,10 @@ class Scroller {
     this.parentOBJ.addEventListener("mouseenter", this._onMouseEnter);
     this.parentOBJ.addEventListener("mouseleave", this._onMouseLeave);
 
-    const wheelTarget = this.wheelTarget || this.parentOBJ;
-    wheelTarget.addEventListener("wheel", this._onWheel, { passive: false });
+    if (!this.disableWheel) {
+      const wheelTarget = this.wheelTarget || this.parentOBJ;
+      wheelTarget.addEventListener("wheel", this._onWheel, { passive: false });
+    }
   }
 
   handlePointerDown(event) {
@@ -339,7 +342,8 @@ class Scroller {
     this.itemOBJ?.removeEventListener("pointerdown", this._onPointerDown);
     this.parentOBJ?.removeEventListener("mouseenter", this._onMouseEnter);
     this.parentOBJ?.removeEventListener("mouseleave", this._onMouseLeave);
-    (this.wheelTarget || this.parentOBJ)?.removeEventListener("wheel", this._onWheel);
+    if (!this.disableWheel)
+      (this.wheelTarget || this.parentOBJ)?.removeEventListener("wheel", this._onWheel);
     this.scrollerFast?.remove();
     this.scrollerOBJ = null;
     this.itemOBJ = null;

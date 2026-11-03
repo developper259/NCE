@@ -200,7 +200,7 @@ test("Bottom Panel removes the redundant title and only exposes multi-view navig
   assert.match(read("src/css/bottomPanel.css"), /\.bottom-panel-resize-handle\s*\{[^}]*height:\s*4px/s);
 });
 
-test("Terminal clips its layers and hides the native scrollbar without hiding xterm's overlay scroller", () => {
+test("Terminal clips its layers and replaces xterm's native scrollbar with the NCE scroller", () => {
   const css = read("src/css/bottomPanel.css");
   const viewport = css.match(/\.terminal-instance \.xterm \.xterm-viewport\s*\{([^}]+)\}/)?.[1] || "";
   assert.match(viewport, /overflow:\s*hidden/);
@@ -219,10 +219,10 @@ test("Terminal clips its layers and hides the native scrollbar without hiding xt
     css,
     /\.terminal-panel \*::-webkit-scrollbar\s*\{[^}]*display:\s*none/s,
   );
-  assert.doesNotMatch(
+  assert.match(
     css,
-    /\.xterm-scrollable-element[^{]*\.scrollbar[^{]*\{[^}]*display:\s*none/s,
-    "xterm's overlay scroller must stay visible",
+    /\.terminal-instance \.xterm \.xterm-scrollable-element > \.scrollbar\s*\{[^}]*display:\s*none/s,
+    "xterm's native scrollbar must be hidden in favor of the NCE scroller",
   );
 });
 

@@ -1,3 +1,106 @@
+class TerminalScroller {
+  constructor(editor, host, getRecord) {
+    this.editor = editor;
+    this.host = host;
+    this.getRecord = typeof getRecord === "function" ? getRecord : () => null;
+    this.vScroller = null;
+    this.frame = null;
+    this.destroyed = false;
+
+    const manager = editor?.scrollerManager;
+    if (!manager || typeof manager.createScroller !== "function" || !host) return;
+
+    this.vScroller = manager.createScroller(
+      host,
+      manager.VERTICAL_TYPE,
+      false,
+      { disableWheel: true },
+    );
+    this.vScroller.calcIsActive = () => this.getScrollInfo().max > 0;
+    this.vScroller.calculProp = () => {
+      const info = this.getScrollInfo();
+      if (info.visible <= 0 || info.total <= 0) return 100;
+      return Math.max(0, Math.min(100, (info.visible / info.total) * 100));
+    };
+    this.vScroller.onScroll = (ratio) => this.scrollToRatio(ratio);
+    this.vScroller.onScrollEnd = () => this.refresh();
+    manager.addScroller(this.vScroller);
+  }
+
+  getScrollInfo(record = this.getRecord()) {
+    const terminal = record?.disposed ? null : record?.terminal;
+    const buffer = terminal?.buffer?.active;
+    if (!terminal || !buffer) return { max: 0, ratio: 0, total: 0, visible: 0 };
+    const visible = Math.max(0, Number(terminal.rows) || 0);
+    const total = Math.max(visible, Number(buffer.length) || 0);
+    const max = Math.max(0, Number(buffer.baseY) || 0);
+    const viewportY = Math.max(0, Math.min(max, Number(buffer.viewportY) || 0));
+    return { max, ratio: max > 0 ? viewportY / max : 0, total, visible };
+  }
+
+  scrollToRatio(ratio) {
+    const record = this.getRecord();
+    const terminal = record?.terminal;
+    const buffer = terminal?.buffer?.active;
+    if (!terminal || !buffer || typeof terminal.scrollToLine !== "function") return false;
+    const max = Math.max(0, Number(buffer.baseY) || 0);
+    if (max <= 0) return false;
+    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    terminal.scrollToLine(Math.round(clamped * max));
+    return true;
+  }
+
+  isDestroyed() {
+    return !this.vScroller || this.vScroller._destroyed === true;
+  }
+
+  refresh({ invalidateMetrics = false } = {}) {
+    if (this.destroyed || this.isDestroyed()) return false;
+    this.vScroller.setScrollRatio(this.getScrollInfo().ratio);
+    const manager = this.editor?.scrollerManager;
+    if (invalidateMetrics && typeof manager?.invalidateScroller === "function")
+      return manager.invalidateScroller(this.vScroller);
+    if (typeof manager?.refreshScroller === "function")
+      return manager.refreshScroller(this.vScroller);
+    this.vScroller.refresh();
+    return true;
+  }
+
+  scheduleRefresh() {
+    if (this.destroyed || this.isDestroyed() || this.frame !== null) return false;
+    const requestFrame = this.editor?.domManager?.requestFrame ||
+      (typeof requestAnimationFrame === "function" ? requestAnimationFrame : null);
+    if (!requestFrame) return this.refresh();
+    this.frame = requestFrame(() => {
+      this.frame = null;
+      this.refresh();
+    });
+    return true;
+  }
+
+  cancelScheduledRefresh() {
+    if (this.frame === null) return;
+    const cancelFrame = this.editor?.domManager?.cancelFrame ||
+      (typeof cancelAnimationFrame === "function" ? cancelAnimationFrame : null);
+    cancelFrame?.(this.frame);
+    this.frame = null;
+  }
+
+  destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.cancelScheduledRefresh();
+    const manager = this.editor?.scrollerManager;
+    if (typeof manager?.destroyScroller === "function")
+      manager.destroyScroller(this.vScroller);
+    else this.vScroller?.destroy?.();
+    this.vScroller = null;
+    this.getRecord = null;
+    this.host = null;
+    this.editor = null;
+  }
+}
+
 export class TerminalPanel {
   constructor(editor, Terminal, FitAddon, WebLinksAddon) {
     this.editor = editor;
@@ -14,6 +117,7 @@ export class TerminalPanel {
     this.pendingNumber = 0;
     this.destroyed = false;
     this.frame = null;
+    this.scroller = null;
 
     this.element = document.createElement("section");
     this.element.className = "terminal-panel";
@@ -76,6 +180,19 @@ export class TerminalPanel {
     this.removeExitListener = editor.api.onTerminalExit?.((payload) => this.handleExit(payload));
     this.removeErrorListener = editor.api.onTerminalError?.((payload) => this.handleError(payload));
     this.applyTheme();
+  }
+
+  ensureScroller() {
+    if (this.destroyed) return null;
+    if (this.scroller?.isDestroyed?.()) this.scroller = null;
+    if (this.scroller) return this.scroller;
+    if (!this.view || !this.editor?.scrollerManager) return null;
+    this.scroller = new TerminalScroller(
+      this.editor,
+      this.view,
+      () => this.getActiveSession(),
+    );
+    return this.scroller;
   }
 
   get currentState() {
@@ -242,6 +359,8 @@ export class TerminalPanel {
   onOpen({ focus = true } = {}) {
     const state = this.currentState;
     this.clearStatus();
+    const scroller = this.ensureScroller();
+    scroller?.refresh({ invalidateMetrics: true });
     if (state.sessions.size) {
       const active = this.getActiveSession();
       if (active) this.showActive(active);
@@ -318,6 +437,7 @@ export class TerminalPanel {
   onActivate() {
     const record = this.getActiveSession();
     if (record) this.showActive(record);
+    this.ensureScroller()?.refresh({ invalidateMetrics: true });
     this.scheduleFit();
   }
 
@@ -410,6 +530,16 @@ export class TerminalPanel {
     record.subscriptions.push(terminal.onResize(({ cols, rows }) => {
       if (record.workspaceKey === this.currentWorkspaceKey)
         this.syncPtySize(record, cols, rows);
+      if (record === this.getActiveSession() && this.editor.bottomPanelManager?.visible)
+        this.scroller?.scheduleRefresh();
+    }));
+    record.subscriptions.push(terminal.onScroll(() => {
+      if (record === this.getActiveSession() && this.editor.bottomPanelManager?.visible)
+        this.scroller?.scheduleRefresh();
+    }));
+    record.subscriptions.push(terminal.onWriteParsed(() => {
+      if (record === this.getActiveSession() && this.editor.bottomPanelManager?.visible)
+        this.scroller?.scheduleRefresh();
     }));
     state.sessions.set(pendingId, record);
     if (activate) state.activeSessionId = pendingId;
@@ -731,6 +861,7 @@ export class TerminalPanel {
         active.terminal.focus?.();
     } else {
       this.clearTerminalActions();
+      this.scroller?.refresh();
     }
     this.notifyWorkspaceChanged(this.currentWorkspaceKey);
 
@@ -763,6 +894,7 @@ export class TerminalPanel {
     const selected = Boolean(record);
     for (const button of this.actionsMenu?.querySelectorAll?.("[data-action]") || [])
       button.disabled = !selected;
+    if (selected) this.scroller?.scheduleRefresh();
   }
 
   hideInactiveWorkspaceSessions() {
@@ -1147,6 +1279,8 @@ export class TerminalPanel {
     const cols = record.terminal.cols;
     const rows = record.terminal.rows;
     if (cols >= 2 && rows >= 2) this.syncPtySize(record, cols, rows);
+    if (record === this.getActiveSession())
+      this.scroller?.refresh({ invalidateMetrics: true });
     return true;
   }
 
@@ -1223,6 +1357,8 @@ export class TerminalPanel {
     this.destroyed = true;
     if (this.frame !== null) cancelAnimationFrame(this.frame);
     this.frame = null;
+    this.scroller?.destroy();
+    this.scroller = null;
     this.removeOutputListener?.();
     this.removeExitListener?.();
     this.removeErrorListener?.();
