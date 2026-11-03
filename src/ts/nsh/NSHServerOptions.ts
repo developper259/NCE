@@ -17,5 +17,9 @@ export function createNSHServerOptions(): NSHServerOptions {
     // plus the null origin some Electron versions send from file://.
     allowedOrigins: [...NSH_RENDERER_ORIGINS],
     allowNullOrigin: true,
+    maxDocumentCharacters: 1024 * 1024,
+    maxDocumentsPerClient: 128,
+    maxClientDocumentCharacters: 64 * 1024 * 1024,
+    maxLinesPerRequest: 0,
   };
 }
