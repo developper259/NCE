@@ -29,16 +29,13 @@ class LspController {
     this.disposed = false;
     this.unsubscribe = [];
     this.pointerMoveHandler = (event) => this.handlePointerMove(event);
-    this.pointerLeaveHandler = () => this.hideTransientUi();
-    this.wheelHandler = () => this.hideTransientUi();
-    this.keyDownHandler = (event) => {
-      if (this.completionWidget.isVisible && this.completionWidget.handleKeyDown(event)) return;
-      if (event.key === "Escape" && (this.hoverPopover.isVisible || this.signaturePopover.isVisible)) {
-        event.preventDefault();
-        event.stopPropagation();
-        this.hideTransientUi();
-      }
+    this.pointerLeaveHandler = () => this.hideHover();
+    this.pointerDownHandler = (event) => {
+      if (this.completionWidget.isVisible &&
+          !event.target?.closest?.(".lsp-completion")) this.completionWidget.hide();
     };
+    this.wheelHandler = () => this.hideTransientUi();
+    this.keyDownHandler = (event) => this.handleKeyDown(event);
 
     this.registerProblemsPanel();
 
@@ -72,8 +69,24 @@ class LspController {
     editor.editorOBJ?.addEventListener("pointermove", this.pointerMoveHandler);
     editor.editorOBJ?.addEventListener("pointerleave", this.pointerLeaveHandler);
     editor.editorOBJ?.addEventListener("wheel", this.wheelHandler, { passive: true });
-    document.addEventListener("keydown", this.keyDownHandler, true);
+    document.addEventListener("pointerdown", this.pointerDownHandler, true);
+    // Window capture runs before the editor's document-level key handler so the
+    // completion list can consume navigation keys without moving the caret.
+    window.addEventListener("keydown", this.keyDownHandler, true);
     void this.refreshStatus();
+  }
+
+  handleKeyDown(event) {
+    if (this.editor.quickPanel?.isOpen?.()) {
+      if (this.completionWidget.isVisible) this.completionWidget.hide();
+      return;
+    }
+    if (this.completionWidget.isVisible && this.completionWidget.handleKeyDown(event)) return;
+    if (event.key === "Escape" && (this.hoverPopover.isVisible || this.signaturePopover.isVisible)) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.hideTransientUi();
+    }
   }
 
   registerProblemsPanel() {
@@ -109,7 +122,8 @@ class LspController {
     this.editor.editorOBJ?.removeEventListener("pointermove", this.pointerMoveHandler);
     this.editor.editorOBJ?.removeEventListener("pointerleave", this.pointerLeaveHandler);
     this.editor.editorOBJ?.removeEventListener("wheel", this.wheelHandler);
-    document.removeEventListener("keydown", this.keyDownHandler, true);
+    document.removeEventListener("pointerdown", this.pointerDownHandler, true);
+    window.removeEventListener("keydown", this.keyDownHandler, true);
     this.completionWidget?.destroy?.();
     this.hoverPopover?.destroy?.();
     this.signaturePopover?.destroy?.();
@@ -529,8 +543,14 @@ class LspController {
   }
 
   async requestCompletion(triggerKind = 1, triggerCharacter = undefined) {
-    const context = this.getActiveContext();
-    if (!context) return null;
+    let context = this.getActiveContext();
+    if (!context) {
+      const file = this.editor.tabManager?.activeFile;
+      if (!file || !this.api) return null;
+      await this.ensureDocument(file);
+      context = this.getActiveContext();
+      if (!context) return null;
+    }
     const { file, record } = context;
     const requestRow = file.row;
     const requestColumn = file.column;
@@ -574,6 +594,9 @@ class LspController {
       session: this.completionSession,
       anchorRect: anchor,
       onAccept: (item, session) => this.applyCompletion(item, session),
+      onDismiss: () => {
+        if (this.completionSession?.token === token) this.completionSession = null;
+      },
     });
     return result;
   }

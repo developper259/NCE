@@ -139,12 +139,6 @@
   text-overflow: ellipsis;
 }
 
-.lsp-completion-source {
-  margin-left: auto;
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
 .lsp-completion-empty {
   padding: 6px 8px;
   color: var(--text-tertiary);

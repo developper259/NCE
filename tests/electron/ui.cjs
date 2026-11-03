@@ -190,6 +190,38 @@ module.exports = async function exerciseUI() {
     'Show Problems palette command',
   );
   panel.close();
+  const completionWidget = editor.lspController.completionWidget;
+  completionWidget.show({
+    items: [
+      { label: 'Alpha', detail: 'first detail', source: 'typescript-language-server' },
+      { label: 'Beta', detail: 'second detail', source: 'eslint-language-server' },
+    ],
+    prefix: '',
+    session: { file: editor.tabManager.activeFile },
+    anchorRect: null,
+  });
+  check(Boolean(completionWidget.element.querySelector('.lsp-completion-label')), 'Completion label');
+  check(completionWidget.element.querySelector('.lsp-completion-detail')?.textContent === 'first detail', 'Completion detail');
+  check(!completionWidget.element.querySelector('.lsp-completion-source'), 'Completion hides the server name');
+  const completionRowBefore = editor.tabManager.activeFile.row;
+  editor.editorOBJ.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  check(completionWidget.selectedIndex === 1, 'Completion consumes arrow navigation');
+  check(editor.tabManager.activeFile.row === completionRowBefore, 'Completion navigation keeps the caret in place');
+  editor.editorOBJ.dispatchEvent(new PointerEvent('pointerleave'));
+  check(completionWidget.isVisible, 'Pointer leaving the editor keeps completion open');
+  editor.editorOBJ.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  check(!completionWidget.isVisible, 'Clicking outside dismisses completion');
+  completionWidget.show({
+    items: [{ label: 'Gamma', detail: 'third detail' }],
+    prefix: '',
+    session: { file: editor.tabManager.activeFile },
+    anchorRect: null,
+  });
+  panel.open({ items: [{ id: 'x', label: 'X' }, { id: 'y', label: 'Y' }], onAccept: () => {} });
+  panel.input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  check(!completionWidget.isVisible, 'Quick panel takes over completion keys');
+  check(panel.session?.selectedIndex === 1, 'Quick panel still handles arrow navigation');
+  panel.close();
   for (const id of ['file-explorer', 'search', 'agent']) {
     const menu = editor.sidebarManager.menus.get(id);
     check(Boolean(menu), `Sidebar registration: ${id}`);

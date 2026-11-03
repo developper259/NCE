@@ -105,12 +105,6 @@ class LspCompletionWidget {
         description.textContent = detail;
         row.appendChild(description);
       }
-      if (item.source) {
-        const source = document.createElement("span");
-        source.className = "lsp-completion-source";
-        source.textContent = item.source;
-        row.appendChild(source);
-      }
       row.addEventListener("mousedown", (event) => {
         event.preventDefault();
         this.selectedIndex = index;

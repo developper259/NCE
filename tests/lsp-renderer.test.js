@@ -310,3 +310,62 @@ test("renderer bundles and preload expose the LSP integration", () => {
   assert.match(lineController, /diagnosticsOutputFast/);
   assert.match(lineController, /refreshDiagnosticsOverlay/);
 });
+
+test("completion opens the document before the first request", async () => {
+  const LspPositions = loadGlobal("src/js/lsp/LspPositions.js", "LspPositions");
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", { LspPositions });
+  const file = {
+    id: 7,
+    path: "/ws/main.ts",
+    row: 1,
+    column: 3,
+    editVersion: 0,
+    lines: makeFile("cons").lines,
+  };
+  let shown = null;
+  let completionPath = null;
+  const controller = Object.create(LspController.prototype);
+  controller.editor = { tabManager: { activeFile: file }, cD: null };
+  controller.api = {
+    async completion(payload) {
+      completionPath = payload.path;
+      return { success: true, items: [{ label: "console" }] };
+    },
+  };
+  controller.documents = new Map();
+  controller.ensureDocument = async (target) => {
+    controller.documents.set(target.id, { path: target.path });
+  };
+  controller.requestToken = 0;
+  controller.completionWidget = { show: (options) => { shown = options; } };
+  controller.notify = () => {};
+
+  const result = await controller.requestCompletion(1);
+
+  assert.equal(result.success, true);
+  assert.equal(completionPath, "/ws/main.ts");
+  assert.equal(shown.items[0].label, "console");
+  assert.equal(shown.session.file, file);
+});
+
+test("quick panel ownership pauses completion key handling", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  let hidden = 0;
+  let handled = 0;
+  controller.completionWidget = {
+    isVisible: true,
+    hide() { hidden += 1; },
+    handleKeyDown() { handled += 1; return true; },
+  };
+  controller.hoverPopover = { isVisible: false };
+  controller.signaturePopover = { isVisible: false };
+  controller.editor = { quickPanel: { isOpen: () => true } };
+  controller.handleKeyDown({ key: "ArrowDown", preventDefault() {}, stopPropagation() {} });
+  assert.equal(hidden, 1);
+  assert.equal(handled, 0);
+
+  controller.editor.quickPanel = { isOpen: () => false };
+  controller.handleKeyDown({ key: "ArrowDown", preventDefault() {}, stopPropagation() {} });
+  assert.equal(handled, 1);
+});
