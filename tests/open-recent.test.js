@@ -128,6 +128,7 @@ function workspaceFixture({
       this.rootPath = folder;
       return true;
     },
+    refresh() {},
   });
   return { explorer, tabManager, calls };
 }

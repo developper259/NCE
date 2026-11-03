@@ -524,6 +524,24 @@ app.whenReady().then(() => {
         const emptyDropWorkspaceInput = path.join(directory, "empty-window-drop");
         fs.mkdirSync(emptyDropWorkspaceInput, { recursive: true });
         const emptyDropWorkspace = await fs.promises.realpath(emptyDropWorkspaceInput);
+        const emptyWindowOpenFileInput = path.join(directory, "empty-window-open.js");
+        fs.writeFileSync(emptyWindowOpenFileInput, "const openBeforeDrop = true;\n", "utf8");
+        const emptyWindowOpenFile = await fs.promises.realpath(emptyWindowOpenFileInput);
+        const emptyWindowWorkspaceFile = path.join(emptyDropWorkspace, "inside-workspace.js");
+        fs.writeFileSync(emptyWindowWorkspaceFile, "const insideWorkspace = true;\n", "utf8");
+        assert.equal(await emptyWindow.window.webContents.executeJavaScript(
+          `editor.sidebarManager.openMenu("file-explorer"); editor.fileExplorer.isOpen`,
+        ), true, "the file explorer sidebar is already open before the folder drop");
+        const openedBeforeDrop = await emptyWindow.window.webContents.executeJavaScript(
+          `Promise.all([${JSON.stringify(emptyWindowOpenFile)}, ${JSON.stringify(emptyWindowWorkspaceFile)}].map(path => editor.tabManager.openFileWithPath(path))).then(opened => ({ openedFiles: opened.filter(Boolean).length }))`,
+        );
+        assert.equal(openedBeforeDrop.openedFiles, 2);
+        await waitForCondition(async () => {
+          if (!emptyWindow.window || !emptyWindow.rendererReady) return false;
+          return emptyWindow.window.webContents.executeJavaScript(
+            `[${JSON.stringify(emptyWindowOpenFile)}, ${JSON.stringify(emptyWindowWorkspaceFile)}].every(path => editor.tabManager.tabs.some(tab => tab.path === path))`,
+          );
+        }, { timeout: 10000, description: "files opened in the empty window before the folder drop" });
         const emptyDropResult = await emptyWindow.window.webContents.executeJavaScript(
           `window.api.openDroppedFiles(${JSON.stringify([emptyDropWorkspaceInput])})`,
         );
@@ -553,6 +571,18 @@ app.whenReady().then(() => {
         assert.equal(nce.windowManager.findWindowByWorkspace(emptyDropWorkspace)?.id, emptyWindow.id,
           "the dropped folder belongs to the existing empty window");
         assert.equal(emptyWindow.workspacePath, emptyDropWorkspace);
+        const emptyWindowAfterDrop = await emptyWindow.window.webContents.executeJavaScript(
+          `({
+            tabs: editor.tabManager.tabs.map(tab => tab.path),
+            visiblePaths: editor.fileExplorer.visibleRows.map(row => row.file.path),
+          })`,
+        );
+        assert.equal(emptyWindowAfterDrop.tabs.includes(emptyWindowOpenFile), false,
+          "files opened before the drop are closed when the empty window adopts a workspace");
+        assert.equal(emptyWindowAfterDrop.tabs.includes(emptyWindowWorkspaceFile), false,
+          "a fresh workspace does not inherit file tabs from the empty window");
+        assert.equal(emptyWindowAfterDrop.visiblePaths.includes(emptyWindowWorkspaceFile), true,
+          "the file explorer refreshes immediately when the dropped folder becomes the workspace");
         await emptyWindow.requestQuit();
         await emptyWindow.waitForDisposal();
 

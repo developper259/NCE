@@ -1175,6 +1175,7 @@ test("explicit File Explorer refresh reloads the root and restored expanded fold
 
 test("switching workspaces loads the new tree once and keeps it on sidebar reopen", async () => {
   const reads = [];
+  const refreshedPaths = [];
   const api = {
     async startWatching() {},
     async stopWatching() {},
@@ -1217,12 +1218,18 @@ test("switching workspaces loads the new tree once and keeps it on sidebar reope
       async pathStatus() { return { exists: true, isDirectory: true }; },
     },
     editor,
-    refresh() {},
+    refresh() {
+      refreshedPaths.push((this.files || []).map((file) => file.path));
+    },
   });
 
   assert.equal(await explorer.requestWorkspaceSwitch("/first"), true);
+  assert.deepEqual(refreshedPaths.at(-1), ["/first/file.js"],
+    "the explorer renders the adopted workspace immediately");
   await explorer.onOpen();
   assert.equal(await explorer.requestWorkspaceSwitch("/second"), true);
+  assert.deepEqual(refreshedPaths.at(-1), ["/second/file.js"],
+    "the explorer renders the replacement workspace immediately");
   await explorer.onOpen();
 
   assert.deepEqual(reads, ["/first", "/second"]);

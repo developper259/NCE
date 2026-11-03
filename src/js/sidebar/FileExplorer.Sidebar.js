@@ -1058,6 +1058,9 @@ class FileExplorer extends Sidebar {
 
     const activeWorkspacePath = this.rootPath || folderPath;
     await this.editor.statesManager.loadWorkspaceState(activeWorkspacePath);
+    // loadProject deferred its render until the restored expansion and scroll
+    // state were applied, so an already-open explorer must render now.
+    this.refresh();
     this.editor.statesManager.lastWorkspace = activeWorkspacePath;
     const stateSaved = await this.editor.statesManager.saveGlobalState();
     await this.editor.api.addRecentFolder?.(activeWorkspacePath);
