@@ -177,6 +177,19 @@ module.exports = async function exerciseUI() {
   check(panel.session.visibleItems.length === 1, 'Quick panel filter');
   key('Enter'); check(accepted === 'b' && !panel.isOpen(), 'Quick panel accept');
   panel.open({ items: [] }); key('Escape'); check(!panel.isOpen(), 'Quick panel Escape');
+  editor.keyBinding.control_open_command();
+  const paletteItems = Array.from(panel.session.options.items || []);
+  const lspPaletteItems = paletteItems.filter((item) => String(item.id).startsWith('lsp_'));
+  check(lspPaletteItems.length === 14, 'Command palette exposes 14 language server actions');
+  check(
+    lspPaletteItems.some((item) => item.id === 'lsp_format_document' && item.label === 'Language Server: Format Document'),
+    'Format Document palette command',
+  );
+  check(
+    lspPaletteItems.some((item) => item.id === 'lsp_show_problems' && item.label === 'Language Server: Show Problems'),
+    'Show Problems palette command',
+  );
+  panel.close();
   for (const id of ['file-explorer', 'search', 'agent']) {
     const menu = editor.sidebarManager.menus.get(id);
     check(Boolean(menu), `Sidebar registration: ${id}`);

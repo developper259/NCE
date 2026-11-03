@@ -336,10 +336,14 @@ test("one crashing server keeps the other session and its diagnostics alive", { 
     });
     assert.equal(completion.success, true);
     assert.equal(completion.items.some((item) => item.label === "typescript-language-server-item"), true);
-    const latest = events.diagnostics.at(-1);
-    const documentDiagnostics = latest.documents.find((document) => document.path === documentPath);
-    assert.equal(documentDiagnostics.diagnostics.every((entry) =>
-      entry.serverId.startsWith("typescript-language-server")), true);
+    const documentDiagnostics = await waitFor(() => {
+      const latest = events.diagnostics.at(-1);
+      const document = latest?.documents.find((entry) => entry.path === documentPath);
+      if (!document?.diagnostics.length) return null;
+      return document.diagnostics.every((entry) =>
+        entry.serverId.startsWith("typescript-language-server")) ? document : null;
+    });
+    assert.equal(documentDiagnostics.diagnostics.length > 0, true);
     assert.equal((await manager.restartServer({ serverId: "eslint-language-server" })).success, true);
     await waitFor(async () => {
       const status = await manager.getStatus();

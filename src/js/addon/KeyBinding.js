@@ -466,7 +466,7 @@ class KeyBinding {
         this.isActionEnabled(item.action),
     ).map((item) => ({
       id: item.action,
-      label: this.getActionLabel(item.action),
+      label: item.label || this.getActionLabel(item.action),
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
@@ -573,23 +573,6 @@ class KeyBinding {
   }
 
   getActionLabel(action) {
-    const labels = {
-      lsp_completion: "Language Server: Trigger Completion",
-      lsp_hover: "Language Server: Show Hover",
-      lsp_signature_help: "Language Server: Signature Help",
-      lsp_definition: "Language Server: Go to Definition",
-      lsp_declaration: "Language Server: Go to Declaration",
-      lsp_implementation: "Language Server: Go to Implementation",
-      lsp_type_definition: "Language Server: Go to Type Definition",
-      lsp_references: "Language Server: Find References",
-      lsp_rename: "Language Server: Rename Symbol",
-      lsp_code_action: "Language Server: Show Code Actions",
-      lsp_format_document: "Language Server: Format Document",
-      lsp_document_symbols: "Language Server: Document Symbols",
-      lsp_workspace_symbols: "Language Server: Workspace Symbols",
-      lsp_show_problems: "Language Server: Show Problems",
-    };
-    if (labels[action]) return labels[action];
     if (action === "open_settings") return "Open Settings (UI)";
     return action
       .split("_")

@@ -104,12 +104,12 @@ Nothing is installed or downloaded. The document still opens and edits normally.
 | Find references | `Shift+F12` |
 | Rename symbol | `F2` |
 | Code actions | `Mod+.` |
-| Format document or selection | `Alt+Shift+F` |
+| Format document | `Alt+Shift+F` |
 | Document symbols | `Ctrl+Alt+O` |
 | Workspace symbols | `Mod+T` |
 | Show Problems | `Mod+Shift+M` |
 
-Hover, signature help, declaration, implementation and type definition are available from the command palette.
+All fourteen language-server commands are also available from the Command Palette (`Mod+Shift+P`). Their shortcuts, including the commands without a default (hover, signature help, declaration, implementation, type definition), can be rebound in Settings → Shortcuts.
 
 ## Security
 

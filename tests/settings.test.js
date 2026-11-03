@@ -436,6 +436,15 @@ test("every configurable renderer shortcut has a persisted default", async () =>
 
   assert.equal(DEFAULT_KEYBINDINGS.next_tab, "Ctrl+Tab");
   assert.equal(DEFAULT_KEYBINDINGS.previous_tab, "Ctrl+Shift+Tab");
+
+  const lspActions = Object.keys(context.defaults).filter((action) =>
+    action.startsWith("lsp_"));
+  assert.equal(lspActions.length, 14);
+  for (const action of lspActions) {
+    const binding = context.bindings.find((item) => item.action === action);
+    assert.ok(binding, `${action} must be registered for shortcut dispatch`);
+    assert.equal(binding.in_editor, false, `${action} must be available outside the editor`);
+  }
 });
 
 test("settings remain IPC-scoped and session state contains no preferences", async () => {

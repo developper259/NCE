@@ -170,6 +170,76 @@ const USERCONFIG_KEYBINDING = [
     description: "Reload Window",
     in_editor: false,
   },
+  {
+    action: "lsp_completion",
+    label: "Language Server: Trigger Completion",
+    in_editor: false,
+  },
+  {
+    action: "lsp_signature_help",
+    label: "Language Server: Signature Help",
+    in_editor: false,
+  },
+  {
+    action: "lsp_hover",
+    label: "Language Server: Show Hover",
+    in_editor: false,
+  },
+  {
+    action: "lsp_definition",
+    label: "Language Server: Go to Definition",
+    in_editor: false,
+  },
+  {
+    action: "lsp_declaration",
+    label: "Language Server: Go to Declaration",
+    in_editor: false,
+  },
+  {
+    action: "lsp_implementation",
+    label: "Language Server: Go to Implementation",
+    in_editor: false,
+  },
+  {
+    action: "lsp_type_definition",
+    label: "Language Server: Go to Type Definition",
+    in_editor: false,
+  },
+  {
+    action: "lsp_references",
+    label: "Language Server: Find References",
+    in_editor: false,
+  },
+  {
+    action: "lsp_rename",
+    label: "Language Server: Rename Symbol",
+    in_editor: false,
+  },
+  {
+    action: "lsp_code_action",
+    label: "Language Server: Show Code Actions",
+    in_editor: false,
+  },
+  {
+    action: "lsp_format_document",
+    label: "Language Server: Format Document",
+    in_editor: false,
+  },
+  {
+    action: "lsp_document_symbols",
+    label: "Language Server: Document Symbols",
+    in_editor: false,
+  },
+  {
+    action: "lsp_workspace_symbols",
+    label: "Language Server: Workspace Symbols",
+    in_editor: false,
+  },
+  {
+    action: "lsp_show_problems",
+    label: "Language Server: Show Problems",
+    in_editor: false,
+  },
   { action: "escape", in_editor: false },
   { action: "indent_right", in_editor: true },
   { action: "delete_right", in_editor: true },

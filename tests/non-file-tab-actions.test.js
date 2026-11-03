@@ -2,8 +2,20 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
-const { loadGlobal } = require("./helpers/runtime");
+const { loadGlobal, root } = require("./helpers/runtime");
+
+function applicationBindings() {
+  const context = {};
+  vm.createContext(context);
+  vm.runInContext(
+    `${fs.readFileSync(path.join(root, "src/config/Application.js"), "utf8")}
+     this.bindings = USERCONFIG_KEYBINDING;`,
+    context,
+  );
+  return Array.from(context.bindings, (binding) => ({ ...binding }));
+}
 
 function createTabActionFixture(types) {
   const tabs = types.map((type, id) => ({ id: id + 1, type }));
@@ -401,4 +413,82 @@ test("tab and titlebar propagate the active file context to both menus", () => {
     titleBar,
     /\["Go to Line\.\.\.", "go_to_line", \{ needsFile: true \}\]/,
   );
+});
+
+test("the command palette exposes and dispatches language server actions", () => {
+  const bindings = applicationBindings();
+  const expected = [
+    ["lsp_completion", "Language Server: Trigger Completion"],
+    ["lsp_signature_help", "Language Server: Signature Help"],
+    ["lsp_hover", "Language Server: Show Hover"],
+    ["lsp_definition", "Language Server: Go to Definition"],
+    ["lsp_declaration", "Language Server: Go to Declaration"],
+    ["lsp_implementation", "Language Server: Go to Implementation"],
+    ["lsp_type_definition", "Language Server: Go to Type Definition"],
+    ["lsp_references", "Language Server: Find References"],
+    ["lsp_rename", "Language Server: Rename Symbol"],
+    ["lsp_code_action", "Language Server: Show Code Actions"],
+    ["lsp_format_document", "Language Server: Format Document"],
+    ["lsp_document_symbols", "Language Server: Document Symbols"],
+    ["lsp_workspace_symbols", "Language Server: Workspace Symbols"],
+    ["lsp_show_problems", "Language Server: Show Problems"],
+  ];
+  assert.deepEqual(
+    bindings
+      .filter((binding) => binding.action.startsWith("lsp_"))
+      .map((binding) => [binding.action, binding.label]),
+    expected,
+  );
+  for (const [action] of expected) {
+    const binding = bindings.find((item) => item.action === action);
+    assert.equal(binding.in_editor, false, `${action} is palette-dispatchable`);
+  }
+
+  let panelOptions;
+  const calls = [];
+  const lspBindings = bindings
+    .filter((binding) => binding.action.startsWith("lsp_"))
+    .map((binding) => ({
+      ...binding,
+      key: binding.action === "lsp_format_document" ? "Alt+Shift+F" : null,
+    }));
+  const KeyBinding = loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding", {
+    USERCONFIG_KEYBINDING: lspBindings,
+    CONFIG_KEYBINDING_DISPLAY: (key) => key,
+  });
+  const keyBinding = new KeyBinding({
+    tabManager: { activeFile: { path: "/workspace/main.ts" }, tabs: [] },
+    lspController: new Proxy({}, {
+      get: (_target, property) => () => calls.push(String(property)),
+    }),
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => { panelOptions = options; },
+    },
+  });
+  keyBinding.editor.keyBinding = keyBinding;
+
+  keyBinding.control_open_command();
+
+  const items = panelOptions.items.filter((item) => item.id.startsWith("lsp_"));
+  assert.deepEqual(
+    Array.from(items, (item) => item.id),
+    expected.map(([action]) => action),
+  );
+  assert.equal(
+    items.find((item) => item.id === "lsp_format_document").shortcut,
+    "Alt+Shift+F",
+  );
+  assert.equal(
+    items.find((item) => item.id === "lsp_show_problems").label,
+    "Language Server: Show Problems",
+  );
+
+  keyBinding.executeCommandItem(
+    items.find((item) => item.id === "lsp_format_document"),
+  );
+  keyBinding.executeCommandItem(
+    items.find((item) => item.id === "lsp_show_problems"),
+  );
+  assert.deepEqual(calls, ["formatDocument", "showProblems"]);
 });
