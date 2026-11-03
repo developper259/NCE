@@ -193,15 +193,25 @@ module.exports = async function exerciseUI() {
   const completionWidget = editor.lspController.completionWidget;
   completionWidget.show({
     items: [
-      { label: 'Alpha', detail: 'first detail', source: 'typescript-language-server' },
-      { label: 'Beta', detail: 'second detail', source: 'eslint-language-server' },
+      { label: 'Alpha', detail: '(method) Greeter.greet(value: string): boolean', source: 'typescript-language-server' },
+      { label: 'Beta', detail: 'const flag: boolean', source: 'eslint-language-server' },
+      { label: 'Gamma', detail: null, source: 'eslint-language-server' },
     ],
     prefix: '',
     session: { file: editor.tabManager.activeFile },
     anchorRect: null,
   });
   check(Boolean(completionWidget.element.querySelector('.lsp-completion-label')), 'Completion label');
-  check(completionWidget.element.querySelector('.lsp-completion-detail')?.textContent === 'first detail', 'Completion detail');
+  const completionAnnotations = Array.from(
+    completionWidget.element.querySelectorAll('.lsp-completion-annotation'),
+    (node) => node.textContent,
+  );
+  check(
+    completionAnnotations.length === 2 &&
+      completionAnnotations[0] === 'Greeter' &&
+      completionAnnotations[1] === 'boolean',
+    'Completion methods show their class and variables their type',
+  );
   check(!completionWidget.element.querySelector('.lsp-completion-source'), 'Completion hides the server name');
   const completionRowBefore = editor.tabManager.activeFile.row;
   editor.editorOBJ.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));

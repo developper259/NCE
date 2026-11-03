@@ -595,7 +595,41 @@ class LspController {
         if (this.completionSession?.token === token) this.completionSession = null;
       },
     });
+    void this.resolveCompletionDetails(this.completionSession);
     return result;
+  }
+
+  completionSourceSupportsResolve(source) {
+    return (this.status?.sessions || []).some((session) =>
+      session.state === "ready" &&
+      session.serverId === source &&
+      session.capabilities?.completionResolve === true);
+  }
+
+  async resolveCompletionDetails(session) {
+    if (!session || this.completionSession !== session || !this.api?.resolveCompletion) return;
+    const pending = session.items
+      .slice(0, 100)
+      .filter((item) => item?.id && !item.detail &&
+        this.completionSourceSupportsResolve(item.source));
+    if (!pending.length) return;
+    let index = 0;
+    const worker = async () => {
+      while (this.completionSession === session) {
+        const item = pending[index];
+        index += 1;
+        if (!item) return;
+        try {
+          const resolved = await this.api.resolveCompletion({ id: item.id });
+          if (this.completionSession !== session) return;
+          if (resolved?.success && typeof resolved.item?.detail === "string" && resolved.item.detail)
+            item.detail = resolved.item.detail;
+        } catch {}
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(6, pending.length) }, worker));
+    if (this.completionSession === session && this.completionWidget.isVisible)
+      this.completionWidget.render();
   }
 
   updateCompletionPrefix(file) {

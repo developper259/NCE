@@ -414,3 +414,64 @@ test("empty completion leaves editor keys untouched", () => {
   assert.equal(widget.handleKeyDown({ key: "Escape", ...event() }), true);
   assert.equal(hidden, 1);
 });
+
+test("completion annotations show a method class or a value type", () => {
+  const LspCompletionWidget = loadGlobal("src/js/lsp/LspCompletionWidget.js", "LspCompletionWidget");
+  const describe = (item) => LspCompletionWidget.prototype.completionDescription(item);
+  assert.equal(describe({ detail: "(method) Greeter.greet(value: string): boolean", kind: 2 }), "Greeter");
+  assert.equal(describe({ detail: "Greeter.greet(): void", kind: 2 }), "Greeter");
+  assert.equal(describe({ detail: "(method) greet(): void", kind: 2 }), "");
+  assert.equal(describe({ detail: "(function) greet(): void", kind: 3 }), "");
+  assert.equal(describe({ detail: "(property) Greeter.count: number", kind: 10 }), "number");
+  assert.equal(describe({ detail: "const flag: boolean", kind: 6 }), "boolean");
+  assert.equal(describe({ detail: "const obj: { a: string; b: number }", kind: 6 }), "{ a: string; b: number }");
+  assert.equal(describe({ detail: null, kind: 6 }), "");
+  assert.equal(describe({}), "");
+});
+
+test("completion details resolve only for supporting servers", async () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  const resolved = [];
+  let renders = 0;
+  const supported = {
+    token: 1,
+    items: [
+      { id: "a", source: "typescript-language-server" },
+      { id: "b", source: "typescript-language-server", detail: "const known: string" },
+      { id: "c", source: "plain-server" },
+    ],
+  };
+  const plainOnly = { token: 2, items: [{ id: "d", source: "plain-server" }] };
+  controller.api = {
+    async resolveCompletion({ id }) {
+      resolved.push(id);
+      return { success: true, item: { detail: "(method) Greeter.greet(): boolean" } };
+    },
+  };
+  controller.status = {
+    sessions: [
+      {
+        serverId: "typescript-language-server",
+        state: "ready",
+        capabilities: { completionResolve: true },
+      },
+      { serverId: "plain-server", state: "ready", capabilities: { completionResolve: false } },
+    ],
+  };
+  controller.completionWidget = { isVisible: true, render: () => { renders += 1; } };
+  controller.completionSession = supported;
+
+  await controller.resolveCompletionDetails(supported);
+
+  assert.deepEqual(resolved, ["a"]);
+  assert.equal(supported.items[0].detail, "(method) Greeter.greet(): boolean");
+  assert.equal(supported.items[1].detail, "const known: string");
+  assert.equal(renders, 1);
+
+  resolved.length = 0;
+  controller.completionSession = plainOnly;
+  await controller.resolveCompletionDetails(plainOnly);
+  assert.deepEqual(resolved, []);
+  assert.equal(renders, 1);
+});

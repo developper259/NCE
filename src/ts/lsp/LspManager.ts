@@ -777,7 +777,7 @@ export class LspManager {
           error: attempt.error,
           documents: 0,
           capabilities: {
-            completion: false, hover: false, definition: false, references: false,
+            completion: false, completionResolve: false, hover: false, definition: false, references: false,
             rename: false, codeAction: false, formatting: false, rangeFormatting: false,
             documentSymbols: false, workspaceSymbols: false, signatureHelp: false,
             completionTriggerCharacters: [], signatureHelpTriggerCharacters: [],
@@ -809,6 +809,7 @@ export class LspManager {
       documents,
       capabilities: {
         completion: capabilities.completion,
+        completionResolve: capabilities.completionResolve,
         hover: capabilities.hover,
         definition: capabilities.definition,
         references: capabilities.references,

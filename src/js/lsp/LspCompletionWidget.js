@@ -98,11 +98,11 @@ class LspCompletionWidget {
       label.className = "lsp-completion-label";
       label.textContent = item.label;
       row.appendChild(label);
-      const detail = item.detail || item.kindLabel || "";
-      if (detail) {
+      const annotation = this.completionDescription(item);
+      if (annotation) {
         const description = document.createElement("span");
-        description.className = "lsp-completion-detail";
-        description.textContent = detail;
+        description.className = "lsp-completion-annotation";
+        description.textContent = annotation;
         row.appendChild(description);
       }
       row.addEventListener("mousedown", (event) => {
@@ -113,6 +113,22 @@ class LspCompletionWidget {
       this.element.appendChild(row);
     });
     this.scrollSelectedIntoView();
+  }
+
+  completionDescription(item) {
+    const detail = typeof item?.detail === "string" ? item.detail : "";
+    if (!detail) return "";
+    const method = /^\((?:method|function|constructor)\)\s+(.+)$/.exec(detail);
+    if (method || [2, 3, 4].includes(item?.kind)) {
+      const signature = method ? method[1] : detail;
+      const open = signature.indexOf("(");
+      const owner = (open >= 0 ? signature.slice(0, open) : signature).trim();
+      const parts = owner.split(".").filter(Boolean);
+      return parts.length > 1 ? parts[parts.length - 2] : "";
+    }
+    const colon = detail.indexOf(": ");
+    if (colon < 0) return "";
+    return detail.slice(colon + 2).replace(/\s+/g, " ").trim().slice(0, 120);
   }
 
   scrollSelectedIntoView() {

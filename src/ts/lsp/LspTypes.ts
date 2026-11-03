@@ -88,6 +88,7 @@ export interface LspServerSessionView {
   documents: number;
   capabilities: {
     completion: boolean;
+    completionResolve: boolean;
     hover: boolean;
     definition: boolean;
     references: boolean;

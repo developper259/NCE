@@ -112,6 +112,7 @@ test("LSP manager runs several servers for one document and routes features", { 
       session.serverId === "typescript-language-server");
     assert.deepEqual(readySession.capabilities.completionTriggerCharacters, ["."]);
     assert.deepEqual(readySession.capabilities.signatureHelpTriggerCharacters, ["("]);
+    assert.equal(readySession.capabilities.completionResolve, true);
 
     const diagnostics = await waitFor(() => {
       const latest = latestDiagnostics(events, documentPath);

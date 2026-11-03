@@ -83,7 +83,7 @@ Nothing is installed or downloaded. The document still opens and edits normally.
 
 ## Feature policies
 
-- **Completion**: merged across capable servers, de-duplicated by label/kind/detail; the selected item is resolved before insertion. Items can provide `textEdit`, `insertText` and additional edits. Server-advertised trigger characters (static or dynamically registered) drive automatic requests.
+- **Completion**: merged across capable servers, de-duplicated by label/kind/detail; the selected item is resolved before insertion. Items can provide `textEdit`, `insertText` and additional edits. Server-advertised trigger characters (static or dynamically registered) drive automatic requests. Resolvable items show the containing class for methods or the value type for variables on the right.
 - **Hover / signature help**: first provider by configured priority, cancellation on cursor/document changes. Markdown hover content is rendered through the existing strict Markdown renderer.
 - **Definition, declaration, implementation, type definition, references**: merged and de-duplicated across servers; multiple results open a picker; targets outside authorized files are rejected.
 - **Rename and formatting**: a single deterministic provider (highest priority). Workspace edits are version-checked and confined to authorized paths. Text edits, creates, renames and deletes from a workspace edit are applied through the editor and file-management APIs; `.nce` state is always rejected.

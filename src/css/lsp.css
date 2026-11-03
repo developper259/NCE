@@ -133,10 +133,13 @@
   color: var(--text-primary);
 }
 
-.lsp-completion-detail {
-  color: var(--text-secondary);
+.lsp-completion-annotation {
+  margin-left: auto;
+  max-width: 45%;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .lsp-completion-empty {
