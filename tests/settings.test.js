@@ -652,7 +652,7 @@ test("default shortcuts never collide under either primary modifier", () => {
   }
 });
 
-test("Language Manager settings use the shared design and a single warning color", async () => {
+test("Language Manager settings use grouped rows, shared states and disclosure details", async () => {
   const settingsView = await fs.readFile(
     path.join(__dirname, "../src/js/view/SettingsView.js"),
     "utf8",
@@ -660,13 +660,25 @@ test("Language Manager settings use the shared design and a single warning color
   const lspCss = await fs.readFile(path.join(__dirname, "../src/css/lsp.css"), "utf8");
   assert.match(settingsView, /category: "Language Manager"/);
   assert.doesNotMatch(settingsView, /category: "Language Servers"/);
+  assert.match(settingsView, /is-language-manager/);
+  assert.match(settingsView, /lsp-preference/);
+  assert.match(settingsView, /lsp-group-list/);
+  assert.match(settingsView, /lsp-disclosure/);
+  assert.match(settingsView, /lsp-server-details/);
+  assert.match(settingsView, /scheduleLanguageManagerRefresh/);
   assert.match(settingsView, /settings-action-button/);
   assert.match(settingsView, /requestLspServerPath/);
   assert.match(settingsView, /languageLabel\(server\)/);
   assert.doesNotMatch(settingsView, /lsp-settings-note/);
   assert.doesNotMatch(settingsView, /lsp-settings-path/);
-  assert.doesNotMatch(lspCss, /lsp-settings-state\.is-error/);
-  assert.match(lspCss, /\.lsp-settings-state\.is-missing\s*\{[^}]*var\(--state-warning\)/);
+  assert.doesNotMatch(lspCss, /\.lsp-settings-state/);
+  assert.match(lspCss, /\.lsp-status\[data-state="not-installed"\][^{]*\{[^}]*--state-warning/);
+  assert.match(lspCss, /\.lsp-details-message\[data-tone="error"\][^{]*\{[^}]*var\(--state-error\)/);
+  assert.match(lspCss, /\.is-language-manager\s*\{[^}]*var\(--font-ui\)/);
+  assert.match(lspCss, /\.lsp-mono\s*\{[^}]*var\(--font-mono\)/);
+  assert.match(settingsView, /lsp-detail-primary/);
+  assert.match(lspCss, /\.lsp-details-grid\s*\{[^}]*auto-fit/);
+  assert.match(lspCss, /\.lsp-detail-primary\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/);
 });
 
 test("Set path prefills the configured executable path", async () => {
@@ -688,4 +700,92 @@ test("Set path prefills the configured executable path", async () => {
   assert.match(options.title, /TypeScript Language Server/);
   options.onAccept(" /next/server ");
   assert.equal(await pending, "/next/server");
+});
+
+test("Language Manager groups ecosystems and labels unavailable servers precisely", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
+  const view = Object.create(SettingsView.prototype);
+  const server = (id, languages, overrides = {}) => ({
+    id,
+    name: id,
+    languages,
+    enabled: true,
+    available: true,
+    requiresConfiguration: false,
+    ...overrides,
+  });
+  const groups = view.groupLanguageServers([
+    server("typescript-language-server", ["javascript", "typescript"], { priority: 100 }),
+    server("eslint-language-server", ["javascript", "typescript"], { priority: 40 }),
+    server("basedpyright", ["python"]),
+    server("future-server", ["ruby"]),
+  ]);
+  assert.deepEqual(
+    Array.from(groups, (group) => group.label),
+    ["JavaScript / TypeScript", "Python", "Ruby"],
+  );
+  assert.deepEqual(
+    Array.from(groups[0].servers, (entry) => entry.id),
+    ["typescript-language-server", "eslint-language-server"],
+  );
+
+  assert.equal(
+    view.getLanguageServerDisplayState(
+      server("missing", ["python"], { available: false }),
+      [],
+      { path: "/missing/server" },
+      true,
+    ).id,
+    "missing-executable",
+  );
+  assert.equal(
+    view.getLanguageServerDisplayState(
+      server("unconfigured", ["java"], { available: false, requiresConfiguration: true }),
+      [],
+      {},
+      true,
+    ).id,
+    "needs-configuration",
+  );
+  assert.equal(
+    view.getLanguageServerDisplayState(
+      server("absent", ["rust"], { available: false }),
+      [],
+      {},
+      true,
+    ).id,
+    "not-installed",
+  );
+  assert.equal(
+    view.getLanguageServerDisplayState(server("ready", ["python"]), [], {}, true).id,
+    "enabled",
+  );
+  assert.equal(
+    view.getLanguageServerDisplayState(
+      server("ready", ["python"]),
+      [{ state: "ready", documents: 2 }],
+      {},
+      true,
+    ).label,
+    "Running",
+  );
+  assert.equal(
+    view.getLanguageServerDisplayState(
+      server("failed", ["python"]),
+      [{ state: "failed", error: "crashed" }],
+      {},
+      true,
+    ).id,
+    "error",
+  );
+  assert.equal(
+    view.getLanguageServerDisplayState(
+      server("disabled", ["python"], { enabled: false }),
+      [],
+      {},
+      true,
+    ).id,
+    "disabled",
+  );
 });

@@ -283,8 +283,15 @@ module.exports = async function exerciseUI() {
     settingsCategories.includes('Language Manager') && !settingsCategories.includes('Language Servers'),
     'Language Servers category is renamed',
   );
-  check(!settingsView.content.querySelector('.settings-page-description'), 'Language Manager has no subtitle');
+  const languageDescription = settingsView.content.querySelector('.settings-page-description');
+  check(
+    languageDescription?.textContent.includes('language servers'),
+    'Language Manager describes its purpose',
+  );
   check(!settingsView.content.querySelector('.lsp-settings-note'), 'Language Manager has no explanatory note');
+  const languagePreference = settingsView.content.querySelector('.lsp-preference');
+  check(Boolean(languagePreference?.querySelector('.lsp-preference-title')), 'Language Manager exposes the global preference');
+  check(Boolean(languagePreference?.querySelector('.setting-toggle input')), 'Language Manager exposes the global toggle');
   const languageRowDeadline = Date.now() + 5000;
   while (
     !settingsView.content.querySelector('[data-server-id="typescript-language-server"]') &&
@@ -293,35 +300,61 @@ module.exports = async function exerciseUI() {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   const languageRow = settingsView.content.querySelector('[data-server-id="typescript-language-server"]');
+  check(Boolean(languageRow?.closest('.lsp-group')), 'Language servers are grouped');
   check(
-    languageRow?.querySelector('.settings-row-label')?.textContent === 'JavaScript / TypeScript',
-    'Language row uses the language title',
+    languageRow?.closest('.lsp-group')?.querySelector('.lsp-group-title')?.textContent === 'JavaScript / TypeScript',
+    'Language group is labelled by ecosystem',
   );
-  check(!languageRow?.querySelector('.setting-toggle input'), 'Language row has no on/off checkbox');
+  check(
+    languageRow?.querySelector('.lsp-server-name')?.textContent === 'TypeScript Language Server',
+    'Language row uses the server name',
+  );
+  check(Boolean(languageRow?.querySelector('.lsp-server-toggle input')), 'Language row has an enable toggle');
+  check(!languageRow?.querySelector('.settings-row-label'), 'Language row is not a generic setting row');
   check(
     !languageRow?.querySelector('.lsp-settings-path') &&
       !languageRow?.querySelector('input[type="text"]'),
     'Language row has no executable path input',
   );
-  check(!settingsView.content.querySelector('.lsp-settings-state.is-error'), 'No red language state remains');
+  check(
+    Boolean(languageRow?.querySelector('.lsp-status')) &&
+      languageRow?.querySelector('.lsp-status')?.dataset.state !== 'error',
+    'Language row exposes a compact status',
+  );
   const lspStatus = await window.api.lsp.getStatus();
   const lspServers = new Map((lspStatus?.servers || []).map((server) => [server.id, server]));
   for (const row of Array.from(settingsView.content.querySelectorAll('[data-server-id]'))) {
     const server = lspServers.get(row.dataset.serverId);
     if (!server) continue;
-    const stateButton = Array.from(row.querySelectorAll('button'))
-      .find((button) => button.textContent === 'Enable' || button.textContent === 'Disable');
-    check(Boolean(stateButton), 'Language row exposes an enable/disable button');
-    if (server.enabled) {
-      check(stateButton.textContent === 'Disable' && stateButton.disabled === false, 'Enabled languages offer Disable');
-    } else {
-      check(stateButton.textContent === 'Enable', 'Disabled languages offer Enable');
-      check(stateButton.disabled === !server.available, 'Enable is unavailable without a detected path');
+    const toggle = row.querySelector('.lsp-server-toggle input');
+    check(Boolean(toggle), 'Language row exposes an enable toggle');
+    const expectedChecked = lspStatus.enabled === true && server.enabled === true;
+    check(toggle.checked === expectedChecked, 'Language toggle reflects the effective state');
+    if (lspStatus.enabled !== true) {
+      check(toggle.disabled === true, 'Language toggles are disabled when language servers are off');
+    } else if (!server.enabled && !server.available) {
+      check(toggle.disabled === true, 'Unavailable languages cannot be enabled');
     }
   }
-  const setPathButton = Array.from(languageRow?.querySelectorAll('button') || [])
-    .find((button) => button.textContent === 'Set path');
-  check(Boolean(setPathButton), 'Language row exposes a Set path button');
+  const disclosure = languageRow.querySelector('.lsp-disclosure');
+  const details = languageRow.querySelector('.lsp-server-details');
+  check(
+    disclosure?.getAttribute('aria-expanded') === 'false' && details?.hasAttribute('inert'),
+    'Language details start collapsed and inert',
+  );
+  disclosure.click();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  check(
+    disclosure.getAttribute('aria-expanded') === 'true' &&
+      details.dataset.open === 'true' &&
+      !details.hasAttribute('inert'),
+    'Language details expand on disclosure',
+  );
+  check(Boolean(details.querySelector('.lsp-detail-label')), 'Expanded details expose server metadata');
+  check(String(details.textContent).includes('Server ID'), 'Expanded details expose the server identifier');
+  const setPathButton = Array.from(details.querySelectorAll('button'))
+    .find((button) => button.textContent.endsWith('executable path'));
+  check(Boolean(setPathButton), 'Expanded details expose the executable path action');
   setPathButton.click();
   await new Promise((resolve) => setTimeout(resolve, 30));
   check(editor.quickPanel.isOpen('lsp-server-path'), 'Set path opens the quick panel input');
@@ -332,6 +365,14 @@ module.exports = async function exerciseUI() {
   editor.quickPanel.close();
   await new Promise((resolve) => setTimeout(resolve, 30));
   check(!editor.quickPanel.isOpen('lsp-server-path'), 'Set path prompt closes');
+  disclosure.click();
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  check(
+    disclosure.getAttribute('aria-expanded') === 'false' &&
+      details.dataset.open === 'false' &&
+      details.hasAttribute('inert'),
+    'Language details collapse back to an inert state',
+  );
   check(problemsPanel.summary.textContent.startsWith('1 error'), 'Problems summary counts errors');
   problemsPanel.destroy();
   await editor.bottomPanelManager.openPanel('problems');

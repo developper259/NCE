@@ -1,4 +1,8 @@
 :root {
+  /* Typography */
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
   /* Background colors */
   --bg-workbench: #141414;
   --bg-primary: #181818;
@@ -95,6 +99,7 @@
 
   /* Semantic UI states */
   --state-info: var(--accent-primary);
+  --state-success: var(--git-added);
   --state-warning: var(--git-conflict);
   --state-error: var(--git-deleted);
 

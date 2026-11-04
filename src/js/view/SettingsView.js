@@ -107,7 +107,29 @@ const SETTINGS_CATEGORY_META = Object.freeze({
   },
   Agent: { description: "Configure AI models and providers." },
   Terminal: { description: "Configure the integrated system terminal." },
+  "Language Manager": {
+    description:
+      "Manage the language servers that provide diagnostics, completion, and code intelligence.",
+  },
 });
+
+const LSP_SETTINGS_LANGUAGE_GROUPS = Object.freeze([
+  {
+    id: "javascript-typescript",
+    label: "JavaScript / TypeScript",
+    badge: "JS",
+    languages: ["javascript", "typescript"],
+  },
+  { id: "python", label: "Python", badge: "PY", languages: ["python"] },
+  { id: "c-cpp", label: "C / C++", badge: "C++", languages: ["c", "cpp"] },
+  { id: "html", label: "HTML", badge: "HTML", languages: ["html"] },
+  { id: "css", label: "CSS", badge: "CSS", languages: ["css"] },
+  { id: "json", label: "JSON", badge: "JSON", languages: ["json"] },
+  { id: "yaml", label: "YAML", badge: "YAML", languages: ["yaml"] },
+  { id: "php", label: "PHP", badge: "PHP", languages: ["php"] },
+  { id: "java", label: "Java", badge: "Java", languages: ["java"] },
+  { id: "xml", label: "XML", badge: "XML", languages: ["xml"] },
+]);
 
 class SettingsView {
   constructor(editor) {
@@ -119,9 +141,17 @@ class SettingsView {
     this.scroller = null;
     this.scrollSaveTimer = null;
     this.scrollRestored = false;
+    this.languageManagerView = null;
+    this.languageManagerRefreshTimer = null;
+    this.unsubscribeLspStatus = null;
     this.onContentScroll = () => this.scheduleScrollSave();
     this.openSettingSelect = null;
     this.settingSelectPositionListener = null;
+    this.onLspStatusPush = (status) => {
+      const view = this.languageManagerView;
+      if (!view || !status?.success || this.host?.hidden) return;
+      this.applyLanguageServerStatus(view, status);
+    };
     this.onSettingSelectOutsidePointerDown = (event) => {
       if (
         this.openSettingSelect &&
@@ -134,6 +164,13 @@ class SettingsView {
       "pointerdown",
       this.onSettingSelectOutsidePointerDown,
     );
+    const subscribeLspStatus = window.api?.lsp?.onStatus;
+    if (typeof subscribeLspStatus === "function") {
+      const unsubscribe = subscribeLspStatus(this.onLspStatusPush);
+      if (typeof unsubscribe === "function") {
+        this.unsubscribeLspStatus = unsubscribe;
+      }
+    }
     this.build();
   }
 
@@ -197,6 +234,13 @@ class SettingsView {
       "pointerdown",
       this.onSettingSelectOutsidePointerDown,
     );
+    if (typeof this.unsubscribeLspStatus === "function") {
+      this.unsubscribeLspStatus();
+    }
+    this.unsubscribeLspStatus = null;
+    this.languageManagerView = null;
+    clearTimeout(this.languageManagerRefreshTimer);
+    this.languageManagerRefreshTimer = null;
     clearTimeout(this.scrollSaveTimer);
     this.scrollSaveTimer = null;
     this.content?.removeEventListener("scroll", this.onContentScroll);
@@ -323,6 +367,7 @@ class SettingsView {
     this.closeSettingSelect();
     const previousScrollTop = preserveScroll ? this.content.scrollTop : 0;
     this.content.scrollTop = 0;
+    this.languageManagerView = null;
     const settings = this.getVisibleSettings();
     this.content.replaceChildren();
     if (!settings.length) {
@@ -336,23 +381,20 @@ class SettingsView {
     }
     const categories = [...new Set(settings.map((item) => item.category))];
     for (const category of categories) {
-      const section = document.createElement("section");
-      section.className = "settings-page";
-      section.appendChild(this.createPageHeader(category));
-
       const categorySettings = settings.filter(
         (item) => item.category === category,
       );
+      if (category === "Language Manager") {
+        this.content.appendChild(
+          this.createLanguageManagerPage(categorySettings),
+        );
+        continue;
+      }
+      const section = document.createElement("section");
+      section.className = "settings-page";
+      section.appendChild(this.createPageHeader(category));
       if (category === "Agent") {
         section.appendChild(this.createAgentSettings());
-      } else if (category === "Language Manager") {
-        const panel = document.createElement("div");
-        panel.className = "settings-panel";
-        for (const setting of categorySettings) {
-          panel.appendChild(this.createRow(setting));
-        }
-        panel.appendChild(this.createLanguageServersSettings());
-        section.appendChild(panel);
       } else {
         const panel = document.createElement("div");
         panel.className = "settings-panel";
@@ -416,110 +458,914 @@ class SettingsView {
     return row;
   }
 
-  createLanguageServersSettings() {
-    const list = document.createElement("div");
-    list.className = "lsp-settings-list";
-    list.setAttribute("role", "list");
-    const showMessage = (text) => {
-      list.replaceChildren();
-      const row = document.createElement("div");
-      row.className = "settings-panel-row";
-      const message = document.createElement("p");
-      message.className = "settings-empty";
-      message.textContent = text;
-      row.appendChild(message);
-      list.appendChild(row);
-    };
-    showMessage("Detecting language servers…");
+  createLanguageManagerPage(categorySettings) {
+    const section = document.createElement("section");
+    section.className = "settings-page is-language-manager";
 
-    const api = window.api?.lsp;
-    if (!api?.getStatus) {
-      showMessage("Language servers are unavailable in this window.");
-      return list;
+    const header = document.createElement("header");
+    header.className = "settings-page-header lsp-page-header";
+    const heading = document.createElement("div");
+    heading.className = "lsp-page-heading";
+    const title = document.createElement("h1");
+    title.className = "settings-page-title";
+    title.textContent = "Language Manager";
+    const description = document.createElement("p");
+    description.className = "settings-page-description";
+    description.textContent =
+      SETTINGS_CATEGORY_META["Language Manager"].description;
+    heading.append(title, description);
+    const globalStatus = this.createLanguageServerGlobalStatus();
+    header.append(heading, globalStatus);
+    section.append(header);
+
+    const preference = document.createElement("div");
+    preference.className = "lsp-preference";
+    const copy = document.createElement("div");
+    copy.className = "lsp-preference-copy";
+    const enabledSetting =
+      categorySettings.find((item) => item.key === "lsp.enabled") ||
+      SETTINGS_UI.find((item) => item.key === "lsp.enabled");
+    let enabledInput = null;
+    if (enabledSetting) {
+      const controlId = "setting-lsp-enabled";
+      const label = document.createElement("label");
+      label.className = "lsp-preference-title";
+      label.htmlFor = controlId;
+      label.textContent = enabledSetting.label;
+      const preferenceDescription = document.createElement("p");
+      preferenceDescription.className = "lsp-preference-description";
+      preferenceDescription.textContent = enabledSetting.description;
+      copy.append(label, preferenceDescription);
+      const toggle = this.createCheckbox(enabledSetting, controlId);
+      toggle.classList.add("lsp-preference-toggle");
+      enabledInput = toggle.querySelector('input[type="checkbox"]');
+      preference.append(copy, toggle);
+    } else {
+      copy.textContent = "Language server preferences are unavailable.";
+      preference.append(copy);
     }
-    const render = (status) => {
-      const servers = Array.isArray(status?.servers) ? status.servers : [];
-      if (!servers.length) {
-        showMessage("No language servers are registered.");
-        return;
-      }
-      list.replaceChildren();
-      for (const server of servers) {
-        list.appendChild(this.createLanguageServerRow(server, status));
-      }
+    section.append(preference);
+
+    const groupsHost = document.createElement("div");
+    groupsHost.className = "lsp-groups";
+    section.append(groupsHost);
+
+    const view = {
+      element: section,
+      globalStatus,
+      globalStatusLabel: globalStatus.querySelector(".lsp-global-status-label"),
+      groupsHost,
+      enabledInput,
+      rows: new Map(),
+      serverSignature: "",
+      status: null,
+      requestToken: 0,
     };
-    const refresh = async () => {
-      try {
-        const status = await api.getStatus();
-        if (status?.success) render(status);
-        else showMessage("Language server status is unavailable.");
-      } catch {
-        showMessage("Language server status is unavailable.");
-      }
-    };
-    void refresh();
-    this.refreshLanguageServerStatus = refresh;
-    return list;
+    this.languageManagerView = view;
+
+    if (enabledInput) {
+      enabledInput.addEventListener("change", () => {
+        this.showLanguageServerGlobalStatus(view, "loading", "Checking…");
+        this.scheduleLanguageManagerRefresh(250);
+      });
+    }
+
+    this.showLanguageManagerMessage(view, "Detecting language servers…");
+    void this.loadLanguageServerStatus(view);
+    return section;
   }
 
-  createLanguageServerRow(server, status) {
-    const row = document.createElement("div");
-    row.className = "settings-panel-row";
-    row.dataset.serverId = server.id;
-    row.setAttribute("role", "listitem");
+  createLanguageServerGlobalStatus() {
+    const status = document.createElement("span");
+    status.className = "lsp-global-status";
+    status.dataset.state = "loading";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    const dot = document.createElement("span");
+    dot.className = "lsp-status-dot";
+    dot.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "lsp-global-status-label";
+    label.textContent = "Checking…";
+    status.append(dot, label);
+    return status;
+  }
 
-    const main = document.createElement("div");
-    main.className = "settings-row-main";
-    const title = document.createElement("span");
-    title.className = "settings-row-label";
-    title.textContent = this.languageLabel(server);
-    const description = document.createElement("p");
-    description.className = "setting-description";
-    description.textContent = server.description;
-    const session = (status.sessions || []).find((entry) => entry.serverId === server.id);
-    const state = document.createElement("p");
-    state.className = "lsp-settings-state";
-    if (server.available) {
-      state.textContent = `Executable: ${server.executable}`;
-      state.classList.add("is-available");
-      if (session?.state === "ready") {
-        state.textContent += ` · ready${session.documents ? ` · ${session.documents} document${session.documents === 1 ? "" : "s"}` : ""}`;
-      } else if (session?.state && session.state !== "stopped") {
-        state.textContent += ` · ${session.state}`;
-      }
-    } else {
-      state.textContent = session?.error || server.error || `${server.name} not detected.`;
-      state.classList.add("is-missing");
+  showLanguageServerGlobalStatus(view, state, label, detail = "") {
+    if (!view?.globalStatus) return;
+    view.globalStatus.dataset.state = state;
+    view.globalStatusLabel.textContent = label;
+    if (detail) view.globalStatus.title = detail;
+    else view.globalStatus.removeAttribute("title");
+  }
+
+  showLanguageManagerMessage(view, text) {
+    view.rows.clear();
+    view.serverSignature = "";
+    const message = document.createElement("p");
+    message.className = "lsp-empty";
+    message.setAttribute("role", "status");
+    message.textContent = text;
+    view.groupsHost.replaceChildren(message);
+  }
+
+  async loadLanguageServerStatus(view) {
+    const token = ++view.requestToken;
+    const api = window.api?.lsp;
+    if (!api?.getStatus) {
+      if (view !== this.languageManagerView) return;
+      this.showLanguageServerGlobalStatus(view, "warning", "Unavailable");
+      this.showLanguageManagerMessage(
+        view,
+        "Language servers are unavailable in this window.",
+      );
+      return;
     }
-    main.append(title, description, state);
+    try {
+      const status = await api.getStatus();
+      if (view !== this.languageManagerView || token !== view.requestToken) return;
+      if (status?.success) {
+        this.applyLanguageServerStatus(view, status);
+      } else {
+        this.showLanguageManagerStatusError(
+          view,
+          "Language server status is unavailable.",
+        );
+      }
+    } catch {
+      if (view !== this.languageManagerView || token !== view.requestToken) return;
+      this.showLanguageManagerStatusError(
+        view,
+        "Language server status is unavailable.",
+      );
+    }
+  }
+
+  refreshLanguageServerStatus() {
+    const view = this.languageManagerView;
+    if (!view) return;
+    void this.loadLanguageServerStatus(view);
+  }
+
+  scheduleLanguageManagerRefresh(delay = 250) {
+    clearTimeout(this.languageManagerRefreshTimer);
+    this.languageManagerRefreshTimer = setTimeout(() => {
+      this.languageManagerRefreshTimer = null;
+      this.refreshLanguageServerStatus();
+    }, delay);
+  }
+
+  showLanguageManagerStatusError(view, message) {
+    this.showLanguageServerGlobalStatus(view, "warning", "Status unavailable");
+    this.showLanguageManagerMessage(view, message);
+  }
+
+  applyLanguageServerStatus(view, status) {
+    if (view !== this.languageManagerView) return;
+    view.status = status;
+    if (view.enabledInput && document.activeElement !== view.enabledInput) {
+      view.enabledInput.checked = status.enabled === true;
+    }
+    this.updateLanguageServerGlobalStatus(view);
+    const servers = Array.isArray(status.servers) ? status.servers : [];
+    if (!servers.length) {
+      this.showLanguageManagerMessage(view, "No language servers are registered.");
+      return;
+    }
+    const groups = this.groupLanguageServers(servers);
+    const signature = servers.map((server) => server.id).join("\n");
+    if (signature === view.serverSignature && view.rows.size) {
+      this.updateLanguageManagerRows(view, groups, status);
+      return;
+    }
+    this.buildLanguageManagerGroups(view, groups, status);
+    view.serverSignature = signature;
+  }
+
+  updateLanguageServerGlobalStatus(view) {
+    const status = view.status;
+    if (!status) {
+      this.showLanguageServerGlobalStatus(view, "loading", "Checking…");
+      return;
+    }
+    if (status.enabled !== true) {
+      this.showLanguageServerGlobalStatus(
+        view,
+        "disabled",
+        "Disabled",
+        "Language servers are disabled globally.",
+      );
+      return;
+    }
+    const servers = Array.isArray(status.servers) ? status.servers : [];
+    const sessions = Array.isArray(status.sessions) ? status.sessions : [];
+    if (!servers.length) {
+      this.showLanguageServerGlobalStatus(view, "warning", "No servers");
+      return;
+    }
+    const failed = new Set(
+      sessions
+        .filter((session) => session.state === "failed")
+        .map((session) => session.serverId),
+    );
+    if (failed.size) {
+      this.showLanguageServerGlobalStatus(
+        view,
+        "error",
+        `${failed.size} error${failed.size === 1 ? "" : "s"}`,
+        `${failed.size} language server${failed.size === 1 ? "" : "s"} failed.`,
+      );
+      return;
+    }
+    const running = new Set(
+      sessions
+        .filter((session) => session.state === "ready")
+        .map((session) => session.serverId),
+    );
+    if (running.size) {
+      this.showLanguageServerGlobalStatus(
+        view,
+        "success",
+        `${running.size} server${running.size === 1 ? "" : "s"} running`,
+        `${running.size} language server${running.size === 1 ? " is" : "s are"} running.`,
+      );
+      return;
+    }
+    if (sessions.some((session) => session.state === "starting" || session.state === "initializing")) {
+      this.showLanguageServerGlobalStatus(view, "info", "Starting");
+      return;
+    }
+    const available = servers.filter((server) => server.available === true).length;
+    if (!available) {
+      this.showLanguageServerGlobalStatus(
+        view,
+        "warning",
+        "No executables",
+        "No language server executable was detected.",
+      );
+      return;
+    }
+    this.showLanguageServerGlobalStatus(
+      view,
+      "success",
+      "Enabled",
+      `${available} of ${servers.length} server executables available.`,
+    );
+  }
+
+  groupLanguageServers(servers) {
+    const groups = new Map();
+    for (const server of servers) {
+      const definition = this.languageGroupForServer(server);
+      if (!groups.has(definition.id)) {
+        groups.set(definition.id, { ...definition, servers: [] });
+      }
+      groups.get(definition.id).servers.push(server);
+    }
+    for (const group of groups.values()) {
+      group.servers.sort(
+        (first, second) =>
+          (Number(second.priority) || 0) - (Number(first.priority) || 0) ||
+          String(first.name).localeCompare(String(second.name)),
+      );
+    }
+    return [...groups.values()];
+  }
+
+  languageGroupForServer(server) {
+    const languages = Array.isArray(server.languages) ? server.languages : [];
+    for (const group of LSP_SETTINGS_LANGUAGE_GROUPS) {
+      if (languages.some((language) => group.languages.includes(language))) {
+        return group;
+      }
+    }
+    const language = languages[0] || "other";
+    return {
+      id: `language-${language}`,
+      label: this.languageLabel(server),
+      badge: language === "other" ? "LSP" : language.slice(0, 2).toUpperCase(),
+      languages: [language],
+    };
+  }
+
+  getLanguageServerConfiguration(serverId) {
+    const servers =
+      typeof SETTINGS_GET === "function" ? SETTINGS_GET("lsp.servers") : null;
+    const entry = servers && typeof servers === "object" ? servers[serverId] : null;
+    return entry && typeof entry === "object" ? entry : {};
+  }
+
+  buildLanguageManagerGroups(view, groups, status) {
+    view.rows.clear();
+    const sessionsByServer = new Map();
+    for (const session of Array.isArray(status.sessions) ? status.sessions : []) {
+      const entries = sessionsByServer.get(session.serverId) || [];
+      entries.push(session);
+      sessionsByServer.set(session.serverId, entries);
+    }
+    const fragment = document.createDocumentFragment();
+    for (const group of groups) {
+      const section = document.createElement("section");
+      section.className = "lsp-group";
+      const titleId = `lsp-group-${group.id.replace(/[^a-z0-9-]/gi, "-")}`;
+      section.setAttribute("aria-labelledby", titleId);
+
+      const header = document.createElement("div");
+      header.className = "lsp-group-header";
+      const badge = document.createElement("span");
+      badge.className = "lsp-group-badge";
+      badge.setAttribute("aria-hidden", "true");
+      badge.textContent = group.badge;
+      const title = document.createElement("h2");
+      title.className = "lsp-group-title";
+      title.id = titleId;
+      title.textContent = group.label;
+      const count = document.createElement("span");
+      count.className = "lsp-group-count";
+      count.textContent = `${group.servers.length} server${group.servers.length === 1 ? "" : "s"}`;
+      header.append(badge, title, count);
+
+      const list = document.createElement("div");
+      list.className = "lsp-group-list";
+      list.setAttribute("role", "list");
+      for (const server of group.servers) {
+        const entry = this.createLanguageServerEntry(server);
+        view.rows.set(server.id, entry);
+        this.updateLanguageServerEntry(
+          entry,
+          server,
+          sessionsByServer.get(server.id) || [],
+          this.getLanguageServerConfiguration(server.id),
+          status.enabled === true,
+        );
+        list.appendChild(entry.element);
+      }
+      section.append(header, list);
+      fragment.appendChild(section);
+    }
+    view.groupsHost.replaceChildren(fragment);
+  }
+
+  updateLanguageManagerRows(view, groups, status) {
+    const sessionsByServer = new Map();
+    for (const session of Array.isArray(status.sessions) ? status.sessions : []) {
+      const entries = sessionsByServer.get(session.serverId) || [];
+      entries.push(session);
+      sessionsByServer.set(session.serverId, entries);
+    }
+    for (const group of groups) {
+      for (const server of group.servers) {
+        const entry = view.rows.get(server.id);
+        if (!entry) continue;
+        this.updateLanguageServerEntry(
+          entry,
+          server,
+          sessionsByServer.get(server.id) || [],
+          this.getLanguageServerConfiguration(server.id),
+          status.enabled === true,
+        );
+      }
+    }
+  }
+
+  createLanguageServerEntry(server) {
+    const element = document.createElement("article");
+    element.className = "lsp-server";
+    element.dataset.serverId = server.id;
+    element.setAttribute("role", "listitem");
+
+    const row = document.createElement("div");
+    row.className = "lsp-server-row";
+    const info = document.createElement("div");
+    info.className = "lsp-server-info";
+    const name = document.createElement("h3");
+    name.className = "lsp-server-name";
+    name.textContent = server.name;
+    const description = document.createElement("p");
+    description.className = "lsp-server-description";
+    description.textContent = server.description;
+    info.append(name, description);
+
+    const side = document.createElement("div");
+    side.className = "lsp-server-side";
+    const status = document.createElement("span");
+    status.className = "lsp-status";
+    status.dataset.state = "loading";
+    const dot = document.createElement("span");
+    dot.className = "lsp-status-dot";
+    dot.setAttribute("aria-hidden", "true");
+    const statusLabel = document.createElement("span");
+    statusLabel.className = "lsp-status-label";
+    statusLabel.textContent = "Checking…";
+    status.append(dot, statusLabel);
+
+    const toggle = document.createElement("label");
+    toggle.className = "setting-toggle lsp-server-toggle";
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.id = `lsp-server-toggle-${server.id}`;
+    input.disabled = true;
+    const track = document.createElement("span");
+    track.setAttribute("aria-hidden", "true");
+    toggle.append(input, track);
+
+    const detailsId = `lsp-server-details-${server.id}`;
+    const disclosure = document.createElement("button");
+    disclosure.type = "button";
+    disclosure.className = "lsp-disclosure";
+    disclosure.setAttribute("aria-expanded", "false");
+    disclosure.setAttribute("aria-controls", detailsId);
+    disclosure.setAttribute("aria-label", `Show details for ${server.name}`);
+    disclosure.title = `Show details for ${server.name}`;
+    const disclosureIcon = document.createElement("i");
+    disclosureIcon.className = "fi fi-rr-angle-small-down";
+    disclosureIcon.setAttribute("aria-hidden", "true");
+    disclosure.append(disclosureIcon);
+
+    side.append(status, toggle, disclosure);
+    row.append(info, side);
+
+    const details = document.createElement("div");
+    details.className = "lsp-server-details";
+    details.id = detailsId;
+    details.dataset.open = "false";
+    details.setAttribute("aria-hidden", "true");
+    details.setAttribute("inert", "");
+    const detailsInner = document.createElement("div");
+    detailsInner.className = "lsp-details-inner";
+    details.appendChild(detailsInner);
+    element.append(row, details);
+
+    const entry = {
+      element,
+      statusEl: status,
+      statusLabel,
+      toggleLabel: toggle,
+      toggleInput: input,
+      disclosure,
+      details,
+      detailsInner,
+      server,
+      sessions: [],
+      config: {},
+      globallyEnabled: false,
+      state: null,
+      expanded: false,
+      busy: false,
+      notice: null,
+    };
+    input.addEventListener("change", () => {
+      void this.handleLanguageServerToggle(entry);
+    });
+    disclosure.addEventListener("click", () => {
+      this.toggleLanguageServerDetails(entry, !entry.expanded);
+    });
+    return entry;
+  }
+
+  updateLanguageServerEntry(entry, server, sessions, config, globallyEnabled) {
+    entry.server = server;
+    entry.sessions = sessions;
+    entry.config = config;
+    entry.globallyEnabled = globallyEnabled;
+    const state = this.getLanguageServerDisplayState(
+      server,
+      sessions,
+      config,
+      globallyEnabled,
+    );
+    entry.state = state;
+    entry.statusEl.dataset.state = state.id;
+    entry.statusLabel.textContent = state.label;
+    entry.element.dataset.state = state.id;
+    entry.element.dataset.enabled = String(server.enabled === true);
+    entry.element.dataset.available = String(server.available === true);
+    this.updateLanguageServerToggle(entry);
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
+  }
+
+  updateLanguageServerToggle(entry) {
+    const { server, config, globallyEnabled } = entry;
+    const configuredEnabled =
+      typeof config.enabled === "boolean"
+        ? config.enabled
+        : server.defaultEnabled === true;
+    if (!entry.busy) {
+      entry.toggleInput.checked = globallyEnabled ? configuredEnabled : false;
+    }
+    const unavailableBlocksEnable =
+      !configuredEnabled && server.available !== true;
+    entry.toggleInput.disabled =
+      entry.busy || !globallyEnabled || unavailableBlocksEnable;
+    entry.toggleInput.setAttribute(
+      "aria-label",
+      `${configuredEnabled ? "Disable" : "Enable"} ${server.name}`,
+    );
+    entry.toggleLabel.title = !globallyEnabled
+      ? "Enable language servers globally to change this server."
+      : unavailableBlocksEnable
+        ? "Configure the executable path before enabling this server."
+        : configuredEnabled
+          ? "Disable this language server."
+          : "Enable this language server.";
+  }
+
+  getLanguageServerDisplayState(server, sessions, config, globallyEnabled) {
+    const configuredPath =
+      typeof config.path === "string" ? config.path.trim() : "";
+    if (server.available !== true) {
+      if (configuredPath) {
+        return {
+          id: "missing-executable",
+          label: "Missing executable",
+          detail:
+            server.error ||
+            "The configured executable is missing or not executable.",
+        };
+      }
+      if (server.requiresConfiguration === true) {
+        return {
+          id: "needs-configuration",
+          label: "Needs configuration",
+          detail:
+            server.error ||
+            "This language server requires an explicit executable path.",
+        };
+      }
+      return {
+        id: "not-installed",
+        label: "Not installed",
+        detail: server.error || `${server.name} is not installed.`,
+      };
+    }
+    if (server.enabled !== true) {
+      return {
+        id: "disabled",
+        label: "Disabled",
+        detail: globallyEnabled
+          ? "This language server is disabled."
+          : "Language servers are disabled globally.",
+      };
+    }
+    const failed = sessions.filter((session) => session.state === "failed");
+    if (failed.length) {
+      return {
+        id: "error",
+        label: "Error",
+        detail:
+          failed[0].error ||
+          server.error ||
+          "The language server stopped unexpectedly.",
+      };
+    }
+    if (
+      sessions.some(
+        (session) =>
+          session.state === "starting" || session.state === "initializing",
+      )
+    ) {
+      return {
+        id: "starting",
+        label: "Starting",
+        detail: "The language server is starting.",
+      };
+    }
+    const ready = sessions.filter((session) => session.state === "ready");
+    if (ready.length) {
+      const documents = ready.reduce(
+        (total, session) =>
+          total + (Number.isFinite(session.documents) ? session.documents : 0),
+        0,
+      );
+      const sessionText = `${ready.length} active session${ready.length === 1 ? "" : "s"}`;
+      return {
+        id: "running",
+        label: "Running",
+        detail: documents
+          ? `${sessionText} · ${documents} document${documents === 1 ? "" : "s"}`
+          : sessionText,
+      };
+    }
+    if (
+      sessions.some(
+        (session) => session.state === "stopping" || session.state === "stopped",
+      )
+    ) {
+      return {
+        id: "stopped",
+        label: "Stopped",
+        detail: "The language server is stopped.",
+      };
+    }
+    return {
+      id: "enabled",
+      label: "Enabled",
+      detail:
+        "The language server starts automatically when a matching file is opened.",
+    };
+  }
+
+  toggleLanguageServerDetails(entry, expanded) {
+    entry.expanded = expanded;
+    entry.disclosure.setAttribute("aria-expanded", String(expanded));
+    entry.disclosure.setAttribute(
+      "aria-label",
+      `${expanded ? "Hide" : "Show"} details for ${entry.server.name}`,
+    );
+    entry.disclosure.title = `${expanded ? "Hide" : "Show"} details for ${entry.server.name}`;
+    entry.details.dataset.open = String(expanded);
+    entry.details.setAttribute("aria-hidden", String(!expanded));
+    entry.element.dataset.expanded = String(expanded);
+    if (expanded) {
+      entry.details.removeAttribute("inert");
+      this.renderLanguageServerDetails(entry);
+    } else {
+      if (entry.details.contains(document.activeElement)) {
+        entry.disclosure.focus({ preventScroll: true });
+      }
+      entry.details.setAttribute("inert", "");
+    }
+  }
+
+  renderLanguageServerDetails(entry) {
+    const { server, sessions, config } = entry;
+    const configuredPath =
+      typeof config.path === "string" ? config.path.trim() : "";
+    const state = entry.state || this.getLanguageServerDisplayState(
+      server,
+      sessions,
+      config,
+      entry.globallyEnabled,
+    );
+    const body = document.createElement("div");
+    body.className = "lsp-details-body";
+
+    const grid = document.createElement("dl");
+    grid.className = "lsp-details-grid";
+    const executable = server.executable || configuredPath || "Not detected";
+    const args =
+      Array.isArray(server.args) && server.args.length ? server.args.join(" ") : "None";
+    const executableDetail = this.createLanguageServerDetail(
+      "Executable",
+      executable,
+      Boolean(server.executable || configuredPath),
+    );
+    executableDetail.classList.add("lsp-detail-primary");
+    grid.append(
+      executableDetail,
+      this.createLanguageServerDetail(
+        "Detection",
+        server.source === "configured"
+          ? "Configured path"
+          : server.source === "path"
+            ? "System PATH"
+            : configuredPath
+              ? "Configured path (not found)"
+              : "Not detected",
+      ),
+      this.createLanguageServerDetail(
+        "Arguments",
+        args,
+        Array.isArray(server.args) && server.args.length > 0,
+      ),
+      this.createLanguageServerDetail("Server ID", server.id, true),
+    );
+    body.appendChild(grid);
+
+    const hasSessionError = sessions.some((session) => session.error);
+    if (
+      state.id === "not-installed" ||
+      state.id === "missing-executable" ||
+      state.id === "needs-configuration" ||
+      (state.id === "error" && !hasSessionError)
+    ) {
+      const message = document.createElement("p");
+      message.className = "lsp-details-message";
+      message.dataset.tone = state.id === "error" ? "error" : "warning";
+      message.textContent = state.detail;
+      body.appendChild(message);
+    }
+
+    if (sessions.length) {
+      const sessionTitle = document.createElement("p");
+      sessionTitle.className = "lsp-details-section-title";
+      sessionTitle.textContent = "Sessions";
+      const sessionList = document.createElement("div");
+      sessionList.className = "lsp-details-sessions";
+      for (const session of sessions) {
+        const sessionRow = document.createElement("div");
+        sessionRow.className = "lsp-session";
+        const root = document.createElement("span");
+        root.className = "lsp-session-root lsp-mono";
+        root.textContent = session.root || "Workspace root unavailable";
+        root.title = session.root || "";
+        const meta = document.createElement("span");
+        meta.className = "lsp-session-meta";
+        const parts = [this.formatLanguageServerSessionState(session.state)];
+        if (session.documents) {
+          parts.push(
+            `${session.documents} document${session.documents === 1 ? "" : "s"}`,
+          );
+        }
+        meta.textContent = parts.join(" · ");
+        sessionRow.append(root, meta);
+        if (session.error) {
+          const sessionError = document.createElement("p");
+          sessionError.className = "lsp-session-error";
+          sessionError.dataset.tone = "error";
+          sessionError.textContent = session.error;
+          sessionRow.appendChild(sessionError);
+        }
+        sessionList.appendChild(sessionRow);
+      }
+      body.append(sessionTitle, sessionList);
+    } else if (state.id === "enabled") {
+      const hint = document.createElement("p");
+      hint.className = "lsp-details-hint";
+      hint.textContent =
+        "No active session. The server starts automatically when a matching file is opened.";
+      body.appendChild(hint);
+    }
+
+    if (entry.notice?.message) {
+      const notice = document.createElement("p");
+      notice.className = "lsp-details-notice";
+      notice.dataset.tone = entry.notice.tone || "error";
+      notice.textContent = entry.notice.message;
+      body.appendChild(notice);
+    }
 
     const actions = document.createElement("div");
-    actions.className = "settings-row-control lsp-settings-actions";
-
-    const setPath = document.createElement("button");
-    setPath.type = "button";
-    setPath.className = "settings-action-button";
-    setPath.textContent = "Set path";
-    setPath.addEventListener("click", async () => {
-      const value = await this.requestLspServerPath(server);
-      if (value === null) return;
-      await this.updateLspServer(server.id, { path: value });
+    actions.className = "lsp-details-actions";
+    const pathButton = document.createElement("button");
+    pathButton.type = "button";
+    pathButton.className = "settings-action-button lsp-detail-action";
+    pathButton.textContent = configuredPath
+      ? "Change executable path"
+      : "Set executable path";
+    pathButton.disabled = entry.busy;
+    pathButton.addEventListener("click", () => {
+      void this.configureLanguageServerPath(entry);
     });
+    actions.appendChild(pathButton);
 
-    const enabled = server.enabled === true;
-    const toggleEnabled = document.createElement("button");
-    toggleEnabled.type = "button";
-    toggleEnabled.className = "settings-action-button";
-    toggleEnabled.textContent = enabled ? "Disable" : "Enable";
-    toggleEnabled.disabled = !enabled && server.available !== true;
-    toggleEnabled.addEventListener("click", async () => {
-      toggleEnabled.disabled = true;
-      await this.updateLspServer(server.id, { enabled: !enabled });
+    if (server.available === true && server.enabled === true) {
+      const restartButton = document.createElement("button");
+      restartButton.type = "button";
+      restartButton.className = "settings-action-button lsp-detail-action";
+      restartButton.textContent = "Restart";
+      restartButton.disabled = entry.busy;
+      restartButton.addEventListener("click", () => {
+        void this.restartLanguageServer(entry);
+      });
+      actions.appendChild(restartButton);
+    }
+
+    if (configuredPath) {
+      const resetButton = document.createElement("button");
+      resetButton.type = "button";
+      resetButton.className = "lsp-text-action";
+      resetButton.textContent = "Use PATH detection";
+      resetButton.disabled = entry.busy;
+      resetButton.addEventListener("click", () => {
+        void this.resetLanguageServerPath(entry);
+      });
+      actions.appendChild(resetButton);
+    }
+
+    body.appendChild(actions);
+    entry.detailsInner.replaceChildren(body);
+  }
+
+  createLanguageServerDetail(label, value, mono = false) {
+    const item = document.createElement("div");
+    item.className = "lsp-detail";
+    const term = document.createElement("dt");
+    term.className = "lsp-detail-label";
+    term.textContent = label;
+    const definition = document.createElement("dd");
+    definition.className = mono
+      ? "lsp-detail-value lsp-mono"
+      : "lsp-detail-value";
+    definition.textContent = value;
+    item.append(term, definition);
+    return item;
+  }
+
+  formatLanguageServerSessionState(state) {
+    const labels = {
+      starting: "Starting",
+      initializing: "Initializing",
+      ready: "Ready",
+      stopping: "Stopping",
+      stopped: "Stopped",
+      failed: "Failed",
+    };
+    return labels[state] || state || "Unknown";
+  }
+
+  async handleLanguageServerToggle(entry) {
+    const requested = entry.toggleInput.checked;
+    entry.busy = true;
+    entry.notice = null;
+    this.updateLanguageServerToggle(entry);
+    const saved = await this.updateLspServer(entry.server.id, {
+      enabled: requested,
     });
+    if (!saved) {
+      entry.toggleInput.checked = !requested;
+      entry.busy = false;
+      entry.notice = {
+        tone: "error",
+        message: "Could not save language server settings.",
+      };
+      this.updateLanguageServerToggle(entry);
+      if (entry.expanded) this.renderLanguageServerDetails(entry);
+      return;
+    }
+    const config = this.getLanguageServerConfiguration(entry.server.id);
+    const configuredEnabled =
+      typeof config.enabled === "boolean"
+        ? config.enabled
+        : entry.server.defaultEnabled === true;
+    entry.busy = false;
+    this.updateLanguageServerEntry(
+      entry,
+      {
+        ...entry.server,
+        enabled: entry.globallyEnabled && configuredEnabled,
+      },
+      entry.sessions,
+      config,
+      entry.globallyEnabled,
+    );
+  }
 
-    actions.append(setPath, toggleEnabled);
-    row.append(main, actions);
-    return row;
+  async configureLanguageServerPath(entry) {
+    const value = await this.requestLspServerPath(entry.server);
+    if (value === null) return;
+    entry.busy = true;
+    entry.notice = null;
+    this.updateLanguageServerToggle(entry);
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
+    const saved = await this.updateLspServer(entry.server.id, { path: value });
+    entry.busy = false;
+    if (!saved) {
+      entry.notice = {
+        tone: "error",
+        message: "Could not save the executable path.",
+      };
+    } else {
+      entry.config = this.getLanguageServerConfiguration(entry.server.id);
+    }
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
+  }
+
+  async restartLanguageServer(entry) {
+    const api = window.api?.lsp;
+    if (!api?.restartServer) return;
+    entry.busy = true;
+    entry.notice = null;
+    this.updateLanguageServerToggle(entry);
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
+    let restarted = false;
+    try {
+      const result = await api.restartServer({ serverId: entry.server.id });
+      restarted = result?.success === true;
+      if (!restarted) {
+        entry.notice = {
+          tone: "error",
+          message: result?.error || "Could not restart the language server.",
+        };
+      }
+    } catch {
+      entry.notice = {
+        tone: "error",
+        message: "Could not restart the language server.",
+      };
+    }
+    entry.busy = false;
+    this.updateLanguageServerToggle(entry);
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
+    if (restarted) this.scheduleLanguageManagerRefresh(150);
+  }
+
+  async resetLanguageServerPath(entry) {
+    entry.busy = true;
+    entry.notice = null;
+    this.updateLanguageServerToggle(entry);
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
+    const saved = await this.updateLspServer(entry.server.id, { path: "" });
+    entry.busy = false;
+    if (!saved) {
+      entry.notice = {
+        tone: "error",
+        message: "Could not reset the executable path.",
+      };
+    } else {
+      entry.config = this.getLanguageServerConfiguration(entry.server.id);
+    }
+    if (entry.expanded) this.renderLanguageServerDetails(entry);
   }
 
   requestLspServerPath(server) {
@@ -560,7 +1406,11 @@ class SettingsView {
       java: "Java",
       xml: "XML",
     };
-    const labels = (server.languages || []).map((language) => names[language] || language);
+    const labels = (server.languages || []).map((language) => {
+      if (names[language]) return names[language];
+      if (!language) return "";
+      return language.charAt(0).toUpperCase() + language.slice(1);
+    });
     return labels.length ? labels.join(" / ") : server.name;
   }
 
@@ -576,7 +1426,7 @@ class SettingsView {
     const saved = await SETTINGS_SET("lsp.servers", current);
     if (saved) {
       this.editor.lspController?.refreshStatus?.();
-      setTimeout(() => void this.refreshLanguageServerStatus?.(), 250);
+      this.scheduleLanguageManagerRefresh(250);
     }
     return saved;
   }
@@ -1361,6 +2211,11 @@ class SettingsView {
     input.checked = setting.key === "files.autoSave"
       ? this.editor.getAutoSaveState()
       : SETTINGS_GET(setting.key) === true;
+    if (key === "lsp.enabled") {
+      const view = this.languageManagerView;
+      if (view) this.showLanguageServerGlobalStatus(view, "loading", "Checking…");
+      this.scheduleLanguageManagerRefresh(0);
+    }
   }
 
   show() {
