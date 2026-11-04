@@ -107,6 +107,16 @@ test("LSP manager runs several servers for one document and routes features", { 
         status.sessions.every((session) => session.state === "ready") && status;
     });
     assert.equal(ready.servers.find((server) => server.id === "typescript-language-server").available, true);
+    const readyServer = ready.servers.find((server) => server.id === "typescript-language-server");
+    assert.equal(readyServer.source, "configured");
+    assert.equal(readyServer.executable, process.execPath);
+    assert.deepEqual(readyServer.args, [fakeServer, "typescript-language-server", "normal"]);
+    assert.equal(readyServer.requiresConfiguration, false);
+    const needsConfiguration = ready.servers.find((server) => server.id === "eclipse-jdtls");
+    assert.equal(needsConfiguration.requiresConfiguration, true);
+    assert.equal(needsConfiguration.available, false);
+    assert.equal(needsConfiguration.source, null);
+    assert.deepEqual(needsConfiguration.args, []);
     assert.equal(ready.sessions.every((session) => session.documents === 1), true);
     const readySession = ready.sessions.find((session) =>
       session.serverId === "typescript-language-server");

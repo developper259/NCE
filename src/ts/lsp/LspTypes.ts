@@ -68,9 +68,12 @@ export interface LspServerDefinitionView {
   priority: number;
   enabled: boolean;
   executable: string | null;
+  args: string[];
+  source: "configured" | "path" | null;
   available: boolean;
   error: string | null;
   description: string;
+  requiresConfiguration: boolean;
 }
 
 export interface LspServerSessionView {

@@ -755,9 +755,12 @@ export class LspManager {
           priority: definition.priority,
           enabled: this.serverEnabled(definition, settings),
           executable: resolution.command,
+          args: [...resolution.args],
+          source: resolution.source,
           available: resolution.available,
           error: resolution.error,
           description: definition.description,
+          requiresConfiguration: definition.requiresConfiguration === true,
         };
       }));
       const workspace = await this.getWorkspace();
