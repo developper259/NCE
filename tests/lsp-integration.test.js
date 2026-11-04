@@ -5,6 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { LspManager } = require("../dist/ts/lsp/LspManager.js");
+const { resolveLspProcessCommand } = require("../dist/ts/lsp/LspSession.js");
 const { PathAccess } = require("../dist/ts/manager/PathAccess.js");
 
 const fakeServer = path.join(__dirname, "helpers", "fake-lsp-server.cjs");
@@ -611,6 +612,68 @@ test("LSP manager answers server-initiated requests and validates payloads", { t
     const invalidPosition = await manager.hover({ path: documentPath, position: { line: -1, character: 0 } });
     assert.equal(invalidPosition.success, false);
     assert.equal(invalidPosition.code, "LSP_INVALID_ARGUMENT");
+  } finally {
+    await manager.dispose();
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("Windows command shims are wrapped through cmd.exe", () => {
+  const executable =
+    "C:\\project with space\\node_modules\\.bin\\typescript-language-server.CMD";
+  const args = ["--stdio", "two words"];
+  const direct = resolveLspProcessCommand(executable, args, "linux");
+  assert.deepEqual(direct, { command: executable, args });
+
+  const wrapped = resolveLspProcessCommand(executable, args, "win32", {
+    ComSpec: "C:\\Windows\\System32\\cmd.exe",
+  });
+  assert.equal(wrapped.command, "C:\\Windows\\System32\\cmd.exe");
+  assert.deepEqual(wrapped.args.slice(0, 3), ["/d", "/s", "/c"]);
+  assert.equal(wrapped.windowsVerbatimArguments, true);
+  assert.match(wrapped.args[3], /typescript-language-server\.CMD/);
+  assert.match(wrapped.args[3], /--stdio/);
+});
+
+test("LSP manager starts a server from a Windows command shim", {
+  skip: process.platform !== "win32",
+  timeout: 30_000,
+}, async () => {
+  const workspace = await createWorkspace();
+  const bin = path.join(workspace, "project with space", "node_modules", ".bin");
+  await fs.mkdir(bin, { recursive: true });
+  const shim = path.join(bin, "typescript-language-server.cmd");
+  await fs.writeFile(
+    shim,
+    `@echo off\r\n"${process.execPath}" "${fakeServer}" typescript-language-server normal\r\n`,
+  );
+  const documentPath = await fs.realpath(path.join(workspace, "main.ts"));
+  const { manager } = createManager(workspace, {
+    eslint: false,
+    servers: {
+      "typescript-language-server": {
+        enabled: true,
+        path: shim,
+        args: ["--stdio", "two words"],
+      },
+    },
+  });
+  try {
+    const opened = await manager.openDocument({
+      path: documentPath,
+      text: "const value = 1;\n",
+    });
+    assert.equal(opened.success, true);
+    const ready = await waitFor(async () => {
+      const status = await manager.getStatus();
+      const session = status.success
+        ? status.sessions.find((item) => item.serverId === "typescript-language-server")
+        : null;
+      return session?.state === "ready" ? status : null;
+    });
+    const server = ready.servers.find((entry) => entry.id === "typescript-language-server");
+    assert.equal(server.available, true);
+    assert.equal(server.executable, shim);
   } finally {
     await manager.dispose();
     await fs.rm(workspace, { recursive: true, force: true });

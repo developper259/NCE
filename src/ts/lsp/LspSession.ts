@@ -75,6 +75,54 @@ const REQUEST_TIMEOUT_MS = 8_000;
 const MAX_DIAGNOSTICS_PER_PUBLISH = 2_000;
 const MAX_DIAGNOSTIC_MESSAGE = 8_192;
 const MAX_LOG_BUFFER = 200;
+const CMD_META_CHARS = /([()\][%!^"`<>&|;, *?])/g;
+const CMD_SCRIPT = /\.(?:cmd|bat)$/i;
+const NODE_MODULES_CMD_SHIM = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i;
+
+export interface LspProcessCommand {
+  command: string;
+  args: string[];
+  windowsVerbatimArguments?: boolean;
+}
+
+function escapeCmdToken(value: string, doubleEscapeMetaChars: boolean): string {
+  let token = String(value);
+  token = token.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"');
+  token = token.replace(/(?=(\\+?)?)\1$/, '$1$1');
+  token = `"${token}"`;
+  token = token.replace(CMD_META_CHARS, '^$1');
+  if (doubleEscapeMetaChars) token = token.replace(CMD_META_CHARS, '^$1');
+  return token;
+}
+
+/**
+ * Node cannot spawn .cmd/.bat files directly on Windows (spawn EINVAL).
+ * Route them through cmd.exe, quoting and escaping the command line the same
+ * way cmd itself expects. npm shims receive a second round of escaping because
+ * they forward their arguments to Node.
+ */
+export function resolveLspProcessCommand(
+  executable: string,
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): LspProcessCommand {
+  if (platform !== "win32" || !CMD_SCRIPT.test(executable)) {
+    return { command: executable, args: [...args] };
+  }
+  const normalized = path.win32.normalize(executable);
+  const doubleEscapeMetaChars = NODE_MODULES_CMD_SHIM.test(normalized);
+  const command = normalized.replace(CMD_META_CHARS, '^$1');
+  const shellCommand = [
+    command,
+    ...args.map((arg) => escapeCmdToken(arg, doubleEscapeMetaChars)),
+  ].join(" ");
+  return {
+    command: env.ComSpec || env.COMSPEC || "cmd.exe",
+    args: ["/d", "/s", "/c", `"${shellCommand}"`],
+    windowsVerbatimArguments: true,
+  };
+}
 
 const EMPTY_CAPABILITIES: LspSessionCapabilities = {
   syncKind: 0,
@@ -249,13 +297,20 @@ export class LspSession implements LspServerSessionLike {
       throw new Error(this.options.executable.error || "The language server executable is unavailable.");
     const env = { ...(this.options.env ?? process.env) };
     delete env.ELECTRON_RUN_AS_NODE;
+    const launch = resolveLspProcessCommand(
+      this.options.executable.command,
+      this.options.executable.args,
+      this.platform,
+      env,
+    );
     let child: ChildProcess;
     try {
-      child = spawn(this.options.executable.command, this.options.executable.args, {
+      child = spawn(launch.command, launch.args, {
         cwd: this.root,
         env,
         shell: false,
         windowsHide: true,
+        windowsVerbatimArguments: launch.windowsVerbatimArguments === true,
         detached: this.platform !== "win32",
         stdio: ["pipe", "pipe", "pipe"],
       });
