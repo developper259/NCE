@@ -950,21 +950,21 @@ class SettingsView {
       typeof config.enabled === "boolean"
         ? config.enabled
         : server.defaultEnabled === true;
+    const available = server.available === true;
     if (!entry.busy) {
-      entry.toggleInput.checked = globallyEnabled ? configuredEnabled : false;
+      entry.toggleInput.checked = globallyEnabled && available && configuredEnabled;
     }
-    const unavailableBlocksEnable =
-      !configuredEnabled && server.available !== true;
-    entry.toggleInput.disabled =
-      entry.busy || !globallyEnabled || unavailableBlocksEnable;
+    entry.toggleInput.disabled = entry.busy || !globallyEnabled || !available;
     entry.toggleInput.setAttribute(
       "aria-label",
-      `${configuredEnabled ? "Disable" : "Enable"} ${server.name}`,
+      available
+        ? `${configuredEnabled ? "Disable" : "Enable"} ${server.name}`
+        : `${server.name} is unavailable`,
     );
     entry.toggleLabel.title = !globallyEnabled
       ? "Enable language servers globally to change this server."
-      : unavailableBlocksEnable
-        ? "Configure the executable path before enabling this server."
+      : !available
+        ? "Install this language server or configure it in the details before enabling it."
         : configuredEnabled
           ? "Disable this language server."
           : "Enable this language server.";

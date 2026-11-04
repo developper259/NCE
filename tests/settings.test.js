@@ -702,6 +702,56 @@ test("Set path prefills the configured executable path", async () => {
   assert.equal(await pending, "/next/server");
 });
 
+test("Language Manager never shows unavailable servers as enabled", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
+  const view = Object.create(SettingsView.prototype);
+  const createEntry = (overrides = {}) => ({
+    server: { name: "BasedPyright", available: false, defaultEnabled: true },
+    config: {},
+    globallyEnabled: true,
+    busy: false,
+    toggleInput: {
+      checked: true,
+      disabled: false,
+      setAttribute(name, value) {
+        this[name] = value;
+      },
+    },
+    toggleLabel: { title: "" },
+    ...overrides,
+  });
+
+  const unavailable = createEntry();
+  view.updateLanguageServerToggle(unavailable);
+  assert.equal(unavailable.toggleInput.checked, false);
+  assert.equal(unavailable.toggleInput.disabled, true);
+  assert.match(unavailable.toggleLabel.title, /Install.*configure/i);
+
+  const available = createEntry({
+    server: { name: "BasedPyright", available: true, defaultEnabled: true },
+  });
+  view.updateLanguageServerToggle(available);
+  assert.equal(available.toggleInput.checked, true);
+  assert.equal(available.toggleInput.disabled, false);
+
+  const disabled = createEntry({
+    config: { enabled: false },
+    server: { name: "ESLint Language Server", available: true, defaultEnabled: false },
+  });
+  view.updateLanguageServerToggle(disabled);
+  assert.equal(disabled.toggleInput.checked, false);
+  assert.equal(disabled.toggleInput.disabled, false);
+
+  const globalOff = createEntry({
+    globallyEnabled: false,
+    server: { name: "BasedPyright", available: true, defaultEnabled: true },
+  });
+  view.updateLanguageServerToggle(globalOff);
+  assert.equal(globalOff.toggleInput.checked, false);
+  assert.equal(globalOff.toggleInput.disabled, true);
+});
+
 test("Language Manager groups ecosystems and labels unavailable servers precisely", () => {
   const { loadGlobal } = require("./helpers/runtime");
   const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});

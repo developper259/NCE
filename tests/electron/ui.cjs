@@ -328,12 +328,16 @@ module.exports = async function exerciseUI() {
     if (!server) continue;
     const toggle = row.querySelector('.lsp-server-toggle input');
     check(Boolean(toggle), 'Language row exposes an enable toggle');
-    const expectedChecked = lspStatus.enabled === true && server.enabled === true;
+    const expectedChecked =
+      lspStatus.enabled === true && server.enabled === true && server.available === true;
     check(toggle.checked === expectedChecked, 'Language toggle reflects the effective state');
-    if (lspStatus.enabled !== true) {
+    if (!server.available) {
+      check(toggle.checked === false, 'Unavailable language servers are never shown as enabled');
+      check(toggle.disabled === true, 'Unavailable language servers cannot be toggled');
+    } else if (lspStatus.enabled !== true) {
       check(toggle.disabled === true, 'Language toggles are disabled when language servers are off');
-    } else if (!server.enabled && !server.available) {
-      check(toggle.disabled === true, 'Unavailable languages cannot be enabled');
+    } else {
+      check(toggle.disabled === false, 'Available language servers can be toggled');
     }
   }
   const disclosure = languageRow.querySelector('.lsp-disclosure');
