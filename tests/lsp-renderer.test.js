@@ -515,7 +515,7 @@ test("definition navigation accepts Windows paths with a different drive-letter 
   };
   const notifications = [];
   const positions = [];
-  const selections = [];
+  let clearedSelections = 0;
   controller.editor = {
     tabManager: {
       activeFile: file,
@@ -527,8 +527,8 @@ test("definition navigation accepts Windows paths with a different drive-letter 
       },
     },
     selectController: {
-      setSelection(start, end, options) {
-        selections.push([start, end, options]);
+      unSelectAll() {
+        clearedSelections += 1;
       },
     },
     focusOutput() {},
@@ -547,12 +547,8 @@ test("definition navigation accepts Windows paths with a different drive-letter 
 
   assert.equal(navigated, true);
   assert.deepEqual(notifications, []);
+  assert.equal(clearedSelections, 1);
   assert.deepEqual(plain(positions), [[2, 2, { ensureVisible: true }]]);
-  assert.deepEqual(plain(selections), [[
-    { row: 2, column: 2 },
-    { row: 4, column: 3 },
-    { emitEvent: true },
-  ]]);
 });
 
 test("Problems status shows progress without server readiness", () => {

@@ -891,16 +891,8 @@ class LspController {
     }
     const row = Math.min(Math.max(location.range.start.line + 1, 1), file.lines.length);
     const column = Math.min(location.range.start.character, file.lines[row - 1]?.getText?.().length || 0);
+    this.editor.selectController?.unSelectAll?.();
     this.editor.cursorController.setCursorPosition(row, column, { ensureVisible: true });
-    const endRow = Math.min(Math.max(location.range.end.line + 1, row), file.lines.length);
-    const endColumn = Math.min(location.range.end.character, file.lines[endRow - 1]?.getText?.().length || 0);
-    if (endRow !== row || endColumn !== column) {
-      this.editor.selectController.setSelection(
-        { row, column },
-        { row: endRow, column: endColumn },
-        { emitEvent: true },
-      );
-    }
     this.editor.focusOutput?.();
     return true;
   }
