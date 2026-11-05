@@ -167,7 +167,7 @@ test("typed trigger characters dispatch without throwing on ready sessions", () 
     sessions: [{
       state: "ready",
       capabilities: {
-        completionTriggerCharacters: ["."],
+        completionTriggerCharacters: [".", "'", '"', "`"],
         signatureHelpTriggerCharacters: ["("],
       },
     }],
@@ -181,6 +181,9 @@ test("typed trigger characters dispatch without throwing on ready sessions", () 
   controller.hideHover = () => {};
   controller.handleChange({ afterText: ".", beforeText: "" });
   controller.handleChange({ afterText: "(", beforeText: "" });
+  controller.handleChange({ afterText: "'", beforeText: "" });
+  controller.handleChange({ afterText: '"', beforeText: "" });
+  controller.handleChange({ afterText: "`", beforeText: "" });
   controller.handleChange({ afterText: "x", beforeText: "" });
   assert.deepEqual(scheduled, [["completion", "."], ["signature"]]);
 });

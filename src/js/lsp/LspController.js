@@ -169,7 +169,7 @@ class LspController {
     const afterText = typeof payload?.afterText === "string" ? payload.afterText : "";
     const typedCharacter = payload?.batch ? "" : afterText.slice(-1);
     if (typedCharacter) {
-      if (this.getTriggerCharacters("completion").includes(typedCharacter)) {
+      if (this.shouldTriggerCompletion(typedCharacter)) {
         this.scheduleAutoCompletion(file, typedCharacter);
       }
       if (this.getTriggerCharacters("signature").includes(typedCharacter)) {
@@ -679,6 +679,14 @@ class LspController {
       });
     }
     this.completionSession = null;
+  }
+
+  shouldTriggerCompletion(character) {
+    // Opening a string literal should not pop the suggestion list, even when
+    // the language server advertises quote characters as triggers.
+    if (!character || character === "'" || character === '"' || character === "`")
+      return false;
+    return this.getTriggerCharacters("completion").includes(character);
   }
 
   getTriggerCharacters(kind) {
