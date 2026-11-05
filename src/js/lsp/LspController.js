@@ -169,7 +169,7 @@ class LspController {
     const afterText = typeof payload?.afterText === "string" ? payload.afterText : "";
     const typedCharacter = payload?.batch ? "" : afterText.slice(-1);
     if (typedCharacter) {
-      if (this.shouldTriggerCompletion(typedCharacter)) {
+      if (this.shouldTriggerCompletion(typedCharacter, file)) {
         this.scheduleAutoCompletion(file, typedCharacter);
       }
       if (this.getTriggerCharacters("signature").includes(typedCharacter)) {
@@ -681,12 +681,30 @@ class LspController {
     this.completionSession = null;
   }
 
-  shouldTriggerCompletion(character) {
+  shouldTriggerCompletion(character, file) {
     // Opening a string literal should not pop the suggestion list, even when
     // the language server advertises quote characters as triggers.
     if (!character || character === "'" || character === '"' || character === "`")
       return false;
+    if (character === "." && this.isInsideQuotedString(file)) return false;
     return this.getTriggerCharacters("completion").includes(character);
+  }
+
+  isInsideQuotedString(file) {
+    if (!file?.lines) return false;
+    const line = file.lines[file.row - 1]?.getText?.() || "";
+    const end = Math.min(Math.max(file.column, 0), line.length);
+    let quote = null;
+    for (let index = 0; index < end; index += 1) {
+      const character = line[index];
+      if (quote) {
+        if (character === "\\") index += 1;
+        else if (character === quote) quote = null;
+      } else if (character === "'" || character === '"') {
+        quote = character;
+      }
+    }
+    return quote !== null;
   }
 
   getTriggerCharacters(kind) {

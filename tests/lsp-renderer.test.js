@@ -188,6 +188,41 @@ test("typed trigger characters dispatch without throwing on ready sessions", () 
   assert.deepEqual(scheduled, [["completion", "."], ["signature"]]);
 });
 
+test("completion ignores dots typed inside quoted strings", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  const makeBuffer = (text, column) => ({
+    id: 1,
+    path: "/ws/main.ts",
+    row: 1,
+    column,
+    lines: makeFile(text).lines,
+  });
+  const quoted = makeBuffer("const value = 'a.b';", 17);
+  const plain = makeBuffer("value.", 6);
+  const scheduled = [];
+  controller.status = {
+    sessions: [{
+      state: "ready",
+      capabilities: { completionTriggerCharacters: ["."], signatureHelpTriggerCharacters: [] },
+    }],
+  };
+  controller.editor = { tabManager: { activeFile: quoted } };
+  controller.documents = new Map([[1, { path: "/ws/main.ts" }]]);
+  controller.completionWidget = { isVisible: false };
+  controller.queueChange = () => {};
+  controller.scheduleAutoCompletion = (_file, character) => scheduled.push(character);
+  controller.scheduleSignatureHelp = () => {};
+  controller.hideHover = () => {};
+
+  controller.handleChange({ afterText: ".", beforeText: "" });
+  assert.deepEqual(scheduled, []);
+
+  controller.editor.tabManager.activeFile = plain;
+  controller.handleChange({ afterText: ".", beforeText: "" });
+  assert.deepEqual(scheduled, ["."]);
+});
+
 test("workspace edits wait for file loading and skip identical text", async () => {
   const LspPositions = loadGlobal("src/js/lsp/LspPositions.js", "LspPositions");
   const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", { LspPositions });
