@@ -259,7 +259,7 @@ test("LSP manager runs several servers for one document and routes features", { 
     assert.equal(statusAfterReopen.sessions.length, 2, "sessions are reused across documents");
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -286,7 +286,7 @@ test("LSP manager reports missing executables without breaking documents", { tim
     assert.match(unavailable.error, /missing or not executable/);
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -315,7 +315,7 @@ test("LSP manager rejects workspace edits outside the authorized workspace", { t
     assert.equal(renamed.code, "LSP_INVALID_PATH");
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -364,7 +364,7 @@ test("one crashing server keeps the other session and its diagnostics alive", { 
     });
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -401,7 +401,7 @@ test("resource operations in workspace edits are sanitized for the renderer", { 
     assert.equal(renamed.edit.files[0].version, null);
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -419,7 +419,7 @@ test("NCE workspace state is never synchronized or edited", { timeout: 20_000 },
     assert.equal(opened.code, "LSP_INVALID_PATH");
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -467,7 +467,7 @@ test("dynamic registrations enable features for servers without static capabilit
     assert.match(watched.hover.contents, /watched:1/);
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -500,7 +500,7 @@ test("server-initiated workspace edits round-trip through the renderer", { timeo
     });
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -526,7 +526,7 @@ test("progress notifications reach the renderer", { timeout: 30_000 }, async () 
     assert.equal(events.messages[0].message, "typescript-language-server message");
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -569,7 +569,7 @@ test("settings changes reset sessions and respect disabled servers", { timeout: 
     assert.equal((await manager.getStatus()).sessions.length, 0);
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -614,7 +614,7 @@ test("LSP manager answers server-initiated requests and validates payloads", { t
     assert.equal(invalidPosition.code, "LSP_INVALID_ARGUMENT");
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -676,6 +676,6 @@ test("LSP manager starts a server from a Windows command shim", {
     assert.equal(server.executable, shim);
   } finally {
     await manager.dispose();
-    await fs.rm(workspace, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

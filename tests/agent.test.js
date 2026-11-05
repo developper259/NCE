@@ -798,15 +798,26 @@ test("delete_file rejects escaped symlinks and dirty tabs, then closes a clean o
   try {
     const outsideFile = path.join(outside, "outside.txt");
     await fs.writeFile(outsideFile, "outside");
-    await fs.symlink(
-      outsideFile,
-      path.join(root, "escape.txt"),
-      process.platform === "win32" ? "file" : undefined,
-    );
-    const escaped = await agent.deleteWorkspaceFile({ path: "escape.txt" });
-    assert.equal(escaped.success, false);
-    assert.equal(escaped.error.code, "OUTSIDE_WORKSPACE");
-    assert.equal(await fs.readFile(outsideFile, "utf8"), "outside");
+    let symlinksSupported = true;
+    try {
+      await fs.symlink(
+        outsideFile,
+        path.join(root, "escape.txt"),
+        process.platform === "win32" ? "file" : undefined,
+      );
+    } catch (error) {
+      symlinksSupported = false;
+      await fs.rm(path.join(root, "escape.txt"), { force: true });
+      if (!new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) {
+        throw error;
+      }
+    }
+    if (symlinksSupported) {
+      const escaped = await agent.deleteWorkspaceFile({ path: "escape.txt" });
+      assert.equal(escaped.success, false);
+      assert.equal(escaped.error.code, "OUTSIDE_WORKSPACE");
+      assert.equal(await fs.readFile(outsideFile, "utf8"), "outside");
+    }
 
     const openPath = path.join(root, "open.txt");
     await fs.writeFile(openPath, "disk");

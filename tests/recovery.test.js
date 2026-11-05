@@ -232,7 +232,11 @@ test("recovery refuses a symlinked storage directory", async () => {
   const outside = await temporaryRoot("nce-recovery-outside-");
   try {
     await fsp.mkdir(path.join(root, ".nce", "temp"), { recursive: true });
-    await fsp.symlink(outside, path.join(root, ".nce", "temp", "recovery"), "dir");
+    await fsp.symlink(
+      outside,
+      path.join(root, ".nce", "temp", "recovery"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
     const result = await new DirtyBufferRecoveryStore(root).save(snapshot());
     assert.equal(result.success, false);
     assert.deepEqual(await fsp.readdir(outside), []);

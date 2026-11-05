@@ -149,7 +149,14 @@ test("workspace state path resolution confines canonical targets and symlinks", 
     await fsp.mkdir(path.join(root, "src"));
     await fsp.writeFile(path.join(root, "src", "safe.js"), "safe\n");
     await fsp.writeFile(path.join(outside, "secret.js"), "secret\n");
-    await fsp.symlink(path.join(outside, "secret.js"), path.join(root, "src", "escape.js"));
+    let symlinksSupported = true;
+    try {
+      await fsp.symlink(path.join(outside, "secret.js"), path.join(root, "src", "escape.js"));
+    } catch (error) {
+      symlinksSupported = false;
+      await fsp.rm(path.join(root, "src", "escape.js"), { force: true });
+      if (!new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) throw error;
+    }
     const manager = new FileManager({ window: null, watcher: null });
 
     const safe = await manager.resolveWorkspaceStatePath(root, "src/safe.js");
@@ -162,7 +169,9 @@ test("workspace state path resolution confines canonical targets and symlinks", 
     ]) {
       assert.equal(await manager.resolveWorkspaceStatePath(root, unsafe), null);
     }
-    assert.equal(await manager.resolveWorkspaceStatePath(root, "src/escape.js"), null);
+    if (symlinksSupported) {
+      assert.equal(await manager.resolveWorkspaceStatePath(root, "src/escape.js"), null);
+    }
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
     await fsp.rm(outside, { recursive: true, force: true });
@@ -343,11 +352,20 @@ test("Markdown image paths stay relative to the Markdown source and workspace", 
 
     const outsideImage = path.join(outside, "secret.png");
     await fsp.writeFile(outsideImage, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
-    await fsp.symlink(outsideImage, path.join(root, "linked.png"));
-    assert.equal((await manager.readImageFile("../linked.png", {
-      sourcePath: markdownPath,
-      workspaceRoot: root,
-    })).code, "OUTSIDE_WORKSPACE");
+    let symlinksSupported = true;
+    try {
+      await fsp.symlink(outsideImage, path.join(root, "linked.png"));
+    } catch (error) {
+      symlinksSupported = false;
+      await fsp.rm(path.join(root, "linked.png"), { force: true });
+      if (!new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) throw error;
+    }
+    if (symlinksSupported) {
+      assert.equal((await manager.readImageFile("../linked.png", {
+        sourcePath: markdownPath,
+        workspaceRoot: root,
+      })).code, "OUTSIDE_WORKSPACE");
+    }
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
     await fsp.rm(outside, { recursive: true, force: true });
@@ -533,7 +551,14 @@ test("Replace All reports dirty buffers, read-only files, and escaping symlinks"
     await fsp.writeFile(readOnlyPath, "needle\n", { mode: 0o444 });
     await fsp.chmod(readOnlyPath, 0o444);
     await fsp.writeFile(outsidePath, "needle\n");
-    await fsp.symlink(outsidePath, path.join(root, "linked.txt"));
+    let symlinksSupported = true;
+    try {
+      await fsp.symlink(outsidePath, path.join(root, "linked.txt"));
+    } catch (error) {
+      symlinksSupported = false;
+      await fsp.rm(path.join(root, "linked.txt"), { force: true });
+      if (!new Set(["EACCES", "EPERM", "ENOTSUP", "EINVAL"]).has(error?.code)) throw error;
+    }
     search = new WorkspaceSearch({ window: null });
 
     const result = await search.replace(root, "needle", "changed", {
@@ -544,7 +569,9 @@ test("Replace All reports dirty buffers, read-only files, and escaping symlinks"
     assert.equal(result.replacements, 0);
     assert.deepEqual(
       result.skippedFiles.map((issue) => issue.code).sort(),
-      ["DIRTY_EDITOR_BUFFER", "READ_ONLY_FILE", "SYMLINK_SKIPPED"],
+      symlinksSupported
+        ? ["DIRTY_EDITOR_BUFFER", "READ_ONLY_FILE", "SYMLINK_SKIPPED"]
+        : ["DIRTY_EDITOR_BUFFER", "READ_ONLY_FILE"],
     );
     assert.equal(await fsp.readFile(dirtyPath, "utf8"), "needle\n");
     assert.equal(await fsp.readFile(readOnlyPath, "utf8"), "needle\n");

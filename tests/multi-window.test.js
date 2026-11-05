@@ -568,7 +568,7 @@ test("WindowManager creates independent windows, focuses workspace duplicates, a
     assert.equal(manager.findWindowByWorkspace(project4), null);
 
     const alias = path.join(root, "project-3-alias");
-    await fs.symlink(project3, alias, "dir");
+    await fs.symlink(project3, alias, process.platform === "win32" ? "junction" : "dir");
     const aliasReservation = await manager.reserveWorkspace(owner.id, alias);
     assert.equal(aliasReservation.success, true);
     assert.equal(manager.commitWorkspace(owner.id, aliasReservation.path, aliasReservation.token), true);
