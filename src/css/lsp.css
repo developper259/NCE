@@ -116,6 +116,10 @@
   font-size: 12px;
 }
 
+.lsp-completion[hidden] {
+  display: none;
+}
+
 .lsp-completion-view {
   flex: 1 1 auto;
   min-height: 0;
