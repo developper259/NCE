@@ -45,7 +45,7 @@ class LspCompletionWidget {
   position(anchorRect) {
     const container = this.editor.mainSection?.getBoundingClientRect();
     if (!container || !anchorRect) return;
-    const width = Math.min(460, Math.max(260, container.width * 0.42)) - 16;
+    const width = Math.min(340, Math.max(200, container.width * 0.3));
     this.element.style.width = `${Math.round(width)}px`;
     const rect = this.element.getBoundingClientRect();
     let left = anchorRect.left - container.left;

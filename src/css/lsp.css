@@ -129,6 +129,9 @@
 }
 
 .lsp-completion-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--font-mono, monospace);
   color: var(--text-primary);
 }
