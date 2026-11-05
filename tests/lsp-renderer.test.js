@@ -495,6 +495,66 @@ test("hover is requested on demand only", () => {
   assert.match(source, /async hover\(\)/);
 });
 
+test("definition navigation accepts Windows paths with a different drive-letter case", async () => {
+  const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", {
+    NCEPath,
+    LspPositions,
+  });
+  const controller = Object.create(LspController.prototype);
+  const file = {
+    id: 4,
+    path: "C:\\workspace\\test.ts",
+    lines: [
+      { getText: () => "class Test {" },
+      { getText: () => "  constructor(self, jsp) {" },
+      { getText: () => "    self.jsp = jsp;" },
+      { getText: () => "  }" },
+      { getText: () => "}" },
+    ],
+  };
+  const notifications = [];
+  const positions = [];
+  const selections = [];
+  controller.editor = {
+    tabManager: {
+      activeFile: file,
+      openFileWithPath: async () => file,
+    },
+    cursorController: {
+      setCursorPosition(row, column, options) {
+        positions.push([row, column, options]);
+      },
+    },
+    selectController: {
+      setSelection(start, end, options) {
+        selections.push([start, end, options]);
+      },
+    },
+    focusOutput() {},
+  };
+  controller.documents = new Map([[file.id, { path: file.path }]]);
+  controller.notify = (message) => notifications.push(message);
+
+  const navigated = await controller.navigateTo({
+    path: "c:\\workspace\\test.ts",
+    authorized: true,
+    range: {
+      start: { line: 1, character: 2 },
+      end: { line: 3, character: 3 },
+    },
+  });
+
+  assert.equal(navigated, true);
+  assert.deepEqual(notifications, []);
+  assert.deepEqual(plain(positions), [[2, 2, { ensureVisible: true }]]);
+  assert.deepEqual(plain(selections), [[
+    { row: 2, column: 2 },
+    { row: 4, column: 3 },
+    { emitEvent: true },
+  ]]);
+});
+
 test("Problems status shows progress without server readiness", () => {
   const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
   const controller = Object.create(LspController.prototype);

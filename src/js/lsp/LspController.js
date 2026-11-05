@@ -885,7 +885,7 @@ class LspController {
       return false;
     }
     file = file || this.editor.tabManager.activeFile;
-    if (!file || file.path !== location.path && !this.isPathForFile(file, location.path)) {
+    if (!file || !this.isPathForFile(file, location.path)) {
       this.notify("Unable to open the target file.", "error");
       return false;
     }
@@ -907,9 +907,9 @@ class LspController {
 
   isPathForFile(file, targetPath) {
     if (!file) return false;
-    if (file.path === targetPath) return true;
+    if (NCEPath.equals(file.path, targetPath)) return true;
     const record = this.documents.get(file.id);
-    return record?.path === targetPath;
+    return NCEPath.equals(record?.path, targetPath);
   }
 
   async references() {
