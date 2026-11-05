@@ -758,6 +758,35 @@ class SelectController {
     }
   }
 
+  isPrimaryModifierClick(event) {
+    const platform = this.editor.api?.platform ||
+      (typeof window !== "undefined" ? window.api?.platform : "");
+    return platform === "darwin"
+      ? event.metaKey === true
+      : event.ctrlKey === true;
+  }
+
+  isGoToDefinitionClick(event) {
+    if (event.button !== 0 || event.shiftKey || event.altKey) return false;
+    if (!this.editor.lspController?.api) return false;
+    if (typeof this.editor.lspController.definition !== "function") return false;
+    return this.isPrimaryModifierClick(event);
+  }
+
+  definitionTargetAt(position) {
+    if (!position || typeof LspPositions === "undefined") return position;
+    const file = this.editor.tabManager.activeFile;
+    const line = file?.lines?.[position.row - 1]?.getText?.() || "";
+    const word = LspPositions.wordRangeAt(line, position.column);
+    if (word.start === word.end) return null;
+    if (!Array.from(word.text).some((character) => LspPositions.isWordCharacter(character)))
+      return null;
+    return {
+      row: position.row,
+      column: Math.min(Math.max(position.column, word.start), word.end - 1),
+    };
+  }
+
   mouseDown(event) {
     if (!this.editor.tabManager.activeFile || event.button === 2) return;
 
@@ -771,6 +800,32 @@ class SelectController {
         event.clientY,
         { toggle: true },
       );
+      return;
+    }
+
+    if (this.isGoToDefinitionClick(event)) {
+      this.stopAutoScroll();
+      event.preventDefault?.();
+      event.stopPropagation?.();
+      this.editor.keyBinding.historyX = undefined;
+      if (this.editor.multiCursorController?.hasMultipleCursors?.()) {
+        this.editor.multiCursorController.removeSecondaryCursors({
+          preservePrimarySelection: false,
+        });
+      }
+      if (this.hasActiveSelection()) this.unSelectAll();
+      const position = this.editor.cursorController.onClick(event);
+      const target = this.definitionTargetAt(position);
+      if (target) {
+        if (target.column !== position.column) {
+          this.editor.cursorController.setCursorPosition(target.row, target.column, {
+            ensureVisible: false,
+          });
+        }
+        this.startSelect = { ...target };
+        this.endSelect = { ...target };
+        void this.editor.lspController.definition();
+      }
       return;
     }
 
