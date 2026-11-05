@@ -6,7 +6,12 @@ class LspCompletionWidget {
     this.element.hidden = true;
     this.element.setAttribute("role", "listbox");
     this.element.setAttribute("aria-label", "Suggestions");
+    this.viewport = document.createElement("div");
+    this.viewport.className = "lsp-completion-view";
+    this.viewport.setAttribute("role", "presentation");
+    this.element.appendChild(this.viewport);
     editor.mainSection?.appendChild(this.element);
+    this.vScroller = null;
     this.items = [];
     this.filtered = [];
     this.visibleItems = [];
@@ -31,8 +36,11 @@ class LspCompletionWidget {
     this.onDismiss = onDismiss || null;
     this.selectedIndex = 0;
     this.element.hidden = false;
+    this.viewport.scrollTop = 0;
     this.filter();
     this.position(anchorRect);
+    this.ensureScroller();
+    this.refreshScroller();
   }
 
   setPrefix(prefix) {
@@ -78,13 +86,65 @@ class LspCompletionWidget {
     this.onChange?.(this.visibleItems, this.prefix);
   }
 
+  ensureScroller() {
+    if (this.vScroller) return this.vScroller;
+    const manager = this.editor.scrollerManager;
+    if (!manager?.createScroller) return null;
+    const scroller = manager.createScroller(
+      this.element,
+      manager.VERTICAL_TYPE,
+      false,
+      { compact: true },
+    );
+    scroller.wheelTarget = this.viewport;
+    scroller.calculProp = () => {
+      const scrollHeight = this.viewport.scrollHeight;
+      const clientHeight = this.viewport.clientHeight;
+      if (scrollHeight <= 0 || scrollHeight <= clientHeight) return 100;
+      return (clientHeight / scrollHeight) * 100;
+    };
+    scroller.calcIsActive = () =>
+      this.viewport.scrollHeight > this.viewport.clientHeight + 1;
+    scroller.onScroll = (ratio) => {
+      const maxScroll = Math.max(
+        0,
+        this.viewport.scrollHeight - this.viewport.clientHeight,
+      );
+      this.viewport.scrollTop = ratio * maxScroll;
+    };
+    this.vScroller = scroller;
+    manager.addScroller(scroller);
+    return scroller;
+  }
+
+  refreshScroller() {
+    const scroller = this.vScroller;
+    if (!scroller || this.element.hidden) return;
+    const maxScroll = Math.max(
+      0,
+      this.viewport.scrollHeight - this.viewport.clientHeight,
+    );
+    scroller.setScrollRatio(maxScroll > 0 ? this.viewport.scrollTop / maxScroll : 0);
+    const manager = this.editor.scrollerManager;
+    if (manager?.refreshScroller) {
+      manager.refreshScroller(scroller, {
+        forceMetrics: true,
+        measureInactive: true,
+      });
+    } else {
+      scroller.refreshMetrics();
+      scroller.refresh();
+    }
+  }
+
   render() {
-    this.element.replaceChildren();
+    this.viewport.replaceChildren();
     if (!this.visibleItems.length) {
       const empty = document.createElement("div");
       empty.className = "lsp-completion-empty";
       empty.textContent = "No suggestions";
-      this.element.appendChild(empty);
+      this.viewport.appendChild(empty);
+      this.refreshScroller();
       return;
     }
     this.visibleItems.forEach((item, index) => {
@@ -110,9 +170,10 @@ class LspCompletionWidget {
         this.selectedIndex = index;
         this.acceptSelected();
       });
-      this.element.appendChild(row);
+      this.viewport.appendChild(row);
     });
     this.scrollSelectedIntoView();
+    this.refreshScroller();
   }
 
   completionDescription(item) {
@@ -199,7 +260,9 @@ class LspCompletionWidget {
   hide() {
     if (this.element.hidden) return;
     this.element.hidden = true;
-    this.element.replaceChildren();
+    this.viewport.replaceChildren();
+    this.viewport.scrollTop = 0;
+    this.vScroller?.setScrollRatio(0);
     this.visibleItems = [];
     this.items = [];
     this.session = null;
@@ -209,6 +272,10 @@ class LspCompletionWidget {
   }
 
   destroy() {
+    const manager = this.editor.scrollerManager;
+    if (manager?.destroyScroller) manager.destroyScroller(this.vScroller);
+    else this.vScroller?.destroy?.();
+    this.vScroller = null;
     this.element.remove();
   }
 }
