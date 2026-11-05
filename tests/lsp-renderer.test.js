@@ -415,6 +415,91 @@ test("empty completion leaves editor keys untouched", () => {
   assert.equal(hidden, 1);
 });
 
+async function applyCompletionEdits(text, column, item, resolvedItem = null) {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", { LspPositions });
+  const file = {
+    id: 9,
+    path: "/ws/main.ts",
+    row: 1,
+    column,
+    editVersion: 0,
+    lines: makeFile(text).lines,
+  };
+  const record = { path: file.path };
+  const edits = [];
+  const controller = Object.create(LspController.prototype);
+  controller.editor = {
+    tabManager: { activeFile: file },
+    writerController: {
+      applyRangeEdit(start, end, value, options) {
+        edits.push({ start, end, text: value, options });
+      },
+    },
+  };
+  controller.documents = new Map([[file.id, record]]);
+  controller.api = resolvedItem
+    ? { resolveCompletion: async () => ({ success: true, item: resolvedItem }) }
+    : {};
+  await controller.applyCompletion(item, { file, record, editVersion: 0 });
+  return edits;
+}
+
+function applyTextEdits(text, edits) {
+  let result = text;
+  for (const edit of [...edits].sort((left, right) =>
+    right.start.column - left.start.column)) {
+    result = result.slice(0, edit.start.column) + edit.text + result.slice(edit.end.column);
+  }
+  return result;
+}
+
+test("member completion keeps the dot when resolve omits the text edit", async () => {
+  const edits = await applyCompletionEdits("t.", 2, {
+    id: "item-1",
+    label: "print",
+    source: "typescript-language-server",
+    textEdit: {
+      range: { start: { line: 0, character: 1 }, end: { line: 0, character: 2 } },
+      newText: ".print",
+    },
+  }, {
+    label: "print",
+    detail: "(method) Test.print(): void",
+  });
+
+  assert.equal(applyTextEdits("t.", edits), "t.print");
+  assert.deepEqual(plain(edits.map(({ start, end, text }) => [start, end, text])), [[
+    { row: 1, column: 1 },
+    { row: 1, column: 2 },
+    ".print",
+  ]]);
+});
+
+test("completion fallback inserts after a trigger character", async () => {
+  const afterDot = await applyCompletionEdits("t.", 2, {
+    label: "print",
+    insertText: "print",
+    source: "plain-server",
+  });
+  assert.equal(applyTextEdits("t.", afterDot), "t.print");
+  assert.deepEqual(plain(afterDot.map(({ start, end, text }) => [start, end, text])), [[
+    { row: 1, column: 2 },
+    { row: 1, column: 2 },
+    "print",
+  ]]);
+
+  const afterPrefix = await applyCompletionEdits("t.pr", 4, {
+    label: "print",
+    source: "plain-server",
+  });
+  assert.equal(applyTextEdits("t.pr", afterPrefix), "t.print");
+  assert.deepEqual(plain(afterPrefix.map(({ start, end, text }) => [start, end, text])), [[
+    { row: 1, column: 2 },
+    { row: 1, column: 4 },
+    "print",
+  ]]);
+});
+
 test("completion annotations show a method class or a value type", () => {
   const LspCompletionWidget = loadGlobal("src/js/lsp/LspCompletionWidget.js", "LspCompletionWidget");
   const describe = (item) => LspCompletionWidget.prototype.completionDescription(item);

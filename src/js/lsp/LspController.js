@@ -634,7 +634,9 @@ class LspController {
     if (item.id && typeof this.api.resolveCompletion === "function") {
       try {
         const resolved = await this.api.resolveCompletion({ id: item.id });
-        if (resolved?.success && resolved.item) item = resolved.item;
+        // Resolution only enriches the item; keep the original edit data
+        // because some servers omit textEdit from the resolved payload.
+        if (resolved?.success && resolved.item) item = { ...item, ...resolved.item };
       } catch {}
     }
     const file = session.file;
@@ -650,9 +652,12 @@ class LspController {
     }
     if (!edits.length) {
       const line = file.lines[file.row - 1]?.getText?.() || "";
-      const word = LspPositions.wordRangeAt(line, file.column);
+      // Only replace the identifier prefix before the caret. The trigger
+      // character (for example the dot in `object.`) must stay in place.
+      let start = Math.min(file.column, line.length);
+      while (start > 0 && LspPositions.isWordCharacter(line[start - 1])) start -= 1;
       edits.push({
-        start: { row: file.row, column: word.start },
+        start: { row: file.row, column: start },
         end: { row: file.row, column: file.column },
         text: item.insertText ?? item.label ?? "",
       });

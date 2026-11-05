@@ -314,7 +314,10 @@ export class LspFeatureRouter {
       data: item.data,
     });
     const normalized = normalizeCompletionItem(result, route.session.serverId);
-    return normalized ? { ...normalized, id: item.id } : item;
+    // Resolve responses usually only add detail/documentation. Keep the
+    // original item fields (notably textEdit), which servers often omit
+    // from the resolved payload.
+    return normalized ? { ...item, ...normalized, id: item.id } : item;
   }
 
   async hover(routes: LspRoute[], params: unknown, signal?: AbortSignal): Promise<LspHoverResult | null> {
