@@ -203,6 +203,55 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   editor.bottomBar.show();
   await nextFrame();
 
+  // Problems and warnings indicators open the Problems panel.
+  const diagnostics = [
+    { severity: 1, message: "Error one", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } },
+    { severity: 1, message: "Error two", range: { start: { line: 0, character: 2 }, end: { line: 0, character: 3 } } },
+    { severity: 2, message: "Warning one", range: { start: { line: 0, character: 4 }, end: { line: 0, character: 5 } } },
+    { severity: 3, message: "Info one", range: { start: { line: 0, character: 6 }, end: { line: 0, character: 7 } } },
+  ];
+  editor.lspController.handleDiagnostics({
+    documents: [{
+      path: filePath,
+      uri: `file://${filePath.replace(/\\/g, "/")}`,
+      diagnostics,
+    }],
+  });
+  await nextFrame();
+  const errorIndicator = document.querySelector(
+    '.bottomBar-problem[data-severity="error"]',
+  );
+  const warningIndicator = document.querySelector(
+    '.bottomBar-problem[data-severity="warning"]',
+  );
+  check(Boolean(errorIndicator && warningIndicator), "problem indicators exist");
+  check(errorIndicator.dataset.count === "2", "error count reflects diagnostics");
+  check(warningIndicator.dataset.count === "1", "warning count reflects diagnostics");
+  check(
+    getComputedStyle(errorIndicator).cursor === "pointer",
+    "problem indicators show a pointer cursor",
+  );
+  errorIndicator.click();
+  await waitFor(
+    () => editor.bottomPanelManager.activePanelId === "problems" &&
+      Boolean(document.querySelector(".problems-panel")),
+    "Problems panel to open from the bottom bar",
+  );
+  await nextFrame();
+  check(
+    document.querySelector(".problems-panel-summary").textContent
+      .startsWith("2 errors, 1 warning, 1 info"),
+    "Problems panel reflects the same counts",
+  );
+  editor.lspController.handleDiagnostics({ documents: [] });
+  editor.bottomPanelManager.closePanel({ restoreFocus: false });
+  await nextFrame();
+  check(
+    errorIndicator.dataset.count === "0" &&
+      warningIndicator.dataset.count === "0",
+    "problem indicators reset with the diagnostics",
+  );
+
   // State D: contextual error.
   git.status = null;
   git.applyStatusError({ code: "GIT_TIMEOUT", error: "Git did not respond in time." });

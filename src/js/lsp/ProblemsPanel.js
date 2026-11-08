@@ -1,4 +1,16 @@
 class ProblemsPanel {
+  static countDiagnostics(documents = []) {
+    const counts = { errors: 0, warnings: 0, infos: 0 };
+    for (const document of documents) {
+      for (const diagnostic of document?.diagnostics || []) {
+        if (diagnostic?.severity === 1) counts.errors += 1;
+        else if (diagnostic?.severity === 2) counts.warnings += 1;
+        else counts.infos += 1;
+      }
+    }
+    return counts;
+  }
+
   constructor(editor, controller) {
     this.editor = editor;
     this.controller = controller;
@@ -34,7 +46,7 @@ class ProblemsPanel {
     this.list.addEventListener("click", this.onClick);
   }
 
-  render(documents = []) {
+  render(documents = [], counts = ProblemsPanel.countDiagnostics(documents)) {
     const entries = [];
     for (const document of documents) {
       for (const diagnostic of document.diagnostics || []) {
@@ -49,12 +61,6 @@ class ProblemsPanel {
       (left.diagnostic.severity || 9) - (right.diagnostic.severity || 9) ||
       left.path.localeCompare(right.path) ||
       left.diagnostic.range.start.line - right.diagnostic.range.start.line);
-    const counts = { errors: 0, warnings: 0, infos: 0 };
-    for (const entry of entries) {
-      if (entry.diagnostic.severity === 1) counts.errors += 1;
-      else if (entry.diagnostic.severity === 2) counts.warnings += 1;
-      else counts.infos += 1;
-    }
     this.summary.textContent = `${counts.errors} error${counts.errors === 1 ? "" : "s"}, `
       + `${counts.warnings} warning${counts.warnings === 1 ? "" : "s"}, `
       + `${counts.infos} info`;

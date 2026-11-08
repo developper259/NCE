@@ -693,3 +693,46 @@ test("Problems status shows progress without server readiness", () => {
   controller.updateProblemsStatus();
   assert.deepEqual(statuses, ["analysis (50%)", ""]);
 });
+
+test("problem counts are shared by the Problems panel and the bottom bar", () => {
+  const ProblemsPanel = loadGlobal("src/js/lsp/ProblemsPanel.js", "ProblemsPanel");
+  const LspController = loadGlobal(
+    "src/js/lsp/LspController.js",
+    "LspController",
+    { ProblemsPanel },
+  );
+  const documents = [{
+    path: "/workspace/a.ts",
+    diagnostics: [
+      { severity: 1, message: "Error one" },
+      { severity: 1, message: "Error two" },
+      { severity: 2, message: "Warning one" },
+      { severity: 3, message: "Info one" },
+    ],
+  }, {
+    path: "/workspace/b.ts",
+    diagnostics: [{ severity: 2, message: "Warning two" }],
+  }];
+  assert.deepEqual(plain(ProblemsPanel.countDiagnostics(documents)), {
+    errors: 2,
+    warnings: 2,
+    infos: 1,
+  });
+
+  const controller = Object.create(LspController.prototype);
+  controller.diagnosticsDocuments = documents;
+  controller.problemsPanel = null;
+  controller.updateProblemsStatus = () => {};
+  const updates = [];
+  controller.editor = {
+    bottomBar: {
+      refreshProblemCounts(counts) {
+        updates.push(counts);
+        return true;
+      },
+    },
+  };
+  controller.refreshProblems();
+  assert.equal(updates.length, 1);
+  assert.deepEqual(plain(updates[0]), { errors: 2, warnings: 2, infos: 1 });
+});

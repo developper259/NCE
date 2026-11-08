@@ -68,6 +68,54 @@
   outline: 1px solid var(--accent-primary);
   outline-offset: -2px;
 }
+
+.bottomBar-problems {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin-left: 4px;
+}
+
+.bottomBar-problem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 100%;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+
+.bottomBar-problem:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.bottomBar-problem:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+
+.bottomBar-problem i {
+  font-size: 12px;
+}
+
+.bottomBar-problem-count {
+  min-width: 8px;
+  text-align: left;
+}
+
+.bottomBar-problem[data-severity="error"][data-count]:not([data-count="0"]) {
+  color: var(--state-error);
+}
+
+.bottomBar-problem[data-severity="warning"][data-count]:not([data-count="0"]) {
+  color: var(--state-warning);
+}
 .bottomBar-preview-mode #language,
 .bottomBar-preview-mode #config-space,
 .bottomBar-preview-mode .bottomBar-cursor-status,

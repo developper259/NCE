@@ -9,11 +9,74 @@ class BottomBar {
     this.configSpaceElement = getElement("#config-space");
     this.viewTypePicker = getElement("#view-type");
     this.bottomBarElement = getElement(".bottomBar");
+    this.problemIndicators = null;
+    this.problemErrorButton = null;
+    this.problemWarningButton = null;
 
+    this.buildProblemIndicators();
+    this.refreshProblemCounts();
     this.refreshLanguage();
     this.refreshScrollers();
     this.refreshFileStatus();
     this.refreshViewTypePicker();
+  }
+
+  buildProblemIndicators() {
+    const left = getElement(".bottomBar .left");
+    if (!left || typeof document === "undefined" ||
+        typeof document.createElement !== "function") return;
+    const group = document.createElement("div");
+    group.className = "bottomBar-problems";
+    group.setAttribute("role", "group");
+    group.setAttribute("aria-label", "Problems");
+    group.setAttribute("aria-live", "polite");
+
+    const createButton = (severity, iconName) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "bottomBar-problem";
+      button.dataset.severity = severity;
+      const icon = document.createElement("i");
+      icon.className = `fi ${iconName}`;
+      icon.setAttribute("aria-hidden", "true");
+      const count = document.createElement("span");
+      count.className = "bottomBar-problem-count";
+      count.textContent = "0";
+      button.append(icon, count);
+      button._count = count;
+      button.addEventListener("click", () => void this.openProblemsPanel());
+      return button;
+    };
+
+    this.problemErrorButton = createButton("error", "fi-rr-cross-circle");
+    this.problemWarningButton = createButton("warning", "fi-rr-triangle-warning");
+    group.append(this.problemErrorButton, this.problemWarningButton);
+    left.append(group);
+    this.problemIndicators = group;
+  }
+
+  openProblemsPanel() {
+    const controller = this.editor.lspController;
+    if (typeof controller?.showProblems === "function")
+      return controller.showProblems();
+    return this.editor.bottomPanelManager?.openPanel?.("problems") || false;
+  }
+
+  refreshProblemCounts(counts = null) {
+    const resolved = counts || this.editor.lspController?.getProblemCounts?.() ||
+      { errors: 0, warnings: 0 };
+    this.updateProblemButton(this.problemErrorButton, resolved.errors, "error");
+    this.updateProblemButton(this.problemWarningButton, resolved.warnings, "warning");
+  }
+
+  updateProblemButton(button, count, severity) {
+    if (!button) return;
+    const value = Number.isSafeInteger(count) && count >= 0 ? count : 0;
+    button.dataset.count = String(value);
+    if (button._count) button._count.textContent = String(value);
+    const label = `${value} ${severity}${value === 1 ? "" : "s"}`;
+    button.title = label;
+    button.setAttribute("aria-label", `${label}. Open Problems panel.`);
   }
 
   openViewTypePicker() {

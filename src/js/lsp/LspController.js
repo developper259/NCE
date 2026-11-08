@@ -392,9 +392,16 @@ class LspController {
     this.problemsPanel.setServerStatus(parts.join(" · "));
   }
 
+  getProblemCounts() {
+    return ProblemsPanel.countDiagnostics(this.diagnosticsDocuments);
+  }
+
   refreshProblems() {
-    if (this.problemsPanel) this.problemsPanel.render(this.diagnosticsDocuments);
+    const counts = this.getProblemCounts();
+    if (this.problemsPanel)
+      this.problemsPanel.render(this.diagnosticsDocuments, counts);
     this.updateProblemsStatus();
+    this.editor.bottomBar?.refreshProblemCounts?.(counts);
   }
 
   scheduleDiagnosticsOverlay() {
