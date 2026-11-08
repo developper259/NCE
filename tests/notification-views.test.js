@@ -275,7 +275,7 @@ function createStorage() {
 function setup(options = {}) {
   const document = new FakeDocument();
   const bellHost = new FakeElement(document, "div");
-  document.setSelector(".bottomBar", bellHost);
+  document.setSelector(".bottomBar .right", bellHost);
   activeDocument = document;
   const managerOptions = {
     storage: createStorage(),
@@ -599,7 +599,7 @@ test("NotificationCenterView restores persisted history after a restart", () => 
   const storage = createStorage();
   const firstDocument = new FakeDocument();
   firstDocument.setSelector(
-    ".bottomBar",
+    ".bottomBar .right",
     new FakeElement(firstDocument, "div"),
   );
   activeDocument = firstDocument;
@@ -610,7 +610,7 @@ test("NotificationCenterView restores persisted history after a restart", () => 
 
   const secondDocument = new FakeDocument();
   secondDocument.setSelector(
-    ".bottomBar",
+    ".bottomBar .right",
     new FakeElement(secondDocument, "div"),
   );
   activeDocument = secondDocument;

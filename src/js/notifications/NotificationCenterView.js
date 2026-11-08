@@ -47,7 +47,7 @@ class NotificationCenterView {
   }
 
   buildBell() {
-    this.bellHost = document.querySelector?.(".bottomBar") || null;
+    this.bellHost = document.querySelector?.(".bottomBar .right") || null;
     this.bellContainer = document.createElement("div");
     this.bellContainer.className = "nce-bottom-bar-actions";
 
@@ -72,7 +72,11 @@ class NotificationCenterView {
     this.bellButton.appendChild(this.badge);
     this.bellButton.addEventListener("click", () => this.toggle());
     this.bellContainer.appendChild(this.bellButton);
-    this.bellHost?.appendChild(this.bellContainer);
+    if (this.bellHost) {
+      if (typeof this.bellHost.insertBefore === "function")
+        this.bellHost.insertBefore(this.bellContainer, this.bellHost.firstChild || null);
+      else this.bellHost.appendChild(this.bellContainer);
+    }
   }
 
   buildCenter() {

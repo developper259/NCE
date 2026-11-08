@@ -178,6 +178,13 @@ module.exports = async function exerciseNotificationUI() {
     const badge = bell?.querySelector(".nce-notification-badge");
     check(Boolean(bell && badge), "notification bell and badge exist");
     check(Boolean(bell.closest(".bottomBar")), "bell lives in the bottom bar");
+    const rightGroup = bell.closest(".bottomBar .right");
+    const bellGroup = bell.closest(".nce-bottom-bar-actions");
+    check(Boolean(rightGroup && bellGroup), "bell belongs to the right status group");
+    check(
+      rightGroup.firstElementChild === bellGroup,
+      "bell precedes the right status items",
+    );
     const bellRect = rectOf(bell);
     const badgeRect = rectOf(badge);
     const bottomBarRect = rectOf(document.querySelector(".bottomBar"));

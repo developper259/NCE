@@ -75,6 +75,10 @@
 .bottomBar-settings-mode #config-space,
 .bottomBar-settings-mode .bottomBar-cursor-status { display: none !important; }
 
+.bottomBar .right.bottomBar-right-collapsed > :not(.nce-bottom-bar-actions) {
+  display: none !important;
+}
+
 .scroller-open:active {
   background-color: var(--bg-active);
 }

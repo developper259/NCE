@@ -166,6 +166,43 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "commit result is notified",
   );
 
+  // Bottom bar ordering: bell first, then the status items, all right aligned.
+  const filePath = `${workspace}${workspace.includes("\\") ? "\\" : "/"}${fileName}`;
+  await editor.tabManager.openFileWithPath(filePath);
+  await waitFor(
+    () => editor.tabManager.activeFile?.path === filePath &&
+      editor.tabManager.activeFile?.isLoaded === true,
+    "fixture file to open for bottom bar layout",
+  );
+  await nextFrame();
+  const rightGroup = document.querySelector(".bottomBar .right");
+  const bellGroup = rightGroup?.querySelector(".nce-bottom-bar-actions");
+  check(Boolean(rightGroup && bellGroup), "notification bell is in the right status group");
+  check(
+    rightGroup.firstElementChild === bellGroup,
+    "notification bell precedes the right status items",
+  );
+  const languageItem = rightGroup.querySelector("#language");
+  check(
+    getComputedStyle(languageItem).display !== "none" &&
+      bellGroup.getBoundingClientRect().right <=
+        languageItem.getBoundingClientRect().left + 1,
+    "right status items follow the notification bell",
+  );
+  check(
+    rightGroup.getBoundingClientRect().right <= innerWidth - 1,
+    "right status group stays aligned to the window edge",
+  );
+  editor.bottomBar.hide();
+  await nextFrame();
+  check(
+    getComputedStyle(bellGroup).display !== "none" &&
+      bellGroup.getBoundingClientRect().width > 0,
+    "notification bell remains visible in a collapsed bottom bar",
+  );
+  editor.bottomBar.show();
+  await nextFrame();
+
   // State D: contextual error.
   git.status = null;
   git.applyStatusError({ code: "GIT_TIMEOUT", error: "Git did not respond in time." });

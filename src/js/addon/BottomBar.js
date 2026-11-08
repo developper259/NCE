@@ -224,7 +224,8 @@ class BottomBar {
 
     leftBottomBar.style.display = "flex";
     middleBottomBar.style.display = "none";
-    rightBottomBar.style.display = "none";
+    rightBottomBar.style.display = "flex";
+    rightBottomBar.classList.add("bottomBar-right-collapsed");
   }
 
   show() {
@@ -235,6 +236,7 @@ class BottomBar {
     leftBottomBar.style.display = "flex";
     middleBottomBar.style.display = "flex";
     rightBottomBar.style.display = "flex";
+    rightBottomBar.classList.remove("bottomBar-right-collapsed");
     this.bottomBarElement?.classList.remove("bottomBar-image-preview-mode", "bottomBar-preview-mode");
     this.refreshViewTypePicker();
     this.refreshFileStatus();
