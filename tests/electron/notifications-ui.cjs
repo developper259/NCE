@@ -111,6 +111,12 @@ module.exports = async function exerciseNotificationUI() {
     toastStyles.every((style) => Number.parseFloat(style.borderLeftWidth) >= 2),
     "toasts keep their type accent border",
   );
+  const closeButton = toasts[0].querySelector(".nce-toast-close");
+  check(Boolean(closeButton), "toast close button exists");
+  check(
+    getComputedStyle(closeButton).cursor === "pointer",
+    "toast close button shows a pointer cursor",
+  );
 
   const probe = document.createElement("span");
   probe.style.position = "absolute";

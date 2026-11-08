@@ -559,7 +559,7 @@
   background: transparent;
   color: var(--text-tertiary);
   font-size: 12px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-toast-close:hover,
