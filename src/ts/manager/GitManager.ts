@@ -211,6 +211,7 @@ export class GitManager {
   handleIPC(ipc: IpcHandlerRegistrar): void {
     ipc.handle("Git:isAvailable", async () => this.isGitAvailable());
     ipc.handle("Git:version", async () => this.getGitVersion());
+    ipc.handle("Git:init", async () => this.initializeRepository());
     ipc.handle("Git:repository", async () => this.getRepository());
     ipc.handle("Git:isRepository", async () => this.isRepository());
     ipc.handle("Git:repositoryRoot", async () => this.getRepositoryRoot());
@@ -276,6 +277,18 @@ export class GitManager {
   async isRepository(): Promise<boolean> {
     const context = await this.resolveContext();
     return !("failure" in context);
+  }
+
+  initializeRepository(): Promise<GitResult<{ root: string }>> {
+    return this.mutationQueue.run(() => this.initializeRepositoryNow());
+  }
+
+  private async initializeRepositoryNow(): Promise<GitResult<{ root: string }>> {
+    const workspace = await this.resolveWorkspace();
+    if ("failure" in workspace) return workspace.failure;
+    const result = await this.runGit(["init", "-q"], { cwd: workspace.workspace });
+    if (!result.ok) return result.failure;
+    return { success: true, root: workspace.workspace };
   }
 
   async getRepositoryRoot(): Promise<GitResult<{ root: string }>> {
@@ -757,7 +770,7 @@ export class GitManager {
     return [`:(literal)${scope}`, ":(exclude,glob)**/.nce/**"];
   }
 
-  private async resolveContext(): Promise<RepositoryContext | { failure: GitFailure }> {
+  private async resolveWorkspace(): Promise<{ workspace: string } | { failure: GitFailure }> {
     if (this.disposed)
       return { failure: failure("OPERATION_CANCELLED", "The Git manager was disposed.") };
     const raw = this.getWorkspaceRoot();
@@ -776,6 +789,13 @@ export class GitManager {
     if (this.pathAccess &&
         !(await this.pathAccess.isAuthorized(workspace, { requireDirectory: true })))
       return { failure: failure("INVALID_PATH", "The workspace is not authorized.") };
+    return { workspace };
+  }
+
+  private async resolveContext(): Promise<RepositoryContext | { failure: GitFailure }> {
+    const resolved = await this.resolveWorkspace();
+    if ("failure" in resolved) return resolved;
+    const { workspace } = resolved;
     const toplevel = await this.runGit(
       ["rev-parse", "--show-toplevel"],
       { cwd: workspace, allowExitCodes: [0, 128] },

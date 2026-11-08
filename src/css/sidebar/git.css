@@ -211,7 +211,13 @@
   display: none;
 }
 
-.git-sidebar-retry {
+.git-sidebar-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.git-sidebar-state-button {
   height: 24px;
   padding: 0 10px;
   border: 1px solid var(--border-secondary);
@@ -223,12 +229,32 @@
   cursor: pointer;
 }
 
-.git-sidebar-retry:hover {
+.git-sidebar-state-button:hover:not(:disabled) {
   background: var(--bg-hover-alt);
 }
 
-.git-sidebar-retry[hidden] {
+.git-sidebar-state-button:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: 1px;
+}
+
+.git-sidebar-state-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.git-sidebar-state-button[hidden] {
   display: none;
+}
+
+.git-sidebar-init {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--text-white);
+}
+
+.git-sidebar-init:hover:not(:disabled) {
+  filter: brightness(1.08);
 }
 
 .git-sidebar-list {

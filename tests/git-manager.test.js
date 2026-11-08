@@ -114,6 +114,48 @@ test("GitManager reports missing Git, bare folders, and removed workspaces", { s
   }
 });
 
+test("GitManager initializes a repository in an empty workspace", { skip: gitSkip }, async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-"));
+  const manager = managerFor(root);
+  try {
+    assert.equal((await manager.getStatus()).code, "NOT_A_REPOSITORY");
+    const initialized = await manager.initializeRepository();
+    assert.equal(initialized.success, true);
+    assert.equal(initialized.root, await fs.realpath(root));
+    assert.equal(fsSync.existsSync(path.join(root, ".git")), true);
+    assert.equal(await manager.isRepository(), true);
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.equal(status.status.hasCommits, false);
+    assert.deepEqual(status.status.entries, []);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager refuses to initialize a missing or unauthorized workspace", { skip: gitSkip }, async () => {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-scope-"));
+  const missing = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-missing-"));
+  const otherRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-other-"));
+  await fs.rm(missing, { recursive: true, force: true });
+  const missingManager = managerFor(missing);
+  const unauthorized = new GitManager({
+    getWorkspaceRoot: () => workspace,
+    pathAccess: new PathAccess(() => otherRoot),
+    env: isolatedEnv,
+  });
+  try {
+    assert.equal((await missingManager.initializeRepository()).code, "REPOSITORY_NOT_FOUND");
+    assert.equal((await unauthorized.initializeRepository()).code, "INVALID_PATH");
+    assert.equal(fsSync.existsSync(path.join(workspace, ".git")), false);
+  } finally {
+    missingManager.dispose();
+    unauthorized.dispose();
+    await removeAll(workspace, otherRoot);
+  }
+});
+
 test("GitManager runs a trusted Git binary without relying on PATH", {
   skip: !gitAvailable
     ? gitSkip
@@ -669,7 +711,7 @@ test("GitManager exposes only named Git channels through the preload", () => {
   );
   assert.match(preload, /git:\s*\{/);
   for (const channel of [
-    "Git:isAvailable", "Git:version", "Git:repository", "Git:isRepository",
+    "Git:isAvailable", "Git:version", "Git:init", "Git:repository", "Git:isRepository",
     "Git:repositoryRoot", "Git:status", "Git:diff", "Git:fileVersions",
     "Git:stage", "Git:unstage", "Git:commit", "Git:branches",
     "Git:currentBranch",

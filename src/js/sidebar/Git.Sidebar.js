@@ -64,6 +64,9 @@ class GitSidebar extends Sidebar {
     this.stateElement = null;
     this.stateText = null;
     this.stateRetry = null;
+    this.stateInit = null;
+    this.stateRefresh = null;
+    this.initializing = false;
     this.listViewport = null;
     this.listLayer = null;
 
@@ -86,6 +89,7 @@ class GitSidebar extends Sidebar {
     this.committing = false;
     this.commitError = "";
     this.actionError = "";
+    this.initError = "";
     this.notice = "";
     this.operationPaths = new Set();
     this.diffLoadingPaths = new Set();
@@ -227,12 +231,33 @@ class GitSidebar extends Sidebar {
     state.hidden = true;
     const stateText = document.createElement("div");
     stateText.className = "git-sidebar-state-text";
+    const stateActions = document.createElement("div");
+    stateActions.className = "git-sidebar-state-actions";
+
+    const stateInit = document.createElement("button");
+    stateInit.type = "button";
+    stateInit.className = "git-sidebar-state-button git-sidebar-init";
+    stateInit.textContent = "Initialize";
+    stateInit.title = "Initialize a Git repository in this workspace";
+    stateInit.setAttribute("aria-label", "Initialize a Git repository");
+    stateInit.addEventListener("click", () => void this.initializeRepository());
+    this.stateInit = stateInit;
+
+    const stateRefresh = document.createElement("button");
+    stateRefresh.type = "button";
+    stateRefresh.className = "git-sidebar-state-button";
+    stateRefresh.textContent = "Refresh";
+    stateRefresh.addEventListener("click", () => this.refresh({ reason: "manual" }));
+    this.stateRefresh = stateRefresh;
+
     const stateRetry = document.createElement("button");
     stateRetry.type = "button";
-    stateRetry.className = "git-sidebar-retry";
+    stateRetry.className = "git-sidebar-state-button";
     stateRetry.textContent = "Retry";
     stateRetry.addEventListener("click", () => this.refresh({ reason: "manual" }));
-    state.append(stateText, stateRetry);
+
+    stateActions.append(stateInit, stateRefresh, stateRetry);
+    state.append(stateText, stateActions);
     this.stateElement = state;
     this.stateText = stateText;
     this.stateRetry = stateRetry;
@@ -316,20 +341,45 @@ class GitSidebar extends Sidebar {
 
   getStateMessage() {
     if (!this.workspaceRoot) return "Open a folder to review its changes.";
+    if (this.initError) return this.initError;
     if (this.error && !(this.stale && this.status)) return this.error.message;
     if (!this.status && this.loading) return "Loading Source Control…";
     return "";
   }
 
+  getStateActions() {
+    const missingRepository = this.error?.code === "NOT_A_REPOSITORY";
+    return {
+      init: missingRepository,
+      refresh: missingRepository,
+      retry: Boolean(this.error) &&
+        !missingRepository &&
+        this.error.code !== "GIT_NOT_FOUND" &&
+        this.error.code !== "GIT_OUTPUT_LIMIT",
+    };
+  }
+
   updateState() {
-    if (!this.stateElement || !this.stateText || !this.stateRetry) return;
+    if (!this.stateElement || !this.stateText) return;
     const message = this.getStateMessage();
     this.stateElement.hidden = !message;
     this.stateText.textContent = message;
-    this.stateRetry.hidden = !(this.error &&
-      this.error.code !== "GIT_NOT_FOUND" &&
-      this.error.code !== "GIT_OUTPUT_LIMIT");
-    this.stateRetry.disabled = this.loading;
+    const actions = this.getStateActions();
+    const busy = this.loading || this.initializing;
+    if (this.stateRetry) {
+      this.stateRetry.hidden = !actions.retry;
+      this.stateRetry.disabled = busy;
+    }
+    if (this.stateInit) {
+      this.stateInit.hidden = !actions.init;
+      this.stateInit.disabled = busy;
+      if (this.initializing) this.stateInit.setAttribute("aria-busy", "true");
+      else this.stateInit.removeAttribute("aria-busy");
+    }
+    if (this.stateRefresh) {
+      this.stateRefresh.hidden = !actions.refresh;
+      this.stateRefresh.disabled = busy;
+    }
   }
 
   getSections() {
@@ -747,8 +797,47 @@ class GitSidebar extends Sidebar {
     return result?.success === true;
   }
 
+  async initializeRepository() {
+    if (this.destroyed || this.initializing || this.loading) return false;
+    const root = this.editor.fileExplorer?.rootPath || "";
+    if (!root || this.error?.code !== "NOT_A_REPOSITORY") return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    this.initializing = true;
+    this.actionError = "";
+    this.initError = "";
+    this.notice = "";
+    this.updateView();
+    let result = null;
+    try {
+      result = await this.editor.api.git.init();
+    } catch {
+      result = null;
+    }
+    this.initializing = false;
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(root, this.editor.fileExplorer?.rootPath || "")) {
+      this.updateView();
+      return false;
+    }
+    if (result?.success === true) {
+      this.notice = "Git repository initialized.";
+      await this.refresh({ reason: "init" });
+    } else {
+      const failure = result || {
+        code: "GIT_COMMAND_FAILED",
+        error: "The Git repository could not be initialized.",
+      };
+      this.initError = GitSidebar.describeError(failure);
+      if (failure.code === "GIT_NOT_FOUND") this.applyStatusError(failure);
+    }
+    this.updateView();
+    return result?.success === true;
+  }
+
   async refresh({ reason = "manual" } = {}) {
     if (this.destroyed) return;
+    this.initError = "";
     const root = this.editor.fileExplorer?.rootPath || "";
     if (!NCEPath.equals(root, this.workspaceRoot)) {
       this.applyWorkspace(root);
@@ -878,6 +967,7 @@ class GitSidebar extends Sidebar {
     this.commitMessage = root ? this.commitDrafts.get(root) || "" : "";
     this.commitError = "";
     this.actionError = "";
+    this.initError = "";
     this.notice = "";
     this.operationPaths.clear();
     this.diffRefreshInFlight.clear();

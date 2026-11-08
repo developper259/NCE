@@ -82,10 +82,16 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
+// Sidebar objects live in a VM realm, so re-create them before strict comparison.
+function stateActions(sidebar) {
+  return { ...sidebar.getStateActions() };
+}
+
 function createSidebar(options = {}) {
   const responses = [...(options.responses || [])];
   const calls = {
     status: 0,
+    init: 0,
     stage: [],
     unstage: [],
     commit: [],
@@ -110,6 +116,11 @@ function createSidebar(options = {}) {
             return { success: true, status: makeStatus(options.entries || []) };
           const next = responses.shift();
           return typeof next === "function" ? next() : next;
+        },
+        async init() {
+          calls.init += 1;
+          if (typeof options.initResult === "function") return options.initResult();
+          return options.initResult || { success: true, root: rootPath };
         },
         async stageFile(filePath) {
           calls.stage.push(filePath);
@@ -355,6 +366,10 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     await empty.sidebar.refresh({ reason: "open" });
     assert.match(empty.sidebar.getStateMessage(), /Open a folder/);
     assert.equal(empty.calls.status, 0, "no Git status without a workspace");
+    assert.deepEqual(
+      stateActions(empty.sidebar),
+      { init: false, refresh: false, retry: false },
+    );
   } finally {
     empty.sidebar.destroy();
   }
@@ -366,6 +381,11 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     await plain.sidebar.refresh({ reason: "open" });
     assert.equal(plain.sidebar.getStateMessage(), "This workspace is not a Git repository.");
     assert.equal(plain.sidebar.status, null);
+    assert.deepEqual(
+      stateActions(plain.sidebar),
+      { init: true, refresh: true, retry: false },
+      "a plain folder offers Initialize and Refresh instead of Retry",
+    );
   } finally {
     plain.sidebar.destroy();
   }
@@ -376,8 +396,132 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
   try {
     await missingGit.sidebar.refresh({ reason: "open" });
     assert.match(missingGit.sidebar.getStateMessage(), /Git is not installed/);
+    assert.deepEqual(
+      stateActions(missingGit.sidebar),
+      { init: false, refresh: false, retry: false },
+    );
   } finally {
     missingGit.sidebar.destroy();
+  }
+});
+
+test("GitSidebar initializes the repository and refreshes with success", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: false, code: "NOT_A_REPOSITORY", error: "not a repo" },
+      { success: true, status: makeStatus([]) },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.initializeRepository(), true);
+    assert.equal(calls.init, 1);
+    assert.equal(calls.status, 2, "the sidebar refreshes after initialization");
+    assert.equal(sidebar.error, null);
+    assert.match(sidebar.getCommitStatusText(), /initialized/i);
+    assert.deepEqual(
+      stateActions(sidebar),
+      { init: false, refresh: false, retry: false },
+    );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar keeps Initialize available after a failed initialization", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [{ success: false, code: "NOT_A_REPOSITORY", error: "not a repo" }],
+    initResult: {
+      success: false,
+      code: "GIT_COMMAND_FAILED",
+      error: "Git could not initialize.",
+    },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.initializeRepository(), false);
+    assert.equal(calls.init, 1);
+    assert.equal(calls.status, 1, "a failed initialization does not refresh");
+    assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
+    assert.deepEqual(
+      stateActions(sidebar),
+      { init: true, refresh: true, retry: false },
+      "the user can try Initialize again",
+    );
+    assert.equal(await sidebar.initializeRepository(), false, "a retry is attempted");
+    assert.equal(calls.init, 2);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar drops Initialize when Git itself is missing", async () => {
+  const { sidebar } = createSidebar({
+    responses: [{ success: false, code: "NOT_A_REPOSITORY", error: "not a repo" }],
+    initResult: { success: false, code: "GIT_NOT_FOUND", error: "missing" },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.initializeRepository(), false);
+    assert.match(sidebar.getStateMessage(), /Git is not installed/);
+    assert.deepEqual(
+      stateActions(sidebar),
+      { init: false, refresh: false, retry: false },
+    );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores a second Initialize click while one is running", async () => {
+  const pending = deferred();
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: false, code: "NOT_A_REPOSITORY", error: "not a repo" },
+      { success: true, status: makeStatus([]) },
+    ],
+    initResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.initializeRepository();
+    assert.equal(await sidebar.initializeRepository(), false);
+    pending.resolve({ success: true, root: "/workspace" });
+    assert.equal(await first, true);
+    assert.equal(calls.init, 1);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar does not initialize outside the not-a-repository state", async () => {
+  const { sidebar, calls } = createSidebar({ entries: [] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.initializeRepository(), false);
+    assert.equal(calls.init, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar drops a stale initialization error on refresh", async () => {
+  const { sidebar } = createSidebar({
+    responses: [
+      { success: false, code: "NOT_A_REPOSITORY", error: "not a repo" },
+      { success: false, code: "NOT_A_REPOSITORY", error: "not a repo" },
+    ],
+    initResult: { success: false, code: "GIT_COMMAND_FAILED", error: "Git could not initialize." },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.initializeRepository();
+    assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
+    await sidebar.refresh({ reason: "manual" });
+    assert.equal(sidebar.getStateMessage(), "This workspace is not a Git repository.");
+    assert.deepEqual(stateActions(sidebar), { init: true, refresh: true, retry: false });
+  } finally {
+    sidebar.destroy();
   }
 });
 
@@ -687,6 +831,11 @@ test("GitSidebar explains output limits without offering a useless retry", async
     assert.equal(sidebar.status, null);
     assert.equal(sidebar.error.code, "GIT_OUTPUT_LIMIT");
     assert.match(sidebar.getStateMessage(), /Too many changes/);
+    assert.deepEqual(
+      stateActions(sidebar),
+      { init: false, refresh: false, retry: false },
+      "output limits offer no useless action",
+    );
   } finally {
     sidebar.destroy();
   }

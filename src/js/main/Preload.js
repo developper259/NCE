@@ -58,6 +58,7 @@ contextBridge.exposeInMainWorld("api", {
   git: {
     isAvailable: () => ipcRenderer.invoke("Git:isAvailable"),
     getVersion: () => ipcRenderer.invoke("Git:version"),
+    init: () => ipcRenderer.invoke("Git:init"),
     getRepository: () => ipcRenderer.invoke("Git:repository"),
     isRepository: () => ipcRenderer.invoke("Git:isRepository"),
     getRepositoryRoot: () => ipcRenderer.invoke("Git:repositoryRoot"),
