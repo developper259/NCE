@@ -1,18 +1,10 @@
-/* Titlebar bell */
-.nce-titlebar-drag-space {
+/* Bottom bar bell */
+.nce-bottom-bar-actions {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding-right: 8px;
-  box-sizing: border-box;
-}
-
-.nce-titlebar-actions {
-  display: flex;
+  flex: 0 0 auto;
   align-items: center;
   height: 100%;
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
+  margin: 0 5px;
 }
 
 .nce-notification-bell {
@@ -20,26 +12,26 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 24px;
+  width: 24px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: 3px;
   background: transparent;
-  color: var(--titlebar-text-muted, var(--text-secondary));
+  color: var(--text-secondary);
   cursor: pointer;
 }
 
 .nce-notification-bell:hover,
 .nce-notification-bell:focus-visible {
-  background: var(--titlebar-hover, var(--bg-hover-alt));
-  color: var(--text-white);
+  background: var(--bg-hover);
+  color: var(--text-primary);
   outline: none;
 }
 
 .nce-notification-bell svg {
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.4;
@@ -49,19 +41,19 @@
 
 .nce-notification-badge {
   position: absolute;
-  top: 1px;
+  top: 0;
   right: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
+  min-width: 11px;
+  height: 11px;
+  padding: 0 2px;
   box-sizing: border-box;
-  border-radius: 7px;
+  border-radius: 6px;
   background: var(--accent-fill);
   color: var(--text-white);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
   line-height: 1;
 }

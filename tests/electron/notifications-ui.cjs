@@ -177,12 +177,17 @@ module.exports = async function exerciseNotificationUI() {
     const bell = document.querySelector(".nce-notification-bell");
     const badge = bell?.querySelector(".nce-notification-badge");
     check(Boolean(bell && badge), "notification bell and badge exist");
-    check(Boolean(bell.closest(".nce-titlebar-drag-space")), "bell lives in the title bar");
+    check(Boolean(bell.closest(".bottomBar")), "bell lives in the bottom bar");
     const bellRect = rectOf(bell);
     const badgeRect = rectOf(badge);
+    const bottomBarRect = rectOf(document.querySelector(".bottomBar"));
     check(
-      bellRect.width >= 24 && bellRect.height >= 20 && bellRect.right <= view.width,
-      "bell keeps its compact title-bar hit area",
+      bellRect.width >= 22 && bellRect.height >= 18 && bellRect.right <= view.width,
+      "bell keeps its compact bottom-bar hit area",
+    );
+    check(
+      bellRect.top >= bottomBarRect.top - 1 && bellRect.bottom <= bottomBarRect.bottom + 1,
+      "bell stays inside the bottom bar",
     );
     check(
       getComputedStyle(bell).cursor === "pointer",
@@ -190,7 +195,7 @@ module.exports = async function exerciseNotificationUI() {
     );
     check(badge.hidden === false && badge.textContent === String(specs.length), "badge shows the unread count");
     check(
-      badgeRect.width >= 13 && badgeRect.height >= 13 &&
+      badgeRect.width >= 11 && badgeRect.height >= 11 &&
         badgeRect.top <= bellRect.top + 2 && badgeRect.right <= bellRect.right + 1,
       "badge stays inside the bell bounds",
     );

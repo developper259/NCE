@@ -47,9 +47,9 @@ class NotificationCenterView {
   }
 
   buildBell() {
-    this.bellHost = document.querySelector?.(".nce-titlebar-drag-space") || null;
+    this.bellHost = document.querySelector?.(".bottomBar") || null;
     this.bellContainer = document.createElement("div");
-    this.bellContainer.className = "nce-titlebar-actions";
+    this.bellContainer.className = "nce-bottom-bar-actions";
 
     this.bellButton = document.createElement("button");
     this.bellButton.type = "button";
