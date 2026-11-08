@@ -659,6 +659,12 @@ class GitSidebar extends Sidebar {
     this.updateCommitControls();
   }
 
+  notifyGit(options) {
+    const manager = this.editor?.notificationManager;
+    if (!manager || typeof manager.notify !== "function") return null;
+    return manager.notify({ source: "Git", ...options });
+  }
+
   clearTransientMessages() {
     this.actionError = "";
     this.commitError = "";
@@ -694,6 +700,17 @@ class GitSidebar extends Sidebar {
       this.notice = staged ? `Unstaged ${entry.path}` : `Staged ${entry.path}`;
     } else {
       this.actionError = result?.error || "The Git operation failed.";
+      this.notifyGit({
+        type: "error",
+        title: staged ? "Could not unstage file" : "Could not stage file",
+        message: this.actionError,
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.toggleStage(entry, staged);
+          },
+        }],
+      });
     }
     await this.refresh({ reason: "stage" });
     this.updateView();
@@ -783,6 +800,11 @@ class GitSidebar extends Sidebar {
       this.commitMessage = "";
       if (this.commitInput) this.commitInput.value = "";
       this.notice = `Committed ${String(result.hash || "").slice(0, 7)}`;
+      this.notifyGit({
+        type: "success",
+        title: "Commit created",
+        message: result.summary || message,
+      });
       await this.refresh({ reason: "commit" });
     } else {
       const code = result?.code;
@@ -791,7 +813,27 @@ class GitSidebar extends Sidebar {
         : code === "EMPTY_COMMIT_MESSAGE"
           ? "Enter a commit message."
           : result?.error || "The commit failed.";
-      if (code === "NOTHING_TO_COMMIT") await this.refresh({ reason: "commit" });
+      if (code === "NOTHING_TO_COMMIT") {
+        this.notifyGit({
+          type: "info",
+          title: "Nothing to commit",
+          message: "There are no staged changes to commit.",
+        });
+        await this.refresh({ reason: "commit" });
+      } else {
+        this.notifyGit({
+          type: "error",
+          title: "Commit failed",
+          message: this.commitError,
+          persistent: code === "GIT_HOOK_FAILED" || code === "GIT_IDENTITY_MISSING",
+          actions: [{
+            label: "Retry",
+            action: () => {
+              if (!this.destroyed) void this.commitChanges();
+            },
+          }],
+        });
+      }
     }
     this.updateView();
     return result?.success === true;
@@ -822,6 +864,11 @@ class GitSidebar extends Sidebar {
     }
     if (result?.success === true) {
       this.notice = "Git repository initialized.";
+      this.notifyGit({
+        type: "success",
+        title: "Git repository initialized",
+        message: "Source Control is ready for this workspace.",
+      });
       await this.refresh({ reason: "init" });
     } else {
       const failure = result || {
@@ -829,7 +876,26 @@ class GitSidebar extends Sidebar {
         error: "The Git repository could not be initialized.",
       };
       this.initError = GitSidebar.describeError(failure);
-      if (failure.code === "GIT_NOT_FOUND") this.applyStatusError(failure);
+      if (failure.code === "GIT_NOT_FOUND") {
+        this.applyStatusError(failure);
+        this.notifyGit({
+          type: "error",
+          title: "Git is not available",
+          message: this.initError,
+        });
+      } else {
+        this.notifyGit({
+          type: "error",
+          title: "Git initialization failed",
+          message: this.initError,
+          actions: [{
+            label: "Retry",
+            action: () => {
+              if (!this.destroyed) void this.initializeRepository();
+            },
+          }],
+        });
+      }
     }
     this.updateView();
     return result?.success === true;
@@ -864,13 +930,20 @@ class GitSidebar extends Sidebar {
     if (generation !== this.generation) return;
     if (!NCEPath.equals(root, this.editor.fileExplorer?.rootPath || "")) return;
     this.loading = false;
-    if (!result) {
-      this.applyStatusError({
-        code: "GIT_COMMAND_FAILED",
-        error: "Git status could not be read.",
-      });
-    } else if (result.success !== true) {
-      this.applyStatusError(result);
+    const statusError = !result
+      ? { code: "GIT_COMMAND_FAILED", error: "Git status could not be read." }
+      : result.success !== true
+        ? result
+        : null;
+    if (statusError) {
+      this.applyStatusError(statusError);
+      if (reason === "manual" && statusError.code !== "NOT_A_REPOSITORY") {
+        this.notifyGit({
+          type: "error",
+          title: "Source Control unavailable",
+          message: GitSidebar.describeError(statusError),
+        });
+      }
     } else {
       this.status = result.status;
       this.error = null;

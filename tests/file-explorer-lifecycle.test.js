@@ -765,6 +765,116 @@ test("creation errors keep the new entry editor active", async () => {
   assert.deepEqual(alerts, ["Denied"]);
 });
 
+test("creation failures notify instead of alerting when notifications are available", async () => {
+  const alerts = [];
+  const notifications = [];
+  const FileExplorer = loadFileExplorer({}, () => true, {
+    alert(message) { alerts.push(message); },
+  });
+  const explorer = Object.create(FileExplorer.prototype);
+  const placeholders = [];
+  Object.assign(explorer, {
+    rootPath: "/project",
+    files: placeholders,
+    editingState: null,
+    fileOperations: {
+      async createFile() {
+        return { success: false, code: "PERMISSION_DENIED", error: "Denied" };
+      },
+    },
+    refresh() {},
+    editor: {
+      notificationManager: {
+        notify(options) {
+          notifications.push(options);
+          return { id: `notification-${notifications.length}`, ...options };
+        },
+      },
+    },
+  });
+
+  await explorer.startCreateEntry("/project", "file");
+  const placeholder = placeholders[0];
+  await explorer.commitEdit("new.js", placeholder);
+  assert.equal(explorer.editingState.status, "editing");
+  assert.deepEqual(alerts, []);
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].type, "error");
+  assert.equal(notifications[0].title, "Could not create item");
+  assert.equal(notifications[0].source, "Files");
+  assert.equal(notifications[0].message, "Denied");
+});
+
+test("duplicate failures notify with a retry action", async () => {
+  const notifications = [];
+  const FileExplorer = loadFileExplorer();
+  const explorer = Object.create(FileExplorer.prototype);
+  let duplicateCalls = 0;
+  Object.assign(explorer, {
+    fileOperations: {
+      async duplicate() {
+        duplicateCalls += 1;
+        return duplicateCalls === 1
+          ? { success: false, error: "Denied" }
+          : { success: true };
+      },
+    },
+    async refreshFolder() {},
+    editor: {
+      notificationManager: {
+        notify(options) {
+          notifications.push(options);
+          return { id: `notification-${notifications.length}`, ...options };
+        },
+      },
+    },
+  });
+
+  await explorer.duplicateEntry({ path: "/project/a.js" });
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].title, "Duplicate failed");
+  assert.equal(notifications[0].source, "Files");
+  assert.equal(notifications[0].actions[0].label, "Retry");
+  notifications[0].actions[0].action();
+  await new Promise(setImmediate);
+  assert.equal(duplicateCalls, 2);
+});
+
+test("workspace switch failures notify when the folder is unavailable", async () => {
+  const notifications = [];
+  const FileExplorer = loadFileExplorer();
+  const explorer = Object.create(FileExplorer.prototype);
+  Object.assign(explorer, {
+    workspaceSwitching: false,
+    invalidateDeleteContext() {},
+    fileOperations: {
+      async pathStatus() {
+        return { exists: false, code: "SOURCE_NOT_FOUND" };
+      },
+    },
+    editor: {
+      api: {
+        async removeRecentFolder() {},
+      },
+      notificationManager: {
+        notify(options) {
+          notifications.push(options);
+          return { id: `notification-${notifications.length}`, ...options };
+        },
+      },
+    },
+  });
+
+  assert.equal(
+    await explorer.requestWorkspaceSwitch("/missing", { fromRecent: true }),
+    false,
+  );
+  assert.equal(notifications.length, 1);
+  assert.equal(notifications[0].title, "Folder unavailable");
+  assert.equal(notifications[0].source, "Files");
+  assert.match(notifications[0].message, /removed from Recent/);
+});
+
 test("Enter and blur share one committing guard", async () => {
   let resolveRename;
   let renameCalls = 0;

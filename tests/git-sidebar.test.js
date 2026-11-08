@@ -87,6 +87,8 @@ function stateActions(sidebar) {
   return { ...sidebar.getStateActions() };
 }
 
+const toPlain = (value) => JSON.parse(JSON.stringify(value));
+
 function createSidebar(options = {}) {
   const responses = [...(options.responses || [])];
   const calls = {
@@ -100,6 +102,7 @@ function createSidebar(options = {}) {
     openFile: [],
     versions: [],
     menus: [],
+    notifications: [],
     unsubscribed: false,
   };
   const rootPath = options.rootPath === undefined ? "/workspace" : options.rootPath;
@@ -176,6 +179,12 @@ function createSidebar(options = {}) {
       openContextMenu(name, context) { calls.menus.push([name, context]); },
     },
     domManager: {},
+    notificationManager: {
+      notify(options) {
+        calls.notifications.push(options);
+        return { id: `notification-${calls.notifications.length}`, ...options };
+      },
+    },
   };
   const sidebar = new GitSidebar(editor);
   sidebar.isOpen = options.isOpen !== false;
@@ -285,6 +294,148 @@ test("GitSidebar gates commits on staged files and a non-empty message", async (
       staged.sidebar.destroy();
     }
     assert.equal(calls.commit.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar notifies commit success and failure with a retry action", async () => {
+  const success = createSidebar({
+    responses: [{ success: true, status: makeStatus([stagedEntry]) }],
+  });
+  try {
+    await success.sidebar.refresh({ reason: "open" });
+    success.sidebar.commitMessage = "feat: notify";
+    assert.equal(await success.sidebar.commitChanges(), true);
+    const created = success.calls.notifications.find(
+      (notification) => notification.title === "Commit created",
+    );
+    assert.equal(created.type, "success");
+    assert.equal(created.source, "Git");
+    assert.match(created.message, /feat: notify/);
+  } finally {
+    success.sidebar.destroy();
+  }
+
+  const failure = createSidebar({
+    responses: [{ success: true, status: makeStatus([stagedEntry]) }],
+    commitResult: {
+      success: false,
+      code: "GIT_HOOK_FAILED",
+      error: "A Git hook rejected the commit.",
+    },
+  });
+  try {
+    await failure.sidebar.refresh({ reason: "open" });
+    failure.sidebar.commitMessage = "fix: retry me";
+    assert.equal(await failure.sidebar.commitChanges(), false);
+    const failed = failure.calls.notifications.find(
+      (notification) => notification.title === "Commit failed",
+    );
+    assert.equal(failed.type, "error");
+    assert.equal(failed.source, "Git");
+    assert.equal(failed.persistent, true);
+    assert.deepEqual(
+      toPlain(failed.actions.map((action) => action.label)),
+      ["Retry"],
+    );
+    failed.actions[0].action();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(failure.calls.commit.length, 2);
+  } finally {
+    failure.sidebar.destroy();
+  }
+});
+
+test("GitSidebar notifies stage and initialization failures", async () => {
+  const stageFailure = createSidebar({
+    entries: [modifiedEntry],
+    stageResult: {
+      success: false,
+      code: "PERMISSION_DENIED",
+      error: "The file cannot be staged.",
+    },
+  });
+  try {
+    await stageFailure.sidebar.refresh({ reason: "open" });
+    assert.equal(
+      await stageFailure.sidebar.toggleStage(modifiedEntry, false),
+      false,
+    );
+    const notification = stageFailure.calls.notifications.find(
+      (item) => item.title === "Could not stage file",
+    );
+    assert.equal(notification.type, "error");
+    assert.equal(notification.source, "Git");
+    assert.equal(notification.message, "The file cannot be staged.");
+    assert.deepEqual(
+      toPlain(notification.actions.map((action) => action.label)),
+      ["Retry"],
+    );
+  } finally {
+    stageFailure.sidebar.destroy();
+  }
+
+  const initFailure = createSidebar({
+    responses: [{ success: false, code: "NOT_A_REPOSITORY", error: "not a repo" }],
+    initResult: {
+      success: false,
+      code: "GIT_COMMAND_FAILED",
+      error: "Git could not initialize.",
+    },
+  });
+  try {
+    await initFailure.sidebar.refresh({ reason: "open" });
+    assert.equal(await initFailure.sidebar.initializeRepository(), false);
+    const notification = initFailure.calls.notifications.find(
+      (item) => item.title === "Git initialization failed",
+    );
+    assert.equal(notification.type, "error");
+    assert.equal(notification.source, "Git");
+    assert.equal(notification.message, "Git could not initialize.");
+    notification.actions[0].action();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(initFailure.calls.init, 2);
+  } finally {
+    initFailure.sidebar.destroy();
+  }
+});
+
+test("GitSidebar notifies manual refresh failures but not watcher failures", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: false, code: "GIT_TIMEOUT", error: "timed out" },
+      { success: false, code: "GIT_TIMEOUT", error: "timed out" },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "manual" });
+    assert.equal(calls.notifications.length, 1);
+    assert.equal(calls.notifications[0].title, "Source Control unavailable");
+    assert.equal(calls.notifications[0].type, "error");
+    assert.equal(calls.notifications[0].source, "Git");
+    await sidebar.refresh({ reason: "watcher" });
+    assert.equal(calls.notifications.length, 1);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar notifies a successful initialization", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: false, code: "NOT_A_REPOSITORY", error: "not a repo" },
+      { success: true, status: makeStatus([]) },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.initializeRepository(), true);
+    const notification = calls.notifications.find(
+      (item) => item.title === "Git repository initialized",
+    );
+    assert.equal(notification.type, "success");
+    assert.equal(notification.source, "Git");
   } finally {
     sidebar.destroy();
   }

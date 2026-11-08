@@ -988,13 +988,18 @@ class FileExplorer extends Sidebar {
   async performWorkspaceSwitch(folderPath, { fromRecent = false } = {}) {
     const status = await this.fileOperations.pathStatus(folderPath);
     if (!status?.exists || !status.isDirectory || status.readable === false) {
-      if (
+      const removedRecent =
         fromRecent &&
         ((!status?.exists && status?.code === "SOURCE_NOT_FOUND") ||
-          (status?.exists && !status.isDirectory))
-      ) {
-        await this.editor.api.removeRecentFolder?.(folderPath);
-      }
+          (status?.exists && !status.isDirectory));
+      if (removedRecent) await this.editor.api.removeRecentFolder?.(folderPath);
+      this.notifyUser(
+        "error",
+        "Folder unavailable",
+        removedRecent
+          ? "The selected folder is no longer available and was removed from Recent."
+          : "The selected folder could not be opened.",
+      );
       return false;
     }
 
@@ -1016,7 +1021,14 @@ class FileExplorer extends Sidebar {
       // still intact. A failed snapshot must not partially switch workspaces.
       const saved =
         await this.editor.statesManager.saveWorkspaceState(previousRoot);
-      if (saved === false) return false;
+      if (saved === false) {
+        this.notifyUser(
+          "error",
+          "Workspace not switched",
+          "The current workspace could not be saved, so the switch was cancelled.",
+        );
+        return false;
+      }
     } else {
       this.editor.statesManager.noWorkspaceState =
         this.editor.statesManager.getNoWorkspaceState();
@@ -1053,6 +1065,13 @@ class FileExplorer extends Sidebar {
           this.editor.statesManager.noWorkspaceState,
         );
       }
+      this.notifyUser(
+        "error",
+        "Could not open folder",
+        previousRoot
+          ? "The folder could not be opened. The previous workspace was restored."
+          : "The folder could not be opened.",
+      );
       return false;
     }
 
@@ -1064,6 +1083,13 @@ class FileExplorer extends Sidebar {
     this.editor.statesManager.lastWorkspace = activeWorkspacePath;
     const stateSaved = await this.editor.statesManager.saveGlobalState();
     await this.editor.api.addRecentFolder?.(activeWorkspacePath);
+    if (stateSaved === false) {
+      this.notifyUser(
+        "warning",
+        "Workspace opened",
+        "The workspace opened, but its session could not be saved.",
+      );
+    }
     return stateSaved !== false;
   }
 
@@ -1235,11 +1261,28 @@ class FileExplorer extends Sidebar {
     if (refresh) this.refresh();
   }
 
+  notifyUser(type, title, message, options = {}) {
+    const { fallbackMessage = null, ...notificationOptions } = options;
+    const manager = this.editor?.notificationManager;
+    if (manager && typeof manager.notify === "function") {
+      manager.notify({ type, title, message, source: "Files", ...notificationOptions });
+      return true;
+    }
+    if (fallbackMessage !== null && typeof alert === "function")
+      alert(fallbackMessage);
+    return false;
+  }
+
   recoverEdit(message) {
     const session = this.editingState;
     if (!session) return;
     session.status = "recovering";
-    alert(message);
+    this.notifyUser(
+      "error",
+      session.mode === "rename" ? "Could not rename item" : "Could not create item",
+      message,
+      { fallbackMessage: message },
+    );
     if (this.editingState !== session) return;
     session.status = "editing";
     session.input?.focus();
@@ -1803,8 +1846,10 @@ class FileExplorer extends Sidebar {
           confirmation,
         );
         if (confirmation.dontAskAgain && !preferenceSaved) {
-          if (typeof alert === "function")
-            alert("The confirmation preference could not be saved. The item was not moved, and confirmations remain enabled.");
+          const message = "The confirmation preference could not be saved. The item was not moved, and confirmations remain enabled.";
+          this.notifyUser("warning", "Confirmation preference not saved", message, {
+            fallbackMessage: message,
+          });
           return false;
         }
       }
@@ -1840,11 +1885,24 @@ class FileExplorer extends Sidebar {
     }
     if (!result?.success) {
       if (result?.code === "SOURCE_NOT_FOUND") return false;
-      if (typeof alert === "function") {
-        alert(result?.error || (action === "trash"
-          ? "Unable to move the item to the Trash."
-          : "Unable to permanently delete the item."));
-      }
+      const message = result?.error || (action === "trash"
+        ? "Unable to move the item to the Trash."
+        : "Unable to permanently delete the item.");
+      this.notifyUser(
+        "error",
+        action === "trash" ? "Could not move item to Trash" : "Could not delete item",
+        message,
+        {
+          fallbackMessage: message,
+          actions: [{
+            label: "Retry",
+            action: () => {
+              if (!this.deleteExplorerDestroyed)
+                void this.runFileRemoval(file, action);
+            },
+          }],
+        },
+      );
       return false;
     }
 
@@ -1881,7 +1939,9 @@ class FileExplorer extends Sidebar {
       (targetFolderPath === this.clipboard.path ||
         NCEPath.isInside(targetFolderPath, this.clipboard.path))
     ) {
-      alert("You can't paste a folder into itself.");
+      this.notifyUser("error", "Cannot paste folder", "You can't paste a folder into itself.", {
+        fallbackMessage: "You can't paste a folder into itself.",
+      });
       return;
     }
 
@@ -1912,21 +1972,26 @@ class FileExplorer extends Sidebar {
           try {
             await this.editor.fileLoader.waitForFileLoaded(sourceFile);
           } catch {
-            alert(
-              "The open working copy is not fully loaded and cannot be copied safely.",
-            );
+            const message = "The open working copy is not fully loaded and cannot be copied safely.";
+            this.notifyUser("warning", "Working copy not ready", message, {
+              fallbackMessage: message,
+            });
             return;
           }
         }
         if (typeof sourceFile.serializeContent !== "function") {
-          alert("The open working copy cannot be copied safely.");
+          const message = "The open working copy cannot be copied safely.";
+          this.notifyUser("warning", "Working copy not ready", message, {
+            fallbackMessage: message,
+          });
           return;
         }
         workingCopy = sourceFile.serializeContent();
       } else if (sourceFile?.isSaved === false) {
-        alert(
-          "The open working copy is not fully loaded and cannot be copied safely.",
-        );
+        const message = "The open working copy is not fully loaded and cannot be copied safely.";
+        this.notifyUser("warning", "Working copy not ready", message, {
+          fallbackMessage: message,
+        });
         return;
       }
 
@@ -1936,7 +2001,10 @@ class FileExplorer extends Sidebar {
           : await this.fileOperations.copy(sourcePath, destPath);
 
       if (!result?.success) {
-        alert(result?.error || "Impossible de coller l'élément.");
+        const message = result?.error || "The item could not be pasted.";
+        this.notifyUser("error", "Paste failed", message, {
+          fallbackMessage: message,
+        });
         return;
       }
 
@@ -1948,7 +2016,10 @@ class FileExplorer extends Sidebar {
           true,
         );
         if (!destination?.success) {
-          alert(destination?.error || "Unable to persist the working copy.");
+          const message = destination?.error || "Unable to persist the working copy.";
+          this.notifyUser("error", "Working copy not saved", message, {
+            fallbackMessage: message,
+          });
           if (this.clipboard.mode === "cut")
             await this.editor.tabManager.updateFilePath(sourcePath, destPath);
           return;
@@ -1972,6 +2043,11 @@ class FileExplorer extends Sidebar {
       await this.refreshFolder(targetFolderPath);
     } catch (error) {
       console.error("Error pasting entry:", error);
+      this.notifyUser(
+        "error",
+        "Paste failed",
+        error?.message || "The item could not be pasted.",
+      );
     }
   }
 
@@ -1979,13 +2055,25 @@ class FileExplorer extends Sidebar {
     try {
       const result = await this.fileOperations.duplicate(file.path);
       if (!result?.success) {
-        alert(result?.error || "Impossible de dupliquer l'élément.");
+        const message = result?.error || "The item could not be duplicated.";
+        this.notifyUser("error", "Duplicate failed", message, {
+          fallbackMessage: message,
+          actions: [{
+            label: "Retry",
+            action: () => { void this.duplicateEntry(file); },
+          }],
+        });
         return;
       }
       const parentPath = NCEPath.dirname(file.path);
       await this.refreshFolder(parentPath);
     } catch (error) {
       console.error("Error duplicating entry:", error);
+      this.notifyUser(
+        "error",
+        "Duplicate failed",
+        error?.message || "The item could not be duplicated.",
+      );
     }
   }
 }

@@ -403,6 +403,58 @@ class AgentSidebar extends Sidebar {
     }
   }
 
+  notifyUser(options) {
+    const manager = this.editor?.notificationManager;
+    if (!manager || typeof manager.notify !== "function") return null;
+    return manager.notify({ source: "Agent", ...options });
+  }
+
+  isAgentSidebarVisible(session = null) {
+    if (!this.isOpen) return false;
+    if (this.editor?.sidebarManager?.rightActiveMenu !== this) return false;
+    if (this.editor?.windowActive === false) return false;
+    return !session || session.id === this.activeSessionId;
+  }
+
+  openFromNotification() {
+    this.editor?.sidebarManager?.openMenu?.("agent");
+  }
+
+  notifyApprovalNeeded(item, session) {
+    if (this.isAgentSidebarVisible(session)) return null;
+    return this.notifyUser({
+      type: "warning",
+      title: "Agent needs your approval",
+      message: item?.detail || item?.title || "The agent is waiting for permission.",
+      actions: [{ label: "Open Agent", action: () => this.openFromNotification() }],
+    });
+  }
+
+  notifyRunFailure(session, message) {
+    if (this.isAgentSidebarVisible(session)) return null;
+    const actions = [{ label: "Open Agent", action: () => this.openFromNotification() }];
+    if (this.canRetryFailedRun(session, message)) {
+      actions.unshift({
+        label: "Retry",
+        action: () => { void this.retryFailedMessage(session, message); },
+      });
+    }
+    return this.notifyUser({
+      type: "error",
+      title: "Agent run failed",
+      message: message?.content || "The request to the model failed.",
+      actions,
+    });
+  }
+
+  notifyConversationSaveFailure() {
+    return this.notifyUser({
+      type: "warning",
+      title: "Agent conversation not saved",
+      message: "Recent changes may not survive an application restart.",
+    });
+  }
+
   rehydratePersistedSession(snapshot) {
     if (!snapshot || typeof snapshot.id !== "string" || !Array.isArray(snapshot.messages)) return null;
     const messages = snapshot.messages.map((message) => ({
@@ -530,7 +582,13 @@ class AgentSidebar extends Sidebar {
       const previous = this.conversationSaveQueues.get(session.id) || Promise.resolve();
       const next = previous.catch(() => undefined).then(() => api.saveAgentConversation(snapshot));
       this.conversationSaveQueues.set(session.id, next);
-      next.catch(() => console.warn("[NCE Agent Conversations] Save failed", { sessionId: session.id, code: "STORE_ERROR" }));
+      const reportFailure = () => {
+        console.warn("[NCE Agent Conversations] Save failed", { sessionId: session.id, code: "STORE_ERROR" });
+        this.notifyConversationSaveFailure();
+      };
+      next.then((saved) => {
+        if (saved === false) reportFailure();
+      }).catch(reportFailure);
     };
     if (immediate) persist();
     else this.conversationSaveTimers.set(session.id, setTimeout(persist, 1200));
@@ -596,6 +654,7 @@ class AgentSidebar extends Sidebar {
       }
       if (shouldScroll) this.scrollMessagesToBottom();
     }
+    this.notifyApprovalNeeded(item, session);
   }
 
   respondToApproval(item, decision) {
@@ -5354,6 +5413,7 @@ class AgentSidebar extends Sidebar {
           this.removeThinkingState();
           this.renderConversationMessageIfVisible(session, errorMessage, true);
         }
+        this.notifyRunFailure(session, errorMessage);
       }
     } finally {
       this.removeThinkingState();
