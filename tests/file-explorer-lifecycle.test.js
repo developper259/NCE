@@ -434,6 +434,34 @@ test("non-empty folders move to Trash in one operation after preparing descendan
   assert.deepEqual(fixture.deleteCalls, [["trash", folder.path], ["marked", folder.path]]);
 });
 
+test("disabled delete confirmations never flash a progress dialog", async () => {
+  let finishTrash;
+  const trash = deleteExplorerFixture({
+    confirmMoveToTrash: false,
+    operationResults: [new Promise((resolve) => { finishTrash = resolve; })],
+  });
+  const trashOperation = trash.explorer.moveToTrash(trash.file);
+  await new Promise(setImmediate);
+  assert.equal(trash.explorer.deleteDialog, null, "no dialog exists for an unconfirmed Trash move");
+  assert.deepEqual(trash.deleteCalls, [["trash", trash.file.path]]);
+  finishTrash({ success: true });
+  assert.equal(await trashOperation, true);
+  assert.equal(trash.explorer.deleteDialog, null);
+
+  let finishPermanent;
+  const permanent = deleteExplorerFixture({
+    confirmPermanentDelete: false,
+    operationResults: [new Promise((resolve) => { finishPermanent = resolve; })],
+  });
+  const permanentOperation = permanent.explorer.permanentlyDelete(permanent.file);
+  await new Promise(setImmediate);
+  assert.equal(permanent.explorer.deleteDialog, null, "no dialog exists for an unconfirmed permanent delete");
+  assert.deepEqual(permanent.deleteCalls, [["permanent", permanent.file.path]]);
+  finishPermanent({ success: true });
+  assert.equal(await permanentOperation, true);
+  assert.equal(permanent.explorer.deleteDialog, null);
+});
+
 test("a Trash failure reports an error and never falls back to permanent deletion", async () => {
   const fixture = deleteExplorerFixture({
     operationResults: [{ success: false, code: "TRASH_FAILED", error: "The system could not move this item to the Trash." }],

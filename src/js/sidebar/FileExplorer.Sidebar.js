@@ -1836,7 +1836,8 @@ class FileExplorer extends Sidebar {
     const confirmPermanent = action === "permanent-delete" &&
       (file.type === "folder" ||
         SETTINGS_GET("files.confirmPermanentDelete") !== false);
-    if (confirmMove || confirmPermanent) {
+    const needsConfirmation = confirmMove || confirmPermanent;
+    if (needsConfirmation) {
       const confirmation = await this.showDeleteConfirmation(file, { action });
       if (!this.isDeleteRequestCurrent(rootPath, generation) ||
           !confirmation?.confirmed) return false;
@@ -1862,7 +1863,7 @@ class FileExplorer extends Sidebar {
     ) return false;
     if (!this.isDeleteRequestCurrent(rootPath, generation)) return false;
 
-    this.showDeleteProgress(action);
+    if (needsConfirmation) this.showDeleteProgress(action);
     let result;
     try {
       result = action === "trash"
@@ -1881,7 +1882,7 @@ class FileExplorer extends Sidebar {
           : "The item could not be permanently deleted.",
       };
     } finally {
-      this.closeDeleteProgress();
+      if (needsConfirmation) this.closeDeleteProgress();
     }
     if (!result?.success) {
       if (result?.code === "SOURCE_NOT_FOUND") return false;
