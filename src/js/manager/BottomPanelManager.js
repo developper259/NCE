@@ -505,7 +505,10 @@ class BottomPanelManager {
     }
     if (this.toggleButton) {
       this.toggleButton.hidden = false;
-      this.toggleButton.setAttribute("aria-expanded", String(this.visible));
+      this.toggleButton.setAttribute(
+        "aria-expanded",
+        String(this.visible && this.activePanelId === "terminal"),
+      );
     }
     if (this.resizeHandle) {
       const bounds = this.getHeightBounds();
