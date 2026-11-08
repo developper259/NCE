@@ -570,13 +570,165 @@ test("GitSidebar initializes the repository and refreshes with success", async (
     assert.equal(calls.status, 2, "the sidebar refreshes after initialization");
     assert.equal(sidebar.error, null);
     assert.match(sidebar.getCommitStatusText(), /initialized/i);
+    assert.equal(sidebar.getViewState().mode, "clean");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false },
+      { init: false, refresh: true, retry: false },
+      "a clean repository only offers a refresh action",
     );
   } finally {
     sidebar.destroy();
   }
+});
+
+test("GitSidebar derives explicit view states from the repository", async () => {
+  const empty = createSidebar({ rootPath: "" });
+  try {
+    await empty.sidebar.refresh({ reason: "open" });
+    assert.equal(empty.sidebar.getViewState().mode, "no-workspace");
+  } finally {
+    empty.sidebar.destroy();
+  }
+
+  const plain = createSidebar({
+    responses: [{ success: false, code: "NOT_A_REPOSITORY", error: "not a repo" }],
+  });
+  try {
+    await plain.sidebar.refresh({ reason: "open" });
+    assert.equal(plain.sidebar.getViewState().mode, "no-repository");
+  } finally {
+    plain.sidebar.destroy();
+  }
+
+  const clean = createSidebar({ entries: [] });
+  try {
+    await clean.sidebar.refresh({ reason: "open" });
+    const state = clean.sidebar.getViewState();
+    assert.equal(state.mode, "clean");
+    assert.equal(state.branch.name, "main");
+  } finally {
+    clean.sidebar.destroy();
+  }
+
+  const stagedOnly = createSidebar({ entries: [stagedEntry] });
+  try {
+    await stagedOnly.sidebar.refresh({ reason: "open" });
+    const state = stagedOnly.sidebar.getViewState();
+    assert.equal(state.mode, "changes");
+    assert.equal(state.total, 1);
+    assert.equal(state.staged.length, 1);
+    assert.equal(state.changes.length, 0);
+  } finally {
+    stagedOnly.sidebar.destroy();
+  }
+
+  const failed = createSidebar({
+    responses: [{ success: false, code: "GIT_TIMEOUT", error: "timed out" }],
+  });
+  try {
+    await failed.sidebar.refresh({ reason: "manual" });
+    const state = failed.sidebar.getViewState();
+    assert.equal(state.mode, "error");
+    assert.equal(state.errorCode, "GIT_TIMEOUT");
+    assert.equal(state.message, "Git did not respond in time.");
+  } finally {
+    failed.sidebar.destroy();
+  }
+
+  const initFailed = createSidebar({
+    responses: [{ success: false, code: "NOT_A_REPOSITORY", error: "not a repo" }],
+    initResult: {
+      success: false,
+      code: "GIT_COMMAND_FAILED",
+      error: "Git could not initialize.",
+    },
+  });
+  try {
+    await initFailed.sidebar.refresh({ reason: "open" });
+    await initFailed.sidebar.initializeRepository();
+    const state = initFailed.sidebar.getViewState();
+    assert.equal(state.mode, "init-error");
+    assert.equal(state.message, "Git could not initialize.");
+    assert.deepEqual(
+      stateActions(initFailed.sidebar),
+      { init: true, refresh: true, retry: false },
+    );
+  } finally {
+    initFailed.sidebar.destroy();
+  }
+});
+
+test("GitSidebar keeps prior changes visible but stale after a transient error", async () => {
+  const { sidebar } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([modifiedEntry]) },
+      { success: false, code: "GIT_TIMEOUT", error: "timed out" },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.refresh({ reason: "manual" });
+    const state = sidebar.getViewState();
+    assert.equal(state.mode, "changes");
+    assert.equal(state.stale, true);
+    assert.equal(state.total, 1);
+    assert.equal(sidebar.getStateMessage(), "");
+    assert.equal(sidebar.canCommit(), false, "stale changes cannot be committed");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar lists only non-empty change sections", async () => {
+  const stagedOnly = createSidebar({ entries: [stagedEntry] });
+  try {
+    await stagedOnly.sidebar.refresh({ reason: "open" });
+    const items = stagedOnly.sidebar.buildListItems(
+      stagedOnly.sidebar.getSections().staged,
+      stagedOnly.sidebar.getSections().changes,
+    );
+    assert.deepEqual(
+      toPlain(items.filter((item) => item.type === "section").map((item) => item.section)),
+      ["staged"],
+    );
+    assert.equal(items.some((item) => item.type === "empty"), false);
+  } finally {
+    stagedOnly.sidebar.destroy();
+  }
+
+  const changedOnly = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await changedOnly.sidebar.refresh({ reason: "open" });
+    const items = changedOnly.sidebar.buildListItems(
+      changedOnly.sidebar.getSections().staged,
+      changedOnly.sidebar.getSections().changes,
+    );
+    assert.deepEqual(
+      toPlain(items.filter((item) => item.type === "section").map((item) => item.section)),
+      ["changes"],
+    );
+    assert.equal(items.some((item) => item.type === "empty"), false);
+  } finally {
+    changedOnly.sidebar.destroy();
+  }
+
+  const clean = createSidebar({ entries: [] });
+  try {
+    await clean.sidebar.refresh({ reason: "open" });
+    assert.deepEqual(toPlain(clean.sidebar.buildListItems([], [])), []);
+  } finally {
+    clean.sidebar.destroy();
+  }
+});
+
+test("GitSidebar maps error codes to contextual state titles", () => {
+  assert.equal(GitSidebar.errorTitle("GIT_NOT_FOUND"), "Git is not installed");
+  assert.equal(GitSidebar.errorTitle("REPOSITORY_NOT_FOUND"), "Workspace unavailable");
+  assert.equal(GitSidebar.errorTitle("PERMISSION_DENIED"), "Repository access denied");
+  assert.equal(GitSidebar.errorTitle("GIT_TIMEOUT"), "Git did not respond");
+  assert.equal(GitSidebar.errorTitle("GIT_INDEX_LOCKED"), "Git is already running");
+  assert.equal(GitSidebar.errorTitle("GIT_OUTPUT_LIMIT"), "Too many changes");
+  assert.equal(GitSidebar.errorTitle("GIT_COMMAND_FAILED"), "Source Control unavailable");
 });
 
 test("GitSidebar keeps Initialize available after a failed initialization", async () => {

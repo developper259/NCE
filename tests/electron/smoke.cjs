@@ -5,25 +5,30 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { DirtyBufferRecoveryStore } = require('../../dist/ts/addon/DirtyBufferRecovery.js');
+
+async function launchElectron(directory, phase) {
+  let log = '';
+  await new Promise((resolve, reject) => {
+    const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+    env.NCE_DISABLE_EXTERNAL_STARTUP_PATHS = '1';
+    const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
+    const timer = setTimeout(() => { child.kill('SIGKILL'); }, 90000);
+    child.once('error', err => { clearTimeout(timer); reject(err); });
+    child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${phase} ${code}/${signal}: ${log}`)); });
+  });
+  try {
+    assert.equal(await fs.readFile(path.join(directory, `${phase}.ok`), 'utf8'), 'ok');
+  } catch (error) {
+    throw Error(`Electron ${phase} exited without its completion marker: ${log}`, { cause: error });
+  }
+}
+
 test('real Electron: preload, editing, Save As, quit and session restore', { timeout: 240000 }, async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-'));
   await fs.writeFile(path.join(directory, '.nce-smoke'), '');
   async function launch(phase) {
-    let log = '';
-    await new Promise((resolve, reject) => {
-      const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
-      env.NCE_DISABLE_EXTERNAL_STARTUP_PATHS = '1';
-      const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-      child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
-      const timer = setTimeout(() => { child.kill('SIGKILL'); }, 90000);
-      child.once('error', err => { clearTimeout(timer); reject(err); });
-      child.once('exit', (code, signal) => { clearTimeout(timer); code === 0 ? resolve() : reject(Error(`Electron ${phase} ${code}/${signal}: ${log}`)); });
-    });
-    try {
-      assert.equal(await fs.readFile(path.join(directory, `${phase}.ok`), 'utf8'), 'ok');
-    } catch (error) {
-      throw Error(`Electron ${phase} exited without its completion marker: ${log}`, { cause: error });
-    }
+    return launchElectron(directory, phase);
   }
   try {
     if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') {
@@ -71,7 +76,6 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     );
     await launch('reload');
     await launch('restore');
-    await launch('notifications');
     await launch('crash');
     await launch('no-nsh');
     // Earlier smoke phases can persist a platform-specific maximized state.
@@ -87,4 +91,26 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     await launch('tabs');
     await launch('multiwindow');
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+test('real Electron: notification visual states', { timeout: 120000 }, async () => {
+  if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') return;
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-notifications-'));
+  await fs.writeFile(path.join(directory, '.nce-smoke'), '');
+  try {
+    await launchElectron(directory, 'notifications');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('real Electron: Source Control visual states', { timeout: 120000 }, async () => {
+  if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') return;
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-source-control-'));
+  await fs.writeFile(path.join(directory, '.nce-smoke'), '');
+  try {
+    await launchElectron(directory, 'source-control');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });

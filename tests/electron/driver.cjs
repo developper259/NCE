@@ -2,6 +2,7 @@ const { app, clipboard, dialog, screen, session } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const { waitForCondition } = require("./wait-for-condition.cjs");
 const [directory, phase] = process.argv.slice(2);
 if (
@@ -124,7 +125,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -1628,6 +1629,75 @@ app.whenReady().then(() => {
           return true;
         })()`);
         traceStep("notification visual regression checks passed");
+      } else if (phase === "source-control") {
+        traceStep("Source Control visual checks started");
+        if (win.isFullScreen()) win.setFullScreen(false);
+        if (win.isMaximized()) win.unmaximize();
+        win.setBounds({ width: 1100, height: 760 });
+        await waitForCondition(
+          async () =>
+            (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
+          { timeout: 10000, description: "Source Control visual fixture viewport" },
+        );
+        const sourceControlWorkspaceInput = path.join(
+          directory,
+          "source-control-workspace",
+        );
+        fs.mkdirSync(sourceControlWorkspaceInput, { recursive: true });
+        assert.equal(
+          await selectWorkspace(sourceControlWorkspaceInput),
+          true,
+          "Source Control fixture workspace opens",
+        );
+        const sourceControlWorkspace = await fs.promises.realpath(
+          sourceControlWorkspaceInput,
+        );
+        await waitForCondition(
+          async () =>
+            (await run(
+              `editor.fileExplorer.rootPath === ${JSON.stringify(sourceControlWorkspace)}`,
+            )) === true,
+          { timeout: 10000, description: "Source Control workspace to become active" },
+        );
+        const sourceControlInit = await run(
+          `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "initialize")`,
+        );
+        assert.equal(sourceControlInit.mode, "clean");
+        assert.ok(sourceControlInit.branch, "Source Control displays its branch");
+        // CI machines have no global Git identity; keep the fixture hermetic.
+        for (const [key, value] of [
+          ["user.name", "NCE Test"],
+          ["user.email", "nce@example.invalid"],
+          ["commit.gpgsign", "false"],
+          ["core.autocrlf", "false"],
+        ]) {
+          execFileSync(
+            "git",
+            ["-C", sourceControlWorkspace, "config", key, value],
+            { stdio: "ignore" },
+          );
+        }
+        const sourceControlResult = await run(
+          `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "repository")`,
+        );
+        assert.equal(sourceControlResult.mode, "clean");
+        assert.ok(sourceControlResult.branch, "Source Control displays its branch");
+        await run(`(() => {
+          editor.notificationManager.clearHistory();
+          editor.notificationManager.flushPersist?.();
+          return true;
+        })()`);
+        await new Promise((resolve) => setTimeout(resolve, 220));
+        const sourceControlScreenshotPath =
+          process.env.NCE_SOURCE_CONTROL_SCREENSHOT_PATH;
+        if (sourceControlScreenshotPath) {
+          fs.writeFileSync(
+            sourceControlScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
+        await run(`editor.sidebarManager.closeSidebar("left")`);
+        traceStep("Source Control visual checks passed");
       } else if (phase === "tabs") {
         traceStep("large-file and tab-scroll checks started");
         const gutterSmokePath = path.join(directory, "gutter-large.js");

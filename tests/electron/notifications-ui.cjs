@@ -4,7 +4,7 @@ module.exports = async function exerciseNotificationUI() {
   };
   const nextFrame = () => new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve)));
-  const waitFor = async (predicate, description, timeout = 4000) => {
+  const waitFor = async (predicate, description, timeout = 8000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
       if (await predicate()) return true;
@@ -29,6 +29,12 @@ module.exports = async function exerciseNotificationUI() {
   const centerView = editor.notificationCenterView;
   check(Boolean(manager && toastView && centerView), "notification manager and views are initialized");
   check(typeof manager.notify === "function", "notification API is available");
+
+  // Keep the visual assertions independent from Chromium's animation scheduler.
+  const motionStyle = document.createElement("style");
+  motionStyle.textContent =
+    ".nce-toast, .nce-notification-center { transition: none !important; }";
+  document.head.appendChild(motionStyle);
 
   manager.clearHistory();
   manager.clear();

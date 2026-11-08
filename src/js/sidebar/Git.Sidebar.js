@@ -54,19 +54,29 @@ class GitSidebar extends Sidebar {
   constructor(editor) {
     super("git", "Source Control", "fi fi-rr-code-branch", "left", editor);
     this.container = null;
+    this.headerElement = null;
+    this.summaryElement = null;
     this.repoNameElement = null;
     this.branchElement = null;
+    this.branchNameElement = null;
+    this.branchSyncElement = null;
     this.refreshButton = null;
     this.menuButton = null;
+    this.commitBoxElement = null;
     this.commitInput = null;
     this.commitButton = null;
     this.commitStatus = null;
     this.stateElement = null;
+    this.stateIconElement = null;
+    this.stateTitleElement = null;
     this.stateText = null;
+    this.stateDetailsElement = null;
+    this.stateCodeElement = null;
     this.stateRetry = null;
     this.stateInit = null;
     this.stateRefresh = null;
     this.initializing = false;
+    this.listElement = null;
     this.listViewport = null;
     this.listLayer = null;
 
@@ -135,22 +145,12 @@ class GitSidebar extends Sidebar {
     container.className = "git-sidebar-container";
     this.container = container;
 
-    const title = document.createElement("div");
-    title.className = "sidebar-main-title";
-    title.textContent = "SOURCE CONTROL";
-
     const header = document.createElement("div");
     header.className = "git-sidebar-header";
-
-    const identity = document.createElement("div");
-    identity.className = "git-sidebar-identity";
-    const repoName = document.createElement("span");
-    repoName.className = "git-sidebar-repo-name";
-    const branch = document.createElement("span");
-    branch.className = "git-sidebar-branch";
-    identity.append(repoName, branch);
-    this.repoNameElement = repoName;
-    this.branchElement = branch;
+    const title = document.createElement("div");
+    title.className = "sidebar-main-title";
+    title.textContent = "Source Control";
+    this.headerTitleElement = title;
 
     const headerActions = document.createElement("div");
     headerActions.className = "git-sidebar-header-actions";
@@ -165,6 +165,7 @@ class GitSidebar extends Sidebar {
     refreshIcon.setAttribute("aria-hidden", "true");
     refreshButton.appendChild(refreshIcon);
     refreshButton.addEventListener("click", () => this.refresh({ reason: "manual" }));
+    refreshButton.dataset.action = "refresh";
     this.refreshButton = refreshButton;
 
     const menuButton = document.createElement("button");
@@ -178,10 +179,12 @@ class GitSidebar extends Sidebar {
     menuIcon.setAttribute("aria-hidden", "true");
     menuButton.appendChild(menuIcon);
     menuButton.addEventListener("click", () => this.openHeaderContextMenu());
+    menuButton.dataset.action = "menu";
     this.menuButton = menuButton;
 
     headerActions.append(refreshButton, menuButton);
-    header.append(identity, headerActions);
+    header.append(title, headerActions);
+    this.headerElement = header;
 
     header.addEventListener("contextmenu", (event) => {
       event.preventDefault();
@@ -189,12 +192,35 @@ class GitSidebar extends Sidebar {
       this.openHeaderContextMenu();
     });
 
+    const summary = document.createElement("div");
+    summary.className = "git-sidebar-summary";
+    summary.hidden = true;
+    const branch = document.createElement("span");
+    branch.className = "git-sidebar-branch";
+    const branchIcon = document.createElement("i");
+    branchIcon.className = "fi fi-rr-code-branch";
+    branchIcon.setAttribute("aria-hidden", "true");
+    const branchName = document.createElement("span");
+    branchName.className = "git-sidebar-branch-name";
+    const branchSync = document.createElement("span");
+    branchSync.className = "git-sidebar-branch-sync";
+    branchSync.hidden = true;
+    branch.append(branchIcon, branchName, branchSync);
+    const repoName = document.createElement("span");
+    repoName.className = "git-sidebar-repo-name";
+    summary.append(branch, repoName);
+    this.summaryElement = summary;
+    this.branchElement = branch;
+    this.branchNameElement = branchName;
+    this.branchSyncElement = branchSync;
+    this.repoNameElement = repoName;
+
     const commitBox = document.createElement("div");
     commitBox.className = "git-sidebar-commit";
     const commitInput = document.createElement("textarea");
     commitInput.className = "git-sidebar-commit-input";
     commitInput.rows = 2;
-    commitInput.placeholder = "Message (Ctrl+Enter to commit)";
+    commitInput.placeholder = "Commit message...";
     commitInput.setAttribute("aria-label", "Commit message");
     commitInput.spellcheck = false;
     commitInput.addEventListener("input", () => {
@@ -225,21 +251,44 @@ class GitSidebar extends Sidebar {
     this.commitButton = commitButton;
     commitActions.append(commitStatus, commitButton);
     commitBox.append(commitInput, commitActions);
+    this.commitBoxElement = commitBox;
 
     const state = document.createElement("div");
     state.className = "git-sidebar-state";
     state.hidden = true;
+    const stateHeading = document.createElement("div");
+    stateHeading.className = "git-sidebar-state-heading";
+    const stateIcon = document.createElement("i");
+    stateIcon.className = "fi fi-rr-code-branch git-state-icon";
+    stateIcon.setAttribute("aria-hidden", "true");
+    const stateCopy = document.createElement("div");
+    stateCopy.className = "git-state-copy";
+    stateCopy.setAttribute("aria-live", "polite");
+    const stateTitle = document.createElement("div");
+    stateTitle.className = "git-state-title";
     const stateText = document.createElement("div");
-    stateText.className = "git-sidebar-state-text";
+    stateText.className = "git-state-description";
+    const stateDetails = document.createElement("details");
+    stateDetails.className = "git-state-details";
+    stateDetails.hidden = true;
+    const stateDetailsSummary = document.createElement("summary");
+    stateDetailsSummary.textContent = "Details";
+    const stateCode = document.createElement("code");
+    stateCode.className = "git-state-code";
+    stateDetails.append(stateDetailsSummary, stateCode);
+    stateCopy.append(stateTitle, stateText, stateDetails);
+    stateHeading.append(stateIcon, stateCopy);
+
     const stateActions = document.createElement("div");
     stateActions.className = "git-sidebar-state-actions";
 
     const stateInit = document.createElement("button");
     stateInit.type = "button";
     stateInit.className = "git-sidebar-state-button git-sidebar-init";
-    stateInit.textContent = "Initialize";
+    stateInit.textContent = "Initialize Repository";
     stateInit.title = "Initialize a Git repository in this workspace";
     stateInit.setAttribute("aria-label", "Initialize a Git repository");
+    stateInit.dataset.action = "init";
     stateInit.addEventListener("click", () => void this.initializeRepository());
     this.stateInit = stateInit;
 
@@ -247,6 +296,7 @@ class GitSidebar extends Sidebar {
     stateRefresh.type = "button";
     stateRefresh.className = "git-sidebar-state-button";
     stateRefresh.textContent = "Refresh";
+    stateRefresh.dataset.action = "refresh";
     stateRefresh.addEventListener("click", () => this.refresh({ reason: "manual" }));
     this.stateRefresh = stateRefresh;
 
@@ -254,12 +304,17 @@ class GitSidebar extends Sidebar {
     stateRetry.type = "button";
     stateRetry.className = "git-sidebar-state-button";
     stateRetry.textContent = "Retry";
+    stateRetry.dataset.action = "retry";
     stateRetry.addEventListener("click", () => this.refresh({ reason: "manual" }));
 
     stateActions.append(stateInit, stateRefresh, stateRetry);
-    state.append(stateText, stateActions);
+    state.append(stateHeading, stateActions);
     this.stateElement = state;
+    this.stateIconElement = stateIcon;
+    this.stateTitleElement = stateTitle;
     this.stateText = stateText;
+    this.stateDetailsElement = stateDetails;
+    this.stateCodeElement = stateCode;
     this.stateRetry = stateRetry;
 
     const list = document.createElement("div");
@@ -272,11 +327,12 @@ class GitSidebar extends Sidebar {
     layerNode.classList?.add?.("git-sidebar-list-layer");
     viewport.appendChild(layerNode);
     list.appendChild(viewport);
+    this.listElement = list;
     this.listViewport = viewport;
     this.listLayer = layerNode;
     this.fileScroller.attach(list, viewport, layerNode);
 
-    container.append(title, header, commitBox, state, list);
+    container.append(header, summary, state, list, commitBox);
     this.updateView();
     return container;
   }
@@ -296,9 +352,17 @@ class GitSidebar extends Sidebar {
     const branchLabel = branch
       ? branch.name || (branch.oid ? `detached @ ${branch.oid.slice(0, 7)}` : "detached")
       : "";
+    if (this.branchNameElement) {
+      this.branchNameElement.textContent = branchLabel || "detached";
+    }
+    if (this.branchSyncElement) {
+      const sync = [];
+      if (branch?.ahead) sync.push(`↑${branch.ahead}`);
+      if (branch?.behind) sync.push(`↓${branch.behind}`);
+      this.branchSyncElement.textContent = sync.join(" ");
+      this.branchSyncElement.hidden = sync.length === 0;
+    }
     if (this.branchElement) {
-      this.branchElement.textContent = branchLabel;
-      this.branchElement.hidden = !branchLabel;
       const tracking = branch && (branch.ahead || branch.behind)
         ? ` ↑${branch.ahead} ↓${branch.behind}`
         : "";
@@ -307,10 +371,13 @@ class GitSidebar extends Sidebar {
         : "";
     }
     if (this.refreshButton) {
+      this.refreshButton.hidden = !this.workspaceRoot;
       this.refreshButton.disabled = this.loading;
       if (this.loading) this.refreshButton.setAttribute("aria-busy", "true");
       else this.refreshButton.removeAttribute("aria-busy");
     }
+    if (this.menuButton)
+      this.menuButton.hidden = !this.status?.branch;
     if (this.commitInput) {
       const focused = typeof document !== "undefined" &&
         document.activeElement === this.commitInput;
@@ -323,8 +390,12 @@ class GitSidebar extends Sidebar {
   }
 
   updateCommitControls() {
-    if (this.commitButton)
+    if (this.commitButton) {
+      this.commitButton.textContent = this.committing ? "Committing…" : "Commit";
       this.commitButton.disabled = !this.canCommit();
+      if (this.committing) this.commitButton.setAttribute("aria-busy", "true");
+      else this.commitButton.removeAttribute("aria-busy");
+    }
     if (!this.commitStatus) return;
     this.commitStatus.textContent = this.getCommitStatusText();
     this.commitStatus.dataset.state = this.actionError || this.commitError
@@ -335,51 +406,203 @@ class GitSidebar extends Sidebar {
   }
 
   getCommitStatusText() {
-    return this.actionError || this.commitError ||
+    const explicit = this.actionError || this.commitError ||
       this.notice || (this.stale ? "Changes may be out of date." : "");
+    if (explicit) return explicit;
+    if (this.getViewState().mode === "changes" && this.stagedCount() === 0)
+      return "Stage a file to commit.";
+    return "";
+  }
+
+  getViewState() {
+    if (!this.workspaceRoot) return { mode: "no-workspace" };
+    if (!this.status) {
+      if (this.initError && this.error?.code !== "GIT_NOT_FOUND") {
+        return {
+          mode: "init-error",
+          message: this.initError,
+          errorCode: this.error?.code || "NOT_A_REPOSITORY",
+          busy: this.initializing,
+        };
+      }
+      if (this.error) {
+        if (this.error.code === "NOT_A_REPOSITORY")
+          return { mode: "no-repository", busy: this.initializing };
+        return {
+          mode: "error",
+          message: this.error.message,
+          errorCode: this.error.code || "GIT_COMMAND_FAILED",
+          busy: this.loading,
+        };
+      }
+      return { mode: "loading", busy: true };
+    }
+    const { staged, changes } = this.getSections();
+    const total = staged.length + changes.length;
+    const stale = Boolean(this.error && this.stale);
+    if (total === 0)
+      return { mode: "clean", branch: this.status.branch, stale };
+    return { mode: "changes", branch: this.status.branch, staged, changes, total, stale };
+  }
+
+  static errorTitle(code) {
+    if (code === "GIT_NOT_FOUND") return "Git is not installed";
+    if (code === "REPOSITORY_NOT_FOUND") return "Workspace unavailable";
+    if (code === "PERMISSION_DENIED") return "Repository access denied";
+    if (code === "GIT_TIMEOUT") return "Git did not respond";
+    if (code === "GIT_INDEX_LOCKED") return "Git is already running";
+    if (code === "GIT_OUTPUT_LIMIT") return "Too many changes";
+    return "Source Control unavailable";
+  }
+
+  getStatePresentation(view = this.getViewState()) {
+    if (view.mode === "no-workspace") {
+      return {
+        icon: "fi-rr-folder",
+        tone: "muted",
+        title: "No folder open",
+        description: "Open a folder to review its changes.",
+      };
+    }
+    if (view.mode === "no-repository") {
+      return {
+        icon: "fi-rr-code-branch",
+        tone: "muted",
+        title: "No Git repository",
+        description: "This workspace is not tracked by Git.",
+      };
+    }
+    if (view.mode === "init-error") {
+      return {
+        icon: "fi-rr-triangle-warning",
+        tone: "error",
+        title: "Repository initialization failed",
+        description: view.message,
+        code: view.errorCode,
+      };
+    }
+    if (view.mode === "error") {
+      return {
+        icon: "fi-rr-triangle-warning",
+        tone: "error",
+        title: GitSidebar.errorTitle(view.errorCode),
+        description: view.message,
+        code: view.errorCode,
+      };
+    }
+    if (view.mode === "loading") {
+      return {
+        icon: "fi-rr-refresh",
+        tone: "muted",
+        title: "Loading Source Control…",
+        description: "Reading the repository status.",
+        spinning: true,
+        busy: true,
+      };
+    }
+    if (view.mode === "clean") {
+      return {
+        icon: "fi-rr-check",
+        tone: view.stale ? "warning" : "success",
+        title: "Working tree clean",
+        description: view.stale
+          ? "The last refresh failed, so this status may be out of date."
+          : "No changes to commit.",
+        code: view.stale ? (this.error?.code || "") : "",
+      };
+    }
+    return null;
   }
 
   getStateMessage() {
-    if (!this.workspaceRoot) return "Open a folder to review its changes.";
-    if (this.initError) return this.initError;
-    if (this.error && !(this.stale && this.status)) return this.error.message;
-    if (!this.status && this.loading) return "Loading Source Control…";
+    const view = this.getViewState();
+    if (view.mode === "no-workspace") return "Open a folder to review its changes.";
+    if (view.mode === "no-repository") return "This workspace is not a Git repository.";
+    if (view.mode === "init-error" || view.mode === "error") return view.message;
+    if (view.mode === "loading") return "Loading Source Control…";
     return "";
   }
 
   getStateActions() {
-    const missingRepository = this.error?.code === "NOT_A_REPOSITORY";
-    return {
-      init: missingRepository,
-      refresh: missingRepository,
-      retry: Boolean(this.error) &&
-        !missingRepository &&
-        this.error.code !== "GIT_NOT_FOUND" &&
-        this.error.code !== "GIT_OUTPUT_LIMIT",
-    };
+    const view = this.getViewState();
+    if (view.mode === "no-repository" || view.mode === "init-error") {
+      return { init: true, refresh: true, retry: false };
+    }
+    if (view.mode === "error") {
+      return {
+        init: false,
+        refresh: false,
+        retry: view.errorCode !== "GIT_NOT_FOUND" &&
+          view.errorCode !== "GIT_OUTPUT_LIMIT",
+      };
+    }
+    if (view.mode === "clean") return { init: false, refresh: true, retry: false };
+    return { init: false, refresh: false, retry: false };
   }
 
   updateState() {
-    if (!this.stateElement || !this.stateText) return;
-    const message = this.getStateMessage();
-    this.stateElement.hidden = !message;
-    this.stateText.textContent = message;
+    if (!this.stateElement) return;
+    const view = this.getViewState();
+    const presentation = this.getStatePresentation(view);
+    this.stateElement.hidden = !presentation;
+    if (presentation) {
+      this.stateElement.dataset.tone = presentation.tone || "muted";
+      this.stateElement.setAttribute(
+        "aria-busy",
+        String(presentation.busy === true || this.initializing),
+      );
+      if (this.stateIconElement) {
+        this.stateIconElement.className =
+          `fi ${presentation.icon} git-state-icon${presentation.spinning ? " is-spinning" : ""}`;
+      }
+      if (this.stateTitleElement)
+        this.stateTitleElement.textContent = presentation.title;
+      if (this.stateText)
+        this.stateText.textContent = presentation.description;
+      if (this.stateDetailsElement && this.stateCodeElement) {
+        this.stateDetailsElement.hidden = !presentation.code;
+        this.stateCodeElement.textContent = presentation.code || "";
+      }
+    } else {
+      this.stateElement.removeAttribute("aria-busy");
+    }
+
     const actions = this.getStateActions();
     const busy = this.loading || this.initializing;
-    if (this.stateRetry) {
-      this.stateRetry.hidden = !actions.retry;
-      this.stateRetry.disabled = busy;
-    }
+    const primary = actions.init
+      ? this.stateInit
+      : actions.retry
+        ? this.stateRetry
+        : null;
     if (this.stateInit) {
       this.stateInit.hidden = !actions.init;
       this.stateInit.disabled = busy;
+      this.stateInit.textContent = view.mode === "init-error"
+        ? "Retry Initialization"
+        : "Initialize Repository";
       if (this.initializing) this.stateInit.setAttribute("aria-busy", "true");
       else this.stateInit.removeAttribute("aria-busy");
+    }
+    if (this.stateRetry) {
+      this.stateRetry.hidden = !actions.retry;
+      this.stateRetry.disabled = busy;
     }
     if (this.stateRefresh) {
       this.stateRefresh.hidden = !actions.refresh;
       this.stateRefresh.disabled = busy;
     }
+    for (const button of [this.stateInit, this.stateRetry, this.stateRefresh]) {
+      button?.classList.toggle("git-sidebar-primary", button === primary);
+    }
+
+    if (this.summaryElement) {
+      this.summaryElement.hidden =
+        view.mode !== "clean" && view.mode !== "changes";
+    }
+    if (this.commitBoxElement)
+      this.commitBoxElement.hidden = view.mode !== "changes";
+    if (this.listElement)
+      this.listElement.hidden = view.mode !== "changes";
   }
 
   getSections() {
@@ -402,7 +625,7 @@ class GitSidebar extends Sidebar {
   }
 
   canCommit() {
-    return Boolean(this.status) &&
+    return this.getViewState().mode === "changes" &&
       this.stagedCount() > 0 &&
       this.commitMessage.trim().length > 0 &&
       !this.committing &&
@@ -545,44 +768,33 @@ class GitSidebar extends Sidebar {
   buildListItems(staged, changes) {
     const items = [];
     if (!this.status) return items;
-    if (staged.length === 0 && changes.length === 0) {
+    if (staged.length > 0) {
       items.push({
-        type: "empty",
-        text: "No changes in this workspace.",
-        height: 48,
-        rowHeight: 48,
+        type: "section",
+        section: "staged",
+        title: "Staged Changes",
+        count: staged.length,
+        height: 24,
+        rowHeight: 24,
       });
-      return items;
-    }
-    items.push({
-      type: "section",
-      section: "staged",
-      title: "Staged Changes",
-      count: staged.length,
-      height: 26,
-      rowHeight: 26,
-    });
-    if (this.collapsed.staged !== true) {
-      if (staged.length === 0)
-        items.push({ type: "empty", text: "No staged changes", height: 34, rowHeight: 34 });
-      else
+      if (this.collapsed.staged !== true) {
         for (const entry of staged)
-          items.push({ type: "entry", section: "staged", entry, height: 24, rowHeight: 24 });
+          items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
+      }
     }
-    items.push({
-      type: "section",
-      section: "changes",
-      title: "Changes",
-      count: changes.length,
-      height: 26,
-      rowHeight: 26,
-    });
-    if (this.collapsed.changes !== true) {
-      if (changes.length === 0)
-        items.push({ type: "empty", text: "No unstaged changes", height: 34, rowHeight: 34 });
-      else
+    if (changes.length > 0) {
+      items.push({
+        type: "section",
+        section: "changes",
+        title: "Changes",
+        count: changes.length,
+        height: 24,
+        rowHeight: 24,
+      });
+      if (this.collapsed.changes !== true) {
         for (const entry of changes)
-          items.push({ type: "entry", section: "changes", entry, height: 24, rowHeight: 24 });
+          items.push({ type: "entry", section: "changes", entry, height: 25, rowHeight: 25 });
+      }
     }
     return items;
   }
