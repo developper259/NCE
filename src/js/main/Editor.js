@@ -142,6 +142,15 @@ class Editor {
     this.savePopupManager = new SavePopup(this, this.tabManager);
     this.bottomBar = new BottomBar(this);
     this.titleBar = new TitleBar(this);
+    this.notificationManager = new NotificationManager();
+    this.notificationToastView = new NotificationToastView(
+      this,
+      this.notificationManager,
+    );
+    this.notificationCenterView = new NotificationCenterView(
+      this,
+      this.notificationManager,
+    );
     this.sidebarResizer = new SidebarResizer(this);
     this._settingsView = null;
     this._pictureView = null;
@@ -400,6 +409,9 @@ class Editor {
   destroy() {
     this.windowActivityUnsubscribe?.();
     this.windowActivityUnsubscribe = null;
+    this.notificationCenterView?.destroy?.();
+    this.notificationToastView?.destroy?.();
+    this.notificationManager?.destroy?.();
     this.lspController?.destroy?.();
     this.externalFileDropController?.destroy?.();
     document.documentElement.classList.remove("nce-window-inactive");
