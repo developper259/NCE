@@ -94,6 +94,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "untracked status letter is displayed",
   );
   check(
+    getComputedStyle(row.querySelector(".git-file-actions")).marginRight === "4px",
+    "stage action keeps space from the row edge",
+  );
+  check(
     [...git.listLayer.querySelectorAll(".git-section-title")]
       .some((element) => element.textContent === "Changes"),
     "Changes section is visible",
