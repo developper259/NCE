@@ -231,7 +231,10 @@ test("language selector exposes technology logos with a neutral fallback", async
   const editor = {
     tabManager: { activeFile: { language: "javascript" } },
     highlightController: {
-      getSupportedLanguage: async () => ["javascript", "typescript", "json"],
+      getSupportedLanguage: async () => [
+        "javascript", "typescript", "jsx", "tsx", "markdown", "bash",
+        "sql", "rust", "go", "scss", "sass", "json",
+      ],
       changeLanguage: async () => {},
     },
     quickPanel: { open(value) { options = value; } },
@@ -241,11 +244,25 @@ test("language selector exposes technology logos with a neutral fallback", async
   });
   const bar = new BottomBar(editor);
   await bar.openLanguage();
-  assert.equal(options.items.find((item) => item.id === "javascript").icon,
+  const item = (id) => options.items.find((entry) => entry.id === id);
+  assert.equal(item("javascript").icon,
     "fi fi-brands-js language-logo-javascript quick-panel-language-logo");
-  assert.equal(options.items.find((item) => item.id === "typescript").icon,
+  assert.equal(item("typescript").icon,
     "fi fi-brands-typescript language-logo-typescript quick-panel-language-logo");
-  assert.equal(options.items.find((item) => item.id === "json").icon,
+  assert.equal(item("jsx").icon,
+    "fi fi-rr-react language-logo-react quick-panel-language-logo");
+  assert.equal(item("tsx").label, "TSX");
+  assert.equal(item("markdown").label, "Markdown");
+  assert.equal(item("bash").icon,
+    "fi fi-rr-terminal language-logo-bash quick-panel-language-logo");
+  assert.equal(item("sql").icon,
+    "fi fi-rr-database language-logo-sql quick-panel-language-logo");
+  assert.equal(item("rust").label, "Rust");
+  assert.equal(item("go").label, "Go");
+  assert.equal(item("scss").icon,
+    "fi fi-brands-sass language-logo-sass quick-panel-language-logo");
+  assert.equal(item("sass").label, "Sass");
+  assert.equal(item("json").icon,
     "fi fi-rr-code-simple quick-panel-language-logo");
 });
 
@@ -282,8 +299,11 @@ test("language selector waits for the language change before refreshing", async 
   await bar.openLanguage();
 
   const accepted = options.onAccept({ data: "typescript" });
-  assert.equal(title.innerText, "javascript");
+  assert.equal(title.innerText, "JavaScript");
   finishChange();
   await accepted;
-  assert.equal(title.innerText, "typescript");
+  assert.equal(title.innerText, "TypeScript");
+  activeFile.language = "sql";
+  bar.refreshLanguage();
+  assert.equal(title.innerText, "SQL");
 });

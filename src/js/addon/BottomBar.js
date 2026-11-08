@@ -1,3 +1,47 @@
+const NSH_LANGUAGE_LABELS = Object.freeze({
+  plaintext: "Plain Text",
+  javascript: "JavaScript",
+  typescript: "TypeScript",
+  jsx: "JSX",
+  tsx: "TSX",
+  python: "Python",
+  html: "HTML",
+  css: "CSS",
+  json: "JSON",
+  yaml: "YAML",
+  php: "PHP",
+  java: "Java",
+  xml: "XML",
+  cpp: "C++",
+  c: "C",
+  csv: "CSV",
+  markdown: "Markdown",
+  bash: "Bash",
+  sql: "SQL",
+  rust: "Rust",
+  go: "Go",
+  scss: "SCSS",
+  sass: "Sass",
+});
+
+const NSH_LANGUAGE_LOGOS = Object.freeze({
+  javascript: "fi fi-brands-js language-logo-javascript",
+  typescript: "fi fi-brands-typescript language-logo-typescript",
+  jsx: "fi fi-rr-react language-logo-react",
+  tsx: "fi fi-rr-react language-logo-react",
+  python: "fi fi-brands-python language-logo-python",
+  html: "fi fi-brands-html5 language-logo-html",
+  css: "fi fi-brands-css3 language-logo-css",
+  php: "fi fi-brands-php language-logo-php",
+  java: "fi fi-brands-java language-logo-java",
+  c: "fi fi-brands-c language-logo-c",
+  cpp: "fi fi-brands-c language-logo-c",
+  bash: "fi fi-rr-terminal language-logo-bash",
+  sql: "fi fi-rr-database language-logo-sql",
+  scss: "fi fi-brands-sass language-logo-sass",
+  sass: "fi fi-brands-sass language-logo-sass",
+});
+
 class BottomBar {
   constructor(e) {
     this.editor = e;
@@ -166,12 +210,7 @@ class BottomBar {
       .map((language) => ({
         id: language.toLowerCase(),
         icon: this.getLanguageLogo(language),
-        label:
-          language === "plaintext"
-            ? "Plain Text"
-            : language === "cpp"
-              ? "C++"
-              : language.charAt(0).toUpperCase() + language.slice(1),
+        label: this.getLanguageLabel(language),
         data: language,
       }));
 
@@ -189,19 +228,15 @@ class BottomBar {
     });
   }
 
+  getLanguageLabel(language) {
+    const normalized = String(language || "plaintext").toLowerCase();
+    return NSH_LANGUAGE_LABELS[normalized] ||
+      normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  }
+
   getLanguageLogo(language) {
-    const logos = {
-      javascript: "fi fi-brands-js language-logo-javascript",
-      typescript: "fi fi-brands-typescript language-logo-typescript",
-      python: "fi fi-brands-python language-logo-python",
-      html: "fi fi-brands-html5 language-logo-html",
-      css: "fi fi-brands-css3 language-logo-css",
-      php: "fi fi-brands-php language-logo-php",
-      java: "fi fi-brands-java language-logo-java",
-      c: "fi fi-brands-c language-logo-c",
-      cpp: "fi fi-brands-c language-logo-c",
-    };
-    return `${logos[language] || "fi fi-rr-code-simple"} quick-panel-language-logo`;
+    return `${NSH_LANGUAGE_LOGOS[language] || "fi fi-rr-code-simple"} `
+      + "quick-panel-language-logo";
   }
 
   openConfigSpace() {
@@ -300,8 +335,7 @@ class BottomBar {
     if (!this.languageElement) return;
     const title = this.languageElement.querySelector(".scroller-title");
     const language = this.editor.tabManager.activeFile?.language || "plaintext";
-    if (title)
-      title.innerText = language === "plaintext" ? "Plain Text" : language;
+    if (title) title.innerText = this.getLanguageLabel(language);
   }
 
   hide() {

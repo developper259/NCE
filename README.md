@@ -112,6 +112,7 @@ NCE also includes a deeply integrated AI coding agent designed to work directly 
 - Multi-server LSP client with diagnostics, completion, hover, navigation, rename, code actions, formatting and symbols
 - Declarative server registry; installed executables are detected, never downloaded or installed
 - Per-server enablement, custom executable paths and a Problems panel
+- JavaScript/TypeScript LSP coverage remains limited to `.js`, `.mjs` and `.ts`; `.jsx` and `.tsx` are highlighted by NSH but not mapped to an LSP server
 
 ### AI Agent
 

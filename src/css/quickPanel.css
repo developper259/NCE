@@ -173,6 +173,8 @@
 .quick-panel-item > i.language-logo-php { color: #777bb4; }
 .quick-panel-item > i.language-logo-java { color: #e76f00; }
 .quick-panel-item > i.language-logo-c { color: #a8b9cc; }
+.quick-panel-item > i.language-logo-react { color: #61dafb; }
+.quick-panel-item > i.language-logo-sass { color: #cf649a; }
 
 .quick-panel-item > i.quick-panel-language-logo:not([class*="language-logo-"]) {
   color: var(--text-secondary);
