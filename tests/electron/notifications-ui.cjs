@@ -46,6 +46,7 @@ module.exports = async function exerciseNotificationUI() {
       title: "Agent run failed",
       message: "The model request failed.",
       source: "Agent",
+      actions: [{ label: "Retry", action() {} }],
     },
     {
       type: "warning",
@@ -117,6 +118,12 @@ module.exports = async function exerciseNotificationUI() {
     getComputedStyle(closeButton).cursor === "pointer",
     "toast close button shows a pointer cursor",
   );
+  const toastAction = document.querySelector(".nce-toast-action");
+  check(Boolean(toastAction), "toast action exists");
+  check(
+    getComputedStyle(toastAction).cursor === "pointer",
+    "toast actions show a pointer cursor",
+  );
 
   const probe = document.createElement("span");
   probe.style.position = "absolute";
@@ -170,6 +177,10 @@ module.exports = async function exerciseNotificationUI() {
     check(
       bellRect.width >= 24 && bellRect.height >= 20 && bellRect.right <= view.width,
       "bell keeps its compact title-bar hit area",
+    );
+    check(
+      getComputedStyle(bell).cursor === "pointer",
+      "bell shows a pointer cursor",
     );
     check(badge.hidden === false && badge.textContent === String(specs.length), "badge shows the unread count");
     check(
@@ -239,12 +250,35 @@ module.exports = async function exerciseNotificationUI() {
       getComputedStyle(center.querySelector(".nce-notification-center-list")).overflowY === "auto",
       "center history scrolls independently",
     );
+    check(
+      getComputedStyle(items[0]).cursor === "pointer",
+      "notification rows show a pointer cursor",
+    );
+    check(
+      getComputedStyle(centerView.markAllButton).cursor === "pointer" &&
+        getComputedStyle(centerView.clearButton).cursor === "pointer",
+      "center header actions show a pointer cursor",
+    );
+    check(
+      getComputedStyle(items[0].querySelector(".nce-notification-item-control")).cursor === "pointer",
+      "notification row controls show a pointer cursor",
+    );
+    const itemAction = center.querySelector(".nce-notification-action");
+    check(Boolean(itemAction), "notification contextual action exists");
+    check(
+      getComputedStyle(itemAction).cursor === "pointer",
+      "notification contextual actions show a pointer cursor",
+    );
 
     centerView.markAllButton.click();
     await nextFrame();
     check(manager.getUnreadCount() === 0, "mark all clears unread state");
     check(badge.hidden === true, "badge hides when everything is read");
     check(count.hidden === true, "unread counter hides when everything is read");
+    check(
+      getComputedStyle(centerView.markAllButton).cursor === "default",
+      "disabled center actions fall back to the default cursor",
+    );
 
     manager.clearHistory();
     await waitFor(
@@ -260,6 +294,10 @@ module.exports = async function exerciseNotificationUI() {
       "center shows its empty state",
     );
     check(centerView.clearButton.disabled === true, "clear action disables on empty history");
+    check(
+      getComputedStyle(centerView.clearButton).cursor === "default",
+      "disabled clear action uses the default cursor",
+    );
 
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     await waitFor(() => !centerView.isOpen, "center to close on Escape");

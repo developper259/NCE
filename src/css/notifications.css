@@ -27,7 +27,7 @@
   border-radius: 3px;
   background: transparent;
   color: var(--titlebar-text-muted, var(--text-secondary));
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-notification-bell:hover,
@@ -153,7 +153,7 @@
   background: transparent;
   color: var(--text-tertiary);
   font-size: 12px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-notification-center-action:hover:not(:disabled),
@@ -164,6 +164,7 @@
 }
 
 .nce-notification-center-action:disabled {
+  cursor: default;
   opacity: 0.4;
 }
 
@@ -192,7 +193,7 @@
   gap: 8px;
   padding: 7px 6px;
   border-radius: 3px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-notification-item:hover,
@@ -324,7 +325,7 @@
   color: var(--text-primary);
   font-family: inherit;
   font-size: 11px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-notification-action:hover:not(:disabled) {
@@ -337,6 +338,7 @@
 }
 
 .nce-notification-action:disabled {
+  cursor: default;
   opacity: 0.5;
 }
 
@@ -365,7 +367,7 @@
   background: transparent;
   color: var(--text-tertiary);
   font-size: 11px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-notification-item-control:hover,
@@ -530,7 +532,7 @@
   color: var(--text-primary);
   font-family: inherit;
   font-size: 11px;
-  cursor: default;
+  cursor: pointer;
 }
 
 .nce-toast-action:hover:not(:disabled) {
@@ -543,6 +545,7 @@
 }
 
 .nce-toast-action:disabled {
+  cursor: default;
   opacity: 0.5;
 }
 
