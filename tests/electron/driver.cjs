@@ -139,6 +139,7 @@ app.whenReady().then(() => {
         );
       }
       assert.equal(win.isVisible(), true);
+      win.webContents.setBackgroundThrottling?.(false);
       const prefs = win.webContents.getLastWebPreferences();
       assert.equal(prefs.sandbox, true);
       assert.equal(prefs.contextIsolation, true);
@@ -1602,6 +1603,9 @@ app.whenReady().then(() => {
         traceStep("notification visual regression checks started");
         if (win.isFullScreen()) win.setFullScreen(false);
         if (win.isMaximized()) win.unmaximize();
+        win.webContents.setBackgroundThrottling?.(false);
+        win.show();
+        win.focus();
         win.setBounds({ width: 1100, height: 760 });
         await waitForCondition(
           async () =>
@@ -1633,6 +1637,9 @@ app.whenReady().then(() => {
         traceStep("Source Control visual checks started");
         if (win.isFullScreen()) win.setFullScreen(false);
         if (win.isMaximized()) win.unmaximize();
+        win.webContents.setBackgroundThrottling?.(false);
+        win.show();
+        win.focus();
         win.setBounds({ width: 1100, height: 760 });
         await waitForCondition(
           async () =>
@@ -3107,6 +3114,10 @@ app.whenReady().then(() => {
         const movePointerTo = async (x, y) => {
           win.webContents.sendInputEvent({ type: "mouseMove", x: Math.round(x), y: Math.round(y) });
         };
+        if (process.platform === "darwin") app.focus({ steal: true });
+        win.focus();
+        win.webContents.focus();
+        win.moveTop?.();
         await movePointerTo(
           resizerGeometry.bottom.left + resizerGeometry.bottom.width / 2,
           resizerGeometry.bottom.top + resizerGeometry.bottom.height / 2,

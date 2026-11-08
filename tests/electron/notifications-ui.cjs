@@ -2,8 +2,17 @@ module.exports = async function exerciseNotificationUI() {
   const check = (condition, message) => {
     if (!condition) throw Error(message);
   };
-  const nextFrame = () => new Promise((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const nextFrame = () => new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    if (typeof requestAnimationFrame === "function")
+      requestAnimationFrame(() => requestAnimationFrame(finish));
+    setTimeout(finish, 250);
+  });
   const waitFor = async (predicate, description, timeout = 8000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
