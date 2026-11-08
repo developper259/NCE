@@ -45,9 +45,12 @@ class FakeElement {
     listeners.push(listener);
     this.listeners.set(type, listeners);
   }
+  dispatch(type, event = {}) {
+    for (const listener of this.listeners.get(type) || [])
+      listener({ stopPropagation() {}, preventDefault() {}, ...event });
+  }
   click() {
-    for (const listener of this.listeners.get("click") || [])
-      listener({ stopPropagation() {}, preventDefault() {} });
+    this.dispatch("click");
   }
 }
 
@@ -83,31 +86,42 @@ test("BottomBar reports real problem counts and opens the Problems panel", () =>
   assert.equal(left.children.length, 2);
   assert.equal(left.children[0], terminal);
   assert.equal(left.children[1], bar.problemIndicators);
-  assert.equal(bar.problemIndicators.getAttribute("role"), "group");
-  assert.equal(bar.problemErrorButton.dataset.count, "1");
-  assert.equal(bar.problemErrorButton.children[0].textContent, "1");
+  assert.equal(bar.problemIndicators.tagName, "div");
+  assert.equal(bar.problemIndicators.getAttribute("role"), "button");
+  assert.equal(bar.problemIndicators.tabIndex, 0);
   assert.equal(
-    bar.problemErrorButton.children[1].className,
+    bar.problemIndicators.getAttribute("aria-label"),
+    "1 error, 0 warnings. Open Problems panel.",
+  );
+  assert.equal(bar.problemIndicators.children.length, 2);
+  assert.equal(bar.problemPairs.errors.children[0], bar.problemCounts.errors);
+  assert.equal(bar.problemPairs.warnings.children[0], bar.problemCounts.warnings);
+  assert.equal(bar.problemCounts.errors.textContent, "1");
+  assert.equal(bar.problemCounts.warnings.textContent, "0");
+  assert.equal(bar.problemPairs.errors.dataset.count, "1");
+  assert.equal(bar.problemPairs.warnings.dataset.count, "0");
+  assert.equal(
+    bar.problemPairs.errors.children[1].className,
     "fi fi-rr-cross-circle",
   );
-  assert.equal(bar.problemWarningButton.dataset.count, "0");
-  assert.equal(bar.problemWarningButton.children[0].textContent, "0");
   assert.equal(
-    bar.problemWarningButton.children[1].className,
+    bar.problemPairs.warnings.children[1].className,
     "fi fi-rr-triangle-warning",
   );
-  assert.equal(
-    bar.problemErrorButton.getAttribute("aria-label"),
-    "1 error. Open Problems panel.",
-  );
-  bar.problemErrorButton.click();
-  assert.deepEqual(opened, [true]);
+
+  bar.problemIndicators.click();
+  bar.problemIndicators.dispatch("keydown", { key: "Enter" });
+  assert.deepEqual(opened, [true, true]);
 
   bar.refreshProblemCounts({ errors: 0, warnings: 3 });
-  assert.equal(bar.problemErrorButton.dataset.count, "0");
-  assert.equal(bar.problemWarningButton.dataset.count, "3");
+  assert.equal(bar.problemCounts.errors.textContent, "0");
+  assert.equal(bar.problemCounts.warnings.textContent, "3");
+  assert.equal(bar.problemPairs.errors.dataset.count, "0");
+  assert.equal(bar.problemPairs.warnings.dataset.count, "3");
+  assert.equal(bar.problemIndicators.dataset.errors, "0");
+  assert.equal(bar.problemIndicators.dataset.warnings, "3");
   assert.equal(
-    bar.problemWarningButton.getAttribute("aria-label"),
-    "3 warnings. Open Problems panel.",
+    bar.problemIndicators.getAttribute("aria-label"),
+    "0 errors, 3 warnings. Open Problems panel.",
   );
 });

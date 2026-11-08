@@ -229,46 +229,64 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     }],
   });
   await nextFrame();
-  const errorIndicator = document.querySelector(
+  const problemsControl = document.querySelector(".bottomBar-problems");
+  const errorIndicator = problemsControl?.querySelector(
     '.bottomBar-problem[data-severity="error"]',
   );
-  const warningIndicator = document.querySelector(
+  const warningIndicator = problemsControl?.querySelector(
     '.bottomBar-problem[data-severity="warning"]',
   );
-  check(Boolean(errorIndicator && warningIndicator), "problem indicators exist");
-  check(errorIndicator.dataset.count === "2", "error count reflects diagnostics");
-  check(warningIndicator.dataset.count === "1", "warning count reflects diagnostics");
+  check(Boolean(problemsControl && errorIndicator && warningIndicator),
+    "single Problems control exists");
   check(
-    getComputedStyle(errorIndicator).cursor === "pointer",
-    "problem indicators show a pointer cursor",
+    problemsControl.tagName === "DIV" &&
+      problemsControl.getAttribute("role") === "button" &&
+      problemsControl.tabIndex === 0 &&
+      problemsControl.querySelectorAll("button").length === 0,
+    "Problems and warnings share one div control",
+  );
+  check(
+    document.querySelector(".bottomBar .left")?.lastElementChild === problemsControl,
+    "Problems control follows Terminal",
+  );
+  check(problemsControl.dataset.errors === "2", "error count reflects diagnostics");
+  check(problemsControl.dataset.warnings === "1", "warning count reflects diagnostics");
+  check(
+    problemsControl.getAttribute("aria-label") ===
+      "2 errors, 1 warning. Open Problems panel.",
+    "Problems control exposes both counts",
+  );
+  check(
+    getComputedStyle(problemsControl).cursor === "pointer",
+    "Problems control shows a pointer cursor",
   );
   const errorCount = errorIndicator.querySelector(".bottomBar-problem-count");
   const errorIcon = errorIndicator.querySelector("i");
   const errorCountRect = rectOf(errorCount);
   const errorIconRect = rectOf(errorIcon);
-  const errorButtonRect = rectOf(errorIndicator);
+  const problemsControlRect = rectOf(problemsControl);
   check(
     errorIndicator.firstElementChild === errorCount &&
       errorCountRect.right <= errorIconRect.left + 1,
     "problem count sits to the left of its icon",
   );
   check(
-    getComputedStyle(errorIndicator).justifyContent === "center" &&
+    getComputedStyle(problemsControl).alignItems === "center" &&
       getComputedStyle(errorIndicator).alignItems === "center",
-    "problem count and icon are centered in their button",
+    "problem count and icon are centered in the single control",
   );
   check(
     Math.abs(
       (errorCountRect.top + errorCountRect.bottom) / 2 -
-        (errorButtonRect.top + errorButtonRect.bottom) / 2,
+        (problemsControlRect.top + problemsControlRect.bottom) / 2,
     ) <= 1.5 &&
       Math.abs(
         (errorIconRect.top + errorIconRect.bottom) / 2 -
-          (errorButtonRect.top + errorButtonRect.bottom) / 2,
+          (problemsControlRect.top + problemsControlRect.bottom) / 2,
       ) <= 1.5,
     "problem count and icon are vertically centered",
   );
-  errorIndicator.click();
+  problemsControl.click();
   await waitFor(
     () => editor.bottomPanelManager.activePanelId === "problems" &&
       Boolean(document.querySelector(".problems-panel")),
@@ -284,8 +302,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   editor.bottomPanelManager.closePanel({ restoreFocus: false });
   await nextFrame();
   check(
-    errorIndicator.dataset.count === "0" &&
-      warningIndicator.dataset.count === "0",
+    problemsControl.dataset.errors === "0" &&
+      problemsControl.dataset.warnings === "0",
     "problem indicators reset with the diagnostics",
   );
 

@@ -10,8 +10,8 @@ class BottomBar {
     this.viewTypePicker = getElement("#view-type");
     this.bottomBarElement = getElement(".bottomBar");
     this.problemIndicators = null;
-    this.problemErrorButton = null;
-    this.problemWarningButton = null;
+    this.problemPairs = { errors: null, warnings: null };
+    this.problemCounts = { errors: null, warnings: null };
 
     this.buildProblemIndicators();
     this.refreshProblemCounts();
@@ -27,30 +27,39 @@ class BottomBar {
         typeof document.createElement !== "function") return;
     const group = document.createElement("div");
     group.className = "bottomBar-problems";
-    group.setAttribute("role", "group");
-    group.setAttribute("aria-label", "Problems");
+    group.setAttribute("role", "button");
+    group.setAttribute("aria-label", "0 errors, 0 warnings. Open Problems panel.");
     group.setAttribute("aria-live", "polite");
+    group.tabIndex = 0;
+    group.title = "0 errors, 0 warnings";
 
-    const createButton = (severity, iconName) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "bottomBar-problem";
-      button.dataset.severity = severity;
+    const createPair = (severity, iconName) => {
+      const pair = document.createElement("span");
+      pair.className = "bottomBar-problem";
+      pair.dataset.severity = severity;
+      pair.setAttribute("aria-hidden", "true");
       const count = document.createElement("span");
       count.className = "bottomBar-problem-count";
       count.textContent = "0";
       const icon = document.createElement("i");
       icon.className = `fi ${iconName}`;
       icon.setAttribute("aria-hidden", "true");
-      button.append(count, icon);
-      button._count = count;
-      button.addEventListener("click", () => void this.openProblemsPanel());
-      return button;
+      pair.append(count, icon);
+      group.append(pair);
+      return { pair, count };
     };
 
-    this.problemErrorButton = createButton("error", "fi-rr-cross-circle");
-    this.problemWarningButton = createButton("warning", "fi-rr-triangle-warning");
-    group.append(this.problemErrorButton, this.problemWarningButton);
+    const errors = createPair("error", "fi-rr-cross-circle");
+    const warnings = createPair("warning", "fi-rr-triangle-warning");
+    this.problemPairs = { errors: errors.pair, warnings: warnings.pair };
+    this.problemCounts = { errors: errors.count, warnings: warnings.count };
+
+    group.addEventListener("click", () => void this.openProblemsPanel());
+    group.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      void this.openProblemsPanel();
+    });
     left.append(group);
     this.problemIndicators = group;
   }
@@ -65,18 +74,33 @@ class BottomBar {
   refreshProblemCounts(counts = null) {
     const resolved = counts || this.editor.lspController?.getProblemCounts?.() ||
       { errors: 0, warnings: 0 };
-    this.updateProblemButton(this.problemErrorButton, resolved.errors, "error");
-    this.updateProblemButton(this.problemWarningButton, resolved.warnings, "warning");
+    const errors = this.updateProblemPair(
+      this.problemPairs.errors,
+      this.problemCounts.errors,
+      resolved.errors,
+    );
+    const warnings = this.updateProblemPair(
+      this.problemPairs.warnings,
+      this.problemCounts.warnings,
+      resolved.warnings,
+    );
+    if (!this.problemIndicators) return;
+    const label = `${errors} error${errors === 1 ? "" : "s"}, `
+      + `${warnings} warning${warnings === 1 ? "" : "s"}`;
+    this.problemIndicators.title = label;
+    this.problemIndicators.setAttribute(
+      "aria-label",
+      `${label}. Open Problems panel.`,
+    );
+    this.problemIndicators.dataset.errors = String(errors);
+    this.problemIndicators.dataset.warnings = String(warnings);
   }
 
-  updateProblemButton(button, count, severity) {
-    if (!button) return;
+  updateProblemPair(pair, countElement, count) {
     const value = Number.isSafeInteger(count) && count >= 0 ? count : 0;
-    button.dataset.count = String(value);
-    if (button._count) button._count.textContent = String(value);
-    const label = `${value} ${severity}${value === 1 ? "" : "s"}`;
-    button.title = label;
-    button.setAttribute("aria-label", `${label}. Open Problems panel.`);
+    if (pair) pair.dataset.count = String(value);
+    if (countElement) countElement.textContent = String(value);
+    return value;
   }
 
   openViewTypePicker() {
