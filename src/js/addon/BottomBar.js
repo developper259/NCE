@@ -36,13 +36,13 @@ class BottomBar {
       button.type = "button";
       button.className = "bottomBar-problem";
       button.dataset.severity = severity;
-      const icon = document.createElement("i");
-      icon.className = `fi ${iconName}`;
-      icon.setAttribute("aria-hidden", "true");
       const count = document.createElement("span");
       count.className = "bottomBar-problem-count";
       count.textContent = "0";
-      button.append(icon, count);
+      const icon = document.createElement("i");
+      icon.className = `fi ${iconName}`;
+      icon.setAttribute("aria-hidden", "true");
+      button.append(count, icon);
       button._count = count;
       button.addEventListener("click", () => void this.openProblemsPanel());
       return button;

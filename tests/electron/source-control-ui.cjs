@@ -4,6 +4,17 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   };
   const nextFrame = () => new Promise((resolve) =>
     requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const rectOf = (element) => {
+    const rect = element.getBoundingClientRect();
+    return {
+      top: rect.top,
+      right: rect.right,
+      bottom: rect.bottom,
+      left: rect.left,
+      width: rect.width,
+      height: rect.height,
+    };
+  };
   const waitFor = async (predicate, description, timeout = 10000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
@@ -230,6 +241,32 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(
     getComputedStyle(errorIndicator).cursor === "pointer",
     "problem indicators show a pointer cursor",
+  );
+  const errorCount = errorIndicator.querySelector(".bottomBar-problem-count");
+  const errorIcon = errorIndicator.querySelector("i");
+  const errorCountRect = rectOf(errorCount);
+  const errorIconRect = rectOf(errorIcon);
+  const errorButtonRect = rectOf(errorIndicator);
+  check(
+    errorIndicator.firstElementChild === errorCount &&
+      errorCountRect.right <= errorIconRect.left + 1,
+    "problem count sits to the left of its icon",
+  );
+  check(
+    getComputedStyle(errorIndicator).justifyContent === "center" &&
+      getComputedStyle(errorIndicator).alignItems === "center",
+    "problem count and icon are centered in their button",
+  );
+  check(
+    Math.abs(
+      (errorCountRect.top + errorCountRect.bottom) / 2 -
+        (errorButtonRect.top + errorButtonRect.bottom) / 2,
+    ) <= 1.5 &&
+      Math.abs(
+        (errorIconRect.top + errorIconRect.bottom) / 2 -
+          (errorButtonRect.top + errorButtonRect.bottom) / 2,
+      ) <= 1.5,
+    "problem count and icon are vertically centered",
   );
   errorIndicator.click();
   await waitFor(

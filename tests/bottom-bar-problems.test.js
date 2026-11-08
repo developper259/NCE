@@ -85,9 +85,17 @@ test("BottomBar reports real problem counts and opens the Problems panel", () =>
   assert.equal(left.children[1], bar.problemIndicators);
   assert.equal(bar.problemIndicators.getAttribute("role"), "group");
   assert.equal(bar.problemErrorButton.dataset.count, "1");
-  assert.equal(bar.problemErrorButton.children[1].textContent, "1");
+  assert.equal(bar.problemErrorButton.children[0].textContent, "1");
+  assert.equal(
+    bar.problemErrorButton.children[1].className,
+    "fi fi-rr-cross-circle",
+  );
   assert.equal(bar.problemWarningButton.dataset.count, "0");
-  assert.equal(bar.problemWarningButton.children[1].textContent, "0");
+  assert.equal(bar.problemWarningButton.children[0].textContent, "0");
+  assert.equal(
+    bar.problemWarningButton.children[1].className,
+    "fi fi-rr-triangle-warning",
+  );
   assert.equal(
     bar.problemErrorButton.getAttribute("aria-label"),
     "1 error. Open Problems panel.",
