@@ -71,6 +71,7 @@ test('real Electron: preload, editing, Save As, quit and session restore', { tim
     );
     await launch('reload');
     await launch('restore');
+    await launch('notifications');
     await launch('crash');
     await launch('no-nsh');
     // Earlier smoke phases can persist a platform-specific maximized state.

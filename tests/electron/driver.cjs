@@ -124,7 +124,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -1597,6 +1597,37 @@ app.whenReady().then(() => {
           );
         }
         traceStep("editor UI and Save As checks passed");
+      } else if (phase === "notifications") {
+        traceStep("notification visual regression checks started");
+        if (win.isFullScreen()) win.setFullScreen(false);
+        if (win.isMaximized()) win.unmaximize();
+        win.setBounds({ width: 1100, height: 760 });
+        await waitForCondition(
+          async () =>
+            (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
+          { timeout: 10000, description: "notification visual fixture viewport" },
+        );
+        const notificationVisualResult = await run(
+          `(${require("./notifications-ui.cjs").toString()})()`,
+        );
+        assert.equal(notificationVisualResult.toasts, 4);
+        assert.equal(notificationVisualResult.surfaces, 4);
+        assert.equal(notificationVisualResult.centerOpen, true);
+        const notificationScreenshotPath =
+          process.env.NCE_NOTIFICATION_SCREENSHOT_PATH;
+        if (notificationScreenshotPath) {
+          fs.writeFileSync(
+            notificationScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
+        await run(`(() => {
+          editor.notificationManager.clearHistory();
+          editor.notificationCenterView.close({ restoreFocus: false });
+          editor.notificationManager.flushPersist?.();
+          return true;
+        })()`);
+        traceStep("notification visual regression checks passed");
       } else if (phase === "tabs") {
         traceStep("large-file and tab-scroll checks started");
         const gutterSmokePath = path.join(directory, "gutter-large.js");
