@@ -173,6 +173,7 @@ class NotificationCenterView {
     this.previousFocus = document.activeElement;
     this.element.classList.add("is-open");
     this.element.setAttribute("aria-hidden", "false");
+    document.body?.classList?.add("nce-notification-center-open");
     this.bellButton.setAttribute("aria-expanded", "true");
     this.render();
     this.element.focus?.();
@@ -184,6 +185,7 @@ class NotificationCenterView {
     this.isOpen = false;
     this.element.classList.remove("is-open");
     this.element.setAttribute("aria-hidden", "true");
+    document.body?.classList?.remove("nce-notification-center-open");
     this.bellButton.setAttribute("aria-expanded", "false");
     if (restoreFocus) {
       const previous = this.previousFocus;

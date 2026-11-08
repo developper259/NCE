@@ -33,7 +33,7 @@ module.exports = async function exerciseNotificationUI() {
   // Keep the visual assertions independent from Chromium's animation scheduler.
   const motionStyle = document.createElement("style");
   motionStyle.textContent =
-    ".nce-toast, .nce-notification-center { transition: none !important; }";
+    ".nce-toast, .nce-toast-host, .nce-notification-center { transition: none !important; }";
   document.head.appendChild(motionStyle);
 
   manager.clearHistory();
@@ -217,6 +217,10 @@ module.exports = async function exerciseNotificationUI() {
     const centerStyle = getComputedStyle(center);
     const titlebarRect = rectOf(document.querySelector(".nce-titlebar"));
     check(
+      getComputedStyle(document.querySelector(".nce-toast-host")).visibility === "hidden",
+      "toasts yield to the open center",
+    );
+    check(
       center.getAttribute("role") === "dialog" &&
         center.getAttribute("aria-label") === "Notifications",
       "center exposes its dialog semantics",
@@ -230,10 +234,14 @@ module.exports = async function exerciseNotificationUI() {
       "center is fully visible",
     );
     check(centerStyle.boxShadow !== "none", "center keeps its native shadow");
-    check(centerRect.top >= titlebarRect.bottom, "center opens below the title bar");
+    check(centerRect.top >= titlebarRect.bottom, "center stays below the title bar");
     check(
       centerRect.right <= view.width - 4 && centerRect.left >= 0 && centerRect.width <= 361,
       "center stays right anchored and inside the window",
+    );
+    check(
+      centerRect.bottom <= bottomBarRect.top - 4 && centerRect.bottom >= bottomBarRect.top - 40,
+      "center opens from the bottom bar",
     );
     check(centerRect.bottom <= view.height, "center stays above the window bottom");
 
