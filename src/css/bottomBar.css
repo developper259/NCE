@@ -59,8 +59,7 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.bottomBar-terminal-toggle:hover,
-.bottomBar-terminal-toggle[aria-expanded="true"] {
+.bottomBar-terminal-toggle:hover {
   color: var(--text-primary);
   background: var(--bg-hover);
 }

@@ -171,10 +171,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.commitBoxElement.hidden === true, "commit form hides after commit");
   check(git.listElement.hidden === true, "change list hides after commit");
   check(git.stateTitleElement.textContent === "Working tree clean", "clean state after commit");
-  check(
-    editor.notificationManager.getNotifications()
+  await waitFor(
+    () => editor.notificationManager.getNotifications()
       .some((notification) => notification.title === "Commit created"),
-    "commit result is notified",
+    "commit result notification",
+    3000,
   );
 
   // Bottom bar ordering: bell first, then the status items, all right aligned.
@@ -213,6 +214,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   editor.bottomBar.show();
   await nextFrame();
+  const terminalToggle = document.querySelector(".bottomBar-terminal-toggle");
+  terminalToggle.setAttribute("aria-expanded", "true");
+  await nextFrame();
+  check(
+    getComputedStyle(terminalToggle).backgroundColor === "rgba(0, 0, 0, 0)",
+    "expanded Terminal does not paint a bottom-bar highlight",
+  );
+  terminalToggle.setAttribute("aria-expanded", "false");
 
   // Problems and warnings indicators open the Problems panel.
   const diagnostics = [
@@ -297,6 +306,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     document.querySelector(".problems-panel-summary").textContent
       .startsWith("2 errors, 1 warning, 1 info"),
     "Problems panel reflects the same counts",
+  );
+  check(
+    document.querySelector(".bottomBar-terminal-toggle")
+      .getAttribute("aria-expanded") === "false",
+    "Terminal is not highlighted while Problems is active",
   );
   editor.lspController.handleDiagnostics({ documents: [] });
   editor.bottomPanelManager.closePanel({ restoreFocus: false });

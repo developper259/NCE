@@ -325,6 +325,48 @@ test("Bottom Panel reduces editor and sidebar bounds above the BottomBar", () =>
   assert.match(css, /\.main-section > \.sidebar-tab-selector,[\s\S]*?bottom:\s*var\(--bottombar-height\)/);
   assert.match(read("src/css/bottomPanel.css"), /bottom:\s*var\(--bottombar-height\)/);
   assert.match(read("src/css/bottomBar.css"), /z-index:\s*5/);
+  assert.doesNotMatch(
+    read("src/css/bottomBar.css"),
+    /\.bottomBar-terminal-toggle\[aria-expanded="true"\]/,
+    "the active Terminal never paints a status-bar highlight",
+  );
+});
+
+test("the terminal toggle reports expansion only while Terminal is the active panel", () => {
+  const BottomPanelManager = loadGlobal("src/js/manager/BottomPanelManager.js", "BottomPanelManager", {
+    document: { createElement: () => ({ addEventListener() {} }) },
+    window: {},
+  });
+  const toggleButton = new ElementStub();
+  const manager = Object.assign(Object.create(BottomPanelManager.prototype), {
+    panels: new Map(),
+    activePanelId: "terminal",
+    visible: true,
+    height: 250,
+    preferredHeight: 250,
+    viewNavigation: null,
+    newButton: null,
+    killButton: null,
+    terminalActionsSlot: null,
+    contentElement: null,
+    toggleButton,
+    resizeHandle: null,
+  });
+  manager.registerPanel({ id: "terminal", title: "Terminal", createView() {} });
+  manager.registerPanel({ id: "problems", title: "Problems", createView() {} });
+  manager.activePanelId = "terminal";
+  manager.visible = true;
+  manager.syncControls();
+  assert.equal(toggleButton.getAttribute("aria-expanded"), "true");
+
+  manager.activePanelId = "problems";
+  manager.syncControls();
+  assert.equal(toggleButton.getAttribute("aria-expanded"), "false");
+
+  manager.visible = false;
+  manager.activePanelId = "terminal";
+  manager.syncControls();
+  assert.equal(toggleButton.getAttribute("aria-expanded"), "false");
 });
 
 test("the kill control only appears for killable panels", () => {
