@@ -51,6 +51,9 @@ NCE also includes a deeply integrated AI coding agent designed to work directly 
 - Multi-cursor editing with multiple selections
 - Virtualized vertical and horizontal rendering for large documents
 - Syntax highlighting powered by [NSH](https://github.com/developper259/NSH)
+- JSX, TSX, Markdown, Bash, SQL, Rust, Go, SCSS and Sass highlighting, with alias-aware Markdown fences
+- Documents beyond NSH's lexical state depth fall back to line highlighting instead of failing
+- CSV remains incremental; line insertions/deletions retokenize the suffix server-side without blocking the renderer
 - Undo & Redo
 - Smart typing and automatic pairs
 - Smart indentation

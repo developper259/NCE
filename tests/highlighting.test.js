@@ -701,3 +701,24 @@ test("Large File Mode skips NSH per file and leaves normal-file highlighting act
   await h.openFile(small);
   assert.equal(calls.some((call) => call.type === "openDocument" && call.language === "javascript"), true);
 });
+
+test("NSH state-depth overflow falls back to line highlighting", async () => {
+  const { editor, file, h } = setup();
+  file.language = "css";
+  file.lines = Array.from({ length: 200 }, () => new LineNode("{"));
+  editor.lineController.lines = file.lines;
+  h.nshClient.request = async (type) => {
+    if (type === "openDocument")
+      throw new Error("Document exceeds the configured lexical state depth");
+    return {};
+  };
+  let resets = 0;
+  h.reset = () => { resets += 1; };
+
+  await h.openFile(file);
+
+  assert.equal(h.documentModes.get(file.id), "line");
+  assert.equal(resets > 0, true);
+  assert.equal(editor.tabManager.activeFile, file);
+  assert.equal(file.lines.length, 200);
+});

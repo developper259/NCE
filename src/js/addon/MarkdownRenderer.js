@@ -1,4 +1,9 @@
 class MarkdownRenderer {
+  static LANGUAGE_HINT_ALIASES = Object.freeze({
+    shell: "bash",
+    "c++": "cpp",
+  });
+
   static MODES = Object.freeze({
     STRICT: "strict",
     WORKSPACE_PREVIEW: "workspace-preview",
@@ -507,23 +512,24 @@ class MarkdownRenderer {
   }
 
   async resolveCodeLanguage(controller, languageHint, supportedLanguages) {
-    if (supportedLanguages.has(languageHint)) return languageHint;
+    const hint = MarkdownRenderer.LANGUAGE_HINT_ALIASES[languageHint] || languageHint;
+    if (supportedLanguages.has(hint)) return hint;
 
-    if (!this.detectedLanguages.has(languageHint)) {
+    if (!this.detectedLanguages.has(hint)) {
       const detected = Promise.resolve(
-        controller.detectLanguage(`code.${languageHint}`),
+        controller.detectLanguage(`code.${hint}`),
       )
         .then((language) =>
           typeof language === "string" ? language.toLowerCase() : "",
         )
         .catch((error) => {
-          this.detectedLanguages.delete(languageHint);
+          this.detectedLanguages.delete(hint);
           throw error;
         });
-      this.detectedLanguages.set(languageHint, detected);
+      this.detectedLanguages.set(hint, detected);
     }
 
-    const language = await this.detectedLanguages.get(languageHint);
+    const language = await this.detectedLanguages.get(hint);
     return supportedLanguages.has(language) ? language : "";
   }
 

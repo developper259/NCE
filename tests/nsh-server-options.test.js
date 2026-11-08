@@ -3,7 +3,9 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const { NSHServer } = require("nsh/server");
+const { Highlighter } = require("nsh");
 const WebSocket = require("ws");
+const { loadGlobal } = require("./helpers/runtime");
 const {
   createNSHServerOptions,
   NSH_RENDERER_ORIGINS,
@@ -171,6 +173,92 @@ test("NSH quotas cover many open tabs and large incremental updates", { timeout:
   }
 });
 
+test("Markdown fence hints resolve to supported NSH languages", async () => {
+  const MarkdownRenderer = loadGlobal(
+    "src/js/addon/MarkdownRenderer.js",
+    "MarkdownRenderer",
+  );
+  const renderer = Object.create(MarkdownRenderer.prototype);
+  renderer.detectedLanguages = new Map();
+  const supported = new Set(Highlighter.getSupportedLanguages());
+  const controller = {
+    detectLanguage: async (fileName) => {
+      const extension = `.${fileName.split(".").pop()}`;
+      return Highlighter.detectLanguage(extension) || "plaintext";
+    },
+  };
+  const expected = {
+    js: "javascript",
+    ts: "typescript",
+    py: "python",
+    sh: "bash",
+    shell: "bash",
+    "c++": "cpp",
+    html: "html",
+    css: "css",
+    json: "json",
+    scss: "scss",
+    sass: "sass",
+    md: "markdown",
+    jsx: "jsx",
+    tsx: "tsx",
+    sql: "sql",
+    rust: "rust",
+    go: "go",
+  };
+  for (const [hint, language] of Object.entries(expected)) {
+    assert.equal(
+      await renderer.resolveCodeLanguage(controller, hint, supported),
+      language,
+      hint,
+    );
+  }
+});
+
+test("NSH rejects documents beyond the default lexical state depth", { timeout: 20_000 }, async () => {
+  const server = new NSHServer(createNSHServerOptions());
+  const port = await server.start();
+  const socket = createClient(port, "file://");
+  const pending = new Map();
+  let nextId = 0;
+  socket.on("message", (data) => {
+    const response = JSON.parse(data);
+    const resolve = pending.get(response.id);
+    if (resolve) {
+      pending.delete(response.id);
+      resolve(response);
+    }
+  });
+  const request = (requestType, args = {}) => new Promise((resolve) => {
+    const id = String(++nextId);
+    pending.set(id, resolve);
+    socket.send(JSON.stringify({ id, requestType, ...args }));
+  });
+  try {
+    await new Promise((resolve, reject) => {
+      socket.once("open", resolve);
+      socket.once("error", reject);
+    });
+    const shallow = await request("openDocument", {
+      documentId: "shallow",
+      language: "css",
+      code: "a { b { c { color: red; } } }",
+    });
+    assert.equal(shallow.success, true, shallow.error);
+
+    const deep = await request("openDocument", {
+      documentId: "deep",
+      language: "css",
+      code: Array.from({ length: 200 }, () => "{").join("\n"),
+    });
+    assert.equal(deep.success, false);
+    assert.match(deep.error, /state depth/i);
+  } finally {
+    socket.terminate();
+    await server.stop();
+  }
+});
+
 test("real NSH token classes keep theme colors", { timeout: 20_000 }, async () => {
   const root = path.resolve(__dirname, "..");
   const themeClasses = new Set();
@@ -204,6 +292,16 @@ test("real NSH token classes keep theme colors", { timeout: 20_000 }, async () =
     const samples = {
       javascript: 'const value = "hello"; // comment',
       typescript: "interface User { name: string; }",
+      jsx: 'const view = <div className="box">{value}</div>;',
+      tsx: "const view: JSX.Element = <Panel value={1} />;",
+      markdown: "# Title\n\n- item\n\n`code`",
+      bash: 'for file in *.txt; do echo "$file"; done',
+      sql: "SELECT id, name FROM users WHERE id = 1;",
+      rust: "fn main() { let value: i32 = 1; }",
+      go: "package main\nfunc main() { var value int = 1 }",
+      scss: "$color: red;\n.box { color: $color; }",
+      sass: ".box\n  color: red",
+      csv: "name,age\nAda,36",
       html: '<!DOCTYPE html><div class="box" id="x">Hello</div>',
       css: ".box { color: red; margin: 10px; }",
       php: '<?php $value = "hello"; echo $value; ?>',

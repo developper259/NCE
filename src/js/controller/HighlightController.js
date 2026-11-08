@@ -116,6 +116,10 @@ class HighlightController {
     if (file.loadingState && file.loadingState.status !== "loaded")
       return false;
     const metrics = file.getSyntaxMetrics();
+    // CSV is line-index sensitive in NSH: inserting/deleting a line
+    // retokenizes the suffix server-side. The measured cost stays within the
+    // incremental budget (tests/nsh-incremental.test.js), so CSV remains
+    // eligible and the work does not block the renderer.
     return (
       metrics.logicalLength <= this.incrementalMaxFileSize &&
       metrics.longLineCount === 0

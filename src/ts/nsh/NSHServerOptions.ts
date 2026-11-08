@@ -21,5 +21,7 @@ export function createNSHServerOptions(): NSHServerOptions {
     maxDocumentsPerClient: 128,
     maxClientDocumentCharacters: 64 * 1024 * 1024,
     maxLinesPerRequest: 0,
+    // Keep NSH's default maxStateDepth (64). HighlightController falls back to
+    // line highlighting if NSH rejects an excessively deep document.
   };
 }
