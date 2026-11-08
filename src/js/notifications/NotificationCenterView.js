@@ -72,11 +72,7 @@ class NotificationCenterView {
     this.bellButton.appendChild(this.badge);
     this.bellButton.addEventListener("click", () => this.toggle());
     this.bellContainer.appendChild(this.bellButton);
-    if (this.bellHost) {
-      if (typeof this.bellHost.insertBefore === "function")
-        this.bellHost.insertBefore(this.bellContainer, this.bellHost.firstChild || null);
-      else this.bellHost.appendChild(this.bellContainer);
-    }
+    this.bellHost?.appendChild(this.bellContainer);
   }
 
   buildCenter() {

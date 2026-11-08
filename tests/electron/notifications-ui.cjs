@@ -182,8 +182,13 @@ module.exports = async function exerciseNotificationUI() {
     const bellGroup = bell.closest(".nce-bottom-bar-actions");
     check(Boolean(rightGroup && bellGroup), "bell belongs to the right status group");
     check(
-      rightGroup.firstElementChild === bellGroup,
-      "bell precedes the right status items",
+      rightGroup.lastElementChild === bellGroup,
+      "bell sits at the far right of the status group",
+    );
+    check(
+      getComputedStyle(bell).borderRadius === "0px" &&
+        getComputedStyle(badge).borderRadius === "0px",
+      "bell and badge keep square corners",
     );
     const bellRect = rectOf(bell);
     const badgeRect = rectOf(badge);

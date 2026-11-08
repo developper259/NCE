@@ -179,15 +179,15 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   const bellGroup = rightGroup?.querySelector(".nce-bottom-bar-actions");
   check(Boolean(rightGroup && bellGroup), "notification bell is in the right status group");
   check(
-    rightGroup.firstElementChild === bellGroup,
-    "notification bell precedes the right status items",
+    rightGroup.lastElementChild === bellGroup,
+    "notification bell sits at the far right of the status group",
   );
   const languageItem = rightGroup.querySelector("#language");
   check(
     getComputedStyle(languageItem).display !== "none" &&
-      bellGroup.getBoundingClientRect().right <=
-        languageItem.getBoundingClientRect().left + 1,
-    "right status items follow the notification bell",
+      languageItem.getBoundingClientRect().right <=
+        bellGroup.getBoundingClientRect().left + 1,
+    "right status items precede the notification bell",
   );
   check(
     rightGroup.getBoundingClientRect().right <= innerWidth - 1,
