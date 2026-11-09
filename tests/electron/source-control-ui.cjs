@@ -90,10 +90,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
 
   // State C: changes.
   const fileName = "source-control-long-file-name-for-sidebar-layout-verification.js";
+  const fileLines = Array.from({ length: 120 }, (_, index) =>
+    `const line${index} = ${index};`);
   const created = await editor.fileExplorer.fileOperations.createFile(
     workspace,
     fileName,
-    "const value = 1;\n",
+    `${fileLines.join("\n")}\n`,
     true,
   );
   check(created?.success === true, "fixture file is created");
@@ -234,10 +236,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
 
   // Problems and warnings indicators open the Problems panel.
   const diagnostics = [
-    { severity: 1, message: "Error one", range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } },
-    { severity: 1, message: "Error two", range: { start: { line: 0, character: 2 }, end: { line: 0, character: 3 } } },
-    { severity: 2, message: "Warning one", range: { start: { line: 0, character: 4 }, end: { line: 0, character: 5 } } },
-    { severity: 3, message: "Info one", range: { start: { line: 0, character: 6 }, end: { line: 0, character: 7 } } },
+    { severity: 1, message: "Error one", range: { start: { line: 80, character: 0 }, end: { line: 80, character: 1 } } },
+    { severity: 1, message: "Error two", range: { start: { line: 90, character: 2 }, end: { line: 90, character: 3 } } },
+    { severity: 2, message: "Warning one", range: { start: { line: 4, character: 4 }, end: { line: 4, character: 5 } } },
+    { severity: 3, message: "Info one", range: { start: { line: 6, character: 6 }, end: { line: 6, character: 7 } } },
   ];
   editor.lspController.handleDiagnostics({
     documents: [{
@@ -321,6 +323,54 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       .getAttribute("aria-expanded") === "false",
     "Terminal is not highlighted while Problems is active",
   );
+  const deepProblem = document.querySelector('.problem-row[data-line="80"]');
+  check(Boolean(deepProblem), "deep problem row exists");
+  deepProblem.click();
+  await waitFor(
+    () => editor.tabManager.activeFile?.row === 81 &&
+      editor.tabManager.activeFile?.column === 0,
+    "problem row to place the cursor",
+  );
+  await nextFrame();
+  const checkCaretVisible = (label) => {
+    const caret = document.querySelector(".editor-caret");
+    const caretRect = caret.getBoundingClientRect();
+    const editorRect = editor.editorOBJ.getBoundingClientRect();
+    const caretState = {
+      display: getComputedStyle(caret).display,
+      top: caretRect.top,
+      left: caretRect.left,
+      height: caretRect.height,
+      editorTop: editorRect.top,
+      editorBottom: editorRect.bottom,
+      row: editor.tabManager.activeFile?.row,
+      startIndex: editor.lineController.startIndex,
+      activeTag: document.activeElement?.tagName,
+      activeClass: document.activeElement?.className,
+    };
+    check(
+      caretState.display !== "none" &&
+        caretState.height > 0 &&
+        caretState.top >= editorRect.top &&
+        caretState.top < editorRect.bottom,
+      `${label}: ${JSON.stringify(caretState)}`,
+    );
+  };
+  checkCaretVisible("caret is visible after problem navigation");
+
+  await editor.tabManager.closeTab(editor.tabManager.activeFile);
+  await waitFor(
+    () => !editor.tabManager.activeFile,
+    "fixture file to close before reopening from Problems",
+  );
+  deepProblem.click();
+  await waitFor(
+    () => editor.tabManager.activeFile?.row === 81 &&
+      editor.tabManager.activeFile?.column === 0,
+    "problem row to reopen the closed file at its diagnostic",
+  );
+  await nextFrame();
+  checkCaretVisible("caret is visible after reopening a closed file from Problems");
   editor.lspController.handleDiagnostics({ documents: [] });
   editor.bottomPanelManager.closePanel({ restoreFocus: false });
   await nextFrame();

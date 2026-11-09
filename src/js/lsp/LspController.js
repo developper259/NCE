@@ -932,6 +932,15 @@ class LspController {
     this.editor.selectController?.unSelectAll?.();
     this.editor.cursorController.setCursorPosition(row, column, { ensureVisible: true });
     this.editor.focusOutput?.();
+    // The line view and bottom panel can still be reflowing; reassert the caret
+    // once layout settles so it is visible without requiring another action.
+    const revealCaret = () => {
+      if (this.editor.tabManager?.activeFile !== file) return;
+      this.editor.cursorController?.updateCaretPosition?.();
+    };
+    if (typeof requestAnimationFrame === "function")
+      requestAnimationFrame(revealCaret);
+    else setTimeout(revealCaret, 0);
     return true;
   }
 
