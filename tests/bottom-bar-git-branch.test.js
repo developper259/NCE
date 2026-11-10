@@ -40,7 +40,29 @@ class FakeElement {
   }
 }
 
-function createHarness({ root = "/workspace", getCurrentBranch } = {}) {
+function makeBranch(name, overrides = {}) {
+  return {
+    name,
+    oid: name ? "a".repeat(40) : null,
+    detached: !name,
+    upstream: null,
+    ahead: 0,
+    behind: 0,
+    ...overrides,
+  };
+}
+
+function makeStatus(branch = makeBranch("main"), entries = []) {
+  return {
+    branch,
+    hasCommits: true,
+    entries,
+    merging: false,
+    rebasing: false,
+  };
+}
+
+function createHarness({ root = "/workspace", getStatus } = {}) {
   const document = { createElement: (tagName) => new FakeElement(tagName) };
   const left = new FakeElement("section");
   const opened = [];
@@ -48,7 +70,7 @@ function createHarness({ root = "/workspace", getCurrentBranch } = {}) {
     tabManager: { activeFile: null, activeTab: null },
     fileExplorer: { rootPath: root },
     lspController: { getProblemCounts: () => ({ errors: 0, warnings: 0 }) },
-    api: { git: { getCurrentBranch } },
+    api: { git: { getStatus } },
     sidebarManager: {
       openMenu(menuId) {
         opened.push(menuId);
@@ -66,17 +88,20 @@ function createHarness({ root = "/workspace", getCurrentBranch } = {}) {
 
 test("BottomBar shows the current branch and opens Source Control", async () => {
   const { bar, opened } = createHarness({
-    getCurrentBranch: async () => ({
+    getStatus: async () => ({
       success: true,
-      branch: "feature/status-bar",
+      status: makeStatus(makeBranch("feature/status-bar")),
     }),
   });
 
   assert.equal(bar.gitBranchIndicator.hidden, true);
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
   assert.equal(await bar.refreshGitBranch(), true);
   assert.equal(bar.gitBranchIndicator.hidden, false);
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
   assert.equal(bar.gitBranchNameElement.textContent, "feature/status-bar");
   assert.equal(bar.gitBranchIndicator.dataset.branch, "feature/status-bar");
+  assert.equal(bar.gitBranchIndicator.dataset.dirty, "false");
   assert.match(
     bar.gitBranchIndicator.getAttribute("aria-label"),
     /Git branch feature\/status-bar\. Open Source Control\./,
@@ -86,64 +111,108 @@ test("BottomBar shows the current branch and opens Source Control", async () => 
   assert.deepEqual(opened, ["git"]);
 });
 
-test("BottomBar labels a detached HEAD and hides without Git or a repository", async () => {
-  let response = { success: true, branch: null };
+test("BottomBar stars the branch only while the repository has changes", async () => {
+  let response = {
+    success: true,
+    status: makeStatus(makeBranch("main"), [
+      { path: "src/app.js", index: null, worktree: "M" },
+    ]),
+  };
   const { bar } = createHarness({
-    getCurrentBranch: async () => response,
+    getStatus: async () => response,
+  });
+
+  assert.equal(await bar.refreshGitBranch(), true);
+  assert.equal(bar.gitBranchIndicator.hidden, false);
+  assert.equal(bar.gitBranchDirtyElement.hidden, false);
+  assert.equal(bar.gitBranchDirtyElement.textContent, "*");
+  assert.equal(bar.gitBranchIndicator.dataset.dirty, "true");
+  assert.match(bar.gitBranchIndicator.title, /Uncommitted changes/);
+  assert.match(
+    bar.gitBranchIndicator.getAttribute("aria-label"),
+    /Uncommitted changes/,
+  );
+
+  response = { success: true, status: makeStatus(makeBranch("main")) };
+  assert.equal(await bar.refreshGitBranch(), true);
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
+  assert.equal(bar.gitBranchIndicator.dataset.dirty, "false");
+  assert.doesNotMatch(bar.gitBranchIndicator.title, /Uncommitted changes/);
+});
+
+test("BottomBar labels a detached HEAD and hides without Git or a repository", async () => {
+  let response = {
+    success: true,
+    status: makeStatus(makeBranch(null)),
+  };
+  const { bar } = createHarness({
+    getStatus: async () => response,
   });
 
   assert.equal(await bar.refreshGitBranch(), true);
   assert.equal(bar.gitBranchIndicator.hidden, false);
   assert.equal(bar.gitBranchNameElement.textContent, "Detached HEAD");
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
 
   response = { success: false, code: "NOT_A_REPOSITORY" };
   assert.equal(await bar.refreshGitBranch(), false);
   assert.equal(bar.gitBranchIndicator.hidden, true);
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
 
   response = { success: false, code: "GIT_NOT_FOUND" };
   assert.equal(await bar.refreshGitBranch(), false);
   assert.equal(bar.gitBranchIndicator.hidden, true);
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
 });
 
 test("BottomBar hides the branch without a workspace or Git API", async () => {
   const withoutWorkspace = createHarness({
     root: "",
-    getCurrentBranch: async () => ({ success: true, branch: "main" }),
+    getStatus: async () => ({ success: true, status: makeStatus() }),
   });
   assert.equal(await withoutWorkspace.bar.refreshGitBranch(), false);
   assert.equal(withoutWorkspace.bar.gitBranchIndicator.hidden, true);
 
-  const withoutApi = createHarness({ getCurrentBranch: undefined });
+  const withoutApi = createHarness({ getStatus: undefined });
   assert.equal(await withoutApi.bar.refreshGitBranch(), false);
   assert.equal(withoutApi.bar.gitBranchIndicator.hidden, true);
 });
 
-test("BottomBar keeps the branch during a transient Git failure", async () => {
-  let response = { success: true, branch: "main" };
+test("BottomBar keeps the branch and its star during a transient Git failure", async () => {
+  let response = {
+    success: true,
+    status: makeStatus(makeBranch("main"), [{ path: "src/app.js" }]),
+  };
   const { bar } = createHarness({
-    getCurrentBranch: async () => response,
+    getStatus: async () => response,
   });
 
   assert.equal(await bar.refreshGitBranch(), true);
+  assert.equal(bar.gitBranchDirtyElement.hidden, false);
   response = { success: false, code: "GIT_TIMEOUT" };
   assert.equal(await bar.refreshGitBranch(), false);
   assert.equal(bar.gitBranchIndicator.hidden, false);
   assert.equal(bar.gitBranchNameElement.textContent, "main");
+  assert.equal(bar.gitBranchDirtyElement.hidden, false);
   assert.match(bar.gitBranchIndicator.title, /Out of date/);
 });
 
 test("BottomBar ignores a branch that resolves after the workspace changes", async () => {
-  let resolveBranch;
+  let resolveStatus;
   const { bar, editor } = createHarness({
-    getCurrentBranch: () => new Promise((resolve) => {
-      resolveBranch = resolve;
+    getStatus: () => new Promise((resolve) => {
+      resolveStatus = resolve;
     }),
   });
 
   const pending = bar.refreshGitBranch();
   editor.fileExplorer.rootPath = "/workspace-b";
-  resolveBranch({ success: true, branch: "old-branch" });
+  resolveStatus({
+    success: true,
+    status: makeStatus(makeBranch("old-branch"), [{ path: "src/app.js" }]),
+  });
   assert.equal(await pending, false);
   assert.equal(bar.gitBranchIndicator.hidden, true);
+  assert.equal(bar.gitBranchDirtyElement.hidden, true);
   assert.equal(bar.gitBranch, null);
 });

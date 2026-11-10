@@ -58,7 +58,9 @@ class BottomBar {
     this.problemCounts = { errors: null, warnings: null };
     this.gitBranchIndicator = null;
     this.gitBranchNameElement = null;
+    this.gitBranchDirtyElement = null;
     this.gitBranch = null;
+    this.gitBranchDirty = false;
     this.gitBranchRequest = 0;
 
     this.buildGitBranchIndicator();
@@ -130,12 +132,18 @@ class BottomBar {
     icon.setAttribute("aria-hidden", "true");
     const name = document.createElement("span");
     name.className = "bottomBar-git-branch-name";
-    button.append(icon, name);
+    const dirty = document.createElement("span");
+    dirty.className = "bottomBar-git-branch-dirty";
+    dirty.textContent = "*";
+    dirty.hidden = true;
+    dirty.setAttribute("aria-hidden", "true");
+    button.append(icon, name, dirty);
 
     button.addEventListener("click", () => void this.openGitSidebar());
     left.append(button);
     this.gitBranchIndicator = button;
     this.gitBranchNameElement = name;
+    this.gitBranchDirtyElement = dirty;
   }
 
   openGitSidebar() {
@@ -162,13 +170,17 @@ class BottomBar {
       code === "GIT_OUTPUT_LIMIT";
   }
 
-  applyGitBranch(branch, { stale = false } = {}) {
+  applyGitBranch(branch, { stale = false, dirty = false } = {}) {
     this.gitBranch = branch || null;
+    this.gitBranchDirty = this.gitBranch ? dirty === true : false;
     if (!this.gitBranchIndicator) return;
     const label = BottomBar.getGitBranchLabel(branch);
     this.gitBranchIndicator.hidden = !label;
     this.gitBranchIndicator.dataset.branch = label;
+    this.gitBranchIndicator.dataset.dirty = String(this.gitBranchDirty);
     if (this.gitBranchNameElement) this.gitBranchNameElement.textContent = label;
+    if (this.gitBranchDirtyElement)
+      this.gitBranchDirtyElement.hidden = !label || !this.gitBranchDirty;
     if (!label) {
       this.gitBranchIndicator.title = "Open Source Control";
       this.gitBranchIndicator.setAttribute("aria-label", "Open Source Control");
@@ -183,12 +195,14 @@ class BottomBar {
     const upstream = typeof branch?.upstream === "string" && branch.upstream
       ? ` (${branch.upstream})`
       : "";
+    const changes = this.gitBranchDirty ? " · Uncommitted changes" : "";
     const details = `${label}${tracking ? ` ${tracking}` : ""}${upstream}`;
     this.gitBranchIndicator.title =
-      `${details}${stale ? " · Out of date" : ""} · Open Source Control`;
+      `${details}${changes}${stale ? " · Out of date" : ""} · Open Source Control`;
     this.gitBranchIndicator.setAttribute(
       "aria-label",
-      `Git branch ${label}.${stale ? " Out of date." : ""} Open Source Control.`,
+      `Git branch ${label}.${this.gitBranchDirty ? " Uncommitted changes." : ""}` +
+        `${stale ? " Out of date." : ""} Open Source Control.`,
     );
   }
 
@@ -197,23 +211,23 @@ class BottomBar {
     const root = this.editor.fileExplorer?.rootPath || "";
     const git = this.editor.api?.git;
     const request = ++this.gitBranchRequest;
-    if (!root || typeof git?.getCurrentBranch !== "function") {
+    if (!root || typeof git?.getStatus !== "function") {
       this.applyGitBranch(null);
       return false;
     }
     let result = null;
     try {
-      result = await git.getCurrentBranch();
+      result = await git.getStatus();
     } catch {
       result = null;
     }
     if (request !== this.gitBranchRequest) return false;
     if (root !== (this.editor.fileExplorer?.rootPath || "")) return false;
     if (result?.success === true) {
-      const branch = typeof result.branch === "string" && result.branch
-        ? { name: result.branch }
-        : { detached: true };
-      this.applyGitBranch(branch);
+      const status = result.status || null;
+      this.applyGitBranch(status?.branch || null, {
+        dirty: Array.isArray(status?.entries) && status.entries.length > 0,
+      });
       return true;
     }
     const code = result?.code || "GIT_COMMAND_FAILED";
@@ -221,7 +235,10 @@ class BottomBar {
       this.applyGitBranch(null);
       return false;
     }
-    this.applyGitBranch(this.gitBranch, { stale: true });
+    this.applyGitBranch(this.gitBranch, {
+      stale: true,
+      dirty: this.gitBranchDirty,
+    });
     return false;
   }
 

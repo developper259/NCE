@@ -98,6 +98,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       branchIndicator.getAttribute("aria-label").includes("Open Source Control"),
       "bottom-bar branch opens Source Control",
     );
+    const branchDirty = branchIndicator.querySelector(
+      ".bottomBar-git-branch-dirty",
+    );
+    check(Boolean(branchDirty), "bottom-bar dirty marker exists");
+    check(
+      branchDirty.hidden === true,
+      "clean branch shows no dirty marker",
+    );
     editor.sidebarManager.closeMenu("git");
     branchIndicator.click();
     await waitFor(() => git.isOpen, "bottom-bar branch to reopen Source Control");
@@ -129,6 +137,22 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
   check(git.commitInput.placeholder === "Commit message...", "commit placeholder");
   check(git.commitButton.disabled === true, "commit is disabled before staging");
+  const branchIndicatorWithChanges = document.querySelector(".bottomBar-git-branch");
+  const branchDirtyWithChanges = branchIndicatorWithChanges.querySelector(
+    ".bottomBar-git-branch-dirty",
+  );
+  await waitFor(
+    () => branchDirtyWithChanges.hidden === false,
+    "dirty branch marker with changes",
+  );
+  check(
+    branchIndicatorWithChanges.dataset.dirty === "true",
+    "changed repository marks the branch as dirty",
+  );
+  check(
+    branchIndicatorWithChanges.title.includes("Uncommitted changes"),
+    "dirty branch tooltip explains the changes",
+  );
   const row = git.listLayer.querySelector(
     `.git-file-row[data-path="${fileName}"]`,
   );
@@ -204,6 +228,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.commitBoxElement.hidden === true, "commit form hides after commit");
   check(git.listElement.hidden === true, "change list hides after commit");
   check(git.stateTitleElement.textContent === "Working tree clean", "clean state after commit");
+  await waitFor(
+    () => branchDirtyWithChanges.hidden === true,
+    "dirty branch marker to clear after commit",
+  );
+  check(
+    branchIndicatorWithChanges.dataset.dirty === "false",
+    "committed repository clears the dirty branch marker",
+  );
   await waitFor(
     () => editor.notificationManager.getNotifications()
       .some((notification) => notification.title === "Commit created"),

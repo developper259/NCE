@@ -103,6 +103,14 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.bottomBar-git-branch-dirty {
+  flex: 0 0 auto;
+  color: var(--git-modified);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+.bottomBar-git-branch-dirty[hidden] { display: none; }
 
 .bottomBar-problems {
   display: flex;
