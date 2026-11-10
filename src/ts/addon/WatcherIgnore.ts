@@ -14,6 +14,7 @@ export const WATCHER_IGNORED_DIRECTORIES = new Set([
   ".svn",
   ".hg",
   ".nce",
+  ".benchmark-data",
 ]);
 
 export function isWatcherPathIgnored(filePath: string): boolean {

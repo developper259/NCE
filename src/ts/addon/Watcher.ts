@@ -272,7 +272,8 @@ export class Watcher {
       code === "EPERM" ||
       code === "EBUSY" ||
       code === "EMFILE" ||
-      code === "ENFILE";
+      code === "ENFILE" ||
+      code === "ENOSPC";
 
     if (!recoverable) {
       console.error("[Watcher] error:", err);

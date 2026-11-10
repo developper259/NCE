@@ -634,7 +634,7 @@ test("macOS polling follows window foreground state and detaches from a replaced
   await runtime.watcher.stopWatching();
 });
 
-for (const code of ["UNKNOWN", "EPERM", "EBUSY", "EMFILE", "ENFILE"]) {
+for (const code of ["UNKNOWN", "EPERM", "EBUSY", "EMFILE", "ENFILE", "ENOSPC"]) {
   test(`watcher falls back to polling for recoverable native error ${code}`, async () => {
     const runtime = createWatcherHarness("linux");
     await runtime.watcher.startWatching("/temporary");
@@ -711,7 +711,7 @@ test("watcher batches events, matches one committed own save and cleans up timer
 
 test("watcher ignore rules exclude NCE state and save temps while preserving workspace dotfiles", () => {
   const { isWatcherPathIgnored } = require("../dist/ts/addon/WatcherIgnore.js");
-  for (const directory of ["node_modules", "dist", "build", "out", "coverage", ".next", ".cache", ".turbo", "release", ".git", ".svn", ".hg"])
+  for (const directory of ["node_modules", "dist", "build", "out", "coverage", ".next", ".cache", ".turbo", "release", ".git", ".svn", ".hg", ".benchmark-data"])
     assert.equal(isWatcherPathIgnored(path.join("workspace", directory, "file.js")), true, directory);
   assert.equal(isWatcherPathIgnored(path.join("workspace", "broken.asar")), true);
   assert.equal(isWatcherPathIgnored(path.join("workspace", ".nce", "workspace.json.123.456.tmp")), true);
