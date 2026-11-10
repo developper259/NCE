@@ -86,6 +86,29 @@ function createHarness({ root = "/workspace", getStatus } = {}) {
   return { bar, editor, left, opened };
 }
 
+test("BottomBar renders the dirty star as a small superscript beside the branch name", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const { bar } = createHarness();
+
+  const label = bar.gitBranchIndicator.children.find(
+    (child) => child.className === "bottomBar-git-branch-label",
+  );
+  assert.ok(label, "branch name and star share a positioned label");
+  assert.equal(label.children[0], bar.gitBranchNameElement);
+  assert.equal(label.children[1], bar.gitBranchDirtyElement);
+
+  const css = fs.readFileSync(
+    path.join(__dirname, "../src/css/bottomBar.css"),
+    "utf8",
+  );
+  const rule = css.match(/\.bottomBar-git-branch-dirty\s*\{([^}]*)\}/)[1];
+  assert.match(rule, /position:\s*absolute/);
+  assert.match(rule, /top:\s*0/);
+  assert.match(rule, /right:\s*0/);
+  assert.match(rule, /font-size:\s*8px/);
+});
+
 test("BottomBar shows the current branch and opens Source Control", async () => {
   const { bar, opened } = createHarness({
     getStatus: async () => ({

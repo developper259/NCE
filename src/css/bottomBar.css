@@ -97,16 +97,26 @@
   flex: 0 0 auto;
   font-size: 12px;
 }
+.bottomBar-git-branch-label {
+  position: relative;
+  display: inline-flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  padding-right: 6px;
+}
 .bottomBar-git-branch-name {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .bottomBar-git-branch-dirty {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  right: 0;
   color: var(--git-modified);
-  font-size: 13px;
+  font-size: 8px;
   font-weight: 700;
   line-height: 1;
 }

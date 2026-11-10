@@ -130,6 +130,8 @@ class BottomBar {
     const icon = document.createElement("i");
     icon.className = "fi fi-rr-code-branch";
     icon.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "bottomBar-git-branch-label";
     const name = document.createElement("span");
     name.className = "bottomBar-git-branch-name";
     const dirty = document.createElement("span");
@@ -137,7 +139,8 @@ class BottomBar {
     dirty.textContent = "*";
     dirty.hidden = true;
     dirty.setAttribute("aria-hidden", "true");
-    button.append(icon, name, dirty);
+    label.append(name, dirty);
+    button.append(icon, label);
 
     button.addEventListener("click", () => void this.openGitSidebar());
     left.append(button);
