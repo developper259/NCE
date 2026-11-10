@@ -1105,7 +1105,7 @@ class GitSidebar extends Sidebar {
     return this.editor.tabManager?.openFileWithPath?.(filePath) ?? null;
   }
 
-  async openBranchPicker() {
+  async openBranchPicker(currentBranch = "") {
     if (this.destroyed || this.switchingBranch) return false;
     const quickPanel = this.editor.quickPanel;
     if (!quickPanel || typeof quickPanel.open !== "function") return false;
@@ -1124,7 +1124,10 @@ class GitSidebar extends Sidebar {
       });
       return false;
     }
-    const current = result.current || this.status?.branch?.name || "";
+    const current = result.current ||
+      String(currentBranch || "").trim() ||
+      this.status?.branch?.name ||
+      "";
     const branches = GitSidebar.sortBranches(result.branches);
     if (current && !branches.some((branch) => branch.name === current)) {
       branches.push({ name: current, current: true });

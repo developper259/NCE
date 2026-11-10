@@ -138,8 +138,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       "bottom bar shows the current branch",
     );
     check(
-      branchIndicator.getAttribute("aria-label").includes("Open Source Control"),
-      "bottom-bar branch opens Source Control",
+      branchIndicator.getAttribute("aria-label").includes("Switch branch"),
+      "bottom-bar branch opens the branch switcher",
     );
     const branchDirty = branchIndicator.querySelector(
       ".bottomBar-git-branch-dirty",
@@ -148,14 +148,6 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     check(
       branchDirty.hidden === true,
       "clean branch shows no dirty marker",
-    );
-    editor.sidebarManager.closeMenu("git");
-    branchIndicator.click();
-    await waitFor(() => git.isOpen, "bottom-bar branch to reopen Source Control");
-    check(git.stateRefresh.hidden === false, "clean state offers refresh");
-    check(
-      !editor.quickPanel.isOpen("git-branch-picker"),
-      "bottom-bar Git opens Source Control, not the branch picker",
     );
     const bottomBarRect = branchIndicator.getBoundingClientRect();
     const bottomBarTopElement = document.elementFromPoint(
@@ -166,6 +158,26 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       branchIndicator.contains(bottomBarTopElement),
       "bottom-bar Git stays clickable above the sidebar",
     );
+    editor.sidebarManager.closeMenu("git");
+    branchIndicator.click();
+    await waitFor(
+      () => editor.quickPanel.isOpen("git-branch-picker"),
+      "bottom-bar Git to open the branch picker",
+    );
+    check(!git.isOpen, "bottom-bar Git does not open Source Control");
+    await waitFor(
+      () => editor.quickPanel.session?.items
+        .some((item) => item.label === git.getBranchLabel()),
+      "bottom-bar branch picker items",
+    );
+    check(
+      editor.quickPanel.session.items[0]?.label === "Create new branch",
+      "bottom-bar branch picker starts with Create new branch",
+    );
+    editor.quickPanel.close();
+    editor.sidebarManager.openMenu("git");
+    await waitFor(() => git.isOpen, "Source Control to reopen for the fixture");
+    check(git.stateRefresh.hidden === false, "clean state offers refresh");
     return { mode: "clean", branch: git.getBranchLabel() };
   }
 
@@ -400,6 +412,20 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "the create item is separated from the branches",
   );
   const pickerRows = [...document.querySelectorAll(".quick-panel-item")];
+  const createRow = pickerRows.find((row) =>
+    row.querySelector(".quick-panel-item-label")?.textContent === "Create new branch");
+  const pickerInputRect = document.querySelector(".quick-panel-input")
+    .getBoundingClientRect();
+  const separatorRect = document.querySelector(".quick-panel-separator")
+    .getBoundingClientRect();
+  const createRect = createRow.getBoundingClientRect();
+  check(
+    Math.abs(
+      (createRect.top + createRect.bottom) / 2 -
+        (pickerInputRect.bottom + (separatorRect.top + separatorRect.bottom) / 2) / 2,
+    ) <= 1.5,
+    "Create new branch is centered between the input and the separator",
+  );
   const mainRow = pickerRows.find((row) =>
     row.querySelector(".quick-panel-item-label")?.textContent === "main");
   const branchCheck = mainRow?.querySelector(".quick-panel-item-checkmark");

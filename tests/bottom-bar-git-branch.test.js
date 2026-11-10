@@ -66,11 +66,18 @@ function createHarness({ root = "/workspace", getStatus } = {}) {
   const document = { createElement: (tagName) => new FakeElement(tagName) };
   const left = new FakeElement("section");
   const opened = [];
+  const picked = [];
   const editor = {
     tabManager: { activeFile: null, activeTab: null },
     fileExplorer: { rootPath: root },
     lspController: { getProblemCounts: () => ({ errors: 0, warnings: 0 }) },
     api: { git: { getStatus } },
+    gitSidebar: {
+      openBranchPicker(branch) {
+        picked.push(branch);
+        return true;
+      },
+    },
     sidebarManager: {
       openMenu(menuId) {
         opened.push(menuId);
@@ -83,7 +90,7 @@ function createHarness({ root = "/workspace", getStatus } = {}) {
     SETTINGS_GET: () => 2,
   });
   const bar = new BottomBar(editor);
-  return { bar, editor, left, opened };
+  return { bar, editor, left, opened, picked };
 }
 
 test("BottomBar renders the dirty star as a small superscript beside the branch name", () => {
@@ -111,8 +118,8 @@ test("BottomBar renders the dirty star as a small superscript beside the branch 
   assert.match(rule, /font-size:\s*8px/);
 });
 
-test("BottomBar shows the current branch and opens Source Control", async () => {
-  const { bar, opened } = createHarness({
+test("BottomBar shows the current branch and opens the branch switcher", async () => {
+  const { bar, opened, picked } = createHarness({
     getStatus: async () => ({
       success: true,
       status: makeStatus(makeBranch("feature/status-bar")),
@@ -129,11 +136,12 @@ test("BottomBar shows the current branch and opens Source Control", async () => 
   assert.equal(bar.gitBranchIndicator.dataset.dirty, "false");
   assert.match(
     bar.gitBranchIndicator.getAttribute("aria-label"),
-    /Git branch feature\/status-bar\. Open Source Control\./,
+    /Git branch feature\/status-bar\. Switch branch\./,
   );
 
   bar.gitBranchIndicator.click();
-  assert.deepEqual(opened, ["git"]);
+  assert.deepEqual(picked, ["feature/status-bar"]);
+  assert.deepEqual(opened, [], "the bottom bar does not open Source Control");
 });
 
 test("BottomBar stars the branch only while the repository has changes", async () => {

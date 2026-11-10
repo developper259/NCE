@@ -124,8 +124,8 @@ class BottomBar {
     button.className = "bottomBar-git-branch";
     button.hidden = true;
     button.dataset.action = "git-branch";
-    button.title = "Open Source Control";
-    button.setAttribute("aria-label", "Open Source Control");
+    button.title = "Switch Branch";
+    button.setAttribute("aria-label", "Switch Branch");
 
     const icon = document.createElement("i");
     icon.className = "fi fi-rr-code-branch";
@@ -142,22 +142,20 @@ class BottomBar {
     label.append(name, dirty);
     button.append(icon, label);
 
-    button.addEventListener("click", () => void this.openGitSidebar());
+    button.addEventListener("click", () => void this.openBranchPicker());
     left.append(button);
     this.gitBranchIndicator = button;
     this.gitBranchNameElement = name;
     this.gitBranchDirtyElement = dirty;
   }
 
-  openGitSidebar() {
-    const manager = this.editor.sidebarManager;
-    if (typeof manager?.openMenu !== "function") return false;
-    this.editor.quickPanel?.close?.({
-      notifyCancel: false,
-      restoreFocus: false,
-    });
-    manager.openMenu("git");
-    return true;
+  openBranchPicker() {
+    const gitSidebar = this.editor.gitSidebar;
+    if (typeof gitSidebar?.openBranchPicker !== "function") return false;
+    const branchName = typeof this.gitBranch === "string"
+      ? this.gitBranch.trim()
+      : String(this.gitBranch?.name || "").trim();
+    return gitSidebar.openBranchPicker(branchName);
   }
 
   static getGitBranchLabel(branch) {
@@ -189,8 +187,8 @@ class BottomBar {
     if (this.gitBranchDirtyElement)
       this.gitBranchDirtyElement.hidden = !label || !this.gitBranchDirty;
     if (!label) {
-      this.gitBranchIndicator.title = "Open Source Control";
-      this.gitBranchIndicator.setAttribute("aria-label", "Open Source Control");
+      this.gitBranchIndicator.title = "Switch Branch";
+      this.gitBranchIndicator.setAttribute("aria-label", "Switch Branch");
       return;
     }
     const ahead = Math.max(0, Number(branch?.ahead) || 0);
@@ -205,11 +203,11 @@ class BottomBar {
     const changes = this.gitBranchDirty ? " · Uncommitted changes" : "";
     const details = `${label}${tracking ? ` ${tracking}` : ""}${upstream}`;
     this.gitBranchIndicator.title =
-      `${details}${changes}${stale ? " · Out of date" : ""} · Open Source Control`;
+      `${details}${changes}${stale ? " · Out of date" : ""} · Switch Branch`;
     this.gitBranchIndicator.setAttribute(
       "aria-label",
       `Git branch ${label}.${this.gitBranchDirty ? " Uncommitted changes." : ""}` +
-        `${stale ? " Out of date." : ""} Open Source Control.`,
+        `${stale ? " Out of date." : ""} Switch branch.`,
     );
   }
 

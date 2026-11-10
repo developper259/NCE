@@ -96,6 +96,10 @@
   display: none;
 }
 
+.quick-panel[data-panel-id="git-branch-picker"] .quick-panel-list {
+  margin-top: 11px;
+}
+
 .quick-panel-list-layer {
   position: relative;
   flex: 0 0 auto;
