@@ -289,6 +289,7 @@ class Editor {
     this._settingsView?.sync?.("terminal.shell");
     this._settingsView?.sync?.("terminal.args");
     this._settingsView?.sync?.("git.path");
+    this._settingsView?.sync?.("git.mainBranch");
     if (SETTINGS_GET("git.path") !== gitPath) {
       this.gitSidebar?.refresh?.({ reason: "settings" });
     }

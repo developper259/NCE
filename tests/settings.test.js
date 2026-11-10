@@ -71,23 +71,41 @@ test("terminal shell preference and Terminal category validate and persist", asy
   }
 });
 
-test("Git path preference validates and persists", async () => {
+test("Git settings validate and persist the executable and main branch", async () => {
   const root = await temporaryUserData();
   try {
     const manager = new SettingsManager(root);
     await manager.initialize();
     assert.equal(manager.get("git.path"), "");
+    assert.equal(manager.get("git.mainBranch"), "main");
     const gitPath = "C:\\Program Files\\Git\\cmd\\git.exe";
     assert.equal(await manager.set("git.path", gitPath), true);
     assert.equal(await manager.set("git.path", "bad\0git"), false);
     assert.equal(await manager.set("git.path", "x".repeat(2049)), false);
     assert.equal(await manager.set("git.path", null), false);
     assert.equal(manager.get("git.path"), gitPath);
+    assert.equal(await manager.set("git.mainBranch", " trunk "), true);
+    assert.equal(manager.get("git.mainBranch"), "trunk");
+    assert.equal(await manager.set("git.mainBranch", "feature/start"), true);
+    assert.equal(await manager.set("git.mainBranch", "bad branch"), false);
+    assert.equal(await manager.set("git.mainBranch", "-bad"), false);
+    assert.equal(await manager.set("git.mainBranch", "bad..branch"), false);
+    assert.equal(await manager.set("git.mainBranch", "bad.lock"), false);
+    assert.equal(await manager.set("git.mainBranch", "bad.lock/child"), false);
+    assert.equal(await manager.set("git.mainBranch", ".hidden"), false);
+    assert.equal(await manager.set("git.mainBranch", "HEAD"), false);
+    assert.equal(await manager.set("git.mainBranch", ""), false);
+    assert.equal(await manager.set("git.mainBranch", null), false);
+    assert.equal(manager.get("git.mainBranch"), "feature/start");
+    assert.equal(await manager.set("ui.settingsCategory", "Git"), true);
 
     const restarted = new SettingsManager(root);
     await restarted.initialize();
     assert.equal(restarted.get("git.path"), gitPath);
+    assert.equal(restarted.get("git.mainBranch"), "feature/start");
+    assert.equal(restarted.get("ui.settingsCategory"), "Git");
     assert.equal((await readSettings(root)).git.path, gitPath);
+    assert.equal((await readSettings(root)).git.mainBranch, "feature/start");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
@@ -119,7 +137,7 @@ test("valid settings persist across manager restarts and set writes JSON", async
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
-      git: { path: "" },
+      git: { path: "", mainBranch: "main" },
       files: {
         autoSave: true,
         confirmMoveToTrash: true,
@@ -271,7 +289,7 @@ test("missing known defaults are merged while unknown properties survive", async
     assert.deepEqual(await manager.initialize(), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 4 },
-      git: { path: "" },
+      git: { path: "", mainBranch: "main" },
       files: {
         autoSave: true,
         confirmMoveToTrash: false,
@@ -305,7 +323,7 @@ test("queued concurrent writes leave a complete latest settings document", async
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 12 },
-      git: { path: "" },
+      git: { path: "", mainBranch: "main" },
       files: {
         autoSave: true,
         confirmMoveToTrash: true,
@@ -576,21 +594,28 @@ test("renderer settings validate their cache and persist through explicit IPC", 
   assert.equal(get("files.confirmPermanentDelete"), false);
   assert.equal(await set("terminal.args", "bad\0args"), false);
   assert.equal(await set("terminal.args", "x".repeat(4097)), false);
+  assert.equal(get("git.mainBranch"), "main");
+  assert.equal(await set("git.mainBranch", " trunk "), true);
+  assert.equal(get("git.mainBranch"), "trunk");
+  assert.equal(await set("git.mainBranch", "bad branch"), false);
+  assert.equal(get("git.mainBranch"), "trunk");
   assert.deepEqual(writes, [
     ["editor.tabWidth", 3],
     ["files.confirmMoveToTrash", false],
     ["files.confirmPermanentDelete", false],
+    ["git.mainBranch", "trunk"],
   ]);
   initialize({ editor: { tabWidth: 99 }, files: {
     autoSave: "yes",
     confirmMoveToTrash: "no",
     confirmPermanentDelete: "no",
-  }, terminal: { args: "x".repeat(4097) } });
+  }, terminal: { args: "x".repeat(4097) }, git: { mainBranch: "bad branch" } });
   assert.equal(get("editor.tabWidth"), 2);
   assert.equal(get("files.autoSave"), false);
   assert.equal(get("files.confirmMoveToTrash"), true);
   assert.equal(get("files.confirmPermanentDelete"), true);
   assert.equal(get("terminal.args"), "");
+  assert.equal(get("git.mainBranch"), "main");
 });
 
 test("renderer keybinding validation accepts supported punctuation and F keys", async () => {
@@ -747,6 +772,89 @@ test("Set Git path prefills the configured path in the quick panel", async () =>
   assert.equal(options.value, "C:\\Program Files\\Git\\cmd\\git.exe");
   options.onAccept(" /next/git ");
   assert.equal(await pending, "/next/git");
+});
+
+test("Git settings own the executable path and main branch", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
+  const settings = SettingsView.getSettings();
+  const gitPath = settings.find((setting) => setting.key === "git.path");
+  const mainBranch = settings.find((setting) => setting.key === "git.mainBranch");
+  assert.equal(gitPath.category, "Git");
+  assert.equal(gitPath.control, "path");
+  assert.equal(mainBranch.category, "Git");
+  assert.equal(mainBranch.control, "quick-input");
+  assert.equal(mainBranch.panelTitle, "Set Git Main Branch");
+  assert.equal(mainBranch.placeholder, "main");
+  assert.equal(
+    settings.some(
+      (setting) => setting.key === "git.path" && setting.category === "Editor",
+    ),
+    false,
+  );
+});
+
+test("Set Git main branch prefills the configured branch in the quick panel", async () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {
+    SETTINGS_GET: (key) => (key === "git.mainBranch" ? "main" : undefined),
+  });
+  const view = Object.create(SettingsView.prototype);
+  let options = null;
+  view.editor = { quickPanel: { open: (value) => { options = value; } } };
+  const pending = view.requestSettingValue({
+    key: "git.mainBranch",
+    label: "Main Branch",
+    panelTitle: "Set Git Main Branch",
+    placeholder: "main",
+  });
+  assert.equal(options.mode, "input");
+  assert.equal(options.title, "Set Git Main Branch");
+  assert.equal(options.value, "main");
+  options.onAccept(" release ");
+  assert.equal(await pending, "release");
+});
+
+test("Git main branch control shows the configured branch and branch actions", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
+  const view = Object.create(SettingsView.prototype);
+  const attributes = new Map();
+  const current = {
+    id: "setting-git-mainBranch-current",
+    hidden: true,
+    textContent: "",
+    title: "",
+  };
+  const button = {
+    id: "setting-git-mainBranch",
+    textContent: "",
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+  };
+  const setting = {
+    label: "Main Branch",
+    setLabel: "Set branch",
+    changeLabel: "Change branch",
+    detail: "This does not rename the current branch of an existing repository.",
+  };
+
+  view.updateQuickInputControl(button, setting, "", current);
+  assert.equal(button.textContent, "Set branch");
+  assert.equal(current.hidden, true);
+  assert.equal(
+    attributes.get("aria-describedby"),
+    "setting-git-mainBranch-description",
+  );
+  assert.equal(attributes.get("aria-label"), "Set Main Branch");
+
+  view.updateQuickInputControl(button, setting, "main", current);
+  assert.equal(button.textContent, "Change branch");
+  assert.equal(current.hidden, false);
+  assert.equal(current.textContent, "main");
+  assert.equal(attributes.get("aria-label"), "Change Main Branch");
+  assert.equal(button.title, setting.detail);
 });
 
 test("Git path control shows the configured path next to a standard action button", () => {

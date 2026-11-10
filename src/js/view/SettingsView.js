@@ -25,7 +25,7 @@ const SETTINGS_UI = Object.freeze([
   },
   {
     key: "git.path",
-    category: "Editor",
+    category: "Git",
     label: "Git Path",
     description:
       "Path to the Git executable. Leave empty to detect Git automatically.",
@@ -33,6 +33,21 @@ const SETTINGS_UI = Object.freeze([
     control: "path",
     panelTitle: "Set Git Path",
     placeholder: "Absolute path to git, empty for automatic detection",
+  },
+  {
+    key: "git.mainBranch",
+    category: "Git",
+    label: "Main Branch",
+    description:
+      "Branch name used when NCE initializes a repository.",
+    keywords: ["git", "branch", "main", "master", "initialize", "repository"],
+    control: "quick-input",
+    panelTitle: "Set Git Main Branch",
+    placeholder: "main",
+    setLabel: "Set branch",
+    changeLabel: "Change branch",
+    detail:
+      "This does not rename the current branch of an existing repository.",
   },
   {
     key: "files.autoSave",
@@ -120,6 +135,10 @@ const SETTINGS_CATEGORY_META = Object.freeze({
   },
   Agent: { description: "Configure AI models and providers." },
   Terminal: { description: "Configure the integrated system terminal." },
+  Git: {
+    description:
+      "Configure Git integration and the branch used for new repositories.",
+  },
   "Language Manager": {
     description:
       "Manage the language servers that provide diagnostics, completion, and code intelligence.",
@@ -457,7 +476,7 @@ class SettingsView {
     description.textContent = setting.description;
     text.append(label, description);
     let pathCurrent = null;
-    if (setting.control === "path") {
+    if (setting.control === "path" || setting.control === "quick-input") {
       pathCurrent = document.createElement("p");
       pathCurrent.className = "setting-path-current";
       pathCurrent.id = `${controlId}-current`;
@@ -473,7 +492,9 @@ class SettingsView {
             ? this.createShortcutInput(setting, controlId)
             : setting.control === "path"
               ? this.createPathControl(setting, controlId, pathCurrent)
-              : this.createTextInput(setting, controlId);
+              : setting.control === "quick-input"
+                ? this.createQuickInputControl(setting, controlId, pathCurrent)
+                : this.createTextInput(setting, controlId);
     const controlWrap = document.createElement("div");
     controlWrap.className = "settings-row-control";
     controlWrap.appendChild(control);
@@ -1989,7 +2010,34 @@ class SettingsView {
     return button;
   }
 
+  createQuickInputControl(setting, id, current) {
+    const button = document.createElement("button");
+    button.id = id;
+    button.type = "button";
+    button.className = "settings-action-button setting-path-button";
+    button.setAttribute("aria-haspopup", "dialog");
+    this.updateQuickInputControl(button, setting, SETTINGS_GET(setting.key), current);
+
+    button.addEventListener("click", async () => {
+      const next = await this.requestSettingValue(setting);
+      if (next === null) return;
+      const res = await SETTINGS_SET(setting.key, next);
+      if (!res || (typeof res === "object" && !res.success)) return;
+      this.updateQuickInputControl(
+        button,
+        setting,
+        SETTINGS_GET(setting.key),
+        current,
+      );
+    });
+    return button;
+  }
+
   requestSettingPath(setting) {
+    return this.requestSettingValue(setting);
+  }
+
+  requestSettingValue(setting) {
     const quickPanel = this.editor.quickPanel;
     if (!quickPanel) return Promise.resolve(null);
     const current = String(SETTINGS_GET(setting.key) || "");
@@ -2033,6 +2081,32 @@ class SettingsView {
         ? `${control.id}-description ${currentEl.id}`
         : `${control.id}-description`,
     );
+  }
+
+  updateQuickInputControl(control, setting, value, current = null) {
+    const display = String(value || "");
+    const currentEl =
+      current ||
+      control.closest?.(".setting-row")?.querySelector(".setting-path-current");
+    if (currentEl) {
+      currentEl.textContent = display;
+      currentEl.title = display;
+      currentEl.hidden = !display;
+    }
+    control.textContent = display
+      ? setting.changeLabel || "Change"
+      : setting.setLabel || "Set";
+    control.setAttribute(
+      "aria-label",
+      `${display ? "Change" : "Set"} ${setting.label}`,
+    );
+    control.setAttribute(
+      "aria-describedby",
+      display && currentEl
+        ? `${control.id}-description ${currentEl.id}`
+        : `${control.id}-description`,
+    );
+    if (setting.detail) control.title = setting.detail;
   }
 
   createShortcutInput(setting, id) {
@@ -2291,6 +2365,10 @@ class SettingsView {
     if (!input) return;
     if (setting.control === "path") {
       this.updatePathControl(input, setting, SETTINGS_GET(key));
+      return;
+    }
+    if (setting.control === "quick-input") {
+      this.updateQuickInputControl(input, setting, SETTINGS_GET(key));
       return;
     }
     if (setting.control === "select") {

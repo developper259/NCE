@@ -312,7 +312,7 @@ class GitSidebar extends Sidebar {
     stateSettings.type = "button";
     stateSettings.className = "git-sidebar-state-button";
     stateSettings.textContent = "Go to Settings";
-    stateSettings.title = "Open Editor settings to configure the Git executable path";
+    stateSettings.title = "Open Git settings to configure the Git executable path";
     stateSettings.dataset.action = "settings";
     stateSettings.addEventListener("click", () => void this.openGitSettings());
 
@@ -554,7 +554,7 @@ class GitSidebar extends Sidebar {
   }
 
   openGitSettings() {
-    return this.editor.openSettings?.("Editor");
+    return this.editor.openSettings?.("Git");
   }
 
   updateState() {

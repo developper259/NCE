@@ -136,6 +136,26 @@ test("GitManager initializes a repository in an empty workspace", { skip: gitSki
   }
 });
 
+test("GitManager initializes new repositories on the configured main branch", { skip: gitSkip }, async () => {
+  const customRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-custom-"));
+  const invalidRoot = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-invalid-"));
+  const custom = managerFor(customRoot, { getMainBranch: () => "trunk" });
+  const invalid = managerFor(invalidRoot, { getMainBranch: () => "bad branch" });
+  try {
+    assert.equal((await custom.initializeRepository()).success, true);
+    assert.equal((await custom.getStatus()).status.branch.name, "trunk");
+    assert.equal((await custom.getCurrentBranch()).branch, "trunk");
+
+    assert.equal((await invalid.initializeRepository()).success, true);
+    assert.equal((await invalid.getStatus()).status.branch.name, "main");
+    assert.equal((await invalid.getCurrentBranch()).branch, "main");
+  } finally {
+    custom.dispose();
+    invalid.dispose();
+    await removeAll(customRoot, invalidRoot);
+  }
+});
+
 test("GitManager refuses to initialize a missing or unauthorized workspace", { skip: gitSkip }, async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-scope-"));
   const missing = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-init-missing-"));

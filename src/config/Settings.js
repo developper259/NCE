@@ -68,7 +68,7 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor", settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
-  git: Object.freeze({ path: "" }),
+  git: Object.freeze({ path: "", mainBranch: "main" }),
   files: Object.freeze({
     autoSave: false,
     confirmMoveToTrash: true,
@@ -143,6 +143,18 @@ function SETTINGS_IS_VALID_KEYBINDING(value) {
     (Array.from(key).length === 1 && RENDERER_KEYBINDING_PUNCTUATION.has(key));
 }
 
+function SETTINGS_IS_VALID_GIT_BRANCH(value) {
+  if (typeof value !== "string") return false;
+  const name = value.trim();
+  if (!name || name.length > 255 || name === "@" || name === "HEAD") return false;
+  if (name.startsWith("-") || name.startsWith("/") || name.endsWith("/")) return false;
+  if (name.endsWith(".") || name.endsWith(".lock")) return false;
+  if (name.includes("..") || name.includes("//") || name.includes("@{")) return false;
+  if (name.split("/").some((part) => !part || part.startsWith(".") || part.endsWith(".lock")))
+    return false;
+  return !/[\u0000-\u0020\u007f~^:?*[\\]/.test(name);
+}
+
 function SETTINGS_SANITIZE_LSP_SERVERS(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const servers = {};
@@ -169,7 +181,7 @@ function SETTINGS_INITIALIZE(settings) {
   RENDERER_SETTINGS = {
     ui: {
       settingsCategory:
-        ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Manager"]
+        ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Git", "Language Manager"]
           .includes(settings?.ui?.settingsCategory)
           ? settings.ui.settingsCategory
           : DEFAULT_RENDERER_SETTINGS.ui.settingsCategory,
@@ -195,6 +207,11 @@ function SETTINGS_INITIALIZE(settings) {
         !settings.git.path.includes("\0")
           ? settings.git.path.trim()
           : DEFAULT_RENDERER_SETTINGS.git.path,
+      mainBranch:
+        typeof settings?.git?.mainBranch === "string" &&
+        SETTINGS_IS_VALID_GIT_BRANCH(settings.git.mainBranch)
+          ? settings.git.mainBranch.trim()
+          : DEFAULT_RENDERER_SETTINGS.git.mainBranch,
     },
     files: {
       autoSave:
@@ -357,6 +374,16 @@ async function SETTINGS_SET(key, value) {
       typeof value !== "string" ||
       value.length > 2048 ||
       value.includes("\0")
+    ) {
+      return false;
+    }
+    value = value.trim();
+  }
+
+  if (section === "git" && property === "mainBranch") {
+    if (
+      typeof value !== "string" ||
+      !SETTINGS_IS_VALID_GIT_BRANCH(value)
     ) {
       return false;
     }

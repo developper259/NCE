@@ -377,6 +377,33 @@ module.exports = async function exerciseUI() {
       details.hasAttribute('inert'),
     'Language details collapse back to an inert state',
   );
+  check(settingsCategories.includes('Git'), 'Git settings category is available');
+  check(settingsView.openCategory('Git') === true, 'Git settings category opens');
+  const gitPathButton = settingsView.content.querySelector('#setting-git-path');
+  const gitBranchButton = settingsView.content.querySelector('#setting-git-mainBranch');
+  check(Boolean(gitPathButton), 'Git settings expose the executable path');
+  check(Boolean(gitBranchButton), 'Git settings expose the main branch');
+  check(
+    settingsView.content.querySelector('.settings-page-description')?.textContent.includes('Git'),
+    'Git settings describe their purpose',
+  );
+  gitBranchButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  check(
+    editor.quickPanel.isOpen('setting-path-git-mainBranch'),
+    'Set main branch opens the quick panel input',
+  );
+  check(
+    editor.quickPanel.title.textContent === 'Set Git Main Branch',
+    'Set main branch prompt is named for Git',
+  );
+  editor.quickPanel.close();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  check(settingsView.openCategory('Editor') === true, 'Editor settings category opens');
+  check(
+    !settingsView.content.querySelector('#setting-git-path'),
+    'Editor settings no longer expose the Git path',
+  );
   check(problemsPanel.summary.textContent.startsWith('1 error'), 'Problems summary counts errors');
   problemsPanel.destroy();
   await editor.bottomPanelManager.openPanel('problems');

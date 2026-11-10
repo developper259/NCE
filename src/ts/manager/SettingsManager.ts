@@ -2,15 +2,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { LspServerConfiguration } from "../lsp/LspTypes";
 import { DEFAULT_LSP_SETTINGS, isValidLspServers, sanitizeLspSettings } from "../lsp/LspSettings";
+import { isValidGitBranchName } from "./GitBranchName";
 
 export interface Settings {
   ui: {
     settingsCategory:
-      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Language Manager";
+      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Git"
+      | "Language Manager";
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
-  git: { path: string };
+  git: { path: string; mainBranch: string };
   files: {
     autoSave: boolean;
     confirmMoveToTrash: boolean;
@@ -100,7 +102,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor" as const, settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
-  git: Object.freeze({ path: "" }),
+  git: Object.freeze({ path: "", mainBranch: "main" }),
   files: Object.freeze({
     autoSave: false,
     confirmMoveToTrash: true,
@@ -122,6 +124,7 @@ const KNOWN_KEYS = new Set([
   "ui.settingsScrollTop",
   "editor.tabWidth",
   "git.path",
+  "git.mainBranch",
   "files.autoSave",
   "files.confirmMoveToTrash",
   "files.confirmPermanentDelete",
@@ -289,7 +292,10 @@ export class SettingsManager {
         settingsScrollTop: this.settings.ui.settingsScrollTop,
       },
       editor: { tabWidth: this.settings.editor.tabWidth },
-      git: { path: this.settings.git.path },
+      git: {
+        path: this.settings.git.path,
+        mainBranch: this.settings.git.mainBranch,
+      },
       files: {
         autoSave: this.settings.files.autoSave,
         confirmMoveToTrash: this.settings.files.confirmMoveToTrash,
@@ -373,7 +379,9 @@ export class SettingsManager {
         (nextSettings as any)[section][property] =
           key === "agent.hiddenModels"
             ? [...new Set(value as string[])]
-            : value;
+            : key === "git.mainBranch"
+              ? (value as string).trim()
+              : value;
         const saved = await this.writeSnapshot(nextSettings);
         if (saved) this.settings = nextSettings;
         return saved;
@@ -426,6 +434,12 @@ export class SettingsManager {
     merged.git.path = this.isValid("git.path", merged.git.path)
       ? merged.git.path.trim()
       : fallback.git.path;
+    merged.git.mainBranch = this.isValid(
+      "git.mainBranch",
+      merged.git.mainBranch,
+    )
+      ? merged.git.mainBranch.trim()
+      : fallback.git.mainBranch;
     merged.files.autoSave = this.isValid(
       "files.autoSave",
       merged.files.autoSave,
@@ -544,7 +558,7 @@ export class SettingsManager {
 
   private isValid(key: string, value: unknown): boolean {
     if (key === "ui.settingsCategory") {
-      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Language Manager"]
+      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Git", "Language Manager"]
         .includes(String(value));
     }
     if (key === "ui.settingsScrollTop") {
@@ -559,6 +573,9 @@ export class SettingsManager {
     }
     if (key === "git.path") {
       return typeof value === "string" && value.length <= 2048 && !value.includes("\0");
+    }
+    if (key === "git.mainBranch") {
+      return isValidGitBranchName(value);
     }
     if (
       key === "files.autoSave" ||

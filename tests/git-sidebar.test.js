@@ -583,7 +583,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
       "the missing Git state offers settings instead of a raw error code",
     );
     await missingGit.sidebar.openGitSettings();
-    assert.deepEqual(missingGit.calls.settings, ["Editor"]);
+    assert.deepEqual(missingGit.calls.settings, ["Git"]);
   } finally {
     missingGit.sidebar.destroy();
   }

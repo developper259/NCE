@@ -5,6 +5,7 @@ import type { PathAccess } from "./PathAccess";
 import type { IpcHandlerRegistrar } from "./IpcRouter";
 import { GitTaskQueue } from "./GitTaskQueue";
 import { classifyGitFailure, killProcessTree, resolveGitExecutable } from "./GitProcess";
+import { isValidGitBranchName } from "./GitBranchName";
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const VERSION_TIMEOUT_MS = 5_000;
@@ -122,6 +123,7 @@ interface GitManagerOptions {
   pathAccess?: Pick<PathAccess, "isAuthorized">;
   gitPath?: string;
   getGitPath?: () => string | null | undefined;
+  getMainBranch?: () => string | null | undefined;
   timeoutMs?: number;
   maxOutputBytes?: number;
   maxConcurrentCommands?: number;
@@ -188,6 +190,7 @@ export class GitManager {
   private readonly pathAccess?: Pick<PathAccess, "isAuthorized">;
   private readonly explicitGitPath?: string;
   private readonly getGitPath?: () => string | null | undefined;
+  private readonly getMainBranch?: () => string | null | undefined;
   private readonly timeoutMs: number;
   private readonly maxOutputBytes: number;
   private readonly extraEnv?: NodeJS.ProcessEnv;
@@ -205,6 +208,7 @@ export class GitManager {
     this.pathAccess = options.pathAccess;
     this.explicitGitPath = options.gitPath || undefined;
     this.getGitPath = options.getGitPath;
+    this.getMainBranch = options.getMainBranch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
     this.extraEnv = options.env;
@@ -292,8 +296,12 @@ export class GitManager {
     if ("failure" in workspace) return workspace.failure;
     const result = await this.runGit(["init", "-q"], { cwd: workspace.workspace });
     if (!result.ok) return result.failure;
+    const configuredBranch = this.getMainBranch?.();
+    const mainBranch = isValidGitBranchName(configuredBranch)
+      ? configuredBranch.trim()
+      : "main";
     const branch = await this.runGit(
-      ["symbolic-ref", "HEAD", "refs/heads/main"],
+      ["symbolic-ref", "HEAD", `refs/heads/${mainBranch}`],
       { cwd: workspace.workspace },
     );
     if (!branch.ok) return branch.failure;

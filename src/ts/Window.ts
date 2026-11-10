@@ -233,6 +233,10 @@ export class Window {
         const gitPath = this.app.settings?.get("git.path");
         return typeof gitPath === "string" ? gitPath : undefined;
       },
+      getMainBranch: () => {
+        const mainBranch = this.app.settings?.get("git.mainBranch");
+        return typeof mainBranch === "string" ? mainBranch : undefined;
+      },
     });
     this.lspManager = new LspManager({
       getWorkspaceRoot: () => this.watcher?.getWatchedPath?.() || this.workspacePath,
