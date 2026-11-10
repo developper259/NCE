@@ -19,3 +19,4 @@ dataset-example/private/provider.json
 dataset.json
 /.benchmark-data/
 .benchmark-data
+/benchmark/
