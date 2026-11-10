@@ -103,6 +103,7 @@ function createSidebar(options = {}) {
     versions: [],
     menus: [],
     notifications: [],
+    settings: [],
     unsubscribed: false,
   };
   const rootPath = options.rootPath === undefined ? "/workspace" : options.rootPath;
@@ -174,6 +175,10 @@ function createSidebar(options = {}) {
         calls.openFile.push(filePath);
         return { type: "file" };
       },
+    },
+    async openSettings(category) {
+      calls.settings.push(category);
+      return { type: "settings" };
     },
     contextMenuManager: {
       openContextMenu(name, context) { calls.menus.push([name, context]); },
@@ -519,7 +524,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(empty.calls.status, 0, "no Git status without a workspace");
     assert.deepEqual(
       stateActions(empty.sidebar),
-      { init: false, refresh: false, retry: false },
+      { init: false, refresh: false, retry: false, settings: false },
     );
   } finally {
     empty.sidebar.destroy();
@@ -534,7 +539,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(plain.sidebar.status, null);
     assert.deepEqual(
       stateActions(plain.sidebar),
-      { init: true, refresh: true, retry: false },
+      { init: true, refresh: true, retry: false, settings: false },
       "a plain folder offers Initialize and Refresh instead of Retry",
     );
   } finally {
@@ -549,8 +554,17 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.match(missingGit.sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(missingGit.sidebar),
-      { init: false, refresh: false, retry: false },
+      { init: false, refresh: false, retry: false, settings: true },
     );
+    assert.equal(
+      missingGit.sidebar.getStatePresentation(
+        missingGit.sidebar.getViewState(),
+      ).code,
+      "",
+      "the missing Git state offers settings instead of a raw error code",
+    );
+    await missingGit.sidebar.openGitSettings();
+    assert.deepEqual(missingGit.calls.settings, ["Editor"]);
   } finally {
     missingGit.sidebar.destroy();
   }
@@ -573,7 +587,7 @@ test("GitSidebar initializes the repository and refreshes with success", async (
     assert.equal(sidebar.getViewState().mode, "clean");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: true, retry: false },
+      { init: false, refresh: true, retry: false, settings: false },
       "a clean repository only offers a refresh action",
     );
   } finally {
@@ -651,7 +665,7 @@ test("GitSidebar derives explicit view states from the repository", async () => 
     assert.equal(state.message, "Git could not initialize.");
     assert.deepEqual(
       stateActions(initFailed.sidebar),
-      { init: true, refresh: true, retry: false },
+      { init: true, refresh: true, retry: false, settings: false },
     );
   } finally {
     initFailed.sidebar.destroy();
@@ -748,7 +762,7 @@ test("GitSidebar keeps Initialize available after a failed initialization", asyn
     assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false },
+      { init: true, refresh: true, retry: false, settings: false },
       "the user can try Initialize again",
     );
     assert.equal(await sidebar.initializeRepository(), false, "a retry is attempted");
@@ -769,7 +783,7 @@ test("GitSidebar drops Initialize when Git itself is missing", async () => {
     assert.match(sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false },
+      { init: false, refresh: false, retry: false, settings: true },
     );
   } finally {
     sidebar.destroy();
@@ -822,7 +836,10 @@ test("GitSidebar drops a stale initialization error on refresh", async () => {
     assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
     await sidebar.refresh({ reason: "manual" });
     assert.equal(sidebar.getStateMessage(), "This workspace is not a Git repository.");
-    assert.deepEqual(stateActions(sidebar), { init: true, refresh: true, retry: false });
+    assert.deepEqual(
+      stateActions(sidebar),
+      { init: true, refresh: true, retry: false, settings: false },
+    );
   } finally {
     sidebar.destroy();
   }
@@ -1136,7 +1153,7 @@ test("GitSidebar explains output limits without offering a useless retry", async
     assert.match(sidebar.getStateMessage(), /Too many changes/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false },
+      { init: false, refresh: false, retry: false, settings: false },
       "output limits offer no useless action",
     );
   } finally {

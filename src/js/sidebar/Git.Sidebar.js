@@ -75,6 +75,7 @@ class GitSidebar extends Sidebar {
     this.stateRetry = null;
     this.stateInit = null;
     this.stateRefresh = null;
+    this.stateSettings = null;
     this.initializing = false;
     this.listElement = null;
     this.listViewport = null;
@@ -307,7 +308,15 @@ class GitSidebar extends Sidebar {
     stateRetry.dataset.action = "retry";
     stateRetry.addEventListener("click", () => this.refresh({ reason: "manual" }));
 
-    stateActions.append(stateInit, stateRefresh, stateRetry);
+    const stateSettings = document.createElement("button");
+    stateSettings.type = "button";
+    stateSettings.className = "git-sidebar-state-button";
+    stateSettings.textContent = "Go to Settings";
+    stateSettings.title = "Open Editor settings to configure the Git executable path";
+    stateSettings.dataset.action = "settings";
+    stateSettings.addEventListener("click", () => void this.openGitSettings());
+
+    stateActions.append(stateInit, stateRefresh, stateRetry, stateSettings);
     state.append(stateHeading, stateActions);
     this.stateElement = state;
     this.stateIconElement = stateIcon;
@@ -316,6 +325,7 @@ class GitSidebar extends Sidebar {
     this.stateDetailsElement = stateDetails;
     this.stateCodeElement = stateCode;
     this.stateRetry = stateRetry;
+    this.stateSettings = stateSettings;
 
     const list = document.createElement("div");
     list.className = "git-sidebar-list";
@@ -487,7 +497,7 @@ class GitSidebar extends Sidebar {
         tone: "error",
         title: GitSidebar.errorTitle(view.errorCode),
         description: view.message,
-        code: view.errorCode,
+        code: view.errorCode === "GIT_NOT_FOUND" ? "" : view.errorCode,
       };
     }
     if (view.mode === "loading") {
@@ -526,7 +536,7 @@ class GitSidebar extends Sidebar {
   getStateActions() {
     const view = this.getViewState();
     if (view.mode === "no-repository" || view.mode === "init-error") {
-      return { init: true, refresh: true, retry: false };
+      return { init: true, refresh: true, retry: false, settings: false };
     }
     if (view.mode === "error") {
       return {
@@ -534,10 +544,17 @@ class GitSidebar extends Sidebar {
         refresh: false,
         retry: view.errorCode !== "GIT_NOT_FOUND" &&
           view.errorCode !== "GIT_OUTPUT_LIMIT",
+        settings: view.errorCode === "GIT_NOT_FOUND",
       };
     }
-    if (view.mode === "clean") return { init: false, refresh: true, retry: false };
-    return { init: false, refresh: false, retry: false };
+    if (view.mode === "clean") {
+      return { init: false, refresh: true, retry: false, settings: false };
+    }
+    return { init: false, refresh: false, retry: false, settings: false };
+  }
+
+  openGitSettings() {
+    return this.editor.openSettings?.("Editor");
   }
 
   updateState() {
@@ -573,7 +590,9 @@ class GitSidebar extends Sidebar {
       ? this.stateInit
       : actions.retry
         ? this.stateRetry
-        : null;
+        : actions.settings
+          ? this.stateSettings
+          : null;
     if (this.stateInit) {
       this.stateInit.hidden = !actions.init;
       this.stateInit.disabled = busy;
@@ -591,7 +610,16 @@ class GitSidebar extends Sidebar {
       this.stateRefresh.hidden = !actions.refresh;
       this.stateRefresh.disabled = busy;
     }
-    for (const button of [this.stateInit, this.stateRetry, this.stateRefresh]) {
+    if (this.stateSettings) {
+      this.stateSettings.hidden = !actions.settings;
+      this.stateSettings.disabled = busy;
+    }
+    for (const button of [
+      this.stateInit,
+      this.stateRetry,
+      this.stateRefresh,
+      this.stateSettings,
+    ]) {
       button?.classList.toggle("git-sidebar-primary", button === primary);
     }
 
