@@ -375,6 +375,41 @@
   font-weight: 600;
 }
 
+.git-section-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.git-section-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-white);
+}
+
+.git-section-action:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-section-action:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.git-section-action[aria-busy="true"] i {
+  animation: git-spin 900ms linear infinite;
+}
+
 .git-file-row {
   display: flex;
   align-items: center;
@@ -634,6 +669,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .git-sidebar-icon-button[aria-busy="true"] i,
+  .git-section-action[aria-busy="true"] i,
   .git-state-icon.is-spinning {
     animation: none;
   }

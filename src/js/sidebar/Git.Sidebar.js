@@ -98,6 +98,7 @@ class GitSidebar extends Sidebar {
     this.loading = false;
     this.commitMessage = "";
     this.committing = false;
+    this.stagingAll = false;
     this.commitError = "";
     this.actionError = "";
     this.initError = "";
@@ -393,7 +394,7 @@ class GitSidebar extends Sidebar {
         document.activeElement === this.commitInput;
       if (!focused && this.commitInput.value !== this.commitMessage)
         this.commitInput.value = this.commitMessage;
-      this.commitInput.disabled = this.committing;
+      this.commitInput.disabled = this.committing || this.stagingAll;
     }
     this.updateCommitControls();
     this.updateState();
@@ -657,6 +658,7 @@ class GitSidebar extends Sidebar {
       this.stagedCount() > 0 &&
       this.commitMessage.trim().length > 0 &&
       !this.committing &&
+      !this.stagingAll &&
       !this.loading &&
       !this.stale;
   }
@@ -693,6 +695,24 @@ class GitSidebar extends Sidebar {
     count.textContent = String(item.count);
 
     header.append(arrow, name, count);
+    if (item.section === "changes" && item.count > 0) {
+      const action = document.createElement("button");
+      action.type = "button";
+      action.className = "git-section-action";
+      action.title = "Stage all changes";
+      action.setAttribute("aria-label", "Stage all changes");
+      action.disabled = this.loading || this.committing || this.stagingAll;
+      if (this.stagingAll) action.setAttribute("aria-busy", "true");
+      const icon = document.createElement("i");
+      icon.className = "fi fi-rr-plus";
+      icon.setAttribute("aria-hidden", "true");
+      action.appendChild(icon);
+      action.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.stageAllChanges();
+      });
+      header.appendChild(action);
+    }
     const toggle = () => {
       this.collapsed[item.section] = !this.collapsed[item.section];
       this.saveCollapsedState();
@@ -700,6 +720,7 @@ class GitSidebar extends Sidebar {
     };
     header.addEventListener("click", toggle);
     header.addEventListener("keydown", (event) => {
+      if (event.target !== header) return;
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       toggle();
@@ -1011,6 +1032,53 @@ class GitSidebar extends Sidebar {
     const filePath = GitSidebar.resolveAbsolutePath(this.workspaceRoot, entry?.path);
     if (!filePath || entry.kind === "deleted") return null;
     return this.editor.tabManager?.openFileWithPath?.(filePath) ?? null;
+  }
+
+  async stageAllChanges() {
+    if (this.destroyed || this.loading || this.committing || this.stagingAll)
+      return false;
+    const { changes } = this.getSections();
+    if (!this.status || changes.length === 0) return false;
+    const count = changes.length;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.stagingAll = true;
+    this.actionError = "";
+    this.notice = "";
+    this.renderList();
+    this.updateView();
+    let result = null;
+    try {
+      result = await this.editor.api.git.stageAll();
+    } catch {
+      result = null;
+    }
+    this.stagingAll = false;
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.updateView();
+      return false;
+    }
+    if (result?.success === true) {
+      this.notice = count === 1 ? "Staged 1 change" : `Staged ${count} changes`;
+    } else {
+      this.actionError = result?.error || "The Git operation failed.";
+      this.notifyGit({
+        type: "error",
+        title: "Could not stage all changes",
+        message: this.actionError,
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.stageAllChanges();
+          },
+        }],
+      });
+    }
+    await this.refresh({ reason: "stage" });
+    this.updateView();
+    return result?.success === true;
   }
 
   async commitChanges() {

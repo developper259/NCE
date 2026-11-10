@@ -37,9 +37,59 @@ class FakeScroller {
   destroy() { this.destroyed = true; }
 }
 
+class FakeElement {
+  constructor(tagName) {
+    this.tagName = tagName;
+    this.children = [];
+    this.dataset = {};
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this.className = "";
+    this.textContent = "";
+    this.title = "";
+    this.hidden = false;
+    this.disabled = false;
+    this.tabIndex = -1;
+  }
+  append(...children) {
+    for (const child of children) this.appendChild(child);
+  }
+  appendChild(child) {
+    this.children.push(child);
+    return child;
+  }
+  setAttribute(name, value) {
+    this.attributes.set(name, String(value));
+  }
+  getAttribute(name) {
+    return this.attributes.has(name) ? this.attributes.get(name) : null;
+  }
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+  dispatch(type, event = {}) {
+    for (const listener of this.listeners.get(type) || [])
+      listener({ stopPropagation() {}, preventDefault() {}, target: this, ...event });
+  }
+  click() {
+    this.dispatch("click");
+  }
+  querySelectorAll() {
+    return [];
+  }
+  contains() {
+    return false;
+  }
+}
+
+const documentStub = { createElement: (tagName) => new FakeElement(tagName) };
+
 const GitSidebar = loadGlobal("src/js/sidebar/Git.Sidebar.js", "GitSidebar", {
   Sidebar,
   SearchResultsScroller: FakeScroller,
+  document: documentStub,
   NCEPath: {
     equals: (left, right) => left === right,
     basename: (value) => String(value || "").replace(/\\/g, "/").split("/").pop(),
@@ -95,6 +145,7 @@ function createSidebar(options = {}) {
     status: 0,
     init: 0,
     stage: [],
+    stageAll: 0,
     unstage: [],
     commit: [],
     clipboard: [],
@@ -131,6 +182,12 @@ function createSidebar(options = {}) {
           return typeof options.stageResult === "function"
             ? options.stageResult(filePath)
             : options.stageResult || { success: true, path: filePath };
+        },
+        async stageAll() {
+          calls.stageAll += 1;
+          return typeof options.stageAllResult === "function"
+            ? options.stageAllResult()
+            : options.stageAllResult || { success: true, staged: true };
         },
         async getFileVersions(filePath, versionOptions) {
           calls.versions.push([filePath, versionOptions]);
@@ -252,6 +309,183 @@ test("GitSidebar stages and unstages through GitManager paths inside the workspa
     assert.equal(await sidebar.toggleStage(entry, true), true);
     assert.deepEqual(calls.unstage, ["/workspace/src/app.js"]);
     assert.match(sidebar.getCommitStatusText(), /Unstaged src\/app\.js/);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar stages every change at once and reports the count", async () => {
+  const changes = [
+    makeEntry("src/a.js", { worktree: "M" }),
+    makeEntry("src/b.js", { worktree: "?", kind: "untracked" }),
+  ];
+  const staged = [
+    makeEntry("src/a.js", { index: "M" }),
+    makeEntry("src/b.js", { index: "A", kind: "added" }),
+  ];
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus(changes) },
+      { success: true, status: makeStatus(staged) },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.stageAllChanges(), true);
+    assert.equal(calls.stageAll, 1);
+    assert.equal(calls.status, 2, "a successful Stage All refreshes the status");
+    assert.equal(sidebar.getCommitStatusText(), "Staged 2 changes");
+    assert.equal(sidebar.getSections().changes.length, 0);
+    assert.equal(sidebar.getSections().staged.length, 2);
+    sidebar.commitMessage = "feat: bulk stage";
+    assert.equal(sidebar.canCommit(), true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores Stage All when nothing is unstaged", async () => {
+  const clean = createSidebar({ entries: [] });
+  try {
+    await clean.sidebar.refresh({ reason: "open" });
+    assert.equal(await clean.sidebar.stageAllChanges(), false);
+    assert.equal(clean.calls.stageAll, 0);
+  } finally {
+    clean.sidebar.destroy();
+  }
+
+  const stagedOnly = createSidebar({ entries: [stagedEntry] });
+  try {
+    await stagedOnly.sidebar.refresh({ reason: "open" });
+    assert.equal(await stagedOnly.sidebar.stageAllChanges(), false);
+    assert.equal(stagedOnly.calls.stageAll, 0);
+  } finally {
+    stagedOnly.sidebar.destroy();
+  }
+});
+
+test("GitSidebar prevents overlapping Stage All operations", async () => {
+  const pending = deferred();
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry, untrackedEntry],
+    stageAllResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.stageAllChanges();
+    assert.equal(await sidebar.stageAllChanges(), false);
+    assert.equal(calls.stageAll, 1);
+    assert.equal(sidebar.stagingAll, true);
+    assert.equal(sidebar.canCommit(), false, "Stage All blocks commit until it settles");
+    pending.resolve({ success: true, staged: true });
+    assert.equal(await first, true);
+    assert.equal(sidebar.stagingAll, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports Stage All failures with a retry action", async () => {
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry, untrackedEntry],
+    stageAllResult: {
+      success: false,
+      code: "PERMISSION_DENIED",
+      error: "The workspace cannot be staged.",
+    },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.stageAllChanges(), false);
+    assert.equal(calls.stageAll, 1);
+    assert.equal(sidebar.getCommitStatusText(), "The workspace cannot be staged.");
+    const notification = calls.notifications.find(
+      (item) => item.title === "Could not stage all changes",
+    );
+    assert.equal(notification.type, "error");
+    assert.equal(notification.source, "Git");
+    assert.equal(notification.message, "The workspace cannot be staged.");
+    assert.deepEqual(
+      toPlain(notification.actions.map((action) => action.label)),
+      ["Retry"],
+    );
+    notification.actions[0].action();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.stageAll, 2);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores Stage All results from a previous workspace", async () => {
+  const pending = deferred();
+  const { sidebar, editor } = createSidebar({
+    entries: [modifiedEntry],
+    stageAllResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const staging = sidebar.stageAllChanges();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    editor.fileExplorer.rootPath = "/workspace-b";
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    pending.resolve({ success: true, staged: true });
+    assert.equal(await staging, false);
+    assert.equal(sidebar.stagingAll, false);
+    assert.doesNotMatch(sidebar.getCommitStatusText(), /Staged 1 change/);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar renders a Stage All action only in a populated Changes header", async () => {
+  const { sidebar } = createSidebar({ entries: [modifiedEntry, untrackedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const changesHeader = sidebar.createSectionHeader({
+      section: "changes",
+      title: "Changes",
+      count: 2,
+    });
+    const action = changesHeader.children.find(
+      (child) => child.className === "git-section-action",
+    );
+    assert.ok(action, "the Changes header offers Stage All");
+    assert.equal(action.getAttribute("aria-label"), "Stage all changes");
+    assert.equal(action.title, "Stage all changes");
+    assert.equal(action.children[0].className, "fi fi-rr-plus");
+    assert.equal(action.disabled, false);
+
+    sidebar.stagingAll = true;
+    const busyAction = sidebar.createSectionHeader({
+      section: "changes",
+      title: "Changes",
+      count: 2,
+    }).children.find((child) => child.className === "git-section-action");
+    assert.equal(busyAction.disabled, true);
+    assert.equal(busyAction.getAttribute("aria-busy"), "true");
+    sidebar.stagingAll = false;
+
+    const stagedHeader = sidebar.createSectionHeader({
+      section: "staged",
+      title: "Staged Changes",
+      count: 1,
+    });
+    assert.equal(
+      stagedHeader.children.some((child) => child.className === "git-section-action"),
+      false,
+      "only the Changes header can stage everything",
+    );
+    const emptyChanges = sidebar.createSectionHeader({
+      section: "changes",
+      title: "Changes",
+      count: 0,
+    });
+    assert.equal(
+      emptyChanges.children.some((child) => child.className === "git-section-action"),
+      false,
+      "an empty Changes section hides Stage All",
+    );
   } finally {
     sidebar.destroy();
   }

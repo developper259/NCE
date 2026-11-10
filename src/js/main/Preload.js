@@ -68,6 +68,7 @@ contextBridge.exposeInMainWorld("api", {
     getFileVersions: (filePath, options) =>
       ipcRenderer.invoke("Git:fileVersions", filePath, options),
     stageFile: (filePath) => ipcRenderer.invoke("Git:stage", filePath),
+    stageAll: () => ipcRenderer.invoke("Git:stageAll"),
     unstageFile: (filePath) => ipcRenderer.invoke("Git:unstage", filePath),
     commit: (message) => ipcRenderer.invoke("Git:commit", message),
     getBranches: () => ipcRenderer.invoke("Git:branches"),

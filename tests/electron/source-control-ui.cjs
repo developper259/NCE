@@ -129,9 +129,21 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     true,
   );
   check(created?.success === true, "fixture file is created");
+  const secondFileName = "source-control-stage-all-second-file.txt";
+  const createdSecond = await editor.fileExplorer.fileOperations.createFile(
+    workspace,
+    secondFileName,
+    "second staged change\n",
+    true,
+  );
+  check(createdSecond?.success === true, "second fixture file is created");
   await git.refresh({ reason: "manual" });
   await waitFor(() => git.getViewState().mode === "changes", "changes state");
   await nextFrame();
+  check(
+    git.getViewState().changes.length === 2,
+    "both fixture changes are listed",
+  );
   check(git.commitBoxElement.hidden === false, "commit form is visible with changes");
   check(git.listElement.hidden === false, "change list is visible with changes");
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
@@ -201,16 +213,41 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   sidebar.style.width = originalWidth;
   await nextFrame();
 
-  // Stage, write a message and commit through real Git operations.
-  const stageRow = git.listLayer.querySelector(
-    `.git-file-row[data-path="${fileName}"]`,
+  // Stage every change with the Changes header action, then commit through real Git operations.
+  const stageAllButton = git.listLayer.querySelector(
+    '.git-section-header[data-section="changes"] .git-section-action',
   );
-  stageRow.querySelector(".git-file-action").click();
-  await waitFor(() => git.getViewState().staged.length === 1, "file to stage");
+  check(Boolean(stageAllButton), "Changes header offers Stage All");
+  check(
+    stageAllButton.getAttribute("aria-label") === "Stage all changes",
+    "Stage All is announced to assistive technology",
+  );
+  check(
+    getComputedStyle(stageAllButton).cursor === "pointer",
+    "Stage All shows a pointer cursor",
+  );
+  const stageAllRect = stageAllButton.getBoundingClientRect();
+  const changesHeaderRect = git.listLayer
+    .querySelector('.git-section-header[data-section="changes"]')
+    .getBoundingClientRect();
+  check(
+    stageAllRect.width >= 16 &&
+      stageAllRect.height >= 16 &&
+      stageAllRect.right <= changesHeaderRect.right,
+    "Stage All stays inside the Changes header",
+  );
+  stageAllButton.click();
   await waitFor(() => {
     const state = git.getViewState();
-    return state.mode === "changes" && state.changes.length === 0;
-  }, "staged-only changes state");
+    return state.mode === "changes" &&
+      state.staged.length === 2 &&
+      state.changes.length === 0;
+  }, "Stage All to stage every change");
+  await nextFrame();
+  check(
+    git.commitStatus.textContent === "Staged 2 changes",
+    "Stage All reports how many changes were staged",
+  );
   await nextFrame();
   check(
     [...git.listLayer.querySelectorAll(".git-section-title")]

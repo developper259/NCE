@@ -535,6 +535,79 @@ test("GitManager stages and unstages without losing worktree changes", { skip: g
   }
 });
 
+test("GitManager stages every workspace change at once", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  await fs.writeFile(path.join(root, "modified.txt"), "one\n");
+  await fs.writeFile(path.join(root, "deleted.txt"), "gone\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "stage-all fixtures"]);
+  await fs.writeFile(path.join(root, "modified.txt"), "two\n");
+  await fs.rm(path.join(root, "deleted.txt"));
+  await fs.writeFile(path.join(root, "untracked.txt"), "new\n");
+  await fs.mkdir(path.join(root, ".nce"), { recursive: true });
+  await fs.writeFile(path.join(root, ".nce", "workspace.json"), "{}\n");
+  const manager = managerFor(root);
+  try {
+    const result = await manager.stageAll();
+    assert.equal(result.success, true);
+    assert.equal(result.staged, true);
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.deepEqual(
+      Object.fromEntries(status.status.entries.map((entry) => [entry.path, entry.index])),
+      { "deleted.txt": "D", "modified.txt": "M", "untracked.txt": "A" },
+    );
+    assert.deepEqual(
+      git(root, ["diff", "--cached", "--name-only"]).trim().split("\n").sort(),
+      ["deleted.txt", "modified.txt", "untracked.txt"],
+    );
+    assert.equal(
+      git(root, ["status", "--porcelain", "--", ".nce"]).trim(),
+      "?? .nce/",
+      "NCE's own workspace state stays out of the index",
+    );
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager scopes stageAll to the open workspace", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const nested = path.join(root, "packages", "app");
+  await fs.mkdir(nested, { recursive: true });
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v1\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "fixtures"]);
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside v2\n");
+  await fs.writeFile(path.join(nested, "new.txt"), "new\n");
+  await fs.writeFile(path.join(root, "outside.txt"), "outside\n");
+  const manager = managerFor(nested);
+  const plain = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-stageall-plain-"));
+  const plainManager = managerFor(plain);
+  try {
+    const result = await manager.stageAll();
+    assert.equal(result.success, true);
+    const status = await manager.getStatus();
+    assert.deepEqual(
+      Object.fromEntries(status.status.entries.map((entry) => [entry.path, entry.index])),
+      { "packages/app/inside.txt": "M", "packages/app/new.txt": "A" },
+    );
+    const porcelain = git(root, ["status", "--porcelain"]).trim().split("\n");
+    assert.ok(porcelain.includes("?? outside.txt"), "changes outside the workspace stay unstaged");
+    assert.equal(
+      porcelain.some((line) => !line.startsWith("??") && line.includes("outside")),
+      false,
+      "changes outside the workspace are never staged",
+    );
+    assert.equal((await plainManager.stageAll()).code, "NOT_A_REPOSITORY");
+  } finally {
+    manager.dispose();
+    plainManager.dispose();
+    await removeAll(root, plain);
+  }
+});
+
 test("GitManager commits staged changes and reports commit failures", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const manager = managerFor(root);
@@ -735,7 +808,7 @@ test("GitManager exposes only named Git channels through the preload", () => {
   for (const channel of [
     "Git:isAvailable", "Git:version", "Git:init", "Git:repository", "Git:isRepository",
     "Git:repositoryRoot", "Git:status", "Git:diff", "Git:fileVersions",
-    "Git:stage", "Git:unstage", "Git:commit", "Git:branches",
+    "Git:stage", "Git:stageAll", "Git:unstage", "Git:commit", "Git:branches",
     "Git:currentBranch",
   ]) {
     assert.match(preload, new RegExp(`"${channel}"`), `preload exposes ${channel}`);

@@ -234,6 +234,7 @@ export class GitManager {
     ipc.handle("Git:diffSummary", async (_event, options) =>
       this.getDiffSummary({ staged: options?.staged === true }));
     ipc.handle("Git:stage", async (_event, filePath) => this.stageFile(filePath));
+    ipc.handle("Git:stageAll", async () => this.stageAll());
     ipc.handle("Git:unstage", async (_event, filePath) => this.unstageFile(filePath));
     ipc.handle("Git:commit", async (_event, message) => this.commit(message));
     ipc.handle("Git:branches", async () => this.getBranches());
@@ -609,6 +610,21 @@ export class GitManager {
     } catch (error: any) {
       return failure("GIT_COMMAND_FAILED", "Unable to parse the Git diff summary.");
     }
+  }
+
+  stageAll(): Promise<GitResult<{ staged: true }>> {
+    return this.mutationQueue.run(() => this.stageAllNow());
+  }
+
+  private async stageAllNow(): Promise<GitResult<{ staged: true }>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const result = await this.runGit(
+      ["add", "-A", "--", ...this.scopePathspecs(context)],
+      { cwd: context.root },
+    );
+    if (!result.ok) return result.failure;
+    return { success: true, staged: true };
   }
 
   stageFile(filePath: unknown): Promise<GitResult<{ path: string }>> {
