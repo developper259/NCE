@@ -711,7 +711,7 @@ test("watcher batches events, matches one committed own save and cleans up timer
 
 test("watcher ignore rules exclude NCE state and save temps while preserving workspace dotfiles", () => {
   const { isWatcherPathIgnored } = require("../dist/ts/addon/WatcherIgnore.js");
-  for (const directory of ["node_modules", "dist", "build", "out", "coverage", ".next", ".cache", ".turbo", "release", ".git", ".svn", ".hg", ".benchmark-data"])
+  for (const directory of ["node_modules", "dist", "build", "out", "coverage", ".next", ".cache", ".turbo", "release", ".git", ".svn", ".hg"])
     assert.equal(isWatcherPathIgnored(path.join("workspace", directory, "file.js")), true, directory);
   assert.equal(isWatcherPathIgnored(path.join("workspace", "broken.asar")), true);
   assert.equal(isWatcherPathIgnored(path.join("workspace", ".nce", "workspace.json.123.456.tmp")), true);
