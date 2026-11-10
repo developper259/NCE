@@ -1,4 +1,6 @@
 class GitSidebar extends Sidebar {
+  static COMMIT_INPUT_MAX_HEIGHT = 140;
+
   static resolveAbsolutePath(root, relativePath) {
     if (typeof root !== "string" || !root.trim()) return null;
     if (typeof relativePath !== "string" || !relativePath.trim()) return null;
@@ -51,6 +53,30 @@ class GitSidebar extends Sidebar {
     return { name: normalized.slice(index + 1), dir: normalized.slice(0, index) };
   }
 
+  static validateBranchName(value) {
+    const name = String(value ?? "").trim();
+    if (!name) return "Enter a branch name.";
+    if (name.length > 255) return "The branch name is too long.";
+    if (name.startsWith("-")) return "Branch names cannot start with a dash.";
+    if (name === "@") return "Enter a valid branch name.";
+    if (/[\s~^:?*\[\\\x00-\x1f\x7f]/.test(name))
+      return "Branch names cannot contain spaces or ~ ^ : ? * [ \\.";
+    if (name.includes("..")) return "Branch names cannot contain '..'.";
+    if (name.includes("@{")) return "Branch names cannot contain '@{'.";
+    if (name.endsWith("/") || name.endsWith(".") || name.endsWith(".lock"))
+      return "Branch names cannot end with '/', '.', or '.lock'.";
+    if (name.split("/").some((part) =>
+      !part || part.startsWith(".") || part.endsWith(".lock")))
+      return "Each branch path segment must be valid.";
+    return null;
+  }
+
+  static sortBranches(branches) {
+    return (Array.isArray(branches) ? branches.slice() : [])
+      .filter((branch) => branch && typeof branch.name === "string" && branch.name)
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
   constructor(editor) {
     super("git", "Source Control", "fi fi-rr-code-branch", "left", editor);
     this.container = null;
@@ -65,7 +91,22 @@ class GitSidebar extends Sidebar {
     this.commitBoxElement = null;
     this.commitInput = null;
     this.commitButton = null;
+    this.commitButtonLabel = null;
     this.commitStatus = null;
+    this.settingsButton = null;
+    this.branchButton = null;
+    this.branchButtonName = null;
+    this.branchMenuElement = null;
+    this.branchMenuOpen = false;
+    this.branchMenuLoading = false;
+    this.branchMenuError = "";
+    this.branchMenuRequest = 0;
+    this.branchMenuDismiss = null;
+    this.branchMenuKeydown = null;
+    this.branches = [];
+    this.switchingBranch = false;
+    this.commitResizeObserver = null;
+    this.commitInputWidth = -1;
     this.stateElement = null;
     this.stateIconElement = null;
     this.stateTitleElement = null;
@@ -221,12 +262,13 @@ class GitSidebar extends Sidebar {
     commitBox.className = "git-sidebar-commit";
     const commitInput = document.createElement("textarea");
     commitInput.className = "git-sidebar-commit-input";
-    commitInput.rows = 2;
+    commitInput.rows = 1;
     commitInput.placeholder = "Commit message...";
     commitInput.setAttribute("aria-label", "Commit message");
     commitInput.spellcheck = false;
     commitInput.addEventListener("input", () => {
       this.commitMessage = commitInput.value;
+      this.autoResizeCommitInput();
       this.updateCommitControls();
     });
     commitInput.addEventListener("keydown", (event) => {
@@ -239,21 +281,87 @@ class GitSidebar extends Sidebar {
 
     const commitActions = document.createElement("div");
     commitActions.className = "git-sidebar-commit-actions";
+
+    const branchButton = document.createElement("button");
+    branchButton.type = "button";
+    branchButton.className = "git-branch-button";
+    branchButton.title = "Switch Branch";
+    branchButton.setAttribute("aria-label", "Switch Branch");
+    branchButton.setAttribute("aria-haspopup", "menu");
+    branchButton.setAttribute("aria-expanded", "false");
+    const branchButtonIcon = document.createElement("i");
+    branchButtonIcon.className = "fi fi-rr-code-branch";
+    branchButtonIcon.setAttribute("aria-hidden", "true");
+    const branchButtonName = document.createElement("span");
+    branchButtonName.className = "git-branch-button-name";
+    const branchButtonArrow = document.createElement("i");
+    branchButtonArrow.className = "fi fi-rr-angle-small-down git-branch-button-arrow";
+    branchButtonArrow.setAttribute("aria-hidden", "true");
+    branchButton.append(branchButtonIcon, branchButtonName, branchButtonArrow);
+    branchButton.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.toggleBranchMenu();
+    });
+    this.branchButton = branchButton;
+    this.branchButtonName = branchButtonName;
+
     const commitStatus = document.createElement("span");
     commitStatus.className = "git-sidebar-commit-status";
     commitStatus.setAttribute("role", "status");
     commitStatus.setAttribute("aria-live", "polite");
     this.commitStatus = commitStatus;
+
+    const commitTools = document.createElement("div");
+    commitTools.className = "git-sidebar-commit-tools";
+
+    const settingsButton = document.createElement("button");
+    settingsButton.type = "button";
+    settingsButton.className = "git-sidebar-icon-button";
+    settingsButton.title = "Git settings";
+    settingsButton.setAttribute("aria-label", "Open Git settings");
+    const settingsIcon = document.createElement("i");
+    settingsIcon.className = "fi fi-rr-settings-sliders";
+    settingsIcon.setAttribute("aria-hidden", "true");
+    settingsButton.appendChild(settingsIcon);
+    settingsButton.addEventListener("click", () => void this.openGitSettings());
+    this.settingsButton = settingsButton;
+
     const commitButton = document.createElement("button");
     commitButton.type = "button";
     commitButton.className = "git-sidebar-commit-button";
-    commitButton.textContent = "Commit";
     commitButton.disabled = true;
+    const commitIcon = document.createElement("i");
+    commitIcon.className = "fi fi-rr-check";
+    commitIcon.setAttribute("aria-hidden", "true");
+    const commitLabel = document.createElement("span");
+    commitLabel.className = "git-sidebar-commit-button-label";
+    commitLabel.textContent = "Commit";
+    commitButton.append(commitIcon, commitLabel);
     commitButton.addEventListener("click", () => void this.commitChanges());
     this.commitButton = commitButton;
-    commitActions.append(commitStatus, commitButton);
-    commitBox.append(commitInput, commitActions);
+    this.commitButtonLabel = commitLabel;
+
+    commitTools.append(settingsButton, commitButton);
+    commitActions.append(branchButton, commitStatus, commitTools);
+
+    const branchMenu = document.createElement("div");
+    branchMenu.className = "git-branch-menu";
+    branchMenu.hidden = true;
+    branchMenu.setAttribute("role", "menu");
+    branchMenu.setAttribute("aria-label", "Branches");
+    this.branchMenuElement = branchMenu;
+
+    commitBox.append(commitInput, commitActions, branchMenu);
     this.commitBoxElement = commitBox;
+    if (typeof ResizeObserver === "function") {
+      this.commitResizeObserver = new ResizeObserver((entries) => {
+        const width = entries[0]?.contentRect?.width;
+        if (width === this.commitInputWidth) return;
+        this.commitInputWidth = width;
+        this.autoResizeCommitInput();
+      });
+      this.commitResizeObserver.observe(commitBox);
+    }
 
     const state = document.createElement("div");
     state.className = "git-sidebar-state";
@@ -360,9 +468,7 @@ class GitSidebar extends Sidebar {
       this.repoNameElement.title = this.workspaceRoot || "";
     }
     const branch = this.status?.branch;
-    const branchLabel = branch
-      ? branch.name || (branch.oid ? `detached @ ${branch.oid.slice(0, 7)}` : "detached")
-      : "";
+    const branchLabel = this.getBranchLabel();
     if (this.branchNameElement) {
       this.branchNameElement.textContent = branchLabel || "detached";
     }
@@ -381,6 +487,16 @@ class GitSidebar extends Sidebar {
         ? `${branchLabel}${tracking}${branch.upstream ? ` (${branch.upstream})` : ""}`
         : "";
     }
+    if (this.branchButtonName)
+      this.branchButtonName.textContent = branchLabel || "No branch";
+    if (this.branchButton) {
+      this.branchButton.title = branchLabel
+        ? `Switch Branch (${branchLabel})`
+        : "Switch Branch";
+      this.branchButton.disabled =
+        this.switchingBranch || this.committing || this.stagingAll;
+      this.branchButton.setAttribute("aria-expanded", String(this.branchMenuOpen));
+    }
     if (this.refreshButton) {
       this.refreshButton.hidden = !this.workspaceRoot;
       this.refreshButton.disabled = this.loading;
@@ -395,14 +511,33 @@ class GitSidebar extends Sidebar {
       if (!focused && this.commitInput.value !== this.commitMessage)
         this.commitInput.value = this.commitMessage;
       this.commitInput.disabled = this.committing || this.stagingAll;
+      this.autoResizeCommitInput();
     }
     this.updateCommitControls();
     this.updateState();
   }
 
+  getBranchLabel() {
+    const branch = this.status?.branch;
+    if (!branch) return "";
+    return branch.name ||
+      (branch.oid ? `detached @ ${branch.oid.slice(0, 7)}` : "detached");
+  }
+
+  autoResizeCommitInput() {
+    const input = this.commitInput;
+    if (!input || !input.isConnected || input.offsetParent === null) return;
+    const maxHeight = GitSidebar.COMMIT_INPUT_MAX_HEIGHT;
+    input.style.height = "auto";
+    const height = Math.min(input.scrollHeight, maxHeight);
+    input.style.height = `${height}px`;
+    input.style.overflowY = input.scrollHeight > maxHeight ? "auto" : "hidden";
+  }
+
   updateCommitControls() {
     if (this.commitButton) {
-      this.commitButton.textContent = this.committing ? "Committing…" : "Commit";
+      if (this.commitButtonLabel)
+        this.commitButtonLabel.textContent = this.committing ? "Committing…" : "Commit";
       this.commitButton.disabled = !this.canCommit();
       if (this.committing) this.commitButton.setAttribute("aria-busy", "true");
       else this.commitButton.removeAttribute("aria-busy");
@@ -632,6 +767,8 @@ class GitSidebar extends Sidebar {
       this.commitBoxElement.hidden = view.mode !== "changes";
     if (this.listElement)
       this.listElement.hidden = view.mode !== "changes";
+    if (view.mode !== "changes" && this.branchMenuOpen)
+      this.closeBranchMenu({ restoreFocus: false });
   }
 
   getSections() {
@@ -1034,6 +1171,246 @@ class GitSidebar extends Sidebar {
     return this.editor.tabManager?.openFileWithPath?.(filePath) ?? null;
   }
 
+  toggleBranchMenu() {
+    if (this.branchMenuOpen) this.closeBranchMenu();
+    else void this.openBranchMenu();
+  }
+
+  async openBranchMenu() {
+    if (this.destroyed || this.switchingBranch || !this.branchMenuElement)
+      return false;
+    this.branchMenuOpen = true;
+    this.branchMenuLoading = true;
+    this.branchMenuError = "";
+    this.branches = [];
+    this.branchMenuElement.hidden = false;
+    this.branchButton?.setAttribute("aria-expanded", "true");
+    this.renderBranchMenu();
+    this.attachBranchMenuDismiss();
+    const request = ++this.branchMenuRequest;
+    let result = null;
+    try {
+      result = await this.editor.api.git.getBranches();
+    } catch {
+      result = null;
+    }
+    if (this.destroyed || !this.branchMenuOpen || request !== this.branchMenuRequest)
+      return false;
+    this.branchMenuLoading = false;
+    if (result?.success === true) {
+      this.branches = GitSidebar.sortBranches(result.branches);
+    } else {
+      this.branchMenuError = result?.error || "Branches could not be loaded.";
+    }
+    this.renderBranchMenu();
+    this.focusBranchMenuItem();
+    return true;
+  }
+
+  closeBranchMenu({ restoreFocus = true } = {}) {
+    const wasOpen = this.branchMenuOpen;
+    this.branchMenuOpen = false;
+    this.branchMenuRequest++;
+    this.branchMenuLoading = false;
+    this.detachBranchMenuDismiss();
+    if (this.branchMenuElement) this.branchMenuElement.hidden = true;
+    this.branchButton?.setAttribute("aria-expanded", "false");
+    if (wasOpen && restoreFocus && !this.destroyed)
+      this.branchButton?.focus?.({ preventScroll: true });
+  }
+
+  renderBranchMenu() {
+    const menu = this.branchMenuElement;
+    if (!menu) return;
+    const nodes = [];
+    if (this.branchMenuLoading) {
+      const loading = document.createElement("div");
+      loading.className = "git-branch-menu-empty";
+      loading.textContent = "Loading branches…";
+      nodes.push(loading);
+    } else if (this.branchMenuError) {
+      const error = document.createElement("div");
+      error.className = "git-branch-menu-empty";
+      error.textContent = this.branchMenuError;
+      nodes.push(error);
+    } else if (this.branches.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "git-branch-menu-empty";
+      empty.textContent = "No branches yet.";
+      nodes.push(empty);
+    } else {
+      for (const branch of this.branches) {
+        const current = branch.current === true ||
+          branch.name === this.getBranchLabel();
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "git-branch-menu-item";
+        item.setAttribute("role", "menuitem");
+        item.title = branch.name;
+        if (current) {
+          item.classList.add("is-current");
+          item.setAttribute("aria-current", "true");
+        }
+        const name = document.createElement("span");
+        name.className = "git-branch-menu-item-name";
+        name.textContent = branch.name;
+        item.appendChild(name);
+        if (current) {
+          const check = document.createElement("i");
+          check.className = "fi fi-rr-check git-branch-menu-check";
+          check.setAttribute("aria-hidden", "true");
+          item.appendChild(check);
+        }
+        item.addEventListener("click", (event) => {
+          event.stopPropagation();
+          void this.switchToBranch(branch.name);
+        });
+        nodes.push(item);
+      }
+    }
+    const separator = document.createElement("div");
+    separator.className = "git-branch-menu-separator";
+    separator.setAttribute("role", "separator");
+    const newBranch = document.createElement("button");
+    newBranch.type = "button";
+    newBranch.className = "git-branch-menu-item git-branch-menu-new";
+    newBranch.setAttribute("role", "menuitem");
+    const plus = document.createElement("i");
+    plus.className = "fi fi-rr-plus";
+    plus.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "git-branch-menu-item-name";
+    label.textContent = "New Branch";
+    newBranch.append(plus, label);
+    newBranch.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.promptNewBranch();
+    });
+    nodes.push(separator, newBranch);
+    menu.replaceChildren(...nodes);
+  }
+
+  focusBranchMenuItem() {
+    if (!this.branchMenuOpen || !this.branchMenuElement) return;
+    const current = this.branchMenuElement.querySelector?.(
+      ".git-branch-menu-item.is-current",
+    );
+    const first = current ||
+      this.branchMenuElement.querySelector?.(".git-branch-menu-item");
+    first?.focus?.({ preventScroll: true });
+  }
+
+  attachBranchMenuDismiss() {
+    if (this.branchMenuDismiss ||
+        typeof document?.addEventListener !== "function") return;
+    this.branchMenuDismiss = (event) => {
+      if (this.branchMenuElement?.contains?.(event.target) ||
+          this.branchButton?.contains?.(event.target)) return;
+      this.closeBranchMenu({ restoreFocus: false });
+    };
+    this.branchMenuKeydown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeBranchMenu();
+    };
+    document.addEventListener("pointerdown", this.branchMenuDismiss, true);
+    document.addEventListener("keydown", this.branchMenuKeydown, true);
+  }
+
+  detachBranchMenuDismiss() {
+    if (typeof document?.removeEventListener === "function") {
+      if (this.branchMenuDismiss)
+        document.removeEventListener("pointerdown", this.branchMenuDismiss, true);
+      if (this.branchMenuKeydown)
+        document.removeEventListener("keydown", this.branchMenuKeydown, true);
+    }
+    this.branchMenuDismiss = null;
+    this.branchMenuKeydown = null;
+  }
+
+  promptNewBranch() {
+    this.closeBranchMenu();
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel || typeof quickPanel.open !== "function") return false;
+    return quickPanel.open({
+      id: "git-new-branch",
+      mode: "input",
+      title: "New Branch",
+      placeholder: "Branch name",
+      validate: (value) => GitSidebar.validateBranchName(value),
+      onAccept: (value) => {
+        void this.createNewBranch(String(value ?? "").trim());
+      },
+    });
+  }
+
+  async switchToBranch(name) {
+    const target = String(name ?? "").trim();
+    if (!target) return false;
+    if (target === this.getBranchLabel()) {
+      this.closeBranchMenu();
+      return false;
+    }
+    return this.checkoutBranch(target, false);
+  }
+
+  async createNewBranch(name) {
+    const target = String(name ?? "").trim();
+    const validation = GitSidebar.validateBranchName(target);
+    if (validation) {
+      this.notifyGit({
+        type: "error",
+        title: "Invalid branch name",
+        message: validation,
+      });
+      return false;
+    }
+    return this.checkoutBranch(target, true);
+  }
+
+  async checkoutBranch(name, create) {
+    if (this.destroyed || this.switchingBranch) return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.switchingBranch = true;
+    this.closeBranchMenu({ restoreFocus: false });
+    this.updateView();
+    let result = null;
+    try {
+      result = create
+        ? await this.editor.api.git.createBranch(name)
+        : await this.editor.api.git.switchBranch(name);
+    } catch {
+      result = null;
+    }
+    this.switchingBranch = false;
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.updateView();
+      return false;
+    }
+    if (result?.success !== true) {
+      this.notifyGit({
+        type: "error",
+        title: create ? "Could not create branch" : "Could not switch branch",
+        message: result?.error || "The branch could not be switched.",
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.checkoutBranch(name, create);
+          },
+        }],
+      });
+      this.updateView();
+      return false;
+    }
+    await this.refresh({ reason: "branch" });
+    this.updateView();
+    return true;
+  }
+
   async stageAllChanges() {
     if (this.destroyed || this.loading || this.committing || this.stagingAll)
       return false;
@@ -1263,7 +1640,8 @@ class GitSidebar extends Sidebar {
     this.renderList();
     this.updateView();
     this.editor.bottomBar?.refreshGitBranch?.();
-    if (reason === "stage" || reason === "commit" || reason === "manual")
+    if (reason === "stage" || reason === "commit" || reason === "branch" ||
+        reason === "manual")
       void this.refreshDiffTabs();
   }
 
@@ -1338,6 +1716,9 @@ class GitSidebar extends Sidebar {
   }
 
   applyWorkspace(root) {
+    this.closeBranchMenu({ restoreFocus: false });
+    this.switchingBranch = false;
+    this.branches = [];
     if (this.workspaceRoot && this.commitMessage.trim())
       this.commitDrafts.set(this.workspaceRoot, this.commitMessage);
     this.workspaceRoot = root;
@@ -1398,6 +1779,7 @@ class GitSidebar extends Sidebar {
   onClose() {
     clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
+    this.closeBranchMenu({ restoreFocus: false });
     this.fileScroller?.suspend?.();
   }
 
@@ -1406,6 +1788,10 @@ class GitSidebar extends Sidebar {
     this.destroyed = true;
     clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
+    this.closeBranchMenu({ restoreFocus: false });
+    this.detachBranchMenuDismiss();
+    this.commitResizeObserver?.disconnect();
+    this.commitResizeObserver = null;
     this.unsubscribeFileSystem?.();
     this.unsubscribeFileSystem = null;
     this.fileScroller?.destroy?.();

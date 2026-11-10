@@ -45,6 +45,27 @@ class FakeElement {
     this.attributes = new Map();
     this.listeners = new Map();
     this.className = "";
+    this.classList = {
+      add: (...names) => {
+        const classes = new Set(this.className.split(" ").filter(Boolean));
+        for (const name of names) classes.add(name);
+        this.className = [...classes].join(" ");
+      },
+      remove: (...names) => {
+        const classes = new Set(this.className.split(" ").filter(Boolean));
+        for (const name of names) classes.delete(name);
+        this.className = [...classes].join(" ");
+      },
+      toggle: (name, force) => {
+        const classes = new Set(this.className.split(" ").filter(Boolean));
+        const enabled = force === undefined ? !classes.has(name) : force === true;
+        if (enabled) classes.add(name);
+        else classes.delete(name);
+        this.className = [...classes].join(" ");
+        return enabled;
+      },
+      contains: (name) => this.className.split(" ").includes(name),
+    };
     this.textContent = "";
     this.title = "";
     this.hidden = false;
@@ -76,8 +97,14 @@ class FakeElement {
   click() {
     this.dispatch("click");
   }
+  querySelector() {
+    return null;
+  }
   querySelectorAll() {
     return [];
+  }
+  replaceChildren(...children) {
+    this.children = children;
   }
   contains() {
     return false;
@@ -148,6 +175,10 @@ function createSidebar(options = {}) {
     stageAll: 0,
     unstage: [],
     commit: [],
+    branches: 0,
+    switchBranch: [],
+    createBranch: [],
+    quickPanel: [],
     clipboard: [],
     openDiff: [],
     openFile: [],
@@ -215,6 +246,31 @@ function createSidebar(options = {}) {
             ? options.commitResult(message)
             : options.commitResult || { success: true, hash: "1234567890abcdef", summary: message };
         },
+        async getBranches() {
+          calls.branches += 1;
+          if (typeof options.branchesResult === "function")
+            return options.branchesResult();
+          return options.branchesResult || {
+            success: true,
+            branches: [
+              { name: "main", current: true },
+              { name: "develop", current: false },
+            ],
+            current: "main",
+          };
+        },
+        async switchBranch(name) {
+          calls.switchBranch.push(name);
+          return typeof options.switchBranchResult === "function"
+            ? options.switchBranchResult(name)
+            : options.switchBranchResult || { success: true, branch: name };
+        },
+        async createBranch(name) {
+          calls.createBranch.push(name);
+          return typeof options.createBranchResult === "function"
+            ? options.createBranchResult(name)
+            : options.createBranchResult || { success: true, branch: name };
+        },
       },
       writeClipboardText(text) { calls.clipboard.push(text); },
       onFileSystemChange(handler) {
@@ -239,6 +295,12 @@ function createSidebar(options = {}) {
     },
     contextMenuManager: {
       openContextMenu(name, context) { calls.menus.push([name, context]); },
+    },
+    quickPanel: {
+      open(config) {
+        calls.quickPanel.push(config);
+        return true;
+      },
     },
     domManager: {},
     notificationManager: {
@@ -486,6 +548,192 @@ test("GitSidebar renders a Stage All action only in a populated Changes header",
       false,
       "an empty Changes section hides Stage All",
     );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar validates branch names before talking to Git", () => {
+  assert.equal(GitSidebar.validateBranchName("feature/login"), null);
+  assert.equal(GitSidebar.validateBranchName("release/1.0"), null);
+  assert.match(GitSidebar.validateBranchName(""), /Enter a branch name/);
+  assert.match(GitSidebar.validateBranchName("-bad"), /dash/);
+  assert.match(GitSidebar.validateBranchName("bad name"), /spaces/);
+  assert.match(GitSidebar.validateBranchName("bad..name"), /'\.\.'/);
+  assert.match(GitSidebar.validateBranchName("bad@{name"), /@\{/);
+  assert.match(GitSidebar.validateBranchName("feature//login"), /segment/);
+  assert.match(GitSidebar.validateBranchName("feature."), /end with/);
+});
+
+test("GitSidebar sorts branches alphabetically for the menu", () => {
+  const sorted = GitSidebar.sortBranches([
+    { name: "zeta" },
+    { name: "develop" },
+    { name: "feature/login" },
+    { name: "alpha" },
+    { name: "" },
+    null,
+  ]);
+  assert.deepEqual(
+    toPlain(sorted.map((branch) => branch.name)),
+    ["alpha", "develop", "feature/login", "zeta"],
+  );
+});
+
+test("GitSidebar builds the branch menu with sorted branches and a New Branch action", async () => {
+  const menu = new FakeElement("div");
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    branchesResult: {
+      success: true,
+      branches: [
+        { name: "zeta", current: false },
+        { name: "main", current: true },
+        { name: "alpha", current: false },
+      ],
+      current: "main",
+    },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.branchMenuElement = menu;
+    assert.equal(await sidebar.openBranchMenu(), true);
+    assert.equal(calls.branches, 1);
+    assert.equal(menu.hidden, false);
+    assert.equal(sidebar.branchMenuOpen, true);
+    assert.deepEqual(
+      toPlain(sidebar.branches.map((branch) => branch.name)),
+      ["alpha", "main", "zeta"],
+    );
+    const items = menu.children.filter((child) =>
+      child.className.split(" ").includes("git-branch-menu-item"));
+    assert.deepEqual(
+      toPlain(items.map((item) => item.children.find((child) =>
+        child.className.includes("git-branch-menu-item-name"))?.textContent)),
+      ["alpha", "main", "zeta", "New Branch"],
+    );
+    const current = items[1];
+    assert.equal(current.getAttribute("aria-current"), "true");
+    assert.ok(current.className.includes("is-current"));
+    assert.ok(current.children[1].className.includes("git-branch-menu-check"));
+    assert.ok(menu.children.some((child) =>
+      child.className === "git-branch-menu-separator"));
+    const newBranch = items[3];
+    assert.ok(newBranch.className.includes("git-branch-menu-new"));
+    assert.equal(newBranch.children[1].textContent, "New Branch");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar switches branches and keeps the commit draft", async () => {
+  const featureStatus = makeStatus([modifiedEntry], {
+    branch: { name: "feature/login" },
+  });
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([modifiedEntry]) },
+      { success: true, status: featureStatus },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.getBranchLabel(), "main");
+    sidebar.commitMessage = "fix: keep draft";
+    assert.equal(await sidebar.switchToBranch("feature/login"), true);
+    assert.deepEqual(calls.switchBranch, ["feature/login"]);
+    assert.equal(calls.status, 2, "a branch switch refreshes the status");
+    assert.equal(sidebar.getBranchLabel(), "feature/login");
+    assert.equal(sidebar.commitMessage, "fix: keep draft");
+    assert.equal(await sidebar.switchToBranch("feature/login"), false);
+    assert.equal(calls.switchBranch.length, 1, "the current branch is ignored");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports branch switch failures with a retry action", async () => {
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    switchBranchResult: {
+      success: false,
+      code: "GIT_COMMAND_FAILED",
+      error: "Your local changes would be overwritten. Commit or stash them first.",
+    },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.switchToBranch("feature/login"), false);
+    const notification = calls.notifications.find(
+      (item) => item.title === "Could not switch branch",
+    );
+    assert.equal(notification.type, "error");
+    assert.equal(notification.source, "Git");
+    assert.match(notification.message, /overwritten/);
+    assert.deepEqual(
+      toPlain(notification.actions.map((action) => action.label)),
+      ["Retry"],
+    );
+    notification.actions[0].action();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.switchBranch.length, 2);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar opens the New Branch prompt and creates the branch", async () => {
+  const { sidebar, calls } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.promptNewBranch(), true);
+    const panel = calls.quickPanel[0];
+    assert.equal(panel.id, "git-new-branch");
+    assert.equal(panel.mode, "input");
+    assert.equal(panel.title, "New Branch");
+    assert.match(panel.validate("bad name"), /spaces/);
+    assert.equal(panel.validate("feature/login"), null);
+    panel.onAccept("feature/login");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls.createBranch, ["feature/login"]);
+    assert.equal(calls.status, 2, "a created branch refreshes the status");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar rejects an invalid new branch name before Git", async () => {
+  const { sidebar, calls } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.createNewBranch("bad name"), false);
+    assert.equal(calls.createBranch.length, 0);
+    const notification = calls.notifications.find(
+      (item) => item.title === "Invalid branch name",
+    );
+    assert.equal(notification.type, "error");
+    assert.equal(notification.source, "Git");
+    assert.match(notification.message, /spaces/);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar prevents overlapping branch switches", async () => {
+  const pending = deferred();
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    switchBranchResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.switchToBranch("feature/login");
+    assert.equal(await sidebar.switchToBranch("other"), false);
+    assert.equal(calls.switchBranch.length, 1);
+    assert.equal(sidebar.switchingBranch, true);
+    pending.resolve({ success: true, branch: "feature/login" });
+    assert.equal(await first, true);
+    assert.equal(sidebar.switchingBranch, false);
   } finally {
     sidebar.destroy();
   }

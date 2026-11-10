@@ -73,6 +73,8 @@ contextBridge.exposeInMainWorld("api", {
     commit: (message) => ipcRenderer.invoke("Git:commit", message),
     getBranches: () => ipcRenderer.invoke("Git:branches"),
     getCurrentBranch: () => ipcRenderer.invoke("Git:currentBranch"),
+    switchBranch: (name) => ipcRenderer.invoke("Git:switchBranch", name),
+    createBranch: (name) => ipcRenderer.invoke("Git:createBranch", name),
   },
   lsp: {
     getStatus: () => ipcRenderer.invoke("Lsp:status"),

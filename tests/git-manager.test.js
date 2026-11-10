@@ -749,6 +749,52 @@ test("GitManager reports merge conflicts in the status", { skip: gitSkip }, asyn
   }
 });
 
+test("GitManager switches and creates branches safely", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    const created = await manager.createBranch("feature/login");
+    assert.equal(created.success, true);
+    assert.equal(created.branch, "feature/login");
+    assert.equal((await manager.getCurrentBranch()).branch, "feature/login");
+    assert.equal(
+      (await manager.createBranch("feature/login")).error,
+      "A branch with that name already exists.",
+    );
+    assert.equal(
+      (await manager.switchBranch("missing")).error,
+      "That branch could not be found.",
+    );
+    assert.equal((await manager.switchBranch("main")).success, true);
+    assert.equal((await manager.getCurrentBranch()).branch, "main");
+    assert.equal((await manager.switchBranch("-bad")).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.createBranch("bad name")).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.createBranch("bad..name")).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.createBranch(42)).code, "INVALID_ARGUMENT");
+
+    await fs.writeFile(path.join(root, "tracked.txt"), "dirty\n");
+    assert.equal((await manager.switchBranch("feature/login")).success, true);
+    assert.equal(
+      await fs.readFile(path.join(root, "tracked.txt"), "utf8"),
+      "dirty\n",
+      "uncommitted worktree changes survive a branch switch",
+    );
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+
+  const unborn = await createRepository({ commits: 0 });
+  const unbornManager = managerFor(unborn);
+  try {
+    assert.equal((await unbornManager.createBranch("first")).success, true);
+    assert.equal((await unbornManager.getCurrentBranch()).branch, "first");
+  } finally {
+    unbornManager.dispose();
+    await removeAll(unborn);
+  }
+});
+
 test("GitManager reads branches and paginated history", { skip: gitSkip }, async () => {
   const root = await createRepository();
   for (const name of ["second.txt", "third.txt"]) {
@@ -809,7 +855,7 @@ test("GitManager exposes only named Git channels through the preload", () => {
     "Git:isAvailable", "Git:version", "Git:init", "Git:repository", "Git:isRepository",
     "Git:repositoryRoot", "Git:status", "Git:diff", "Git:fileVersions",
     "Git:stage", "Git:stageAll", "Git:unstage", "Git:commit", "Git:branches",
-    "Git:currentBranch",
+    "Git:currentBranch", "Git:switchBranch", "Git:createBranch",
   ]) {
     assert.match(preload, new RegExp(`"${channel}"`), `preload exposes ${channel}`);
     assert.match(managerSource, new RegExp(`"${channel}"`), `GitManager registers ${channel}`);

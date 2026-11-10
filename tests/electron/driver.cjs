@@ -1684,6 +1684,24 @@ app.whenReady().then(() => {
             { stdio: "ignore" },
           );
         }
+        // Branch switching needs a commit so the default branch ref exists.
+        fs.writeFileSync(
+          path.join(sourceControlWorkspace, "source-control-base.txt"),
+          "base\n",
+        );
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "add", "--", "source-control-base.txt"],
+          { stdio: "ignore" },
+        );
+        execFileSync(
+          "git",
+          [
+            "-C", sourceControlWorkspace,
+            "commit", "-q", "-m", "Seed Source Control fixture",
+          ],
+          { stdio: "ignore" },
+        );
         const sourceControlResult = await run(
           `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "repository")`,
         );

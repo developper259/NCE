@@ -239,6 +239,8 @@ export class GitManager {
     ipc.handle("Git:commit", async (_event, message) => this.commit(message));
     ipc.handle("Git:branches", async () => this.getBranches());
     ipc.handle("Git:currentBranch", async () => this.getCurrentBranch());
+    ipc.handle("Git:switchBranch", async (_event, name) => this.switchBranch(name));
+    ipc.handle("Git:createBranch", async (_event, name) => this.createBranch(name));
     ipc.handle("Git:log", async (_event, options) => this.getLog(options));
   }
 
@@ -756,6 +758,60 @@ export class GitManager {
         ? result.output.stdout.toString("utf8").trim()
         : null,
     };
+  }
+
+  switchBranch(name: unknown): Promise<GitResult<{ branch: string }>> {
+    return this.mutationQueue.run(() => this.checkoutBranch(name, false));
+  }
+
+  createBranch(name: unknown): Promise<GitResult<{ branch: string }>> {
+    return this.mutationQueue.run(() => this.checkoutBranch(name, true));
+  }
+
+  private async checkoutBranch(
+    name: unknown,
+    create: boolean,
+  ): Promise<GitResult<{ branch: string }>> {
+    const branchName = this.readBranchName(name);
+    if (!branchName)
+      return failure("INVALID_ARGUMENT", "Enter a valid branch name.");
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const format = await this.runGit(
+      ["check-ref-format", `refs/heads/${branchName}`],
+      { cwd: context.root, allowExitCodes: [0, 1] },
+    );
+    if (!format.ok) return format.failure;
+    if (format.output.code !== 0)
+      return failure("INVALID_ARGUMENT", "Enter a valid branch name.");
+    const branches = await this.getBranches();
+    if (!branches.success) return branches;
+    const exists = branches.branches.some((branch) => branch.name === branchName);
+    if (create && exists)
+      return failure("GIT_COMMAND_FAILED", "A branch with that name already exists.");
+    if (!create && !exists)
+      return failure("GIT_COMMAND_FAILED", "That branch could not be found.");
+    const result = await this.runGit(
+      create ? ["checkout", "-b", branchName] : ["checkout", branchName],
+      { cwd: context.root },
+    );
+    if (!result.ok) {
+      const detail = result.stderr || "";
+      if (/would be overwritten by checkout|please commit your changes or stash/i.test(detail))
+        return failure(
+          "GIT_COMMAND_FAILED",
+          "Your local changes would be overwritten. Commit or stash them first.",
+        );
+      return result.failure;
+    }
+    return { success: true, branch: branchName };
+  }
+
+  private readBranchName(name: unknown): string | null {
+    if (typeof name !== "string") return null;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 255 || trimmed.startsWith("-")) return null;
+    return trimmed;
   }
 
   async getLog(

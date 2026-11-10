@@ -148,18 +148,92 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.listElement.hidden === false, "change list is visible with changes");
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
   check(git.commitInput.placeholder === "Commit message...", "commit placeholder");
+  check(
+    getComputedStyle(git.commitInput).resize === "none",
+    "commit input has no manual resize handle",
+  );
+  const singleLineHeight = git.commitInput.getBoundingClientRect().height;
+  check(
+    singleLineHeight > 0 && singleLineHeight <= 32,
+    "commit input starts as a single line",
+  );
+  git.commitInput.value = "line one\nline two\nline three";
+  git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await nextFrame();
+  const multiLineHeight = git.commitInput.getBoundingClientRect().height;
+  check(
+    multiLineHeight >= singleLineHeight + 20,
+    "commit input grows with the message lines",
+  );
+  git.commitInput.value = Array.from(
+    { length: 20 },
+    (_, index) => `line ${index + 1}`,
+  ).join("\n");
+  git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await nextFrame();
+  const cappedHeight = git.commitInput.getBoundingClientRect().height;
+  check(
+    cappedHeight > multiLineHeight && cappedHeight <= 141 &&
+      getComputedStyle(git.commitInput).overflowY === "auto",
+    "commit input caps its growth and scrolls instead",
+  );
+  git.commitInput.value = "";
+  git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await nextFrame();
+  check(
+    Math.abs(git.commitInput.getBoundingClientRect().height - singleLineHeight) <= 1,
+    "commit input shrinks back when the message is cleared",
+  );
   check(git.commitButton.disabled === true, "commit is disabled before staging");
   check(
     git.commitStatus.getBoundingClientRect().width <= 1,
     "commit status text takes no visible space",
   );
   check(
-    Math.abs(
-      git.commitButton.parentElement.getBoundingClientRect().right -
-        git.commitButton.getBoundingClientRect().right,
-    ) <= 1,
-    "Commit is the only visible control in its row",
+    Boolean(git.commitBoxElement.querySelector(".git-sidebar-commit-input")) &&
+      !git.commitBoxElement.querySelector(".fi-rr-pencil"),
+    "commit card has no pencil icon",
   );
+  check(
+    git.branchButton.textContent.includes("main") &&
+      Boolean(git.branchButton.querySelector(".git-branch-button-arrow")),
+    "branch selector shows the current branch and a dropdown arrow",
+  );
+  const commitActions = git.commitButton.closest(".git-sidebar-commit-actions");
+  const commitTools = git.commitButton.parentElement;
+  check(
+    commitActions.firstElementChild === git.branchButton,
+    "branch selector sits at the far left of the commit card",
+  );
+  check(
+    commitActions.lastElementChild === commitTools &&
+      commitTools.lastElementChild === git.commitButton,
+    "Commit sits at the far right of the commit card",
+  );
+  check(
+    git.settingsButton.parentElement === commitTools &&
+      commitTools.firstElementChild === git.settingsButton &&
+      git.settingsButton.getAttribute("aria-label") === "Open Git settings",
+    "Git settings gear sits directly left of Commit",
+  );
+  check(
+    git.commitButton.querySelector("i")?.className.includes("fi-rr-check") === true &&
+      git.commitButton.querySelector(".git-sidebar-commit-button-label")?.textContent ===
+        "Commit",
+    "Commit button keeps its check icon and label",
+  );
+  git.settingsButton.click();
+  await waitFor(
+    () => editor.tabManager.activeTab?.type === "settings",
+    "Git settings tab to open",
+  );
+  check(
+    editor.getSettingsView().category === "Git",
+    "Git settings gear opens the Git category",
+  );
+  await editor.tabManager.closeTab(editor.tabManager.activeTab);
+  await nextFrame();
+  check(git.isOpen, "Source Control stays open after visiting settings");
   const branchIndicatorWithChanges = document.querySelector(".bottomBar-git-branch");
   const branchDirtyWithChanges = branchIndicatorWithChanges.querySelector(
     ".bottomBar-git-branch-dirty",
@@ -176,7 +250,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     branchIndicatorWithChanges.title.includes("Uncommitted changes"),
     "dirty branch tooltip explains the changes",
   );
-  const row = git.listLayer.querySelector(
+  let row = git.listLayer.querySelector(
     `.git-file-row[data-path="${fileName}"]`,
   );
   check(Boolean(row), "untracked file row is visible");
@@ -193,6 +267,105 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       .some((element) => element.textContent === "Changes"),
     "Changes section is visible",
   );
+
+  // Branch selector: alphabetical menu, creation and switching.
+  check(
+    (await editor.api.git.createBranch("zeta"))?.success === true,
+    "fixture branch zeta is created",
+  );
+  check(
+    (await editor.api.git.createBranch("alpha"))?.success === true,
+    "fixture branch alpha is created",
+  );
+  const backToMain = await editor.api.git.switchBranch("main");
+  check(
+    backToMain?.success === true,
+    `fixture returns to main: ${JSON.stringify(backToMain)}`,
+  );
+  await git.refresh({ reason: "manual" });
+  await waitFor(() => git.getBranchLabel() === "main", "main branch fixture");
+  git.branchButton.click();
+  await waitFor(
+    () => git.branchMenuOpen && !git.branchMenuLoading,
+    "branch menu to load",
+  );
+  await nextFrame();
+  const branchMenu = document.querySelector(".git-branch-menu");
+  const branchMenuRect = branchMenu.getBoundingClientRect();
+  const branchButtonRect = git.branchButton.getBoundingClientRect();
+  const commitBoxRect = git.commitBoxElement.getBoundingClientRect();
+  check(branchMenu.hidden === false, "branch menu is visible");
+  check(
+    branchMenuRect.bottom <= branchButtonRect.top + 1,
+    "branch menu opens upward",
+  );
+  check(
+    branchMenuRect.left >= commitBoxRect.left - 1 &&
+      branchMenuRect.right <= commitBoxRect.right + 1,
+    "branch menu aligns with the commit card",
+  );
+  const branchItems = [...branchMenu.querySelectorAll(".git-branch-menu-item")];
+  const branchLabels = branchItems
+    .map((item) => item.querySelector(".git-branch-menu-item-name")?.textContent)
+    .filter(Boolean);
+  check(
+    branchLabels.join(",") === "alpha,main,zeta,New Branch",
+    "branch menu lists branches alphabetically then New Branch",
+  );
+  const currentBranchItem = branchItems.find(
+    (item) =>
+      item.querySelector(".git-branch-menu-item-name")?.textContent === "main",
+  );
+  check(
+    currentBranchItem?.classList.contains("is-current") === true &&
+      Boolean(currentBranchItem.querySelector(".git-branch-menu-check")),
+    "current branch is marked in the menu",
+  );
+  const newBranchItem = branchItems.find(
+    (item) => item.classList.contains("git-branch-menu-new"),
+  );
+  newBranchItem.click();
+  await waitFor(
+    () => editor.quickPanel.isOpen("git-new-branch"),
+    "new branch prompt",
+  );
+  check(
+    editor.quickPanel.title.textContent === "New Branch",
+    "new branch prompt is titled",
+  );
+  editor.quickPanel.input.value = "feature/test";
+  editor.quickPanel.accept("feature/test");
+  await waitFor(
+    () => git.getBranchLabel() === "feature/test",
+    "new branch to be created and checked out",
+  );
+  await nextFrame();
+  check(
+    git.branchButton.textContent.includes("feature/test"),
+    "branch selector follows the created branch",
+  );
+  check(!git.branchMenuOpen, "branch menu closes after creating a branch");
+  git.branchButton.click();
+  await waitFor(
+    () => git.branchMenuOpen && !git.branchMenuLoading,
+    "branch menu to reopen",
+  );
+  await nextFrame();
+  const mainBranchItem = [...document.querySelectorAll(".git-branch-menu-item")]
+    .find((item) =>
+      item.querySelector(".git-branch-menu-item-name")?.textContent === "main");
+  mainBranchItem.click();
+  await waitFor(() => git.getBranchLabel() === "main", "switch back to main");
+  await nextFrame();
+  check(!git.branchMenuOpen, "branch menu closes after switching");
+  check(
+    git.getViewState().changes.length === 2,
+    "branch switches preserve the working changes",
+  );
+  row = git.listLayer.querySelector(
+    `.git-file-row[data-path="${fileName}"]`,
+  );
+  check(Boolean(row), "change row is visible after branch switching");
 
   // Responsive widths.
   const sidebar = document.querySelector(".sidebar-left");
