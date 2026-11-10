@@ -589,26 +589,21 @@
 .git-sidebar-commit-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   min-width: 0;
 }
 
 .git-sidebar-commit-status {
-  flex: 1 1 auto;
-  min-width: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
   overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: 10.5px;
-  text-overflow: ellipsis;
+  clip-path: inset(50%);
   white-space: nowrap;
-}
-
-.git-sidebar-commit-status[data-state="error"] {
-  color: var(--state-error);
-}
-
-.git-sidebar-commit-status[data-state="warning"] {
-  color: var(--state-warning);
 }
 
 .git-sidebar-commit-button {
@@ -663,10 +658,6 @@
 @container (max-width: 190px) {
   .git-sidebar-branch-sync {
     display: none;
-  }
-
-  .git-sidebar-commit-status {
-    font-size: 10px;
   }
 }
 

@@ -149,6 +149,17 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
   check(git.commitInput.placeholder === "Commit message...", "commit placeholder");
   check(git.commitButton.disabled === true, "commit is disabled before staging");
+  check(
+    git.commitStatus.getBoundingClientRect().width <= 1,
+    "commit status text takes no visible space",
+  );
+  check(
+    Math.abs(
+      git.commitButton.parentElement.getBoundingClientRect().right -
+        git.commitButton.getBoundingClientRect().right,
+    ) <= 1,
+    "Commit is the only visible control in its row",
+  );
   const branchIndicatorWithChanges = document.querySelector(".bottomBar-git-branch");
   const branchDirtyWithChanges = branchIndicatorWithChanges.querySelector(
     ".bottomBar-git-branch-dirty",
