@@ -516,6 +516,25 @@ test("GitSidebar discards a status that belongs to a previous workspace", async 
   }
 });
 
+test("GitSidebar refreshes the bottom-bar branch after status and workspace changes", async () => {
+  const { sidebar, editor } = createSidebar({ entries: [] });
+  let refreshes = 0;
+  editor.bottomBar = {
+    refreshGitBranch() {
+      refreshes += 1;
+    },
+  };
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(refreshes, 1);
+    sidebar.isOpen = false;
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    assert.equal(refreshes, 2);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar explains missing workspaces, plain folders, and missing Git", async () => {
   const empty = createSidebar({ rootPath: "" });
   try {

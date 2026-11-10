@@ -1156,6 +1156,7 @@ class GitSidebar extends Sidebar {
       this.stale = false;
       this.renderList();
       this.updateView();
+      this.editor.bottomBar?.refreshGitBranch?.();
       return;
     }
     this.loading = true;
@@ -1193,6 +1194,7 @@ class GitSidebar extends Sidebar {
       this.listResetPending = true;
     this.renderList();
     this.updateView();
+    this.editor.bottomBar?.refreshGitBranch?.();
     if (reason === "stage" || reason === "commit" || reason === "manual")
       void this.refreshDiffTabs();
   }
@@ -1296,6 +1298,7 @@ class GitSidebar extends Sidebar {
       : this.editor.fileExplorer?.rootPath || "";
     this.applyWorkspace(root);
     if (this.isOpen && root) void this.refresh({ reason: "workspace" });
+    else this.editor.bottomBar?.refreshGitBranch?.();
   }
 
   handleFileSystemEvents() {

@@ -68,6 +68,42 @@
   outline-offset: -2px;
 }
 
+.bottomBar-git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 100%;
+  max-width: min(240px, 30vw);
+  margin-left: 4px;
+  padding: 0 8px;
+  border: 0;
+  color: var(--text-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.bottomBar-git-branch[hidden] { display: none; }
+.bottomBar-git-branch:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.bottomBar-git-branch:focus-visible {
+  outline: 1px solid var(--accent-primary);
+  outline-offset: -2px;
+}
+.bottomBar-git-branch i {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+.bottomBar-git-branch-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bottomBar-problems {
   display: flex;
   align-items: center;

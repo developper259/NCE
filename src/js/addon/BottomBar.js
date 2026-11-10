@@ -56,7 +56,12 @@ class BottomBar {
     this.problemIndicators = null;
     this.problemPairs = { errors: null, warnings: null };
     this.problemCounts = { errors: null, warnings: null };
+    this.gitBranchIndicator = null;
+    this.gitBranchNameElement = null;
+    this.gitBranch = null;
+    this.gitBranchRequest = 0;
 
+    this.buildGitBranchIndicator();
     this.buildProblemIndicators();
     this.refreshProblemCounts();
     this.refreshLanguage();
@@ -106,6 +111,118 @@ class BottomBar {
     });
     left.append(group);
     this.problemIndicators = group;
+  }
+
+  buildGitBranchIndicator() {
+    const left = getElement(".bottomBar .left");
+    if (!left || typeof document === "undefined" ||
+        typeof document.createElement !== "function") return;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "bottomBar-git-branch";
+    button.hidden = true;
+    button.dataset.action = "git-branch";
+    button.title = "Open Source Control";
+    button.setAttribute("aria-label", "Open Source Control");
+
+    const icon = document.createElement("i");
+    icon.className = "fi fi-rr-code-branch";
+    icon.setAttribute("aria-hidden", "true");
+    const name = document.createElement("span");
+    name.className = "bottomBar-git-branch-name";
+    button.append(icon, name);
+
+    button.addEventListener("click", () => void this.openGitSidebar());
+    left.append(button);
+    this.gitBranchIndicator = button;
+    this.gitBranchNameElement = name;
+  }
+
+  openGitSidebar() {
+    const manager = this.editor.sidebarManager;
+    if (typeof manager?.openMenu !== "function") return false;
+    manager.openMenu("git");
+    return true;
+  }
+
+  static getGitBranchLabel(branch) {
+    if (typeof branch === "string") return branch.trim();
+    if (!branch) return "";
+    if (branch.name) return String(branch.name).trim();
+    if (branch.oid) return `detached @ ${String(branch.oid).slice(0, 7)}`;
+    return branch.detached ? "Detached HEAD" : "detached";
+  }
+
+  static isTerminalGitError(code) {
+    return code === "GIT_NOT_FOUND" ||
+      code === "NOT_A_REPOSITORY" ||
+      code === "REPOSITORY_NOT_FOUND" ||
+      code === "PERMISSION_DENIED" ||
+      code === "INVALID_PATH" ||
+      code === "GIT_OUTPUT_LIMIT";
+  }
+
+  applyGitBranch(branch, { stale = false } = {}) {
+    this.gitBranch = branch || null;
+    if (!this.gitBranchIndicator) return;
+    const label = BottomBar.getGitBranchLabel(branch);
+    this.gitBranchIndicator.hidden = !label;
+    this.gitBranchIndicator.dataset.branch = label;
+    if (this.gitBranchNameElement) this.gitBranchNameElement.textContent = label;
+    if (!label) {
+      this.gitBranchIndicator.title = "Open Source Control";
+      this.gitBranchIndicator.setAttribute("aria-label", "Open Source Control");
+      return;
+    }
+    const ahead = Math.max(0, Number(branch?.ahead) || 0);
+    const behind = Math.max(0, Number(branch?.behind) || 0);
+    const tracking = [
+      ahead ? `↑${ahead}` : "",
+      behind ? `↓${behind}` : "",
+    ].filter(Boolean).join(" ");
+    const upstream = typeof branch?.upstream === "string" && branch.upstream
+      ? ` (${branch.upstream})`
+      : "";
+    const details = `${label}${tracking ? ` ${tracking}` : ""}${upstream}`;
+    this.gitBranchIndicator.title =
+      `${details}${stale ? " · Out of date" : ""} · Open Source Control`;
+    this.gitBranchIndicator.setAttribute(
+      "aria-label",
+      `Git branch ${label}.${stale ? " Out of date." : ""} Open Source Control.`,
+    );
+  }
+
+  async refreshGitBranch() {
+    if (!this.gitBranchIndicator) return false;
+    const root = this.editor.fileExplorer?.rootPath || "";
+    const git = this.editor.api?.git;
+    const request = ++this.gitBranchRequest;
+    if (!root || typeof git?.getCurrentBranch !== "function") {
+      this.applyGitBranch(null);
+      return false;
+    }
+    let result = null;
+    try {
+      result = await git.getCurrentBranch();
+    } catch {
+      result = null;
+    }
+    if (request !== this.gitBranchRequest) return false;
+    if (root !== (this.editor.fileExplorer?.rootPath || "")) return false;
+    if (result?.success === true) {
+      const branch = typeof result.branch === "string" && result.branch
+        ? { name: result.branch }
+        : { detached: true };
+      this.applyGitBranch(branch);
+      return true;
+    }
+    const code = result?.code || "GIT_COMMAND_FAILED";
+    if (BottomBar.isTerminalGitError(code) || !this.gitBranch) {
+      this.applyGitBranch(null);
+      return false;
+    }
+    this.applyGitBranch(this.gitBranch, { stale: true });
+    return false;
   }
 
   openProblemsPanel() {

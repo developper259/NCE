@@ -322,6 +322,7 @@ class Events {
 
   onWindowFocus() {
     this.editor.tabManager.scheduleFocusResync();
+    this.editor.bottomBar?.refreshGitBranch?.();
   }
 
   onKeyDown(event) {

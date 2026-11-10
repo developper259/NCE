@@ -83,9 +83,11 @@ test("BottomBar reports real problem counts and opens the Problems panel", () =>
   );
   const bar = new BottomBar(editor);
 
-  assert.equal(left.children.length, 2);
+  assert.equal(left.children.length, 3);
   assert.equal(left.children[0], terminal);
-  assert.equal(left.children[1], bar.problemIndicators);
+  assert.equal(left.children[1], bar.gitBranchIndicator);
+  assert.equal(left.children[2], bar.problemIndicators);
+  assert.equal(bar.gitBranchIndicator.hidden, true);
   assert.equal(bar.problemIndicators.tagName, "div");
   assert.equal(bar.problemIndicators.getAttribute("role"), "button");
   assert.equal(bar.problemIndicators.tabIndex, 0);

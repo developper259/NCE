@@ -63,6 +63,13 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       getComputedStyle(git.stateInit).cursor === "pointer",
       "initialization action shows a pointer cursor",
     );
+    const branchIndicator = document.querySelector(".bottomBar-git-branch");
+    check(Boolean(branchIndicator), "bottom-bar branch control exists");
+    await nextFrame();
+    check(
+      branchIndicator.hidden === true,
+      "bottom bar hides the branch without a repository",
+    );
 
     // State B: initialize then clean repository.
     git.stateInit.click();
@@ -79,6 +86,21 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       Boolean(git.summaryElement.querySelector(".fi-rr-code-branch")),
       "branch icon is displayed",
     );
+    await waitFor(
+      () => branchIndicator.hidden === false,
+      "bottom-bar branch indicator",
+    );
+    check(
+      branchIndicator.textContent.includes(git.branchNameElement.textContent.trim()),
+      "bottom bar shows the current branch",
+    );
+    check(
+      branchIndicator.getAttribute("aria-label").includes("Open Source Control"),
+      "bottom-bar branch opens Source Control",
+    );
+    editor.sidebarManager.closeMenu("git");
+    branchIndicator.click();
+    await waitFor(() => git.isOpen, "bottom-bar branch to reopen Source Control");
     check(git.stateRefresh.hidden === false, "clean state offers refresh");
     return { mode: "clean", branch: git.branchNameElement.textContent.trim() };
   }
