@@ -104,9 +104,11 @@ const SETTINGS_UI = Object.freeze([
     key: "terminal.args",
     category: "Terminal",
     label: "Shell Arguments",
-    description: "Arguments passed to the shell for new terminal sessions. Quote values that contain spaces. PowerShell prompt colors are neutralized automatically unless you supply -Command or -File.",
+    description: "Arguments passed to the shell for new terminal sessions.",
     keywords: ["args", "arguments", "shell", "terminal", "powershell", "cmd", "flags"],
     control: "text",
+    detail:
+      "Quote values that contain spaces. PowerShell prompt colors are neutralized automatically unless you supply -Command or -File.",
   },
 ]);
 
@@ -1948,6 +1950,7 @@ class SettingsView {
       input.autocomplete = "off";
       input.spellcheck = false;
       input.classList.add("setting-input-wide");
+      if (setting.detail) input.title = setting.detail;
     }
     input.addEventListener("change", async () => {
       const previous = String(SETTINGS_GET(setting.key) || "");
