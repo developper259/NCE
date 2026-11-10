@@ -33,7 +33,6 @@ const SETTINGS_UI = Object.freeze([
     control: "path",
     panelTitle: "Set Git Path",
     placeholder: "Absolute path to git, empty for automatic detection",
-    emptyLabel: "Automatic detection",
   },
   {
     key: "files.autoSave",
@@ -457,6 +456,14 @@ class SettingsView {
     description.id = `${controlId}-description`;
     description.textContent = setting.description;
     text.append(label, description);
+    let pathCurrent = null;
+    if (setting.control === "path") {
+      pathCurrent = document.createElement("p");
+      pathCurrent.className = "setting-path-current";
+      pathCurrent.id = `${controlId}-current`;
+      pathCurrent.hidden = true;
+      text.appendChild(pathCurrent);
+    }
     const control =
       setting.control === "select"
         ? this.createSelect(setting, controlId)
@@ -465,7 +472,7 @@ class SettingsView {
           : setting.control === "shortcut"
             ? this.createShortcutInput(setting, controlId)
             : setting.control === "path"
-              ? this.createPathControl(setting, controlId)
+              ? this.createPathControl(setting, controlId, pathCurrent)
               : this.createTextInput(setting, controlId);
     const controlWrap = document.createElement("div");
     controlWrap.className = "settings-row-control";
@@ -1963,27 +1970,20 @@ class SettingsView {
     return input;
   }
 
-  createPathControl(setting, id) {
+  createPathControl(setting, id, current) {
     const button = document.createElement("button");
     button.id = id;
     button.type = "button";
-    button.className = "setting-input setting-path-button";
-    button.setAttribute("aria-label", setting.label);
-    button.setAttribute("aria-describedby", `${id}-description`);
-    const value = document.createElement("span");
-    value.className = "setting-path-value";
-    const icon = document.createElement("i");
-    icon.className = "fi fi-rr-pencil";
-    icon.setAttribute("aria-hidden", "true");
-    button.append(value, icon);
-    this.updatePathControl(button, setting, SETTINGS_GET(setting.key));
+    button.className = "settings-action-button setting-path-button";
+    button.setAttribute("aria-haspopup", "dialog");
+    this.updatePathControl(button, setting, SETTINGS_GET(setting.key), current);
 
     button.addEventListener("click", async () => {
       const next = await this.requestSettingPath(setting);
       if (next === null) return;
       const res = await SETTINGS_SET(setting.key, next);
       if (!res || (typeof res === "object" && !res.success)) return;
-      this.updatePathControl(button, setting, SETTINGS_GET(setting.key));
+      this.updatePathControl(button, setting, SETTINGS_GET(setting.key), current);
       this.editor.gitSidebar?.refresh?.({ reason: "settings" });
     });
     return button;
@@ -2012,14 +2012,27 @@ class SettingsView {
     });
   }
 
-  updatePathControl(control, setting, value) {
+  updatePathControl(control, setting, value, current = null) {
     const display = String(value || "");
-    const label = control.querySelector(".setting-path-value");
-    if (label) {
-      label.textContent = display || setting.emptyLabel || "Automatic detection";
+    const currentEl =
+      current ||
+      control.closest?.(".setting-row")?.querySelector(".setting-path-current");
+    if (currentEl) {
+      currentEl.textContent = display;
+      currentEl.title = display;
+      currentEl.hidden = !display;
     }
-    control.classList.toggle("is-placeholder", !display);
-    control.title = display;
+    control.textContent = display ? "Change path" : "Set path";
+    control.setAttribute(
+      "aria-label",
+      `${display ? "Change" : "Set"} ${setting.label}`,
+    );
+    control.setAttribute(
+      "aria-describedby",
+      display && currentEl
+        ? `${control.id}-description ${currentEl.id}`
+        : `${control.id}-description`,
+    );
   }
 
   createShortcutInput(setting, id) {

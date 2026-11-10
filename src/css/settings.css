@@ -99,20 +99,19 @@
 .setting-select-option.selected { color: var(--text-primary); }
 .setting-input { width: 150px; }
 .setting-input-wide { width: min(360px, 40vw); }
-.setting-path-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: min(320px, 40vw);
+.setting-path-button { white-space: nowrap; }
+.setting-path-current {
   max-width: 100%;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  margin: 6px 0 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.setting-path-button:hover { border-color: var(--text-tertiary); background: var(--bg-hover-alt); }
-.setting-path-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.setting-path-button.is-placeholder .setting-path-value { color: var(--text-tertiary); }
-.setting-path-button i { flex: 0 0 auto; color: var(--text-tertiary); font-size: 11px; }
+.setting-path-current[hidden] { display: none; }
 .nce-checkbox { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 18px; color: var(--text-secondary); font-size: 12px; line-height: 18px; cursor: pointer; user-select: none; }
 .nce-checkbox[hidden] { display: none; }
 .nce-checkbox > input[type="checkbox"] { position: absolute; inset: 0 auto auto 0; width: 18px; height: 18px; margin: 0; opacity: 0; appearance: none; cursor: inherit; }
@@ -133,6 +132,7 @@
 .settings-search:focus-visible,
 .setting-select:focus-visible,
 .setting-input:focus-visible,
+.setting-path-button:focus-visible,
 .settings-nav-item:focus-visible,
 .setting-toggle input:focus-visible + span,
 .setting-shortcut-btn:focus-visible,
@@ -198,7 +198,6 @@
   .setting-select,
   .setting-select-arrow,
   .setting-select-option { transition: none; }
-  .setting-path-button { transition: none; }
 }
 @media (max-width: 760px) {
   .settings-sidebar { width: 170px; flex-basis: 170px; }

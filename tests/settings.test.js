@@ -749,6 +749,48 @@ test("Set Git path prefills the configured path in the quick panel", async () =>
   assert.equal(await pending, "/next/git");
 });
 
+test("Git path control shows the configured path next to a standard action button", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
+  const view = Object.create(SettingsView.prototype);
+  const attributes = new Map();
+  const current = {
+    id: "setting-git-path-current",
+    hidden: true,
+    textContent: "",
+    title: "",
+  };
+  const button = {
+    id: "setting-git-path",
+    textContent: "",
+    setAttribute(name, value) {
+      attributes.set(name, value);
+    },
+  };
+
+  view.updatePathControl(button, { label: "Git Path" }, "", current);
+  assert.equal(button.textContent, "Set path");
+  assert.equal(current.hidden, true);
+  assert.equal(
+    attributes.get("aria-describedby"),
+    "setting-git-path-description",
+  );
+
+  view.updatePathControl(
+    button,
+    { label: "Git Path" },
+    "C:\\Program Files\\Git\\cmd\\git.exe",
+    current,
+  );
+  assert.equal(button.textContent, "Change path");
+  assert.equal(current.hidden, false);
+  assert.equal(current.textContent, "C:\\Program Files\\Git\\cmd\\git.exe");
+  assert.equal(
+    attributes.get("aria-describedby"),
+    "setting-git-path-description setting-git-path-current",
+  );
+});
+
 test("Language Manager never shows unavailable servers as enabled", () => {
   const { loadGlobal } = require("./helpers/runtime");
   const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
