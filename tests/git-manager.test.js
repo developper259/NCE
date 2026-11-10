@@ -608,6 +608,94 @@ test("GitManager scopes stageAll to the open workspace", { skip: gitSkip }, asyn
   }
 });
 
+test("GitManager unstages every workspace change at once", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  await fs.writeFile(path.join(root, "tracked.txt"), "changed\n");
+  await fs.writeFile(path.join(root, "new.txt"), "new\n");
+  const manager = managerFor(root);
+  try {
+    assert.equal((await manager.unstageAll()).code, "NOTHING_TO_COMMIT");
+    assert.equal((await manager.stageAll()).success, true);
+    const staged = await manager.getStatus();
+    assert.deepEqual(
+      Object.fromEntries(staged.status.entries.map((entry) => [entry.path, entry.index])),
+      { "new.txt": "A", "tracked.txt": "M" },
+    );
+    const result = await manager.unstageAll();
+    assert.equal(result.success, true);
+    assert.equal(result.unstaged, true);
+    const status = await manager.getStatus();
+    assert.deepEqual(
+      Object.fromEntries(status.status.entries.map((entry) => [
+        entry.path,
+        [entry.index, entry.worktree],
+      ])),
+      { "new.txt": [null, "?"], "tracked.txt": [null, "M"] },
+    );
+    assert.equal(
+      await fs.readFile(path.join(root, "tracked.txt"), "utf8"),
+      "changed\n",
+      "unstaging preserves worktree changes",
+    );
+    assert.equal(await fs.readFile(path.join(root, "new.txt"), "utf8"), "new\n");
+    assert.equal((await manager.unstageAll()).code, "NOTHING_TO_COMMIT");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager scopes unstageAll to the open workspace", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const nested = path.join(root, "packages", "app");
+  await fs.mkdir(nested, { recursive: true });
+  await fs.writeFile(path.join(nested, "inside.txt"), "inside\n");
+  await fs.writeFile(path.join(root, "outside.txt"), "outside\n");
+  git(root, ["add", "-A"]);
+  const manager = managerFor(nested);
+  const plain = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-unstageall-plain-"));
+  const plainManager = managerFor(plain);
+  try {
+    assert.equal((await manager.unstageAll()).success, true);
+    const status = await manager.getStatus();
+    assert.deepEqual(
+      status.status.entries.map((entry) => [entry.path, entry.index, entry.kind]),
+      [["packages/app/inside.txt", null, "untracked"]],
+    );
+    assert.deepEqual(
+      git(root, ["diff", "--cached", "--name-only"]).trim().split("\n"),
+      ["outside.txt"],
+      "staged changes outside the workspace are preserved",
+    );
+    assert.equal((await plainManager.unstageAll()).code, "NOT_A_REPOSITORY");
+  } finally {
+    manager.dispose();
+    plainManager.dispose();
+    await removeAll(root, plain);
+  }
+});
+
+test("GitManager unstages all in a repository without an initial commit", { skip: gitSkip }, async () => {
+  const root = await createRepository({ commits: 0 });
+  await fs.writeFile(path.join(root, "first.txt"), "first\n");
+  const manager = managerFor(root);
+  try {
+    assert.equal((await manager.stageAll()).success, true);
+    const result = await manager.unstageAll();
+    assert.equal(result.success, true);
+    assert.equal(result.unstaged, true);
+    const status = await manager.getStatus();
+    assert.equal(status.status.entries.length, 1);
+    assert.equal(status.status.entries[0].path, "first.txt");
+    assert.equal(status.status.entries[0].index, null);
+    assert.equal(status.status.entries[0].kind, "untracked");
+    assert.equal(await fs.readFile(path.join(root, "first.txt"), "utf8"), "first\n");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
 test("GitManager commits staged changes and reports commit failures", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const manager = managerFor(root);
@@ -854,8 +942,9 @@ test("GitManager exposes only named Git channels through the preload", () => {
   for (const channel of [
     "Git:isAvailable", "Git:version", "Git:init", "Git:repository", "Git:isRepository",
     "Git:repositoryRoot", "Git:status", "Git:diff", "Git:fileVersions",
-    "Git:stage", "Git:stageAll", "Git:unstage", "Git:commit", "Git:branches",
-    "Git:currentBranch", "Git:switchBranch", "Git:createBranch",
+    "Git:stage", "Git:stageAll", "Git:unstage", "Git:unstageAll",
+    "Git:commit", "Git:branches", "Git:currentBranch", "Git:switchBranch",
+    "Git:createBranch",
   ]) {
     assert.match(preload, new RegExp(`"${channel}"`), `preload exposes ${channel}`);
     assert.match(managerSource, new RegExp(`"${channel}"`), `GitManager registers ${channel}`);

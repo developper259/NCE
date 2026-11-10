@@ -37,6 +37,48 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(Boolean(git), "Source Control sidebar exists");
   editor.sidebarManager.openMenu("git");
   await waitFor(() => git.isOpen && Boolean(git.container), "Source Control sidebar to open");
+  const getSectionAction = (section) => git.listLayer.querySelector(
+    `.git-section-header[data-section="${section}"] .git-section-action`,
+  );
+  const clickSectionAction = async (section, description) => {
+    let button = null;
+    await waitFor(() => {
+      button = getSectionAction(section);
+      return Boolean(button && !button.disabled);
+    }, description);
+    button.click();
+  };
+  const waitForIdle = () => waitFor(
+    () => !git.loading && !git.switchingBranch &&
+      !git.stagingAll && !git.unstagingAll && !git.committing,
+    "Source Control idle",
+  );
+  const branchFailure = () => editor.notificationManager.getNotifications()
+    .find((notification) =>
+      notification.title === "Could not switch branch" ||
+      notification.title === "Could not create branch");
+  const waitForBranch = async (name, description) => {
+    await waitFor(
+      () => git.getBranchLabel() === name || Boolean(branchFailure()),
+      description,
+    );
+    const failure = branchFailure();
+    if (failure) throw Error(`${description}: ${failure.message}`);
+    await waitForIdle();
+  };
+  const openBranchPicker = async () => {
+    await waitForIdle();
+    await waitFor(() => !git.branchButton.disabled, "branch selector to be ready");
+    git.branchButton.click();
+    await waitFor(
+      () => editor.quickPanel.isOpen("git-branch-picker"),
+      "branch picker to open",
+    );
+    await waitFor(
+      () => document.querySelectorAll(".quick-panel-item").length >= 4,
+      "branch picker rows",
+    );
+  };
 
   if (stage === "initialize") {
     // State A: no repository.
@@ -80,18 +122,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     check(git.stateElement.hidden === false, "clean state is visible");
     check(git.stateTitleElement.textContent === "Working tree clean", "clean state title");
     check(git.stateText.textContent === "No changes to commit.", "clean state description");
-    check(git.summaryElement.hidden === false, "branch summary is visible");
-    check(git.branchNameElement.textContent.trim().length > 0, "current branch is displayed");
-    check(
-      Boolean(git.summaryElement.querySelector(".fi-rr-code-branch")),
-      "branch icon is displayed",
-    );
     await waitFor(
       () => branchIndicator.hidden === false,
       "bottom-bar branch indicator",
     );
     check(
-      branchIndicator.textContent.includes(git.branchNameElement.textContent.trim()),
+      branchIndicator.textContent.includes(git.getBranchLabel()),
       "bottom bar shows the current branch",
     );
     check(
@@ -110,7 +146,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     branchIndicator.click();
     await waitFor(() => git.isOpen, "bottom-bar branch to reopen Source Control");
     check(git.stateRefresh.hidden === false, "clean state offers refresh");
-    return { mode: "clean", branch: git.branchNameElement.textContent.trim() };
+    return { mode: "clean", branch: git.getBranchLabel() };
   }
 
   await waitFor(
@@ -147,6 +183,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.commitBoxElement.hidden === false, "commit form is visible with changes");
   check(git.listElement.hidden === false, "change list is visible with changes");
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
+  check(
+    !document.querySelector(".git-sidebar-summary") &&
+      !document.querySelector(".git-sidebar-repo-name"),
+    "top branch and repository summary are removed",
+  );
   check(git.commitInput.placeholder === "Commit message...", "commit placeholder");
   check(
     git.commitInput.tagName === "INPUT" && git.commitInput.type === "text",
@@ -297,15 +338,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   await git.refresh({ reason: "manual" });
   await waitFor(() => git.getBranchLabel() === "main", "main branch fixture");
-  git.branchButton.click();
-  await waitFor(
-    () => editor.quickPanel.isOpen("git-branch-picker"),
-    "branch picker to open",
-  );
-  await waitFor(
-    () => document.querySelectorAll(".quick-panel-item").length >= 4,
-    "branch picker rows",
-  );
+  await openBranchPicker();
   const pickerItems = editor.quickPanel.session.items;
   check(
     pickerItems[0]?.label === "Create new branch",
@@ -341,20 +374,13 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   const alphaItem = pickerItems.find((item) => item.label === "alpha");
   editor.quickPanel.accept(alphaItem);
-  await waitFor(
-    () => git.getBranchLabel() === "alpha",
-    "branch switch from picker",
-  );
+  await waitForBranch("alpha", "branch switch from picker");
   await nextFrame();
   check(
     !editor.quickPanel.isOpen("git-branch-picker"),
     "branch picker closes after switching",
   );
-  git.branchButton.click();
-  await waitFor(
-    () => editor.quickPanel.isOpen("git-branch-picker"),
-    "branch picker to reopen",
-  );
+  await openBranchPicker();
   const createItem = editor.quickPanel.session.items.find(
     (item) => item.id === "create",
   );
@@ -369,8 +395,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   editor.quickPanel.input.value = "feature/test";
   editor.quickPanel.accept("feature/test");
-  await waitFor(
-    () => git.getBranchLabel() === "feature/test",
+  await waitForBranch(
+    "feature/test",
     "new branch to be created and checked out",
   );
   await nextFrame();
@@ -382,16 +408,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     !editor.quickPanel.isOpen("git-new-branch"),
     "new branch prompt closes after creation",
   );
-  git.branchButton.click();
-  await waitFor(
-    () => editor.quickPanel.isOpen("git-branch-picker"),
-    "branch picker to reopen after creation",
-  );
+  await openBranchPicker();
   const mainItem = editor.quickPanel.session.items.find(
     (item) => item.label === "main",
   );
   editor.quickPanel.accept(mainItem);
-  await waitFor(() => git.getBranchLabel() === "main", "switch back to main");
+  await waitForBranch("main", "switch back to main");
   await nextFrame();
   check(
     !editor.quickPanel.isOpen("git-branch-picker"),
@@ -428,19 +450,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "narrow sidebar has no horizontal overflow",
   );
   check(
-    getComputedStyle(git.repoNameElement).display === "none",
-    "repository name hides at narrow width",
-  );
-  check(
     getComputedStyle(row.querySelector(".git-file-name")).textOverflow === "ellipsis",
     "long file names use ellipsis",
   );
   sidebar.style.width = "320px";
   await nextFrame();
-  check(
-    getComputedStyle(git.repoNameElement).display !== "none",
-    "repository name returns at wide width",
-  );
   check(
     git.container.scrollWidth <= git.container.clientWidth + 1,
     "wide sidebar has no horizontal overflow",
@@ -490,7 +504,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     ) <= 0.5,
     "Stage All and row stage icons share a vertical axis",
   );
-  stageAllButton.click();
+  await clickSectionAction("changes", "Stage All to be ready");
   await waitFor(() => {
     const state = git.getViewState();
     return state.mode === "changes" &&
@@ -508,6 +522,44 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       .map((element) => element.textContent)
       .join(",") === "Staged Changes",
     "empty change sections are not rendered",
+  );
+  const unstageAllButton = git.listLayer.querySelector(
+    '.git-section-header[data-section="staged"] .git-section-action',
+  );
+  check(Boolean(unstageAllButton), "Staged header offers Unstage All");
+  check(
+    unstageAllButton.getAttribute("aria-label") === "Unstage all changes" &&
+      unstageAllButton.querySelector("i")?.className.includes("fi-rr-minus"),
+    "Unstage All is announced with a minus icon",
+  );
+  await clickSectionAction("staged", "Unstage All to be ready");
+  await waitFor(() => {
+    const state = git.getViewState();
+    return state.mode === "changes" &&
+      state.staged.length === 0 &&
+      state.changes.length === 2;
+  }, "Unstage All to unstage every change");
+  await nextFrame();
+  check(
+    git.commitStatus.textContent === "Unstaged 2 changes",
+    "Unstage All reports how many changes were unstaged",
+  );
+  check(git.commitButton.disabled === true, "commit disables after unstaging everything");
+  const restageAllButton = git.listLayer.querySelector(
+    '.git-section-header[data-section="changes"] .git-section-action',
+  );
+  check(Boolean(restageAllButton), "Changes header offers Stage All again");
+  await clickSectionAction("changes", "Stage All to restage every change");
+  await waitFor(() => {
+    const state = git.getViewState();
+    return state.mode === "changes" &&
+      state.staged.length === 2 &&
+      state.changes.length === 0;
+  }, "Stage All to restage every change");
+  await nextFrame();
+  check(
+    git.commitStatus.textContent === "Staged 2 changes",
+    "Stage All restores the staged changes",
   );
   check(git.commitButton.disabled === true, "commit stays disabled with an empty message");
   git.commitInput.value = "feat: source control redesign";
@@ -770,7 +822,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
 
   return {
     mode: git.getViewState().mode,
-    branch: git.branchNameElement.textContent.trim(),
+    branch: git.getBranchLabel(),
     file: fileName,
   };
 };

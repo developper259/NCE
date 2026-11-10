@@ -236,6 +236,7 @@ export class GitManager {
     ipc.handle("Git:stage", async (_event, filePath) => this.stageFile(filePath));
     ipc.handle("Git:stageAll", async () => this.stageAll());
     ipc.handle("Git:unstage", async (_event, filePath) => this.unstageFile(filePath));
+    ipc.handle("Git:unstageAll", async () => this.unstageAll());
     ipc.handle("Git:commit", async (_event, message) => this.commit(message));
     ipc.handle("Git:branches", async () => this.getBranches());
     ipc.handle("Git:currentBranch", async () => this.getCurrentBranch());
@@ -674,6 +675,46 @@ export class GitManager {
     );
     if (!result.ok) return result.failure;
     return { success: true, path: target.relativePath };
+  }
+
+  unstageAll(): Promise<GitResult<{ unstaged: true }>> {
+    return this.mutationQueue.run(() => this.unstageAllNow());
+  }
+
+  private async unstageAllNow(): Promise<GitResult<{ unstaged: true }>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const pathspecs = this.scopePathspecs(context);
+    const head = await this.hasHeadCommit(context.root);
+    if ("failure" in head) return head.failure;
+    if (!head.found) {
+      const staged = await this.runGit(
+        ["ls-files", "-z", "--", ...pathspecs],
+        { cwd: context.root },
+      );
+      if (!staged.ok) return staged.failure;
+      if (!staged.output.stdout.length)
+        return failure("NOTHING_TO_COMMIT", "There are no staged changes to unstage.");
+      const removed = await this.runGit(
+        ["rm", "--cached", "-q", "-r", "--", ...pathspecs],
+        { cwd: context.root },
+      );
+      if (!removed.ok) return removed.failure;
+      return { success: true, unstaged: true };
+    }
+    const staged = await this.runGit(
+      ["diff", "--cached", "--quiet", "--", ...pathspecs],
+      { cwd: context.root, allowExitCodes: [0, 1] },
+    );
+    if (!staged.ok) return staged.failure;
+    if (staged.output.code === 0)
+      return failure("NOTHING_TO_COMMIT", "There are no staged changes to unstage.");
+    const result = await this.runGit(
+      ["reset", "-q", "--", ...pathspecs],
+      { cwd: context.root },
+    );
+    if (!result.ok) return result.failure;
+    return { success: true, unstaged: true };
   }
 
   commit(message: unknown): Promise<GitResult<{ hash: string; summary: string }>> {

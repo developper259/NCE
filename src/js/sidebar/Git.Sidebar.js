@@ -79,11 +79,6 @@ class GitSidebar extends Sidebar {
     super("git", "Source Control", "fi fi-rr-code-branch", "left", editor);
     this.container = null;
     this.headerElement = null;
-    this.summaryElement = null;
-    this.repoNameElement = null;
-    this.branchElement = null;
-    this.branchNameElement = null;
-    this.branchSyncElement = null;
     this.refreshButton = null;
     this.menuButton = null;
     this.commitBoxElement = null;
@@ -128,6 +123,7 @@ class GitSidebar extends Sidebar {
     this.commitMessage = "";
     this.committing = false;
     this.stagingAll = false;
+    this.unstagingAll = false;
     this.commitError = "";
     this.actionError = "";
     this.initError = "";
@@ -222,29 +218,6 @@ class GitSidebar extends Sidebar {
       event.stopPropagation();
       this.openHeaderContextMenu();
     });
-
-    const summary = document.createElement("div");
-    summary.className = "git-sidebar-summary";
-    summary.hidden = true;
-    const branch = document.createElement("span");
-    branch.className = "git-sidebar-branch";
-    const branchIcon = document.createElement("i");
-    branchIcon.className = "fi fi-rr-code-branch";
-    branchIcon.setAttribute("aria-hidden", "true");
-    const branchName = document.createElement("span");
-    branchName.className = "git-sidebar-branch-name";
-    const branchSync = document.createElement("span");
-    branchSync.className = "git-sidebar-branch-sync";
-    branchSync.hidden = true;
-    branch.append(branchIcon, branchName, branchSync);
-    const repoName = document.createElement("span");
-    repoName.className = "git-sidebar-repo-name";
-    summary.append(branch, repoName);
-    this.summaryElement = summary;
-    this.branchElement = branch;
-    this.branchNameElement = branchName;
-    this.branchSyncElement = branchSync;
-    this.repoNameElement = repoName;
 
     const commitBox = document.createElement("div");
     commitBox.className = "git-sidebar-commit";
@@ -411,42 +384,14 @@ class GitSidebar extends Sidebar {
     this.listLayer = layerNode;
     this.fileScroller.attach(list, viewport, layerNode);
 
-    container.append(header, summary, state, list, commitBox);
+    container.append(header, state, list, commitBox);
     this.updateView();
     return container;
   }
 
   updateView() {
     if (!this.container) return;
-    const projectName = this.editor.fileExplorer?.projectName;
-    const rootName = this.workspaceRoot
-      .replace(/[\\/]+$/, "")
-      .split(/[\\/]/)
-      .pop();
-    if (this.repoNameElement) {
-      this.repoNameElement.textContent = projectName || rootName || "Workspace";
-      this.repoNameElement.title = this.workspaceRoot || "";
-    }
-    const branch = this.status?.branch;
     const branchLabel = this.getBranchLabel();
-    if (this.branchNameElement) {
-      this.branchNameElement.textContent = branchLabel || "detached";
-    }
-    if (this.branchSyncElement) {
-      const sync = [];
-      if (branch?.ahead) sync.push(`↑${branch.ahead}`);
-      if (branch?.behind) sync.push(`↓${branch.behind}`);
-      this.branchSyncElement.textContent = sync.join(" ");
-      this.branchSyncElement.hidden = sync.length === 0;
-    }
-    if (this.branchElement) {
-      const tracking = branch && (branch.ahead || branch.behind)
-        ? ` ↑${branch.ahead} ↓${branch.behind}`
-        : "";
-      this.branchElement.title = branch
-        ? `${branchLabel}${tracking}${branch.upstream ? ` (${branch.upstream})` : ""}`
-        : "";
-    }
     if (this.branchButtonName)
       this.branchButtonName.textContent = branchLabel || "No branch";
     if (this.branchButton) {
@@ -454,7 +399,8 @@ class GitSidebar extends Sidebar {
         ? `Switch Branch (${branchLabel})`
         : "Switch Branch";
       this.branchButton.disabled =
-        this.switchingBranch || this.committing || this.stagingAll;
+        this.switchingBranch || this.committing || this.stagingAll ||
+        this.unstagingAll;
     }
     if (this.refreshButton) {
       this.refreshButton.hidden = !this.workspaceRoot;
@@ -469,7 +415,8 @@ class GitSidebar extends Sidebar {
         document.activeElement === this.commitInput;
       if (!focused && this.commitInput.value !== this.commitMessage)
         this.commitInput.value = this.commitMessage;
-      this.commitInput.disabled = this.committing || this.stagingAll;
+      this.commitInput.disabled =
+        this.committing || this.stagingAll || this.unstagingAll;
     }
     this.updateCommitControls();
     this.updateState();
@@ -718,10 +665,6 @@ class GitSidebar extends Sidebar {
       button?.classList.toggle("git-sidebar-primary", button === primary);
     }
 
-    if (this.summaryElement) {
-      this.summaryElement.hidden =
-        view.mode !== "clean" && view.mode !== "changes";
-    }
     if (this.commitBoxElement)
       this.commitBoxElement.hidden = view.mode !== "changes";
     if (this.listElement)
@@ -753,6 +696,7 @@ class GitSidebar extends Sidebar {
       this.commitMessage.trim().length > 0 &&
       !this.committing &&
       !this.stagingAll &&
+      !this.unstagingAll &&
       !this.loading &&
       !this.stale;
   }
@@ -789,21 +733,24 @@ class GitSidebar extends Sidebar {
     count.textContent = String(item.count);
 
     header.append(arrow, name, count);
-    if (item.section === "changes" && item.count > 0) {
+    if ((item.section === "changes" || item.section === "staged") && item.count > 0) {
+      const staging = item.section === "changes";
       const action = document.createElement("button");
       action.type = "button";
       action.className = "git-section-action";
-      action.title = "Stage all changes";
-      action.setAttribute("aria-label", "Stage all changes");
-      action.disabled = this.loading || this.committing || this.stagingAll;
-      if (this.stagingAll) action.setAttribute("aria-busy", "true");
+      action.title = staging ? "Stage all changes" : "Unstage all changes";
+      action.setAttribute("aria-label", action.title);
+      action.disabled = this.loading || this.committing ||
+        this.stagingAll || this.unstagingAll;
+      if (staging ? this.stagingAll : this.unstagingAll)
+        action.setAttribute("aria-busy", "true");
       const icon = document.createElement("i");
-      icon.className = "fi fi-rr-plus";
+      icon.className = `fi ${staging ? "fi-rr-plus" : "fi-rr-minus"}`;
       icon.setAttribute("aria-hidden", "true");
       action.appendChild(icon);
       action.addEventListener("click", (event) => {
         event.stopPropagation();
-        void this.stageAllChanges();
+        void (staging ? this.stageAllChanges() : this.unstageAllChanges());
       });
       header.appendChild(action);
     }
@@ -911,20 +858,6 @@ class GitSidebar extends Sidebar {
   buildListItems(staged, changes) {
     const items = [];
     if (!this.status) return items;
-    if (staged.length > 0) {
-      items.push({
-        type: "section",
-        section: "staged",
-        title: "Staged Changes",
-        count: staged.length,
-        height: 24,
-        rowHeight: 24,
-      });
-      if (this.collapsed.staged !== true) {
-        for (const entry of staged)
-          items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
-      }
-    }
     if (changes.length > 0) {
       items.push({
         type: "section",
@@ -937,6 +870,20 @@ class GitSidebar extends Sidebar {
       if (this.collapsed.changes !== true) {
         for (const entry of changes)
           items.push({ type: "entry", section: "changes", entry, height: 25, rowHeight: 25 });
+      }
+    }
+    if (staged.length > 0) {
+      items.push({
+        type: "section",
+        section: "staged",
+        title: "Staged Changes",
+        count: staged.length,
+        height: 24,
+        rowHeight: 24,
+      });
+      if (this.collapsed.staged !== true) {
+        for (const entry of staged)
+          items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
       }
     }
     return items;
@@ -1026,6 +973,8 @@ class GitSidebar extends Sidebar {
   }
 
   async toggleStage(entry, staged) {
+    if (this.stagingAll || this.unstagingAll) return false;
+    this.cancelScheduledRefresh();
     const filePath = GitSidebar.resolveAbsolutePath(this.workspaceRoot, entry?.path);
     if (!filePath) {
       this.setActionError("This change is outside the workspace.");
@@ -1215,6 +1164,7 @@ class GitSidebar extends Sidebar {
 
   async checkoutBranch(name, create) {
     if (this.destroyed || this.switchingBranch) return false;
+    this.cancelScheduledRefresh();
     const workspaceGeneration = this.workspaceGeneration;
     const workspaceRoot = this.workspaceRoot;
     this.switchingBranch = true;
@@ -1255,8 +1205,10 @@ class GitSidebar extends Sidebar {
   }
 
   async stageAllChanges() {
-    if (this.destroyed || this.loading || this.committing || this.stagingAll)
+    if (this.destroyed || this.loading || this.committing ||
+        this.stagingAll || this.unstagingAll)
       return false;
+    this.cancelScheduledRefresh();
     const { changes } = this.getSections();
     if (!this.status || changes.length === 0) return false;
     const count = changes.length;
@@ -1301,8 +1253,60 @@ class GitSidebar extends Sidebar {
     return result?.success === true;
   }
 
+  async unstageAllChanges() {
+    if (this.destroyed || this.loading || this.committing ||
+        this.stagingAll || this.unstagingAll)
+      return false;
+    this.cancelScheduledRefresh();
+    const { staged } = this.getSections();
+    if (!this.status || staged.length === 0) return false;
+    const count = staged.length;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.unstagingAll = true;
+    this.actionError = "";
+    this.notice = "";
+    this.renderList();
+    this.updateView();
+    let result = null;
+    try {
+      result = await this.editor.api.git.unstageAll();
+    } catch {
+      result = null;
+    }
+    this.unstagingAll = false;
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.updateView();
+      return false;
+    }
+    if (result?.success === true) {
+      this.notice = count === 1
+        ? "Unstaged 1 change"
+        : `Unstaged ${count} changes`;
+    } else {
+      this.actionError = result?.error || "The Git operation failed.";
+      this.notifyGit({
+        type: "error",
+        title: "Could not unstage all changes",
+        message: this.actionError,
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.unstageAllChanges();
+          },
+        }],
+      });
+    }
+    await this.refresh({ reason: "stage" });
+    this.updateView();
+    return result?.success === true;
+  }
+
   async commitChanges() {
     if (!this.canCommit()) return false;
+    this.cancelScheduledRefresh();
     const message = this.commitMessage.trim();
     const workspaceGeneration = this.workspaceGeneration;
     const workspaceRoot = this.workspaceRoot;
@@ -1369,6 +1373,7 @@ class GitSidebar extends Sidebar {
 
   async initializeRepository() {
     if (this.destroyed || this.initializing || this.loading) return false;
+    this.cancelScheduledRefresh();
     const root = this.editor.fileExplorer?.rootPath || "";
     if (!root || this.error?.code !== "NOT_A_REPOSITORY") return false;
     const workspaceGeneration = this.workspaceGeneration;
@@ -1591,13 +1596,23 @@ class GitSidebar extends Sidebar {
     else this.editor.bottomBar?.refreshGitBranch?.();
   }
 
+  isMutating() {
+    return this.committing || this.switchingBranch || this.stagingAll ||
+      this.unstagingAll || this.initializing;
+  }
+
+  cancelScheduledRefresh() {
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = null;
+  }
+
   handleFileSystemEvents() {
-    if (!this.isOpen || this.committing) return;
+    if (!this.isOpen || this.isMutating()) return;
     this.scheduleRefresh();
   }
 
   noteEditorSave() {
-    if (!this.isOpen || this.committing) return;
+    if (!this.isOpen || this.isMutating()) return;
     this.scheduleRefresh();
   }
 
@@ -1606,6 +1621,7 @@ class GitSidebar extends Sidebar {
     clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
+      if (this.isMutating()) return;
       void this.refresh({ reason: "watcher" });
     }, 300);
   }

@@ -85,68 +85,6 @@
   animation: git-spin 900ms linear infinite;
 }
 
-/* Branch summary */
-.git-sidebar-summary {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  padding: 8px 2px 7px 4px;
-}
-
-.git-sidebar-summary[hidden] {
-  display: none;
-}
-
-.git-sidebar-branch {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  max-width: 100%;
-  padding: 2px 7px 2px 6px;
-  border-radius: 10px;
-  background: var(--bg-hover-alt);
-  color: var(--text-secondary);
-  font-size: 11px;
-  line-height: 1.3;
-}
-
-.git-sidebar-branch i {
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
-.git-sidebar-branch-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.git-sidebar-branch-sync {
-  flex: 0 0 auto;
-  color: var(--git-modified);
-  font-size: 10px;
-  white-space: nowrap;
-}
-
-.git-sidebar-branch-sync[hidden] {
-  display: none;
-}
-
-.git-sidebar-repo-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--text-tertiary);
-  font-size: 10.5px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* State panel */
 .git-sidebar-state {
   flex: 1 1 auto;
@@ -696,22 +634,12 @@
 }
 
 @container (max-width: 230px) {
-  .git-sidebar-repo-name {
-    display: none;
-  }
-
   .git-file-dir {
     display: none;
   }
 
   .git-sidebar-state-actions {
     padding-left: 0;
-  }
-}
-
-@container (max-width: 190px) {
-  .git-sidebar-branch-sync {
-    display: none;
   }
 }
 
