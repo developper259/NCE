@@ -68,6 +68,7 @@ const DEFAULT_KEYBINDINGS = Object.freeze({
 const DEFAULT_RENDERER_SETTINGS = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor", settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
+  git: Object.freeze({ path: "" }),
   files: Object.freeze({
     autoSave: false,
     confirmMoveToTrash: true,
@@ -84,6 +85,7 @@ const DEFAULT_RENDERER_SETTINGS = Object.freeze({
 let RENDERER_SETTINGS = {
   ui: { ...DEFAULT_RENDERER_SETTINGS.ui },
   editor: { ...DEFAULT_RENDERER_SETTINGS.editor },
+  git: { ...DEFAULT_RENDERER_SETTINGS.git },
   files: { ...DEFAULT_RENDERER_SETTINGS.files },
   appearance: { ...DEFAULT_RENDERER_SETTINGS.appearance },
   agent: { hiddenModels: [] },
@@ -185,6 +187,14 @@ function SETTINGS_INITIALIZE(settings) {
         settings.editor.tabWidth <= 16
           ? settings.editor.tabWidth
           : DEFAULT_RENDERER_SETTINGS.editor.tabWidth,
+    },
+    git: {
+      path:
+        typeof settings?.git?.path === "string" &&
+        settings.git.path.length <= 2048 &&
+        !settings.git.path.includes("\0")
+          ? settings.git.path.trim()
+          : DEFAULT_RENDERER_SETTINGS.git.path,
     },
     files: {
       autoSave:
@@ -340,6 +350,17 @@ async function SETTINGS_SET(key, value) {
     if (value !== "system" && value !== "dark" && value !== "light") {
       return false;
     }
+  }
+
+  if (section === "git" && property === "path") {
+    if (
+      typeof value !== "string" ||
+      value.length > 2048 ||
+      value.includes("\0")
+    ) {
+      return false;
+    }
+    value = value.trim();
   }
 
   if (section === "terminal") {

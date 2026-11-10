@@ -273,6 +273,7 @@ class Editor {
 
   applySettingsSnapshot(settings) {
     const autoSaveEnabled = this.getAutoSaveState();
+    const gitPath = SETTINGS_GET("git.path");
     SETTINGS_INITIALIZE(settings);
     const nextAutoSaveEnabled = SETTINGS_GET("files.autoSave");
     if (autoSaveEnabled !== nextAutoSaveEnabled) {
@@ -287,6 +288,10 @@ class Editor {
     this._settingsView?.sync?.("files.openRecentIn");
     this._settingsView?.sync?.("terminal.shell");
     this._settingsView?.sync?.("terminal.args");
+    this._settingsView?.sync?.("git.path");
+    if (SETTINGS_GET("git.path") !== gitPath) {
+      this.gitSidebar?.refresh?.({ reason: "settings" });
+    }
     this._settingsView?.sync?.("agent.hiddenModels");
     this._settingsView?.sync?.("lsp.enabled");
     this.lspController?.refreshStatus?.();

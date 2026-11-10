@@ -24,6 +24,18 @@ const SETTINGS_UI = Object.freeze([
     options: [2, 4, 8],
   },
   {
+    key: "git.path",
+    category: "Editor",
+    label: "Git Path",
+    description:
+      "Path to the Git executable. Leave empty to detect Git automatically.",
+    keywords: ["git", "path", "executable", "binary", "source control"],
+    control: "path",
+    panelTitle: "Set Git Path",
+    placeholder: "Absolute path to git, empty for automatic detection",
+    emptyLabel: "Automatic detection",
+  },
+  {
     key: "files.autoSave",
     category: "Files",
     label: "Auto Save",
@@ -450,7 +462,9 @@ class SettingsView {
           ? this.createCheckbox(setting, controlId)
           : setting.control === "shortcut"
             ? this.createShortcutInput(setting, controlId)
-            : this.createTextInput(setting, controlId);
+            : setting.control === "path"
+              ? this.createPathControl(setting, controlId)
+              : this.createTextInput(setting, controlId);
     const controlWrap = document.createElement("div");
     controlWrap.className = "settings-row-control";
     controlWrap.appendChild(control);
@@ -1946,6 +1960,65 @@ class SettingsView {
     return input;
   }
 
+  createPathControl(setting, id) {
+    const button = document.createElement("button");
+    button.id = id;
+    button.type = "button";
+    button.className = "setting-input setting-path-button";
+    button.setAttribute("aria-label", setting.label);
+    button.setAttribute("aria-describedby", `${id}-description`);
+    const value = document.createElement("span");
+    value.className = "setting-path-value";
+    const icon = document.createElement("i");
+    icon.className = "fi fi-rr-pencil";
+    icon.setAttribute("aria-hidden", "true");
+    button.append(value, icon);
+    this.updatePathControl(button, setting, SETTINGS_GET(setting.key));
+
+    button.addEventListener("click", async () => {
+      const next = await this.requestSettingPath(setting);
+      if (next === null) return;
+      const res = await SETTINGS_SET(setting.key, next);
+      if (!res || (typeof res === "object" && !res.success)) return;
+      this.updatePathControl(button, setting, SETTINGS_GET(setting.key));
+      this.editor.gitSidebar?.refresh?.({ reason: "settings" });
+    });
+    return button;
+  }
+
+  requestSettingPath(setting) {
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel) return Promise.resolve(null);
+    const current = String(SETTINGS_GET(setting.key) || "");
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+      quickPanel.open({
+        id: `setting-path-${setting.key.replace(/\./g, "-")}`,
+        mode: "input",
+        title: setting.panelTitle || setting.label,
+        placeholder: setting.placeholder || "Absolute path",
+        value: current,
+        onAccept: (value) => finish(String(value ?? "").trim()),
+        onCancel: () => finish(null),
+      });
+    });
+  }
+
+  updatePathControl(control, setting, value) {
+    const display = String(value || "");
+    const label = control.querySelector(".setting-path-value");
+    if (label) {
+      label.textContent = display || setting.emptyLabel || "Automatic detection";
+    }
+    control.classList.toggle("is-placeholder", !display);
+    control.title = display;
+  }
+
   createShortcutInput(setting, id) {
     const container = document.createElement("div");
     container.className = "setting-shortcut-container";
@@ -2200,6 +2273,10 @@ class SettingsView {
     const id = `setting-${setting.key.replace(/\./g, "-")}`;
     const input = this.host?.querySelector(`#${id}`);
     if (!input) return;
+    if (setting.control === "path") {
+      this.updatePathControl(input, setting, SETTINGS_GET(key));
+      return;
+    }
     if (setting.control === "select") {
       const wrapper = input.closest(".setting-select-wrap");
       if (!wrapper?.contains(document.activeElement))

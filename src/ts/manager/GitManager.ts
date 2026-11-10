@@ -121,6 +121,7 @@ interface GitManagerOptions {
   getWorkspaceRoot: () => string | null | undefined;
   pathAccess?: Pick<PathAccess, "isAuthorized">;
   gitPath?: string;
+  getGitPath?: () => string | null | undefined;
   timeoutMs?: number;
   maxOutputBytes?: number;
   maxConcurrentCommands?: number;
@@ -186,6 +187,7 @@ export class GitManager {
   private readonly getWorkspaceRoot: () => string | null | undefined;
   private readonly pathAccess?: Pick<PathAccess, "isAuthorized">;
   private readonly explicitGitPath?: string;
+  private readonly getGitPath?: () => string | null | undefined;
   private readonly timeoutMs: number;
   private readonly maxOutputBytes: number;
   private readonly extraEnv?: NodeJS.ProcessEnv;
@@ -195,12 +197,14 @@ export class GitManager {
   private readonly mutationQueue = new GitTaskQueue(1);
   private readonly statusRequests = new Map<string, Promise<GitResult<{ status: GitStatus }>>>();
   private gitExecutable: Promise<string> | null = null;
+  private gitExecutableSource = "";
   private disposed = false;
 
   constructor(options: GitManagerOptions) {
     this.getWorkspaceRoot = options.getWorkspaceRoot;
     this.pathAccess = options.pathAccess;
     this.explicitGitPath = options.gitPath || undefined;
+    this.getGitPath = options.getGitPath;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
     this.extraEnv = options.env;
@@ -1071,10 +1075,15 @@ export class GitManager {
   }
 
   private resolveGitPath(): Promise<string> {
-    this.gitExecutable ??= resolveGitExecutable({
-      platform: this.platform,
-      explicit: this.explicitGitPath,
-    });
+    const configured = String(this.getGitPath?.() ?? "").trim();
+    const explicit = configured || this.explicitGitPath || "";
+    if (this.gitExecutable === null || this.gitExecutableSource !== explicit) {
+      this.gitExecutableSource = explicit;
+      this.gitExecutable = resolveGitExecutable({
+        platform: this.platform,
+        explicit,
+      });
+    }
     return this.gitExecutable;
   }
 

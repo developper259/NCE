@@ -10,6 +10,7 @@ export interface Settings {
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
+  git: { path: string };
   files: {
     autoSave: boolean;
     confirmMoveToTrash: boolean;
@@ -99,6 +100,7 @@ export const DEFAULT_KEYBINDINGS: Readonly<Record<string, string | null>> =
 export const DEFAULT_SETTINGS: Settings = Object.freeze({
   ui: Object.freeze({ settingsCategory: "Editor" as const, settingsScrollTop: 0 }),
   editor: Object.freeze({ tabWidth: 2 }),
+  git: Object.freeze({ path: "" }),
   files: Object.freeze({
     autoSave: false,
     confirmMoveToTrash: true,
@@ -119,6 +121,7 @@ const KNOWN_KEYS = new Set([
   "ui.settingsCategory",
   "ui.settingsScrollTop",
   "editor.tabWidth",
+  "git.path",
   "files.autoSave",
   "files.confirmMoveToTrash",
   "files.confirmPermanentDelete",
@@ -286,6 +289,7 @@ export class SettingsManager {
         settingsScrollTop: this.settings.ui.settingsScrollTop,
       },
       editor: { tabWidth: this.settings.editor.tabWidth },
+      git: { path: this.settings.git.path },
       files: {
         autoSave: this.settings.files.autoSave,
         confirmMoveToTrash: this.settings.files.confirmMoveToTrash,
@@ -394,6 +398,7 @@ export class SettingsManager {
     const merged: any = clone(source);
     if (!isObject(merged.ui)) merged.ui = {};
     if (!isObject(merged.editor)) merged.editor = {};
+    if (!isObject(merged.git)) merged.git = {};
     if (!isObject(merged.files)) merged.files = {};
     if (!isObject(merged.appearance)) merged.appearance = {};
     if (!isObject(merged.agent)) merged.agent = {};
@@ -418,6 +423,9 @@ export class SettingsManager {
     )
       ? merged.editor.tabWidth
       : fallback.editor.tabWidth;
+    merged.git.path = this.isValid("git.path", merged.git.path)
+      ? merged.git.path.trim()
+      : fallback.git.path;
     merged.files.autoSave = this.isValid(
       "files.autoSave",
       merged.files.autoSave,
@@ -548,6 +556,9 @@ export class SettingsManager {
         (value as number) >= 1 &&
         (value as number) <= 16
       );
+    }
+    if (key === "git.path") {
+      return typeof value === "string" && value.length <= 2048 && !value.includes("\0");
     }
     if (
       key === "files.autoSave" ||

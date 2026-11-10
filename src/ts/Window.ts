@@ -229,6 +229,10 @@ export class Window {
     this.gitManager = new GitManager({
       getWorkspaceRoot: () => this.watcher?.getWatchedPath?.() || this.workspacePath,
       pathAccess: this.pathAccess,
+      getGitPath: () => {
+        const gitPath = this.app.settings?.get("git.path");
+        return typeof gitPath === "string" ? gitPath : undefined;
+      },
     });
     this.lspManager = new LspManager({
       getWorkspaceRoot: () => this.watcher?.getWatchedPath?.() || this.workspacePath,

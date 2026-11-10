@@ -71,6 +71,28 @@ test("terminal shell preference and Terminal category validate and persist", asy
   }
 });
 
+test("Git path preference validates and persists", async () => {
+  const root = await temporaryUserData();
+  try {
+    const manager = new SettingsManager(root);
+    await manager.initialize();
+    assert.equal(manager.get("git.path"), "");
+    const gitPath = "C:\\Program Files\\Git\\cmd\\git.exe";
+    assert.equal(await manager.set("git.path", gitPath), true);
+    assert.equal(await manager.set("git.path", "bad\0git"), false);
+    assert.equal(await manager.set("git.path", "x".repeat(2049)), false);
+    assert.equal(await manager.set("git.path", null), false);
+    assert.equal(manager.get("git.path"), gitPath);
+
+    const restarted = new SettingsManager(root);
+    await restarted.initialize();
+    assert.equal(restarted.get("git.path"), gitPath);
+    assert.equal((await readSettings(root)).git.path, gitPath);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("valid settings persist across manager restarts and set writes JSON", async () => {
   const root = await temporaryUserData();
   try {
@@ -97,6 +119,7 @@ test("valid settings persist across manager restarts and set writes JSON", async
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 8 },
+      git: { path: "" },
       files: {
         autoSave: true,
         confirmMoveToTrash: true,
@@ -248,6 +271,7 @@ test("missing known defaults are merged while unknown properties survive", async
     assert.deepEqual(await manager.initialize(), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 4 },
+      git: { path: "" },
       files: {
         autoSave: true,
         confirmMoveToTrash: false,
@@ -281,6 +305,7 @@ test("queued concurrent writes leave a complete latest settings document", async
     assert.deepEqual(await readSettings(root), {
       ui: { settingsCategory: "Editor", settingsScrollTop: 0 },
       editor: { tabWidth: 12 },
+      git: { path: "" },
       files: {
         autoSave: true,
         confirmMoveToTrash: true,
@@ -700,6 +725,28 @@ test("Set path prefills the configured executable path", async () => {
   assert.match(options.title, /TypeScript Language Server/);
   options.onAccept(" /next/server ");
   assert.equal(await pending, "/next/server");
+});
+
+test("Set Git path prefills the configured path in the quick panel", async () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {
+    SETTINGS_GET: (key) =>
+      key === "git.path" ? "C:\\Program Files\\Git\\cmd\\git.exe" : undefined,
+  });
+  const view = Object.create(SettingsView.prototype);
+  let options = null;
+  view.editor = { quickPanel: { open: (value) => { options = value; } } };
+  const pending = view.requestSettingPath({
+    key: "git.path",
+    label: "Git Path",
+    panelTitle: "Set Git Path",
+    placeholder: "Absolute path to git, empty for automatic detection",
+  });
+  assert.equal(options.mode, "input");
+  assert.equal(options.title, "Set Git Path");
+  assert.equal(options.value, "C:\\Program Files\\Git\\cmd\\git.exe");
+  options.onAccept(" /next/git ");
+  assert.equal(await pending, "/next/git");
 });
 
 test("Language Manager never shows unavailable servers as enabled", () => {
