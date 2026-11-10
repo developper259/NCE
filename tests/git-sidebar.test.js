@@ -553,6 +553,12 @@ test("GitSidebar renders a Stage All action only in a populated Changes header",
   }
 });
 
+test("GitSidebar labels the commit shortcut for the platform", () => {
+  assert.equal(GitSidebar.commitShortcutLabel("darwin"), "⌘ ↵ Commit");
+  assert.equal(GitSidebar.commitShortcutLabel("linux"), "Ctrl ↵ Commit");
+  assert.equal(GitSidebar.commitShortcutLabel("win32"), "Ctrl ↵ Commit");
+});
+
 test("GitSidebar validates branch names before talking to Git", () => {
   assert.equal(GitSidebar.validateBranchName("feature/login"), null);
   assert.equal(GitSidebar.validateBranchName("release/1.0"), null);

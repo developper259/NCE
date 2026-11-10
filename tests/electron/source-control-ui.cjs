@@ -149,79 +149,90 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
   check(git.commitInput.placeholder === "Commit message...", "commit placeholder");
   check(
-    getComputedStyle(git.commitInput).resize === "none",
-    "commit input has no manual resize handle",
+    git.commitInput.tagName === "INPUT" && git.commitInput.type === "text",
+    "commit message uses a single-line input",
   );
-  const singleLineHeight = git.commitInput.getBoundingClientRect().height;
   check(
-    singleLineHeight > 0 && singleLineHeight <= 32,
-    "commit input starts as a single line",
+    getComputedStyle(git.commitInput).borderTopStyle === "none" &&
+      getComputedStyle(git.commitInput).backgroundColor === "rgba(0, 0, 0, 0)",
+    "commit input blends into the composer bar",
   );
-  git.commitInput.value = "line one\nline two\nline three";
+  const composerBar = git.commitInput.parentElement;
+  const composerHeight = composerBar.getBoundingClientRect().height;
+  check(
+    composerBar.className.includes("git-composer-bar") &&
+      composerHeight > 0 &&
+      composerHeight <= 32,
+    "commit composer is a single compact bar",
+  );
+  git.commitInput.value = `feat: ${"long message ".repeat(20)}`;
   git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
   await nextFrame();
-  const multiLineHeight = git.commitInput.getBoundingClientRect().height;
   check(
-    multiLineHeight >= singleLineHeight + 20,
-    "commit input grows with the message lines",
-  );
-  git.commitInput.value = Array.from(
-    { length: 20 },
-    (_, index) => `line ${index + 1}`,
-  ).join("\n");
-  git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
-  await nextFrame();
-  const cappedHeight = git.commitInput.getBoundingClientRect().height;
-  check(
-    cappedHeight > multiLineHeight && cappedHeight <= 141 &&
-      getComputedStyle(git.commitInput).overflowY === "auto",
-    "commit input caps its growth and scrolls instead",
+    Math.abs(composerBar.getBoundingClientRect().height - composerHeight) <= 1,
+    "a long commit message does not deform the composer bar",
   );
   git.commitInput.value = "";
   git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
   await nextFrame();
-  check(
-    Math.abs(git.commitInput.getBoundingClientRect().height - singleLineHeight) <= 1,
-    "commit input shrinks back when the message is cleared",
-  );
   check(git.commitButton.disabled === true, "commit is disabled before staging");
   check(
     git.commitStatus.getBoundingClientRect().width <= 1,
     "commit status text takes no visible space",
   );
   check(
-    Boolean(git.commitBoxElement.querySelector(".git-sidebar-commit-input")) &&
-      !git.commitBoxElement.querySelector(".fi-rr-pencil"),
-    "commit card has no pencil icon",
+    composerBar.children[0] === git.branchButton &&
+      composerBar.children[1].className.includes("git-composer-separator") &&
+      composerBar.children[2] === git.commitInput,
+    "branch, separator and message are ordered left to right",
+  );
+  check(
+    !git.commitBoxElement.querySelector(".fi-rr-pencil"),
+    "composer has no pencil icon",
   );
   check(
     git.branchButton.textContent.includes("main") &&
       Boolean(git.branchButton.querySelector(".git-branch-button-arrow")),
     "branch selector shows the current branch and a dropdown arrow",
   );
-  const commitActions = git.commitButton.closest(".git-sidebar-commit-actions");
-  const commitTools = git.commitButton.parentElement;
   check(
-    commitActions.firstElementChild === git.branchButton,
-    "branch selector sits at the far left of the commit card",
+    git.settingsButton.parentElement === composerBar &&
+      git.settingsButton.nextElementSibling === git.commitButton,
+    "Git settings sits directly left of Commit",
   );
   check(
-    commitActions.lastElementChild === commitTools &&
-      commitTools.lastElementChild === git.commitButton,
-    "Commit sits at the far right of the commit card",
+    git.commitButton.title === "Commit changes" &&
+      git.commitButton.getAttribute("aria-label") === "Commit changes" &&
+      git.commitButton.textContent.trim() === "" &&
+      git.commitButton.querySelector("i")?.className.includes("fi-rr-check"),
+    "Commit is a compact icon action with an accessible tooltip",
   );
   check(
-    git.settingsButton.parentElement === commitTools &&
-      commitTools.firstElementChild === git.settingsButton &&
-      git.settingsButton.getAttribute("aria-label") === "Open Git settings",
-    "Git settings gear sits directly left of Commit",
+    document.querySelector(".git-composer-hint")?.textContent ===
+      (editor.api.platform === "darwin" ? "⌘ ↵ Commit" : "Ctrl ↵ Commit"),
+    "commit hint shows the supported shortcut",
   );
-  check(
-    git.commitButton.querySelector("i")?.className.includes("fi-rr-check") === true &&
-      git.commitButton.querySelector(".git-sidebar-commit-button-label")?.textContent ===
-        "Commit",
-    "Commit button keeps its check icon and label",
-  );
+  const themeBeforeComposer = editor.themeManager.getResolvedTheme();
+  editor.themeManager.applyTheme("light");
+  await nextFrame();
+  const composerThemeProbe = document.createElement("span");
+  composerThemeProbe.style.position = "absolute";
+  composerThemeProbe.style.visibility = "hidden";
+  document.body.appendChild(composerThemeProbe);
+  try {
+    composerThemeProbe.style.color = getComputedStyle(document.documentElement)
+      .getPropertyValue("--bg-secondary")
+      .trim();
+    check(
+      getComputedStyle(composerBar).backgroundColor ===
+        getComputedStyle(composerThemeProbe).color,
+      "commit composer follows the active theme",
+    );
+  } finally {
+    composerThemeProbe.remove();
+    editor.themeManager.applyTheme(themeBeforeComposer);
+    await nextFrame();
+  }
   git.settingsButton.click();
   await waitFor(
     () => editor.tabManager.activeTab?.type === "settings",
@@ -396,11 +407,19 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     getComputedStyle(row.querySelector(".git-file-name")).textOverflow === "ellipsis",
     "long file names use ellipsis",
   );
+  check(
+    getComputedStyle(git.settingsButton).display === "none",
+    "narrow sidebar hides the settings shortcut",
+  );
   sidebar.style.width = "320px";
   await nextFrame();
   check(
     getComputedStyle(git.repoNameElement).display !== "none",
     "repository name returns at wide width",
+  );
+  check(
+    getComputedStyle(git.settingsButton).display !== "none",
+    "settings shortcut returns at wide width",
   );
   check(
     git.container.scrollWidth <= git.container.clientWidth + 1,

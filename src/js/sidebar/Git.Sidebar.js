@@ -1,5 +1,7 @@
 class GitSidebar extends Sidebar {
-  static COMMIT_INPUT_MAX_HEIGHT = 140;
+  static commitShortcutLabel(platform) {
+    return platform === "darwin" ? "⌘ ↵ Commit" : "Ctrl ↵ Commit";
+  }
 
   static resolveAbsolutePath(root, relativePath) {
     if (typeof root !== "string" || !root.trim()) return null;
@@ -91,7 +93,7 @@ class GitSidebar extends Sidebar {
     this.commitBoxElement = null;
     this.commitInput = null;
     this.commitButton = null;
-    this.commitButtonLabel = null;
+    this.commitButtonIcon = null;
     this.commitStatus = null;
     this.settingsButton = null;
     this.branchButton = null;
@@ -105,8 +107,6 @@ class GitSidebar extends Sidebar {
     this.branchMenuKeydown = null;
     this.branches = [];
     this.switchingBranch = false;
-    this.commitResizeObserver = null;
-    this.commitInputWidth = -1;
     this.stateElement = null;
     this.stateIconElement = null;
     this.stateTitleElement = null;
@@ -260,27 +260,9 @@ class GitSidebar extends Sidebar {
 
     const commitBox = document.createElement("div");
     commitBox.className = "git-sidebar-commit";
-    const commitInput = document.createElement("textarea");
-    commitInput.className = "git-sidebar-commit-input";
-    commitInput.rows = 1;
-    commitInput.placeholder = "Commit message...";
-    commitInput.setAttribute("aria-label", "Commit message");
-    commitInput.spellcheck = false;
-    commitInput.addEventListener("input", () => {
-      this.commitMessage = commitInput.value;
-      this.autoResizeCommitInput();
-      this.updateCommitControls();
-    });
-    commitInput.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-        event.preventDefault();
-        void this.commitChanges();
-      }
-    });
-    this.commitInput = commitInput;
 
-    const commitActions = document.createElement("div");
-    commitActions.className = "git-sidebar-commit-actions";
+    const commitBar = document.createElement("div");
+    commitBar.className = "git-composer-bar";
 
     const branchButton = document.createElement("button");
     branchButton.type = "button";
@@ -305,18 +287,33 @@ class GitSidebar extends Sidebar {
     this.branchButton = branchButton;
     this.branchButtonName = branchButtonName;
 
-    const commitStatus = document.createElement("span");
-    commitStatus.className = "git-sidebar-commit-status";
-    commitStatus.setAttribute("role", "status");
-    commitStatus.setAttribute("aria-live", "polite");
-    this.commitStatus = commitStatus;
+    const separator = document.createElement("span");
+    separator.className = "git-composer-separator";
+    separator.setAttribute("aria-hidden", "true");
 
-    const commitTools = document.createElement("div");
-    commitTools.className = "git-sidebar-commit-tools";
+    const commitInput = document.createElement("input");
+    commitInput.type = "text";
+    commitInput.className = "git-composer-input";
+    commitInput.placeholder = "Commit message...";
+    commitInput.setAttribute("aria-label", "Commit message");
+    commitInput.setAttribute("aria-keyshortcuts", "Meta+Enter Control+Enter");
+    commitInput.autocomplete = "off";
+    commitInput.spellcheck = false;
+    commitInput.addEventListener("input", () => {
+      this.commitMessage = commitInput.value;
+      this.updateCommitControls();
+    });
+    commitInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        void this.commitChanges();
+      }
+    });
+    this.commitInput = commitInput;
 
     const settingsButton = document.createElement("button");
     settingsButton.type = "button";
-    settingsButton.className = "git-sidebar-icon-button";
+    settingsButton.className = "git-composer-settings";
     settingsButton.title = "Git settings";
     settingsButton.setAttribute("aria-label", "Open Git settings");
     const settingsIcon = document.createElement("i");
@@ -328,21 +325,17 @@ class GitSidebar extends Sidebar {
 
     const commitButton = document.createElement("button");
     commitButton.type = "button";
-    commitButton.className = "git-sidebar-commit-button";
+    commitButton.className = "git-composer-commit";
     commitButton.disabled = true;
+    commitButton.title = "Commit changes";
+    commitButton.setAttribute("aria-label", "Commit changes");
     const commitIcon = document.createElement("i");
     commitIcon.className = "fi fi-rr-check";
     commitIcon.setAttribute("aria-hidden", "true");
-    const commitLabel = document.createElement("span");
-    commitLabel.className = "git-sidebar-commit-button-label";
-    commitLabel.textContent = "Commit";
-    commitButton.append(commitIcon, commitLabel);
+    commitButton.appendChild(commitIcon);
     commitButton.addEventListener("click", () => void this.commitChanges());
     this.commitButton = commitButton;
-    this.commitButtonLabel = commitLabel;
-
-    commitTools.append(settingsButton, commitButton);
-    commitActions.append(branchButton, commitStatus, commitTools);
+    this.commitButtonIcon = commitIcon;
 
     const branchMenu = document.createElement("div");
     branchMenu.className = "git-branch-menu";
@@ -351,17 +344,30 @@ class GitSidebar extends Sidebar {
     branchMenu.setAttribute("aria-label", "Branches");
     this.branchMenuElement = branchMenu;
 
-    commitBox.append(commitInput, commitActions, branchMenu);
+    commitBar.append(
+      branchButton,
+      separator,
+      commitInput,
+      settingsButton,
+      commitButton,
+      branchMenu,
+    );
+
+    const commitHint = document.createElement("div");
+    commitHint.className = "git-composer-hint";
+    commitHint.textContent = GitSidebar.commitShortcutLabel(
+      typeof window !== "undefined" ? window.api?.platform : "",
+    );
+    commitHint.setAttribute("aria-hidden", "true");
+
+    const commitStatus = document.createElement("span");
+    commitStatus.className = "git-sidebar-commit-status";
+    commitStatus.setAttribute("role", "status");
+    commitStatus.setAttribute("aria-live", "polite");
+    this.commitStatus = commitStatus;
+
+    commitBox.append(commitBar, commitHint, commitStatus);
     this.commitBoxElement = commitBox;
-    if (typeof ResizeObserver === "function") {
-      this.commitResizeObserver = new ResizeObserver((entries) => {
-        const width = entries[0]?.contentRect?.width;
-        if (width === this.commitInputWidth) return;
-        this.commitInputWidth = width;
-        this.autoResizeCommitInput();
-      });
-      this.commitResizeObserver.observe(commitBox);
-    }
 
     const state = document.createElement("div");
     state.className = "git-sidebar-state";
@@ -511,7 +517,6 @@ class GitSidebar extends Sidebar {
       if (!focused && this.commitInput.value !== this.commitMessage)
         this.commitInput.value = this.commitMessage;
       this.commitInput.disabled = this.committing || this.stagingAll;
-      this.autoResizeCommitInput();
     }
     this.updateCommitControls();
     this.updateState();
@@ -524,22 +529,21 @@ class GitSidebar extends Sidebar {
       (branch.oid ? `detached @ ${branch.oid.slice(0, 7)}` : "detached");
   }
 
-  autoResizeCommitInput() {
-    const input = this.commitInput;
-    if (!input || !input.isConnected || input.offsetParent === null) return;
-    const maxHeight = GitSidebar.COMMIT_INPUT_MAX_HEIGHT;
-    input.style.height = "auto";
-    const height = Math.min(input.scrollHeight, maxHeight);
-    input.style.height = `${height}px`;
-    input.style.overflowY = input.scrollHeight > maxHeight ? "auto" : "hidden";
-  }
-
   updateCommitControls() {
     if (this.commitButton) {
-      if (this.commitButtonLabel)
-        this.commitButtonLabel.textContent = this.committing ? "Committing…" : "Commit";
+      const committing = this.committing;
       this.commitButton.disabled = !this.canCommit();
-      if (this.committing) this.commitButton.setAttribute("aria-busy", "true");
+      this.commitButton.title = committing ? "Committing…" : "Commit changes";
+      this.commitButton.setAttribute(
+        "aria-label",
+        committing ? "Committing…" : "Commit changes",
+      );
+      if (this.commitButtonIcon) {
+        this.commitButtonIcon.className = committing
+          ? "fi fi-rr-refresh git-commit-spinner"
+          : "fi fi-rr-check";
+      }
+      if (committing) this.commitButton.setAttribute("aria-busy", "true");
       else this.commitButton.removeAttribute("aria-busy");
     }
     if (!this.commitStatus) return;
@@ -1790,8 +1794,6 @@ class GitSidebar extends Sidebar {
     this.refreshTimer = null;
     this.closeBranchMenu({ restoreFocus: false });
     this.detachBranchMenuDismiss();
-    this.commitResizeObserver?.disconnect();
-    this.commitResizeObserver = null;
     this.unsubscribeFileSystem?.();
     this.unsubscribeFileSystem = null;
     this.fileScroller?.destroy?.();
