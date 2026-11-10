@@ -422,6 +422,13 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     document.querySelector(".quick-panel-list").style.minHeight === "150px",
     "the branch picker sizes its list to all entries",
   );
+  const alphaRow = pickerRows.find((row) =>
+    row.querySelector(".quick-panel-item-label")?.textContent === "alpha");
+  check(
+    getComputedStyle(alphaRow.querySelector("i")).color ===
+      getComputedStyle(alphaRow.querySelector(".quick-panel-item-label")).color,
+    "branch picker icons match their text color",
+  );
   const createRow = pickerRows.find((row) =>
     row.querySelector(".quick-panel-item-label")?.textContent === "Create new branch");
   const pickerInputRect = document.querySelector(".quick-panel-input")

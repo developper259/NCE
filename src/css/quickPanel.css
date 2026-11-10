@@ -100,6 +100,10 @@
   margin-top: 11px;
 }
 
+.quick-panel[data-panel-id="git-branch-picker"] .quick-panel-item > i {
+  color: inherit;
+}
+
 .quick-panel-list-layer {
   position: relative;
   flex: 0 0 auto;

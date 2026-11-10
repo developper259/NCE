@@ -187,6 +187,14 @@ module.exports = async function exerciseNotificationUI() {
     const badge = bell?.querySelector(".nce-notification-badge");
     check(Boolean(bell && badge), "notification bell and badge exist");
     check(Boolean(bell.closest(".bottomBar")), "bell lives in the bottom bar");
+    check(
+      getComputedStyle(badge).backgroundColor === "rgba(0, 0, 0, 0)",
+      "notification count badge has no background",
+    );
+    check(
+      getComputedStyle(badge).color === getComputedStyle(bell).color,
+      "notification count inherits the bell color",
+    );
     const rightGroup = bell.closest(".bottomBar .right");
     const bellGroup = bell.closest(".nce-bottom-bar-actions");
     check(Boolean(rightGroup && bellGroup), "bell belongs to the right status group");
@@ -219,10 +227,6 @@ module.exports = async function exerciseNotificationUI() {
       badgeRect.width >= 11 && badgeRect.height >= 11 &&
         badgeRect.top <= bellRect.top + 2 && badgeRect.right <= bellRect.right + 1,
       "badge stays inside the bell bounds",
-    );
-    check(
-      getComputedStyle(badge).backgroundColor === colorOf("--accent-fill"),
-      "badge uses the accent token",
     );
 
     bell.click();
