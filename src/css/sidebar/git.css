@@ -543,11 +543,10 @@
 
 /* Commit composer */
 .git-sidebar-commit {
-  position: relative;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
   margin-top: 6px;
 }
 
@@ -555,31 +554,50 @@
   display: none;
 }
 
-.git-composer-bar {
-  position: relative;
+.git-composer-input {
   box-sizing: border-box;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  width: calc(100% - 8px);
+  min-width: 0;
   height: 30px;
-  padding: 0 4px 0 6px;
+  margin-right: 8px;
+  padding: 0 8px;
   border: 1px solid var(--border-primary);
   border-radius: 6px;
+  outline: none;
   background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
 }
 
-.git-composer-bar:focus-within {
+.git-composer-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.git-composer-input:focus {
   border-color: var(--border-active);
+}
+
+.git-composer-input:disabled {
+  opacity: 0.6;
+}
+
+.git-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
 }
 
 .git-branch-button {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  max-width: 42%;
-  height: 22px;
+  max-width: 65%;
+  height: 24px;
   padding: 0 4px;
   border: none;
   border-radius: 3px;
@@ -622,73 +640,20 @@
   font-size: 9px;
 }
 
-.git-composer-separator {
-  flex: 0 0 auto;
-  width: 1px;
-  height: 14px;
-  background: var(--border-primary);
-}
-
-.git-composer-input {
-  flex: 1 1 0;
-  width: 0;
-  min-width: 0;
-  height: 100%;
-  padding: 0 2px;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: inherit;
-  font-size: 12px;
-}
-
-.git-composer-input::placeholder {
-  color: var(--text-tertiary);
-}
-
-.git-composer-input:disabled {
-  opacity: 0.6;
-}
-
-.git-composer-settings {
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-tertiary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.git-composer-settings:hover {
-  background: var(--bg-hover-alt);
-  color: var(--text-white);
-}
-
-.git-composer-settings:focus-visible {
-  outline: 1px solid var(--border-active);
-  outline-offset: -1px;
-}
-
 .git-composer-commit {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 24px;
+  gap: 5px;
   height: 24px;
-  padding: 0;
+  margin-right: 8px;
+  padding: 0 8px;
   border: none;
   border-radius: 4px;
   background: var(--accent-fill);
   color: var(--text-white);
+  font-family: inherit;
   font-size: 11px;
   cursor: pointer;
 }
@@ -712,13 +677,6 @@
   animation: git-spin 900ms linear infinite;
 }
 
-.git-composer-hint {
-  padding-left: 7px;
-  color: var(--text-tertiary);
-  font-size: 10px;
-  line-height: 1;
-}
-
 .git-sidebar-commit-status {
   position: absolute;
   width: 1px;
@@ -731,103 +689,9 @@
   white-space: nowrap;
 }
 
-.git-branch-menu {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(100% + 6px);
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  max-height: 240px;
-  padding: 4px;
-  border: 1px solid var(--border-secondary);
-  border-radius: 6px;
-  background: var(--bg-secondary);
-  box-shadow: 0 6px 16px var(--shadow-color, rgba(0, 0, 0, 0.28));
-  overflow-y: auto;
-}
-
-.git-branch-menu[hidden] {
-  display: none;
-}
-
-.git-branch-menu:not([hidden]) {
-  animation: git-menu-fade 120ms ease-out;
-}
-
-.git-branch-menu-item {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 8px;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 11.5px;
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.git-branch-menu-item:hover,
-.git-branch-menu-item:focus-visible {
-  outline: none;
-  background: var(--bg-hover-alt);
-  color: var(--text-white);
-}
-
-.git-branch-menu-item.is-current {
-  color: var(--text-white);
-}
-
-.git-branch-menu-item > i {
-  flex: 0 0 auto;
-  color: var(--text-tertiary);
-  font-size: 10.5px;
-}
-
-.git-branch-menu-item .git-branch-menu-check {
-  color: var(--accent-fill);
-}
-
-.git-branch-menu-item-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.git-branch-menu-separator {
-  flex: 0 0 auto;
-  height: 1px;
-  margin: 4px 2px;
-  background: var(--border-primary);
-}
-
-.git-branch-menu-empty {
-  padding: 6px 8px;
-  color: var(--text-tertiary);
-  font-size: 11px;
-}
-
 @keyframes git-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes git-menu-fade {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
   }
 }
 
@@ -849,18 +713,13 @@
   .git-sidebar-branch-sync {
     display: none;
   }
-
-  .git-composer-settings {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .git-sidebar-icon-button[aria-busy="true"] i,
   .git-section-action[aria-busy="true"] i,
   .git-composer-commit[aria-busy="true"] i,
-  .git-state-icon.is-spinning,
-  .git-branch-menu:not([hidden]) {
+  .git-state-icon.is-spinning {
     animation: none;
   }
 }

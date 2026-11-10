@@ -153,24 +153,25 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "commit message uses a single-line input",
   );
   check(
-    getComputedStyle(git.commitInput).borderTopStyle === "none" &&
-      getComputedStyle(git.commitInput).backgroundColor === "rgba(0, 0, 0, 0)",
-    "commit input blends into the composer bar",
+    git.commitInput.parentElement === git.commitBoxElement &&
+      git.commitBoxElement.children[1]?.className.includes("git-composer-footer"),
+    "the message input sits alone above the footer",
   );
-  const composerBar = git.commitInput.parentElement;
-  const composerHeight = composerBar.getBoundingClientRect().height;
+  const inputHeight = git.commitInput.getBoundingClientRect().height;
+  const composerHeight = git.commitBoxElement.getBoundingClientRect().height;
   check(
-    composerBar.className.includes("git-composer-bar") &&
-      composerHeight > 0 &&
-      composerHeight <= 32,
-    "commit composer is a single compact bar",
+    inputHeight > 0 &&
+      inputHeight <= 31 &&
+      getComputedStyle(git.commitInput).borderTopWidth === "1px",
+    "the commit message is a compact standalone field",
   );
   git.commitInput.value = `feat: ${"long message ".repeat(20)}`;
   git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
   await nextFrame();
   check(
-    Math.abs(composerBar.getBoundingClientRect().height - composerHeight) <= 1,
-    "a long commit message does not deform the composer bar",
+    Math.abs(git.commitInput.getBoundingClientRect().height - inputHeight) <= 1 &&
+      Math.abs(git.commitBoxElement.getBoundingClientRect().height - composerHeight) <= 1,
+    "a long commit message does not deform the composer",
   );
   git.commitInput.value = "";
   git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
@@ -180,11 +181,26 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     git.commitStatus.getBoundingClientRect().width <= 1,
     "commit status text takes no visible space",
   );
+  const composerFooter = git.commitBoxElement.children[1];
   check(
-    composerBar.children[0] === git.branchButton &&
-      composerBar.children[1].className.includes("git-composer-separator") &&
-      composerBar.children[2] === git.commitInput,
-    "branch, separator and message are ordered left to right",
+    composerFooter.firstElementChild === git.branchButton &&
+      composerFooter.lastElementChild === git.commitButton,
+    "branch selector sits left and Commit sits right below the input",
+  );
+  const composerRight = git.commitBoxElement.getBoundingClientRect().right;
+  check(
+    Math.abs(
+      composerRight - git.commitInput.getBoundingClientRect().right - 8,
+    ) <= 1 &&
+      Math.abs(
+        composerRight - git.commitButton.getBoundingClientRect().right - 8,
+      ) <= 1,
+    "input and Commit keep a right inset",
+  );
+  check(
+    !git.commitBoxElement.querySelector(".fi-rr-settings-sliders") &&
+      !document.querySelector(".git-branch-menu"),
+    "the settings button and custom branch menu are removed",
   );
   check(
     !git.commitBoxElement.querySelector(".fi-rr-pencil"),
@@ -195,22 +211,20 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       Boolean(git.branchButton.querySelector(".git-branch-button-arrow")),
     "branch selector shows the current branch and a dropdown arrow",
   );
-  check(
-    git.settingsButton.parentElement === composerBar &&
-      git.settingsButton.nextElementSibling === git.commitButton,
-    "Git settings sits directly left of Commit",
+  const commitLabel = git.commitButton.querySelector(
+    ".git-composer-commit-label",
   );
   check(
     git.commitButton.title === "Commit changes" &&
       git.commitButton.getAttribute("aria-label") === "Commit changes" &&
-      git.commitButton.textContent.trim() === "" &&
-      git.commitButton.querySelector("i")?.className.includes("fi-rr-check"),
-    "Commit is a compact icon action with an accessible tooltip",
+      commitLabel?.textContent === "Commit" &&
+      git.commitButton.lastElementChild === commitLabel &&
+      git.commitButton.firstElementChild?.className.includes("fi-rr-check"),
+    "Commit shows its label right of the check icon",
   );
   check(
-    document.querySelector(".git-composer-hint")?.textContent ===
-      (editor.api.platform === "darwin" ? "⌘ ↵ Commit" : "Ctrl ↵ Commit"),
-    "commit hint shows the supported shortcut",
+    !document.querySelector(".git-composer-hint"),
+    "the commit hint is removed",
   );
   const themeBeforeComposer = editor.themeManager.getResolvedTheme();
   editor.themeManager.applyTheme("light");
@@ -224,7 +238,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       .getPropertyValue("--bg-secondary")
       .trim();
     check(
-      getComputedStyle(composerBar).backgroundColor ===
+      getComputedStyle(git.commitInput).backgroundColor ===
         getComputedStyle(composerThemeProbe).color,
       "commit composer follows the active theme",
     );
@@ -233,18 +247,6 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     editor.themeManager.applyTheme(themeBeforeComposer);
     await nextFrame();
   }
-  git.settingsButton.click();
-  await waitFor(
-    () => editor.tabManager.activeTab?.type === "settings",
-    "Git settings tab to open",
-  );
-  check(
-    editor.getSettingsView().category === "Git",
-    "Git settings gear opens the Git category",
-  );
-  await editor.tabManager.closeTab(editor.tabManager.activeTab);
-  await nextFrame();
-  check(git.isOpen, "Source Control stays open after visiting settings");
   const branchIndicatorWithChanges = document.querySelector(".bottomBar-git-branch");
   const branchDirtyWithChanges = branchIndicatorWithChanges.querySelector(
     ".bottomBar-git-branch-dirty",
@@ -279,7 +281,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "Changes section is visible",
   );
 
-  // Branch selector: alphabetical menu, creation and switching.
+  // Branch selector: QuickPanel picker with create first and sorted branches.
   check(
     (await editor.api.git.createBranch("zeta"))?.success === true,
     "fixture branch zeta is created",
@@ -297,45 +299,66 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   await waitFor(() => git.getBranchLabel() === "main", "main branch fixture");
   git.branchButton.click();
   await waitFor(
-    () => git.branchMenuOpen && !git.branchMenuLoading,
-    "branch menu to load",
+    () => editor.quickPanel.isOpen("git-branch-picker"),
+    "branch picker to open",
+  );
+  await waitFor(
+    () => document.querySelectorAll(".quick-panel-item").length >= 4,
+    "branch picker rows",
+  );
+  const pickerItems = editor.quickPanel.session.items;
+  check(
+    pickerItems[0]?.label === "Create new branch",
+    "Create new branch is the first picker item",
+  );
+  check(
+    pickerItems.slice(1).map((item) => item.label).join(",") ===
+      "alpha,main,zeta",
+    "branches are listed alphabetically after the create item",
+  );
+  check(
+    pickerItems[1]?.separatorBefore === true,
+    "a separator follows the create item",
+  );
+  check(
+    pickerItems.find((item) => item.label === "main")?.checked === true &&
+      editor.quickPanel.session.options.selectedId === "branch:main",
+    "current branch is selected in the picker",
+  );
+  check(
+    Boolean(document.querySelector(".quick-panel-separator")),
+    "the create item is separated from the branches",
+  );
+  const pickerRows = [...document.querySelectorAll(".quick-panel-item")];
+  const mainRow = pickerRows.find((row) =>
+    row.querySelector(".quick-panel-item-label")?.textContent === "main");
+  const branchCheck = mainRow?.querySelector(".quick-panel-item-checkmark");
+  check(Boolean(branchCheck), "current branch shows a checkmark");
+  check(
+    branchCheck.getBoundingClientRect().right >=
+      mainRow.getBoundingClientRect().right - 9,
+    "branch checkmark sits at the far right of its row",
+  );
+  const alphaItem = pickerItems.find((item) => item.label === "alpha");
+  editor.quickPanel.accept(alphaItem);
+  await waitFor(
+    () => git.getBranchLabel() === "alpha",
+    "branch switch from picker",
   );
   await nextFrame();
-  const branchMenu = document.querySelector(".git-branch-menu");
-  const branchMenuRect = branchMenu.getBoundingClientRect();
-  const branchButtonRect = git.branchButton.getBoundingClientRect();
-  const commitBoxRect = git.commitBoxElement.getBoundingClientRect();
-  check(branchMenu.hidden === false, "branch menu is visible");
   check(
-    branchMenuRect.bottom <= branchButtonRect.top + 1,
-    "branch menu opens upward",
+    !editor.quickPanel.isOpen("git-branch-picker"),
+    "branch picker closes after switching",
   );
-  check(
-    branchMenuRect.left >= commitBoxRect.left - 1 &&
-      branchMenuRect.right <= commitBoxRect.right + 1,
-    "branch menu aligns with the commit card",
+  git.branchButton.click();
+  await waitFor(
+    () => editor.quickPanel.isOpen("git-branch-picker"),
+    "branch picker to reopen",
   );
-  const branchItems = [...branchMenu.querySelectorAll(".git-branch-menu-item")];
-  const branchLabels = branchItems
-    .map((item) => item.querySelector(".git-branch-menu-item-name")?.textContent)
-    .filter(Boolean);
-  check(
-    branchLabels.join(",") === "alpha,main,zeta,New Branch",
-    "branch menu lists branches alphabetically then New Branch",
+  const createItem = editor.quickPanel.session.items.find(
+    (item) => item.id === "create",
   );
-  const currentBranchItem = branchItems.find(
-    (item) =>
-      item.querySelector(".git-branch-menu-item-name")?.textContent === "main",
-  );
-  check(
-    currentBranchItem?.classList.contains("is-current") === true &&
-      Boolean(currentBranchItem.querySelector(".git-branch-menu-check")),
-    "current branch is marked in the menu",
-  );
-  const newBranchItem = branchItems.find(
-    (item) => item.classList.contains("git-branch-menu-new"),
-  );
-  newBranchItem.click();
+  editor.quickPanel.accept(createItem);
   await waitFor(
     () => editor.quickPanel.isOpen("git-new-branch"),
     "new branch prompt",
@@ -355,20 +378,25 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     git.branchButton.textContent.includes("feature/test"),
     "branch selector follows the created branch",
   );
-  check(!git.branchMenuOpen, "branch menu closes after creating a branch");
+  check(
+    !editor.quickPanel.isOpen("git-new-branch"),
+    "new branch prompt closes after creation",
+  );
   git.branchButton.click();
   await waitFor(
-    () => git.branchMenuOpen && !git.branchMenuLoading,
-    "branch menu to reopen",
+    () => editor.quickPanel.isOpen("git-branch-picker"),
+    "branch picker to reopen after creation",
   );
-  await nextFrame();
-  const mainBranchItem = [...document.querySelectorAll(".git-branch-menu-item")]
-    .find((item) =>
-      item.querySelector(".git-branch-menu-item-name")?.textContent === "main");
-  mainBranchItem.click();
+  const mainItem = editor.quickPanel.session.items.find(
+    (item) => item.label === "main",
+  );
+  editor.quickPanel.accept(mainItem);
   await waitFor(() => git.getBranchLabel() === "main", "switch back to main");
   await nextFrame();
-  check(!git.branchMenuOpen, "branch menu closes after switching");
+  check(
+    !editor.quickPanel.isOpen("git-branch-picker"),
+    "branch picker closes after switching back",
+  );
   check(
     git.getViewState().changes.length === 2,
     "branch switches preserve the working changes",
@@ -407,19 +435,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     getComputedStyle(row.querySelector(".git-file-name")).textOverflow === "ellipsis",
     "long file names use ellipsis",
   );
-  check(
-    getComputedStyle(git.settingsButton).display === "none",
-    "narrow sidebar hides the settings shortcut",
-  );
   sidebar.style.width = "320px";
   await nextFrame();
   check(
     getComputedStyle(git.repoNameElement).display !== "none",
     "repository name returns at wide width",
-  );
-  check(
-    getComputedStyle(git.settingsButton).display !== "none",
-    "settings shortcut returns at wide width",
   );
   check(
     git.container.scrollWidth <= git.container.clientWidth + 1,

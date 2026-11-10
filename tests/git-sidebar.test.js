@@ -553,12 +553,6 @@ test("GitSidebar renders a Stage All action only in a populated Changes header",
   }
 });
 
-test("GitSidebar labels the commit shortcut for the platform", () => {
-  assert.equal(GitSidebar.commitShortcutLabel("darwin"), "⌘ ↵ Commit");
-  assert.equal(GitSidebar.commitShortcutLabel("linux"), "Ctrl ↵ Commit");
-  assert.equal(GitSidebar.commitShortcutLabel("win32"), "Ctrl ↵ Commit");
-});
-
 test("GitSidebar validates branch names before talking to Git", () => {
   assert.equal(GitSidebar.validateBranchName("feature/login"), null);
   assert.equal(GitSidebar.validateBranchName("release/1.0"), null);
@@ -586,8 +580,7 @@ test("GitSidebar sorts branches alphabetically for the menu", () => {
   );
 });
 
-test("GitSidebar builds the branch menu with sorted branches and a New Branch action", async () => {
-  const menu = new FakeElement("div");
+test("GitSidebar opens the branch picker with a create item and sorted branches", async () => {
   const { sidebar, calls } = createSidebar({
     entries: [modifiedEntry],
     branchesResult: {
@@ -602,31 +595,28 @@ test("GitSidebar builds the branch menu with sorted branches and a New Branch ac
   });
   try {
     await sidebar.refresh({ reason: "open" });
-    sidebar.branchMenuElement = menu;
-    assert.equal(await sidebar.openBranchMenu(), true);
-    assert.equal(calls.branches, 1);
-    assert.equal(menu.hidden, false);
-    assert.equal(sidebar.branchMenuOpen, true);
+    assert.equal(await sidebar.openBranchPicker(), true);
+    const panel = calls.quickPanel[0];
+    assert.equal(panel.id, "git-branch-picker");
+    assert.equal(panel.mode, "pick");
+    assert.equal(panel.title, "Switch Branch");
+    assert.equal(panel.preserveLabelCase, true);
+    assert.equal(panel.selectedId, "branch:main");
     assert.deepEqual(
-      toPlain(sidebar.branches.map((branch) => branch.name)),
-      ["alpha", "main", "zeta"],
+      toPlain(panel.items.map((item) => item.label)),
+      ["Create new branch", "alpha", "main", "zeta"],
     );
-    const items = menu.children.filter((child) =>
-      child.className.split(" ").includes("git-branch-menu-item"));
-    assert.deepEqual(
-      toPlain(items.map((item) => item.children.find((child) =>
-        child.className.includes("git-branch-menu-item-name"))?.textContent)),
-      ["alpha", "main", "zeta", "New Branch"],
-    );
-    const current = items[1];
-    assert.equal(current.getAttribute("aria-current"), "true");
-    assert.ok(current.className.includes("is-current"));
-    assert.ok(current.children[1].className.includes("git-branch-menu-check"));
-    assert.ok(menu.children.some((child) =>
-      child.className === "git-branch-menu-separator"));
-    const newBranch = items[3];
-    assert.ok(newBranch.className.includes("git-branch-menu-new"));
-    assert.equal(newBranch.children[1].textContent, "New Branch");
+    assert.equal(panel.items[0].id, "create");
+    assert.equal(panel.items[1].separatorBefore, true);
+    assert.equal(panel.items[2].checked, true);
+    assert.equal(panel.items[3].checked, false);
+
+    panel.onAccept(panel.items[1]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(calls.switchBranch, ["alpha"]);
+
+    panel.onAccept(panel.items[0]);
+    assert.equal(calls.quickPanel[1].id, "git-new-branch");
   } finally {
     sidebar.destroy();
   }
