@@ -40,19 +40,26 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   const getSectionAction = (section) => git.listLayer.querySelector(
     `.git-section-header[data-section="${section}"] .git-section-action`,
   );
-  const clickSectionAction = async (section, description) => {
-    let button = null;
-    await waitFor(() => {
-      button = getSectionAction(section);
-      return Boolean(button && !button.disabled);
-    }, description);
-    button.click();
-  };
   const waitForIdle = () => waitFor(
     () => !git.loading && !git.switchingBranch &&
       !git.stagingAll && !git.unstagingAll && !git.committing,
     "Source Control idle",
   );
+  const triggerSectionAction = async (section, description, predicate) => {
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      if (predicate()) return;
+      await waitForIdle();
+      const button = getSectionAction(section);
+      if (!button || button.disabled) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        continue;
+      }
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    throw Error(description);
+  };
   const branchFailure = () => editor.notificationManager.getNotifications()
     .find((notification) =>
       notification.title === "Could not switch branch" ||
@@ -190,33 +197,50 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   check(git.commitInput.placeholder === "Commit message...", "commit placeholder");
   check(
-    git.commitInput.tagName === "INPUT" && git.commitInput.type === "text",
-    "commit message uses a single-line input",
+    git.commitInput.tagName === "TEXTAREA" && git.commitInput.rows === 1,
+    "commit message uses a compact multiline field",
   );
   check(
     git.commitInput.parentElement === git.commitBoxElement &&
       git.commitBoxElement.children[1]?.className.includes("git-composer-footer"),
     "the message input sits alone above the footer",
   );
-  const inputHeight = git.commitInput.getBoundingClientRect().height;
-  const composerHeight = git.commitBoxElement.getBoundingClientRect().height;
+  const singleLineHeight = git.commitInput.getBoundingClientRect().height;
   check(
-    inputHeight > 0 &&
-      inputHeight <= 31 &&
-      getComputedStyle(git.commitInput).borderTopWidth === "1px",
-    "the commit message is a compact standalone field",
+    singleLineHeight > 0 &&
+      singleLineHeight <= 34 &&
+      getComputedStyle(git.commitInput).borderTopWidth === "1px" &&
+      getComputedStyle(git.commitInput).resize === "none",
+    "the commit message starts at one line",
   );
-  git.commitInput.value = `feat: ${"long message ".repeat(20)}`;
+  git.commitInput.value = "line one\nline two\nline three";
   git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
   await nextFrame();
+  const multiLineHeight = git.commitInput.getBoundingClientRect().height;
   check(
-    Math.abs(git.commitInput.getBoundingClientRect().height - inputHeight) <= 1 &&
-      Math.abs(git.commitBoxElement.getBoundingClientRect().height - composerHeight) <= 1,
-    "a long commit message does not deform the composer",
+    multiLineHeight >= singleLineHeight + 20,
+    "the commit message grows with its lines",
+  );
+  git.commitInput.value = Array.from(
+    { length: 20 },
+    (_, index) => `line ${index + 1}`,
+  ).join("\n");
+  git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
+  await nextFrame();
+  const cappedHeight = git.commitInput.getBoundingClientRect().height;
+  check(
+    cappedHeight > multiLineHeight &&
+      cappedHeight <= 161 &&
+      getComputedStyle(git.commitInput).overflowY === "auto",
+    "the commit message caps its growth and scrolls",
   );
   git.commitInput.value = "";
   git.commitInput.dispatchEvent(new Event("input", { bubbles: true }));
   await nextFrame();
+  check(
+    Math.abs(git.commitInput.getBoundingClientRect().height - singleLineHeight) <= 1,
+    "the commit message shrinks when cleared",
+  );
   check(git.commitButton.disabled === true, "commit is disabled before staging");
   check(
     git.commitStatus.getBoundingClientRect().width <= 1,
@@ -516,13 +540,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     ) <= 0.5,
     "Stage All and row stage icons share a vertical axis",
   );
-  await clickSectionAction("changes", "Stage All to be ready");
-  await waitFor(() => {
+  await triggerSectionAction("changes", "Stage All to stage every change", () => {
     const state = git.getViewState();
     return state.mode === "changes" &&
       state.staged.length === 2 &&
       state.changes.length === 0;
-  }, "Stage All to stage every change");
+  });
   await nextFrame();
   check(
     git.commitStatus.textContent === "Staged 2 changes",
@@ -544,13 +567,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       unstageAllButton.querySelector("i")?.className.includes("fi-rr-minus"),
     "Unstage All is announced with a minus icon",
   );
-  await clickSectionAction("staged", "Unstage All to be ready");
-  await waitFor(() => {
+  await triggerSectionAction("staged", "Unstage All to unstage every change", () => {
     const state = git.getViewState();
     return state.mode === "changes" &&
       state.staged.length === 0 &&
       state.changes.length === 2;
-  }, "Unstage All to unstage every change");
+  });
   await nextFrame();
   check(
     git.commitStatus.textContent === "Unstaged 2 changes",
@@ -561,13 +583,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     '.git-section-header[data-section="changes"] .git-section-action',
   );
   check(Boolean(restageAllButton), "Changes header offers Stage All again");
-  await clickSectionAction("changes", "Stage All to restage every change");
-  await waitFor(() => {
+  await triggerSectionAction("changes", "Stage All to restage every change", () => {
     const state = git.getViewState();
     return state.mode === "changes" &&
       state.staged.length === 2 &&
       state.changes.length === 0;
-  }, "Stage All to restage every change");
+  });
   await nextFrame();
   check(
     git.commitStatus.textContent === "Staged 2 changes",

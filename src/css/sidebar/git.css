@@ -494,11 +494,13 @@
 
 .git-composer-input {
   box-sizing: border-box;
+  flex: 0 0 auto;
   width: calc(100% - 8px);
   min-width: 0;
-  height: 30px;
+  min-height: 30px;
+  max-height: 160px;
   margin-right: 8px;
-  padding: 0 8px;
+  padding: 6px 8px;
   border: 1px solid var(--border-primary);
   border-radius: 6px;
   outline: none;
@@ -506,6 +508,9 @@
   color: var(--text-primary);
   font-family: inherit;
   font-size: 12px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: hidden;
 }
 
 .git-composer-input::placeholder {

@@ -1,4 +1,6 @@
 class GitSidebar extends Sidebar {
+  static COMMIT_INPUT_MAX_HEIGHT = 160;
+
   static resolveAbsolutePath(root, relativePath) {
     if (typeof root !== "string" || !root.trim()) return null;
     if (typeof relativePath !== "string" || !relativePath.trim()) return null;
@@ -90,6 +92,8 @@ class GitSidebar extends Sidebar {
     this.branchButton = null;
     this.branchButtonName = null;
     this.switchingBranch = false;
+    this.commitResizeObserver = null;
+    this.commitInputWidth = -1;
     this.stateElement = null;
     this.stateIconElement = null;
     this.stateTitleElement = null;
@@ -222,9 +226,9 @@ class GitSidebar extends Sidebar {
     const commitBox = document.createElement("div");
     commitBox.className = "git-sidebar-commit";
 
-    const commitInput = document.createElement("input");
-    commitInput.type = "text";
+    const commitInput = document.createElement("textarea");
     commitInput.className = "git-composer-input";
+    commitInput.rows = 1;
     commitInput.placeholder = "Commit message...";
     commitInput.setAttribute("aria-label", "Commit message");
     commitInput.setAttribute("aria-keyshortcuts", "Meta+Enter Control+Enter");
@@ -232,6 +236,7 @@ class GitSidebar extends Sidebar {
     commitInput.spellcheck = false;
     commitInput.addEventListener("input", () => {
       this.commitMessage = commitInput.value;
+      this.autoResizeCommitInput();
       this.updateCommitControls();
     });
     commitInput.addEventListener("keydown", (event) => {
@@ -295,6 +300,15 @@ class GitSidebar extends Sidebar {
 
     commitBox.append(commitInput, commitFooter, commitStatus);
     this.commitBoxElement = commitBox;
+    if (typeof ResizeObserver === "function") {
+      this.commitResizeObserver = new ResizeObserver((entries) => {
+        const width = entries[0]?.contentRect?.width;
+        if (width === this.commitInputWidth) return;
+        this.commitInputWidth = width;
+        this.autoResizeCommitInput();
+      });
+      this.commitResizeObserver.observe(commitBox);
+    }
 
     const state = document.createElement("div");
     state.className = "git-sidebar-state";
@@ -417,6 +431,7 @@ class GitSidebar extends Sidebar {
         this.commitInput.value = this.commitMessage;
       this.commitInput.disabled =
         this.committing || this.stagingAll || this.unstagingAll;
+      this.autoResizeCommitInput();
     }
     this.updateCommitControls();
     this.updateState();
@@ -427,6 +442,19 @@ class GitSidebar extends Sidebar {
     if (!branch) return "";
     return branch.name ||
       (branch.oid ? `detached @ ${branch.oid.slice(0, 7)}` : "detached");
+  }
+
+  autoResizeCommitInput() {
+    const input = this.commitInput;
+    if (!input || !input.isConnected || input.offsetParent === null) return;
+    const maxHeight = GitSidebar.COMMIT_INPUT_MAX_HEIGHT;
+    input.style.height = "auto";
+    const border = Math.max(0, input.offsetHeight - input.clientHeight);
+    const height = Math.min(input.scrollHeight + border, maxHeight);
+    input.style.height = `${height}px`;
+    input.style.overflowY = input.scrollHeight + border > maxHeight
+      ? "auto"
+      : "hidden";
   }
 
   updateCommitControls() {
@@ -1648,6 +1676,8 @@ class GitSidebar extends Sidebar {
     this.destroyed = true;
     clearTimeout(this.refreshTimer);
     this.refreshTimer = null;
+    this.commitResizeObserver?.disconnect();
+    this.commitResizeObserver = null;
     this.unsubscribeFileSystem?.();
     this.unsubscribeFileSystem = null;
     this.fileScroller?.destroy?.();
