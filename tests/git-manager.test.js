@@ -877,9 +877,56 @@ test("GitManager switches and creates branches safely", { skip: gitSkip }, async
   try {
     assert.equal((await unbornManager.createBranch("first")).success, true);
     assert.equal((await unbornManager.getCurrentBranch()).branch, "first");
+    const unbornBranches = await unbornManager.getBranches();
+    assert.deepEqual(
+      unbornBranches.branches.map((branch) => branch.name).sort(),
+      ["first", "main"],
+      "creating the first branch keeps the unborn base branch",
+    );
+    const unbornLog = await unbornManager.getLog();
+    assert.equal(unbornLog.commits.length, 1);
+    assert.equal(unbornLog.commits[0].subject, "Initial commit");
   } finally {
     unbornManager.dispose();
     await removeAll(unborn);
+  }
+});
+
+test("GitManager preserves the base branch and staged work on the first branch", { skip: gitSkip }, async () => {
+  const root = await createRepository({ commits: 0 });
+  await fs.writeFile(path.join(root, "staged.txt"), "staged\n");
+  await fs.writeFile(path.join(root, "untracked.txt"), "untracked\n");
+  git(root, ["add", "--", "staged.txt"]);
+  const manager = managerFor(root);
+  try {
+    assert.equal((await manager.createBranch("feature")).success, true);
+    assert.equal((await manager.getCurrentBranch()).branch, "feature");
+    const branches = await manager.getBranches();
+    assert.deepEqual(branches.branches.map((branch) => branch.name).sort(), [
+      "feature",
+      "main",
+    ]);
+    const status = await manager.getStatus();
+    assert.deepEqual(
+      Object.fromEntries(status.status.entries.map((entry) => [
+        entry.path,
+        [entry.index, entry.worktree],
+      ])),
+      { "staged.txt": ["A", null], "untracked.txt": [null, "?"] },
+      "the initial commit leaves staged and untracked work untouched",
+    );
+    assert.equal(
+      git(root, ["show", "--pretty=format:", "--name-only", "HEAD"]).trim(),
+      "",
+      "the initial commit is empty",
+    );
+    assert.equal(
+      git(root, ["rev-parse", "main"]),
+      git(root, ["rev-parse", "feature"]),
+    );
+  } finally {
+    manager.dispose();
+    await removeAll(root);
   }
 });
 

@@ -832,6 +832,34 @@ export class GitManager {
       return failure("GIT_COMMAND_FAILED", "A branch with that name already exists.");
     if (!create && !exists)
       return failure("GIT_COMMAND_FAILED", "That branch could not be found.");
+    if (create) {
+      const head = await this.hasHeadCommit(context.root);
+      if ("failure" in head) return head.failure;
+      if (!head.found) {
+        // An unborn branch has no ref to fork from. Materialize the current
+        // branch with an empty commit without touching the index so main is
+        // preserved when the first branch is created.
+        const current = await this.getCurrentBranch();
+        if (!current.success) return current;
+        const initial = await this.runGit(
+          ["commit", "--allow-empty", "--only", "-m", "Initial commit"],
+          { cwd: context.root },
+        );
+        if (!initial.ok) {
+          const detail = initial.stderr || "";
+          if (/Please tell me who you are|auto-detect email address|empty ident name/i.test(detail))
+            return failure(
+              "GIT_IDENTITY_MISSING",
+              "Git needs an author name and email before it can create the initial commit.",
+            );
+          if (initial.exitCode === 1 || /hook/i.test(detail))
+            return failure("GIT_HOOK_FAILED", "A Git hook rejected the initial commit.");
+          return initial.failure;
+        }
+        if (current.branch && current.branch === branchName)
+          return { success: true, branch: branchName };
+      }
+    }
     const result = await this.runGit(
       create ? ["checkout", "-b", branchName] : ["checkout", branchName],
       { cwd: context.root },
