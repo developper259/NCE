@@ -153,6 +153,19 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     branchIndicator.click();
     await waitFor(() => git.isOpen, "bottom-bar branch to reopen Source Control");
     check(git.stateRefresh.hidden === false, "clean state offers refresh");
+    check(
+      !editor.quickPanel.isOpen("git-branch-picker"),
+      "bottom-bar Git opens Source Control, not the branch picker",
+    );
+    const bottomBarRect = branchIndicator.getBoundingClientRect();
+    const bottomBarTopElement = document.elementFromPoint(
+      bottomBarRect.left + bottomBarRect.width / 2,
+      bottomBarRect.top + bottomBarRect.height / 2,
+    );
+    check(
+      branchIndicator.contains(bottomBarTopElement),
+      "bottom-bar Git stays clickable above the sidebar",
+    );
     return { mode: "clean", branch: git.getBranchLabel() };
   }
 

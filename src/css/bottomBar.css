@@ -5,7 +5,7 @@
   bottom: 0;
   height: var(--bottombar-height);
   width: 100%;
-  z-index: 5;
+  z-index: 20;
   user-select: none;
   display: flex;
   flex-direction: row;

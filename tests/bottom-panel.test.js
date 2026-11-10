@@ -324,7 +324,7 @@ test("Bottom Panel reduces editor and sidebar bounds above the BottomBar", () =>
   assert.match(css, /\.main-section > \.editor\s*\{[^}]*bottom:\s*calc\(var\(--bottombar-height\) \+ var\(--bottom-panel-height, 0px\)\)[^}]*isolation:\s*isolate/s);
   assert.match(css, /\.main-section > \.sidebar-tab-selector,[\s\S]*?bottom:\s*var\(--bottombar-height\)/);
   assert.match(read("src/css/bottomPanel.css"), /bottom:\s*var\(--bottombar-height\)/);
-  assert.match(read("src/css/bottomBar.css"), /z-index:\s*5/);
+  assert.match(read("src/css/bottomBar.css"), /z-index:\s*20/);
   assert.doesNotMatch(
     read("src/css/bottomBar.css"),
     /\.bottomBar-terminal-toggle\[aria-expanded="true"\]/,

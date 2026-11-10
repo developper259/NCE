@@ -152,6 +152,10 @@ class BottomBar {
   openGitSidebar() {
     const manager = this.editor.sidebarManager;
     if (typeof manager?.openMenu !== "function") return false;
+    this.editor.quickPanel?.close?.({
+      notifyCancel: false,
+      restoreFocus: false,
+    });
     manager.openMenu("git");
     return true;
   }
