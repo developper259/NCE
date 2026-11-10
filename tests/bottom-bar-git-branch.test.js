@@ -106,6 +106,8 @@ test("BottomBar renders the dirty star as a small superscript beside the branch 
   assert.match(rule, /position:\s*absolute/);
   assert.match(rule, /top:\s*0/);
   assert.match(rule, /right:\s*0/);
+  assert.match(rule, /color:\s*inherit/);
+  assert.doesNotMatch(rule, /--git-modified/);
   assert.match(rule, /font-size:\s*8px/);
 });
 
