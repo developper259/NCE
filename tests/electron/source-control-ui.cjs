@@ -412,6 +412,16 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "the create item is separated from the branches",
   );
   const pickerRows = [...document.querySelectorAll(".quick-panel-item")];
+  check(
+    [...document.querySelectorAll(".quick-panel-item-label")]
+      .map((element) => element.textContent)
+      .join(",") === "Create new branch,alpha,main,zeta",
+    "every branch row is rendered",
+  );
+  check(
+    document.querySelector(".quick-panel-list").style.minHeight === "150px",
+    "the branch picker sizes its list to all entries",
+  );
   const createRow = pickerRows.find((row) =>
     row.querySelector(".quick-panel-item-label")?.textContent === "Create new branch");
   const pickerInputRect = document.querySelector(".quick-panel-input")
