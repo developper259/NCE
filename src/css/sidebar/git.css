@@ -9,7 +9,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 0 8px 10px 6px;
+  padding: 0 0 10px 6px;
   color: var(--text-secondary);
   font-family: var(--font-ui);
 }
@@ -326,11 +326,12 @@
 }
 
 .git-section-header {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
   height: 24px;
-  padding: 0 6px;
+  padding: 0 8px 0 6px;
   border-radius: 3px;
   color: var(--text-tertiary);
   font-size: 10px;
@@ -380,8 +381,8 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: none;
   border-radius: 3px;
@@ -411,6 +412,7 @@
 }
 
 .git-file-row {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -489,7 +491,7 @@
   display: flex;
   flex: 0 0 auto;
   gap: 2px;
-  margin-right: 8px;
+  margin-right: 2px;
   opacity: 0;
 }
 
@@ -531,6 +533,7 @@
 }
 
 .git-sidebar-empty {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   padding: 0 10px;

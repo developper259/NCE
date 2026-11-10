@@ -174,8 +174,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "untracked status letter is displayed",
   );
   check(
-    getComputedStyle(row.querySelector(".git-file-actions")).marginRight === "8px",
-    "stage action keeps space from the row edge",
+    getComputedStyle(row.querySelector(".git-file-actions")).marginRight === "2px",
+    "stage action keeps a small inset from the row edge",
   );
   check(
     [...git.listLayer.querySelectorAll(".git-section-title")]
@@ -185,6 +185,18 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
 
   // Responsive widths.
   const sidebar = document.querySelector(".sidebar-left");
+  const sidebarRect = sidebar.getBoundingClientRect();
+  const changesSection = git.listLayer.querySelector(
+    '.git-section-header[data-section="changes"]',
+  );
+  check(
+    Math.abs(changesSection.getBoundingClientRect().right - sidebarRect.right) <= 1,
+    "Changes header reaches the sidebar's right edge",
+  );
+  check(
+    Math.abs(row.getBoundingClientRect().right - sidebarRect.right) <= 1,
+    "change rows reach the sidebar's right edge",
+  );
   const originalWidth = sidebar.style.width;
   sidebar.style.width = "190px";
   await nextFrame();
@@ -227,14 +239,33 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "Stage All shows a pointer cursor",
   );
   const stageAllRect = stageAllButton.getBoundingClientRect();
-  const changesHeaderRect = git.listLayer
-    .querySelector('.git-section-header[data-section="changes"]')
-    .getBoundingClientRect();
+  const changesHeaderRect = changesSection.getBoundingClientRect();
   check(
     stageAllRect.width >= 16 &&
       stageAllRect.height >= 16 &&
       stageAllRect.right <= changesHeaderRect.right,
     "Stage All stays inside the Changes header",
+  );
+  const listRect = git.listViewport.getBoundingClientRect();
+  const stageInset = listRect.right - stageAllRect.right;
+  const rowInset = listRect.right -
+    row.querySelector(".git-file-action").getBoundingClientRect().right;
+  check(
+    stageInset >= 4 && stageInset <= 12,
+    "Stage All keeps a small inset from the list edge",
+  );
+  check(
+    Math.abs(stageInset - rowInset) <= 1,
+    "Stage All and row stage actions align at the right edge",
+  );
+  const stageIconRect = stageAllButton.querySelector("i").getBoundingClientRect();
+  const rowIconRect = row.querySelector(".git-file-action i").getBoundingClientRect();
+  check(
+    Math.abs(
+      (stageIconRect.left + stageIconRect.right) / 2 -
+        (rowIconRect.left + rowIconRect.right) / 2,
+    ) <= 0.5,
+    "Stage All and row stage icons share a vertical axis",
   );
   stageAllButton.click();
   await waitFor(() => {
