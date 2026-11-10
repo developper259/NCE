@@ -70,7 +70,7 @@ app.whenReady().then(() => {
           return await win.webContents.executeJavaScript(code);
         } catch (error) {
           throw new Error(
-            `Renderer smoke expression failed: ${String(code).slice(0, 240)}\n${error?.message || error}`,
+            `Renderer smoke expression failed: ${error?.message || error}\nExpression: ${String(code).slice(0, 240)}`,
             { cause: error },
           );
         }
