@@ -404,6 +404,35 @@ module.exports = async function exerciseUI() {
     !settingsView.content.querySelector('#setting-git-path'),
     'Editor settings no longer expose the Git path',
   );
+  const tabWidthButton = settingsView.content.querySelector('#setting-editor-tabWidth');
+  check(Boolean(tabWidthButton) && tabWidthButton.tagName === 'BUTTON', 'Tab Width renders an action control');
+  check(
+    !settingsView.content.querySelector('#setting-editor-tabWidth-trigger'),
+    'Tab Width no longer renders an inline dropdown',
+  );
+  const tabWidthValue = tabWidthButton.querySelector('.setting-select-value');
+  check(
+    Boolean(tabWidthValue) && tabWidthValue.textContent.trim().length > 0,
+    'Tab Width shows its current value',
+  );
+  const tabWidthArrow = tabWidthButton.querySelector('.setting-select-arrow');
+  check(
+    Boolean(tabWidthArrow) &&
+      getComputedStyle(tabWidthArrow).justifySelf === 'end',
+    'Tab Width arrow is right-aligned like dropdown controls',
+  );
+  tabWidthButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  check(
+    editor.quickPanel.isOpen('config-space'),
+    'Tab Width opens the shared tab size picker',
+  );
+  check(
+    editor.quickPanel.title.textContent === 'Select Tab Size',
+    'Tab Width picker matches the bottom bar picker',
+  );
+  editor.quickPanel.close();
+  await new Promise((resolve) => setTimeout(resolve, 30));
   check(problemsPanel.summary.textContent.startsWith('1 error'), 'Problems summary counts errors');
   problemsPanel.destroy();
   await editor.bottomPanelManager.openPanel('problems');

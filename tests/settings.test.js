@@ -774,6 +774,48 @@ test("Set Git path prefills the configured path in the quick panel", async () =>
   assert.equal(await pending, "/next/git");
 });
 
+test("Tab Width opens the shared tab size picker instead of a dropdown", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  let current = 2;
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {
+    SETTINGS_GET: (key) => (key === "editor.tabWidth" ? current : undefined),
+  });
+  const tabWidth = SettingsView.getSettings().find(
+    (setting) => setting.key === "editor.tabWidth",
+  );
+  assert.equal(tabWidth.control, "quick-pick");
+  assert.equal(tabWidth.options, undefined);
+
+  const view = Object.create(SettingsView.prototype);
+  let request = null;
+  view.editor = {
+    bottomBar: {
+      openConfigSpace(options) {
+        request = options;
+      },
+    },
+  };
+  const selected = { textContent: "2" };
+  const control = { querySelector: () => selected };
+  assert.equal(view.openQuickPick(tabWidth, control), true);
+  assert.ok(request, "the bottom-bar tab size picker is reused");
+
+  current = 4;
+  request.onApplied(4);
+  assert.equal(selected.textContent, "4");
+});
+
+test("Settings select arrows are right-aligned inside their control", async () => {
+  const css = await fs.readFile(
+    path.join(__dirname, "../src/css/settings.css"),
+    "utf8",
+  );
+  assert.match(
+    css,
+    /\.setting-select-arrow\s*\{[^}]*justify-self:\s*end/,
+  );
+});
+
 test("Git settings own the executable path and main branch", () => {
   const { loadGlobal } = require("./helpers/runtime");
   const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});

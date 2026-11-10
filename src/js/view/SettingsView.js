@@ -20,8 +20,7 @@ const SETTINGS_UI = Object.freeze([
     label: "Tab Width",
     description: "Number of spaces used for indentation.",
     keywords: ["tab", "indent", "spaces"],
-    control: "select",
-    options: [2, 4, 8],
+    control: "quick-pick",
   },
   {
     key: "git.path",
@@ -494,7 +493,9 @@ class SettingsView {
               ? this.createPathControl(setting, controlId, pathCurrent)
               : setting.control === "quick-input"
                 ? this.createQuickInputControl(setting, controlId, pathCurrent)
-                : this.createTextInput(setting, controlId);
+                : setting.control === "quick-pick"
+                  ? this.createQuickPickControl(setting, controlId)
+                  : this.createTextInput(setting, controlId);
     const controlWrap = document.createElement("div");
     controlWrap.className = "settings-row-control";
     controlWrap.appendChild(control);
@@ -2033,6 +2034,49 @@ class SettingsView {
     return button;
   }
 
+  createQuickPickControl(setting, id) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "setting-select-wrap";
+
+    const button = document.createElement("button");
+    button.id = id;
+    button.type = "button";
+    button.className = "setting-select setting-quick-pick";
+    button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-describedby", `${id}-description`);
+
+    const value = document.createElement("span");
+    value.className = "setting-select-value";
+    value.textContent = String(SETTINGS_GET(setting.key) ?? "");
+    const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    arrow.setAttribute("class", "setting-select-arrow");
+    arrow.setAttribute("viewBox", "0 0 12 12");
+    arrow.setAttribute("aria-hidden", "true");
+    const arrowPath = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    arrowPath.setAttribute("d", "m3 4.5 3 3 3-3");
+    arrow.appendChild(arrowPath);
+    button.append(value, arrow);
+    button.addEventListener("click", () => this.openQuickPick(setting, button));
+
+    wrapper.append(button);
+    return wrapper;
+  }
+
+  openQuickPick(setting, control) {
+    const bottomBar = this.editor?.bottomBar;
+    if (typeof bottomBar?.openConfigSpace !== "function") return false;
+    bottomBar.openConfigSpace({
+      onApplied: () =>
+        this.updateQuickPickControl(control, SETTINGS_GET(setting.key)),
+    });
+    return true;
+  }
+
+  updateQuickPickControl(control, value) {
+    const selected = control?.querySelector?.(".setting-select-value");
+    if (selected) selected.textContent = String(value ?? "");
+  }
+
   requestSettingPath(setting) {
     return this.requestSettingValue(setting);
   }
@@ -2369,6 +2413,10 @@ class SettingsView {
     }
     if (setting.control === "quick-input") {
       this.updateQuickInputControl(input, setting, SETTINGS_GET(key));
+      return;
+    }
+    if (setting.control === "quick-pick") {
+      this.updateQuickPickControl(input, SETTINGS_GET(key));
       return;
     }
     if (setting.control === "select") {

@@ -376,7 +376,7 @@ class BottomBar {
       + "quick-panel-language-logo";
   }
 
-  openConfigSpace() {
+  openConfigSpace({ onApplied } = {}) {
     const current = Number(SETTINGS_GET("editor.tabWidth"));
     const items = Array.from({ length: 8 }, (_, index) => {
       const value = index + 1;
@@ -398,6 +398,7 @@ class BottomBar {
         if (!(await SETTINGS_SET("editor.tabWidth", item.data))) return;
         this.refreshScrollers();
         this.editor.lineController.refresh(true);
+        onApplied?.(item.data);
       },
     });
   }

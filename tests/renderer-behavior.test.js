@@ -220,6 +220,48 @@ test("bottom bar exposes loading and failure only for the active file", () => {
   assert.equal(status.style.display, "none");
 });
 
+test("bottom bar tab size picker reports applied values to settings", async () => {
+  const elements = new Map([
+    [".bottomBar-cursorPos", {}], [".bottomBar-cursor-status", { style: {} }],
+    [".bottomBar-file-status", { style: {}, querySelector: () => ({ innerText: "" }) }],
+    ["#language", { querySelector: () => ({ innerText: "" }) }],
+    ["#config-space", { querySelector: () => ({ innerText: "" }) }],
+  ]);
+  let options;
+  let applied = null;
+  let refreshed = 0;
+  const writes = [];
+  const BottomBar = loadGlobal("src/js/addon/BottomBar.js", "BottomBar", {
+    getElement: (selector) => elements.get(selector),
+    SETTINGS_GET: () => 2,
+    SETTINGS_SET: async (key, value) => {
+      writes.push([key, value]);
+      return true;
+    },
+  });
+  const bar = new BottomBar({
+    tabManager: { activeFile: null },
+    quickPanel: { open(value) { options = value; } },
+    lineController: { refresh() { refreshed += 1; } },
+  });
+
+  bar.openConfigSpace({ onApplied: (value) => { applied = value; } });
+  assert.equal(options.id, "config-space");
+  assert.equal(options.mode, "pick");
+  assert.equal(options.title, "Select Tab Size");
+  assert.equal(options.selectedId, "2");
+  assert.equal(options.items.length, 8);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(options.items[3])),
+    { id: "4", label: "Spaces: 4", data: 4 },
+  );
+
+  await options.onAccept(options.items[3]);
+  assert.deepEqual(writes, [["editor.tabWidth", 4]]);
+  assert.equal(refreshed, 1);
+  assert.equal(applied, 4);
+});
+
 test("language selector exposes technology logos with a neutral fallback", async () => {
   const elements = new Map([
     [".bottomBar-cursorPos", {}], [".bottomBar-cursor-status", { style: {} }],
