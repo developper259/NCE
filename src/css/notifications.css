@@ -50,9 +50,9 @@
   height: 11px;
   padding: 0 2px;
   box-sizing: border-box;
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--text-white);
   font-size: 8px;
   font-weight: 600;
   line-height: 1;

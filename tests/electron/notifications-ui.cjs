@@ -188,12 +188,12 @@ module.exports = async function exerciseNotificationUI() {
     check(Boolean(bell && badge), "notification bell and badge exist");
     check(Boolean(bell.closest(".bottomBar")), "bell lives in the bottom bar");
     check(
-      getComputedStyle(badge).backgroundColor === "rgba(0, 0, 0, 0)",
-      "notification count badge has no background",
+      getComputedStyle(badge).backgroundColor === colorOf("--accent-fill"),
+      "notification count badge uses the accent token",
     );
     check(
-      getComputedStyle(badge).color === getComputedStyle(bell).color,
-      "notification count inherits the bell color",
+      getComputedStyle(badge).borderRadius === "50%",
+      "notification count badge is round",
     );
     const rightGroup = bell.closest(".bottomBar .right");
     const bellGroup = bell.closest(".nce-bottom-bar-actions");
@@ -203,9 +203,8 @@ module.exports = async function exerciseNotificationUI() {
       "bell sits at the far right of the status group",
     );
     check(
-      getComputedStyle(bell).borderRadius === "0px" &&
-        getComputedStyle(badge).borderRadius === "0px",
-      "bell and badge keep square corners",
+      getComputedStyle(bell).borderRadius === "0px",
+      "bell keeps square corners",
     );
     const bellRect = rectOf(bell);
     const badgeRect = rectOf(badge);
