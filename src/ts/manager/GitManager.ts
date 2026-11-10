@@ -292,6 +292,11 @@ export class GitManager {
     if ("failure" in workspace) return workspace.failure;
     const result = await this.runGit(["init", "-q"], { cwd: workspace.workspace });
     if (!result.ok) return result.failure;
+    const branch = await this.runGit(
+      ["symbolic-ref", "HEAD", "refs/heads/main"],
+      { cwd: workspace.workspace },
+    );
+    if (!branch.ok) return branch.failure;
     return { success: true, root: workspace.workspace };
   }
 

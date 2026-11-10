@@ -128,6 +128,8 @@ test("GitManager initializes a repository in an empty workspace", { skip: gitSki
     assert.equal(status.success, true);
     assert.equal(status.status.hasCommits, false);
     assert.deepEqual(status.status.entries, []);
+    assert.equal(status.status.branch.name, "main");
+    assert.equal((await manager.getCurrentBranch()).branch, "main");
   } finally {
     manager.dispose();
     await removeAll(root);
