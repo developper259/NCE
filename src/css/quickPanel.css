@@ -92,6 +92,10 @@
   padding: 0;
 }
 
+.quick-panel-list[hidden] {
+  display: none;
+}
+
 .quick-panel-list-layer {
   position: relative;
   flex: 0 0 auto;

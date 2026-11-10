@@ -384,14 +384,26 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   const createItem = editor.quickPanel.session.items.find(
     (item) => item.id === "create",
   );
+  const pickerPanelHeight = document.querySelector(".quick-panel")
+    .getBoundingClientRect().height;
   editor.quickPanel.accept(createItem);
   await waitFor(
     () => editor.quickPanel.isOpen("git-new-branch"),
     "new branch prompt",
   );
+  await nextFrame();
   check(
     editor.quickPanel.title.textContent === "New Branch",
     "new branch prompt is titled",
+  );
+  check(
+    getComputedStyle(document.querySelector(".quick-panel-list")).display === "none",
+    "the new branch prompt hides the result list",
+  );
+  check(
+    document.querySelector(".quick-panel").getBoundingClientRect().height <
+      pickerPanelHeight,
+    "the new branch prompt shrinks to its input",
   );
   editor.quickPanel.input.value = "feature/test";
   editor.quickPanel.accept("feature/test");

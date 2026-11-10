@@ -763,6 +763,27 @@ test("GitSidebar opens the branch picker with a create item and sorted branches"
   }
 });
 
+test("GitSidebar keeps the current branch in the picker without refs", async () => {
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    branchesResult: { success: true, branches: [], current: null },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.openBranchPicker(), true);
+    const panel = calls.quickPanel[0];
+    assert.deepEqual(
+      toPlain(panel.items.map((item) => item.label)),
+      ["Create new branch", "main"],
+    );
+    assert.equal(panel.items[1].checked, true);
+    assert.equal(panel.items[1].separatorBefore, true);
+    assert.equal(panel.selectedId, "branch:main");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar switches branches and keeps the commit draft", async () => {
   const featureStatus = makeStatus([modifiedEntry], {
     branch: { name: "feature/login" },

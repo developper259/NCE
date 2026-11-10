@@ -1096,8 +1096,12 @@ class GitSidebar extends Sidebar {
       });
       return false;
     }
-    const current = result.current || this.getBranchLabel();
+    const current = result.current || this.status?.branch?.name || "";
     const branches = GitSidebar.sortBranches(result.branches);
+    if (current && !branches.some((branch) => branch.name === current)) {
+      branches.push({ name: current, current: true });
+      branches.sort((left, right) => left.name.localeCompare(right.name));
+    }
     const items = [
       { id: "create", label: "Create new branch", icon: "fi fi-rr-plus" },
       ...branches.map((branch, index) => ({
