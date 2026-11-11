@@ -419,7 +419,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "every branch row is rendered",
   );
   check(
-    document.querySelector(".quick-panel-list").style.minHeight === "150px",
+    document.querySelector(".quick-panel-list").style.height === "150px",
     "the branch picker sizes its list to all entries",
   );
   const alphaRow = pickerRows.find((row) =>
@@ -519,6 +519,71 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     `.git-file-row[data-path="${fileName}"]`,
   );
   check(Boolean(row), "change row is visible after branch switching");
+
+  // Long branch lists remain fully scrollable inside the panel.
+  const extraBranches = Array.from(
+    { length: 14 },
+    (_, index) => `scroll-${String(index + 1).padStart(2, "0")}`,
+  );
+  for (const name of extraBranches) {
+    check(
+      (await editor.api.git.createBranch(name))?.success === true,
+      `scroll fixture branch ${name} is created`,
+    );
+  }
+  check(
+    (await editor.api.git.switchBranch("main"))?.success === true,
+    "scroll fixture returns to main",
+  );
+  await git.refresh({ reason: "manual" });
+  await waitForIdle();
+  await waitFor(
+    () => !git.branchButton.disabled,
+    "branch selector ready for the long list",
+  );
+  git.branchButton.click();
+  await waitFor(
+    () => editor.quickPanel.isOpen("git-branch-picker"),
+    "long branch picker to open",
+  );
+  await nextFrame();
+  const longList = document.querySelector(".quick-panel-list");
+  const longPanel = document.querySelector(".quick-panel");
+  const longScroller = editor.quickPanel.resultsScroller;
+  check(
+    longScroller.totalVirtualHeight > longList.clientHeight,
+    "long branch picker is scrollable",
+  );
+  check(
+    longList.getBoundingClientRect().bottom <=
+      longPanel.getBoundingClientRect().bottom + 1,
+    "long branch list is not clipped by the panel",
+  );
+  longScroller.setScrollY(longScroller.getMaxScrollY());
+  await nextFrame();
+  await nextFrame();
+  check(
+    [...document.querySelectorAll(".quick-panel-item-label")]
+      .some((element) => element.textContent === "zeta"),
+    "the last branch is reachable by scrolling",
+  );
+  const zetaRow = [...document.querySelectorAll(".quick-panel-item")]
+    .find((element) =>
+      element.querySelector(".quick-panel-item-label")?.textContent === "zeta");
+  const zetaRect = zetaRow?.getBoundingClientRect();
+  const longListRect = longList.getBoundingClientRect();
+  check(
+    Boolean(zetaRect) &&
+      zetaRect.top >= longListRect.top - 1 &&
+      zetaRect.bottom <= longListRect.bottom + 1,
+    "the last branch row is fully visible after scrolling",
+  );
+  editor.quickPanel.close();
+  await nextFrame();
+  row = git.listLayer.querySelector(
+    `.git-file-row[data-path="${fileName}"]`,
+  );
+  check(Boolean(row), "change row is visible after the long branch list");
 
   // Responsive widths.
   const sidebar = document.querySelector(".sidebar-left");

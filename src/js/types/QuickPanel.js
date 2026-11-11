@@ -152,7 +152,7 @@ class QuickPanel {
     this.input.type = "text";
     this.empty.textContent = "";
     this.error.textContent = "";
-    if (this.list?.style) this.list.style.minHeight = "";
+    if (this.list?.style) this.list.style.height = "";
 
     // Keep the rendered rows until the fade-out has completed.
     this.closeCleanupTimer = setTimeout(() => {
@@ -438,7 +438,7 @@ class QuickPanel {
 
     this.error.hidden = true;
     this.empty.hidden = true;
-    this.updateListMinHeight();
+    this.updateListHeight();
 
     if (this.session.mode === "input") {
       this.resultsScroller?.setItems([]);
@@ -476,11 +476,11 @@ class QuickPanel {
     this.resultsScroller?.setItems(this.session.visibleItems);
   }
 
-  updateListMinHeight() {
+  updateListHeight() {
     if (!this.list?.style) return;
     if (!this.session || this.session.mode !== "pick" ||
         this.session.visibleItems.length === 0) {
-      this.list.style.minHeight = "";
+      this.list.style.height = "";
       return;
     }
     const separators = this.session.visibleItems
@@ -495,7 +495,7 @@ class QuickPanel {
       if (Number.isFinite(measured) && measured > 0) rowHeight = measured;
     }
     const rows = this.session.visibleItems.length + separators;
-    this.list.style.minHeight = `${Math.min(354, rows * rowHeight)}px`;
+    this.list.style.height = `${Math.min(354, rows * rowHeight)}px`;
   }
 
   createVirtualRow(entry, itemCount) {
