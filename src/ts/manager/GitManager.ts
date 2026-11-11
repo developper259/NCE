@@ -16,6 +16,7 @@ const MAX_UNTRACKED_PREVIEW_BYTES = 64 * 1024;
 const MAX_COMMIT_MESSAGE_LENGTH = 10_000;
 const MAX_DETAIL_LENGTH = 2_000;
 const MAX_VERSION_BYTES = 4 * 1024 * 1024;
+const MAX_CHECKOUT_CONFLICT_PATHS = 5;
 const DEFAULT_LOG_LIMIT = 50;
 const MAX_LOG_LIMIT = 200;
 
@@ -162,6 +163,50 @@ interface RepositoryContext {
 
 function failure(code: GitErrorCode, error: string): GitFailure {
   return { success: false, code, error };
+}
+
+function parseCheckoutConflicts(detail: string): { untracked: boolean; paths: string[] } | null {
+  const untracked = /untracked working tree files would be overwritten by checkout/i.test(detail);
+  const modified = /local changes to the following files would be overwritten by checkout/i.test(detail);
+  if (!untracked && !modified) return null;
+  const paths: string[] = [];
+  let collecting = false;
+  for (const line of detail.split(/\r?\n/)) {
+    if (/would be overwritten by checkout:/i.test(line)) {
+      collecting = true;
+      continue;
+    }
+    if (!collecting) continue;
+    const trimmed = line.trim();
+    if (!trimmed || /^(please|aborting)\b/i.test(trimmed)) break;
+    paths.push(trimmed.replace(/^"(.*)"$/, "$1"));
+  }
+  return { untracked, paths };
+}
+
+function isNceStatePath(relativePath: string): boolean {
+  const segments = relativePath.split(/[\\/]+/);
+  return segments.length >= 2 &&
+    segments[0] === ".nce" &&
+    segments.every((segment) => Boolean(segment) && segment !== "." && segment !== "..");
+}
+
+function checkoutConflictFailure(detail: string): GitFailure | null {
+  const conflict = parseCheckoutConflicts(detail);
+  if (!conflict) return null;
+  const shown = conflict.paths.slice(0, MAX_CHECKOUT_CONFLICT_PATHS);
+  const list = shown.length
+    ? ` ${shown.join(", ")}${conflict.paths.length > shown.length ? ", …" : ""}`
+    : "";
+  if (conflict.untracked)
+    return failure(
+      "GIT_COMMAND_FAILED",
+      `Untracked files would be overwritten by checkout:${list}. Move or remove them before switching branches.`,
+    );
+  return failure(
+    "GIT_COMMAND_FAILED",
+    `Your local changes would be overwritten by checkout:${list}. Commit or stash them before switching branches.`,
+  );
 }
 
 function validPathValue(value: unknown): value is string {
@@ -860,18 +905,41 @@ export class GitManager {
           return { success: true, branch: branchName };
       }
     }
-    const result = await this.runGit(
-      create ? ["checkout", "-b", branchName] : ["checkout", branchName],
-      { cwd: context.root },
-    );
+    const checkoutArgs = create ? ["checkout", "-b", branchName] : ["checkout", branchName];
+    let result = await this.runGit(checkoutArgs, { cwd: context.root });
     if (!result.ok) {
-      const detail = result.stderr || "";
-      if (/would be overwritten by checkout|please commit your changes or stash/i.test(detail))
-        return failure(
-          "GIT_COMMAND_FAILED",
-          "Your local changes would be overwritten. Commit or stash them first.",
-        );
-      return result.failure;
+      const conflict = parseCheckoutConflicts(result.stderr || "");
+      if (
+        conflict?.untracked &&
+        conflict.paths.length > 0 &&
+        conflict.paths.every(isNceStatePath)
+      ) {
+        // .nce is NCE-owned state excluded from the status view. The target
+        // branch may track files there, so clear the local copies and retry.
+        const targets: string[] = [];
+        for (const relativePath of conflict.paths) {
+          const absolutePath = path.resolve(context.root, relativePath);
+          if (!isInside(context.root, absolutePath, this.platform)) break;
+          let realPath: string;
+          try {
+            realPath = await fs.realpath(absolutePath);
+          } catch {
+            break;
+          }
+          if (!isInside(context.root, realPath, this.platform)) break;
+          if (!isNceStatePath(path.relative(context.root, realPath))) break;
+          targets.push(realPath);
+        }
+        if (targets.length === conflict.paths.length) {
+          for (const target of targets) await fs.rm(target, { recursive: true, force: true });
+          result = await this.runGit(checkoutArgs, { cwd: context.root });
+        }
+      }
+      if (!result.ok) {
+        const conflictFailure = checkoutConflictFailure(result.stderr || "");
+        if (conflictFailure) return conflictFailure;
+        return result.failure;
+      }
     }
     return { success: true, branch: branchName };
   }

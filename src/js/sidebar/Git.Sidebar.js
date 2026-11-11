@@ -1220,6 +1220,8 @@ class GitSidebar extends Sidebar {
       return false;
     }
     if (result?.success !== true) {
+      await this.refresh({ reason: "branch" });
+      if (this.destroyed) return false;
       this.notifyGit({
         type: "error",
         title: create ? "Could not create branch" : "Could not switch branch",

@@ -822,6 +822,7 @@ test("GitSidebar reports branch switch failures with a retry action", async () =
   try {
     await sidebar.refresh({ reason: "open" });
     assert.equal(await sidebar.switchToBranch("feature/login"), false);
+    assert.equal(calls.status, 2, "a failed switch refreshes the status");
     const notification = calls.notifications.find(
       (item) => item.title === "Could not switch branch",
     );

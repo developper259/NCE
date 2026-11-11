@@ -892,6 +892,61 @@ test("GitManager switches and creates branches safely", { skip: gitSkip }, async
   }
 });
 
+test("GitManager reports the paths that block a branch switch", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    git(root, ["checkout", "-qb", "feature"]);
+    await fs.writeFile(path.join(root, "feature-only.txt"), "feature\n");
+    await fs.writeFile(path.join(root, "tracked.txt"), "feature change\n");
+    git(root, ["add", "--", "feature-only.txt", "tracked.txt"]);
+    git(root, ["commit", "-q", "-m", "feature work"]);
+    git(root, ["checkout", "-q", "main"]);
+
+    await fs.writeFile(path.join(root, "feature-only.txt"), "local\n");
+    const untracked = await manager.switchBranch("feature");
+    assert.equal(untracked.success, false);
+    assert.match(untracked.error, /Untracked files would be overwritten by checkout/);
+    assert.match(untracked.error, /feature-only\.txt/);
+
+    await fs.unlink(path.join(root, "feature-only.txt"));
+    await fs.writeFile(path.join(root, "tracked.txt"), "local change\n");
+    const modified = await manager.switchBranch("feature");
+    assert.equal(modified.success, false);
+    assert.match(modified.error, /local changes would be overwritten by checkout/i);
+    assert.match(modified.error, /tracked\.txt/);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager clears NCE state files that block a branch switch", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    git(root, ["checkout", "-qb", "feature"]);
+    await fs.mkdir(path.join(root, ".nce"));
+    await fs.writeFile(path.join(root, ".nce", ".gitignore"), "*\n!.gitignore\n");
+    git(root, ["add", "--", ".nce/.gitignore"]);
+    git(root, ["commit", "-q", "-m", "track nce state"]);
+    git(root, ["checkout", "-q", "main"]);
+
+    await fs.mkdir(path.join(root, ".nce"), { recursive: true });
+    await fs.writeFile(path.join(root, ".nce", ".gitignore"), "local state\n");
+    const result = await manager.switchBranch("feature");
+    assert.equal(result.success, true);
+    assert.equal(
+      await fs.readFile(path.join(root, ".nce", ".gitignore"), "utf8"),
+      "*\n!.gitignore\n",
+      "the tracked NCE state file is restored by checkout",
+    );
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
 test("GitManager preserves the base branch and staged work on the first branch", { skip: gitSkip }, async () => {
   const root = await createRepository({ commits: 0 });
   await fs.writeFile(path.join(root, "staged.txt"), "staged\n");
