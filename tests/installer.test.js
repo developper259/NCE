@@ -250,7 +250,7 @@ for (const format of ["tar.gz", "zip"]) {
     }
   });
 
-  test(`Installer rejects symbolic links and absolute paths in ${format.toUpperCase()}`, async () => {
+  test(`Installer rejects links escaping the destination and absolute paths in ${format.toUpperCase()}`, async () => {
     const root = await tempDir();
     const symlinkFixture = await fixtureArchive([
       { name: "bin/tool", data: "tool" },
@@ -278,6 +278,34 @@ for (const format of ["tar.gz", "zip"]) {
       await fs.rm(root, { recursive: true, force: true });
       await fs.rm(symlinkFixture.dir, { recursive: true, force: true });
       await fs.rm(absoluteFixture.dir, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const format of ["tar.gz", "zip"]) {
+  test(`Installer materializes in-tree links as regular copies in ${format.toUpperCase()}`, async () => {
+    const root = await tempDir();
+    const fixture = await fixtureArchive([
+      { name: "bin/tool-link", type: "symlink", linkname: "tool" },
+      { name: "bin/tool", data: "tool", mode: 0o755 },
+    ], format);
+    const server = await serve({ "/tool.archive": staticRoute(fixture.body) });
+    try {
+      const definition = definitionFor(`${server.origin}/tool.archive`, fixture.checksum);
+      definition.platforms[process.platform][process.arch].archive = { format, stripComponents: 0 };
+      const installer = installerFor(root, definition);
+      const result = await installer.install("tool");
+      assert.equal(result.success, true, result.error);
+      const link = path.join(result.installDir, "bin", "tool-link");
+      const stats = await fs.lstat(link);
+      assert.ok(stats.isFile(), "the link is materialized as a regular file");
+      assert.equal(stats.isSymbolicLink(), false);
+      assert.equal(await fs.readFile(link, "utf8"), "tool");
+      if (process.platform !== "win32") assert.ok(stats.mode & 0o111, "the copy keeps the target exec bit");
+    } finally {
+      await server.close();
+      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(fixture.dir, { recursive: true, force: true });
     }
   });
 }

@@ -17,6 +17,7 @@ import type {
   InstallerPlatform,
   PackageDefinition,
   PlatformConfig,
+  VerificationConfig,
 } from "./types";
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -307,16 +308,17 @@ export class Installer {
       signal,
       report: () => {},
     };
-    const executable = await this.resolveInside(definition.verification.executable, dir, verificationContext);
+    const verification = verificationContext.platformConfig.verification ?? definition.verification;
+    const executable = await this.resolveInside(verification.executable, dir, verificationContext);
     const stats = await fs.stat(executable).catch(() => null);
     if (!stats?.isFile())
       throw new InstallerError("VERIFICATION_FAILED", `Installed executable is missing: ${executable}`);
     if (this.platform !== "win32" && (stats.mode & 0o111) === 0)
       throw new InstallerError("VERIFICATION_FAILED", `Installed executable is not executable: ${executable}`);
     try {
-      return await runCommand(executable, substituteArgs(definition.verification.args ?? [], verificationContext), {
+      return await runCommand(executable, substituteArgs(verification.args ?? [], verificationContext), {
         cwd: dir,
-        timeoutMs: definition.verification.timeoutMs ?? COMMAND_TIMEOUT_MS,
+        timeoutMs: verification.timeoutMs ?? COMMAND_TIMEOUT_MS,
         signal,
       });
     } catch (error) {
@@ -359,6 +361,7 @@ function validateDefinition(definition: PackageDefinition): void {
       if (archive.format !== "zip" && archive.format !== "tar.gz") invalid(`unsupported archive format ${archive.format}.`);
       if (archive.stripComponents !== undefined && (!Number.isInteger(archive.stripComponents) || archive.stripComponents < 0 || archive.stripComponents > 16)) invalid("stripComponents must be an integer between 0 and 16.");
       if (!isSafeRelativePath(executable)) invalid("executable must be a relative path inside the install directory.");
+      if (config.verification) validateVerification(config.verification, invalid);
     }
   }
   for (const step of definition.install?.steps ?? []) {
@@ -374,6 +377,13 @@ function validateDefinition(definition: PackageDefinition): void {
     if (step.type === "delete" && typeof step.path !== "string") invalid("delete step requires a path.");
   }
   if (typeof definition.verification?.executable !== "string" || !definition.verification.executable.trim()) invalid("verification executable is required.");
+  validateVerification(definition.verification, invalid);
+}
+
+function validateVerification(verification: VerificationConfig, invalid: (reason: string) => never): void {
+  if (typeof verification.executable !== "string" || !verification.executable.trim()) invalid("verification executable is required.");
+  if (verification.args !== undefined && (!Array.isArray(verification.args) || verification.args.some((arg) => typeof arg !== "string" || arg.includes("\0")))) invalid("verification args must be plain strings.");
+  if (verification.timeoutMs !== undefined && (!Number.isInteger(verification.timeoutMs) || verification.timeoutMs <= 0 || verification.timeoutMs > MAX_COMMAND_TIMEOUT_MS)) invalid("verification timeoutMs is out of range.");
 }
 
 function isSafeRelativePath(value: string): boolean {

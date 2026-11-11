@@ -19,6 +19,7 @@ export interface PlatformConfig {
   download: DownloadConfig;
   archive: ArchiveConfig;
   executable: string;
+  verification?: VerificationConfig;
 }
 
 export type InstallStep =
