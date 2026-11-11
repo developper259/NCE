@@ -85,6 +85,9 @@ class FakeElement {
   getAttribute(name) {
     return this.attributes.has(name) ? this.attributes.get(name) : null;
   }
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
   addEventListener(type, listener) {
     const listeners = this.listeners.get(type) || [];
     listeners.push(listener);
@@ -106,6 +109,9 @@ class FakeElement {
   replaceChildren(...children) {
     this.children = children;
   }
+  remove() {
+    this.removed = true;
+  }
   contains() {
     return false;
   }
@@ -117,6 +123,7 @@ const GitSidebar = loadGlobal("src/js/sidebar/Git.Sidebar.js", "GitSidebar", {
   Sidebar,
   SearchResultsScroller: FakeScroller,
   document: documentStub,
+  SETTINGS_SET: (key, value) => settingsSetHandler(key, value),
   NCEPath: {
     equals: (left, right) => left === right,
     basename: (value) => String(value || "").replace(/\\/g, "/").split("/").pop(),
@@ -166,6 +173,9 @@ function stateActions(sidebar) {
 
 const toPlain = (value) => JSON.parse(JSON.stringify(value));
 
+// SETTINGS_SET is a renderer global, so it is routed to the fake editor under test.
+let settingsSetHandler = async () => false;
+
 function createSidebar(options = {}) {
   const responses = [...(options.responses || [])];
   const calls = {
@@ -186,7 +196,13 @@ function createSidebar(options = {}) {
     versions: [],
     menus: [],
     notifications: [],
+    dismissed: [],
     settings: [],
+    setSetting: [],
+    install: [],
+    installCancel: 0,
+    installListeners: [],
+    installUnsubscribed: 0,
     unsubscribed: false,
   };
   const rootPath = options.rootPath === undefined ? "/workspace" : options.rootPath;
@@ -279,6 +295,25 @@ function createSidebar(options = {}) {
             : options.createBranchResult || { success: true, branch: name };
         },
       },
+      installer: options.installer === null ? undefined : {
+        async install(packageId) {
+          calls.install.push(packageId);
+          if (typeof options.installResult === "function")
+            return options.installResult(packageId);
+          return options.installResult || {
+            success: true,
+            packageId,
+            version: "2.56.1",
+            executable: "/userData/tools/git/2.56.1/bin/git",
+            installDir: "/userData/tools/git/2.56.1",
+          };
+        },
+        async cancel() { calls.installCancel += 1; },
+        onProgress(listener) {
+          calls.installListeners.push(listener);
+          return () => { calls.installUnsubscribed += 1; };
+        },
+      },
       writeClipboardText(text) { calls.clipboard.push(text); },
       onFileSystemChange(handler) {
         calls.fileSystemHandler = handler;
@@ -315,7 +350,15 @@ function createSidebar(options = {}) {
         calls.notifications.push(options);
         return { id: `notification-${calls.notifications.length}`, ...options };
       },
+      dismiss(id) {
+        calls.dismissed.push(id);
+        return true;
+      },
     },
+  };
+  settingsSetHandler = async (key, value) => {
+    calls.setSetting.push([key, value]);
+    return options.setSettingResult !== false;
   };
   const sidebar = new GitSidebar(editor);
   sidebar.isOpen = options.isOpen !== false;
@@ -1184,7 +1227,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(empty.calls.status, 0, "no Git status without a workspace");
     assert.deepEqual(
       stateActions(empty.sidebar),
-      { init: false, refresh: false, retry: false, settings: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false },
     );
   } finally {
     empty.sidebar.destroy();
@@ -1199,7 +1242,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(plain.sidebar.status, null);
     assert.deepEqual(
       stateActions(plain.sidebar),
-      { init: true, refresh: true, retry: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
       "a plain folder offers Initialize and Refresh instead of Retry",
     );
   } finally {
@@ -1214,7 +1257,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.match(missingGit.sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(missingGit.sidebar),
-      { init: false, refresh: false, retry: false, settings: true },
+      { init: false, refresh: false, retry: false, install: true, settings: true },
     );
     assert.equal(
       missingGit.sidebar.getStatePresentation(
@@ -1247,7 +1290,7 @@ test("GitSidebar initializes the repository and refreshes with success", async (
     assert.equal(sidebar.getViewState().mode, "clean");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: true, retry: false, settings: false },
+      { init: false, refresh: true, retry: false, install: false, settings: false },
       "a clean repository only offers a refresh action",
     );
   } finally {
@@ -1325,7 +1368,7 @@ test("GitSidebar derives explicit view states from the repository", async () => 
     assert.equal(state.message, "Git could not initialize.");
     assert.deepEqual(
       stateActions(initFailed.sidebar),
-      { init: true, refresh: true, retry: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
     );
   } finally {
     initFailed.sidebar.destroy();
@@ -1422,7 +1465,7 @@ test("GitSidebar keeps Initialize available after a failed initialization", asyn
     assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
       "the user can try Initialize again",
     );
     assert.equal(await sidebar.initializeRepository(), false, "a retry is attempted");
@@ -1443,8 +1486,198 @@ test("GitSidebar drops Initialize when Git itself is missing", async () => {
     assert.match(sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, settings: true },
+      { init: false, refresh: false, retry: false, install: true, settings: true },
     );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+// The state buttons fire installGit without returning its promise.
+function trackInstallGit(sidebar) {
+  const installGit = sidebar.installGit.bind(sidebar);
+  const runs = [];
+  sidebar.installGit = () => {
+    const run = installGit();
+    runs.push(run);
+    return run;
+  };
+  return runs;
+}
+
+test("GitSidebar installs Git from the missing-Git state and saves git.path", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: false, code: "GIT_NOT_FOUND", error: "missing" },
+      { success: true, status: makeStatus([]) },
+    ],
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.stateInstall.hidden, false);
+    assert.equal(sidebar.stateInstall.dataset.action, "install");
+    assert.equal(
+      sidebar.stateInstall.classList.contains("git-sidebar-primary"),
+      true,
+      "Install Git is the primary fix when Git is missing",
+    );
+    assert.equal(sidebar.stateSettings.hidden, false, "the manual path stays available");
+    const runs = trackInstallGit(sidebar);
+    sidebar.stateInstall.click();
+    assert.equal(await runs[0], true);
+    assert.deepEqual(calls.install, ["git"]);
+    assert.deepEqual(calls.setSetting, [
+      ["git.path", "/userData/tools/git/2.56.1/bin/git"],
+    ]);
+    assert.equal(calls.status, 2, "the sidebar refreshes with the installed Git");
+    assert.equal(sidebar.error, null);
+    assert.equal(sidebar.installingGit, false);
+    assert.equal(calls.installUnsubscribed, 1);
+    const success = calls.notifications[calls.notifications.length - 1];
+    assert.equal(success.type, "success");
+    assert.equal(success.source, "Git");
+    assert.match(success.message, /2\.56\.1/);
+    assert.deepEqual(calls.dismissed, ["notification-1"], "the progress notification is removed");
+    assert.equal(sidebar.stateInstall.hidden, true, "a working Git no longer offers Install");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar shows install progress and blocks other actions while installing", async () => {
+  const pending = deferred();
+  const { sidebar, calls } = createSidebar({
+    responses: [{ success: false, code: "GIT_NOT_FOUND", error: "missing" }],
+    installResult: () => pending.promise,
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const run = sidebar.installGit();
+    assert.equal(sidebar.installingGit, true);
+    assert.deepEqual(
+      stateActions(sidebar),
+      { init: false, refresh: false, retry: false, install: false, settings: false },
+    );
+    assert.equal(sidebar.stateInstall.hidden, true);
+    assert.equal(sidebar.stateSettings.hidden, true);
+    const presentation = sidebar.getStatePresentation();
+    assert.equal(presentation.title, "Installing Git…");
+    assert.equal(presentation.busy, true);
+    assert.equal(presentation.spinning, true);
+    assert.equal(sidebar.stateElement.getAttribute("aria-busy"), "true");
+    assert.equal(sidebar.getStateMessage(), "Installing Git…");
+    calls.installListeners[0]({ packageId: "other", percent: 10 });
+    assert.equal(sidebar.installProgress, null, "another package's progress is ignored");
+    calls.installListeners[0]({
+      packageId: "git",
+      version: "2.56.1",
+      step: "download",
+      message: "Downloading Git 2.56.1…",
+      percent: 42,
+    });
+    assert.match(sidebar.getStatePresentation().description, /42%/);
+    assert.equal(
+      sidebar.stateText.textContent,
+      sidebar.getStatePresentation().description,
+    );
+    const progressNotification = calls.notifications[0];
+    assert.equal(progressNotification.persistent, true);
+    assert.equal(progressNotification.actions.length, 1);
+    progressNotification.actions[0].action();
+    assert.equal(calls.installCancel, 1, "the notification cancels the installation");
+    pending.resolve({ success: false, code: "CANCELLED", error: "Installation cancelled." });
+    assert.equal(await run, false);
+    assert.equal(sidebar.installingGit, false);
+    assert.equal(sidebar.installProgress, null);
+    assert.equal(calls.installUnsubscribed, 1);
+    assert.deepEqual(calls.setSetting, [], "a cancelled install never touches git.path");
+    assert.equal(calls.notifications[calls.notifications.length - 1].type, "info");
+    assert.equal(sidebar.stateInstall.hidden, false, "the user can install again");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar keeps the configured Git path when installation fails", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [{ success: false, code: "GIT_NOT_FOUND", error: "missing" }],
+    installResult: {
+      success: false,
+      packageId: "git",
+      code: "CHECKSUM_MISMATCH",
+      error: "Checksum mismatch for the Git archive.",
+    },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const runs = trackInstallGit(sidebar);
+    assert.equal(await sidebar.installGit(), false);
+    assert.deepEqual(calls.setSetting, [], "a failed install never rewrites git.path");
+    assert.equal(calls.status, 1, "a failed install does not refresh the status");
+    const failure = calls.notifications[calls.notifications.length - 1];
+    assert.equal(failure.type, "error");
+    assert.match(failure.message, /Checksum mismatch/);
+    assert.equal(failure.actions.length, 1);
+    failure.actions[0].action();
+    assert.equal(await runs[1], false);
+    assert.equal(calls.install.length, 2, "the notification retries the installation");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports a Git path that could not be saved", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [{ success: false, code: "GIT_NOT_FOUND", error: "missing" }],
+    setSettingResult: false,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.installGit(), true);
+    assert.deepEqual(calls.setSetting, [
+      ["git.path", "/userData/tools/git/2.56.1/bin/git"],
+    ]);
+    const failure = calls.notifications[calls.notifications.length - 1];
+    assert.equal(failure.type, "error");
+    assert.match(failure.message, /tools\/git\/2\.56\.1\/bin\/git/);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports an installer that is not available", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [{ success: false, code: "GIT_NOT_FOUND", error: "missing" }],
+    installer: null,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.installGit(), false);
+    assert.deepEqual(calls.install, []);
+    assert.equal(calls.notifications[calls.notifications.length - 1].type, "error");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores overlapping installs and unsubscribes on destroy", async () => {
+  const pending = deferred();
+  const { sidebar, calls } = createSidebar({
+    responses: [{ success: false, code: "GIT_NOT_FOUND", error: "missing" }],
+    installResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.installGit();
+    assert.equal(await sidebar.installGit(), false);
+    assert.deepEqual(calls.install, ["git"]);
+    sidebar.destroy();
+    assert.equal(calls.installUnsubscribed, 1);
+    pending.resolve({ success: false, code: "CANCELLED", error: "Installation cancelled." });
+    assert.equal(await first, false);
+    assert.deepEqual(calls.setSetting, []);
   } finally {
     sidebar.destroy();
   }
@@ -1498,7 +1731,7 @@ test("GitSidebar drops a stale initialization error on refresh", async () => {
     assert.equal(sidebar.getStateMessage(), "This workspace is not a Git repository.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
     );
   } finally {
     sidebar.destroy();
@@ -1813,7 +2046,7 @@ test("GitSidebar explains output limits without offering a useless retry", async
     assert.match(sidebar.getStateMessage(), /Too many changes/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, settings: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false },
       "output limits offer no useless action",
     );
   } finally {

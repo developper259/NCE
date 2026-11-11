@@ -77,6 +77,16 @@ contextBridge.exposeInMainWorld("api", {
     switchBranch: (name) => ipcRenderer.invoke("Git:switchBranch", name),
     createBranch: (name) => ipcRenderer.invoke("Git:createBranch", name),
   },
+  installer: {
+    install: (packageId) =>
+      ipcRenderer.invoke("Installer:install", { packageId }),
+    cancel: () => ipcRenderer.invoke("Installer:cancel"),
+    onProgress: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Installer:progress", listener);
+      return () => ipcRenderer.removeListener("Installer:progress", listener);
+    },
+  },
   lsp: {
     getStatus: () => ipcRenderer.invoke("Lsp:status"),
     openDocument: (payload) => ipcRenderer.invoke("Lsp:openDocument", payload),

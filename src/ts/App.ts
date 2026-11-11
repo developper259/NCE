@@ -13,6 +13,7 @@ import { IpcRouter } from "./manager/IpcRouter";
 import { WindowManager } from "./manager/WindowManager";
 import { WindowSessionStore } from "./manager/WindowSessionStore";
 import { ExternalOpenCoordinator } from "./manager/ExternalOpenCoordinator";
+import { InstallerManager } from "./manager/InstallerManager";
 
 const SWITCHES_WITH_VALUES = new Set([
   "--app",
@@ -118,6 +119,7 @@ export class App {
   recentFolders!: RecentFoldersManager;
   agentConversations!: AgentConversationStore;
   agentSecrets!: AgentSecretStore;
+  installer!: InstallerManager;
   externalOpenCoordinator!: ExternalOpenCoordinator;
   name = "NCE";
   version = getPackageVersion();
@@ -146,6 +148,7 @@ export class App {
     this.recentFolders = new RecentFoldersManager(userData);
     this.agentConversations = new AgentConversationStore(userData);
     this.agentSecrets = new AgentSecretStore(userData);
+    this.installer = new InstallerManager({ userDataPath: userData });
     this.windowSessionStore = new WindowSessionStore(userData, process.platform, this.agentSecrets);
     this.windowManager = new WindowManager(this, this.ipcRouter, this.windowSessionStore);
     this.externalOpenCoordinator = new ExternalOpenCoordinator(this.windowManager);

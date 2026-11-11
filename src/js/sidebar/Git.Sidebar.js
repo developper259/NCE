@@ -104,7 +104,11 @@ class GitSidebar extends Sidebar {
     this.stateInit = null;
     this.stateRefresh = null;
     this.stateSettings = null;
+    this.stateInstall = null;
     this.initializing = false;
+    this.installingGit = false;
+    this.installProgress = null;
+    this.unsubscribeInstallProgress = null;
     this.listElement = null;
     this.listViewport = null;
     this.listLayer = null;
@@ -364,6 +368,16 @@ class GitSidebar extends Sidebar {
     stateRetry.dataset.action = "retry";
     stateRetry.addEventListener("click", () => this.refresh({ reason: "manual" }));
 
+    const stateInstall = document.createElement("button");
+    stateInstall.type = "button";
+    stateInstall.className = "git-sidebar-state-button";
+    stateInstall.textContent = "Install Git";
+    stateInstall.title = "Download a verified Git build and configure NCE to use it";
+    stateInstall.setAttribute("aria-label", "Install Git");
+    stateInstall.dataset.action = "install";
+    stateInstall.addEventListener("click", () => void this.installGit());
+    this.stateInstall = stateInstall;
+
     const stateSettings = document.createElement("button");
     stateSettings.type = "button";
     stateSettings.className = "git-sidebar-state-button";
@@ -372,7 +386,7 @@ class GitSidebar extends Sidebar {
     stateSettings.dataset.action = "settings";
     stateSettings.addEventListener("click", () => void this.openGitSettings());
 
-    stateActions.append(stateInit, stateRefresh, stateRetry, stateSettings);
+    stateActions.append(stateInit, stateRefresh, stateRetry, stateInstall, stateSettings);
     state.append(stateHeading, stateActions);
     this.stateElement = state;
     this.stateIconElement = stateIcon;
@@ -536,6 +550,20 @@ class GitSidebar extends Sidebar {
   }
 
   getStatePresentation(view = this.getViewState()) {
+    if (this.installingGit) {
+      const progress = this.installProgress;
+      const percent = typeof progress?.percent === "number"
+        ? ` ${progress.percent}%`
+        : "";
+      return {
+        icon: "fi-rr-refresh",
+        tone: "muted",
+        title: "Installing Git…",
+        description: `${progress?.message || "Downloading a verified Git build."}${percent}`,
+        spinning: true,
+        busy: true,
+      };
+    }
     if (view.mode === "no-workspace") {
       return {
         icon: "fi-rr-folder",
@@ -596,6 +624,7 @@ class GitSidebar extends Sidebar {
 
   getStateMessage() {
     const view = this.getViewState();
+    if (this.installingGit) return "Installing Git…";
     if (view.mode === "no-workspace") return "Open a folder to review its changes.";
     if (view.mode === "no-repository") return "This workspace is not a Git repository.";
     if (view.mode === "init-error" || view.mode === "error") return view.message;
@@ -605,8 +634,11 @@ class GitSidebar extends Sidebar {
 
   getStateActions() {
     const view = this.getViewState();
+    if (this.installingGit) {
+      return { init: false, refresh: false, retry: false, install: false, settings: false };
+    }
     if (view.mode === "no-repository" || view.mode === "init-error") {
-      return { init: true, refresh: true, retry: false, settings: false };
+      return { init: true, refresh: true, retry: false, install: false, settings: false };
     }
     if (view.mode === "error") {
       return {
@@ -614,13 +646,14 @@ class GitSidebar extends Sidebar {
         refresh: false,
         retry: view.errorCode !== "GIT_NOT_FOUND" &&
           view.errorCode !== "GIT_OUTPUT_LIMIT",
+        install: view.errorCode === "GIT_NOT_FOUND",
         settings: view.errorCode === "GIT_NOT_FOUND",
       };
     }
     if (view.mode === "clean") {
-      return { init: false, refresh: true, retry: false, settings: false };
+      return { init: false, refresh: true, retry: false, install: false, settings: false };
     }
-    return { init: false, refresh: false, retry: false, settings: false };
+    return { init: false, refresh: false, retry: false, install: false, settings: false };
   }
 
   openGitSettings() {
@@ -655,14 +688,16 @@ class GitSidebar extends Sidebar {
     }
 
     const actions = this.getStateActions();
-    const busy = this.loading || this.initializing;
+    const busy = this.loading || this.initializing || this.installingGit;
     const primary = actions.init
       ? this.stateInit
-      : actions.retry
-        ? this.stateRetry
-        : actions.settings
-          ? this.stateSettings
-          : null;
+      : actions.install
+        ? this.stateInstall
+        : actions.retry
+          ? this.stateRetry
+          : actions.settings
+            ? this.stateSettings
+            : null;
     if (this.stateInit) {
       this.stateInit.hidden = !actions.init;
       this.stateInit.disabled = busy;
@@ -680,6 +715,12 @@ class GitSidebar extends Sidebar {
       this.stateRefresh.hidden = !actions.refresh;
       this.stateRefresh.disabled = busy;
     }
+    if (this.stateInstall) {
+      this.stateInstall.hidden = !actions.install;
+      this.stateInstall.disabled = busy;
+      if (this.installingGit) this.stateInstall.setAttribute("aria-busy", "true");
+      else this.stateInstall.removeAttribute("aria-busy");
+    }
     if (this.stateSettings) {
       this.stateSettings.hidden = !actions.settings;
       this.stateSettings.disabled = busy;
@@ -688,6 +729,7 @@ class GitSidebar extends Sidebar {
       this.stateInit,
       this.stateRetry,
       this.stateRefresh,
+      this.stateInstall,
       this.stateSettings,
     ]) {
       button?.classList.toggle("git-sidebar-primary", button === primary);
@@ -1471,6 +1513,91 @@ class GitSidebar extends Sidebar {
     return result?.success === true;
   }
 
+  async installGit() {
+    if (this.destroyed || this.installingGit) return false;
+    const installer = this.editor.api?.installer;
+    if (typeof installer?.install !== "function") {
+      this.notifyGit({
+        type: "error",
+        title: "Git installation unavailable",
+        message: "Set the Git executable path in Settings instead.",
+      });
+      return false;
+    }
+    this.cancelScheduledRefresh();
+    this.installingGit = true;
+    this.installProgress = null;
+    this.actionError = "";
+    this.notice = "";
+    this.updateView();
+    this.unsubscribeInstallProgress = installer.onProgress?.((progress) => {
+      if (this.destroyed || !this.installingGit) return;
+      if (progress?.packageId !== "git") return;
+      this.installProgress = progress;
+      this.updateState();
+    }) || null;
+    const pending = this.notifyGit({
+      type: "info",
+      title: "Installing Git",
+      message: "Downloading a verified Git build. This can take a few minutes.",
+      persistent: true,
+      actions: [{
+        label: "Cancel",
+        action: () => { void installer.cancel?.(); },
+      }],
+    });
+    let result = null;
+    try {
+      result = await installer.install("git");
+    } catch {
+      result = null;
+    }
+    this.unsubscribeInstallProgress?.();
+    this.unsubscribeInstallProgress = null;
+    this.installingGit = false;
+    this.installProgress = null;
+    if (pending?.id) this.editor.notificationManager?.dismiss?.(pending.id);
+    if (this.destroyed) return false;
+    if (result?.success === true) {
+      const saved = await SETTINGS_SET("git.path", result.executable);
+      if (saved) {
+        this.notice = `Git ${result.version} installed.`;
+        this.notifyGit({
+          type: "success",
+          title: "Git installed",
+          message: `Git ${result.version} is now used by Source Control.`,
+        });
+        await this.refresh({ reason: "settings" });
+      } else {
+        this.notifyGit({
+          type: "error",
+          title: "Git path could not be saved",
+          message: `Git ${result.version} was installed at ${result.executable}. Set that path in Settings.`,
+        });
+      }
+    } else if (result?.code === "CANCELLED") {
+      this.notifyGit({
+        type: "info",
+        title: "Git installation cancelled",
+        message: "Your Git configuration was left unchanged.",
+      });
+    } else {
+      this.notifyGit({
+        type: "error",
+        title: "Git installation failed",
+        message: result?.error || "The Git package could not be installed.",
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.installGit();
+          },
+        }],
+      });
+    }
+    this.updateView();
+    return result?.success === true;
+  }
+
   async refresh({ reason = "manual" } = {}) {
     if (this.destroyed) return;
     this.initError = "";
@@ -1685,6 +1812,8 @@ class GitSidebar extends Sidebar {
     this.commitResizeObserver = null;
     this.unsubscribeFileSystem?.();
     this.unsubscribeFileSystem = null;
+    this.unsubscribeInstallProgress?.();
+    this.unsubscribeInstallProgress = null;
     this.fileScroller?.destroy?.();
     this.fileScroller = null;
     this.container?.remove();

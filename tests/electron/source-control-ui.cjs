@@ -952,6 +952,130 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   await git.refresh({ reason: "manual" });
   await waitFor(() => git.getViewState().mode === "clean", "clean state after retry");
 
+  // State E: missing Git offers a one-click installation.
+  const realApi = git.editor.api;
+  let installProgressListener = null;
+  let stubInstalls = 0;
+  const installerStub = {
+    install: async (packageId) => {
+      stubInstalls += 1;
+      check(packageId === "git", "Source Control installs the git package");
+      installProgressListener?.({
+        packageId: "git",
+        version: "2.56.1",
+        step: "download",
+        stepIndex: 0,
+        stepCount: 2,
+        message: "Downloading Git 2.56.1…",
+        percent: 42,
+        receivedBytes: 42,
+        totalBytes: 100,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      return {
+        success: false,
+        packageId: "git",
+        code: "CANCELLED",
+        error: "Installation cancelled.",
+      };
+    },
+    cancel: async () => true,
+    onProgress: (listener) => {
+      installProgressListener = listener;
+      return () => { installProgressListener = null; };
+    },
+  };
+  // The preload API is a frozen contextBridge proxy, so it is copied, not wrapped.
+  const apiStub = { ...realApi, installer: installerStub };
+  git.editor.api = apiStub;
+  try {
+    git.status = null;
+    git.applyStatusError({
+      code: "GIT_NOT_FOUND",
+      error: "Git is not installed or is not accessible from NCE.",
+    });
+    git.updateView();
+    await nextFrame();
+    check(git.getViewState().mode === "error", "missing Git is an error state");
+    check(
+      git.stateTitleElement.textContent === "Git is not installed",
+      "missing Git state title",
+    );
+    check(git.stateInstall.hidden === false, "missing Git offers Install Git");
+    check(git.stateInstall.textContent === "Install Git", "Install Git label");
+    check(
+      git.stateInstall.classList.contains("git-sidebar-primary"),
+      "Install Git is the primary action when Git is missing",
+    );
+    check(git.stateSettings.hidden === false, "the manual Git path stays available");
+    check(git.stateRetry.hidden === true, "retrying cannot fix a missing Git");
+    const installRect = git.stateInstall.getBoundingClientRect();
+    const stateActionsRect = git.stateInstall.parentElement.getBoundingClientRect();
+    check(
+      installRect.width >= 60 && installRect.height >= 24,
+      `Install Git is large enough to click: ${JSON.stringify(installRect)}`,
+    );
+    check(
+      installRect.left >= stateActionsRect.left &&
+        installRect.right <= stateActionsRect.right + 1 &&
+        installRect.bottom <= stateActionsRect.bottom + 1,
+      "Install Git stays inside the state action row",
+    );
+    check(
+      getComputedStyle(git.stateInstall).cursor === "pointer",
+      "Install Git looks clickable",
+    );
+
+    const installRun = git.installGit();
+    check(stubInstalls === 1, "the Install Git click reaches the installer");
+    await waitFor(
+      () => git.installingGit && Boolean(git.installProgress),
+      "the first install progress event",
+    );
+    await nextFrame();
+    check(git.installingGit === true, "the installation is running");
+    check(
+      git.stateTitleElement.textContent === "Installing Git…",
+      "installing state title",
+    );
+    check(
+      git.stateText.textContent.includes("42%"),
+      `installing state reports progress: ${git.stateText.textContent}`,
+    );
+    check(
+      git.stateIconElement.className.includes("is-spinning"),
+      "installing state spins its icon",
+    );
+    check(
+      git.stateElement.getAttribute("aria-busy") === "true",
+      "installing state is announced as busy",
+    );
+    check(
+      git.stateInstall.hidden === true && git.stateSettings.hidden === true,
+      "installing hides the state actions",
+    );
+    await installRun;
+    await nextFrame();
+    check(git.installingGit === false, "the installation settled");
+    check(
+      git.stateInstall.hidden === false,
+      "Install Git is offered again after a cancelled installation",
+    );
+    check(
+      editor.notificationManager.getNotifications().some(
+        (notification) => notification.title === "Git installation cancelled",
+      ),
+      "a cancelled installation is reported",
+    );
+  } finally {
+    git.editor.api = realApi;
+  }
+  await git.refresh({ reason: "manual" });
+  await waitFor(
+    () => git.getViewState().mode === "clean",
+    "clean state after the install check",
+  );
+
   // Theme compatibility.
   const previousTheme = editor.themeManager.getResolvedTheme();
   editor.themeManager.applyTheme("light");
