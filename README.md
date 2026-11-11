@@ -69,6 +69,8 @@ npm start
 
 Language server architecture, configuration and tests are documented in [docs/lsp.md](docs/lsp.md).
 
+The package installer (used to install Git when it is missing) is documented in [docs/installer.md](docs/installer.md).
+
 Run the test suite:
 
 ```bash
