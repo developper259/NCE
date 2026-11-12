@@ -126,7 +126,7 @@ async function extractZip(
   let totalBytes = 0;
   const pendingLinks: PendingLink[] = [];
   await new Promise<void>((resolve, reject) => {
-    yauzl.open(archivePath, { lazyEntries: true }, (openError, zipfile) => {
+    yauzl.open(archivePath, { lazyEntries: true }, (openError: Error | null, zipfile: yauzl.ZipFile) => {
       if (openError || !zipfile) {
         reject(new InstallerError("EXTRACTION_FAILED", `Could not open ZIP archive: ${openError?.message ?? "unknown error"}`));
         return;
@@ -142,7 +142,7 @@ async function extractZip(
       };
       const onAbort = () => finish(new InstallerError("CANCELLED", "Installation cancelled."));
       signal?.addEventListener("abort", onAbort, { once: true });
-      zipfile.on("error", (error) => finish(error));
+      zipfile.on("error", (error: Error) => finish(error));
       zipfile.on("end", () => {
         signal?.removeEventListener("abort", onAbort);
         finish();
@@ -188,7 +188,7 @@ async function extractZip(
 
       function openEntryStream(entry: yauzl.Entry): Promise<Readable> {
         return new Promise<Readable>((resolveStream, rejectStream) => {
-          zipfile.openReadStream(entry, (error, readable) => {
+          zipfile.openReadStream(entry, (error: Error | null, readable: Readable) => {
             if (error || !readable) rejectStream(error ?? new Error("missing entry stream"));
             else resolveStream(readable);
           });
@@ -208,11 +208,18 @@ async function extractTarGz(
   let totalBytes = 0;
   const pendingLinks: PendingLink[] = [];
   const extract = tarExtract();
-  extract.on("entry", (header: Header, stream, next) => {
-    handleEntry(header, stream)
-      .then(() => next())
-      .catch((error) => next(error instanceof Error ? error : new Error(String(error))));
-  });
+  extract.on(
+    "entry",
+    (
+      header: Header,
+      stream: { resume(): unknown; [Symbol.asyncIterator](): AsyncIterator<unknown> },
+      next: (error?: Error | null) => void,
+    ) => {
+      handleEntry(header, stream)
+        .then(() => next())
+        .catch((error) => next(error instanceof Error ? error : new Error(String(error))));
+    },
+  );
   await pipeline(createReadStream(archivePath), createGunzip(), extract);
   await resolvePendingLinks(pendingLinks, destDir);
 
