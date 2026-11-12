@@ -257,6 +257,16 @@ function createSidebar(options = {}) {
     installCancel: 0,
     installListeners: [],
     installUnsubscribed: 0,
+    remotes: 0,
+    addRemote: [],
+    setRemoteUrl: [],
+    removeRemote: [],
+    fetch: [],
+    pull: [],
+    push: [],
+    cancelNetwork: 0,
+    networkListeners: [],
+    networkUnsubscribed: 0,
     unsubscribed: false,
   };
   const rootPath = options.rootPath === undefined ? "/workspace" : options.rootPath;
@@ -423,6 +433,69 @@ function createSidebar(options = {}) {
           if (typeof options.abortResult === "function")
             return options.abortResult(operation);
           return options.abortResult || { success: true, aborted: operation };
+        },
+        async getRemotes() {
+          calls.remotes += 1;
+          if (typeof options.remotesResult === "function")
+            return options.remotesResult();
+          return options.remotesResult || {
+            success: true,
+            remotes: options.remotes || [],
+            defaultRemote: options.defaultRemote || null,
+          };
+        },
+        async addRemote(name, url) {
+          calls.addRemote.push([name, url]);
+          if (typeof options.addRemoteResult === "function")
+            return options.addRemoteResult(name, url);
+          return options.addRemoteResult || { success: true, remote: name };
+        },
+        async setRemoteUrl(name, url, remoteOptions) {
+          calls.setRemoteUrl.push([name, url, remoteOptions]);
+          if (typeof options.setRemoteUrlResult === "function")
+            return options.setRemoteUrlResult(name, url, remoteOptions);
+          return options.setRemoteUrlResult || { success: true, remote: name };
+        },
+        async removeRemote(name) {
+          calls.removeRemote.push(name);
+          if (typeof options.removeRemoteResult === "function")
+            return options.removeRemoteResult(name);
+          return options.removeRemoteResult || { success: true, remote: name };
+        },
+        async fetch(fetchOptions) {
+          calls.fetch.push(fetchOptions);
+          if (typeof options.fetchResult === "function")
+            return options.fetchResult(fetchOptions);
+          return options.fetchResult || { success: true, remote: "origin", all: false };
+        },
+        async pull(pullOptions) {
+          calls.pull.push(pullOptions);
+          if (typeof options.pullResult === "function")
+            return options.pullResult(pullOptions);
+          return options.pullResult || {
+            success: true,
+            summary: "Updating abc..def",
+            alreadyUpToDate: false,
+          };
+        },
+        async push(pushOptions) {
+          calls.push.push(pushOptions);
+          if (typeof options.pushResult === "function")
+            return options.pushResult(pushOptions);
+          return options.pushResult || {
+            success: true,
+            remote: "origin",
+            branch: "main",
+            forced: false,
+          };
+        },
+        async cancelNetworkOperation() {
+          calls.cancelNetwork += 1;
+          return true;
+        },
+        onNetworkProgress(listener) {
+          calls.networkListeners.push(listener);
+          return () => { calls.networkUnsubscribed += 1; };
         },
       },
       installer: options.installer === null ? undefined : {
@@ -2033,7 +2106,10 @@ test("Git context menus expose only implemented Git actions", () => {
   const header = builders.buildGitHeaderContextMenu(editor)({ sidebar });
   assert.deepEqual(
     Object.keys(header),
-    ["refresh", "history", "discardAllChanges", "discardAllStaged", "copyBranch"],
+    [
+      "refresh", "history", "discardAllChanges", "discardAllStaged", "copyBranch",
+      "sep2", "fetch", "pull", "push", "manageRemotes",
+    ],
   );
   assert.equal(header.history.name, "Show History");
   assert.equal(header.history.enabled, false, "history needs a loaded repository status");
@@ -3346,6 +3422,561 @@ test("Git menus discard the selection and expose discard-all in the header", asy
     assert.equal(sidebar.operationDialog.open, true);
     sidebar.operationDialogCancelButton.click();
     await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+const tick = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test("GitSidebar sync helpers describe success and failure per operation", () => {
+  assert.equal(GitSidebar.syncSuccessTitle("fetch"), "Fetched");
+  assert.equal(GitSidebar.syncSuccessTitle("pull"), "Pulled");
+  assert.equal(GitSidebar.syncSuccessTitle("push"), "Pushed");
+  assert.equal(GitSidebar.syncFailureTitle("fetch"), "Fetch failed");
+  assert.equal(GitSidebar.syncFailureTitle("pull"), "Pull failed");
+  assert.equal(GitSidebar.syncFailureTitle("push"), "Push failed");
+  assert.equal(
+    GitSidebar.syncSuccessMessage("fetch", { all: true }),
+    "Fetched updates from all remotes.",
+  );
+  assert.equal(
+    GitSidebar.syncSuccessMessage("fetch", { remote: "upstream" }),
+    "Fetched updates from upstream.",
+  );
+  assert.equal(
+    GitSidebar.syncSuccessMessage("pull", { alreadyUpToDate: true }),
+    "Already up to date.",
+  );
+  assert.equal(
+    GitSidebar.syncSuccessMessage("push", { remote: "origin", branch: "main" }),
+    "Pushed main to origin.",
+  );
+  assert.equal(
+    GitSidebar.syncSuccessMessage("push", { remote: "origin", branch: "main", forced: true }),
+    "Force pushed main to origin with lease.",
+  );
+});
+
+test("GitSidebar renders the sync bar with ahead and behind badges", async () => {
+  const { sidebar } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([], { branch: { ahead: 2, behind: 3 } }) },
+    ],
+  });
+  try {
+    sidebar.render();
+    assert.equal(sidebar.syncBar.hidden, true, "hidden before status loads");
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.syncBar.hidden, false);
+    assert.equal(sidebar.syncPullCount.hidden, false);
+    assert.equal(sidebar.syncPullCount.textContent, "3");
+    assert.equal(sidebar.syncPushCount.hidden, false);
+    assert.equal(sidebar.syncPushCount.textContent, "2");
+    assert.equal(sidebar.syncStatus.hidden, true);
+    assert.equal(sidebar.syncCancelButton.hidden, true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar hides the sync count badges when there is nothing to sync", async () => {
+  const { sidebar } = createSidebar();
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.syncBar.hidden, false);
+    assert.equal(sidebar.syncPullCount.hidden, true);
+    assert.equal(sidebar.syncPushCount.hidden, true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar fetches, pulls and pushes through the Git API and notifies success", async () => {
+  const { sidebar, calls } = createSidebar();
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.fetchChanges(), true);
+    assert.deepEqual(toPlain(calls.fetch), [{}]);
+    assert.equal(await sidebar.pullChanges(), true);
+    assert.deepEqual(toPlain(calls.pull), [{}]);
+    assert.equal(await sidebar.pushChanges(), true);
+    assert.deepEqual(toPlain(calls.push), [{}]);
+    const titles = calls.notifications.map((note) => note.title);
+    assert.ok(titles.includes("Fetched"));
+    assert.ok(titles.includes("Pulled"));
+    assert.ok(titles.includes("Pushed"));
+    assert.equal(sidebar.syncing, null);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar shows network progress only for the running operation and cancels it", async () => {
+  const { sidebar, calls } = createSidebar();
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    sidebar.syncing = "fetch";
+    sidebar.handleNetworkProgress({ operation: "push", phase: "Writing objects", percent: 90 });
+    assert.equal(sidebar.syncProgress, null, "progress for another operation is ignored");
+    sidebar.handleNetworkProgress({ operation: "fetch", phase: "Receiving objects", percent: 42 });
+    assert.equal(sidebar.syncStatus.hidden, false);
+    assert.match(sidebar.syncStatus.textContent, /Fetching… Receiving objects 42%/);
+    assert.equal(sidebar.syncCancelButton.hidden, false);
+    assert.equal(await sidebar.cancelSync(), true);
+    assert.equal(calls.cancelNetwork, 1);
+    sidebar.syncing = null;
+    assert.equal(await sidebar.cancelSync(), false, "no cancel when idle");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar prevents overlapping sync operations and ignores stale workspace results", async () => {
+  const gate = deferred();
+  const { sidebar, calls } = createSidebar({
+    fetchResult: () => gate.promise,
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.fetchChanges();
+    await tick();
+    assert.equal(sidebar.syncing, "fetch");
+    assert.equal(await sidebar.pushChanges(), false, "a second sync is rejected while busy");
+    assert.equal(calls.push.length, 0);
+    sidebar.applyWorkspace("/other-workspace");
+    gate.resolve({ success: true, remote: "origin", all: false });
+    assert.equal(await first, false, "a result from the previous workspace is discarded");
+    assert.equal(sidebar.syncing, null);
+    assert.equal(calls.notifications.length, 0, "no success notification for a stale result");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar offers Pull and Force With Lease when a push is rejected", async () => {
+  const { sidebar, calls } = createSidebar({
+    pushResult: { success: false, code: "PUSH_REJECTED", error: "non-fast-forward" },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.pushChanges(), false);
+    const note = calls.notifications.find((item) => item.title === "Push rejected");
+    assert.ok(note, "a push rejection is reported");
+    assert.equal(note.persistent, true);
+    const labels = note.actions.map((action) => action.label);
+    assert.deepEqual(toPlain(labels), ["Pull", "Force With Lease…"]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar proposes publishing the branch when a push has no upstream", async () => {
+  const { sidebar, calls } = createSidebar({
+    pushResult: { success: false, code: "NO_UPSTREAM", error: "no upstream" },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.pushChanges();
+    const note = calls.notifications.find((item) => item.title === "No upstream branch");
+    assert.ok(note);
+    assert.equal(note.actions[0].label, "Publish Branch");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar asks for a pull strategy and replays the pull with the chosen mode", async () => {
+  let pullCalls = 0;
+  const { sidebar, calls } = createSidebar({
+    pullResult: () => {
+      pullCalls += 1;
+      return pullCalls === 1
+        ? { success: false, code: "PULL_STRATEGY_REQUIRED", error: "divergent" }
+        : { success: true, summary: "ok", alreadyUpToDate: false };
+    },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.pullChanges();
+    const config = calls.quickPanel.find((item) => item.id === "git-pull-strategy");
+    assert.ok(config, "the pull strategy picker opens");
+    assert.deepEqual(toPlain(config.items.map((item) => item.id)), ["merge", "rebase"]);
+    config.onAccept({ id: "rebase" });
+    await tick();
+    assert.deepEqual(toPlain(calls.pull), [{}, { rebase: true }]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar offers to add a remote when none is configured", async () => {
+  const { sidebar, calls } = createSidebar({
+    fetchResult: { success: false, code: "NO_REMOTE", error: "no remote" },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.fetchChanges();
+    const note = calls.notifications.find((item) => item.title === "No remote configured");
+    assert.ok(note);
+    assert.equal(note.actions[0].label, "Add Remote");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports authentication failures persistently without retrying silently", async () => {
+  const { sidebar, calls } = createSidebar({
+    fetchResult: { success: false, code: "AUTH_REQUIRED", error: "authentication failed" },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.fetchChanges();
+    const note = calls.notifications.find((item) => item.title === "Authentication required");
+    assert.ok(note);
+    assert.equal(note.persistent, true);
+    assert.equal(note.actions, undefined);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar treats a cancelled sync as a neutral notice", async () => {
+  const { sidebar, calls } = createSidebar({
+    fetchResult: { success: false, code: "OPERATION_CANCELLED", error: "cancelled" },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.fetchChanges();
+    assert.match(sidebar.getCommitStatusText(), /cancelled/);
+    assert.equal(calls.notifications.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar force pushes with lease only after an explicit confirmation", async () => {
+  const { sidebar, calls } = createSidebar({
+    remotes: [{ name: "origin", fetchUrl: "https://example.invalid/repo.git", pushUrl: null }],
+    defaultRemote: "origin",
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const cancelled = sidebar.requestForcePush({ remote: "origin", branch: "main" });
+    await tick();
+    assert.equal(sidebar.operationDialog.open, true);
+    assert.equal(sidebar.operationDialog.dataset.mode, "force-push");
+    assert.equal(sidebar.operationDialogTitle.textContent, "Force Push With Lease");
+    sidebar.operationDialogCancelButton.click();
+    assert.equal(await cancelled, false);
+    assert.equal(calls.push.length, 0, "cancelling never force pushes");
+
+    const confirmed = sidebar.requestForcePush({ remote: "origin", branch: "main" });
+    await tick();
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await confirmed, true);
+    assert.deepEqual(toPlain(calls.push), [
+      { remote: "origin", branch: "main", forceWithLease: true },
+    ]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar publishes the current branch to the resolved remote with upstream", async () => {
+  const { sidebar, calls } = createSidebar({
+    remotes: [{ name: "origin", fetchUrl: "https://example.invalid/repo.git", pushUrl: null }],
+    defaultRemote: "origin",
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.publishBranch(), true);
+    assert.deepEqual(toPlain(calls.push), [
+      { remote: "origin", branch: "main", setUpstream: true },
+    ]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar resolves the sync remote from config, a single remote, or a picker", async () => {
+  const single = createSidebar({
+    remotes: [{ name: "upstream", fetchUrl: "https://example.invalid/repo.git", pushUrl: null }],
+  });
+  try {
+    assert.equal(await single.sidebar.resolveSyncRemote(), "upstream");
+  } finally {
+    single.sidebar.destroy();
+  }
+
+  const ambiguous = createSidebar({
+    remotes: [
+      { name: "origin", fetchUrl: "https://example.invalid/a.git", pushUrl: null },
+      { name: "upstream", fetchUrl: "https://example.invalid/b.git", pushUrl: null },
+    ],
+  });
+  try {
+    const pending = ambiguous.sidebar.resolveSyncRemote();
+    await tick();
+    const config = ambiguous.calls.quickPanel.find((item) => item.id === "git-remote-picker");
+    assert.ok(config, "an ambiguous remote set opens a picker");
+    assert.deepEqual(config.items.map((item) => item.id), ["origin", "upstream"]);
+    config.onAccept({ id: "upstream" });
+    assert.equal(await pending, "upstream");
+  } finally {
+    ambiguous.sidebar.destroy();
+  }
+});
+
+test("GitSidebar opens the remotes dialog, lists remotes and marks the default", async () => {
+  const { sidebar } = createSidebar({
+    remotes: [
+      { name: "origin", fetchUrl: "https://example.invalid/a.git", pushUrl: "https://example.invalid/push.git" },
+      { name: "upstream", fetchUrl: "https://example.invalid/b.git", pushUrl: null },
+    ],
+    defaultRemote: "origin",
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openRemotesDialog();
+    await tick();
+    assert.equal(sidebar.remotesDialog.open, true);
+    assert.equal(sidebar.remotesList.children.length, 2);
+    const firstRow = sidebar.remotesList.children[0];
+    assert.equal(firstRow.dataset.remote, "origin");
+    assert.match(firstRow.children[0].children[0].textContent, /origin/);
+    assert.equal(firstRow.children[0].children[0].children.length, 1, "default tag present");
+    sidebar.remotesCloseButton.click();
+    assert.equal(await opening, true);
+    assert.equal(sidebar.remotesDialog.open, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar adds a remote from the dialog and reports validation errors", async () => {
+  let remotes = [];
+  const { sidebar, calls } = createSidebar({
+    remotesResult: () => ({ success: true, remotes, defaultRemote: null }),
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openRemotesDialog();
+    await tick();
+    sidebar.remotesAddName.value = "  ";
+    sidebar.remotesAddUrl.value = "https://example.invalid/repo.git";
+    sidebar.remotesAddButton.click();
+    await tick();
+    assert.equal(calls.addRemote.length, 0, "an empty name is rejected before Git");
+    assert.equal(sidebar.remotesError.hidden, false);
+
+    sidebar.remotesAddName.value = "origin";
+    sidebar.remotesAddUrl.value = "https://example.invalid/repo.git";
+    remotes = [{ name: "origin", fetchUrl: "https://example.invalid/repo.git", pushUrl: null }];
+    sidebar.remotesAddButton.click();
+    await tick();
+    assert.deepEqual(toPlain(calls.addRemote), [
+      ["origin", "https://example.invalid/repo.git"],
+    ]);
+    assert.equal(sidebar.remotesList.children.length, 1);
+    assert.equal(sidebar.remotesAddName.value, "");
+    assert.ok(calls.notifications.some((note) => note.title === "Remote added"));
+    sidebar.remotesCloseButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar edits a remote fetch and push URL from the dialog", async () => {
+  const { sidebar, calls } = createSidebar({
+    remotes: [{ name: "origin", fetchUrl: "https://example.invalid/old.git", pushUrl: null }],
+    defaultRemote: "origin",
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openRemotesDialog();
+    await tick();
+    const row = sidebar.remotesList.children[0];
+    const editButton = row.children[1].children[0];
+    assert.equal(editButton.textContent, "Edit");
+    editButton.click();
+    const editForm = sidebar.remotesList.children[0].children[0];
+    const fetchInput = editForm.children[1];
+    const pushInput = editForm.children[2];
+    fetchInput.value = "https://example.invalid/new.git";
+    pushInput.value = "https://example.invalid/push.git";
+    const saveButton = editForm.children[3].children[1];
+    saveButton.click();
+    await tick();
+    assert.deepEqual(toPlain(calls.setRemoteUrl), [
+      ["origin", "https://example.invalid/new.git", null],
+      ["origin", "https://example.invalid/push.git", { push: true }],
+    ]);
+    assert.ok(calls.notifications.some((note) => note.title === "Remote updated"));
+    sidebar.remotesCloseButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar removes a remote only after an inline confirmation", async () => {
+  let remotes = [{ name: "origin", fetchUrl: "https://example.invalid/a.git", pushUrl: null }];
+  const { sidebar, calls } = createSidebar({
+    remotesResult: () => ({ success: true, remotes, defaultRemote: null }),
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openRemotesDialog();
+    await tick();
+    const row = sidebar.remotesList.children[0];
+    const removeButton = row.children[1].children[1];
+    assert.equal(removeButton.textContent, "Remove");
+    removeButton.click();
+    assert.equal(calls.removeRemote.length, 0, "the first click only asks for confirmation");
+    const confirmRow = sidebar.remotesList.children[0];
+    const cancelButton = confirmRow.children[1];
+    const confirmButton = confirmRow.children[2];
+    assert.equal(confirmButton.textContent, "Remove");
+    cancelButton.click();
+    assert.equal(calls.removeRemote.length, 0, "cancelling keeps the remote");
+
+    sidebar.remotesList.children[0].children[1].children[1].click();
+    remotes = [];
+    sidebar.remotesList.children[0].children[2].click();
+    await tick();
+    assert.deepEqual(toPlain(calls.removeRemote), ["origin"]);
+    assert.equal(sidebar.remotesList.children.length, 1);
+    assert.equal(sidebar.remotesList.children[0].className, "git-remotes-empty");
+    assert.ok(calls.notifications.some((note) => note.title === "Remote removed"));
+    sidebar.remotesCloseButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar surfaces remote API failures inside the dialog", async () => {
+  const { sidebar, calls } = createSidebar({
+    remotes: [{ name: "origin", fetchUrl: "https://example.invalid/a.git", pushUrl: null }],
+    addRemoteResult: { success: false, code: "REMOTE_EXISTS", error: "already exists" },
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openRemotesDialog();
+    await tick();
+    sidebar.remotesAddName.value = "origin";
+    sidebar.remotesAddUrl.value = "https://example.invalid/a.git";
+    sidebar.remotesAddButton.click();
+    await tick();
+    assert.equal(sidebar.remotesError.hidden, false);
+    assert.match(sidebar.remotesError.textContent, /already exists/);
+    assert.equal(sidebar.remotesBusy, false, "the dialog re-enables after a failure");
+    assert.equal(sidebar.remotesAddButton.disabled, false);
+    sidebar.remotesCloseButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar resets sync state and closes the remotes dialog on workspace change", async () => {
+  const { sidebar } = createSidebar({
+    remotes: [{ name: "origin", fetchUrl: "https://example.invalid/a.git", pushUrl: null }],
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const opening = sidebar.openRemotesDialog();
+    await tick();
+    sidebar.syncing = "fetch";
+    sidebar.syncProgress = { phase: "Receiving objects", percent: 10 };
+    sidebar.applyWorkspace("/other-workspace");
+    assert.equal(sidebar.syncing, null);
+    assert.equal(sidebar.syncProgress, null);
+    assert.equal(sidebar.remotes.length, 0);
+    assert.equal(sidebar.remotesDialog.open, false);
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar unsubscribes network progress and removes the remotes dialog on destroy", async () => {
+  const { sidebar, calls } = createSidebar({
+    remotes: [{ name: "origin", fetchUrl: "https://example.invalid/a.git", pushUrl: null }],
+  });
+  sidebar.render();
+  await sidebar.refresh({ reason: "open" });
+  const opening = sidebar.openRemotesDialog();
+  await tick();
+  assert.equal(calls.networkListeners.length, 1);
+  sidebar.destroy();
+  await opening;
+  assert.equal(calls.networkUnsubscribed, 1);
+  assert.equal(sidebar.remotesDialog, null);
+});
+
+test("Git header context menu exposes fetch, pull, push and remote management", async () => {
+  const builders = loadGlobal(
+    "src/js/contextMenu/GitFile.ContextMenu.js",
+    "({ buildGitFileContextMenu, buildGitHeaderContextMenu })",
+    { GitSidebar },
+  );
+  const { sidebar, calls } = createSidebar();
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const header = builders.buildGitHeaderContextMenu(sidebar.editor)({ sidebar });
+    assert.equal(header.fetch.enabled, true);
+    assert.equal(header.pull.enabled, true);
+    assert.equal(header.push.enabled, true);
+    assert.equal(header.manageRemotes.enabled, true);
+    header.fetch.callback();
+    await tick();
+    assert.equal(calls.fetch.length, 1);
+    header.pull.callback();
+    await tick();
+    assert.equal(calls.pull.length, 1);
+    header.push.callback();
+    await tick();
+    assert.equal(calls.push.length, 1);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("Git header context menu disables sync actions without a repository", () => {
+  const builders = loadGlobal(
+    "src/js/contextMenu/GitFile.ContextMenu.js",
+    "({ buildGitFileContextMenu, buildGitHeaderContextMenu })",
+    { GitSidebar },
+  );
+  const { sidebar } = createSidebar();
+  try {
+    const header = builders.buildGitHeaderContextMenu(sidebar.editor)({ sidebar });
+    assert.equal(header.fetch.enabled, false);
+    assert.equal(header.pull.enabled, false);
+    assert.equal(header.push.enabled, false);
+    assert.equal(header.manageRemotes.enabled, false);
   } finally {
     sidebar.destroy();
   }

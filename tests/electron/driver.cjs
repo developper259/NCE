@@ -1818,6 +1818,97 @@ app.whenReady().then(() => {
           !fs.existsSync(path.join(sourceControlWorkspace, ".git", "MERGE_HEAD")),
           "MERGE_HEAD is removed by the abort",
         );
+        // A real bare remote exercises the sync bar (push/fetch) and remotes dialog.
+        const sourceControlRemote = path.join(directory, "source-control-remote.git");
+        execFileSync("git", ["init", "-q", "--bare", sourceControlRemote], { stdio: "ignore" });
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "remote", "add", "origin", sourceControlRemote],
+          { stdio: "ignore" },
+        );
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "push", "-q", "-u", "origin", fixtureBranch],
+          { stdio: "ignore" },
+        );
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "commit", "-q", "--allow-empty", "-m", "Sync fixture local commit"],
+          { stdio: "ignore" },
+        );
+        const syncLocalHead = execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "rev-parse", "HEAD"],
+          { encoding: "utf8" },
+        ).trim();
+        const sourceControlSync = await run(`(async () => {
+          const git = editor.gitSidebar;
+          await git.refresh({ reason: "manual" });
+          const upstreamDeadline = Date.now() + 5000;
+          while (!git.status?.branch?.upstream && Date.now() < upstreamDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          if (!git.status?.branch?.upstream)
+            return { ok: false, reason: "upstream not detected" };
+          if (git.syncBar?.hidden !== false)
+            return { ok: false, reason: "sync bar is hidden" };
+          const pushBadge = git.syncPushCount.hidden === false ? git.syncPushCount.textContent : null;
+          const aheadBefore = git.status.branch.ahead;
+          git.syncPushButton.click();
+          const pushDeadline = Date.now() + 8000;
+          while ((git.syncing || git.status?.branch?.ahead !== 0) && Date.now() < pushDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          const pushNotice = git.notice;
+          const aheadAfterPush = git.status?.branch?.ahead;
+          git.syncFetchButton.click();
+          const fetchDeadline = Date.now() + 8000;
+          while (!/Fetched/.test(git.notice || "") && Date.now() < fetchDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          const fetchNotice = git.notice;
+          const opening = git.openRemotesDialog();
+          const dialogDeadline = Date.now() + 5000;
+          while (git.remotesDialog?.open !== true && Date.now() < dialogDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          if (git.remotesDialog?.open !== true)
+            return { ok: false, reason: "remotes dialog did not open" };
+          const rows = Array.from(git.remotesList.children, (row) => row.dataset.remote);
+          const defaultTag =
+            git.remotesList.children[0]?.children[0]?.children[0]?.children?.length === 1;
+          git.remotesCloseButton.click();
+          await opening;
+          return {
+            ok: true,
+            pushBadge,
+            aheadBefore,
+            aheadAfterPush,
+            pushNotice,
+            fetchNotice,
+            rows,
+            defaultTag,
+            dialogClosed: git.remotesDialog.open === false,
+          };
+        })()`);
+        assert.equal(
+          sourceControlSync.ok,
+          true,
+          `sync bar and remotes dialog work: ${JSON.stringify(sourceControlSync)}`,
+        );
+        assert.equal(sourceControlSync.pushBadge, "1", "the push badge shows the ahead count");
+        assert.equal(sourceControlSync.aheadBefore, 1);
+        assert.equal(sourceControlSync.aheadAfterPush, 0, "push clears the ahead count");
+        assert.match(sourceControlSync.pushNotice, /Pushed/);
+        assert.match(sourceControlSync.fetchNotice, /Fetched/);
+        assert.deepEqual(sourceControlSync.rows, ["origin"]);
+        assert.equal(sourceControlSync.defaultTag, true, "the default remote is tagged");
+        assert.equal(sourceControlSync.dialogClosed, true);
+        assert.equal(
+          execFileSync(
+            "git",
+            ["-C", sourceControlRemote, "rev-parse", fixtureBranch],
+            { encoding: "utf8" },
+          ).trim(),
+          syncLocalHead,
+          "the sync bar push published the local commit to the real remote",
+        );
         await run(`(() => {
           editor.notificationManager.clearHistory();
           editor.notificationManager.flushPersist?.();

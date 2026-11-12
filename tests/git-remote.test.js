@@ -498,7 +498,12 @@ test("network operations can be cancelled and time out", { skip: posixSkip }, as
       signal: controller.signal,
       onProgress: (event) => progress.push(event),
     });
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    const hasReceiveProgress = () => progress.some(
+      (event) => event.operation === "fetch" && event.phase === "Receiving objects",
+    );
+    const progressDeadline = Date.now() + 5000;
+    while (!hasReceiveProgress() && Date.now() < progressDeadline)
+      await new Promise((resolve) => setTimeout(resolve, 25));
     controller.abort();
     const started = Date.now();
     const cancelled = await pending;
@@ -511,8 +516,13 @@ test("network operations can be cancelled and time out", { skip: posixSkip }, as
     );
 
     const pendingIpc = manager.fetch();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    assert.equal(manager.cancelNetworkOperation(), true);
+    const ipcDeadline = Date.now() + 5000;
+    let ipcCancelled = false;
+    while (Date.now() < ipcDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      if (manager.cancelNetworkOperation()) { ipcCancelled = true; break; }
+    }
+    assert.equal(ipcCancelled, true, "a running fetch can be cancelled over IPC");
     assert.equal((await pendingIpc).code, "OPERATION_CANCELLED");
     assert.equal(manager.cancelNetworkOperation(), false);
 

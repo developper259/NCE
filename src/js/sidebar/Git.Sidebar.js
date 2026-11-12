@@ -60,6 +60,35 @@ class GitSidebar extends Sidebar {
     return result?.error || "Git status could not be read.";
   }
 
+  static syncSuccessTitle(operation) {
+    if (operation === "fetch") return "Fetched";
+    if (operation === "pull") return "Pulled";
+    return "Pushed";
+  }
+
+  static syncFailureTitle(operation) {
+    if (operation === "fetch") return "Fetch failed";
+    if (operation === "pull") return "Pull failed";
+    return "Push failed";
+  }
+
+  static syncSuccessMessage(operation, result) {
+    if (operation === "fetch") {
+      if (result?.all) return "Fetched updates from all remotes.";
+      return result?.remote
+        ? `Fetched updates from ${result.remote}.`
+        : "Fetched updates.";
+    }
+    if (operation === "pull")
+      return result?.alreadyUpToDate ? "Already up to date." : "Pulled the latest changes.";
+    const remote = result?.remote;
+    const branch = result?.branch;
+    const target = remote && branch ? `${branch} to ${remote}` : "the current branch";
+    return result?.forced
+      ? `Force pushed ${target} with lease.`
+      : `Pushed ${target}.`;
+  }
+
   static statusLetter(entry, staged) {
     const code = staged ? entry?.index : entry?.worktree;
     if (entry?.conflicted) return "!";
@@ -207,6 +236,31 @@ class GitSidebar extends Sidebar {
     this.operationBannerButton = null;
     this.operationDialog = null;
     this.operationDialogSession = null;
+    this.syncing = null;
+    this.syncProgress = null;
+    this.unsubscribeNetworkProgress = null;
+    this.syncBar = null;
+    this.syncFetchButton = null;
+    this.syncPullButton = null;
+    this.syncPushButton = null;
+    this.syncPullCount = null;
+    this.syncPushCount = null;
+    this.syncRemotesButton = null;
+    this.syncStatus = null;
+    this.syncCancelButton = null;
+    this.remotes = [];
+    this.defaultRemote = null;
+    this.remotesDialog = null;
+    this.remotesDialogSession = null;
+    this.remotesBusy = false;
+    this.remotesEditing = null;
+    this.remotesPendingRemove = null;
+    this.remotesList = null;
+    this.remotesError = null;
+    this.remotesAddName = null;
+    this.remotesAddUrl = null;
+    this.remotesAddButton = null;
+    this.remotesCloseButton = null;
     this.diffLoadingPaths = new Set();
     this.generation = 0;
     this.refreshTimer = null;
@@ -218,6 +272,9 @@ class GitSidebar extends Sidebar {
     this.unsubscribeFileSystem =
       editor.api?.onFileSystemChange?.((events) =>
         this.handleFileSystemEvents(events)) || null;
+    this.unsubscribeNetworkProgress =
+      editor.api?.git?.onNetworkProgress?.((progress) =>
+        this.handleNetworkProgress(progress)) || null;
   }
 
   loadCollapsedState() {
@@ -486,6 +543,73 @@ class GitSidebar extends Sidebar {
     this.operationBannerText = bannerText;
     this.operationBannerButton = bannerButton;
 
+    const syncBar = document.createElement("div");
+    syncBar.className = "git-sync-bar";
+    syncBar.hidden = true;
+    syncBar.setAttribute("role", "group");
+    syncBar.setAttribute("aria-label", "Remote synchronization");
+
+    const makeSyncButton = (action, iconClass, label) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "git-sync-button";
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.dataset.action = action;
+      const icon = document.createElement("i");
+      icon.className = iconClass;
+      icon.setAttribute("aria-hidden", "true");
+      button.appendChild(icon);
+      return button;
+    };
+
+    const fetchButton = makeSyncButton("fetch", "fi fi-rr-refresh", "Fetch");
+    fetchButton.addEventListener("click", () => void this.fetchChanges());
+    this.syncFetchButton = fetchButton;
+
+    const pullButton = makeSyncButton("pull", "fi fi-rr-arrow-up git-sync-pull-icon", "Pull");
+    const pullCount = document.createElement("span");
+    pullCount.className = "git-sync-count";
+    pullCount.hidden = true;
+    pullButton.appendChild(pullCount);
+    pullButton.addEventListener("click", () => void this.pullChanges());
+    this.syncPullButton = pullButton;
+    this.syncPullCount = pullCount;
+
+    const pushButton = makeSyncButton("push", "fi fi-rr-arrow-up", "Push");
+    const pushCount = document.createElement("span");
+    pushCount.className = "git-sync-count";
+    pushCount.hidden = true;
+    pushButton.appendChild(pushCount);
+    pushButton.addEventListener("click", () => void this.pushChanges());
+    this.syncPushButton = pushButton;
+    this.syncPushCount = pushCount;
+
+    const syncStatus = document.createElement("span");
+    syncStatus.className = "git-sync-status";
+    syncStatus.setAttribute("role", "status");
+    syncStatus.setAttribute("aria-live", "polite");
+    syncStatus.hidden = true;
+    this.syncStatus = syncStatus;
+
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "git-sync-cancel";
+    cancelButton.textContent = "Cancel";
+    cancelButton.title = "Cancel the running operation";
+    cancelButton.setAttribute("aria-label", "Cancel the running operation");
+    cancelButton.hidden = true;
+    cancelButton.addEventListener("click", () => void this.cancelSync());
+    this.syncCancelButton = cancelButton;
+
+    const remotesButton = makeSyncButton("remotes", "fi fi-rr-settings-sliders", "Manage Remotes");
+    remotesButton.setAttribute("aria-haspopup", "dialog");
+    remotesButton.addEventListener("click", () => void this.openRemotesDialog());
+    this.syncRemotesButton = remotesButton;
+
+    syncBar.append(fetchButton, pullButton, pushButton, syncStatus, cancelButton, remotesButton);
+    this.syncBar = syncBar;
+
     const list = document.createElement("div");
     list.className = "git-sidebar-list";
     const viewport = document.createElement("div");
@@ -501,7 +625,7 @@ class GitSidebar extends Sidebar {
     this.listLayer = layerNode;
     this.fileScroller.attach(list, viewport, layerNode);
 
-    container.append(header, state, banner, list, commitBox);
+    container.append(header, state, banner, syncBar, list, commitBox);
     this.updateView();
     return container;
   }
@@ -517,7 +641,7 @@ class GitSidebar extends Sidebar {
         : "Switch Branch";
       this.branchButton.disabled =
         this.switchingBranch || this.committing || this.stagingAll ||
-        this.unstagingAll || this.discarding || this.aborting;
+        this.unstagingAll || this.discarding || this.aborting || Boolean(this.syncing);
     }
     if (this.refreshButton) {
       this.refreshButton.hidden = !this.workspaceRoot;
@@ -534,12 +658,13 @@ class GitSidebar extends Sidebar {
         this.commitInput.value = this.commitMessage;
       this.commitInput.disabled =
         this.committing || this.stagingAll || this.unstagingAll ||
-        this.discarding || this.aborting;
+        this.discarding || this.aborting || Boolean(this.syncing);
       this.autoResizeCommitInput();
     }
     this.updateCommitControls();
     this.updateState();
     this.updateOperationBanner();
+    this.updateSyncBar();
   }
 
   getBranchLabel() {
@@ -2165,6 +2290,770 @@ class GitSidebar extends Sidebar {
     else this.operationBannerButton.removeAttribute("aria-busy");
   }
 
+  updateSyncBar() {
+    if (!this.syncBar) return;
+    const branch = this.status?.branch;
+    this.syncBar.hidden = !this.status;
+    if (!this.status) return;
+    const busy = this.loading || this.isMutating();
+    const syncing = Boolean(this.syncing);
+    const behind = Number(branch?.behind) || 0;
+    const ahead = Number(branch?.ahead) || 0;
+    const remoteLabel = this.defaultRemote ? ` (${this.defaultRemote})` : "";
+
+    this.syncFetchButton.disabled = busy;
+    this.syncFetchButton.title = `Fetch${remoteLabel}`;
+    this.syncFetchButton.setAttribute("aria-label", `Fetch${remoteLabel}`);
+
+    this.syncPullButton.disabled = busy;
+    this.syncPullButton.title = behind > 0 ? `Pull ${behind} commit${behind === 1 ? "" : "s"}` : "Pull";
+    this.syncPullButton.setAttribute("aria-label", this.syncPullButton.title);
+    this.syncPullCount.hidden = behind === 0;
+    this.syncPullCount.textContent = String(behind);
+
+    this.syncPushButton.disabled = busy;
+    this.syncPushButton.title = ahead > 0 ? `Push ${ahead} commit${ahead === 1 ? "" : "s"}` : "Push";
+    this.syncPushButton.setAttribute("aria-label", this.syncPushButton.title);
+    this.syncPushCount.hidden = ahead === 0;
+    this.syncPushCount.textContent = String(ahead);
+
+    this.syncRemotesButton.disabled = this.loading || this.remotesBusy || syncing;
+
+    if (syncing) {
+      const progress = this.syncProgress;
+      const label = this.syncing === "fetch" ? "Fetching" : this.syncing === "pull" ? "Pulling" : "Pushing";
+      this.syncStatus.hidden = false;
+      this.syncStatus.textContent = progress
+        ? `${label}… ${progress.phase} ${progress.percent}%`
+        : `${label}…`;
+      this.syncCancelButton.hidden = false;
+      this.syncCancelButton.disabled = false;
+    } else {
+      this.syncStatus.hidden = true;
+      this.syncStatus.textContent = "";
+      this.syncCancelButton.hidden = true;
+    }
+  }
+
+  handleNetworkProgress(progress) {
+    if (!progress || this.destroyed) return;
+    if (!this.syncing || progress.operation !== this.syncing) return;
+    this.syncProgress = {
+      phase: String(progress.phase || ""),
+      percent: Number(progress.percent) || 0,
+    };
+    this.updateSyncBar();
+  }
+
+  fetchChanges() {
+    return this.performSync("fetch", {});
+  }
+
+  pullChanges() {
+    return this.performSync("pull", {});
+  }
+
+  pushChanges() {
+    return this.performSync("push", {});
+  }
+
+  async cancelSync() {
+    if (!this.syncing) return false;
+    try {
+      await this.editor.api?.git?.cancelNetworkOperation?.();
+    } catch {}
+    return true;
+  }
+
+  async performSync(operation, options = {}) {
+    if (this.destroyed || this.loading || this.isMutating()) return false;
+    const api = this.editor.api?.git;
+    if (!api || typeof api[operation] !== "function") return false;
+    this.cancelScheduledRefresh();
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.syncing = operation;
+    this.syncProgress = null;
+    this.clearTransientMessages();
+    this.notice = "";
+    this.updateView();
+    let result = null;
+    try {
+      result = await api[operation](options);
+    } catch {
+      result = null;
+    }
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.syncing = null;
+      this.syncProgress = null;
+      this.updateView();
+      return false;
+    }
+    this.syncing = null;
+    this.syncProgress = null;
+    if (result?.success === true) {
+      this.notice = GitSidebar.syncSuccessMessage(operation, result);
+      this.notifyGit({
+        type: "success",
+        title: GitSidebar.syncSuccessTitle(operation),
+        message: this.notice,
+      });
+      await this.refresh({ reason: "branch" });
+      this.updateView();
+      return true;
+    }
+    this.updateView();
+    this.handleSyncFailure(operation, result, options);
+    return false;
+  }
+
+  handleSyncFailure(operation, result, options) {
+    const code = result?.code;
+    const message = result
+      ? GitSidebar.describeError(result)
+      : "The Git operation failed.";
+    if (code === "OPERATION_CANCELLED") {
+      this.notice = "The operation was cancelled.";
+      this.updateCommitControls();
+      return;
+    }
+    if (code === "PULL_CONFLICTS") {
+      this.notifyGit({
+        type: "warning",
+        title: "Pull stopped with conflicts",
+        message,
+      });
+      void this.refresh({ reason: "branch" });
+      return;
+    }
+    if (code === "NO_UPSTREAM" && operation === "push") {
+      this.notifyGit({
+        type: "info",
+        title: "No upstream branch",
+        message: "Publish this branch to a remote so it can be tracked.",
+        actions: [{
+          label: "Publish Branch",
+          action: () => { if (!this.destroyed) void this.publishBranch(); },
+        }],
+      });
+      return;
+    }
+    if (code === "PUSH_REJECTED") {
+      this.notifyGit({
+        type: "error",
+        title: "Push rejected",
+        message,
+        persistent: true,
+        actions: [
+          { label: "Pull", action: () => { if (!this.destroyed) void this.pullChanges(); } },
+          { label: "Force With Lease…", action: () => { if (!this.destroyed) void this.requestForcePush(options); } },
+        ],
+      });
+      return;
+    }
+    if (code === "PULL_STRATEGY_REQUIRED") {
+      this.promptPullStrategy();
+      return;
+    }
+    if (code === "NO_REMOTE") {
+      this.notifyGit({
+        type: "info",
+        title: "No remote configured",
+        message,
+        actions: [{
+          label: "Add Remote",
+          action: () => { if (!this.destroyed) void this.openRemotesDialog(); },
+        }],
+      });
+      return;
+    }
+    if (code === "AUTH_REQUIRED") {
+      this.notifyGit({
+        type: "error",
+        title: "Authentication required",
+        message,
+        persistent: true,
+      });
+      return;
+    }
+    this.setActionError(message);
+    this.notifyGit({
+      type: "error",
+      title: GitSidebar.syncFailureTitle(operation),
+      message,
+      actions: [{
+        label: "Retry",
+        action: () => { if (!this.destroyed) void this.performSync(operation, options); },
+      }],
+    });
+  }
+
+  async publishBranch() {
+    const branch = this.status?.branch?.name;
+    if (!branch) {
+      this.notifyGit({
+        type: "error",
+        title: "Cannot publish branch",
+        message: "There is no current branch to publish.",
+      });
+      return false;
+    }
+    const remote = await this.resolveSyncRemote();
+    if (!remote) return false;
+    return this.performSync("push", { remote, branch, setUpstream: true });
+  }
+
+  async requestForcePush(options = {}) {
+    const remote = options.remote || await this.resolveSyncRemote();
+    const branch = options.branch || this.status?.branch?.name;
+    if (!remote || !branch) {
+      this.notifyGit({
+        type: "error",
+        title: "Force push unavailable",
+        message: "A remote and a branch are required to force push.",
+      });
+      return false;
+    }
+    const answer = await this.showForcePushConfirmation(remote, branch);
+    if (!answer?.confirmed) return false;
+    return this.performSync("push", { remote, branch, forceWithLease: true });
+  }
+
+  showForcePushConfirmation(remote, branch) {
+    const dialog = this.ensureOperationDialog();
+    if (!dialog || dialog.open || this.operationDialogSession || this.destroyed)
+      return Promise.resolve({ confirmed: false });
+    this.operationDialog.dataset.mode = "force-push";
+    this.operationDialogBadgeIcon.className = "fi fi-rr-triangle-warning";
+    this.operationDialogTitle.textContent = "Force Push With Lease";
+    this.operationDialogMessage.textContent =
+      `This overwrites "${branch}" on "${remote}" with your local branch. ` +
+      "Remote commits you do not have will be lost. The lease aborts the push if the remote moved since your last fetch.";
+    this.operationDialogFiles.hidden = true;
+    this.operationDialogFiles.replaceChildren();
+    this.operationDialogCheckboxLabel.hidden = true;
+    this.operationDialogCheckbox.checked = false;
+    this.operationDialogConfirmButton.textContent = "Force Push With Lease";
+    this.operationDialogCancelButton.disabled = false;
+    this.operationDialogConfirmButton.disabled = false;
+    return this.openOperationDialog();
+  }
+
+  promptPullStrategy() {
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel || typeof quickPanel.open !== "function") {
+      this.notifyGit({
+        type: "info",
+        title: "Choose a pull strategy",
+        message: "Configure pull.rebase in Git, or pull again with an explicit merge or rebase choice.",
+      });
+      return false;
+    }
+    return quickPanel.open({
+      id: "git-pull-strategy",
+      mode: "pick",
+      title: "Pull Strategy",
+      placeholder: "Reconcile divergent branches",
+      items: [
+        { id: "merge", label: "Merge — create a merge commit", icon: "fi fi-rr-code-branch" },
+        { id: "rebase", label: "Rebase — replay local commits", icon: "fi fi-rr-arrow-up" },
+      ],
+      onAccept: (item) => {
+        void this.performSync("pull", { rebase: item.id === "rebase" });
+      },
+    });
+  }
+
+  async loadRemotes() {
+    let result = null;
+    try {
+      result = await this.editor.api?.git?.getRemotes?.();
+    } catch {
+      result = null;
+    }
+    if (result?.success === true) {
+      this.remotes = Array.isArray(result.remotes) ? result.remotes : [];
+      this.defaultRemote = result.defaultRemote || null;
+    }
+    return result?.success === true;
+  }
+
+  async resolveSyncRemote() {
+    await this.loadRemotes();
+    if (this.defaultRemote) return this.defaultRemote;
+    if (this.remotes.length === 1) return this.remotes[0].name;
+    if (this.remotes.length === 0) {
+      void this.openRemotesDialog();
+      return null;
+    }
+    const quickPanel = this.editor.quickPanel;
+    if (!quickPanel || typeof quickPanel.open !== "function") return null;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (value) => { if (!settled) { settled = true; resolve(value); } };
+      quickPanel.open({
+        id: "git-remote-picker",
+        mode: "pick",
+        title: "Choose Remote",
+        placeholder: "Choose a remote",
+        items: this.remotes.map((remote) => ({
+          id: remote.name,
+          label: remote.name,
+          icon: "fi fi-rr-database",
+        })),
+        onAccept: (item) => finish(item.id),
+        onCancel: () => finish(null),
+      });
+    });
+  }
+
+  async openRemotesDialog() {
+    const dialog = this.ensureRemotesDialog();
+    if (!dialog || dialog.open || this.remotesDialogSession || this.destroyed)
+      return false;
+    this.remotesEditing = null;
+    this.remotesPendingRemove = null;
+    this.setRemotesError("");
+    await this.loadRemotes();
+    if (this.destroyed) return false;
+    this.renderRemotesList();
+    return new Promise((resolve) => {
+      const session = {
+        resolve,
+        completed: false,
+        previousFocus: document.activeElement,
+      };
+      this.remotesDialogSession = session;
+      try {
+        dialog.showModal();
+        this.remotesAddName?.focus({ preventScroll: true });
+      } catch {
+        this.completeRemotesDialog();
+      }
+    });
+  }
+
+  ensureRemotesDialog() {
+    if (this.remotesDialog) return this.remotesDialog;
+    if (!document.body || typeof document.createElement !== "function") return null;
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "git-remotes-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "git-remotes-title");
+
+    const content = document.createElement("div");
+    content.className = "git-remotes-content";
+
+    const heading = document.createElement("div");
+    heading.className = "git-remotes-heading";
+    const badge = document.createElement("span");
+    badge.className = "git-operation-badge";
+    badge.setAttribute("aria-hidden", "true");
+    const badgeIcon = document.createElement("i");
+    badgeIcon.className = "fi fi-rr-database";
+    badge.appendChild(badgeIcon);
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "git-operation-title-group";
+    const title = document.createElement("h2");
+    title.id = "git-remotes-title";
+    title.textContent = "Remotes";
+    const subtitle = document.createElement("p");
+    subtitle.className = "git-operation-subtitle";
+    subtitle.textContent = "Manage the remote repositories for this project.";
+    titleGroup.append(title, subtitle);
+    heading.append(badge, titleGroup);
+
+    const list = document.createElement("div");
+    list.className = "git-remotes-list";
+
+    const error = document.createElement("p");
+    error.className = "git-remotes-error";
+    error.setAttribute("role", "alert");
+    error.hidden = true;
+
+    const addForm = document.createElement("div");
+    addForm.className = "git-remotes-add";
+    const addTitle = document.createElement("h3");
+    addTitle.className = "git-remotes-add-title";
+    addTitle.textContent = "Add Remote";
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = "git-remotes-input";
+    nameInput.placeholder = "Name (e.g. origin)";
+    nameInput.setAttribute("aria-label", "Remote name");
+    nameInput.autocomplete = "off";
+    nameInput.spellcheck = false;
+    const urlInput = document.createElement("input");
+    urlInput.type = "text";
+    urlInput.className = "git-remotes-input";
+    urlInput.placeholder = "https://… or git@host:…";
+    urlInput.setAttribute("aria-label", "Remote URL");
+    urlInput.autocomplete = "off";
+    urlInput.spellcheck = false;
+    const addButton = document.createElement("button");
+    addButton.type = "button";
+    addButton.className = "git-remotes-add-button";
+    addButton.textContent = "Add Remote";
+    addButton.addEventListener("click", () => void this.submitAddRemote());
+    const submitOnEnter = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void this.submitAddRemote();
+      }
+    };
+    nameInput.addEventListener("keydown", submitOnEnter);
+    urlInput.addEventListener("keydown", submitOnEnter);
+    addForm.append(addTitle, nameInput, urlInput, addButton);
+
+    const actions = document.createElement("div");
+    actions.className = "git-operation-actions";
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "git-operation-cancel";
+    closeButton.textContent = "Close";
+    closeButton.addEventListener("click", () => this.finishRemotesDialog());
+    actions.append(closeButton);
+
+    content.append(heading, list, error, addForm, actions);
+    dialog.appendChild(content);
+
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.finishRemotesDialog();
+    });
+    dialog.addEventListener("close", () => this.completeRemotesDialog());
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) this.finishRemotesDialog();
+    });
+    document.body.appendChild(dialog);
+
+    this.remotesDialog = dialog;
+    this.remotesList = list;
+    this.remotesError = error;
+    this.remotesAddName = nameInput;
+    this.remotesAddUrl = urlInput;
+    this.remotesAddButton = addButton;
+    this.remotesCloseButton = closeButton;
+    return dialog;
+  }
+
+  renderRemotesList() {
+    const list = this.remotesList;
+    if (!list) return;
+    list.replaceChildren();
+    if (!this.remotes.length) {
+      const empty = document.createElement("p");
+      empty.className = "git-remotes-empty";
+      empty.textContent = "No remotes configured.";
+      list.appendChild(empty);
+      return;
+    }
+    for (const remote of this.remotes) {
+      list.appendChild(this.buildRemoteRow(remote));
+    }
+  }
+
+  buildRemoteRow(remote) {
+    const row = document.createElement("div");
+    row.className = "git-remotes-row";
+    row.dataset.remote = remote.name;
+
+    if (this.remotesPendingRemove === remote.name) {
+      const prompt = document.createElement("span");
+      prompt.className = "git-remotes-remove-prompt";
+      prompt.textContent = `Remove "${remote.name}"?`;
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "git-remotes-row-button";
+      cancel.textContent = "Cancel";
+      cancel.disabled = this.remotesBusy;
+      cancel.addEventListener("click", () => {
+        this.remotesPendingRemove = null;
+        this.renderRemotesList();
+      });
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = "git-remotes-row-button danger";
+      confirm.textContent = "Remove";
+      confirm.disabled = this.remotesBusy;
+      confirm.addEventListener("click", () => void this.confirmRemoveRemote(remote.name));
+      row.append(prompt, cancel, confirm);
+      return row;
+    }
+
+    if (this.remotesEditing === remote.name) {
+      const form = document.createElement("div");
+      form.className = "git-remotes-edit";
+      const nameLabel = document.createElement("span");
+      nameLabel.className = "git-remotes-name";
+      nameLabel.textContent = remote.name;
+      const fetchInput = document.createElement("input");
+      fetchInput.type = "text";
+      fetchInput.className = "git-remotes-input";
+      fetchInput.value = remote.fetchUrl || "";
+      fetchInput.placeholder = "Fetch URL";
+      fetchInput.setAttribute("aria-label", `Fetch URL for ${remote.name}`);
+      fetchInput.autocomplete = "off";
+      fetchInput.spellcheck = false;
+      const pushInput = document.createElement("input");
+      pushInput.type = "text";
+      pushInput.className = "git-remotes-input";
+      pushInput.value = remote.pushUrl || "";
+      pushInput.placeholder = "Push URL (optional)";
+      pushInput.setAttribute("aria-label", `Push URL for ${remote.name}`);
+      pushInput.autocomplete = "off";
+      pushInput.spellcheck = false;
+      const buttons = document.createElement("div");
+      buttons.className = "git-remotes-edit-actions";
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "git-remotes-row-button";
+      cancel.textContent = "Cancel";
+      cancel.disabled = this.remotesBusy;
+      cancel.addEventListener("click", () => {
+        this.remotesEditing = null;
+        this.renderRemotesList();
+      });
+      const save = document.createElement("button");
+      save.type = "button";
+      save.className = "git-remotes-row-button primary";
+      save.textContent = "Save";
+      save.disabled = this.remotesBusy;
+      save.addEventListener("click", () =>
+        void this.submitEditRemote(remote.name, fetchInput.value, pushInput.value));
+      const saveOnEnter = (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          void this.submitEditRemote(remote.name, fetchInput.value, pushInput.value);
+        }
+      };
+      fetchInput.addEventListener("keydown", saveOnEnter);
+      pushInput.addEventListener("keydown", saveOnEnter);
+      buttons.append(cancel, save);
+      form.append(nameLabel, fetchInput, pushInput, buttons);
+      row.appendChild(form);
+      return row;
+    }
+
+    const info = document.createElement("div");
+    info.className = "git-remotes-info";
+    const name = document.createElement("span");
+    name.className = "git-remotes-name";
+    name.textContent = remote.name;
+    if (this.defaultRemote === remote.name) {
+      const tag = document.createElement("span");
+      tag.className = "git-remotes-default";
+      tag.textContent = "default";
+      name.appendChild(tag);
+    }
+    const fetchUrl = document.createElement("span");
+    fetchUrl.className = "git-remotes-url";
+    fetchUrl.textContent = remote.fetchUrl || "";
+    fetchUrl.title = remote.fetchUrl || "";
+    info.append(name, fetchUrl);
+    if (remote.pushUrl && remote.pushUrl !== remote.fetchUrl) {
+      const pushUrl = document.createElement("span");
+      pushUrl.className = "git-remotes-url git-remotes-push-url";
+      pushUrl.textContent = `push: ${remote.pushUrl}`;
+      pushUrl.title = remote.pushUrl;
+      info.appendChild(pushUrl);
+    }
+
+    const buttons = document.createElement("div");
+    buttons.className = "git-remotes-row-actions";
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "git-remotes-row-button";
+    edit.textContent = "Edit";
+    edit.disabled = this.remotesBusy;
+    edit.addEventListener("click", () => {
+      this.remotesEditing = remote.name;
+      this.remotesPendingRemove = null;
+      this.setRemotesError("");
+      this.renderRemotesList();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "git-remotes-row-button danger";
+    remove.textContent = "Remove";
+    remove.disabled = this.remotesBusy;
+    remove.addEventListener("click", () => {
+      this.remotesPendingRemove = remote.name;
+      this.remotesEditing = null;
+      this.setRemotesError("");
+      this.renderRemotesList();
+    });
+    buttons.append(edit, remove);
+    row.append(info, buttons);
+    return row;
+  }
+
+  setRemotesError(message) {
+    if (!this.remotesError) return;
+    this.remotesError.textContent = message || "";
+    this.remotesError.hidden = !message;
+  }
+
+  setRemotesBusy(busy) {
+    this.remotesBusy = busy;
+    if (this.remotesAddButton) this.remotesAddButton.disabled = busy;
+    if (this.remotesAddName) this.remotesAddName.disabled = busy;
+    if (this.remotesAddUrl) this.remotesAddUrl.disabled = busy;
+    this.renderRemotesList();
+    this.updateSyncBar();
+  }
+
+  async submitAddRemote() {
+    if (this.remotesBusy || this.destroyed) return false;
+    const name = (this.remotesAddName?.value || "").trim();
+    const url = (this.remotesAddUrl?.value || "").trim();
+    if (!name || !url) {
+      this.setRemotesError("A remote name and URL are required.");
+      return false;
+    }
+    const api = this.editor.api?.git;
+    if (!api?.addRemote) return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.setRemotesError("");
+    this.setRemotesBusy(true);
+    let result = null;
+    try {
+      result = await api.addRemote(name, url);
+    } catch {
+      result = null;
+    }
+    if (this.destroyed ||
+        workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.remotesBusy = false;
+      return false;
+    }
+    if (result?.success === true) {
+      if (this.remotesAddName) this.remotesAddName.value = "";
+      if (this.remotesAddUrl) this.remotesAddUrl.value = "";
+      await this.loadRemotes();
+      this.setRemotesBusy(false);
+      this.notifyGit({
+        type: "success",
+        title: "Remote added",
+        message: `Added remote "${name}".`,
+      });
+      return true;
+    }
+    this.setRemotesBusy(false);
+    this.setRemotesError(result ? GitSidebar.describeError(result) : "Could not add the remote.");
+    return false;
+  }
+
+  async submitEditRemote(name, fetchUrl, pushUrl) {
+    if (this.remotesBusy || this.destroyed) return false;
+    const fetch = String(fetchUrl || "").trim();
+    const push = String(pushUrl || "").trim();
+    if (!fetch) {
+      this.setRemotesError("A fetch URL is required.");
+      return false;
+    }
+    const api = this.editor.api?.git;
+    if (!api?.setRemoteUrl) return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.setRemotesError("");
+    this.setRemotesBusy(true);
+    let result = null;
+    try {
+      result = await api.setRemoteUrl(name, fetch);
+      if (result?.success === true && push)
+        result = await api.setRemoteUrl(name, push, { push: true });
+    } catch {
+      result = null;
+    }
+    if (this.destroyed ||
+        workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.remotesBusy = false;
+      return false;
+    }
+    if (result?.success === true) {
+      this.remotesEditing = null;
+      await this.loadRemotes();
+      this.setRemotesBusy(false);
+      this.notifyGit({
+        type: "success",
+        title: "Remote updated",
+        message: `Updated remote "${name}".`,
+      });
+      return true;
+    }
+    this.setRemotesBusy(false);
+    this.setRemotesError(result ? GitSidebar.describeError(result) : "Could not update the remote.");
+    return false;
+  }
+
+  async confirmRemoveRemote(name) {
+    if (this.remotesBusy || this.destroyed) return false;
+    const api = this.editor.api?.git;
+    if (!api?.removeRemote) return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.setRemotesError("");
+    this.setRemotesBusy(true);
+    let result = null;
+    try {
+      result = await api.removeRemote(name);
+    } catch {
+      result = null;
+    }
+    if (this.destroyed ||
+        workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.remotesBusy = false;
+      return false;
+    }
+    this.remotesPendingRemove = null;
+    if (result?.success === true) {
+      await this.loadRemotes();
+      this.setRemotesBusy(false);
+      this.notifyGit({
+        type: "success",
+        title: "Remote removed",
+        message: `Removed remote "${name}".`,
+      });
+      return true;
+    }
+    this.setRemotesBusy(false);
+    this.setRemotesError(result ? GitSidebar.describeError(result) : "Could not remove the remote.");
+    return false;
+  }
+
+  finishRemotesDialog() {
+    const session = this.remotesDialogSession;
+    if (!session) return false;
+    if (this.remotesDialog?.open) this.remotesDialog.close();
+    else this.completeRemotesDialog();
+    return true;
+  }
+
+  completeRemotesDialog() {
+    const session = this.remotesDialogSession;
+    if (!session || session.completed) return false;
+    this.remotesDialogSession = null;
+    session.completed = true;
+    this.remotesEditing = null;
+    this.remotesPendingRemove = null;
+    const previousFocus = session.previousFocus;
+    if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
+      try {
+        previousFocus.focus({ preventScroll: true });
+      } catch {}
+    }
+    session.resolve(true);
+    return true;
+  }
+
   ensureOperationDialog() {
     if (this.operationDialog) return this.operationDialog;
     if (!document.body || typeof document.createElement !== "function") return null;
@@ -3082,6 +3971,12 @@ class GitSidebar extends Sidebar {
     this.operationPaths.clear();
     this.selectedEntries.clear();
     this.selectionAnchor = null;
+    this.syncing = null;
+    this.syncProgress = null;
+    this.remotes = [];
+    this.defaultRemote = null;
+    this.remotesBusy = false;
+    this.finishRemotesDialog();
     this.finishOperationDialog({ confirmed: false });
     this.diffRefreshInFlight.clear();
     this.listResetPending = true;
@@ -3101,7 +3996,8 @@ class GitSidebar extends Sidebar {
 
   isMutating() {
     return this.committing || this.switchingBranch || this.stagingAll ||
-      this.unstagingAll || this.initializing || this.discarding || this.aborting;
+      this.unstagingAll || this.initializing || this.discarding || this.aborting ||
+      Boolean(this.syncing);
   }
 
   cancelScheduledRefresh() {
@@ -3153,8 +4049,13 @@ class GitSidebar extends Sidebar {
     this.unsubscribeFileSystem = null;
     this.unsubscribeInstallProgress?.();
     this.unsubscribeInstallProgress = null;
+    this.unsubscribeNetworkProgress?.();
+    this.unsubscribeNetworkProgress = null;
     this.fileScroller?.destroy?.();
     this.fileScroller = null;
+    this.finishRemotesDialog();
+    this.remotesDialog?.remove();
+    this.remotesDialog = null;
     this.finishOperationDialog({ confirmed: false });
     this.operationDialog?.remove();
     this.operationDialog = null;

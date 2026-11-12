@@ -299,6 +299,125 @@
   cursor: default;
 }
 
+/* Remote sync bar */
+.git-sync-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 6px 8px 0 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-primary);
+  border-radius: 5px;
+  background: var(--bg-secondary);
+}
+
+.git-sync-bar[hidden] {
+  display: none;
+}
+
+.git-sync-button {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.git-sync-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-white);
+}
+
+.git-sync-button:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-sync-button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.git-sync-pull-icon {
+  transform: rotate(180deg);
+}
+
+.git-sync-count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent-fill);
+  color: var(--text-white);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+}
+
+.git-sync-count[hidden] {
+  display: none;
+}
+
+.git-sync-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-sync-status[hidden] {
+  display: none;
+}
+
+.git-sync-cancel {
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.git-sync-cancel:hover:not(:disabled) {
+  background: var(--bg-hover-alt);
+}
+
+.git-sync-cancel:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-sync-cancel[hidden] {
+  display: none;
+}
+
+.git-sync-cancel:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Changes list */
 .git-sidebar-list {
   position: relative;
@@ -1121,6 +1240,268 @@ code.git-commit-detail-value {
 }
 
 .git-operation-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Remotes dialog */
+.git-remotes-dialog {
+  box-sizing: border-box;
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 32px));
+  margin: auto;
+  padding: 0;
+  overflow: hidden auto;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 9px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.3);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.git-remotes-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.52);
+}
+
+.git-remotes-content {
+  display: grid;
+  gap: 13px;
+  padding: 18px;
+  font-size: 13px;
+}
+
+.git-remotes-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.git-remotes-dialog .git-operation-badge {
+  border-color: var(--border-active);
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.git-remotes-dialog h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.git-remotes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: hidden auto;
+}
+
+.git-remotes-empty {
+  margin: 0;
+  padding: 8px 4px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.git-remotes-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid var(--border-primary);
+  border-radius: 6px;
+  background: var(--bg-primary);
+}
+
+.git-remotes-info {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.git-remotes-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.git-remotes-default {
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--accent-fill);
+  color: var(--text-white);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.git-remotes-url {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-remotes-push-url {
+  color: var(--text-tertiary);
+}
+
+.git-remotes-row-actions,
+.git-remotes-edit-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.git-remotes-row-button {
+  min-height: 24px;
+  padding: 3px 9px;
+  border: 1px solid var(--border-primary);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease;
+}
+
+.git-remotes-row-button:hover:not(:disabled) {
+  border-color: var(--border-secondary);
+  background: var(--bg-hover-alt);
+}
+
+.git-remotes-row-button:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: 1px;
+}
+
+.git-remotes-row-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.git-remotes-row-button.danger {
+  border-color: rgba(182, 77, 88, 0.5);
+  color: #c9727c;
+}
+
+.git-remotes-row-button.danger:hover:not(:disabled) {
+  border-color: #b64d58;
+  background: rgba(182, 77, 88, 0.14);
+}
+
+.git-remotes-row-button.primary {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--text-white);
+}
+
+.git-remotes-remove-prompt {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.git-remotes-edit {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.git-remotes-edit-actions {
+  justify-content: flex-end;
+}
+
+.git-remotes-error {
+  margin: 0;
+  color: #c9727c;
+  font-size: 11.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.git-remotes-error[hidden] {
+  display: none;
+}
+
+.git-remotes-add {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border-primary);
+}
+
+.git-remotes-add-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.git-remotes-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 30px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-primary);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+
+.git-remotes-input:focus {
+  border-color: var(--border-active);
+  outline: none;
+}
+
+.git-remotes-input:disabled {
+  opacity: 0.6;
+}
+
+.git-remotes-add-button {
+  align-self: flex-end;
+  min-height: 30px;
+  padding: 5px 13px;
+  border: 1px solid var(--accent-fill);
+  border-radius: 5px;
+  background: var(--accent-fill);
+  color: var(--text-white);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.git-remotes-add-button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.git-remotes-add-button:focus-visible {
+  outline: 2px solid var(--text-secondary);
+  outline-offset: 2px;
+}
+
+.git-remotes-add-button:disabled {
   opacity: 0.6;
   cursor: default;
 }

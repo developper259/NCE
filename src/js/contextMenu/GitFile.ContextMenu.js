@@ -88,6 +88,27 @@ function buildGitHeaderContextMenu(editor) {
         enabled: Boolean(branch),
         callback: () => editor?.api?.writeClipboardText?.(branch),
       },
+      sep2: { type: "separator" },
+      fetch: {
+        name: "Fetch",
+        enabled: Boolean(sidebar.status),
+        callback: () => sidebar.fetchChanges(),
+      },
+      pull: {
+        name: "Pull",
+        enabled: Boolean(sidebar.status),
+        callback: () => sidebar.pullChanges(),
+      },
+      push: {
+        name: "Push",
+        enabled: Boolean(sidebar.status),
+        callback: () => sidebar.pushChanges(),
+      },
+      manageRemotes: {
+        name: "Manage Remotes…",
+        enabled: Boolean(sidebar.status),
+        callback: () => sidebar.openRemotesDialog(),
+      },
     };
   };
 }
