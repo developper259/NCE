@@ -3,6 +3,19 @@ class GitSidebar extends Sidebar {
   static HISTORY_PAGE_SIZE = 50;
   static MAX_HISTORY_COMMITS = 500;
   static MAX_COMMIT_REF_BADGES = 2;
+  static DETAIL_ROW_HEIGHT = 16;
+  static DETAIL_NAV_HEIGHT = 26;
+  static DETAIL_FILE_HEIGHT = 20;
+  static DETAIL_MESSAGE_HEIGHT = 24;
+  static DETAIL_GAP = 2;
+  static DETAIL_PADDING = 10;
+  static COMMIT_FILE_LETTERS = {
+    added: "A",
+    modified: "M",
+    deleted: "D",
+    renamed: "R",
+    copied: "C",
+  };
   static HISTORY_REFRESH_REASONS = new Set(["commit", "branch", "init", "manual", "settings"]);
 
   static emptyHistory() {
@@ -169,6 +182,9 @@ class GitSidebar extends Sidebar {
     this.status = null;
     this.history = GitSidebar.emptyHistory();
     this.selectedCommit = null;
+    this.commitDetail = null;
+    this.compare = null;
+    this.compareBase = null;
     this.error = null;
     this.stale = false;
     this.loading = false;
@@ -821,6 +837,7 @@ class GitSidebar extends Sidebar {
     if (item.type === "entry") return this.createEntryRow(item.entry, item.section);
     if (item.type === "commit") return this.createCommitRow(item.commit);
     if (item.type === "commit-detail") return this.createCommitDetail(item.commit);
+    if (item.type === "compare-detail") return this.createCompareDetail(item.commit);
     if (item.type === "history-more") return this.createHistoryMoreRow();
     const empty = document.createElement("div");
     empty.className = "git-sidebar-empty";
@@ -1027,8 +1044,13 @@ class GitSidebar extends Sidebar {
     for (const commit of commits) {
       items.push({ type: "commit", commit, height: 40, rowHeight: 40 });
       if (this.selectedCommit !== commit.hash) continue;
-      const height = this.commitDetailHeight(commit);
-      items.push({ type: "commit-detail", commit, height, rowHeight: height });
+      if (this.compare && this.compare.target === commit.hash) {
+        const height = this.compareDetailHeight();
+        items.push({ type: "compare-detail", commit, height, rowHeight: height });
+      } else {
+        const height = this.commitDetailHeight(commit);
+        items.push({ type: "commit-detail", commit, height, rowHeight: height });
+      }
     }
     if (loading)
       items.push({ type: "message", text: "Loading history…", height: 24, rowHeight: 24 });
@@ -1049,7 +1071,38 @@ class GitSidebar extends Sidebar {
   }
 
   commitDetailHeight(commit) {
-    return (3 + (commit?.refs?.length ? 1 : 0)) * 18 + 10;
+    const heights = [
+      GitSidebar.DETAIL_ROW_HEIGHT,
+      GitSidebar.DETAIL_ROW_HEIGHT,
+      GitSidebar.DETAIL_ROW_HEIGHT,
+    ];
+    if (commit?.refs?.length) heights.push(GitSidebar.DETAIL_ROW_HEIGHT);
+    heights.push(GitSidebar.DETAIL_NAV_HEIGHT);
+    if (this.compareBase === commit?.hash) heights.push(GitSidebar.DETAIL_ROW_HEIGHT);
+    heights.push(GitSidebar.DETAIL_ROW_HEIGHT);
+    const state = this.commitDetail?.hash === commit?.hash ? this.commitDetail : null;
+    heights.push(...this.commitFilesHeights(state));
+    return heights.reduce((total, value) => total + value, 0) +
+      GitSidebar.DETAIL_GAP * (heights.length - 1) + GitSidebar.DETAIL_PADDING;
+  }
+
+  compareDetailHeight() {
+    const heights = [
+      GitSidebar.DETAIL_ROW_HEIGHT,
+      GitSidebar.DETAIL_NAV_HEIGHT,
+      GitSidebar.DETAIL_ROW_HEIGHT,
+      ...this.commitFilesHeights(this.compare),
+    ];
+    return heights.reduce((total, value) => total + value, 0) +
+      GitSidebar.DETAIL_GAP * (heights.length - 1) + GitSidebar.DETAIL_PADDING;
+  }
+
+  commitFilesHeights(state) {
+    if (!state || state.loading || state.error) return [GitSidebar.DETAIL_MESSAGE_HEIGHT];
+    const heights = state.files.map(() => GitSidebar.DETAIL_FILE_HEIGHT);
+    if (state.files.length === 0) heights.push(GitSidebar.DETAIL_MESSAGE_HEIGHT);
+    if (state.truncated) heights.push(GitSidebar.DETAIL_MESSAGE_HEIGHT);
+    return heights;
   }
 
   createCommitRow(commit) {
@@ -1161,7 +1214,191 @@ class GitSidebar extends Sidebar {
     addRow("Author", commit.email ? `${commit.author} <${commit.email}>` : commit.author);
     addRow("Date", GitSidebar.formatCommitTimestamp(commit.timestamp));
     if (commit.refs?.length) addRow("Refs", commit.refs.join(", "));
+    detail.appendChild(this.createCommitNav(commit));
+    if (this.compareBase === commit.hash) {
+      const hint = doc.createElement("div");
+      hint.className = "git-commit-detail-hint";
+      hint.textContent = "Select another commit to compare.";
+      detail.appendChild(hint);
+    }
+    const state = this.commitDetail?.hash === commit.hash ? this.commitDetail : null;
+    detail.appendChild(this.createCommitFilesSection(commit.hash, state, null));
     return detail;
+  }
+
+  createCompareDetail(commit) {
+    const doc = document;
+    const compare = this.compare;
+    const detail = doc.createElement("div");
+    detail.className = "git-commit-detail git-compare-detail";
+    detail.dataset.gitFocusKey = `compare-detail:${commit.hash}`;
+    const row = doc.createElement("div");
+    row.className = "git-commit-detail-row";
+    const label = doc.createElement("span");
+    label.className = "git-commit-detail-label";
+    label.textContent = "Compare";
+    const value = doc.createElement("span");
+    value.className = "git-commit-detail-value";
+    value.textContent = `${GitSidebar.shortHash(compare.base)} → ${GitSidebar.shortHash(compare.target)}`;
+    value.title = `${compare.base} → ${compare.target}`;
+    row.append(label, value);
+    detail.appendChild(row);
+
+    const nav = doc.createElement("div");
+    nav.className = "git-commit-nav";
+    const cancel = doc.createElement("button");
+    cancel.type = "button";
+    cancel.className = "git-commit-nav-button";
+    cancel.textContent = "Cancel Comparison";
+    cancel.dataset.action = "cancel-compare";
+    cancel.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.cancelCompare();
+    });
+    nav.appendChild(cancel);
+    detail.appendChild(nav);
+    detail.appendChild(this.createCommitFilesSection(compare.target, compare, compare.base));
+    return detail;
+  }
+
+  createCommitNav(commit) {
+    const doc = document;
+    const nav = doc.createElement("div");
+    nav.className = "git-commit-nav";
+    const index = this.history.commits.findIndex((entry) => entry.hash === commit.hash);
+    const newer = index > 0 ? this.history.commits[index - 1] : null;
+    const older = index >= 0 && index < this.history.commits.length - 1
+      ? this.history.commits[index + 1]
+      : null;
+    const makeButton = (text, title, target, action) => {
+      const button = doc.createElement("button");
+      button.type = "button";
+      button.className = "git-commit-nav-button";
+      button.textContent = text;
+      button.title = title;
+      button.setAttribute("aria-label", title);
+      button.dataset.action = action;
+      button.disabled = !target;
+      if (target) {
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          this.selectCommit(target.hash);
+        });
+      }
+      return button;
+    };
+    nav.append(
+      makeButton("Newer", "Select the newer commit", newer, "commit-newer"),
+      makeButton("Older", "Select the older commit", older, "commit-older"),
+    );
+    const compare = doc.createElement("button");
+    compare.type = "button";
+    compare.className = "git-commit-nav-button";
+    compare.textContent = "Compare";
+    compare.title = "Compare this commit with another one";
+    compare.setAttribute("aria-label", compare.title);
+    compare.dataset.action = "commit-compare";
+    compare.addEventListener("click", (event) => {
+      event.stopPropagation();
+      this.beginCompare(commit.hash);
+    });
+    nav.appendChild(compare);
+    return nav;
+  }
+
+  createCommitFilesSection(hash, state, baseHash) {
+    const doc = document;
+    const section = doc.createElement("div");
+    section.className = "git-commit-files";
+    const header = doc.createElement("div");
+    header.className = "git-commit-detail-row";
+    const label = doc.createElement("span");
+    label.className = "git-commit-detail-label";
+    label.textContent = "Files";
+    const count = doc.createElement("span");
+    count.className = "git-commit-detail-value";
+    count.textContent = state && !state.loading && !state.error
+      ? String(state.files.length)
+      : "";
+    header.append(label, count);
+    section.appendChild(header);
+
+    const message = (text, retryAction) => {
+      const row = doc.createElement("div");
+      row.className = "git-commit-files-message";
+      const label = doc.createElement("span");
+      label.textContent = text;
+      row.appendChild(label);
+      if (retryAction) {
+        const retry = doc.createElement("button");
+        retry.type = "button";
+        retry.className = "git-sidebar-state-button";
+        retry.textContent = "Retry";
+        retry.dataset.action = retryAction;
+        retry.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (baseHash) void this.startCompare(baseHash, hash);
+          else void this.loadCommitDetail(hash);
+        });
+        row.appendChild(retry);
+      }
+      section.appendChild(row);
+    };
+
+    if (!state || state.loading) {
+      message("Loading files…");
+      return section;
+    }
+    if (state.error) {
+      message(state.error, baseHash ? "retry-compare" : "retry-commit-files");
+      return section;
+    }
+    if (state.files.length === 0) message("No file changes.");
+    for (const file of state.files)
+      section.appendChild(this.createCommitFileRow(hash, file, baseHash));
+    if (state.truncated) message("Showing the first 500 files.");
+    return section;
+  }
+
+  createCommitFileRow(hash, file, baseHash) {
+    const doc = document;
+    const row = doc.createElement("div");
+    row.className = "git-commit-file";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.dataset.path = file.path;
+    const parts = GitSidebar.splitPath(file.path);
+    row.title = file.originalPath ? `${file.path} ← ${file.originalPath}` : file.path;
+    row.setAttribute(
+      "aria-label",
+      `${parts.name}${parts.dir ? ` in ${parts.dir}` : ""}, ${file.status} in commit`,
+    );
+    const badge = doc.createElement("span");
+    badge.className = "git-status-badge";
+    badge.dataset.kind = file.status;
+    badge.textContent = GitSidebar.COMMIT_FILE_LETTERS[file.status] || "M";
+    const info = doc.createElement("span");
+    info.className = "git-file-info";
+    const name = doc.createElement("span");
+    name.className = "git-file-name";
+    name.textContent = parts.name;
+    info.appendChild(name);
+    if (parts.dir) {
+      const directory = doc.createElement("span");
+      directory.className = "git-file-dir";
+      directory.textContent = parts.dir;
+      info.appendChild(directory);
+    }
+    row.append(badge, info);
+    const open = () => void this.openCommitFileDiff(hash, file, baseHash);
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (event) => {
+      if (event.target !== row) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      open();
+    });
+    return row;
   }
 
   createHistoryMoreRow() {
@@ -1178,9 +1415,184 @@ class GitSidebar extends Sidebar {
 
   selectCommit(hash) {
     if (this.destroyed || typeof hash !== "string" || !hash) return false;
+    if (this.compareBase && this.compareBase !== hash) {
+      const base = this.compareBase;
+      this.compareBase = null;
+      void this.startCompare(base, hash);
+      return true;
+    }
+    if (this.compareBase === hash) {
+      this.compareBase = null;
+      this.notice = "";
+      this.renderList();
+      this.updateCommitControls();
+      return false;
+    }
     this.selectedCommit = this.selectedCommit === hash ? null : hash;
+    if (this.selectedCommit) {
+      this.compare = null;
+      void this.loadCommitDetail(hash);
+    } else {
+      this.commitDetail = null;
+    }
     this.renderList();
     return this.selectedCommit === hash;
+  }
+
+  beginCompare(hash) {
+    if (this.destroyed || typeof hash !== "string" || !hash) return false;
+    this.compareBase = hash;
+    this.notice = `Select a commit to compare with ${GitSidebar.shortHash(hash)}.`;
+    this.renderList();
+    this.updateCommitControls();
+    return true;
+  }
+
+  cancelCompare() {
+    this.compare = null;
+    this.compareBase = null;
+    this.notice = "";
+    if (this.selectedCommit) void this.loadCommitDetail(this.selectedCommit);
+    this.renderList();
+    this.updateCommitControls();
+  }
+
+  async startCompare(base, target) {
+    if (this.destroyed || !this.status) return false;
+    const api = this.editor.api?.git;
+    if (typeof api?.compareCommits !== "function") return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.selectedCommit = target;
+    this.commitDetail = null;
+    this.compare = { base, target, loading: true, error: "", files: [], truncated: false };
+    this.notice = "";
+    this.renderList();
+    this.updateCommitControls();
+    let result = null;
+    try {
+      result = await api.compareCommits(base, target);
+    } catch {
+      result = null;
+    }
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot))
+      return false;
+    if (this.compare?.base !== base || this.compare?.target !== target) return false;
+    if (result?.success !== true) {
+      this.compare = {
+        base,
+        target,
+        loading: false,
+        error: result ? GitSidebar.describeError(result) : "The commits could not be compared.",
+        files: [],
+        truncated: false,
+      };
+    } else {
+      this.compare = {
+        base: result.base || base,
+        target: result.target || target,
+        loading: false,
+        error: "",
+        files: Array.isArray(result.files) ? result.files : [],
+        truncated: result.truncated === true,
+      };
+    }
+    this.renderList();
+    return result?.success === true;
+  }
+
+  async loadCommitDetail(hash) {
+    if (this.destroyed || !this.status) return false;
+    const api = this.editor.api?.git;
+    if (typeof api?.getCommitDetail !== "function") return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.commitDetail = { hash, loading: true, error: "", files: [], truncated: false };
+    this.renderList();
+    let result = null;
+    try {
+      result = await api.getCommitDetail(hash);
+    } catch {
+      result = null;
+    }
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot))
+      return false;
+    if (this.selectedCommit !== hash) return false;
+    if (result?.success !== true) {
+      this.commitDetail = {
+        hash,
+        loading: false,
+        error: result ? GitSidebar.describeError(result) : "The commit could not be read.",
+        files: [],
+        truncated: false,
+      };
+    } else {
+      this.commitDetail = {
+        hash,
+        loading: false,
+        error: "",
+        files: Array.isArray(result.files) ? result.files : [],
+        truncated: result.truncated === true,
+      };
+    }
+    this.renderList();
+    return result?.success === true;
+  }
+
+  async openCommitFileDiff(hash, file, baseHash = null) {
+    const filePath = GitSidebar.resolveAbsolutePath(this.workspaceRoot, file?.path);
+    if (!filePath) {
+      this.setActionError("This change is outside the workspace.");
+      return null;
+    }
+    const key = `commit:${baseHash || ""}:${hash}:${file.path}`;
+    if (this.diffLoadingPaths.has(key)) return null;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.diffLoadingPaths.add(key);
+    this.clearTransientMessages();
+    this.notice = "Loading diff…";
+    this.updateCommitControls();
+    try {
+      let versions = null;
+      try {
+        versions = await this.editor.api.git.getCommitFileVersions(hash, file.path, {
+          baseHash: baseHash || null,
+          originalPath: file.originalPath || null,
+        });
+      } catch {
+        versions = null;
+      }
+      if (this.destroyed ||
+          workspaceGeneration !== this.workspaceGeneration ||
+          !NCEPath.equals(workspaceRoot, this.workspaceRoot) ||
+          !NCEPath.equals(workspaceRoot, this.editor.fileExplorer?.rootPath || ""))
+        return null;
+      if (!versions || versions.success !== true) {
+        this.actionError = versions
+          ? GitSidebar.describeError(versions)
+          : "The diff could not be loaded.";
+        return null;
+      }
+      return (await this.editor.tabManager?.openGitDiff?.({
+        filePath,
+        relativePath: file.path,
+        staged: false,
+        statusKind: file.status,
+        originalPath: file.originalPath || null,
+        commitHash: hash,
+        baseHash: baseHash || null,
+        versions,
+      })) || null;
+    } finally {
+      this.diffLoadingPaths.delete(key);
+      if (this.notice === "Loading diff…") this.notice = "";
+      this.updateCommitControls();
+    }
   }
 
   async showHistory() {
@@ -1236,8 +1648,12 @@ class GitSidebar extends Sidebar {
     this.history.hasMore = result.hasMore === true && commits.length > 0 && !truncated;
     this.history.loaded = true;
     if (this.selectedCommit &&
-        !this.history.commits.some((commit) => commit.hash === this.selectedCommit))
+        !this.history.commits.some((commit) => commit.hash === this.selectedCommit)) {
       this.selectedCommit = null;
+      this.commitDetail = null;
+      this.compare = null;
+      this.compareBase = null;
+    }
     this.renderList();
     return this.flushPendingHistoryReset(true);
   }
@@ -1969,7 +2385,8 @@ class GitSidebar extends Sidebar {
     if (!workspaceRoot) return;
     const workspaceGeneration = this.workspaceGeneration;
     const tabs = manager.tabs.filter((tab) =>
-      tab.type === "git-diff" && this.isPathInWorkspace(tab.filePath, workspaceRoot));
+      tab.type === "git-diff" && !tab.commitHash &&
+      this.isPathInWorkspace(tab.filePath, workspaceRoot));
     for (const tab of tabs) {
       if (this.diffRefreshInFlight.has(tab)) continue;
       this.diffRefreshInFlight.add(tab);
@@ -2042,6 +2459,9 @@ class GitSidebar extends Sidebar {
     this.status = null;
     this.history = GitSidebar.emptyHistory();
     this.selectedCommit = null;
+    this.commitDetail = null;
+    this.compare = null;
+    this.compareBase = null;
     this.error = null;
     this.stale = false;
     this.loading = false;

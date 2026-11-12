@@ -230,11 +230,15 @@ class tabManager {
     const filePath = options?.filePath;
     if (typeof filePath !== "string" || !filePath) return null;
     const staged = options.staged === true;
+    const commitHash = options.commitHash || null;
+    const baseHash = options.baseHash || null;
     const focus = options.focus !== false;
     const textTab = await buildGitDiffBuffer(this.editor, options);
     let tab = this.tabs.find((candidate) =>
       candidate.type === TAB_TYPES.GIT_DIFF &&
       candidate.staged === staged &&
+      (candidate.commitHash || null) === commitHash &&
+      (candidate.baseHash || null) === baseHash &&
       NCEPath.equals(candidate.filePath, filePath));
     if (tab) {
       if (tab.textTab && tab.textTab !== textTab)
@@ -243,7 +247,7 @@ class tabManager {
       tab.relativePath = options.relativePath || tab.relativePath;
       tab.statusKind = options.statusKind || tab.statusKind;
       tab.originalPath = options.originalPath ?? null;
-      tab.name = GitDiffTab.displayName(filePath, staged);
+      tab.name = GitDiffTab.displayName(filePath, staged, commitHash, baseHash);
     } else {
       const diffTabs = this.tabs.filter((candidate) => candidate.type === TAB_TYPES.GIT_DIFF);
       if (diffTabs.length >= MAX_GIT_DIFF_TABS) {
@@ -256,6 +260,8 @@ class tabManager {
         staged,
         statusKind: options.statusKind,
         originalPath: options.originalPath,
+        commitHash,
+        baseHash,
       });
       tab.textTab = textTab;
       this.tabs.push(tab);
@@ -298,6 +304,7 @@ class tabManager {
 
       if (
         file.hasPath() &&
+        this.activeTab?.type === TAB_TYPES.FILE &&
         this.activeFile &&
         !this.activeFile.hasPath() &&
         this.activeFile.isEmpty()

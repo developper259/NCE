@@ -64,18 +64,26 @@ class MarkdownTab extends Tab {
 }
 
 class GitDiffTab extends Tab {
-  constructor(id, { filePath, relativePath, staged, statusKind, originalPath = null }) {
-    super(id, TAB_TYPES.GIT_DIFF, GitDiffTab.displayName(filePath, staged));
+  constructor(id, { filePath, relativePath, staged, statusKind, originalPath = null, commitHash = null, baseHash = null }) {
+    super(id, TAB_TYPES.GIT_DIFF, GitDiffTab.displayName(filePath, staged, commitHash, baseHash));
     this.filePath = filePath;
     this.relativePath = relativePath;
     this.staged = staged === true;
     this.statusKind = statusKind || "modified";
     this.originalPath = originalPath;
+    this.commitHash = commitHash || null;
+    this.baseHash = baseHash || null;
     this.textTab = null;
   }
 
-  static displayName(filePath, staged) {
+  static displayName(filePath, staged, commitHash = null, baseHash = null) {
     const base = NCEPath.basename(filePath);
+    if (commitHash) {
+      const target = String(commitHash).slice(0, 7);
+      return baseHash
+        ? `${base} (${String(baseHash).slice(0, 7)}…${target})`
+        : `${base} (${target})`;
+    }
     return `${base} (${staged ? "Index" : "Working Tree"})`;
   }
 }

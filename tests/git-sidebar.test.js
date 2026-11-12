@@ -216,6 +216,9 @@ function createSidebar(options = {}) {
     unstageAll: 0,
     commit: [],
     log: [],
+    commitDetail: [],
+    commitVersions: [],
+    compare: [],
     branches: 0,
     switchBranch: [],
     createBranch: [],
@@ -338,6 +341,51 @@ function createSidebar(options = {}) {
             limit,
             skip,
             hasMore: skip + commits.length < all.length,
+          };
+        },
+        async getCommitDetail(hash) {
+          calls.commitDetail.push(hash);
+          if (typeof options.commitDetailResult === "function")
+            return options.commitDetailResult(hash);
+          if (options.commitDetailResult) return options.commitDetailResult;
+          return {
+            success: true,
+            commit: makeCommit(hash),
+            files: options.commitFiles || [
+              { path: "src/app.js", originalPath: null, status: "modified" },
+            ],
+            truncated: options.commitTruncated === true,
+          };
+        },
+        async getCommitFileVersions(hash, filePath, versionOptions) {
+          calls.commitVersions.push([hash, filePath, versionOptions]);
+          if (typeof options.commitVersionsResult === "function")
+            return options.commitVersionsResult(hash, filePath, versionOptions);
+          return options.commitVersionsResult || {
+            success: true,
+            path: filePath,
+            staged: false,
+            oldContent: "old\n",
+            newContent: "new\n",
+            binary: false,
+            tooLarge: false,
+            untracked: false,
+            deleted: false,
+          };
+        },
+        async compareCommits(base, target) {
+          calls.compare.push([base, target]);
+          if (typeof options.compareResult === "function")
+            return options.compareResult(base, target);
+          if (options.compareResult) return options.compareResult;
+          return {
+            success: true,
+            base,
+            target,
+            files: options.compareFiles || [
+              { path: "src/app.js", originalPath: null, status: "modified" },
+            ],
+            truncated: false,
           };
         },
       },
@@ -2157,10 +2205,12 @@ test("GitSidebar expands a commit into details and copies the full hash", async 
     assert.ok(detailItem, "selecting a commit inserts its detail row");
     assert.equal(detailItem.height, sidebar.commitDetailHeight(commit));
     const detail = sidebar.createListItem(detailItem);
-    const rows = detail.children.map((child) => [
-      child.children[0].textContent,
-      child.children[1].textContent,
-    ]);
+    const rows = detail.children
+      .filter((child) => child.className === "git-commit-detail-row")
+      .map((child) => [
+        child.children[0].textContent,
+        child.children[1].textContent,
+      ]);
     assert.deepEqual(rows, [
       ["Commit", commit.hash],
       ["Author", "NCE Test <nce@example.invalid>"],
@@ -2173,6 +2223,274 @@ test("GitSidebar expands a commit into details and copies the full hash", async 
     assert.equal(sidebar.selectCommit(commit.hash), false);
     assert.equal(sidebar.selectedCommit, null);
     assert.equal(sidebar.selectCommit(""), false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("GitSidebar lists commit files with types and opens their diffs", async () => {
+  const commits = makeCommits(2);
+  const commitFiles = [
+    { path: "src/new.js", originalPath: null, status: "added" },
+    { path: "src/app.js", originalPath: null, status: "modified" },
+    { path: "old.js", originalPath: null, status: "deleted" },
+    { path: "dest.js", originalPath: "src/old.js", status: "renamed" },
+  ];
+  const { sidebar, calls } = createSidebar({ commits, commitFiles });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    assert.equal(sidebar.selectCommit(commits[0].hash), true);
+    await flush();
+    assert.deepEqual(toPlain(calls.commitDetail), [commits[0].hash]);
+    assert.equal(sidebar.commitDetail.files.length, 4);
+    const detailItem = sidebar.fileScroller.items.find((item) => item.type === "commit-detail");
+    assert.equal(detailItem.height, sidebar.commitDetailHeight(commits[0]));
+    const detail = sidebar.createListItem(detailItem);
+    const section = detail.children.find((child) => child.className === "git-commit-files");
+    const fileRows = section.children.filter((child) => child.className === "git-commit-file");
+    assert.deepEqual(fileRows.map((row) => row.children[0].textContent), ["A", "M", "D", "R"]);
+    assert.deepEqual(fileRows.map((row) => row.dataset.path), [
+      "src/new.js", "src/app.js", "old.js", "dest.js",
+    ]);
+    assert.equal(fileRows[3].title, "dest.js ← src/old.js");
+
+    fileRows[3].click();
+    await flush();
+    assert.deepEqual(toPlain(calls.commitVersions), [[
+      commits[0].hash,
+      "dest.js",
+      { baseHash: null, originalPath: "src/old.js" },
+    ]]);
+    assert.equal(calls.openDiff.length, 1);
+    const opened = calls.openDiff[0];
+    assert.equal(opened.filePath, "/workspace/dest.js");
+    assert.equal(opened.commitHash, commits[0].hash);
+    assert.equal(opened.baseHash, null);
+    assert.equal(opened.statusKind, "renamed");
+    assert.equal(opened.staged, false);
+    assert.equal(opened.versions.success, true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar navigates between commits from the detail panel", async () => {
+  const commits = makeCommits(3);
+  const { sidebar } = createSidebar({ commits });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    sidebar.selectCommit(commits[1].hash);
+    await flush();
+    const navOf = (hash) => {
+      const item = sidebar.fileScroller.items.find((entry) =>
+        entry.type === "commit-detail" && entry.commit.hash === hash);
+      const detail = sidebar.createListItem(item);
+      return detail.children.find((child) => child.className === "git-commit-nav");
+    };
+    let nav = navOf(commits[1].hash);
+    assert.equal(nav.children[0].disabled, false);
+    assert.equal(nav.children[1].disabled, false);
+    nav.children[1].click();
+    await flush();
+    assert.equal(sidebar.selectedCommit, commits[2].hash);
+    nav = navOf(commits[2].hash);
+    assert.equal(nav.children[1].disabled, true, "the oldest commit has no older neighbour");
+    nav.children[0].click();
+    await flush();
+    assert.equal(sidebar.selectedCommit, commits[1].hash);
+    nav = navOf(commits[1].hash);
+    nav.children[0].click();
+    await flush();
+    assert.equal(sidebar.selectedCommit, commits[0].hash);
+    nav = navOf(commits[0].hash);
+    assert.equal(nav.children[0].disabled, true, "the newest commit has no newer neighbour");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar compares two commits and cancels the comparison", async () => {
+  const commits = makeCommits(2);
+  const compareFiles = [
+    { path: "src/app.js", originalPath: null, status: "modified" },
+    { path: "gone.js", originalPath: null, status: "deleted" },
+  ];
+  const { sidebar, calls } = createSidebar({ commits, compareFiles });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    sidebar.selectCommit(commits[0].hash);
+    await flush();
+    const item = sidebar.fileScroller.items.find((entry) => entry.type === "commit-detail");
+    const detail = sidebar.createListItem(item);
+    const nav = detail.children.find((child) => child.className === "git-commit-nav");
+    nav.children[2].click();
+    assert.equal(sidebar.compareBase, commits[0].hash);
+    assert.match(sidebar.notice, /Select a commit to compare/);
+
+    assert.equal(sidebar.selectCommit(commits[1].hash), true);
+    await flush();
+    assert.deepEqual(toPlain(calls.compare), [[commits[0].hash, commits[1].hash]]);
+    assert.equal(sidebar.compareBase, null);
+    assert.equal(sidebar.selectedCommit, commits[1].hash);
+    const compareItem = sidebar.fileScroller.items.find((entry) => entry.type === "compare-detail");
+    assert.ok(compareItem, "the target commit shows the comparison detail");
+    assert.equal(compareItem.height, sidebar.compareDetailHeight());
+    const compareDetail = sidebar.createListItem(compareItem);
+    assert.equal(compareDetail.children[0].children[1].textContent,
+      `${commits[0].hash.slice(0, 7)} → ${commits[1].hash.slice(0, 7)}`);
+    const section = compareDetail.children.find((child) => child.className === "git-commit-files");
+    const fileRows = section.children.filter((child) => child.className === "git-commit-file");
+    assert.equal(fileRows.length, 2);
+    fileRows[0].click();
+    await flush();
+    assert.deepEqual(toPlain(calls.commitVersions[0]), [
+      commits[1].hash,
+      "src/app.js",
+      { baseHash: commits[0].hash, originalPath: null },
+    ]);
+    assert.equal(calls.openDiff[0].baseHash, commits[0].hash);
+
+    const cancel = compareDetail.children
+      .find((child) => child.className === "git-commit-nav").children[0];
+    cancel.click();
+    await flush();
+    assert.equal(sidebar.compare, null);
+    assert.equal(sidebar.selectedCommit, commits[1].hash);
+    assert.ok(sidebar.fileScroller.items.find((entry) => entry.type === "commit-detail"));
+    assert.equal(calls.commitDetail.length, 2, "cancelling reloads the plain commit detail");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar cancels a pending comparison when the base commit is clicked again", async () => {
+  const commits = makeCommits(2);
+  const { sidebar, calls } = createSidebar({ commits });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    sidebar.selectCommit(commits[0].hash);
+    await flush();
+    sidebar.beginCompare(commits[0].hash);
+    assert.equal(sidebar.selectCommit(commits[0].hash), false);
+    assert.equal(sidebar.compareBase, null);
+    assert.equal(sidebar.notice, "");
+    assert.equal(calls.compare.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar retries a failed commit detail and reports compare failures", async () => {
+  let failing = true;
+  const commits = makeCommits(2);
+  const { sidebar } = createSidebar({
+    commits,
+    commitDetailResult: () => failing
+      ? { success: false, code: "GIT_TIMEOUT", error: "timeout" }
+      : {
+        success: true,
+        commit: commits[0],
+        files: [{ path: "a.txt", originalPath: null, status: "modified" }],
+        truncated: false,
+      },
+    compareResult: { success: false, code: "GIT_COMMAND_FAILED", error: "compare failed" },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    sidebar.selectCommit(commits[0].hash);
+    await flush();
+    assert.equal(sidebar.commitDetail.error, "Git did not respond in time.");
+    let item = sidebar.fileScroller.items.find((entry) => entry.type === "commit-detail");
+    let detail = sidebar.createListItem(item);
+    let section = detail.children.find((child) => child.className === "git-commit-files");
+    const retry = section.children
+      .find((child) => child.className === "git-commit-files-message").children
+      .find((child) => child.dataset.action === "retry-commit-files");
+    failing = false;
+    retry.click();
+    await flush();
+    assert.equal(sidebar.commitDetail.error, "");
+    assert.equal(sidebar.commitDetail.files.length, 1);
+
+    sidebar.beginCompare(commits[0].hash);
+    sidebar.selectCommit(commits[1].hash);
+    await flush();
+    assert.equal(sidebar.compare.error, "compare failed");
+    item = sidebar.fileScroller.items.find((entry) => entry.type === "compare-detail");
+    detail = sidebar.createListItem(item);
+    section = detail.children.find((child) => child.className === "git-commit-files");
+    const message = section.children.find((child) => child.className === "git-commit-files-message");
+    assert.equal(message.children[0].textContent, "compare failed");
+    assert.ok(message.children.find((child) => child.dataset.action === "retry-compare"));
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar drops commit detail and compare results after a workspace switch", async () => {
+  const pendingDetail = deferred();
+  const pendingCompare = deferred();
+  const commits = makeCommits(2);
+  const { sidebar, editor } = createSidebar({
+    commits,
+    commitDetailResult: () => pendingDetail.promise,
+    compareResult: () => pendingCompare.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    sidebar.selectCommit(commits[0].hash);
+    sidebar.beginCompare(commits[0].hash);
+    sidebar.selectCommit(commits[1].hash);
+    editor.fileExplorer.rootPath = "/workspace-b";
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    pendingDetail.resolve({ success: true, commit: commits[0], files: [], truncated: false });
+    pendingCompare.resolve({ success: true, base: commits[0].hash, target: commits[1].hash, files: [], truncated: false });
+    await flush();
+    assert.equal(sidebar.selectedCommit, null);
+    assert.equal(sidebar.commitDetail, null);
+    assert.equal(sidebar.compare, null);
+    assert.equal(sidebar.compareBase, null);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar explains truncated and empty commit file lists", async () => {
+  const commits = makeCommits(1);
+  const { sidebar } = createSidebar({
+    commits,
+    commitFiles: [{ path: "a.txt", originalPath: null, status: "modified" }],
+    commitTruncated: true,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    sidebar.selectCommit(commits[0].hash);
+    await flush();
+    const item = sidebar.fileScroller.items.find((entry) => entry.type === "commit-detail");
+    const detail = sidebar.createListItem(item);
+    const section = detail.children.find((child) => child.className === "git-commit-files");
+    const messages = section.children
+      .filter((child) => child.className === "git-commit-files-message")
+      .map((child) => child.children[0].textContent);
+    assert.deepEqual(messages, ["Showing the first 500 files."]);
+
+    sidebar.commitDetail = { hash: commits[0].hash, loading: false, error: "", files: [], truncated: false };
+    const emptyDetail = sidebar.createListItem({ type: "commit-detail", commit: commits[0] });
+    const emptySection = emptyDetail.children.find((child) => child.className === "git-commit-files");
+    assert.equal(
+      emptySection.children.find((child) => child.className === "git-commit-files-message").children[0].textContent,
+      "No file changes.",
+    );
+    assert.equal(await sidebar.loadCommitDetail(""), false);
   } finally {
     sidebar.destroy();
   }

@@ -599,6 +599,104 @@ code.git-commit-detail-value {
   font-size: 10px;
 }
 
+.git-commit-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+}
+
+.git-commit-nav-button {
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.git-commit-nav-button:hover:not(:disabled) {
+  background: var(--bg-hover-alt);
+  color: var(--text-primary);
+}
+
+.git-commit-nav-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.git-commit-nav-button:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-commit-detail-hint {
+  height: 16px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.git-commit-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.git-commit-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 20px;
+  padding: 0 2px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.git-commit-file:hover {
+  background: var(--bg-hover-alt);
+}
+
+.git-commit-file:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-commit-file .git-file-name {
+  font-size: 11px;
+}
+
+.git-commit-files-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+
+.git-commit-files-message > span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.git-commit-files-message .git-sidebar-state-button {
+  flex: 0 0 auto;
+  height: 20px;
+  padding: 0 8px;
+  font-size: 10.5px;
+}
+
 .git-history-more {
   box-sizing: border-box;
   display: flex;

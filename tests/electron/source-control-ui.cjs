@@ -860,8 +860,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(
     [...detail.querySelectorAll(".git-commit-detail-label")]
       .map((element) => element.textContent)
-      .join(",") === "Commit,Author,Date,Refs",
-    "commit details expose hash, author, date and refs",
+      .join(",") === "Commit,Author,Date,Refs,Files",
+    "commit details expose hash, author, date, refs and files",
   );
   check(
     detail.querySelector("code.git-commit-detail-value").textContent ===
@@ -880,11 +880,127 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     detail.querySelector(".git-commit-copy") !== null,
     "the commit hash offers a copy action",
   );
-  git.listLayer.querySelector(".git-commit-row").click();
+
+  // Commit detail: real changed files, per-file diff, navigation, comparison.
+  const newestHash = git.history.commits[0].hash;
+  await waitFor(
+    () => git.commitDetail && !git.commitDetail.loading &&
+      git.commitDetail.hash === newestHash,
+    "the commit file list to load",
+  );
+  await nextFrame();
+  const detailNow = git.listLayer.querySelector(".git-commit-detail");
+  check(
+    git.commitDetail.files.length > 0,
+    `the newest commit lists its changed files: ${git.commitDetail.files.length}`,
+  );
+  const commitFileRows = [...detailNow.querySelectorAll(".git-commit-file")];
+  check(
+    commitFileRows.length === git.commitDetail.files.length,
+    "every changed file gets a row in the commit detail",
+  );
+  check(
+    commitFileRows.every((row) =>
+      ["A", "M", "D", "R", "C"].includes(row.querySelector(".git-status-badge").textContent)),
+    "commit file rows carry a change-type badge",
+  );
+  check(
+    detailNow.scrollHeight <= detailNow.getBoundingClientRect().height + 1,
+    `the commit detail content fits its declared height: ${detailNow.scrollHeight} vs ${detailNow.getBoundingClientRect().height}`,
+  );
+  commitFileRows[0].click();
+  await waitFor(
+    () => editor.tabManager.tabs.some((tab) =>
+      tab.type === "git-diff" && tab.commitHash === newestHash),
+    "a per-file commit diff tab to open",
+  );
+  const commitDiffTab = editor.tabManager.tabs.find((tab) =>
+    tab.type === "git-diff" && tab.commitHash === newestHash);
+  check(
+    commitDiffTab.name.includes(newestHash.slice(0, 7)),
+    `the commit diff tab is named after the commit: ${commitDiffTab.name}`,
+  );
+  check(
+    commitDiffTab.textTab?.diffRows?.some((row) => row.type !== "unchanged") === true,
+    "the commit diff tab shows real changed lines",
+  );
+
+  const navButton = (action) => git.listLayer.querySelector(
+    `.git-commit-detail [data-action="${action}"]`,
+  );
+  navButton("commit-older").click();
+  await waitFor(
+    () => git.selectedCommit === git.history.commits[1].hash &&
+      git.commitDetail && !git.commitDetail.loading,
+    "Older navigation to select the previous commit",
+  );
+  check(
+    git.listLayer.querySelector(".git-commit-detail") !== null,
+    "navigating to another commit opens its detail",
+  );
+  navButton("commit-newer").click();
+  await waitFor(
+    () => git.selectedCommit === newestHash &&
+      git.commitDetail && !git.commitDetail.loading,
+    "Newer navigation to return to the newest commit",
+  );
+
+  navButton("commit-compare").click();
+  check(
+    git.compareBase === newestHash,
+    "Compare arms a base commit for the comparison",
+  );
+  historyRows()[1].click();
+  await waitFor(
+    () => git.compare && !git.compare.loading &&
+      git.compare.target === git.history.commits[1].hash,
+    "the two-commit comparison to load",
+  );
+  await nextFrame();
+  const compareDetail = git.listLayer.querySelector(".git-compare-detail");
+  check(Boolean(compareDetail), "the comparison renders its own detail panel");
+  check(
+    git.compare.files.length > 0,
+    `the comparison lists changed files: ${git.compare.files.length}`,
+  );
+  const compareFileRow = compareDetail.querySelector(".git-commit-file");
+  compareFileRow.click();
+  await waitFor(
+    () => editor.tabManager.tabs.some((tab) =>
+      tab.type === "git-diff" && tab.commitHash === git.history.commits[1].hash &&
+      tab.baseHash === newestHash),
+    "a comparison diff tab to open",
+  );
+  const compareDiffTab = editor.tabManager.tabs.find((tab) =>
+    tab.type === "git-diff" && tab.commitHash === git.history.commits[1].hash &&
+    tab.baseHash === newestHash);
+  check(
+    compareDiffTab.textTab?.diffRows?.some((row) => row.type === "removed") === true,
+    "the comparison diff shows the lines removed since the base commit",
+  );
+  compareDetail.querySelector('[data-action="cancel-compare"]').click();
+  await waitFor(
+    () => git.compare === null && git.commitDetail && !git.commitDetail.loading,
+    "cancelling the comparison to restore the commit detail",
+  );
+  check(
+    git.listLayer.querySelector(".git-compare-detail") === null,
+    "the comparison panel is removed after cancelling",
+  );
+
+  git.listLayer.querySelector(".git-commit-row.is-selected").click();
   await nextFrame();
   check(
     git.listLayer.querySelector(".git-commit-detail") === null,
     "clicking the selected commit closes its details",
+  );
+  for (const tab of [...editor.tabManager.tabs]) {
+    if (tab.type === "git-diff" && tab.commitHash)
+      await editor.tabManager.closeTab(tab);
+  }
+  await waitFor(
+    () => !editor.tabManager.tabs.some((tab) => tab.type === "git-diff"),
+    "commit diff tabs to close after the detail checks",
   );
   const historySidebar = document.querySelector(".sidebar-left");
   const historyOriginalWidth = historySidebar.style.width;

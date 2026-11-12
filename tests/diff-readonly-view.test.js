@@ -185,3 +185,64 @@ test("LineController mutators are inert on a diff buffer", () => {
   assert.equal(controller.supLine(0), undefined);
   assert.equal(touched, false);
 });
+
+function createOpenFilesHarness(tabs, activeTab) {
+  const TabManager = loadGlobal("src/js/manager/TabManager.js", "tabManager", {
+    TAB_TYPES: { FILE: "file", GIT_DIFF: "git-diff", PICTURE: "picture" },
+    PictureView: { isSupportedPath: () => false },
+    Events: { ON_OPEN_FILE: "onOpen" },
+    NCEPath: { equals: (a, b) => a === b },
+  });
+  const focused = [];
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    tabs,
+    activeTab,
+    editor: { events: { callEvent() {} }, refreshAll() {} },
+    async setFocusTab(tab) { this.activeTab = tab; focused.push(tab); },
+  });
+  return { manager, focused };
+}
+
+test("opening a file never replaces an active diff buffer, even an empty one", async () => {
+  // A pure-deletion diff has an empty document; it must not be mistaken for
+  // the empty untitled buffer that openFiles replaces in place.
+  const diffBuffer = {
+    id: 3, type: "file", path: null, isDiffView: true, isLoaded: true,
+    hasPath() { return Boolean(this.path); },
+    isEmpty() { return true; },
+    replaceFile() { assert.fail("a diff buffer must never be replaced in place"); },
+  };
+  const diffTab = { id: 4, type: "git-diff", filePath: "/workspace/deleted.js", textTab: diffBuffer };
+  const { manager, focused } = createOpenFilesHarness([diffTab], diffTab);
+  const file = {
+    id: 5, type: "file", path: "/workspace/file.js", language: "javascript",
+    hasPath() { return true; },
+    isEmpty() { return false; },
+  };
+  const opened = await manager.openFiles([file]);
+  assert.equal(opened, file, "the opened file is returned, not the diff buffer");
+  assert.deepEqual(manager.tabs, [diffTab, file], "the file gets its own tab");
+  assert.equal(manager.activeTab, file);
+  assert.deepEqual(focused, [file]);
+  assert.equal(diffBuffer.path, null, "the diff buffer keeps its identity");
+  assert.equal(manager.activeFile, file, "activeFile resolves to a real tab");
+});
+
+test("opening a file still replaces the empty untitled file tab in place", async () => {
+  const untitled = {
+    id: 1, type: "file", path: null,
+    hasPath() { return Boolean(this.path); },
+    isEmpty() { return true; },
+    replaceFile(file) { this.path = file.path; },
+  };
+  const { manager } = createOpenFilesHarness([untitled], untitled);
+  const file = {
+    id: 5, type: "file", path: "/workspace/file.js", language: "javascript",
+    hasPath() { return true; },
+    isEmpty() { return false; },
+  };
+  const opened = await manager.openFiles([file]);
+  assert.equal(opened, untitled, "the untitled tab is reused");
+  assert.equal(manager.tabs.length, 1);
+  assert.equal(untitled.path, "/workspace/file.js");
+});
