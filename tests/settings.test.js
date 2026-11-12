@@ -941,6 +941,144 @@ test("Git path control shows the configured path next to a standard action butto
   );
 });
 
+test("Git uninstall resets the path only for the installer-managed Git", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});
+  const windowsInstallation = {
+    success: true,
+    installDir: "C:\\Users\\test\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1",
+    executable: "C:\\Users\\test\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1\\cmd\\git.exe",
+  };
+  assert.equal(
+    SettingsView.isInstalledPackagePathCurrent(
+      "c:\\users\\TEST\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1\\cmd\\git.exe",
+      windowsInstallation,
+    ),
+    true,
+  );
+  assert.equal(
+    SettingsView.isInstalledPackagePathCurrent(
+      "C:\\Program Files\\Git\\cmd\\git.exe",
+      windowsInstallation,
+    ),
+    false,
+  );
+  assert.equal(
+    SettingsView.isInstalledPackagePathCurrent("", windowsInstallation),
+    false,
+  );
+  assert.equal(
+    SettingsView.isInstalledPackagePathCurrent(
+      windowsInstallation.executable,
+      { ...windowsInstallation, success: false },
+    ),
+    false,
+  );
+  assert.equal(
+    SettingsView.isInstalledPackagePathCurrent(
+      "/home/user/.config/NCE/tools/git/2.56.1/bin/git",
+      {
+        success: true,
+        installDir: "/home/user/.config/NCE/tools/git/2.56.1",
+        executable: "/home/user/.config/NCE/tools/git/2.56.1/bin/git",
+      },
+    ),
+    true,
+  );
+  assert.equal(
+    SettingsView.isInstalledPackagePathCurrent(
+      "/home/user/.config/NCE/tools/git/2.56.1-other/bin/git",
+      {
+        success: true,
+        installDir: "/home/user/.config/NCE/tools/git/2.56.1",
+        executable: "/home/user/.config/NCE/tools/git/2.56.1/bin/git",
+      },
+    ),
+    false,
+  );
+});
+
+test("Git settings show an uninstall button while the installer Git is present", async () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  const installerPath = "C:\\Users\\test\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1\\cmd\\git.exe";
+  let current = installerPath;
+  let installation = {
+    success: true,
+    installDir: "C:\\Users\\test\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1",
+    executable: current,
+  };
+  const calls = { refreshed: 0, notifications: [] };
+  class FakeElement {
+    constructor(tag) {
+      this.tag = tag;
+      this.hidden = false;
+      this.disabled = false;
+      this.listeners = {};
+      this.attributes = new Map();
+    }
+    setAttribute(name, value) { this.attributes.set(name, value); }
+    addEventListener(type, listener) { this.listeners[type] = listener; }
+  }
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {
+    document: { createElement: (tag) => new FakeElement(tag) },
+    SETTINGS_GET: (key) => (key === "git.path" ? current : undefined),
+    SETTINGS_SET: async (key, value) => {
+      if (key !== "git.path") return false;
+      current = value;
+      return true;
+    },
+  });
+  const view = Object.create(SettingsView.prototype);
+  view.updatePathControl = (button, _setting, value) => {
+    button.textContent = value ? "Change path" : "Set path";
+  };
+  view.editor = {
+    api: {
+      installer: {
+        getInstallation: async () => installation,
+        uninstall: async () => ({
+          success: true,
+          installDir: "C:\\Users\\test\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1",
+        }),
+      },
+    },
+    gitSidebar: { refresh: () => { calls.refreshed += 1; } },
+    notificationManager: {
+      notify: (notification) => { calls.notifications.push(notification); },
+    },
+  };
+  const setting = SettingsView.getSettings().find(
+    (entry) => entry.key === "git.path",
+  );
+  assert.equal(setting.installerPackage, "git");
+  const change = new FakeElement("button");
+  change.id = "setting-git-path";
+  const uninstall = view.createUninstallControl(setting, change, null);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(uninstall.hidden, false);
+  assert.equal(uninstall.textContent, "Uninstall");
+
+  installation = null;
+  await uninstall.refresh();
+  assert.equal(uninstall.hidden, true);
+  installation = {
+    success: true,
+    installDir: "C:\\Users\\test\\AppData\\Roaming\\NCE\\tools\\git\\2.56.1",
+    executable: installerPath,
+  };
+  current = "C:\\Program Files\\Git\\cmd\\git.exe";
+  await uninstall.refresh();
+  assert.equal(uninstall.hidden, false);
+  current = installerPath;
+
+  await uninstall.listeners.click();
+  assert.equal(current, "");
+  assert.equal(uninstall.hidden, true);
+  assert.equal(change.textContent, "Set path");
+  assert.equal(calls.refreshed, 1);
+  assert.equal(calls.notifications.at(-1).type, "success");
+});
+
 test("Language Manager never shows unavailable servers as enabled", () => {
   const { loadGlobal } = require("./helpers/runtime");
   const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {});

@@ -12,11 +12,13 @@ import type {
   InstallProgress,
   InstallResult,
   InstallStep,
+  InstallSuccess,
   InstallerArchitecture,
   InstallerOptions,
   InstallerPlatform,
   PackageDefinition,
   PlatformConfig,
+  UninstallResult,
   VerificationConfig,
 } from "./types";
 
@@ -178,6 +180,64 @@ export class Installer {
       options.signal?.removeEventListener("abort", onExternalAbort);
       this.active = null;
       if (stagingDir) await fs.rm(stagingDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+
+  async getInstallation(packageId: string): Promise<InstallSuccess | null> {
+    try {
+      const definition = getPackageDefinition(packageId, this.registry);
+      validateDefinition(definition);
+      const platformConfig = resolvePlatformConfig(definition, this.platform, this.arch);
+      const installDir = this.resolveDestination(definition);
+      const executable = path.resolve(installDir, platformConfig.executable);
+      if (!(await pathExists(executable))) return null;
+      const stats = await fs.stat(executable).catch(() => null);
+      if (!stats?.isFile()) return null;
+      return {
+        success: true,
+        packageId: definition.id,
+        version: definition.version,
+        executable,
+        installDir,
+        alreadyInstalled: true,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  async uninstall(packageId: string): Promise<UninstallResult> {
+    if (this.active)
+      return { success: false, packageId, code: "INSTALL_BUSY", error: "Another installation is already running." };
+    try {
+      const definition = getPackageDefinition(packageId, this.registry);
+      validateDefinition(definition);
+      const installDir = this.resolveDestination(definition);
+      if (!(await pathExists(installDir)))
+        return { success: false, packageId, code: "NOT_INSTALLED", error: `${definition.name} is not installed.` };
+
+      const controller = new AbortController();
+      this.active = controller;
+      try {
+        await fs.rm(installDir, { recursive: true, force: true });
+      } finally {
+        this.active = null;
+      }
+
+      const parent = path.dirname(installDir);
+      const toolsRoot = this.toolsRoot();
+      if (parent !== toolsRoot && parent.startsWith(toolsRoot + path.sep)) {
+        const remaining = await fs.readdir(parent).catch(() => []);
+        if (remaining.length === 0) await fs.rmdir(parent).catch(() => {});
+      }
+      return { success: true, packageId: definition.id, version: definition.version, installDir };
+    } catch (error) {
+      return {
+        success: false,
+        packageId,
+        code: error instanceof InstallerError ? error.code : "INSTALL_FAILED",
+        error: errorMessage(error),
+      };
     }
   }
 

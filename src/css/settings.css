@@ -100,6 +100,13 @@
 .setting-input { width: 150px; }
 .setting-input-wide { width: min(360px, 40vw); }
 .setting-path-button { white-space: nowrap; }
+.setting-path-actions { display: inline-flex; align-items: center; gap: 8px; }
+.setting-uninstall-button { color: var(--error, #d66); }
+.setting-uninstall-button:hover {
+  border-color: var(--error, #d66);
+  color: var(--error, #d66);
+}
+.setting-uninstall-button[hidden] { display: none; }
 .setting-path-current {
   max-width: 100%;
   margin: 6px 0 0;

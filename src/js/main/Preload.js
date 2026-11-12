@@ -81,6 +81,10 @@ contextBridge.exposeInMainWorld("api", {
     install: (packageId) =>
       ipcRenderer.invoke("Installer:install", { packageId }),
     cancel: () => ipcRenderer.invoke("Installer:cancel"),
+    getInstallation: (packageId) =>
+      ipcRenderer.invoke("Installer:installation", { packageId }),
+    uninstall: (packageId) =>
+      ipcRenderer.invoke("Installer:uninstall", { packageId }),
     onProgress: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on("Installer:progress", listener);

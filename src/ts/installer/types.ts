@@ -77,7 +77,8 @@ export type InstallerErrorCode =
   | "STEP_FAILED"
   | "VERIFICATION_FAILED"
   | "CANCELLED"
-  | "INSTALL_FAILED";
+  | "INSTALL_FAILED"
+  | "NOT_INSTALLED";
 
 export interface InstallProgress {
   packageId: string;
@@ -108,6 +109,22 @@ export interface InstallFailure {
 }
 
 export type InstallResult = InstallSuccess | InstallFailure;
+
+export interface UninstallSuccess {
+  success: true;
+  packageId: string;
+  version: string;
+  installDir: string;
+}
+
+export interface UninstallFailure {
+  success: false;
+  packageId: string;
+  code: InstallerErrorCode;
+  error: string;
+}
+
+export type UninstallResult = UninstallSuccess | UninstallFailure;
 
 export interface InstallOptions {
   onProgress?: (progress: InstallProgress) => void;

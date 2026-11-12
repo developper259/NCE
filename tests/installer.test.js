@@ -155,6 +155,44 @@ test("Installer installs a TAR.GZ package end to end and reports progress", asyn
   }
 });
 
+test("Installer reports and uninstalls an existing installation", async () => {
+  const root = await tempDir();
+  try {
+    const installer = installerFor(
+      root,
+      definitionFor("https://example.invalid/tool.tar.gz", "a".repeat(64)),
+    );
+    const installDir = path.join(root, "tools", "tool", "1.0.0");
+    const executable = path.join(installDir, "bin", "tool");
+    await fs.mkdir(path.dirname(executable), { recursive: true });
+    await fs.writeFile(executable, "installed tool");
+
+    assert.equal(await installer.getInstallation("missing"), null);
+    const installation = await installer.getInstallation("tool");
+    assert.equal(installation?.success, true);
+    assert.equal(installation.executable, executable);
+    assert.equal(installation.installDir, installDir);
+    assert.equal(installation.alreadyInstalled, true);
+
+    const missing = await installer.uninstall("missing");
+    assert.equal(missing.success, false);
+    assert.equal(missing.code, "PACKAGE_NOT_FOUND");
+
+    const removed = await installer.uninstall("tool");
+    assert.equal(removed.success, true);
+    assert.equal(removed.installDir, installDir);
+    assert.equal(await installer.getInstallation("tool"), null);
+    await assert.rejects(fs.stat(installDir));
+    assert.deepEqual(await listing(path.join(root, "tools")), []);
+
+    const again = await installer.uninstall("tool");
+    assert.equal(again.success, false);
+    assert.equal(again.code, "NOT_INSTALLED");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("Installer installs a ZIP package and honours stripComponents", async () => {
   const root = await tempDir();
   const fixture = await fixtureArchive([

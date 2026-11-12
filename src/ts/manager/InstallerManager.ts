@@ -24,5 +24,13 @@ export class InstallerManager {
       this.installer.cancel();
       return true;
     });
+    ipc.handle("Installer:installation", async (_event, payload) => {
+      const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
+      return this.installer.getInstallation(packageId);
+    });
+    ipc.handle("Installer:uninstall", async (_event, payload) => {
+      const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";
+      return this.installer.uninstall(packageId);
+    });
   }
 }

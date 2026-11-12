@@ -74,7 +74,12 @@ test("InstallerManager installs a package and streams progress to its window", a
     const manager = new InstallerManager({ userDataPath, registry: { tool: definition } });
     const ipc = createRegistrar();
     manager.handleIPC(ipc);
-    assert.deepEqual([...ipc.handlers.keys()], ["Installer:install", "Installer:cancel"]);
+    assert.deepEqual([...ipc.handlers.keys()], [
+      "Installer:install",
+      "Installer:cancel",
+      "Installer:installation",
+      "Installer:uninstall",
+    ]);
 
     const sender = createSender();
     const result = await ipc.handlers.get("Installer:install")({ sender }, { packageId: "tool" });
@@ -86,9 +91,21 @@ test("InstallerManager installs a package and streams progress to its window", a
     assert.ok(sender.sent.some((message) => message.payload.percent === 100));
     assert.equal(sender.sent[sender.sent.length - 1].payload.step, "complete");
 
+    const status = await ipc.handlers.get("Installer:installation")({ sender }, { packageId: "tool" });
+    assert.equal(status.executable, result.executable);
+    assert.equal(status.installDir, result.installDir);
+
     const again = await ipc.handlers.get("Installer:install")({ sender }, { packageId: "tool" });
     assert.equal(again.alreadyInstalled, true);
     assert.equal(again.executable, result.executable);
+
+    const removed = await ipc.handlers.get("Installer:uninstall")({ sender }, { packageId: "tool" });
+    assert.equal(removed.success, true);
+    assert.equal(removed.installDir, result.installDir);
+    assert.equal(
+      await ipc.handlers.get("Installer:installation")({ sender }, { packageId: "tool" }),
+      null,
+    );
   } finally {
     await server.close();
     await fs.rm(userDataPath, { recursive: true, force: true });
@@ -120,6 +137,16 @@ test("InstallerManager rejects malformed payloads and skips destroyed windows", 
       assert.equal(result.code, "PACKAGE_NOT_FOUND");
     }
     assert.equal(sender.sent.length, 0, "a rejected package reports no progress");
+    assert.equal(
+      await ipc.handlers.get("Installer:installation")({ sender }, { packageId: "missing" }),
+      null,
+    );
+    const uninstallMissing = await ipc.handlers.get("Installer:uninstall")(
+      { sender },
+      { packageId: "missing" },
+    );
+    assert.equal(uninstallMissing.success, false);
+    assert.equal(uninstallMissing.code, "PACKAGE_NOT_FOUND");
 
     sender.destroyed = true;
     const result = await install({ sender }, { packageId: "other" });
@@ -184,6 +211,8 @@ test("Installer IPC is wired into the app, the window and the preload", () => {
   assert.match(preload, /installer: \{/);
   assert.match(preload, /ipcRenderer\.invoke\("Installer:install", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.invoke\("Installer:cancel"\)/);
+  assert.match(preload, /ipcRenderer\.invoke\("Installer:installation", \{ packageId \}\)/);
+  assert.match(preload, /ipcRenderer\.invoke\("Installer:uninstall", \{ packageId \}\)/);
   assert.match(preload, /ipcRenderer\.on\("Installer:progress", listener\)/);
   assert.match(preload, /ipcRenderer\.removeListener\("Installer:progress", listener\)/);
 });

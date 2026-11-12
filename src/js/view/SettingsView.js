@@ -30,6 +30,7 @@ const SETTINGS_UI = Object.freeze([
       "Path to the Git executable. Leave empty to detect Git automatically.",
     keywords: ["git", "path", "executable", "binary", "source control"],
     control: "path",
+    installerPackage: "git",
     panelTitle: "Set Git Path",
     placeholder: "Absolute path to git, empty for automatic detection",
   },
@@ -325,6 +326,22 @@ class SettingsView {
     }
   }
 
+  static isInstalledPackagePathCurrent(currentPath, installation) {
+    if (installation?.success !== true) return false;
+    const current = String(currentPath || "").trim();
+    const installDir = String(installation.installDir || "").trim();
+    if (!current || !installDir) return false;
+    const windows = /^[a-zA-Z]:[\\/]/.test(installDir) ||
+      installDir.startsWith("\\\\");
+    const normalize = (value) => {
+      const normalized = String(value).replace(/\\/g, "/").replace(/\/+$/, "");
+      return windows ? normalized.toLowerCase() : normalized;
+    };
+    const executable = normalize(current);
+    const directory = normalize(installDir);
+    return executable.startsWith(`${directory}/`);
+  }
+
   static getSettings() {
     const shortcuts =
       typeof USERCONFIG_KEYBINDING === "undefined"
@@ -498,7 +515,17 @@ class SettingsView {
                   : this.createTextInput(setting, controlId);
     const controlWrap = document.createElement("div");
     controlWrap.className = "settings-row-control";
-    controlWrap.appendChild(control);
+    if (setting.installerPackage) {
+      const actions = document.createElement("div");
+      actions.className = "setting-path-actions";
+      actions.append(
+        control,
+        this.createUninstallControl(setting, control, pathCurrent),
+      );
+      controlWrap.appendChild(actions);
+    } else {
+      controlWrap.appendChild(control);
+    }
     row.append(text, controlWrap);
     return row;
   }
@@ -2006,8 +2033,89 @@ class SettingsView {
       const res = await SETTINGS_SET(setting.key, next);
       if (!res || (typeof res === "object" && !res.success)) return;
       this.updatePathControl(button, setting, SETTINGS_GET(setting.key), current);
+      const uninstall = button
+        .closest?.(".setting-row")
+        ?.querySelector?.(`#${button.id}-uninstall`);
+      void uninstall?.refresh?.();
       this.editor.gitSidebar?.refresh?.({ reason: "settings" });
     });
+    return button;
+  }
+
+  createUninstallControl(setting, changeButton, current) {
+    const button = document.createElement("button");
+    button.id = `${changeButton.id}-uninstall`;
+    button.type = "button";
+    button.className = "settings-action-button setting-uninstall-button";
+    button.textContent = "Uninstall";
+    button.title = "Uninstall the Git build installed by NCE";
+    button.setAttribute(
+      "aria-label",
+      `Uninstall ${setting.label} installed by NCE`,
+    );
+    button.hidden = true;
+
+    let requestId = 0;
+    const refresh = async () => {
+      const currentRequest = ++requestId;
+      let installation = null;
+      try {
+        installation = await this.editor.api?.installer
+          ?.getInstallation?.(setting.installerPackage);
+      } catch {
+        installation = null;
+      }
+      if (currentRequest !== requestId) return;
+      button.hidden = installation?.success !== true;
+    };
+    button.refresh = refresh;
+
+    button.addEventListener("click", async () => {
+      if (button.disabled) return;
+      button.disabled = true;
+      let result = null;
+      try {
+        result = await this.editor.api?.installer
+          ?.uninstall?.(setting.installerPackage);
+      } catch {
+        result = null;
+      }
+      button.disabled = false;
+      if (result?.success === true) {
+        const configuredPath = SETTINGS_GET(setting.key);
+        const resetsPath = SettingsView.isInstalledPackagePathCurrent(
+          configuredPath,
+          { success: true, installDir: result.installDir },
+        );
+        const saved = resetsPath ? await SETTINGS_SET(setting.key, "") : true;
+        this.updatePathControl(
+          changeButton,
+          setting,
+          SETTINGS_GET(setting.key),
+          current,
+        );
+        button.hidden = true;
+        this.editor.gitSidebar?.refresh?.({ reason: "settings" });
+        this.editor.notificationManager?.notify?.({
+          type: saved ? "success" : "warning",
+          title: saved ? "Git uninstalled" : "Git uninstalled but path not reset",
+          message: saved
+            ? "The Git installation managed by NCE was removed."
+            : "The Git files were removed, but the Git path setting could not be cleared.",
+          source: "Git",
+        });
+        return;
+      }
+      void refresh();
+      this.editor.notificationManager?.notify?.({
+        type: "error",
+        title: "Could not uninstall Git",
+        message: result?.error || "The Git installation could not be removed.",
+        source: "Git",
+      });
+    });
+
+    void refresh();
     return button;
   }
 
@@ -2409,6 +2517,10 @@ class SettingsView {
     if (!input) return;
     if (setting.control === "path") {
       this.updatePathControl(input, setting, SETTINGS_GET(key));
+      if (setting.installerPackage) {
+        const uninstall = this.host?.querySelector?.(`#${id}-uninstall`);
+        void uninstall?.refresh?.();
+      }
       return;
     }
     if (setting.control === "quick-input") {
