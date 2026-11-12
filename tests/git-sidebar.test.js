@@ -73,6 +73,8 @@ class FakeElement {
     this.hidden = false;
     this.disabled = false;
     this.tabIndex = -1;
+    this.open = false;
+    this.focused = false;
   }
   append(...children) {
     for (const child of children) this.appendChild(child);
@@ -102,6 +104,18 @@ class FakeElement {
   click() {
     this.dispatch("click");
   }
+  focus() {
+    this.focused = true;
+  }
+  showModal() {
+    if (this.open) throw new Error("The dialog is already open.");
+    this.open = true;
+  }
+  close() {
+    if (!this.open) return;
+    this.open = false;
+    this.dispatch("close");
+  }
   querySelector() {
     return null;
   }
@@ -119,7 +133,12 @@ class FakeElement {
   }
 }
 
-const documentStub = { createElement: (tagName) => new FakeElement(tagName) };
+const documentStub = {
+  createElement: (tagName) => new FakeElement(tagName),
+  createElementNS: (_namespace, tagName) => new FakeElement(tagName),
+  body: new FakeElement("body"),
+  activeElement: null,
+};
 
 const storageStub = {
   values: new Map(),
@@ -215,6 +234,8 @@ function createSidebar(options = {}) {
     unstage: [],
     unstageAll: 0,
     commit: [],
+    discard: [],
+    abort: [],
     log: [],
     commitDetail: [],
     commitVersions: [],
@@ -387,6 +408,21 @@ function createSidebar(options = {}) {
             ],
             truncated: false,
           };
+        },
+        async discardChanges(entries) {
+          calls.discard.push(entries);
+          if (typeof options.discardResult === "function")
+            return options.discardResult(entries);
+          return options.discardResult || {
+            success: true,
+            discarded: entries.map((entry) => entry.path),
+          };
+        },
+        async abortOperation(operation) {
+          calls.abort.push(operation);
+          if (typeof options.abortResult === "function")
+            return options.abortResult(operation);
+          return options.abortResult || { success: true, aborted: operation };
         },
       },
       installer: options.installer === null ? undefined : {
@@ -1979,7 +2015,7 @@ test("Git context menus expose only implemented Git actions", () => {
   });
   assert.deepEqual(
     Object.keys(unstaged).filter((key) => unstaged[key].type !== "separator"),
-    ["openDiff", "stage", "openFile", "copyRelativePath", "copyAbsolutePath", "refresh"],
+    ["openDiff", "stage", "discard", "openFile", "copyRelativePath", "copyAbsolutePath", "refresh"],
   );
   const stagedMenu = builders.buildGitFileContextMenu(editor)({
     sidebar,
@@ -1995,7 +2031,10 @@ test("Git context menus expose only implemented Git actions", () => {
   });
   assert.equal(deletedMenu.openFile.enabled, false);
   const header = builders.buildGitHeaderContextMenu(editor)({ sidebar });
-  assert.deepEqual(Object.keys(header), ["refresh", "history", "copyBranch"]);
+  assert.deepEqual(
+    Object.keys(header),
+    ["refresh", "history", "discardAllChanges", "discardAllStaged", "copyBranch"],
+  );
   assert.equal(header.history.name, "Show History");
   assert.equal(header.history.enabled, false, "history needs a loaded repository status");
   sidebar.destroy();
@@ -2844,4 +2883,470 @@ test("Git UI is wired into the renderer manifest and editor", () => {
     application,
     /id:\s*"git",\s*\n\s*title:\s*"Source Control",\s*\n\s*icon:\s*"fi fi-rr-code-branch",\s*\n\s*position:\s*"left"/,
   );
+});
+
+const selectionEntries = [
+  makeEntry("a.js", { worktree: "M" }),
+  makeEntry("b.js", { worktree: "M" }),
+  makeEntry("c.js", { worktree: "M" }),
+];
+
+const selectionKeys = (sidebar) => Array.from(sidebar.selectedEntries.keys()).sort();
+
+test("GitSidebar selects rows with modifier clicks and clears on plain click", async () => {
+  const { sidebar, calls } = createSidebar({ entries: selectionEntries });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const [a, b, c] = selectionEntries;
+    const rowFor = (entry) => sidebar.createEntryRow(entry, "changes");
+    rowFor(a).dispatch("click", { ctrlKey: true });
+    assert.deepEqual(selectionKeys(sidebar), ["c:a.js"]);
+    assert.ok(rowFor(a).classList.contains("is-selected"));
+    rowFor(b).dispatch("click", { metaKey: true });
+    assert.deepEqual(selectionKeys(sidebar), ["c:a.js", "c:b.js"]);
+    rowFor(c).dispatch("click", { shiftKey: true });
+    assert.deepEqual(selectionKeys(sidebar), ["c:a.js", "c:b.js", "c:c.js"]);
+    rowFor(b).dispatch("click", {});
+    assert.equal(sidebar.selectedEntries.size, 0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.openDiff.length, 1, "a plain click still opens the diff");
+    assert.equal(sidebar.selectionAnchor, null);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar shift-click stays inside one section and Delete asks to discard", async () => {
+  const staged = makeEntry("a.js", { index: "M" });
+  const { sidebar } = createSidebar({ entries: [staged, ...selectionEntries] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.createEntryRow(selectionEntries[0], "changes")
+      .dispatch("click", { ctrlKey: true });
+    sidebar.createEntryRow(staged, "staged").dispatch("click", { shiftKey: true });
+    assert.deepEqual(selectionKeys(sidebar), ["c:a.js", "s:a.js"]);
+    const row = sidebar.createEntryRow(selectionEntries[1], "changes");
+    row.dispatch("keydown", { key: "Delete" });
+    assert.equal(sidebar.operationDialog?.open, true);
+    assert.equal(sidebar.operationDialog.dataset.mode, "discard");
+    sidebar.operationDialogCancelButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sidebar.operationDialog.open, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar discards a single change through the confirmation dialog", async () => {
+  const { sidebar, calls } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const cancelled = sidebar.requestDiscard([{ entry: modifiedEntry, staged: false }]);
+    const dialog = sidebar.operationDialog;
+    assert.equal(dialog.open, true);
+    assert.equal(dialog.dataset.mode, "discard");
+    assert.equal(sidebar.operationDialogTitle.textContent, "Discard Change");
+    assert.equal(
+      sidebar.operationDialogMessage.textContent,
+      "These working tree changes will be reverted.",
+    );
+    assert.equal(sidebar.operationDialogFiles.children.length, 1);
+    assert.equal(
+      sidebar.operationDialogFiles.children[0].children[1].textContent,
+      "src/app.js",
+    );
+    assert.equal(sidebar.operationDialogCheckboxLabel.hidden, true);
+    assert.equal(sidebar.operationDialogCancelButton.focused, true);
+    sidebar.operationDialogCancelButton.click();
+    assert.equal(await cancelled, false);
+    assert.equal(dialog.open, false);
+    assert.equal(calls.discard.length, 0);
+
+    const before = calls.status;
+    const confirmed = sidebar.requestDiscard([{ entry: modifiedEntry, staged: false }]);
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await confirmed, true);
+    assert.deepEqual(toPlain(calls.discard), [[{ path: "src/app.js", originalPath: null }]]);
+    assert.match(sidebar.getCommitStatusText(), /Discarded 1 change/);
+    assert.ok(calls.status > before, "a successful discard refreshes the status");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar builds discard entries for staged, untracked and renamed scopes", async () => {
+  const renamed = makeEntry("new.js", { index: "R", kind: "renamed", originalPath: "old.js" });
+  const untracked = makeEntry("notes.md", { worktree: "?", kind: "untracked" });
+  const modified = makeEntry("lib/b.js", { worktree: "M" });
+  const { sidebar, calls } = createSidebar({ entries: [renamed, untracked, modified] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const stagedRequest = sidebar.requestDiscardAll("staged");
+    assert.equal(sidebar.operationDialogTitle.textContent, "Discard Staged Change");
+    assert.equal(
+      sidebar.operationDialogFiles.children[0].children[1].textContent,
+      "new.js ← old.js",
+    );
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await stagedRequest, true);
+    assert.deepEqual(toPlain(calls.discard[0]), [
+      { path: "new.js", originalPath: "old.js", staged: true },
+    ]);
+
+    const changesRequest = sidebar.requestDiscardAll("changes");
+    assert.equal(sidebar.operationDialogTitle.textContent, "Discard 2 Changes");
+    assert.equal(
+      sidebar.operationDialogMessage.textContent,
+      "Tracked changes will be reverted and untracked files will be permanently deleted.",
+    );
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await changesRequest, true);
+    assert.deepEqual(toPlain(calls.discard[1]), [
+      { path: "notes.md", untracked: true },
+      { path: "lib/b.js", originalPath: null },
+    ]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar offers the also-staged checkbox only for tracked counterparts", async () => {
+  const mixed = makeEntry("src/app.js", { index: "M", worktree: "M" });
+  const untracked = makeEntry("notes.md", { worktree: "?", kind: "untracked" });
+  const { sidebar, calls } = createSidebar({ entries: [mixed, untracked] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const withStaged = sidebar.requestDiscard([{ entry: mixed, staged: false }]);
+    assert.equal(sidebar.operationDialogCheckboxLabel.hidden, false);
+    sidebar.operationDialogCheckbox.checked = true;
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await withStaged, true);
+    assert.deepEqual(toPlain(calls.discard[0]), [
+      { path: "src/app.js", originalPath: null },
+      { path: "src/app.js", originalPath: null, staged: true },
+    ]);
+
+    const untrackedOnly = sidebar.requestDiscard([{ entry: untracked, staged: false }]);
+    assert.equal(sidebar.operationDialogCheckboxLabel.hidden, true);
+    assert.equal(
+      sidebar.operationDialogMessage.textContent,
+      "This untracked file will be permanently deleted.",
+    );
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await untrackedOnly, true);
+    assert.deepEqual(toPlain(calls.discard[1]), [{ path: "notes.md", untracked: true }]);
+
+    const stagedOnly = sidebar.requestDiscard([{ entry: mixed, staged: true }]);
+    assert.equal(sidebar.operationDialogCheckboxLabel.hidden, true);
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await stagedOnly, true);
+    assert.deepEqual(toPlain(calls.discard[2]), [
+      { path: "src/app.js", originalPath: null, staged: true },
+    ]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar excludes conflicted and stale entries from discard", async () => {
+  const conflicted = makeEntry("u.js", {
+    index: "U",
+    worktree: "U",
+    kind: "conflicted",
+    conflicted: true,
+  });
+  const ok = makeEntry("ok.js", { worktree: "M" });
+  const { sidebar, calls } = createSidebar({ entries: [conflicted, ok] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(
+      await sidebar.requestDiscard([{ entry: conflicted, staged: false }]),
+      false,
+    );
+    assert.equal(sidebar.operationDialog, null, "no dialog for conflicted-only requests");
+    assert.match(sidebar.actionError, /no changes to discard/i);
+    assert.equal(
+      await sidebar.requestDiscard([{ entry: makeEntry("gone.js", { worktree: "M" }), staged: false }]),
+      false,
+    );
+
+    const request = sidebar.requestDiscardAll("changes");
+    assert.equal(sidebar.operationDialogFiles.children.length, 1);
+    assert.equal(
+      sidebar.operationDialogFiles.children[0].children[1].textContent,
+      "ok.js",
+    );
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await request, true);
+    assert.deepEqual(toPlain(calls.discard), [[{ path: "ok.js", originalPath: null }]]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar discards the whole multi-selection and clears it afterwards", async () => {
+  const { sidebar, calls } = createSidebar({ entries: selectionEntries });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.toggleEntrySelection(selectionEntries[0], false);
+    sidebar.toggleEntrySelection(selectionEntries[1], false);
+    const targets = sidebar.resolveDiscardTargetsFor(selectionEntries[0], false);
+    assert.equal(targets.length, 2);
+    const request = sidebar.requestDiscard(targets);
+    assert.equal(sidebar.operationDialogTitle.textContent, "Discard 2 Changes");
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await request, true);
+    assert.deepEqual(toPlain(calls.discard), [[
+      { path: "a.js", originalPath: null },
+      { path: "b.js", originalPath: null },
+    ]]);
+    assert.equal(sidebar.selectedEntries.size, 0);
+    assert.match(sidebar.getCommitStatusText(), /Discarded 2 changes/);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar section headers expose a guarded discard-all button", async () => {
+  const conflicted = makeEntry("u.js", {
+    index: "U",
+    worktree: "U",
+    kind: "conflicted",
+    conflicted: true,
+  });
+  const { sidebar } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const header = sidebar.createSectionHeader({ section: "changes", title: "Changes", count: 1 });
+    const discard = header.children.find((child) => child.dataset?.action === "discard-all");
+    assert.ok(discard, "the changes header has a discard-all action");
+    assert.equal(discard.disabled, false);
+    discard.click();
+    assert.equal(sidebar.operationDialog?.open, true);
+    sidebar.operationDialogCancelButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    sidebar.status = makeStatus([conflicted]);
+    const conflictedHeader = sidebar.createSectionHeader({ section: "changes", title: "Changes", count: 1 });
+    const conflictedDiscard = conflictedHeader.children
+      .find((child) => child.dataset?.action === "discard-all");
+    assert.equal(conflictedDiscard.disabled, true, "conflicted-only sections cannot discard");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports discard failures with a retry notification", async () => {
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    discardResult: { success: false, code: "GIT_COMMAND_FAILED", error: "boom" },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const request = sidebar.requestDiscard([{ entry: modifiedEntry, staged: false }]);
+    sidebar.operationDialogConfirmButton.click();
+    assert.equal(await request, false);
+    assert.equal(sidebar.actionError, "boom");
+    assert.equal(calls.notifications.length, 1);
+    assert.equal(calls.notifications[0].title, "Could not discard changes");
+    assert.equal(calls.notifications[0].actions[0].label, "Retry");
+    calls.notifications[0].actions[0].action();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(calls.discard.length, 2, "retry re-runs the discard without a new dialog");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores discard results after a workspace switch", async () => {
+  const gate = deferred();
+  const { sidebar, calls } = createSidebar({
+    entries: [modifiedEntry],
+    discardResult: () => gate.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const request = sidebar.requestDiscard([{ entry: modifiedEntry, staged: false }]);
+    sidebar.operationDialogConfirmButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sidebar.discarding, true);
+    sidebar.handleWorkspaceChanged("/other");
+    gate.resolve({ success: true, discarded: ["src/app.js"] });
+    assert.equal(await request, false);
+    assert.equal(sidebar.notice, "");
+    assert.equal(sidebar.discarding, false);
+    assert.equal(calls.discard.length, 1);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar shows the merge banner and aborts through confirmation", async () => {
+  const conflicted = makeEntry("u.js", {
+    index: "U",
+    worktree: "U",
+    kind: "conflicted",
+    conflicted: true,
+  });
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([conflicted], { merging: true }) },
+      { success: true, status: makeStatus([]) },
+    ],
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.operationBanner.hidden, false);
+    assert.equal(sidebar.operationBannerText.textContent, "A merge is in progress.");
+    assert.equal(sidebar.operationBannerButton.textContent, "Abort Merge");
+    sidebar.operationBannerButton.click();
+    const dialog = sidebar.operationDialog;
+    assert.equal(dialog.open, true);
+    assert.equal(dialog.dataset.mode, "abort");
+    assert.equal(sidebar.operationDialogTitle.textContent, "Abort Merge");
+    assert.equal(sidebar.operationDialogFiles.hidden, true);
+    assert.equal(sidebar.operationDialogCheckboxLabel.hidden, true);
+    sidebar.operationDialogCancelButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.abort.length, 0, "cancelling never aborts");
+
+    sidebar.operationBannerButton.click();
+    sidebar.operationDialogConfirmButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(toPlain(calls.abort), ["merge"]);
+    assert.match(sidebar.getCommitStatusText(), /Aborted the merge/);
+    assert.equal(sidebar.operationBanner.hidden, true, "the banner hides once the merge is gone");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar aborts a rebase and hides the banner when no operation is active", async () => {
+  const { sidebar, calls } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([], { rebasing: true }) },
+      { success: true, status: makeStatus([]) },
+    ],
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.operationBannerButton.textContent, "Abort Rebase");
+    assert.equal(sidebar.operationBannerText.textContent, "A rebase is in progress.");
+    sidebar.operationBannerButton.click();
+    assert.equal(sidebar.operationDialogTitle.textContent, "Abort Rebase");
+    sidebar.operationDialogConfirmButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(toPlain(calls.abort), ["rebase"]);
+    assert.equal(sidebar.operationBanner.hidden, true);
+    assert.equal(await sidebar.requestAbortOperation(), false, "no operation, no abort");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar guards the operation dialog against reentry and Escape", async () => {
+  const { sidebar, calls } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.requestDiscard([{ entry: modifiedEntry, staged: false }]);
+    const session = sidebar.operationDialogSession;
+    assert.equal(
+      await sidebar.requestDiscard([{ entry: modifiedEntry, staged: false }]),
+      false,
+      "a second request while the dialog is open is rejected",
+    );
+    assert.equal(sidebar.operationDialogSession, session);
+    assert.equal(sidebar.operationDialog.open, true);
+    let prevented = false;
+    assert.equal(
+      sidebar.handleOperationDialogKeyDown({
+        key: "Escape",
+        preventDefault() { prevented = true; },
+        stopPropagation() {},
+      }),
+      true,
+    );
+    assert.equal(prevented, true);
+    assert.equal(await first, false);
+    assert.equal(sidebar.operationDialog.open, false);
+    assert.equal(calls.discard.length, 0);
+    assert.equal(sidebar.handleOperationDialogKeyDown({ key: "Escape" }), false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar prunes the selection when entries disappear on refresh", async () => {
+  const { sidebar } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus(selectionEntries) },
+      { success: true, status: makeStatus([selectionEntries[0]]) },
+    ],
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.toggleEntrySelection(selectionEntries[0], false);
+    sidebar.toggleEntrySelection(selectionEntries[1], false);
+    await sidebar.refresh({ reason: "watcher" });
+    assert.deepEqual(selectionKeys(sidebar), ["c:a.js"]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("Git menus discard the selection and expose discard-all in the header", async () => {
+  const builders = loadGlobal(
+    "src/js/contextMenu/GitFile.ContextMenu.js",
+    "({ buildGitFileContextMenu, buildGitHeaderContextMenu })",
+    { GitSidebar },
+  );
+  const { sidebar } = createSidebar({ entries: selectionEntries });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    sidebar.toggleEntrySelection(selectionEntries[0], false);
+    sidebar.toggleEntrySelection(selectionEntries[1], false);
+    const menu = builders.buildGitFileContextMenu(sidebar.editor)({
+      sidebar,
+      entry: selectionEntries[0],
+      staged: false,
+    });
+    assert.equal(menu.discard.name, "Discard 2 Changes…");
+    assert.equal(menu.discard.enabled, true);
+    menu.discard.callback();
+    assert.equal(sidebar.operationDialog.open, true);
+    assert.equal(sidebar.operationDialogTitle.textContent, "Discard 2 Changes");
+    sidebar.operationDialogCancelButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const single = builders.buildGitFileContextMenu(sidebar.editor)({
+      sidebar,
+      entry: selectionEntries[2],
+      staged: false,
+    });
+    assert.equal(single.discard.name, "Discard Changes…");
+    const stagedMenu = builders.buildGitFileContextMenu(sidebar.editor)({
+      sidebar,
+      entry: makeEntry("a.js", { index: "M" }),
+      staged: true,
+    });
+    assert.equal(stagedMenu.discard.name, "Discard Staged Changes…");
+    const conflictedMenu = builders.buildGitFileContextMenu(sidebar.editor)({
+      sidebar,
+      entry: makeEntry("u.js", { kind: "conflicted", conflicted: true, index: "U", worktree: "U" }),
+      staged: false,
+    });
+    assert.equal(conflictedMenu.discard.enabled, false);
+
+    const header = builders.buildGitHeaderContextMenu(sidebar.editor)({ sidebar });
+    assert.equal(header.discardAllChanges.enabled, true);
+    assert.equal(header.discardAllStaged.enabled, false);
+    header.discardAllChanges.callback();
+    assert.equal(sidebar.operationDialog.open, true);
+    sidebar.operationDialogCancelButton.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  } finally {
+    sidebar.destroy();
+  }
 });

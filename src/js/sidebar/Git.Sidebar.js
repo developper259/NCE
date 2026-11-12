@@ -9,6 +9,7 @@ class GitSidebar extends Sidebar {
   static DETAIL_MESSAGE_HEIGHT = 24;
   static DETAIL_GAP = 2;
   static DETAIL_PADDING = 10;
+  static MAX_DISCARD_LIST_ROWS = 8;
   static COMMIT_FILE_LETTERS = {
     added: "A",
     modified: "M",
@@ -197,6 +198,15 @@ class GitSidebar extends Sidebar {
     this.initError = "";
     this.notice = "";
     this.operationPaths = new Set();
+    this.selectedEntries = new Map();
+    this.selectionAnchor = null;
+    this.discarding = false;
+    this.aborting = false;
+    this.operationBanner = null;
+    this.operationBannerText = null;
+    this.operationBannerButton = null;
+    this.operationDialog = null;
+    this.operationDialogSession = null;
     this.diffLoadingPaths = new Set();
     this.generation = 0;
     this.refreshTimer = null;
@@ -458,6 +468,24 @@ class GitSidebar extends Sidebar {
     this.stateRetry = stateRetry;
     this.stateSettings = stateSettings;
 
+    const banner = document.createElement("div");
+    banner.className = "git-operation-banner";
+    banner.hidden = true;
+    banner.setAttribute("role", "status");
+    const bannerIcon = document.createElement("i");
+    bannerIcon.className = "fi fi-rr-triangle-warning";
+    bannerIcon.setAttribute("aria-hidden", "true");
+    const bannerText = document.createElement("span");
+    bannerText.className = "git-operation-banner-text";
+    const bannerButton = document.createElement("button");
+    bannerButton.type = "button";
+    bannerButton.className = "git-operation-banner-button";
+    bannerButton.addEventListener("click", () => void this.requestAbortOperation());
+    banner.append(bannerIcon, bannerText, bannerButton);
+    this.operationBanner = banner;
+    this.operationBannerText = bannerText;
+    this.operationBannerButton = bannerButton;
+
     const list = document.createElement("div");
     list.className = "git-sidebar-list";
     const viewport = document.createElement("div");
@@ -473,7 +501,7 @@ class GitSidebar extends Sidebar {
     this.listLayer = layerNode;
     this.fileScroller.attach(list, viewport, layerNode);
 
-    container.append(header, state, list, commitBox);
+    container.append(header, state, banner, list, commitBox);
     this.updateView();
     return container;
   }
@@ -489,7 +517,7 @@ class GitSidebar extends Sidebar {
         : "Switch Branch";
       this.branchButton.disabled =
         this.switchingBranch || this.committing || this.stagingAll ||
-        this.unstagingAll;
+        this.unstagingAll || this.discarding || this.aborting;
     }
     if (this.refreshButton) {
       this.refreshButton.hidden = !this.workspaceRoot;
@@ -505,11 +533,13 @@ class GitSidebar extends Sidebar {
       if (!focused && this.commitInput.value !== this.commitMessage)
         this.commitInput.value = this.commitMessage;
       this.commitInput.disabled =
-        this.committing || this.stagingAll || this.unstagingAll;
+        this.committing || this.stagingAll || this.unstagingAll ||
+        this.discarding || this.aborting;
       this.autoResizeCommitInput();
     }
     this.updateCommitControls();
     this.updateState();
+    this.updateOperationBanner();
   }
 
   getBranchLabel() {
@@ -828,6 +858,8 @@ class GitSidebar extends Sidebar {
       !this.committing &&
       !this.stagingAll &&
       !this.unstagingAll &&
+      !this.discarding &&
+      !this.aborting &&
       !this.loading &&
       !this.stale;
   }
@@ -884,8 +916,8 @@ class GitSidebar extends Sidebar {
       action.className = "git-section-action";
       action.title = staging ? "Stage all changes" : "Unstage all changes";
       action.setAttribute("aria-label", action.title);
-      action.disabled = this.loading || this.committing ||
-        this.stagingAll || this.unstagingAll;
+      action.dataset.action = staging ? "stage-all" : "unstage-all";
+      action.disabled = this.loading || this.isMutating();
       if (staging ? this.stagingAll : this.unstagingAll)
         action.setAttribute("aria-busy", "true");
       const icon = document.createElement("i");
@@ -896,7 +928,25 @@ class GitSidebar extends Sidebar {
         event.stopPropagation();
         void (staging ? this.stageAllChanges() : this.unstageAllChanges());
       });
-      header.appendChild(action);
+
+      const discard = document.createElement("button");
+      discard.type = "button";
+      discard.className = "git-section-action git-section-discard";
+      discard.title = staging ? "Discard all changes" : "Discard all staged changes";
+      discard.setAttribute("aria-label", discard.title);
+      discard.dataset.action = staging ? "discard-all" : "discard-all-staged";
+      discard.disabled = this.loading || this.isMutating() ||
+        !this.getSections()[item.section].some((entry) => !entry.conflicted);
+      if (this.discarding) discard.setAttribute("aria-busy", "true");
+      const discardIcon = document.createElement("i");
+      discardIcon.className = "fi fi-rr-undo";
+      discardIcon.setAttribute("aria-hidden", "true");
+      discard.appendChild(discardIcon);
+      discard.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void this.requestDiscardAll(item.section);
+      });
+      header.append(discard, action);
     }
     const toggle = () => this.toggleSection(item.section);
     header.addEventListener("click", toggle);
@@ -918,6 +968,7 @@ class GitSidebar extends Sidebar {
     row.setAttribute("role", "button");
     const relativePath = entry.path;
     row.dataset.path = relativePath;
+    row.dataset.section = section;
     row.dataset.gitFocusKey = `entry:${relativePath}`;
     const parts = GitSidebar.splitPath(relativePath);
     row.setAttribute(
@@ -928,6 +979,8 @@ class GitSidebar extends Sidebar {
       ? `${relativePath} ← ${entry.originalPath}`
       : relativePath;
     if (this.operationPaths.has(relativePath)) row.classList.add("git-file-pending");
+    if (this.selectedEntries.has(this.selectionKey(entry, staged)))
+      row.classList.add("is-selected");
 
     const badge = doc.createElement("span");
     badge.className = "git-status-badge";
@@ -966,9 +1019,31 @@ class GitSidebar extends Sidebar {
     actions.appendChild(action);
 
     row.append(badge, info, actions);
-    row.addEventListener("click", () => void this.openDiff(entry, staged));
+    row.addEventListener("click", (event) => {
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        this.toggleEntrySelection(entry, staged);
+        return;
+      }
+      if (event.shiftKey) {
+        event.preventDefault();
+        this.selectEntryRange(entry, staged);
+        return;
+      }
+      this.clearEntrySelection();
+      void this.openDiff(entry, staged);
+    });
     row.addEventListener("keydown", (event) => {
       if (event.target !== row) return;
+      if (event.key === "Delete") {
+        event.preventDefault();
+        const key = this.selectionKey(entry, staged);
+        const targets = this.selectedEntries.has(key) && this.selectedEntries.size > 1
+          ? this.getSelectedTargets()
+          : [{ entry, staged }];
+        void this.requestDiscard(targets);
+        return;
+      }
       if (event.key !== "Enter" && event.key !== " ") return;
       event.preventDefault();
       void this.openDiff(entry, staged);
@@ -984,6 +1059,80 @@ class GitSidebar extends Sidebar {
   describeEntry(entry, staged) {
     const label = staged ? "staged" : "unstaged";
     return `${entry.kind}, ${label}`;
+  }
+
+  selectionKey(entry, staged) {
+    return `${staged === true ? "s" : "c"}:${entry?.path || ""}`;
+  }
+
+  liveTargetMap({ excludeConflicted = false } = {}) {
+    const { staged, changes } = this.getSections();
+    const live = new Map();
+    for (const entry of staged) {
+      if (excludeConflicted && entry.conflicted) continue;
+      live.set(this.selectionKey(entry, true), { entry, staged: true });
+    }
+    for (const entry of changes) {
+      if (excludeConflicted && entry.conflicted) continue;
+      live.set(this.selectionKey(entry, false), { entry, staged: false });
+    }
+    return live;
+  }
+
+  getSelectedTargets() {
+    const live = this.liveTargetMap();
+    const targets = [];
+    for (const key of this.selectedEntries.keys()) {
+      const target = live.get(key);
+      if (target) targets.push(target);
+    }
+    return targets;
+  }
+
+  toggleEntrySelection(entry, staged) {
+    const key = this.selectionKey(entry, staged);
+    if (this.selectedEntries.has(key)) this.selectedEntries.delete(key);
+    else this.selectedEntries.set(key, true);
+    this.selectionAnchor = key;
+    this.renderList();
+  }
+
+  selectEntryRange(entry, staged) {
+    const key = this.selectionKey(entry, staged);
+    const section = staged === true ? "staged" : "changes";
+    const entries = this.getSections()[section];
+    const targetIndex = entries.findIndex((candidate) => candidate.path === entry.path);
+    const anchorSection = this.selectionAnchor?.startsWith("s:") ? "staged" : "changes";
+    const anchorIndex = this.selectionAnchor && anchorSection === section
+      ? entries.findIndex((candidate) => candidate.path === this.selectionAnchor.slice(2))
+      : -1;
+    if (targetIndex < 0) return;
+    if (anchorIndex < 0) {
+      this.selectedEntries.set(key, true);
+    } else {
+      const from = Math.min(anchorIndex, targetIndex);
+      const to = Math.max(anchorIndex, targetIndex);
+      for (let index = from; index <= to; index++)
+        this.selectedEntries.set(this.selectionKey(entries[index], staged), true);
+    }
+    if (!this.selectionAnchor) this.selectionAnchor = key;
+    this.renderList();
+  }
+
+  clearEntrySelection() {
+    this.selectionAnchor = null;
+    if (this.selectedEntries.size === 0) return;
+    this.selectedEntries.clear();
+    this.renderList();
+  }
+
+  pruneEntrySelection() {
+    if (this.selectedEntries.size === 0) return;
+    const live = this.liveTargetMap();
+    for (const key of [...this.selectedEntries.keys()])
+      if (!live.has(key)) this.selectedEntries.delete(key);
+    if (this.selectionAnchor && !live.has(this.selectionAnchor))
+      this.selectionAnchor = null;
   }
 
   describeStatus() {
@@ -1806,6 +1955,465 @@ class GitSidebar extends Sidebar {
     return result?.success === true;
   }
 
+  resolveDiscardTargets(targets) {
+    const live = this.liveTargetMap({ excludeConflicted: true });
+    const resolved = [];
+    const seen = new Set();
+    for (const target of Array.isArray(targets) ? targets : []) {
+      const key = this.selectionKey(target?.entry, target?.staged === true);
+      const match = live.get(key);
+      if (!match || seen.has(key)) continue;
+      seen.add(key);
+      resolved.push(match);
+    }
+    return resolved;
+  }
+
+  resolveDiscardTargetsFor(entry, staged) {
+    const key = this.selectionKey(entry, staged);
+    if (this.selectedEntries.has(key) && this.selectedEntries.size > 1)
+      return this.getSelectedTargets();
+    return [{ entry, staged }];
+  }
+
+  requestDiscardAll(section) {
+    if (section !== "changes" && section !== "staged") return Promise.resolve(false);
+    const staged = section === "staged";
+    const targets = this.getSections()[section]
+      .filter((entry) => !entry.conflicted)
+      .map((entry) => ({ entry, staged }));
+    return this.requestDiscard(targets);
+  }
+
+  requestDiscard(targets) {
+    if (this.destroyed || this.loading || this.isMutating())
+      return Promise.resolve(false);
+    const resolved = this.resolveDiscardTargets(targets);
+    if (resolved.length === 0) {
+      this.setActionError("There are no changes to discard.");
+      return Promise.resolve(false);
+    }
+    return this.showDiscardConfirmation(resolved).then((answer) => {
+      if (!answer?.confirmed || this.destroyed) return false;
+      return this.performDiscard(resolved, answer.includeStaged === true);
+    });
+  }
+
+  buildDiscardEntries(targets, includeStaged) {
+    const stagedByPath = new Map();
+    for (const entry of this.getSections().staged)
+      if (!entry.conflicted) stagedByPath.set(entry.path, entry);
+    const entries = [];
+    const seen = new Set();
+    const push = (entry) => {
+      const key = `${entry.staged ? "s" : entry.untracked ? "u" : "w"}:${entry.path}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      entries.push(entry);
+    };
+    for (const { entry, staged } of targets) {
+      if (!entry || entry.conflicted) continue;
+      if (staged) {
+        push({ path: entry.path, originalPath: entry.originalPath || null, staged: true });
+      } else if (entry.kind === "untracked" || entry.worktree === "?") {
+        push({ path: entry.path, untracked: true });
+      } else {
+        push({ path: entry.path, originalPath: entry.originalPath || null });
+        if (includeStaged) {
+          const counterpart = stagedByPath.get(entry.path);
+          if (counterpart)
+            push({ path: counterpart.path, originalPath: counterpart.originalPath || null, staged: true });
+        }
+      }
+    }
+    return entries;
+  }
+
+  canIncludeStaged(targets) {
+    const stagedPaths = new Set(
+      this.getSections().staged
+        .filter((entry) => !entry.conflicted)
+        .map((entry) => entry.path),
+    );
+    return targets.some(({ entry, staged }) =>
+      !staged && !entry.conflicted &&
+      entry.kind !== "untracked" && entry.worktree !== "?" &&
+      stagedPaths.has(entry.path));
+  }
+
+  async performDiscard(targets, includeStaged) {
+    if (this.destroyed || this.discarding || this.committing ||
+        this.stagingAll || this.unstagingAll)
+      return false;
+    const entries = this.buildDiscardEntries(targets, includeStaged);
+    if (entries.length === 0) return false;
+    this.cancelScheduledRefresh();
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    const paths = [...new Set(entries.map((entry) => entry.path))];
+    this.discarding = true;
+    for (const path of paths) this.operationPaths.add(path);
+    this.actionError = "";
+    this.notice = "";
+    this.renderList();
+    this.updateView();
+    let result = null;
+    try {
+      result = await this.editor.api.git.discardChanges(entries);
+    } catch {
+      result = null;
+    }
+    this.discarding = false;
+    for (const path of paths) this.operationPaths.delete(path);
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.updateView();
+      return false;
+    }
+    if (result?.success === true) {
+      const count = Array.isArray(result.discarded) ? result.discarded.length : entries.length;
+      this.notice = count === 1 ? "Discarded 1 change" : `Discarded ${count} changes`;
+      this.clearEntrySelection();
+    } else {
+      this.actionError = result?.error || "The Git operation failed.";
+      this.notifyGit({
+        type: "error",
+        title: "Could not discard changes",
+        message: this.actionError,
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.performDiscard(targets, includeStaged);
+          },
+        }],
+      });
+    }
+    await this.refresh({ reason: "stage" });
+    this.updateView();
+    return result?.success === true;
+  }
+
+  requestAbortOperation() {
+    const operation = this.status?.merging === true ? "merge"
+      : this.status?.rebasing === true ? "rebase"
+        : null;
+    if (!operation || this.destroyed || this.loading || this.isMutating())
+      return Promise.resolve(false);
+    return this.showAbortConfirmation(operation).then((answer) => {
+      if (!answer?.confirmed || this.destroyed) return false;
+      return this.performAbort(operation);
+    });
+  }
+
+  async performAbort(operation) {
+    if (this.destroyed || this.isMutating()) return false;
+    this.cancelScheduledRefresh();
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    this.aborting = true;
+    this.actionError = "";
+    this.notice = "";
+    this.renderList();
+    this.updateView();
+    let result = null;
+    try {
+      result = await this.editor.api.git.abortOperation(operation);
+    } catch {
+      result = null;
+    }
+    this.aborting = false;
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot)) {
+      this.updateView();
+      return false;
+    }
+    if (result?.success === true) {
+      this.notice = operation === "merge" ? "Aborted the merge" : "Aborted the rebase";
+    } else {
+      this.actionError = result?.error || "The Git operation failed.";
+      this.notifyGit({
+        type: "error",
+        title: operation === "merge" ? "Could not abort merge" : "Could not abort rebase",
+        message: this.actionError,
+        actions: [{
+          label: "Retry",
+          action: () => {
+            if (!this.destroyed) void this.performAbort(operation);
+          },
+        }],
+      });
+    }
+    await this.refresh({ reason: "branch" });
+    this.updateView();
+    return result?.success === true;
+  }
+
+  updateOperationBanner() {
+    if (!this.operationBanner) return;
+    const merging = this.status?.merging === true;
+    const rebasing = this.status?.rebasing === true;
+    this.operationBanner.hidden = !merging && !rebasing;
+    if (!merging && !rebasing) return;
+    this.operationBannerText.textContent = merging
+      ? "A merge is in progress."
+      : "A rebase is in progress.";
+    this.operationBannerButton.textContent = merging ? "Abort Merge" : "Abort Rebase";
+    this.operationBannerButton.disabled = this.loading || this.isMutating();
+    if (this.aborting) this.operationBannerButton.setAttribute("aria-busy", "true");
+    else this.operationBannerButton.removeAttribute("aria-busy");
+  }
+
+  ensureOperationDialog() {
+    if (this.operationDialog) return this.operationDialog;
+    if (!document.body || typeof document.createElement !== "function") return null;
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "git-operation-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "git-operation-title");
+    dialog.setAttribute(
+      "aria-describedby",
+      "git-operation-subtitle git-operation-message",
+    );
+
+    const content = document.createElement("div");
+    content.className = "git-operation-dialog-content";
+    const heading = document.createElement("div");
+    heading.className = "git-operation-heading";
+    const badge = document.createElement("span");
+    badge.className = "git-operation-badge";
+    badge.setAttribute("aria-hidden", "true");
+    const badgeIcon = document.createElement("i");
+    badge.appendChild(badgeIcon);
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "git-operation-title-group";
+    const title = document.createElement("h2");
+    title.id = "git-operation-title";
+    const subtitle = document.createElement("p");
+    subtitle.id = "git-operation-subtitle";
+    subtitle.className = "git-operation-subtitle";
+    subtitle.textContent = "This action cannot be undone.";
+    titleGroup.append(title, subtitle);
+    heading.append(badge, titleGroup);
+    const message = document.createElement("p");
+    message.className = "git-operation-description";
+    message.id = "git-operation-message";
+
+    const files = document.createElement("div");
+    files.className = "git-operation-files";
+
+    const checkboxLabel = document.createElement("label");
+    checkboxLabel.className = "nce-checkbox git-operation-checkbox";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = false;
+    const checkboxBox = document.createElement("span");
+    checkboxBox.className = "nce-checkbox-box";
+    checkboxBox.setAttribute("aria-hidden", "true");
+    const checkboxIcon = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "svg",
+    );
+    checkboxIcon.setAttribute("viewBox", "0 0 16 16");
+    checkboxIcon.setAttribute("focusable", "false");
+    const checkboxTick = document.createElementNS(
+      "http://www.w3.org/2000/svg",
+      "path",
+    );
+    checkboxTick.setAttribute("d", "M3.25 8.25 6.5 11.5 12.75 4.75");
+    checkboxIcon.appendChild(checkboxTick);
+    checkboxBox.appendChild(checkboxIcon);
+    const checkboxText = document.createElement("span");
+    checkboxText.className = "nce-checkbox-text";
+    checkboxText.textContent = "Also discard staged changes";
+    checkboxLabel.append(checkbox, checkboxBox, checkboxText);
+
+    const actions = document.createElement("div");
+    actions.className = "git-operation-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "git-operation-cancel";
+    cancelButton.textContent = "Cancel";
+    cancelButton.autofocus = true;
+    const confirmButton = document.createElement("button");
+    confirmButton.type = "button";
+    confirmButton.className = "git-operation-confirm danger";
+    actions.append(cancelButton, confirmButton);
+    content.append(heading, message, files, checkboxLabel, actions);
+    dialog.appendChild(content);
+
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.finishOperationDialog({ confirmed: false });
+    });
+    dialog.addEventListener("close", () => this.completeOperationDialog());
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) this.finishOperationDialog({ confirmed: false });
+    });
+    cancelButton.addEventListener("click", () =>
+      this.finishOperationDialog({ confirmed: false }));
+    confirmButton.addEventListener("click", () =>
+      this.finishOperationDialog({
+        confirmed: true,
+        includeStaged: checkbox.checked === true,
+      }));
+    document.body.appendChild(dialog);
+
+    this.operationDialog = dialog;
+    this.operationDialogBadgeIcon = badgeIcon;
+    this.operationDialogTitle = title;
+    this.operationDialogMessage = message;
+    this.operationDialogFiles = files;
+    this.operationDialogCheckboxLabel = checkboxLabel;
+    this.operationDialogCheckbox = checkbox;
+    this.operationDialogCancelButton = cancelButton;
+    this.operationDialogConfirmButton = confirmButton;
+    return dialog;
+  }
+
+  showDiscardConfirmation(targets) {
+    const dialog = this.ensureOperationDialog();
+    if (!dialog || dialog.open || this.operationDialogSession || this.destroyed)
+      return Promise.resolve({ confirmed: false, includeStaged: false });
+
+    const stagedOnly = targets.every((target) => target.staged);
+    const untrackedCount = targets.filter(({ entry, staged }) =>
+      !staged && (entry.kind === "untracked" || entry.worktree === "?")).length;
+    this.operationDialog.dataset.mode = "discard";
+    this.operationDialogBadgeIcon.className = "fi fi-rr-trash";
+    this.operationDialogTitle.textContent = targets.length === 1
+      ? (stagedOnly ? "Discard Staged Change" : "Discard Change")
+      : (stagedOnly
+        ? `Discard ${targets.length} Staged Changes`
+        : `Discard ${targets.length} Changes`);
+    this.operationDialogMessage.textContent = untrackedCount > 0
+      ? (untrackedCount === targets.length
+        ? (untrackedCount === 1
+          ? "This untracked file will be permanently deleted."
+          : "These untracked files will be permanently deleted.")
+        : "Tracked changes will be reverted and untracked files will be permanently deleted.")
+      : (stagedOnly
+        ? "These staged changes will be removed from the index and the working tree."
+        : "These working tree changes will be reverted.");
+
+    this.operationDialogFiles.hidden = false;
+    this.operationDialogFiles.replaceChildren();
+    const visible = targets.slice(0, GitSidebar.MAX_DISCARD_LIST_ROWS);
+    for (const { entry, staged } of visible) {
+      const row = document.createElement("div");
+      row.className = "git-operation-file";
+      const fileBadge = document.createElement("span");
+      fileBadge.className = "git-status-badge";
+      fileBadge.dataset.kind = entry.conflicted ? "conflicted" : entry.kind;
+      fileBadge.textContent = GitSidebar.statusLetter(entry, staged);
+      const name = document.createElement("span");
+      name.className = "git-operation-file-name";
+      name.textContent = entry.originalPath
+        ? `${entry.path} ← ${entry.originalPath}`
+        : entry.path;
+      name.title = name.textContent;
+      row.append(fileBadge, name);
+      this.operationDialogFiles.appendChild(row);
+    }
+    if (targets.length > visible.length) {
+      const more = document.createElement("div");
+      more.className = "git-operation-more";
+      more.textContent = `…and ${targets.length - visible.length} more`;
+      this.operationDialogFiles.appendChild(more);
+    }
+    const canIncludeStaged = this.canIncludeStaged(targets);
+    this.operationDialogCheckboxLabel.hidden = !canIncludeStaged;
+    this.operationDialogCheckbox.checked = false;
+    this.operationDialogConfirmButton.textContent = stagedOnly
+      ? "Discard Staged Changes"
+      : "Discard Changes";
+    this.operationDialogCancelButton.disabled = false;
+    this.operationDialogConfirmButton.disabled = false;
+    return this.openOperationDialog();
+  }
+
+  showAbortConfirmation(operation) {
+    const dialog = this.ensureOperationDialog();
+    if (!dialog || dialog.open || this.operationDialogSession || this.destroyed)
+      return Promise.resolve({ confirmed: false });
+    this.operationDialog.dataset.mode = "abort";
+    this.operationDialogBadgeIcon.className = "fi fi-rr-triangle-warning";
+    this.operationDialogTitle.textContent = operation === "merge"
+      ? "Abort Merge"
+      : "Abort Rebase";
+    this.operationDialogMessage.textContent = operation === "merge"
+      ? "This stops the merge in progress and restores the state from before it started."
+      : "This stops the rebase in progress and returns the branch to its original state.";
+    this.operationDialogFiles.hidden = true;
+    this.operationDialogFiles.replaceChildren();
+    this.operationDialogCheckboxLabel.hidden = true;
+    this.operationDialogCheckbox.checked = false;
+    this.operationDialogConfirmButton.textContent = operation === "merge"
+      ? "Abort Merge"
+      : "Abort Rebase";
+    this.operationDialogCancelButton.disabled = false;
+    this.operationDialogConfirmButton.disabled = false;
+    return this.openOperationDialog();
+  }
+
+  openOperationDialog() {
+    const dialog = this.operationDialog;
+    return new Promise((resolve) => {
+      const session = {
+        resolve,
+        result: null,
+        completed: false,
+        previousFocus: document.activeElement,
+      };
+      this.operationDialogSession = session;
+      try {
+        dialog.showModal();
+        this.operationDialogCancelButton.focus({ preventScroll: true });
+      } catch {
+        session.result = { confirmed: false };
+        this.completeOperationDialog();
+      }
+    });
+  }
+
+  finishOperationDialog(result) {
+    const session = this.operationDialogSession;
+    if (!session || session.result) return false;
+    session.result = result;
+    if (this.operationDialog?.open) this.operationDialog.close();
+    else this.completeOperationDialog();
+    return true;
+  }
+
+  completeOperationDialog() {
+    const session = this.operationDialogSession;
+    if (!session || session.completed) return false;
+    this.operationDialogSession = null;
+    session.completed = true;
+    const previousFocus = session.previousFocus;
+    if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
+      try {
+        previousFocus.focus({ preventScroll: true });
+      } catch {}
+    }
+    session.resolve(session.result || { confirmed: false });
+    return true;
+  }
+
+  handleOperationDialogKeyDown(event) {
+    if (!this.operationDialog?.open) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopImmediatePropagation?.();
+      event.stopPropagation?.();
+      this.finishOperationDialog({ confirmed: false });
+    }
+    return true;
+  }
+
   async openDiff(entry, staged) {
     const filePath = GitSidebar.resolveAbsolutePath(this.workspaceRoot, entry?.path);
     if (!filePath) {
@@ -2361,6 +2969,7 @@ class GitSidebar extends Sidebar {
       this.status = result.status;
       this.error = null;
       this.stale = false;
+      this.pruneEntrySelection();
     }
     if (reason === "open" || reason === "workspace")
       this.listResetPending = true;
@@ -2471,6 +3080,9 @@ class GitSidebar extends Sidebar {
     this.initError = "";
     this.notice = "";
     this.operationPaths.clear();
+    this.selectedEntries.clear();
+    this.selectionAnchor = null;
+    this.finishOperationDialog({ confirmed: false });
     this.diffRefreshInFlight.clear();
     this.listResetPending = true;
     if (this.commitInput) this.commitInput.value = this.commitMessage;
@@ -2489,7 +3101,7 @@ class GitSidebar extends Sidebar {
 
   isMutating() {
     return this.committing || this.switchingBranch || this.stagingAll ||
-      this.unstagingAll || this.initializing;
+      this.unstagingAll || this.initializing || this.discarding || this.aborting;
   }
 
   cancelScheduledRefresh() {
@@ -2543,6 +3155,9 @@ class GitSidebar extends Sidebar {
     this.unsubscribeInstallProgress = null;
     this.fileScroller?.destroy?.();
     this.fileScroller = null;
+    this.finishOperationDialog({ confirmed: false });
+    this.operationDialog?.remove();
+    this.operationDialog = null;
     this.container?.remove();
     this.container = null;
   }

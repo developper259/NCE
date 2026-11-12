@@ -1719,6 +1719,105 @@ app.whenReady().then(() => {
         );
         assert.equal(sourceControlResult.mode, "clean");
         assert.ok(sourceControlResult.branch, "Source Control displays its branch");
+        // The app stores workspace state in .nce/; keep it out of the fixture status.
+        fs.appendFileSync(
+          path.join(sourceControlWorkspace, ".git", "info", "exclude"),
+          "\n.nce/\n",
+        );
+        // A real merge conflict must surface the abort banner and recover cleanly.
+        const fixtureBranch = execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "rev-parse", "--abbrev-ref", "HEAD"],
+          { encoding: "utf8" },
+        ).trim();
+        const fixtureBasePath = path.join(
+          sourceControlWorkspace,
+          "source-control-base.txt",
+        );
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "checkout", "-q", "-b", "abort-side"],
+          { stdio: "ignore" },
+        );
+        fs.writeFileSync(fixtureBasePath, "side change\n");
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "commit", "-q", "-am", "Side change"],
+          { stdio: "ignore" },
+        );
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "checkout", "-q", fixtureBranch],
+          { stdio: "ignore" },
+        );
+        fs.writeFileSync(fixtureBasePath, "main change\n");
+        execFileSync(
+          "git",
+          ["-C", sourceControlWorkspace, "commit", "-q", "-am", "Main change"],
+          { stdio: "ignore" },
+        );
+        let fixtureMergeConflict = false;
+        try {
+          execFileSync(
+            "git",
+            ["-C", sourceControlWorkspace, "merge", "--no-edit", "abort-side"],
+            { stdio: "ignore" },
+          );
+        } catch {
+          fixtureMergeConflict = true;
+        }
+        assert.ok(fixtureMergeConflict, "the fixture merge produces a real conflict");
+        const sourceControlAbort = await run(`(async () => {
+          const git = editor.gitSidebar;
+          await git.refresh({ reason: "manual" });
+          const detectDeadline = Date.now() + 5000;
+          while (git.status?.merging !== true && Date.now() < detectDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          if (git.status?.merging !== true)
+            return { ok: false, reason: "merge state not detected" };
+          if (git.operationBanner.hidden !== false)
+            return { ok: false, reason: "abort banner is hidden" };
+          const label = git.operationBannerButton.textContent;
+          git.operationBannerButton.click();
+          if (git.operationDialog?.open !== true)
+            return { ok: false, reason: "abort confirmation did not open" };
+          const mode = git.operationDialog.dataset.mode;
+          const title = git.operationDialogTitle.textContent;
+          git.operationDialogConfirmButton.click();
+          const abortDeadline = Date.now() + 8000;
+          while ((git.status?.merging === true || git.aborting) && Date.now() < abortDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          return {
+            ok: git.status?.merging === false && git.operationBanner.hidden === true,
+            label,
+            mode,
+            title,
+            notice: git.notice,
+            entries: git.status?.entries?.length ?? -1,
+          };
+        })()`);
+        assert.equal(
+          sourceControlAbort.ok,
+          true,
+          `merge abort recovers: ${JSON.stringify(sourceControlAbort)}`,
+        );
+        assert.equal(sourceControlAbort.label, "Abort Merge");
+        assert.equal(sourceControlAbort.mode, "abort");
+        assert.equal(sourceControlAbort.title, "Abort Merge");
+        assert.equal(sourceControlAbort.entries, 0, "the worktree is clean after abort");
+        assert.equal(
+          execFileSync(
+            "git",
+            ["-C", sourceControlWorkspace, "status", "--porcelain"],
+            { encoding: "utf8" },
+          ).trim(),
+          "",
+          "git reports a clean worktree after the abort",
+        );
+        assert.ok(
+          !fs.existsSync(path.join(sourceControlWorkspace, ".git", "MERGE_HEAD")),
+          "MERGE_HEAD is removed by the abort",
+        );
         await run(`(() => {
           editor.notificationManager.clearHistory();
           editor.notificationManager.flushPersist?.();

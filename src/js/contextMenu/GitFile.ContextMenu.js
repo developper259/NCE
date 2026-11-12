@@ -22,6 +22,14 @@ function buildGitFileContextMenu(editor) {
         callback: () => sidebar.toggleStage(entry, false),
       };
     }
+    const selectionCount = sidebar.resolveDiscardTargetsFor?.(entry, staged)?.length || 1;
+    actions.discard = {
+      name: selectionCount > 1
+        ? `Discard ${selectionCount} Changes…`
+        : staged ? "Discard Staged Changes…" : "Discard Changes…",
+      enabled: entry.conflicted !== true,
+      callback: () => sidebar.requestDiscard(sidebar.resolveDiscardTargetsFor(entry, staged)),
+    };
     actions.sep1 = { type: "separator" };
     actions.openFile = {
       name: "Open File",
@@ -51,6 +59,7 @@ function buildGitHeaderContextMenu(editor) {
     const sidebar = context?.sidebar;
     if (!sidebar) return {};
     const branch = sidebar.getBranchName?.() || null;
+    const sections = sidebar.getSections?.() || { staged: [], changes: [] };
     return {
       refresh: {
         name: "Refresh",
@@ -63,6 +72,16 @@ function buildGitHeaderContextMenu(editor) {
           if (sidebar.collapsed?.history === false) sidebar.toggleSection("history");
           else void sidebar.showHistory();
         },
+      },
+      discardAllChanges: {
+        name: "Discard All Changes…",
+        enabled: sections.changes.some((entry) => !entry.conflicted),
+        callback: () => sidebar.requestDiscardAll("changes"),
+      },
+      discardAllStaged: {
+        name: "Discard All Staged Changes…",
+        enabled: sections.staged.length > 0,
+        callback: () => sidebar.requestDiscardAll("staged"),
       },
       copyBranch: {
         name: "Copy Branch Name",

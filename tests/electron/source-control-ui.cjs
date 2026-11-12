@@ -38,11 +38,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   editor.sidebarManager.openMenu("git");
   await waitFor(() => git.isOpen && Boolean(git.container), "Source Control sidebar to open");
   const getSectionAction = (section) => git.listLayer.querySelector(
-    `.git-section-header[data-section="${section}"] .git-section-action`,
+    `.git-section-header[data-section="${section}"] .git-section-action:not(.git-section-discard)`,
   );
   const waitForIdle = () => waitFor(
     () => !git.loading && !git.switchingBranch &&
-      !git.stagingAll && !git.unstagingAll && !git.committing,
+      !git.stagingAll && !git.unstagingAll && !git.committing &&
+      !git.discarding && !git.aborting,
     "Source Control idle",
   );
   const triggerSectionAction = async (section, description, predicate) => {
@@ -249,6 +250,135 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.commitBoxElement.hidden === false, "commit form is visible with changes");
   check(git.listElement.hidden === false, "change list is visible with changes");
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
+
+  // Discard: cancel path, single untracked file, then a mixed multi-selection.
+  const scratchName = "source-control-discard-scratch.txt";
+  const baseName = "source-control-base.txt";
+  const createdScratch = await editor.fileExplorer.fileOperations.createFile(
+    workspace,
+    scratchName,
+    "scratch\n",
+    true,
+  );
+  check(createdScratch?.success === true, "discard scratch file is created");
+  const modifiedBase = await editor.fileExplorer.fileOperations.createFile(
+    workspace,
+    baseName,
+    "locally modified\n",
+    true,
+  );
+  check(modifiedBase?.success === true, "base file is modified locally");
+  await git.refresh({ reason: "manual" });
+  await waitFor(
+    () => git.getViewState().changes.length === 4,
+    "four changes before discard",
+  );
+  const changeRow = (path) => [...git.listLayer.querySelectorAll(".git-file-row")]
+    .find((row) => row.dataset.path === path);
+  const scratchEntry = () => git.getSections().changes
+    .find((entry) => entry.path === scratchName);
+
+  const cancelledDiscard = git.requestDiscard([{ entry: scratchEntry(), staged: false }]);
+  await waitFor(() => git.operationDialog?.open === true, "discard confirmation to open");
+  check(
+    git.operationDialogMessage.textContent ===
+      "This untracked file will be permanently deleted.",
+    "untracked discard warns about permanent deletion",
+  );
+  const discardDialogRect = git.operationDialog.getBoundingClientRect();
+  check(
+    discardDialogRect.width >= 300 && discardDialogRect.height >= 120 &&
+      discardDialogRect.top >= 0 && discardDialogRect.left >= 0,
+    `discard dialog is visible: ${JSON.stringify(discardDialogRect)}`,
+  );
+  git.operationDialogCancelButton.click();
+  check(await cancelledDiscard === false, "cancelling discards nothing");
+  await waitFor(
+    () => git.getViewState().changes.length === 4,
+    "cancel keeps all changes",
+  );
+
+  const singleDiscard = git.requestDiscard([{ entry: scratchEntry(), staged: false }]);
+  await waitFor(() => git.operationDialog?.open === true, "discard confirmation to reopen");
+  git.operationDialogConfirmButton.click();
+  check(await singleDiscard === true, "single untracked discard succeeds");
+  await waitFor(
+    () => git.getViewState().changes.length === 3,
+    "the discarded scratch file disappears",
+  );
+  check(
+    (await editor.fileExplorer.fileOperations.pathExists(
+      `${workspace}/${scratchName}`,
+    )) === false,
+    "the untracked file is deleted from disk",
+  );
+
+  const recreatedScratch = await editor.fileExplorer.fileOperations.createFile(
+    workspace,
+    scratchName,
+    "scratch again\n",
+    true,
+  );
+  check(recreatedScratch?.success === true, "scratch file is recreated");
+  await git.refresh({ reason: "manual" });
+  await waitFor(
+    () => git.getViewState().changes.length === 4,
+    "four changes again",
+  );
+  await waitFor(() => Boolean(changeRow(scratchName)), "scratch row to render");
+  changeRow(scratchName).dispatchEvent(
+    new MouseEvent("click", { bubbles: true, ctrlKey: true }),
+  );
+  await nextFrame();
+  await waitFor(() => Boolean(changeRow(baseName)), "base row to render");
+  changeRow(baseName).dispatchEvent(
+    new MouseEvent("click", { bubbles: true, ctrlKey: true }),
+  );
+  await nextFrame();
+  check(git.selectedEntries.size === 2, "modifier clicks select two rows");
+  check(
+    changeRow(scratchName)?.classList.contains("is-selected") &&
+      changeRow(baseName)?.classList.contains("is-selected"),
+    "selected rows are highlighted",
+  );
+  const multiDiscard = git.requestDiscard(git.getSelectedTargets());
+  await waitFor(() => git.operationDialog?.open === true, "multi discard confirmation");
+  check(
+    git.operationDialogTitle.textContent === "Discard 2 Changes",
+    "multi discard names the count",
+  );
+  check(
+    git.operationDialogMessage.textContent ===
+      "Tracked changes will be reverted and untracked files will be permanently deleted.",
+    "mixed discard explains both effects",
+  );
+  check(
+    git.operationDialogFiles.children.length === 2,
+    "both affected files are listed",
+  );
+  git.operationDialogConfirmButton.click();
+  check(await multiDiscard === true, "multi-selection discard succeeds");
+  await waitFor(
+    () => git.getViewState().changes.length === 2,
+    "only the two fixture files remain",
+  );
+  check(git.selectedEntries.size === 0, "the selection clears after discard");
+  check(
+    (await editor.fileExplorer.fileOperations.pathExists(
+      `${workspace}/${scratchName}`,
+    )) === false,
+    "the recreated scratch file is deleted from disk",
+  );
+  const restoredBase = await editor.api.git.getFileVersions(
+    `${workspace}/${baseName}`,
+    {},
+  );
+  check(
+    restoredBase?.success === true &&
+      restoredBase.oldContent === restoredBase.newContent,
+    "the tracked file is restored to its committed content",
+  );
+  await nextFrame();
   check(
     !document.querySelector(".git-sidebar-summary") &&
       !document.querySelector(".git-sidebar-repo-name"),
@@ -663,7 +793,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
 
   // Stage every change with the Changes header action, then commit through real Git operations.
   const stageAllButton = git.listLayer.querySelector(
-    '.git-section-header[data-section="changes"] .git-section-action',
+    '.git-section-header[data-section="changes"] .git-section-action:not(.git-section-discard)',
   );
   check(Boolean(stageAllButton), "Changes header offers Stage All");
   check(
@@ -722,7 +852,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "empty change sections are not rendered, History stays available",
   );
   const unstageAllButton = git.listLayer.querySelector(
-    '.git-section-header[data-section="staged"] .git-section-action',
+    '.git-section-header[data-section="staged"] .git-section-action:not(.git-section-discard)',
   );
   check(Boolean(unstageAllButton), "Staged header offers Unstage All");
   check(
@@ -743,7 +873,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   check(git.commitButton.disabled === true, "commit disables after unstaging everything");
   const restageAllButton = git.listLayer.querySelector(
-    '.git-section-header[data-section="changes"] .git-section-action',
+    '.git-section-header[data-section="changes"] .git-section-action:not(.git-section-discard)',
   );
   check(Boolean(restageAllButton), "Changes header offers Stage All again");
   await triggerSectionAction("changes", "Stage All to restage every change", () => {
