@@ -44,6 +44,7 @@ class FakeElement {
     this.tagName = tagName;
     this.children = [];
     this.dataset = {};
+    this.style = {};
     this.attributes = new Map();
     this.listeners = new Map();
     this.className = "";
@@ -264,6 +265,9 @@ function createSidebar(options = {}) {
     fetch: [],
     pull: [],
     push: [],
+    clone: [],
+    selectFolder: 0,
+    workspaceSwitch: [],
     cancelNetwork: 0,
     networkListeners: [],
     networkUnsubscribed: 0,
@@ -274,6 +278,14 @@ function createSidebar(options = {}) {
     fileExplorer: {
       rootPath,
       projectName: options.projectName || "workspace",
+      async requestWorkspaceSwitch(folderPath, switchOptions) {
+        calls.workspaceSwitch.push([folderPath, switchOptions]);
+        if (typeof options.workspaceSwitchResult === "function")
+          return options.workspaceSwitchResult(folderPath, switchOptions);
+        return options.workspaceSwitchResult === undefined
+          ? true
+          : options.workspaceSwitchResult;
+      },
     },
     api: {
       git: {
@@ -489,6 +501,16 @@ function createSidebar(options = {}) {
             forced: false,
           };
         },
+        async clone(cloneOptions) {
+          calls.clone.push(cloneOptions);
+          if (typeof options.cloneResult === "function")
+            return options.cloneResult(cloneOptions);
+          return options.cloneResult || {
+            success: true,
+            path: "/cloned/repo",
+            folderName: "repo",
+          };
+        },
         async cancelNetworkOperation() {
           calls.cancelNetwork += 1;
           return true;
@@ -518,6 +540,14 @@ function createSidebar(options = {}) {
         },
       },
       writeClipboardText(text) { calls.clipboard.push(text); },
+      async selectFolder() {
+        calls.selectFolder += 1;
+        if (typeof options.selectFolderResult === "function")
+          return options.selectFolderResult();
+        return options.selectFolderResult === undefined
+          ? "/chosen/destination"
+          : options.selectFolderResult;
+      },
       onFileSystemChange(handler) {
         calls.fileSystemHandler = handler;
         return () => { calls.unsubscribed = true; };
@@ -1430,7 +1460,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(empty.calls.status, 0, "no Git status without a workspace");
     assert.deepEqual(
       stateActions(empty.sidebar),
-      { init: false, refresh: false, retry: false, install: false, settings: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false, clone: true },
     );
   } finally {
     empty.sidebar.destroy();
@@ -1445,7 +1475,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(plain.sidebar.status, null);
     assert.deepEqual(
       stateActions(plain.sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
       "a plain folder offers Initialize and Refresh instead of Retry",
     );
   } finally {
@@ -1460,7 +1490,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.match(missingGit.sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(missingGit.sidebar),
-      { init: false, refresh: false, retry: false, install: true, settings: true },
+      { init: false, refresh: false, retry: false, install: true, settings: true, clone: false },
     );
     assert.equal(
       missingGit.sidebar.getStatePresentation(
@@ -1493,7 +1523,7 @@ test("GitSidebar initializes the repository and refreshes with success", async (
     assert.equal(sidebar.getViewState().mode, "clean");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: true, retry: false, install: false, settings: false },
+      { init: false, refresh: true, retry: false, install: false, settings: false, clone: false },
       "a clean repository only offers a refresh action",
     );
   } finally {
@@ -1571,7 +1601,7 @@ test("GitSidebar derives explicit view states from the repository", async () => 
     assert.equal(state.message, "Git could not initialize.");
     assert.deepEqual(
       stateActions(initFailed.sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
     );
   } finally {
     initFailed.sidebar.destroy();
@@ -1674,7 +1704,7 @@ test("GitSidebar keeps Initialize available after a failed initialization", asyn
     assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
       "the user can try Initialize again",
     );
     assert.equal(await sidebar.initializeRepository(), false, "a retry is attempted");
@@ -1695,7 +1725,7 @@ test("GitSidebar drops Initialize when Git itself is missing", async () => {
     assert.match(sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, install: true, settings: true },
+      { init: false, refresh: false, retry: false, install: true, settings: true, clone: false },
     );
   } finally {
     sidebar.destroy();
@@ -1767,7 +1797,7 @@ test("GitSidebar shows install progress and blocks other actions while installin
     assert.equal(sidebar.installingGit, true);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, install: false, settings: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false, clone: false },
     );
     assert.equal(sidebar.stateInstall.hidden, true);
     assert.equal(sidebar.stateSettings.hidden, true);
@@ -1940,7 +1970,7 @@ test("GitSidebar drops a stale initialization error on refresh", async () => {
     assert.equal(sidebar.getStateMessage(), "This workspace is not a Git repository.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false },
+      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
     );
   } finally {
     sidebar.destroy();
@@ -2915,7 +2945,7 @@ test("GitSidebar explains output limits without offering a useless retry", async
     assert.match(sidebar.getStateMessage(), /Too many changes/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, install: false, settings: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false, clone: false },
       "output limits offer no useless action",
     );
   } finally {
@@ -3980,4 +4010,209 @@ test("Git header context menu disables sync actions without a repository", () =>
   } finally {
     sidebar.destroy();
   }
+});
+
+test("GitSidebar shows the clone action without a repository and hides it once clean", async () => {
+  const { sidebar } = createSidebar();
+  try {
+    sidebar.render();
+    sidebar.workspaceRoot = "/workspace";
+    sidebar.status = null;
+    sidebar.error = { code: "NOT_A_REPOSITORY", error: "not a repo" };
+    sidebar.loading = false;
+    assert.equal(stateActions(sidebar).clone, true);
+    sidebar.error = null;
+    sidebar.status = makeStatus([]);
+    assert.equal(stateActions(sidebar).clone, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar opens the clone dialog and cancels it without calling Git", async () => {
+  const { sidebar, calls } = createSidebar();
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    assert.equal(sidebar.cloneDialog.open, true);
+    assert.equal(sidebar.cloneUrlInput.focused, true);
+    sidebar.cloneCancelButton.click();
+    assert.equal(await opening, true);
+    assert.equal(sidebar.cloneDialog.open, false);
+    assert.equal(calls.clone.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar browses for a clone destination through the native folder dialog", async () => {
+  const { sidebar, calls } = createSidebar({ selectFolderResult: "/picked/folder" });
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    await sidebar.browseCloneDestination();
+    assert.equal(calls.selectFolder, 1);
+    assert.equal(sidebar.cloneDestination, "/picked/folder");
+    assert.equal(sidebar.cloneDestinationInput.value, "/picked/folder");
+    sidebar.cloneCancelButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar validates the clone URL and destination before calling Git", async () => {
+  const { sidebar, calls } = createSidebar();
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    sidebar.cloneUrlInput.value = "   ";
+    await sidebar.submitClone();
+    assert.equal(calls.clone.length, 0, "an empty URL is rejected");
+    assert.equal(sidebar.cloneError.hidden, false);
+
+    sidebar.cloneUrlInput.value = "https://example.invalid/repo.git";
+    await sidebar.submitClone();
+    assert.equal(calls.clone.length, 0, "a missing destination is rejected");
+    assert.match(sidebar.cloneError.textContent, /destination/i);
+    sidebar.cloneCancelButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar clones and opens the cloned folder through the project system", async () => {
+  const { sidebar, calls } = createSidebar({
+    cloneResult: { success: true, path: "/chosen/destination/repo", folderName: "repo" },
+  });
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    sidebar.cloneUrlInput.value = "https://example.invalid/repo.git";
+    sidebar.cloneDestination = "/chosen/destination";
+    sidebar.cloneFolderInput.value = "repo";
+    await sidebar.submitClone();
+    assert.deepEqual(toPlain(calls.clone), [
+      { url: "https://example.invalid/repo.git", destination: "/chosen/destination", folderName: "repo" },
+    ]);
+    assert.deepEqual(toPlain(calls.workspaceSwitch), [["/chosen/destination/repo", null]]);
+    assert.ok(calls.notifications.some((note) => note.title === "Repository cloned"));
+    assert.equal(sidebar.cloneDialog.open, false);
+    assert.equal(await opening, true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar omits an empty folder name so Git derives it from the URL", async () => {
+  const { sidebar, calls } = createSidebar();
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    sidebar.cloneUrlInput.value = "https://example.invalid/repo.git";
+    sidebar.cloneDestination = "/chosen/destination";
+    sidebar.cloneFolderInput.value = "  ";
+    await sidebar.submitClone();
+    assert.deepEqual(toPlain(calls.clone), [
+      { url: "https://example.invalid/repo.git", destination: "/chosen/destination" },
+    ]);
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar surfaces clone failures inside the dialog and stays open", async () => {
+  const { sidebar, calls } = createSidebar({
+    cloneResult: { success: false, code: "CLONE_DESTINATION_EXISTS", error: "The folder already exists and is not empty." },
+  });
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    sidebar.cloneUrlInput.value = "https://example.invalid/repo.git";
+    sidebar.cloneDestination = "/chosen/destination";
+    await sidebar.submitClone();
+    assert.equal(sidebar.cloneError.hidden, false);
+    assert.match(sidebar.cloneError.textContent, /already exists/);
+    assert.equal(sidebar.cloneDialog.open, true);
+    assert.equal(calls.workspaceSwitch.length, 0);
+    assert.equal(sidebar.cloneBusy, false);
+    assert.equal(sidebar.cloneCloneButton.disabled, false);
+    sidebar.cloneCancelButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar shows clone progress and cancels a running clone", async () => {
+  const gate = deferred();
+  const { sidebar, calls } = createSidebar({ cloneResult: () => gate.promise });
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    sidebar.cloneUrlInput.value = "https://example.invalid/repo.git";
+    sidebar.cloneDestination = "/chosen/destination";
+    const submitting = sidebar.submitClone();
+    await tick();
+    assert.equal(sidebar.cloneBusy, true);
+    assert.equal(sidebar.cloneCloneButton.disabled, true);
+    assert.equal(sidebar.cloneProgressElement.hidden, false);
+
+    const listener = calls.networkListeners[0];
+    listener({ operation: "clone", phase: "Receiving objects", percent: 42 });
+    assert.equal(sidebar.cloneProgress.percent, 42);
+    assert.equal(sidebar.cloneProgressBar.style.width, "42%");
+    assert.match(sidebar.cloneProgressText.textContent, /Receiving objects 42%/);
+    listener({ operation: "fetch", phase: "Receiving objects", percent: 99 });
+    assert.equal(sidebar.cloneProgress.percent, 42, "foreign operations do not drive clone progress");
+
+    sidebar.cloneCancelButton.click();
+    await tick();
+    assert.equal(calls.cancelNetwork, 1);
+    assert.equal(sidebar.cloneDialog.open, true, "cancelling a running clone keeps the dialog open");
+    gate.resolve({ success: false, code: "OPERATION_CANCELLED", error: "cancelled" });
+    await submitting;
+    assert.match(sidebar.cloneError.textContent, /cancelled/i);
+    sidebar.cloneCancelButton.click();
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar resets clone state and closes the clone dialog on workspace change", async () => {
+  const { sidebar } = createSidebar();
+  try {
+    sidebar.render();
+    const opening = sidebar.openCloneDialog();
+    await tick();
+    sidebar.cloneDestination = "/chosen/destination";
+    sidebar.applyWorkspace("/other-workspace");
+    assert.equal(sidebar.cloneBusy, false);
+    assert.equal(sidebar.cloneProgress, null);
+    assert.equal(sidebar.cloneDestination, "");
+    assert.equal(sidebar.cloneDialog.open, false);
+    await opening;
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar removes the clone dialog on destroy", async () => {
+  const { sidebar } = createSidebar();
+  sidebar.render();
+  const opening = sidebar.openCloneDialog();
+  await tick();
+  sidebar.destroy();
+  await opening;
+  assert.equal(sidebar.cloneDialog, null);
 });

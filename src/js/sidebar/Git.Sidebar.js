@@ -261,6 +261,22 @@ class GitSidebar extends Sidebar {
     this.remotesAddUrl = null;
     this.remotesAddButton = null;
     this.remotesCloseButton = null;
+    this.stateClone = null;
+    this.cloneDialog = null;
+    this.cloneDialogSession = null;
+    this.cloneBusy = false;
+    this.cloneProgress = null;
+    this.cloneDestination = "";
+    this.cloneUrlInput = null;
+    this.cloneFolderInput = null;
+    this.cloneDestinationInput = null;
+    this.cloneBrowseButton = null;
+    this.cloneCloneButton = null;
+    this.cloneCancelButton = null;
+    this.cloneError = null;
+    this.cloneProgressElement = null;
+    this.cloneProgressBar = null;
+    this.cloneProgressText = null;
     this.diffLoadingPaths = new Set();
     this.generation = 0;
     this.refreshTimer = null;
@@ -514,7 +530,17 @@ class GitSidebar extends Sidebar {
     stateSettings.dataset.action = "settings";
     stateSettings.addEventListener("click", () => void this.openGitSettings());
 
-    stateActions.append(stateInit, stateRefresh, stateRetry, stateInstall, stateSettings);
+    const stateClone = document.createElement("button");
+    stateClone.type = "button";
+    stateClone.className = "git-sidebar-state-button";
+    stateClone.textContent = "Clone Repository";
+    stateClone.title = "Clone a remote repository into a folder you choose";
+    stateClone.setAttribute("aria-label", "Clone a repository");
+    stateClone.dataset.action = "clone";
+    stateClone.addEventListener("click", () => void this.openCloneDialog());
+    this.stateClone = stateClone;
+
+    stateActions.append(stateInit, stateRefresh, stateRetry, stateInstall, stateSettings, stateClone);
     state.append(stateHeading, stateActions);
     this.stateElement = state;
     this.stateIconElement = stateIcon;
@@ -851,10 +877,13 @@ class GitSidebar extends Sidebar {
   getStateActions() {
     const view = this.getViewState();
     if (this.installingGit) {
-      return { init: false, refresh: false, retry: false, install: false, settings: false };
+      return { init: false, refresh: false, retry: false, install: false, settings: false, clone: false };
     }
     if (view.mode === "no-repository" || view.mode === "init-error") {
-      return { init: true, refresh: true, retry: false, install: false, settings: false };
+      return { init: true, refresh: true, retry: false, install: false, settings: false, clone: true };
+    }
+    if (view.mode === "no-workspace") {
+      return { init: false, refresh: false, retry: false, install: false, settings: false, clone: true };
     }
     if (view.mode === "error") {
       return {
@@ -864,12 +893,13 @@ class GitSidebar extends Sidebar {
           view.errorCode !== "GIT_OUTPUT_LIMIT",
         install: view.errorCode === "GIT_NOT_FOUND",
         settings: view.errorCode === "GIT_NOT_FOUND",
+        clone: false,
       };
     }
     if (view.mode === "clean") {
-      return { init: false, refresh: true, retry: false, install: false, settings: false };
+      return { init: false, refresh: true, retry: false, install: false, settings: false, clone: false };
     }
-    return { init: false, refresh: false, retry: false, install: false, settings: false };
+    return { init: false, refresh: false, retry: false, install: false, settings: false, clone: false };
   }
 
   openGitSettings() {
@@ -913,7 +943,9 @@ class GitSidebar extends Sidebar {
           ? this.stateRetry
           : actions.settings
             ? this.stateSettings
-            : null;
+            : actions.clone
+              ? this.stateClone
+              : null;
     if (this.stateInit) {
       this.stateInit.hidden = !actions.init;
       this.stateInit.disabled = busy;
@@ -941,12 +973,17 @@ class GitSidebar extends Sidebar {
       this.stateSettings.hidden = !actions.settings;
       this.stateSettings.disabled = busy;
     }
+    if (this.stateClone) {
+      this.stateClone.hidden = !actions.clone;
+      this.stateClone.disabled = busy || this.cloneBusy;
+    }
     for (const button of [
       this.stateInit,
       this.stateRetry,
       this.stateRefresh,
       this.stateInstall,
       this.stateSettings,
+      this.stateClone,
     ]) {
       button?.classList.toggle("git-sidebar-primary", button === primary);
     }
@@ -2337,6 +2374,14 @@ class GitSidebar extends Sidebar {
 
   handleNetworkProgress(progress) {
     if (!progress || this.destroyed) return;
+    if (this.cloneBusy && progress.operation === "clone") {
+      this.cloneProgress = {
+        phase: String(progress.phase || ""),
+        percent: Number(progress.percent) || 0,
+      };
+      this.renderCloneProgress();
+      return;
+    }
     if (!this.syncing || progress.operation !== this.syncing) return;
     this.syncProgress = {
       phase: String(progress.phase || ""),
@@ -3044,6 +3089,313 @@ class GitSidebar extends Sidebar {
     session.completed = true;
     this.remotesEditing = null;
     this.remotesPendingRemove = null;
+    const previousFocus = session.previousFocus;
+    if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
+      try {
+        previousFocus.focus({ preventScroll: true });
+      } catch {}
+    }
+    session.resolve(true);
+    return true;
+  }
+
+  async openCloneDialog() {
+    const dialog = this.ensureCloneDialog();
+    if (!dialog || dialog.open || this.cloneDialogSession || this.destroyed)
+      return false;
+    this.cloneBusy = false;
+    this.cloneProgress = null;
+    this.cloneDestination = "";
+    this.setCloneError("");
+    if (this.cloneUrlInput) this.cloneUrlInput.value = "";
+    if (this.cloneFolderInput) this.cloneFolderInput.value = "";
+    if (this.cloneDestinationInput) this.cloneDestinationInput.value = "";
+    this.updateCloneControls();
+    return new Promise((resolve) => {
+      const session = {
+        resolve,
+        completed: false,
+        previousFocus: document.activeElement,
+      };
+      this.cloneDialogSession = session;
+      try {
+        dialog.showModal();
+        this.cloneUrlInput?.focus({ preventScroll: true });
+      } catch {
+        this.completeCloneDialog();
+      }
+    });
+  }
+
+  ensureCloneDialog() {
+    if (this.cloneDialog) return this.cloneDialog;
+    if (!document.body || typeof document.createElement !== "function") return null;
+
+    const dialog = document.createElement("dialog");
+    dialog.className = "git-clone-dialog";
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.setAttribute("aria-labelledby", "git-clone-title");
+
+    const content = document.createElement("div");
+    content.className = "git-clone-content";
+
+    const heading = document.createElement("div");
+    heading.className = "git-remotes-heading";
+    const badge = document.createElement("span");
+    badge.className = "git-operation-badge";
+    badge.setAttribute("aria-hidden", "true");
+    const badgeIcon = document.createElement("i");
+    badgeIcon.className = "fi fi-rr-code-branch";
+    badge.appendChild(badgeIcon);
+    const titleGroup = document.createElement("div");
+    titleGroup.className = "git-operation-title-group";
+    const title = document.createElement("h2");
+    title.id = "git-clone-title";
+    title.textContent = "Clone Repository";
+    const subtitle = document.createElement("p");
+    subtitle.className = "git-operation-subtitle";
+    subtitle.textContent = "Clone a remote repository into a folder you choose.";
+    titleGroup.append(title, subtitle);
+    heading.append(badge, titleGroup);
+
+    const urlInput = document.createElement("input");
+    urlInput.type = "text";
+    urlInput.className = "git-remotes-input";
+    urlInput.placeholder = "https://… or git@host:…";
+    urlInput.setAttribute("aria-label", "Repository URL");
+    urlInput.autocomplete = "off";
+    urlInput.spellcheck = false;
+
+    const destinationRow = document.createElement("div");
+    destinationRow.className = "git-clone-destination";
+    const destinationInput = document.createElement("input");
+    destinationInput.type = "text";
+    destinationInput.className = "git-remotes-input";
+    destinationInput.placeholder = "Destination folder";
+    destinationInput.setAttribute("aria-label", "Destination folder");
+    destinationInput.readOnly = true;
+    const browseButton = document.createElement("button");
+    browseButton.type = "button";
+    browseButton.className = "git-remotes-add-button git-clone-browse";
+    browseButton.textContent = "Browse…";
+    browseButton.addEventListener("click", () => void this.browseCloneDestination());
+    destinationRow.append(destinationInput, browseButton);
+
+    const folderInput = document.createElement("input");
+    folderInput.type = "text";
+    folderInput.className = "git-remotes-input";
+    folderInput.placeholder = "Folder name (optional, defaults to the repository name)";
+    folderInput.setAttribute("aria-label", "Folder name");
+    folderInput.autocomplete = "off";
+    folderInput.spellcheck = false;
+
+    const progress = document.createElement("div");
+    progress.className = "git-clone-progress";
+    progress.hidden = true;
+    const progressTrack = document.createElement("div");
+    progressTrack.className = "git-clone-progress-track";
+    const progressBar = document.createElement("div");
+    progressBar.className = "git-clone-progress-bar";
+    progressTrack.appendChild(progressBar);
+    const progressText = document.createElement("span");
+    progressText.className = "git-clone-progress-text";
+    progress.append(progressTrack, progressText);
+
+    const error = document.createElement("p");
+    error.className = "git-remotes-error";
+    error.setAttribute("role", "alert");
+    error.hidden = true;
+
+    const actions = document.createElement("div");
+    actions.className = "git-operation-actions";
+    const cancelButton = document.createElement("button");
+    cancelButton.type = "button";
+    cancelButton.className = "git-operation-cancel";
+    cancelButton.textContent = "Cancel";
+    cancelButton.addEventListener("click", () => this.requestCloneCancel());
+    const cloneButton = document.createElement("button");
+    cloneButton.type = "button";
+    cloneButton.className = "git-operation-confirm";
+    cloneButton.textContent = "Clone";
+    cloneButton.addEventListener("click", () => void this.submitClone());
+    actions.append(cancelButton, cloneButton);
+
+    const submitOnEnter = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void this.submitClone();
+      }
+    };
+    urlInput.addEventListener("keydown", submitOnEnter);
+    folderInput.addEventListener("keydown", submitOnEnter);
+
+    content.append(heading, urlInput, destinationRow, folderInput, progress, error, actions);
+    dialog.appendChild(content);
+
+    dialog.addEventListener("cancel", (event) => {
+      event.preventDefault();
+      this.requestCloneCancel();
+    });
+    dialog.addEventListener("close", () => this.completeCloneDialog());
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) this.requestCloneCancel();
+    });
+    document.body.appendChild(dialog);
+
+    this.cloneDialog = dialog;
+    this.cloneUrlInput = urlInput;
+    this.cloneFolderInput = folderInput;
+    this.cloneDestinationInput = destinationInput;
+    this.cloneBrowseButton = browseButton;
+    this.cloneCloneButton = cloneButton;
+    this.cloneCancelButton = cancelButton;
+    this.cloneError = error;
+    this.cloneProgressElement = progress;
+    this.cloneProgressBar = progressBar;
+    this.cloneProgressText = progressText;
+    return dialog;
+  }
+
+  async browseCloneDestination() {
+    if (this.cloneBusy || this.destroyed) return false;
+    const selectFolder = this.editor.api?.selectFolder;
+    if (typeof selectFolder !== "function") return false;
+    let folderPath;
+    try {
+      folderPath = await selectFolder();
+    } catch {
+      folderPath = undefined;
+    }
+    if (!folderPath || this.destroyed) return false;
+    this.cloneDestination = folderPath;
+    if (this.cloneDestinationInput) this.cloneDestinationInput.value = folderPath;
+    this.setCloneError("");
+    this.updateCloneControls();
+    return true;
+  }
+
+  setCloneError(message) {
+    if (!this.cloneError) return;
+    this.cloneError.textContent = message || "";
+    this.cloneError.hidden = !message;
+  }
+
+  updateCloneControls() {
+    const busy = this.cloneBusy;
+    if (this.cloneUrlInput) this.cloneUrlInput.disabled = busy;
+    if (this.cloneFolderInput) this.cloneFolderInput.disabled = busy;
+    if (this.cloneBrowseButton) this.cloneBrowseButton.disabled = busy;
+    if (this.cloneCloneButton) {
+      this.cloneCloneButton.disabled = busy;
+      this.cloneCloneButton.textContent = busy ? "Cloning…" : "Clone";
+      if (busy) this.cloneCloneButton.setAttribute("aria-busy", "true");
+      else this.cloneCloneButton.removeAttribute("aria-busy");
+    }
+    if (this.cloneCancelButton)
+      this.cloneCancelButton.textContent = busy ? "Cancel Clone" : "Cancel";
+    if (this.cloneProgressElement) this.cloneProgressElement.hidden = !busy;
+    if (busy) this.renderCloneProgress();
+    this.updateState();
+  }
+
+  renderCloneProgress() {
+    const progress = this.cloneProgress;
+    if (this.cloneProgressBar)
+      this.cloneProgressBar.style.width = `${progress ? progress.percent : 0}%`;
+    if (this.cloneProgressText) {
+      this.cloneProgressText.textContent = progress
+        ? `${progress.phase} ${progress.percent}%`
+        : "Cloning…";
+    }
+  }
+
+  async submitClone() {
+    if (this.cloneBusy || this.destroyed) return false;
+    const api = this.editor.api?.git;
+    if (!api || typeof api.clone !== "function") return false;
+    const url = String(this.cloneUrlInput?.value || "").trim();
+    if (!url) {
+      this.setCloneError("Enter the repository URL to clone.");
+      this.cloneUrlInput?.focus({ preventScroll: true });
+      return false;
+    }
+    if (!this.cloneDestination) {
+      this.setCloneError("Choose a destination folder.");
+      return false;
+    }
+    const folderName = String(this.cloneFolderInput?.value || "").trim();
+    const destination = this.cloneDestination;
+    this.cloneBusy = true;
+    this.cloneProgress = null;
+    this.setCloneError("");
+    this.updateCloneControls();
+    let result = null;
+    try {
+      result = await api.clone({
+        url,
+        destination,
+        ...(folderName ? { folderName } : {}),
+      });
+    } catch {
+      result = null;
+    }
+    if (this.destroyed) return false;
+    if (!result || result.success !== true) {
+      this.cloneBusy = false;
+      this.cloneProgress = null;
+      this.updateCloneControls();
+      if (result?.code === "OPERATION_CANCELLED") {
+        this.setCloneError("The clone was cancelled.");
+        return false;
+      }
+      this.setCloneError(result?.error || "The repository could not be cloned.");
+      return false;
+    }
+    const clonedPath = result.path;
+    this.cloneBusy = false;
+    this.cloneProgress = null;
+    this.finishCloneDialog();
+    this.notifyGit({
+      tone: "success",
+      title: "Repository cloned",
+      message: `Cloned into ${result.folderName}. Opening the folder…`,
+    });
+    await this.editor.fileExplorer?.requestWorkspaceSwitch?.(clonedPath);
+    return true;
+  }
+
+  requestCloneCancel() {
+    if (this.cloneBusy) {
+      void this.cancelClone();
+      return;
+    }
+    this.finishCloneDialog();
+  }
+
+  async cancelClone() {
+    if (!this.cloneBusy) return false;
+    try {
+      await this.editor.api?.git?.cancelNetworkOperation?.();
+    } catch {}
+    return true;
+  }
+
+  finishCloneDialog() {
+    const session = this.cloneDialogSession;
+    if (!session) return false;
+    if (this.cloneDialog?.open) this.cloneDialog.close();
+    else this.completeCloneDialog();
+    return true;
+  }
+
+  completeCloneDialog() {
+    const session = this.cloneDialogSession;
+    if (!session || session.completed) return false;
+    this.cloneDialogSession = null;
+    session.completed = true;
+    this.cloneBusy = false;
+    this.cloneProgress = null;
     const previousFocus = session.previousFocus;
     if (previousFocus?.isConnected && typeof previousFocus.focus === "function") {
       try {
@@ -3977,6 +4329,10 @@ class GitSidebar extends Sidebar {
     this.defaultRemote = null;
     this.remotesBusy = false;
     this.finishRemotesDialog();
+    this.cloneBusy = false;
+    this.cloneProgress = null;
+    this.cloneDestination = "";
+    this.finishCloneDialog();
     this.finishOperationDialog({ confirmed: false });
     this.diffRefreshInFlight.clear();
     this.listResetPending = true;
@@ -4056,6 +4412,9 @@ class GitSidebar extends Sidebar {
     this.finishRemotesDialog();
     this.remotesDialog?.remove();
     this.remotesDialog = null;
+    this.finishCloneDialog();
+    this.cloneDialog?.remove();
+    this.cloneDialog = null;
     this.finishOperationDialog({ confirmed: false });
     this.operationDialog?.remove();
     this.operationDialog = null;

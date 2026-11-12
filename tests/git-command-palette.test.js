@@ -26,6 +26,7 @@ const GIT_ACTIONS = [
   ["git_unstage_all", "Git: Unstage All Changes"],
   ["git_focus_commit_message", "Git: Focus Commit Message"],
   ["git_open_settings", "Git: Open Settings"],
+  ["git_clone", "Git: Clone Repository"],
 ];
 
 test("the command palette exposes the Git commands", () => {
@@ -82,6 +83,10 @@ test("Git palette commands dispatch to Source Control", async () => {
       calls.push("create-branch");
       return true;
     },
+    openCloneDialog: () => {
+      calls.push("clone-dialog");
+      return true;
+    },
   };
   const keyBinding = new (loadGlobal(
     "src/js/addon/KeyBinding.js",
@@ -130,4 +135,7 @@ test("Git palette commands dispatch to Source Control", async () => {
 
   keyBinding.exec({ action: "git_open_settings" });
   assert.deepEqual(calls.at(-1), ["open-settings", "Git"]);
+
+  assert.equal(keyBinding.control_git_clone(), true);
+  assert.equal(calls.at(-1), "clone-dialog");
 });

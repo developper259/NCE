@@ -1909,6 +1909,84 @@ app.whenReady().then(() => {
           syncLocalHead,
           "the sync bar push published the local commit to the real remote",
         );
+        // A real clone through the dialog must clone the bare remote and open the
+        // result through the existing project system, not just render a dialog.
+        const cloneDestinationInput = path.join(directory, "source-control-clone-dest");
+        fs.mkdirSync(cloneDestinationInput, { recursive: true });
+        await authorizeWorkspace(cloneDestinationInput);
+        const cloneDestination = await fs.promises.realpath(cloneDestinationInput);
+        const clonedExpected = path.join(cloneDestination, "cloned-fixture");
+        const sourceControlClone = await run(`(async () => {
+          const git = editor.gitSidebar;
+          const opening = git.openCloneDialog();
+          const openDeadline = Date.now() + 5000;
+          while (git.cloneDialog?.open !== true && Date.now() < openDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          if (git.cloneDialog?.open !== true)
+            return { ok: false, reason: "clone dialog did not open" };
+          git.cloneUrlInput.value = ${JSON.stringify(sourceControlRemote)};
+          git.cloneDestination = ${JSON.stringify(cloneDestination)};
+          git.cloneFolderInput.value = "cloned-fixture";
+          await git.submitClone();
+          const expected = ${JSON.stringify(clonedExpected)};
+          const switchDeadline = Date.now() + 15000;
+          while (editor.fileExplorer.rootPath !== expected && Date.now() < switchDeadline)
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          const settleDeadline = Date.now() + 10000;
+          while (
+            (git.loading || git.getViewState().mode === "loading") &&
+            Date.now() < settleDeadline
+          )
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          await opening;
+          return {
+            ok: editor.fileExplorer.rootPath === expected,
+            rootPath: editor.fileExplorer.rootPath,
+            expected,
+            mode: git.getViewState().mode,
+            branch: git.getBranchLabel?.() || null,
+            dialogClosed: git.cloneDialog?.open === false,
+            cloneError: git.cloneError?.textContent || "",
+          };
+        })()`);
+        assert.equal(
+          sourceControlClone.ok,
+          true,
+          `the clone dialog cloned and opened the repository: ${JSON.stringify(sourceControlClone)}`,
+        );
+        assert.equal(sourceControlClone.dialogClosed, true, "the clone dialog closes on success");
+        assert.ok(
+          ["clean", "changes"].includes(sourceControlClone.mode),
+          `the cloned repository opens as a repository: ${JSON.stringify(sourceControlClone)}`,
+        );
+        assert.ok(sourceControlClone.branch, "the cloned repository displays its branch");
+        assert.equal(
+          execFileSync(
+            "git",
+            ["-C", clonedExpected, "rev-parse", "--is-inside-work-tree"],
+            { encoding: "utf8" },
+          ).trim(),
+          "true",
+          "the cloned folder is a real Git worktree",
+        );
+        assert.equal(
+          execFileSync(
+            "git",
+            ["-C", clonedExpected, "rev-parse", "HEAD"],
+            { encoding: "utf8" },
+          ).trim(),
+          syncLocalHead,
+          "the clone fetched the real commit from the bare remote",
+        );
+        // Restore the fixture workspace so the visual phase is unchanged.
+        assert.equal(await selectWorkspace(sourceControlWorkspaceInput), true);
+        await waitForCondition(
+          async () =>
+            (await run(
+              `editor.fileExplorer.rootPath === ${JSON.stringify(sourceControlWorkspace)}`,
+            )) === true,
+          { timeout: 10000, description: "Source Control fixture workspace restored after clone" },
+        );
         await run(`(() => {
           editor.notificationManager.clearHistory();
           editor.notificationManager.flushPersist?.();

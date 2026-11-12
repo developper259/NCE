@@ -204,6 +204,12 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "git_clone",
+    label: "Git: Clone Repository",
+    keywords: ["git", "clone", "repository", "remote", "checkout"],
+    in_editor: false,
+  },
+  {
     action: "open_settings",
     description: "Open Settings",
     in_editor: false,

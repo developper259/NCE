@@ -71,6 +71,7 @@ class KeyBinding {
       git_unstage_all: this.control_git_unstage_all,
       git_focus_commit_message: this.control_git_focus_commit_message,
       git_open_settings: this.control_git_open_settings,
+      git_clone: this.control_git_clone,
 
       lsp_completion: this.control_lsp_completion,
       lsp_hover: this.control_lsp_hover,
@@ -756,6 +757,10 @@ class KeyBinding {
 
   control_git_open_settings() {
     return this.editor.openSettings?.("Git");
+  }
+
+  control_git_clone() {
+    return this.editor.gitSidebar?.openCloneDialog?.();
   }
 
   // --- Key functions ---
