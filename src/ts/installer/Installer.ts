@@ -1,7 +1,7 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { runCommand } from "./command";
 import { downloadFile, isAllowedDownloadUrl } from "./download";
 import { InstallerError, isCancelled } from "./errors";
 import { extractArchive } from "./extract";
@@ -24,7 +24,6 @@ import type {
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const MAX_COMMAND_TIMEOUT_MS = 120_000;
-const MAX_COMMAND_OUTPUT = 64 * 1024;
 const SAFE_TOKEN = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 const CHECKSUM_LENGTH: Record<string, number> = { sha256: 64, sha512: 128 };
 const ARCHITECTURES: InstallerArchitecture[] = ["x64", "arm64", "ia32", "arm"];
@@ -489,66 +488,6 @@ function describeStep(step: InstallStep, definition: PackageDefinition): string 
     case "delete": return "Cleaning temporary files…";
     case "verify": return "Verifying installation…";
   }
-}
-
-interface CommandOptions {
-  cwd: string;
-  timeoutMs: number;
-  signal: AbortSignal;
-}
-
-function runCommand(executable: string, args: string[], options: CommandOptions): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, {
-      cwd: options.cwd,
-      shell: false,
-      windowsHide: true,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    const kill = () => {
-      if (process.platform === "win32") {
-        try { child.kill("SIGKILL"); } catch {}
-        return;
-      }
-      try { process.kill(-child.pid!, "SIGKILL"); } catch {
-        try { child.kill("SIGKILL"); } catch {}
-      }
-    };
-    const finish = (error: InstallerError | null, result?: { stdout: string; stderr: string }) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      options.signal.removeEventListener("abort", onAbort);
-      if (error) reject(error);
-      else resolve(result!);
-    };
-    const timer = setTimeout(() => {
-      kill();
-      finish(new InstallerError("STEP_FAILED", `Command timed out after ${options.timeoutMs}ms: ${executable}`));
-    }, options.timeoutMs);
-    const onAbort = () => {
-      kill();
-      finish(new InstallerError("CANCELLED", "Installation cancelled."));
-    };
-    options.signal.addEventListener("abort", onAbort, { once: true });
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (stdout.length < MAX_COMMAND_OUTPUT) stdout += chunk.toString("utf8");
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (stderr.length < MAX_COMMAND_OUTPUT) stderr += chunk.toString("utf8");
-    });
-    child.on("error", (error) => {
-      finish(new InstallerError("STEP_FAILED", `Could not run ${executable}: ${error.message}`));
-    });
-    child.on("close", (code) => {
-      if (code === 0) finish(null, { stdout, stderr });
-      else finish(new InstallerError("STEP_FAILED", `${path.basename(executable)} exited with code ${code}: ${(stderr || stdout).trim().slice(0, 400)}`));
-    });
-  });
 }
 
 function throwIfAborted(signal: AbortSignal): void {
