@@ -193,6 +193,32 @@ test("Installer reports and uninstalls an existing installation", async () => {
   }
 });
 
+test("Installer reuses a verified installation without re-downloading", async () => {
+  const root = await tempDir();
+  const fixture = await fixtureArchive([{ name: "bin/tool", data: "#!/bin/sh\necho tool\n", mode: 0o755 }]);
+  let requests = 0;
+  const server = await serve({
+    "/tool.tar.gz": (req, res) => { requests++; staticRoute(fixture.body)(req, res); },
+  });
+  try {
+    const installer = installerFor(root, definitionFor(`${server.origin}/tool.tar.gz`, fixture.checksum));
+    const first = await installer.install("tool");
+    assert.equal(first.success, true, first.error);
+    assert.equal(first.alreadyInstalled, undefined);
+    assert.equal(requests, 1);
+
+    const second = await installer.install("tool");
+    assert.equal(second.success, true, second.error);
+    assert.equal(second.alreadyInstalled, true);
+    assert.equal(second.executable, first.executable);
+    assert.equal(requests, 1, "a verified installation must not be downloaded again");
+  } finally {
+    await server.close();
+    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test("Installer installs a ZIP package and honours stripComponents", async () => {
   const root = await tempDir();
   const fixture = await fixtureArchive([
