@@ -21,6 +21,7 @@ const DEFAULT_LOG_LIMIT = 50;
 const MAX_LOG_LIMIT = 200;
 const MAX_COMMIT_FILES = 500;
 const MAX_COMMIT_BODY_LENGTH = 2_000;
+const MAX_DISCARD_ENTRIES = 1000;
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{4,64}$/i;
 
 export type GitErrorCode =
@@ -38,7 +39,10 @@ export type GitErrorCode =
   | "GIT_INDEX_LOCKED"
   | "GIT_OUTPUT_LIMIT"
   | "GIT_TIMEOUT"
-  | "OPERATION_CANCELLED";
+  | "OPERATION_CANCELLED"
+  | "CONFLICTED_CHANGES"
+  | "NOTHING_TO_DISCARD"
+  | "NO_OPERATION_IN_PROGRESS";
 
 export interface GitFailure {
   success: false;
@@ -151,6 +155,13 @@ export interface GitCommitComparison {
   target: string;
   files: GitCommitFile[];
   truncated: boolean;
+}
+
+export interface GitDiscardEntry {
+  path: string;
+  originalPath?: string | null;
+  staged?: boolean;
+  untracked?: boolean;
 }
 
 interface GitManagerOptions {
@@ -317,6 +328,10 @@ export class GitManager {
     ipc.handle("Git:unstage", async (_event, filePath) => this.unstageFile(filePath));
     ipc.handle("Git:unstageAll", async () => this.unstageAll());
     ipc.handle("Git:commit", async (_event, message) => this.commit(message));
+    ipc.handle("Git:discardChanges", async (_event, entries) =>
+      this.discardChanges(entries));
+    ipc.handle("Git:abortOperation", async (_event, operation) =>
+      this.abortOperation(operation));
     ipc.handle("Git:branches", async () => this.getBranches());
     ipc.handle("Git:currentBranch", async () => this.getCurrentBranch());
     ipc.handle("Git:switchBranch", async (_event, name) => this.switchBranch(name));
@@ -849,6 +864,191 @@ export class GitManager {
       hash: head.output.stdout.toString("utf8").trim(),
       summary: subject.ok ? subject.output.stdout.toString("utf8").trim() : "",
     };
+  }
+
+  discardChanges(entries: unknown): Promise<GitResult<{ discarded: string[] }>> {
+    return this.mutationQueue.run(() => this.discardChangesNow(entries));
+  }
+
+  private async discardChangesNow(entries: unknown): Promise<GitResult<{ discarded: string[] }>> {
+    if (!Array.isArray(entries) || entries.length === 0)
+      return failure("INVALID_ARGUMENT", "At least one change to discard is required.");
+    if (entries.length > MAX_DISCARD_ENTRIES)
+      return failure("INVALID_ARGUMENT", "Too many changes to discard at once.");
+    const requests: {
+      path: string; originalPath: string | null; staged: boolean; untracked: boolean;
+    }[] = [];
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (!entry || typeof entry !== "object")
+        return failure("INVALID_ARGUMENT", "Each discard entry must be an object.");
+      const record = entry as GitDiscardEntry;
+      const relativePath = this.sanitizeRepositoryPath(record.path);
+      if (!relativePath)
+        return failure("INVALID_PATH", "A valid repository file path is required.");
+      const originalPath = record.originalPath == null
+        ? null
+        : this.sanitizeRepositoryPath(record.originalPath);
+      if (record.originalPath != null && !originalPath)
+        return failure("INVALID_PATH", "The original file path is invalid.");
+      const staged = record.staged === true;
+      const untracked = record.untracked === true;
+      if (staged && untracked)
+        return failure("INVALID_ARGUMENT", "A change cannot be staged and untracked.");
+      const key = `${untracked ? "u" : staged ? "s" : "w"}:${relativePath}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      requests.push({ path: relativePath, originalPath, staged, untracked });
+    }
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    // Re-read the live status so only changes that still exist are discarded.
+    const live = await this.runGit(
+      [
+        "status", "--porcelain=v2", "-z", "--branch", "--untracked-files=all",
+        "--", ...this.scopePathspecs(context),
+      ],
+      { cwd: context.root },
+    );
+    if (!live.ok) return live.failure;
+    let status: GitStatus;
+    try {
+      status = this.parseStatus(live.output.stdout);
+    } catch {
+      return failure("GIT_COMMAND_FAILED", "Unable to parse the Git status output.");
+    }
+    const byPath = new Map(status.entries.map((entry) => [entry.path, entry]));
+    const stagedPaths: string[] = [];
+    const worktreePaths: string[] = [];
+    const untrackedPaths: string[] = [];
+    const discarded: string[] = [];
+    for (const request of requests) {
+      const entry = byPath.get(request.path);
+      if (!entry) {
+        if (request.untracked) {
+          const stats = await fs.lstat(path.join(context.root, request.path)).catch(() => null);
+          if (stats?.isDirectory())
+            return failure("INVALID_PATH", "Folders cannot be discarded from Source Control.");
+        }
+        continue;
+      }
+      if (entry.conflicted)
+        return failure(
+          "CONFLICTED_CHANGES",
+          "Conflicted files must be resolved, or the merge/rebase aborted, before discarding.",
+        );
+      if (request.untracked) {
+        if (entry.worktree !== "?") continue;
+        untrackedPaths.push(request.path);
+      } else if (request.staged) {
+        if (!entry.index) continue;
+        stagedPaths.push(request.path);
+        if (entry.originalPath) stagedPaths.push(entry.originalPath);
+      } else {
+        if (!entry.worktree || entry.worktree === "?") continue;
+        worktreePaths.push(request.path);
+        if (entry.originalPath) worktreePaths.push(entry.originalPath);
+      }
+      discarded.push(request.path);
+    }
+    if (discarded.length === 0)
+      return failure("NOTHING_TO_DISCARD", "None of the requested changes still exist.");
+    const head = await this.hasHeadCommit(context.root);
+    if ("failure" in head) return head.failure;
+    if (stagedPaths.length > 0) {
+      if (head.found) {
+        const restored = await this.runGit(
+          ["restore", "--staged", "--worktree", "--source=HEAD", "--", ...stagedPaths],
+          { cwd: context.root, literalPaths: true },
+        );
+        if (!restored.ok) return restored.failure;
+      } else {
+        const removed = await this.runGit(
+          ["rm", "--cached", "-q", "--", ...stagedPaths],
+          { cwd: context.root, literalPaths: true },
+        );
+        if (!removed.ok) return removed.failure;
+        for (const relativePath of stagedPaths) {
+          const deleted = await this.deleteUntrackedFile(context.root, relativePath);
+          if (deleted) return deleted;
+        }
+      }
+    }
+    if (worktreePaths.length > 0) {
+      const restored = await this.runGit(
+        ["restore", "--worktree", "--", ...worktreePaths],
+        { cwd: context.root, literalPaths: true },
+      );
+      if (!restored.ok) return restored.failure;
+    }
+    for (const relativePath of untrackedPaths) {
+      const deleted = await this.deleteUntrackedFile(context.root, relativePath);
+      if (deleted) return deleted;
+    }
+    return { success: true, discarded };
+  }
+
+  // Untracked paths are removed without Git: lstat first so a symbolic link is
+  // unlinked itself and never followed, and directories are always refused.
+  private async deleteUntrackedFile(root: string, relativePath: string): Promise<GitFailure | null> {
+    const absolutePath = path.join(root, relativePath);
+    if (!isInside(root, absolutePath, this.platform))
+      return failure("INVALID_PATH", "The file must remain inside the authorized workspace.");
+    let parentReal: string;
+    try {
+      parentReal = await fs.realpath(path.dirname(absolutePath));
+    } catch {
+      return null;
+    }
+    if (!isInside(root, parentReal, this.platform))
+      return failure("INVALID_PATH", "The file must remain inside the authorized workspace.");
+    let stats: Awaited<ReturnType<typeof fs.lstat>>;
+    try {
+      stats = await fs.lstat(absolutePath);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return null;
+      if (error?.code === "EACCES" || error?.code === "EPERM")
+        return failure("PERMISSION_DENIED", "The file cannot be removed.");
+      return failure("GIT_COMMAND_FAILED", "The file cannot be removed.");
+    }
+    if (stats.isDirectory())
+      return failure("INVALID_PATH", "Folders cannot be discarded from Source Control.");
+    if (!stats.isFile() && !stats.isSymbolicLink())
+      return failure("INVALID_PATH", "Only regular files and symbolic links can be discarded.");
+    try {
+      await fs.unlink(absolutePath);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") return null;
+      if (error?.code === "EACCES" || error?.code === "EPERM")
+        return failure("PERMISSION_DENIED", "The file cannot be removed.");
+      return failure("GIT_COMMAND_FAILED", "The file cannot be removed.");
+    }
+    return null;
+  }
+
+  abortOperation(operation: unknown): Promise<GitResult<{ aborted: "merge" | "rebase" }>> {
+    return this.mutationQueue.run(() => this.abortOperationNow(operation));
+  }
+
+  private async abortOperationNow(operation: unknown): Promise<GitResult<{ aborted: "merge" | "rebase" }>> {
+    if (operation !== "merge" && operation !== "rebase")
+      return failure("INVALID_ARGUMENT", "Only a merge or a rebase can be aborted.");
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const state = await this.readOperationState(context.root);
+    const active = operation === "merge" ? state.merging : state.rebasing;
+    if (!active) {
+      const other = operation === "merge" ? state.rebasing : state.merging;
+      return failure(
+        "NO_OPERATION_IN_PROGRESS",
+        other
+          ? `A ${operation === "merge" ? "rebase" : "merge"} is in progress, not a ${operation}.`
+          : `No ${operation} is in progress.`,
+      );
+    }
+    const result = await this.runGit([operation, "--abort"], { cwd: context.root });
+    if (!result.ok) return result.failure;
+    return { success: true, aborted: operation };
   }
 
   async getBranches(): Promise<GitResult<{ branches: GitBranchInfo[]; current: string | null }>> {

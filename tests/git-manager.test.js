@@ -1531,3 +1531,274 @@ test("GitManager caps commit file lists for huge commits", { skip: gitSkip }, as
     await removeAll(root);
   }
 });
+
+function gitAllowFailure(cwd, args) {
+  const { spawnSync } = require("node:child_process");
+  const result = spawnSync("git", args, {
+    cwd, encoding: "utf8", env: { ...process.env, ...isolatedEnv },
+  });
+  return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+}
+
+async function createConflictedRepository(kind) {
+  const root = await createRepository();
+  const tracked = path.join(root, "tracked.txt");
+  git(root, ["checkout", "-q", "-b", "side"]);
+  await fs.writeFile(tracked, "side change\n");
+  git(root, ["commit", "-q", "-am", "side"]);
+  git(root, ["checkout", "-q", "main"]);
+  await fs.writeFile(tracked, "main change\n");
+  git(root, ["commit", "-q", "-am", "main"]);
+  const attempt = kind === "merge"
+    ? gitAllowFailure(root, ["merge", "--no-edit", "side"])
+    : gitAllowFailure(root, ["rebase", "side"]);
+  if (attempt.code === 0) throw new Error(`expected a ${kind} conflict`);
+  return root;
+}
+
+test("GitManager discards worktree changes without touching the index", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const tracked = path.join(root, "tracked.txt");
+  const manager = managerFor(root);
+  try {
+    await fs.writeFile(tracked, "staged version\n");
+    git(root, ["add", "--", "tracked.txt"]);
+    await fs.writeFile(tracked, "worktree version\n");
+    const result = await manager.discardChanges([{ path: "tracked.txt" }]);
+    assert.equal(result.success, true);
+    assert.deepEqual(result.discarded, ["tracked.txt"]);
+    assert.equal(await fs.readFile(tracked, "utf8"), "staged version\n");
+    const status = await manager.getStatus();
+    assert.equal(status.success, true);
+    assert.equal(status.status.entries.length, 1);
+    assert.equal(status.status.entries[0].index, "M");
+    assert.equal(status.status.entries[0].worktree, null);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager discards staged and worktree changes back to HEAD", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const tracked = path.join(root, "tracked.txt");
+  const manager = managerFor(root);
+  try {
+    await fs.writeFile(tracked, "staged version\n");
+    git(root, ["add", "--", "tracked.txt"]);
+    await fs.writeFile(tracked, "worktree version\n");
+    const result = await manager.discardChanges([
+      { path: "tracked.txt", staged: true },
+      { path: "tracked.txt" },
+    ]);
+    assert.equal(result.success, true);
+    assert.equal(await fs.readFile(tracked, "utf8"), "initial\n");
+    const status = await manager.getStatus();
+    assert.equal(status.status.entries.length, 0);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager discards staged additions, deletions and renames", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    await fs.writeFile(path.join(root, "added.txt"), "added\n");
+    git(root, ["add", "--", "added.txt"]);
+    git(root, ["mv", "tracked.txt", "renamed.txt"]);
+    await fs.rm(path.join(root, "renamed.txt"));
+    const status = await manager.getStatus();
+    const renamed = status.status.entries.find((entry) => entry.path === "renamed.txt");
+    assert.equal(renamed.originalPath, "tracked.txt");
+    const result = await manager.discardChanges([
+      { path: "added.txt", staged: true },
+      { path: "renamed.txt", staged: true, originalPath: "tracked.txt" },
+    ]);
+    assert.equal(result.success, true);
+    assert.equal(await fs.readFile(path.join(root, "tracked.txt"), "utf8"), "initial\n");
+    await assert.rejects(fs.access(path.join(root, "added.txt")));
+    await assert.rejects(fs.access(path.join(root, "renamed.txt")));
+    const after = await manager.getStatus();
+    assert.equal(after.status.entries.length, 0);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager discards manual renames and deleted files", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    await fs.rename(path.join(root, "tracked.txt"), path.join(root, "moved.txt"));
+    const result = await manager.discardChanges([
+      { path: "tracked.txt" },
+      { path: "moved.txt", untracked: true },
+    ]);
+    assert.equal(result.success, true);
+    assert.equal(await fs.readFile(path.join(root, "tracked.txt"), "utf8"), "initial\n");
+    await assert.rejects(fs.access(path.join(root, "moved.txt")));
+    const after = await manager.getStatus();
+    assert.equal(after.status.entries.length, 0);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager deletes untracked files but refuses directories and escapes", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    await fs.writeFile(path.join(root, "untracked.txt"), "scratch\n");
+    await fs.mkdir(path.join(root, "untracked-dir"));
+    await fs.writeFile(path.join(root, "untracked-dir", "inner.txt"), "keep\n");
+    const refused = await manager.discardChanges([{ path: "untracked-dir", untracked: true }]);
+    assert.equal(refused.code, "INVALID_PATH");
+    assert.equal(await fs.readFile(path.join(root, "untracked-dir", "inner.txt"), "utf8"), "keep\n");
+    const result = await manager.discardChanges([{ path: "untracked.txt", untracked: true }]);
+    assert.equal(result.success, true);
+    await assert.rejects(fs.access(path.join(root, "untracked.txt")));
+    for (const bad of ["../escape.txt", "/etc/passwd", ".nce/state.json", "a/../../b", ""]) {
+      const rejected = await manager.discardChanges([{ path: bad, untracked: true }]);
+      assert.equal(rejected.code, "INVALID_PATH", `path ${bad} must be rejected`);
+    }
+    const missing = await manager.discardChanges([{ path: "gone.txt", untracked: true }]);
+    assert.equal(missing.code, "NOTHING_TO_DISCARD");
+    const plain = await manager.discardChanges([{ path: "untracked-dir/inner.txt" }]);
+    assert.equal(plain.code, "NOTHING_TO_DISCARD", "tracked-scope requests never delete untracked files");
+    assert.equal(await fs.readFile(path.join(root, "untracked-dir", "inner.txt"), "utf8"), "keep\n");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager discard validates arguments and caps the batch", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const manager = managerFor(root);
+  try {
+    assert.equal((await manager.discardChanges(null)).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.discardChanges([])).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.discardChanges([null])).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.discardChanges([{ path: "tracked.txt", staged: true, untracked: true }])).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.discardChanges([{ path: "tracked.txt", originalPath: "../x" }])).code, "INVALID_PATH");
+    const huge = Array.from({ length: 1001 }, (_, index) => ({ path: `file-${index}.txt` }));
+    assert.equal((await manager.discardChanges(huge)).code, "INVALID_ARGUMENT");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager discards staged files on an unborn HEAD", { skip: gitSkip }, async () => {
+  const root = await createRepository({ commits: 0 });
+  const manager = managerFor(root);
+  try {
+    await fs.writeFile(path.join(root, "first.txt"), "first\n");
+    git(root, ["add", "--", "first.txt"]);
+    const result = await manager.discardChanges([{ path: "first.txt", staged: true }]);
+    assert.equal(result.success, true);
+    await assert.rejects(fs.access(path.join(root, "first.txt")));
+    const status = await manager.getStatus();
+    assert.equal(status.status.entries.length, 0);
+    assert.equal(status.status.hasCommits, false);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager refuses to discard conflicted files", { skip: gitSkip }, async () => {
+  const root = await createConflictedRepository("merge");
+  const manager = managerFor(root);
+  try {
+    const status = await manager.getStatus();
+    assert.equal(status.status.merging, true);
+    assert.equal(status.status.entries[0].conflicted, true);
+    const result = await manager.discardChanges([{ path: "tracked.txt" }]);
+    assert.equal(result.code, "CONFLICTED_CHANGES");
+    assert.match(await fs.readFile(path.join(root, "tracked.txt"), "utf8"), /<<<<<<</);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager aborts a real merge and restores the pre-merge state", { skip: gitSkip }, async () => {
+  const root = await createConflictedRepository("merge");
+  const manager = managerFor(root);
+  try {
+    const wrong = await manager.abortOperation("rebase");
+    assert.equal(wrong.code, "NO_OPERATION_IN_PROGRESS");
+    const result = await manager.abortOperation("merge");
+    assert.equal(result.success, true);
+    assert.equal(result.aborted, "merge");
+    const status = await manager.getStatus();
+    assert.equal(status.status.merging, false);
+    assert.equal(status.status.entries.length, 0);
+    assert.equal(await fs.readFile(path.join(root, "tracked.txt"), "utf8"), "main change\n");
+    const again = await manager.abortOperation("merge");
+    assert.equal(again.code, "NO_OPERATION_IN_PROGRESS");
+    assert.equal((await manager.abortOperation("push")).code, "INVALID_ARGUMENT");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager aborts a real rebase and restores the branch", { skip: gitSkip }, async () => {
+  const root = await createConflictedRepository("rebase");
+  const manager = managerFor(root);
+  try {
+    const status = await manager.getStatus();
+    assert.equal(status.status.rebasing, true);
+    const wrong = await manager.abortOperation("merge");
+    assert.equal(wrong.code, "NO_OPERATION_IN_PROGRESS");
+    const result = await manager.abortOperation("rebase");
+    assert.equal(result.success, true);
+    const after = await manager.getStatus();
+    assert.equal(after.status.rebasing, false);
+    assert.equal(after.status.branch.name, "main");
+    assert.equal(await fs.readFile(path.join(root, "tracked.txt"), "utf8"), "main change\n");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager discard never follows symbolic links out of the repository", { skip: posixSkip }, async () => {
+  const root = await createRepository();
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-discard-outside-"));
+  const secret = path.join(outside, "secret.txt");
+  await fs.writeFile(secret, "secret\n");
+  const manager = managerFor(root);
+  try {
+    await fs.symlink(secret, path.join(root, "link.txt"));
+    const linked = await manager.discardChanges([{ path: "link.txt", untracked: true }]);
+    assert.equal(linked.success, true);
+    await assert.rejects(fs.lstat(path.join(root, "link.txt")));
+    assert.equal(await fs.readFile(secret, "utf8"), "secret\n");
+
+    await fs.symlink(outside, path.join(root, "escape-dir"));
+    const dirLink = await manager.discardChanges([{ path: "escape-dir", untracked: true }]);
+    assert.equal(dirLink.success, true);
+    assert.equal(await fs.readFile(secret, "utf8"), "secret\n");
+    const through = await manager.discardChanges([{ path: "escape-dir/secret.txt", untracked: true }]);
+    assert.equal(through.code, "NOTHING_TO_DISCARD");
+    assert.equal(await fs.readFile(secret, "utf8"), "secret\n");
+
+    await fs.rm(path.join(root, "tracked.txt"));
+    await fs.symlink(secret, path.join(root, "tracked.txt"));
+    const replaced = await manager.discardChanges([{ path: "tracked.txt" }]);
+    assert.equal(replaced.success, true);
+    assert.equal(await fs.readFile(path.join(root, "tracked.txt"), "utf8"), "initial\n");
+    assert.equal(await fs.readFile(secret, "utf8"), "secret\n");
+    assert.equal((await fs.lstat(path.join(root, "tracked.txt"))).isSymbolicLink(), false);
+  } finally {
+    manager.dispose();
+    await removeAll(root, outside);
+  }
+});
