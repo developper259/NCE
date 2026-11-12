@@ -63,6 +63,15 @@ class KeyBinding {
       toggle_agent: this.control_toggle_agent,
       toggle_terminal: this.control_toggle_terminal,
 
+      git_open_source_control: this.control_git_open_source_control,
+      git_refresh: this.control_git_refresh,
+      git_switch_branch: this.control_git_switch_branch,
+      git_create_branch: this.control_git_create_branch,
+      git_stage_all: this.control_git_stage_all,
+      git_unstage_all: this.control_git_unstage_all,
+      git_focus_commit_message: this.control_git_focus_commit_message,
+      git_open_settings: this.control_git_open_settings,
+
       lsp_completion: this.control_lsp_completion,
       lsp_hover: this.control_lsp_hover,
       lsp_signature_help: this.control_lsp_signature_help,
@@ -468,6 +477,7 @@ class KeyBinding {
     ).map((item) => ({
       id: item.action,
       label: item.label || this.getActionLabel(item.action),
+      keywords: Array.isArray(item.keywords) ? item.keywords : undefined,
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
@@ -696,6 +706,56 @@ class KeyBinding {
 
   control_toggle_terminal(s, c, m, a) {
     void this.editor.bottomPanelManager?.togglePanel("terminal");
+  }
+
+  control_git_open_source_control() {
+    return this.editor.sidebarManager?.openMenu?.("git");
+  }
+
+  control_git_refresh() {
+    const sidebar = this.editor.gitSidebar;
+    if (!sidebar) return false;
+    if (sidebar.isOpen)
+      return sidebar.refresh?.({ reason: "manual" });
+    return this.editor.sidebarManager?.openMenu?.("git");
+  }
+
+  control_git_switch_branch() {
+    return this.editor.gitSidebar?.openBranchPicker?.();
+  }
+
+  control_git_create_branch() {
+    return this.editor.gitSidebar?.promptNewBranch?.();
+  }
+
+  async control_git_stage_all() {
+    const sidebar = this.editor.gitSidebar;
+    if (typeof sidebar?.stageAllChanges !== "function") return false;
+    if (!sidebar.status)
+      await sidebar.refresh?.({ reason: "manual" });
+    return sidebar.stageAllChanges();
+  }
+
+  async control_git_unstage_all() {
+    const sidebar = this.editor.gitSidebar;
+    if (typeof sidebar?.unstageAllChanges !== "function") return false;
+    if (!sidebar.status)
+      await sidebar.refresh?.({ reason: "manual" });
+    return sidebar.unstageAllChanges();
+  }
+
+  control_git_focus_commit_message() {
+    const sidebar = this.editor.gitSidebar;
+    if (!sidebar) return false;
+    if (!sidebar.isOpen)
+      this.editor.sidebarManager?.openMenu?.("git");
+    if (typeof sidebar.commitInput?.focus !== "function") return false;
+    sidebar.commitInput.focus();
+    return true;
+  }
+
+  control_git_open_settings() {
+    return this.editor.openSettings?.("Git");
   }
 
   // --- Key functions ---
