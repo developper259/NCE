@@ -7,6 +7,7 @@ import { InstallerError, isCancelled } from "./errors";
 import { extractArchive } from "./extract";
 import { builtinPackages } from "./packages";
 import { getPackageDefinition } from "./registry";
+import { verifyGitFunctional } from "./verify-git";
 import type {
   InstallOptions,
   InstallProgress,
@@ -375,11 +376,20 @@ export class Installer {
     if (this.platform !== "win32" && (stats.mode & 0o111) === 0)
       throw new InstallerError("VERIFICATION_FAILED", `Installed executable is not executable: ${executable}`);
     try {
-      return await runCommand(executable, substituteArgs(verification.args ?? [], verificationContext), {
+      const result = await runCommand(executable, substituteArgs(verification.args ?? [], verificationContext), {
         cwd: dir,
         timeoutMs: verification.timeoutMs ?? COMMAND_TIMEOUT_MS,
         signal,
       });
+      if (verification.functional === "git") {
+        await verifyGitFunctional({
+          executable,
+          installDir: dir,
+          signal,
+          timeoutMs: verification.timeoutMs ?? COMMAND_TIMEOUT_MS,
+        });
+      }
+      return result;
     } catch (error) {
       if (isCancelled(error)) throw error;
       throw new InstallerError("VERIFICATION_FAILED", errorMessage(error));
@@ -443,6 +453,7 @@ function validateVerification(verification: VerificationConfig, invalid: (reason
   if (typeof verification.executable !== "string" || !verification.executable.trim()) invalid("verification executable is required.");
   if (verification.args !== undefined && (!Array.isArray(verification.args) || verification.args.some((arg) => typeof arg !== "string" || arg.includes("\0")))) invalid("verification args must be plain strings.");
   if (verification.timeoutMs !== undefined && (!Number.isInteger(verification.timeoutMs) || verification.timeoutMs <= 0 || verification.timeoutMs > MAX_COMMAND_TIMEOUT_MS)) invalid("verification timeoutMs is out of range.");
+  if (verification.functional !== undefined && verification.functional !== "git") invalid("verification functional must be \"git\".");
 }
 
 function isSafeRelativePath(value: string): boolean {

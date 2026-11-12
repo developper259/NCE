@@ -6,6 +6,7 @@ const { promises: fs } = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
 const { Installer } = require("../dist/ts/installer/Installer.js");
+const { verifyGitFunctional } = require("../dist/ts/installer/verify-git.js");
 const { tempDir } = require("./helpers/installer.js");
 
 const networkSkip = process.env.NCE_INSTALLER_NETWORK === "1"
@@ -34,6 +35,17 @@ test("Installer installs the real Git package and reuses it on second call", { s
     const version = await run(result.executable, ["--version"]);
     assert.match(version, /git version 2\.56\.1/);
     assert.ok(progress.some((event) => event.step === "download" && event.percent === 100));
+
+    // install() now runs a real Git lifecycle (init/commit/status/log), not just
+    // --version. Exercise it directly against the installed dugite-native layout.
+    const execPathDir = path.join(result.installDir, "libexec", "git-core");
+    assert.ok(await fs.stat(execPathDir).then((stats) => stats.isDirectory(), () => false), "dugite libexec/git-core must exist");
+    await verifyGitFunctional({
+      executable: result.executable,
+      installDir: result.installDir,
+      signal: new AbortController().signal,
+      timeoutMs: 60000,
+    });
 
     const again = await installer.install("git");
     assert.equal(again.success, true, again.error);

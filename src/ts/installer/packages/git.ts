@@ -17,7 +17,7 @@ function distribution(asset: string, checksum: string, size: number, executable:
     },
     archive: { format: "tar.gz", stripComponents: 0 },
     executable,
-    verification: { executable: verificationExecutable, args: ["--version"] },
+    verification: { executable: verificationExecutable, args: ["--version"], functional: "git" },
   };
 }
 
@@ -43,5 +43,5 @@ export const git: PackageDefinition = {
     destination: "tools/{id}/{version}",
     steps: [{ type: "download" }, { type: "extract" }],
   },
-  verification: { executable: "{installDir}/bin/git", args: ["--version"] },
+  verification: { executable: "{installDir}/bin/git", args: ["--version"], functional: "git" },
 };

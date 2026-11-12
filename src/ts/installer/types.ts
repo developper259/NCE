@@ -53,6 +53,7 @@ export interface VerificationConfig {
   executable: string;
   args?: string[];
   timeoutMs?: number;
+  functional?: "git";
 }
 
 export interface PackageDefinition {
