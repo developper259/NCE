@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld("api", {
     fetch: (options) => ipcRenderer.invoke("Git:fetch", options),
     pull: (options) => ipcRenderer.invoke("Git:pull", options),
     push: (options) => ipcRenderer.invoke("Git:push", options),
+    clone: (options) => ipcRenderer.invoke("Git:clone", options),
     cancelNetworkOperation: () => ipcRenderer.invoke("Git:cancelNetworkOperation"),
     onNetworkProgress: (callback) => {
       const listener = (_event, payload) => callback(payload);

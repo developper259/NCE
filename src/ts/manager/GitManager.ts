@@ -55,7 +55,8 @@ export type GitErrorCode =
   | "PUSH_REJECTED"
   | "AUTH_REQUIRED"
   | "PULL_CONFLICTS"
-  | "PULL_STRATEGY_REQUIRED";
+  | "PULL_STRATEGY_REQUIRED"
+  | "CLONE_DESTINATION_EXISTS";
 
 export interface GitFailure {
   success: false;
@@ -184,9 +185,16 @@ export interface GitRemoteInfo {
 }
 
 export interface GitNetworkProgress {
-  operation: "fetch" | "pull" | "push";
+  operation: "fetch" | "pull" | "push" | "clone";
   phase: string;
   percent: number;
+}
+
+export interface GitCloneOptions {
+  url?: string;
+  destination?: string;
+  folderName?: string;
+  branch?: string;
 }
 
 export interface GitFetchOptions {
@@ -447,6 +455,8 @@ export class GitManager {
       this.pull(options, { onProgress: this.networkProgressSender(event) }));
     ipc.handle("Git:push", async (event, options) =>
       this.push(options, { onProgress: this.networkProgressSender(event) }));
+    ipc.handle("Git:clone", async (event, options) =>
+      this.clone(options, { onProgress: this.networkProgressSender(event) }));
     ipc.handle("Git:cancelNetworkOperation", async () => this.cancelNetworkOperation());
   }
 
@@ -1267,7 +1277,7 @@ export class GitManager {
     if (settings.prune === true) args.push("--prune");
     if (all) args.push("--all");
     else args.push(remoteName!);
-    const result = await this.runNetworkOperation("fetch", args, context, callbacks);
+    const result = await this.runNetworkOperation("fetch", args, context.root, callbacks);
     if (!result.ok) return this.classifyNetworkFailure(result, "fetch");
     return { success: true, remote: remoteName, all };
   }
@@ -1308,7 +1318,7 @@ export class GitManager {
       args.push(remote);
       if (branch) args.push(branch);
     }
-    const result = await this.runNetworkOperation("pull", args, context, callbacks);
+    const result = await this.runNetworkOperation("pull", args, context.root, callbacks);
     if (!result.ok) {
       const state = await this.readOperationState(context.root);
       if (state.merging || state.rebasing) {
@@ -1377,7 +1387,7 @@ export class GitManager {
     if (setUpstream) args.push("--set-upstream");
     if (forceWithLease) args.push("--force-with-lease");
     if (explicit) args.push(remote, branch);
-    const result = await this.runNetworkOperation("push", args, context, callbacks);
+    const result = await this.runNetworkOperation("push", args, context.root, callbacks);
     if (!result.ok) return this.classifyNetworkFailure(result, "push");
     return {
       success: true,
@@ -1391,6 +1401,101 @@ export class GitManager {
     if (!this.networkAbort) return false;
     this.networkAbort.abort();
     return true;
+  }
+
+  clone(
+    options: GitCloneOptions = {},
+    callbacks: GitNetworkCallbacks = {},
+  ): Promise<GitResult<{ path: string; folderName: string }>> {
+    return this.mutationQueue.run(() => this.cloneNow(options, callbacks));
+  }
+
+  private async cloneNow(
+    options: GitCloneOptions,
+    callbacks: GitNetworkCallbacks,
+  ): Promise<GitResult<{ path: string; folderName: string }>> {
+    if (this.disposed)
+      return failure("OPERATION_CANCELLED", "The Git manager was disposed.");
+    const settings = options && typeof options === "object" ? options : {};
+    const url = typeof settings.url === "string" ? settings.url.trim() : "";
+    if (!validRemoteUrl(url))
+      return failure("INVALID_ARGUMENT", "Enter a valid repository URL (HTTPS, SSH or a local path).");
+    const destinationRaw = typeof settings.destination === "string" ? settings.destination.trim() : "";
+    if (!validPathValue(destinationRaw) || !path.isAbsolute(destinationRaw))
+      return failure("INVALID_PATH", "Choose an existing destination folder.");
+    let destination: string;
+    try {
+      destination = await fs.realpath(destinationRaw);
+      if (!(await fs.stat(destination)).isDirectory())
+        return failure("INVALID_PATH", "The destination must be an existing folder.");
+    } catch (error: any) {
+      if (error?.code === "EACCES" || error?.code === "EPERM")
+        return failure("PERMISSION_DENIED", "The destination folder cannot be accessed.");
+      return failure("INVALID_PATH", "The destination folder is not available.");
+    }
+    if (this.pathAccess &&
+        !(await this.pathAccess.isAuthorized(destination, { requireDirectory: true })))
+      return failure("INVALID_PATH", "The destination folder is not authorized.");
+    const folderName = this.resolveCloneFolderName(settings.folderName, url);
+    if (!folderName)
+      return failure("INVALID_ARGUMENT", "Enter a valid folder name for the clone.");
+    const target = path.join(destination, folderName);
+    // Only a destination this clone creates may be cleaned up on failure; a
+    // pre-existing folder (even empty) must never be deleted.
+    let createdDestination = false;
+    try {
+      const stat = await fs.lstat(target);
+      if (!stat.isDirectory())
+        return failure("CLONE_DESTINATION_EXISTS", `A file named "${folderName}" already exists at the destination.`);
+      if ((await fs.readdir(target)).length > 0)
+        return failure("CLONE_DESTINATION_EXISTS", `The folder "${folderName}" already exists and is not empty. Choose another name or destination.`);
+    } catch (error: any) {
+      if (error?.code === "ENOENT") createdDestination = true;
+      else if (error?.code === "EACCES" || error?.code === "EPERM")
+        return failure("PERMISSION_DENIED", "The destination folder cannot be accessed.");
+      else return failure("INVALID_PATH", "The destination folder cannot be inspected.");
+    }
+    const args = ["clone", "--progress"];
+    const branch = typeof settings.branch === "string" ? settings.branch.trim() : "";
+    if (branch) {
+      if (!isValidGitBranchName(branch))
+        return failure("INVALID_ARGUMENT", "A valid branch name is required.");
+      args.push("--branch", branch);
+    }
+    args.push("--", url, target);
+    const result = await this.runNetworkOperation("clone", args, destination, callbacks);
+    if (!result.ok) {
+      if (createdDestination) await this.removePartialClone(target);
+      return this.classifyNetworkFailure(result, "clone");
+    }
+    let clonedPath = target;
+    try {
+      clonedPath = await fs.realpath(target);
+    } catch {}
+    return { success: true, path: clonedPath, folderName };
+  }
+
+  private resolveCloneFolderName(folderName: unknown, url: string): string | null {
+    if (folderName !== undefined && folderName !== null) {
+      if (typeof folderName !== "string") return null;
+      const explicit = folderName.trim();
+      return this.isValidCloneFolderName(explicit) ? explicit : null;
+    }
+    const lastSegment = url.replace(/[\\/]+$/, "").split(/[\\/:]/).pop() || "";
+    const derived = lastSegment.replace(/\.git$/i, "");
+    return this.isValidCloneFolderName(derived) ? derived : null;
+  }
+
+  private isValidCloneFolderName(name: string): boolean {
+    if (!name || name.length > 255 || name === "." || name === "..") return false;
+    if (name.startsWith("-")) return false;
+    return !/[\\/:*?"<>|\u0000-\u001f\u007f]/.test(name);
+  }
+
+  private async removePartialClone(target: string): Promise<void> {
+    try {
+      await fs.rm(target, { recursive: true, force: true });
+    } catch {}
   }
 
   private async readRemotes(root: string): Promise<{ remotes: GitRemoteInfo[] } | { failure: GitFailure }> {
@@ -1450,7 +1555,7 @@ export class GitManager {
   private async runNetworkOperation(
     operation: GitNetworkProgress["operation"],
     args: string[],
-    context: RepositoryContext,
+    cwd: string,
     callbacks: GitNetworkCallbacks,
   ): Promise<GitRunOutcome> {
     const controller = new AbortController();
@@ -1463,7 +1568,7 @@ export class GitManager {
     }
     try {
       return await this.runGit(args, {
-        cwd: context.root,
+        cwd,
         timeoutMs: this.networkTimeoutMs,
         signal: controller.signal,
         onStderrLine: networkProgressParser(operation, callbacks.onProgress),
@@ -1474,7 +1579,7 @@ export class GitManager {
     }
   }
 
-  private classifyNetworkFailure(result: GitRunFailure, operation: "fetch" | "pull" | "push"): GitFailure {
+  private classifyNetworkFailure(result: GitRunFailure, operation: "fetch" | "pull" | "push" | "clone"): GitFailure {
     const code = result.failure.code;
     if (code !== "GIT_COMMAND_FAILED") return result.failure;
     const detail = result.stderr || "";
@@ -1485,6 +1590,12 @@ export class GitManager {
       return failure(
         "AUTH_REQUIRED",
         `Authentication is required. Set up a credential helper, access token, or SSH key, then retry.${summary ? ` ${summary}` : ""}`,
+      );
+    }
+    if (operation === "clone" && /repository .*not found|does not appear to be a git repository|could not read from remote repository|not found\. did you specify/i.test(detail)) {
+      return failure(
+        "GIT_COMMAND_FAILED",
+        `The repository could not be found. Check the URL and your access rights.${summary ? ` ${summary}` : ""}`,
       );
     }
     if (/no tracking information|no upstream configured|has no upstream branch|not currently on a branch/i.test(detail)) {
