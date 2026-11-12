@@ -23,6 +23,11 @@ const MAX_COMMIT_FILES = 500;
 const MAX_COMMIT_BODY_LENGTH = 2_000;
 const MAX_DISCARD_ENTRIES = 1000;
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{4,64}$/i;
+const DEFAULT_NETWORK_TIMEOUT_MS = 120_000;
+const MAX_REMOTE_URL_LENGTH = 2048;
+const NETWORK_DETAIL_LENGTH = 300;
+const REMOTE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+const NETWORK_PROGRESS_PATTERN = /^(?:remote:\s*)?([A-Z][A-Za-z ]*?):\s*(\d{1,3})%/;
 
 export type GitErrorCode =
   | "GIT_NOT_FOUND"
@@ -42,7 +47,15 @@ export type GitErrorCode =
   | "OPERATION_CANCELLED"
   | "CONFLICTED_CHANGES"
   | "NOTHING_TO_DISCARD"
-  | "NO_OPERATION_IN_PROGRESS";
+  | "NO_OPERATION_IN_PROGRESS"
+  | "NO_REMOTE"
+  | "REMOTE_NOT_FOUND"
+  | "REMOTE_EXISTS"
+  | "NO_UPSTREAM"
+  | "PUSH_REJECTED"
+  | "AUTH_REQUIRED"
+  | "PULL_CONFLICTS"
+  | "PULL_STRATEGY_REQUIRED";
 
 export interface GitFailure {
   success: false;
@@ -164,6 +177,43 @@ export interface GitDiscardEntry {
   untracked?: boolean;
 }
 
+export interface GitRemoteInfo {
+  name: string;
+  fetchUrl: string;
+  pushUrl: string | null;
+}
+
+export interface GitNetworkProgress {
+  operation: "fetch" | "pull" | "push";
+  phase: string;
+  percent: number;
+}
+
+export interface GitFetchOptions {
+  remote?: string;
+  all?: boolean;
+  tags?: boolean;
+  prune?: boolean;
+}
+
+export interface GitPullOptions {
+  remote?: string;
+  branch?: string;
+  rebase?: boolean;
+}
+
+export interface GitPushOptions {
+  remote?: string;
+  branch?: string;
+  setUpstream?: boolean;
+  forceWithLease?: boolean;
+}
+
+export interface GitNetworkCallbacks {
+  onProgress?: (progress: GitNetworkProgress) => void;
+  signal?: AbortSignal;
+}
+
 interface GitManagerOptions {
   getWorkspaceRoot: () => string | null | undefined;
   pathAccess?: Pick<PathAccess, "isAuthorized">;
@@ -171,6 +221,7 @@ interface GitManagerOptions {
   getGitPath?: () => string | null | undefined;
   getMainBranch?: () => string | null | undefined;
   timeoutMs?: number;
+  networkTimeoutMs?: number;
   maxOutputBytes?: number;
   maxConcurrentCommands?: number;
   env?: NodeJS.ProcessEnv;
@@ -199,6 +250,8 @@ interface GitRunOptions {
   maxOutputBytes?: number;
   allowExitCodes?: readonly number[];
   literalPaths?: boolean;
+  signal?: AbortSignal;
+  onStderrLine?: (line: string) => void;
 }
 
 interface RepositoryContext {
@@ -271,7 +324,41 @@ function isInside(root: string, candidate: string, platform: NodeJS.Platform): b
 
 function trimmedDetail(output: GitCommandOutput): string | undefined {
   const text = output.stderr.toString("utf8").trim() || output.stdout.toString("utf8").trim();
-  return text ? text.slice(0, MAX_DETAIL_LENGTH) : undefined;
+  return text ? redactCredentials(text).slice(0, MAX_DETAIL_LENGTH) : undefined;
+}
+
+/** Strip userinfo from URLs so tokens and passwords never reach logs or the UI. */
+export function redactCredentials(text: string): string {
+  return text
+    .replace(/(https?:\/\/[^/\s:@]+):[^/\s@]+@/gi, "$1:<redacted>@")
+    .replace(/(https?:\/\/)[^/\s:@]+@/gi, "$1<redacted>@");
+}
+
+function validRemoteUrl(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const url = value.trim();
+  if (!url || url.length > MAX_REMOTE_URL_LENGTH) return false;
+  if (/[\u0000-\u001f\u007f]/.test(url) || url.startsWith("-")) return false;
+  return /^(?:(?:https?|ssh|git|file):\/\/|[A-Za-z0-9._-]+@[A-Za-z0-9._-]+:|(?:[A-Za-z]:[\\/]|[\\/]|\.\/|\.\.\/))/.test(url);
+}
+
+function networkProgressParser(
+  operation: GitNetworkProgress["operation"],
+  onProgress?: (progress: GitNetworkProgress) => void,
+): (line: string) => void {
+  let lastPhase = "";
+  let lastPercent = -1;
+  return (line) => {
+    if (!onProgress) return;
+    const match = line.match(NETWORK_PROGRESS_PATTERN);
+    if (!match) return;
+    const phase = match[1].trim();
+    const percent = Math.min(100, Number(match[2]));
+    if (phase === lastPhase && percent === lastPercent) return;
+    lastPhase = phase;
+    lastPercent = percent;
+    onProgress({ operation, phase, percent });
+  };
 }
 
 /** Main-process Git integration for one NCE window. */
@@ -282,6 +369,7 @@ export class GitManager {
   private readonly getGitPath?: () => string | null | undefined;
   private readonly getMainBranch?: () => string | null | undefined;
   private readonly timeoutMs: number;
+  private readonly networkTimeoutMs: number;
   private readonly maxOutputBytes: number;
   private readonly extraEnv?: NodeJS.ProcessEnv;
   private readonly platform: NodeJS.Platform;
@@ -292,6 +380,7 @@ export class GitManager {
   private gitExecutable: Promise<string> | null = null;
   private gitExecutableSource = "";
   private disposed = false;
+  private networkAbort: AbortController | null = null;
 
   constructor(options: GitManagerOptions) {
     this.getWorkspaceRoot = options.getWorkspaceRoot;
@@ -300,6 +389,7 @@ export class GitManager {
     this.getGitPath = options.getGitPath;
     this.getMainBranch = options.getMainBranch;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.networkTimeoutMs = options.networkTimeoutMs ?? DEFAULT_NETWORK_TIMEOUT_MS;
     this.maxOutputBytes = options.maxOutputBytes ?? MAX_OUTPUT_BYTES;
     this.extraEnv = options.env;
     this.platform = options.platform ?? process.platform;
@@ -346,6 +436,25 @@ export class GitManager {
       }));
     ipc.handle("Git:compareCommits", async (_event, base, target) =>
       this.compareCommits(base, target));
+    ipc.handle("Git:remotes", async () => this.getRemotes());
+    ipc.handle("Git:addRemote", async (_event, name, url) => this.addRemote(name, url));
+    ipc.handle("Git:setRemoteUrl", async (_event, name, url, options) =>
+      this.setRemoteUrl(name, url, options?.push === true));
+    ipc.handle("Git:removeRemote", async (_event, name) => this.removeRemote(name));
+    ipc.handle("Git:fetch", async (event, options) =>
+      this.fetch(options, { onProgress: this.networkProgressSender(event) }));
+    ipc.handle("Git:pull", async (event, options) =>
+      this.pull(options, { onProgress: this.networkProgressSender(event) }));
+    ipc.handle("Git:push", async (event, options) =>
+      this.push(options, { onProgress: this.networkProgressSender(event) }));
+    ipc.handle("Git:cancelNetworkOperation", async () => this.cancelNetworkOperation());
+  }
+
+  private networkProgressSender(event: { sender: { isDestroyed(): boolean; send(channel: string, payload: unknown): void } }) {
+    const sender = event.sender;
+    return (progress: GitNetworkProgress) => {
+      if (!sender.isDestroyed()) sender.send("Git:networkProgress", progress);
+    };
   }
 
   dispose(): void {
@@ -1049,6 +1158,360 @@ export class GitManager {
     const result = await this.runGit([operation, "--abort"], { cwd: context.root });
     if (!result.ok) return result.failure;
     return { success: true, aborted: operation };
+  }
+
+  async getRemotes(): Promise<GitResult<{ remotes: GitRemoteInfo[]; defaultRemote: string | null }>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const remotes = await this.readRemotes(context.root);
+    if ("failure" in remotes) return remotes.failure;
+    const defaultRemote = await this.resolveDefaultRemote(context.root, remotes.remotes);
+    return { success: true, remotes: remotes.remotes, defaultRemote };
+  }
+
+  addRemote(name: unknown, url: unknown): Promise<GitResult<{ remote: string }>> {
+    return this.mutationQueue.run(() => this.addRemoteNow(name, url));
+  }
+
+  private async addRemoteNow(name: unknown, url: unknown): Promise<GitResult<{ remote: string }>> {
+    if (typeof name !== "string" || !REMOTE_NAME_PATTERN.test(name))
+      return failure("INVALID_ARGUMENT", "The remote name may only contain letters, digits, dots, dashes and underscores.");
+    if (!validRemoteUrl(url))
+      return failure("INVALID_ARGUMENT", "A valid remote URL is required (HTTPS, SSH, or a local path).");
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const remotes = await this.readRemotes(context.root);
+    if ("failure" in remotes) return remotes.failure;
+    if (remotes.remotes.some((remote) => remote.name === name))
+      return failure("REMOTE_EXISTS", `The remote "${name}" already exists.`);
+    const result = await this.runGit(["remote", "add", name, url.trim()], { cwd: context.root });
+    if (!result.ok) return result.failure;
+    return { success: true, remote: name };
+  }
+
+  setRemoteUrl(name: unknown, url: unknown, push = false): Promise<GitResult<{ remote: string }>> {
+    return this.mutationQueue.run(() => this.setRemoteUrlNow(name, url, push));
+  }
+
+  private async setRemoteUrlNow(name: unknown, url: unknown, push: boolean): Promise<GitResult<{ remote: string }>> {
+    if (typeof name !== "string" || !REMOTE_NAME_PATTERN.test(name))
+      return failure("INVALID_ARGUMENT", "A valid remote name is required.");
+    if (!validRemoteUrl(url))
+      return failure("INVALID_ARGUMENT", "A valid remote URL is required (HTTPS, SSH, or a local path).");
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const remotes = await this.readRemotes(context.root);
+    if ("failure" in remotes) return remotes.failure;
+    if (!remotes.remotes.some((remote) => remote.name === name))
+      return failure("REMOTE_NOT_FOUND", `The remote "${name}" does not exist.`);
+    const args = ["remote", "set-url"];
+    if (push) args.push("--push");
+    args.push(name, url.trim());
+    const result = await this.runGit(args, { cwd: context.root });
+    if (!result.ok) return result.failure;
+    return { success: true, remote: name };
+  }
+
+  removeRemote(name: unknown): Promise<GitResult<{ remote: string }>> {
+    return this.mutationQueue.run(() => this.removeRemoteNow(name));
+  }
+
+  private async removeRemoteNow(name: unknown): Promise<GitResult<{ remote: string }>> {
+    if (typeof name !== "string" || !REMOTE_NAME_PATTERN.test(name))
+      return failure("INVALID_ARGUMENT", "A valid remote name is required.");
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const remotes = await this.readRemotes(context.root);
+    if ("failure" in remotes) return remotes.failure;
+    if (!remotes.remotes.some((remote) => remote.name === name))
+      return failure("REMOTE_NOT_FOUND", `The remote "${name}" does not exist.`);
+    const result = await this.runGit(["remote", "remove", name], { cwd: context.root });
+    if (!result.ok) return result.failure;
+    return { success: true, remote: name };
+  }
+
+  fetch(
+    options: GitFetchOptions = {},
+    callbacks: GitNetworkCallbacks = {},
+  ): Promise<GitResult<{ remote: string | null; all: boolean }>> {
+    return this.mutationQueue.run(() => this.fetchNow(options, callbacks));
+  }
+
+  private async fetchNow(
+    options: GitFetchOptions,
+    callbacks: GitNetworkCallbacks,
+  ): Promise<GitResult<{ remote: string | null; all: boolean }>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const settings = options && typeof options === "object" ? options : {};
+    const all = settings.all === true;
+    const remotes = await this.readRemotes(context.root);
+    if ("failure" in remotes) return remotes.failure;
+    if (remotes.remotes.length === 0)
+      return failure("NO_REMOTE", "This repository has no remotes. Add one first.");
+    let remoteName: string | null = null;
+    if (!all) {
+      const requested = typeof settings.remote === "string" ? settings.remote.trim() : "";
+      if (requested) {
+        if (!remotes.remotes.some((remote) => remote.name === requested))
+          return failure("REMOTE_NOT_FOUND", `The remote "${requested}" does not exist.`);
+        remoteName = requested;
+      } else {
+        remoteName = await this.resolveDefaultRemote(context.root, remotes.remotes);
+        if (!remoteName)
+          return failure("NO_REMOTE", "Several remotes are configured. Choose which one to fetch from.");
+      }
+    }
+    const args = ["fetch", "--progress"];
+    if (settings.tags === true) args.push("--tags");
+    if (settings.prune === true) args.push("--prune");
+    if (all) args.push("--all");
+    else args.push(remoteName!);
+    const result = await this.runNetworkOperation("fetch", args, context, callbacks);
+    if (!result.ok) return this.classifyNetworkFailure(result, "fetch");
+    return { success: true, remote: remoteName, all };
+  }
+
+  pull(
+    options: GitPullOptions = {},
+    callbacks: GitNetworkCallbacks = {},
+  ): Promise<GitResult<{ summary: string; alreadyUpToDate: boolean }>> {
+    return this.mutationQueue.run(() => this.pullNow(options, callbacks));
+  }
+
+  private async pullNow(
+    options: GitPullOptions,
+    callbacks: GitNetworkCallbacks,
+  ): Promise<GitResult<{ summary: string; alreadyUpToDate: boolean }>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const settings = options && typeof options === "object" ? options : {};
+    const remote = typeof settings.remote === "string" ? settings.remote.trim() : "";
+    const branch = typeof settings.branch === "string" ? settings.branch.trim() : "";
+    if (branch && !remote)
+      return failure("INVALID_ARGUMENT", "A remote is required when a branch is specified.");
+    if (remote && !REMOTE_NAME_PATTERN.test(remote))
+      return failure("INVALID_ARGUMENT", "A valid remote name is required.");
+    if (branch && !isValidGitBranchName(branch))
+      return failure("INVALID_ARGUMENT", "A valid branch name is required.");
+    if (remote) {
+      const remotes = await this.readRemotes(context.root);
+      if ("failure" in remotes) return remotes.failure;
+      if (!remotes.remotes.some((entry) => entry.name === remote))
+        return failure("REMOTE_NOT_FOUND", `The remote "${remote}" does not exist.`);
+    }
+    const args = ["pull", "--progress"];
+    // Without an explicit choice Git's pull.rebase configuration decides the strategy.
+    if (settings.rebase === true) args.push("--rebase");
+    else if (settings.rebase === false) args.push("--no-rebase");
+    if (remote) {
+      args.push(remote);
+      if (branch) args.push(branch);
+    }
+    const result = await this.runNetworkOperation("pull", args, context, callbacks);
+    if (!result.ok) {
+      const state = await this.readOperationState(context.root);
+      if (state.merging || state.rebasing) {
+        return failure(
+          "PULL_CONFLICTS",
+          "The pull stopped with conflicts. Resolve them, or abort the operation from Source Control.",
+        );
+      }
+      return this.classifyNetworkFailure(result, "pull");
+    }
+    const summary = result.output.stdout.toString("utf8").trim();
+    return {
+      success: true,
+      summary: redactCredentials(summary).slice(0, MAX_DETAIL_LENGTH),
+      alreadyUpToDate: /already up to date/i.test(summary),
+    };
+  }
+
+  push(
+    options: GitPushOptions = {},
+    callbacks: GitNetworkCallbacks = {},
+  ): Promise<GitResult<{ remote: string | null; branch: string | null; forced: boolean }>> {
+    return this.mutationQueue.run(() => this.pushNow(options, callbacks));
+  }
+
+  private async pushNow(
+    options: GitPushOptions,
+    callbacks: GitNetworkCallbacks,
+  ): Promise<GitResult<{ remote: string | null; branch: string | null; forced: boolean }>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const settings = options && typeof options === "object" ? options : {};
+    const forceWithLease = settings.forceWithLease === true;
+    const setUpstream = settings.setUpstream === true;
+    let remote = typeof settings.remote === "string" ? settings.remote.trim() : "";
+    let branch = typeof settings.branch === "string" ? settings.branch.trim() : "";
+    if (forceWithLease && (!remote || !branch))
+      return failure("INVALID_ARGUMENT", "Force with lease requires an explicit remote and branch.");
+    if (remote && !REMOTE_NAME_PATTERN.test(remote))
+      return failure("INVALID_ARGUMENT", "A valid remote name is required.");
+    if (branch && !isValidGitBranchName(branch))
+      return failure("INVALID_ARGUMENT", "A valid branch name is required.");
+    const explicit = Boolean(remote || branch || setUpstream || forceWithLease);
+    if (explicit) {
+      const remotes = await this.readRemotes(context.root);
+      if ("failure" in remotes) return remotes.failure;
+      if (remotes.remotes.length === 0)
+        return failure("NO_REMOTE", "This repository has no remotes. Add one first.");
+      if (!remote) {
+        const fallback = await this.resolveDefaultRemote(context.root, remotes.remotes);
+        if (!fallback)
+          return failure("NO_REMOTE", "Several remotes are configured. Choose which one to push to.");
+        remote = fallback;
+      } else if (!remotes.remotes.some((entry) => entry.name === remote)) {
+        return failure("REMOTE_NOT_FOUND", `The remote "${remote}" does not exist.`);
+      }
+      if (!branch) {
+        const current = await this.currentBranchName(context.root);
+        if ("failure" in current) return current.failure;
+        if (!current.branch)
+          return failure("INVALID_ARGUMENT", "Cannot push from a detached HEAD. Choose a branch.");
+        branch = current.branch;
+      }
+    }
+    const args = ["push", "--progress"];
+    if (setUpstream) args.push("--set-upstream");
+    if (forceWithLease) args.push("--force-with-lease");
+    if (explicit) args.push(remote, branch);
+    const result = await this.runNetworkOperation("push", args, context, callbacks);
+    if (!result.ok) return this.classifyNetworkFailure(result, "push");
+    return {
+      success: true,
+      remote: explicit ? remote : null,
+      branch: explicit ? branch : null,
+      forced: forceWithLease,
+    };
+  }
+
+  cancelNetworkOperation(): boolean {
+    if (!this.networkAbort) return false;
+    this.networkAbort.abort();
+    return true;
+  }
+
+  private async readRemotes(root: string): Promise<{ remotes: GitRemoteInfo[] } | { failure: GitFailure }> {
+    const result = await this.runGit(["remote", "-v"], { cwd: root });
+    if (!result.ok) return { failure: result.failure };
+    const byName = new Map<string, { fetchUrl: string; pushUrl: string | null }>();
+    for (const line of result.output.stdout.toString("utf8").split("\n")) {
+      const match = line.match(/^(\S+)\t(.*) \((fetch|push)\)$/);
+      if (!match) continue;
+      const [, name, url, kind] = match;
+      const existing = byName.get(name) || { fetchUrl: "", pushUrl: null };
+      if (kind === "fetch") existing.fetchUrl = url;
+      else existing.pushUrl = url;
+      byName.set(name, existing);
+    }
+    const remotes = [...byName.entries()].map(([name, urls]) => ({
+      name,
+      fetchUrl: urls.fetchUrl,
+      pushUrl: urls.pushUrl && urls.pushUrl !== urls.fetchUrl ? urls.pushUrl : null,
+    }));
+    return { remotes };
+  }
+
+  /** Never assume "origin": prefer the branch's remote, then checkout.defaultRemote. */
+  private async resolveDefaultRemote(root: string, remotes: GitRemoteInfo[]): Promise<string | null> {
+    if (remotes.length === 0) return null;
+    if (remotes.length === 1) return remotes[0].name;
+    const known = (value: string) => remotes.some((remote) => remote.name === value);
+    const configValue = async (key: string): Promise<string> => {
+      const result = await this.runGit(["config", "--get", key], {
+        cwd: root,
+        allowExitCodes: [0, 1],
+      });
+      return result.ok && result.output.code === 0
+        ? result.output.stdout.toString("utf8").trim()
+        : "";
+    };
+    const current = await this.currentBranchName(root);
+    if (!("failure" in current) && current.branch) {
+      const branchRemote = await configValue(`branch.${current.branch}.remote`);
+      if (branchRemote && known(branchRemote)) return branchRemote;
+    }
+    const fallback = await configValue("checkout.defaultRemote");
+    return fallback && known(fallback) ? fallback : null;
+  }
+
+  private async currentBranchName(root: string): Promise<{ branch: string | null } | { failure: GitFailure }> {
+    const result = await this.runGit(
+      ["symbolic-ref", "--quiet", "--short", "HEAD"],
+      { cwd: root, allowExitCodes: [0, 1] },
+    );
+    if (!result.ok) return { failure: result.failure };
+    const branch = result.output.stdout.toString("utf8").trim();
+    return { branch: result.output.code === 0 && branch ? branch : null };
+  }
+
+  private async runNetworkOperation(
+    operation: GitNetworkProgress["operation"],
+    args: string[],
+    context: RepositoryContext,
+    callbacks: GitNetworkCallbacks,
+  ): Promise<GitRunOutcome> {
+    const controller = new AbortController();
+    this.networkAbort = controller;
+    const external = callbacks.signal;
+    const onExternalAbort = () => controller.abort();
+    if (external) {
+      if (external.aborted) controller.abort();
+      else external.addEventListener("abort", onExternalAbort, { once: true });
+    }
+    try {
+      return await this.runGit(args, {
+        cwd: context.root,
+        timeoutMs: this.networkTimeoutMs,
+        signal: controller.signal,
+        onStderrLine: networkProgressParser(operation, callbacks.onProgress),
+      });
+    } finally {
+      external?.removeEventListener("abort", onExternalAbort);
+      if (this.networkAbort === controller) this.networkAbort = null;
+    }
+  }
+
+  private classifyNetworkFailure(result: GitRunFailure, operation: "fetch" | "pull" | "push"): GitFailure {
+    const code = result.failure.code;
+    if (code !== "GIT_COMMAND_FAILED") return result.failure;
+    const detail = result.stderr || "";
+    const lines = detail.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const fatal = lines.find((line) => /^(fatal|error):/i.test(line));
+    const summary = (fatal || lines[lines.length - 1] || "").slice(0, NETWORK_DETAIL_LENGTH);
+    if (/authentication failed|could not read username|could not read password|permission denied \(publickey\)|terminal prompts disabled|access denied/i.test(detail)) {
+      return failure(
+        "AUTH_REQUIRED",
+        `Authentication is required. Set up a credential helper, access token, or SSH key, then retry.${summary ? ` ${summary}` : ""}`,
+      );
+    }
+    if (/no tracking information|no upstream configured|has no upstream branch|not currently on a branch/i.test(detail)) {
+      return failure(
+        "NO_UPSTREAM",
+        "The current branch has no upstream. Publish the branch or choose a remote branch explicitly.",
+      );
+    }
+    if (operation === "pull" && /need to specify how to reconcile divergent branches/i.test(detail)) {
+      return failure(
+        "PULL_STRATEGY_REQUIRED",
+        "The branches have diverged and Git has no configured pull strategy. Choose merge or rebase.",
+      );
+    }
+    if (operation === "push" && /non-fast-forward|fetch first|failed to push some refs/i.test(detail)) {
+      return failure(
+        "PUSH_REJECTED",
+        "The push was rejected because the remote has newer commits. Pull first, or force with lease if you are certain.",
+      );
+    }
+    if (/could not resolve host|connection refused|connection timed out|network is unreachable|unable to access|ssl certificate|certificate verify failed/i.test(detail)) {
+      return failure(
+        "GIT_COMMAND_FAILED",
+        `The remote could not be reached. Check the URL and your network connection.${summary ? ` ${summary}` : ""}`,
+      );
+    }
+    return failure("GIT_COMMAND_FAILED", summary || result.failure.error);
   }
 
   async getBranches(): Promise<GitResult<{ branches: GitBranchInfo[]; current: string | null }>> {
@@ -1758,6 +2221,12 @@ export class GitManager {
         failure: failure("OPERATION_CANCELLED", "The Git manager was disposed."),
         outputLimit: false,
       };
+    if (options.signal?.aborted)
+      return {
+        ok: false,
+        failure: failure("OPERATION_CANCELLED", "The operation was cancelled."),
+        outputLimit: false,
+      };
     const executable = await this.resolveGitPath();
     if (this.disposed)
       return {
@@ -1792,13 +2261,23 @@ export class GitManager {
       let total = 0;
       let settled = false;
       let timedOut = false;
+      let cancelled = false;
       let outputLimit = false;
+      let stderrLineBuffer = "";
       let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+      const signal = options.signal;
+      const onAbort = () => {
+        if (settled) return;
+        cancelled = true;
+        killProcessTree(child, "SIGTERM", this.platform);
+        forceKillTimer = setTimeout(() => stopChild("SIGKILL"), 250);
+      };
       const finish = (outcome: GitRunOutcome) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
         if (forceKillTimer) clearTimeout(forceKillTimer);
+        signal?.removeEventListener("abort", onAbort);
         this.children.delete(child);
         resolve(outcome);
       };
@@ -1819,6 +2298,10 @@ export class GitManager {
           });
         }, 250);
       }, timeoutMs);
+      if (signal) {
+        signal.addEventListener("abort", onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      }
       const collect = (target: Buffer[], chunk: Buffer) => {
         if (settled) return;
         total += chunk.length;
@@ -1835,7 +2318,14 @@ export class GitManager {
         target.push(chunk);
       };
       child.stdout?.on("data", (chunk: Buffer) => collect(stdout, chunk));
-      child.stderr?.on("data", (chunk: Buffer) => collect(stderr, chunk));
+      child.stderr?.on("data", (chunk: Buffer) => {
+        collect(stderr, chunk);
+        if (!options.onStderrLine || settled) return;
+        stderrLineBuffer += chunk.toString("utf8");
+        const lines = stderrLineBuffer.split(/\r\n|\n|\r/);
+        stderrLineBuffer = lines.pop() || "";
+        for (const line of lines) if (line) options.onStderrLine(line);
+      });
       child.on("error", (error: NodeJS.ErrnoException) => {
         if (this.disposed) {
           finish({
@@ -1872,6 +2362,14 @@ export class GitManager {
           finish({
             ok: false,
             failure: failure("GIT_TIMEOUT", "The Git command timed out."),
+            outputLimit: false,
+          });
+          return;
+        }
+        if (cancelled) {
+          finish({
+            ok: false,
+            failure: failure("OPERATION_CANCELLED", "The operation was cancelled."),
             outputLimit: false,
           });
           return;

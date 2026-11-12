@@ -85,6 +85,20 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.invoke("Git:commitFileVersions", hash, filePath, options),
     compareCommits: (base, target) =>
       ipcRenderer.invoke("Git:compareCommits", base, target),
+    getRemotes: () => ipcRenderer.invoke("Git:remotes"),
+    addRemote: (name, url) => ipcRenderer.invoke("Git:addRemote", name, url),
+    setRemoteUrl: (name, url, options) =>
+      ipcRenderer.invoke("Git:setRemoteUrl", name, url, options),
+    removeRemote: (name) => ipcRenderer.invoke("Git:removeRemote", name),
+    fetch: (options) => ipcRenderer.invoke("Git:fetch", options),
+    pull: (options) => ipcRenderer.invoke("Git:pull", options),
+    push: (options) => ipcRenderer.invoke("Git:push", options),
+    cancelNetworkOperation: () => ipcRenderer.invoke("Git:cancelNetworkOperation"),
+    onNetworkProgress: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("Git:networkProgress", listener);
+      return () => ipcRenderer.removeListener("Git:networkProgress", listener);
+    },
   },
   installer: {
     install: (packageId) =>
