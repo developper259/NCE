@@ -19,6 +19,9 @@ const MAX_VERSION_BYTES = 4 * 1024 * 1024;
 const MAX_CHECKOUT_CONFLICT_PATHS = 5;
 const DEFAULT_LOG_LIMIT = 50;
 const MAX_LOG_LIMIT = 200;
+const MAX_COMMIT_FILES = 500;
+const MAX_COMMIT_BODY_LENGTH = 2_000;
+const COMMIT_HASH_PATTERN = /^[0-9a-f]{4,64}$/i;
 
 export type GitErrorCode =
   | "GIT_NOT_FOUND"
@@ -118,6 +121,36 @@ export interface GitLogEntry {
   timestamp: number;
   subject: string;
   refs: string[];
+}
+
+export interface GitCommitFile {
+  path: string;
+  originalPath: string | null;
+  status: "added" | "modified" | "deleted" | "renamed" | "copied";
+}
+
+export interface GitCommitDetail {
+  hash: string;
+  parents: string[];
+  author: string;
+  email: string;
+  timestamp: number;
+  subject: string;
+  body: string;
+  refs: string[];
+}
+
+export interface GitCommitInspection {
+  commit: GitCommitDetail;
+  files: GitCommitFile[];
+  truncated: boolean;
+}
+
+export interface GitCommitComparison {
+  base: string;
+  target: string;
+  files: GitCommitFile[];
+  truncated: boolean;
 }
 
 interface GitManagerOptions {
@@ -290,6 +323,14 @@ export class GitManager {
     ipc.handle("Git:createBranch", async (_event, name) => this.createBranch(name));
     ipc.handle("Git:log", async (_event, options) =>
       this.getLog({ limit: options?.limit, skip: options?.skip }));
+    ipc.handle("Git:commitDetail", async (_event, hash) => this.getCommit(hash));
+    ipc.handle("Git:commitFileVersions", async (_event, hash, filePath, options) =>
+      this.getCommitFileVersions(hash, filePath, {
+        baseHash: options?.baseHash,
+        originalPath: options?.originalPath,
+      }));
+    ipc.handle("Git:compareCommits", async (_event, base, target) =>
+      this.compareCommits(base, target));
   }
 
   dispose(): void {
@@ -992,6 +1033,182 @@ export class GitManager {
     // One extra commit is read so the UI can offer more without a second call.
     const hasMore = commits.length > limit;
     return { success: true, commits: commits.slice(0, limit), limit, skip, hasMore };
+  }
+
+  async getCommit(hash: unknown): Promise<GitResult<GitCommitInspection>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const commit = await this.resolveCommit(context.root, hash);
+    if ("failure" in commit) return commit.failure;
+    const meta = await this.runGit(
+      ["log", "-1", "--format=%H%x00%P%x00%an%x00%ae%x00%at%x00%D%x00%s%x00%b", commit.oid],
+      { cwd: context.root },
+    );
+    if (!meta.ok) return meta.failure;
+    const fields = meta.output.stdout.toString("utf8").split("\0");
+    const [fullHash, parents, author, email, timestamp, refs, subject] = fields;
+    const files = await this.readCommitFiles(context.root, commit.oid);
+    if ("failure" in files) return files.failure;
+    return {
+      success: true,
+      commit: {
+        hash: fullHash || commit.oid,
+        parents: (parents || "").split(" ").filter(Boolean),
+        author: author || "",
+        email: email || "",
+        timestamp: Number(timestamp) || 0,
+        subject: subject || "",
+        body: (fields.slice(7).join("\0") || "")
+          .replace(/\n+$/, "")
+          .slice(0, MAX_COMMIT_BODY_LENGTH),
+        refs: (refs || "").split(",").map((ref) => ref.trim()).filter(Boolean),
+      },
+      files: files.files,
+      truncated: files.truncated,
+    };
+  }
+
+  async getCommitFileVersions(
+    hash: unknown,
+    filePath: unknown,
+    options: { baseHash?: unknown; originalPath?: unknown } = {},
+  ): Promise<GitResult<GitFileVersions>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const commit = await this.resolveCommit(context.root, hash);
+    if ("failure" in commit) return commit.failure;
+    const relativePath = this.sanitizeRepositoryPath(filePath);
+    if (!relativePath)
+      return failure("INVALID_PATH", "A valid repository file path is required.");
+    const originalPath = this.sanitizeRepositoryPath(options.originalPath);
+    if (options.originalPath != null && !originalPath)
+      return failure("INVALID_PATH", "The original file path is invalid.");
+    let baseOid: string | null = null;
+    if (options.baseHash != null) {
+      const base = await this.resolveCommit(context.root, options.baseHash);
+      if ("failure" in base) return base.failure;
+      baseOid = base.oid;
+    } else {
+      const parent = await this.runGit(
+        ["rev-parse", "--verify", "-q", `${commit.oid}^`],
+        { cwd: context.root, allowExitCodes: [0, 1] },
+      );
+      if (!parent.ok) return parent.failure;
+      if (parent.output.code === 0)
+        baseOid = parent.output.stdout.toString("utf8").trim();
+    }
+    const empty = { content: "", binary: false, tooLarge: false, missing: false };
+    let oldVersion = empty;
+    if (baseOid) {
+      const reference = await this.readBlobVersion(
+        context.root,
+        `${baseOid}:${originalPath || relativePath}`,
+      );
+      if ("failure" in reference) return reference.failure;
+      oldVersion = reference;
+    }
+    const newVersion = await this.readBlobVersion(context.root, `${commit.oid}:${relativePath}`);
+    if ("failure" in newVersion) return newVersion.failure;
+    const binary = oldVersion.binary || newVersion.binary;
+    const tooLarge = oldVersion.tooLarge || newVersion.tooLarge;
+    return {
+      success: true,
+      path: relativePath,
+      staged: false,
+      oldContent: binary || tooLarge ? "" : oldVersion.content,
+      newContent: binary || tooLarge ? "" : newVersion.content,
+      binary,
+      tooLarge,
+      untracked: false,
+      deleted: newVersion.missing,
+    };
+  }
+
+  async compareCommits(base: unknown, target: unknown): Promise<GitResult<GitCommitComparison>> {
+    const context = await this.resolveContext();
+    if ("failure" in context) return context.failure;
+    const baseCommit = await this.resolveCommit(context.root, base);
+    if ("failure" in baseCommit) return baseCommit.failure;
+    const targetCommit = await this.resolveCommit(context.root, target);
+    if ("failure" in targetCommit) return targetCommit.failure;
+    const result = await this.runGit(
+      ["diff", "--name-status", "-z", "-M", baseCommit.oid, targetCommit.oid],
+      { cwd: context.root, maxOutputBytes: MAX_OUTPUT_BYTES },
+    );
+    if (!result.ok) return result.failure;
+    const parsed = this.parseNameStatus(result.output.stdout);
+    return {
+      success: true,
+      base: baseCommit.oid,
+      target: targetCommit.oid,
+      files: parsed.files,
+      truncated: parsed.truncated,
+    };
+  }
+
+  private async resolveCommit(
+    root: string,
+    value: unknown,
+  ): Promise<{ oid: string } | { failure: GitFailure }> {
+    if (typeof value !== "string" || !COMMIT_HASH_PATTERN.test(value.trim()))
+      return { failure: failure("INVALID_ARGUMENT", "A valid commit hash is required.") };
+    const result = await this.runGit(
+      ["rev-parse", "--verify", "-q", `${value.trim()}^{commit}`],
+      { cwd: root, allowExitCodes: [0, 1] },
+    );
+    if (!result.ok) return { failure: result.failure };
+    const oid = result.output.stdout.toString("utf8").trim();
+    if (result.output.code !== 0 || !oid)
+      return { failure: failure("INVALID_ARGUMENT", "That commit could not be found.") };
+    return { oid };
+  }
+
+  private async readCommitFiles(
+    root: string,
+    oid: string,
+  ): Promise<{ files: GitCommitFile[]; truncated: boolean } | { failure: GitFailure }> {
+    // -m --first-parent keeps merge commits readable; --root covers the initial commit.
+    const result = await this.runGit(
+      [
+        "diff-tree", "--root", "--no-commit-id", "-r", "-M",
+        "--name-status", "-z", "-m", "--first-parent", oid,
+      ],
+      { cwd: root, maxOutputBytes: MAX_OUTPUT_BYTES },
+    );
+    if (!result.ok) return { failure: result.failure };
+    return this.parseNameStatus(result.output.stdout);
+  }
+
+  private parseNameStatus(output: Buffer): { files: GitCommitFile[]; truncated: boolean } {
+    const chunks = output.toString("utf8").split("\0");
+    const files: GitCommitFile[] = [];
+    let truncated = false;
+    for (let index = 0; index < chunks.length; index++) {
+      const record = chunks[index];
+      if (!record) continue;
+      const letter = record[0].toUpperCase();
+      let status: GitCommitFile["status"] = "modified";
+      if (letter === "A") status = "added";
+      else if (letter === "D") status = "deleted";
+      else if (letter === "R") status = "renamed";
+      else if (letter === "C") status = "copied";
+      let filePath = chunks[index + 1] ?? "";
+      let originalPath: string | null = null;
+      if (status === "renamed" || status === "copied") {
+        originalPath = filePath;
+        filePath = chunks[index + 2] ?? "";
+        index += 2;
+      } else {
+        index += 1;
+      }
+      if (!filePath) continue;
+      if (files.length >= MAX_COMMIT_FILES) {
+        truncated = true;
+        break;
+      }
+      files.push({ path: filePath, originalPath, status });
+    }
+    return { files, truncated };
   }
 
   private scopePathspecs(context: RepositoryContext): string[] {

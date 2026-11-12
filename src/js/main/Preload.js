@@ -78,6 +78,11 @@ contextBridge.exposeInMainWorld("api", {
     switchBranch: (name) => ipcRenderer.invoke("Git:switchBranch", name),
     createBranch: (name) => ipcRenderer.invoke("Git:createBranch", name),
     getLog: (options) => ipcRenderer.invoke("Git:log", options),
+    getCommitDetail: (hash) => ipcRenderer.invoke("Git:commitDetail", hash),
+    getCommitFileVersions: (hash, filePath, options) =>
+      ipcRenderer.invoke("Git:commitFileVersions", hash, filePath, options),
+    compareCommits: (base, target) =>
+      ipcRenderer.invoke("Git:compareCommits", base, target),
   },
   installer: {
     install: (packageId) =>

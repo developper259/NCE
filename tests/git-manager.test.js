@@ -1317,3 +1317,217 @@ test("GitManager scopes diff summaries to the workspace", { skip: gitSkip }, asy
     await removeAll(root);
   }
 });
+
+async function createHistoryRepository() {
+  const root = await createRepository({ commits: 0 });
+  await fs.writeFile(path.join(root, "a.txt"), "one\n");
+  await fs.writeFile(path.join(root, "keep.txt"), "keep\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "root commit"]);
+  const first = git(root, ["rev-parse", "HEAD"]).trim();
+  await fs.writeFile(path.join(root, "a.txt"), "one\ntwo\n");
+  await fs.writeFile(path.join(root, "b.txt"), "bee\n");
+  await fs.rm(path.join(root, "keep.txt"));
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "second commit", "-m", "body line one\nbody line two"]);
+  const second = git(root, ["rev-parse", "HEAD"]).trim();
+  git(root, ["mv", "a.txt", "renamed.txt"]);
+  git(root, ["commit", "-q", "-m", "rename a"]);
+  const third = git(root, ["rev-parse", "HEAD"]).trim();
+  git(root, ["checkout", "-qb", "side"]);
+  await fs.writeFile(path.join(root, "side.txt"), "side\n");
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "side commit"]);
+  git(root, ["checkout", "-q", "main"]);
+  git(root, ["merge", "-q", "--no-ff", "side", "-m", "merge side"]);
+  const merge = git(root, ["rev-parse", "HEAD"]).trim();
+  return { root, first, second, third, merge };
+}
+
+test("GitManager inspects commits with metadata and typed file changes", { skip: gitSkip }, async () => {
+  const { root, first, second, third, merge } = await createHistoryRepository();
+  const manager = managerFor(root);
+  try {
+    const rootCommit = await manager.getCommit(first);
+    assert.equal(rootCommit.success, true);
+    assert.deepEqual(rootCommit.commit.parents, []);
+    assert.deepEqual(
+      rootCommit.files.map((file) => [file.path, file.status]),
+      [["a.txt", "added"], ["keep.txt", "added"]],
+    );
+
+    const detail = await manager.getCommit(second);
+    assert.equal(detail.success, true);
+    assert.equal(detail.commit.hash, second);
+    assert.deepEqual(detail.commit.parents, [first]);
+    assert.equal(detail.commit.subject, "second commit");
+    assert.equal(detail.commit.body, "body line one\nbody line two");
+    assert.equal(detail.commit.author, "NCE Test");
+    assert.equal(detail.commit.email, "nce@example.invalid");
+    assert.ok(detail.commit.timestamp > 0);
+    assert.deepEqual(
+      detail.files.map((file) => [file.path, file.status, file.originalPath]),
+      [
+        ["a.txt", "modified", null],
+        ["b.txt", "added", null],
+        ["keep.txt", "deleted", null],
+      ],
+    );
+    assert.equal(detail.truncated, false);
+
+    const rename = await manager.getCommit(third);
+    assert.deepEqual(
+      rename.files.map((file) => [file.path, file.status, file.originalPath]),
+      [["renamed.txt", "renamed", "a.txt"]],
+    );
+
+    const merged = await manager.getCommit(merge);
+    assert.equal(merged.commit.parents.length, 2);
+    assert.deepEqual(
+      merged.files.map((file) => [file.path, file.status]),
+      [["side.txt", "added"]],
+    );
+
+    const short = await manager.getCommit(second.slice(0, 8));
+    assert.equal(short.success, true);
+    assert.equal(short.commit.hash, second);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager rejects invalid or unknown commit hashes", { skip: gitSkip }, async () => {
+  const { root } = await createHistoryRepository();
+  const manager = managerFor(root);
+  try {
+    for (const value of [null, 42, "", "zzzz", "../escape", "HEAD", "main", "-x"])
+      assert.equal((await manager.getCommit(value)).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.getCommit("f".repeat(40))).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.compareCommits("f".repeat(40), "a".repeat(40))).code, "INVALID_ARGUMENT");
+    assert.equal(
+      (await manager.getCommitFileVersions("f".repeat(40), "a.txt")).code,
+      "INVALID_ARGUMENT",
+    );
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager reads commit file versions for diffs and comparisons", { skip: gitSkip }, async () => {
+  const { root, first, second, third } = await createHistoryRepository();
+  const manager = managerFor(root);
+  try {
+    const modified = await manager.getCommitFileVersions(second, "a.txt");
+    assert.equal(modified.success, true);
+    assert.equal(modified.oldContent, "one\n");
+    assert.equal(modified.newContent, "one\ntwo\n");
+    assert.equal(modified.deleted, false);
+
+    const deleted = await manager.getCommitFileVersions(second, "keep.txt");
+    assert.equal(deleted.oldContent, "keep\n");
+    assert.equal(deleted.newContent, "");
+    assert.equal(deleted.deleted, true);
+
+    const added = await manager.getCommitFileVersions(second, "b.txt");
+    assert.equal(added.oldContent, "");
+    assert.equal(added.newContent, "bee\n");
+
+    const rootVersion = await manager.getCommitFileVersions(first, "a.txt");
+    assert.equal(rootVersion.oldContent, "");
+    assert.equal(rootVersion.newContent, "one\n");
+
+    const renamed = await manager.getCommitFileVersions(third, "renamed.txt", {
+      originalPath: "a.txt",
+    });
+    assert.equal(renamed.oldContent, "one\ntwo\n");
+    assert.equal(renamed.newContent, "one\ntwo\n");
+
+    const compared = await manager.getCommitFileVersions(third, "renamed.txt", {
+      baseHash: first,
+      originalPath: "a.txt",
+    });
+    assert.equal(compared.oldContent, "one\n");
+    assert.equal(compared.newContent, "one\ntwo\n");
+
+    for (const value of ["../escape.txt", "/etc/passwd", ".nce/state.json", "a/../../b", ""])
+      assert.equal((await manager.getCommitFileVersions(second, value)).code, "INVALID_PATH");
+    assert.equal(
+      (await manager.getCommitFileVersions(second, "a.txt", { originalPath: "../x" })).code,
+      "INVALID_PATH",
+    );
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager marks binary commit content without decoding it", { skip: gitSkip }, async () => {
+  const root = await createRepository({ commits: 0 });
+  await fs.writeFile(path.join(root, "bin.dat"), Buffer.from([0, 1, 2, 255]));
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "binary"]);
+  const hash = git(root, ["rev-parse", "HEAD"]).trim();
+  const manager = managerFor(root);
+  try {
+    const versions = await manager.getCommitFileVersions(hash, "bin.dat");
+    assert.equal(versions.success, true);
+    assert.equal(versions.binary, true);
+    assert.equal(versions.oldContent, "");
+    assert.equal(versions.newContent, "");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager compares two commits as a tree diff", { skip: gitSkip }, async () => {
+  const { root, first, second, third } = await createHistoryRepository();
+  const manager = managerFor(root);
+  try {
+    const comparison = await manager.compareCommits(first, third);
+    assert.equal(comparison.success, true);
+    assert.equal(comparison.base, first);
+    assert.equal(comparison.target, third);
+    const byPath = new Map(comparison.files.map((file) => [file.path, file]));
+    assert.equal(byPath.get("renamed.txt").status, "renamed");
+    assert.equal(byPath.get("renamed.txt").originalPath, "a.txt");
+    assert.equal(byPath.get("keep.txt").status, "deleted");
+    assert.equal(byPath.get("b.txt").status, "added");
+
+    const identical = await manager.compareCommits(second, second);
+    assert.deepEqual(identical.files, []);
+    assert.equal(identical.truncated, false);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager caps commit file lists for huge commits", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  const base = git(root, ["rev-parse", "HEAD"]).trim();
+  const names = [];
+  for (let index = 0; index < 502; index++) {
+    const name = `file-${String(index).padStart(4, "0")}.txt`;
+    names.push(name);
+    await fs.writeFile(path.join(root, name), `${index}\n`);
+  }
+  git(root, ["add", "-A"]);
+  git(root, ["commit", "-q", "-m", "huge commit"]);
+  const hash = git(root, ["rev-parse", "HEAD"]).trim();
+  const manager = managerFor(root);
+  try {
+    const detail = await manager.getCommit(hash);
+    assert.equal(detail.success, true);
+    assert.equal(detail.files.length, 500);
+    assert.equal(detail.truncated, true);
+    const comparison = await manager.compareCommits(base, hash);
+    assert.equal(comparison.files.length, 500);
+    assert.equal(comparison.truncated, true);
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
