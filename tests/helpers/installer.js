@@ -20,6 +20,7 @@ function sha256(buffer) {
 
 async function makeTarGz(entries, file) {
   const pack = tar.pack();
+  const done = pipeline(pack, createGzip(), createWriteStream(file));
   for (const entry of entries) {
     const type = entry.type ?? (entry.name.endsWith("/") ? "directory" : "file");
     const header = {
@@ -36,7 +37,7 @@ async function makeTarGz(entries, file) {
     });
   }
   pack.finalize();
-  await pipeline(pack, createGzip(), createWriteStream(file));
+  await done;
 }
 
 async function makeZip(entries, file) {

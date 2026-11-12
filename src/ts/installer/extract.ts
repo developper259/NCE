@@ -123,6 +123,7 @@ async function extractZip(
   strip: number,
   signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   let totalBytes = 0;
   const pendingLinks: PendingLink[] = [];
   await new Promise<void>((resolve, reject) => {
@@ -183,7 +184,12 @@ async function extractZip(
         await assertFreshTarget(target);
         await fs.mkdir(path.dirname(target), { recursive: true });
         const mode = unixMode & 0o777;
-        await pipeline(await openEntryStream(entry), createWriteStream(target, { mode: mode || 0o644 }));
+        try {
+          await pipeline(await openEntryStream(entry), createWriteStream(target, { mode: mode || 0o644 }), { signal });
+        } catch (error) {
+          if (signal?.aborted) throw new InstallerError("CANCELLED", "Installation cancelled.");
+          throw error;
+        }
       }
 
       function openEntryStream(entry: yauzl.Entry): Promise<Readable> {
@@ -205,6 +211,7 @@ async function extractTarGz(
   strip: number,
   signal?: AbortSignal,
 ): Promise<void> {
+  throwIfAborted(signal);
   let totalBytes = 0;
   const pendingLinks: PendingLink[] = [];
   const extract = tarExtract();
@@ -220,7 +227,14 @@ async function extractTarGz(
         .catch((error) => next(error instanceof Error ? error : new Error(String(error))));
     },
   );
-  await pipeline(createReadStream(archivePath), createGunzip(), extract);
+  try {
+    await pipeline(createReadStream(archivePath), createGunzip(), extract, { signal });
+  } catch (error) {
+    if (signal?.aborted) throw new InstallerError("CANCELLED", "Installation cancelled.");
+    if (error instanceof InstallerError) throw error;
+    throw new InstallerError("EXTRACTION_FAILED", `TAR extraction failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  throwIfAborted(signal);
   await resolvePendingLinks(pendingLinks, destDir);
 
   async function handleEntry(
@@ -257,6 +271,6 @@ async function extractTarGz(
     await assertFreshTarget(target);
     await fs.mkdir(path.dirname(target), { recursive: true });
     const mode = (header.mode ?? 0o644) & 0o777;
-    await pipeline(Readable.from(stream as AsyncIterable<Buffer>), createWriteStream(target, { mode: mode || 0o644 }));
+    await pipeline(Readable.from(stream as AsyncIterable<Buffer>), createWriteStream(target, { mode: mode || 0o644 }), { signal });
   }
 }
