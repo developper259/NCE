@@ -18,9 +18,10 @@ const Sidebar = class {
 };
 
 class FakeScroller {
-  constructor(editor, renderItem) {
+  constructor(editor, renderItem, onNearEnd) {
     this.editor = editor;
     this.renderItem = renderItem;
+    this.onNearEnd = onNearEnd;
     this.items = [];
     this.lastOptions = null;
     this.attached = false;
@@ -32,6 +33,7 @@ class FakeScroller {
     this.items = items;
     this.lastOptions = options;
   }
+  nearEnd() { this.onNearEnd?.(); }
   suspend() { this.suspended = true; }
   resume() { this.suspended = false; }
   destroy() { this.destroyed = true; }
@@ -119,16 +121,42 @@ class FakeElement {
 
 const documentStub = { createElement: (tagName) => new FakeElement(tagName) };
 
+const storageStub = {
+  values: new Map(),
+  getItem(key) { return this.values.has(key) ? this.values.get(key) : null; },
+  setItem(key, value) { this.values.set(key, String(value)); },
+  removeItem(key) { this.values.delete(key); },
+  clear() { this.values.clear(); },
+};
+
 const GitSidebar = loadGlobal("src/js/sidebar/Git.Sidebar.js", "GitSidebar", {
   Sidebar,
   SearchResultsScroller: FakeScroller,
   document: documentStub,
+  localStorage: storageStub,
   SETTINGS_SET: (key, value) => settingsSetHandler(key, value),
   NCEPath: {
     equals: (left, right) => left === right,
     basename: (value) => String(value || "").replace(/\\/g, "/").split("/").pop(),
   },
 });
+
+function makeCommit(hash, overrides = {}) {
+  return {
+    hash,
+    author: "NCE Test",
+    email: "nce@example.invalid",
+    timestamp: 1_760_000_000,
+    subject: `commit ${hash.slice(0, 7)}`,
+    refs: [],
+    ...overrides,
+  };
+}
+
+function makeCommits(count) {
+  return Array.from({ length: count }, (_unused, index) =>
+    makeCommit(String(index + 1).padStart(40, "0")));
+}
 
 function makeEntry(relativePath, {
   index = null,
@@ -177,6 +205,7 @@ const toPlain = (value) => JSON.parse(JSON.stringify(value));
 let settingsSetHandler = async () => false;
 
 function createSidebar(options = {}) {
+  storageStub.clear();
   const responses = [...(options.responses || [])];
   const calls = {
     status: 0,
@@ -186,6 +215,7 @@ function createSidebar(options = {}) {
     unstage: [],
     unstageAll: 0,
     commit: [],
+    log: [],
     branches: 0,
     switchBranch: [],
     createBranch: [],
@@ -294,6 +324,22 @@ function createSidebar(options = {}) {
             ? options.createBranchResult(name)
             : options.createBranchResult || { success: true, branch: name };
         },
+        async getLog(logOptions) {
+          calls.log.push(logOptions);
+          if (typeof options.logResult === "function") return options.logResult(logOptions);
+          if (options.logResult) return options.logResult;
+          const all = options.commits || [];
+          const limit = logOptions?.limit ?? GitSidebar.HISTORY_PAGE_SIZE;
+          const skip = logOptions?.skip ?? 0;
+          const commits = all.slice(skip, skip + limit);
+          return {
+            success: true,
+            commits,
+            limit,
+            skip,
+            hasMore: skip + commits.length < all.length,
+          };
+        },
       },
       installer: options.installer === null ? undefined : {
         async install(packageId) {
@@ -382,7 +428,7 @@ test("GitSidebar counts staged and unstaged changes from normalized status", asy
     const sections = items.filter((item) => item.type === "section");
     assert.equal(
       sections.map((item) => `${item.section}:${item.count}`).join("|"),
-      "changes:2|staged:1",
+      "changes:2|staged:1|history:0",
     );
     assert.equal(items.filter((item) => item.type === "entry").length, 3);
     assert.equal(sidebar.fileScroller.items.length, items.length);
@@ -1397,6 +1443,9 @@ test("GitSidebar keeps prior changes visible but stale after a transient error",
 });
 
 test("GitSidebar lists only non-empty change sections", async () => {
+  const changeSections = (items) => toPlain(items
+    .filter((item) => item.type === "section" && item.section !== "history")
+    .map((item) => item.section));
   const stagedOnly = createSidebar({ entries: [stagedEntry] });
   try {
     await stagedOnly.sidebar.refresh({ reason: "open" });
@@ -1404,10 +1453,7 @@ test("GitSidebar lists only non-empty change sections", async () => {
       stagedOnly.sidebar.getSections().staged,
       stagedOnly.sidebar.getSections().changes,
     );
-    assert.deepEqual(
-      toPlain(items.filter((item) => item.type === "section").map((item) => item.section)),
-      ["staged"],
-    );
+    assert.deepEqual(changeSections(items), ["staged"]);
     assert.equal(items.some((item) => item.type === "empty"), false);
   } finally {
     stagedOnly.sidebar.destroy();
@@ -1420,10 +1466,7 @@ test("GitSidebar lists only non-empty change sections", async () => {
       changedOnly.sidebar.getSections().staged,
       changedOnly.sidebar.getSections().changes,
     );
-    assert.deepEqual(
-      toPlain(items.filter((item) => item.type === "section").map((item) => item.section)),
-      ["changes"],
-    );
+    assert.deepEqual(changeSections(items), ["changes"]);
     assert.equal(items.some((item) => item.type === "empty"), false);
   } finally {
     changedOnly.sidebar.destroy();
@@ -1431,8 +1474,17 @@ test("GitSidebar lists only non-empty change sections", async () => {
 
   const clean = createSidebar({ entries: [] });
   try {
+    clean.sidebar.render();
     await clean.sidebar.refresh({ reason: "open" });
-    assert.deepEqual(toPlain(clean.sidebar.buildListItems([], [])), []);
+    const items = clean.sidebar.buildListItems([], []);
+    assert.deepEqual(changeSections(items), []);
+    assert.deepEqual(
+      toPlain(items.map((item) => item.type)),
+      ["section"],
+      "a clean repository still offers the collapsed history section",
+    );
+    assert.equal(items[0].section, "history");
+    assert.equal(clean.sidebar.listElement.hidden, false);
   } finally {
     clean.sidebar.destroy();
   }
@@ -1895,8 +1947,392 @@ test("Git context menus expose only implemented Git actions", () => {
   });
   assert.equal(deletedMenu.openFile.enabled, false);
   const header = builders.buildGitHeaderContextMenu(editor)({ sidebar });
-  assert.deepEqual(Object.keys(header), ["refresh", "copyBranch"]);
+  assert.deepEqual(Object.keys(header), ["refresh", "history", "copyBranch"]);
+  assert.equal(header.history.name, "Show History");
+  assert.equal(header.history.enabled, false, "history needs a loaded repository status");
   sidebar.destroy();
+});
+
+test("Git header menu toggles the history section", async () => {
+  const builders = loadGlobal(
+    "src/js/contextMenu/GitFile.ContextMenu.js",
+    "({ buildGitHeaderContextMenu })",
+    { GitSidebar },
+  );
+  const { sidebar, calls } = createSidebar({ commits: makeCommits(2) });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const menu = () => builders.buildGitHeaderContextMenu(sidebar.editor)({ sidebar });
+    assert.equal(menu().history.enabled, true);
+    assert.equal(menu().history.name, "Show History");
+    menu().history.callback();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sidebar.collapsed.history, false);
+    assert.equal(calls.log.length, 1);
+    assert.equal(menu().history.name, "Hide History");
+    menu().history.callback();
+    assert.equal(sidebar.collapsed.history, true);
+    assert.equal(calls.log.length, 1, "hiding the section does not re-read the log");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar loads commit history only when the section is expanded", async () => {
+  const commits = makeCommits(3);
+  const { sidebar, calls } = createSidebar({ entries: [modifiedEntry], commits });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(calls.log.length, 0, "a collapsed history section reads nothing");
+    assert.equal(sidebar.collapsed.history, true);
+    const items = () => sidebar.buildListItems(
+      sidebar.getSections().staged,
+      sidebar.getSections().changes,
+    );
+    assert.equal(items().some((item) => item.type === "commit"), false);
+
+    assert.equal(sidebar.toggleSection("history"), false, "expanding returns the collapsed flag");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(toPlain(calls.log), [{ limit: 50, skip: 0 }]);
+    assert.equal(sidebar.history.commits.length, 3);
+    assert.equal(sidebar.history.hasMore, false);
+    const expanded = items();
+    assert.deepEqual(
+      toPlain(expanded.filter((item) => item.type === "commit").map((item) => item.commit.hash)),
+      commits.map((commit) => commit.hash),
+    );
+    assert.equal(
+      expanded.find((item) => item.type === "section" && item.section === "history").count,
+      3,
+    );
+    assert.equal(sidebar.fileScroller.items.length, expanded.length);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar paginates history through Load more and the scroller tail", async () => {
+  const commits = makeCommits(120);
+  const { sidebar, calls } = createSidebar({ commits });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    assert.equal(sidebar.history.commits.length, 50);
+    assert.equal(sidebar.history.hasMore, true);
+    const moreItem = () => sidebar.fileScroller.items.find((item) => item.type === "history-more");
+    assert.ok(moreItem(), "a partial page offers more commits");
+
+    const moreRow = sidebar.createListItem(moreItem());
+    assert.equal(moreRow.dataset.action, "history-more");
+    moreRow.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(toPlain(calls.log[1]), { limit: 50, skip: 50 });
+    assert.equal(sidebar.history.commits.length, 100);
+
+    sidebar.fileScroller.nearEnd();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(toPlain(calls.log[2]), { limit: 50, skip: 100 });
+    assert.equal(sidebar.history.commits.length, 120);
+    assert.equal(sidebar.history.hasMore, false);
+    assert.equal(moreItem(), undefined);
+
+    sidebar.fileScroller.nearEnd();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.log.length, 3, "an exhausted history stops requesting pages");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar stops loading history at its in-memory ceiling", async () => {
+  const total = GitSidebar.MAX_HISTORY_COMMITS + 120;
+  const { sidebar, calls } = createSidebar({ commits: makeCommits(total) });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    while (sidebar.history.hasMore) {
+      await sidebar.loadHistory();
+      assert.ok(calls.log.length <= 20, "the ceiling stops the pagination loop");
+    }
+    assert.equal(sidebar.history.commits.length, GitSidebar.MAX_HISTORY_COMMITS);
+    assert.equal(sidebar.history.truncated, true);
+    const notice = sidebar.fileScroller.items.find((item) =>
+      item.type === "message" &&
+      item.text === `Showing the most recent ${GitSidebar.MAX_HISTORY_COMMITS} commits.`);
+    assert.ok(notice, "a truncated history says so instead of offering more");
+    assert.equal(
+      sidebar.fileScroller.items.some((item) => item.type === "history-more"),
+      false,
+    );
+    sidebar.fileScroller.nearEnd();
+    const before = calls.log.length;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.log.length, before, "the scroller tail cannot exceed the ceiling");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar replays a history reset requested during a load", async () => {
+  const pending = deferred();
+  const stale = makeCommits(2);
+  const fresh = [makeCommit("b".repeat(40), { subject: "feat: after commit" }), ...stale];
+  let payload = stale;
+  const { sidebar, calls } = createSidebar({
+    commits: stale,
+    logResult: (logOptions) => {
+      if (calls.log.length === 1) return pending.promise;
+      return { success: true, commits: payload, hasMore: false, skip: logOptions.skip };
+    },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.loadHistory({ reset: true });
+    assert.equal(sidebar.history.loading, true);
+    payload = fresh;
+    assert.equal(await sidebar.loadHistory({ reset: true }), false);
+    assert.equal(sidebar.history.pendingReset, true);
+    pending.resolve({ success: true, commits: stale, hasMore: false });
+    assert.equal(await first, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.log.length, 2, "the dropped reset is replayed");
+    assert.deepEqual(toPlain(calls.log[1]), { limit: 50, skip: 0 });
+    assert.equal(sidebar.history.commits.length, 3);
+    assert.equal(sidebar.history.commits[0].subject, "feat: after commit");
+    assert.equal(sidebar.history.pendingReset, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar ignores overlapping history requests", async () => {
+  const pending = deferred();
+  const { sidebar, calls } = createSidebar({
+    commits: makeCommits(80),
+    logResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const first = sidebar.showHistory();
+    assert.equal(sidebar.history.loading, true);
+    assert.equal(await sidebar.loadHistory(), false);
+    assert.equal(calls.log.length, 1);
+    const loadingRow = sidebar.fileScroller.items.find((item) =>
+      item.type === "message" && item.text === "Loading history…");
+    assert.ok(loadingRow, "a running load is visible in the list");
+    pending.resolve({ success: true, commits: makeCommits(50), hasMore: true });
+    assert.equal(await first, true);
+    assert.equal(sidebar.history.loading, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar expands a commit into details and copies the full hash", async () => {
+  const commit = makeCommit("f".repeat(40), {
+    subject: "feat: history",
+    refs: ["HEAD -> main", "tag: v1", "origin/main", "dev"],
+  });
+  const { sidebar, calls } = createSidebar({ commits: [commit] });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    const row = sidebar.createListItem({ type: "commit", commit, height: 40, rowHeight: 40 });
+    assert.equal(row.dataset.hash, commit.hash);
+    assert.equal(row.dataset.gitFocusKey, `commit:${commit.hash}`);
+    assert.equal(row.getAttribute("aria-expanded"), "false");
+    const refs = row.children.find((child) => child.className === "git-commit-refs");
+    assert.deepEqual(refs.children.map((badge) => badge.textContent), ["main", "tag: v1", "+2"]);
+    assert.equal(refs.children[0].dataset.current, "true");
+    assert.equal(refs.children[2].title, "origin/main, dev");
+    const unordered = sidebar.createCommitRefs(["dev", "origin/main", "tag: v2", "HEAD -> main"]);
+    assert.deepEqual(unordered.children.map((badge) => badge.textContent), ["main", "tag: v2", "+2"]);
+    const branchesOnly = sidebar.createCommitRefs(["alpha", "zeta", "scroll-01"]);
+    assert.deepEqual(branchesOnly.children.map((badge) => badge.textContent), ["+3"]);
+    assert.equal(branchesOnly.children[0].title, "alpha, zeta, scroll-01");
+
+    row.click();
+    assert.equal(sidebar.selectedCommit, commit.hash);
+    const detailItem = sidebar.fileScroller.items.find((item) => item.type === "commit-detail");
+    assert.ok(detailItem, "selecting a commit inserts its detail row");
+    assert.equal(detailItem.height, sidebar.commitDetailHeight(commit));
+    const detail = sidebar.createListItem(detailItem);
+    const rows = detail.children.map((child) => [
+      child.children[0].textContent,
+      child.children[1].textContent,
+    ]);
+    assert.deepEqual(rows, [
+      ["Commit", commit.hash],
+      ["Author", "NCE Test <nce@example.invalid>"],
+      ["Date", GitSidebar.formatCommitTimestamp(commit.timestamp)],
+      ["Refs", "HEAD -> main, tag: v1, origin/main, dev"],
+    ]);
+    detail.children[0].children[2].click();
+    assert.deepEqual(calls.clipboard, [commit.hash]);
+
+    assert.equal(sidebar.selectCommit(commit.hash), false);
+    assert.equal(sidebar.selectedCommit, null);
+    assert.equal(sidebar.selectCommit(""), false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reports history failures inline and retries them", async () => {
+  let failing = true;
+  const commits = makeCommits(2);
+  const { sidebar, calls } = createSidebar({
+    commits,
+    logResult: () => failing
+      ? { success: false, code: "GIT_TIMEOUT", error: "timeout" }
+      : { success: true, commits, hasMore: false },
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(await sidebar.showHistory(), true);
+    assert.equal(sidebar.history.loaded, false);
+    const errorItem = sidebar.fileScroller.items.find((item) => item.action === "retry-history");
+    assert.equal(errorItem.text, "Git did not respond in time.");
+    const retry = sidebar.createListItem(errorItem).children
+      .find((child) => child.dataset.action === "retry-history");
+    failing = false;
+    retry.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.log.length, 2);
+    assert.equal(sidebar.history.error, "");
+    assert.equal(sidebar.history.commits.length, 2);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar drops history that resolves after a workspace switch", async () => {
+  const pending = deferred();
+  const { sidebar, editor, calls } = createSidebar({
+    commits: makeCommits(4),
+    logResult: () => pending.promise,
+  });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    const loading = sidebar.loadHistory({ reset: true });
+    editor.fileExplorer.rootPath = "/workspace-b";
+    sidebar.handleWorkspaceChanged("/workspace-b");
+    pending.resolve({ success: true, commits: makeCommits(4), hasMore: false });
+    assert.equal(await loading, false);
+    assert.equal(sidebar.history.commits.length, 0);
+    assert.equal(sidebar.history.loaded, false);
+    assert.equal(sidebar.selectedCommit, null);
+    assert.ok(calls.log.length >= 1);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar reloads history after commits and branches, not after watcher events", async () => {
+  const { sidebar, calls } = createSidebar({ commits: makeCommits(2) });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.showHistory();
+    assert.equal(calls.log.length, 1);
+    await sidebar.refresh({ reason: "watcher" });
+    assert.equal(calls.log.length, 1, "file events do not re-read the log");
+    await sidebar.refresh({ reason: "commit" });
+    assert.deepEqual(toPlain(calls.log[1]), { limit: 50, skip: 0 });
+    await sidebar.refresh({ reason: "branch" });
+    assert.equal(calls.log.length, 3);
+    sidebar.toggleSection("history");
+    await sidebar.refresh({ reason: "commit" });
+    assert.equal(calls.log.length, 3, "a collapsed history is not re-read in the background");
+    assert.equal(sidebar.history.loaded, false);
+    sidebar.toggleSection("history");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(toPlain(calls.log[3]), { limit: 50, skip: 0 });
+    assert.equal(sidebar.history.loaded, true);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar explains an empty history and keeps it reachable when clean", async () => {
+  const { sidebar, calls } = createSidebar({ entries: [], commits: [] });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.getViewState().mode, "clean");
+    assert.equal(sidebar.listElement.hidden, false);
+    await sidebar.showHistory();
+    assert.deepEqual(toPlain(calls.log), [{ limit: 50, skip: 0 }]);
+    const empty = sidebar.fileScroller.items.find((item) =>
+      item.type === "message" && item.text === "No commits yet.");
+    assert.ok(empty, "an unborn repository explains the empty history");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar refuses history without a repository status or a log channel", async () => {
+  const noStatus = createSidebar({ commits: makeCommits(1) });
+  try {
+    assert.equal(await noStatus.sidebar.showHistory(), false);
+    assert.equal(await noStatus.sidebar.loadHistory(), false);
+    assert.equal(noStatus.calls.log.length, 0);
+  } finally {
+    noStatus.sidebar.destroy();
+  }
+
+  const { sidebar, editor, calls } = createSidebar({ commits: makeCommits(1) });
+  try {
+    await sidebar.refresh({ reason: "open" });
+    delete editor.api.git.getLog;
+    assert.equal(await sidebar.loadHistory({ reset: true }), false);
+    assert.equal(calls.log.length, 0);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar remembers the expanded history section", async () => {
+  const first = createSidebar({ commits: makeCommits(1) });
+  try {
+    await first.sidebar.refresh({ reason: "open" });
+    await first.sidebar.showHistory();
+    assert.equal(
+      JSON.parse(storageStub.getItem("nce.gitSidebar.collapsed")).history,
+      false,
+    );
+  } finally {
+    first.sidebar.destroy();
+  }
+
+  const stored = storageStub.getItem("nce.gitSidebar.collapsed");
+  const restored = new GitSidebar(first.editor);
+  restored.isOpen = true;
+  try {
+    assert.equal(restored.collapsed.history, false);
+    assert.equal(JSON.parse(stored).history, false);
+  } finally {
+    restored.destroy();
+  }
+});
+
+test("GitSidebar formats commit hashes and dates for the history rows", () => {
+  assert.equal(GitSidebar.shortHash("0123456789abcdef"), "0123456");
+  assert.equal(GitSidebar.shortHash(""), "");
+  const now = Date.UTC(2026, 10, 12, 12, 0, 0);
+  const seconds = (value) => Math.floor(value / 1000);
+  assert.equal(GitSidebar.formatCommitDate(seconds(now - 30_000), now), "just now");
+  assert.equal(GitSidebar.formatCommitDate(seconds(now - 5 * 60_000), now), "5 minutes ago");
+  assert.equal(GitSidebar.formatCommitDate(seconds(now - 3 * 3_600_000), now), "3 hours ago");
+  assert.equal(GitSidebar.formatCommitDate(seconds(now - 2 * 86_400_000), now), "2 days ago");
+  assert.equal(
+    GitSidebar.formatCommitDate(seconds(Date.UTC(2026, 0, 3, 8, 5, 0)), now),
+    "2026-01-03",
+  );
+  assert.equal(
+    GitSidebar.formatCommitTimestamp(seconds(Date.UTC(2026, 0, 3, 8, 5, 0))),
+    "2026-01-03 08:05 UTC",
+  );
+  assert.equal(GitSidebar.formatCommitDate(0), "");
 });
 
 

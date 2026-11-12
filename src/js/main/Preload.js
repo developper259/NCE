@@ -67,6 +67,7 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.invoke("Git:diff", filePath, options),
     getFileVersions: (filePath, options) =>
       ipcRenderer.invoke("Git:fileVersions", filePath, options),
+    getDiffSummary: (options) => ipcRenderer.invoke("Git:diffSummary", options),
     stageFile: (filePath) => ipcRenderer.invoke("Git:stage", filePath),
     stageAll: () => ipcRenderer.invoke("Git:stageAll"),
     unstageFile: (filePath) => ipcRenderer.invoke("Git:unstage", filePath),
@@ -76,6 +77,7 @@ contextBridge.exposeInMainWorld("api", {
     getCurrentBranch: () => ipcRenderer.invoke("Git:currentBranch"),
     switchBranch: (name) => ipcRenderer.invoke("Git:switchBranch", name),
     createBranch: (name) => ipcRenderer.invoke("Git:createBranch", name),
+    getLog: (options) => ipcRenderer.invoke("Git:log", options),
   },
   installer: {
     install: (packageId) =>

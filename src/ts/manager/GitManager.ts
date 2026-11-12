@@ -117,6 +117,7 @@ export interface GitLogEntry {
   email: string;
   timestamp: number;
   subject: string;
+  refs: string[];
 }
 
 interface GitManagerOptions {
@@ -287,7 +288,8 @@ export class GitManager {
     ipc.handle("Git:currentBranch", async () => this.getCurrentBranch());
     ipc.handle("Git:switchBranch", async (_event, name) => this.switchBranch(name));
     ipc.handle("Git:createBranch", async (_event, name) => this.createBranch(name));
-    ipc.handle("Git:log", async (_event, options) => this.getLog(options));
+    ipc.handle("Git:log", async (_event, options) =>
+      this.getLog({ limit: options?.limit, skip: options?.skip }));
   }
 
   dispose(): void {
@@ -953,7 +955,7 @@ export class GitManager {
 
   async getLog(
     options: { limit?: unknown; skip?: unknown } = {},
-  ): Promise<GitResult<{ commits: GitLogEntry[]; limit: number; skip: number }>> {
+  ): Promise<GitResult<{ commits: GitLogEntry[]; limit: number; skip: number; hasMore: boolean }>> {
     const limit = this.readInteger(options?.limit, DEFAULT_LOG_LIMIT, 1, MAX_LOG_LIMIT);
     const skip = this.readInteger(options?.skip, 0, 0, 1_000_000);
     if (limit === null || skip === null)
@@ -962,13 +964,13 @@ export class GitManager {
     if ("failure" in context) return context.failure;
     const head = await this.hasHeadCommit(context.root);
     if ("failure" in head) return head.failure;
-    if (!head.found) return { success: true, commits: [], limit, skip };
+    if (!head.found) return { success: true, commits: [], limit, skip, hasMore: false };
     const result = await this.runGit(
       [
         "log",
-        `--max-count=${limit}`,
+        `--max-count=${limit + 1}`,
         `--skip=${skip}`,
-        "--format=%H%x00%an%x00%ae%x00%at%x00%s",
+        "--format=%H%x00%an%x00%ae%x00%at%x00%D%x00%s",
       ],
       { cwd: context.root },
     );
@@ -976,7 +978,7 @@ export class GitManager {
     const commits: GitLogEntry[] = [];
     for (const line of result.output.stdout.toString("utf8").split("\n")) {
       if (!line) continue;
-      const [hash, author, email, timestamp, subject] = line.split("\0");
+      const [hash, author, email, timestamp, refs, subject] = line.split("\0");
       if (!hash || timestamp === undefined) continue;
       commits.push({
         hash,
@@ -984,9 +986,12 @@ export class GitManager {
         email: email || "",
         timestamp: Number(timestamp) || 0,
         subject: subject || "",
+        refs: (refs || "").split(",").map((ref) => ref.trim()).filter(Boolean),
       });
     }
-    return { success: true, commits, limit, skip };
+    // One extra commit is read so the UI can offer more without a second call.
+    const hasMore = commits.length > limit;
+    return { success: true, commits: commits.slice(0, limit), limit, skip, hasMore };
   }
 
   private scopePathspecs(context: RepositoryContext): string[] {

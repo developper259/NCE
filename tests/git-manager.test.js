@@ -999,15 +999,57 @@ test("GitManager reads branches and paginated history", { skip: gitSkip }, async
     assert.equal(firstPage.commits.length, 2);
     assert.equal(firstPage.commits[0].subject, "add third.txt");
     assert.equal(firstPage.commits[1].subject, "add second.txt");
+    assert.equal(firstPage.hasMore, true);
+    assert.equal(firstPage.commits[0].author, "NCE Test");
+    assert.equal(firstPage.commits[0].email, "nce@example.invalid");
+    assert.match(firstPage.commits[0].hash, /^[0-9a-f]{40}$/);
+    assert.ok(firstPage.commits[0].timestamp > 0);
+    assert.deepEqual(firstPage.commits[0].refs, ["HEAD -> main", "dev"]);
+    assert.deepEqual(firstPage.commits[1].refs, []);
     const secondPage = await manager.getLog({ limit: 1, skip: 2 });
     assert.equal(secondPage.commits.length, 1);
     assert.equal(secondPage.commits[0].subject, "initial");
+    assert.equal(secondPage.hasMore, false);
+    const wholeHistory = await manager.getLog({ limit: 50 });
+    assert.equal(wholeHistory.commits.length, 3);
+    assert.equal(wholeHistory.hasMore, false);
     assert.equal((await manager.getLog({ limit: 0 })).code, "INVALID_ARGUMENT");
     assert.equal((await manager.getLog({ limit: "5" })).code, "INVALID_ARGUMENT");
     const branches = await manager.getBranches();
     assert.deepEqual(branches.branches.map(branch => branch.name).sort(), ["dev", "main"]);
     assert.equal(branches.current, "main");
     assert.equal((await manager.getCurrentBranch()).branch, "main");
+  } finally {
+    manager.dispose();
+    await removeAll(root);
+  }
+});
+
+test("GitManager bounds history pagination and keeps commit metadata intact", { skip: gitSkip }, async () => {
+  const root = await createRepository();
+  git(root, ["config", "user.name", "Élodie Martin"]);
+  await fs.writeFile(path.join(root, "unicode.txt"), "ü\n");
+  git(root, ["add", "--", "unicode.txt"]);
+  git(root, ["commit", "-q", "-m", "feat: café — 日本語"]);
+  git(root, ["tag", "v1"]);
+  const manager = managerFor(root);
+  try {
+    const page = await manager.getLog({ limit: 1 });
+    assert.equal(page.commits[0].subject, "feat: café — 日本語");
+    assert.equal(page.commits[0].author, "Élodie Martin");
+    assert.deepEqual(page.commits[0].refs, ["HEAD -> main", "tag: v1"]);
+
+    const past = await manager.getLog({ limit: 10, skip: 50 });
+    assert.deepEqual(past.commits, []);
+    assert.equal(past.hasMore, false);
+    assert.equal(past.skip, 50);
+    assert.equal((await manager.getLog({ skip: -1 })).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.getLog({ limit: 1000 })).code, "INVALID_ARGUMENT");
+    assert.equal((await manager.getLog({ limit: 1.5 })).code, "INVALID_ARGUMENT");
+
+    git(root, ["checkout", "-q", "--detach"]);
+    const detached = await manager.getLog({ limit: 1 });
+    assert.deepEqual(detached.commits[0].refs, ["HEAD", "tag: v1", "main"]);
   } finally {
     manager.dispose();
     await removeAll(root);
@@ -1041,16 +1083,16 @@ test("GitManager exposes only named Git channels through the preload", () => {
     "utf8",
   );
   assert.match(preload, /git:\s*\{/);
-  for (const channel of [
-    "Git:isAvailable", "Git:version", "Git:init", "Git:repository", "Git:isRepository",
-    "Git:repositoryRoot", "Git:status", "Git:diff", "Git:fileVersions",
-    "Git:stage", "Git:stageAll", "Git:unstage", "Git:unstageAll",
-    "Git:commit", "Git:branches", "Git:currentBranch", "Git:switchBranch",
-    "Git:createBranch",
-  ]) {
-    assert.match(preload, new RegExp(`"${channel}"`), `preload exposes ${channel}`);
-    assert.match(managerSource, new RegExp(`"${channel}"`), `GitManager registers ${channel}`);
-  }
+  const registered = [...managerSource.matchAll(/ipc\.handle\("(Git:[^"]+)"/g)]
+    .map((match) => match[1]);
+  const exposed = [...preload.matchAll(/ipcRenderer\.invoke\("(Git:[^"]+)"/g)]
+    .map((match) => match[1]);
+  assert.ok(registered.length >= 19, "GitManager registers the Git channels");
+  assert.deepEqual(
+    [...new Set(exposed)].sort(),
+    [...new Set(registered)].sort(),
+    "every registered Git channel is exposed in the preload, and vice versa",
+  );
   assert.doesNotMatch(preload, /child_process|require\("node:/);
   assert.doesNotMatch(preload, /gitCommand|runGit/);
   assert.match(windowSource, /new GitManager\(\{/);

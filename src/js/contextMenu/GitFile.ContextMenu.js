@@ -56,6 +56,14 @@ function buildGitHeaderContextMenu(editor) {
         name: "Refresh",
         callback: () => sidebar.refresh({ reason: "manual" }),
       },
+      history: {
+        name: sidebar.collapsed?.history === false ? "Hide History" : "Show History",
+        enabled: Boolean(sidebar.status),
+        callback: () => {
+          if (sidebar.collapsed?.history === false) sidebar.toggleSection("history");
+          else void sidebar.showHistory();
+        },
+      },
       copyBranch: {
         name: "Copy Branch Name",
         enabled: Boolean(branch),

@@ -125,10 +125,40 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     await waitFor(() => git.getViewState().mode === "clean", "clean state after initialization");
     await nextFrame();
     check(git.commitBoxElement.hidden === true, "commit form is hidden on a clean repository");
-    check(git.listElement.hidden === true, "change list is hidden on a clean repository");
+    check(
+      git.listElement.hidden === false,
+      "the list stays visible on a clean repository so history is reachable",
+    );
     check(git.stateElement.hidden === false, "clean state is visible");
     check(git.stateTitleElement.textContent === "Working tree clean", "clean state title");
     check(git.stateText.textContent === "No changes to commit.", "clean state description");
+    const emptyHistoryHeader = git.listLayer.querySelector(
+      '.git-section-header[data-section="history"]',
+    );
+    check(Boolean(emptyHistoryHeader), "a clean repository offers the History section");
+    check(
+      git.listLayer.querySelectorAll(".git-commit-row").length === 0,
+      "history starts collapsed",
+    );
+    emptyHistoryHeader.click();
+    await waitFor(
+      () => git.history.loaded && !git.history.loading,
+      "the empty history to load",
+    );
+    await nextFrame();
+    check(
+      [...git.listLayer.querySelectorAll(".git-sidebar-empty")].some(
+        (element) => element.textContent === "No commits yet.",
+      ),
+      "an unborn repository explains that it has no commits",
+    );
+    git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
+    await nextFrame();
+    check(
+      git.listLayer.querySelectorAll(".git-commit-row").length === 0 &&
+        git.listLayer.querySelectorAll(".git-sidebar-empty").length === 0,
+      "collapsing History hides its rows",
+    );
     await waitFor(
       () => branchIndicator.hidden === false,
       "bottom-bar branch indicator",
@@ -206,11 +236,15 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   check(createdSecond?.success === true, "second fixture file is created");
   await git.refresh({ reason: "manual" });
-  await waitFor(() => git.getViewState().mode === "changes", "changes state");
+  await waitFor(
+    () => git.getViewState().mode === "changes" &&
+      git.getViewState().changes.length === 2,
+    "both fixture changes to be listed",
+  );
   await nextFrame();
   check(
     git.getViewState().changes.length === 2,
-    "both fixture changes are listed",
+    `both fixture changes are listed: ${JSON.stringify(git.getViewState().changes.map((entry) => entry.path))}`,
   );
   check(git.commitBoxElement.hidden === false, "commit form is visible with changes");
   check(git.listElement.hidden === false, "change list is visible with changes");
@@ -353,9 +387,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     branchIndicatorWithChanges.title.includes("Uncommitted changes"),
     "dirty branch tooltip explains the changes",
   );
-  let row = git.listLayer.querySelector(
+  const findChangeRow = () => git.listLayer.querySelector(
     `.git-file-row[data-path="${fileName}"]`,
   );
+  await waitFor(() => Boolean(findChangeRow()), "the untracked file row to render");
+  let row = findChangeRow();
   check(Boolean(row), "untracked file row is visible");
   check(
     row.querySelector(".git-status-badge").textContent === "U",
@@ -515,9 +551,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     git.getViewState().changes.length === 2,
     "branch switches preserve the working changes",
   );
-  row = git.listLayer.querySelector(
-    `.git-file-row[data-path="${fileName}"]`,
+  await waitFor(
+    () => Boolean(findChangeRow()),
+    "the change row to render after branch switching",
   );
+  row = findChangeRow();
   check(Boolean(row), "change row is visible after branch switching");
 
   // Long branch lists remain fully scrollable inside the panel.
@@ -580,9 +618,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   editor.quickPanel.close();
   await nextFrame();
-  row = git.listLayer.querySelector(
-    `.git-file-row[data-path="${fileName}"]`,
+  await waitFor(
+    () => Boolean(findChangeRow()),
+    "the change row to render after the long branch list",
   );
+  row = findChangeRow();
   check(Boolean(row), "change row is visible after the long branch list");
 
   // Responsive widths.
@@ -606,8 +646,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     git.container.scrollWidth <= git.container.clientWidth + 1,
     "narrow sidebar has no horizontal overflow",
   );
+  row = findChangeRow();
   check(
-    getComputedStyle(row.querySelector(".git-file-name")).textOverflow === "ellipsis",
+    Boolean(row) &&
+      getComputedStyle(row.querySelector(".git-file-name")).textOverflow === "ellipsis",
     "long file names use ellipsis",
   );
   sidebar.style.width = "320px";
@@ -676,8 +718,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(
     [...git.listLayer.querySelectorAll(".git-section-title")]
       .map((element) => element.textContent)
-      .join(",") === "Staged Changes",
-    "empty change sections are not rendered",
+      .join(",") === "Staged Changes,History",
+    "empty change sections are not rendered, History stays available",
   );
   const unstageAllButton = git.listLayer.querySelector(
     '.git-section-header[data-section="staged"] .git-section-action',
@@ -723,7 +765,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   await waitFor(() => git.getViewState().mode === "clean", "clean state after commit");
   await nextFrame();
   check(git.commitBoxElement.hidden === true, "commit form hides after commit");
-  check(git.listElement.hidden === true, "change list hides after commit");
+  check(
+    git.listElement.hidden === false,
+    "the list stays visible after commit so history is reachable",
+  );
   check(git.stateTitleElement.textContent === "Working tree clean", "clean state after commit");
   await waitFor(
     () => branchDirtyWithChanges.hidden === true,
@@ -738,6 +783,133 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       .some((notification) => notification.title === "Commit created"),
     "commit result notification",
     3000,
+  );
+
+  // Commit history: real Git log, progressive pages, selection and details.
+  const historyHeader = () => git.listLayer.querySelector(
+    '.git-section-header[data-section="history"]',
+  );
+  check(Boolean(historyHeader()), "History is offered after a commit");
+  if (git.collapsed.history) historyHeader().click();
+  await waitFor(
+    () => git.history.loaded && !git.history.loading &&
+      git.history.commits[0]?.subject === "feat: source control redesign",
+    "the commit history to include the commit just created",
+  );
+  await waitFor(
+    () => !git.history.loading && git.history.hasMore === false,
+    "the scroller to reach the end of the history",
+    20000,
+  );
+  await nextFrame();
+  check(
+    git.history.commits.length > 50,
+    `history pages beyond the first batch: ${git.history.commits.length}`,
+  );
+  check(
+    git.history.commits[git.history.commits.length - 1].subject ===
+      "Seed Source Control fixture",
+    "progressive loading reaches the oldest commit",
+  );
+  check(
+    git.history.commits[0].subject === "feat: source control redesign",
+    `the newest commit is the one just created: ${git.history.commits[0].subject}`,
+  );
+  check(
+    /^[0-9a-f]{40}$/.test(git.history.commits[0].hash) &&
+      git.history.commits[0].author === "NCE Test",
+    "history rows carry real commit metadata",
+  );
+  const historyRows = () => [...git.listLayer.querySelectorAll(".git-commit-row")];
+  check(historyRows().length > 0, "history rows are rendered");
+  const firstRow = historyRows()[0];
+  const sidebarRight = document.querySelector(".sidebar-left").getBoundingClientRect().right;
+  const firstRowRect = firstRow.getBoundingClientRect();
+  check(
+    Math.abs(firstRowRect.height - 40) <= 1,
+    `a commit row keeps its declared height: ${firstRowRect.height}`,
+  );
+  check(
+    Math.abs(firstRowRect.right - sidebarRight) <= 1,
+    "commit rows reach the sidebar's right edge",
+  );
+  check(
+    firstRow.querySelector(".git-commit-subject").textContent ===
+      "feat: source control redesign",
+    "the commit subject is displayed",
+  );
+  check(
+    firstRow.querySelector(".git-commit-meta").textContent.includes(
+      git.history.commits[0].hash.slice(0, 7),
+    ),
+    "the commit meta line shows the short hash",
+  );
+  check(
+    getComputedStyle(firstRow.querySelector(".git-commit-subject")).textOverflow ===
+      "ellipsis",
+    "long commit subjects use ellipsis",
+  );
+  check(
+    firstRow.querySelector(".git-commit-ref")?.textContent === git.getBranchLabel(),
+    "the current branch is badged on the newest commit",
+  );
+  firstRow.click();
+  await nextFrame();
+  const detail = git.listLayer.querySelector(".git-commit-detail");
+  check(Boolean(detail), "selecting a commit opens its details");
+  check(
+    [...detail.querySelectorAll(".git-commit-detail-label")]
+      .map((element) => element.textContent)
+      .join(",") === "Commit,Author,Date,Refs",
+    "commit details expose hash, author, date and refs",
+  );
+  check(
+    detail.querySelector("code.git-commit-detail-value").textContent ===
+      git.history.commits[0].hash,
+    "the full commit hash is displayed",
+  );
+  const detailRect = detail.getBoundingClientRect();
+  const historyViewport = git.listViewport.getBoundingClientRect();
+  check(
+    detailRect.left >= historyViewport.left - 1 &&
+      detailRect.right <= historyViewport.right + 1 &&
+      detailRect.height > 40,
+    `commit details stay inside the list viewport: ${JSON.stringify({ detailRect, historyViewport })}`,
+  );
+  check(
+    detail.querySelector(".git-commit-copy") !== null,
+    "the commit hash offers a copy action",
+  );
+  git.listLayer.querySelector(".git-commit-row").click();
+  await nextFrame();
+  check(
+    git.listLayer.querySelector(".git-commit-detail") === null,
+    "clicking the selected commit closes its details",
+  );
+  const historySidebar = document.querySelector(".sidebar-left");
+  const historyOriginalWidth = historySidebar.style.width;
+  historySidebar.style.width = "190px";
+  await nextFrame();
+  check(
+    git.container.scrollWidth <= git.container.clientWidth + 1,
+    "a narrow sidebar keeps history rows without horizontal overflow",
+  );
+  check(
+    git.listLayer.querySelector(".git-commit-refs") === null ||
+      getComputedStyle(git.listLayer.querySelector(".git-commit-refs")).display === "none",
+    "ref badges are dropped on a narrow sidebar",
+  );
+  historySidebar.style.width = historyOriginalWidth;
+  await nextFrame();
+  historyHeader().click();
+  await nextFrame();
+  check(historyRows().length === 0, "collapsing History removes its rows");
+  historyHeader().click();
+  await waitFor(() => !git.history.loading, "History to reopen");
+  await nextFrame();
+  check(
+    historyRows().length > 0 && git.history.commits.length > 50,
+    "reopening History keeps the loaded pages",
   );
 
   // Bottom bar ordering: bell first, then the status items, all right aligned.

@@ -1,5 +1,21 @@
 class GitSidebar extends Sidebar {
   static COMMIT_INPUT_MAX_HEIGHT = 160;
+  static HISTORY_PAGE_SIZE = 50;
+  static MAX_HISTORY_COMMITS = 500;
+  static MAX_COMMIT_REF_BADGES = 2;
+  static HISTORY_REFRESH_REASONS = new Set(["commit", "branch", "init", "manual", "settings"]);
+
+  static emptyHistory() {
+    return {
+      commits: [],
+      hasMore: false,
+      loading: false,
+      error: "",
+      loaded: false,
+      truncated: false,
+      pendingReset: false,
+    };
+  }
 
   static resolveAbsolutePath(root, relativePath) {
     if (typeof root !== "string" || !root.trim()) return null;
@@ -51,6 +67,31 @@ class GitSidebar extends Sidebar {
     const index = normalized.lastIndexOf("/");
     if (index < 0) return { name: normalized, dir: "" };
     return { name: normalized.slice(index + 1), dir: normalized.slice(0, index) };
+  }
+
+  static shortHash(hash) {
+    return String(hash || "").slice(0, 7);
+  }
+
+  static plural(count, unit) {
+    return `${count} ${unit}${count === 1 ? "" : "s"} ago`;
+  }
+
+  static formatCommitDate(timestamp, now = Date.now()) {
+    const seconds = Number(timestamp);
+    if (!Number.isFinite(seconds) || seconds <= 0) return "";
+    const elapsed = Math.max(0, Math.floor(now / 1000 - seconds));
+    if (elapsed < 60) return "just now";
+    if (elapsed < 3600) return GitSidebar.plural(Math.floor(elapsed / 60), "minute");
+    if (elapsed < 86400) return GitSidebar.plural(Math.floor(elapsed / 3600), "hour");
+    if (elapsed < 604800) return GitSidebar.plural(Math.floor(elapsed / 86400), "day");
+    return new Date(seconds * 1000).toISOString().slice(0, 10);
+  }
+
+  static formatCommitTimestamp(timestamp) {
+    const seconds = Number(timestamp);
+    if (!Number.isFinite(seconds) || seconds <= 0) return "";
+    return `${new Date(seconds * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
   }
 
   static validateBranchName(value) {
@@ -116,6 +157,7 @@ class GitSidebar extends Sidebar {
     this.fileScroller = new SearchResultsScroller(
       editor,
       (item) => this.createListItem(item),
+      () => this.handleListNearEnd(),
     );
 
     this.workspaceRoot = "";
@@ -125,6 +167,8 @@ class GitSidebar extends Sidebar {
     this.sectionsCache = null;
     this.diffRefreshInFlight = new Set();
     this.status = null;
+    this.history = GitSidebar.emptyHistory();
+    this.selectedCommit = null;
     this.error = null;
     this.stale = false;
     this.loading = false;
@@ -142,7 +186,7 @@ class GitSidebar extends Sidebar {
     this.refreshTimer = null;
     this.listResetPending = true;
     this.destroyed = false;
-    this.collapsed = { staged: false, changes: false };
+    this.collapsed = { staged: false, changes: false, history: true };
     this.loadCollapsedState();
 
     this.unsubscribeFileSystem =
@@ -157,6 +201,7 @@ class GitSidebar extends Sidebar {
       if (!stored || typeof stored !== "object") return;
       this.collapsed.staged = stored.staged === true;
       this.collapsed.changes = stored.changes === true;
+      this.collapsed.history = stored.history !== false;
     } catch {}
   }
 
@@ -738,7 +783,7 @@ class GitSidebar extends Sidebar {
     if (this.commitBoxElement)
       this.commitBoxElement.hidden = view.mode !== "changes";
     if (this.listElement)
-      this.listElement.hidden = view.mode !== "changes";
+      this.listElement.hidden = view.mode !== "changes" && view.mode !== "clean";
   }
 
   getSections() {
@@ -774,9 +819,21 @@ class GitSidebar extends Sidebar {
   createListItem(item) {
     if (item.type === "section") return this.createSectionHeader(item);
     if (item.type === "entry") return this.createEntryRow(item.entry, item.section);
+    if (item.type === "commit") return this.createCommitRow(item.commit);
+    if (item.type === "commit-detail") return this.createCommitDetail(item.commit);
+    if (item.type === "history-more") return this.createHistoryMoreRow();
     const empty = document.createElement("div");
     empty.className = "git-sidebar-empty";
     empty.textContent = item.text;
+    if (item.action === "retry-history") {
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "git-sidebar-state-button";
+      retry.textContent = "Retry";
+      retry.dataset.action = "retry-history";
+      retry.addEventListener("click", () => void this.loadHistory({ reset: true }));
+      empty.appendChild(retry);
+    }
     return empty;
   }
 
@@ -824,11 +881,7 @@ class GitSidebar extends Sidebar {
       });
       header.appendChild(action);
     }
-    const toggle = () => {
-      this.collapsed[item.section] = !this.collapsed[item.section];
-      this.saveCollapsedState();
-      this.renderList();
-    };
+    const toggle = () => this.toggleSection(item.section);
     header.addEventListener("click", toggle);
     header.addEventListener("keydown", (event) => {
       if (event.target !== header) return;
@@ -956,7 +1009,251 @@ class GitSidebar extends Sidebar {
           items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
       }
     }
+    items.push({
+      type: "section",
+      section: "history",
+      title: "History",
+      count: this.history.commits.length,
+      height: 24,
+      rowHeight: 24,
+    });
+    if (this.collapsed.history !== true) items.push(...this.buildHistoryItems());
     return items;
+  }
+
+  buildHistoryItems() {
+    const items = [];
+    const { commits, loading, error, hasMore, loaded, truncated } = this.history;
+    for (const commit of commits) {
+      items.push({ type: "commit", commit, height: 40, rowHeight: 40 });
+      if (this.selectedCommit !== commit.hash) continue;
+      const height = this.commitDetailHeight(commit);
+      items.push({ type: "commit-detail", commit, height, rowHeight: height });
+    }
+    if (loading)
+      items.push({ type: "message", text: "Loading history…", height: 24, rowHeight: 24 });
+    else if (error)
+      items.push({ type: "message", text: error, action: "retry-history", height: 24, rowHeight: 24 });
+    else if (hasMore)
+      items.push({ type: "history-more", height: 26, rowHeight: 26 });
+    else if (truncated)
+      items.push({
+        type: "message",
+        text: `Showing the most recent ${GitSidebar.MAX_HISTORY_COMMITS} commits.`,
+        height: 24,
+        rowHeight: 24,
+      });
+    else if (loaded && commits.length === 0)
+      items.push({ type: "message", text: "No commits yet.", height: 24, rowHeight: 24 });
+    return items;
+  }
+
+  commitDetailHeight(commit) {
+    return (3 + (commit?.refs?.length ? 1 : 0)) * 18 + 10;
+  }
+
+  createCommitRow(commit) {
+    const doc = document;
+    const row = doc.createElement("div");
+    row.className = "git-commit-row";
+    row.tabIndex = 0;
+    row.setAttribute("role", "button");
+    row.dataset.hash = commit.hash;
+    row.dataset.gitFocusKey = `commit:${commit.hash}`;
+    const selected = this.selectedCommit === commit.hash;
+    row.classList.toggle("is-selected", selected);
+    row.setAttribute("aria-expanded", String(selected));
+    row.setAttribute(
+      "aria-label",
+      `${commit.subject || "(no message)"}, ${GitSidebar.shortHash(commit.hash)} by ${commit.author}`,
+    );
+    row.title = `${commit.subject || "(no message)"}\n${commit.hash}`;
+
+    const main = doc.createElement("span");
+    main.className = "git-commit-main";
+    const subject = doc.createElement("span");
+    subject.className = "git-commit-subject";
+    subject.textContent = commit.subject || "(no message)";
+    const meta = doc.createElement("span");
+    meta.className = "git-commit-meta";
+    meta.textContent = [
+      GitSidebar.shortHash(commit.hash),
+      commit.author,
+      GitSidebar.formatCommitDate(commit.timestamp),
+    ].filter(Boolean).join(" · ");
+    main.append(subject, meta);
+    row.appendChild(main);
+    if (commit.refs?.length) row.appendChild(this.createCommitRefs(commit.refs));
+
+    const toggle = () => this.selectCommit(commit.hash);
+    row.addEventListener("click", toggle);
+    row.addEventListener("keydown", (event) => {
+      if (event.target !== row) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      toggle();
+    });
+    return row;
+  }
+
+  createCommitRefs(refs) {
+    const wrap = document.createElement("span");
+    wrap.className = "git-commit-refs";
+    // Only HEAD and tags name a commit usefully; a wall of branch names does not.
+    const named = [
+      ...refs.filter((ref) => ref.startsWith("HEAD")),
+      ...refs.filter((ref) => ref.startsWith("tag: ")),
+    ];
+    const shown = named.slice(0, GitSidebar.MAX_COMMIT_REF_BADGES);
+    for (const ref of shown) {
+      const badge = document.createElement("span");
+      badge.className = "git-commit-ref";
+      badge.textContent = ref.replace(/^HEAD -> /, "");
+      badge.title = ref;
+      if (ref.startsWith("HEAD -> ")) badge.dataset.current = "true";
+      wrap.appendChild(badge);
+    }
+    const hidden = refs.filter((ref) => !shown.includes(ref));
+    if (hidden.length > 0) {
+      const more = document.createElement("span");
+      more.className = "git-commit-ref git-commit-ref-more";
+      more.textContent = `+${hidden.length}`;
+      more.title = hidden.join(", ");
+      wrap.appendChild(more);
+    }
+    return wrap;
+  }
+
+  createCommitDetail(commit) {
+    const doc = document;
+    const detail = doc.createElement("div");
+    detail.className = "git-commit-detail";
+    detail.dataset.gitFocusKey = `commit-detail:${commit.hash}`;
+    const addRow = (label, value, { code = false, copy = false } = {}) => {
+      const row = doc.createElement("div");
+      row.className = "git-commit-detail-row";
+      const name = doc.createElement("span");
+      name.className = "git-commit-detail-label";
+      name.textContent = label;
+      const text = doc.createElement(code ? "code" : "span");
+      text.className = "git-commit-detail-value";
+      text.textContent = value;
+      row.append(name, text);
+      if (copy) {
+        const button = doc.createElement("button");
+        button.type = "button";
+        button.className = "git-file-action git-commit-copy";
+        button.title = "Copy Commit Hash";
+        button.setAttribute("aria-label", "Copy Commit Hash");
+        const icon = doc.createElement("i");
+        icon.className = "fi fi-rr-copy";
+        icon.setAttribute("aria-hidden", "true");
+        button.appendChild(icon);
+        button.addEventListener("click", (event) => {
+          event.stopPropagation();
+          void this.editor.api?.writeClipboardText?.(commit.hash);
+        });
+        row.appendChild(button);
+      }
+      detail.appendChild(row);
+    };
+    addRow("Commit", commit.hash, { code: true, copy: true });
+    addRow("Author", commit.email ? `${commit.author} <${commit.email}>` : commit.author);
+    addRow("Date", GitSidebar.formatCommitTimestamp(commit.timestamp));
+    if (commit.refs?.length) addRow("Refs", commit.refs.join(", "));
+    return detail;
+  }
+
+  createHistoryMoreRow() {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "git-history-more";
+    row.textContent = "Load more commits";
+    row.dataset.action = "history-more";
+    row.dataset.gitFocusKey = "history-more";
+    row.disabled = this.history.loading;
+    row.addEventListener("click", () => void this.loadHistory());
+    return row;
+  }
+
+  selectCommit(hash) {
+    if (this.destroyed || typeof hash !== "string" || !hash) return false;
+    this.selectedCommit = this.selectedCommit === hash ? null : hash;
+    this.renderList();
+    return this.selectedCommit === hash;
+  }
+
+  async showHistory() {
+    if (this.destroyed || !this.status) return false;
+    this.collapsed.history = false;
+    this.saveCollapsedState();
+    this.renderList();
+    if (!this.history.loaded) await this.loadHistory({ reset: true });
+    return true;
+  }
+
+  async loadHistory({ reset = false } = {}) {
+    if (this.destroyed || !this.status) return false;
+    if (this.history.loading) {
+      // A refresh that lands mid-load must still replace the stale page.
+      if (reset) this.history.pendingReset = true;
+      return false;
+    }
+    const api = this.editor.api?.git;
+    if (typeof api?.getLog !== "function") return false;
+    const workspaceGeneration = this.workspaceGeneration;
+    const workspaceRoot = this.workspaceRoot;
+    const skip = reset ? 0 : this.history.commits.length;
+    this.history.loading = true;
+    this.history.error = "";
+    this.renderList();
+    let result = null;
+    try {
+      result = await api.getLog({ limit: GitSidebar.HISTORY_PAGE_SIZE, skip });
+    } catch {
+      result = null;
+    }
+    this.history.loading = false;
+    if (this.destroyed) return false;
+    if (workspaceGeneration !== this.workspaceGeneration ||
+        !NCEPath.equals(workspaceRoot, this.workspaceRoot))
+      return false;
+    if (result?.success !== true) {
+      this.history.error = result
+        ? GitSidebar.describeError(result)
+        : "The commit history could not be read.";
+      this.renderList();
+      return this.flushPendingHistoryReset(false);
+    }
+    const commits = Array.isArray(result.commits) ? result.commits : [];
+    const merged = reset ? commits : [...this.history.commits, ...commits];
+    // A huge repository must never pull its whole log into the renderer.
+    const truncated = merged.length > GitSidebar.MAX_HISTORY_COMMITS;
+    this.history.commits = truncated
+      ? merged.slice(0, GitSidebar.MAX_HISTORY_COMMITS)
+      : merged;
+    this.history.truncated = truncated;
+    this.history.hasMore = result.hasMore === true && commits.length > 0 && !truncated;
+    this.history.loaded = true;
+    if (this.selectedCommit &&
+        !this.history.commits.some((commit) => commit.hash === this.selectedCommit))
+      this.selectedCommit = null;
+    this.renderList();
+    return this.flushPendingHistoryReset(true);
+  }
+
+  flushPendingHistoryReset(result) {
+    if (!this.history.pendingReset) return result;
+    this.history.pendingReset = false;
+    if (this.destroyed) return result;
+    void this.loadHistory({ reset: true });
+    return result;
+  }
+
+  handleListNearEnd() {
+    if (this.destroyed || this.collapsed.history === true) return;
+    if (!this.history.hasMore || this.history.loading) return;
+    void this.loadHistory();
   }
 
   renderList() {
@@ -1019,10 +1316,12 @@ class GitSidebar extends Sidebar {
   }
 
   toggleSection(section) {
-    if (section !== "staged" && section !== "changes") return false;
+    if (section !== "staged" && section !== "changes" && section !== "history") return false;
     this.collapsed[section] = !this.collapsed[section];
     this.saveCollapsedState();
     this.renderList();
+    if (section === "history" && !this.collapsed.history && !this.history.loaded)
+      void this.loadHistory({ reset: true });
     return this.collapsed[section];
   }
 
@@ -1655,6 +1954,12 @@ class GitSidebar extends Sidebar {
     if (reason === "stage" || reason === "commit" || reason === "branch" ||
         reason === "manual")
       void this.refreshDiffTabs();
+    if (this.history.loaded && GitSidebar.HISTORY_REFRESH_REASONS.has(reason)) {
+      // A collapsed section re-reads its log when it is opened again, not on
+      // every commit, so unrelated work never re-renders the visible rows.
+      if (this.collapsed.history === true) this.history.loaded = false;
+      else void this.loadHistory({ reset: true });
+    }
   }
 
   async refreshDiffTabs() {
@@ -1735,6 +2040,8 @@ class GitSidebar extends Sidebar {
     this.workspaceGeneration++;
     this.generation++;
     this.status = null;
+    this.history = GitSidebar.emptyHistory();
+    this.selectedCommit = null;
     this.error = null;
     this.stale = false;
     this.loading = false;

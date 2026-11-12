@@ -474,9 +474,161 @@
   box-sizing: border-box;
   display: flex;
   align-items: center;
+  gap: 8px;
   padding: 0 10px;
   color: var(--text-tertiary);
   font-size: 12px;
+}
+
+/* Commit history */
+.git-commit-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.git-commit-row:hover,
+.git-commit-row.is-selected {
+  background: var(--bg-hover-alt);
+}
+
+.git-commit-row:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-commit-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.git-commit-subject {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-meta {
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-refs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 3px;
+  max-width: 45%;
+  overflow: hidden;
+}
+
+.git-commit-ref {
+  flex: 0 1 auto;
+  overflow: hidden;
+  padding: 0 5px;
+  border: 1px solid var(--border-primary);
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: 9.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-commit-ref[data-current="true"] {
+  border-color: var(--border-active);
+  color: var(--text-primary);
+}
+
+.git-commit-ref-more {
+  flex: 0 0 auto;
+}
+
+.git-commit-detail {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 5px 8px 5px 16px;
+  border-left: 1px solid var(--border-primary);
+}
+
+.git-commit-detail-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 16px;
+  min-width: 0;
+}
+
+.git-commit-detail-label {
+  flex: 0 0 44px;
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.git-commit-detail-value {
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+code.git-commit-detail-value {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.git-history-more {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.git-history-more:hover {
+  background: var(--bg-hover-alt);
+  color: var(--text-primary);
+}
+
+.git-history-more:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-history-more:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* Commit composer */
@@ -640,6 +792,10 @@
 
 @container (max-width: 230px) {
   .git-file-dir {
+    display: none;
+  }
+
+  .git-commit-refs {
     display: none;
   }
 

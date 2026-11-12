@@ -1702,6 +1702,18 @@ app.whenReady().then(() => {
           ],
           { stdio: "ignore" },
         );
+        // Enough commits to exercise progressive history loading in the sidebar.
+        for (let index = 0; index < 54; index += 1) {
+          execFileSync(
+            "git",
+            [
+              "-C", sourceControlWorkspace,
+              "commit", "-q", "--allow-empty",
+              "-m", `Fixture history ${String(index + 1).padStart(2, "0")}`,
+            ],
+            { stdio: "ignore" },
+          );
+        }
         const sourceControlResult = await run(
           `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "repository")`,
         );
