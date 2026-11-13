@@ -146,7 +146,6 @@ class QuickPanel {
     const transitionDuration = options.transitionDuration || 160;
     if (options.deferAcceptUntilClose) this.host.classList.add("is-switching");
     this.host.setAttribute("aria-hidden", "true");
-    delete this.panel.dataset.panelId;
     this.input.blur();
     this.input.value = "";
     this.input.type = "text";
@@ -154,10 +153,13 @@ class QuickPanel {
     this.error.textContent = "";
     if (this.list?.style) this.list.style.height = "";
 
-    // Keep the rendered rows until the fade-out has completed.
+    // Keep the rendered rows and their per-panel styling until the fade-out has
+    // completed; clearing panelId early reverts icons to the default accent color.
     this.closeCleanupTimer = setTimeout(() => {
       this.closeCleanupTimer = null;
-      if (!this.session) this.resultsScroller?.clear();
+      if (this.session) return;
+      delete this.panel?.dataset.panelId;
+      this.resultsScroller?.clear();
     }, transitionDuration);
 
     if (restoreFocus) {
