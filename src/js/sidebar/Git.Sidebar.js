@@ -4225,6 +4225,10 @@ class GitSidebar extends Sidebar {
       // every commit, so unrelated work never re-renders the visible rows.
       if (this.collapsed.history === true) this.history.loaded = false;
       else void this.loadHistory({ reset: true });
+    } else if (!this.collapsed.history && !this.history.loaded) {
+      // An expanded section also loads on first open, not only after a
+      // collapse/expand toggle, so it never shows an empty "History 0".
+      void this.loadHistory({ reset: true });
     }
   }
 

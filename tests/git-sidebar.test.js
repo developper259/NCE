@@ -2778,6 +2778,36 @@ test("GitSidebar remembers the expanded history section", async () => {
   }
 });
 
+test("GitSidebar loads an expanded history section on open without a toggle", async () => {
+  const first = createSidebar({ commits: makeCommits(2) });
+  try {
+    await first.sidebar.refresh({ reason: "open" });
+    await first.sidebar.showHistory();
+  } finally {
+    first.sidebar.destroy();
+  }
+
+  // Reopen with the persisted expanded section: the log must load on open, not
+  // only after a collapse/expand toggle (regression: expanded showed "History 0").
+  const restored = new GitSidebar(first.editor);
+  restored.isOpen = true;
+  try {
+    assert.equal(restored.collapsed.history, false);
+    assert.equal(restored.history.loaded, false);
+    await restored.refresh({ reason: "open" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(restored.history.loaded, true);
+    assert.equal(restored.history.commits.length, 2);
+    const section = restored.buildListItems(
+      restored.getSections().staged,
+      restored.getSections().changes,
+    ).find((item) => item.type === "section" && item.section === "history");
+    assert.equal(section.count, 2, "the expanded history shows its real count on open");
+  } finally {
+    restored.destroy();
+  }
+});
+
 test("GitSidebar formats commit hashes and dates for the history rows", () => {
   assert.equal(GitSidebar.shortHash("0123456789abcdef"), "0123456");
   assert.equal(GitSidebar.shortHash(""), "");
