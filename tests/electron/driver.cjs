@@ -1831,6 +1831,13 @@ app.whenReady().then(() => {
           ["-C", sourceControlWorkspace, "push", "-q", "-u", "origin", fixtureBranch],
           { stdio: "ignore" },
         );
+        // A bare init sets HEAD to the platform default branch, which may not be the
+        // pushed one; point it at the pushed branch so clones can check out a worktree.
+        execFileSync(
+          "git",
+          ["-C", sourceControlRemote, "symbolic-ref", "HEAD", `refs/heads/${fixtureBranch}`],
+          { stdio: "ignore" },
+        );
         execFileSync(
           "git",
           ["-C", sourceControlWorkspace, "commit", "-q", "--allow-empty", "-m", "Sync fixture local commit"],
