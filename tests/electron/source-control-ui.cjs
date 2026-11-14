@@ -40,6 +40,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   const getSectionAction = (section) => git.listLayer.querySelector(
     `.git-section-header[data-section="${section}"] .git-section-action:not(.git-section-discard)`,
   );
+  const sectionTitles = (root) => [...root.querySelectorAll(".git-section-title")]
+    .map((element) => element.textContent);
   const waitForIdle = () => waitFor(
     () => !git.loading && !git.switchingBranch &&
       !git.stagingAll && !git.unstagingAll && !git.committing &&
@@ -133,10 +135,24 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     check(git.stateElement.hidden === false, "clean state is visible");
     check(git.stateTitleElement.textContent === "Working tree clean", "clean state title");
     check(git.stateText.textContent === "No changes to commit.", "clean state description");
-    const emptyHistoryHeader = git.listLayer.querySelector(
+    const emptyHistoryHeader = git.container.querySelector(
       '.git-section-header[data-section="history"]',
     );
     check(Boolean(emptyHistoryHeader), "a clean repository offers the History section");
+    check(
+      git.collapsedBar.contains(emptyHistoryHeader) &&
+        git.listLayer.querySelector('.git-section-header[data-section="history"]') === null,
+      "the collapsed History header lives in the pinned bar, not the virtual list",
+    );
+    const cleanContainerRect = git.container.getBoundingClientRect();
+    const cleanPaddingBottom = parseFloat(getComputedStyle(git.container).paddingBottom);
+    check(
+      Math.abs(
+        emptyHistoryHeader.getBoundingClientRect().bottom -
+          (cleanContainerRect.bottom - cleanPaddingBottom),
+      ) <= 2,
+      "the collapsed History header is pinned to the bottom of the sidebar",
+    );
     check(
       git.listLayer.querySelectorAll(".git-commit-row").length === 0,
       "history starts collapsed",
@@ -153,7 +169,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       ),
       "an unborn repository explains that it has no commits",
     );
-    git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
+    git.container.querySelector('.git-section-header[data-section="history"]').click();
     await nextFrame();
     check(
       git.listLayer.querySelectorAll(".git-commit-row").length === 0 &&
@@ -536,6 +552,52 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       .some((element) => element.textContent === "Changes"),
     "Changes section is visible",
   );
+  git.listLayer.querySelector('.git-section-header[data-section="changes"]').click();
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).length === 0,
+    "collapsing Changes removes it from the expanded list",
+  );
+  check(
+    sectionTitles(git.collapsedBar).join(",") === "Changes,History",
+    "collapsed Changes pins above the collapsed History header",
+  );
+  const collapsedChanges = git.collapsedBar.querySelector(
+    '.git-section-header[data-section="changes"]',
+  );
+  check(
+    collapsedChanges.getAttribute("aria-expanded") === "false",
+    "the pinned Changes header announces its collapsed state",
+  );
+  const changesBarRect = git.collapsedBar.getBoundingClientRect();
+  const changesComposerRect = git.commitBoxElement.getBoundingClientRect();
+  check(
+    changesBarRect.bottom <= changesComposerRect.top + 1 &&
+      changesComposerRect.top - changesBarRect.bottom <= 8,
+    "the collapsed Changes and History headers sit just above the commit input",
+  );
+  git.collapsedBar.querySelector('.git-section-header[data-section="history"]').click();
+  await waitFor(() => !git.history.loading, "History to expand while Changes stays collapsed");
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).join(",") === "History" &&
+      sectionTitles(git.collapsedBar).join(",") === "Changes",
+    "opening History lifts it to the top while the collapsed Changes header stays pinned below",
+  );
+  git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).length === 0 &&
+      sectionTitles(git.collapsedBar).join(",") === "Changes,History",
+    "collapsing History returns it to the pinned bar below Changes",
+  );
+  collapsedChanges.click();
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).join(",") === "Changes" &&
+      sectionTitles(git.collapsedBar).join(",") === "History",
+    "expanding Changes lifts it back to the top of the list",
+  );
 
   // Branch selector: QuickPanel picker with create first and sorted branches.
   check(
@@ -846,10 +908,36 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   await nextFrame();
   check(
-    [...git.listLayer.querySelectorAll(".git-section-title")]
+    [...git.container.querySelectorAll(".git-section-title")]
       .map((element) => element.textContent)
       .join(",") === "Staged Changes,History",
-    "empty change sections are not rendered, History stays available",
+    "empty change sections are not rendered, expanded Staged stacks above the pinned History",
+  );
+  const pinnedHistory = git.collapsedBar.querySelector(
+    '.git-section-header[data-section="history"]',
+  );
+  const commitBoxRect = git.commitBoxElement.getBoundingClientRect();
+  check(
+    Boolean(pinnedHistory) &&
+      pinnedHistory.getBoundingClientRect().bottom <= commitBoxRect.top + 1 &&
+      commitBoxRect.top - pinnedHistory.getBoundingClientRect().bottom <= 8,
+    "the collapsed History header is pinned just above the commit input",
+  );
+  git.listLayer.querySelector('.git-section-header[data-section="staged"]').click();
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).length === 0 &&
+      sectionTitles(git.collapsedBar).join(",") === "Staged Changes,History",
+    "collapsing Staged pins its header above History and empties the expanded list",
+  );
+  const collapsedStaged = git.collapsedBar.querySelector(
+    '.git-section-header[data-section="staged"]',
+  );
+  collapsedStaged.click();
+  await waitFor(
+    () => sectionTitles(git.listLayer).join(",") === "Staged Changes" &&
+      sectionTitles(git.collapsedBar).join(",") === "History",
+    "clicking a pinned Staged header expands it back to the top",
   );
   const unstageAllButton = git.listLayer.querySelector(
     '.git-section-header[data-section="staged"] .git-section-action:not(.git-section-discard)',
@@ -916,7 +1004,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
 
   // Commit history: real Git log, progressive pages, selection and details.
-  const historyHeader = () => git.listLayer.querySelector(
+  const historyHeader = () => git.container.querySelector(
     '.git-section-header[data-section="history"]',
   );
   check(Boolean(historyHeader()), "History is offered after a commit");

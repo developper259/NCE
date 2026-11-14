@@ -440,6 +440,17 @@
   width: 100%;
 }
 
+/* Collapsed section headers pinned above the composer (accordion layout) */
+.git-collapsed-bar {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.git-collapsed-bar[hidden] {
+  display: none;
+}
+
 .git-section-header {
   box-sizing: border-box;
   display: flex;

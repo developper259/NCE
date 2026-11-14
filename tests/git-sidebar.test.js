@@ -609,13 +609,19 @@ test("GitSidebar counts staged and unstaged changes from normalized status", asy
   try {
     await sidebar.refresh({ reason: "open" });
     assert.equal(sidebar.getBranchName(), "main");
-    const { staged, changes, items } = sidebar.describeStatus();
+    const { staged, changes, items, collapsed } = sidebar.describeStatus();
     assert.equal(staged.length, 1);
     assert.equal(changes.length, 2);
     const sections = items.filter((item) => item.type === "section");
     assert.equal(
       sections.map((item) => `${item.section}:${item.count}`).join("|"),
-      "changes:2|staged:1|history:0",
+      "changes:2|staged:1",
+      "expanded sections stack in the list; the collapsed history moves to the bar",
+    );
+    assert.deepEqual(
+      toPlain(collapsed.map((item) => `${item.section}:${item.count}`)),
+      ["history:0"],
+      "the collapsed history section is described separately for the pinned bar",
     );
     assert.equal(items.filter((item) => item.type === "entry").length, 3);
     assert.equal(sidebar.fileScroller.items.length, items.length);
@@ -1667,13 +1673,131 @@ test("GitSidebar lists only non-empty change sections", async () => {
     assert.deepEqual(changeSections(items), []);
     assert.deepEqual(
       toPlain(items.map((item) => item.type)),
-      ["section"],
-      "a clean repository still offers the collapsed history section",
+      [],
+      "a clean repository renders no expanded list sections",
     );
-    assert.equal(items[0].section, "history");
+    const collapsed = clean.sidebar.buildCollapsedSections([], []);
+    assert.deepEqual(
+      toPlain(collapsed.map((item) => item.section)),
+      ["history"],
+      "a clean repository still offers the collapsed history section in the pinned bar",
+    );
+    assert.equal(clean.sidebar.collapsedBar.children.length, 1);
+    assert.equal(clean.sidebar.collapsedBar.children[0].dataset.section, "history");
+    assert.equal(clean.sidebar.collapsedBar.hidden, false);
     assert.equal(clean.sidebar.listElement.hidden, false);
   } finally {
     clean.sidebar.destroy();
+  }
+});
+
+test("GitSidebar accordion stacks expanded sections on top and pins collapsed headers below", async () => {
+  const { sidebar } = createSidebar({
+    entries: [stagedEntry, modifiedEntry],
+    commits: makeCommits(2),
+  });
+  const listSections = () => toPlain(sidebar.buildListItems(
+    sidebar.getSections().staged,
+    sidebar.getSections().changes,
+  ).filter((item) => item.type === "section").map((item) => item.section));
+  const barSections = () => toPlain(
+    sidebar.collapsedBar.children.map((child) => child.dataset.section),
+  );
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    // Changes and Staged are expanded by default; History starts collapsed.
+    assert.deepEqual(listSections(), ["changes", "staged"]);
+    assert.deepEqual(barSections(), ["history"]);
+    assert.equal(sidebar.collapsedBar.hidden, false);
+
+    // Collapsing Changes moves its header down to the bar, above History.
+    assert.equal(sidebar.toggleSection("changes"), true);
+    assert.deepEqual(listSections(), ["staged"]);
+    assert.deepEqual(barSections(), ["changes", "history"]);
+
+    // Expanding History lifts it to the top region, after the expanded Staged.
+    assert.equal(sidebar.toggleSection("history"), false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(listSections(), ["staged", "history"]);
+    assert.deepEqual(barSections(), ["changes"]);
+
+    // Collapsing Staged keeps the collapsed headers in their natural order.
+    assert.equal(sidebar.toggleSection("staged"), true);
+    assert.deepEqual(listSections(), ["history"]);
+    assert.deepEqual(barSections(), ["changes", "staged"]);
+
+    // Re-expanding Changes restores it to the very top of the list.
+    assert.equal(sidebar.toggleSection("changes"), false);
+    assert.deepEqual(listSections(), ["changes", "history"]);
+    assert.deepEqual(barSections(), ["staged"]);
+    assert.equal(
+      sidebar.fileScroller.items.some((item) =>
+        item.type === "section" && item.section === "staged"),
+      false,
+      "a collapsed section never stays in the virtual list",
+    );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar hides the pinned bar when nothing is collapsed or the list is hidden", async () => {
+  const { sidebar } = createSidebar({ entries: [modifiedEntry], commits: makeCommits(1) });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.deepEqual(
+      toPlain(sidebar.collapsedBar.children.map((child) => child.dataset.section)),
+      ["history"],
+    );
+    assert.equal(sidebar.collapsedBar.hidden, false);
+
+    // Every section expanded: the bar empties and hides so it adds no gap.
+    assert.equal(sidebar.toggleSection("history"), false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sidebar.collapsedBar.children.length, 0);
+    assert.equal(sidebar.collapsedBar.hidden, true);
+
+    assert.equal(sidebar.toggleSection("history"), true);
+    assert.equal(sidebar.collapsedBar.hidden, false);
+
+    // The bar mirrors the list visibility: a hidden list hides the bar too.
+    sidebar.listElement.hidden = true;
+    sidebar.syncCollapsedBarVisibility();
+    assert.equal(sidebar.collapsedBar.hidden, true);
+    sidebar.listElement.hidden = false;
+    sidebar.syncCollapsedBarVisibility();
+    assert.equal(sidebar.collapsedBar.hidden, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar pinned bar headers reuse the section header and expand on click", async () => {
+  const { sidebar } = createSidebar({ entries: [], commits: makeCommits(2) });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    const barHeader = sidebar.collapsedBar.children[0];
+    assert.equal(barHeader.dataset.section, "history");
+    assert.equal(barHeader.dataset.gitFocusKey, "section:history");
+    assert.equal(barHeader.getAttribute("aria-expanded"), "false");
+    assert.equal(barHeader.getAttribute("role"), "button");
+
+    barHeader.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(sidebar.collapsed.history, false);
+    assert.equal(sidebar.collapsedBar.children.length, 0);
+    assert.equal(sidebar.collapsedBar.hidden, true);
+    const listHeader = sidebar.fileScroller.items.find((item) =>
+      item.type === "section" && item.section === "history");
+    assert.ok(listHeader, "the expanded history header joins the virtual list");
+    const rendered = sidebar.createListItem(listHeader);
+    assert.equal(rendered.getAttribute("aria-expanded"), "true");
+    assert.equal(sidebar.history.commits.length, 2);
+  } finally {
+    sidebar.destroy();
   }
 });
 

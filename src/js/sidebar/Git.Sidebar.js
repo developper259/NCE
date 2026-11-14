@@ -196,6 +196,7 @@ class GitSidebar extends Sidebar {
     this.listElement = null;
     this.listViewport = null;
     this.listLayer = null;
+    this.collapsedBar = null;
 
     this.fileScroller = new SearchResultsScroller(
       editor,
@@ -651,7 +652,15 @@ class GitSidebar extends Sidebar {
     this.listLayer = layerNode;
     this.fileScroller.attach(list, viewport, layerNode);
 
-    container.append(header, state, banner, syncBar, list, commitBox);
+    // Collapsed section headers live in their own flex-pinned bar so they always
+    // sit at the bottom, just above the commit input, while expanded sections
+    // stack at the top of the virtual list (accordion layout).
+    const collapsedBar = document.createElement("div");
+    collapsedBar.className = "git-collapsed-bar";
+    collapsedBar.hidden = true;
+    this.collapsedBar = collapsedBar;
+
+    container.append(header, state, banner, syncBar, list, collapsedBar, commitBox);
     this.updateView();
     return container;
   }
@@ -992,6 +1001,7 @@ class GitSidebar extends Sidebar {
       this.commitBoxElement.hidden = view.mode !== "changes";
     if (this.listElement)
       this.listElement.hidden = view.mode !== "changes" && view.mode !== "clean";
+    this.syncCollapsedBarVisibility();
   }
 
   getSections() {
@@ -1303,50 +1313,44 @@ class GitSidebar extends Sidebar {
       staged,
       changes,
       items: this.buildListItems(staged, changes),
+      collapsed: this.buildCollapsedSections(staged, changes),
     };
+  }
+
+  sectionDescriptor(section, title, count) {
+    return { type: "section", section, title, count, height: 24, rowHeight: 24 };
   }
 
   buildListItems(staged, changes) {
     const items = [];
     if (!this.status) return items;
-    if (changes.length > 0) {
-      items.push({
-        type: "section",
-        section: "changes",
-        title: "Changes",
-        count: changes.length,
-        height: 24,
-        rowHeight: 24,
-      });
-      if (this.collapsed.changes !== true) {
-        for (const entry of changes)
-          items.push({ type: "entry", section: "changes", entry, height: 25, rowHeight: 25 });
-      }
+    if (changes.length > 0 && this.collapsed.changes !== true) {
+      items.push(this.sectionDescriptor("changes", "Changes", changes.length));
+      for (const entry of changes)
+        items.push({ type: "entry", section: "changes", entry, height: 25, rowHeight: 25 });
     }
-    if (staged.length > 0) {
-      items.push({
-        type: "section",
-        section: "staged",
-        title: "Staged Changes",
-        count: staged.length,
-        height: 24,
-        rowHeight: 24,
-      });
-      if (this.collapsed.staged !== true) {
-        for (const entry of staged)
-          items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
-      }
+    if (staged.length > 0 && this.collapsed.staged !== true) {
+      items.push(this.sectionDescriptor("staged", "Staged Changes", staged.length));
+      for (const entry of staged)
+        items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
     }
-    items.push({
-      type: "section",
-      section: "history",
-      title: "History",
-      count: this.history.commits.length,
-      height: 24,
-      rowHeight: 24,
-    });
-    if (this.collapsed.history !== true) items.push(...this.buildHistoryItems());
+    if (this.collapsed.history !== true) {
+      items.push(this.sectionDescriptor("history", "History", this.history.commits.length));
+      items.push(...this.buildHistoryItems());
+    }
     return items;
+  }
+
+  buildCollapsedSections(staged, changes) {
+    const sections = [];
+    if (!this.status) return sections;
+    if (changes.length > 0 && this.collapsed.changes === true)
+      sections.push(this.sectionDescriptor("changes", "Changes", changes.length));
+    if (staged.length > 0 && this.collapsed.staged === true)
+      sections.push(this.sectionDescriptor("staged", "Staged Changes", staged.length));
+    if (this.collapsed.history === true)
+      sections.push(this.sectionDescriptor("history", "History", this.history.commits.length));
+    return sections;
   }
 
   buildHistoryItems() {
@@ -1991,7 +1995,23 @@ class GitSidebar extends Sidebar {
       resetScroll: this.listResetPending,
     });
     this.listResetPending = false;
+    this.renderCollapsedBar(staged, changes);
     if (focusKey) this.restoreListFocus(focusKey);
+  }
+
+  renderCollapsedBar(staged, changes) {
+    if (!this.collapsedBar) return;
+    const sections = this.buildCollapsedSections(staged, changes);
+    this.collapsedBar.replaceChildren(
+      ...sections.map((section) => this.createSectionHeader(section)),
+    );
+    this.syncCollapsedBarVisibility();
+  }
+
+  syncCollapsedBarVisibility() {
+    if (!this.collapsedBar) return;
+    const listHidden = this.listElement?.hidden !== false;
+    this.collapsedBar.hidden = listHidden || this.collapsedBar.children.length === 0;
   }
 
   captureListFocusKey() {
