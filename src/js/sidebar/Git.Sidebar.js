@@ -2088,10 +2088,14 @@ class GitSidebar extends Sidebar {
     this.collapsed[section] = !this.collapsed[section];
     this.saveCollapsedState();
     this.renderList();
-    const risen = this.partitionSections(staged, changes)
-      .top.filter((item) => !previousTop.has(item.section))
+    const { top, bottom } = this.partitionSections(staged, changes);
+    const risen = top
+      .filter((item) => !previousTop.has(item.section))
       .map((item) => item.section);
     if (risen.length > 0) this.animateRisenSections(risen);
+    const bottomSections = new Set(bottom.map((item) => item.section));
+    const descended = [...previousTop].filter((name) => bottomSections.has(name));
+    if (descended.length > 0) this.animateDescendedSections(descended);
     if (this.collapsed[section] === false) this.requestItemAnimation(section);
     if (section === "history" && !this.collapsed.history && !this.history.loaded)
       void this.loadHistory({ reset: true });
@@ -2128,6 +2132,32 @@ class GitSidebar extends Sidebar {
     // full opacity for one frame before the fade starts.
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
     else run();
+  }
+
+  animateDescendedSections(sections) {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    // The pinned bar re-renders synchronously in renderList, so its headers
+    // already exist here before paint; no animation frame is needed and the
+    // slide-down starts from the first frame without a full-opacity flash.
+    sections.forEach((section, index) => {
+      const header = this.collapsedBar?.querySelector(
+        `.git-section-header[data-section="${section}"]`,
+      );
+      if (!header || typeof header.animate !== "function") return;
+      header.animate(
+        [
+          { opacity: 0, transform: "translateY(-10px)" },
+          { opacity: 1, transform: "translateY(0)" },
+        ],
+        {
+          duration: 200,
+          delay: index * 24,
+          easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+          fill: "backwards",
+        },
+      );
+    });
   }
 
   requestItemAnimation(section) {

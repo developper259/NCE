@@ -1839,6 +1839,39 @@ test("GitSidebar animates only the sections that rise into the top list on toggl
   }
 });
 
+test("GitSidebar animates only the sections that descend into the pinned bar on toggle", async () => {
+  const { sidebar } = createSidebar({
+    entries: [stagedEntry, modifiedEntry],
+    commits: makeCommits(2),
+  });
+  const descents = [];
+  sidebar.animateDescendedSections = (sections) => descents.push([...sections]);
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+
+    // Changes and Staged start expanded, History pinned. Collapsing Staged
+    // drops its header below the still-expanded Changes into the bar.
+    sidebar.toggleSection("staged");
+    assert.deepEqual(descents, [["staged"]]);
+
+    // Collapsing Changes leaves nothing expanded, so Changes descends too.
+    sidebar.toggleSection("changes");
+    assert.deepEqual(descents, [["staged"], ["changes"]]);
+
+    // Opening History lifts everything up; nothing descends.
+    sidebar.toggleSection("history");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(descents, [["staged"], ["changes"]]);
+
+    // Collapsing History drops Changes, Staged and History back into the bar.
+    sidebar.toggleSection("history");
+    assert.deepEqual(descents, [["staged"], ["changes"], ["changes", "staged", "history"]]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar rise animation staggers a fade/slide and honors reduced motion", () => {
   let reduceMotion = false;
   const frames = [];
@@ -1910,6 +1943,63 @@ test("GitSidebar rise animation staggers a fade/slide and honors reduced motion"
   headers.delete("history");
   animate.call(context, ["history", "changes"]);
   flush();
+  assert.deepEqual(animations.map((entry) => entry.section), ["changes"]);
+});
+
+test("GitSidebar descent animation slides headers down and honors reduced motion", () => {
+  let reduceMotion = false;
+  const AnimatedSidebar = loadGlobal("src/js/sidebar/Git.Sidebar.js", "GitSidebar", {
+    Sidebar,
+    SearchResultsScroller: FakeScroller,
+    document: documentStub,
+    localStorage: storageStub,
+    SETTINGS_SET: (key, value) => settingsSetHandler(key, value),
+    NCEPath: {
+      equals: (left, right) => left === right,
+      basename: (value) => String(value || "").replace(/\\/g, "/").split("/").pop(),
+    },
+    window: {
+      matchMedia: (query) => ({ matches: reduceMotion && query.includes("reduce") }),
+    },
+  });
+  const animate = AnimatedSidebar.prototype.animateDescendedSections;
+  const animations = [];
+  const headers = new Map();
+  for (const section of ["changes", "staged", "history"]) {
+    headers.set(section, {
+      animate: (keyframes, options) => animations.push({ section, keyframes, options }),
+    });
+  }
+  const context = {
+    collapsedBar: {
+      querySelector: (selector) => {
+        const match = selector.match(/data-section="(\w+)"/);
+        return headers.get(match?.[1]) || null;
+      },
+    },
+  };
+
+  // Reduced motion animates nothing.
+  reduceMotion = true;
+  animate.call(context, ["changes"]);
+  assert.equal(animations.length, 0);
+
+  // Normal motion slides each pinned header down from above with a stagger and
+  // a backwards fill. The bar renders synchronously, so this needs no frame.
+  reduceMotion = false;
+  animate.call(context, ["changes", "staged", "history"]);
+  assert.deepEqual(animations.map((entry) => entry.section), ["changes", "staged", "history"]);
+  animations.forEach((entry, index) => {
+    assert.equal(entry.options.delay, index * 24);
+    assert.equal(entry.options.fill, "backwards");
+    assert.deepEqual(toPlain(entry.keyframes[0]), { opacity: 0, transform: "translateY(-10px)" });
+    assert.deepEqual(toPlain(entry.keyframes[1]), { opacity: 1, transform: "translateY(0)" });
+  });
+
+  // Headers absent from the bar are skipped without throwing.
+  animations.length = 0;
+  headers.delete("history");
+  animate.call(context, ["history", "changes"]);
   assert.deepEqual(animations.map((entry) => entry.section), ["changes"]);
 });
 

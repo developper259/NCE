@@ -704,8 +704,33 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       "the header and commit item animations to finish",
       1500,
     );
+    // Collapse History: both Changes and History descend from the top list
+    // into the pinned bar, sliding down from above as they fade in. The bar
+    // renders synchronously, so the slide-down is already running at click
+    // time; poll for it directly rather than waiting a frame.
     git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
-    await nextFrame();
+    const descendedHistory = git.collapsedBar.querySelector(
+      '.git-section-header[data-section="history"]',
+    );
+    check(Boolean(descendedHistory), "the descended History header is pinned after collapsing History");
+    let descentKeyframes = null;
+    await waitFor(() => {
+      const running = descendedHistory.getAnimations()
+        .find((animation) => animation.playState === "running");
+      if (!running) return false;
+      descentKeyframes = running.effect?.getKeyframes?.() || null;
+      return true;
+    }, "the descended History header to play its slide-down animation", 1000);
+    check(
+      Array.isArray(descentKeyframes) && descentKeyframes.length >= 2 &&
+        descentKeyframes.some((frame) => Number(frame.opacity) === 0),
+      "the descended header entrance animates opacity from transparent",
+    );
+    await waitFor(
+      () => descendedHistory.getAnimations().length === 0,
+      "the descent animation to finish",
+      1000,
+    );
     check(
       sectionTitles(git.collapsedBar).join(",") === "Changes,History",
       "collapsing History after the animation returns both headers to the pinned bar",
