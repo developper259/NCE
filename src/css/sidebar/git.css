@@ -299,57 +299,77 @@
   cursor: default;
 }
 
-/* Remote sync bar */
-.git-sync-bar {
+/* Remote sync strip + header actions */
+.git-sync-strip {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 6px 8px 0 2px;
-  padding: 4px 6px;
-  border: 1px solid var(--border-primary);
-  border-radius: 5px;
-  background: var(--bg-secondary);
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 6px 0 2px;
+  border-bottom: 1px solid var(--border-primary);
+  color: var(--text-tertiary);
+  font-size: 10.5px;
 }
 
-.git-sync-bar[hidden] {
+.git-sync-strip[hidden] {
   display: none;
 }
 
-.git-sync-button {
-  position: relative;
-  display: inline-flex;
+.git-sync-strip-icon {
   flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: 3px;
-  background: transparent;
+  font-size: 11px;
+}
+
+.git-sync-strip-icon.is-spinning {
+  animation: git-spin 900ms linear infinite;
+}
+
+.git-sync-strip-icon.is-success {
+  color: var(--git-added);
+}
+
+.git-sync-strip-counts {
+  display: inline-flex;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.git-sync-strip-counts[hidden] {
+  display: none;
+}
+
+.git-sync-strip-counts b {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.git-sync-strip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-sync-strip-label[hidden] {
+  display: none;
+}
+
+.git-sync-strip-remote {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-tertiary);
-  font-size: 12px;
-  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.git-sync-button:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-white);
+.git-sync-strip-remote[hidden] {
+  display: none;
 }
 
-.git-sync-button:focus-visible {
-  outline: 1px solid var(--border-active);
-  outline-offset: -1px;
-}
-
-.git-sync-button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.git-sync-pull-icon {
-  transform: rotate(180deg);
+.git-sync-action {
+  position: relative;
 }
 
 .git-sync-count {
@@ -1637,7 +1657,8 @@ code.git-commit-detail-value {
   .git-sidebar-icon-button[aria-busy="true"] i,
   .git-section-action[aria-busy="true"] i,
   .git-composer-commit[aria-busy="true"] i,
-  .git-state-icon.is-spinning {
+  .git-state-icon.is-spinning,
+  .git-sync-strip-icon.is-spinning {
     animation: none;
   }
 }

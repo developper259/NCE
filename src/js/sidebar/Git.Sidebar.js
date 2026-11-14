@@ -165,7 +165,6 @@ class GitSidebar extends Sidebar {
     super("git", "Source Control", "fi fi-rr-code-branch", "left", editor);
     this.container = null;
     this.headerElement = null;
-    this.refreshButton = null;
     this.menuButton = null;
     this.commitBoxElement = null;
     this.commitInput = null;
@@ -243,13 +242,16 @@ class GitSidebar extends Sidebar {
     this.syncing = null;
     this.syncProgress = null;
     this.unsubscribeNetworkProgress = null;
-    this.syncBar = null;
+    this.syncStrip = null;
+    this.syncStripIcon = null;
+    this.syncStripCounts = null;
+    this.syncStripLabel = null;
+    this.syncStripRemote = null;
     this.syncFetchButton = null;
     this.syncPullButton = null;
     this.syncPushButton = null;
     this.syncPullCount = null;
     this.syncPushCount = null;
-    this.syncRemotesButton = null;
     this.syncStatus = null;
     this.syncCancelButton = null;
     this.remotes = [];
@@ -338,18 +340,41 @@ class GitSidebar extends Sidebar {
     const headerActions = document.createElement("div");
     headerActions.className = "git-sidebar-header-actions";
 
-    const refreshButton = document.createElement("button");
-    refreshButton.type = "button";
-    refreshButton.className = "git-sidebar-icon-button";
-    refreshButton.title = "Refresh";
-    refreshButton.setAttribute("aria-label", "Refresh Source Control");
-    const refreshIcon = document.createElement("i");
-    refreshIcon.className = "fi fi-rr-refresh";
-    refreshIcon.setAttribute("aria-hidden", "true");
-    refreshButton.appendChild(refreshIcon);
-    refreshButton.addEventListener("click", () => this.refresh({ reason: "manual" }));
-    refreshButton.dataset.action = "refresh";
-    this.refreshButton = refreshButton;
+    const makeSyncAction = (action, iconClass, label) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "git-sidebar-icon-button git-sync-action";
+      button.title = label;
+      button.setAttribute("aria-label", label);
+      button.dataset.action = action;
+      const icon = document.createElement("i");
+      icon.className = iconClass;
+      icon.setAttribute("aria-hidden", "true");
+      button.appendChild(icon);
+      return button;
+    };
+
+    const fetchButton = makeSyncAction("fetch", "fi fi-rr-cloud-download", "Fetch");
+    fetchButton.addEventListener("click", () => void this.fetchChanges());
+    this.syncFetchButton = fetchButton;
+
+    const pullButton = makeSyncAction("pull", "fi fi-rr-download", "Pull");
+    const pullCount = document.createElement("span");
+    pullCount.className = "git-sync-count";
+    pullCount.hidden = true;
+    pullButton.appendChild(pullCount);
+    pullButton.addEventListener("click", () => void this.pullChanges());
+    this.syncPullButton = pullButton;
+    this.syncPullCount = pullCount;
+
+    const pushButton = makeSyncAction("push", "fi fi-rr-upload", "Push");
+    const pushCount = document.createElement("span");
+    pushCount.className = "git-sync-count";
+    pushCount.hidden = true;
+    pushButton.appendChild(pushCount);
+    pushButton.addEventListener("click", () => void this.pushChanges());
+    this.syncPushButton = pushButton;
+    this.syncPushCount = pushCount;
 
     const menuButton = document.createElement("button");
     menuButton.type = "button";
@@ -365,7 +390,7 @@ class GitSidebar extends Sidebar {
     menuButton.dataset.action = "menu";
     this.menuButton = menuButton;
 
-    headerActions.append(refreshButton, menuButton);
+    headerActions.append(fetchButton, pullButton, pushButton, menuButton);
     header.append(title, headerActions);
     this.headerElement = header;
 
@@ -573,47 +598,26 @@ class GitSidebar extends Sidebar {
     this.operationBannerText = bannerText;
     this.operationBannerButton = bannerButton;
 
-    const syncBar = document.createElement("div");
-    syncBar.className = "git-sync-bar";
-    syncBar.hidden = true;
-    syncBar.setAttribute("role", "group");
-    syncBar.setAttribute("aria-label", "Remote synchronization");
+    const syncStrip = document.createElement("div");
+    syncStrip.className = "git-sync-strip";
+    syncStrip.hidden = true;
+    syncStrip.setAttribute("role", "group");
+    syncStrip.setAttribute("aria-label", "Remote synchronization");
 
-    const makeSyncButton = (action, iconClass, label) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "git-sync-button";
-      button.title = label;
-      button.setAttribute("aria-label", label);
-      button.dataset.action = action;
-      const icon = document.createElement("i");
-      icon.className = iconClass;
-      icon.setAttribute("aria-hidden", "true");
-      button.appendChild(icon);
-      return button;
-    };
+    const stripIcon = document.createElement("i");
+    stripIcon.className = "fi fi-rr-cloud git-sync-strip-icon";
+    stripIcon.setAttribute("aria-hidden", "true");
+    this.syncStripIcon = stripIcon;
 
-    const fetchButton = makeSyncButton("fetch", "fi fi-rr-refresh", "Fetch");
-    fetchButton.addEventListener("click", () => void this.fetchChanges());
-    this.syncFetchButton = fetchButton;
+    const stripCounts = document.createElement("span");
+    stripCounts.className = "git-sync-strip-counts";
+    stripCounts.hidden = true;
+    this.syncStripCounts = stripCounts;
 
-    const pullButton = makeSyncButton("pull", "fi fi-rr-arrow-up git-sync-pull-icon", "Pull");
-    const pullCount = document.createElement("span");
-    pullCount.className = "git-sync-count";
-    pullCount.hidden = true;
-    pullButton.appendChild(pullCount);
-    pullButton.addEventListener("click", () => void this.pullChanges());
-    this.syncPullButton = pullButton;
-    this.syncPullCount = pullCount;
-
-    const pushButton = makeSyncButton("push", "fi fi-rr-arrow-up", "Push");
-    const pushCount = document.createElement("span");
-    pushCount.className = "git-sync-count";
-    pushCount.hidden = true;
-    pushButton.appendChild(pushCount);
-    pushButton.addEventListener("click", () => void this.pushChanges());
-    this.syncPushButton = pushButton;
-    this.syncPushCount = pushCount;
+    const stripLabel = document.createElement("span");
+    stripLabel.className = "git-sync-strip-label";
+    stripLabel.hidden = true;
+    this.syncStripLabel = stripLabel;
 
     const syncStatus = document.createElement("span");
     syncStatus.className = "git-sync-status";
@@ -632,13 +636,13 @@ class GitSidebar extends Sidebar {
     cancelButton.addEventListener("click", () => void this.cancelSync());
     this.syncCancelButton = cancelButton;
 
-    const remotesButton = makeSyncButton("remotes", "fi fi-rr-settings-sliders", "Manage Remotes");
-    remotesButton.setAttribute("aria-haspopup", "dialog");
-    remotesButton.addEventListener("click", () => void this.openRemotesDialog());
-    this.syncRemotesButton = remotesButton;
+    const stripRemote = document.createElement("span");
+    stripRemote.className = "git-sync-strip-remote";
+    stripRemote.hidden = true;
+    this.syncStripRemote = stripRemote;
 
-    syncBar.append(fetchButton, pullButton, pushButton, syncStatus, cancelButton, remotesButton);
-    this.syncBar = syncBar;
+    syncStrip.append(stripIcon, stripCounts, stripLabel, syncStatus, cancelButton, stripRemote);
+    this.syncStrip = syncStrip;
 
     const list = document.createElement("div");
     list.className = "git-sidebar-list";
@@ -663,7 +667,7 @@ class GitSidebar extends Sidebar {
     collapsedBar.hidden = true;
     this.collapsedBar = collapsedBar;
 
-    container.append(header, state, banner, syncBar, list, collapsedBar, commitBox);
+    container.append(header, state, banner, syncStrip, list, collapsedBar, commitBox);
     this.updateView();
     return container;
   }
@@ -681,12 +685,6 @@ class GitSidebar extends Sidebar {
         this.switchingBranch || this.committing || this.stagingAll ||
         this.unstagingAll || this.discarding || this.aborting || Boolean(this.syncing);
     }
-    if (this.refreshButton) {
-      this.refreshButton.hidden = !this.workspaceRoot;
-      this.refreshButton.disabled = this.loading;
-      if (this.loading) this.refreshButton.setAttribute("aria-busy", "true");
-      else this.refreshButton.removeAttribute("aria-busy");
-    }
     if (this.menuButton)
       this.menuButton.hidden = !this.status?.branch;
     if (this.commitInput) {
@@ -702,7 +700,7 @@ class GitSidebar extends Sidebar {
     this.updateCommitControls();
     this.updateState();
     this.updateOperationBanner();
-    this.updateSyncBar();
+    this.updateSyncStrip();
   }
 
   getBranchLabel() {
@@ -2458,48 +2456,81 @@ class GitSidebar extends Sidebar {
     else this.operationBannerButton.removeAttribute("aria-busy");
   }
 
-  updateSyncBar() {
-    if (!this.syncBar) return;
+  updateSyncStrip() {
+    if (!this.syncStrip) return;
     const branch = this.status?.branch;
-    this.syncBar.hidden = !this.status;
-    if (!this.status) return;
+    const hasStatus = Boolean(this.status);
     const busy = this.loading || this.isMutating();
     const syncing = Boolean(this.syncing);
     const behind = Number(branch?.behind) || 0;
     const ahead = Number(branch?.ahead) || 0;
+    const upstream = branch?.upstream || "";
     const remoteLabel = this.defaultRemote ? ` (${this.defaultRemote})` : "";
 
+    this.syncFetchButton.hidden = !hasStatus;
     this.syncFetchButton.disabled = busy;
     this.syncFetchButton.title = `Fetch${remoteLabel}`;
     this.syncFetchButton.setAttribute("aria-label", `Fetch${remoteLabel}`);
 
+    this.syncPullButton.hidden = !hasStatus;
     this.syncPullButton.disabled = busy;
     this.syncPullButton.title = behind > 0 ? `Pull ${behind} commit${behind === 1 ? "" : "s"}` : "Pull";
     this.syncPullButton.setAttribute("aria-label", this.syncPullButton.title);
     this.syncPullCount.hidden = behind === 0;
     this.syncPullCount.textContent = String(behind);
 
+    this.syncPushButton.hidden = !hasStatus;
     this.syncPushButton.disabled = busy;
     this.syncPushButton.title = ahead > 0 ? `Push ${ahead} commit${ahead === 1 ? "" : "s"}` : "Push";
     this.syncPushButton.setAttribute("aria-label", this.syncPushButton.title);
     this.syncPushCount.hidden = ahead === 0;
     this.syncPushCount.textContent = String(ahead);
 
-    this.syncRemotesButton.disabled = this.loading || this.remotesBusy || syncing;
+    this.syncStrip.hidden = !hasStatus;
+    if (!hasStatus) return;
 
     if (syncing) {
       const progress = this.syncProgress;
       const label = this.syncing === "fetch" ? "Fetching" : this.syncing === "pull" ? "Pulling" : "Pushing";
+      this.syncStripIcon.className = "fi fi-rr-refresh git-sync-strip-icon is-spinning";
+      this.syncStripCounts.hidden = true;
+      this.syncStripLabel.hidden = true;
+      this.syncStripRemote.hidden = true;
       this.syncStatus.hidden = false;
       this.syncStatus.textContent = progress
         ? `${label}… ${progress.phase} ${progress.percent}%`
         : `${label}…`;
       this.syncCancelButton.hidden = false;
       this.syncCancelButton.disabled = false;
+      return;
+    }
+
+    this.syncStatus.hidden = true;
+    this.syncStatus.textContent = "";
+    this.syncCancelButton.hidden = true;
+
+    const remoteText = upstream || this.defaultRemote || "";
+    this.syncStripRemote.hidden = !remoteText;
+    this.syncStripRemote.textContent = remoteText;
+
+    if (behind > 0 || ahead > 0) {
+      const parts = [];
+      if (behind > 0) parts.push(`↓<b>${behind}</b>`);
+      if (ahead > 0) parts.push(`↑<b>${ahead}</b>`);
+      this.syncStripIcon.className = "fi fi-rr-cloud git-sync-strip-icon";
+      this.syncStripCounts.innerHTML = parts.join(" ");
+      this.syncStripCounts.hidden = false;
+      this.syncStripLabel.hidden = true;
+    } else if (upstream) {
+      this.syncStripIcon.className = "fi fi-rr-check git-sync-strip-icon is-success";
+      this.syncStripCounts.hidden = true;
+      this.syncStripLabel.textContent = "Up to date";
+      this.syncStripLabel.hidden = false;
     } else {
-      this.syncStatus.hidden = true;
-      this.syncStatus.textContent = "";
-      this.syncCancelButton.hidden = true;
+      this.syncStripIcon.className = "fi fi-rr-cloud git-sync-strip-icon";
+      this.syncStripCounts.hidden = true;
+      this.syncStripLabel.textContent = "No upstream";
+      this.syncStripLabel.hidden = false;
     }
   }
 
@@ -2518,7 +2549,7 @@ class GitSidebar extends Sidebar {
       phase: String(progress.phase || ""),
       percent: Number(progress.percent) || 0,
     };
-    this.updateSyncBar();
+    this.updateSyncStrip();
   }
 
   fetchChanges() {
@@ -3079,7 +3110,7 @@ class GitSidebar extends Sidebar {
     if (this.remotesAddName) this.remotesAddName.disabled = busy;
     if (this.remotesAddUrl) this.remotesAddUrl.disabled = busy;
     this.renderRemotesList();
-    this.updateSyncBar();
+    this.updateSyncStrip();
   }
 
   async submitAddRemote() {

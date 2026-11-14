@@ -1785,8 +1785,16 @@ app.whenReady().then(() => {
           const title = git.operationDialogTitle.textContent;
           git.operationDialogConfirmButton.click();
           const abortDeadline = Date.now() + 8000;
-          while ((git.status?.merging === true || git.aborting) && Date.now() < abortDeadline)
+          // A status snapshot can straddle the abort (entries read before the
+          // worktree reset, MERGE_HEAD checked after), so force fresh refreshes
+          // until the converged snapshot is clean instead of trusting the first.
+          while (Date.now() < abortDeadline) {
+            if (!git.aborting && git.status?.merging === false) {
+              if ((git.status?.entries?.length ?? -1) === 0) break;
+              await git.refresh({ reason: "manual" });
+            }
             await new Promise((resolve) => setTimeout(resolve, 50));
+          }
           return {
             ok: git.status?.merging === false && git.operationBanner.hidden === true,
             label,
@@ -1818,7 +1826,7 @@ app.whenReady().then(() => {
           !fs.existsSync(path.join(sourceControlWorkspace, ".git", "MERGE_HEAD")),
           "MERGE_HEAD is removed by the abort",
         );
-        // A real bare remote exercises the sync bar (push/fetch) and remotes dialog.
+        // A real bare remote exercises the sync strip (push/fetch) and remotes dialog.
         const sourceControlRemote = path.join(directory, "source-control-remote.git");
         execFileSync("git", ["init", "-q", "--bare", sourceControlRemote], { stdio: "ignore" });
         execFileSync(
@@ -1856,8 +1864,8 @@ app.whenReady().then(() => {
             await new Promise((resolve) => setTimeout(resolve, 50));
           if (!git.status?.branch?.upstream)
             return { ok: false, reason: "upstream not detected" };
-          if (git.syncBar?.hidden !== false)
-            return { ok: false, reason: "sync bar is hidden" };
+          if (git.syncStrip?.hidden !== false)
+            return { ok: false, reason: "sync strip is hidden" };
           const pushBadge = git.syncPushCount.hidden === false ? git.syncPushCount.textContent : null;
           const aheadBefore = git.status.branch.ahead;
           git.syncPushButton.click();
@@ -1897,7 +1905,7 @@ app.whenReady().then(() => {
         assert.equal(
           sourceControlSync.ok,
           true,
-          `sync bar and remotes dialog work: ${JSON.stringify(sourceControlSync)}`,
+          `sync strip and remotes dialog work: ${JSON.stringify(sourceControlSync)}`,
         );
         assert.equal(sourceControlSync.pushBadge, "1", "the push badge shows the ahead count");
         assert.equal(sourceControlSync.aheadBefore, 1);
@@ -1914,7 +1922,7 @@ app.whenReady().then(() => {
             { encoding: "utf8" },
           ).trim(),
           syncLocalHead,
-          "the sync bar push published the local commit to the real remote",
+          "the sync strip push published the local commit to the real remote",
         );
         // A real clone through the dialog must clone the bare remote and open the
         // result through the existing project system, not just render a dialog.

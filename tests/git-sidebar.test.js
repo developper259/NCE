@@ -3981,7 +3981,7 @@ test("GitSidebar sync helpers describe success and failure per operation", () =>
   );
 });
 
-test("GitSidebar renders the sync bar with ahead and behind badges", async () => {
+test("GitSidebar renders the sync strip with ahead and behind badges", async () => {
   const { sidebar } = createSidebar({
     responses: [
       { success: true, status: makeStatus([], { branch: { ahead: 2, behind: 3 } }) },
@@ -3989,13 +3989,19 @@ test("GitSidebar renders the sync bar with ahead and behind badges", async () =>
   });
   try {
     sidebar.render();
-    assert.equal(sidebar.syncBar.hidden, true, "hidden before status loads");
+    assert.equal(sidebar.syncStrip.hidden, true, "hidden before status loads");
+    assert.equal(sidebar.syncFetchButton.hidden, true, "header actions hidden before status loads");
     await sidebar.refresh({ reason: "open" });
-    assert.equal(sidebar.syncBar.hidden, false);
+    assert.equal(sidebar.syncStrip.hidden, false);
+    assert.equal(sidebar.syncFetchButton.hidden, false);
     assert.equal(sidebar.syncPullCount.hidden, false);
     assert.equal(sidebar.syncPullCount.textContent, "3");
     assert.equal(sidebar.syncPushCount.hidden, false);
     assert.equal(sidebar.syncPushCount.textContent, "2");
+    assert.equal(sidebar.syncStripCounts.hidden, false);
+    assert.match(sidebar.syncStripCounts.innerHTML, /↓<b>3<\/b>/);
+    assert.match(sidebar.syncStripCounts.innerHTML, /↑<b>2<\/b>/);
+    assert.equal(sidebar.syncStripLabel.hidden, true);
     assert.equal(sidebar.syncStatus.hidden, true);
     assert.equal(sidebar.syncCancelButton.hidden, true);
   } finally {
@@ -4008,7 +4014,33 @@ test("GitSidebar hides the sync count badges when there is nothing to sync", asy
   try {
     sidebar.render();
     await sidebar.refresh({ reason: "open" });
-    assert.equal(sidebar.syncBar.hidden, false);
+    assert.equal(sidebar.syncStrip.hidden, false);
+    assert.equal(sidebar.syncPullCount.hidden, true);
+    assert.equal(sidebar.syncPushCount.hidden, true);
+    assert.equal(sidebar.syncStripCounts.hidden, true);
+    assert.equal(sidebar.syncStripLabel.hidden, false);
+    assert.equal(sidebar.syncStripLabel.textContent, "No upstream");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar shows Up to date and the upstream when the branch is in sync", async () => {
+  const { sidebar } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([], { branch: { upstream: "origin/main" } }) },
+    ],
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.syncStrip.hidden, false);
+    assert.equal(sidebar.syncStripCounts.hidden, true);
+    assert.equal(sidebar.syncStripLabel.hidden, false);
+    assert.equal(sidebar.syncStripLabel.textContent, "Up to date");
+    assert.match(sidebar.syncStripIcon.className, /is-success/);
+    assert.equal(sidebar.syncStripRemote.hidden, false);
+    assert.equal(sidebar.syncStripRemote.textContent, "origin/main");
     assert.equal(sidebar.syncPullCount.hidden, true);
     assert.equal(sidebar.syncPushCount.hidden, true);
   } finally {
@@ -4049,6 +4081,9 @@ test("GitSidebar shows network progress only for the running operation and cance
     assert.equal(sidebar.syncStatus.hidden, false);
     assert.match(sidebar.syncStatus.textContent, /Fetching… Receiving objects 42%/);
     assert.equal(sidebar.syncCancelButton.hidden, false);
+    assert.match(sidebar.syncStripIcon.className, /is-spinning/);
+    assert.equal(sidebar.syncStripCounts.hidden, true);
+    assert.equal(sidebar.syncStripRemote.hidden, true);
     assert.equal(await sidebar.cancelSync(), true);
     assert.equal(calls.cancelNetwork, 1);
     sidebar.syncing = null;
