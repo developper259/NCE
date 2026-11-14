@@ -76,6 +76,19 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     if (failure) throw Error(`${description}: ${failure.message}`);
     await waitForIdle();
   };
+  // getStatus dedupes concurrent requests, so a manual refresh issued right
+  // after a checkout can join a watcher request that started before the switch
+  // and resolve with the previous branch. Re-refresh until the snapshot
+  // converges instead of polling a label that a single stale refresh left wrong.
+  const refreshUntil = async (predicate, description, timeout = 15000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      await git.refresh({ reason: "manual" });
+      if (predicate()) return;
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    }
+    throw Error(description);
+  };
   const openBranchPicker = async () => {
     await waitForIdle();
     await waitFor(() => !git.branchButton.disabled, "branch selector to be ready");
@@ -357,6 +370,9 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       changeRow(baseName)?.classList.contains("is-selected"),
     "selected rows are highlighted",
   );
+  // requestDiscard bails out while a refresh or mutation is in flight, so settle
+  // to idle first; otherwise the confirmation dialog never opens.
+  await waitForIdle();
   const multiDiscard = git.requestDiscard(git.getSelectedTargets());
   await waitFor(() => git.operationDialog?.open === true, "multi discard confirmation");
   check(
@@ -782,8 +798,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     backToMain?.success === true,
     `fixture returns to main: ${JSON.stringify(backToMain)}`,
   );
-  await git.refresh({ reason: "manual" });
-  await waitFor(() => git.getBranchLabel() === "main", "main branch fixture");
+  await refreshUntil(() => git.getBranchLabel() === "main", "main branch fixture");
   await openBranchPicker();
   const pickerItems = editor.quickPanel.session.items;
   check(
