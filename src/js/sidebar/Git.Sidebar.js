@@ -197,6 +197,7 @@ class GitSidebar extends Sidebar {
     this.listViewport = null;
     this.listLayer = null;
     this.collapsedBar = null;
+    this.riseAnimationToken = 0;
 
     this.fileScroller = new SearchResultsScroller(
       editor,
@@ -2079,12 +2080,52 @@ class GitSidebar extends Sidebar {
 
   toggleSection(section) {
     if (section !== "staged" && section !== "changes" && section !== "history") return false;
+    const { staged, changes } = this.getSections();
+    const previousTop = new Set(
+      this.partitionSections(staged, changes).top.map((item) => item.section),
+    );
     this.collapsed[section] = !this.collapsed[section];
     this.saveCollapsedState();
     this.renderList();
+    const risen = this.partitionSections(staged, changes)
+      .top.filter((item) => !previousTop.has(item.section))
+      .map((item) => item.section);
+    if (risen.length > 0) this.animateRisenSections(risen);
     if (section === "history" && !this.collapsed.history && !this.history.loaded)
       void this.loadHistory({ reset: true });
     return this.collapsed[section];
+  }
+
+  animateRisenSections(sections) {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const token = ++this.riseAnimationToken;
+    const run = () => {
+      if (token !== this.riseAnimationToken || this.destroyed) return;
+      sections.forEach((section, index) => {
+        const header = this.listLayer?.querySelector(
+          `.git-section-header[data-section="${section}"]`,
+        );
+        if (!header || typeof header.animate !== "function") return;
+        header.animate(
+          [
+            { opacity: 0, transform: "translateY(10px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          {
+            duration: 200,
+            delay: index * 24,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            fill: "backwards",
+          },
+        );
+      });
+    };
+    // The virtual scroller renders the risen rows on its own animation frame,
+    // scheduled first; queueing after it keeps the headers from flashing at
+    // full opacity for one frame before the fade starts.
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else run();
   }
 
   setActionError(message) {

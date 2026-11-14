@@ -1787,6 +1787,132 @@ test("GitSidebar accordion lifts collapsed headers above an opened section to th
   }
 });
 
+test("GitSidebar animates only the sections that rise into the top list on toggle", async () => {
+  const { sidebar } = createSidebar({
+    entries: [stagedEntry, modifiedEntry],
+    commits: makeCommits(2),
+  });
+  const rises = [];
+  sidebar.animateRisenSections = (sections) => rises.push([...sections]);
+  const collapseAll = () => {
+    for (const section of ["changes", "staged", "history"]) {
+      if (sidebar.collapsed[section] !== true) sidebar.toggleSection(section);
+    }
+  };
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+
+    // Collapsing never lifts a header into the top list, so nothing animates.
+    collapseAll();
+    assert.deepEqual(rises, []);
+
+    // Opening History lifts Changes, Staged and History itself out of the bar.
+    sidebar.toggleSection("history");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(rises, [["changes", "staged", "history"]]);
+
+    // Collapsing History drops them back down without a rise animation.
+    sidebar.toggleSection("history");
+    assert.deepEqual(rises, [["changes", "staged", "history"]]);
+
+    // Opening Staged lifts only Changes and Staged; History stays pinned low.
+    sidebar.toggleSection("staged");
+    assert.deepEqual(rises, [["changes", "staged", "history"], ["changes", "staged"]]);
+
+    // Changes already sits in the top list, so expanding it animates nothing.
+    sidebar.toggleSection("changes");
+    assert.deepEqual(rises, [["changes", "staged", "history"], ["changes", "staged"]]);
+
+    // Collapsing Staged pins it below Changes; re-opening History then lifts the
+    // collapsed Staged header and History, but not the already-present Changes.
+    sidebar.toggleSection("staged");
+    sidebar.toggleSection("history");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(rises, [
+      ["changes", "staged", "history"],
+      ["changes", "staged"],
+      ["staged", "history"],
+    ]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar rise animation staggers a fade/slide and honors reduced motion", () => {
+  let reduceMotion = false;
+  const frames = [];
+  const AnimatedSidebar = loadGlobal("src/js/sidebar/Git.Sidebar.js", "GitSidebar", {
+    Sidebar,
+    SearchResultsScroller: FakeScroller,
+    document: documentStub,
+    localStorage: storageStub,
+    SETTINGS_SET: (key, value) => settingsSetHandler(key, value),
+    NCEPath: {
+      equals: (left, right) => left === right,
+      basename: (value) => String(value || "").replace(/\\/g, "/").split("/").pop(),
+    },
+    window: {
+      matchMedia: (query) => ({ matches: reduceMotion && query.includes("reduce") }),
+    },
+    requestAnimationFrame: (callback) => { frames.push(callback); return frames.length; },
+  });
+  const animate = AnimatedSidebar.prototype.animateRisenSections;
+  const animations = [];
+  const headers = new Map();
+  for (const section of ["changes", "staged", "history"]) {
+    headers.set(section, {
+      animate: (keyframes, options) => animations.push({ section, keyframes, options }),
+    });
+  }
+  const context = {
+    riseAnimationToken: 0,
+    destroyed: false,
+    listLayer: {
+      querySelector: (selector) => {
+        const match = selector.match(/data-section="(\w+)"/);
+        return headers.get(match?.[1]) || null;
+      },
+    },
+  };
+  const flush = () => { while (frames.length) frames.shift()(); };
+
+  // Reduced motion queues no frame and animates nothing.
+  reduceMotion = true;
+  animate.call(context, ["changes"]);
+  assert.equal(frames.length, 0);
+  assert.equal(animations.length, 0);
+
+  // Normal motion waits one frame for the scroller render, then fades each
+  // header in from below with a stagger and a backwards fill.
+  reduceMotion = false;
+  animate.call(context, ["changes", "staged", "history"]);
+  assert.equal(frames.length, 1);
+  assert.equal(animations.length, 0, "the animation waits for the scroller render frame");
+  flush();
+  assert.deepEqual(animations.map((entry) => entry.section), ["changes", "staged", "history"]);
+  animations.forEach((entry, index) => {
+    assert.equal(entry.options.delay, index * 24);
+    assert.equal(entry.options.fill, "backwards");
+    assert.deepEqual(toPlain(entry.keyframes[0]), { opacity: 0, transform: "translateY(10px)" });
+    assert.deepEqual(toPlain(entry.keyframes[1]), { opacity: 1, transform: "translateY(0)" });
+  });
+
+  // A newer toggle supersedes any still-queued animation frame.
+  animations.length = 0;
+  animate.call(context, ["changes"]);
+  animate.call(context, ["staged"]);
+  flush();
+  assert.deepEqual(animations.map((entry) => entry.section), ["staged"]);
+
+  // Headers the scroller has not rendered yet are skipped without throwing.
+  animations.length = 0;
+  headers.delete("history");
+  animate.call(context, ["history", "changes"]);
+  flush();
+  assert.deepEqual(animations.map((entry) => entry.section), ["changes"]);
+});
+
 test("GitSidebar hides the pinned bar when nothing is collapsed or the list is hidden", async () => {
   const { sidebar } = createSidebar({ entries: [modifiedEntry], commits: makeCommits(1) });
   try {

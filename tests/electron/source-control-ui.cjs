@@ -639,6 +639,70 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   await nextFrame();
   editor.setSelected(false);
 
+  // Rise animation: opening a section fades and slides the risen headers into
+  // the top list. Collapse Changes first so opening History lifts BOTH Changes
+  // and History out of the pinned bar. Force motion on so the check is
+  // deterministic regardless of the host OS "reduce motion" setting.
+  git.listLayer.querySelector('.git-section-header[data-section="changes"]').click();
+  await nextFrame();
+  check(
+    sectionTitles(git.collapsedBar).join(",") === "Changes,History",
+    "both headers start pinned before the rise animation check",
+  );
+  const originalMatchMedia = window.matchMedia;
+  window.matchMedia = (query) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent() { return false; },
+  });
+  try {
+    git.collapsedBar.querySelector('.git-section-header[data-section="history"]').click();
+    await nextFrame();
+    const animatedChanges = git.listLayer.querySelector(
+      '.git-section-header[data-section="changes"]',
+    );
+    check(Boolean(animatedChanges), "the risen Changes header is rendered after opening History");
+    let riseKeyframes = null;
+    await waitFor(() => {
+      const running = animatedChanges.getAnimations()
+        .find((animation) => animation.playState === "running");
+      if (!running) return false;
+      riseKeyframes = running.effect?.getKeyframes?.() || null;
+      return true;
+    }, "the risen Changes header to play its entrance animation", 1000);
+    check(
+      Array.isArray(riseKeyframes) && riseKeyframes.length >= 2 &&
+        riseKeyframes.some((frame) => Number(frame.opacity) === 0),
+      "the risen header entrance animates opacity from transparent",
+    );
+    await waitFor(
+      () => animatedChanges.getAnimations().length === 0,
+      "the rise animation to finish",
+      1000,
+    );
+    git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
+    await nextFrame();
+    check(
+      sectionTitles(git.collapsedBar).join(",") === "Changes,History",
+      "collapsing History after the animation returns both headers to the pinned bar",
+    );
+  } finally {
+    window.matchMedia = originalMatchMedia;
+  }
+  // Restore the prior state: Changes expanded on top, History pinned below.
+  git.collapsedBar.querySelector('.git-section-header[data-section="changes"]').click();
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).join(",") === "Changes" &&
+      sectionTitles(git.collapsedBar).join(",") === "History",
+    "the accordion returns to Changes expanded with History pinned",
+  );
+
   // Branch selector: QuickPanel picker with create first and sorted branches.
   check(
     (await editor.api.git.createBranch("zeta"))?.success === true,
