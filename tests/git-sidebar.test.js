@@ -1913,6 +1913,149 @@ test("GitSidebar rise animation staggers a fade/slide and honors reduced motion"
   assert.deepEqual(animations.map((entry) => entry.section), ["changes"]);
 });
 
+test("GitSidebar requests an item animation only when a section opens", async () => {
+  const { sidebar } = createSidebar({
+    entries: [stagedEntry, modifiedEntry],
+    commits: makeCommits(2),
+  });
+  const requests = [];
+  sidebar.requestItemAnimation = (section) => requests.push(section);
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+
+    // Changes starts expanded: collapsing it animates nothing.
+    sidebar.toggleSection("changes");
+    assert.deepEqual(requests, []);
+    // Re-opening Changes animates its file rows.
+    sidebar.toggleSection("changes");
+    assert.deepEqual(requests, ["changes"]);
+
+    // Opening History animates its commit rows (loaded asynchronously).
+    sidebar.toggleSection("history");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(requests, ["changes", "history"]);
+    // Collapsing History animates nothing.
+    sidebar.toggleSection("history");
+    assert.deepEqual(requests, ["changes", "history"]);
+
+    // Staged starts expanded: collapse requests nothing, re-open animates.
+    sidebar.toggleSection("staged");
+    assert.deepEqual(requests, ["changes", "history"]);
+    sidebar.toggleSection("staged");
+    assert.deepEqual(requests, ["changes", "history", "staged"]);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar item animation staggers rows, caps delay, and waits for async rows", () => {
+  let reduceMotion = false;
+  const frames = [];
+  const AnimatedSidebar = loadGlobal("src/js/sidebar/Git.Sidebar.js", "GitSidebar", {
+    Sidebar,
+    SearchResultsScroller: FakeScroller,
+    document: documentStub,
+    localStorage: storageStub,
+    SETTINGS_SET: (key, value) => settingsSetHandler(key, value),
+    NCEPath: {
+      equals: (left, right) => left === right,
+      basename: (value) => String(value || "").replace(/\\/g, "/").split("/").pop(),
+    },
+    window: {
+      matchMedia: (query) => ({ matches: reduceMotion && query.includes("reduce") }),
+    },
+    requestAnimationFrame: (callback) => { frames.push(callback); return frames.length; },
+  });
+  const request = AnimatedSidebar.prototype.requestItemAnimation;
+  const schedule = AnimatedSidebar.prototype.scheduleItemAnimation;
+  const getRows = AnimatedSidebar.prototype.getSectionItemRows;
+  const animations = [];
+  const makeRow = () => ({
+    animate: (keyframes, options) => animations.push({ keyframes, options }),
+  });
+  const fileRows = [makeRow(), makeRow(), makeRow()];
+  let commitRows = [];
+  const context = {
+    itemAnimationToken: 0,
+    pendingItemSection: null,
+    destroyed: false,
+    collapsed: { changes: false, staged: false, history: false },
+    scheduleItemAnimation: schedule,
+    getSectionItemRows: getRows,
+    listLayer: {
+      querySelectorAll: (selector) => {
+        if (selector === ".git-commit-row") return commitRows;
+        if (selector === '.git-file-row[data-section="changes"]') return fileRows;
+        return [];
+      },
+    },
+  };
+  const flush = () => { while (frames.length) frames.shift()(); };
+
+  // Selector mapping: files by data-section, history by commit row.
+  const changeRows = getRows.call(context, "changes");
+  assert.equal(changeRows.length, 3);
+  assert.equal(changeRows[1], fileRows[1]);
+  commitRows = [makeRow(), makeRow()];
+  const historyRows = getRows.call(context, "history");
+  assert.equal(historyRows.length, 2);
+  assert.equal(historyRows[0], commitRows[0]);
+  commitRows = [];
+
+  // Reduced motion leaves no pending request and queues no frame.
+  reduceMotion = true;
+  request.call(context, "changes");
+  assert.equal(context.pendingItemSection, null);
+  assert.equal(frames.length, 0);
+
+  // Opening Changes animates its visible file rows with a capped stagger.
+  reduceMotion = false;
+  request.call(context, "changes");
+  assert.equal(context.pendingItemSection, "changes");
+  assert.equal(frames.length, 1);
+  assert.equal(animations.length, 0, "the animation waits for the scroller render frame");
+  flush();
+  assert.equal(context.pendingItemSection, null, "the request is consumed once rows animate");
+  assert.equal(animations.length, 3);
+  animations.forEach((entry, index) => {
+    assert.equal(entry.options.delay, Math.min(index, 10) * 20);
+    assert.equal(entry.options.fill, "backwards");
+    assert.deepEqual(toPlain(entry.keyframes[0]), { opacity: 0, transform: "translateY(6px)" });
+    assert.deepEqual(toPlain(entry.keyframes[1]), { opacity: 1, transform: "translateY(0)" });
+  });
+
+  // History commits are not rendered yet: the request stays pending across frames.
+  animations.length = 0;
+  request.call(context, "history");
+  flush();
+  assert.equal(context.pendingItemSection, "history", "still pending while commits load");
+  assert.equal(animations.length, 0);
+  // A later render produces the commit rows; scheduling again animates them once.
+  commitRows = [makeRow(), makeRow()];
+  schedule.call(context);
+  flush();
+  assert.equal(context.pendingItemSection, null);
+  assert.equal(animations.length, 2);
+
+  // Collapsing the section before its rows render cancels the pending request.
+  animations.length = 0;
+  context.collapsed.history = true;
+  request.call(context, "history");
+  flush();
+  assert.equal(context.pendingItemSection, null);
+  assert.equal(animations.length, 0);
+
+  // A newer request supersedes a still-queued frame.
+  context.collapsed.history = false;
+  animations.length = 0;
+  request.call(context, "changes");
+  request.call(context, "history");
+  flush();
+  assert.equal(context.pendingItemSection, null);
+  assert.equal(animations.length, 2, "only the latest section's rows animate");
+});
+
 test("GitSidebar hides the pinned bar when nothing is collapsed or the list is hidden", async () => {
   const { sidebar } = createSidebar({ entries: [modifiedEntry], commits: makeCommits(1) });
   try {

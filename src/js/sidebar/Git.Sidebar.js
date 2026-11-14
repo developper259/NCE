@@ -198,6 +198,8 @@ class GitSidebar extends Sidebar {
     this.listLayer = null;
     this.collapsedBar = null;
     this.riseAnimationToken = 0;
+    this.itemAnimationToken = 0;
+    this.pendingItemSection = null;
 
     this.fileScroller = new SearchResultsScroller(
       editor,
@@ -2012,6 +2014,7 @@ class GitSidebar extends Sidebar {
     });
     this.listResetPending = false;
     this.renderCollapsedBar(staged, changes);
+    if (this.pendingItemSection) this.scheduleItemAnimation();
     if (focusKey) this.restoreListFocus(focusKey);
   }
 
@@ -2091,6 +2094,7 @@ class GitSidebar extends Sidebar {
       .top.filter((item) => !previousTop.has(item.section))
       .map((item) => item.section);
     if (risen.length > 0) this.animateRisenSections(risen);
+    if (this.collapsed[section] === false) this.requestItemAnimation(section);
     if (section === "history" && !this.collapsed.history && !this.history.loaded)
       void this.loadHistory({ reset: true });
     return this.collapsed[section];
@@ -2126,6 +2130,57 @@ class GitSidebar extends Sidebar {
     // full opacity for one frame before the fade starts.
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
     else run();
+  }
+
+  requestItemAnimation(section) {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    this.pendingItemSection = section;
+    this.itemAnimationToken++;
+    this.scheduleItemAnimation();
+  }
+
+  scheduleItemAnimation() {
+    const token = this.itemAnimationToken;
+    const run = () => {
+      if (token !== this.itemAnimationToken || this.destroyed) return;
+      const section = this.pendingItemSection;
+      if (!section) return;
+      if (this.collapsed[section] === true) {
+        this.pendingItemSection = null;
+        return;
+      }
+      const rows = this.getSectionItemRows(section);
+      // History commits arrive asynchronously; keep the request pending across
+      // renders until the rows exist, then animate them exactly once.
+      if (rows.length === 0) return;
+      this.pendingItemSection = null;
+      rows.forEach((row, index) => {
+        if (typeof row.animate !== "function") return;
+        row.animate(
+          [
+            { opacity: 0, transform: "translateY(6px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          {
+            duration: 180,
+            delay: Math.min(index, 10) * 20,
+            easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+            fill: "backwards",
+          },
+        );
+      });
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else run();
+  }
+
+  getSectionItemRows(section) {
+    if (!this.listLayer?.querySelectorAll) return [];
+    const selector = section === "history"
+      ? ".git-commit-row"
+      : `.git-file-row[data-section="${section}"]`;
+    return [...this.listLayer.querySelectorAll(selector)];
   }
 
   setActionError(message) {

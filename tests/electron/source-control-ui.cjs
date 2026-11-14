@@ -680,10 +680,29 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
         riseKeyframes.some((frame) => Number(frame.opacity) === 0),
       "the risen header entrance animates opacity from transparent",
     );
+
+    // History commit items animate in once the async load renders them.
+    await waitFor(() => !git.history.loading, "History commits to load");
+    let commitKeyframes = null;
+    await waitFor(() => {
+      const row = git.listLayer.querySelector(".git-commit-row");
+      const running = row?.getAnimations()
+        .find((animation) => animation.playState === "running");
+      if (!running) return false;
+      commitKeyframes = running.effect?.getKeyframes?.() || null;
+      return true;
+    }, "a History commit item to play its entrance animation", 1500);
+    check(
+      Array.isArray(commitKeyframes) && commitKeyframes.length >= 2 &&
+        commitKeyframes.some((frame) => Number(frame.opacity) === 0),
+      "the commit item entrance animates opacity from transparent",
+    );
     await waitFor(
-      () => animatedChanges.getAnimations().length === 0,
-      "the rise animation to finish",
-      1000,
+      () => animatedChanges.getAnimations().length === 0 &&
+        ![...git.listLayer.querySelectorAll(".git-commit-row")]
+          .some((row) => row.getAnimations().length > 0),
+      "the header and commit item animations to finish",
+      1500,
     );
     git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
     await nextFrame();
@@ -691,17 +710,38 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       sectionTitles(git.collapsedBar).join(",") === "Changes,History",
       "collapsing History after the animation returns both headers to the pinned bar",
     );
+
+    // Expanding Changes animates its file rows in.
+    git.collapsedBar.querySelector('.git-section-header[data-section="changes"]').click();
+    await nextFrame();
+    let fileKeyframes = null;
+    await waitFor(() => {
+      const row = git.listLayer.querySelector('.git-file-row[data-section="changes"]');
+      const running = row?.getAnimations()
+        .find((animation) => animation.playState === "running");
+      if (!running) return false;
+      fileKeyframes = running.effect?.getKeyframes?.() || null;
+      return true;
+    }, "a Changes file item to play its entrance animation", 1000);
+    check(
+      Array.isArray(fileKeyframes) && fileKeyframes.length >= 2 &&
+        fileKeyframes.some((frame) => Number(frame.opacity) === 0),
+      "the file item entrance animates opacity from transparent",
+    );
+    await waitFor(
+      () => ![...git.listLayer.querySelectorAll('.git-file-row[data-section="changes"]')]
+        .some((row) => row.getAnimations().length > 0),
+      "the file item animations to finish",
+      1000,
+    );
+    check(
+      sectionTitles(git.listLayer).join(",") === "Changes" &&
+        sectionTitles(git.collapsedBar).join(",") === "History",
+      "the accordion returns to Changes expanded with History pinned",
+    );
   } finally {
     window.matchMedia = originalMatchMedia;
   }
-  // Restore the prior state: Changes expanded on top, History pinned below.
-  git.collapsedBar.querySelector('.git-section-header[data-section="changes"]').click();
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).join(",") === "Changes" &&
-      sectionTitles(git.collapsedBar).join(",") === "History",
-    "the accordion returns to Changes expanded with History pinned",
-  );
 
   // Branch selector: QuickPanel picker with create first and sorted branches.
   check(
