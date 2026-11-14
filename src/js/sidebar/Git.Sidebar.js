@@ -667,7 +667,9 @@ class GitSidebar extends Sidebar {
     collapsedBar.hidden = true;
     this.collapsedBar = collapsedBar;
 
-    container.append(header, state, banner, syncStrip, list, collapsedBar, commitBox);
+    // The sync strip stays pinned directly under the header in every view
+    // state; the clean-state panel grows below it instead of pushing it down.
+    container.append(header, syncStrip, state, banner, list, collapsedBar, commitBox);
     this.updateView();
     return container;
   }

@@ -246,6 +246,22 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "clean state before repository fixture",
   );
 
+  // The sync strip stays pinned directly under the header in the clean state,
+  // above the centered clean-state panel — it must not float down mid-panel.
+  await waitFor(() => git.syncStrip.hidden === false, "sync strip visible in the clean state");
+  await nextFrame();
+  const cleanHeaderRect = rectOf(git.container.querySelector(".git-sidebar-header"));
+  const cleanStripRect = rectOf(git.syncStrip);
+  const cleanStateRect = rectOf(git.stateElement);
+  check(
+    Math.abs(cleanStripRect.top - cleanHeaderRect.bottom) <= 2,
+    `the sync strip is pinned under the header: strip.top=${cleanStripRect.top} header.bottom=${cleanHeaderRect.bottom}`,
+  );
+  check(
+    cleanStripRect.bottom <= cleanStateRect.top + 1,
+    "the sync strip stays above the clean-state panel",
+  );
+
   // State C: changes.
   const fileName = "source-control-long-file-name-for-sidebar-layout-verification.js";
   const fileLines = Array.from({ length: 120 }, (_, index) =>
@@ -279,6 +295,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   check(git.commitBoxElement.hidden === false, "commit form is visible with changes");
   check(git.listElement.hidden === false, "change list is visible with changes");
   check(git.stateElement.hidden === true, "empty state is hidden with changes");
+  const changesTopHeaderRect = rectOf(git.container.querySelector(".git-sidebar-header"));
+  const changesTopStripRect = rectOf(git.syncStrip);
+  check(
+    Math.abs(changesTopStripRect.top - changesTopHeaderRect.bottom) <= 2,
+    "the sync strip stays pinned under the header with changes too",
+  );
 
   // Discard: cancel path, single untracked file, then a mixed multi-selection.
   const scratchName = "source-control-discard-scratch.txt";
