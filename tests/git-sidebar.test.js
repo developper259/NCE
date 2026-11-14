@@ -1691,18 +1691,27 @@ test("GitSidebar lists only non-empty change sections", async () => {
   }
 });
 
-test("GitSidebar accordion stacks expanded sections on top and pins collapsed headers below", async () => {
+test("GitSidebar accordion lifts collapsed headers above an opened section to the top", async () => {
   const { sidebar } = createSidebar({
     entries: [stagedEntry, modifiedEntry],
     commits: makeCommits(2),
   });
-  const listSections = () => toPlain(sidebar.buildListItems(
+  const listItems = () => sidebar.buildListItems(
     sidebar.getSections().staged,
     sidebar.getSections().changes,
-  ).filter((item) => item.type === "section").map((item) => item.section));
+  );
+  const listSections = () => toPlain(listItems()
+    .filter((item) => item.type === "section").map((item) => item.section));
   const barSections = () => toPlain(
     sidebar.collapsedBar.children.map((child) => child.dataset.section),
   );
+  const entrySections = () => toPlain([...new Set(listItems()
+    .filter((item) => item.type === "entry").map((item) => item.section))]);
+  const collapseAll = () => {
+    for (const section of ["changes", "staged", "history"]) {
+      if (sidebar.collapsed[section] !== true) sidebar.toggleSection(section);
+    }
+  };
   try {
     sidebar.render();
     await sidebar.refresh({ reason: "open" });
@@ -1711,31 +1720,67 @@ test("GitSidebar accordion stacks expanded sections on top and pins collapsed he
     assert.deepEqual(barSections(), ["history"]);
     assert.equal(sidebar.collapsedBar.hidden, false);
 
-    // Collapsing Changes moves its header down to the bar, above History.
-    assert.equal(sidebar.toggleSection("changes"), true);
-    assert.deepEqual(listSections(), ["staged"]);
-    assert.deepEqual(barSections(), ["changes", "history"]);
+    // Nothing expanded: every header pins to the bottom bar, list stays empty.
+    collapseAll();
+    assert.deepEqual(listSections(), []);
+    assert.deepEqual(barSections(), ["changes", "staged", "history"]);
 
-    // Expanding History lifts it to the top region, after the expanded Staged.
+    // Opening History lifts the collapsed Changes and Staged headers above it,
+    // still collapsed, into the top list; the bottom bar empties.
     assert.equal(sidebar.toggleSection("history"), false);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.deepEqual(listSections(), ["staged", "history"]);
-    assert.deepEqual(barSections(), ["changes"]);
-
-    // Collapsing Staged keeps the collapsed headers in their natural order.
-    assert.equal(sidebar.toggleSection("staged"), true);
-    assert.deepEqual(listSections(), ["history"]);
-    assert.deepEqual(barSections(), ["changes", "staged"]);
-
-    // Re-expanding Changes restores it to the very top of the list.
-    assert.equal(sidebar.toggleSection("changes"), false);
-    assert.deepEqual(listSections(), ["changes", "history"]);
-    assert.deepEqual(barSections(), ["staged"]);
+    assert.deepEqual(listSections(), ["changes", "staged", "history"]);
+    assert.deepEqual(barSections(), []);
+    assert.deepEqual(entrySections(), [], "risen headers stay collapsed: only History has content");
     assert.equal(
-      sidebar.fileScroller.items.some((item) =>
-        item.type === "section" && item.section === "staged"),
-      false,
-      "a collapsed section never stays in the virtual list",
+      sidebar.history.commits.length > 0, true,
+      "the expanded History loads its commits",
+    );
+    for (const section of ["changes", "staged"]) {
+      const header = listItems().find((item) =>
+        item.type === "section" && item.section === section);
+      assert.equal(
+        sidebar.createListItem(header).getAttribute("aria-expanded"), "false",
+        `the risen ${section} header stays collapsed in the top list`,
+      );
+    }
+
+    // Collapsing History again pins every header back to the bottom bar.
+    assert.equal(sidebar.toggleSection("history"), true);
+    assert.deepEqual(listSections(), []);
+    assert.deepEqual(barSections(), ["changes", "staged", "history"]);
+
+    // Opening the middle section (Staged) lifts only Changes above it; History
+    // stays pinned below because it sits under the last expanded section.
+    assert.equal(sidebar.toggleSection("staged"), false);
+    assert.deepEqual(listSections(), ["changes", "staged"]);
+    assert.deepEqual(barSections(), ["history"]);
+    assert.deepEqual(entrySections(), ["staged"]);
+
+    // Opening Changes too keeps natural order with both expanded on top.
+    assert.equal(sidebar.toggleSection("changes"), false);
+    assert.deepEqual(listSections(), ["changes", "staged"]);
+    assert.deepEqual(barSections(), ["history"]);
+    assert.deepEqual(entrySections(), ["changes", "staged"]);
+
+    // Collapsing Staged while Changes stays expanded pins Staged below Changes.
+    assert.equal(sidebar.toggleSection("staged"), true);
+    assert.deepEqual(listSections(), ["changes"]);
+    assert.deepEqual(barSections(), ["staged", "history"]);
+    assert.deepEqual(entrySections(), ["changes"]);
+
+    // Re-opening History lifts the collapsed Staged header between the two
+    // expanded sections, preserving natural order in the top list.
+    assert.equal(sidebar.toggleSection("history"), false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(listSections(), ["changes", "staged", "history"]);
+    assert.deepEqual(barSections(), []);
+    assert.deepEqual(entrySections(), ["changes"]);
+    assert.equal(
+      sidebar.createListItem(listItems().find((item) =>
+        item.type === "section" && item.section === "staged")).getAttribute("aria-expanded"),
+      "false",
+      "the collapsed Staged header sits between the expanded Changes and History",
     );
   } finally {
     sidebar.destroy();
@@ -1796,6 +1841,31 @@ test("GitSidebar pinned bar headers reuse the section header and expand on click
     const rendered = sidebar.createListItem(listHeader);
     assert.equal(rendered.getAttribute("aria-expanded"), "true");
     assert.equal(sidebar.history.commits.length, 2);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar claims Enter/Space on list headers and rows for its own keydown handling", async () => {
+  const { sidebar } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    sidebar.render();
+    const header = { closest: (selector) => selector.includes(".git-section-header") ? header : null };
+    const row = { closest: (selector) => selector.includes(".git-file-row") ? row : null };
+    const foreign = { closest: () => foreign };
+    const plain = { closest: () => null };
+    sidebar.container.contains = (element) => element === header || element === row;
+    assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: header }), true);
+    assert.equal(sidebar.handleListKeyDown({ key: " ", target: header }), true);
+    assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: row }), true);
+    assert.equal(sidebar.handleListKeyDown({ key: "a", target: header }), false);
+    assert.equal(sidebar.handleListKeyDown({ key: "Escape", target: header }), false);
+    assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: plain }), false);
+    assert.equal(
+      sidebar.handleListKeyDown({ key: "Enter", target: foreign }), false,
+      "elements outside the sidebar container are not claimed",
+    );
+    assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: null }), false);
   } finally {
     sidebar.destroy();
   }

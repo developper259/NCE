@@ -1321,36 +1321,51 @@ class GitSidebar extends Sidebar {
     return { type: "section", section, title, count, height: 24, rowHeight: 24 };
   }
 
+  // Accordion split: every expanded section lives in the top list, and a
+  // collapsed section rises into that top list (header only) when it sits above
+  // the last expanded section. Collapsed sections below the last expanded one
+  // stay pinned in the bottom bar. With nothing expanded, all headers pin low.
+  partitionSections(staged, changes) {
+    if (!this.status) return { top: [], bottom: [] };
+    const sections = [];
+    if (changes.length > 0)
+      sections.push({ section: "changes", title: "Changes", count: changes.length, collapsed: this.collapsed.changes === true });
+    if (staged.length > 0)
+      sections.push({ section: "staged", title: "Staged Changes", count: staged.length, collapsed: this.collapsed.staged === true });
+    sections.push({ section: "history", title: "History", count: this.history.commits.length, collapsed: this.collapsed.history === true });
+    let lastExpanded = -1;
+    sections.forEach((section, index) => {
+      if (!section.collapsed) lastExpanded = index;
+    });
+    return {
+      top: lastExpanded === -1 ? [] : sections.slice(0, lastExpanded + 1),
+      bottom: lastExpanded === -1 ? sections : sections.slice(lastExpanded + 1),
+    };
+  }
+
   buildListItems(staged, changes) {
     const items = [];
-    if (!this.status) return items;
-    if (changes.length > 0 && this.collapsed.changes !== true) {
-      items.push(this.sectionDescriptor("changes", "Changes", changes.length));
-      for (const entry of changes)
-        items.push({ type: "entry", section: "changes", entry, height: 25, rowHeight: 25 });
-    }
-    if (staged.length > 0 && this.collapsed.staged !== true) {
-      items.push(this.sectionDescriptor("staged", "Staged Changes", staged.length));
-      for (const entry of staged)
-        items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
-    }
-    if (this.collapsed.history !== true) {
-      items.push(this.sectionDescriptor("history", "History", this.history.commits.length));
-      items.push(...this.buildHistoryItems());
+    const { top } = this.partitionSections(staged, changes);
+    for (const section of top) {
+      items.push(this.sectionDescriptor(section.section, section.title, section.count));
+      if (section.collapsed) continue;
+      if (section.section === "changes") {
+        for (const entry of changes)
+          items.push({ type: "entry", section: "changes", entry, height: 25, rowHeight: 25 });
+      } else if (section.section === "staged") {
+        for (const entry of staged)
+          items.push({ type: "entry", section: "staged", entry, height: 25, rowHeight: 25 });
+      } else if (section.section === "history") {
+        items.push(...this.buildHistoryItems());
+      }
     }
     return items;
   }
 
   buildCollapsedSections(staged, changes) {
-    const sections = [];
-    if (!this.status) return sections;
-    if (changes.length > 0 && this.collapsed.changes === true)
-      sections.push(this.sectionDescriptor("changes", "Changes", changes.length));
-    if (staged.length > 0 && this.collapsed.staged === true)
-      sections.push(this.sectionDescriptor("staged", "Staged Changes", staged.length));
-    if (this.collapsed.history === true)
-      sections.push(this.sectionDescriptor("history", "History", this.history.commits.length));
-    return sections;
+    const { bottom } = this.partitionSections(staged, changes);
+    return bottom.map((section) =>
+      this.sectionDescriptor(section.section, section.title, section.count));
   }
 
   buildHistoryItems() {
@@ -3661,6 +3676,17 @@ class GitSidebar extends Sidebar {
       } catch {}
     }
     session.resolve(session.result || { confirmed: false });
+    return true;
+  }
+
+  handleListKeyDown(event) {
+    if (event.key !== "Enter" && event.key !== " ") return false;
+    const target = event.target;
+    if (!target?.closest?.(".git-section-header, .git-file-row")) return false;
+    if (!this.container?.contains?.(target)) return false;
+    // Rows and headers activate in their own keydown listener; claim the event
+    // so the global editor keybinding router does not swallow it when the
+    // editor is selected.
     return true;
   }
 

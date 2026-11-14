@@ -580,24 +580,64 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   await waitFor(() => !git.history.loading, "History to expand while Changes stays collapsed");
   await nextFrame();
   check(
-    sectionTitles(git.listLayer).join(",") === "History" &&
-      sectionTitles(git.collapsedBar).join(",") === "Changes",
-    "opening History lifts it to the top while the collapsed Changes header stays pinned below",
+    sectionTitles(git.listLayer).join(",") === "Changes,History" &&
+      sectionTitles(git.collapsedBar).length === 0,
+    "opening History lifts the collapsed Changes header above it, still collapsed, and empties the pinned bar",
   );
-  git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
+  const risenChanges = git.listLayer.querySelector(
+    '.git-section-header[data-section="changes"]',
+  );
+  const openedHistory = git.listLayer.querySelector(
+    '.git-section-header[data-section="history"]',
+  );
+  check(
+    risenChanges.getAttribute("aria-expanded") === "false" &&
+      openedHistory.getAttribute("aria-expanded") === "true",
+    "the risen Changes header stays collapsed while History is expanded",
+  );
+  check(
+    risenChanges.getBoundingClientRect().bottom <=
+      openedHistory.getBoundingClientRect().top + 1,
+    "the collapsed Changes header sits above the expanded History section",
+  );
+  openedHistory.click();
   await nextFrame();
   check(
     sectionTitles(git.listLayer).length === 0 &&
       sectionTitles(git.collapsedBar).join(",") === "Changes,History",
     "collapsing History returns it to the pinned bar below Changes",
   );
-  collapsedChanges.click();
+  git.collapsedBar.querySelector('.git-section-header[data-section="changes"]').click();
   await nextFrame();
   check(
     sectionTitles(git.listLayer).join(",") === "Changes" &&
       sectionTitles(git.collapsedBar).join(",") === "History",
     "expanding Changes lifts it back to the top of the list",
   );
+
+  // Keyboard activation: Enter on a pinned header must expand it even when the
+  // editor is selected (the global keybinding router used to swallow it).
+  editor.setSelected(true);
+  const keyboardHistoryHeader = git.collapsedBar.querySelector(
+    '.git-section-header[data-section="history"]',
+  );
+  keyboardHistoryHeader.focus();
+  keyboardHistoryHeader.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true,
+  }));
+  await waitFor(
+    () => git.collapsed.history === false && !git.history.loading,
+    "Enter to expand the pinned History header while the editor is selected",
+  );
+  await nextFrame();
+  check(
+    sectionTitles(git.listLayer).join(",") === "Changes,History" &&
+      sectionTitles(git.collapsedBar).length === 0,
+    "Enter expands History and lifts the collapsed Changes header above it",
+  );
+  git.listLayer.querySelector('.git-section-header[data-section="history"]').click();
+  await nextFrame();
+  editor.setSelected(false);
 
   // Branch selector: QuickPanel picker with create first and sorted branches.
   check(
