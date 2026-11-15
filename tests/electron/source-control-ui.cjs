@@ -372,24 +372,27 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       () => git.history.loaded && !git.history.loading,
       "the empty history to load",
     );
-    await nextFrame();
-    const loadedHistoryBadge = git.container
-      .querySelector('.git-section-header[data-section="history"] .git-section-count');
-    check(
-      Boolean(loadedHistoryBadge) && loadedHistoryBadge.hidden === false &&
-        getComputedStyle(loadedHistoryBadge).display !== "none",
+    // The virtual list renders on its own animation frame, which loaded CI
+    // runners can delay past nextFrame's fallback timer; poll the DOM instead.
+    await waitFor(
+      () => {
+        const badge = git.container.querySelector(
+          '.git-section-header[data-section="history"] .git-section-count',
+        );
+        return Boolean(badge) && badge.hidden === false &&
+          getComputedStyle(badge).display !== "none";
+      },
       "the loaded History header shows its count badge",
     );
-    check(
-      [...git.listLayer.querySelectorAll(".git-sidebar-empty")].some(
+    await waitFor(
+      () => [...git.listLayer.querySelectorAll(".git-sidebar-empty")].some(
         (element) => element.textContent === "No commits yet.",
       ),
       "an unborn repository explains that it has no commits",
     );
     git.container.querySelector('.git-section-header[data-section="history"]').click();
-    await nextFrame();
-    check(
-      git.listLayer.querySelectorAll(".git-commit-row").length === 0 &&
+    await waitFor(
+      () => git.listLayer.querySelectorAll(".git-commit-row").length === 0 &&
         git.listLayer.querySelectorAll(".git-sidebar-empty").length === 0,
       "collapsing History hides its rows",
     );
@@ -591,8 +594,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   await nextFrame();
   check(git.selectedEntries.size === 2, "modifier clicks select two rows");
-  check(
-    changeRow(scratchName)?.classList.contains("is-selected") &&
+  await waitFor(
+    () => changeRow(scratchName)?.classList.contains("is-selected") &&
       changeRow(baseName)?.classList.contains("is-selected"),
     "selected rows are highlighted",
   );
@@ -795,9 +798,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "Changes section is visible",
   );
   git.listLayer.querySelector('.git-section-header[data-section="changes"]').click();
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).length === 0,
+  await waitFor(
+    () => sectionTitles(git.listLayer).length === 0,
     "collapsing Changes removes it from the expanded list",
   );
   check(
@@ -820,9 +822,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   );
   git.collapsedBar.querySelector('.git-section-header[data-section="history"]').click();
   await waitFor(() => !git.history.loading, "History to expand while Changes stays collapsed");
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).join(",") === "Changes,History" &&
+  await waitFor(
+    () => sectionTitles(git.listLayer).join(",") === "Changes,History" &&
       sectionTitles(git.collapsedBar).length === 0,
     "opening History lifts the collapsed Changes header above it, still collapsed, and empties the pinned bar",
   );
@@ -843,16 +844,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "the collapsed Changes header sits above the expanded History section",
   );
   openedHistory.click();
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).length === 0 &&
+  await waitFor(
+    () => sectionTitles(git.listLayer).length === 0 &&
       sectionTitles(git.collapsedBar).join(",") === "Changes,History",
     "collapsing History returns it to the pinned bar below Changes",
   );
   git.collapsedBar.querySelector('.git-section-header[data-section="changes"]').click();
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).join(",") === "Changes" &&
+  await waitFor(
+    () => sectionTitles(git.listLayer).join(",") === "Changes" &&
       sectionTitles(git.collapsedBar).join(",") === "History",
     "expanding Changes lifts it back to the top of the list",
   );
@@ -871,9 +870,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     () => git.collapsed.history === false && !git.history.loading,
     "Enter to expand the pinned History header while the editor is selected",
   );
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).join(",") === "Changes,History" &&
+  await waitFor(
+    () => sectionTitles(git.listLayer).join(",") === "Changes,History" &&
       sectionTitles(git.collapsedBar).length === 0,
     "Enter expands History and lifts the collapsed Changes header above it",
   );
@@ -904,11 +902,13 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   });
   try {
     git.collapsedBar.querySelector('.git-section-header[data-section="history"]').click();
-    await nextFrame();
+    await waitFor(
+      () => Boolean(git.listLayer.querySelector('.git-section-header[data-section="changes"]')),
+      "the risen Changes header is rendered after opening History",
+    );
     const animatedChanges = git.listLayer.querySelector(
       '.git-section-header[data-section="changes"]',
     );
-    check(Boolean(animatedChanges), "the risen Changes header is rendered after opening History");
     let riseKeyframes = null;
     await waitFor(() => {
       const running = animatedChanges.getAnimations()
@@ -1200,10 +1200,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "long branch list is not clipped by the panel",
   );
   longScroller.setScrollY(longScroller.getMaxScrollY());
-  await nextFrame();
-  await nextFrame();
-  check(
-    [...document.querySelectorAll(".quick-panel-item-label")]
+  await waitFor(
+    () => [...document.querySelectorAll(".quick-panel-item-label")]
       .some((element) => element.textContent === "zeta"),
     "the last branch is reachable by scrolling",
   );
@@ -1316,9 +1314,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     git.commitStatus.textContent === "Staged 2 changes",
     "Stage All reports how many changes were staged",
   );
-  await nextFrame();
-  check(
-    [...git.container.querySelectorAll(".git-section-title")]
+  await waitFor(
+    () => [...git.container.querySelectorAll(".git-section-title")]
       .map((element) => element.textContent)
       .join(",") === "Staged Changes,History",
     "empty change sections are not rendered, expanded Staged stacks above the pinned History",
@@ -1334,9 +1331,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "the collapsed History header is pinned just above the commit input",
   );
   git.listLayer.querySelector('.git-section-header[data-section="staged"]').click();
-  await nextFrame();
-  check(
-    sectionTitles(git.listLayer).length === 0 &&
+  await waitFor(
+    () => sectionTitles(git.listLayer).length === 0 &&
       sectionTitles(git.collapsedBar).join(",") === "Staged Changes,History",
     "collapsing Staged pins its header above History and empties the expanded list",
   );
@@ -1449,7 +1445,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "history rows carry real commit metadata",
   );
   const historyRows = () => [...git.listLayer.querySelectorAll(".git-commit-row")];
-  check(historyRows().length > 0, "history rows are rendered");
+  await waitFor(() => historyRows().length > 0, "history rows are rendered");
   const firstRow = historyRows()[0];
   const sidebarRight = document.querySelector(".sidebar-left").getBoundingClientRect().right;
   const firstRowRect = firstRow.getBoundingClientRect();
@@ -1482,9 +1478,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "the current branch is badged on the newest commit",
   );
   firstRow.click();
-  await nextFrame();
+  await waitFor(
+    () => Boolean(git.listLayer.querySelector(".git-commit-detail")),
+    "selecting a commit opens its details",
+  );
   const detail = git.listLayer.querySelector(".git-commit-detail");
-  check(Boolean(detail), "selecting a commit opens its details");
   check(
     [...detail.querySelectorAll(".git-commit-detail-label")]
       .map((element) => element.textContent)
@@ -1516,17 +1514,21 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       git.commitDetail.hash === newestHash,
     "the commit file list to load",
   );
-  await nextFrame();
-  const detailNow = git.listLayer.querySelector(".git-commit-detail");
   check(
     git.commitDetail.files.length > 0,
     `the newest commit lists its changed files: ${git.commitDetail.files.length}`,
   );
-  const commitFileRows = [...detailNow.querySelectorAll(".git-commit-file")];
-  check(
-    commitFileRows.length === git.commitDetail.files.length,
+  await waitFor(
+    () => {
+      const detailElement = git.listLayer.querySelector(".git-commit-detail");
+      return Boolean(detailElement) &&
+        detailElement.querySelectorAll(".git-commit-file").length ===
+          git.commitDetail.files.length;
+    },
     "every changed file gets a row in the commit detail",
   );
+  const detailNow = git.listLayer.querySelector(".git-commit-detail");
+  const commitFileRows = [...detailNow.querySelectorAll(".git-commit-file")];
   check(
     commitFileRows.every((row) =>
       ["A", "M", "D", "R", "C"].includes(row.querySelector(".git-status-badge").textContent)),
@@ -1562,8 +1564,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       git.commitDetail && !git.commitDetail.loading,
     "Older navigation to select the previous commit",
   );
-  check(
-    git.listLayer.querySelector(".git-commit-detail") !== null,
+  await waitFor(
+    () => git.listLayer.querySelector(".git-commit-detail") !== null,
     "navigating to another commit opens its detail",
   );
   navButton("commit-newer").click();
@@ -1584,9 +1586,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       git.compare.target === git.history.commits[1].hash,
     "the two-commit comparison to load",
   );
-  await nextFrame();
+  await waitFor(
+    () => Boolean(git.listLayer.querySelector(".git-compare-detail")),
+    "the comparison renders its own detail panel",
+  );
   const compareDetail = git.listLayer.querySelector(".git-compare-detail");
-  check(Boolean(compareDetail), "the comparison renders its own detail panel");
   check(
     git.compare.files.length > 0,
     `the comparison lists changed files: ${git.compare.files.length}`,
@@ -1611,15 +1615,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     () => git.compare === null && git.commitDetail && !git.commitDetail.loading,
     "cancelling the comparison to restore the commit detail",
   );
-  check(
-    git.listLayer.querySelector(".git-compare-detail") === null,
+  await waitFor(
+    () => git.listLayer.querySelector(".git-compare-detail") === null,
     "the comparison panel is removed after cancelling",
   );
 
   git.listLayer.querySelector(".git-commit-row.is-selected").click();
-  await nextFrame();
-  check(
-    git.listLayer.querySelector(".git-commit-detail") === null,
+  await waitFor(
+    () => git.listLayer.querySelector(".git-commit-detail") === null,
     "clicking the selected commit closes its details",
   );
   for (const tab of [...editor.tabManager.tabs]) {
@@ -1646,13 +1649,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   historySidebar.style.width = historyOriginalWidth;
   await nextFrame();
   historyHeader().click();
-  await nextFrame();
-  check(historyRows().length === 0, "collapsing History removes its rows");
+  await waitFor(() => historyRows().length === 0, "collapsing History removes its rows");
   historyHeader().click();
   await waitFor(() => !git.history.loading, "History to reopen");
-  await nextFrame();
-  check(
-    historyRows().length > 0 && git.history.commits.length > 50,
+  await waitFor(
+    () => historyRows().length > 0 && git.history.commits.length > 50,
     "reopening History keeps the loaded pages",
   );
 
@@ -1999,7 +2000,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     () => git.history.loaded && !git.history.loading,
     "history to load for the clean-banner overlap check",
   );
-  await nextFrame();
+  await waitFor(
+    () => Boolean(git.listLayer.querySelector(".git-commit-row")),
+    "history commits to render for the clean-banner overlap check",
+  );
   const overlapState = git.stateElement;
   const overlapStateRect = rectOf(overlapState);
   const overlapListRect = rectOf(git.listElement);
@@ -2074,9 +2078,8 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     () => git.collapsed.history === false && git.history.loaded && !git.history.loading,
     "Git: Show History to expand and load history from the palette",
   );
-  await nextFrame();
-  check(
-    Boolean(git.container.querySelector('.git-section-header[data-section="history"]')),
+  await waitFor(
+    () => Boolean(git.container.querySelector('.git-section-header[data-section="history"]')),
     "the history section is present after the palette command",
   );
   git.toggleSection("history");
