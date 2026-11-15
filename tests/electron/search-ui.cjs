@@ -85,13 +85,13 @@ module.exports = async function exerciseSearchUI(term) {
   const typeSignature = (node) => {
     const style = getComputedStyle(node);
     return [
-      style.fontSize, style.fontWeight, style.letterSpacing,
-      style.textTransform, style.color,
+      style.fontSize, style.fontWeight, style.fontFamily, style.letterSpacing,
+      style.textTransform, style.color, node.getBoundingClientRect().height,
     ].join("|");
   };
   check(
     typeSignature(gitHeader.querySelector(".sidebar-main-title")) === typeSignature(title),
-    "the search title typography matches the Source Control title",
+    `the search title typography matches the Source Control title (${typeSignature(gitHeader.querySelector(".sidebar-main-title"))} vs ${typeSignature(title)})`,
   );
   const buttonSignature = (node) => {
     const style = getComputedStyle(node);
