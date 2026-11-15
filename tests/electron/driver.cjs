@@ -1646,6 +1646,21 @@ app.whenReady().then(() => {
             (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
           { timeout: 10000, description: "Source Control visual fixture viewport" },
         );
+        const sourceControlNoWorkspace = await run(
+          `(${require("./source-control-ui.cjs").toString()})("", "no-workspace")`,
+        );
+        assert.equal(sourceControlNoWorkspace.mode, "no-workspace");
+        const noWorkspaceScreenshotPath =
+          process.env.NCE_SOURCE_CONTROL_NOWORKSPACE_SCREENSHOT_PATH;
+        if (noWorkspaceScreenshotPath) {
+          // The sidebar was just reopened; let the compositor paint it before
+          // capture or the PNG keeps the previous (closed) surface.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          fs.writeFileSync(
+            noWorkspaceScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
         const sourceControlWorkspaceInput = path.join(
           directory,
           "source-control-workspace",
