@@ -602,6 +602,43 @@ const stagedEntry = makeEntry("src/app.js", { index: "A", kind: "added" });
 const modifiedEntry = makeEntry("src/app.js", { worktree: "M", kind: "modified" });
 const untrackedEntry = makeEntry("notes.md", { worktree: "?", kind: "untracked" });
 
+test("Source Control more-options opens at a static anchor; header right-click keeps the cursor", () => {
+  const { sidebar, editor } = createSidebar();
+  try {
+    sidebar.render();
+    const opened = [];
+    editor.contextMenuManager.openContextMenu = (name, context, position) => {
+      opened.push([
+        name,
+        position == null ? null : JSON.parse(JSON.stringify(position)),
+      ]);
+    };
+    const button = sidebar.menuButton;
+    button.getBoundingClientRect = () => ({
+      left: 300,
+      right: 324,
+      top: 10,
+      bottom: 34,
+    });
+    button.click();
+    assert.deepEqual(
+      opened,
+      [["git-header", { x: 300, y: 34 }]],
+      "the dots button drops its menu below the button at a fixed anchor",
+    );
+
+    opened.length = 0;
+    sidebar.headerElement.dispatch("contextmenu");
+    assert.deepEqual(
+      opened,
+      [["git-header", null]],
+      "a genuine header right-click still opens at the native cursor position",
+    );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar counts staged and unstaged changes from normalized status", async () => {
   const { sidebar } = createSidebar({
     entries: [stagedEntry, makeEntry("lib/b.js", { worktree: "M" }), untrackedEntry],

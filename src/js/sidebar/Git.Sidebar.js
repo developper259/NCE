@@ -386,7 +386,10 @@ class GitSidebar extends Sidebar {
     menuIcon.className = "fi fi-rr-menu-dots-vertical";
     menuIcon.setAttribute("aria-hidden", "true");
     menuButton.appendChild(menuIcon);
-    menuButton.addEventListener("click", () => this.openHeaderContextMenu());
+    menuButton.addEventListener("click", () => {
+      const rect = menuButton.getBoundingClientRect();
+      this.openHeaderContextMenu({ x: rect.left, y: rect.bottom });
+    });
     menuButton.dataset.action = "menu";
     this.menuButton = menuButton;
 
@@ -2068,10 +2071,14 @@ class GitSidebar extends Sidebar {
     return this.status?.branch?.name || null;
   }
 
-  openHeaderContextMenu() {
-    this.editor.contextMenuManager?.openContextMenu("git-header", {
-      sidebar: this,
-    });
+  openHeaderContextMenu(position = null) {
+    this.editor.contextMenuManager?.openContextMenu(
+      "git-header",
+      {
+        sidebar: this,
+      },
+      position,
+    );
   }
 
   openFileContextMenu(entry, staged) {

@@ -1752,6 +1752,32 @@ app.whenReady().then(() => {
           `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "no-repository")`,
         );
         assert.equal(sourceControlNoRepo.mode, "no-repository");
+        // The Source Control "more options" button opens its native menu at a
+        // static anchor below the button, not at the mouse cursor.
+        const gitMenuAnchorProbe = await run(`(() => {
+          const manager = editor.contextMenuManager;
+          const original = manager.openContextMenu.bind(manager);
+          const opened = [];
+          manager.openContextMenu = (name, context, position) => {
+            opened.push([name, position == null ? null : position]);
+            return Promise.resolve();
+          };
+          const button = editor.gitSidebar.menuButton;
+          const rect = button.getBoundingClientRect();
+          button.click();
+          manager.openContextMenu = original;
+          return {
+            opened: JSON.parse(JSON.stringify(opened)),
+            expected: { x: rect.left, y: rect.bottom },
+          };
+        })()`);
+        assert.equal(gitMenuAnchorProbe.opened.length, 1);
+        assert.equal(gitMenuAnchorProbe.opened[0][0], "git-header");
+        assert.deepEqual(
+          gitMenuAnchorProbe.opened[0][1],
+          gitMenuAnchorProbe.expected,
+          "the more-options menu drops below the button at a static anchor",
+        );
         if (noRepoScreenshotPath) {
           // Git was just remounted after the explorer checks; let the
           // compositor paint it before capture.
