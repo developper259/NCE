@@ -3361,6 +3361,37 @@ test("GitSidebar loads an expanded history section on open without a toggle", as
   }
 });
 
+test("GitSidebar hides the History count badge until history is loaded", () => {
+  const { sidebar } = createSidebar({ entries: [modifiedEntry] });
+  try {
+    const badgeOf = (header) => header.children.find(
+      (child) => child.className === "git-section-count",
+    );
+
+    sidebar.history.loaded = false;
+    sidebar.history.commits = [];
+    const unloaded = sidebar.createSectionHeader({
+      section: "history", title: "History", count: 0,
+    });
+    assert.equal(badgeOf(unloaded).hidden, true, "pre-load history badge is hidden");
+
+    sidebar.history.loaded = true;
+    sidebar.history.commits = makeCommits(3);
+    const loaded = sidebar.createSectionHeader({
+      section: "history", title: "History", count: 3,
+    });
+    assert.equal(badgeOf(loaded).hidden, false, "loaded history badge is visible");
+    assert.equal(badgeOf(loaded).textContent, "3");
+
+    const changesZero = sidebar.createSectionHeader({
+      section: "changes", title: "Changes", count: 0,
+    });
+    assert.equal(badgeOf(changesZero).hidden, false, "other sections keep their badge");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar formats commit hashes and dates for the history rows", () => {
   assert.equal(GitSidebar.shortHash("0123456789abcdef"), "0123456");
   assert.equal(GitSidebar.shortHash(""), "");

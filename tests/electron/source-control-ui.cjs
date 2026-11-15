@@ -152,6 +152,12 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       '.git-section-header[data-section="history"]',
     );
     check(Boolean(emptyHistoryHeader), "a clean repository offers the History section");
+    const emptyHistoryBadge = emptyHistoryHeader.querySelector(".git-section-count");
+    check(
+      Boolean(emptyHistoryBadge) && emptyHistoryBadge.hidden === true &&
+        getComputedStyle(emptyHistoryBadge).display === "none",
+      "the pre-load History header hides its count badge instead of showing 0",
+    );
     check(
       git.collapsedBar.contains(emptyHistoryHeader) &&
         git.listLayer.querySelector('.git-section-header[data-section="history"]') === null,
@@ -176,6 +182,13 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       "the empty history to load",
     );
     await nextFrame();
+    const loadedHistoryBadge = git.container
+      .querySelector('.git-section-header[data-section="history"] .git-section-count');
+    check(
+      Boolean(loadedHistoryBadge) && loadedHistoryBadge.hidden === false &&
+        getComputedStyle(loadedHistoryBadge).display !== "none",
+      "the loaded History header shows its count badge",
+    );
     check(
       [...git.listLayer.querySelectorAll(".git-sidebar-empty")].some(
         (element) => element.textContent === "No commits yet.",

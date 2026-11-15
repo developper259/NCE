@@ -1082,6 +1082,8 @@ class GitSidebar extends Sidebar {
     const count = document.createElement("span");
     count.className = "git-section-count";
     count.textContent = String(item.count);
+    // Hide the history badge until loaded so a pre-load "0" never shows.
+    if (item.section === "history" && !this.history.loaded) count.hidden = true;
 
     header.append(arrow, name, count);
     if ((item.section === "changes" || item.section === "staged") && item.count > 0) {

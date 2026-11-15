@@ -522,6 +522,10 @@
   font-weight: 600;
 }
 
+.git-section-count[hidden] {
+  display: none;
+}
+
 .git-section-action {
   display: inline-flex;
   flex: 0 0 auto;
