@@ -758,3 +758,25 @@ test("a collapsed file header reports aria-expanded false and the collapsed clas
   assert.equal(calls.attrs["aria-expanded"], "false");
   assert.equal(calls.classes["is-collapsed"], true);
 });
+
+test("SearchSidebar claims Enter/Space on file headers for its own keydown handling", () => {
+  const { sidebar } = createSearchSidebar();
+  const header = {
+    closest: (selector) =>
+      selector.includes(".search-sidebar-file-header") ? header : null,
+  };
+  const match = { closest: () => null };
+  const foreign = { closest: () => foreign };
+  sidebar.container = { contains: (element) => element === header };
+
+  assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: header }), true);
+  assert.equal(sidebar.handleListKeyDown({ key: " ", target: header }), true);
+  assert.equal(sidebar.handleListKeyDown({ key: "a", target: header }), false);
+  assert.equal(sidebar.handleListKeyDown({ key: "Escape", target: header }), false);
+  assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: match }), false);
+  assert.equal(
+    sidebar.handleListKeyDown({ key: "Enter", target: foreign }), false,
+    "elements outside the sidebar container are not claimed",
+  );
+  assert.equal(sidebar.handleListKeyDown({ key: "Enter", target: null }), false);
+});

@@ -181,7 +181,7 @@ class SearchSidebar extends Sidebar {
     replaceRow.hidden = !this.replaceExpanded;
     replaceInput.hidden = !this.replaceExpanded;
 
-    const replaceAll = this.createActionButton("Replace All", "⟳", () => this.replaceAll());
+    const replaceAll = this.createActionButton("Replace All", "fi-rr-exchange", () => this.replaceAll());
     replaceRow.append(replaceInput, replaceAll);
     replaceInput.hidden = !this.replaceExpanded;
     replaceAll.hidden = !this.replaceExpanded;
@@ -371,6 +371,17 @@ class SearchSidebar extends Sidebar {
     this.renderResults();
   }
 
+  handleListKeyDown(event) {
+    if (event.key !== "Enter" && event.key !== " ") return false;
+    const target = event.target;
+    if (!target?.closest?.(".search-sidebar-file-header")) return false;
+    if (!this.container?.contains?.(target)) return false;
+    // Headers activate in their own keydown listener; claim the event so the
+    // global editor keybinding router does not swallow it when the editor is
+    // selected (Enter is bound to newline, Space types a character).
+    return true;
+  }
+
   createOptionButton(label, title, active, onClick) {
     const button = document.createElement("button");
     button.type = "button";
@@ -392,13 +403,16 @@ class SearchSidebar extends Sidebar {
     return button;
   }
 
-  createActionButton(title, label, onClick) {
+  createActionButton(title, iconClass, onClick) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "search-sidebar-action";
     button.title = title;
     button.setAttribute("aria-label", title);
-    button.textContent = label;
+    const icon = document.createElement("i");
+    icon.className = `fi ${iconClass}`;
+    icon.setAttribute("aria-hidden", "true");
+    button.appendChild(icon);
     button.addEventListener("click", onClick);
     return button;
   }

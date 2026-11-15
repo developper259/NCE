@@ -174,20 +174,39 @@ module.exports = async function exerciseSearchUI(term) {
   );
   const expandRestoresMatches = true;
 
-  // Keyboard activation toggles the group just like a click.
-  restoredHeader.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-  await nextFrame();
-  await waitFor(() => matches().length === 1, "Enter to collapse the focused header");
-  const keyboardCollapsed = headers().find(
-    (node) => node.dataset.file === firstHeader.dataset.file,
+  // Keyboard activation toggles the group just like a click. The virtualized
+  // scroller rebuilds rows on a frame, so settle it and re-query the header
+  // immediately before dispatching to avoid acting on a replaced node.
+  const settleResults = () => waitFor(
+    () => search.resultsScroller.frame === null &&
+      search.resultsScroller.renderedVersion === search.resultsScroller.itemsVersion,
+    "the results scroller to finish rendering",
   );
+  const headerFor = (file) => headers().find((node) => node.dataset.file === file);
+  const targetFile = firstHeader.dataset.file;
+  // The virtualized scroller rebuilds rows on a frame and a synthetic key can
+  // land on a node that is being replaced; re-dispatch on a fresh header until
+  // the collapse/expand actually converges (same pattern as Source Control).
+  const pressKey = async (key, expected, description) => {
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline) {
+      await settleResults();
+      headerFor(targetFile).dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      const converged = await waitFor(
+        () => matches().length === expected, description, 600,
+      ).catch(() => false);
+      if (converged) return;
+    }
+    throw Error(description);
+  };
+  await pressKey("Enter", 1, "Enter to collapse the focused header");
+  await settleResults();
+  const keyboardCollapsed = headerFor(targetFile);
   check(
     keyboardCollapsed.getAttribute("aria-expanded") === "false",
     "Enter collapses the header",
   );
-  keyboardCollapsed.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
-  await nextFrame();
-  await waitFor(() => matches().length === 3, "Space to expand the focused header");
+  await pressKey(" ", 3, "Space to expand the focused header");
   const keyboardCollapse = true;
 
   // The replace sub-row reveals an input and a same-size Replace All button.
@@ -197,6 +216,11 @@ module.exports = async function exerciseSearchUI(term) {
   check(search.replaceRow.hidden === false, "the replace toggle reveals the replace row");
   check(search.replaceInput.hidden === false, "the replace input is revealed");
   check(search.replaceAllButton.hidden === false, "the Replace All button is revealed");
+  check(
+    Boolean(search.replaceAllButton.querySelector("i.fi-rr-exchange")),
+    "the Replace All button uses the replace/swap icon, not a refresh glyph",
+  );
+  const replaceIcon = true;
   check(
     search.replaceExpandButton.getAttribute("aria-expanded") === "true",
     "the replace toggle reports aria-expanded true",
@@ -242,5 +266,6 @@ module.exports = async function exerciseSearchUI(term) {
     keyboardCollapse,
     replaceRowShown,
     replaceSameHeight,
+    replaceIcon,
   };
 };

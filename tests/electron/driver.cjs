@@ -3249,6 +3249,7 @@ app.whenReady().then(() => {
         assert.equal(searchResult.keyboardCollapse, true);
         assert.equal(searchResult.replaceRowShown, true);
         assert.equal(searchResult.replaceSameHeight, true);
+        assert.equal(searchResult.replaceIcon, true);
         const searchScreenshotPath = process.env.NCE_SEARCH_SCREENSHOT_PATH;
         if (searchScreenshotPath) {
           fs.writeFileSync(

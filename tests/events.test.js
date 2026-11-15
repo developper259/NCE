@@ -292,8 +292,15 @@ test("Events routes lazy Quick Panel input, keyboard, click, and context actions
 test("Events sends unhandled keyboard and composition input to KeyBindingManager", () => {
   const document = createEventTarget();
   const calls = [];
+  const searchHeader = {};
   const editor = {
     quickPanel: { handleKeyDownEvent() { return false; } },
+    searchSidebar: {
+      handleListKeyDown(event) {
+        return (event.key === "Enter" || event.key === " ") &&
+          event.target === searchHeader;
+      },
+    },
     keyBindingManager: {
       onKey(event) { calls.push(["keydown", event.key]); },
       onCompositionStart() { calls.push(["compositionstart"]); },
@@ -306,13 +313,14 @@ test("Events sends unhandled keyboard and composition input to KeyBindingManager
   });
   new Events(editor).init();
 
+  document.dispatch("keydown", { key: "Enter", target: searchHeader });
   document.dispatch("keydown", { key: "a" });
   document.dispatch("compositionstart", {});
   document.dispatch("compositionend", { data: "é" });
 
   assert.deepEqual(calls, [
     ["keydown", "a"], ["compositionstart"], ["compositionend", "é"],
-  ]);
+  ], "Enter claimed by the search file header never reaches the global router");
 });
 
 test("TabManager resolves delegated context menus from current tab identity", () => {

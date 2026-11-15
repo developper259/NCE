@@ -329,6 +329,7 @@ class Events {
     if (this.editor.fileExplorer?.handleDeleteDialogKeyDown?.(event)) return;
     if (this.editor.gitSidebar?.handleOperationDialogKeyDown?.(event)) return;
     if (this.editor.gitSidebar?.handleListKeyDown?.(event)) return;
+    if (this.editor.searchSidebar?.handleListKeyDown?.(event)) return;
     if (this.editor.fileExplorer?.handleFileExplorerRemovalShortcut?.(event)) return;
     if (this.editor.quickPanel?.handleKeyDownEvent?.(event)) return;
     if (this.editor.fileExplorer?.handleWorkspaceModeKeyDown?.(event)) return;
