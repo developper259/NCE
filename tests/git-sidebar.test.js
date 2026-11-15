@@ -1466,7 +1466,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(empty.calls.status, 0, "no Git status without a workspace");
     assert.deepEqual(
       stateActions(empty.sidebar),
-      { init: false, refresh: false, retry: false, install: false, settings: false, clone: true },
+      { init: false, refresh: false, retry: false, install: false, settings: false },
     );
   } finally {
     empty.sidebar.destroy();
@@ -1481,7 +1481,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.equal(plain.sidebar.status, null);
     assert.deepEqual(
       stateActions(plain.sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
       "a plain folder offers Initialize and Refresh instead of Retry",
     );
   } finally {
@@ -1496,7 +1496,7 @@ test("GitSidebar explains missing workspaces, plain folders, and missing Git", a
     assert.match(missingGit.sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(missingGit.sidebar),
-      { init: false, refresh: false, retry: false, install: true, settings: true, clone: false },
+      { init: false, refresh: false, retry: false, install: true, settings: true },
     );
     assert.equal(
       missingGit.sidebar.getStatePresentation(
@@ -1529,7 +1529,7 @@ test("GitSidebar initializes the repository and refreshes with success", async (
     assert.equal(sidebar.getViewState().mode, "clean");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: true, retry: false, install: false, settings: false, clone: false },
+      { init: false, refresh: true, retry: false, install: false, settings: false },
       "a clean repository only offers a refresh action",
     );
   } finally {
@@ -1607,7 +1607,7 @@ test("GitSidebar derives explicit view states from the repository", async () => 
     assert.equal(state.message, "Git could not initialize.");
     assert.deepEqual(
       stateActions(initFailed.sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
     );
   } finally {
     initFailed.sidebar.destroy();
@@ -2257,7 +2257,7 @@ test("GitSidebar keeps Initialize available after a failed initialization", asyn
     assert.equal(sidebar.getStateMessage(), "Git could not initialize.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
       "the user can try Initialize again",
     );
     assert.equal(await sidebar.initializeRepository(), false, "a retry is attempted");
@@ -2278,7 +2278,7 @@ test("GitSidebar drops Initialize when Git itself is missing", async () => {
     assert.match(sidebar.getStateMessage(), /Git is not installed/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, install: true, settings: true, clone: false },
+      { init: false, refresh: false, retry: false, install: true, settings: true },
     );
   } finally {
     sidebar.destroy();
@@ -2350,7 +2350,7 @@ test("GitSidebar shows install progress and blocks other actions while installin
     assert.equal(sidebar.installingGit, true);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, install: false, settings: false, clone: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false },
     );
     assert.equal(sidebar.stateInstall.hidden, true);
     assert.equal(sidebar.stateSettings.hidden, true);
@@ -2523,7 +2523,7 @@ test("GitSidebar drops a stale initialization error on refresh", async () => {
     assert.equal(sidebar.getStateMessage(), "This workspace is not a Git repository.");
     assert.deepEqual(
       stateActions(sidebar),
-      { init: true, refresh: true, retry: false, install: false, settings: false, clone: true },
+      { init: true, refresh: true, retry: false, install: false, settings: false },
     );
   } finally {
     sidebar.destroy();
@@ -3589,7 +3589,7 @@ test("GitSidebar explains output limits without offering a useless retry", async
     assert.match(sidebar.getStateMessage(), /Too many changes/);
     assert.deepEqual(
       stateActions(sidebar),
-      { init: false, refresh: false, retry: false, install: false, settings: false, clone: false },
+      { init: false, refresh: false, retry: false, install: false, settings: false },
       "output limits offer no useless action",
     );
   } finally {
@@ -4773,7 +4773,7 @@ test("Git header context menu disables sync actions without a repository", () =>
   }
 });
 
-test("GitSidebar shows the clone action without a repository and hides it once clean", async () => {
+test("GitSidebar state panel never offers a Clone Repository button", async () => {
   const { sidebar } = createSidebar();
   try {
     sidebar.render();
@@ -4781,10 +4781,22 @@ test("GitSidebar shows the clone action without a repository and hides it once c
     sidebar.status = null;
     sidebar.error = { code: "NOT_A_REPOSITORY", error: "not a repo" };
     sidebar.loading = false;
-    assert.equal(stateActions(sidebar).clone, true);
+    sidebar.updateState();
+    assert.equal(
+      sidebar.stateElement.querySelector('[data-action="clone"]'),
+      null,
+      "no clone button without a repository",
+    );
+    assert.equal(sidebar.stateInit.hidden, false, "Initialize Repository stays available");
+    assert.equal(sidebar.stateRefresh.hidden, false, "Refresh stays available");
     sidebar.error = null;
     sidebar.status = makeStatus([]);
-    assert.equal(stateActions(sidebar).clone, false);
+    sidebar.updateState();
+    assert.equal(
+      sidebar.stateElement.querySelector('[data-action="clone"]'),
+      null,
+      "no clone button on a clean repository",
+    );
   } finally {
     sidebar.destroy();
   }

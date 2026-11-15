@@ -268,7 +268,6 @@ class GitSidebar extends Sidebar {
     this.remotesAddUrl = null;
     this.remotesAddButton = null;
     this.remotesCloseButton = null;
-    this.stateClone = null;
     this.cloneDialog = null;
     this.cloneDialogSession = null;
     this.cloneBusy = false;
@@ -560,17 +559,7 @@ class GitSidebar extends Sidebar {
     stateSettings.dataset.action = "settings";
     stateSettings.addEventListener("click", () => void this.openGitSettings());
 
-    const stateClone = document.createElement("button");
-    stateClone.type = "button";
-    stateClone.className = "git-sidebar-state-button";
-    stateClone.textContent = "Clone Repository";
-    stateClone.title = "Clone a remote repository into a folder you choose";
-    stateClone.setAttribute("aria-label", "Clone a repository");
-    stateClone.dataset.action = "clone";
-    stateClone.addEventListener("click", () => void this.openCloneDialog());
-    this.stateClone = stateClone;
-
-    stateActions.append(stateInit, stateRefresh, stateRetry, stateInstall, stateSettings, stateClone);
+    stateActions.append(stateInit, stateRefresh, stateRetry, stateInstall, stateSettings);
     state.append(stateHeading, stateActions);
     this.stateElement = state;
     this.stateIconElement = stateIcon;
@@ -900,13 +889,13 @@ class GitSidebar extends Sidebar {
   getStateActions() {
     const view = this.getViewState();
     if (this.installingGit) {
-      return { init: false, refresh: false, retry: false, install: false, settings: false, clone: false };
+      return { init: false, refresh: false, retry: false, install: false, settings: false };
     }
     if (view.mode === "no-repository" || view.mode === "init-error") {
-      return { init: true, refresh: true, retry: false, install: false, settings: false, clone: true };
+      return { init: true, refresh: true, retry: false, install: false, settings: false };
     }
     if (view.mode === "no-workspace") {
-      return { init: false, refresh: false, retry: false, install: false, settings: false, clone: true };
+      return { init: false, refresh: false, retry: false, install: false, settings: false };
     }
     if (view.mode === "error") {
       return {
@@ -916,13 +905,12 @@ class GitSidebar extends Sidebar {
           view.errorCode !== "GIT_OUTPUT_LIMIT",
         install: view.errorCode === "GIT_NOT_FOUND",
         settings: view.errorCode === "GIT_NOT_FOUND",
-        clone: false,
       };
     }
     if (view.mode === "clean") {
-      return { init: false, refresh: true, retry: false, install: false, settings: false, clone: false };
+      return { init: false, refresh: true, retry: false, install: false, settings: false };
     }
-    return { init: false, refresh: false, retry: false, install: false, settings: false, clone: false };
+    return { init: false, refresh: false, retry: false, install: false, settings: false };
   }
 
   openGitSettings() {
@@ -972,9 +960,7 @@ class GitSidebar extends Sidebar {
           ? this.stateRetry
           : actions.settings
             ? this.stateSettings
-            : actions.clone
-              ? this.stateClone
-              : null;
+            : null;
     if (this.stateInit) {
       this.stateInit.hidden = !actions.init;
       this.stateInit.disabled = busy;
@@ -1002,17 +988,12 @@ class GitSidebar extends Sidebar {
       this.stateSettings.hidden = !actions.settings;
       this.stateSettings.disabled = busy;
     }
-    if (this.stateClone) {
-      this.stateClone.hidden = !actions.clone;
-      this.stateClone.disabled = busy || this.cloneBusy;
-    }
     for (const button of [
       this.stateInit,
       this.stateRetry,
       this.stateRefresh,
       this.stateInstall,
       this.stateSettings,
-      this.stateClone,
     ]) {
       button?.classList.toggle("git-sidebar-primary", button === primary);
     }

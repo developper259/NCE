@@ -1666,6 +1666,17 @@ app.whenReady().then(() => {
             )) === true,
           { timeout: 10000, description: "Source Control workspace to become active" },
         );
+        const noRepoScreenshotPath =
+          process.env.NCE_SOURCE_CONTROL_NOREPO_SCREENSHOT_PATH;
+        if (noRepoScreenshotPath) {
+          await run(
+            `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "no-repository")`,
+          );
+          fs.writeFileSync(
+            noRepoScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
         const sourceControlInit = await run(
           `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "initialize")`,
         );

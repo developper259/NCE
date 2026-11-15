@@ -103,6 +103,20 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     );
   };
 
+  if (stage === "no-repository") {
+    await waitFor(
+      () => git.getViewState().mode === "no-repository",
+      "no-repository state",
+    );
+    await nextFrame();
+    check(git.stateElement.hidden === false, "empty repository state is visible");
+    check(
+      !git.stateElement.querySelector('[data-action="clone"]'),
+      "no Clone Repository button without a repository",
+    );
+    return { mode: git.getViewState().mode };
+  }
+
   if (stage === "initialize") {
     // State A: no repository.
     await waitFor(
@@ -124,6 +138,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       "primary initialization action",
     );
     check(git.stateRefresh.hidden === false, "secondary refresh action");
+    check(
+      !git.stateElement.querySelector('[data-action="clone"]'),
+      "no Clone Repository button without a repository",
+    );
     check(
       getComputedStyle(git.stateInit).cursor === "pointer",
       "initialization action shows a pointer cursor",
