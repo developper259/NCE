@@ -3,6 +3,8 @@ class SearchSidebar extends Sidebar {
     super("search", "Search", "fi fi-rr-search", "left", editor);
 
     this.container = null;
+    this.headerElement = null;
+    this.filterToggleButton = null;
     this.input = null;
     this.replaceInput = null;
     this.replaceRow = null;
@@ -55,6 +57,9 @@ class SearchSidebar extends Sidebar {
     this.replaceRequestSequence = 0;
     this.replacementSummary = null;
     this.replaceExpanded = false;
+    this.filtersExpanded = false;
+    this.collapsedFiles = new Set();
+    this.collapseVersion = 0;
     this.resultOpenController = null;
   }
 
@@ -68,10 +73,26 @@ class SearchSidebar extends Sidebar {
     container.className = "search-sidebar-container";
     this.container = container;
 
+    const header = document.createElement("div");
+    header.className = "search-sidebar-header";
+    this.headerElement = header;
+
     const title = document.createElement("div");
     title.className = "sidebar-main-title";
     title.textContent = "SEARCH";
-    container.appendChild(title);
+
+    const filterToggle = document.createElement("button");
+    filterToggle.type = "button";
+    filterToggle.className = "search-sidebar-filter-toggle";
+    const filterIcon = document.createElement("i");
+    filterIcon.className = "fi fi-rr-filter";
+    filterIcon.setAttribute("aria-hidden", "true");
+    filterToggle.appendChild(filterIcon);
+    filterToggle.addEventListener("click", () => this.toggleFilters());
+    this.filterToggleButton = filterToggle;
+
+    header.append(title, filterToggle);
+    container.appendChild(header);
 
     const searchBox = document.createElement("div");
     searchBox.className = "search-sidebar-box";
@@ -202,6 +223,7 @@ class SearchSidebar extends Sidebar {
 
     searchBox.append(replaceExpand, inputWrapper, replaceRow, include, exclude);
     container.appendChild(searchBox);
+    this.applyFiltersExpandedState();
 
     const summary = document.createElement("div");
     summary.className = "search-sidebar-summary";
@@ -295,6 +317,8 @@ class SearchSidebar extends Sidebar {
     this.replaceExpanded = state?.sidebarExpanded === true;
     if (this.input) this.input.value = this.query;
     this.applyReplaceExpandedState();
+    this.filtersExpanded = false;
+    this.applyFiltersExpandedState();
     this.clearResults();
     if (runSearch && this.isOpen && this.query.trim()) {
       this.runSearch();
@@ -317,6 +341,34 @@ class SearchSidebar extends Sidebar {
     }
     this.replaceExpandIcon?.classList.toggle("fi-rr-angle-small-down", !expanded);
     this.replaceExpandIcon?.classList.toggle("fi-rr-angle-small-up", expanded);
+  }
+
+  toggleFilters() {
+    this.filtersExpanded = !this.filtersExpanded;
+    this.applyFiltersExpandedState();
+    if (this.filtersExpanded) this.includeInput?.focus();
+  }
+
+  applyFiltersExpandedState() {
+    const expanded = this.filtersExpanded;
+    this.searchBox?.classList.toggle("search-sidebar-filters-expanded", expanded);
+    if (this.includeInput) this.includeInput.hidden = !expanded;
+    if (this.excludeInput) this.excludeInput.hidden = !expanded;
+    this.filterToggleButton?.classList.toggle("is-active", expanded);
+    this.filterToggleButton?.setAttribute("aria-expanded", String(expanded));
+    const label = expanded ? "Hide filters" : "Show filters";
+    if (this.filterToggleButton) {
+      this.filterToggleButton.title = label;
+      this.filterToggleButton.setAttribute("aria-label", label);
+    }
+  }
+
+  toggleFileCollapse(filePath) {
+    if (this.collapsedFiles.has(filePath)) this.collapsedFiles.delete(filePath);
+    else this.collapsedFiles.add(filePath);
+    this.collapseVersion++;
+    this.resetResultsScroll = false;
+    this.renderResults();
   }
 
   createOptionButton(label, title, active, onClick) {
@@ -452,6 +504,8 @@ class SearchSidebar extends Sidebar {
     this.hasMoreResults = false;
     this.nextResultsOffset = 0;
     this.resetResultsScroll = true;
+    this.collapsedFiles.clear();
+    this.collapseVersion++;
     this.results = [];
     this.totalMatches = 0;
     this.filesSearched = 0;
@@ -625,6 +679,8 @@ class SearchSidebar extends Sidebar {
     this.hasMoreResults = false;
     this.isLoadingMore = false;
     this.resetResultsScroll = true;
+    this.collapsedFiles.clear();
+    this.collapseVersion++;
     this.isSearching = false;
   }
 
@@ -750,15 +806,24 @@ class SearchSidebar extends Sidebar {
     const sameView = this.resultsViewState &&
       this.resultsViewState.isSearching === this.isSearching &&
       this.resultsViewState.query === this.query &&
-      this.resultsViewState.results === this.results;
+      this.resultsViewState.results === this.results &&
+      this.resultsViewState.collapseVersion === this.collapseVersion;
     if (sameView) return;
 
     this.resultsViewState = {
       isSearching: this.isSearching,
       query: this.query,
       results: this.results,
+      collapseVersion: this.collapseVersion,
     };
 
+    this.resultsScroller.setItems(this.buildResultItems(), {
+      resetScroll: this.resetResultsScroll,
+    });
+    this.resetResultsScroll = true;
+  }
+
+  buildResultItems() {
     const items = [];
     if (this.isSearching) {
       items.push({
@@ -784,15 +849,18 @@ class SearchSidebar extends Sidebar {
       }
 
       for (const [filePath, matches] of groups) {
+        const collapsed = this.collapsedFiles.has(filePath);
         items.push({
           type: "header",
           filePath,
           name: matches[0].name,
           icon: this.getFileIcon(matches[0].name),
-          count: matches.length,
+          collapsed,
           height: 26,
           rowHeight: 26,
         });
+
+        if (collapsed) continue;
 
         for (let index = 0; index < matches.length; index++) {
           const match = matches[index];
@@ -806,11 +874,7 @@ class SearchSidebar extends Sidebar {
         }
       }
     }
-
-    this.resultsScroller.setItems(items, {
-      resetScroll: this.resetResultsScroll,
-    });
-    this.resetResultsScroll = true;
+    return items;
   }
 
   createResultNode(item) {
@@ -825,20 +889,35 @@ class SearchSidebar extends Sidebar {
 
     if (item.type === "header") {
       row.setClassName("search-sidebar-file-header");
+      row.toggleClass("is-collapsed", item.collapsed);
+      row.setAttribute("role", "button");
+      row.setProperty("tabIndex", 0);
+      row.setAttribute("aria-expanded", String(!item.collapsed));
+      row.setDataset("file", item.filePath);
+      row.setTitle(item.filePath);
+
+      const caret = dom.createFastElement("i");
+      caret.setClassName("fi fi-rr-angle-small-down search-sidebar-file-caret");
+      caret.setAttribute("aria-hidden", "true");
 
       const icon = dom.createFastElement("i");
       icon.setClassName(`${item.icon} search-sidebar-file-icon`);
+      icon.setAttribute("aria-hidden", "true");
 
       const fileName = dom.createFastElement("span");
       fileName.setClassName("search-sidebar-file-name");
       fileName.setTextContent(item.name);
-      fileName.setTitle(item.filePath);
 
-      const count = dom.createFastElement("span");
-      count.setClassName("search-sidebar-file-count");
-      count.setTextContent(item.count);
+      row.append(caret, icon, fileName);
 
-      row.append(icon, fileName, count);
+      const toggle = () => this.toggleFileCollapse(item.filePath);
+      row.addEventListener("click", toggle);
+      row.addEventListener("keydown", (event) => {
+        if (event.target !== row.domNode) return;
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        toggle();
+      });
       return row;
     }
 

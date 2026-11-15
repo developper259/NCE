@@ -125,7 +125,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -3199,6 +3199,64 @@ app.whenReady().then(() => {
           { timeout: 10000, description: "closing the last file to clear the explorer highlight" },
         );
         traceStep("File Explorer highlight checks passed");
+      } else if (phase === "search") {
+        traceStep("Search sidebar visual checks started");
+        if (win.isFullScreen()) win.setFullScreen(false);
+        if (win.isMaximized()) win.unmaximize();
+        win.webContents.setBackgroundThrottling?.(false);
+        win.show();
+        win.focus();
+        win.setBounds({ width: 1100, height: 760 });
+        await waitForCondition(
+          async () =>
+            (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
+          { timeout: 10000, description: "Search visual fixture viewport" },
+        );
+        const searchWorkspaceInput = path.join(directory, "search-workspace");
+        fs.mkdirSync(searchWorkspaceInput, { recursive: true });
+        fs.writeFileSync(
+          path.join(searchWorkspaceInput, "alpha.js"),
+          "const nceSearchFixture = 1;\nconst nceSearchFixture = 2;\n",
+        );
+        fs.writeFileSync(
+          path.join(searchWorkspaceInput, "beta.js"),
+          "let nceSearchFixture = 3;\n",
+        );
+        assert.equal(await selectWorkspace(searchWorkspaceInput), true);
+        const searchWorkspace = await fs.promises.realpath(searchWorkspaceInput);
+        await waitForCondition(
+          async () =>
+            (await run(
+              `editor.fileExplorer.rootPath === ${JSON.stringify(searchWorkspace)}`,
+            )) === true,
+          { timeout: 10000, description: "search workspace to become active" },
+        );
+        const searchResult = await run(
+          `(${require("./search-ui.cjs").toString()})("nceSearchFixture")`,
+        );
+        assert.equal(searchResult.headerTitle, "SEARCH");
+        assert.equal(searchResult.filtersHiddenByDefault, true);
+        assert.equal(searchResult.filtersOpenActive, true);
+        assert.equal(searchResult.filtersClosedInactive, true);
+        assert.equal(searchResult.totalMatches, 3);
+        assert.equal(searchResult.fileHeaders, 2);
+        assert.equal(searchResult.matchRows, 3);
+        assert.equal(searchResult.noCountBadge, true);
+        assert.equal(searchResult.headerChildren, 3);
+        assert.equal(searchResult.collapseHidesMatches, true);
+        assert.equal(searchResult.caretRotates, true);
+        assert.equal(searchResult.expandRestoresMatches, true);
+        assert.equal(searchResult.keyboardCollapse, true);
+        assert.equal(searchResult.replaceRowShown, true);
+        assert.equal(searchResult.replaceSameHeight, true);
+        const searchScreenshotPath = process.env.NCE_SEARCH_SCREENSHOT_PATH;
+        if (searchScreenshotPath) {
+          fs.writeFileSync(
+            searchScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
+        traceStep("Search sidebar visual checks passed");
       } else {
         await waitForCondition(
           async () => {

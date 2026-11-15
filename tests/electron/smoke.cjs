@@ -125,3 +125,14 @@ test('real Electron: File Explorer highlight clears when the last file closes', 
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('real Electron: Search sidebar design A visual states', { timeout: 120000 }, async () => {
+  if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1') return;
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-search-'));
+  await fs.writeFile(path.join(directory, '.nce-smoke'), '');
+  try {
+    await launchElectron(directory, 'search');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});

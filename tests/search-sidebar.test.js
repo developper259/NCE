@@ -600,3 +600,161 @@ test("search result navigation cancels a pending waiter when its query is replac
   assert.deepEqual(calls.scrolls, []);
   assert.deepEqual(calls.positions, []);
 });
+
+const SAMPLE_RESULTS = [
+  { path: "/w/a.js", name: "a.js", relativePath: "a.js", line: 1, preview: "sync", matchStart: 0, matchLength: 4 },
+  { path: "/w/a.js", name: "a.js", relativePath: "a.js", line: 2, preview: "sync", matchStart: 0, matchLength: 4 },
+  { path: "/w/b.js", name: "b.js", relativePath: "b.js", line: 5, preview: "sync", matchStart: 0, matchLength: 4 },
+];
+
+function createResultsSidebar(results = SAMPLE_RESULTS) {
+  const { sidebar } = createSearchSidebar();
+  sidebar.query = "sync";
+  sidebar.results = results;
+  const rendered = [];
+  sidebar.resultsScroller = {
+    setItems(items, options) { rendered.push({ items, options }); },
+  };
+  return { sidebar, rendered };
+}
+
+function createRecordingDom() {
+  const make = (tag) => {
+    const calls = { tag, className: "", classes: {}, attrs: {}, props: {}, dataset: {}, title: "", text: "", children: [], listeners: {} };
+    const node = {
+      domNode: { tag },
+      _calls: calls,
+      setClassName(value) { calls.className = value; return true; },
+      toggleClass(name, on) { calls.classes[name] = on; return true; },
+      setAttribute(name, value) { calls.attrs[name] = String(value); return true; },
+      setProperty(name, value) { calls.props[name] = value; return true; },
+      setDataset(name, value) { calls.dataset[name] = String(value); return true; },
+      setTitle(value) { calls.title = String(value); return true; },
+      setTextContent(value) { calls.text = String(value); return true; },
+      append(...kids) { calls.children.push(...kids); },
+      addEventListener(type, fn) { (calls.listeners[type] ||= []).push(fn); },
+    };
+    return node;
+  };
+  return { createFastElement: make };
+}
+
+test("result items group matches under collapsible file headers without a count badge", () => {
+  const { sidebar } = createResultsSidebar();
+  const items = sidebar.buildResultItems();
+
+  assert.deepEqual([...items.map((item) => item.type)], ["header", "match", "match", "header", "match"]);
+  const headers = items.filter((item) => item.type === "header");
+  assert.deepEqual([...headers.map((header) => header.filePath)], ["/w/a.js", "/w/b.js"]);
+  assert.ok(headers.every((header) => header.collapsed === false));
+  assert.ok(headers.every((header) => !("count" in header)), "no per-file count badge");
+});
+
+test("collapsing a file hides its matches and expanding restores them", () => {
+  const { sidebar, rendered } = createResultsSidebar();
+  sidebar.renderResults();
+  assert.equal(rendered.at(-1).items.filter((item) => item.type === "match").length, 3);
+
+  sidebar.toggleFileCollapse("/w/a.js");
+  assert.ok(sidebar.collapsedFiles.has("/w/a.js"));
+  let items = rendered.at(-1).items;
+  assert.equal(items.filter((item) => item.type === "match").length, 1);
+  assert.equal(items.find((item) => item.type === "header" && item.filePath === "/w/a.js").collapsed, true);
+  assert.equal(rendered.at(-1).options.resetScroll, false, "collapse preserves scroll position");
+
+  sidebar.toggleFileCollapse("/w/a.js");
+  assert.ok(!sidebar.collapsedFiles.has("/w/a.js"));
+  items = rendered.at(-1).items;
+  assert.equal(items.filter((item) => item.type === "match").length, 3);
+  assert.equal(items.find((item) => item.type === "header" && item.filePath === "/w/a.js").collapsed, false);
+});
+
+test("renderResults skips an identical view but rebuilds when a group collapses", () => {
+  const { sidebar, rendered } = createResultsSidebar();
+  sidebar.renderResults();
+  const count = rendered.length;
+  sidebar.renderResults();
+  assert.equal(rendered.length, count, "identical view is not rebuilt");
+  sidebar.toggleFileCollapse("/w/b.js");
+  assert.equal(rendered.length, count + 1, "collapse forces a rebuild");
+});
+
+test("a new search clears collapsed files", async () => {
+  const { sidebar } = createResultsSidebar();
+  sidebar.collapsedFiles.add("/w/a.js");
+  sidebar.collapseVersion = 5;
+
+  await sidebar.runSearch();
+
+  assert.equal(sidebar.collapsedFiles.size, 0);
+});
+
+test("filter toggle reveals include/exclude inputs and marks the button active", () => {
+  const { sidebar } = createSearchSidebar();
+  sidebar.searchBox = { classList: { toggle() {} } };
+  sidebar.includeInput = { hidden: true, focus() { this.focused = true; } };
+  sidebar.excludeInput = { hidden: true };
+  const state = {};
+  sidebar.filterToggleButton = {
+    classList: { toggle(name, on) { state[name] = on; } },
+    setAttribute(name, value) { state[name] = value; },
+    title: "",
+  };
+
+  sidebar.applyFiltersExpandedState();
+  assert.equal(sidebar.includeInput.hidden, true);
+  assert.equal(sidebar.excludeInput.hidden, true);
+  assert.equal(state["aria-expanded"], "false");
+  assert.equal(state["is-active"], false);
+
+  sidebar.toggleFilters();
+  assert.equal(sidebar.filtersExpanded, true);
+  assert.equal(sidebar.includeInput.hidden, false);
+  assert.equal(sidebar.excludeInput.hidden, false);
+  assert.equal(sidebar.includeInput.focused, true);
+  assert.equal(state["aria-expanded"], "true");
+  assert.equal(state["is-active"], true);
+  assert.equal(sidebar.filterToggleButton.title, "Hide filters");
+
+  sidebar.toggleFilters();
+  assert.equal(sidebar.filtersExpanded, false);
+  assert.equal(sidebar.includeInput.hidden, true);
+  assert.equal(state["is-active"], false);
+  assert.equal(sidebar.filterToggleButton.title, "Show filters");
+});
+
+test("file header node is a collapsible button without a count badge", () => {
+  const { sidebar } = createResultsSidebar();
+  sidebar.editor.domManager = createRecordingDom();
+  const header = sidebar.buildResultItems().find((item) => item.type === "header");
+
+  const row = sidebar.createResultNode(header);
+  const calls = row._calls;
+  assert.equal(calls.className, "search-sidebar-file-header");
+  assert.equal(calls.attrs.role, "button");
+  assert.equal(calls.attrs["aria-expanded"], "true");
+  assert.equal(calls.props.tabIndex, 0);
+  assert.equal(calls.dataset.file, header.filePath);
+  assert.equal(calls.children.length, 3, "caret + icon + name, no count");
+  assert.match(calls.children[0]._calls.className, /search-sidebar-file-caret/);
+  assert.match(calls.children[1]._calls.className, /search-sidebar-file-icon/);
+  assert.equal(calls.children[2]._calls.className, "search-sidebar-file-name");
+  assert.ok(calls.listeners.click?.length, "header wires a click toggle");
+  assert.ok(calls.listeners.keydown?.length, "header wires a keyboard toggle");
+
+  assert.equal(sidebar.collapsedFiles.size, 0);
+  calls.listeners.click[0]();
+  assert.ok(sidebar.collapsedFiles.has(header.filePath));
+});
+
+test("a collapsed file header reports aria-expanded false and the collapsed class", () => {
+  const { sidebar } = createResultsSidebar();
+  sidebar.editor.domManager = createRecordingDom();
+  sidebar.collapsedFiles.add("/w/a.js");
+  const header = sidebar.buildResultItems().find((item) => item.filePath === "/w/a.js");
+  assert.equal(header.collapsed, true);
+
+  const calls = sidebar.createResultNode(header)._calls;
+  assert.equal(calls.attrs["aria-expanded"], "false");
+  assert.equal(calls.classes["is-collapsed"], true);
+});
