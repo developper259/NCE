@@ -10,9 +10,6 @@ class SidebarManager {
     this.tabSelector = null;
     this.leftMenuContainer = null;
     this.rightMenuContainer = null;
-    this.settingsMenuOpen = false;
-    this.settingsOutsideClickHandler = null;
-    this.settingsKeydownHandler = null;
     this.hiddenMenuIds = new Set();
     try {
       const stored = JSON.parse(
@@ -104,10 +101,6 @@ class SidebarManager {
   renderTabSelector() {
     if (!this.tabSelector) return;
 
-    // The selector can be rebuilt after sidebar changes. The old menu nodes
-    // are discarded with it, so never carry an open state across a render.
-    this.settingsMenuOpen = false;
-
     const fragment = document.createDocumentFragment();
 
     for (const menuConfig of USERCONFIG_SIDEBAR_MENUS) {
@@ -137,36 +130,21 @@ class SidebarManager {
     settingsButton.title = "Settings";
     settingsButton.setAttribute("aria-label", "Open Settings");
     settingsButton.setAttribute("aria-haspopup", "menu");
-    settingsButton.setAttribute("aria-expanded", "false");
     const settingsIcon = document.createElement("i");
     settingsIcon.className = "fi fi-rr-settings-sliders";
     settingsIcon.setAttribute("aria-hidden", "true");
     settingsButton.appendChild(settingsIcon);
 
-    const settingsMenu = document.createElement("div");
-    settingsMenu.className = "sidebar-settings-menu";
-    settingsMenu.setAttribute("role", "menu");
-    settingsMenu.hidden = true;
-
-    const openSettingsUI = this.createSettingsMenuItem(
-      "Open Settings UI",
-      () => {
-        this.closeSettingsMenu();
-        this.editor.openSettings();
-      },
-    );
-    const openSettingsJSON = this.createSettingsMenuItem(
-      "Open Settings JSON",
-      () => {
-        this.closeSettingsMenu();
-        this.editor.openSettingsJson?.();
-      },
-    );
-    settingsMenu.append(openSettingsUI, openSettingsJSON);
-    settingsButton.addEventListener("click", () =>
-      this.toggleSettingsMenu(),
-    );
-    settingsContainer.append(settingsButton, settingsMenu);
+    settingsButton.addEventListener("click", () => {
+      const buttonRect = settingsButton.getBoundingClientRect();
+      const iconRect = settingsIcon.getBoundingClientRect();
+      this.editor.contextMenuManager?.openContextMenu("sidebar-settings", null, {
+        x: buttonRect.right,
+        y: iconRect.bottom,
+        verticalAlign: "bottom",
+      });
+    });
+    settingsContainer.append(settingsButton);
     fragment.appendChild(settingsContainer);
 
     this.tabSelector.replaceChildren(fragment);
@@ -209,90 +187,10 @@ class SidebarManager {
           );
         });
       }
-      this.settingsOutsideClickHandler = (e) => {
-        if (
-          this.settingsMenuOpen &&
-          !e.target.closest(".sidebar-settings-container")
-        ) {
-          this.closeSettingsMenu();
-        }
-      };
-      this.settingsKeydownHandler = (e) => {
-        if (e.key === "Escape" && this.settingsMenuOpen) {
-          e.preventDefault();
-          this.closeSettingsMenu({ restoreFocus: true });
-        }
-      };
-      document.addEventListener("click", this.settingsOutsideClickHandler);
-      document.addEventListener("keydown", this.settingsKeydownHandler);
     }
-  }
-
-  createSettingsMenuItem(label, action) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "sidebar-settings-menu-item";
-    item.setAttribute("role", "menuitem");
-    item.textContent = label;
-    item.addEventListener("click", action);
-    item.addEventListener("keydown", (event) => {
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-      const items = [...item.parentElement.querySelectorAll("[role='menuitem']")];
-      const index = items.indexOf(item);
-      const next = event.key === "ArrowDown"
-        ? (index + 1) % items.length
-        : (index - 1 + items.length) % items.length;
-      event.preventDefault();
-      items[next].focus();
-    });
-    return item;
-  }
-
-  toggleSettingsMenu() {
-    if (this.settingsMenuOpen) {
-      this.closeSettingsMenu({ restoreFocus: true });
-    } else {
-      this.openSettingsMenu();
-    }
-  }
-
-  openSettingsMenu() {
-    const container = this.tabSelector?.querySelector(
-      ".sidebar-settings-container",
-    );
-    const button = container?.querySelector(".sidebar-settings-icon");
-    const menu = container?.querySelector(".sidebar-settings-menu");
-    if (!button || !menu) return;
-
-    this.settingsMenuOpen = true;
-    menu.hidden = false;
-    button.setAttribute("aria-expanded", "true");
-  }
-
-  closeSettingsMenu({ restoreFocus = false } = {}) {
-    const container = this.tabSelector?.querySelector(
-      ".sidebar-settings-container",
-    );
-    const button = container?.querySelector(".sidebar-settings-icon");
-    const menu = container?.querySelector(".sidebar-settings-menu");
-    this.settingsMenuOpen = false;
-    if (!button || !menu) return;
-
-    menu.hidden = true;
-    button.setAttribute("aria-expanded", "false");
-    if (restoreFocus) button.focus();
   }
 
   destroy() {
-    if (this.settingsOutsideClickHandler) {
-      document.removeEventListener("click", this.settingsOutsideClickHandler);
-      this.settingsOutsideClickHandler = null;
-    }
-    if (this.settingsKeydownHandler) {
-      document.removeEventListener("keydown", this.settingsKeydownHandler);
-      this.settingsKeydownHandler = null;
-    }
-    this.closeSettingsMenu();
     this.leftScroller?.destroy();
     this.leftScroller = null;
   }

@@ -1646,6 +1646,53 @@ app.whenReady().then(() => {
             (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
           { timeout: 10000, description: "Source Control visual fixture viewport" },
         );
+        // The Settings button must open the native menu snug against the button
+        // (left edge at the button right edge) with its bottom level with the
+        // icon bottom, not a custom panel and not the cursor.
+        // Spy on openContextMenu so no real native menu pops during the phase.
+        const settingsMenuProbe = await run(`(() => {
+          const manager = editor.contextMenuManager;
+          const original = manager.openContextMenu.bind(manager);
+          const opened = [];
+          manager.openContextMenu = (name, context, position) => {
+            opened.push([name, context, position]);
+            return Promise.resolve();
+          };
+          const button = editor.sidebarManager.tabSelector
+            .querySelector(".sidebar-settings-icon");
+          const icon = button.querySelector("i");
+          const buttonRect = button.getBoundingClientRect();
+          const iconRect = icon.getBoundingClientRect();
+          button.click();
+          manager.openContextMenu = original;
+          return {
+            opened: JSON.parse(JSON.stringify(opened)),
+            customPanel: Boolean(document.querySelector(".sidebar-settings-menu")),
+            anchor: {
+              x: buttonRect.right,
+              y: iconRect.bottom,
+              verticalAlign: "bottom",
+            },
+            buttonRight: buttonRect.right,
+            iconBottom: iconRect.bottom,
+          };
+        })()`);
+        assert.equal(settingsMenuProbe.opened.length, 1);
+        assert.equal(settingsMenuProbe.opened[0][0], "sidebar-settings");
+        assert.equal(settingsMenuProbe.opened[0][1], null);
+        assert.deepEqual(settingsMenuProbe.opened[0][2], settingsMenuProbe.anchor);
+        assert.equal(
+          settingsMenuProbe.anchor.x,
+          settingsMenuProbe.buttonRight,
+          "the settings menu left edge is snug against the button right edge",
+        );
+        assert.equal(
+          settingsMenuProbe.anchor.y,
+          settingsMenuProbe.iconBottom,
+          "the settings menu bottom aligns with the icon bottom",
+        );
+        assert.equal(settingsMenuProbe.anchor.verticalAlign, "bottom");
+        assert.equal(settingsMenuProbe.customPanel, false);
         const sourceControlNoWorkspace = await run(
           `(${require("./source-control-ui.cjs").toString()})("", "no-workspace")`,
         );

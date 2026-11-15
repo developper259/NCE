@@ -19,7 +19,7 @@ class ContextMenuManager {
     this.registeredMenus.set(name, actionsDict);
   }
 
-  async openContextMenu(name, context = null) {
+  async openContextMenu(name, context = null, position = null) {
     const registeredMenu = this.registeredMenus.get(name);
     const menuConfig = typeof registeredMenu === "function"
       ? registeredMenu(context)
@@ -60,6 +60,6 @@ class ContextMenuManager {
       });
     }
 
-    await window.api.openContextMenu(payload);
+    await window.api.openContextMenu(payload, position);
   }
 }

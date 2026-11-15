@@ -361,7 +361,8 @@ contextBridge.exposeInMainWorld("api", {
 
   stopWatching: () => ipcRenderer.invoke("Watcher:stopWatching"),
 
-  openContextMenu: (actions) => ipcRenderer.invoke("ContextMenu:show", actions),
+  openContextMenu: (actions, position) =>
+    ipcRenderer.invoke("ContextMenu:show", actions, position),
   setNativeThemeSource: (source, resolvedTheme) =>
     ipcRenderer.invoke("Theme:setNativeSource", source, resolvedTheme),
 

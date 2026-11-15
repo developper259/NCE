@@ -117,6 +117,10 @@ class Editor {
       buildSidebarTitleContextMenu(this.sidebarManager),
     );
     this.contextMenuManager.setMenu(
+      "sidebar-settings",
+      buildSidebarSettingsContextMenu(this),
+    );
+    this.contextMenuManager.setMenu(
       "git-file",
       buildGitFileContextMenu(this),
     );

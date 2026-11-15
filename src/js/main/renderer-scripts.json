@@ -71,6 +71,7 @@
   "js/contextMenu/EmptyMenu.ContextMenu.js",
   "js/contextMenu/SidebarSelector.ContextMenu.js",
   "js/contextMenu/SidebarTitle.ContextMenu.js",
+  "js/contextMenu/SidebarSettings.ContextMenu.js",
   "js/contextMenu/GitFile.ContextMenu.js",
   "js/contextMenu/Input.ContextMenu.js",
   "js/contextMenu/Terminal.ContextMenu.js",

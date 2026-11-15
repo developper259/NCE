@@ -8,6 +8,35 @@ import {
 import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import { TITLEBAR_OVERLAY_THEME } from "../manager/TitleBarTheme";
 
+export type MenuPosition = {
+  x: number;
+  y: number;
+  verticalAlign?: "top" | "bottom";
+};
+
+// Native menus do not expose their pixel height, so a bottom anchor is
+// converted to the popup's top-left origin using per-platform row metrics.
+const MENU_ROW_METRICS: Record<
+  string,
+  { row: number; separator: number; padding: number }
+> = {
+  darwin: { row: 22, separator: 11, padding: 8 },
+  win32: { row: 26, separator: 9, padding: 4 },
+  linux: { row: 24, separator: 9, padding: 4 },
+};
+
+function estimateMenuHeight(
+  template: MenuItemConstructorOptions[],
+  platform: string,
+): number {
+  const metrics = MENU_ROW_METRICS[platform] ?? MENU_ROW_METRICS.linux;
+  return template.reduce(
+    (height, item) =>
+      height + (item.type === "separator" ? metrics.separator : metrics.row),
+    metrics.padding,
+  );
+}
+
 export class ContextMenu {
   window: BrowserWindow;
   private readonly ipc: IpcHandlerRegistrar;
@@ -41,8 +70,9 @@ export class ContextMenu {
           type?: string;
           checked?: boolean;
         }>,
+        position?: MenuPosition | null,
       ) => {
-        return this.openContext(actions);
+        return this.openContext(actions, position);
       },
     );
   }
@@ -55,6 +85,7 @@ export class ContextMenu {
       keys?: string;
       enabled?: boolean;
     }>,
+    position?: MenuPosition | null,
   ) {
     const template: MenuItemConstructorOptions[] = actions.map((action) => {
       if (action.type === "separator") {
@@ -74,6 +105,25 @@ export class ContextMenu {
     });
 
     const menu = Menu.buildFromTemplate(template);
-    menu.popup({ window: this.window });
+    const popupOptions: { window: BrowserWindow; x?: number; y?: number } = {
+      window: this.window,
+    };
+    // Anchor to an explicit point (e.g. beside the Settings icon) instead of
+    // the mouse cursor when the renderer supplies one. A "bottom" anchor means
+    // the supplied y is the menu's desired bottom edge, so lift the top origin
+    // by the estimated menu height.
+    if (
+      position &&
+      Number.isFinite(position.x) &&
+      Number.isFinite(position.y)
+    ) {
+      popupOptions.x = Math.round(position.x);
+      const top =
+        position.verticalAlign === "bottom"
+          ? position.y - estimateMenuHeight(template, process.platform)
+          : position.y;
+      popupOptions.y = Math.round(top);
+    }
+    menu.popup(popupOptions);
   }
 }
