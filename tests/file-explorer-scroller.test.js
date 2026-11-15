@@ -307,7 +307,7 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   const header = explorer.projectHeader;
   const button = explorer.openFolderButton;
   const nodeCount = created.length;
-  assert.equal(nodeCount - 1, 9, "the Explorer shell has one header and nine supporting DOM nodes");
+  assert.equal(nodeCount - 1, 10, "the Explorer shell has one header and ten supporting DOM nodes");
   assert.equal(shell.children.length, 2, "the unique workspace header sits directly above the tree viewport");
   assert.equal(shell.children[0], header);
   assert.equal(header.children.length, 2, "the workspace header only contains its chevron and title");
@@ -380,6 +380,7 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   assert.equal(explorer.projectTitle.textContent, "NEXT");
   assert.equal(explorer.projectTitle.title, "next\n/next");
   assert.equal(explorer.treeEmptyMessage.textContent, "Folder empty");
+  assert.equal(explorer.cloneButton.hidden, true, "Clone Repository hides on an empty workspace");
   explorer.rootPath = "";
   explorer.projectName = "";
   explorer.projectExpanded = false;
@@ -391,6 +392,7 @@ test("File Explorer keeps one shell, viewport, layer and delegated listener set"
   assert.equal(explorer.projectArrow.hidden, true);
   assert.equal(viewport.hidden, false, "Open Folder remains reachable after a collapsed workspace closes");
   assert.equal(button.hidden, false);
+  assert.equal(explorer.cloneButton.hidden, false, "Clone Repository is offered without a workspace");
   header.listeners.get("click")[0]();
   assert.equal(explorer.projectExpanded, false, "the no-workspace header is not an interactive collapse control");
   assert.equal(explorer.treeEmptyMessage.textContent, "You have not yet opened a folder.");
