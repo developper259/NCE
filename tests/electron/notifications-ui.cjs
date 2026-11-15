@@ -105,7 +105,22 @@ module.exports = async function exerciseNotificationUI() {
   check(hostRect.left >= 0 && hostRect.top >= 0, "toast host stays on screen");
   if (bottomBarRect) {
     check(hostRect.bottom <= bottomBarRect.top + 1, "toasts stay above the status bar");
+    check(
+      Math.abs(bottomBarRect.top - hostRect.bottom - 12) <= 1,
+      "toast stack sits 12px above the status bar",
+    );
   }
+  const rootStyle = document.documentElement.style;
+  const previousPanelHeight = rootStyle.getPropertyValue("--bottom-panel-height");
+  rootStyle.setProperty("--bottom-panel-height", "240px");
+  const panelOpenHostRect = rectOf(host);
+  check(
+    Math.abs(panelOpenHostRect.bottom - hostRect.bottom) <= 0.5 &&
+      Math.abs(panelOpenHostRect.right - hostRect.right) <= 0.5,
+    "toast stack keeps the same position whether the bottom panel is open or closed",
+  );
+  if (previousPanelHeight) rootStyle.setProperty("--bottom-panel-height", previousPanelHeight);
+  else rootStyle.removeProperty("--bottom-panel-height");
   for (const rect of toastRects) {
     check(rect.width > 200 && rect.height > 30, "toast keeps a readable size");
     check(
