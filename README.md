@@ -32,16 +32,20 @@ Text rendering, cursor handling, selections, history, scrolling, file management
 
 NCE also includes a deeply integrated AI coding agent designed to work directly with the editor, workspace, files and project tooling.
 
-**Current version**: **0.0.1-beta.5**
+**Current version**: **0.0.1-beta.6**
 
-## Beta 5 highlights
+## Beta 6 highlights
 
-- Source Control sidebar with status, staging, unstaging and workspace-scoped commits
-- Native read-only diff view rendered in editor tabs, with syntax colors and virtualized scrolling
-- Hardened Git execution: bounded command queue, single-flight status, scrubbed environment, process-group timeouts, trusted Git resolution and explicit `index.lock` reporting
-- Agent sidebar loading, empty and failure states with real retry and lazy ghost-shell placeholders
-- Typed Myers line diff with a bounded fallback, capped and auto-refreshed diff tabs
-- Per-architecture node-pty packaging verified with `lipo`, fixing the beta 4 Intel terminal
+- Full remote workflow in Source Control: fetch, pull, push and header sync actions with network progress, cancellation, a pinned status strip, remote management and an Add remote action for branches without upstream
+- Repository clone with folder picker, progress, safe cleanup and direct project opening
+- Paginated commit history with commit inspection, per-file versions and commit comparison
+- Validated discard with confirmation, merge/rebase abort banner and an accordion layout with animated pinned section headers
+- Transactional package installer that installs a verified Git (dugite-native) from Source Control, with configurable `git.path`, uninstall and real cancellation
+- Multi-server language intelligence: completions, on-demand hover, go to definition, live diagnostics, a Problems panel with bottom-bar counts and a redesigned Language Manager
+- Centralized notifications with toasts, a notification center and Git, Files and Agent integrations
+- Redesigned Search sidebar with filter toggle and collapsible file groups
+- Native context menus for Settings and Source Control actions, Open Folder and Clone Repository in the explorer, and a Settings tab pinned to the leftmost slot
+- Configurable terminal shell arguments, unified terminal rendering and background workers moved to utility processes
 
 ## Getting Started
 
@@ -109,7 +113,7 @@ Build artifacts are generated in `release/`.
 
 NCE is currently in beta and under active development.
 
-Current version: **0.0.1-beta.5**
+Current version: **0.0.1-beta.6**
 
 ## License
 
