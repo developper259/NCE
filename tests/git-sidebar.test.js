@@ -3392,6 +3392,36 @@ test("GitSidebar hides the History count badge until history is loaded", () => {
   }
 });
 
+test("GitSidebar keeps the clean banner compact while History is expanded", async () => {
+  const { sidebar } = createSidebar({ entries: [] });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.getViewState().mode, "clean");
+    sidebar.collapsed.history = true;
+    sidebar.updateState();
+    assert.equal(
+      sidebar.stateElement.classList.contains("is-compact"),
+      false,
+      "a collapsed History leaves the centered clean empty-state",
+    );
+    sidebar.toggleSection("history");
+    assert.equal(
+      sidebar.stateElement.classList.contains("is-compact"),
+      true,
+      "expanding History compacts the clean banner so the list cannot squeeze it",
+    );
+    sidebar.toggleSection("history");
+    assert.equal(
+      sidebar.stateElement.classList.contains("is-compact"),
+      false,
+      "collapsing History restores the centered clean empty-state",
+    );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar formats commit hashes and dates for the history rows", () => {
   assert.equal(GitSidebar.shortHash("0123456789abcdef"), "0123456");
   assert.equal(GitSidebar.shortHash(""), "");

@@ -106,6 +106,14 @@
   display: none;
 }
 
+/* With History expanded the list fills the panel; the clean banner stays at
+   its natural height on top instead of being squeezed by the list. */
+.git-sidebar-state.is-compact {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  padding: 12px 8px;
+}
+
 .git-sidebar-state-heading {
   display: flex;
   align-items: flex-start;

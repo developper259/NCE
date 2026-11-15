@@ -923,6 +923,12 @@ class GitSidebar extends Sidebar {
     const view = this.getViewState();
     const presentation = this.getStatePresentation(view);
     this.stateElement.hidden = !presentation;
+    // Expanded History owns the panel; keep the clean banner at its natural
+    // height above the list so commits never squeeze or overlap it.
+    this.stateElement.classList.toggle(
+      "is-compact",
+      view.mode === "clean" && this.collapsed.history === false,
+    );
     if (presentation) {
       this.stateElement.dataset.tone = presentation.tone || "muted";
       this.stateElement.setAttribute(
@@ -2016,6 +2022,7 @@ class GitSidebar extends Sidebar {
     });
     this.listResetPending = false;
     this.renderCollapsedBar(staged, changes);
+    this.updateState();
     if (this.pendingItemSection) this.scheduleItemAnimation();
     if (focusKey) this.restoreListFocus(focusKey);
   }

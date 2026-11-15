@@ -1801,6 +1801,35 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "clean state after the install check",
   );
 
+  // Clean + expanded History with many commits must not squeeze the clean
+  // banner or draw commits over it: the list starts below the banner.
+  if (git.collapsed.history === true) git.toggleSection("history");
+  await waitFor(
+    () => git.history.loaded && !git.history.loading,
+    "history to load for the clean-banner overlap check",
+  );
+  await nextFrame();
+  const overlapState = git.stateElement;
+  const overlapStateRect = rectOf(overlapState);
+  const overlapListRect = rectOf(git.listElement);
+  check(
+    overlapState.scrollHeight <= overlapState.clientHeight + 1,
+    "the clean banner keeps its full height beside an expanded history",
+  );
+  check(
+    overlapListRect.top >= overlapStateRect.bottom - 1,
+    "the history list starts below the clean banner, not over it",
+  );
+  const overlapRow = git.listLayer.querySelector(".git-commit-row");
+  if (overlapRow) {
+    check(
+      rectOf(overlapRow).top >= overlapStateRect.bottom - 1,
+      "history commits render below the clean banner",
+    );
+  }
+  git.toggleSection("history");
+  await nextFrame();
+
   // Theme compatibility.
   const previousTheme = editor.themeManager.getResolvedTheme();
   editor.themeManager.applyTheme("light");
