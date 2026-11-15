@@ -72,6 +72,11 @@ class KeyBinding {
       git_focus_commit_message: this.control_git_focus_commit_message,
       git_open_settings: this.control_git_open_settings,
       git_clone: this.control_git_clone,
+      git_fetch: this.control_git_fetch,
+      git_pull: this.control_git_pull,
+      git_push: this.control_git_push,
+      git_show_history: this.control_git_show_history,
+      git_manage_remotes: this.control_git_manage_remotes,
 
       lsp_completion: this.control_lsp_completion,
       lsp_hover: this.control_lsp_hover,
@@ -761,6 +766,39 @@ class KeyBinding {
 
   control_git_clone() {
     return this.editor.gitSidebar?.openCloneDialog?.();
+  }
+
+  async control_git_fetch() {
+    return this.runGitSidebarCommand("fetchChanges");
+  }
+
+  async control_git_pull() {
+    return this.runGitSidebarCommand("pullChanges");
+  }
+
+  async control_git_push() {
+    return this.runGitSidebarCommand("pushChanges");
+  }
+
+  async control_git_show_history() {
+    return this.runGitSidebarCommand("showHistory");
+  }
+
+  control_git_manage_remotes() {
+    const sidebar = this.editor.gitSidebar;
+    if (typeof sidebar?.openRemotesDialog !== "function") return false;
+    if (!sidebar.isOpen) this.editor.sidebarManager?.openMenu?.("git");
+    return sidebar.openRemotesDialog();
+  }
+
+  // Palette Git actions surface Source Control so progress is visible, then
+  // make sure a status is loaded before delegating to the existing operation.
+  async runGitSidebarCommand(method) {
+    const sidebar = this.editor.gitSidebar;
+    if (typeof sidebar?.[method] !== "function") return false;
+    if (!sidebar.isOpen) this.editor.sidebarManager?.openMenu?.("git");
+    if (!sidebar.status) await sidebar.refresh?.({ reason: "manual" });
+    return sidebar[method]();
   }
 
   // --- Key functions ---

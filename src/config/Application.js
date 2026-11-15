@@ -210,6 +210,36 @@ const USERCONFIG_KEYBINDING = [
     in_editor: false,
   },
   {
+    action: "git_fetch",
+    label: "Git: Fetch",
+    keywords: ["git", "fetch", "remote", "sync", "download"],
+    in_editor: false,
+  },
+  {
+    action: "git_pull",
+    label: "Git: Pull",
+    keywords: ["git", "pull", "remote", "sync", "merge", "rebase"],
+    in_editor: false,
+  },
+  {
+    action: "git_push",
+    label: "Git: Push",
+    keywords: ["git", "push", "remote", "sync", "upload", "publish"],
+    in_editor: false,
+  },
+  {
+    action: "git_show_history",
+    label: "Git: Show History",
+    keywords: ["git", "history", "log", "commits", "show"],
+    in_editor: false,
+  },
+  {
+    action: "git_manage_remotes",
+    label: "Git: Manage Remotes",
+    keywords: ["git", "remote", "remotes", "manage", "origin", "url"],
+    in_editor: false,
+  },
+  {
     action: "open_settings",
     description: "Open Settings",
     in_editor: false,

@@ -27,6 +27,11 @@ const GIT_ACTIONS = [
   ["git_focus_commit_message", "Git: Focus Commit Message"],
   ["git_open_settings", "Git: Open Settings"],
   ["git_clone", "Git: Clone Repository"],
+  ["git_fetch", "Git: Fetch"],
+  ["git_pull", "Git: Pull"],
+  ["git_push", "Git: Push"],
+  ["git_show_history", "Git: Show History"],
+  ["git_manage_remotes", "Git: Manage Remotes"],
 ];
 
 test("the command palette exposes the Git commands", () => {
@@ -87,6 +92,26 @@ test("Git palette commands dispatch to Source Control", async () => {
       calls.push("clone-dialog");
       return true;
     },
+    fetchChanges: async () => {
+      calls.push("fetch");
+      return true;
+    },
+    pullChanges: async () => {
+      calls.push("pull");
+      return true;
+    },
+    pushChanges: async () => {
+      calls.push("push");
+      return true;
+    },
+    showHistory: async () => {
+      calls.push("show-history");
+      return true;
+    },
+    openRemotesDialog: async () => {
+      calls.push("remotes-dialog");
+      return true;
+    },
   };
   const keyBinding = new (loadGlobal(
     "src/js/addon/KeyBinding.js",
@@ -138,4 +163,42 @@ test("Git palette commands dispatch to Source Control", async () => {
 
   assert.equal(keyBinding.control_git_clone(), true);
   assert.equal(calls.at(-1), "clone-dialog");
+
+  // Sync, history and remotes commands delegate to the open sidebar directly.
+  sidebar.isOpen = true;
+  sidebar.status = { entries: [] };
+  assert.equal(await keyBinding.control_git_fetch(), true);
+  assert.equal(calls.at(-1), "fetch");
+  assert.equal(await keyBinding.control_git_pull(), true);
+  assert.equal(calls.at(-1), "pull");
+  assert.equal(await keyBinding.control_git_push(), true);
+  assert.equal(calls.at(-1), "push");
+  assert.equal(await keyBinding.control_git_show_history(), true);
+  assert.equal(calls.at(-1), "show-history");
+  assert.equal(await keyBinding.control_git_manage_remotes(), true);
+  assert.equal(calls.at(-1), "remotes-dialog");
+
+  // Closed with no status: a sync command opens Source Control and refreshes
+  // before running, so the operation has a repository to act on.
+  sidebar.isOpen = false;
+  sidebar.status = null;
+  assert.equal(await keyBinding.control_git_fetch(), true);
+  assert.deepEqual(calls.slice(-3), [
+    ["open-menu", "git"],
+    ["refresh", "manual"],
+    "fetch",
+  ]);
+
+  // Manage Remotes opens the sidebar but the dialog loads its own remotes.
+  sidebar.isOpen = false;
+  assert.equal(await keyBinding.control_git_manage_remotes(), true);
+  assert.deepEqual(calls.slice(-2), [["open-menu", "git"], "remotes-dialog"]);
+
+  // Missing sidebar operations fail closed instead of throwing.
+  const bare = new (loadGlobal("src/js/addon/KeyBinding.js", "KeyBinding"))({
+    gitSidebar: {},
+  });
+  assert.equal(await bare.control_git_fetch(), false);
+  assert.equal(await bare.control_git_show_history(), false);
+  assert.equal(bare.control_git_manage_remotes(), false);
 });

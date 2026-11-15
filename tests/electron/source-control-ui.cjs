@@ -1894,6 +1894,45 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   editor.themeManager.applyTheme(previousTheme);
   await nextFrame();
 
+  // The command palette exposes the Git sync/history/remotes actions and
+  // dispatches them to Source Control through the real keybinding pipeline.
+  editor.keyBinding.control_open_command();
+  await waitFor(
+    () => editor.quickPanel.isOpen("command-palette") &&
+      editor.quickPanel.session.items.some((entry) => entry.id === "git_fetch"),
+    "the command palette to list the Git actions",
+  );
+  const gitPaletteCommands = [
+    ["git_fetch", "Git: Fetch"],
+    ["git_pull", "Git: Pull"],
+    ["git_push", "Git: Push"],
+    ["git_show_history", "Git: Show History"],
+    ["git_manage_remotes", "Git: Manage Remotes"],
+  ];
+  for (const [action, label] of gitPaletteCommands) {
+    const item = editor.quickPanel.session.items.find((entry) => entry.id === action);
+    check(Boolean(item), `${action} is listed in the command palette`);
+    check(item.label === label, `${action} has the "${label}" palette label`);
+    check(
+      Array.isArray(item.keywords) && item.keywords.includes("git"),
+      `${action} palette keywords include git`,
+    );
+  }
+  const historyCommand = editor.quickPanel.session.items
+    .find((entry) => entry.id === "git_show_history");
+  editor.quickPanel.accept(historyCommand);
+  await waitFor(
+    () => git.collapsed.history === false && git.history.loaded && !git.history.loading,
+    "Git: Show History to expand and load history from the palette",
+  );
+  await nextFrame();
+  check(
+    Boolean(git.container.querySelector('.git-section-header[data-section="history"]')),
+    "the history section is present after the palette command",
+  );
+  git.toggleSection("history");
+  await nextFrame();
+
   return {
     mode: git.getViewState().mode,
     branch: git.getBranchLabel(),
