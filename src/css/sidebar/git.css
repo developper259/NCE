@@ -376,6 +376,43 @@
   display: none;
 }
 
+.git-sync-add-remote {
+  flex: 0 0 auto;
+  margin-left: auto;
+  height: 20px;
+  padding: 0 8px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 10.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.git-sync-add-remote.is-inline {
+  margin-left: 0;
+}
+
+.git-sync-add-remote:hover:not(:disabled) {
+  background: var(--bg-hover-alt);
+}
+
+.git-sync-add-remote:focus-visible {
+  outline: 1px solid var(--border-active);
+  outline-offset: -1px;
+}
+
+.git-sync-add-remote[hidden] {
+  display: none;
+}
+
+.git-sync-add-remote:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .git-sync-action {
   position: relative;
 }

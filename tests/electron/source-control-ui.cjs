@@ -148,6 +148,48 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     check(git.stateElement.hidden === false, "clean state is visible");
     check(git.stateTitleElement.textContent === "Working tree clean", "clean state title");
     check(git.stateText.textContent === "No changes to commit.", "clean state description");
+
+    // A repository without an upstream offers a far-right "Add remote" action
+    // in the sync strip that reuses the existing remotes dialog.
+    await waitFor(() => git.syncStrip.hidden === false, "the sync strip on a clean repository");
+    await nextFrame();
+    check(git.syncStripLabel.textContent === "No upstream", "the strip reports no upstream");
+    const addRemoteButton = git.syncAddRemoteButton;
+    check(
+      Boolean(addRemoteButton) && addRemoteButton.hidden === false &&
+        getComputedStyle(addRemoteButton).display !== "none",
+      "the Add remote action is offered when there is no upstream",
+    );
+    check(addRemoteButton.textContent === "Add remote", "the Add remote action label");
+    check(addRemoteButton.disabled === false, "the Add remote action is enabled when idle");
+    const addRemoteStripRect = rectOf(git.syncStrip);
+    const addRemoteRect = rectOf(addRemoteButton);
+    const noUpstreamLabelRect = rectOf(git.syncStripLabel);
+    check(
+      addRemoteStripRect.right - addRemoteRect.right <= 8 &&
+        addRemoteRect.left >= noUpstreamLabelRect.right - 1,
+      "the Add remote action sits flush at the far right, past the No upstream label",
+    );
+    const addRemoteTopElement = document.elementFromPoint(
+      addRemoteRect.left + addRemoteRect.width / 2,
+      addRemoteRect.top + addRemoteRect.height / 2,
+    );
+    check(
+      addRemoteButton.contains(addRemoteTopElement),
+      "the Add remote action is clickable, not obscured",
+    );
+    addRemoteButton.click();
+    await waitFor(
+      () => Boolean(git.remotesDialog) && git.remotesDialog.open === true,
+      "the Add remote action to open the remotes dialog",
+    );
+    git.remotesCloseButton.click();
+    await waitFor(
+      () => git.remotesDialog.open === false,
+      "the remotes dialog to close",
+    );
+    await nextFrame();
+
     const emptyHistoryHeader = git.container.querySelector(
       '.git-section-header[data-section="history"]',
     );

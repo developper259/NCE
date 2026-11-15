@@ -254,6 +254,7 @@ class GitSidebar extends Sidebar {
     this.syncPushCount = null;
     this.syncStatus = null;
     this.syncCancelButton = null;
+    this.syncAddRemoteButton = null;
     this.remotes = [];
     this.defaultRemote = null;
     this.remotesDialog = null;
@@ -641,7 +642,17 @@ class GitSidebar extends Sidebar {
     stripRemote.hidden = true;
     this.syncStripRemote = stripRemote;
 
-    syncStrip.append(stripIcon, stripCounts, stripLabel, syncStatus, cancelButton, stripRemote);
+    const addRemoteButton = document.createElement("button");
+    addRemoteButton.type = "button";
+    addRemoteButton.className = "git-sync-add-remote";
+    addRemoteButton.textContent = "Add remote";
+    addRemoteButton.title = "Add a remote repository";
+    addRemoteButton.setAttribute("aria-label", "Add a remote repository");
+    addRemoteButton.hidden = true;
+    addRemoteButton.addEventListener("click", () => void this.openRemotesDialog());
+    this.syncAddRemoteButton = addRemoteButton;
+
+    syncStrip.append(stripIcon, stripCounts, stripLabel, syncStatus, cancelButton, stripRemote, addRemoteButton);
     this.syncStrip = syncStrip;
 
     const list = document.createElement("div");
@@ -2537,6 +2548,7 @@ class GitSidebar extends Sidebar {
       this.syncStripCounts.hidden = true;
       this.syncStripLabel.hidden = true;
       this.syncStripRemote.hidden = true;
+      this.syncAddRemoteButton.hidden = true;
       this.syncStatus.hidden = false;
       this.syncStatus.textContent = progress
         ? `${label}… ${progress.phase} ${progress.percent}%`
@@ -2553,6 +2565,12 @@ class GitSidebar extends Sidebar {
     const remoteText = upstream || this.defaultRemote || "";
     this.syncStripRemote.hidden = !remoteText;
     this.syncStripRemote.textContent = remoteText;
+
+    // Offer a far-right "Add remote" action whenever the branch has no upstream.
+    // It hugs the remote label when one is shown, otherwise it right-aligns itself.
+    this.syncAddRemoteButton.hidden = Boolean(upstream);
+    this.syncAddRemoteButton.disabled = busy;
+    this.syncAddRemoteButton.classList.toggle("is-inline", Boolean(remoteText));
 
     if (behind > 0 || ahead > 0) {
       const parts = [];

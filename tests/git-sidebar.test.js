@@ -4199,6 +4199,88 @@ test("GitSidebar shows Up to date and the upstream when the branch is in sync", 
   }
 });
 
+test("GitSidebar offers a far-right Add remote action when the branch has no upstream", async () => {
+  const { sidebar } = createSidebar();
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.syncStripLabel.textContent, "No upstream");
+    assert.equal(sidebar.syncAddRemoteButton.hidden, false, "offered without an upstream");
+    assert.equal(sidebar.syncAddRemoteButton.textContent, "Add remote");
+    assert.equal(sidebar.syncAddRemoteButton.disabled, false);
+    assert.equal(
+      sidebar.syncAddRemoteButton.classList.contains("is-inline"),
+      false,
+      "right-aligns itself when no remote label is shown",
+    );
+    assert.equal(sidebar.syncStripRemote.hidden, true);
+    assert.equal(
+      sidebar.syncStrip.children[sidebar.syncStrip.children.length - 1],
+      sidebar.syncAddRemoteButton,
+      "the action sits at the far right of the strip",
+    );
+
+    sidebar.loading = true;
+    sidebar.updateSyncStrip();
+    assert.equal(sidebar.syncAddRemoteButton.disabled, true, "disabled while busy");
+    sidebar.loading = false;
+    sidebar.updateSyncStrip();
+
+    sidebar.syncAddRemoteButton.click();
+    await tick();
+    assert.equal(sidebar.remotesDialog.open, true, "reuses the existing remotes dialog");
+    sidebar.remotesCloseButton.click();
+    await tick();
+    assert.equal(sidebar.remotesDialog.open, false);
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar hugs the remote label with Add remote when a remote exists without upstream", async () => {
+  const { sidebar } = createSidebar({ defaultRemote: "origin" });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    await sidebar.loadRemotes();
+    sidebar.updateSyncStrip();
+    assert.equal(sidebar.syncStripLabel.textContent, "No upstream");
+    assert.equal(sidebar.syncAddRemoteButton.hidden, false);
+    assert.equal(sidebar.syncStripRemote.hidden, false);
+    assert.equal(sidebar.syncStripRemote.textContent, "origin");
+    assert.equal(
+      sidebar.syncAddRemoteButton.classList.contains("is-inline"),
+      true,
+      "collapses its auto margin so it sits beside the remote label",
+    );
+  } finally {
+    sidebar.destroy();
+  }
+});
+
+test("GitSidebar hides Add remote when an upstream is set or a sync is running", async () => {
+  const { sidebar } = createSidebar({
+    responses: [
+      { success: true, status: makeStatus([], { branch: { upstream: "origin/main" } }) },
+    ],
+  });
+  try {
+    sidebar.render();
+    await sidebar.refresh({ reason: "open" });
+    assert.equal(sidebar.syncAddRemoteButton.hidden, true, "hidden once an upstream is tracked");
+
+    sidebar.status = makeStatus([]);
+    sidebar.syncing = "fetch";
+    sidebar.updateSyncStrip();
+    assert.equal(sidebar.syncAddRemoteButton.hidden, true, "hidden while syncing");
+    sidebar.syncing = null;
+    sidebar.updateSyncStrip();
+    assert.equal(sidebar.syncAddRemoteButton.hidden, false, "offered again when idle");
+  } finally {
+    sidebar.destroy();
+  }
+});
+
 test("GitSidebar fetches, pulls and pushes through the Git API and notifies success", async () => {
   const { sidebar, calls } = createSidebar();
   try {
