@@ -105,6 +105,34 @@ module.exports = async function exerciseSearchUI(term) {
       buttonSignature(filterToggle),
     "the filter toggle matches the Source Control header icon buttons",
   );
+  const placementSignature = (button, bar) => {
+    const box = button.getBoundingClientRect();
+    const frame = bar.getBoundingClientRect();
+    return [
+      (box.top + box.bottom) / 2 - (frame.top + frame.bottom) / 2,
+      frame.right - box.right,
+    ].join("|");
+  };
+  const gitMenuButton = gitContainer.querySelector('.git-sidebar-icon-button[data-action="menu"]');
+  // Outside a repository the menu button is hidden and has no layout box;
+  // reveal it just for the measurement, then restore its state.
+  const menuWasHidden = gitMenuButton.hidden;
+  gitMenuButton.hidden = false;
+  const gitPlacement = placementSignature(gitMenuButton, gitHeader);
+  gitMenuButton.hidden = menuWasHidden;
+  const searchPlacement = placementSignature(filterToggle, header);
+  check(
+    gitPlacement === searchPlacement,
+    `the header actions share the same centering and edge margin (${gitPlacement} vs ${searchPlacement})`,
+  );
+  check(
+    Math.abs(Number(searchPlacement.split("|")[0])) <= 1,
+    "the filter toggle is vertically centered in the title bar",
+  );
+  check(
+    Number(searchPlacement.split("|")[1]) >= 6,
+    "the filter toggle keeps a breathing margin from the sidebar edge",
+  );
   gitContainer.remove();
   const titleBarMatchesSourceControl = true;
 
