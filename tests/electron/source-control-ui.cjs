@@ -24,6 +24,16 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       height: rect.height,
     };
   };
+  // The hidden property alone is not enough: an author display rule (e.g.
+  // display:block) overrides the UA [hidden] style, so assert real rendering.
+  const isVisible = (element) => {
+    if (!element || element.hidden) return false;
+    const style = getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const computedDisplay = (element) => getComputedStyle(element).display;
   const waitFor = async (predicate, description, timeout = 10000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
@@ -115,16 +125,43 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     check(git.stateElement.hidden === false, "no-workspace state is visible");
     check(git.stateOpenFolder.hidden === false, "Open Folder appears without a workspace");
     check(git.stateClone.hidden === false, "Clone Repository appears without a workspace");
+    check(isVisible(git.stateOpenFolder), "Open Folder actually renders without a workspace");
+    check(isVisible(git.stateClone), "Clone Repository actually renders without a workspace");
     check(
       git.stateOpenFolder.classList.contains("git-sidebar-primary"),
       "Open Folder is the primary action without a workspace",
     );
     const explorer = editor.fileExplorer;
+    // Mount the explorer shell: getComputedStyle ignores author stylesheets on
+    // a disconnected node, so the button must be in the active sidebar to
+    // reflect the real [hidden] rendering the user sees.
+    editor.sidebarManager.openMenu("file-explorer");
+    await waitFor(
+      () => explorer.shell && explorer.shell.isConnected,
+      "Explorer sidebar to mount",
+    );
     explorer.render();
+    await nextFrame();
     check(
       explorer.openFolderButton.hidden === false,
       "explorer offers Open Folder without a workspace",
     );
+    check(
+      computedDisplay(explorer.openFolderButton) !== "none",
+      "explorer Open Folder is not display:none without a workspace",
+    );
+    check(
+      isVisible(explorer.openFolderButton),
+      "explorer Open Folder actually renders without a workspace",
+    );
+    // Leave Source Control mounted so the no-workspace screenshot shows Git.
+    editor.sidebarManager.openMenu("git");
+    await waitFor(() => git.isOpen && Boolean(git.container), "Source Control sidebar to reopen");
+    await waitFor(
+      () => git.getViewState().mode === "no-workspace",
+      "no-workspace state after reopen",
+    );
+    await nextFrame();
     return { mode: git.getViewState().mode };
   }
 
@@ -143,16 +180,40 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       git.stateOpenFolder.hidden === true,
       "no Open Folder button once a folder is open",
     );
+    check(!isVisible(git.stateClone), "Clone Repository does not render without a repository");
+    check(!isVisible(git.stateOpenFolder), "Open Folder does not render once a folder is open");
     const explorer = editor.fileExplorer;
+    // Mount the explorer shell so author CSS applies (getComputedStyle returns
+    // UA defaults on a disconnected node). This mirrors the user's view: the
+    // Explorer sidebar open on an empty workspace must not show Open Folder.
+    editor.sidebarManager.openMenu("file-explorer");
+    await waitFor(
+      () => explorer.shell && explorer.shell.isConnected,
+      "Explorer sidebar to mount",
+    );
     explorer.render();
+    await nextFrame();
     check(
       explorer.openFolderButton.hidden === true,
       "explorer hides Open Folder on an empty workspace",
     );
     check(
+      computedDisplay(explorer.openFolderButton) === "none",
+      "explorer Open Folder is display:none on an empty workspace",
+    );
+    check(
       explorer.treeEmptyMessage.textContent === "Folder empty",
       "explorer reports the empty folder",
     );
+    // Leave Source Control mounted so the no-repository screenshot shows Git.
+    editor.sidebarManager.openMenu("git");
+    await waitFor(() => git.isOpen && Boolean(git.container), "Source Control sidebar to reopen");
+    // Remounting kicks off a refresh; wait for it to settle back to no-repository.
+    await waitFor(
+      () => git.getViewState().mode === "no-repository",
+      "no-repository state after reopen",
+    );
+    await nextFrame();
     return { mode: git.getViewState().mode };
   }
 

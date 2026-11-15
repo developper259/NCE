@@ -1,6 +1,10 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const { loadGlobal } = require("./helpers/runtime");
+
+const root = path.resolve(__dirname, "..");
 
 const NCEPath = loadGlobal("src/js/core/Path.js", "NCEPath");
 
@@ -1428,4 +1432,16 @@ test("large workspace index stats stay scoped without badge or popup UI", () => 
   assert.equal(explorer.applyWorkspaceIndexStats(largeStats), false);
   explorer.clearWorkspaceIndexStats();
   assert.equal(explorer.workspaceIndexStats, null);
+});
+
+test("Open Folder button honors hidden despite its display:block rule", () => {
+  const css = fs.readFileSync(
+    path.join(root, "src/css/sidebar/fileExplorer.css"),
+    "utf8",
+  );
+  assert.match(css, /\.open-folder-btn\s*\{[^}]*display:\s*block/);
+  assert.match(
+    css,
+    /\.open-folder-btn\[hidden\]\s*\{\s*display:\s*none;?\s*\}/,
+  );
 });

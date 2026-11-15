@@ -389,6 +389,10 @@
   font-family: inherit;
 }
 
+.open-folder-btn[hidden] {
+  display: none;
+}
+
 .open-folder-btn:hover {
   background-color: var(--accent-fill-hover);
 }

@@ -1683,12 +1683,30 @@ app.whenReady().then(() => {
         );
         const noRepoScreenshotPath =
           process.env.NCE_SOURCE_CONTROL_NOREPO_SCREENSHOT_PATH;
+        const sourceControlNoRepo = await run(
+          `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "no-repository")`,
+        );
+        assert.equal(sourceControlNoRepo.mode, "no-repository");
         if (noRepoScreenshotPath) {
-          await run(
-            `(${require("./source-control-ui.cjs").toString()})(${JSON.stringify(sourceControlWorkspace)}, "no-repository")`,
-          );
+          // Git was just remounted after the explorer checks; let the
+          // compositor paint it before capture.
+          await new Promise((resolve) => setTimeout(resolve, 500));
           fs.writeFileSync(
             noRepoScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
+        const explorerEmptyScreenshotPath =
+          process.env.NCE_EXPLORER_EMPTY_SCREENSHOT_PATH;
+        if (explorerEmptyScreenshotPath) {
+          await run(`(() => {
+            editor.sidebarManager.openMenu("file-explorer");
+            return true;
+          })()`);
+          // Let the compositor paint the switched sidebar before capture.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          fs.writeFileSync(
+            explorerEmptyScreenshotPath,
             (await win.capturePage()).toPNG(),
           );
         }
