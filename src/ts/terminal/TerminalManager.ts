@@ -309,6 +309,20 @@ export function neutralizePowerShellPromptArgs(
   return next;
 }
 
+const LOGIN_SHELL_NAMES = new Set([
+  "zsh", "bash", "sh", "dash", "ash", "ksh", "fish", "pwsh", "powershell",
+]);
+
+// GUI-launched apps inherit only launchd's minimal PATH; the system paths
+// (/usr/local/bin, Homebrew, ...) are restored by login profiles such as
+// macOS /etc/zprofile running path_helper. Without -l, commands like node
+// are missing from the integrated terminal even though they work elsewhere.
+function loginShellArgs(shellName: string, platform: NodeJS.Platform): string[] {
+  if (platform === "win32") return [];
+  const base = shellName.toLowerCase().replace(/\.exe$/, "");
+  return LOGIN_SHELL_NAMES.has(base) ? ["-l"] : [];
+}
+
 export async function resolveTerminalShell(
   configured: unknown,
   options: {
@@ -328,7 +342,8 @@ export async function resolveTerminalShell(
       new Error("The configured terminal shell could not be found or executed."),
       { code: "SHELL_NOT_FOUND" },
     );
-    return { path: resolved, args: [], name: pathApi.basename(resolved) };
+    const name = pathApi.basename(resolved);
+    return { path: resolved, args: loginShellArgs(name, platform), name };
   }
 
   const candidates = platform === "win32"
@@ -337,7 +352,10 @@ export async function resolveTerminalShell(
   for (const candidate of candidates) {
     if (typeof candidate !== "string" || !candidate.trim()) continue;
     const resolved = await executablePath(candidate, platform, env, fsApi);
-    if (resolved) return { path: resolved, args: [], name: pathApi.basename(resolved) };
+    if (resolved) {
+      const name = pathApi.basename(resolved);
+      return { path: resolved, args: loginShellArgs(name, platform), name };
+    }
   }
   throw Object.assign(new Error("No usable system shell was found."), { code: "SHELL_NOT_FOUND" });
 }

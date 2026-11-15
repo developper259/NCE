@@ -172,6 +172,7 @@ test("PowerShell terminals automatically neutralize PSReadLine colors", async ()
   const result = await create(f);
   assert.equal(result.success, true);
   assert.deepEqual(f.ptys[0].args, [
+    "-l",
     "-NoLogo",
     "-NoExit",
     "-Command",
@@ -195,7 +196,7 @@ test("a user-provided PowerShell startup command disables automatic neutralizati
   const f = fixture({ platform: "linux", shell: "/usr/bin/pwsh", args: '-NoExit -Command "Write-Host custom"' });
   const result = await create(f);
   assert.equal(result.success, true);
-  assert.deepEqual(f.ptys[0].args, ["-NoExit", "-Command", "Write-Host custom"]);
+  assert.deepEqual(f.ptys[0].args, ["-l", "-NoExit", "-Command", "Write-Host custom"]);
 
   for (const args of [["-c", "Write-Host custom"], ["-EncodedCommand", "AAAA"], ["-File", "init.ps1"]]) {
     assert.deepEqual(neutralizePowerShellPromptArgs("pwsh", args), args);
@@ -365,6 +366,7 @@ test("TerminalManager resolves the configured executable and falls back to an av
     fs: { access: async (file) => { calls.push(file); if (file.endsWith("pwsh.exe")) return; throw Error("missing"); } },
   });
   assert.equal(shell.name, "pwsh.exe");
+  assert.deepEqual(shell.args, []);
   assert.equal(calls.length, 1, "an explicit executable extension is not doubled");
 
   const fallback = await resolveTerminalShell("", {
@@ -373,12 +375,35 @@ test("TerminalManager resolves the configured executable and falls back to an av
     fs: { access: async (file) => { if (file === "/bin/bash") return; throw Error("missing"); } },
   });
   assert.equal(fallback.path, "/bin/bash");
+  assert.deepEqual(fallback.args, ["-l"]);
   await assert.rejects(
     resolveTerminalShell("/missing shell", {
       platform: "linux", env: { PATH: "" }, fs: { access: async () => { throw Error("missing"); } },
     }),
     { code: "SHELL_NOT_FOUND" },
   );
+});
+
+test("POSIX terminals launch as login shells so GUI apps inherit the system PATH", async () => {
+  const fsApi = { access: async () => {} };
+  const guiEnv = { PATH: "/usr/bin:/bin:/usr/sbin:/sbin", SHELL: "/bin/zsh" };
+  const configured = await resolveTerminalShell("/bin/zsh", { platform: "darwin", env: guiEnv, fs: fsApi });
+  assert.deepEqual(configured.args, ["-l"]);
+  const fallback = await resolveTerminalShell("", { platform: "darwin", env: guiEnv, fs: fsApi });
+  assert.equal(fallback.path, "/bin/zsh");
+  assert.deepEqual(fallback.args, ["-l"]);
+  for (const shellPath of ["/bin/bash", "/bin/sh", "/usr/bin/fish", "/bin/ksh", "/bin/dash", "/usr/bin/pwsh"]) {
+    const shell = await resolveTerminalShell(shellPath, { platform: "linux", env: { PATH: "/usr/bin" }, fs: fsApi });
+    assert.deepEqual(shell.args, ["-l"], shellPath);
+  }
+  const exotic = await resolveTerminalShell("/opt/custom/shell", { platform: "darwin", env: guiEnv, fs: fsApi });
+  assert.deepEqual(exotic.args, [], "unknown shells keep their own startup contract");
+  const windows = await resolveTerminalShell("C:/Windows/System32/cmd.exe", {
+    platform: "win32",
+    env: { PATH: "C:/Windows/System32", PATHEXT: ".EXE;.CMD" },
+    fs: fsApi,
+  });
+  assert.deepEqual(windows.args, []);
 });
 
 test("terminal links allow only explicit safe web protocols", () => {
