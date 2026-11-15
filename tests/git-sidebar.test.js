@@ -623,8 +623,8 @@ test("Source Control more-options opens at a static anchor; header right-click k
     button.click();
     assert.deepEqual(
       opened,
-      [["git-header", { x: 300, y: 34 }]],
-      "the dots button drops its menu below the button at a fixed anchor",
+      [["git-header", { x: 324, y: 34 }]],
+      "the dots button opens its menu diagonally at the button bottom-right",
     );
 
     opened.length = 0;

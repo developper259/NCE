@@ -388,7 +388,7 @@ class GitSidebar extends Sidebar {
     menuButton.appendChild(menuIcon);
     menuButton.addEventListener("click", () => {
       const rect = menuButton.getBoundingClientRect();
-      this.openHeaderContextMenu({ x: rect.left, y: rect.bottom });
+      this.openHeaderContextMenu({ x: rect.right, y: rect.bottom });
     });
     menuButton.dataset.action = "menu";
     this.menuButton = menuButton;
