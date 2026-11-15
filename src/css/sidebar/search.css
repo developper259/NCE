@@ -4,7 +4,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  padding: 0 5px 12px 4px;
+  padding: 0 0 12px 6px;
   color: var(--text-secondary);
 }
 
@@ -13,8 +13,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
-  padding: 2px 2px 0 2px;
+  min-height: 34px;
+  padding: 2px 0 6px 2px;
+  border-bottom: 1px solid var(--border-primary);
 }
 
 .search-sidebar-header .sidebar-main-title {
@@ -32,6 +33,12 @@
   white-space: nowrap;
 }
 
+.search-sidebar-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
 .search-sidebar-filter-toggle {
   display: inline-flex;
   align-items: center;
@@ -40,11 +47,11 @@
   height: 24px;
   flex: 0 0 auto;
   padding: 0;
-  border: 1px solid transparent;
+  border: none;
   border-radius: 3px;
   background: transparent;
   color: var(--text-tertiary);
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -54,7 +61,6 @@
 }
 
 .search-sidebar-filter-toggle.is-active {
-  border-color: var(--accent-primary);
   background: var(--bg-hover-alt);
   color: var(--accent-primary);
 }
@@ -73,6 +79,8 @@
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
   gap: 4px;
+  margin-top: 6px;
+  margin-right: 5px;
 }
 
 /* Nouveau conteneur pour superposer les boutons sur l'input */

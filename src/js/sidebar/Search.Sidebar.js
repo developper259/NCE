@@ -91,7 +91,11 @@ class SearchSidebar extends Sidebar {
     filterToggle.addEventListener("click", () => this.toggleFilters());
     this.filterToggleButton = filterToggle;
 
-    header.append(title, filterToggle);
+    const headerActions = document.createElement("div");
+    headerActions.className = "search-sidebar-header-actions";
+    headerActions.appendChild(filterToggle);
+
+    header.append(title, headerActions);
     container.appendChild(header);
 
     const searchBox = document.createElement("div");

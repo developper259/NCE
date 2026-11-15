@@ -55,6 +55,59 @@ module.exports = async function exerciseSearchUI(term) {
     "the filter toggle carries the filter icon",
   );
 
+  // The title bar must be indistinguishable from Source Control's: same box
+  // and separator, same title typography, same borderless icon buttons. Mount
+  // the real Git header briefly to compare computed styles, then unmount it.
+  const gitContainer = editor.gitSidebar.render();
+  document.body.appendChild(gitContainer);
+  const gitHeader = gitContainer.querySelector(".git-sidebar-header");
+  const boxSignature = (node) => {
+    const style = getComputedStyle(node);
+    return [
+      style.display, style.alignItems, style.gap, style.minHeight,
+      style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft,
+      style.borderBottomWidth, style.borderBottomStyle, style.borderBottomColor,
+    ].join("|");
+  };
+  check(
+    boxSignature(gitHeader) === boxSignature(header),
+    `the search title bar box matches the Source Control title bar (${boxSignature(gitHeader)} vs ${boxSignature(header)})`,
+  );
+  const insetSignature = (node, root) => {
+    const box = node.getBoundingClientRect();
+    const frame = root.getBoundingClientRect();
+    return [box.left - frame.left, frame.right - box.right, box.height].join("|");
+  };
+  check(
+    insetSignature(gitHeader, gitContainer) === insetSignature(header, container),
+    `the search title bar sits at the same insets as Source Control (${insetSignature(gitHeader, gitContainer)} vs ${insetSignature(header, container)})`,
+  );
+  const typeSignature = (node) => {
+    const style = getComputedStyle(node);
+    return [
+      style.fontSize, style.fontWeight, style.letterSpacing,
+      style.textTransform, style.color,
+    ].join("|");
+  };
+  check(
+    typeSignature(gitHeader.querySelector(".sidebar-main-title")) === typeSignature(title),
+    "the search title typography matches the Source Control title",
+  );
+  const buttonSignature = (node) => {
+    const style = getComputedStyle(node);
+    return [
+      style.width, style.height, style.borderTopWidth, style.borderRadius,
+      style.backgroundColor, style.color, style.fontSize,
+    ].join("|");
+  };
+  check(
+    buttonSignature(gitContainer.querySelector('.git-sidebar-icon-button[data-action="menu"]')) ===
+      buttonSignature(filterToggle),
+    "the filter toggle matches the Source Control header icon buttons",
+  );
+  gitContainer.remove();
+  const titleBarMatchesSourceControl = true;
+
   // Filters start collapsed; the toggle is not highlighted while closed.
   check(search.filtersExpanded === false, "filters start collapsed");
   check(search.includeInput.hidden === true, "include input starts hidden");
@@ -252,6 +305,7 @@ module.exports = async function exerciseSearchUI(term) {
   motionStyle.remove();
   return {
     headerTitle: title.textContent,
+    titleBarMatchesSourceControl,
     filtersHiddenByDefault,
     filtersOpenActive,
     filtersClosedInactive,
