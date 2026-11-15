@@ -1444,4 +1444,34 @@ test("Open Folder button honors hidden despite its display:block rule", () => {
     css,
     /\.open-folder-btn\[hidden\]\s*\{\s*display:\s*none;?\s*\}/,
   );
+  assert.match(css, /\.clone-repo-btn\s*\{[^}]*display:\s*block/);
+  assert.match(
+    css,
+    /\.clone-repo-btn\[hidden\]\s*\{\s*display:\s*none;?\s*\}/,
+  );
+});
+
+test("Explorer no-folder state offers Open Folder and Clone; empty workspace hides both", () => {
+  const FileExplorer = loadFileExplorer();
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    treeEmptyMessage: {},
+    openFolderButton: {},
+    cloneButton: {},
+    treeEmptyState: {},
+    treeLayer: {},
+  });
+  explorer.renderNoFolderState();
+  assert.equal(
+    explorer.treeEmptyMessage.textContent,
+    "You have not yet opened a folder.",
+  );
+  assert.equal(explorer.openFolderButton.hidden, false);
+  assert.equal(explorer.cloneButton.hidden, false);
+  assert.equal(explorer.treeEmptyState.hidden, false);
+  assert.equal(explorer.treeLayer.hidden, true);
+  explorer.renderEmptyFolderState();
+  assert.equal(explorer.treeEmptyMessage.textContent, "Folder empty");
+  assert.equal(explorer.openFolderButton.hidden, true);
+  assert.equal(explorer.cloneButton.hidden, true);
+  assert.equal(explorer.treeEmptyState.hidden, false);
 });

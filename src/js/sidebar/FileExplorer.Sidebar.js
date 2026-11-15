@@ -63,6 +63,7 @@ class FileExplorer extends Sidebar {
     this.treeEmptyState = null;
     this.treeEmptyMessage = null;
     this.openFolderButton = null;
+    this.cloneButton = null;
     this.treeViewport = null;
     this.treeLayer = null;
     this.treeLayerFast = null;
@@ -584,6 +585,11 @@ class FileExplorer extends Sidebar {
     openFolderButton.textContent = "Open Folder";
     openFolderButton.addEventListener("click", () => this.selectFolder());
     emptyState.appendChild(openFolderButton);
+    const cloneButton = document.createElement("button");
+    cloneButton.className = "clone-repo-btn";
+    cloneButton.textContent = "Clone Repository";
+    cloneButton.addEventListener("click", () => void this.editor.gitSidebar.openCloneDialog());
+    emptyState.appendChild(cloneButton);
     viewport.appendChild(emptyState);
 
     const layer = document.createElement("div");
@@ -655,6 +661,7 @@ class FileExplorer extends Sidebar {
     this.treeEmptyState = emptyState;
     this.treeEmptyMessage = emptyMessage;
     this.openFolderButton = openFolderButton;
+    this.cloneButton = cloneButton;
     this.treeViewport = viewport;
     this.treeLayer = layer;
     this.treeLayerFast = this.editor.domManager.wrapFastNode(layer);
@@ -791,6 +798,7 @@ class FileExplorer extends Sidebar {
   renderNoFolderState() {
     this.treeEmptyMessage.textContent = "You have not yet opened a folder.";
     this.openFolderButton.hidden = false;
+    this.cloneButton.hidden = false;
     this.treeEmptyState.hidden = false;
     this.treeLayer.hidden = true;
   }
@@ -798,6 +806,7 @@ class FileExplorer extends Sidebar {
   renderEmptyFolderState() {
     this.treeEmptyMessage.textContent = "Folder empty";
     this.openFolderButton.hidden = true;
+    this.cloneButton.hidden = true;
     this.treeEmptyState.hidden = false;
     this.treeLayer.hidden = true;
   }

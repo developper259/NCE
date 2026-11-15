@@ -123,13 +123,13 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     await waitFor(() => git.isOpen && Boolean(git.container), "Source Control sidebar to open");
     await nextFrame();
     check(git.stateElement.hidden === false, "no-workspace state is visible");
-    check(git.stateOpenFolder.hidden === false, "Open Folder appears without a workspace");
-    check(git.stateClone.hidden === false, "Clone Repository appears without a workspace");
-    check(isVisible(git.stateOpenFolder), "Open Folder actually renders without a workspace");
-    check(isVisible(git.stateClone), "Clone Repository actually renders without a workspace");
     check(
-      git.stateOpenFolder.classList.contains("git-sidebar-primary"),
-      "Open Folder is the primary action without a workspace",
+      git.stateElement.querySelector('[data-action="open-folder"]') === null,
+      "Open Folder lives in the explorer, not the Git sidebar",
+    );
+    check(
+      git.stateElement.querySelector('[data-action="clone"]') === null,
+      "Clone Repository lives in the explorer, not the Git sidebar",
     );
     const explorer = editor.fileExplorer;
     // Mount the explorer shell: getComputedStyle ignores author stylesheets on
@@ -154,6 +154,25 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
       isVisible(explorer.openFolderButton),
       "explorer Open Folder actually renders without a workspace",
     );
+    check(
+      explorer.cloneButton.hidden === false,
+      "explorer offers Clone Repository without a workspace",
+    );
+    check(
+      computedDisplay(explorer.cloneButton) !== "none",
+      "explorer Clone Repository is not display:none without a workspace",
+    );
+    check(
+      isVisible(explorer.cloneButton),
+      "explorer Clone Repository actually renders without a workspace",
+    );
+    explorer.cloneButton.click();
+    await waitFor(
+      () => Boolean(git.cloneDialog) && git.cloneDialog.open,
+      "clone dialog to open from the explorer",
+    );
+    git.cloneCancelButton.click();
+    await waitFor(() => !git.cloneDialog.open, "clone dialog to close");
     // Leave Source Control mounted so the no-workspace screenshot shows Git.
     editor.sidebarManager.openMenu("git");
     await waitFor(() => git.isOpen && Boolean(git.container), "Source Control sidebar to reopen");
@@ -173,15 +192,15 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     await nextFrame();
     check(git.stateElement.hidden === false, "empty repository state is visible");
     check(
-      git.stateClone.hidden === true,
+      git.stateElement.querySelector('[data-action="clone"]') === null,
       "no Clone Repository button without a repository",
     );
     check(
-      git.stateOpenFolder.hidden === true,
+      git.stateElement.querySelector('[data-action="open-folder"]') === null,
       "no Open Folder button once a folder is open",
     );
-    check(!isVisible(git.stateClone), "Clone Repository does not render without a repository");
-    check(!isVisible(git.stateOpenFolder), "Open Folder does not render once a folder is open");
+    check(git.stateInit.hidden === false, "Initialize Repository stays available");
+    check(git.stateRefresh.hidden === false, "Refresh stays available");
     const explorer = editor.fileExplorer;
     // Mount the explorer shell so author CSS applies (getComputedStyle returns
     // UA defaults on a disconnected node). This mirrors the user's view: the
@@ -200,6 +219,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     check(
       computedDisplay(explorer.openFolderButton) === "none",
       "explorer Open Folder is display:none on an empty workspace",
+    );
+    check(
+      explorer.cloneButton.hidden === true,
+      "explorer hides Clone Repository on an empty workspace",
+    );
+    check(
+      computedDisplay(explorer.cloneButton) === "none",
+      "explorer Clone Repository is display:none on an empty workspace",
     );
     check(
       explorer.treeEmptyMessage.textContent === "Folder empty",
@@ -239,11 +266,11 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     );
     check(git.stateRefresh.hidden === false, "secondary refresh action");
     check(
-      git.stateClone.hidden === true,
+      git.stateElement.querySelector('[data-action="clone"]') === null,
       "no Clone Repository button without a repository",
     );
     check(
-      git.stateOpenFolder.hidden === true,
+      git.stateElement.querySelector('[data-action="open-folder"]') === null,
       "no Open Folder button once a folder is open",
     );
     check(

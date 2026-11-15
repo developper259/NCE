@@ -1650,9 +1650,27 @@ app.whenReady().then(() => {
           `(${require("./source-control-ui.cjs").toString()})("", "no-workspace")`,
         );
         assert.equal(sourceControlNoWorkspace.mode, "no-workspace");
+        const explorerNoWorkspaceScreenshotPath =
+          process.env.NCE_EXPLORER_NOWORKSPACE_SCREENSHOT_PATH;
+        if (explorerNoWorkspaceScreenshotPath) {
+          await run(`(() => {
+            editor.sidebarManager.openMenu("file-explorer");
+            return true;
+          })()`);
+          // Let the compositor paint the switched sidebar before capture.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          fs.writeFileSync(
+            explorerNoWorkspaceScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
         const noWorkspaceScreenshotPath =
           process.env.NCE_SOURCE_CONTROL_NOWORKSPACE_SCREENSHOT_PATH;
         if (noWorkspaceScreenshotPath) {
+          await run(`(() => {
+            editor.sidebarManager.openMenu("git");
+            return true;
+          })()`);
           // The sidebar was just reopened; let the compositor paint it before
           // capture or the PNG keeps the previous (closed) surface.
           await new Promise((resolve) => setTimeout(resolve, 500));

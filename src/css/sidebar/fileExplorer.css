@@ -415,6 +415,42 @@
   background-color: #4da3ff;
 }
 
+.clone-repo-btn {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-secondary);
+  border-radius: 2px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+}
+
+.clone-repo-btn[hidden] {
+  display: none;
+}
+
+.clone-repo-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+.clone-repo-btn:active {
+  background-color: var(--bg-hover-alt);
+}
+
+.clone-repo-btn:focus-visible {
+  outline: 2px solid var(--text-secondary);
+  outline-offset: 2px;
+}
+
+.clone-repo-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .file-item.editing {
   padding-left: calc(var(--depth) * 14px + 4px);
 }
