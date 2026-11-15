@@ -746,6 +746,28 @@ app.whenReady().then(() => {
         assert.equal(settingsColdStart.markdownBundleLoaded, false);
         assert.deepEqual(settingsColdStart.rendererErrors, []);
         traceStep("Agent settings cold-start checks passed");
+        const settingsLeftmost = await run(`(async () => {
+          const jsonTab = await editor.openSettingsJson();
+          if (!jsonTab) throw Error("Settings JSON tab did not open for the leftmost-pin check");
+          const settingsTab = await editor.openSettings();
+          const tabs = editor.tabManager.tabs;
+          const strip = document.querySelector(".file-manager .files-ul");
+          const entry = editor.tabManager.tabElements.get(String(settingsTab.id));
+          const result = {
+            pinnedFirst: tabs[0] === settingsTab,
+            domFirst: strip.children[0] === entry.element,
+            jsonStillOpen: tabs.includes(jsonTab),
+          };
+          await editor.tabManager.closeTab(jsonTab);
+          await editor.tabManager.closeTab(settingsTab);
+          return result;
+        })()`);
+        assert.equal(settingsLeftmost.pinnedFirst, true,
+          "the Settings tab must occupy the leftmost slot even when opened after a file tab");
+        assert.equal(settingsLeftmost.domFirst, true,
+          "the tab strip must render the Settings tab first");
+        assert.equal(settingsLeftmost.jsonStillOpen, true);
+        traceStep("Settings leftmost-pin checks passed");
         const largeWorkspaceRootA = JSON.stringify(path.join(directory, "workspace-a"));
         const largeWorkspaceRootB = JSON.stringify(path.join(directory, "workspace-b"));
         const workspaceHeader = await run(`(() => {

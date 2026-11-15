@@ -367,6 +367,64 @@ test("TabManager rechecks active-tab visibility after preceding tabs are removed
   assert.deepEqual(visibilityRequests, [activeElement, activeElement]);
 });
 
+test("TabManager openSettings always pins the Settings tab to the leftmost slot", async () => {
+  const ul = new FakeElement("ul");
+  const focused = [];
+  class SettingsTabStub {
+    constructor(id) {
+      this.id = id;
+      this.type = "settings";
+      this.name = "Settings";
+    }
+  }
+  const TabManager = loadGlobal(
+    "src/js/manager/TabManager.js",
+    "tabManager",
+    {
+      TAB_TYPES: { FILE: "file", SETTINGS: "settings", PICTURE: "picture", MARKDOWN: "markdown" },
+      SettingsTab: SettingsTabStub,
+      getElement: (selector) => selector === ".file-manager .files-ul" ? ul : null,
+      document: { createElement: (tagName) => new FakeElement(tagName) },
+    },
+  );
+  const a = { id: 1, type: "file", name: "a.js", dirty: false, isVisuallyDirty() { return this.dirty; } };
+  const b = { id: 2, type: "file", name: "b.js", dirty: false, isVisuallyDirty() { return this.dirty; } };
+  const manager = Object.assign(Object.create(TabManager.prototype), {
+    editor: {
+      api: { setActiveFileContext() {} },
+      titleBar: { refresh() {} },
+      isOnInit: false,
+      isActive: true,
+      reset() {},
+      reactive() {},
+    },
+    tabs: [a, b],
+    activeTab: a,
+    tabElements: new Map(),
+    idCounter: 2,
+  });
+  manager.setFocusTab = async (tab) => {
+    focused.push(tab);
+    manager.activeTab = tab;
+    manager.refresh();
+  };
+
+  const settings = await manager.openSettings();
+  assert.equal(settings.type, "settings");
+  assert.deepEqual(manager.tabs, [settings, a, b]);
+  assert.deepEqual(focused, [settings]);
+  assert.equal(ul.children[0], manager.tabElements.get(String(settings.id)).element);
+
+  manager.tabs = [a, b, settings];
+  manager.activeTab = a;
+  const reopened = await manager.openSettings();
+  assert.equal(reopened, settings);
+  assert.deepEqual(manager.tabs, [settings, a, b]);
+  assert.equal(manager.tabs.filter((tab) => tab.type === "settings").length, 1);
+  assert.deepEqual(focused, [settings, settings]);
+  assert.equal(ul.children[0], manager.tabElements.get(String(settings.id)).element);
+});
+
 test("closing the last file tab resets the editor without a global refresh", async () => {
   const ul = new FakeElement("ul");
   const calls = { contexts: [], titles: 0, resets: 0, mainContent: 0, refreshAll: 0, closed: 0 };

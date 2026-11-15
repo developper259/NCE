@@ -218,9 +218,12 @@ class tabManager {
     let tab = this.tabs.find(
       (candidate) => candidate.type === TAB_TYPES.SETTINGS,
     );
-    if (!tab) {
-      tab = new SettingsTab(this.getNextID());
-      this.tabs.push(tab);
+    if (!tab) tab = new SettingsTab(this.getNextID());
+    // The Settings tab is pinned to the leftmost slot whenever it is opened.
+    const index = this.tabs.indexOf(tab);
+    if (index !== 0) {
+      if (index > 0) this.tabs.splice(index, 1);
+      this.tabs.unshift(tab);
     }
     await this.setFocusTab(tab);
     return tab;
