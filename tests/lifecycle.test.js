@@ -22,6 +22,15 @@ const Editor = loadGlobal('src/js/main/Editor.js', 'Editor', {
 });
 const TestRunner = loadGlobal('src/js/agent/debug/TestRunner.js', 'TestRunner', { window: {} });
 const StatesManager = loadGlobal('src/js/manager/StatesManager.js', 'StatesManager', { FileNode, SettingsTab, TAB_TYPES });
+const FileExplorer = loadGlobal('src/js/sidebar/FileExplorer.Sidebar.js', 'FileExplorer', {
+  Sidebar: class {}, FileOperations: class {}, NCEPath,
+  Events: { ON_OPEN_PROJECT: 'open', ON_CLOSE_PROJECT: 'close' },
+  window: { api: {} }, alert() {}, confirm: () => true,
+  requestAnimationFrame(callback) { callback(); },
+  document: { createElement() { return {}; } },
+  buildFileContextMenu() {}, buildFolderContextMenu() {},
+  buildBackgroundContextMenu() {}, buildProjectContextMenu() {},
+});
 const quiet = { ...console, warn() {}, error() {} };
 
 function setup() {
@@ -857,4 +866,86 @@ test('Quit stops before the dirty-file prompt when recovery persistence fails', 
   assert.equal(prompted, false);
   assert.equal(cancelled, 1);
   assert.equal(editor.tabManager.files.length, 1);
+});
+
+// Mount the real FileExplorer.setActiveFile against stub .file-item nodes so the
+// active-file highlight is modeled exactly as in the renderer (FastDOMNode writes
+// className from the cached class set). Closing the last tab must clear it.
+function mountExplorerHighlight(editor, paths) {
+  const items = paths.map((path) => ({
+    style: {},
+    dataset: { path },
+    className: 'file-item',
+    get classList() { return this.className.split(/\s+/).filter(Boolean); },
+  }));
+  const explorer = Object.create(FileExplorer.prototype);
+  explorer.rootPath = '/project';
+  explorer.activeFilePath = null;
+  explorer.treeLayer = {};
+  explorer.editor = editor;
+  editor.domManager.getElements = (selector) => (selector === '.file-item' ? items : []);
+  editor.fileExplorer = explorer;
+  return { explorer, items };
+}
+
+function isHighlighted(item) {
+  return item.className.split(/\s+/).includes('active-file');
+}
+
+function savedFile(editor, id, name, path) {
+  const file = new FileNode(editor, id, name, path);
+  file.isSaved = true;
+  file.flushAutoSave = async () => true;
+  file.flushRecoverySnapshot = async () => true;
+  file.clearRecoverySnapshot = async () => true;
+  return file;
+}
+
+test('closing the last file clears the File Explorer active-file highlight', async () => {
+  const editor = setup();
+  const file = savedFile(editor, 1, 'a.js', '/project/a.js');
+  editor.tabManager.files = [file];
+  editor.tabManager.activeFile = file;
+  const { explorer, items } = mountExplorerHighlight(editor, [file.path]);
+  explorer.setActiveFile(file.path);
+  assert.equal(explorer.activeFilePath, file.path);
+  assert.equal(isHighlighted(items[0]), true);
+
+  assert.equal(await editor.tabManager.closeFile(file.id), true);
+  assert.equal(editor.tabManager.tabs.length, 0);
+  assert.equal(explorer.activeFilePath, null);
+  assert.equal(isHighlighted(items[0]), false);
+});
+
+test('closing the last non-file tab clears a stale File Explorer highlight', async () => {
+  const editor = setup();
+  const picture = { id: 7, type: TAB_TYPES.PICTURE, path: '/project/img.png' };
+  editor.tabManager.tabs = [picture];
+  editor.tabManager.activeTab = picture;
+  const { explorer, items } = mountExplorerHighlight(editor, ['/project/a.js']);
+  explorer.setActiveFile('/project/a.js');
+  assert.equal(isHighlighted(items[0]), true);
+
+  assert.equal(await editor.tabManager.closeTab(picture), true);
+  assert.equal(editor.tabManager.tabs.length, 0);
+  assert.equal(explorer.activeFilePath, null);
+  assert.equal(isHighlighted(items[0]), false);
+});
+
+test('Close All clears the File Explorer active-file highlight', async () => {
+  const editor = setup();
+  const a = savedFile(editor, 1, 'a.js', '/project/a.js');
+  const b = savedFile(editor, 2, 'b.js', '/project/b.js');
+  editor.tabManager.files = [a, b];
+  editor.tabManager.activeFile = b;
+  const { explorer, items } = mountExplorerHighlight(editor, [a.path, b.path]);
+  explorer.setActiveFile(b.path);
+  assert.equal(isHighlighted(items[0]), false);
+  assert.equal(isHighlighted(items[1]), true);
+
+  assert.equal(await editor.tabManager.closeFiles(), true);
+  assert.equal(editor.tabManager.tabs.length, 0);
+  assert.equal(explorer.activeFilePath, null);
+  assert.equal(isHighlighted(items[0]), false);
+  assert.equal(isHighlighted(items[1]), false);
 });

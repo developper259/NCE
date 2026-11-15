@@ -125,7 +125,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -3147,6 +3147,58 @@ app.whenReady().then(() => {
         if (screenshotPath) {
           fs.writeFileSync(screenshotPath, (await win.capturePage()).toPNG());
         }
+      } else if (phase === "explorer-highlight") {
+        traceStep("File Explorer highlight checks started");
+        const highlightWorkspaceInput = path.join(directory, "explorer-highlight-workspace");
+        fs.mkdirSync(highlightWorkspaceInput, { recursive: true });
+        const highlightFileInput = path.join(highlightWorkspaceInput, "highlight.js");
+        fs.writeFileSync(highlightFileInput, "const highlight = true;\n");
+        assert.equal(await selectWorkspace(highlightWorkspaceInput), true);
+        const highlightWorkspace = await fs.promises.realpath(highlightWorkspaceInput);
+        const highlightFile = await fs.promises.realpath(highlightFileInput);
+        await waitForCondition(
+          async () =>
+            (await run(`editor.fileExplorer.rootPath === ${JSON.stringify(highlightWorkspace)}`)) === true,
+          { timeout: 10000, description: "highlight workspace to become active" },
+        );
+        await run('editor.sidebarManager.openMenu("file-explorer")');
+        await waitForCondition(
+          async () => (await run(`(() => {
+            const explorer = editor.fileExplorer;
+            if (!explorer.isOpen || !explorer.treeLayer) return false;
+            return [...explorer.treeLayer.querySelectorAll(".file-item")]
+              .some(item => item.dataset.path === ${JSON.stringify(highlightFile)});
+          })()`)) === true,
+          { timeout: 10000, description: "the file row to mount in the explorer tree" },
+        );
+        await run(`editor.tabManager.openFileWithPath(${JSON.stringify(highlightFile)}).then(() => true)`);
+        await waitForCondition(
+          async () => (await run(`(() => {
+            const explorer = editor.fileExplorer;
+            const item = [...explorer.treeLayer.querySelectorAll(".file-item")]
+              .find(node => node.dataset.path === ${JSON.stringify(highlightFile)});
+            return Boolean(item) && item.classList.contains("active-file") &&
+              explorer.activeFilePath === ${JSON.stringify(highlightFile)} &&
+              editor.tabManager.tabs.length === 1;
+          })()`)) === true,
+          { timeout: 10000, description: "the open file to highlight its explorer row" },
+        );
+        const closedLastFile = await run(`(async () => {
+          const file = editor.tabManager.getFileByPath(${JSON.stringify(highlightFile)});
+          return editor.tabManager.closeFile(file.id);
+        })()`);
+        assert.equal(closedLastFile, true, "closing the only open file succeeds");
+        await waitForCondition(
+          async () => (await run(`(() => {
+            const explorer = editor.fileExplorer;
+            return explorer.activeFilePath === null &&
+              editor.tabManager.tabs.length === 0 &&
+              ![...explorer.treeLayer.querySelectorAll(".file-item")]
+                .some(node => node.classList.contains("active-file"));
+          })()`)) === true,
+          { timeout: 10000, description: "closing the last file to clear the explorer highlight" },
+        );
+        traceStep("File Explorer highlight checks passed");
       } else {
         await waitForCondition(
           async () => {

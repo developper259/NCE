@@ -412,7 +412,7 @@ class tabManager {
     this.editor._markdownView?.clear?.();
     this.tabs = [];
     this.activeTab = null;
-    this.editor.fileExplorer.activeFilePath = null;
+    this.editor.fileExplorer.setActiveFile(null);
     this.editor.searchController.close();
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
       file: null,
@@ -531,7 +531,7 @@ class tabManager {
     const closedLastTab = this.tabs.length === 0;
     if (closedLastTab) {
       this.activeTab = null;
-      this.editor.fileExplorer.activeFilePath = null;
+      this.editor.fileExplorer.setActiveFile(null);
       this.editor.searchController.close();
     }
 
@@ -578,7 +578,7 @@ class tabManager {
     }
     if (closedLastTab) {
       this.activeTab = null;
-      this.editor.fileExplorer.activeFilePath = null;
+      this.editor.fileExplorer.setActiveFile(null);
       this.editor.searchController?.close?.();
     }
     this.editor.events.callEvent(Events.ON_CLOSE_FILE, {
