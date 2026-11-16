@@ -419,3 +419,69 @@ test("refresh rebuilds the render window when the document grows", () => {
     ["0", "1", "2", "3"],
   );
 });
+
+function installRebuildingInit(controller, output) {
+  controller.initLineOutput = () => {
+    controller.initCalls += 1;
+    output.children = [];
+    const count = controller.renderedLineCount;
+    for (let screenIndex = 0; screenIndex < count; screenIndex += 1) {
+      const displayIndex = controller.renderStartIndex + screenIndex;
+      output.children.push({
+        dataset: { line: String(displayIndex), displayLine: String(displayIndex) },
+        children: [],
+        parent: output,
+        top: screenIndex * 20,
+      });
+    }
+  };
+}
+
+test("a line-count change before a vertical scroll repaints instead of skipping on a zero delta", () => {
+  const { controller, file, output } = makeController(12, 4, 0);
+  installRebuildingInit(controller, output);
+  controller.refreshForVerticalScroll(0);
+  const initBefore = controller.initCalls;
+
+  // A paste grows the document while the viewport stays put: the scroll delta
+  // is zero but the cached window no longer matches the model.
+  file.lines.push(new LineNode("const pasted = true;"));
+  controller.refreshForVerticalScroll(0);
+
+  assert.equal(controller.initCalls, initBefore + 1);
+  assert.equal(output.children.length, 4);
+});
+
+test("an emptied output is rebuilt by the next vertical scroll", () => {
+  const { controller, output } = makeController(12, 4, 0);
+  installRebuildingInit(controller, output);
+  controller.refreshForVerticalScroll(0);
+  output.children = [];
+
+  controller.refreshForVerticalScroll(0);
+
+  assert.equal(controller.initCalls, 1);
+  assert.equal(output.children.length, 4);
+  assert.deepEqual(
+    output.children.map((row) => row.dataset.displayLine),
+    ["0", "1", "2", "3"],
+  );
+});
+
+test("refresh rebuilds an emptied output even when the render window is unchanged", () => {
+  const { controller, output } = makeController(12, 4, 0);
+  controller.outputScroller = {
+    clampScrollState: () => false,
+    updateNbItem() {},
+    refresh() {},
+  };
+  controller.applyScrollTransform = () => {};
+  controller.updateRenderWindow();
+  installRebuildingInit(controller, output);
+  output.children = [];
+
+  controller.refresh();
+
+  assert.equal(controller.initCalls, 1);
+  assert.equal(output.children.length, 4);
+});

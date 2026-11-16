@@ -1172,20 +1172,27 @@ class LineController {
       this._renderWindowTotalLines = this.getDisplayLineCount();
     }
 
-    const previousRenderStart = this.renderStartIndex;
-    const previousRenderCount = this.renderedLineCount;
+    // Read the RAW cache (the window the DOM actually holds), not the
+    // self-healing getters: once an edit changes the line count those getters
+    // recompute the current window, erasing the scroll delta and skipping every
+    // repaint while the DOM still shows the previous window.
+    const previousRenderStart = this._renderStartIndex ?? this.startIndex;
+    const previousRenderCount = this._renderedLineCount ?? 0;
+    const staleWindow =
+      this._renderWindowTotalLines !== this.getDisplayLineCount();
     const renderWindow = this.updateRenderWindow();
     const delta = renderWindow.start - previousRenderStart;
     const children = this.editor.output.children;
-    const rowCount = this.renderedLineCount;
+    const rowCount = renderWindow.count;
     const newlyVisibleDocumentIndexes = [];
+    // A changed line count or a DOM/window row-count desync (e.g. an emptied
+    // output) cannot be repaired by rotating existing rows; rebuild instead.
+    const fullInit = staleWindow ||
+      children.length !== rowCount ||
+      previousRenderCount !== rowCount ||
+      Math.abs(delta) >= rowCount;
 
-    if (
-      delta !== 0 &&
-      (children.length !== rowCount ||
-        previousRenderCount !== rowCount ||
-        Math.abs(delta) >= rowCount)
-    ) {
+    if (fullInit) {
       this.initLineOutput();
       for (let screenIndex = 0; screenIndex < rowCount; screenIndex++) {
         const displayRow = this.getDisplayRow(this.renderStartIndex + screenIndex);
@@ -1240,7 +1247,7 @@ class LineController {
 
     this.applyOutputTransform();
 
-    if (delta !== 0) {
+    if (delta !== 0 || fullInit) {
       this.refreshNumberLines(false, previousRenderStart);
     }
 
@@ -1886,7 +1893,8 @@ class LineController {
       const previousStart = this._renderStartIndex;
       const previousCount = this._renderedLineCount;
       const next = this.updateRenderWindow();
-      if (next.start !== previousStart || next.count !== previousCount) {
+      if (next.start !== previousStart || next.count !== previousCount ||
+          this.editor.output.children.length !== next.count) {
         this.editor.highlightController.lineNodes.clear();
         this.dirtyLines.clear();
         needsInit = true;
