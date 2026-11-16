@@ -1,3 +1,7 @@
+// Internal metadata directories are not user content: .nce holds workspace
+// state and .git holds repository internals, so neither belongs in the tree.
+const HIDDEN_EXPLORER_ENTRIES = new Set([".nce", ".git"]);
+
 class FileExplorer extends Sidebar {
   constructor(editor) {
     super("file-explorer", "File Explorer", "fi fi-rr-folder", "left", editor);
@@ -275,7 +279,7 @@ class FileExplorer extends Sidebar {
         ? new Map(this.files.map((item) => [item.path, item]))
         : null;
       const newFiles = items
-        .filter((item) => item.name !== ".nce")
+        .filter((item) => !HIDDEN_EXPLORER_ENTRIES.has(item.name))
         .map((item) => {
           const previous = existingByPath?.get(item.path);
           return {
@@ -410,13 +414,15 @@ class FileExplorer extends Sidebar {
     try {
       const items = await window.api.getFolderContent(folderPath);
       this.staleFolderPaths?.delete(NCEPath.comparisonKey(folderPath));
-      return items.map((item) => ({
-        name: item.name,
-        type: item.type,
-        path: item.path,
-        expanded: false,
-        children: item.type === "folder" ? [] : undefined,
-      }));
+      return items
+        .filter((item) => !HIDDEN_EXPLORER_ENTRIES.has(item.name))
+        .map((item) => ({
+          name: item.name,
+          type: item.type,
+          path: item.path,
+          expanded: false,
+          children: item.type === "folder" ? [] : undefined,
+        }));
     } catch (error) {
       this.staleFolderPaths?.add(NCEPath.comparisonKey(folderPath));
       console.error("Error loading folder content:", error);

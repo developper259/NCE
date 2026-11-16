@@ -1315,6 +1315,54 @@ test("explicit File Explorer refresh reloads the root and restored expanded fold
   assert.equal(explorer.isStale, false);
 });
 
+test("File Explorer hides .git and .nce from the root and expanded folders", async () => {
+  const FileExplorer = loadFileExplorer({
+    async getFolderContent(folderPath) {
+      if (folderPath === "/project")
+        return [
+          { name: ".git", type: "folder", path: "/project/.git" },
+          { name: ".nce", type: "folder", path: "/project/.nce" },
+          { name: "src", type: "folder", path: "/project/src" },
+          { name: "README.md", type: "file", path: "/project/README.md" },
+        ];
+      // A nested worktree exposes .git as a file; hide it by name regardless.
+      return [
+        { name: ".git", type: "file", path: `${folderPath}/.git` },
+        { name: "index.js", type: "file", path: `${folderPath}/index.js` },
+      ];
+    },
+  });
+  const explorer = Object.assign(Object.create(FileExplorer.prototype), {
+    rootPath: "/project",
+    files: [{
+      name: "src",
+      type: "folder",
+      path: "/project/src",
+      expanded: true,
+      children: [],
+    }],
+    isLoaded: true,
+    isStale: false,
+    staleFolderPaths: new Set(),
+    fileOperations: {
+      async pathStatus() { return { exists: true, isDirectory: true }; },
+    },
+    refresh() {},
+  });
+
+  await explorer.refreshFolder("/project");
+  assert.deepEqual(
+    explorer.files.map((item) => item.name),
+    ["src", "README.md"],
+    "the root tree omits .git and .nce",
+  );
+  assert.deepEqual(
+    explorer.files[0].children.map((item) => item.name),
+    ["index.js"],
+    "an expanded folder omits its .git entry",
+  );
+});
+
 test("switching workspaces loads the new tree once and keeps it on sidebar reopen", async () => {
   const reads = [];
   const refreshedPaths = [];
