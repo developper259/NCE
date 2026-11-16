@@ -42,6 +42,16 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     }
     throw Error(`Timed out waiting for ${description}`);
   };
+  // The virtual list renders on its own animation frame, which loaded CI
+  // runners can delay past a fixed frame wait. Wait for the exact element
+  // before clicking so an interaction cannot race a pending render (or a
+  // captured node that a later re-render detached) and hit a null target.
+  const clickRendered = async (find, description, timeout = 10000) => {
+    await waitFor(() => Boolean(find()), description, timeout);
+    const element = find();
+    element.click();
+    return element;
+  };
 
   const git = editor.gitSidebar;
   check(Boolean(git), "Source Control sidebar exists");
@@ -1558,7 +1568,7 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
   const navButton = (action) => git.listLayer.querySelector(
     `.git-commit-detail [data-action="${action}"]`,
   );
-  navButton("commit-older").click();
+  await clickRendered(() => navButton("commit-older"), "the Older commit navigation to render");
   await waitFor(
     () => git.selectedCommit === git.history.commits[1].hash &&
       git.commitDetail && !git.commitDetail.loading,
@@ -1568,19 +1578,19 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     () => git.listLayer.querySelector(".git-commit-detail") !== null,
     "navigating to another commit opens its detail",
   );
-  navButton("commit-newer").click();
+  await clickRendered(() => navButton("commit-newer"), "the Newer commit navigation to render");
   await waitFor(
     () => git.selectedCommit === newestHash &&
       git.commitDetail && !git.commitDetail.loading,
     "Newer navigation to return to the newest commit",
   );
 
-  navButton("commit-compare").click();
+  await clickRendered(() => navButton("commit-compare"), "the Compare commit navigation to render");
   check(
     git.compareBase === newestHash,
     "Compare arms a base commit for the comparison",
   );
-  historyRows()[1].click();
+  await clickRendered(() => historyRows()[1], "the second history row to render for comparison");
   await waitFor(
     () => git.compare && !git.compare.loading &&
       git.compare.target === git.history.commits[1].hash,
@@ -1590,13 +1600,14 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     () => Boolean(git.listLayer.querySelector(".git-compare-detail")),
     "the comparison renders its own detail panel",
   );
-  const compareDetail = git.listLayer.querySelector(".git-compare-detail");
   check(
     git.compare.files.length > 0,
     `the comparison lists changed files: ${git.compare.files.length}`,
   );
-  const compareFileRow = compareDetail.querySelector(".git-commit-file");
-  compareFileRow.click();
+  await clickRendered(
+    () => git.listLayer.querySelector(".git-compare-detail .git-commit-file"),
+    "a comparison file row to render",
+  );
   await waitFor(
     () => editor.tabManager.tabs.some((tab) =>
       tab.type === "git-diff" && tab.commitHash === git.history.commits[1].hash &&
@@ -1610,7 +1621,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     compareDiffTab.textTab?.diffRows?.some((row) => row.type === "removed") === true,
     "the comparison diff shows the lines removed since the base commit",
   );
-  compareDetail.querySelector('[data-action="cancel-compare"]').click();
+  await clickRendered(
+    () => git.listLayer.querySelector('.git-compare-detail [data-action="cancel-compare"]'),
+    "the cancel-compare action to render",
+  );
   await waitFor(
     () => git.compare === null && git.commitDetail && !git.commitDetail.loading,
     "cancelling the comparison to restore the commit detail",
@@ -1620,7 +1634,10 @@ module.exports = async function exerciseSourceControlUI(workspace, stage = "repo
     "the comparison panel is removed after cancelling",
   );
 
-  git.listLayer.querySelector(".git-commit-row.is-selected").click();
+  await clickRendered(
+    () => git.listLayer.querySelector(".git-commit-row.is-selected"),
+    "the selected commit row to render after cancelling comparison",
+  );
   await waitFor(
     () => git.listLayer.querySelector(".git-commit-detail") === null,
     "clicking the selected commit closes its details",
