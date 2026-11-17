@@ -796,3 +796,95 @@ test("App captures macOS open-file before the lock and queues startup and second
     paths: [windowsFile, uncFile], cwd: windowsCwd,
   }, "Windows drive and UNC paths remain filesystem paths instead of URL schemes");
 });
+
+function makeResultWindow() {
+  const { Window, timers, clearedTimers } = loadWindowWithTimers();
+  const window = new Window({});
+  const sent = [];
+  window.window = {
+    isDestroyed: () => false,
+    webContents: {
+      isDestroyed: () => false,
+      send: (channel, payload) => sent.push({ channel, payload }),
+    },
+  };
+  const results = () => sent.filter((message) => message.channel === "ExternalOpen:result");
+  return { window, sent, results, timers, clearedTimers };
+}
+
+function failureResult(paths) {
+  return {
+    success: false,
+    openedFiles: 0,
+    openedFolders: 0,
+    focusedFolders: 0,
+    failures: paths.map((filePath) => ({
+      path: filePath,
+      code: "PATH_NOT_FOUND",
+      message: "This file or folder no longer exists.",
+    })),
+  };
+}
+
+test("external open failure toasts bridge startup but never replay after a renderer reload", async () => {
+  const { window, results } = makeResultWindow();
+
+  // Initial startup: the renderer is not ready yet, so the failure is queued.
+  window.rendererReady = false;
+  const startupFailure = failureResult(["/tmp/startup-a.js", "/tmp/startup-b.js"]);
+  window.notifyExternalOpenResult(startupFailure);
+  assert.equal(results().length, 0, "startup failure waits for the renderer");
+  assert.equal(window.pendingExternalOpenResults.length, 1);
+
+  // First renderer ready flushes the legitimate startup notification once.
+  window.rendererReady = true;
+  window.flushExternalOpenResults();
+  assert.deepEqual(results().map((message) => message.payload), [startupFailure]);
+  assert.equal(window.pendingExternalOpenResults.length, 0);
+
+  // A reload makes the renderer unavailable again; a failure arriving now must
+  // not be queued and replayed as a phantom popup when the renderer returns.
+  window.rendererReady = false;
+  window.notifyExternalOpenResult(failureResult(["/tmp/reload-a.js", "/tmp/reload-b.js"]));
+  assert.equal(window.pendingExternalOpenResults.length, 0,
+    "post-startup failures are not queued across a reload");
+  window.rendererReady = true;
+  window.flushExternalOpenResults();
+  assert.deepEqual(results().map((message) => message.payload), [startupFailure],
+    "the reload produces no phantom 'Could not open' popup");
+});
+
+test("a Windows system open of missing paths during reload surfaces no phantom popup", async () => {
+  const { window, results } = makeResultWindow();
+  const manager = {
+    getFocusedWindow: () => window,
+    getAllWindows: () => [window],
+    findWindowByWorkspace: () => null,
+    focusWindow: () => true,
+    createEmptyWindow: () => window,
+    async openWorkspaceInNewWindowWithOutcome() { return { opened: false, focused: false }; },
+  };
+  const coordinator = new ExternalOpenCoordinator(manager, "win32");
+  coordinator.start();
+
+  // The window is already running (renderer has been ready once).
+  window.rendererReady = true;
+  window.flushExternalOpenResults();
+
+  // The user reloads; while the renderer is down a second-instance delivers two
+  // Windows paths that no longer exist.
+  window.rendererReady = false;
+  const result = await coordinator.enqueueSystemPaths(
+    [String.raw`C:\Users\test\gone-a.js`, String.raw`C:\Users\test\gone-b.js`],
+    String.raw`C:\Users\test`,
+  );
+  assert.equal(result.failures.length, 2, "the open request still reports its failures to the caller");
+  assert.ok(result.failures.every((failure) => failure.code === "PATH_NOT_FOUND"));
+  assert.equal(window.pendingExternalOpenResults.length, 0,
+    "the failure is not queued for replay after the reload");
+
+  window.rendererReady = true;
+  window.flushExternalOpenResults();
+  assert.equal(results().length, 0, "no phantom drag/drop popup appears when the window returns");
+  coordinator.dispose();
+});

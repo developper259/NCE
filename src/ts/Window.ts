@@ -146,6 +146,7 @@ export class Window {
     resolve: (result: DeliveredFileResult) => void;
   }>();
   private readonly pendingExternalOpenResults: ExternalOpenResult[] = [];
+  private hasRendererBeenReady = false;
 
   constructor(
     app: App,
@@ -629,10 +630,15 @@ export class Window {
     const target = this.window;
     if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
     if (!this.rendererReady) {
+      // The queue only bridges the initial renderer startup. Once the renderer
+      // has been ready, a reload must not replay stale failure toasts as phantom
+      // "Could not open" popups; the main process already logs these failures.
+      if (this.hasRendererBeenReady) return;
       if (this.pendingExternalOpenResults.length >= 8) this.pendingExternalOpenResults.shift();
       this.pendingExternalOpenResults.push(result);
       return;
     }
+    this.hasRendererBeenReady = true;
     try { target.webContents.send("ExternalOpen:result", result); }
     catch (error) { console.warn("[External Open] Failed to report open result", error); }
   }
@@ -640,6 +646,7 @@ export class Window {
   private flushExternalOpenResults(): void {
     const target = this.window;
     if (!this.rendererReady || !target || target.isDestroyed() || target.webContents.isDestroyed()) return;
+    this.hasRendererBeenReady = true;
     const results = this.pendingExternalOpenResults.splice(0);
     for (let index = 0; index < results.length; index++) {
       const result = results[index];
