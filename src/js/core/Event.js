@@ -327,6 +327,7 @@ class Events {
   }
 
   onKeyDown(event) {
+    if (this.editor.versionManager?.handleKeyDown?.(event)) return;
     if (this.editor.fileExplorer?.handleDeleteDialogKeyDown?.(event)) return;
     if (this.editor.gitSidebar?.handleOperationDialogKeyDown?.(event)) return;
     if (this.editor.gitSidebar?.handleListKeyDown?.(event)) return;

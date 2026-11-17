@@ -68,6 +68,12 @@ class FakeElement {
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
 
+  contains(node) {
+    for (let current = node; current; current = current.parent)
+      if (current === this) return true;
+    return false;
+  }
+
   focus() { this.document.activeElement = this; }
 
   remove() {
@@ -208,6 +214,7 @@ function createApiFixture(packages = [gitPackage()]) {
   const state = {
     snapshot: { version: 1, packages, operations: [] },
     getStateCalls: 0,
+    refreshCalls: 0,
     installs: [],
     uninstalls: [],
     verifies: [],
@@ -220,6 +227,10 @@ function createApiFixture(packages = [gitPackage()]) {
       state.getStateCalls += 1;
       if (state.getStateError) throw state.getStateError;
       return state.snapshot;
+    },
+    async refresh() {
+      state.refreshCalls += 1;
+      return api.getState();
     },
     async install(packageId) { state.installs.push(packageId); return { success: true }; },
     async uninstall(installationId) { state.uninstalls.push(installationId); return { success: true }; },
@@ -646,10 +657,130 @@ test("Editor creates one VersionManager instance only when opened", () => {
   editor._versionManager = null;
 
   assert.equal(constructed, 0);
+  assert.equal(editor.versionManager, null, "the nullable accessor must not create the view");
+  assert.equal(constructed, 0);
   assert.equal(editor.openVersionManager(), true);
   assert.equal(constructed, 1);
   assert.equal(editor.getVersionManager(), editor._versionManager);
+  assert.equal(editor.versionManager, editor._versionManager);
   assert.equal(constructed, 1);
+});
+
+test("the root keydown route claims Escape and Tab before KeyBindingManager can swallow them", async () => {
+  const { document, timers, manager } = setup();
+  const Events = loadGlobal("src/js/core/Event.js", "Events", { document, window: {} });
+  const calls = [];
+  const events = new Events({
+    get versionManager() { return manager; },
+    fileExplorer: null,
+    gitSidebar: null,
+    searchSidebar: null,
+    quickPanel: null,
+    keyBindingManager: {
+      onKey(event) { calls.push("keyBinding"); event.stopPropagation(); },
+    },
+  });
+  const makeEvent = (key) => {
+    const payload = {
+      key,
+      defaultPrevented: false,
+      stopped: false,
+      preventDefault() { payload.defaultPrevented = true; },
+      stopPropagation() { payload.stopped = true; },
+    };
+    return payload;
+  };
+
+  manager.show();
+  await flush();
+  timers.tick(0);
+
+  const escape = makeEvent("Escape");
+  events.onKeyDown(escape);
+  assert.deepEqual(calls, [], "the global key binder must not see Escape while the popup is open");
+  assert.equal(escape.defaultPrevented, true);
+  assert.equal(escape.stopped, true);
+  timers.tick(160);
+  assert.equal(manager.host.hidden, true);
+
+  const escapeWhileClosed = makeEvent("Escape");
+  events.onKeyDown(escapeWhileClosed);
+  assert.deepEqual(calls, ["keyBinding"], "a closed popup leaves the global route untouched");
+
+  manager.show();
+  await flush();
+  const focusable = manager.focusableElements();
+  focusable[focusable.length - 1].focus();
+  const tab = makeEvent("Tab");
+  events.onKeyDown(tab);
+  assert.equal(tab.defaultPrevented, true);
+  assert.equal(tab.stopped, true);
+  assert.equal(document.activeElement, focusable[0]);
+  assert.deepEqual(calls, ["keyBinding"], "Tab is trapped without reaching the global binder");
+
+  const letter = makeEvent("a");
+  events.onKeyDown(letter);
+  assert.equal(letter.stopped, true, "unclaimed keys still flow to the global binder");
+  assert.deepEqual(calls, ["keyBinding", "keyBinding"]);
+});
+
+test("out-of-order inventory responses cannot resurrect a finished operation", async () => {
+  const { api, manager } = setup();
+  const stale = {
+    version: 1,
+    packages: [gitPackage({ state: "installed", installations: [gitRecord()] })],
+    operations: [runningOperation({ kind: "uninstall" })],
+  };
+  const fresh = {
+    version: 1,
+    packages: [gitPackage()],
+    operations: [runningOperation({ state: "completed", finishedAt: Date.UTC(2026, 10, 17) })],
+  };
+  let resolveStale;
+  const staleResponse = new Promise((resolve) => { resolveStale = resolve; });
+  let calls = 0;
+  api.getState = async () => {
+    calls += 1;
+    return calls === 1 ? staleResponse : fresh;
+  };
+
+  const first = manager.reload();
+  const second = manager.reload();
+  await second;
+  assert.equal(manager.snapshot, fresh);
+  assert.equal(manager.activeOperation(), null);
+
+  resolveStale(stale);
+  await first;
+  assert.equal(manager.snapshot, fresh, "a stale response must never overwrite a newer snapshot");
+  assert.equal(manager.activeOperation(), null, "Escape must not be blocked by a stale running operation");
+
+  let rejectStale;
+  const staleFailure = new Promise((_resolve, reject) => { rejectStale = reject; });
+  api.getState = async () => {
+    calls += 1;
+    return calls === 3 ? staleFailure : fresh;
+  };
+  const third = manager.reload();
+  const fourth = manager.reload();
+  await fourth;
+  rejectStale(new Error("stale failure"));
+  await third;
+  assert.equal(manager.loadError, null, "a stale failure must not surface after a newer success");
+  assert.equal(manager.snapshot, fresh);
+});
+
+test("focus returns to the dialog when a re-render removes the focused control", async () => {
+  const { document, manager } = setup();
+  manager.show();
+  await flush();
+
+  const stray = document.createElement("button");
+  manager.main.appendChild(stray);
+  stray.focus();
+  manager.render();
+  assert.equal(document.activeElement, manager.closeButton,
+    "a modal must not leave focus on body after its focused control disappears");
 });
 
 test("bundle, stylesheet, sidebar and icon wiring stay consistent", () => {
@@ -665,6 +796,12 @@ test("bundle, stylesheet, sidebar and icon wiring stay consistent", () => {
   assert.match(sidebar, /sidebar-version-manager-icon/);
   assert.match(sidebar, /this\.editor\.openVersionManager\?\.\(\)/);
   assert.match(sidebar, /settingsContainer\.append\(versionManagerButton, settingsButton\)/);
+
+  const eventSource = read("src/js/core/Event.js");
+  const claimIndex = eventSource.indexOf("versionManager?.handleKeyDown");
+  assert.ok(claimIndex >= 0, "the root keydown route claims the Version Manager");
+  assert.ok(claimIndex < eventSource.indexOf("keyBindingManager?.onKey"),
+    "the popup claims keys before the global binder can stop propagation");
 
   const source = read("src/js/view/VersionManager.js");
   const css = read("src/css/versionManager.css");

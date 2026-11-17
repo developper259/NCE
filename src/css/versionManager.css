@@ -7,8 +7,8 @@
   padding: 48px;
   box-sizing: border-box;
   background: rgba(0, 0, 0, 0.55);
+  /* No -webkit- alias: the minifier keeps only the prefixed form, which Chromium ignores. */
   backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
   opacity: 0;
   transition: opacity 160ms ease;
 }

@@ -459,7 +459,7 @@ test("application Quit prepares all windows before stopping shared NSH", async (
     createEmptyWindow() {}
   }
   class FakeSessionStore { async initialize() { return []; } async flush() { return true; } }
-  class FakeManager { async initialize() {} async flush() { return true; } }
+  class FakeManager { async initialize() {} async flush() { return true; } dispose() {} }
   class FakeIpcRouter { dispose() {} forWindow() { return { handle() {} }; } }
   const { App } = loadMain("dist/ts/App.js", {
     electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
@@ -480,6 +480,7 @@ test("application Quit prepares all windows before stopping shared NSH", async (
     "./manager/SettingsManager": { SettingsManager: FakeManager },
     "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
     "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
+    "./manager/VersionManager": { VersionManager: FakeManager },
   });
   const nce = new App();
   let prevented = false;
@@ -526,7 +527,7 @@ test("global Quit waits for every commit acknowledgment before closing any windo
     createEmptyWindow() {}
   }
   class FakeSessionStore { async initialize() { return []; } async flush() { return true; } }
-  class FakeManager { async initialize() {} async flush() { return true; } }
+  class FakeManager { async initialize() {} async flush() { return true; } dispose() {} }
   class FakeIpcRouter { dispose() {} forWindow() { return { handle() {} }; } }
   const { App } = loadMain("dist/ts/App.js", {
     electron: { app, BrowserWindow: { getFocusedWindow: () => null }, dialog: {} },
@@ -538,6 +539,7 @@ test("global Quit waits for every commit acknowledgment before closing any windo
     "./manager/SettingsManager": { SettingsManager: FakeManager },
     "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
     "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
+    "./manager/VersionManager": { VersionManager: FakeManager },
   });
   const runtime = new App();
   assert.equal(await runtime.requestQuitAll(), false);
@@ -560,7 +562,7 @@ test("closing the last macOS window does not turn Close Window into app Quit", a
     createEmptyWindow() {}
     dispose() {}
   }
-  class FakeManager { async initialize() {} }
+  class FakeManager { async initialize() {} dispose() {} }
   class FakeIpcRouter { dispose() {} }
   class FakeSessionStore { async initialize() { return []; } }
   const { App } = loadMain("dist/ts/App.js", {
@@ -573,6 +575,7 @@ test("closing the last macOS window does not turn Close Window into app Quit", a
     "./manager/SettingsManager": { SettingsManager: FakeManager },
     "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
     "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
+    "./manager/VersionManager": { VersionManager: FakeManager },
   }, { process: { platform: "darwin" } });
   const nce = new App();
   nce.requestQuitAll = () => { quitRequests++; return Promise.resolve(true); };

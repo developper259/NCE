@@ -379,6 +379,10 @@ class Editor {
     return this.getPerformanceDashboard().show();
   }
 
+  get versionManager() {
+    return this._versionManager || null;
+  }
+
   getVersionManager() {
     if (!this._versionManager) this._versionManager = new VersionManager(this);
     return this._versionManager;

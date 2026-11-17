@@ -125,7 +125,7 @@ app.whenReady().then(() => {
         },
       );
       traceStep("renderer initialized");
-      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search") {
+      if (phase !== "write" && phase !== "multiwindow" && phase !== "benchmark" && phase !== "notifications" && phase !== "source-control" && phase !== "explorer-highlight" && phase !== "search" && phase !== "version-manager") {
         await waitForCondition(
           async () => (await run(`typeof AgentSidebar !== "undefined" &&
             editor.agentSidebar instanceof AgentSidebar &&
@@ -3417,6 +3417,67 @@ app.whenReady().then(() => {
           );
         }
         traceStep("Search sidebar visual checks passed");
+      } else if (phase === "version-manager") {
+        traceStep("Version Manager popup checks started");
+        if (win.isFullScreen()) win.setFullScreen(false);
+        if (win.isMaximized()) win.unmaximize();
+        win.webContents.setBackgroundThrottling?.(false);
+        win.show();
+        win.focus();
+        win.setBounds({ width: 1100, height: 760 });
+        await waitForCondition(
+          async () =>
+            (await run("window.innerWidth >= 900 && window.innerHeight >= 600")) === true,
+          { timeout: 10000, description: "Version Manager fixture viewport" },
+        );
+        // Plant a pre-existing managed Git installation so opening the popup
+        // reconciles it without any network download. The folder is named
+        // 9.9.9 but the binary reports 2.56.1: the version must come from the
+        // executable, never from the directory name.
+        const plantedGitDir = path.join(directory, "profile", "tools", "git", "9.9.9");
+        fs.mkdirSync(path.join(plantedGitDir, "bin"), { recursive: true });
+        fs.writeFileSync(
+          path.join(plantedGitDir, "bin", "git"),
+          '#!/bin/sh\necho "git version 2.56.1"\n',
+          { mode: 0o755 },
+        );
+        const versionManagerResult = await run(
+          `(${require("./version-manager-ui.cjs").toString()})(${JSON.stringify(plantedGitDir)})`,
+        );
+        assert.equal(versionManagerResult.opened, true);
+        assert.ok(
+          versionManagerResult.widthRatio >= 0.85 && versionManagerResult.widthRatio <= 0.95,
+          "the popup width is immersive",
+        );
+        assert.ok(
+          versionManagerResult.heightRatio >= 0.85 && versionManagerResult.heightRatio <= 0.95,
+          "the popup height is immersive",
+        );
+        assert.equal(versionManagerResult.dialogBlur, "none", "the popup itself is never blurred");
+        assert.deepEqual(versionManagerResult.stats.slice(1), ["1", "0"]);
+        assert.equal(versionManagerResult.versionFromBinary, true);
+        assert.equal(versionManagerResult.uninstalled, true);
+        assert.equal(versionManagerResult.escapeClosed, true);
+        assert.equal(versionManagerResult.sidebarReopened, true);
+        assert.equal(versionManagerResult.updatesHonest, true);
+        assert.equal(
+          fs.existsSync(plantedGitDir),
+          false,
+          "the real uninstall removed the planted installation directory",
+        );
+        assert.equal(
+          fs.existsSync(path.join(directory, "profile", "tools", "git")),
+          false,
+          "the empty package root is cleaned up after the last installation",
+        );
+        const versionManagerScreenshotPath = process.env.NCE_VERSION_MANAGER_SCREENSHOT_PATH;
+        if (versionManagerScreenshotPath) {
+          fs.writeFileSync(
+            versionManagerScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+        }
+        traceStep("Version Manager popup checks passed");
       } else {
         await waitForCondition(
           async () => {

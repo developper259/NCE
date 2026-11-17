@@ -23,14 +23,27 @@ class VersionManager {
     this.confirmation = null;
     this.unsubscribe = null;
     this.hideTimer = null;
-    this.onKeyDown = (event) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        this.requestClose();
-      } else if (event.key === "Tab") {
-        this.trapFocus(event);
-      }
-    };
+    this.reloadSequence = 0;
+    this.onKeyDown = (event) => this.handleKeyDown(event);
+  }
+
+  // Claimed from the root capture-phase keydown route before KeyBindingManager,
+  // which stops propagation of every key while the editor has a selection.
+  handleKeyDown(event) {
+    if (!this.host || this.host.hidden) return false;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.requestClose();
+      return true;
+    }
+    if (event.key === "Tab") {
+      event.preventDefault();
+      event.stopPropagation();
+      this.trapFocus(event);
+      return true;
+    }
+    return false;
   }
 
   get api() {
@@ -166,7 +179,7 @@ class VersionManager {
     this.host.setAttribute("aria-hidden", "false");
     setTimeout(() => this.host?.classList.add("nce-vm-open"), 0);
     this.subscribe();
-    this.reload();
+    this.reload(true);
     this.closeButton?.focus();
     return true;
   }
@@ -222,19 +235,26 @@ class VersionManager {
     if (event.type === "inventory-changed") this.reload();
   }
 
-  async reload() {
+  async reload(rescan = false) {
     if (!this.api) {
       this.loadError = "The Version Manager API is unavailable.";
       this.loading = false;
       this.render();
       return;
     }
+    // IPC responses can resolve out of order; only the latest request may apply.
+    const sequence = ++this.reloadSequence;
     this.loading = !this.snapshot;
     this.render();
     try {
-      this.snapshot = await this.api.getState();
+      const snapshot = rescan && typeof this.api.refresh === "function"
+        ? await this.api.refresh()
+        : await this.api.getState();
+      if (sequence !== this.reloadSequence) return;
+      this.snapshot = snapshot;
       this.loadError = null;
     } catch (error) {
+      if (sequence !== this.reloadSequence) return;
       this.loadError = error instanceof Error ? error.message : String(error);
     }
     this.loading = false;
@@ -307,6 +327,8 @@ class VersionManager {
       const target = this.findByFocusKey(this.dialog, focusKey);
       target?.focus();
     }
+    if (!this.host.hidden && !this.dialog.contains(document.activeElement))
+      this.closeButton?.focus();
   }
 
   findByFocusKey(node, focusKey) {
@@ -436,6 +458,11 @@ class VersionManager {
     return VersionManager.CATEGORY_LABELS[category] || category;
   }
 
+  iconClass(icon) {
+    const name = icon || "fi-rr-database";
+    return name.startsWith("fi ") ? name : `fi ${name}`;
+  }
+
   formatDate(timestamp) {
     if (!Number.isFinite(timestamp) || timestamp <= 0) return "—";
     return new Date(timestamp).toLocaleDateString();
@@ -563,7 +590,7 @@ class VersionManager {
     row.className = "nce-vm-row nce-vm-row-button";
     row.dataset.focusKey = `vm-installation-${record.id}`;
     const icon = document.createElement("i");
-    icon.className = `fi ${packageInfo.icon || "fi-rr-database"} nce-vm-row-icon`;
+    icon.className = `${this.iconClass(packageInfo.icon)} nce-vm-row-icon`;
     icon.setAttribute("aria-hidden", "true");
     const main = document.createElement("div");
     main.className = "nce-vm-row-main";
@@ -614,7 +641,7 @@ class VersionManager {
     const row = document.createElement("div");
     row.className = "nce-vm-row nce-vm-row-static";
     const icon = document.createElement("i");
-    icon.className = `fi ${packageInfo.icon || "fi-rr-database"} nce-vm-row-icon`;
+    icon.className = `${this.iconClass(packageInfo.icon)} nce-vm-row-icon`;
     icon.setAttribute("aria-hidden", "true");
     const main = document.createElement("div");
     main.className = "nce-vm-row-main";
@@ -741,7 +768,7 @@ class VersionManager {
     const header = document.createElement("div");
     header.className = "nce-vm-detail-header";
     const icon = document.createElement("i");
-    icon.className = `fi ${packageInfo.icon || "fi-rr-database"} nce-vm-detail-icon`;
+    icon.className = `${this.iconClass(packageInfo.icon)} nce-vm-detail-icon`;
     icon.setAttribute("aria-hidden", "true");
     const titles = document.createElement("div");
     titles.className = "nce-vm-detail-titles";

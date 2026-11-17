@@ -136,3 +136,16 @@ test('real Electron: Search sidebar design A visual states', { timeout: 120000 }
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test('real Electron: Version Manager popup lifecycle', { timeout: 120000 }, async () => {
+  // The planted Git fixture is a POSIX shell script; Windows coverage lives
+  // in the fixture-based PackageManager suites.
+  if (process.env.NCE_ELECTRON_SMOKE_EXTERNAL_ONLY === '1' || process.platform === 'win32') return;
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-version-manager-'));
+  await fs.writeFile(path.join(directory, '.nce-smoke'), '');
+  try {
+    await launchElectron(directory, 'version-manager');
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});

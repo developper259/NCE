@@ -719,7 +719,7 @@ test("App captures macOS open-file before the lock and queues startup and second
   }
   class FakeIpcRouter { dispose() {} }
   class FakeSessionStore { async initialize() {} }
-  class FakeManager { async initialize() {} async flush() { return true; } }
+  class FakeManager { async initialize() {} async flush() { return true; } dispose() {} }
   class FakeNshServer { async start() { return 1234; } async stop() {} getPort() { return 1234; } }
   const mockProcess = {
     platform: process.platform,
@@ -744,6 +744,7 @@ test("App captures macOS open-file before the lock and queues startup and second
     "./manager/RecentFoldersManager": { RecentFoldersManager: FakeManager },
     "./manager/AgentConversationStore": { AgentConversationStore: FakeManager },
     "./manager/AgentSecretStore": { AgentSecretStore: FakeManager },
+    "./manager/VersionManager": { VersionManager: FakeManager },
     "./manager/ExternalOpenCoordinator": { ExternalOpenCoordinator: FakeExternalOpenCoordinator },
   }, { process: mockProcess });
 

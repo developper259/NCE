@@ -220,7 +220,7 @@ test("the command palette hides file commands outside a file tab", () => {
 
   assert.deepEqual(
     [...panelOptions.items].map((item) => item.id),
-    ["select-color-theme", "open-settings-json", "developer-performance", "quick_open", "toggle_search"],
+    ["select-color-theme", "open-settings-json", "open-version-manager", "developer-performance", "quick_open", "toggle_search"],
   );
 });
 
@@ -324,6 +324,7 @@ test("the command palette exposes settings categories", () => {
     "Open Editor Settings (UI)",
     "Open Files Settings (UI)",
     "Open Shortcuts Settings (UI)",
+    "Version Manager",
     "Developer: Performance",
   ]);
 });
