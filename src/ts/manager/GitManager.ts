@@ -2038,6 +2038,12 @@ export class GitManager {
     } catch {
       return { failure: failure("REPOSITORY_NOT_FOUND", "The repository folder is not available.") };
     }
+    // Source Control tracks only the opened folder itself. git resolves the
+    // enclosing repository by walking up the tree, so a subfolder of a repo
+    // would otherwise inherit its parent's branch and changes; reject any root
+    // that is not the workspace itself.
+    if (comparable(rootReal, this.platform) !== comparable(workspace, this.platform))
+      return { failure: failure("NOT_A_REPOSITORY", "The workspace folder is not a Git repository.") };
     return { workspace, root: rootReal };
   }
 

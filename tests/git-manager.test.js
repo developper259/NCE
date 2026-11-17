@@ -231,24 +231,27 @@ test("GitManager applies case-insensitive .nce protection on Windows", { skip: g
   }
 });
 
-test("GitManager resolves a workspace inside a repository subfolder", { skip: gitSkip }, async () => {
+test("GitManager ignores an enclosing parent repository", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const nested = path.join(root, "packages", "app");
   await fs.mkdir(nested, { recursive: true });
   await fs.writeFile(path.join(nested, "nested.txt"), "nested\n");
   await fs.writeFile(path.join(root, "outside-workspace.txt"), "root change\n");
-  // The authorization boundary is the workspace, but Git may report a parent root.
+  // Source Control tracks only the opened folder itself: a subfolder of a
+  // repository must never inherit the parent's branch, status, or staging.
   const manager = managerFor(nested);
   try {
-    assert.equal((await manager.getRepositoryRoot()).root, await fs.realpath(root));
-    const staged = await manager.stageFile(path.join(nested, "nested.txt"));
-    assert.equal(staged.success, true);
-    assert.equal(staged.path, path.join("packages", "app", "nested.txt").split(path.sep).join("/"));
-    const status = await manager.getStatus();
-    assert.equal(status.success, true);
-    assert.equal(status.status.entries.length, 1, "status stays scoped to the workspace");
-    assert.equal(status.status.entries[0].path, "packages/app/nested.txt");
-    assert.equal((await manager.stageFile(path.join(root, "outside-workspace.txt"))).code, "INVALID_PATH");
+    assert.equal((await manager.getRepositoryRoot()).code, "NOT_A_REPOSITORY");
+    assert.equal((await manager.getStatus()).code, "NOT_A_REPOSITORY");
+    assert.equal((await manager.getDiffSummary()).code, "NOT_A_REPOSITORY");
+    assert.equal((await manager.stageAll()).code, "NOT_A_REPOSITORY");
+    assert.equal((await manager.stageFile(path.join(nested, "nested.txt"))).code, "NOT_A_REPOSITORY");
+    assert.equal(fsSync.existsSync(path.join(nested, ".git")), false, "no repository is created in the workspace");
+    assert.deepEqual(
+      git(root, ["status", "--porcelain", "--untracked-files=all"]).trim().split("\n").sort(),
+      ["?? outside-workspace.txt", "?? packages/app/nested.txt"],
+      "the parent repository is left untouched",
+    );
   } finally {
     manager.dispose();
     await removeAll(root);
@@ -269,9 +272,7 @@ test("GitManager hides NCE's own workspace state from the status", { skip: gitSk
     assert.deepEqual(status.status.entries.map(entry => entry.path), ["visible.txt"]);
     const nested = managerFor(path.join(root, "packages", "app"));
     try {
-      const scoped = await nested.getStatus();
-      assert.equal(scoped.success, true);
-      assert.deepEqual(scoped.status.entries, []);
+      assert.equal((await nested.getStatus()).code, "NOT_A_REPOSITORY");
     } finally {
       nested.dispose();
     }
@@ -572,7 +573,7 @@ test("GitManager stages every workspace change at once", { skip: gitSkip }, asyn
   }
 });
 
-test("GitManager scopes stageAll to the open workspace", { skip: gitSkip }, async () => {
+test("GitManager refuses stageAll through an enclosing parent repository", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const nested = path.join(root, "packages", "app");
   await fs.mkdir(nested, { recursive: true });
@@ -586,19 +587,11 @@ test("GitManager scopes stageAll to the open workspace", { skip: gitSkip }, asyn
   const plain = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-stageall-plain-"));
   const plainManager = managerFor(plain);
   try {
-    const result = await manager.stageAll();
-    assert.equal(result.success, true);
-    const status = await manager.getStatus();
-    assert.deepEqual(
-      Object.fromEntries(status.status.entries.map((entry) => [entry.path, entry.index])),
-      { "packages/app/inside.txt": "M", "packages/app/new.txt": "A" },
-    );
-    const porcelain = git(root, ["status", "--porcelain"]).trim().split("\n");
-    assert.ok(porcelain.includes("?? outside.txt"), "changes outside the workspace stay unstaged");
+    assert.equal((await manager.stageAll()).code, "NOT_A_REPOSITORY");
     assert.equal(
-      porcelain.some((line) => !line.startsWith("??") && line.includes("outside")),
-      false,
-      "changes outside the workspace are never staged",
+      git(root, ["diff", "--cached", "--name-only"]).trim(),
+      "",
+      "the parent repository index is never staged from a subfolder workspace",
     );
     assert.equal((await plainManager.stageAll()).code, "NOT_A_REPOSITORY");
   } finally {
@@ -645,7 +638,7 @@ test("GitManager unstages every workspace change at once", { skip: gitSkip }, as
   }
 });
 
-test("GitManager scopes unstageAll to the open workspace", { skip: gitSkip }, async () => {
+test("GitManager refuses unstageAll through an enclosing parent repository", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const nested = path.join(root, "packages", "app");
   await fs.mkdir(nested, { recursive: true });
@@ -656,16 +649,11 @@ test("GitManager scopes unstageAll to the open workspace", { skip: gitSkip }, as
   const plain = await fs.mkdtemp(path.join(os.tmpdir(), "nce-git-unstageall-plain-"));
   const plainManager = managerFor(plain);
   try {
-    assert.equal((await manager.unstageAll()).success, true);
-    const status = await manager.getStatus();
+    assert.equal((await manager.unstageAll()).code, "NOT_A_REPOSITORY");
     assert.deepEqual(
-      status.status.entries.map((entry) => [entry.path, entry.index, entry.kind]),
-      [["packages/app/inside.txt", null, "untracked"]],
-    );
-    assert.deepEqual(
-      git(root, ["diff", "--cached", "--name-only"]).trim().split("\n"),
-      ["outside.txt"],
-      "staged changes outside the workspace are preserved",
+      git(root, ["diff", "--cached", "--name-only"]).trim().split("\n").sort(),
+      ["outside.txt", "packages/app/inside.txt"],
+      "the parent repository index is never unstaged from a subfolder workspace",
     );
     assert.equal((await plainManager.unstageAll()).code, "NOT_A_REPOSITORY");
   } finally {
@@ -1125,7 +1113,7 @@ test("GitManager times out and cancels Git processes", { skip: posixSkip }, asyn
   }
 });
 
-test("GitManager confines getFileVersions originalPath to the workspace", { skip: gitSkip }, async () => {
+test("GitManager refuses getFileVersions through an enclosing parent repository", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const nested = path.join(root, "packages", "app");
   await fs.mkdir(nested, { recursive: true });
@@ -1137,56 +1125,55 @@ test("GitManager confines getFileVersions originalPath to the workspace", { skip
   git(root, ["add", "--", "packages/app/inside.txt"]);
   const manager = managerFor(nested);
   try {
-    const escaped = await manager.getFileVersions(path.join(nested, "inside.txt"), {
-      staged: true,
-      originalPath: "secret-root.txt",
-    });
-    assert.equal(escaped.code, "INVALID_PATH");
-    const inside = await manager.getFileVersions(path.join(nested, "inside.txt"), {
-      staged: true,
-      originalPath: "packages/app/inside.txt",
-    });
-    assert.equal(inside.success, true);
-    assert.equal(inside.oldContent, "inside\n");
+    assert.equal(
+      (await manager.getFileVersions(path.join(nested, "inside.txt"), {
+        staged: true,
+        originalPath: "packages/app/inside.txt",
+      })).code,
+      "NOT_A_REPOSITORY",
+    );
+    assert.equal(
+      (await manager.getFileVersions(path.join(nested, "inside.txt"), {
+        staged: true,
+        originalPath: "secret-root.txt",
+      })).code,
+      "NOT_A_REPOSITORY",
+    );
   } finally {
     manager.dispose();
     await removeAll(root);
   }
 });
 
-test("GitManager refuses NCE state files and commits only the workspace scope", { skip: gitSkip }, async () => {
+test("GitManager refuses NCE state files and excludes them from commits", { skip: gitSkip }, async () => {
   const root = await createRepository();
-  const nested = path.join(root, "sub");
   await fs.mkdir(path.join(root, ".nce"), { recursive: true });
-  await fs.mkdir(nested, { recursive: true });
-  await fs.writeFile(path.join(nested, "inside.txt"), "inside v1\n");
-  await fs.writeFile(path.join(root, "outside.txt"), "outside v1\n");
+  await fs.writeFile(path.join(root, "inside.txt"), "inside v1\n");
   git(root, ["add", "-A"]);
   git(root, ["commit", "-q", "-m", "fixtures"]);
 
-  await fs.writeFile(path.join(nested, "inside.txt"), "inside v2\n");
-  await fs.writeFile(path.join(root, "outside.txt"), "outside v2\n");
+  await fs.writeFile(path.join(root, "inside.txt"), "inside v2\n");
   await fs.writeFile(path.join(root, ".nce", "workspace.json"), '{"secret":true}\n');
   git(root, ["add", "-A"]);
   git(root, ["add", "-f", ".nce/workspace.json"]);
 
-  const manager = managerFor(nested);
+  const manager = managerFor(root);
   try {
     assert.equal((await manager.stageFile(path.join(root, ".nce", "workspace.json"))).code, "INVALID_PATH");
     assert.equal((await manager.getFileVersions(path.join(root, ".nce", "workspace.json"))).code, "INVALID_PATH");
 
     const status = await manager.getStatus();
     assert.equal(status.success, true);
-    assert.deepEqual(status.status.entries.map((entry) => entry.path), ["sub/inside.txt"]);
+    assert.deepEqual(status.status.entries.map((entry) => entry.path), ["inside.txt"]);
 
     const commit = await manager.commit("scoped commit");
     assert.equal(commit.success, true);
     const committed = git(root, ["show", "--pretty=format:", "--name-only", "HEAD"])
       .trim().split("\n").filter(Boolean);
-    assert.deepEqual(committed, ["sub/inside.txt"]);
+    assert.deepEqual(committed, ["inside.txt"]);
     const stillStaged = git(root, ["diff", "--cached", "--name-only"])
       .trim().split("\n").filter(Boolean).sort();
-    assert.deepEqual(stillStaged, [".nce/workspace.json", "outside.txt"]);
+    assert.deepEqual(stillStaged, [".nce/workspace.json"]);
   } finally {
     manager.dispose();
     await removeAll(root);
@@ -1297,7 +1284,7 @@ test("GitManager fails fast when a hook outlives the timeout", { skip: posixSkip
   }
 });
 
-test("GitManager scopes diff summaries to the workspace", { skip: gitSkip }, async () => {
+test("GitManager refuses diff summaries through an enclosing parent repository", { skip: gitSkip }, async () => {
   const root = await createRepository();
   const nested = path.join(root, "sub");
   await fs.mkdir(nested, { recursive: true });
@@ -1309,9 +1296,8 @@ test("GitManager scopes diff summaries to the workspace", { skip: gitSkip }, asy
   await fs.writeFile(path.join(root, "outside.txt"), "outside v2\n");
   const manager = managerFor(nested);
   try {
-    const summary = await manager.getDiffSummary();
-    assert.equal(summary.success, true);
-    assert.deepEqual(summary.files.map((file) => file.path), ["sub/inside.txt"]);
+    assert.equal((await manager.getDiffSummary()).code, "NOT_A_REPOSITORY");
+    assert.equal((await manager.getDiffSummary({ staged: true })).code, "NOT_A_REPOSITORY");
   } finally {
     manager.dispose();
     await removeAll(root);
