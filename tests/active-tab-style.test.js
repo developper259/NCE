@@ -20,3 +20,22 @@ test("active tabs cover the tab-bar divider with the editor surface", async () =
   assert.match(activeTab, /border-bottom-color:\s*var\(--bg-secondary\)/);
   assert.match(activeTab, /z-index:\s*2/);
 });
+
+test("tab close glyph uses theme colors and stays legible in light theme", async () => {
+  const [tabCss, vars] = await Promise.all([
+    fs.readFile("src/css/tabManager.css", "utf8"),
+    fs.readFile("src/css/var.css", "utf8"),
+  ]);
+  assert.match(
+    tabCss,
+    /\.file-manager \.file-el \.file-el-btn\.file-saved::before\s*\{[^}]*background-color:\s*var\(--tab-close-icon-color\)/s,
+  );
+  assert.match(
+    tabCss,
+    /mask:\s*url\("\.\.\/assets\/icons\/close\.svg"\) center \/ 16px 16px no-repeat/,
+  );
+  const dark = vars.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  const light = vars.match(/:root\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(dark, /--tab-close-icon-color:\s*#e3e3e3/);
+  assert.match(light, /--tab-close-icon-color:\s*#4f5965/);
+});
