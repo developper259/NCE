@@ -39,3 +39,17 @@ test("tab close glyph uses theme colors and stays legible in light theme", async
   assert.match(dark, /--tab-close-icon-color:\s*#e3e3e3/);
   assert.match(light, /--tab-close-icon-color:\s*#4f5965/);
 });
+
+test("settings navigation keeps the active category visible in light theme", async () => {
+  const [settingsCss, vars] = await Promise.all([
+    fs.readFile("src/css/settings.css", "utf8"),
+    fs.readFile("src/css/var.css", "utf8"),
+  ]);
+  const active =
+    settingsCss.match(/\.settings-nav-item\.active\s*\{([^}]*)\}/s)?.[1] || "";
+  assert.match(active, /background:\s*var\(--settings-nav-active-bg\)/);
+  const dark = vars.match(/:root\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  const light = vars.match(/:root\[data-theme="light"\]\s*\{([\s\S]*?)\n\}/)?.[1] || "";
+  assert.match(dark, /--settings-nav-active-bg:\s*#262626/);
+  assert.match(light, /--settings-nav-active-bg:\s*#d5dbe2/);
+});

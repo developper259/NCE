@@ -63,6 +63,7 @@
   --shadow-color: black;
   --unsaved-indicator: #eeeeee;
   --tab-close-icon-color: #e3e3e3;
+  --settings-nav-active-bg: #262626;
 
   --titlebar-controls-height: 35px;
   --titlebar-height: 36px;
@@ -155,6 +156,7 @@
   --text-selected: #1d232a;
   --text-white: #11161c;
   --tab-close-icon-color: #4f5965;
+  --settings-nav-active-bg: #d5dbe2;
 
   --accent-primary: #0067b8;
   --accent-fill: #4da3ff;
