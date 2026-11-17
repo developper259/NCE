@@ -38,6 +38,17 @@ class QuickPanel {
     this.input.autocomplete = "off";
     this.input.spellcheck = false;
 
+    this.browseButton = document.createElement("button");
+    this.browseButton.type = "button";
+    this.browseButton.className = "quick-panel-browse";
+    this.browseButton.textContent = "Browse…";
+    this.browseButton.setAttribute("aria-label", "Browse for a path");
+    this.browseButton.hidden = true;
+
+    this.inputRow = document.createElement("div");
+    this.inputRow.className = "quick-panel-input-row";
+    this.inputRow.append(this.input, this.browseButton);
+
     this.list = document.createElement("div");
     this.list.className = "quick-panel-list";
     this.list.setAttribute("role", "listbox");
@@ -54,7 +65,7 @@ class QuickPanel {
 
     this.panel.append(
       this.title,
-      this.input,
+      this.inputRow,
       this.error,
       this.list,
       this.empty,
@@ -116,6 +127,10 @@ class QuickPanel {
     this.list.hidden = mode !== "pick";
     this.empty.hidden = true;
     this.error.hidden = true;
+    if (this.browseButton) {
+      this.browseButton.hidden = typeof options.browse !== "function";
+      this.browseButton.disabled = false;
+    }
 
     if (mode === "pick") this.resultsScroller?.resume();
     else this.resultsScroller?.suspend();
@@ -151,6 +166,10 @@ class QuickPanel {
     this.input.type = "text";
     this.empty.textContent = "";
     this.error.textContent = "";
+    if (this.browseButton) {
+      this.browseButton.hidden = true;
+      this.browseButton.disabled = false;
+    }
     if (this.list?.style) this.list.style.height = "";
 
     // Keep the rendered rows and their per-panel styling until the fade-out has
@@ -216,7 +235,16 @@ class QuickPanel {
   }
 
   handleKeyDownEvent(event) {
-    if (!this.session || event.target !== this.input) return false;
+    if (!this.session) return false;
+    if (
+      event.target === this.browseButton &&
+      (event.key === "Enter" || event.key === " ")
+    ) {
+      return false;
+    }
+    if (event.target !== this.input && event.target !== this.browseButton) {
+      return false;
+    }
     return this.handleKeyDown(event);
   }
 
@@ -228,6 +256,54 @@ class QuickPanel {
     event.stopPropagation();
     this.acceptRow(row);
     return true;
+  }
+
+  handleBrowseClick(event) {
+    if (!this.session || !this.browseButton) return false;
+    const target = event.target;
+    const isBrowse =
+      target === this.browseButton ||
+      (typeof this.browseButton.contains === "function" &&
+        this.browseButton.contains(target));
+    if (!isBrowse) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    void this.browse();
+    return true;
+  }
+
+  async browse() {
+    const session = this.session;
+    const browse = session?.options?.browse;
+    if (!session || typeof browse !== "function" || this.browseButton?.disabled) {
+      return false;
+    }
+    if (this.browseButton) this.browseButton.disabled = true;
+    try {
+      const selected = await browse();
+      if (this.session !== session) return false;
+      if (selected != null && String(selected).length > 0) {
+        this.input.value = String(selected);
+        this.handleInput();
+      }
+      this.input.focus();
+      this.input.setSelectionRange(
+        this.input.value.length,
+        this.input.value.length,
+      );
+      return true;
+    } catch (error) {
+      if (this.session !== session) return false;
+      console.error("Quick panel browse failed:", error);
+      this.error.textContent = "Unable to browse for a path.";
+      this.error.hidden = false;
+      this.input.focus();
+      return false;
+    } finally {
+      if (this.session === session && this.browseButton) {
+        this.browseButton.disabled = false;
+      }
+    }
   }
 
   handleBackdropClick(event) {

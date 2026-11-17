@@ -28,6 +28,8 @@ class FakeElement {
   }
   setAttribute(name, value) { this.attributes.set(name, value); }
   focus() {}
+  blur() {}
+  contains(child) { return this.children.includes(child); }
   setSelectionRange() {}
 }
 
@@ -60,7 +62,7 @@ test("QuickPanel creates its DOM on first open and delegates native events", () 
   assert.equal(panel.open({ id: "smoke", mode: "input", value: "query" }), true);
   assert.equal(panel.initialized, true);
   assert.equal(hostQueries, 1);
-  assert.equal(created.length, 7);
+  assert.equal(created.length, 9);
   assert.equal(panel.list.children[0].className, "quick-panel-list-layer");
   assert.equal(host.children.length, 1);
   const directListenerCount = [...created, host].reduce((count, element) =>
@@ -73,7 +75,7 @@ test("QuickPanel creates its DOM on first open and delegates native events", () 
 
   assert.equal(panel.init(), true);
   assert.equal(hostQueries, 1);
-  assert.equal(created.length, 7);
+  assert.equal(created.length, 9);
 });
 
 test("QuickPanel keeps its panel id until the close fade-out completes", () => {
@@ -107,6 +109,53 @@ test("QuickPanel keeps its panel id until the close fade-out completes", () => {
   scheduled.callback();
   assert.equal(panel.panel.dataset.panelId, undefined);
   assert.equal(panel.closeCleanupTimer, null);
+});
+
+test("QuickPanel shows the browse action only when an input provides it", async () => {
+  const host = new FakeElement("div");
+  const document = {
+    activeElement: null,
+    querySelector(selector) {
+      assert.equal(selector, ".quick-panel-host");
+      return host;
+    },
+    createElement(tagName) {
+      return new FakeElement(tagName);
+    },
+  };
+  const QuickPanel = loadGlobal("src/js/types/QuickPanel.js", "QuickPanel", {
+    document,
+  });
+  const panel = new QuickPanel({});
+
+  assert.equal(panel.open({ id: "plain", mode: "input", value: "text" }), true);
+  assert.equal(panel.browseButton.hidden, true);
+  assert.equal(await panel.browse(), false);
+  panel.close({ restoreFocus: false });
+
+  let calls = 0;
+  assert.equal(
+    panel.open({
+      id: "path",
+      mode: "input",
+      value: "",
+      browse: async () => {
+        calls++;
+        return "C:/tools/git.exe";
+      },
+    }),
+    true,
+  );
+  assert.equal(panel.browseButton.hidden, false);
+  assert.equal(await panel.browse(), true);
+  assert.equal(calls, 1);
+  assert.equal(panel.input.value, "C:/tools/git.exe");
+  assert.equal(panel.session.query, "C:/tools/git.exe");
+  assert.equal(panel.isOpen("path"), true);
+  assert.equal(panel.browseButton.disabled, false);
+
+  panel.close({ restoreFocus: false });
+  assert.equal(panel.browseButton.hidden, true);
 });
 
 test("QuickPanel reopening cancels the pending panel id cleanup", () => {

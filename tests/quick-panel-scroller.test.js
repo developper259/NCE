@@ -766,7 +766,8 @@ test("QuickPanel keeps its input outside the virtual viewport and navigates larg
   const input = panel.input;
   const inputParent = input.parentElement;
   assert.equal(panel.list.contains(input), false);
-  assert.equal(inputParent, panel.panel);
+  assert.equal(inputParent, panel.inputRow);
+  assert.equal(inputParent.className, "quick-panel-input-row");
   assert.ok(panel.resultsScroller.renderedRows.size < 50);
   assert.ok(panel.listLayer.children.filter((row) => row.className === "quick-panel-item").length < 50);
 

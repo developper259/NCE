@@ -180,6 +180,7 @@ class Events {
   // DOM Event
   onClick(e) {
     if (this.editor.quickPanel?.handleItemClick?.(e)) return;
+    if (this.editor.quickPanel?.handleBrowseClick?.(e)) return;
 
     const el = e.target;
     const cl = e.target.classList;

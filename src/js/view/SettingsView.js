@@ -1457,6 +1457,7 @@ class SettingsView {
         title: `Set ${server.name} path`,
         placeholder: "Absolute executable path, empty for PATH detection",
         value: current,
+        browse: this.createBrowseHandler(),
         onAccept: (value) => finish(String(value ?? "").trim()),
         onCancel: () => finish(null),
       });
@@ -2206,10 +2207,21 @@ class SettingsView {
         title: setting.panelTitle || setting.label,
         placeholder: setting.placeholder || "Absolute path",
         value: current,
+        browse:
+          setting.control === "path"
+            ? this.createBrowseHandler(setting.pathType)
+            : null,
         onAccept: (value) => finish(String(value ?? "").trim()),
         onCancel: () => finish(null),
       });
     });
+  }
+
+  createBrowseHandler(kind = "file") {
+    const api = this.editor.api;
+    const select =
+      kind === "directory" ? api?.selectFolder : api?.selectFile;
+    return typeof select === "function" ? () => select() : null;
   }
 
   updatePathControl(control, setting, value, current = null) {

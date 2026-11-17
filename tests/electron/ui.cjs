@@ -366,6 +366,10 @@ module.exports = async function exerciseUI() {
     String(editor.quickPanel.title.textContent).includes('TypeScript Language Server'),
     'Set path prompt names the language server',
   );
+  check(
+    editor.quickPanel.browseButton?.hidden === false,
+    'Path quick inputs expose a browse action',
+  );
   editor.quickPanel.close();
   await new Promise((resolve) => setTimeout(resolve, 30));
   check(!editor.quickPanel.isOpen('lsp-server-path'), 'Set path prompt closes');
@@ -387,6 +391,18 @@ module.exports = async function exerciseUI() {
     settingsView.content.querySelector('.settings-page-description')?.textContent.includes('Git'),
     'Git settings describe their purpose',
   );
+  gitPathButton.click();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  check(
+    editor.quickPanel.isOpen('setting-path-git-path'),
+    'Git path opens the quick panel input',
+  );
+  check(
+    editor.quickPanel.browseButton?.hidden === false,
+    'Git path input exposes a browse action',
+  );
+  editor.quickPanel.close();
+  await new Promise((resolve) => setTimeout(resolve, 30));
   gitBranchButton.click();
   await new Promise((resolve) => setTimeout(resolve, 30));
   check(
@@ -396,6 +412,10 @@ module.exports = async function exerciseUI() {
   check(
     editor.quickPanel.title.textContent === 'Set Git Main Branch',
     'Set main branch prompt is named for Git',
+  );
+  check(
+    editor.quickPanel.browseButton?.hidden === true,
+    'Non-path quick inputs hide the browse action',
   );
   editor.quickPanel.close();
   await new Promise((resolve) => setTimeout(resolve, 30));
