@@ -19,8 +19,11 @@ import type {
   InstallerPlatform,
   PackageDefinition,
   PlatformConfig,
+  UninstallOptions,
   UninstallResult,
   VerificationConfig,
+  VerifyInstallationOptions,
+  VerifyInstallationResult,
 } from "./types";
 
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -106,6 +109,7 @@ export class Installer {
             executable: path.resolve(destination, platformConfig.executable),
             installDir: destination,
             alreadyInstalled: true,
+            source: { url: platformConfig.download.url, checksum: platformConfig.download.checksum, checksumAlgorithm: platformConfig.download.checksumAlgorithm },
           };
         }
       }
@@ -172,6 +176,7 @@ export class Installer {
         version: definition.version,
         executable: path.resolve(destination, platformConfig.executable),
         installDir: destination,
+        source: { url: platformConfig.download.url, checksum: platformConfig.download.checksum, checksumAlgorithm: platformConfig.download.checksumAlgorithm },
       };
     } catch (error) {
       const code = error instanceof InstallerError ? error.code : "INSTALL_FAILED";
@@ -206,13 +211,15 @@ export class Installer {
     }
   }
 
-  async uninstall(packageId: string): Promise<UninstallResult> {
+  async uninstall(packageId: string, options: UninstallOptions = {}): Promise<UninstallResult> {
     if (this.active)
       return { success: false, packageId, code: "INSTALL_BUSY", error: "Another installation is already running." };
     try {
       const definition = getPackageDefinition(packageId, this.registry);
       validateDefinition(definition);
-      const installDir = this.resolveDestination(definition);
+      const installDir = options.installDir !== undefined
+        ? this.resolveUninstallTarget(definition, options.installDir)
+        : this.resolveDestination(definition);
       if (!(await pathExists(installDir)))
         return { success: false, packageId, code: "NOT_INSTALLED", error: `${definition.name} is not installed.` };
 
@@ -239,6 +246,72 @@ export class Installer {
         error: errorMessage(error),
       };
     }
+  }
+
+  /**
+   * Verify an existing installation directory without installing anything. The
+   * directory must live inside the managed tools root; symlinks escaping it are
+   * rejected. Returns the verification command stdout so callers can read the
+   * real installed version.
+   */
+  async verifyInstallation(
+    packageId: string,
+    installDir: string,
+    options: VerifyInstallationOptions = {},
+  ): Promise<VerifyInstallationResult> {
+    const signal = options.signal ?? new AbortController().signal;
+    let target = typeof installDir === "string" && installDir ? path.resolve(installDir) : "";
+    let executable = "";
+    try {
+      const definition = getPackageDefinition(packageId, this.registry);
+      validateDefinition(definition);
+      target = await this.resolveContainedDir(installDir);
+      const platformConfig = resolvePlatformConfig(definition, this.platform, this.arch);
+      executable = path.resolve(target, platformConfig.executable);
+      const outcome = await this.runVerification(
+        definition,
+        target,
+        signal,
+        { installDir: target, stagingDir: target, downloadDir: target },
+        options.functional !== false,
+      );
+      return { success: true, packageId: definition.id, installDir: target, executable, stdout: outcome.stdout };
+    } catch (error) {
+      return {
+        success: false,
+        packageId,
+        installDir: target || installDir,
+        executable,
+        code: error instanceof InstallerError ? error.code : "VERIFICATION_FAILED",
+        error: errorMessage(error),
+      };
+    }
+  }
+
+  private resolveUninstallTarget(definition: PackageDefinition, installDir: string): string {
+    if (typeof installDir !== "string" || !installDir || installDir.includes("\0"))
+      throw new InstallerError("INVALID_PACKAGE", "Uninstall target must be a non-empty path.");
+    const resolved = path.resolve(installDir);
+    const toolsRoot = this.toolsRoot();
+    const packageRoot = path.join(toolsRoot, definition.id);
+    // Never remove the tools root, a bare package root, or anything outside it.
+    if (resolved === toolsRoot || resolved === packageRoot || !resolved.startsWith(packageRoot + path.sep))
+      throw new InstallerError("INVALID_PACKAGE", `Uninstall target must stay inside ${packageRoot}: ${installDir}`);
+    return resolved;
+  }
+
+  private async resolveContainedDir(installDir: string): Promise<string> {
+    if (typeof installDir !== "string" || !installDir || installDir.includes("\0"))
+      throw new InstallerError("INVALID_PACKAGE", "Installation directory must be a non-empty path.");
+    const resolved = path.resolve(installDir);
+    const toolsRoot = this.toolsRoot();
+    if (resolved === toolsRoot || !resolved.startsWith(toolsRoot + path.sep))
+      throw new InstallerError("INVALID_PACKAGE", `Installation directory must stay inside ${toolsRoot}: ${installDir}`);
+    const realRoot = await fs.realpath(toolsRoot).catch(() => toolsRoot);
+    const real = await fs.realpath(resolved).catch(() => null);
+    if (real && real !== realRoot && !real.startsWith(realRoot + path.sep))
+      throw new InstallerError("INVALID_PACKAGE", `Installation directory escapes the tools root: ${installDir}`);
+    return resolved;
   }
 
   private toolsRoot(): string {
@@ -357,6 +430,7 @@ export class Installer {
     dir: string,
     signal: AbortSignal,
     context: Pick<StepContext, "installDir" | "stagingDir" | "downloadDir">,
+    functional = true,
   ): Promise<{ stdout: string; stderr: string }> {
     const verificationContext: StepContext = {
       ...context,
@@ -381,7 +455,7 @@ export class Installer {
         timeoutMs: verification.timeoutMs ?? COMMAND_TIMEOUT_MS,
         signal,
       });
-      if (verification.functional === "git") {
+      if (functional && verification.functional === "git") {
         await verifyGitFunctional({
           executable,
           installDir: dir,

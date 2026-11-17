@@ -10,6 +10,11 @@ export class InstallerManager {
     this.installer = new Installer(options);
   }
 
+  /** The shared Installer, so other managers reuse the same busy guard and tools root. */
+  getInstaller(): Installer {
+    return this.installer;
+  }
+
   handleIPC(ipc: IpcHandlerRegistrar): void {
     ipc.handle("Installer:install", async (event, payload) => {
       const packageId = typeof payload?.packageId === "string" ? payload.packageId : "";

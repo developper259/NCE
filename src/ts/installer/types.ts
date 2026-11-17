@@ -100,6 +100,7 @@ export interface InstallSuccess {
   executable: string;
   installDir: string;
   alreadyInstalled?: boolean;
+  source?: { url: string; checksum: string; checksumAlgorithm: ChecksumAlgorithm };
 }
 
 export interface InstallFailure {
@@ -137,4 +138,34 @@ export interface InstallerOptions {
   registry?: Record<string, PackageDefinition>;
   platform?: InstallerPlatform;
   arch?: InstallerArchitecture;
+}
+
+export interface VerifyInstallationOptions {
+  /** Run the declared functional probe (e.g. a real Git repository lifecycle). Defaults to true. */
+  functional?: boolean;
+  signal?: AbortSignal;
+}
+
+export interface VerifyInstallationSuccess {
+  success: true;
+  packageId: string;
+  installDir: string;
+  executable: string;
+  stdout: string;
+}
+
+export interface VerifyInstallationFailure {
+  success: false;
+  packageId: string;
+  installDir: string;
+  executable: string;
+  code: InstallerErrorCode;
+  error: string;
+}
+
+export type VerifyInstallationResult = VerifyInstallationSuccess | VerifyInstallationFailure;
+
+export interface UninstallOptions {
+  /** Target a specific installation directory instead of the definition's current destination. */
+  installDir?: string;
 }

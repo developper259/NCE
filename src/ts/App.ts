@@ -14,6 +14,7 @@ import { WindowManager } from "./manager/WindowManager";
 import { WindowSessionStore } from "./manager/WindowSessionStore";
 import { ExternalOpenCoordinator } from "./manager/ExternalOpenCoordinator";
 import { InstallerManager } from "./manager/InstallerManager";
+import { VersionManager } from "./manager/VersionManager";
 
 const SWITCHES_WITH_VALUES = new Set([
   "--app",
@@ -120,6 +121,7 @@ export class App {
   agentConversations!: AgentConversationStore;
   agentSecrets!: AgentSecretStore;
   installer!: InstallerManager;
+  versionManager!: VersionManager;
   externalOpenCoordinator!: ExternalOpenCoordinator;
   name = "NCE";
   version = getPackageVersion();
@@ -152,6 +154,19 @@ export class App {
     this.windowSessionStore = new WindowSessionStore(userData, process.platform, this.agentSecrets);
     this.windowManager = new WindowManager(this, this.ipcRouter, this.windowSessionStore);
     this.externalOpenCoordinator = new ExternalOpenCoordinator(this.windowManager);
+    this.versionManager = new VersionManager({
+      userDataPath: userData,
+      installer: this.installer.getInstaller(),
+      settings: {
+        get: (key) => this.settings.get(key),
+        set: async (key, value) => {
+          const saved = await this.settings.set(key, value);
+          if (saved) this.broadcastToWindows("settings-changed", this.settings.getAll());
+          return saved;
+        },
+      },
+      broadcast: (channel, payload) => this.broadcastToWindows(channel, payload),
+    });
     const startupArgStart = app.isPackaged ? 1 : 2;
     const argv = Array.isArray(process.argv) ? process.argv : [];
     const startupPaths = process.env?.NCE_DISABLE_EXTERNAL_STARTUP_PATHS === "1"
@@ -200,6 +215,7 @@ export class App {
       await this.recentFolders.initialize();
       await this.agentConversations.initialize();
       await this.windowSessionStore.initialize();
+      await this.versionManager.initialize();
       await this.startNsh();
       await this.windowManager.restoreSessions({
         createEmptyWindow: !this.externalOpenCoordinator.hasPendingSystemRequests(),
@@ -244,6 +260,7 @@ export class App {
 
     app.on("will-quit", () => {
       this.externalOpenCoordinator?.dispose();
+      this.versionManager?.dispose();
       this.ipcRouter.dispose();
       this.windowManager.dispose();
     });

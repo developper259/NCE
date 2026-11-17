@@ -580,6 +580,7 @@ export class Window {
     this.gitManager?.handleIPC(this.ipc);
     this.lspManager?.handleIPC(this.ipc);
     this.app.installer?.handleIPC(this.ipc);
+    this.app.versionManager?.handleIPC(this.ipc);
   }
 
   private async authorizeDroppedPaths(paths: unknown): Promise<string[] | null> {
