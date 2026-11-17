@@ -17,10 +17,15 @@ const { PackageRegistry } = require("../dist/ts/packages/PackageRegistry.js");
 const { GitManager } = require("../dist/ts/manager/GitManager.js");
 const { PathAccess } = require("../dist/ts/manager/PathAccess.js");
 const { resolveGitExecutable, trustedGitCandidates } = require("../dist/ts/manager/GitProcess.js");
-const { makeTarGz, serve, sha256, staticRoute, tempDir } = require("./helpers/installer.js");
-const { memorySettings } = require("./helpers/version-manager.js");
+const { tempDir } = require("./helpers/installer.js");
+const {
+  GIT_FIXTURE_VERSION: FIXTURE_VERSION,
+  gitFixtureDistribution,
+  serveGitFixture,
+  plantGit,
+  memorySettings,
+} = require("./helpers/version-manager.js");
 
-const FIXTURE_VERSION = "2.56.1";
 const posixSkip = process.platform === "win32" ? "POSIX shell-script Git fixture" : false;
 const networkSkip = process.env.NCE_INSTALLER_NETWORK === "1"
   ? false
@@ -56,48 +61,6 @@ function gitManagerFor(workspace, settings) {
     getGitPath: () => settings.get("git.path"),
     env: isolatedEnv,
   });
-}
-
-function gitFixtureDistribution(url, checksum) {
-  return {
-    id: "git",
-    name: "Git",
-    version: FIXTURE_VERSION,
-    platforms: {
-      [process.platform]: {
-        [process.arch]: {
-          download: { url, checksum, checksumAlgorithm: "sha256" },
-          archive: { format: "tar.gz", stripComponents: 0 },
-          executable: "bin/git",
-          verification: { executable: "{installDir}/bin/git", args: ["--version"] },
-        },
-      },
-    },
-    install: { destination: "tools/{id}/{version}", steps: [{ type: "download" }, { type: "extract" }] },
-    verification: { executable: "{installDir}/bin/git", args: ["--version"] },
-  };
-}
-
-async function serveGitFixture() {
-  const dir = await tempDir("nce-vm-git-fixture-");
-  const file = path.join(dir, "git.tar.gz");
-  await makeTarGz([
-    { name: "bin/", type: "directory" },
-    { name: "bin/git", mode: 0o755, data: `#!/bin/sh\necho "git version ${FIXTURE_VERSION}"\n` },
-  ], file);
-  const body = await fs.readFile(file);
-  const checksum = sha256(body);
-  const server = await serve({ "/git.tar.gz": staticRoute(body) });
-  return { dir, server, distribution: gitFixtureDistribution(`${server.origin}/git.tar.gz`, checksum) };
-}
-
-/** Plant a pre-Version-Manager installation directly on disk (no installer call). */
-async function plantGit(root, dirName, version = FIXTURE_VERSION) {
-  const dir = path.join(root, "tools", "git", dirName);
-  await fs.mkdir(path.join(dir, "bin"), { recursive: true });
-  const executable = path.join(dir, "bin", "git");
-  await fs.writeFile(executable, `#!/bin/sh\necho "git version ${version}"\n`, { mode: 0o755 });
-  return { dir, executable };
 }
 
 async function findSystemGit() {

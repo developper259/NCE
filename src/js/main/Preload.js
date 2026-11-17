@@ -115,6 +115,23 @@ contextBridge.exposeInMainWorld("api", {
       return () => ipcRenderer.removeListener("Installer:progress", listener);
     },
   },
+  versionManager: {
+    getState: () => ipcRenderer.invoke("VersionManager:state"),
+    refresh: () => ipcRenderer.invoke("VersionManager:refresh"),
+    install: (packageId) =>
+      ipcRenderer.invoke("VersionManager:install", { packageId }),
+    uninstall: (installationId) =>
+      ipcRenderer.invoke("VersionManager:uninstall", { installationId }),
+    verify: (installationId) =>
+      ipcRenderer.invoke("VersionManager:verify", { installationId }),
+    cancel: (packageId) =>
+      ipcRenderer.invoke("VersionManager:cancel", { packageId }),
+    onEvent: (callback) => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on("VersionManager:event", listener);
+      return () => ipcRenderer.removeListener("VersionManager:event", listener);
+    },
+  },
   lsp: {
     getStatus: () => ipcRenderer.invoke("Lsp:status"),
     openDocument: (payload) => ipcRenderer.invoke("Lsp:openDocument", payload),
