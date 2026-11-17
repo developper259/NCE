@@ -456,6 +456,12 @@ class KeyBinding {
       keywords: ["developer", "performance", "metrics", "dashboard"],
       data: { performanceDashboard: true },
     }];
+    const toolItems = [{
+      id: "open-version-manager",
+      label: "Version Manager",
+      keywords: ["version", "manager", "packages", "git", "install", "uninstall", "tools"],
+      data: { versionManager: true },
+    }];
 
     const activeTab = this.editor.tabManager.activeTab;
     const viewTypeActions = Boolean(
@@ -487,7 +493,7 @@ class KeyBinding {
       shortcut: CONFIG_KEYBINDING_DISPLAY(item.key),
       data: item,
     }));
-    const allActions = settingCategories.concat(developerItems, viewTypeActions, shortcutItems);
+    const allActions = settingCategories.concat(toolItems, developerItems, viewTypeActions, shortcutItems);
     const recentlyUsedItems = this.recentCommandIds
       .map((id) => allActions.find((item) => item.id === id))
       .filter(Boolean)
@@ -564,6 +570,9 @@ class KeyBinding {
     }
     if (item?.data?.performanceDashboard) {
       return this.editor.openPerformanceDashboard?.();
+    }
+    if (item?.data?.versionManager) {
+      return this.editor.openVersionManager?.();
     }
     if (item?.data?.settingsCategory) {
       return this.editor.openSettings(item.data.settingsCategory);

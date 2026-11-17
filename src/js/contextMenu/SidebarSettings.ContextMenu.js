@@ -16,5 +16,9 @@ function buildSidebarSettingsContextMenu(editor) {
       name: "Open Settings JSON",
       callback: () => editor.openSettingsJson?.(),
     },
+    openVersionManager: {
+      name: "Open Version Manager",
+      callback: () => editor.openVersionManager?.(),
+    },
   };
 }

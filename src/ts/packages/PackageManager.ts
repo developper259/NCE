@@ -456,6 +456,7 @@ export class PackageManager {
       state,
       supported,
       installableVersion: definition.installableVersion,
+      managedSettings: definition.managedSettings ? [...definition.managedSettings] : undefined,
       installations,
       external: this.external.get(definition.id),
       lastError,

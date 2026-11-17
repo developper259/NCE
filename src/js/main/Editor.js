@@ -379,6 +379,15 @@ class Editor {
     return this.getPerformanceDashboard().show();
   }
 
+  getVersionManager() {
+    if (!this._versionManager) this._versionManager = new VersionManager(this);
+    return this._versionManager;
+  }
+
+  openVersionManager() {
+    return this.getVersionManager().show();
+  }
+
   async ensureAgentSidebar() {
     await ensureAgentBundle();
     if (this.agentSidebar instanceof AgentSidebar) return this.agentSidebar;

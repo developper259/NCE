@@ -124,6 +124,8 @@ export interface PackageInfo {
   supported: boolean;
   /** Version NCE can install today; not a claim about newer upstream releases. */
   installableVersion: string;
+  /** Settings keys that may reference the installation; lets the UI describe uninstall consequences. */
+  managedSettings?: string[];
   installations: InstallationRecord[];
   external?: ExternalInstallation;
   lastError?: InstallationError;

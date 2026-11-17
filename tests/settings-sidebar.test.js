@@ -83,7 +83,7 @@ test("sidebar Settings button opens the native menu anchored right of the icon",
   );
 });
 
-test("buildSidebarSettingsContextMenu exposes both actions with a normalized shortcut", () => {
+test("buildSidebarSettingsContextMenu exposes all actions with a normalized shortcut", () => {
   const build = loadGlobal(
     "src/js/contextMenu/SidebarSettings.ContextMenu.js",
     "buildSidebarSettingsContextMenu",
@@ -96,15 +96,19 @@ test("buildSidebarSettingsContextMenu exposes both actions with a normalized sho
   const menu = build({
     openSettings: () => calls.push("ui"),
     openSettingsJson: () => calls.push("json"),
+    openVersionManager: () => calls.push("vm"),
   });
-  assert.deepEqual(Object.keys(menu), ["openSettingsUI", "openSettingsJSON"]);
+  assert.deepEqual(Object.keys(menu), ["openSettingsUI", "openSettingsJSON", "openVersionManager"]);
   assert.equal(menu.openSettingsUI.name, "Open Settings UI");
   assert.equal(menu.openSettingsJSON.name, "Open Settings JSON");
+  assert.equal(menu.openVersionManager.name, "Open Version Manager");
   assert.equal(menu.openSettingsUI.keys(), "CommandOrControl+,");
   assert.equal(menu.openSettingsJSON.keys, undefined);
+  assert.equal(menu.openVersionManager.keys, undefined);
   menu.openSettingsUI.callback();
   menu.openSettingsJSON.callback();
-  assert.deepEqual(calls, ["ui", "json"]);
+  menu.openVersionManager.callback();
+  assert.deepEqual(calls, ["ui", "json", "vm"]);
 });
 
 test("ContextMenuManager sends the settings menu natively and routes its callbacks", async () => {
@@ -132,6 +136,7 @@ test("ContextMenuManager sends the settings menu natively and routes its callbac
   manager.setMenu("sidebar-settings", build({
     openSettings: () => calls.push("ui"),
     openSettingsJson: () => calls.push("json"),
+    openVersionManager: () => calls.push("vm"),
   }));
   await manager.openContextMenu("sidebar-settings", null);
   assert.equal(sent.length, 1);
@@ -141,19 +146,24 @@ test("ContextMenuManager sends the settings menu natively and routes its callbac
     [
       ["Open Settings UI", true, "CommandOrControl+,"],
       ["Open Settings JSON", true, null],
+      ["Open Version Manager", true, null],
     ],
   );
   trigger("Open Settings JSON");
   assert.deepEqual(calls, ["json"]);
+
+  await manager.openContextMenu("sidebar-settings", null);
+  trigger("Open Version Manager");
+  assert.deepEqual(calls, ["json", "vm"]);
 
   await manager.openContextMenu("sidebar-settings", null, {
     x: 48,
     y: 664,
     verticalAlign: "bottom",
   });
-  assert.equal(sent.length, 2);
+  assert.equal(sent.length, 3);
   assert.deepEqual(
-    JSON.parse(JSON.stringify(sent[1].position)),
+    JSON.parse(JSON.stringify(sent[2].position)),
     { x: 48, y: 664, verticalAlign: "bottom" },
     "an explicit bottom anchor is forwarded verbatim to the native bridge",
   );

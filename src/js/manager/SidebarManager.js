@@ -124,6 +124,19 @@ class SidebarManager {
     const settingsContainer = document.createElement("div");
     settingsContainer.className = "sidebar-settings-container";
 
+    const versionManagerButton = document.createElement("button");
+    versionManagerButton.type = "button";
+    versionManagerButton.className = "sidebar-tab-icon sidebar-version-manager-icon";
+    versionManagerButton.title = "Version Manager";
+    versionManagerButton.setAttribute("aria-label", "Open Version Manager");
+    const versionManagerIcon = document.createElement("i");
+    versionManagerIcon.className = "fi fi-rr-database";
+    versionManagerIcon.setAttribute("aria-hidden", "true");
+    versionManagerButton.appendChild(versionManagerIcon);
+    versionManagerButton.addEventListener("click", () => {
+      this.editor.openVersionManager?.();
+    });
+
     const settingsButton = document.createElement("button");
     settingsButton.type = "button";
     settingsButton.className = "sidebar-tab-icon sidebar-settings-icon";
@@ -144,7 +157,7 @@ class SidebarManager {
         verticalAlign: "bottom",
       });
     });
-    settingsContainer.append(settingsButton);
+    settingsContainer.append(versionManagerButton, settingsButton);
     fragment.appendChild(settingsContainer);
 
     this.tabSelector.replaceChildren(fragment);
