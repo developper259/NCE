@@ -51,7 +51,8 @@
     },
     "files": [
       "dist/**/*",
-      "assets/logo/NCE/dark-logo.png",
+      "assets/logo/NCE/dark-logo.ico",
+      "assets/logo/NCE/dark-logo-512.png",
       "!node_modules/node-pty/prebuilds/**/*",
       "!node_modules/node-pty/bin/**/*",
       "package.json",
@@ -110,7 +111,7 @@
         "AppImage",
         "deb"
       ],
-      "icon": "assets/logo/NCE/dark-logo.png",
+      "icon": "assets/logo/NCE/dark-logo-512.png",
       "category": "Development",
       "syncDesktopName": true,
       "mimeTypes": [

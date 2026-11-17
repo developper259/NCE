@@ -29,6 +29,12 @@ test("Windows packaging icon contains a 256px frame", () => {
   );
 });
 
+test("empty menu uses the vector logo instead of the oversized bitmap", () => {
+  const source = read("src/js/addon/EmptyMenu.js");
+  assert.match(source, /assets\/logo\/NCE\/dark-logo\.svg/);
+  assert.doesNotMatch(source, /assets\/logo\/NCE\/dark-logo\.png/);
+});
+
 test("NSHClient configures, resolves requests, rejects session loss, and disposes", async () => {
   const messages = [];
   class FakeWorker {

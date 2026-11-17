@@ -20,8 +20,8 @@ const workerSourcePath = path.join(
 const runtimeAssets = [
   ["assets/icons/close.svg", path.join(sourceRoot, "assets/icons/close.svg")],
   [
-    "assets/logo/NCE/dark-logo.png",
-    path.join(sourceRoot, "assets/logo/NCE/dark-logo.png"),
+    "assets/logo/NCE/dark-logo.svg",
+    path.join(sourceRoot, "assets/logo/NCE/dark-logo.svg"),
   ],
 ];
 

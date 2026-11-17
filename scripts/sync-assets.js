@@ -115,7 +115,7 @@ fs.cpSync(
   },
 );
 
-for (const file of ["dark-logo.ico", "dark-logo.png"]) {
+for (const file of ["dark-logo.ico", "dark-logo.svg"]) {
   fs.mkdirSync(path.dirname(path.join(devAssetRoot, "logo/NCE", file)), {
     recursive: true,
   });

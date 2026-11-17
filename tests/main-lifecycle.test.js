@@ -96,6 +96,29 @@ test("window chrome is integrated without forced fullscreen on every platform", 
   assert.equal("fullscreen" in windows, false);
 });
 
+test("window icons avoid decoding the oversized source logo", async () => {
+  const { getWindowIconPath } = loadMain("dist/ts/Window.js", {
+    electron: {},
+    "./addon/FileManager": { FileManager: class {} },
+    "./addon/Watcher": { Watcher: class {} },
+    "./addon/Menu": { AppMenu: class {} },
+    "./addon/ContextMenu": { ContextMenu: class {} },
+    "./addon/WorkspaceSearch": { WorkspaceSearch: class {} },
+    "./App": { App: class {} },
+  });
+  const root = path.join(__dirname, "..");
+  const windows = getWindowIconPath(root, "win32");
+  const linux = getWindowIconPath(root, "linux");
+  assert.equal(windows, path.join(root, "assets/logo/NCE/dark-logo.ico"));
+  assert.equal(linux, path.join(root, "assets/logo/NCE/dark-logo-512.png"));
+  assert.equal(getWindowIconPath(root, "darwin"), null);
+
+  const png = await fs.readFile(linux);
+  assert.equal(png.toString("ascii", 1, 4), "PNG");
+  assert.equal(png.readUInt32BE(16), 512, "Linux window icon width");
+  assert.equal(png.readUInt32BE(20), 512, "Linux window icon height");
+});
+
 test("native titlebar controls share the workbench background palette", async () => {
   const css = await fs.readFile(
     path.join(__dirname, "..", "src/css/var.css"),

@@ -60,6 +60,27 @@ const AGENT_MODEL_ENDPOINTS: Record<
   },
 };
 
+const WINDOW_ICON_FILES: Partial<Record<NodeJS.Platform, string>> = {
+  win32: "dark-logo.ico",
+  linux: "dark-logo-512.png",
+};
+
+/**
+ * The source logo is 8000×8000. Passing it to BrowserWindow forces Windows to
+ * decode a 256 MB bitmap while the window is created (~6 s with a CPU spike),
+ * so use the multi-size ICO on Windows and a small PNG on Linux. macOS takes
+ * its icon from the app bundle.
+ */
+export function getWindowIconPath(
+  appRoot: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const fileName = WINDOW_ICON_FILES[platform];
+  return fileName
+    ? path.join(appRoot, "assets/logo/NCE", fileName)
+    : null;
+}
+
 export function getWindowChromeConfig(
   platform: NodeJS.Platform = process.platform,
 ) {
@@ -182,6 +203,7 @@ export class Window {
     const assetRoot = app.isPackaged ? appRoot : path.join(appRoot, "src");
 
     const restoreBounds = this.app.windowManager?.getRestoreBounds(this.initialSession.bounds) || null;
+    const windowIcon = getWindowIconPath(appRoot);
     this.window = new BrowserWindow({
       ...(restoreBounds || { width: 1100, height: 720 }),
       minWidth: Math.min(800, restoreBounds?.width || 800),
@@ -190,7 +212,7 @@ export class Window {
       show: false,
       backgroundColor: "#181818",
       ...getWindowChromeConfig(),
-      icon: path.join(appRoot, "assets/logo/NCE/dark-logo.png"),
+      ...(windowIcon ? { icon: windowIcon } : {}),
 
       webPreferences: {
         sandbox: true,

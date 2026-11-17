@@ -60,9 +60,10 @@ for (const archive of archives) {
     'dist/ts/addon/WorkspaceRegexWorker.js',
     'dist/ts/addon/WorkerParentPort.js',
     'dist/renderer/assets/icons/close.svg',
-    'dist/renderer/assets/logo/NCE/dark-logo.png',
+    'dist/renderer/assets/logo/NCE/dark-logo.svg',
     'js/main/Preload.js',
-    'assets/logo/NCE/dark-logo.png',
+    'assets/logo/NCE/dark-logo.ico',
+    'assets/logo/NCE/dark-logo-512.png',
     'package.json',
     'node_modules/nsh/package.json',
     'node_modules/node-pty/package.json',
@@ -83,7 +84,10 @@ for (const archive of archives) {
       assert.equal(file, 'js/main/Preload.js', `${archive}: unexpected renderer source ${file}`);
     }
     if (file.startsWith('assets/')) {
-      assert.equal(file, 'assets/logo/NCE/dark-logo.png', `${archive}: unexpected duplicate source asset ${file}`);
+      assert.ok(
+        ['assets/logo/NCE/dark-logo.ico', 'assets/logo/NCE/dark-logo-512.png'].includes(file),
+        `${archive}: unexpected duplicate source asset ${file}`,
+      );
     }
   }
 
