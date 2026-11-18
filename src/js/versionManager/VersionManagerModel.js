@@ -1,0 +1,201 @@
+/**
+ * Pure catalog model. It knows how to derive the visible package groups from a
+ * VersionManager snapshot, but never touches the DOM or the installer API.
+ */
+class VersionManagerModel {
+  static matchesFilter(packageInfo, filterId) {
+    const filter = VersionManagerModel.FILTERS.find((entry) => entry.id === filterId);
+    if (!filter || !filter.categories) return true;
+    const categories = packageInfo.categories || [];
+    if (filterId === "other") {
+      return categories.length === 0 || categories.some((category) =>
+        category === "other" || !VersionManagerModel.CATEGORY_LABELS[category]);
+    }
+    return categories.some((category) => filter.categories.includes(category));
+  }
+
+  static matchesSearch(packageInfo, query) {
+    const needle = String(query || "").trim().toLowerCase();
+    if (!needle) return true;
+    const haystack = [
+      packageInfo.id,
+      packageInfo.name,
+      packageInfo.description,
+      packageInfo.publisher,
+      packageInfo.installableVersion,
+      ...(packageInfo.categories || []).map((category) => VersionManagerModel.categoryLabel(category)),
+      ...(packageInfo.installations || []).map((record) => record.version),
+    ].filter(Boolean).join(" ").toLowerCase();
+    return haystack.includes(needle);
+  }
+
+  static categoryLabel(category) {
+    return VersionManagerModel.CATEGORY_LABELS[category] || category;
+  }
+
+  static categoryLabels(packageInfo) {
+    return (packageInfo.categories || []).map((category) => VersionManagerModel.categoryLabel(category));
+  }
+
+  static categorySummary(packageInfo) {
+    const labels = VersionManagerModel.categoryLabels(packageInfo);
+    return labels.length ? labels[0] : "Other";
+  }
+
+  static isInstalled(packageInfo) {
+    return (packageInfo.installations || []).length > 0;
+  }
+
+  static installationState(packageInfo, operations) {
+    const operation = operations?.get?.(packageInfo.id);
+    if (operation?.state === "running") {
+      if (operation.kind === "install") return "installing";
+      if (operation.kind === "uninstall") return "uninstalling";
+    }
+    return packageInfo.state;
+  }
+
+  static primaryInstallation(packageInfo) {
+    const installations = [...(packageInfo.installations || [])];
+    installations.sort((a, b) => {
+      const aReady = a.state === "installed" ? 1 : 0;
+      const bReady = b.state === "installed" ? 1 : 0;
+      if (aReady !== bReady) return bReady - aReady;
+      return (b.updatedAt || b.installedAt || 0) - (a.updatedAt || a.installedAt || 0);
+    });
+    return installations[0] || null;
+  }
+
+  static packageVersion(packageInfo) {
+    const installation = VersionManagerModel.primaryInstallation(packageInfo);
+    return installation?.version || packageInfo.installableVersion || "";
+  }
+
+  static latestInstalledAt(packageInfo) {
+    return Math.max(0, ...(packageInfo.installations || []).map((record) => record.installedAt || 0));
+  }
+
+  static latestUpdatedAt(packageInfo) {
+    return Math.max(0, ...(packageInfo.installations || []).map((record) => record.updatedAt || record.installedAt || 0));
+  }
+
+  static sortPackages(packages, sort) {
+    const entries = [...packages];
+    const byName = (a, b) => a.name.localeCompare(b.name);
+    if (sort === "recent-installed") {
+      return entries.sort((a, b) =>
+        VersionManagerModel.latestInstalledAt(b) - VersionManagerModel.latestInstalledAt(a) || byName(a, b));
+    }
+    if (sort === "recent-updated") {
+      return entries.sort((a, b) =>
+        VersionManagerModel.latestUpdatedAt(b) - VersionManagerModel.latestUpdatedAt(a) || byName(a, b));
+    }
+    return entries.sort(byName);
+  }
+
+  static catalogSections(packages, { filter = "all", query = "", sort = "name" } = {}) {
+    const visible = packages.filter((packageInfo) =>
+      VersionManagerModel.matchesFilter(packageInfo, filter) &&
+      VersionManagerModel.matchesSearch(packageInfo, query));
+    return {
+      installed: VersionManagerModel.sortPackages(
+        visible.filter((packageInfo) => VersionManagerModel.isInstalled(packageInfo)),
+        sort,
+      ),
+      available: VersionManagerModel.sortPackages(
+        visible.filter((packageInfo) => !VersionManagerModel.isInstalled(packageInfo)),
+        sort,
+      ),
+    };
+  }
+
+  static summary(packages) {
+    const installed = packages.filter((packageInfo) => VersionManagerModel.isInstalled(packageInfo));
+    const available = packages.filter((packageInfo) =>
+      !VersionManagerModel.isInstalled(packageInfo) && packageInfo.supported);
+    let attention = 0;
+    for (const packageInfo of packages) {
+      if (packageInfo.state === "failed") attention += 1;
+      for (const record of packageInfo.installations || [])
+        if (record.state === "corrupted" || record.state === "unknown") attention += 1;
+    }
+    return {
+      packages: packages.length,
+      installed: installed.length,
+      available: available.length,
+      installations: packages.reduce((total, entry) => total + (entry.installations || []).length, 0),
+      attention,
+    };
+  }
+}
+
+VersionManagerModel.FILTERS = [
+  { id: "all", label: "All", emptyLabel: "package", icon: "fi-rr-database", categories: null },
+  { id: "languages", label: "Languages", emptyLabel: "language", icon: "fi-rr-code-simple", categories: ["language"] },
+  { id: "tools", label: "Tools", emptyLabel: "tool", icon: "fi-rr-settings-sliders", categories: ["git"] },
+  { id: "runtimes", label: "Runtimes", emptyLabel: "runtime", icon: "fi-rr-terminal", categories: ["runtime"] },
+  { id: "compilers", label: "Compilers", emptyLabel: "compiler", icon: "fi-rr-file-code", categories: ["compiler"] },
+  { id: "toolchains", label: "Toolchains", emptyLabel: "toolchain", icon: "fi-rr-command", categories: ["toolchain"] },
+  { id: "language-servers", label: "Language Servers", emptyLabel: "language server", icon: "fi-rr-exchange", categories: ["language-server"] },
+  { id: "other", label: "Other", emptyLabel: "other", icon: "fi-rr-database", categories: ["other"] },
+];
+
+VersionManagerModel.SORTS = [
+  { id: "name", label: "Name" },
+  { id: "recent-installed", label: "Recently installed" },
+  { id: "recent-updated", label: "Recently updated" },
+];
+
+VersionManagerModel.CATEGORY_LABELS = {
+  git: "Tools",
+  language: "Languages",
+  runtime: "Runtimes",
+  compiler: "Compilers",
+  toolchain: "Toolchains",
+  "language-server": "Language Servers",
+  other: "Other",
+};
+
+VersionManagerModel.STATE_LABELS = {
+  "not-installed": "Not installed",
+  available: "Available",
+  unavailable: "Unavailable",
+  installed: "Installed",
+  installing: "Installing…",
+  uninstalling: "Uninstalling…",
+  failed: "Failed",
+  corrupted: "Corrupted",
+  external: "External",
+  unknown: "Unknown",
+  running: "Running",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+VersionManagerModel.STATE_ICONS = {
+  "not-installed": "fi-rr-minus",
+  available: "fi-rr-download",
+  unavailable: "fi-rr-lock",
+  installed: "fi-rr-check",
+  installing: "fi-rr-refresh",
+  uninstalling: "fi-rr-refresh",
+  failed: "fi-rr-cross-circle",
+  corrupted: "fi-rr-triangle-warning",
+  external: "fi-rr-lock",
+  unknown: "fi-rr-info",
+  running: "fi-rr-refresh",
+  completed: "fi-rr-check",
+  cancelled: "fi-rr-cross-small",
+};
+
+VersionManagerModel.OPERATION_LABELS = {
+  install: "Install",
+  uninstall: "Uninstall",
+  verify: "Verify",
+};
+
+VersionManagerModel.OPERATION_ICONS = {
+  install: "fi-rr-download",
+  uninstall: "fi-rr-trash",
+  verify: "fi-rr-refresh",
+};

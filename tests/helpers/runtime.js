@@ -10,8 +10,7 @@ const FastDOMNode = (() => {
   return context.__exported;
 })();
 
-function loadGlobal(relativePath, exportName, globals = {}) {
-  const source = fs.readFileSync(path.join(root, relativePath), "utf8");
+function createContext(globals = {}) {
   const context = {
     console,
     setTimeout,
@@ -27,17 +26,35 @@ function loadGlobal(relativePath, exportName, globals = {}) {
     ...globals,
   };
   vm.createContext(context);
+  return context;
+}
+
+function runFile(context, relativePath) {
+  const source = fs.readFileSync(path.join(root, relativePath), "utf8");
+  vm.runInContext(source, context, { filename: relativePath });
+}
+
+function loadGlobal(relativePath, exportName, globals = {}) {
+  const context = createContext(globals);
   if (relativePath === "src/js/types/Tab.js") {
-    const mergeSource = fs.readFileSync(
-      path.join(root, "src/js/core/ThreeWayMerge.js"),
-      "utf8",
-    );
-    vm.runInContext(mergeSource, context, {
-      filename: "src/js/core/ThreeWayMerge.js",
-    });
+    runFile(context, "src/js/core/ThreeWayMerge.js");
   }
-  vm.runInContext(`${source}\nthis.__exported = ${exportName};`, context, {
+  runFile(context, relativePath);
+  vm.runInContext(`this.__exported = ${exportName};`, context, {
     filename: relativePath,
+  });
+  return context.__exported;
+}
+
+/**
+ * Runs several classic scripts in one shared VM context, mirroring how the
+ * renderer evaluates the concatenated bundle. Returns the requested global.
+ */
+function loadGlobals(relativePaths, exportName, globals = {}) {
+  const context = createContext(globals);
+  for (const relativePath of relativePaths) runFile(context, relativePath);
+  vm.runInContext(`this.__exported = ${exportName};`, context, {
+    filename: relativePaths[relativePaths.length - 1],
   });
   return context.__exported;
 }
@@ -145,4 +162,11 @@ function createEditor(text = "") {
   return { editor, file };
 }
 
-module.exports = { root, loadGlobal, createLine, createEditor, FastDOMNode };
+module.exports = {
+  root,
+  loadGlobal,
+  loadGlobals,
+  createLine,
+  createEditor,
+  FastDOMNode,
+};

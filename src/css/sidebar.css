@@ -28,7 +28,8 @@
   margin-top: auto;
 }
 
-.sidebar-settings-icon {
+.sidebar-settings-icon,
+.sidebar-version-manager-icon {
   margin-top: 0;
   border: 0;
   padding: 0;

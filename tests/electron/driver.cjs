@@ -3454,12 +3454,14 @@ app.whenReady().then(() => {
           "the popup height is immersive",
         );
         assert.equal(versionManagerResult.dialogBlur, "none", "the popup itself is never blurred");
-        assert.deepEqual(versionManagerResult.stats.slice(1), ["1", "0"]);
+        assert.equal(versionManagerResult.sectionsOrdered, true, "Installed is followed by Available");
+        assert.equal(versionManagerResult.noNavigation, true, "the single page has no section navigation");
         assert.equal(versionManagerResult.versionFromBinary, true);
+        assert.equal(versionManagerResult.searchWorks, true);
+        assert.equal(versionManagerResult.filtersWork, true);
         assert.equal(versionManagerResult.uninstalled, true);
         assert.equal(versionManagerResult.escapeClosed, true);
         assert.equal(versionManagerResult.sidebarReopened, true);
-        assert.equal(versionManagerResult.updatesHonest, true);
         assert.equal(
           fs.existsSync(plantedGitDir),
           false,

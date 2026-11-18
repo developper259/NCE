@@ -38,8 +38,19 @@ test("Installer installs the real Git package and reuses it on second call", { s
 
     // install() now runs a real Git lifecycle (init/commit/status/log), not just
     // --version. Exercise it directly against the installed dugite-native layout.
-    const execPathDir = path.join(result.installDir, "libexec", "git-core");
-    assert.ok(await fs.stat(execPathDir).then((stats) => stats.isDirectory(), () => false), "dugite libexec/git-core must exist");
+    // Windows bundles place git-core under a toolchain directory (ucrt64 or
+    // clangarm64), while macOS and Linux use libexec at the archive root.
+    const candidates = [path.join(result.installDir, "libexec", "git-core")];
+    for (const entry of await fs.readdir(result.installDir))
+      candidates.push(path.join(result.installDir, entry, "libexec", "git-core"));
+    let execPathDir = null;
+    for (const candidate of candidates) {
+      if (await fs.stat(candidate).then((stats) => stats.isDirectory(), () => false)) {
+        execPathDir = candidate;
+        break;
+      }
+    }
+    assert.ok(execPathDir, "dugite git-core must exist");
     await verifyGitFunctional({
       executable: result.executable,
       installDir: result.installDir,

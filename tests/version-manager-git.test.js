@@ -362,7 +362,7 @@ test("Version Manager installs, verifies, uses and uninstalls the real Git", { s
     assert.equal(result.installDir, path.join(root, "tools", "git", "2.56.1"));
 
     const record = store.listByPackage("git")[0];
-    assert.equal(record.version, "2.56.1");
+    assert.match(record.version, /^2\.56\.1(?:\.windows\.\d+)?$/);
     assert.equal(record.provenance, "managed");
     assert.equal(settings.get("git.path"), record.executable);
 
@@ -370,13 +370,13 @@ test("Version Manager installs, verifies, uses and uninstalls the real Git", { s
     const verified = await manager.verify(record.id);
     assert.equal(verified.success, true);
     assert.equal(verified.installation.state, "installed");
-    assert.equal(verified.installation.version, "2.56.1");
+    assert.match(verified.installation.version, /^2\.56\.1(?:\.windows\.\d+)?$/);
 
     // GitManager drives the managed binary against a real repository.
     assert.equal(await gitManager.isGitAvailable(), true);
     const version = await gitManager.getGitVersion();
     assert.equal(version.success, true);
-    assert.equal(version.version, "2.56.1");
+    assert.match(version.version, /^2\.56\.1(?:\.windows\.\d+)?$/);
     const repository = await gitManager.getRepository();
     assert.equal(repository.success, true);
     assert.equal(repository.repository.root, await fs.realpath(repo));

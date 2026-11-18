@@ -40,8 +40,8 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(editor.openVersionManager() === true, "the popup opens");
   await waitFor(() => host() && !host().hidden, "the popup host to become visible");
   await waitFor(
-    () => document.querySelectorAll(".nce-vm-stat").length === 3,
-    "the overview stats to load from the real inventory",
+    () => document.querySelectorAll(".nce-vm-group-title").length === 2,
+    "the single catalog page to load from the real inventory",
   );
   await nextFrame();
 
@@ -63,39 +63,40 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(heightRatio >= 0.85 && heightRatio <= 0.95, `dialog height is immersive (${heightRatio})`);
   check(dialogRect.left >= 32 && dialogRect.top >= 32, "the dialog keeps visible margins");
 
-  const stats = [...document.querySelectorAll(".nce-vm-stat-value")].map((node) => node.textContent);
-  check(stats[1] === "1", "the planted installation is reported as functional");
-  check(stats[2] === "0", "a healthy inventory needs no attention");
+  const sectionTitles = [...document.querySelectorAll(".nce-vm-group-title")].map((node) => node.textContent);
+  check(sectionTitles.join("|") === "Installed|Available", `sections stay ordered (got ${sectionTitles.join("|")})`);
+  check(document.querySelectorAll('[data-focus-key^="vm-nav-"]').length === 0, "there is no section navigation");
+  check(document.querySelectorAll(".nce-vm-stat").length === 0, "there is no dashboard statistics block");
+  check(document.querySelector(".nce-vm-footer-status").textContent.includes("1 installed"), "the footer reports real ownership");
 
   // The planted directory is named 9.9.9 but its binary reports 2.56.1:
   // reconcile must trust the binary, not the folder name.
-  const installedNav = document.querySelector('[data-focus-key="vm-nav-installed"]');
-  installedNav.click();
   await waitFor(
-    () => document.querySelectorAll('[data-focus-key^="vm-installation-"]').length === 1,
+    () => document.querySelectorAll('[data-focus-key="vm-details-git"]').length === 1,
     "the imported installation to be listed",
   );
-  const row = document.querySelector('[data-focus-key^="vm-installation-"]');
-  check(row.textContent.includes("2.56.1"), "the version comes from the binary");
-  check(row.textContent.includes(plantedInstallDir), "the real location is shown");
-  check(!row.textContent.includes("9.9.9 ·"), "the folder name is not used as the version");
+  const card = document.querySelector('[data-focus-key="vm-details-git"]');
+  check(card.textContent.includes("2.56.1"), "the version comes from the binary");
+  check(card.textContent.includes("Installed"), "the card marks the package as installed");
+  check(!card.textContent.includes("9.9.9"), "the folder name is not used as the version");
 
   const search = document.querySelector('[data-focus-key="vm-search"]');
+  search.focus();
   search.value = "zzz-no-match";
   search.dispatchEvent(new Event("input", { bubbles: true }));
   await waitFor(
-    () => main().textContent.includes("No installations match"),
+    () => main().textContent.includes("No packages match"),
     "the no-match empty state",
   );
   check(document.activeElement.dataset.focusKey === "vm-search", "search keeps focus across re-render");
   search.value = "";
   search.dispatchEvent(new Event("input", { bubbles: true }));
   await waitFor(
-    () => document.querySelectorAll('[data-focus-key^="vm-installation-"]').length === 1,
+    () => document.querySelectorAll('[data-focus-key="vm-details-git"]').length === 1,
     "the installation to return after clearing the search",
   );
 
-  document.querySelector('[data-focus-key^="vm-installation-"]').click();
+  document.querySelector('[data-focus-key="vm-details-git"]').click();
   await waitFor(
     () => document.querySelector(".nce-vm-detail-name")?.textContent === "Git",
     "the Git detail view",
@@ -150,22 +151,23 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(Boolean(sidebarButton), "the sidebar exposes a Version Manager button");
   sidebarButton.click();
   await waitFor(() => !host().hidden, "the sidebar button to reopen the popup");
+  await waitFor(
+    () => document.querySelectorAll(".nce-vm-group-title").length === 2,
+    "the single page to reload after reopening",
+  );
   const gearMenu = editor.contextMenuManager.registeredMenus.get("sidebar-settings");
   check(typeof gearMenu?.openVersionManager?.callback === "function", "the gear menu offers the Version Manager");
-
-  document.querySelector('[data-focus-key="vm-nav-updates"]').click();
-  await nextFrame();
-  check(main().textContent.includes("Update checking is not available yet"), "Updates is honest about its limits");
-  check(!/up to date/i.test(main().textContent), "Updates never claims packages are current");
-
-  document.querySelector('[data-focus-key="vm-nav-available"]').click();
-  await nextFrame();
+  check(document.querySelectorAll('[data-focus-key^="vm-nav-"]').length === 0, "reopening has no section navigation");
   check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')), "Available offers a real Git install action");
   check(!main().textContent.includes("Update"), "no fake update actions are offered");
 
-  document.querySelector('[data-focus-key="vm-nav-category:language"]').click();
+  document.querySelector('[data-focus-key="vm-filter-languages"]').click();
   await nextFrame();
-  check(main().textContent.includes("No languages tools yet"), "empty categories stay honest");
+  check(main().textContent.includes("No language packages yet"), "empty categories stay honest");
+  document.querySelector('[data-focus-key="vm-filter-tools"]').click();
+  await nextFrame();
+  check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')), "the Tools filter exposes Git");
+  check(document.querySelector('[data-focus-key="vm-filter-all"]').getAttribute("aria-pressed") === "false", "the active filter is exposed");
 
   return {
     opened: true,
@@ -173,7 +175,8 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     heightRatio,
     blur: hostStyle.backdropFilter,
     dialogBlur: dialogStyle.backdropFilter,
-    stats,
+    sectionsOrdered: true,
+    noNavigation: true,
     versionFromBinary: true,
     searchWorks: true,
     externalPanel: Boolean(externalPanel),
@@ -181,6 +184,6 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     uninstalled: true,
     escapeClosed: true,
     sidebarReopened: true,
-    updatesHonest: true,
+    filtersWork: true,
   };
 };

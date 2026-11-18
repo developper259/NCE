@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert");
+const { execFileSync } = require("node:child_process");
 const { promises: fs } = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
@@ -9,6 +10,14 @@ const { verifyGitFunctional } = require("../dist/ts/installer/verify-git.js");
 const { resolveGitExecutable } = require("../dist/ts/manager/GitProcess.js");
 const { tempDir } = require("./helpers/installer.js");
 
+let gitAvailable = true;
+try {
+  execFileSync("git", ["--version"], { stdio: "ignore" });
+} catch {
+  gitAvailable = false;
+}
+const gitSkip = !gitAvailable && "Git CLI is required for functional verification";
+
 async function scratchRoot() {
   const root = await tempDir("nce-verify-git-");
   const tempRoot = path.join(root, "scratch");
@@ -16,7 +25,7 @@ async function scratchRoot() {
   return { root, tempRoot };
 }
 
-test("verifyGitFunctional completes a real temp-repo lifecycle and cleans up", async () => {
+test("verifyGitFunctional completes a real temp-repo lifecycle and cleans up", { skip: gitSkip }, async () => {
   const git = await resolveGitExecutable();
   const { root, tempRoot } = await scratchRoot();
   try {

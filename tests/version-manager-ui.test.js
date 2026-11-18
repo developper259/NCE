@@ -2,10 +2,17 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { loadGlobal } = require("./helpers/runtime");
+const { loadGlobal, loadGlobals } = require("./helpers/runtime");
 
 const root = path.resolve(__dirname, "..");
 const read = (relativePath) => fs.readFileSync(path.join(root, relativePath), "utf8");
+const versionManagerModules = () => {
+  const manifest = JSON.parse(read("src/js/main/renderer-scripts.json"));
+  return [
+    ...manifest.filter((entry) => entry.startsWith("js/versionManager/")).map((entry) => `src/${entry}`),
+    "src/js/view/VersionManager.js",
+  ];
+};
 
 class FakeElement {
   constructor(tagName, document) {
@@ -262,7 +269,7 @@ function setup(packages) {
   const document = createDocument();
   const timers = createTimers();
   const { api, state } = createApiFixture(packages);
-  const VersionManager = loadGlobal("src/js/view/VersionManager.js", "VersionManager", {
+  const VersionManager = loadGlobals(versionManagerModules(), "VersionManager", {
     document,
     window: {},
     setTimeout: timers.setTimeout,
@@ -292,10 +299,14 @@ test("Version Manager stays uncreated until first open, then loads and focuses",
   assert.equal(document.activeElement, manager.closeButton);
 
   await flush();
-  assert.match(textOf(manager.main), /Managed packages/);
-  assert.match(textOf(manager.main), /Functional installations/);
-  assert.match(textOf(manager.main), /Needs attention/);
-  assert.match(textOf(manager.main), /No operations yet/);
+  assert.match(textOf(manager.main), /Installed/);
+  assert.match(textOf(manager.main), /Available/);
+  assert.match(textOf(manager.main), /No packages installed yet\./);
+  assert.match(textOf(manager.main), /Git/);
+  assert.ok(byFocusKey(manager.headerControls, "vm-search"));
+  assert.ok(byFocusKey(manager.headerControls, "vm-sort"));
+  assert.ok(byFocusKey(manager.headerControls, "vm-filter-all"));
+  assert.match(manager.footerStatus.textContent, /0 installed · 1 available/);
 
   assert.equal(manager.hide(), true);
   assert.equal(state.listeners.size, 0);
@@ -351,36 +362,52 @@ test("Tab focus is trapped inside the dialog and wraps in both directions", asyn
   assert.equal(document.activeElement, last);
 });
 
-test("navigation covers every section with honest Updates and empty categories", async () => {
-  const { manager } = setup();
+test("the single page keeps Installed above Available and filters in the header", async () => {
+  const { document, state, manager } = setup();
   manager.show();
   await flush();
 
-  byFocusKey(manager.dialog, "vm-nav-available").click();
-  assert.match(textOf(manager.main), /Packages NCE can really install today/);
+  const sectionTitles = descendants(manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(sectionTitles, ["Installed", "Available"]);
+  assert.match(textOf(manager.main), /No packages installed yet\./);
   assert.match(textOf(manager.main), /Git/);
   assert.ok(byFocusKey(manager.main, "vm-install-git"), "Git offers a real Install action");
+  assert.equal(descendants(manager.dialog)
+    .filter((node) => node.dataset?.focusKey?.startsWith("vm-nav-")).length, 0,
+    "there is no section navigation");
+  assert.doesNotMatch(textOf(manager.main), /Update checking|up to date/i);
 
-  byFocusKey(manager.dialog, "vm-nav-updates").click();
-  assert.match(textOf(manager.main), /Update checking is not available yet/);
-  assert.doesNotMatch(textOf(manager.main), /No updates available/);
-  assert.doesNotMatch(textOf(manager.main), /up to date/i);
+  const loads = state.getStateCalls;
+  byFocusKey(manager.headerControls, "vm-filter-languages").click();
+  assert.match(textOf(manager.main), /No language packages yet/);
+  assert.equal(byFocusKey(manager.main, "vm-install-git"), null);
+  assert.equal(state.getStateCalls, loads, "filters never reload the inventory");
 
-  byFocusKey(manager.dialog, "vm-nav-category:language").click();
-  assert.match(textOf(manager.main), /No languages tools yet/);
-  assert.doesNotMatch(textOf(manager.main), /Install/);
-
-  byFocusKey(manager.dialog, "vm-nav-category:git").click();
+  byFocusKey(manager.headerControls, "vm-filter-tools").click();
   assert.match(textOf(manager.main), /Git/);
   assert.ok(byFocusKey(manager.main, "vm-install-git"));
 
-  byFocusKey(manager.dialog, "vm-nav-installed").click();
-  assert.match(textOf(manager.main), /No managed installations yet/);
-  buttonWithLabel(manager.main, "Browse available").click();
-  assert.match(textOf(manager.main), /Packages NCE can really install today/);
+  const search = byFocusKey(manager.headerControls, "vm-search");
+  search.value = "git";
+  search.dispatch("input");
+  assert.ok(byFocusKey(manager.main, "vm-install-git"));
+  search.value = "zzz-no-match";
+  search.dispatch("input");
+  assert.match(textOf(manager.main), /No packages match “zzz-no-match”/);
+  assert.equal(manager.filter, "tools", "searching keeps the active category filter");
+  assert.equal(state.getStateCalls, loads);
+
+  byFocusKey(manager.main, "vm-clear-filters").click();
+  assert.equal(manager.filter, "all");
+  assert.equal(manager.searchQuery, "");
+  assert.equal(byFocusKey(manager.headerControls, "vm-search").value, "");
+  assert.match(textOf(manager.main), /Git/);
+  assert.equal(document.activeElement.dataset.focusKey, "vm-filter-all");
 });
 
-test("Installed lists real installations and search filters them without losing focus", async () => {
+test("Installed and Available share one card design and one search", async () => {
   const record = gitRecord();
   const { document, manager } = setup([gitPackage({
     state: "installed",
@@ -388,41 +415,54 @@ test("Installed lists real installations and search filters them without losing 
   })]);
   manager.show();
   await flush();
-  byFocusKey(manager.dialog, "vm-nav-installed").click();
 
-  const row = byFocusKey(manager.main, `vm-installation-${record.id}`);
-  assert.ok(row);
-  assert.match(textOf(row), /Git/);
-  assert.match(textOf(row), /2\.56\.1/);
-  assert.match(textOf(row), /\/userData\/tools\/git\/2\.56\.1/);
+  const titles = descendants(manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(titles, ["Installed", "Available"]);
+  assert.match(textOf(manager.main), /No packages available\./);
 
-  const search = byFocusKey(manager.main, "vm-search");
+  const card = byFocusKey(manager.main, "vm-details-git");
+  assert.ok(card);
+  assert.match(textOf(card), /Git/);
+  assert.match(textOf(card), /2\.56\.1/);
+  assert.match(textOf(card), /Installed/);
+  assert.ok(byFocusKey(manager.main, "vm-manage-git"), "installed cards expose Manage");
+  assert.equal(byFocusKey(manager.main, "vm-install-git"), null);
+  assert.equal(descendants(manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-card")).length, 1);
+
+  const search = byFocusKey(manager.headerControls, "vm-search");
+  search.focus();
   search.value = "zzz-no-match";
   search.dispatch("input");
-  assert.match(textOf(manager.main), /No installations match “zzz-no-match”/);
+  assert.match(textOf(manager.main), /No packages match “zzz-no-match”/);
   assert.equal(document.activeElement.dataset.focusKey, "vm-search");
   assert.equal(document.activeElement.value, "zzz-no-match");
 
-  document.activeElement.value = "2.56.1";
-  document.activeElement.dispatch("input");
-  assert.ok(byFocusKey(manager.main, `vm-installation-${record.id}`));
+  search.value = "2.56.1";
+  search.dispatch("input");
+  assert.ok(byFocusKey(manager.main, "vm-details-git"));
 
-  document.activeElement.value = "git";
-  document.activeElement.dispatch("input");
-  assert.ok(byFocusKey(manager.main, `vm-installation-${record.id}`), "category names are searchable");
+  search.value = "Distributed version control";
+  search.dispatch("input");
+  assert.ok(byFocusKey(manager.main, "vm-details-git"), "descriptions are searchable");
+
+  search.value = "git";
+  search.dispatch("input");
+  assert.ok(byFocusKey(manager.main, "vm-details-git"), "category names are searchable");
 });
 
 test("details show real fields, provenance, verify, and a read-only external panel", async () => {
   const record = gitRecord();
-  const { state, manager } = setup([gitPackage({
+  const { document, state, manager } = setup([gitPackage({
     state: "installed",
     installations: [record],
     external: { executable: "/usr/bin/git", version: "2.39.5", detectedAt: Date.UTC(2026, 10, 1) },
   })]);
   manager.show();
   await flush();
-  byFocusKey(manager.dialog, "vm-nav-installed").click();
-  byFocusKey(manager.main, `vm-installation-${record.id}`).click();
+  byFocusKey(manager.main, "vm-details-git").click();
 
   const text = textOf(manager.main);
   assert.match(text, /Managed by NCE/);
@@ -430,7 +470,7 @@ test("details show real fields, provenance, verify, and a read-only external pan
   assert.match(text, /\/userData\/tools\/git\/2\.56\.1\/bin\/git/);
   assert.match(text, /darwin \/ x64/);
   assert.match(text, /https:\/\/example\.com\/git\.tar\.gz/);
-  assert.match(text, /External — not managed by NCE/);
+  assert.match(text, /External/);
   assert.match(text, /\/usr\/bin\/git/);
   assert.match(text, /never modifies or uninstalls external tools/);
 
@@ -443,7 +483,9 @@ test("details show real fields, provenance, verify, and a read-only external pan
   assert.deepEqual(state.verifies, [record.id]);
 
   byFocusKey(manager.main, "vm-back").click();
-  assert.match(textOf(manager.main), /Installations owned by NCE/);
+  assert.match(textOf(manager.main), /No packages available\./);
+  assert.equal(document.activeElement?.dataset?.focusKey, "vm-details-git",
+    "closing the detail returns focus to its card");
 });
 
 test("uninstall asks a specific confirmation and only then calls the API", async () => {
@@ -487,7 +529,7 @@ test("uninstall asks a specific confirmation and only then calls the API", async
   assert.ok(byFocusKey(manager.main, "vm-install-git"), "retry install is offered after removal");
 });
 
-test("install progress drives the footer, survives navigation, and can be cancelled", async () => {
+test("install progress drives the footer and can be cancelled from the card", async () => {
   const record = gitRecord();
   const { state, manager } = setup([gitPackage({
     state: "installed",
@@ -495,11 +537,9 @@ test("install progress drives the footer, survives navigation, and can be cancel
   })]);
   manager.show();
   await flush();
-  byFocusKey(manager.dialog, "vm-nav-available").click();
   byFocusKey(manager.main, "vm-details-git").click();
   assert.equal(byFocusKey(manager.main, `vm-verify-${record.id}`).disabled, false);
   byFocusKey(manager.main, "vm-back").click();
-  byFocusKey(manager.dialog, "vm-nav-available").click();
 
   manager.install("git");
   await flush();
@@ -519,13 +559,11 @@ test("install progress drives the footer, survives navigation, and can be cancel
   assert.equal(state.getStateCalls, before + 1, "progress updates do not reload the inventory");
   assert.equal(manager.footerProgressLabel.textContent, "80%");
 
-  byFocusKey(manager.dialog, "vm-nav-overview").click();
-  assert.match(manager.footerStatus.textContent, /Install Git/);
-  byFocusKey(manager.dialog, "vm-nav-available").click();
   assert.ok(descendants(manager.main).some((node) => node.classList.contains("nce-vm-badge-installing")));
-  assert.ok(byFocusKey(manager.main, "vm-row-cancel-git"), "the running row offers Cancel");
+  assert.ok(byFocusKey(manager.main, "vm-row-cancel-git"), "the running card offers Cancel");
 
   manager.openDetail("git");
+  assert.match(manager.footerStatus.textContent, /Install Git/);
   assert.equal(byFocusKey(manager.main, `vm-verify-${record.id}`).disabled, true, "actions are disabled while busy");
   assert.equal(byFocusKey(manager.main, `vm-uninstall-${record.id}`).disabled, true);
   byFocusKey(manager.main, "vm-back").click();
@@ -541,7 +579,7 @@ test("install progress drives the footer, survives navigation, and can be cancel
   await flush();
   assert.equal(manager.footerProgress.hidden, true);
   assert.equal(manager.footerCancel.hidden, true);
-  assert.match(manager.footerStatus.textContent, /1 package\(s\) · 1 installation\(s\)/);
+  assert.match(manager.footerStatus.textContent, /1 installed · 0 available/);
 });
 
 test("closing during an operation asks first and the operation continues in background", async () => {
@@ -581,15 +619,14 @@ test("inventory-changed events refresh the displayed installations", async () =>
   const { state, manager } = setup();
   manager.show();
   await flush();
-  byFocusKey(manager.dialog, "vm-nav-installed").click();
-  assert.match(textOf(manager.main), /No managed installations yet/);
+  assert.match(textOf(manager.main), /No packages installed yet\./);
 
   state.snapshot.packages[0].installations = [gitRecord()];
   state.snapshot.packages[0].state = "installed";
   state.emit({ type: "inventory-changed" });
   await flush();
   assert.equal(state.getStateCalls, 2);
-  assert.ok(byFocusKey(manager.main, "vm-installation-a1b2c3d4"));
+  assert.ok(byFocusKey(manager.main, "vm-details-git"));
 });
 
 test("failures surface a clear error with retry, and load errors are not hidden", async () => {
@@ -619,6 +656,94 @@ test("failures surface a clear error with retry, and load errors are not hidden"
   apiLess.manager.show();
   await flush();
   assert.match(textOf(apiLess.manager.main), /The Version Manager API is unavailable\./);
+});
+
+test("the page keeps both sections in order and renders each package once", async () => {
+  const available = setup();
+  available.manager.show();
+  await flush();
+  const availableTitles = descendants(available.manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(availableTitles, ["Installed", "Available"]);
+  assert.match(textOf(available.manager.main), /No packages installed yet\./);
+  assert.equal(descendants(available.manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-card")).length, 1);
+
+  const installed = setup([gitPackage({ state: "installed", installations: [gitRecord()] })]);
+  installed.manager.show();
+  await flush();
+  const installedTitles = descendants(installed.manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(installedTitles, ["Installed", "Available"]);
+  assert.match(textOf(installed.manager.main), /No packages available\./);
+  assert.equal(descendants(installed.manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-card")).length, 1,
+    "a package is rendered exactly once even when it has several categories");
+});
+
+test("catalog model dedupes categories, sorts by install date and searches real fields", () => {
+  const Model = loadGlobals(
+    ["src/js/versionManager/VersionManagerModel.js"],
+    "VersionManagerModel",
+  );
+  const packages = [
+    gitPackage({
+      id: "zeta",
+      name: "Zeta",
+      categories: ["git", "other"],
+      state: "installed",
+      installations: [gitRecord({
+        id: "z",
+        installedAt: Date.UTC(2026, 9, 1),
+        updatedAt: Date.UTC(2026, 11, 1),
+      })],
+    }),
+    gitPackage({
+      id: "alpha",
+      name: "Alpha",
+      categories: ["git"],
+      state: "installed",
+      installations: [gitRecord({ id: "a", installedAt: Date.UTC(2026, 10, 1) })],
+    }),
+    gitPackage({
+      id: "beta",
+      name: "Beta",
+      categories: ["language"],
+      installations: [],
+    }),
+  ];
+  const all = Model.catalogSections(packages, { filter: "all" });
+  assert.deepEqual(Array.from(all.installed, (entry) => entry.id), ["alpha", "zeta"]);
+  assert.deepEqual(Array.from(all.available, (entry) => entry.id), ["beta"]);
+  assert.equal(new Set([...all.installed, ...all.available].map((entry) => entry.id)).size, packages.length);
+
+  const tools = Model.catalogSections(packages, { filter: "tools" });
+  assert.deepEqual(Array.from(tools.installed, (entry) => entry.id), ["alpha", "zeta"]);
+  assert.deepEqual(Array.from(tools.available), []);
+
+  const other = Model.catalogSections(packages, { filter: "other" });
+  assert.deepEqual(Array.from(other.installed, (entry) => entry.id), ["zeta"]);
+  assert.deepEqual(Array.from(other.available), []);
+
+  const languages = Model.catalogSections(packages, { filter: "languages" });
+  assert.deepEqual(Array.from(languages.installed), []);
+  assert.deepEqual(Array.from(languages.available, (entry) => entry.id), ["beta"]);
+
+  const recent = Model.catalogSections(packages, { filter: "all", sort: "recent-installed" });
+  assert.deepEqual(Array.from(recent.installed, (entry) => entry.id), ["alpha", "zeta"]);
+  const updated = Model.catalogSections(packages, { filter: "all", sort: "recent-updated" });
+  assert.deepEqual(Array.from(updated.installed, (entry) => entry.id), ["zeta", "alpha"]);
+
+  const searched = Model.catalogSections(packages, { filter: "all", query: "tools" });
+  assert.deepEqual(Array.from(searched.installed, (entry) => entry.id), ["alpha", "zeta"]);
+  const versionSearch = Model.catalogSections(packages, { filter: "all", query: "2.56.1" });
+  assert.equal(Array.from(versionSearch.installed).length, 2);
+
+  const stale = gitPackage({ state: "installed", installations: [] });
+  assert.equal(Model.isInstalled(stale), false, "installation records define ownership, not stale state");
+  assert.equal(Model.packageVersion(packages[1]), "2.56.1");
 });
 
 test("Version Manager is registered in the Command Palette and opens lazily", async () => {
@@ -788,6 +913,31 @@ test("bundle, stylesheet, sidebar and icon wiring stay consistent", () => {
   const viewIndex = manifest.indexOf("js/view/VersionManager.js");
   assert.ok(viewIndex >= 0, "the view is bundled");
   assert.ok(viewIndex < manifest.indexOf("js/main/Editor.js"), "the view loads before Editor");
+  const modulePaths = manifest.filter((entry) => entry.startsWith("js/versionManager/"));
+  assert.ok(modulePaths.length >= 8, "the Version Manager is split into modules");
+  assert.ok(
+    modulePaths.every((entry) => manifest.indexOf(entry) < viewIndex),
+    "every Version Manager module loads before the root view",
+  );
+  assert.ok(
+    !modulePaths.some((entry) => /Navigation|Overview|Installed\.js|Updates\.js/.test(entry)),
+    "the single page has no section navigation modules",
+  );
+  assert.ok(
+    modulePaths.indexOf("js/versionManager/VersionManagerModel.js") <
+      modulePaths.indexOf("js/versionManager/VersionManagerUI.js"),
+    "the model defines labels and icons before the UI helper uses them",
+  );
+  assert.ok(
+    modulePaths.indexOf("js/versionManager/VersionManagerUI.js") <
+      modulePaths.indexOf("js/versionManager/VersionManagerHeader.js"),
+    "shared UI helpers load before the header controls",
+  );
+  assert.ok(
+    modulePaths.indexOf("js/versionManager/VersionManagerUI.js") <
+      modulePaths.indexOf("js/versionManager/VersionManagerCatalog.js"),
+    "shared UI helpers load before the views",
+  );
 
   const html = read("src/html/index.html");
   assert.match(html, /css\/versionManager\.css/);
@@ -797,22 +947,41 @@ test("bundle, stylesheet, sidebar and icon wiring stay consistent", () => {
   assert.match(sidebar, /this\.editor\.openVersionManager\?\.\(\)/);
   assert.match(sidebar, /settingsContainer\.append\(versionManagerButton, settingsButton\)/);
 
+  const sidebarCss = read("src/css/sidebar.css");
+  assert.match(
+    sidebarCss,
+    /\.sidebar-version-manager-icon\s*\{[^}]*background:\s*transparent/,
+    "the Version Manager icon button must not keep the native light button chrome",
+  );
+
   const eventSource = read("src/js/core/Event.js");
   const claimIndex = eventSource.indexOf("versionManager?.handleKeyDown");
   assert.ok(claimIndex >= 0, "the root keydown route claims the Version Manager");
   assert.ok(claimIndex < eventSource.indexOf("keyBindingManager?.onKey"),
     "the popup claims keys before the global binder can stop propagation");
 
-  const source = read("src/js/view/VersionManager.js");
+  const sources = [
+    ...modulePaths.map((entry) => read(`src/${entry}`)),
+    read("src/js/view/VersionManager.js"),
+  ];
+  const rootSource = sources[sources.length - 1];
+  assert.match(rootSource, /VersionManagerHeader/);
+  assert.match(rootSource, /VersionManagerCatalog/);
+  assert.doesNotMatch(rootSource, /VersionManagerNavigation|VersionManagerOverview/);
   const css = read("src/css/versionManager.css");
-  const usedClasses = new Set([...source.matchAll(/nce-vm-[a-z0-9-]+/g)].map((match) => match[0]));
+  assert.doesNotMatch(css, /\.nce-vm-nav|\.nce-vm-stat/);
+  const usedClasses = new Set(
+    sources.flatMap((source) => [...source.matchAll(/nce-vm-[a-z0-9-]+/g)].map((match) => match[0])),
+  );
   for (const name of usedClasses)
     assert.ok(css.includes(`.${name}`), `stylesheet is missing .${name}`);
-  for (const state of ["not-installed", "installed", "installing", "uninstalling", "failed", "corrupted", "external", "unknown", "running", "completed", "cancelled"])
+  for (const state of ["not-installed", "available", "unavailable", "installed", "installing", "uninstalling", "failed", "corrupted", "external", "unknown", "running", "completed", "cancelled"])
     assert.ok(css.includes(`.nce-vm-badge-${state}`), `stylesheet is missing badge ${state}`);
 
   const icons = read("src/assets/flaticon/all.css");
-  const usedIcons = new Set([...source.matchAll(/fi-rr-[a-z-]+/g)].map((match) => match[0]));
+  const usedIcons = new Set(
+    sources.flatMap((source) => [...source.matchAll(/fi-rr-[a-z-]+/g)].map((match) => match[0])),
+  );
   for (const icon of usedIcons)
     assert.ok(new RegExp(`\\.${icon}(?![a-z-])`).test(icons), `icon subset is missing ${icon}`);
 });
