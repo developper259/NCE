@@ -484,7 +484,11 @@ test("details show real fields, provenance, verify, and a read-only external pan
 
   const uninstallButtons = descendants(manager.main).filter((node) =>
     node.tagName === "button" && textOf(node).includes("Uninstall"));
-  assert.equal(uninstallButtons.length, 1, "only the managed installation offers Uninstall");
+  assert.equal(uninstallButtons.length, 2, "the header shortcut plus the managed installation block");
+  const externalZone = descendants(manager.main).find((node) =>
+    node.classList?.contains("nce-vm-install-zone-external"));
+  assert.equal(descendants(externalZone).filter((node) => node.tagName === "button").length, 0,
+    "the external installation offers no actions");
 
   byFocusKey(manager.main, `vm-verify-${record.id}`).click();
   await flush();
@@ -494,6 +498,93 @@ test("details show real fields, provenance, verify, and a read-only external pan
   assert.match(textOf(manager.main), /No packages available\./);
   assert.equal(document.activeElement?.dataset?.focusKey, "vm-details-git",
     "closing the detail returns focus to its card");
+});
+
+test("the detail page keeps two columns and honest zones through every state", async () => {
+  const record = gitRecord();
+  const external = { executable: "/usr/bin/git", version: "2.39.5", detectedAt: Date.UTC(2026, 10, 1) };
+  const { state, manager } = setup([gitPackage({ external })]);
+  manager.show();
+  await flush();
+  manager.openDetail("git");
+
+  const columns = () => descendants(manager.main).filter((node) => node.classList?.contains("nce-vm-detail-col"));
+  const left = () => columns()[0];
+  const right = () => columns()[1];
+  const uninstallButtons = () => descendants(manager.main).filter((node) =>
+    node.tagName === "button" && textOf(node).includes("Uninstall"));
+  assert.equal(columns().length, 2, "the detail is a two-column page");
+  assert.match(textOf(left()), /State and installations/);
+  assert.match(textOf(right()), /About/);
+  assert.match(textOf(right()), /Information/);
+
+  // State A + external detection: install lives in the header, left stays compact.
+  assert.ok(byFocusKey(manager.main, "vm-install-git"));
+  assert.match(textOf(left()), /Not installed\. NCE can install this package into its managed tools directory\./);
+  assert.match(textOf(left()), /External installation/);
+  assert.match(textOf(left()), /\/usr\/bin\/git/);
+  assert.match(textOf(left()), /never modifies or uninstalls external tools/);
+  assert.equal(uninstallButtons().length, 0, "nothing is uninstallable before an NCE install");
+  assert.equal(descendants(manager.main).filter((node) => node.classList?.contains("nce-vm-empty")).length, 0,
+    "no big empty panel for the missing installation");
+
+  // Right column: full description and only real metadata, homepage as a real link.
+  assert.match(textOf(right()), /Distributed version control system/);
+  assert.match(textOf(right()), /dugite-native/);
+  assert.match(textOf(right()), /2\.56\.1/);
+  assert.match(textOf(right()), /Tools/);
+  assert.match(textOf(right()), /darwin, linux, win32/);
+  const link = descendants(right()).find((node) => node.tagName === "a");
+  assert.equal(link.getAttribute("href"), "https://git-scm.com");
+  assert.equal(link.getAttribute("target"), "_blank");
+  assert.equal(link.getAttribute("rel"), "noopener noreferrer");
+  assert.ok(manager.focusableElements().includes(link), "the homepage link is keyboard reachable");
+  assert.equal(descendants(manager.main).filter((node) => node.classList?.contains("nce-vm-category-tag")).length, 0,
+    "categories are not duplicated between header and columns");
+
+  // States B and D: managed and external installations stay separate blocks.
+  state.snapshot.packages[0] = gitPackage({ state: "installed", installations: [record], external });
+  manager.reload();
+  await flush();
+  assert.equal(descendants(left()).filter((node) => node.classList?.contains("nce-vm-install-zone")).length, 2);
+  assert.match(textOf(left()), /Managed by NCE/);
+  assert.match(textOf(left()), /\/userData\/tools\/git\/2\.56\.1/);
+  assert.equal(uninstallButtons().length, 2, "header shortcut plus per-installation action");
+  assert.ok(byFocusKey(manager.main, `vm-verify-${record.id}`));
+  assert.ok(byFocusKey(manager.main, `vm-header-uninstall-${record.id}`));
+
+  // State E: real progress inside the installation zone, package info stays visible.
+  state.emit({ type: "operation", operation: runningOperation({ progress: { percent: 42, step: "Downloading" } }) });
+  await flush();
+  const progress = descendants(left()).find((node) => node.classList?.contains("nce-vm-install-progress"));
+  assert.match(textOf(progress), /Downloading · 42%/);
+  const fill = descendants(progress).find((node) => node.classList?.contains("nce-vm-progress-fill"));
+  assert.equal(fill.style.width, "42%");
+  assert.ok(byFocusKey(manager.main, "vm-cancel-install-git"));
+  assert.match(textOf(right()), /Distributed version control system/, "the about column survives the operation");
+
+  // State F: the error stays inside the installations column with a real retry.
+  state.snapshot.packages[0] = gitPackage({
+    external,
+    lastError: { code: "INSTALL_FAILED", message: "checksum mismatch", at: Date.UTC(2026, 10, 17) },
+  });
+  state.emit({ type: "operation", operation: runningOperation({ state: "failed", finishedAt: Date.UTC(2026, 10, 17) }) });
+  await flush();
+  const errorPanel = descendants(left()).find((node) => node.classList?.contains("nce-vm-error"));
+  assert.ok(errorPanel, "the error is presented in the concerned zone");
+  assert.match(textOf(errorPanel), /INSTALL_FAILED/);
+  assert.match(textOf(errorPanel), /checksum mismatch/);
+  assert.ok(byFocusKey(manager.main, "vm-retry-git"));
+  assert.equal(descendants(right()).some((node) => node.classList?.contains("nce-vm-error")), false,
+    "a localized error does not paint the whole page");
+
+  // Uninstalling: progress note in the zone, no verify or uninstall while busy.
+  state.snapshot.packages[0] = gitPackage({ state: "installed", installations: [record], external });
+  state.emit({ type: "operation", operation: runningOperation({ kind: "uninstall" }) });
+  await flush();
+  assert.match(textOf(left()), /Uninstalling…/);
+  assert.equal(byFocusKey(manager.main, `vm-verify-${record.id}`), null);
+  assert.equal(uninstallButtons().length, 0, "no uninstall action while one is running");
 });
 
 test("uninstall asks a specific confirmation and only then calls the API", async () => {

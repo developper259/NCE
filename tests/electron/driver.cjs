@@ -3466,6 +3466,9 @@ app.whenReady().then(() => {
         assert.equal(versionManagerResult.uninstalled, true);
         assert.equal(versionManagerResult.escapeClosed, true);
         assert.equal(versionManagerResult.sidebarReopened, true);
+        assert.equal(versionManagerResult.twoColumns, true, "the detail page renders two columns");
+        assert.equal(versionManagerResult.stackedSmall, true, "the detail columns stack on a small window");
+        assert.equal(versionManagerResult.homepageLink, true, "the homepage opens as a real external link");
         assert.equal(
           fs.existsSync(plantedGitDir),
           false,
@@ -3482,6 +3485,52 @@ app.whenReady().then(() => {
             versionManagerScreenshotPath,
             (await win.capturePage()).toPNG(),
           );
+        }
+        const versionManagerDetailScreenshotPath = process.env.NCE_VERSION_MANAGER_DETAIL_SCREENSHOT_PATH;
+        if (versionManagerDetailScreenshotPath) {
+          // capturePage() can return the last committed frame: let the detail
+          // paint settle, then prove the catalog is gone before capturing.
+          const settleDetailPaint = async () => {
+            await run(`new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`);
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            assert.equal(
+              await run(`Boolean(document.querySelector(".nce-vm-detail-name")) && document.querySelectorAll(".nce-vm-group-title").length === 0`),
+              true,
+              "the detail page is painted before the screenshot",
+            );
+          };
+          await run(`(() => { editor.versionManager.openDetail("git"); return true; })()`);
+          await waitForCondition(async () => {
+            try {
+              return await run(`Boolean(document.querySelector(".nce-vm-detail-name"))`);
+            } catch {
+              return false;
+            }
+          });
+          await settleDetailPaint();
+          fs.writeFileSync(
+            versionManagerDetailScreenshotPath,
+            (await win.capturePage()).toPNG(),
+          );
+          const versionManagerStackedScreenshotPath = process.env.NCE_VERSION_MANAGER_STACKED_SCREENSHOT_PATH;
+          if (versionManagerStackedScreenshotPath) {
+            await run(`window.resizeTo(800, 700)`);
+            await waitForCondition(async () => (await run("window.innerWidth")) === 800, {
+              timeout: 10000,
+              description: "the stacked screenshot viewport",
+            });
+            await settleDetailPaint();
+            fs.writeFileSync(
+              versionManagerStackedScreenshotPath,
+              (await win.capturePage()).toPNG(),
+            );
+            await run(`window.resizeTo(1100, 760)`);
+            await waitForCondition(async () => (await run("window.innerWidth")) === 1100, {
+              timeout: 10000,
+              description: "the restored screenshot viewport",
+            });
+          }
+          await run(`(() => { editor.versionManager.closeDetail(); return true; })()`);
         }
         traceStep("Version Manager popup checks passed");
       } else {

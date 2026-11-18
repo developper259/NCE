@@ -102,23 +102,65 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     () => document.querySelector(".nce-vm-detail-name")?.textContent === "Git",
     "the Git detail view",
   );
+  const columnsOf = () => [...document.querySelectorAll(".nce-vm-detail-col")];
+  const leftCol = () => columnsOf()[0];
+  const rightCol = () => columnsOf()[1];
+  const tracks = () => getComputedStyle(document.querySelector(".nce-vm-detail-columns"))
+    .gridTemplateColumns.split(" ").length;
+  check(columnsOf().length === 2, "the detail page has two columns");
+  check(leftCol().textContent.includes("State and installations"), "the left column covers state and installations");
+  check(rightCol().textContent.includes("About") && rightCol().textContent.includes("Information"),
+    "the right column covers about and information");
+  check(tracks() === 2, "both columns render side by side at full window size");
   const detailText = main().textContent;
   check(detailText.includes("Managed by NCE"), "provenance is shown");
   check(detailText.includes(plantedInstallDir), "the detail shows the real location");
   check(detailText.includes(`${plantedInstallDir}/bin/git`), "the detail shows the executable");
   const info = await gitInfo();
-  const externalPanel = document.querySelector(".nce-vm-badge-external");
-  if (externalPanel) {
-    check(info.external, "the external panel reflects a real detection");
-    const panel = externalPanel.closest(".nce-vm-panel");
-    check(!panel.querySelector("button"), "the external installation offers no actions");
-    check(panel.textContent.includes("never modifies or uninstalls external tools"), "the external guarantee is stated");
+  check(rightCol().textContent.includes(info.description), "the about column shows the full description");
+  const homepage = rightCol().querySelector("a.nce-vm-link");
+  check(
+    Boolean(homepage) &&
+    new URL(homepage.href).href === new URL(info.homepage).href &&
+    homepage.target === "_blank",
+    "the homepage is a real external link",
+  );
+  check(!document.querySelector(".nce-vm-detail-header .nce-vm-category-tag"),
+    "categories are not duplicated in the header");
+  const externalZone = document.querySelector(".nce-vm-install-zone-external");
+  if (externalZone) {
+    check(info.external, "the external zone reflects a real detection");
+    check(!externalZone.querySelector("button"), "the external installation offers no actions");
+    check(externalZone.textContent.includes("never modifies or uninstalls external tools"), "the external guarantee is stated");
   }
   const uninstallButtons = [...main().querySelectorAll("button")]
     .filter((button) => button.textContent.includes("Uninstall"));
-  check(uninstallButtons.length === 1, "only the managed installation can be uninstalled");
+  check(uninstallButtons.length === 1 + info.installations.length,
+    "header shortcut plus one action per managed installation");
+  check(uninstallButtons.every((button) => !externalZone?.contains(button)),
+    "no uninstall action targets the external installation");
 
-  uninstallButtons[0].click();
+  // Window adaptation: stack below the breakpoint, keep paths readable, scroll.
+  const locationValue = [...leftCol().querySelectorAll(".nce-vm-field-value")]
+    .find((node) => node.textContent.includes(plantedInstallDir));
+  check(locationValue.scrollWidth <= locationValue.clientWidth, "the install path wraps instead of clipping");
+  check(main().scrollWidth <= main().clientWidth, "no horizontal overflow at full size");
+  window.resizeTo(800, 700);
+  await waitFor(() => innerWidth === 800, "the window to reach its minimum width");
+  await nextFrame();
+  check(tracks() === 1, "the columns stack on a small window");
+  check(main().scrollWidth <= main().clientWidth, "no horizontal overflow when stacked");
+  check(locationValue.scrollWidth <= locationValue.clientWidth, "paths stay readable when stacked");
+  check(main().scrollHeight > main().clientHeight, "the stacked detail scrolls vertically");
+  main().scrollTop = 120;
+  check(main().scrollTop > 0, "the detail scroll container responds");
+  main().scrollTop = 0;
+  window.resizeTo(1100, 760);
+  await waitFor(() => innerWidth === 1100, "the window to return to full size");
+  await nextFrame();
+  check(tracks() === 2, "the two columns return on a large window");
+
+  document.querySelector('[data-focus-key^="vm-uninstall-"]').click();
   await waitFor(() => document.querySelector(".nce-vm-confirm"), "the uninstall confirmation");
   const confirmText = document.querySelector(".nce-vm-confirm").textContent;
   check(confirmText.includes("Uninstall Git 2.56.1?"), "the confirmation names the package and version");
@@ -133,8 +175,7 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   await waitFor(() => !document.querySelector(".nce-vm-confirm"), "the confirmation to dismiss");
   check((await gitInfo()).installations.length === 1, "cancelling keeps the installation");
 
-  [...main().querySelectorAll("button")]
-    .find((button) => button.textContent.includes("Uninstall")).click();
+  document.querySelector('[data-focus-key^="vm-uninstall-"]').click();
   await waitFor(() => document.querySelector(".nce-vm-confirm"), "the confirmation to reopen");
   document.querySelector('[data-focus-key^="vm-confirm-uninstall-"]').click();
   await waitFor(
@@ -145,6 +186,11 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     () => main().textContent.includes("Not installed"),
     "the detail to reflect the removal",
   );
+  check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')),
+    "the header offers the install action again after removal");
+  // Escape refuses to close while an operation is running; let the uninstall
+  // settle in the manager's own state, not only in the main-process store.
+  await waitFor(() => !editor.versionManager.activeOperation(), "the uninstall operation to settle");
 
   host().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
   await waitFor(() => host().hidden, "Escape to close the popup");
@@ -228,7 +274,10 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     noNavigation: true,
     versionFromBinary: true,
     searchWorks: true,
-    externalPanel: Boolean(externalPanel),
+    externalZone: Boolean(externalZone),
+    twoColumns: true,
+    stackedSmall: true,
+    homepageLink: true,
     confirmationSpecific: true,
     uninstalled: true,
     escapeClosed: true,

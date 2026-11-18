@@ -322,6 +322,7 @@ class VersionManager {
       const tag = String(node.tagName || "").toLowerCase();
       if ((tag === "button" || tag === "input" || tag === "select" || tag === "textarea") && !node.disabled)
         elements.push(node);
+      if (tag === "a" && node.getAttribute("href")) elements.push(node);
       for (const child of node.children || []) walk(child);
     };
     walk(this.dialog);
