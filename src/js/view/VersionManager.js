@@ -178,6 +178,8 @@ class VersionManager {
 
   hide() {
     if (!this.host || this.host.hidden) return false;
+    // A reload still in flight must not render (and reclaim focus) mid-close.
+    this.reloadSequence++;
     this.host.classList.remove("nce-vm-open");
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -188,7 +190,10 @@ class VersionManager {
       if (!this.host) return;
       this.host.hidden = true;
       this.host.setAttribute("aria-hidden", "true");
-      if (this.previousFocus?.isConnected && typeof this.previousFocus.focus === "function")
+      // Another surface (quick panel, tab, sidebar) may already own focus.
+      const active = document.activeElement;
+      const focusStillOurs = active === document.body || this.dialog?.contains?.(active);
+      if (focusStillOurs && this.previousFocus?.isConnected && typeof this.previousFocus.focus === "function")
         this.previousFocus.focus();
       this.previousFocus = null;
     };

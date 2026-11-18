@@ -43,6 +43,7 @@ class GoToLine {
   open() {
     const panel = this.editor.quickPanel;
     if (!panel) return false;
+    this.editor.versionManager?.hide();
     if (panel.isOpen("go-to-line")) {
       panel.input?.focus();
       return true;

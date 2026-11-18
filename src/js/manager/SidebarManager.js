@@ -492,6 +492,7 @@ class SidebarManager {
   }
 
   openSidebar(position) {
+    this.editor.versionManager?.hide();
     if (position === "left" && this.leftSidebar) {
       this.leftSidebar.classList.add("open");
       this.editor.domManager

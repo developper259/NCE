@@ -623,6 +623,68 @@ test("closing during an operation asks first and the operation continues in back
   assert.equal(state.getStateCalls, callsWhileHidden + 1);
 });
 
+test("surface hooks close the popup immediately even while an operation runs", async () => {
+  const { timers, state, manager } = setup();
+  manager.show();
+  await flush();
+  state.emit({ type: "operation", operation: runningOperation({ progress: { percent: 10 } }) });
+  await flush();
+
+  assert.equal(manager.hide(), true);
+  assert.equal(manager.confirmation, null, "hide() must not raise the close confirmation");
+  assert.equal(state.listeners.size, 0);
+  timers.tick(160);
+  assert.equal(manager.host.hidden, true);
+
+  const callsWhileHidden = state.getStateCalls;
+  state.emit({ type: "operation", operation: runningOperation({ state: "completed", finishedAt: Date.UTC(2026, 10, 17) }) });
+  await flush();
+  assert.equal(state.getStateCalls, callsWhileHidden, "the operation keeps finishing in main, not in the hidden popup");
+});
+
+test("closing behind another surface never steals its focus", async () => {
+  const { document, timers, manager } = setup();
+  const outsideButton = document.createElement("button");
+  document.body.appendChild(outsideButton);
+  outsideButton.focus();
+  manager.show();
+  await flush();
+
+  const panelInput = document.createElement("input");
+  document.body.appendChild(panelInput);
+  manager.hide();
+  panelInput.focus();
+  timers.tick(160);
+  assert.equal(manager.host.hidden, true);
+  assert.equal(document.activeElement, panelInput, "the surface that replaced the popup keeps focus");
+
+  outsideButton.focus();
+  manager.show();
+  await flush();
+  manager.hide();
+  timers.tick(160);
+  assert.equal(document.activeElement, outsideButton, "focus still returns when nothing else took it");
+});
+
+test("a reload in flight cannot reclaim focus after the popup closes", async () => {
+  const { document, timers, api, manager } = setup();
+  let resolveLoad;
+  const pending = new Promise((resolve) => { resolveLoad = resolve; });
+  const originalGetState = api.getState;
+  api.getState = () => pending;
+  manager.show();
+
+  const panelInput = document.createElement("input");
+  document.body.appendChild(panelInput);
+  manager.hide();
+  panelInput.focus();
+  resolveLoad(originalGetState());
+  await flush();
+  timers.tick(160);
+  assert.equal(manager.host.hidden, true);
+  assert.equal(document.activeElement, panelInput, "the stale reload must not render or refocus the closing popup");
+});
+
 test("inventory-changed events refresh the displayed installations", async () => {
   const { state, manager } = setup();
   manager.show();
@@ -978,6 +1040,8 @@ test("bundle, stylesheet, sidebar and icon wiring stay consistent", () => {
   assert.match(rootSource, /VersionManagerCatalog/);
   assert.doesNotMatch(rootSource, /VersionManagerNavigation|VersionManagerOverview/);
   const css = read("src/css/versionManager.css");
+  assert.match(css, /width:\s*min\(900px/, "the popup keeps its compact width cap");
+  assert.match(css, /height:\s*min\(600px/, "the popup keeps its compact height cap");
   assert.doesNotMatch(css, /\.nce-vm-nav|\.nce-vm-stat/);
   const usedClasses = new Set(
     sources.flatMap((source) => [...source.matchAll(/nce-vm-[a-z0-9-]+/g)].map((match) => match[0])),
@@ -993,4 +1057,28 @@ test("bundle, stylesheet, sidebar and icon wiring stay consistent", () => {
   );
   for (const icon of usedIcons)
     assert.ok(new RegExp(`\\.${icon}(?![a-z-])`).test(icons), `icon subset is missing ${icon}`);
+});
+
+test("every surface that opens a tab, sidebar or quick panel dismisses the Version Manager", () => {
+  const hooks = [
+    ["src/js/types/QuickPanel.js", "open(options"],
+    ["src/js/quickPanel/GoToLine.js", "open()"],
+    ["src/js/manager/SidebarManager.js", "openSidebar(position)"],
+    ["src/js/manager/TabManager.js", "setFocusTab(tab)"],
+    ["src/js/view/PerformanceDashboard.js", "show()"],
+  ];
+  for (const [file, method] of hooks) {
+    const source = read(file);
+    const methodIndex = source.indexOf(method);
+    assert.ok(methodIndex >= 0, `${file} defines ${method}`);
+    assert.ok(
+      source.indexOf("this.editor.versionManager?.hide()", methodIndex) >= 0,
+      `${file} hides the Version Manager when ${method} runs`,
+    );
+  }
+  const goToLine = read("src/js/quickPanel/GoToLine.js");
+  assert.ok(
+    goToLine.indexOf("this.editor.versionManager?.hide()") < goToLine.indexOf('isOpen("go-to-line")'),
+    "the hook runs before the already-open early return",
+  );
 });

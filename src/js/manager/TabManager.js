@@ -694,6 +694,7 @@ class tabManager {
 
   async setFocusTab(tab) {
     if (!tab) return;
+    this.editor.versionManager?.hide();
     const focusGeneration = ++this.focusGeneration;
     const previousFile = this.activeFile;
     if (previousFile && previousFile !== tab) {

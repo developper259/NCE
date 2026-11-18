@@ -94,6 +94,7 @@ class PerformanceDashboard {
 
   show() {
     if (!this.ensureDOM()) return false;
+    this.editor.versionManager?.hide();
     this.previousFocus = document.activeElement;
     this.host.hidden = false;
     this.host.setAttribute("aria-hidden", "false");

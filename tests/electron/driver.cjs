@@ -3446,13 +3446,17 @@ app.whenReady().then(() => {
         );
         assert.equal(versionManagerResult.opened, true);
         assert.ok(
-          versionManagerResult.widthRatio >= 0.85 && versionManagerResult.widthRatio <= 0.95,
-          "the popup width is immersive",
+          versionManagerResult.widthRatio >= 0.7 && versionManagerResult.widthRatio <= 0.85,
+          "the popup width stays compact",
         );
         assert.ok(
-          versionManagerResult.heightRatio >= 0.85 && versionManagerResult.heightRatio <= 0.95,
-          "the popup height is immersive",
+          versionManagerResult.heightRatio >= 0.7 && versionManagerResult.heightRatio <= 0.85,
+          "the popup height stays compact",
         );
+        assert.equal(versionManagerResult.paletteClosed, true, "opening the command palette closes the popup");
+        assert.equal(versionManagerResult.goToLineClosed, true, "opening Go to Line closes the popup");
+        assert.equal(versionManagerResult.sidebarClosed, true, "opening a sidebar closes the popup");
+        assert.equal(versionManagerResult.settingsTabClosed, true, "opening a tab closes the popup");
         assert.equal(versionManagerResult.dialogBlur, "none", "the popup itself is never blurred");
         assert.equal(versionManagerResult.sectionsOrdered, true, "Installed is followed by Available");
         assert.equal(versionManagerResult.noNavigation, true, "the single page has no section navigation");

@@ -84,6 +84,8 @@ class QuickPanel {
 
   open(options = {}) {
     if (!this.init()) return false;
+    // The Version Manager modal yields to any work surface that opens.
+    this.editor.versionManager?.hide();
     if (this.closeCleanupTimer) {
       clearTimeout(this.closeCleanupTimer);
       this.closeCleanupTimer = null;

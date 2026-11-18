@@ -59,8 +59,9 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(dialogStyle.backdropFilter === "none", "the popup itself is never blurred");
   const widthRatio = dialogRect.width / view.width;
   const heightRatio = dialogRect.height / view.height;
-  check(widthRatio >= 0.85 && widthRatio <= 0.95, `dialog width is immersive (${widthRatio})`);
-  check(heightRatio >= 0.85 && heightRatio <= 0.95, `dialog height is immersive (${heightRatio})`);
+  check(widthRatio >= 0.7 && widthRatio <= 0.85, `dialog width stays compact (${widthRatio})`);
+  check(heightRatio >= 0.7 && heightRatio <= 0.85, `dialog height stays compact (${heightRatio})`);
+  check(dialogRect.width <= 900 && dialogRect.height <= 600, "the dialog respects its compact size cap");
   check(dialogRect.left >= 32 && dialogRect.top >= 32, "the dialog keeps visible margins");
 
   const sectionTitles = [...document.querySelectorAll(".nce-vm-group-title")].map((node) => node.textContent);
@@ -174,6 +175,49 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')), "the Tools filter exposes Git");
   check(document.querySelector('[data-focus-key="vm-filter-all"]').getAttribute("aria-pressed") === "false", "the active filter is exposed");
 
+  // Every work surface that opens must dismiss the modal: quick panel modes,
+  // sidebars and tabs all route through the same dismissal hooks.
+  const reopen = async () => {
+    editor.openVersionManager();
+    await waitFor(() => !host().hidden, "the popup to reopen");
+  };
+  const expectClosed = (label) => waitFor(() => host().hidden, `${label} to close the popup`);
+  const closePanel = () => editor.quickPanel.close({ notifyCancel: false, restoreFocus: false });
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 240));
+  const expectPanelFocus = (label) =>
+    check(
+      document.activeElement === editor.quickPanel.input,
+      `${label} keeps focus after the popup finishes closing`,
+    );
+
+  await reopen();
+  editor.keyBinding.control_open_command();
+  await expectClosed("the command palette");
+  await settle();
+  expectPanelFocus("the command palette");
+  closePanel();
+
+  await reopen();
+  editor.goToLine.open();
+  await expectClosed("Go to Line");
+  await settle();
+  expectPanelFocus("Go to Line");
+  closePanel();
+
+  await reopen();
+  editor.sidebarManager.openMenu(editor.fileExplorer.id);
+  await expectClosed("the explorer sidebar");
+
+  await reopen();
+  await editor.openSettings();
+  await expectClosed("the settings tab");
+
+  await reopen();
+  await waitFor(
+    () => document.querySelectorAll(".nce-vm-group-title").length === 2,
+    "the catalog to survive the dismissal round-trip",
+  );
+
   return {
     opened: true,
     widthRatio,
@@ -190,5 +234,9 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     escapeClosed: true,
     sidebarReopened: true,
     filtersWork: true,
+    paletteClosed: true,
+    goToLineClosed: true,
+    sidebarClosed: true,
+    settingsTabClosed: true,
   };
 };
