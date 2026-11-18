@@ -8,8 +8,8 @@ class VersionManagerModel {
     if (!filter || !filter.categories) return true;
     const categories = packageInfo.categories || [];
     if (filterId === "other") {
-      return categories.length === 0 || categories.some((category) =>
-        category === "other" || !VersionManagerModel.CATEGORY_LABELS[category]);
+      return !VersionManagerModel.matchesFilter(packageInfo, "languages") &&
+        !VersionManagerModel.matchesFilter(packageInfo, "tools");
     }
     return categories.some((category) => filter.categories.includes(category));
   }
@@ -71,40 +71,20 @@ class VersionManagerModel {
     return installation?.version || packageInfo.installableVersion || "";
   }
 
-  static latestInstalledAt(packageInfo) {
-    return Math.max(0, ...(packageInfo.installations || []).map((record) => record.installedAt || 0));
+  static sortByName(packages) {
+    return [...packages].sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  static latestUpdatedAt(packageInfo) {
-    return Math.max(0, ...(packageInfo.installations || []).map((record) => record.updatedAt || record.installedAt || 0));
-  }
-
-  static sortPackages(packages, sort) {
-    const entries = [...packages];
-    const byName = (a, b) => a.name.localeCompare(b.name);
-    if (sort === "recent-installed") {
-      return entries.sort((a, b) =>
-        VersionManagerModel.latestInstalledAt(b) - VersionManagerModel.latestInstalledAt(a) || byName(a, b));
-    }
-    if (sort === "recent-updated") {
-      return entries.sort((a, b) =>
-        VersionManagerModel.latestUpdatedAt(b) - VersionManagerModel.latestUpdatedAt(a) || byName(a, b));
-    }
-    return entries.sort(byName);
-  }
-
-  static catalogSections(packages, { filter = "all", query = "", sort = "name" } = {}) {
+  static catalogSections(packages, { filter = "all", query = "" } = {}) {
     const visible = packages.filter((packageInfo) =>
       VersionManagerModel.matchesFilter(packageInfo, filter) &&
       VersionManagerModel.matchesSearch(packageInfo, query));
     return {
-      installed: VersionManagerModel.sortPackages(
+      installed: VersionManagerModel.sortByName(
         visible.filter((packageInfo) => VersionManagerModel.isInstalled(packageInfo)),
-        sort,
       ),
-      available: VersionManagerModel.sortPackages(
+      available: VersionManagerModel.sortByName(
         visible.filter((packageInfo) => !VersionManagerModel.isInstalled(packageInfo)),
-        sort,
       ),
     };
   }
@@ -133,17 +113,7 @@ VersionManagerModel.FILTERS = [
   { id: "all", label: "All", emptyLabel: "package", icon: "fi-rr-database", categories: null },
   { id: "languages", label: "Languages", emptyLabel: "language", icon: "fi-rr-code-simple", categories: ["language"] },
   { id: "tools", label: "Tools", emptyLabel: "tool", icon: "fi-rr-settings-sliders", categories: ["git"] },
-  { id: "runtimes", label: "Runtimes", emptyLabel: "runtime", icon: "fi-rr-terminal", categories: ["runtime"] },
-  { id: "compilers", label: "Compilers", emptyLabel: "compiler", icon: "fi-rr-file-code", categories: ["compiler"] },
-  { id: "toolchains", label: "Toolchains", emptyLabel: "toolchain", icon: "fi-rr-command", categories: ["toolchain"] },
-  { id: "language-servers", label: "Language Servers", emptyLabel: "language server", icon: "fi-rr-exchange", categories: ["language-server"] },
   { id: "other", label: "Other", emptyLabel: "other", icon: "fi-rr-database", categories: ["other"] },
-];
-
-VersionManagerModel.SORTS = [
-  { id: "name", label: "Name" },
-  { id: "recent-installed", label: "Recently installed" },
-  { id: "recent-updated", label: "Recently updated" },
 ];
 
 VersionManagerModel.CATEGORY_LABELS = {

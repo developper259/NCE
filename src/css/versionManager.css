@@ -169,7 +169,7 @@
 .nce-vm-empty-description { max-width: 460px; margin: 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 .nce-vm-empty .nce-vm-button { margin-top: 8px; }
 
-/* Search and sort */
+/* Search */
 .nce-vm-toolbar-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .nce-vm-toolbar-row .nce-vm-search { flex: 1; }
 .nce-vm-search {
@@ -198,26 +198,6 @@
   font-size: 12px;
 }
 .nce-vm-search-input::placeholder { color: var(--text-tertiary); }
-
-.nce-vm-sort { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.nce-vm-sort-label { color: var(--text-tertiary); font-size: 11px; }
-.nce-vm-sort-select-wrap { position: relative; display: inline-flex; align-items: center; }
-.nce-vm-sort-select-wrap > i { position: absolute; right: 9px; color: var(--text-tertiary); font-size: 10px; pointer-events: none; }
-.nce-vm-select {
-  height: 32px;
-  box-sizing: border-box;
-  padding: 0 28px 0 10px;
-  border: 1px solid var(--border-secondary);
-  border-radius: 4px;
-  outline: none;
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-  appearance: none;
-}
-.nce-vm-select:hover { border-color: var(--text-tertiary); }
 
 /* Category filters */
 .nce-vm-filter-bar { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -511,7 +491,6 @@
   .nce-vm-header { padding: 10px 12px; }
   .nce-vm-subtitle { display: none; }
   .nce-vm-toolbar-row { align-items: stretch; flex-direction: column; }
-  .nce-vm-sort { justify-content: space-between; }
   .nce-vm-detail-meta { grid-template-columns: 1fr; }
   .nce-vm-footer-progress { flex-basis: 140px; }
   .nce-vm-detail-header { flex-wrap: wrap; }

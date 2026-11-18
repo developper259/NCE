@@ -28,7 +28,6 @@ class VersionManager {
   get loadError() { return this.state.loadError; }
   set loadError(value) { this.state.loadError = value; }
   get filter() { return this.state.filter; }
-  get sort() { return this.state.sort; }
   get searchQuery() { return this.state.searchQuery; }
   get selectedPackageId() { return this.state.selectedPackageId; }
   get operations() { return this.state.operations; }
@@ -283,13 +282,6 @@ class VersionManager {
     this.renderHeaderControls();
     this.renderMain();
     this.focusByKey(`vm-filter-${filterId}`);
-  }
-
-  setSort(sortId) {
-    this.state.setSort(sortId);
-    this.renderHeaderControls();
-    this.renderMain();
-    this.focusByKey("vm-sort");
   }
 
   setSearchQuery(query) {

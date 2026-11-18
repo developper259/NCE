@@ -161,6 +161,11 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')), "Available offers a real Git install action");
   check(!main().textContent.includes("Update"), "no fake update actions are offered");
 
+  check(!document.querySelector('[data-focus-key="vm-sort"]'), "there is no sort control");
+  const filterButtons = [...document.querySelectorAll('[data-focus-key^="vm-filter-"]')];
+  check(filterButtons.length === 4, "the header keeps four category filters");
+  check(!document.querySelector('[data-focus-key="vm-filter-runtimes"]'), "removed filters are gone");
+
   document.querySelector('[data-focus-key="vm-filter-languages"]').click();
   await nextFrame();
   check(main().textContent.includes("No language packages yet"), "empty categories stay honest");

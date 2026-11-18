@@ -304,8 +304,16 @@ test("Version Manager stays uncreated until first open, then loads and focuses",
   assert.match(textOf(manager.main), /No packages installed yet\./);
   assert.match(textOf(manager.main), /Git/);
   assert.ok(byFocusKey(manager.headerControls, "vm-search"));
-  assert.ok(byFocusKey(manager.headerControls, "vm-sort"));
-  assert.ok(byFocusKey(manager.headerControls, "vm-filter-all"));
+  assert.equal(byFocusKey(manager.headerControls, "vm-sort"), null, "there is no sort control");
+  const filterKeys = descendants(manager.headerControls)
+    .filter((node) => node.dataset?.focusKey?.startsWith("vm-filter-"))
+    .map((node) => node.dataset.focusKey);
+  assert.deepEqual(filterKeys, [
+    "vm-filter-all",
+    "vm-filter-languages",
+    "vm-filter-tools",
+    "vm-filter-other",
+  ]);
   assert.match(manager.footerStatus.textContent, /0 installed · 1 available/);
 
   assert.equal(manager.hide(), true);
@@ -683,7 +691,7 @@ test("the page keeps both sections in order and renders each package once", asyn
     "a package is rendered exactly once even when it has several categories");
 });
 
-test("catalog model dedupes categories, sorts by install date and searches real fields", () => {
+test("catalog model dedupes categories, sorts by name and searches real fields", () => {
   const Model = loadGlobals(
     ["src/js/versionManager/VersionManagerModel.js"],
     "VersionManagerModel",
@@ -724,17 +732,18 @@ test("catalog model dedupes categories, sorts by install date and searches real 
   assert.deepEqual(Array.from(tools.available), []);
 
   const other = Model.catalogSections(packages, { filter: "other" });
-  assert.deepEqual(Array.from(other.installed, (entry) => entry.id), ["zeta"]);
+  assert.deepEqual(Array.from(other.installed), []);
   assert.deepEqual(Array.from(other.available), []);
 
   const languages = Model.catalogSections(packages, { filter: "languages" });
   assert.deepEqual(Array.from(languages.installed), []);
   assert.deepEqual(Array.from(languages.available, (entry) => entry.id), ["beta"]);
 
-  const recent = Model.catalogSections(packages, { filter: "all", sort: "recent-installed" });
-  assert.deepEqual(Array.from(recent.installed, (entry) => entry.id), ["alpha", "zeta"]);
-  const updated = Model.catalogSections(packages, { filter: "all", sort: "recent-updated" });
-  assert.deepEqual(Array.from(updated.installed, (entry) => entry.id), ["zeta", "alpha"]);
+  const runtime = gitPackage({ id: "runtime", name: "Runtime", categories: ["runtime"], installations: [] });
+  const runtimeOther = Model.catalogSections([runtime], { filter: "other" });
+  assert.deepEqual(Array.from(runtimeOther.available, (entry) => entry.id), ["runtime"]);
+  assert.deepEqual(Array.from(Model.catalogSections([runtime], { filter: "tools" }).available), []);
+  assert.deepEqual(Array.from(Model.catalogSections([runtime], { filter: "languages" }).available), []);
 
   const searched = Model.catalogSections(packages, { filter: "all", query: "tools" });
   assert.deepEqual(Array.from(searched.installed, (entry) => entry.id), ["alpha", "zeta"]);

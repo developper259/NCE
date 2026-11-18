@@ -1,7 +1,7 @@
 /**
- * Header controls for the single-page catalog: global search, sorting and the
- * category filters. Kept apart from the page body so the chrome stays stable
- * while results change underneath it.
+ * Header controls for the single-page catalog: global search and category
+ * filters. Kept apart from the page body so the chrome stays stable while
+ * results change underneath it.
  */
 class VersionManagerHeader {
   static render(manager) {
@@ -14,12 +14,11 @@ class VersionManagerHeader {
 
   static toolbar(manager) {
     const row = VersionManagerUI.element("div", "nce-vm-toolbar-row");
-    row.append(
+    row.appendChild(
       VersionManagerUI.searchField(manager.searchQuery, (value) => manager.setSearchQuery(value), {
         placeholder: "Search packages by name or description",
         ariaLabel: "Search packages",
       }),
-      VersionManagerUI.sortField(manager.sort, (value) => manager.setSort(value)),
     );
     return row;
   }

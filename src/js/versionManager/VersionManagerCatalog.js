@@ -9,7 +9,6 @@ class VersionManagerCatalog {
     const sections = VersionManagerModel.catalogSections(packages, {
       filter: manager.filter,
       query: manager.searchQuery,
-      sort: manager.sort,
     });
 
     const fragment = document.createDocumentFragment();

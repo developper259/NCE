@@ -84,25 +84,4 @@ class VersionManagerUI {
     wrap.append(VersionManagerUI.icon("fi-rr-search"), input);
     return wrap;
   }
-
-  static sortField(value, onChange) {
-    const wrap = VersionManagerUI.element("label", "nce-vm-sort");
-    wrap.appendChild(VersionManagerUI.element("span", "nce-vm-sort-label", "Sort"));
-    const selectWrap = VersionManagerUI.element("span", "nce-vm-sort-select-wrap");
-    const select = document.createElement("select");
-    select.className = "nce-vm-select";
-    select.dataset.focusKey = "vm-sort";
-    select.setAttribute("aria-label", "Sort packages");
-    for (const sort of VersionManagerModel.SORTS) {
-      const option = document.createElement("option");
-      option.value = sort.id;
-      option.textContent = sort.label;
-      select.appendChild(option);
-    }
-    select.value = value || "name";
-    select.addEventListener("change", () => onChange(select.value));
-    selectWrap.append(select, VersionManagerUI.icon("fi-rr-angle-small-down"));
-    wrap.appendChild(selectWrap);
-    return wrap;
-  }
 }

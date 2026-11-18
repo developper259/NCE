@@ -9,7 +9,6 @@ class VersionManagerState {
     this.loading = false;
     this.loadError = null;
     this.filter = "all";
-    this.sort = "name";
     this.searchQuery = "";
     this.selectedPackageId = null;
     this.confirmation = null;
@@ -19,10 +18,6 @@ class VersionManagerState {
   setFilter(filter) {
     this.filter = filter;
     this.confirmation = null;
-  }
-
-  setSort(sort) {
-    this.sort = sort;
   }
 
   setSearchQuery(query) {
