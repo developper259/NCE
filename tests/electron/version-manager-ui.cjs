@@ -149,6 +149,19 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(uninstallButtons.every((button) => !externalZone?.contains(button)),
     "no uninstall action targets the external installation");
 
+  // The two-column block sits low on the page with a wide gutter between
+  // installations and package information.
+  const headerRect = rectOf(document.querySelector(".nce-vm-detail-header"));
+  const columnsElement = document.querySelector(".nce-vm-detail-columns");
+  const columnsRect = rectOf(columnsElement);
+  check(columnsRect.top >= headerRect.bottom + 24,
+    `the detail columns sit below the header (${columnsRect.top - headerRect.bottom}px)`);
+  const columnsStyle = getComputedStyle(columnsElement);
+  check(columnsStyle.columnGap === "40px",
+    `the two columns keep a wide gutter (got ${columnsStyle.columnGap})`);
+  check(rectOf(rightCol()).left - rectOf(leftCol()).right >= 39,
+    "the second column is separated from the first");
+
   const backButton = document.querySelector('[data-focus-key="vm-back"]');
   check(Boolean(backButton), "the detail page offers a Back action");
   backButton.click();

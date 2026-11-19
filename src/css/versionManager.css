@@ -470,12 +470,13 @@
 .nce-vm-detail-columns {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 26px;
+  gap: 40px;
   align-items: start;
+  margin-top: 30px;
 }
 .nce-vm-detail-col { min-width: 0; }
 .nce-vm-detail-col + .nce-vm-detail-col {
-  padding-left: 26px;
+  padding-left: 40px;
   border-left: 1px solid var(--border-primary);
 }
 .nce-vm-detail-col-title {
@@ -573,8 +574,8 @@
 .nce-vm-error .nce-vm-button { flex: 0 0 auto; margin-left: auto; }
 
 @media (max-width: 900px) {
-  .nce-vm-detail-columns { gap: 20px; }
-  .nce-vm-detail-col + .nce-vm-detail-col { padding-left: 20px; }
+  .nce-vm-detail-columns { gap: 24px; }
+  .nce-vm-detail-col + .nce-vm-detail-col { padding-left: 24px; }
 }
 
 @media (max-width: 860px) {
