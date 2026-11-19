@@ -535,7 +535,14 @@ test("details show real fields, provenance, verify, and a read-only external pan
 
   const uninstallButtons = descendants(manager.main).filter((node) =>
     node.tagName === "button" && textOf(node).includes("Uninstall"));
-  assert.equal(uninstallButtons.length, 2, "the header shortcut plus the managed installation block");
+  assert.equal(uninstallButtons.length, 1, "the header offers the only uninstall action");
+  const headerActions = descendants(manager.main).find((node) =>
+    node.classList?.contains("nce-vm-detail-actions"));
+  assert.ok(byFocusKey(headerActions, `vm-verify-${record.id}`), "Verify sits in the detail header");
+  assert.ok(byFocusKey(headerActions, `vm-header-uninstall-${record.id}`), "Uninstall sits in the detail header");
+  assert.equal(descendants(manager.main).filter((node) =>
+    node.tagName === "button" && node.dataset?.focusKey?.startsWith("vm-uninstall-")).length, 0,
+    "installation blocks no longer repeat the actions");
   const externalZone = descendants(manager.main).find((node) =>
     node.classList?.contains("nce-vm-install-zone-external"));
   assert.equal(descendants(externalZone).filter((node) => node.tagName === "button").length, 0,
@@ -614,7 +621,7 @@ test("the detail page keeps two columns and honest zones through every state", a
   assert.doesNotMatch(textOf(left()), /Location/);
   assert.doesNotMatch(textOf(left()), /example\.com\/git\.tar\.gz/);
   assert.doesNotMatch(textOf(left()), /Checksum/);
-  assert.equal(uninstallButtons().length, 2, "header shortcut plus per-installation action");
+  assert.equal(uninstallButtons().length, 1, "the header offers the only uninstall action");
   assert.ok(byFocusKey(manager.main, `vm-verify-${record.id}`));
   assert.ok(byFocusKey(manager.main, `vm-header-uninstall-${record.id}`));
 
@@ -662,7 +669,7 @@ test("uninstall asks a specific confirmation and only then calls the API", async
   await flush();
   manager.openDetail("git");
 
-  byFocusKey(manager.main, `vm-uninstall-${record.id}`).click();
+  byFocusKey(manager.main, `vm-header-uninstall-${record.id}`).click();
   const confirmText = textOf(manager.main);
   assert.match(confirmText, /Uninstall Git 2\.56\.1\?/);
   assert.match(confirmText, /This permanently removes \/userData\/tools\/git\/2\.56\.1\./);
@@ -674,7 +681,7 @@ test("uninstall asks a specific confirmation and only then calls the API", async
   assert.doesNotMatch(textOf(manager.main), /This permanently removes/);
   assert.deepEqual(state.uninstalls, []);
 
-  byFocusKey(manager.main, `vm-uninstall-${record.id}`).click();
+  byFocusKey(manager.main, `vm-header-uninstall-${record.id}`).click();
   byFocusKey(manager.main, `vm-confirm-uninstall-${record.id}`).click();
   await flush();
   assert.deepEqual(state.uninstalls, [record.id]);
@@ -728,8 +735,11 @@ test("install progress drives the footer and can be cancelled from the card", as
 
   manager.openDetail("git");
   assert.match(manager.footerStatus.textContent, /Install Git/);
-  assert.equal(byFocusKey(manager.main, `vm-verify-${record.id}`).disabled, true, "actions are disabled while busy");
-  assert.equal(byFocusKey(manager.main, `vm-uninstall-${record.id}`).disabled, true);
+  assert.ok(byFocusKey(manager.main, "vm-cancel-install-git"), "the header offers Cancel install while busy");
+  assert.equal(byFocusKey(manager.main, `vm-verify-${record.id}`), null,
+    "Verify leaves the header while installing");
+  assert.equal(byFocusKey(manager.main, `vm-header-uninstall-${record.id}`), null,
+    "Uninstall leaves the header while installing");
   byFocusKey(manager.main, "vm-back").click();
 
   state.emit({ type: "operation", operation: runningOperation() });

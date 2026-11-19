@@ -64,11 +64,20 @@ class VersionManagerPackageDetail {
     } else if (installed && state !== "uninstalling") {
       const primary = VersionManagerModel.primaryInstallation(packageInfo);
       if (primary) {
-        row.appendChild(VersionManagerUI.button("Uninstall", () => manager.askUninstall(primary.id), {
-          className: "nce-vm-button nce-vm-button-danger",
-          focusKey: `vm-header-uninstall-${primary.id}`,
-          icon: "fi-rr-trash",
-        }));
+        const operation = VersionManagerPackageDetail.operationFor(manager, packageInfo.id);
+        row.append(
+          VersionManagerUI.button("Verify", () => manager.verify(primary.id), {
+            icon: "fi-rr-refresh",
+            disabled: Boolean(operation),
+            focusKey: `vm-verify-${primary.id}`,
+          }),
+          VersionManagerUI.button("Uninstall", () => manager.askUninstall(primary.id), {
+            className: "nce-vm-button nce-vm-button-danger",
+            focusKey: `vm-header-uninstall-${primary.id}`,
+            icon: "fi-rr-trash",
+            disabled: Boolean(operation),
+          }),
+        );
       }
     }
     return row;
@@ -205,24 +214,11 @@ class VersionManagerPackageDetail {
     const uninstalling = record.state === "uninstalling" || operation?.kind === "uninstall";
     if (confirming) {
       actionRow.appendChild(VersionManagerPackageDetail.uninstallConfirmation(manager, packageInfo, record));
+      block.appendChild(actionRow);
     } else if (uninstalling) {
       actionRow.appendChild(VersionManagerUI.element("span", "nce-vm-note", "Uninstalling…"));
-    } else {
-      actionRow.append(
-        VersionManagerUI.button("Verify", () => manager.verify(record.id), {
-          icon: "fi-rr-refresh",
-          disabled: Boolean(operation),
-          focusKey: `vm-verify-${record.id}`,
-        }),
-        VersionManagerUI.button("Uninstall", () => manager.askUninstall(record.id), {
-          className: "nce-vm-button nce-vm-button-danger",
-          icon: "fi-rr-trash",
-          disabled: Boolean(operation),
-          focusKey: `vm-uninstall-${record.id}`,
-        }),
-      );
+      block.appendChild(actionRow);
     }
-    block.appendChild(actionRow);
     return block;
   }
 

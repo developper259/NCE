@@ -147,10 +147,20 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   }
   const uninstallButtons = [...main().querySelectorAll("button")]
     .filter((button) => button.textContent.includes("Uninstall"));
-  check(uninstallButtons.length === 1 + info.installations.length,
-    "header shortcut plus one action per managed installation");
+  check(uninstallButtons.length === 1, "the header offers the only uninstall action");
   check(uninstallButtons.every((button) => !externalZone?.contains(button)),
     "no uninstall action targets the external installation");
+  const headerActions = document.querySelector(".nce-vm-detail-actions");
+  const verifyButton = headerActions.querySelector('[data-focus-key^="vm-verify-"]');
+  const headerUninstall = headerActions.querySelector('[data-focus-key^="vm-header-uninstall-"]');
+  check(Boolean(verifyButton) && Boolean(headerUninstall), "the header offers Verify and Uninstall");
+  const verifyRect = rectOf(verifyButton);
+  const headerUninstallRect = rectOf(headerUninstall);
+  check(verifyRect.left < headerUninstallRect.left, "Verify sits to the left of Uninstall");
+  check(Math.abs(verifyRect.top - headerUninstallRect.top) <= 1,
+    "Verify and Uninstall share the header row");
+  check(leftCol().querySelectorAll(".nce-vm-install-actions button").length === 0,
+    "installation blocks no longer repeat the actions");
 
   // The two-column block sits low on the page with a wide gutter between
   // installations and package information.
@@ -211,7 +221,7 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   await nextFrame();
   check(tracks() === 2, "the two columns return on a large window");
 
-  document.querySelector('[data-focus-key^="vm-uninstall-"]').click();
+  document.querySelector('[data-focus-key^="vm-header-uninstall-"]').click();
   await waitFor(() => document.querySelector(".nce-vm-confirm"), "the uninstall confirmation");
   const confirmText = document.querySelector(".nce-vm-confirm").textContent;
   check(confirmText.includes("Uninstall Git 2.56.1?"), "the confirmation names the package and version");
@@ -226,7 +236,7 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   await waitFor(() => !document.querySelector(".nce-vm-confirm"), "the confirmation to dismiss");
   check((await gitInfo()).installations.length === 1, "cancelling keeps the installation");
 
-  document.querySelector('[data-focus-key^="vm-uninstall-"]').click();
+  document.querySelector('[data-focus-key^="vm-header-uninstall-"]').click();
   await waitFor(() => document.querySelector(".nce-vm-confirm"), "the confirmation to reopen");
   document.querySelector('[data-focus-key^="vm-confirm-uninstall-"]').click();
   await waitFor(
