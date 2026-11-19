@@ -187,22 +187,11 @@ class VersionManagerPackageDetail {
     );
     block.appendChild(head);
     block.append(
-      VersionManagerPackageDetail.field("Location", record.installDir, { mono: true, title: record.installDir }),
       VersionManagerPackageDetail.field("Executable", record.executable, { mono: true, title: record.executable }),
       VersionManagerPackageDetail.field("Platform", `${record.platform} / ${record.arch}`),
       VersionManagerPackageDetail.field("Installed", VersionManagerUI.formatDate(record.installedAt)),
       VersionManagerPackageDetail.field("Last verified", record.verifiedAt ? VersionManagerUI.formatDateTime(record.verifiedAt) : "Never"),
     );
-    if (record.source?.url) {
-      block.appendChild(VersionManagerPackageDetail.field("Source", record.source.url, { mono: true, title: record.source.url }));
-      if (record.source.checksum) {
-        block.appendChild(VersionManagerPackageDetail.field(
-          `Checksum (${record.source.checksumAlgorithm || "sha256"})`,
-          record.source.checksum,
-          { mono: true },
-        ));
-      }
-    }
     if (record.error) {
       block.appendChild(VersionManagerUI.element(
         "p",

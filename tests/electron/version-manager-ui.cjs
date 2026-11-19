@@ -123,8 +123,11 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(tracks() === 2, "both columns render side by side at full window size");
   const detailText = main().textContent;
   check(detailText.includes("Managed by NCE"), "provenance is shown");
-  check(detailText.includes(plantedInstallDir), "the detail shows the real location");
   check(detailText.includes(`${plantedInstallDir}/bin/git`), "the detail shows the executable");
+  const fieldLabels = [...leftCol().querySelectorAll(".nce-vm-field-label")].map((node) => node.textContent);
+  check(!fieldLabels.includes("Location"), "the detail hides the install location");
+  check(!fieldLabels.includes("Source"), "the detail hides the download source");
+  check(!fieldLabels.some((label) => label.startsWith("Checksum")), "the detail hides the checksum");
   const info = await gitInfo();
   check(rightCol().textContent.includes(info.description), "the about column shows the full description");
   const homepage = rightCol().querySelector("a.nce-vm-link");
@@ -187,16 +190,16 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   await nextFrame();
 
   // Window adaptation: stack below the breakpoint, keep paths readable, scroll.
-  const locationValue = [...leftCol().querySelectorAll(".nce-vm-field-value")]
+  const pathValue = [...leftCol().querySelectorAll(".nce-vm-field-value")]
     .find((node) => node.textContent.includes(plantedInstallDir));
-  check(locationValue.scrollWidth <= locationValue.clientWidth, "the install path wraps instead of clipping");
+  check(pathValue.scrollWidth <= pathValue.clientWidth, "the executable path wraps instead of clipping");
   check(main().scrollWidth <= main().clientWidth, "no horizontal overflow at full size");
   window.resizeTo(800, 700);
   await waitFor(() => innerWidth === 800, "the window to reach its minimum width");
   await nextFrame();
   check(tracks() === 1, "the columns stack on a small window");
   check(main().scrollWidth <= main().clientWidth, "no horizontal overflow when stacked");
-  check(locationValue.scrollWidth <= locationValue.clientWidth, "paths stay readable when stacked");
+  check(pathValue.scrollWidth <= pathValue.clientWidth, "paths stay readable when stacked");
   check(main().scrollHeight > main().clientHeight, "the stacked detail scrolls vertically");
   main().scrollTop = 120;
   check(main().scrollTop > 0, "the detail scroll container responds");

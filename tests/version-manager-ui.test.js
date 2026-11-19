@@ -524,10 +524,11 @@ test("details show real fields, provenance, verify, and a read-only external pan
 
   const text = textOf(manager.main);
   assert.match(text, /Managed by NCE/);
-  assert.match(text, /\/userData\/tools\/git\/2\.56\.1/);
   assert.match(text, /\/userData\/tools\/git\/2\.56\.1\/bin\/git/);
   assert.match(text, /darwin \/ x64/);
-  assert.match(text, /https:\/\/example\.com\/git\.tar\.gz/);
+  assert.doesNotMatch(text, /Location/);
+  assert.doesNotMatch(text, /example\.com\/git\.tar\.gz/);
+  assert.doesNotMatch(text, /Checksum/);
   assert.match(text, /External/);
   assert.match(text, /\/usr\/bin\/git/);
   assert.match(text, /never modifies or uninstalls external tools/);
@@ -609,7 +610,10 @@ test("the detail page keeps two columns and honest zones through every state", a
   await flush();
   assert.equal(descendants(left()).filter((node) => node.classList?.contains("nce-vm-install-zone")).length, 2);
   assert.match(textOf(left()), /Managed by NCE/);
-  assert.match(textOf(left()), /\/userData\/tools\/git\/2\.56\.1/);
+  assert.match(textOf(left()), /\/userData\/tools\/git\/2\.56\.1\/bin\/git/);
+  assert.doesNotMatch(textOf(left()), /Location/);
+  assert.doesNotMatch(textOf(left()), /example\.com\/git\.tar\.gz/);
+  assert.doesNotMatch(textOf(left()), /Checksum/);
   assert.equal(uninstallButtons().length, 2, "header shortcut plus per-installation action");
   assert.ok(byFocusKey(manager.main, `vm-verify-${record.id}`));
   assert.ok(byFocusKey(manager.main, `vm-header-uninstall-${record.id}`));
