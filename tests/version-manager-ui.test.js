@@ -515,6 +515,8 @@ test("details show real fields, provenance, verify, and a read-only external pan
   manager.show();
   await flush();
   byFocusKey(manager.main, "vm-details-git").click();
+  assert.equal(manager.headerControls.hidden, true,
+    "the detail page hides the catalog search and filters");
 
   const text = textOf(manager.main);
   assert.match(text, /Managed by NCE/);
@@ -539,6 +541,8 @@ test("details show real fields, provenance, verify, and a read-only external pan
   assert.deepEqual(state.verifies, [record.id]);
 
   byFocusKey(manager.main, "vm-back").click();
+  assert.equal(manager.headerControls.hidden, false,
+    "closing the detail restores the catalog search and filters");
   const titles = descendants(manager.main)
     .filter((node) => node.classList?.contains("nce-vm-group-title"))
     .map((node) => node.textContent);

@@ -368,6 +368,10 @@ class VersionManager {
 
   renderMain() {
     if (!this.main) return;
+    // The package detail is a self-contained page: search and filters only
+    // describe the catalog, so they leave the chrome while it is open.
+    if (this.headerControls)
+      this.headerControls.hidden = Boolean(this.state.selectedPackageId);
     if (this.loading) {
       this.main.replaceChildren(VersionManagerUI.emptyState("fi-rr-refresh", "Loading inventory…", ""));
       return;

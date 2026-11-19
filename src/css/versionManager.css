@@ -69,6 +69,7 @@
 }
 .nce-vm-close:hover { background: var(--bg-hover-alt); color: var(--text-primary); }
 .nce-vm-header-controls { display: flex; min-width: 0; flex-direction: column; gap: 8px; }
+.nce-vm-header-controls[hidden] { display: none; }
 
 .nce-vm-body { display: flex; flex: 1; min-height: 0; }
 .nce-vm-main {

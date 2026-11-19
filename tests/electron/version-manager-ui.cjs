@@ -107,6 +107,10 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     () => document.querySelector(".nce-vm-detail-name")?.textContent === "Git",
     "the Git detail view",
   );
+  const headerControls = document.querySelector(".nce-vm-header-controls");
+  check(headerControls.hidden === true, "the detail page hides the catalog search and filters");
+  check(getComputedStyle(headerControls).display === "none",
+    "the hidden catalog controls take no space");
   const columnsOf = () => [...document.querySelectorAll(".nce-vm-detail-col")];
   const leftCol = () => columnsOf()[0];
   const rightCol = () => columnsOf()[1];
@@ -144,6 +148,26 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     "header shortcut plus one action per managed installation");
   check(uninstallButtons.every((button) => !externalZone?.contains(button)),
     "no uninstall action targets the external installation");
+
+  const backButton = document.querySelector('[data-focus-key="vm-back"]');
+  check(Boolean(backButton), "the detail page offers a Back action");
+  backButton.click();
+  await waitFor(
+    () => document.querySelectorAll('[data-focus-key="vm-details-git"]').length === 1,
+    "the catalog to return after Back",
+  );
+  await nextFrame();
+  check(headerControls.hidden === false, "Back restores the catalog search and filters");
+  check(getComputedStyle(headerControls).display !== "none",
+    "the restored catalog controls take space again");
+  check(document.activeElement?.dataset?.focusKey === "vm-details-git",
+    "Back returns focus to the package card");
+  document.querySelector('[data-focus-key="vm-details-git"]').click();
+  await waitFor(
+    () => document.querySelector(".nce-vm-detail-name")?.textContent === "Git",
+    "the Git detail view to reopen",
+  );
+  await nextFrame();
 
   // Window adaptation: stack below the breakpoint, keep paths readable, scroll.
   const locationValue = [...leftCol().querySelectorAll(".nce-vm-field-value")]
