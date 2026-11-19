@@ -57,11 +57,15 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(hostStyle.backgroundColor === "rgba(0, 0, 0, 0.55)", "the backdrop is semi-transparent black");
   check(hostStyle.backdropFilter.includes("blur(6px)"), `the backdrop blurs the editor behind (got ${JSON.stringify(hostStyle.backdropFilter)})`);
   check(dialogStyle.backdropFilter === "none", "the popup itself is never blurred");
-  const widthRatio = dialogRect.width / view.width;
-  const heightRatio = dialogRect.height / view.height;
-  check(widthRatio >= 0.7 && widthRatio <= 0.85, `dialog width stays compact (${widthRatio})`);
-  check(heightRatio >= 0.7 && heightRatio <= 0.85, `dialog height stays compact (${heightRatio})`);
-  check(dialogRect.width <= 900 && dialogRect.height <= 600, "the dialog respects its compact size cap");
+  // The dialog is sized by CSS to min(900px, 100vw - 88px) by
+  // min(600px, 100vh - 88px). Compare against that real target instead of a
+  // viewport ratio: macOS runners expose a shorter viewport than the 600px
+  // cap, so a fixed ratio bound rejects a correctly sized dialog.
+  const expectedWidth = Math.min(900, view.width - 88);
+  const expectedHeight = Math.min(600, view.height - 88);
+  const compactSize = Math.abs(dialogRect.width - expectedWidth) <= 1
+    && Math.abs(dialogRect.height - expectedHeight) <= 1;
+  check(compactSize, `dialog matches its compact size (${dialogRect.width}x${dialogRect.height} vs ${expectedWidth}x${expectedHeight})`);
   check(dialogRect.left >= 32 && dialogRect.top >= 32, "the dialog keeps visible margins");
 
   const sectionTitles = [...document.querySelectorAll(".nce-vm-group-title")].map((node) => node.textContent);
@@ -291,8 +295,9 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
 
   return {
     opened: true,
-    widthRatio,
-    heightRatio,
+    compactSize,
+    dialogWidth: dialogRect.width,
+    dialogHeight: dialogRect.height,
     blur: hostStyle.backdropFilter,
     dialogBlur: dialogStyle.backdropFilter,
     sectionsOrdered: true,

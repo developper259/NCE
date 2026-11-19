@@ -3445,13 +3445,10 @@ app.whenReady().then(() => {
           `(${require("./version-manager-ui.cjs").toString()})(${JSON.stringify(plantedGitDir)})`,
         );
         assert.equal(versionManagerResult.opened, true);
-        assert.ok(
-          versionManagerResult.widthRatio >= 0.7 && versionManagerResult.widthRatio <= 0.85,
-          "the popup width stays compact",
-        );
-        assert.ok(
-          versionManagerResult.heightRatio >= 0.7 && versionManagerResult.heightRatio <= 0.85,
-          "the popup height stays compact",
+        assert.equal(
+          versionManagerResult.compactSize,
+          true,
+          `the popup matches its compact size (${versionManagerResult.dialogWidth}x${versionManagerResult.dialogHeight})`,
         );
         assert.equal(versionManagerResult.paletteClosed, true, "opening the command palette closes the popup");
         assert.equal(versionManagerResult.goToLineClosed, true, "opening Go to Line closes the popup");
