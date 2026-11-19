@@ -161,7 +161,9 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(main().scrollTop > 0, "the detail scroll container responds");
   main().scrollTop = 0;
   window.resizeTo(1100, 760);
-  await waitFor(() => innerWidth === 1100, "the window to return to full size");
+  // macOS clamps windows to the display work area, so require a viewport
+  // past the stacking breakpoint instead of an exact pixel width.
+  await waitFor(() => innerWidth >= 900, "the window to return to a wide layout");
   await nextFrame();
   check(tracks() === 2, "the two columns return on a large window");
 
