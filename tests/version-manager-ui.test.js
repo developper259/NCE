@@ -566,7 +566,13 @@ test("the detail page keeps two columns and honest zones through every state", a
   assert.match(textOf(right()), /Information/);
 
   // State A + external detection: install lives in the header, left stays compact.
-  assert.ok(byFocusKey(manager.main, "vm-install-git"));
+  const detailHeader = descendants(manager.main)
+    .find((node) => node.classList?.contains("nce-vm-detail-header"));
+  const installButton = byFocusKey(manager.main, "vm-install-git");
+  assert.ok(installButton);
+  assert.ok(detailHeader.contains(installButton), "the install action belongs to the detail header");
+  assert.equal(installButton.parent.parent, detailHeader,
+    "the install action sits beside the package name, not below it");
   assert.match(textOf(left()), /Not installed\. NCE can install this package into its managed tools directory\./);
   assert.match(textOf(left()), /External installation/);
   assert.match(textOf(left()), /\/usr\/bin\/git/);

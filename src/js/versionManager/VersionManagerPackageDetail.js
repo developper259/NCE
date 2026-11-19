@@ -25,9 +25,8 @@ class VersionManagerPackageDetail {
     if (packageInfo.description) {
       titles.appendChild(VersionManagerUI.element("p", "nce-vm-detail-description", packageInfo.description));
     }
-    header.append(icon, titles);
+    header.append(icon, titles, VersionManagerPackageDetail.actions(manager, packageInfo, state));
     fragment.appendChild(header);
-    fragment.appendChild(VersionManagerPackageDetail.actions(manager, packageInfo, state));
 
     const columns = VersionManagerUI.element("div", "nce-vm-detail-columns");
     columns.appendChild(VersionManagerPackageDetail.installationsColumn(manager, packageInfo, state));

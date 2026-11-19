@@ -189,6 +189,15 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   );
   check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')),
     "the header offers the install action again after removal");
+  const headerInstall = document.querySelector('[data-focus-key="vm-install-git"]');
+  const detailNameRect = rectOf(document.querySelector(".nce-vm-detail-name"));
+  const headerInstallRect = rectOf(headerInstall);
+  check(headerInstall.closest(".nce-vm-detail-header") !== null,
+    "the install action belongs to the detail header");
+  check(headerInstallRect.left > detailNameRect.right,
+    "the install action sits to the right of the package name");
+  check(headerInstallRect.top < detailNameRect.bottom,
+    "the install action does not sit below the package name");
   // Escape refuses to close while an operation is running; let the uninstall
   // settle in the manager's own state, not only in the main-process store.
   await waitFor(() => !editor.versionManager.activeOperation(), "the uninstall operation to settle");
