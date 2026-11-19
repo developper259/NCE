@@ -164,6 +164,10 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
 
   const backButton = document.querySelector('[data-focus-key="vm-back"]');
   check(Boolean(backButton), "the detail page offers a Back action");
+  const pageRect = rectOf(document.querySelector(".nce-vm-detail-page"));
+  const backRect = rectOf(backButton);
+  check(backRect.width < pageRect.width / 3,
+    `the Back pill keeps its content width (got ${backRect.width}px)`);
   backButton.click();
   await waitFor(
     () => document.querySelectorAll('[data-focus-key="vm-details-git"]').length === 1,

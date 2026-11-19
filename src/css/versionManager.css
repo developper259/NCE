@@ -419,6 +419,7 @@
 }
 .nce-vm-back {
   display: inline-flex;
+  align-self: flex-start;
   align-items: center;
   gap: 6px;
   height: 28px;
