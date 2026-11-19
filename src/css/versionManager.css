@@ -414,16 +414,25 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 14px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  height: 28px;
+  margin: 0 0 14px;
+  padding: 0 12px 0 9px;
+  border: 1px solid var(--border-primary);
+  border-radius: 14px;
+  background: var(--bg-primary);
   color: var(--text-secondary);
   font: inherit;
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
-.nce-vm-back:hover { color: var(--text-primary); }
+.nce-vm-back i { font-size: 14px; }
+.nce-vm-back:hover {
+  border-color: var(--border-secondary);
+  background: var(--bg-hover-alt);
+  color: var(--text-primary);
+}
 .nce-vm-detail-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 12px; }
 .nce-vm-detail-icon {
   display: grid;

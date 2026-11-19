@@ -8,7 +8,7 @@ class VersionManagerPackageDetail {
 
     fragment.appendChild(VersionManagerUI.button("Back", () => manager.closeDetail(), {
       className: "nce-vm-back",
-      icon: "fi-rr-caret-square-left",
+      icon: "fi-rr-arrow-small-left",
       focusKey: "vm-back",
     }));
 

@@ -517,6 +517,10 @@ test("details show real fields, provenance, verify, and a read-only external pan
   byFocusKey(manager.main, "vm-details-git").click();
   assert.equal(manager.headerControls.hidden, true,
     "the detail page hides the catalog search and filters");
+  const back = byFocusKey(manager.main, "vm-back");
+  assert.equal(back.className, "nce-vm-back", "the Back action keeps its dedicated style");
+  assert.equal(descendants(back).find((node) => node.tagName === "i")?.className,
+    "fi fi-rr-arrow-small-left", "the Back action points left with an arrow");
 
   const text = textOf(manager.main);
   assert.match(text, /Managed by NCE/);
