@@ -17,24 +17,16 @@ class VersionManagerCatalog {
       return fragment;
     }
 
-    const anyInstalled = packages.some((packageInfo) => VersionManagerModel.isInstalled(packageInfo));
-    const anyAvailable = packages.some((packageInfo) =>
-      !VersionManagerModel.isInstalled(packageInfo) && packageInfo.supported);
-
-    fragment.append(
-      VersionManagerGrid.section("Installed", sections.installed, manager, {
-        id: "installed",
-        emptyText: anyInstalled
-          ? "No installed packages match these filters."
-          : "No packages installed yet.",
-      }),
-      VersionManagerGrid.section("Available", sections.available, manager, {
-        id: "available",
-        emptyText: anyAvailable
-          ? "No available packages match these filters."
-          : "No packages available.",
-      }),
-    );
+    if (sections.installed.length) {
+      fragment.appendChild(
+        VersionManagerGrid.section("Installed", sections.installed, manager, { id: "installed" }),
+      );
+    }
+    if (sections.available.length) {
+      fragment.appendChild(
+        VersionManagerGrid.section("Available", sections.available, manager, { id: "available" }),
+      );
+    }
     return fragment;
   }
 

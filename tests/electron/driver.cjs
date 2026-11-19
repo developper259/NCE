@@ -3458,12 +3458,12 @@ app.whenReady().then(() => {
         assert.equal(versionManagerResult.sidebarClosed, true, "opening a sidebar closes the popup");
         assert.equal(versionManagerResult.settingsTabClosed, true, "opening a tab closes the popup");
         assert.equal(versionManagerResult.dialogBlur, "none", "the popup itself is never blurred");
-        assert.equal(versionManagerResult.sectionsOrdered, true, "Installed is followed by Available");
+        assert.equal(versionManagerResult.sectionsOrdered, true, "only non-empty sections render, Installed above Available");
         assert.equal(versionManagerResult.noNavigation, true, "the single page has no section navigation");
         assert.equal(versionManagerResult.versionFromBinary, true);
         assert.equal(versionManagerResult.searchWorks, true);
         assert.equal(versionManagerResult.filtersWork, true);
-        assert.equal(versionManagerResult.collapseWorks, true, "sections collapse independently");
+        assert.equal(versionManagerResult.collapseWorks, true, "the Available section collapses and expands");
         assert.equal(versionManagerResult.uninstalled, true);
         assert.equal(versionManagerResult.escapeClosed, true);
         assert.equal(versionManagerResult.sidebarReopened, true);

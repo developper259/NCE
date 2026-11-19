@@ -40,7 +40,7 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(editor.openVersionManager() === true, "the popup opens");
   await waitFor(() => host() && !host().hidden, "the popup host to become visible");
   await waitFor(
-    () => document.querySelectorAll(".nce-vm-group-title").length === 2,
+    () => document.querySelectorAll(".nce-vm-group-title").length === 1,
     "the single catalog page to load from the real inventory",
   );
   await nextFrame();
@@ -65,7 +65,8 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(dialogRect.left >= 32 && dialogRect.top >= 32, "the dialog keeps visible margins");
 
   const sectionTitles = [...document.querySelectorAll(".nce-vm-group-title")].map((node) => node.textContent);
-  check(sectionTitles.join("|") === "Installed|Available", `sections stay ordered (got ${sectionTitles.join("|")})`);
+  check(sectionTitles.join("|") === "Installed", `only the non-empty section is rendered (got ${sectionTitles.join("|")})`);
+  check(!main().textContent.includes("No packages available."), "the empty Available section is hidden");
   check(document.querySelectorAll('[data-focus-key^="vm-nav-"]').length === 0, "there is no section navigation");
   check(document.querySelectorAll(".nce-vm-stat").length === 0, "there is no dashboard statistics block");
   check(document.querySelector(".nce-vm-footer-status").textContent.includes("1 installed"), "the footer reports real ownership");
@@ -199,9 +200,11 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   sidebarButton.click();
   await waitFor(() => !host().hidden, "the sidebar button to reopen the popup");
   await waitFor(
-    () => document.querySelectorAll(".nce-vm-group-title").length === 2,
+    () => document.querySelectorAll(".nce-vm-group-title").length === 1,
     "the single page to reload after reopening",
   );
+  check(document.querySelector(".nce-vm-group-title").textContent === "Available",
+    "only the non-empty Available section renders after the uninstall");
   const gearMenu = editor.contextMenuManager.registeredMenus.get("sidebar-settings");
   check(typeof gearMenu?.openVersionManager?.callback === "function", "the gear menu offers the Version Manager");
   check(document.querySelectorAll('[data-focus-key^="vm-nav-"]').length === 0, "reopening has no section navigation");
@@ -221,18 +224,18 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')), "the Tools filter exposes Git");
   check(document.querySelector('[data-focus-key="vm-filter-all"]').getAttribute("aria-pressed") === "false", "the active filter is exposed");
 
-  const installedToggle = document.querySelector('[data-focus-key="vm-collapse-installed"]');
   const availableToggle = document.querySelector('[data-focus-key="vm-collapse-available"]');
-  check(Boolean(installedToggle) && Boolean(availableToggle), "both sections expose a collapse button");
-  check(installedToggle.getAttribute("aria-expanded") === "true", "the Installed section starts expanded");
-  installedToggle.click();
+  const installedToggle = document.querySelector('[data-focus-key="vm-collapse-installed"]');
+  check(Boolean(availableToggle), "the Available section exposes a collapse button");
+  check(installedToggle === null, "the empty Installed section is not rendered at all");
+  check(availableToggle.getAttribute("aria-expanded") === "true", "the Available section starts expanded");
+  availableToggle.click();
   await nextFrame();
-  check(document.querySelector('[data-focus-key="vm-collapse-installed"]').getAttribute("aria-expanded") === "false", "the Installed section collapses");
-  check(document.getElementById("nce-vm-section-installed").hidden === true, "the Installed body is hidden");
-  check(document.querySelector('[data-focus-key="vm-collapse-available"]').getAttribute("aria-expanded") === "true", "the Available section stays expanded");
-  document.querySelector('[data-focus-key="vm-collapse-installed"]').click();
+  check(document.querySelector('[data-focus-key="vm-collapse-available"]').getAttribute("aria-expanded") === "false", "the Available section collapses");
+  check(document.getElementById("nce-vm-section-available").hidden === true, "the Available body is hidden");
+  document.querySelector('[data-focus-key="vm-collapse-available"]').click();
   await nextFrame();
-  check(document.getElementById("nce-vm-section-installed").hidden === false, "the Installed section expands again");
+  check(document.getElementById("nce-vm-section-available").hidden === false, "the Available section expands again");
 
   // Every work surface that opens must dismiss the modal: quick panel modes,
   // sidebars and tabs all route through the same dismissal hooks.
@@ -273,7 +276,7 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
 
   await reopen();
   await waitFor(
-    () => document.querySelectorAll(".nce-vm-group-title").length === 2,
+    () => document.querySelectorAll(".nce-vm-group-title").length === 1,
     "the catalog to survive the dismissal round-trip",
   );
 

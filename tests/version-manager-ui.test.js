@@ -299,9 +299,11 @@ test("Version Manager stays uncreated until first open, then loads and focuses",
   assert.equal(document.activeElement, manager.closeButton);
 
   await flush();
-  assert.match(textOf(manager.main), /Installed/);
-  assert.match(textOf(manager.main), /Available/);
-  assert.match(textOf(manager.main), /No packages installed yet\./);
+  const titles = descendants(manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(titles, ["Available"], "an empty Installed section is not rendered");
+  assert.doesNotMatch(textOf(manager.main), /No packages installed yet\./);
   assert.match(textOf(manager.main), /Git/);
   assert.ok(byFocusKey(manager.headerControls, "vm-search"));
   assert.equal(byFocusKey(manager.headerControls, "vm-sort"), null, "there is no sort control");
@@ -378,8 +380,8 @@ test("the single page keeps Installed above Available and filters in the header"
   const sectionTitles = descendants(manager.main)
     .filter((node) => node.classList?.contains("nce-vm-group-title"))
     .map((node) => node.textContent);
-  assert.deepEqual(sectionTitles, ["Installed", "Available"]);
-  assert.match(textOf(manager.main), /No packages installed yet\./);
+  assert.deepEqual(sectionTitles, ["Available"], "an empty Installed section is hidden");
+  assert.doesNotMatch(textOf(manager.main), /No packages installed yet\./);
   assert.match(textOf(manager.main), /Git/);
   assert.ok(byFocusKey(manager.main, "vm-install-git"), "Git offers a real Install action");
   assert.equal(descendants(manager.dialog)
@@ -469,8 +471,8 @@ test("Installed and Available share one card design and one search", async () =>
   const titles = descendants(manager.main)
     .filter((node) => node.classList?.contains("nce-vm-group-title"))
     .map((node) => node.textContent);
-  assert.deepEqual(titles, ["Installed", "Available"]);
-  assert.match(textOf(manager.main), /No packages available\./);
+  assert.deepEqual(titles, ["Installed"], "an empty Available section is hidden");
+  assert.doesNotMatch(textOf(manager.main), /No packages available\./);
 
   const card = byFocusKey(manager.main, "vm-details-git");
   assert.ok(card);
@@ -537,7 +539,10 @@ test("details show real fields, provenance, verify, and a read-only external pan
   assert.deepEqual(state.verifies, [record.id]);
 
   byFocusKey(manager.main, "vm-back").click();
-  assert.match(textOf(manager.main), /No packages available\./);
+  const titles = descendants(manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(titles, ["Installed"]);
   assert.equal(document.activeElement?.dataset?.focusKey, "vm-details-git",
     "closing the detail returns focus to its card");
 });
@@ -822,13 +827,18 @@ test("inventory-changed events refresh the displayed installations", async () =>
   const { state, manager } = setup();
   manager.show();
   await flush();
-  assert.match(textOf(manager.main), /No packages installed yet\./);
+  const titles = () => descendants(manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(titles(), ["Available"], "no empty Installed section is shown");
+  assert.doesNotMatch(textOf(manager.main), /No packages installed yet\./);
 
   state.snapshot.packages[0].installations = [gitRecord()];
   state.snapshot.packages[0].state = "installed";
   state.emit({ type: "inventory-changed" });
   await flush();
   assert.equal(state.getStateCalls, 2);
+  assert.deepEqual(titles(), ["Installed"], "the section appears with the real installation");
   assert.ok(byFocusKey(manager.main, "vm-details-git"));
 });
 
@@ -861,15 +871,15 @@ test("failures surface a clear error with retry, and load errors are not hidden"
   assert.match(textOf(apiLess.manager.main), /The Version Manager API is unavailable\./);
 });
 
-test("the page keeps both sections in order and renders each package once", async () => {
+test("the page keeps non-empty sections in order and renders each package once", async () => {
   const available = setup();
   available.manager.show();
   await flush();
   const availableTitles = descendants(available.manager.main)
     .filter((node) => node.classList?.contains("nce-vm-group-title"))
     .map((node) => node.textContent);
-  assert.deepEqual(availableTitles, ["Installed", "Available"]);
-  assert.match(textOf(available.manager.main), /No packages installed yet\./);
+  assert.deepEqual(availableTitles, ["Available"], "an empty Installed section is hidden");
+  assert.doesNotMatch(textOf(available.manager.main), /No packages installed yet\./);
   assert.equal(descendants(available.manager.main)
     .filter((node) => node.classList?.contains("nce-vm-card")).length, 1);
 
@@ -879,11 +889,24 @@ test("the page keeps both sections in order and renders each package once", asyn
   const installedTitles = descendants(installed.manager.main)
     .filter((node) => node.classList?.contains("nce-vm-group-title"))
     .map((node) => node.textContent);
-  assert.deepEqual(installedTitles, ["Installed", "Available"]);
-  assert.match(textOf(installed.manager.main), /No packages available\./);
+  assert.deepEqual(installedTitles, ["Installed"], "an empty Available section is hidden");
+  assert.doesNotMatch(textOf(installed.manager.main), /No packages available\./);
   assert.equal(descendants(installed.manager.main)
     .filter((node) => node.classList?.contains("nce-vm-card")).length, 1,
     "a package is rendered exactly once even when it has several categories");
+
+  const both = setup([
+    gitPackage({ state: "installed", installations: [gitRecord()] }),
+    gitPackage({ id: "node", name: "Node", categories: ["runtime"], installations: [] }),
+  ]);
+  both.manager.show();
+  await flush();
+  const bothTitles = descendants(both.manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-group-title"))
+    .map((node) => node.textContent);
+  assert.deepEqual(bothTitles, ["Installed", "Available"], "Installed stays above Available");
+  assert.equal(descendants(both.manager.main)
+    .filter((node) => node.classList?.contains("nce-vm-card")).length, 2);
 });
 
 test("catalog model dedupes categories, sorts by name and searches real fields", () => {

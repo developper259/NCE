@@ -35,12 +35,7 @@ class VersionManagerGrid {
     body.id = `nce-vm-section-${sectionId}`;
     body.hidden = collapsed;
     toggle.setAttribute("aria-controls", body.id);
-    if (packages.length) body.appendChild(VersionManagerGrid.render(packages, manager));
-    else body.appendChild(VersionManagerUI.element(
-      "p",
-      "nce-vm-section-empty",
-      options.emptyText || "No packages.",
-    ));
+    body.appendChild(VersionManagerGrid.render(packages, manager));
 
     section.append(head, body);
     return section;

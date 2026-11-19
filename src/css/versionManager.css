@@ -271,7 +271,6 @@
   font-size: 10px;
   line-height: 16px;
 }
-.nce-vm-section-empty { margin: 0 0 2px; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 .nce-vm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(238px, 1fr)); gap: 10px; }
 
 .nce-vm-card {
