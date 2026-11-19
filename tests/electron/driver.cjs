@@ -3463,6 +3463,7 @@ app.whenReady().then(() => {
         assert.equal(versionManagerResult.versionFromBinary, true);
         assert.equal(versionManagerResult.searchWorks, true);
         assert.equal(versionManagerResult.filtersWork, true);
+        assert.equal(versionManagerResult.collapseWorks, true, "sections collapse independently");
         assert.equal(versionManagerResult.uninstalled, true);
         assert.equal(versionManagerResult.escapeClosed, true);
         assert.equal(versionManagerResult.sidebarReopened, true);

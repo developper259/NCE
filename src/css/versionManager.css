@@ -229,6 +229,32 @@
 .nce-vm-grid-section { margin-bottom: 24px; }
 .nce-vm-grid-section:last-child { margin-bottom: 0; }
 .nce-vm-group-header { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.nce-vm-group-heading { margin: 0; }
+.nce-vm-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 24px;
+  margin-left: -3px;
+  padding: 0 6px 0 3px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.nce-vm-group-toggle:hover { background: var(--bg-hover); }
+.nce-vm-group-toggle:focus-visible { outline: 1px solid var(--accent-primary); outline-offset: 1px; }
+.nce-vm-group-chevron {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  transition: transform 140ms ease;
+}
+.nce-vm-grid-section-collapsed .nce-vm-group-chevron { transform: rotate(-90deg); }
+.nce-vm-grid-section-collapsed .nce-vm-group-header { margin-bottom: 0; }
+.nce-vm-section-body { min-width: 0; }
+.nce-vm-section-body[hidden] { display: none; }
 .nce-vm-group-title {
   margin: 0;
   color: var(--text-secondary);
@@ -573,6 +599,7 @@
   .nce-vm-card,
   .nce-vm-filter,
   .nce-vm-button,
+  .nce-vm-group-chevron,
   .nce-vm-progress-fill { transition: none; }
   .nce-vm-progress-fill.nce-vm-progress-indeterminate,
   .nce-vm-badge-installing i,

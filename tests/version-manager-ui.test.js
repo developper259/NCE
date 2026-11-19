@@ -415,6 +415,48 @@ test("the single page keeps Installed above Available and filters in the header"
   assert.equal(document.activeElement.dataset.focusKey, "vm-filter-all");
 });
 
+test("Installed and Available sections collapse independently", async () => {
+  const { document, manager } = setup([
+    gitPackage({ state: "installed", installations: [gitRecord()] }),
+    gitPackage({ id: "node", name: "Node", categories: ["runtime"] }),
+  ]);
+  manager.show();
+  await flush();
+
+  const body = (id) => descendants(manager.main).find((node) => node.id === `nce-vm-section-${id}`);
+  const toggle = (id) => byFocusKey(manager.main, `vm-collapse-${id}`);
+
+  assert.equal(toggle("installed").getAttribute("aria-expanded"), "true");
+  assert.equal(toggle("available").getAttribute("aria-expanded"), "true");
+  assert.equal(body("installed").hidden, false);
+  assert.equal(body("available").hidden, false);
+
+  toggle("installed").click();
+  assert.equal(manager.isSectionCollapsed("installed"), true);
+  assert.equal(toggle("installed").getAttribute("aria-expanded"), "false");
+  assert.equal(toggle("installed").getAttribute("aria-controls"), "nce-vm-section-installed");
+  assert.equal(body("installed").hidden, true);
+  assert.equal(document.activeElement, toggle("installed"));
+  assert.equal(toggle("available").getAttribute("aria-expanded"), "true", "sections collapse independently");
+  assert.equal(body("available").hidden, false);
+
+  toggle("available").click();
+  assert.equal(manager.isSectionCollapsed("available"), true);
+  assert.equal(body("available").hidden, true);
+  assert.equal(toggle("installed").getAttribute("aria-expanded"), "false");
+
+  toggle("installed").click();
+  assert.equal(manager.isSectionCollapsed("installed"), false);
+  assert.equal(body("installed").hidden, false);
+
+  toggle("installed").click();
+  const search = byFocusKey(manager.headerControls, "vm-search");
+  search.value = "git";
+  search.dispatch("input");
+  assert.equal(manager.isSectionCollapsed("installed"), true, "collapse state survives search rerenders");
+  assert.equal(toggle("installed").getAttribute("aria-expanded"), "false");
+});
+
 test("Installed and Available share one card design and one search", async () => {
   const record = gitRecord();
   const { document, manager } = setup([gitPackage({

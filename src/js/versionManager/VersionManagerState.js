@@ -13,6 +13,7 @@ class VersionManagerState {
     this.selectedPackageId = null;
     this.confirmation = null;
     this.operations = new Map();
+    this.collapsedSections = new Set();
   }
 
   setFilter(filter) {
@@ -34,6 +35,15 @@ class VersionManagerState {
     this.confirmation = null;
   }
 
+  isSectionCollapsed(sectionId) {
+    return this.collapsedSections.has(sectionId);
+  }
+
+  toggleSection(sectionId) {
+    if (this.collapsedSections.has(sectionId)) this.collapsedSections.delete(sectionId);
+    else this.collapsedSections.add(sectionId);
+  }
+
   clearFilters() {
     this.filter = "all";
     this.searchQuery = "";
@@ -47,6 +57,7 @@ class VersionManagerState {
 
   clear() {
     this.operations.clear();
+    this.collapsedSections.clear();
     this.confirmation = null;
     this.selectedPackageId = null;
   }

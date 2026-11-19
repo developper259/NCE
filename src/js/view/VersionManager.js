@@ -282,6 +282,16 @@ class VersionManager {
     if (packageId) this.focusByKey(`vm-details-${packageId}`);
   }
 
+  isSectionCollapsed(sectionId) {
+    return this.state.isSectionCollapsed(sectionId);
+  }
+
+  toggleSection(sectionId) {
+    this.state.toggleSection(sectionId);
+    this.renderMain();
+    this.focusByKey(`vm-collapse-${sectionId}`);
+  }
+
   setFilter(filterId) {
     this.state.setFilter(filterId);
     this.renderHeaderControls();

@@ -221,6 +221,19 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(Boolean(document.querySelector('[data-focus-key="vm-install-git"]')), "the Tools filter exposes Git");
   check(document.querySelector('[data-focus-key="vm-filter-all"]').getAttribute("aria-pressed") === "false", "the active filter is exposed");
 
+  const installedToggle = document.querySelector('[data-focus-key="vm-collapse-installed"]');
+  const availableToggle = document.querySelector('[data-focus-key="vm-collapse-available"]');
+  check(Boolean(installedToggle) && Boolean(availableToggle), "both sections expose a collapse button");
+  check(installedToggle.getAttribute("aria-expanded") === "true", "the Installed section starts expanded");
+  installedToggle.click();
+  await nextFrame();
+  check(document.querySelector('[data-focus-key="vm-collapse-installed"]').getAttribute("aria-expanded") === "false", "the Installed section collapses");
+  check(document.getElementById("nce-vm-section-installed").hidden === true, "the Installed body is hidden");
+  check(document.querySelector('[data-focus-key="vm-collapse-available"]').getAttribute("aria-expanded") === "true", "the Available section stays expanded");
+  document.querySelector('[data-focus-key="vm-collapse-installed"]').click();
+  await nextFrame();
+  check(document.getElementById("nce-vm-section-installed").hidden === false, "the Installed section expands again");
+
   // Every work surface that opens must dismiss the modal: quick panel modes,
   // sidebars and tabs all route through the same dismissal hooks.
   const reopen = async () => {
@@ -283,6 +296,7 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     escapeClosed: true,
     sidebarReopened: true,
     filtersWork: true,
+    collapseWorks: true,
     paletteClosed: true,
     goToLineClosed: true,
     sidebarClosed: true,

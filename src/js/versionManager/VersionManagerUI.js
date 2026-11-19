@@ -27,6 +27,7 @@ class VersionManagerUI {
     if (options.title) button.title = options.title;
     if (options.ariaLabel) button.setAttribute("aria-label", options.ariaLabel);
     if (options.ariaPressed !== undefined) button.setAttribute("aria-pressed", String(options.ariaPressed));
+    if (options.ariaExpanded !== undefined) button.setAttribute("aria-expanded", String(options.ariaExpanded));
     if (options.disabled) button.disabled = true;
     if (options.icon) button.appendChild(VersionManagerUI.icon(options.icon));
     if (label) button.appendChild(VersionManagerUI.element("span", null, label));

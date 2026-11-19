@@ -23,11 +23,13 @@ class VersionManagerCatalog {
 
     fragment.append(
       VersionManagerGrid.section("Installed", sections.installed, manager, {
+        id: "installed",
         emptyText: anyInstalled
           ? "No installed packages match these filters."
           : "No packages installed yet.",
       }),
       VersionManagerGrid.section("Available", sections.available, manager, {
+        id: "available",
         emptyText: anyAvailable
           ? "No available packages match these filters."
           : "No packages available.",
