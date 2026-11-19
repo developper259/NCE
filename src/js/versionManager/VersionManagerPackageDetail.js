@@ -5,8 +5,9 @@ class VersionManagerPackageDetail {
     if (!packageInfo) return null;
     const state = VersionManagerModel.installationState(packageInfo, manager.operations);
     const fragment = document.createDocumentFragment();
+    const page = VersionManagerUI.element("div", "nce-vm-detail-page");
 
-    fragment.appendChild(VersionManagerUI.button("Back", () => manager.closeDetail(), {
+    page.appendChild(VersionManagerUI.button("Back", () => manager.closeDetail(), {
       className: "nce-vm-back",
       icon: "fi-rr-arrow-small-left",
       focusKey: "vm-back",
@@ -26,12 +27,13 @@ class VersionManagerPackageDetail {
       titles.appendChild(VersionManagerUI.element("p", "nce-vm-detail-description", packageInfo.description));
     }
     header.append(icon, titles, VersionManagerPackageDetail.actions(manager, packageInfo, state));
-    fragment.appendChild(header);
+    page.appendChild(header);
 
     const columns = VersionManagerUI.element("div", "nce-vm-detail-columns");
     columns.appendChild(VersionManagerPackageDetail.installationsColumn(manager, packageInfo, state));
     columns.appendChild(VersionManagerPackageDetail.aboutColumn(packageInfo));
-    fragment.appendChild(columns);
+    page.appendChild(columns);
+    fragment.appendChild(page);
     return fragment;
   }
 

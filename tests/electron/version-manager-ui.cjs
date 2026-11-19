@@ -257,6 +257,29 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   );
   check(document.querySelector(".nce-vm-group-title").textContent === "Available",
     "only the non-empty Available section renders after the uninstall");
+
+  // With a short detail page the two columns anchor to the bottom instead of
+  // floating directly under the header.
+  document.querySelector('[data-focus-key="vm-details-git"]').click();
+  await waitFor(
+    () => document.querySelector(".nce-vm-detail-name")?.textContent === "Git",
+    "the short Git detail view",
+  );
+  await nextFrame();
+  check(main().scrollHeight <= main().clientHeight + 1,
+    "the short detail fits without scrolling");
+  const shortMainRect = rectOf(main());
+  const shortColumnsRect = rectOf(document.querySelector(".nce-vm-detail-columns"));
+  const mainPaddingBottom = Number.parseFloat(getComputedStyle(main()).paddingBottom);
+  check(Math.abs((shortMainRect.bottom - mainPaddingBottom) - shortColumnsRect.bottom) <= 1,
+    "the two columns sit against the bottom of the page");
+  document.querySelector('[data-focus-key="vm-back"]').click();
+  await waitFor(
+    () => document.querySelectorAll('[data-focus-key="vm-details-git"]').length === 1,
+    "the catalog to return after the short detail",
+  );
+  await nextFrame();
+
   const gearMenu = editor.contextMenuManager.registeredMenus.get("sidebar-settings");
   check(typeof gearMenu?.openVersionManager?.callback === "function", "the gear menu offers the Version Manager");
   check(document.querySelectorAll('[data-focus-key^="vm-nav-"]').length === 0, "reopening has no section navigation");

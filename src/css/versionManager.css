@@ -409,7 +409,14 @@
   white-space: nowrap;
 }
 
-/* Package detail: full-width header above two balanced columns. */
+/* Package detail: full-width header above two balanced columns pinned to the
+   bottom of the page while their own styling stays unchanged. */
+.nce-vm-detail-page {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  min-height: 100%;
+}
 .nce-vm-back {
   display: inline-flex;
   align-items: center;
@@ -433,7 +440,7 @@
   background: var(--bg-hover-alt);
   color: var(--text-primary);
 }
-.nce-vm-detail-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 12px; }
+.nce-vm-detail-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 30px; }
 .nce-vm-detail-icon {
   display: grid;
   flex: 0 0 46px;
@@ -472,7 +479,7 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 40px;
   align-items: start;
-  margin-top: 30px;
+  margin-top: auto;
 }
 .nce-vm-detail-col { min-width: 0; }
 .nce-vm-detail-col + .nce-vm-detail-col {
