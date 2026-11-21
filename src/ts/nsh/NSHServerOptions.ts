@@ -1,5 +1,7 @@
 import type { NSHServerOptions } from "nsh/server";
 
+import { getRendererDevOrigin } from "../RendererDevUrl";
+
 export const NSH_SERVER_HOST = "127.0.0.1";
 
 /** Only the packaged file:// renderer and NCE's local Vite renderer may connect. */
@@ -10,12 +12,17 @@ export const NSH_RENDERER_ORIGINS = [
 ] as const;
 
 export function createNSHServerOptions(): NSHServerOptions {
+  const allowedOrigins: string[] = [...NSH_RENDERER_ORIGINS];
+  const devOrigin = getRendererDevOrigin();
+  if (devOrigin && !allowedOrigins.includes(devOrigin)) {
+    allowedOrigins.push(devOrigin);
+  }
   return {
     host: NSH_SERVER_HOST,
     port: 0,
     // The allowlist deliberately stays local: packaged renderer, dev renderer,
     // plus the null origin some Electron versions send from file://.
-    allowedOrigins: [...NSH_RENDERER_ORIGINS],
+    allowedOrigins,
     allowNullOrigin: true,
     maxDocumentCharacters: 1024 * 1024,
     maxDocumentsPerClient: 128,

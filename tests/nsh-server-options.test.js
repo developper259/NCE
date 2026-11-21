@@ -11,6 +11,18 @@ const {
   NSH_RENDERER_ORIGINS,
 } = require("../dist/ts/nsh/NSHServerOptions.js");
 
+function withRendererDevUrl(value, run) {
+  const previous = process.env.NCE_RENDERER_URL;
+  if (value === undefined) delete process.env.NCE_RENDERER_URL;
+  else process.env.NCE_RENDERER_URL = value;
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.NCE_RENDERER_URL;
+    else process.env.NCE_RENDERER_URL = previous;
+  }
+}
+
 function createClient(port, origin) {
   return new WebSocket(`ws://127.0.0.1:${port}`, {
     headers: origin === undefined ? {} : { Origin: origin },
@@ -66,20 +78,52 @@ async function expectRejected(port, origin) {
 }
 
 test("NSH server options keep quotas and origins explicit", () => {
-  const options = createNSHServerOptions();
-  assert.equal(options.host, "127.0.0.1");
-  assert.equal(options.port, 0);
-  assert.deepEqual([...options.allowedOrigins], [...NSH_RENDERER_ORIGINS]);
-  assert.equal(options.allowedOrigins.includes("*"), false);
-  assert.equal(options.allowNullOrigin, true);
-  assert.equal(options.maxDocumentCharacters, 1024 * 1024);
-  assert.equal(options.maxDocumentsPerClient, 128);
-  assert.equal(options.maxClientDocumentCharacters, 64 * 1024 * 1024);
-  assert.equal(options.maxLinesPerRequest, 0);
-  assert.equal(options.maxPayload, undefined, "maxPayload keeps the NSH default");
-  assert.equal(options.maxStateDepth, undefined, "maxStateDepth keeps the NSH default");
-  assert.equal(options.maxClients, undefined, "maxClients keeps the NSH default");
-  assert.equal(options.maxRequestsPerSecond, undefined, "rate limit keeps the NSH default");
+  withRendererDevUrl(undefined, () => {
+    const options = createNSHServerOptions();
+    assert.equal(options.host, "127.0.0.1");
+    assert.equal(options.port, 0);
+    assert.deepEqual([...options.allowedOrigins], [...NSH_RENDERER_ORIGINS]);
+    assert.equal(options.allowedOrigins.includes("*"), false);
+    assert.equal(options.allowNullOrigin, true);
+    assert.equal(options.maxDocumentCharacters, 1024 * 1024);
+    assert.equal(options.maxDocumentsPerClient, 128);
+    assert.equal(options.maxClientDocumentCharacters, 64 * 1024 * 1024);
+    assert.equal(options.maxLinesPerRequest, 0);
+    assert.equal(options.maxPayload, undefined, "maxPayload keeps the NSH default");
+    assert.equal(options.maxStateDepth, undefined, "maxStateDepth keeps the NSH default");
+    assert.equal(options.maxClients, undefined, "maxClients keeps the NSH default");
+    assert.equal(options.maxRequestsPerSecond, undefined, "rate limit keeps the NSH default");
+  });
+});
+
+test("NSH server options allow the configured dev renderer origin", () => {
+  withRendererDevUrl("http://127.0.0.1:5174/html/index.html", () => {
+    const options = createNSHServerOptions();
+    assert.deepEqual([...options.allowedOrigins], [
+      ...NSH_RENDERER_ORIGINS,
+      "http://127.0.0.1:5174",
+    ]);
+  });
+});
+
+test("NSH server options ignore non-local dev renderer URLs", () => {
+  for (const candidate of [
+    "https://127.0.0.1:5174/html/index.html",
+    "http://192.168.1.10:5174/html/index.html",
+    "http://127.0.0.1:5174/other.html",
+    "http://127.0.0.1/html/index.html",
+    "http://127.0.0.1:5174/html/index.html?debug=1",
+    "not a url",
+  ]) {
+    withRendererDevUrl(candidate, () => {
+      const options = createNSHServerOptions();
+      assert.deepEqual(
+        [...options.allowedOrigins],
+        [...NSH_RENDERER_ORIGINS],
+        candidate,
+      );
+    });
+  }
 });
 
 test("NSH accepts only local renderer origins", { timeout: 20_000 }, async () => {

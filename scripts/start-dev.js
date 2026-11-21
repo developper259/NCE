@@ -2,7 +2,6 @@ const { spawn } = require("node:child_process");
 const path = require("node:path");
 
 const projectRoot = path.resolve(__dirname, "..");
-const rendererUrl = "http://127.0.0.1:5173/html/index.html";
 
 async function start() {
   const { createServer } = await import("vite");
@@ -10,6 +9,13 @@ async function start() {
     configFile: path.join(projectRoot, "vite.config.mjs"),
   });
   await vite.listen();
+
+  const address = vite.httpServer?.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Vite dev server did not expose a TCP address");
+  }
+  const rendererUrl = `http://127.0.0.1:${address.port}/html/index.html`;
+  console.log(`NCE renderer: ${rendererUrl}`);
 
   const electronEnvironment = {
     ...process.env,

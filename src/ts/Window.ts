@@ -9,6 +9,7 @@ import {
 import path from "path";
 import { randomUUID } from "node:crypto";
 
+import { getRendererDevUrl } from "./RendererDevUrl";
 import { FileManager } from "./addon/FileManager";
 import { Watcher } from "./addon/Watcher";
 import { AppMenu } from "./addon/Menu";
@@ -32,7 +33,6 @@ const MACOS_TRAFFIC_LIGHT_SIZE = 14;
 const MACOS_TRAFFIC_LIGHT_Y = Math.round(
   (TITLEBAR_CONTROLS_HEIGHT - MACOS_TRAFFIC_LIGHT_SIZE) / 2,
 );
-const RENDERER_DEV_URL = "http://127.0.0.1:5173/html/index.html";
 const WINDOW_RELOAD_DELAY_MS = 50;
 const WINDOW_CLOSE_RESPONSE_TIMEOUT_MS = 10_000;
 export const EXTERNAL_OPEN_TIMEOUTS_MS = Object.freeze({
@@ -320,11 +320,9 @@ export class Window {
     if (this.initialSession.maximized) this.window.maximize();
     if (this.initialSession.fullScreen) this.window.setFullScreen(true);
 
-    if (
-      !app.isPackaged &&
-      process.env.NCE_RENDERER_URL === RENDERER_DEV_URL
-    ) {
-      this.window.loadURL(RENDERER_DEV_URL);
+    const rendererDevUrl = app.isPackaged ? null : getRendererDevUrl();
+    if (rendererDevUrl) {
+      this.window.loadURL(rendererDevUrl);
     } else {
       this.window.loadFile(
         path.join(appRoot, "dist/renderer/html/index.html"),
