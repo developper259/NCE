@@ -7,8 +7,7 @@ import { isValidGitBranchName } from "./GitBranchName";
 export interface Settings {
   ui: {
     settingsCategory:
-      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Git"
-      | "Language Manager";
+      | "Editor" | "Files" | "Shortcuts" | "Agent" | "Terminal" | "Git";
     settingsScrollTop: number;
   };
   editor: { tabWidth: number };
@@ -558,7 +557,7 @@ export class SettingsManager {
 
   private isValid(key: string, value: unknown): boolean {
     if (key === "ui.settingsCategory") {
-      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Git", "Language Manager"]
+      return ["Editor", "Files", "Shortcuts", "Agent", "Terminal", "Git"]
         .includes(String(value));
     }
     if (key === "ui.settingsScrollTop") {

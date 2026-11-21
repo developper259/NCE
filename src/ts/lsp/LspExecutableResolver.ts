@@ -88,7 +88,7 @@ export async function resolveServerExecutable(
       command: null,
       args: [],
       source: null,
-      error: `${definition.name} requires an explicit executable path and arguments. Configure them in Language Manager settings.`,
+      error: `${definition.name} requires an explicit executable path and arguments. Configure lsp.servers in settings.json.`,
     };
   }
 

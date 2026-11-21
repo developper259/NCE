@@ -41,7 +41,7 @@ NCE also includes a deeply integrated AI coding agent designed to work directly 
 - Paginated commit history with commit inspection, per-file versions and commit comparison
 - Validated discard with confirmation, merge/rebase abort banner and an accordion layout with animated pinned section headers
 - Transactional package installer that installs a verified Git (dugite-native) from Source Control, with configurable `git.path`, uninstall and real cancellation
-- Multi-server language intelligence: completions, on-demand hover, go to definition, live diagnostics, a Problems panel with bottom-bar counts and a redesigned Language Manager
+- Multi-server language intelligence: completions, on-demand hover, go to definition, live diagnostics and a Problems panel with bottom-bar counts
 - Centralized notifications with toasts, a notification center and Git, Files and Agent integrations
 - Redesigned Search sidebar with filter toggle and collapsible file groups
 - Native context menus for Settings and Source Control actions, Open Folder and Clone Repository in the explorer, and a Settings tab pinned to the leftmost slot
