@@ -6,11 +6,12 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { DirtyBufferRecoveryStore } = require('../../dist/ts/addon/DirtyBufferRecovery.js');
 
-async function launchElectron(directory, phase) {
+async function launchElectron(directory, phase, extraEnv = {}) {
   let log = '';
   await new Promise((resolve, reject) => {
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
     env.NCE_DISABLE_EXTERNAL_STARTUP_PATHS = '1';
+    Object.assign(env, extraEnv);
     const child = spawn(require('electron'), [path.join(__dirname, 'driver.cjs'), directory, phase], { env, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.on('data', b => { log += b; }); child.stderr.on('data', b => { log += b; });
     const timer = setTimeout(() => { child.kill('SIGKILL'); }, 90000);
@@ -144,7 +145,10 @@ test('real Electron: Version Manager popup lifecycle', { timeout: 120000 }, asyn
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'nce-electron-version-manager-'));
   await fs.writeFile(path.join(directory, '.nce-smoke'), '');
   try {
-    await launchElectron(directory, 'version-manager');
+    // Keep this integration test focused on Git reconciliation: the full
+    // language runtime catalog would add non-empty "Available" sections and
+    // change the catalog assertions, which are about Git, not the catalog.
+    await launchElectron(directory, 'version-manager', { NCE_VERSION_MANAGER_PACKAGES: 'git' });
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
