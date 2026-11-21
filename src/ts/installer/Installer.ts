@@ -447,6 +447,8 @@ export class Installer {
     const stats = await fs.stat(executable).catch(() => null);
     if (!stats?.isFile())
       throw new InstallerError("VERIFICATION_FAILED", `Installed executable is missing: ${executable}`);
+    if (verification.mode === "presence")
+      return { stdout: executable, stderr: "" };
     if (this.platform !== "win32" && (stats.mode & 0o111) === 0)
       throw new InstallerError("VERIFICATION_FAILED", `Installed executable is not executable: ${executable}`);
     try {
@@ -528,6 +530,7 @@ function validateVerification(verification: VerificationConfig, invalid: (reason
   if (verification.args !== undefined && (!Array.isArray(verification.args) || verification.args.some((arg) => typeof arg !== "string" || arg.includes("\0")))) invalid("verification args must be plain strings.");
   if (verification.timeoutMs !== undefined && (!Number.isInteger(verification.timeoutMs) || verification.timeoutMs <= 0 || verification.timeoutMs > MAX_COMMAND_TIMEOUT_MS)) invalid("verification timeoutMs is out of range.");
   if (verification.functional !== undefined && verification.functional !== "git") invalid("verification functional must be \"git\".");
+  if (verification.mode !== undefined && verification.mode !== "command" && verification.mode !== "presence") invalid("verification mode must be \"command\" or \"presence\".");
 }
 
 function isSafeRelativePath(value: string): boolean {
