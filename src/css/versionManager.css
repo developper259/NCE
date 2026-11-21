@@ -581,6 +581,48 @@
 .nce-vm-error-text { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .nce-vm-error .nce-vm-button { flex: 0 0 auto; margin-left: auto; }
 
+/* Language component selection */
+.nce-vm-lang-section { margin-top: 4px; }
+.nce-vm-component-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 16px; }
+.nce-vm-component {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-primary);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+}
+.nce-vm-component:hover { border-color: var(--border-accent); }
+.nce-vm-component-checkbox { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent-primary); cursor: pointer; }
+.nce-vm-component-checkbox:disabled { cursor: not-allowed; opacity: 0.5; }
+.nce-vm-component-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.nce-vm-component-title { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.nce-vm-component-type {
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+.nce-vm-component-desc { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.nce-vm-component-meta { color: var(--text-secondary); font-size: 11px; }
+.nce-vm-lang-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+}
+.nce-vm-lang-plan-summary { color: var(--text-primary); font-size: 12px; font-weight: 600; }
+.nce-vm-lang-plan-blocker { color: var(--state-error); font-size: 12px; }
+.nce-vm-lang-apply { align-self: flex-start; }
+
 @media (max-width: 900px) {
   .nce-vm-detail-columns { gap: 24px; }
   .nce-vm-detail-col + .nce-vm-detail-col { padding-left: 24px; }

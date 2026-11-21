@@ -14,6 +14,10 @@ class VersionManagerState {
     this.confirmation = null;
     this.operations = new Map();
     this.collapsedSections = new Set();
+    this.languages = [];
+    this.languageViews = new Map();
+    this.componentSelection = new Map();
+    this.languageApplying = null;
   }
 
   setFilter(filter) {
@@ -55,9 +59,30 @@ class VersionManagerState {
     else this.operations.delete(operation.packageId);
   }
 
+  selectionFor(languageId) {
+    return this.componentSelection.get(languageId) || null;
+  }
+
+  setSelection(languageId, ids) {
+    this.componentSelection.set(languageId, new Set(ids));
+  }
+
+  toggleComponent(languageId, componentId, checked) {
+    let selection = this.componentSelection.get(languageId);
+    if (!selection) {
+      selection = new Set();
+      this.componentSelection.set(languageId, selection);
+    }
+    if (checked) selection.add(componentId);
+    else selection.delete(componentId);
+  }
+
   clear() {
     this.operations.clear();
     this.collapsedSections.clear();
+    this.componentSelection.clear();
+    this.languageViews.clear();
+    this.languages = [];
     this.confirmation = null;
     this.selectedPackageId = null;
   }
