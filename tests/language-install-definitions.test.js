@@ -85,6 +85,53 @@ test("selecting the JS LSP plans its runtime and compiler dependencies", () => {
   assert.deepEqual(plan.blockers, []);
 });
 
+test("Python uses verified python-build-standalone archives across platforms", () => {
+  const py = builtinPackages.python;
+  assert.equal(py.version, "3.12.16");
+  const expected = {
+    "darwin/arm64": ["aarch64-apple-darwin", "e956e60bc9465d577ef8062059aa05cd3a2665b4b8678a2ed24e432368330b8f", "bin/python"],
+    "darwin/x64": ["x86_64-apple-darwin", "83f2922437e6d546d0fcdb8c11f150a8e52787e8d9ea8651b1974e20908eb1bc", "bin/python"],
+    "linux/x64": ["x86_64-unknown-linux-gnu", "c2f87d4b4e8db3abddb0f116c6ccfc503d0cbdbb9ee8faacddad1b679ec12e99", "bin/python"],
+    "win32/x64": ["x86_64-pc-windows-msvc", "e23fe5b16926de1d81661b1a97352e89fb167549c55a6825796ccd0f32ec7f1b", "python.exe"],
+  };
+  for (const [key, [target, checksum, executable]] of Object.entries(expected)) {
+    const [platform, arch] = key.split("/");
+    const config = py.platforms[platform][arch];
+    assert.match(config.download.url, new RegExp(`cpython-3\\.12\\.16%2B20261110-${target}-install_only\\.tar\\.gz$`));
+    assert.equal(config.download.checksum, checksum);
+    assert.equal(config.executable, executable);
+    assert.equal(config.archive.stripComponents, 1);
+  }
+});
+
+test("Pyright LSP definition is verified and self-contained", () => {
+  const pyright = builtinPackages.pyright;
+  assert.equal(pyright.version, "1.1.414");
+  assert.match(pyright.platforms.darwin.x64.download.url, /pyright-1\.1\.414\.tgz/);
+  assert.equal(pyright.platforms.darwin.x64.download.checksumAlgorithm, "sha512");
+  assert.equal(pyright.verification.executable, "langserver.index.js");
+  assert.equal(pyright.verification.mode, "presence");
+});
+
+test("Python language definition resolves to real packages with dependency planning", () => {
+  const packages = new PackageRegistry(builtinManagedPackages);
+  const languages = new LanguageRegistry(builtinLanguages, packages);
+  const py = languages.get("python");
+  assert.deepEqual(py.fileExtensions, [".py", ".pyi", ".pyw"]);
+  for (const component of py.components) {
+    assert.ok(packages.has(component.packageId));
+    assert.ok(builtinPackages[component.packageId]);
+  }
+  const plan = new ComponentPlanner().plan({
+    language: py,
+    selected: ["python.lsp"],
+    installed: new Map(),
+    platform: "darwin",
+  });
+  assert.deepEqual(plan.toInstall, ["python.runtime", "python.lsp"]);
+  assert.deepEqual(plan.blockers, []);
+});
+
 test("presence verification installs a script package without an executable bit", async () => {
   const root = await tempDir();
   const archive = await tempDir("nce-npm-fixture-");
