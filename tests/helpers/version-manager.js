@@ -5,6 +5,7 @@ const { promises: fs } = require("node:fs");
 const { makeTarGz, serve, sha256, staticRoute, tempDir } = require("./installer.js");
 const { Installer } = require("../../dist/ts/installer/Installer.js");
 const { git: gitDistribution } = require("../../dist/ts/installer/packages/git.js");
+const { git: gitManaged } = require("../../dist/ts/packages/git.js");
 const { PackageManager } = require("../../dist/ts/packages/PackageManager.js");
 const { PackageRegistry } = require("../../dist/ts/packages/PackageRegistry.js");
 const { InstallationStore } = require("../../dist/ts/packages/InstallationStore.js");
@@ -134,7 +135,8 @@ async function plantGit(root, dirName, version = GIT_FIXTURE_VERSION) {
 /** App-layer owner wired exactly like App.ts: one shared Installer, settings bridge, broadcast. */
 function createVersionManager(userDataPath, { distribution, settings, broadcast } = {}) {
   const installer = new Installer({ userDataPath, registry: { git: distribution ?? gitDistribution } });
-  const versionManager = new VersionManager({ userDataPath, installer, settings, broadcast });
+  const registry = new PackageRegistry([gitManaged]);
+  const versionManager = new VersionManager({ userDataPath, installer, registry, settings, broadcast });
   return { versionManager, installer };
 }
 

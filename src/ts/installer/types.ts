@@ -54,6 +54,12 @@ export interface VerificationConfig {
   args?: string[];
   timeoutMs?: number;
   functional?: "git";
+  /**
+   * "presence" verifies only that the target file exists (and is a file),
+   * without requiring an executable bit or running it. Used for script-based
+   * packages such as npm tarballs whose entry point is launched by a runtime.
+   */
+  mode?: "command" | "presence";
 }
 
 export interface PackageDefinition {

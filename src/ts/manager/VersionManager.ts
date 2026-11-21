@@ -1,5 +1,6 @@
 import type { Installer } from "../installer/Installer";
 import { PackageManager } from "../packages/PackageManager";
+import type { PackageRegistry } from "../packages/PackageRegistry";
 import type { SettingsBridge } from "../packages/types";
 import type { IpcHandlerRegistrar } from "./IpcRouter";
 
@@ -9,6 +10,8 @@ export interface VersionManagerOptions {
   userDataPath: string;
   installer: Installer;
   settings: SettingsBridge;
+  /** Optional registry override; defaults to all built-in managed packages. */
+  registry?: PackageRegistry;
   broadcast?: (channel: string, payload: unknown) => void;
 }
 
@@ -26,6 +29,7 @@ export class VersionManager {
     this.packages = new PackageManager({
       userDataPath: options.userDataPath,
       installer: options.installer,
+      registry: options.registry,
       settings: options.settings,
     });
     this.broadcast = options.broadcast;
