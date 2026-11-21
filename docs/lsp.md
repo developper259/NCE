@@ -58,7 +58,7 @@ Adding a server means adding one declarative entry; the transport, document stor
 
 ## Configuration
 
-Settings → **Language Manager** exposes per-language enable/disable buttons, availability, a Set path action and a startup error, plus a global enable switch. Persistent values live in `settings.json`:
+Language servers are enabled by default and their paths are resolved from the server registry. Persistent overrides live in `settings.json` (the former Settings → Language Manager panel has been removed; language runtimes and servers are managed from the Version Manager):
 
 ```json
 {
