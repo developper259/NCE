@@ -15,6 +15,8 @@ import { WindowSessionStore } from "./manager/WindowSessionStore";
 import { ExternalOpenCoordinator } from "./manager/ExternalOpenCoordinator";
 import { InstallerManager } from "./manager/InstallerManager";
 import { VersionManager } from "./manager/VersionManager";
+import { PackageRegistry } from "./packages/PackageRegistry";
+import { git } from "./packages/git";
 
 const SWITCHES_WITH_VALUES = new Set([
   "--app",
@@ -154,9 +156,16 @@ export class App {
     this.windowSessionStore = new WindowSessionStore(userData, process.platform, this.agentSecrets);
     this.windowManager = new WindowManager(this, this.ipcRouter, this.windowSessionStore);
     this.externalOpenCoordinator = new ExternalOpenCoordinator(this.windowManager);
+    // Integration smoke tests can narrow the managed catalog to Git only so
+    // they stay focused on Git reconciliation without depending on the full
+    // language runtime catalog. Normal startup always uses every built-in.
+    const registry = process.env?.NCE_VERSION_MANAGER_PACKAGES === "git"
+      ? new PackageRegistry([git])
+      : undefined;
     this.versionManager = new VersionManager({
       userDataPath: userData,
       installer: this.installer.getInstaller(),
+      registry,
       settings: {
         get: (key) => this.settings.get(key),
         set: async (key, value) => {
