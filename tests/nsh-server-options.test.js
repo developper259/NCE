@@ -38,6 +38,8 @@ async function expectAccepted(port, origin) {
     const resolve = pending.get(response.id);
     if (resolve) {
       pending.delete(response.id);
+      // Test harness: resolve is a local Promise resolver from the pending Map, never input-controlled.
+      // codeql[js/unvalidated-dynamic-method-call]
       resolve(response);
     }
   });
@@ -159,6 +161,8 @@ test("NSH quotas cover many open tabs and large incremental updates", { timeout:
     const resolve = pending.get(response.id);
     if (resolve) {
       pending.delete(response.id);
+      // Test harness: resolve is a local Promise resolver from the pending Map, never input-controlled.
+      // codeql[js/unvalidated-dynamic-method-call]
       resolve(response);
     }
   });
@@ -270,6 +274,8 @@ test("NSH rejects documents beyond the default lexical state depth", { timeout: 
     const resolve = pending.get(response.id);
     if (resolve) {
       pending.delete(response.id);
+      // Test harness: resolve is a local Promise resolver from the pending Map, never input-controlled.
+      // codeql[js/unvalidated-dynamic-method-call]
       resolve(response);
     }
   });
@@ -320,6 +326,8 @@ test("real NSH token classes keep theme colors", { timeout: 20_000 }, async () =
     const resolve = pending.get(response.id);
     if (resolve) {
       pending.delete(response.id);
+      // Test harness: resolve is a local Promise resolver from the pending Map, never input-controlled.
+      // codeql[js/unvalidated-dynamic-method-call]
       resolve(response);
     }
   });

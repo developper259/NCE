@@ -173,6 +173,8 @@ test("Bottom Panel removes the redundant title and only exposes multi-view navig
   assert.match(html, /class="bottom-panel-views" role="tablist"/);
   const header = html.match(/<header class="bottom-panel-header">([\s\S]*?)<\/header>/)?.[1] || "";
   assert.doesNotMatch(header, /bottom-panel-title|<h2/i);
+  // Test assertion: strips tags from checked-in HTML to prove the header has no static label; not sanitization.
+  // codeql[js/incomplete-multi-character-sanitization]
   assert.equal(header.replace(/<[^>]*>/g, "").trim(), "", "the header has no static label");
   assert.doesNotMatch(read("src/css/bottomPanel.css"), /bottom-panel-title/);
   assert.match(html, /class="bottom-panel-views" role="tablist"[^>]*hidden><\/nav>/);
