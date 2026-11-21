@@ -480,12 +480,8 @@ class SettingsView {
     row.className = "settings-panel-row setting-row";
     const text = document.createElement("div");
     text.className = "settings-row-main";
-    const label = document.createElement("label");
     const controlId = `setting-${setting.key.replace(/\./g, "-")}`;
-    label.className = "setting-label";
-    label.htmlFor = setting.control === "select" ? `${controlId}-trigger` : controlId;
-    if (setting.control === "select") label.id = `${controlId}-label`;
-    label.textContent = setting.label;
+    const label = this.createSettingTitle(setting, controlId);
     const description = document.createElement("p");
     description.className = "setting-description";
     description.id = `${controlId}-description`;
@@ -528,6 +524,20 @@ class SettingsView {
     }
     row.append(text, controlWrap);
     return row;
+  }
+
+  createSettingTitle(setting, controlId) {
+    // A <label for="..."> forwards hover and click to its control. That is
+    // desirable for native inputs, but button-based controls would run their
+    // action when the user only interacts with the title.
+    const nativeInput =
+      setting.control === "checkbox" || setting.control === "text";
+    const title = document.createElement(nativeInput ? "label" : "span");
+    title.className = "setting-label";
+    if (nativeInput) title.htmlFor = controlId;
+    else title.id = `${controlId}-label`;
+    title.textContent = setting.label;
+    return title;
   }
 
   createLanguageManagerPage(categorySettings) {
@@ -2152,6 +2162,7 @@ class SettingsView {
     button.type = "button";
     button.className = "setting-select setting-quick-pick";
     button.setAttribute("aria-haspopup", "dialog");
+    button.setAttribute("aria-labelledby", `${id}-label`);
     button.setAttribute("aria-describedby", `${id}-description`);
 
     const value = document.createElement("span");
