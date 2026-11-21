@@ -85,6 +85,7 @@
   "js/versionManager/VersionManagerGrid.js",
   "js/versionManager/VersionManagerCatalog.js",
   "js/versionManager/VersionManagerPackageDetail.js",
+  "js/versionManager/VersionManagerLanguageDetail.js",
   "js/view/VersionManager.js",
   "js/lsp/LspPositions.js",
   "js/lsp/LspPopover.js",

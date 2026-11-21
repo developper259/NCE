@@ -33,6 +33,9 @@ const CHANNELS = [
   "VersionManager:uninstall",
   "VersionManager:verify",
   "VersionManager:cancel",
+  "VersionManager:languages",
+  "VersionManager:language-view",
+  "VersionManager:apply-components",
 ];
 
 test("VersionManager IPC drives the full lifecycle across windows and broadcasts events", { skip: posixSkip }, async () => {

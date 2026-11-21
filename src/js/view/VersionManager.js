@@ -33,6 +33,15 @@ class VersionManager {
   get operations() { return this.state.operations; }
   get confirmation() { return this.state.confirmation; }
   set confirmation(value) { this.state.confirmation = value; }
+  get languages() { return this.state.languages; }
+  get languageViews() { return this.state.languageViews; }
+  get languageApplying() { return this.state.languageApplying; }
+  set languageApplying(value) { this.state.languageApplying = value; }
+  selectionFor(languageId) { return this.state.selectionFor(languageId); }
+  toggleLanguageComponent(languageId, componentId, checked) {
+    this.state.toggleComponent(languageId, componentId, checked);
+    this.refreshLanguageView(languageId);
+  }
 
   // Claimed from the root capture-phase keydown route before KeyBindingManager,
   // which stops propagation of every key while the editor has a selection.
@@ -250,12 +259,68 @@ class VersionManager {
       if (sequence !== this.reloadSequence) return;
       this.snapshot = snapshot;
       this.loadError = null;
+      await this.loadLanguages(sequence);
     } catch (error) {
       if (sequence !== this.reloadSequence) return;
       this.loadError = error instanceof Error ? error.message : String(error);
     }
     this.loading = false;
     this.render();
+  }
+
+  async loadLanguages(sequence) {
+    if (typeof this.api?.languages !== "function") return;
+    try {
+      const languages = await this.api.languages();
+      if (sequence !== this.reloadSequence) return;
+      this.state.languages = Array.isArray(languages) ? languages : [];
+      for (const language of this.state.languages) {
+        await this.refreshLanguageView(language.id, sequence);
+      }
+    } catch {
+      // Language metadata is optional; the package catalog stays usable.
+      this.state.languages = [];
+    }
+  }
+
+  async refreshLanguageView(languageId, sequence = this.reloadSequence) {
+    if (typeof this.api?.languageView !== "function") return;
+    const selected = this.state.selectionFor(languageId);
+    try {
+      const view = await this.api.languageView(languageId, selected ? [...selected] : undefined);
+      if (sequence !== this.reloadSequence || !view) return;
+      this.state.languageViews.set(languageId, view);
+      if (!selected) this.state.setSelection(languageId, view.selected || []);
+      if (this.state.selectedPackageId &&
+          this.languageForPackage(this.state.selectedPackageId) === languageId) {
+        this.renderMain();
+      }
+    } catch {
+      // A single language view failing must not break the whole manager.
+    }
+  }
+
+  languageForPackage(packageId) {
+    for (const language of this.state.languages) {
+      if (!this.languageViews.has(language.id)) continue;
+      const view = this.state.languageViews.get(language.id);
+      if ((view.components || []).some((component) => component.packageId === packageId))
+        return language.id;
+    }
+    return null;
+  }
+
+  async applyLanguageComponents(languageId) {
+    if (this.languageApplying || typeof this.api?.applyComponents !== "function") return;
+    const selected = this.state.selectionFor(languageId);
+    this.languageApplying = languageId;
+    this.renderMain();
+    try {
+      await this.api.applyComponents(languageId, selected ? [...selected] : []);
+    } finally {
+      this.languageApplying = null;
+      await this.reload(true);
+    }
   }
 
   activeOperation() {
@@ -394,6 +459,14 @@ class VersionManager {
     }
 
     if (this.state.selectedPackageId) {
+      const languageId = this.languageForPackage(this.state.selectedPackageId);
+      if (languageId) {
+        const languageDetail = VersionManagerLanguageDetail.render(this, languageId);
+        if (languageDetail) {
+          this.main.replaceChildren(languageDetail);
+          return;
+        }
+      }
       const detail = VersionManagerPackageDetail.render(this);
       if (detail) {
         this.main.replaceChildren(detail);

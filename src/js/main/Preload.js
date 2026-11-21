@@ -126,6 +126,11 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.invoke("VersionManager:verify", { installationId }),
     cancel: (packageId) =>
       ipcRenderer.invoke("VersionManager:cancel", { packageId }),
+    languages: () => ipcRenderer.invoke("VersionManager:languages"),
+    languageView: (languageId, selected) =>
+      ipcRenderer.invoke("VersionManager:language-view", { languageId, selected }),
+    applyComponents: (languageId, selected) =>
+      ipcRenderer.invoke("VersionManager:apply-components", { languageId, selected }),
     onEvent: (callback) => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on("VersionManager:event", listener);
