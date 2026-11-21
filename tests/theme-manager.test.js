@@ -79,3 +79,37 @@ test("destroy removes the system listener", () => {
   state.mediaQuery.emit(false);
   assert.equal(state.root.dataset.theme, "dark");
 });
+
+test("theme picker opens the shared quick panel and reports applied preferences", async () => {
+  const state = setup("dark");
+  const sessions = [];
+  const editor = {
+    ...state.editor,
+    quickPanel: {
+      isOpen: () => false,
+      open: (options) => { sessions.push(options); },
+      input: { focus() {} },
+    },
+  };
+  const manager = new state.ThemeManager(editor).init();
+  const applied = [];
+  assert.equal(
+    manager.openThemePicker({
+      onApplied: (preference) => applied.push(preference),
+    }),
+    true,
+  );
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].id, "theme-picker");
+  assert.equal(sessions[0].title, "Color Theme");
+  assert.equal(sessions[0].selectedId, "dark");
+
+  await sessions[0].onSelectionChange({ id: "light" });
+  assert.equal(manager.getPreference(), "light");
+  assert.deepEqual(applied, ["light"]);
+
+  await sessions[0].onAccept({ id: "system" });
+  assert.equal(manager.getPreference(), "system");
+  assert.deepEqual(applied, ["light", "system"]);
+  manager.destroy();
+});

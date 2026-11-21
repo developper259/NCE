@@ -805,6 +805,40 @@ test("Tab Width opens the shared tab size picker instead of a dropdown", () => {
   assert.equal(selected.textContent, "4");
 });
 
+test("Theme opens the shared quick panel theme picker instead of a dropdown", () => {
+  const { loadGlobal } = require("./helpers/runtime");
+  let current = "dark";
+  const SettingsView = loadGlobal("src/js/view/SettingsView.js", "SettingsView", {
+    SETTINGS_GET: (key) => (key === "appearance.theme" ? current : undefined),
+  });
+  const theme = SettingsView.getSettings().find(
+    (setting) => setting.key === "appearance.theme",
+  );
+  assert.equal(theme.control, "quick-pick");
+  assert.equal(theme.valueType, undefined);
+  assert.equal(theme.apply, undefined);
+
+  const view = Object.create(SettingsView.prototype);
+  let request = null;
+  view.editor = {
+    themeManager: {
+      openThemePicker(options) {
+        request = options;
+        return true;
+      },
+    },
+  };
+  const selected = { textContent: "Dark" };
+  const control = { querySelector: () => selected };
+  assert.equal(view.openQuickPick(theme, control), true);
+  assert.ok(request, "the shared theme picker is reused");
+
+  current = "light";
+  request.onApplied(current);
+  assert.equal(selected.textContent, "Light");
+  assert.equal(view.formatQuickPickValue(theme, "system"), "System");
+});
+
 test("Settings select arrows are right-aligned inside their control", async () => {
   const css = await fs.readFile(
     path.join(__dirname, "../src/css/settings.css"),

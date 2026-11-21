@@ -103,9 +103,9 @@ test("button controls stay named by their title", () => {
 
   const themeRow = view.createRow(findSetting(SettingsView, "appearance.theme"));
   const themeTitle = rowTitle(themeRow);
-  const themeTrigger = themeRow.children[1].children[0].children[1];
+  const themeButton = themeRow.children[1].children[0].children[0];
   assert.equal(themeTitle.tagName, "SPAN");
-  assert.equal(themeTrigger.getAttribute("aria-labelledby"), themeTitle.id);
+  assert.equal(themeButton.getAttribute("aria-labelledby"), themeTitle.id);
 
   const tabRow = view.createRow(findSetting(SettingsView, "editor.tabWidth"));
   const tabTitle = rowTitle(tabRow);

@@ -5,14 +5,12 @@ const SETTINGS_UI = Object.freeze([
     label: "Theme",
     description: "Controls the color theme used by NCE.",
     keywords: ["theme", "color", "appearance"],
-    control: "select",
-    valueType: "string",
+    control: "quick-pick",
     options: [
       { value: "system", label: "System" },
       { value: "dark", label: "Dark" },
       { value: "light", label: "Light" },
     ],
-    apply: (editor, value) => editor.themeManager.setTheme(value),
   },
   {
     key: "editor.tabWidth",
@@ -2167,7 +2165,10 @@ class SettingsView {
 
     const value = document.createElement("span");
     value.className = "setting-select-value";
-    value.textContent = String(SETTINGS_GET(setting.key) ?? "");
+    value.textContent = this.formatQuickPickValue(
+      setting,
+      SETTINGS_GET(setting.key),
+    );
     const arrow = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     arrow.setAttribute("class", "setting-select-arrow");
     arrow.setAttribute("viewBox", "0 0 12 12");
@@ -2183,18 +2184,32 @@ class SettingsView {
   }
 
   openQuickPick(setting, control) {
+    if (setting.key === "appearance.theme") {
+      const opened = this.editor?.themeManager?.openThemePicker?.({
+        onApplied: (preference) =>
+          this.updateQuickPickControl(control, preference, setting),
+      });
+      return opened === true;
+    }
     const bottomBar = this.editor?.bottomBar;
     if (typeof bottomBar?.openConfigSpace !== "function") return false;
     bottomBar.openConfigSpace({
       onApplied: () =>
-        this.updateQuickPickControl(control, SETTINGS_GET(setting.key)),
+        this.updateQuickPickControl(control, SETTINGS_GET(setting.key), setting),
     });
     return true;
   }
 
-  updateQuickPickControl(control, value) {
+  updateQuickPickControl(control, value, setting = null) {
     const selected = control?.querySelector?.(".setting-select-value");
-    if (selected) selected.textContent = String(value ?? "");
+    if (selected) {
+      selected.textContent = this.formatQuickPickValue(setting, value);
+    }
+  }
+
+  formatQuickPickValue(setting, value) {
+    const option = setting?.options?.find((item) => item.value === value);
+    return option?.label ?? String(value ?? "");
   }
 
   requestSettingPath(setting) {
@@ -2551,7 +2566,7 @@ class SettingsView {
       return;
     }
     if (setting.control === "quick-pick") {
-      this.updateQuickPickControl(input, SETTINGS_GET(key));
+      this.updateQuickPickControl(input, SETTINGS_GET(key), setting);
       return;
     }
     if (setting.control === "select") {

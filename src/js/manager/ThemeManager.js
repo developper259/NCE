@@ -13,6 +13,7 @@ class ThemeManager {
     this.mediaQuery = null;
     this.initialized = false;
     this.destroyed = false;
+    this.themePickerOnApplied = null;
     this.handleSystemThemeChange = this.handleSystemThemeChange.bind(this);
   }
 
@@ -34,14 +35,21 @@ class ThemeManager {
     return this.resolvedTheme;
   }
 
-  openThemePicker() {
+  openThemePicker({ onApplied } = {}) {
     const quickPanel = this.editor?.quickPanel;
     if (!quickPanel) return false;
+    this.themePickerOnApplied =
+      typeof onApplied === "function" ? onApplied : null;
     if (quickPanel.isOpen("theme-picker")) {
       quickPanel.input?.focus();
       return true;
     }
 
+    const apply = async (item) => {
+      const saved = await this.setTheme(item?.id);
+      if (saved) this.themePickerOnApplied?.(this.preference);
+      return saved;
+    };
     const items = [
       { id: "system", label: "System", keywords: ["automatic", "os"] },
       { id: "dark", label: "Dark", keywords: ["night"] },
@@ -54,8 +62,8 @@ class ThemeManager {
       placeholder: "Select a theme...",
       items,
       selectedId: this.preference,
-      onSelectionChange: (item) => this.setTheme(item?.id),
-      onAccept: (item) => this.setTheme(item.id),
+      onSelectionChange: (item) => apply(item),
+      onAccept: (item) => apply(item),
     });
     return true;
   }
