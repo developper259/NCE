@@ -8,6 +8,10 @@ const { loadGlobals } = require("./helpers/runtime");
 const { createDocument, walk, byFocusKey } = require("./helpers/vm-dom.js");
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+const textOf = (node) => walk(node, () => true)
+  .map((child) => child.textContent)
+  .filter(Boolean)
+  .join(" ");
 
 const root = path.resolve(__dirname, "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "src/js/main/renderer-scripts.json"), "utf8"));
@@ -42,25 +46,28 @@ const languageView = {
   },
 };
 
-function setup() {
+function setup(options = {}) {
   const document = createDocument();
   const calls = { languages: 0, views: [], apply: [] };
+  const languages = options.languages || [{ id: "python", name: "Python" }];
+  const views = options.views || { python: languageView };
+  const packages = options.packages || [
+    { id: "python", name: "Python", categories: ["language"], state: "not-installed", supported: true, installations: [], capabilities: ["install"], installableVersion: "3.12.16" },
+    { id: "pyright", name: "Pyright", categories: ["language-server"], state: "not-installed", supported: true, installations: [], capabilities: ["install"], installableVersion: "1.1.414" },
+  ];
   const api = {
     async getState() {
       return {
         version: 1,
-        packages: [
-          { id: "python", name: "Python", categories: ["language"], state: "not-installed", supported: true, installations: [], capabilities: ["install"], installableVersion: "3.12.16" },
-          { id: "pyright", name: "Pyright", categories: ["language-server"], state: "not-installed", supported: true, installations: [], capabilities: ["install"], installableVersion: "1.1.414" },
-        ],
+        packages,
         operations: [],
       };
     },
     async refresh() { return api.getState(); },
-    async languages() { calls.languages += 1; return [{ id: "python", name: "Python" }]; },
+    async languages() { calls.languages += 1; return languages; },
     async languageView(languageId, selected) {
       calls.views.push({ languageId, selected });
-      return languageView;
+      return views[languageId] || null;
     },
     async applyComponents(languageId, selected) {
       calls.apply.push({ languageId, selected });
@@ -77,6 +84,78 @@ function setup() {
   });
   const manager = new VersionManager({ api: { versionManager: api } });
   return { document, manager, calls };
+}
+
+function languageComponent(id, name, type, packageId, overrides = {}) {
+  return {
+    id, name, description: name, type, packageId,
+    platforms: ["darwin"], installableVersion: "1.0.0", supported: true,
+    ...overrides,
+  };
+}
+
+function emptyPlan() {
+  return {
+    toInstall: [], toUninstall: [], unchanged: [],
+    dependenciesToInstall: [], blockers: [], unsupported: [],
+  };
+}
+
+function javascriptLanguageView() {
+  return {
+    id: "javascript",
+    name: "JavaScript",
+    description: "JavaScript language",
+    categories: ["language"],
+    icon: "fi fi-brands-nodejs",
+    fileExtensions: [".js"],
+    components: [
+      languageComponent("javascript.runtime", "Node.js Runtime", "runtime", "node", {
+        installableVersion: "24.22.3", defaultSelected: true,
+      }),
+      languageComponent("javascript.typescript", "TypeScript Compiler", "compiler", "typescript", {
+        installableVersion: "5.9.3", dependencies: ["javascript.runtime"],
+      }),
+      languageComponent("javascript.lsp", "TypeScript Language Server", "language-server", "typescript-language-server", {
+        installableVersion: "6.1.0", dependencies: ["javascript.typescript"], defaultSelected: true,
+      }),
+    ],
+    selected: ["javascript.runtime", "javascript.lsp"],
+    plan: emptyPlan(),
+  };
+}
+
+function typescriptLanguageView() {
+  return {
+    id: "typescript",
+    name: "TypeScript",
+    description: "TypeScript language",
+    categories: ["language"],
+    icon: "fi fi-brands-typescript",
+    fileExtensions: [".ts"],
+    components: [
+      languageComponent("typescript.runtime", "Node.js Runtime", "runtime", "node", {
+        installableVersion: "24.22.3", defaultSelected: true,
+      }),
+      languageComponent("typescript.compiler", "TypeScript Compiler", "compiler", "typescript", {
+        installableVersion: "5.9.3", dependencies: ["typescript.runtime"], defaultSelected: true,
+      }),
+      languageComponent("typescript.lsp", "TypeScript Language Server", "language-server", "typescript-language-server", {
+        installableVersion: "6.1.0", dependencies: ["typescript.compiler"], defaultSelected: true,
+      }),
+    ],
+    selected: ["typescript.runtime", "typescript.compiler", "typescript.lsp"],
+    plan: emptyPlan(),
+  };
+}
+
+function packageInfo(overrides = {}) {
+  return {
+    id: "node", name: "Node.js", description: "Node.js runtime",
+    categories: ["language", "runtime"], state: "not-installed", supported: true,
+    installations: [], capabilities: ["install"], installableVersion: "24.22.3",
+    ...overrides,
+  };
 }
 
 test("loading the manager fetches languages and builds component views", async () => {
@@ -102,6 +181,54 @@ test("the catalog lists the language without its language-server package", async
   manager.openDetail("python");
   assert.ok(byFocusKey(manager.main, "vm-component-python.lsp"),
     "the language server is still available inside the language detail");
+});
+
+test("JavaScript and TypeScript open separate language details", async () => {
+  const javascript = javascriptLanguageView();
+  const typescript = typescriptLanguageView();
+  const { manager } = setup({
+    languages: [javascript, typescript],
+    views: { javascript, typescript },
+    packages: [
+      packageInfo({ id: "node", name: "Node.js", categories: ["language", "runtime"] }),
+      packageInfo({
+        id: "typescript", name: "TypeScript", categories: ["language", "compiler"],
+        installableVersion: "5.9.3",
+      }),
+      packageInfo({
+        id: "typescript-language-server", name: "TypeScript Language Server",
+        categories: ["language-server"], installableVersion: "6.1.0",
+      }),
+      packageInfo({
+        id: "git", name: "Git", categories: ["git"], installableVersion: "2.56.1",
+      }),
+    ],
+  });
+  await manager.show();
+  await flush();
+
+  assert.ok(byFocusKey(manager.main, "vm-details-node"), "Node.js stays in the catalog");
+  assert.ok(byFocusKey(manager.main, "vm-details-typescript"), "TypeScript stays in the catalog");
+  assert.equal(byFocusKey(manager.main, "vm-details-typescript-language-server"), null,
+    "the shared language server is not a top-level package");
+  assert.match(manager.footerStatus.textContent, /0 installed · 3 available/,
+    "hidden language servers are not counted");
+
+  byFocusKey(manager.main, "vm-details-typescript").click();
+  let text = textOf(manager.main);
+  assert.match(text, /TypeScript/);
+  assert.doesNotMatch(text, /JavaScript/);
+  assert.ok(byFocusKey(manager.main, "vm-component-typescript.compiler"));
+  assert.equal(byFocusKey(manager.main, "vm-component-javascript.runtime"), null,
+    "the TypeScript detail never renders JavaScript components");
+
+  manager.closeDetail();
+  byFocusKey(manager.main, "vm-details-node").click();
+  text = textOf(manager.main);
+  assert.match(text, /JavaScript/);
+  assert.ok(byFocusKey(manager.main, "vm-component-javascript.runtime"));
+  assert.equal(byFocusKey(manager.main, "vm-component-typescript.compiler"), null,
+    "the JavaScript detail never renders TypeScript components");
 });
 
 test("language detail renders one checkbox per component with version metadata", async () => {

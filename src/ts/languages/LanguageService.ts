@@ -62,9 +62,14 @@ export class LanguageService {
 
   /** Which language owns a managed package, if any (for the detail page). */
   languageForPackage(packageId: string): string | null {
-    return this.languages.find((language) =>
-      language.components.some((component) => component.packageId === packageId),
-    )?.id ?? null;
+    const owns = (language: LanguageDefinition) =>
+      language.components.some((component) => component.packageId === packageId);
+    // A language whose id matches the package wins over shared components:
+    // "typescript" must open TypeScript, not the JavaScript definition that
+    // also lists the compiler and the language server.
+    const exact = this.languages.find((language) => language.id === packageId && owns(language));
+    if (exact) return exact.id;
+    return this.languages.find(owns)?.id ?? null;
   }
 
   /** Component ids for a language, mapped to their managed package ids. */

@@ -301,6 +301,16 @@ class VersionManager {
   }
 
   languageForPackage(packageId) {
+    const owns = (language) => {
+      const view = this.languageViews.get(language.id);
+      const components = language.components || view?.components || [];
+      return components.some((component) => component.packageId === packageId);
+    };
+    // Shared packages (node, typescript, typescript-language-server) belong to
+    // several languages. An exact id match must win: the TypeScript card opens
+    // TypeScript, while the Node.js card still opens JavaScript.
+    const exact = this.state.languages.find((language) => language.id === packageId && owns(language));
+    if (exact) return exact.id;
     for (const language of this.state.languages) {
       if (!this.languageViews.has(language.id)) continue;
       const view = this.state.languageViews.get(language.id);

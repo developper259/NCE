@@ -23,23 +23,36 @@ const snapshot = (states = {}) => ({
   operations: [],
 });
 
-test("LanguageService lists both languages with real component versions", () => {
+test("LanguageService lists every language with real component versions", () => {
   const list = service.list();
-  assert.deepEqual(list.map((item) => item.id).sort(), ["javascript", "python"]);
+  assert.deepEqual(list.map((item) => item.id).sort(), ["javascript", "python", "typescript"]);
   const js = list.find((item) => item.id === "javascript");
+  assert.equal(js.name, "JavaScript");
+  assert.deepEqual(js.fileExtensions, [".js", ".jsx", ".mjs", ".cjs"]);
   const runtime = js.components.find((component) => component.id === "javascript.runtime");
   assert.equal(runtime.installableVersion, "24.22.3");
   assert.equal(runtime.type, "runtime");
+  const ts = list.find((item) => item.id === "typescript");
+  assert.equal(ts.name, "TypeScript");
+  assert.deepEqual(ts.fileExtensions, [".ts", ".tsx", ".mts", ".cts"]);
+  assert.equal(ts.components.find((c) => c.id === "typescript.compiler").installableVersion, "5.9.3");
+  assert.equal(ts.components.find((c) => c.id === "typescript.lsp").installableVersion, "6.1.0");
   const py = list.find((item) => item.id === "python");
   assert.equal(py.components.find((c) => c.id === "python.runtime").installableVersion, "3.12.16");
 });
 
 test("LanguageService maps packages to their owning language", () => {
   assert.equal(service.languageForPackage("node"), "javascript");
+  assert.equal(service.languageForPackage("typescript"), "typescript");
+  assert.equal(service.languageForPackage("typescript-language-server"), "javascript");
   assert.equal(service.languageForPackage("python"), "python");
   assert.equal(service.languageForPackage("pyright"), "python");
   assert.equal(service.languageForPackage("git"), null);
   assert.deepEqual(service.packageIdsFor("python").sort(), ["pyright", "python"]);
+  assert.deepEqual(
+    service.packageIdsFor("typescript").sort(),
+    ["node", "typescript", "typescript-language-server"],
+  );
 });
 
 test("LanguageService uses declared defaults and plans missing components", () => {
@@ -61,6 +74,17 @@ test("LanguageService computes a mixed plan from an explicit selection", () => {
   assert.deepEqual(view.selected, ["javascript.lsp"]);
   assert.deepEqual(view.plan.toInstall, ["javascript.lsp"]);
   assert.deepEqual(view.plan.unchanged.sort(), ["javascript.runtime", "javascript.typescript"]);
+});
+
+test("TypeScript plans its own components independently from JavaScript", () => {
+  const view = service.view(
+    "typescript",
+    snapshot({ node: "installed", typescript: "installed" }),
+    ["typescript.lsp"],
+  );
+  assert.deepEqual(view.selected, ["typescript.lsp"]);
+  assert.deepEqual(view.plan.toInstall, ["typescript.lsp"]);
+  assert.deepEqual(view.plan.unchanged.sort(), ["typescript.compiler", "typescript.runtime"]);
 });
 
 test("LanguageService rejects unknown languages", () => {

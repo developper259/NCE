@@ -54,16 +54,35 @@ test("npm tarballs use verified sha512 integrity and presence verification", () 
 test("managed packages and language definitions are consistent with the registry", () => {
   const packages = new PackageRegistry(builtinManagedPackages);
   const languages = new LanguageRegistry(builtinLanguages, packages);
+
   const js = languages.get("javascript");
+  assert.equal(js.name, "JavaScript");
   assert.ok(js.fileExtensions.includes(".py") === false);
-  for (const ext of [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]) {
+  for (const ext of [".js", ".jsx", ".mjs", ".cjs"]) {
     assert.ok(js.fileExtensions.includes(ext), `javascript covers ${ext}`);
+  }
+  for (const ext of [".ts", ".tsx", ".mts", ".cts"]) {
+    assert.equal(js.fileExtensions.includes(ext), false, `javascript does not claim ${ext}`);
   }
   for (const component of js.components) {
     assert.ok(packages.has(component.packageId), `${component.id} -> managed package ${component.packageId}`);
     assert.ok(builtinPackages[component.packageId], `${component.packageId} has an Installer distribution`);
   }
   assert.deepEqual(js.defaultSelection, ["javascript.runtime", "javascript.lsp"]);
+
+  const ts = languages.get("typescript");
+  assert.equal(ts.name, "TypeScript");
+  for (const ext of [".ts", ".tsx", ".mts", ".cts"]) {
+    assert.ok(ts.fileExtensions.includes(ext), `typescript covers ${ext}`);
+  }
+  for (const ext of [".js", ".jsx", ".mjs", ".cjs"]) {
+    assert.equal(ts.fileExtensions.includes(ext), false, `typescript does not claim ${ext}`);
+  }
+  for (const component of ts.components) {
+    assert.ok(packages.has(component.packageId), `${component.id} -> managed package ${component.packageId}`);
+    assert.ok(builtinPackages[component.packageId], `${component.packageId} has an Installer distribution`);
+  }
+  assert.deepEqual(ts.defaultSelection, ["typescript.runtime", "typescript.compiler", "typescript.lsp"]);
 });
 
 test("selecting the JS LSP plans its runtime and compiler dependencies", () => {
@@ -82,6 +101,25 @@ test("selecting the JS LSP plans its runtime and compiler dependencies", () => {
     "javascript.lsp",
   ]);
   assert.deepEqual(plan.dependenciesToInstall.sort(), ["javascript.runtime", "javascript.typescript"]);
+  assert.deepEqual(plan.blockers, []);
+});
+
+test("selecting the TypeScript LSP plans its runtime and compiler dependencies", () => {
+  const packages = new PackageRegistry(builtinManagedPackages);
+  const languages = new LanguageRegistry(builtinLanguages, packages);
+  const ts = languages.get("typescript");
+  const plan = new ComponentPlanner().plan({
+    language: ts,
+    selected: ["typescript.lsp"],
+    installed: new Map(),
+    platform: "darwin",
+  });
+  assert.deepEqual(plan.toInstall, [
+    "typescript.runtime",
+    "typescript.compiler",
+    "typescript.lsp",
+  ]);
+  assert.deepEqual(plan.dependenciesToInstall.sort(), ["typescript.compiler", "typescript.runtime"]);
   assert.deepEqual(plan.blockers, []);
 });
 

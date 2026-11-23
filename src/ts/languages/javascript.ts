@@ -1,20 +1,18 @@
 import type { LanguageDefinition } from "./types";
 
 /**
- * JavaScript and TypeScript share one language environment: the same Node.js
- * runtime and the same typescript-language-server. Components map to managed
- * packages, so their lifecycle stays in the existing PackageManager.
+ * JavaScript environment: the Node.js runtime and the TypeScript language
+ * server. The compiler is a component because the language server needs its
+ * tsserver backend. TypeScript has its own definition (typescript.ts); both
+ * map to the same managed packages so their lifecycle stays in PackageManager.
  */
 export const javascript: LanguageDefinition = {
   id: "javascript",
-  name: "JavaScript / TypeScript",
-  description: "Node.js runtime and TypeScript language tooling for JavaScript and TypeScript projects.",
+  name: "JavaScript",
+  description: "Node.js runtime and TypeScript language tooling for JavaScript projects.",
   categories: ["language"],
   icon: "fi fi-brands-nodejs",
-  fileExtensions: [
-    ".js", ".jsx", ".mjs", ".cjs",
-    ".ts", ".tsx", ".mts", ".cts",
-  ],
+  fileExtensions: [".js", ".jsx", ".mjs", ".cjs"],
   components: [
     {
       id: "javascript.runtime",
@@ -29,8 +27,8 @@ export const javascript: LanguageDefinition = {
     },
     {
       id: "javascript.typescript",
-      name: "TypeScript",
-      description: "TypeScript compiler and tsserver backend.",
+      name: "TypeScript Compiler",
+      description: "Compiler and tsserver backend required by the language server.",
       type: "compiler",
       packageId: "typescript",
       platforms: ["darwin", "win32", "linux"],
@@ -39,14 +37,14 @@ export const javascript: LanguageDefinition = {
     {
       id: "javascript.lsp",
       name: "TypeScript Language Server",
-      description: "LSP server for JavaScript and TypeScript diagnostics and navigation.",
+      description: "LSP server for JavaScript diagnostics, completion and navigation.",
       type: "language-server",
       packageId: "typescript-language-server",
       platforms: ["darwin", "win32", "linux"],
       dependencies: ["javascript.typescript"],
       capabilities: ["language-server"],
       lspServerId: "typescript-language-server",
-      fileExtensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
+      fileExtensions: [".js", ".jsx", ".mjs", ".cjs"],
       defaultSelected: true,
     },
   ],
