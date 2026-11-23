@@ -75,8 +75,17 @@ class VersionManagerModel {
     return [...packages].sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  /** Language servers are language components, never top-level catalog packages. */
+  static isLanguageServer(packageInfo) {
+    return (packageInfo.categories || []).includes("language-server");
+  }
+
+  static catalogPackages(packages) {
+    return packages.filter((packageInfo) => !VersionManagerModel.isLanguageServer(packageInfo));
+  }
+
   static catalogSections(packages, { filter = "all", query = "" } = {}) {
-    const visible = packages.filter((packageInfo) =>
+    const visible = VersionManagerModel.catalogPackages(packages).filter((packageInfo) =>
       VersionManagerModel.matchesFilter(packageInfo, filter) &&
       VersionManagerModel.matchesSearch(packageInfo, query));
     return {
@@ -90,20 +99,21 @@ class VersionManagerModel {
   }
 
   static summary(packages) {
-    const installed = packages.filter((packageInfo) => VersionManagerModel.isInstalled(packageInfo));
-    const available = packages.filter((packageInfo) =>
+    const visible = VersionManagerModel.catalogPackages(packages);
+    const installed = visible.filter((packageInfo) => VersionManagerModel.isInstalled(packageInfo));
+    const available = visible.filter((packageInfo) =>
       !VersionManagerModel.isInstalled(packageInfo) && packageInfo.supported);
     let attention = 0;
-    for (const packageInfo of packages) {
+    for (const packageInfo of visible) {
       if (packageInfo.state === "failed") attention += 1;
       for (const record of packageInfo.installations || [])
         if (record.state === "corrupted" || record.state === "unknown") attention += 1;
     }
     return {
-      packages: packages.length,
+      packages: visible.length,
       installed: installed.length,
       available: available.length,
-      installations: packages.reduce((total, entry) => total + (entry.installations || []).length, 0),
+      installations: visible.reduce((total, entry) => total + (entry.installations || []).length, 0),
       attention,
     };
   }

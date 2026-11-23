@@ -50,8 +50,8 @@ function setup() {
       return {
         version: 1,
         packages: [
-          { id: "python", name: "Python", categories: ["language"], state: "not-installed", installations: [], capabilities: ["install"], installableVersion: "3.12.16" },
-          { id: "pyright", name: "Pyright", categories: ["language-server"], state: "not-installed", installations: [], capabilities: ["install"], installableVersion: "1.1.414" },
+          { id: "python", name: "Python", categories: ["language"], state: "not-installed", supported: true, installations: [], capabilities: ["install"], installableVersion: "3.12.16" },
+          { id: "pyright", name: "Pyright", categories: ["language-server"], state: "not-installed", supported: true, installations: [], capabilities: ["install"], installableVersion: "1.1.414" },
         ],
         operations: [],
       };
@@ -87,6 +87,21 @@ test("loading the manager fetches languages and builds component views", async (
   assert.ok(calls.views.some((view) => view.languageId === "python"));
   assert.ok(manager.languageViews.has("python"));
   assert.deepEqual([...manager.selectionFor("python")].sort(), ["python.lsp", "python.runtime"]);
+});
+
+test("the catalog lists the language without its language-server package", async () => {
+  const { manager } = setup();
+  await manager.show();
+  await flush();
+  assert.ok(byFocusKey(manager.main, "vm-details-python"), "Python stays in the catalog");
+  assert.equal(byFocusKey(manager.main, "vm-details-pyright"), null,
+    "the language server is not a top-level package");
+  assert.match(manager.footerStatus.textContent, /0 installed · 1 available/,
+    "the footer only counts visible packages");
+
+  manager.openDetail("python");
+  assert.ok(byFocusKey(manager.main, "vm-component-python.lsp"),
+    "the language server is still available inside the language detail");
 });
 
 test("language detail renders one checkbox per component with version metadata", async () => {

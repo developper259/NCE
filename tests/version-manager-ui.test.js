@@ -1001,6 +1001,38 @@ test("catalog model dedupes categories, sorts by name and searches real fields",
   assert.equal(Model.packageVersion(packages[1]), "2.56.1");
 });
 
+test("language servers stay out of the package catalog and its summary", () => {
+  const Model = loadGlobals(
+    ["src/js/versionManager/VersionManagerModel.js"],
+    "VersionManagerModel",
+  );
+  const packages = [
+    gitPackage({ id: "python", name: "Python", categories: ["language", "runtime"] }),
+    gitPackage({
+      id: "pyright",
+      name: "Pyright Language Server",
+      categories: ["language-server"],
+      state: "installed",
+      installations: [gitRecord({ id: "pyright-install" })],
+    }),
+    gitPackage({ id: "tsls", name: "TypeScript Language Server", categories: ["language-server"] }),
+  ];
+
+  const sections = Model.catalogSections(packages, { filter: "all" });
+  assert.deepEqual(Array.from(sections.installed), []);
+  assert.deepEqual(Array.from(sections.available, (entry) => entry.id), ["python"]);
+
+  const other = Model.catalogSections(packages, { filter: "other" });
+  assert.deepEqual(Array.from(other.installed), []);
+  assert.deepEqual(Array.from(other.available), []);
+
+  const summary = Model.summary(packages);
+  assert.equal(summary.packages, 1, "hidden components do not inflate the package count");
+  assert.equal(summary.installed, 0);
+  assert.equal(summary.available, 1);
+  assert.equal(summary.installations, 0);
+});
+
 test("Version Manager is registered in the Command Palette and opens lazily", async () => {
   let panelOptions;
   let opened = 0;
