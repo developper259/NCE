@@ -1,4 +1,12 @@
-/** Package detail page: full-width header above two balanced columns. */
+/**
+ * Unified package detail page.
+ *
+ * Every package uses the same vertical structure: a compact header, then
+ * Installation / Components / Package Information sections. Only the data
+ * changes between packages; the layout and the building blocks are shared.
+ * This module renders only what the catalog already provides and delegates
+ * every install/verify/uninstall action to the manager unchanged.
+ */
 class VersionManagerPackageDetail {
   static render(manager) {
     const packageInfo = manager.packageById(manager.selectedPackageId);
@@ -13,28 +21,42 @@ class VersionManagerPackageDetail {
       focusKey: "vm-back",
     }));
 
+    page.appendChild(VersionManagerPackageDetail.header(manager, packageInfo, state));
+
+    const installation = VersionManagerPackageDetail.installationSection(manager, packageInfo, state);
+    if (installation) page.appendChild(installation);
+
+    const information = VersionManagerPackageDetail.informationSection(packageInfo);
+    if (information) page.appendChild(information);
+
+    fragment.appendChild(page);
+    return fragment;
+  }
+
+  static header(manager, packageInfo, state) {
     const header = VersionManagerUI.element("div", "nce-vm-detail-header");
+
     const icon = VersionManagerUI.element("span", "nce-vm-detail-icon");
     icon.appendChild(VersionManagerUI.icon(packageInfo.icon));
+    header.appendChild(icon);
+
     const titles = VersionManagerUI.element("div", "nce-vm-detail-titles");
     const nameRow = VersionManagerUI.element("div", "nce-vm-detail-name-row");
     nameRow.append(
       VersionManagerUI.element("h3", "nce-vm-detail-name", packageInfo.name),
+      VersionManagerUI.categoryTag(VersionManagerModel.categorySummary(packageInfo)),
       VersionManagerUI.badge(state),
     );
     titles.appendChild(nameRow);
     if (packageInfo.description) {
       titles.appendChild(VersionManagerUI.element("p", "nce-vm-detail-description", packageInfo.description));
     }
-    header.append(icon, titles, VersionManagerPackageDetail.actions(manager, packageInfo, state));
-    page.appendChild(header);
+    header.appendChild(titles);
 
-    const columns = VersionManagerUI.element("div", "nce-vm-detail-columns");
-    columns.appendChild(VersionManagerPackageDetail.installationsColumn(manager, packageInfo, state));
-    columns.appendChild(VersionManagerPackageDetail.aboutColumn(packageInfo));
-    page.appendChild(columns);
-    fragment.appendChild(page);
-    return fragment;
+    const actions = VersionManagerPackageDetail.actions(manager, packageInfo, state);
+    actions.classList.add("nce-vm-detail-actions");
+    header.appendChild(actions);
+    return header;
   }
 
   static operationFor(manager, packageId) {
@@ -45,62 +67,56 @@ class VersionManagerPackageDetail {
   }
 
   static actions(manager, packageInfo, state) {
-    const row = VersionManagerUI.element("div", "nce-vm-detail-actions");
+    const primary = [];
     const installed = VersionManagerModel.isInstalled(packageInfo);
     if (state === "installing") {
-      row.appendChild(VersionManagerUI.button("Cancel install", () => manager.cancelOperation(packageInfo.id), {
+      primary.push(VersionManagerUI.button("Cancel install", () => manager.cancelOperation(packageInfo.id), {
         className: "nce-vm-button",
         focusKey: `vm-cancel-install-${packageInfo.id}`,
         icon: "fi-rr-cross-small",
       }));
     } else if (!installed && packageInfo.supported && packageInfo.capabilities.includes("install")) {
-      row.appendChild(VersionManagerUI.button(`Install · ${packageInfo.installableVersion}`, () => manager.install(packageInfo.id), {
+      primary.push(VersionManagerUI.button(`Install · ${packageInfo.installableVersion}`, () => manager.install(packageInfo.id), {
         className: "nce-vm-button nce-vm-button-primary",
         focusKey: `vm-install-${packageInfo.id}`,
         icon: "fi-rr-download",
       }));
     } else if (!packageInfo.supported) {
-      row.appendChild(VersionManagerUI.element("span", "nce-vm-detail-hint", "Not available on this platform"));
+      primary.push(VersionManagerUI.element("span", "nce-vm-detail-hint", "Not available on this platform"));
     } else if (installed && state !== "uninstalling") {
-      const primary = VersionManagerModel.primaryInstallation(packageInfo);
-      if (primary) {
+      const record = VersionManagerModel.primaryInstallation(packageInfo);
+      if (record) {
         const operation = VersionManagerPackageDetail.operationFor(manager, packageInfo.id);
-        row.append(
-          VersionManagerUI.button("Verify", () => manager.verify(primary.id), {
+        primary.push(
+          VersionManagerUI.button("Verify", () => manager.verify(record.id), {
             icon: "fi-rr-refresh",
             disabled: Boolean(operation),
-            focusKey: `vm-verify-${primary.id}`,
+            focusKey: `vm-verify-${record.id}`,
           }),
-          VersionManagerUI.button("Uninstall", () => manager.askUninstall(primary.id), {
+          VersionManagerUI.button("Uninstall", () => manager.askUninstall(record.id), {
             className: "nce-vm-button nce-vm-button-danger",
-            focusKey: `vm-header-uninstall-${primary.id}`,
+            focusKey: `vm-header-uninstall-${record.id}`,
             icon: "fi-rr-trash",
             disabled: Boolean(operation),
           }),
         );
       }
     }
-    return row;
+    return VersionManagerUI.actionArea(primary);
   }
 
-  static installationsColumn(manager, packageInfo, state) {
-    const column = VersionManagerUI.element("section", "nce-vm-detail-col");
-    column.appendChild(VersionManagerUI.element("h4", "nce-vm-detail-col-title", "State and installations"));
-    if (packageInfo.lastError) column.appendChild(VersionManagerPackageDetail.errorPanel(manager, packageInfo));
+  static installationSection(manager, packageInfo, state) {
+    const section = VersionManagerUI.element("section", "nce-vm-detail-section");
+    section.appendChild(VersionManagerUI.sectionHeader("Installation"));
+
+    if (packageInfo.lastError) section.appendChild(VersionManagerPackageDetail.errorPanel(manager, packageInfo));
 
     const operation = VersionManagerPackageDetail.operationFor(manager, packageInfo.id);
-    const zone = VersionManagerUI.element("div", "nce-vm-install-zone");
-    const head = VersionManagerUI.element("div", "nce-vm-install-head");
-    head.append(
-      VersionManagerUI.element("span", "nce-vm-install-title", "NCE installation"),
-      VersionManagerUI.badge(state),
-    );
-    zone.appendChild(head);
-    if (operation) zone.appendChild(VersionManagerPackageDetail.progress(operation));
+    if (operation) section.appendChild(VersionManagerPackageDetail.progress(operation));
 
     const installations = packageInfo.installations || [];
     if (!installations.length) {
-      zone.appendChild(VersionManagerUI.element(
+      section.appendChild(VersionManagerUI.element(
         "p",
         "nce-vm-note",
         packageInfo.supported
@@ -109,14 +125,13 @@ class VersionManagerPackageDetail {
       ));
     }
     for (const record of installations) {
-      zone.appendChild(VersionManagerPackageDetail.installation(manager, packageInfo, record, operation));
+      section.appendChild(VersionManagerPackageDetail.installation(manager, packageInfo, record, operation));
     }
-    column.appendChild(zone);
 
     if (packageInfo.external) {
-      column.appendChild(VersionManagerPackageDetail.externalZone(packageInfo));
+      section.appendChild(VersionManagerPackageDetail.externalZone(packageInfo));
     }
-    return column;
+    return section;
   }
 
   static progress(operation) {
@@ -137,57 +152,8 @@ class VersionManagerPackageDetail {
     return wrap;
   }
 
-  static aboutColumn(packageInfo) {
-    const column = VersionManagerUI.element("section", "nce-vm-detail-col");
-    if (packageInfo.description) {
-      column.appendChild(VersionManagerUI.element("h4", "nce-vm-detail-col-title", "About"));
-      column.appendChild(VersionManagerUI.element("p", "nce-vm-detail-about", packageInfo.description));
-    }
-    const infoTitle = VersionManagerUI.element(
-      "h4",
-      packageInfo.description ? "nce-vm-detail-col-title nce-vm-detail-col-title-spaced" : "nce-vm-detail-col-title",
-      "Information",
-    );
-    column.appendChild(infoTitle);
-    const meta = VersionManagerUI.element("div", "nce-vm-detail-meta");
-    if (packageInfo.publisher) meta.appendChild(VersionManagerPackageDetail.field("Publisher", packageInfo.publisher));
-    if (packageInfo.installableVersion) {
-      meta.appendChild(VersionManagerPackageDetail.field("Installable version", packageInfo.installableVersion, { mono: true }));
-    }
-    const categories = VersionManagerModel.categoryLabels(packageInfo);
-    if (categories.length) meta.appendChild(VersionManagerPackageDetail.field("Categories", categories.join(", ")));
-    if (packageInfo.homepage) {
-      meta.appendChild(VersionManagerPackageDetail.field("Homepage", packageInfo.homepage, { link: true }));
-    }
-    if (packageInfo.platforms?.length) {
-      meta.appendChild(VersionManagerPackageDetail.field("Platforms", packageInfo.platforms.join(", ")));
-    }
-    column.appendChild(meta);
-    return column;
-  }
-
-  static field(label, value, options = {}) {
-    const row = VersionManagerUI.element("div", "nce-vm-field");
-    const term = VersionManagerUI.element("span", "nce-vm-field-label", label);
-    let definition;
-    if (options.link) {
-      definition = document.createElement("a");
-      definition.className = "nce-vm-link";
-      definition.setAttribute("href", value);
-      definition.setAttribute("target", "_blank");
-      definition.setAttribute("rel", "noopener noreferrer");
-      definition.textContent = value;
-    } else {
-      definition = VersionManagerUI.element("span", "nce-vm-field-value", value || "—");
-    }
-    if (options.mono) definition.classList.add("nce-vm-mono");
-    if (options.title) definition.title = options.title;
-    row.append(term, definition);
-    return row;
-  }
-
   static installation(manager, packageInfo, record, operation) {
-    const block = VersionManagerUI.element("div", "nce-vm-installation");
+    const block = VersionManagerUI.element("div", "nce-vm-installation nce-vm-install-zone");
     const head = VersionManagerUI.element("div", "nce-vm-installation-head");
     head.append(
       VersionManagerUI.element("span", "nce-vm-install-version", record.version),
@@ -195,12 +161,19 @@ class VersionManagerPackageDetail {
       VersionManagerUI.element("span", "nce-vm-provenance", "Managed by NCE"),
     );
     block.appendChild(head);
-    block.append(
-      VersionManagerPackageDetail.field("Executable", record.executable, { mono: true, title: record.executable }),
-      VersionManagerPackageDetail.field("Platform", `${record.platform} / ${record.arch}`),
-      VersionManagerPackageDetail.field("Installed", VersionManagerUI.formatDate(record.installedAt)),
-      VersionManagerPackageDetail.field("Last verified", record.verifiedAt ? VersionManagerUI.formatDateTime(record.verifiedAt) : "Never"),
+
+    const rows = VersionManagerUI.element("div", "nce-vm-info-list");
+    rows.append(
+      VersionManagerUI.informationRow("Executable", record.executable, { mono: true, title: record.executable }),
+      VersionManagerUI.informationRow("Platform", `${record.platform} / ${record.arch}`),
+      VersionManagerUI.informationRow("Installed", VersionManagerUI.formatDate(record.installedAt)),
+      VersionManagerUI.informationRow(
+        "Last verified",
+        record.verifiedAt ? VersionManagerUI.formatDateTime(record.verifiedAt) : "Never",
+      ),
     );
+    block.appendChild(rows);
+
     if (record.error) {
       block.appendChild(VersionManagerUI.element(
         "p",
@@ -209,38 +182,67 @@ class VersionManagerPackageDetail {
       ));
     }
 
-    const actionRow = VersionManagerUI.element("div", "nce-vm-install-actions");
     const confirming = manager.confirmation?.kind === "uninstall" && manager.confirmation.installationId === record.id;
     const uninstalling = record.state === "uninstalling" || operation?.kind === "uninstall";
     if (confirming) {
-      actionRow.appendChild(VersionManagerPackageDetail.uninstallConfirmation(manager, packageInfo, record));
-      block.appendChild(actionRow);
+      block.appendChild(VersionManagerPackageDetail.uninstallConfirmation(manager, packageInfo, record));
     } else if (uninstalling) {
-      actionRow.appendChild(VersionManagerUI.element("span", "nce-vm-note", "Uninstalling…"));
-      block.appendChild(actionRow);
+      block.appendChild(VersionManagerUI.element("p", "nce-vm-note", "Uninstalling…"));
     }
     return block;
   }
 
   static externalZone(packageInfo) {
-    const zone = VersionManagerUI.element("div", "nce-vm-install-zone nce-vm-install-zone-external");
-    const head = VersionManagerUI.element("div", "nce-vm-install-head");
+    const zone = VersionManagerUI.element("div", "nce-vm-installation nce-vm-install-zone nce-vm-install-zone-external");
+    const head = VersionManagerUI.element("div", "nce-vm-installation-head");
     head.append(
       VersionManagerUI.element("span", "nce-vm-install-title", "External installation"),
+      VersionManagerUI.element("span", "nce-vm-install-version", packageInfo.external.version || ""),
       VersionManagerUI.badge("external"),
+      VersionManagerUI.element("span", "nce-vm-provenance", "Detected on your system"),
     );
     zone.appendChild(head);
-    zone.appendChild(VersionManagerUI.element("p", "nce-vm-note", "Detected on your system."));
-    zone.append(
-      VersionManagerPackageDetail.field("Version", packageInfo.external.version),
-      VersionManagerPackageDetail.field("Executable", packageInfo.external.executable, { mono: true, title: packageInfo.external.executable }),
+
+    const rows = VersionManagerUI.element("div", "nce-vm-info-list");
+    rows.append(
+      VersionManagerUI.informationRow("Executable", packageInfo.external.executable, {
+        mono: true,
+        title: packageInfo.external.executable,
+      }),
     );
+    zone.appendChild(rows);
     zone.appendChild(VersionManagerUI.element(
       "p",
       "nce-vm-note",
       "This installation is managed outside NCE. You can keep using it normally; the Version Manager never modifies or uninstalls external tools.",
     ));
     return zone;
+  }
+
+  static informationSection(packageInfo) {
+    const rows = VersionManagerUI.element("div", "nce-vm-info-list");
+    if (packageInfo.publisher) {
+      rows.appendChild(VersionManagerUI.informationRow("Publisher", packageInfo.publisher));
+    }
+    if (packageInfo.installableVersion) {
+      rows.appendChild(VersionManagerUI.informationRow("Installable version", packageInfo.installableVersion, { mono: true }));
+    }
+    const categories = VersionManagerModel.categoryLabels(packageInfo);
+    if (categories.length) {
+      rows.appendChild(VersionManagerUI.informationRow("Categories", categories.join(", ")));
+    }
+    if (packageInfo.homepage) {
+      rows.appendChild(VersionManagerUI.informationRow("Homepage", packageInfo.homepage, { link: true }));
+    }
+    if (packageInfo.platforms?.length) {
+      rows.appendChild(VersionManagerUI.informationRow("Platforms", packageInfo.platforms.join(", ")));
+    }
+    if (!rows.children.length) return null;
+
+    const section = VersionManagerUI.element("section", "nce-vm-detail-section");
+    section.appendChild(VersionManagerUI.sectionHeader("Package Information"));
+    section.appendChild(rows);
+    return section;
   }
 
   static uninstallConfirmation(manager, packageInfo, record) {

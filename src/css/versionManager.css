@@ -409,131 +409,109 @@
   white-space: nowrap;
 }
 
-/* Package detail: full-width header above two balanced columns pinned to the
-   bottom of the page while their own styling stays unchanged. */
+/* Unified package detail: one compact column of clearly separated sections.
+   Shared by Git, Python and every future package type. */
 .nce-vm-detail-page {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  min-height: 100%;
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
 }
 .nce-vm-back {
   display: inline-flex;
   align-self: flex-start;
   align-items: center;
   gap: 6px;
-  height: 28px;
-  margin: 0 0 14px;
-  padding: 0 12px 0 9px;
+  height: 26px;
+  margin: 0 0 12px;
+  padding: 0 11px 0 8px;
   border: 1px solid var(--border-primary);
-  border-radius: 14px;
-  background: var(--bg-primary);
+  border-radius: 13px;
+  background: transparent;
   color: var(--text-secondary);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   line-height: 1;
   cursor: pointer;
   transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
 }
-.nce-vm-back i { font-size: 14px; }
+.nce-vm-back i { font-size: 13px; }
 .nce-vm-back:hover {
   border-color: var(--border-secondary);
   background: var(--bg-hover-alt);
   color: var(--text-primary);
 }
-.nce-vm-detail-header { display: flex; align-items: flex-start; gap: 14px; margin-bottom: 30px; }
+
+/* Header: icon, name, category, status and primary actions in one compact band. */
+.nce-vm-detail-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-primary);
+}
 .nce-vm-detail-icon {
   display: grid;
-  flex: 0 0 46px;
+  flex: 0 0 40px;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: 7px;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
   background: var(--bg-tertiary);
   color: var(--text-secondary);
-  font-size: 22px;
+  font-size: 20px;
 }
 .nce-vm-detail-titles { flex: 1; min-width: 0; }
-.nce-vm-detail-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.nce-vm-detail-name { margin: 0; font-size: 19px; font-weight: 500; }
+.nce-vm-detail-name-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.nce-vm-detail-name { margin: 0; font-size: 17px; font-weight: 600; }
 .nce-vm-detail-description {
-  margin: 3px 0 0;
-  overflow: hidden;
+  margin: 4px 0 0;
   color: var(--text-tertiary);
   font-size: 12px;
   line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
-.nce-vm-detail-actions {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-  margin-left: auto;
-}
+.nce-vm-detail-actions { flex: 0 0 auto; align-self: center; margin-left: auto; }
+.nce-vm-action-area { display: flex; align-items: center; gap: 8px; }
+.nce-vm-actions-primary, .nce-vm-actions-secondary { display: flex; align-items: center; gap: 8px; }
+.nce-vm-actions-secondary { margin-left: 4px; }
 .nce-vm-detail-hint { color: var(--text-tertiary); font-size: 12px; }
 
-.nce-vm-detail-columns {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 40px;
-  align-items: start;
-  margin-top: auto;
+/* Sections: titles with discreet dividers, never cards or tables. */
+.nce-vm-detail-section { padding: 14px 0 4px; }
+.nce-vm-detail-section + .nce-vm-detail-section {
+  margin-top: 10px;
+  border-top: 1px solid var(--border-primary);
 }
-.nce-vm-detail-col { min-width: 0; }
-.nce-vm-detail-col + .nce-vm-detail-col {
-  padding-left: 40px;
-  border-left: 1px solid var(--border-primary);
-}
-.nce-vm-detail-col-title {
-  margin: 0 0 12px;
+.nce-vm-section-header { margin-bottom: 8px; }
+.nce-vm-section-title {
+  margin: 0;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
-.nce-vm-detail-col-title-spaced {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-primary);
+.nce-vm-section-description {
+  margin: 4px 0 0;
+  color: var(--text-tertiary);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
-.nce-vm-detail-about {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 12.5px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-.nce-vm-detail-meta { display: block; }
 
-.nce-vm-install-zone + .nce-vm-install-zone {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-primary);
+/* Information rows: label left, value right, long values wrap. */
+.nce-vm-info-list { display: flex; flex-direction: column; }
+.nce-vm-info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  min-width: 0;
+  padding: 5px 0;
 }
-.nce-vm-install-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
-.nce-vm-install-title { color: var(--text-primary); font-size: 13px; font-weight: 600; }
-.nce-vm-install-zone-external .nce-vm-install-title { color: var(--text-secondary); }
-.nce-vm-install-progress { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px; }
-.nce-vm-install-progress-label { flex: 0 0 auto; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 11px; }
-.nce-vm-installation + .nce-vm-installation {
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-primary);
-}
-.nce-vm-installation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 4px; }
-.nce-vm-install-version { font-family: var(--font-mono); font-size: 14px; font-weight: 600; }
-.nce-vm-provenance { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
-.nce-vm-install-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
-.nce-vm-install-actions .nce-vm-note { margin: 0; }
-.nce-vm-install-actions .nce-vm-confirm { flex: 1 1 100%; }
-
-.nce-vm-field { display: flex; align-items: baseline; gap: 14px; min-width: 0; padding: 4px 0; }
-.nce-vm-field-label { flex: 0 0 140px; color: var(--text-tertiary); font-size: 12px; }
-.nce-vm-field-value {
+.nce-vm-info-label { flex: 0 0 140px; color: var(--text-tertiary); font-size: 12px; }
+.nce-vm-info-value {
   flex: 1;
   min-width: 0;
   color: var(--text-primary);
@@ -543,19 +521,30 @@
 }
 .nce-vm-mono { font-family: var(--font-mono); font-size: 11px; }
 .nce-vm-link {
-  flex: 1;
-  min-width: 0;
   color: var(--accent-primary);
-  font-size: 12px;
-  line-height: 1.5;
-  overflow-wrap: anywhere;
   text-decoration: none;
 }
 .nce-vm-link:hover { text-decoration: underline; }
 .nce-vm-link:focus-visible { outline: 1px solid var(--accent-primary); outline-offset: 1px; }
 .nce-vm-note { margin: 8px 0 0; color: var(--text-tertiary); font-size: 12px; line-height: 1.5; }
 
+/* Installation entries inside the Installation section. */
+.nce-vm-install-zone + .nce-vm-install-zone,
+.nce-vm-installation + .nce-vm-installation {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-primary);
+}
+.nce-vm-installation-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 4px; }
+.nce-vm-install-title { color: var(--text-primary); font-size: 12.5px; font-weight: 600; }
+.nce-vm-install-version { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+.nce-vm-provenance { margin-left: auto; color: var(--text-tertiary); font-size: 11px; }
+.nce-vm-install-zone-external .nce-vm-install-version { color: var(--text-secondary); }
+.nce-vm-install-progress { display: flex; align-items: center; gap: 8px; margin: 4px 0 10px; }
+.nce-vm-install-progress-label { flex: 0 0 auto; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 11px; }
+
 .nce-vm-confirm {
+  margin-top: 10px;
   padding: 12px 14px;
   border: 1px solid var(--state-warning);
   border-radius: 5px;
@@ -581,24 +570,34 @@
 .nce-vm-error-text { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .nce-vm-error .nce-vm-button { flex: 0 0 auto; margin-left: auto; }
 
-/* Language component selection */
-.nce-vm-lang-section { margin-top: 4px; }
-.nce-vm-component-list { display: flex; flex-direction: column; gap: 8px; margin: 12px 0 16px; }
-.nce-vm-component {
+/* Component rows: compact lines, not cards. */
+.nce-vm-component-list { display: flex; flex-direction: column; }
+.nce-vm-component-row {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
-  padding: 12px 14px;
-  border: 1px solid var(--border-primary);
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  cursor: pointer;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-primary);
 }
-.nce-vm-component:hover { border-color: var(--border-accent); }
-.nce-vm-component-checkbox { flex: 0 0 auto; width: 16px; height: 16px; margin-top: 2px; accent-color: var(--accent-primary); cursor: pointer; }
+.nce-vm-component-row:last-child { border-bottom: 0; }
+.nce-vm-component-row:hover { background: var(--bg-hover-alt); }
+.nce-vm-component-checkbox { flex: 0 0 auto; width: 15px; height: 15px; margin-top: 3px; accent-color: var(--accent-primary); cursor: pointer; }
 .nce-vm-component-checkbox:disabled { cursor: not-allowed; opacity: 0.5; }
-.nce-vm-component-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.nce-vm-component-title { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 13px; font-weight: 600; }
+.nce-vm-component-icon {
+  display: grid;
+  flex: 0 0 28px;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 5px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+.nce-vm-component-body { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+.nce-vm-component-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.nce-vm-component-name { color: var(--text-primary); font-size: 12.5px; font-weight: 600; }
 .nce-vm-component-type {
   padding: 1px 6px;
   border-radius: 10px;
@@ -608,36 +607,21 @@
   font-weight: 500;
   text-transform: capitalize;
 }
-.nce-vm-component-desc { color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
-.nce-vm-component-meta { color: var(--text-secondary); font-size: 11px; }
+.nce-vm-component-desc { color: var(--text-secondary); font-size: 11.5px; line-height: 1.5; }
+.nce-vm-component-meta { color: var(--text-tertiary); font-size: 11px; }
+.nce-vm-component-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+
 .nce-vm-lang-plan {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border-radius: 6px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 5px;
   background: var(--bg-tertiary);
 }
 .nce-vm-lang-plan-summary { color: var(--text-primary); font-size: 12px; font-weight: 600; }
 .nce-vm-lang-plan-blocker { color: var(--state-error); font-size: 12px; }
-.nce-vm-lang-apply { align-self: flex-start; }
-
-@media (max-width: 900px) {
-  .nce-vm-detail-columns { gap: 24px; }
-  .nce-vm-detail-col + .nce-vm-detail-col { padding-left: 24px; }
-}
-
-@media (max-width: 860px) {
-  .nce-vm-detail-columns { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .nce-vm-detail-col + .nce-vm-detail-col {
-    margin-top: 18px;
-    padding-top: 16px;
-    padding-left: 0;
-    border-left: 0;
-    border-top: 1px solid var(--border-primary);
-  }
-}
 
 @media (max-width: 720px) {
   .nce-vm-host { padding: 16px; }
@@ -648,8 +632,9 @@
   .nce-vm-toolbar-row { align-items: stretch; flex-direction: column; }
   .nce-vm-footer-progress { flex-basis: 140px; }
   .nce-vm-detail-header { flex-wrap: wrap; }
-  .nce-vm-field { flex-direction: column; gap: 2px; }
-  .nce-vm-field-label { flex-basis: auto; }
+  .nce-vm-detail-actions { margin-left: 0; width: 100%; }
+  .nce-vm-info-row { flex-direction: column; gap: 2px; }
+  .nce-vm-info-label { flex-basis: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

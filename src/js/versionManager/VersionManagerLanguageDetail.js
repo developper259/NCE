@@ -1,4 +1,11 @@
-/** Language detail page: per-component checkboxes and a computed change plan. */
+/**
+ * Unified language detail page.
+ *
+ * Uses the same header, section, information-row and component-row building
+ * blocks as a plain package. Components are the one structural difference of
+ * an environment. Selection, planning and apply stay entirely in the manager
+ * and its services; this module only renders them.
+ */
 class VersionManagerLanguageDetail {
   static render(manager, languageId) {
     const view = manager.languageViews.get(languageId);
@@ -12,55 +19,85 @@ class VersionManagerLanguageDetail {
       focusKey: "vm-back",
     }));
 
+    page.appendChild(VersionManagerLanguageDetail.header(manager, view));
+
+    const components = VersionManagerLanguageDetail.componentsSection(manager, languageId, view);
+    if (components) page.appendChild(components);
+
+    const information = VersionManagerLanguageDetail.informationSection(manager, languageId, view);
+    if (information) page.appendChild(information);
+
+    fragment.appendChild(page);
+    return fragment;
+  }
+
+  static header(manager, view) {
     const header = VersionManagerUI.element("div", "nce-vm-detail-header");
+
     const icon = VersionManagerUI.element("span", "nce-vm-detail-icon");
     icon.appendChild(VersionManagerUI.icon(view.icon));
+    header.appendChild(icon);
+
     const titles = VersionManagerUI.element("div", "nce-vm-detail-titles");
     const nameRow = VersionManagerUI.element("div", "nce-vm-detail-name-row");
     nameRow.append(
       VersionManagerUI.element("h3", "nce-vm-detail-name", view.name),
-      VersionManagerUI.element("span", "nce-vm-category-tag", "Language"),
+      VersionManagerUI.categoryTag("language"),
+      VersionManagerUI.badge(VersionManagerLanguageDetail.environmentState(view)),
     );
     titles.appendChild(nameRow);
     if (view.description) {
       titles.appendChild(VersionManagerUI.element("p", "nce-vm-detail-description", view.description));
     }
-    header.append(icon, titles);
-    page.appendChild(header);
+    header.appendChild(titles);
 
-    const section = VersionManagerUI.element("section", "nce-vm-lang-section");
-    section.appendChild(VersionManagerUI.element("h4", "nce-vm-detail-col-title", "Components"));
-    section.appendChild(VersionManagerUI.element(
-      "p",
-      "nce-vm-note",
+    const applyLabel = manager.languageApplying === view.id
+      ? "Applying…"
+      : `Apply changes${VersionManagerLanguageDetail.actionCount(view.plan) ? ` (${VersionManagerLanguageDetail.actionCount(view.plan)})` : ""}`;
+    const apply = VersionManagerUI.button(applyLabel, () => manager.applyLanguageComponents(view.id), {
+      className: "nce-vm-button nce-vm-button-primary",
+      icon: "fi-rr-check",
+      focusKey: `vm-apply-components-${view.id}`,
+      disabled: manager.languageApplying === view.id || (view.plan?.blockers?.length || 0) > 0,
+    });
+    header.appendChild(VersionManagerUI.actionArea([apply]));
+    return header;
+  }
+
+  static actionCount(plan) {
+    if (!plan) return 0;
+    return (plan.toInstall?.length || 0) + (plan.toUninstall?.length || 0);
+  }
+
+  /** Environment status is derived from the real component plan, never invented. */
+  static environmentState(view) {
+    const plan = view.plan;
+    if (!plan) return "unknown";
+    if ((plan.blockers?.length || 0) > 0) return "failed";
+    if ((plan.toInstall?.length || 0) > 0 || (plan.toUninstall?.length || 0) > 0) return "available";
+    if ((plan.unchanged?.length || 0) > 0) return "installed";
+    return "not-installed";
+  }
+
+  static componentsSection(manager, languageId, view) {
+    if (!view.components?.length) return null;
+    const section = VersionManagerUI.element("section", "nce-vm-detail-section");
+    section.appendChild(VersionManagerUI.sectionHeader(
+      "Components",
       "Select the components you want. NCE compares your selection with what is installed and performs only the needed operations.",
     ));
 
-    const selection = manager.selectionFor(languageId) || new Set(view.selected);
+    const selection = manager.selectionFor(languageId) || new Set(view.selected || []);
     const list = VersionManagerUI.element("div", "nce-vm-component-list");
     for (const component of view.components) {
-      list.appendChild(VersionManagerLanguageDetail.componentRow(manager, languageId, component, selection));
+      list.appendChild(VersionManagerLanguageDetail.componentRow(manager, languageId, component, selection, view.plan));
     }
     section.appendChild(list);
-
-    const plan = view.plan;
-    section.appendChild(VersionManagerLanguageDetail.planSummary(plan));
-    const applyLabel = manager.languageApplying === languageId
-      ? "Applying…"
-      : `Apply changes${plan.toInstall.length + plan.toUninstall.length ? ` (${plan.toInstall.length + plan.toUninstall.length})` : ""}`;
-    section.appendChild(VersionManagerUI.button(applyLabel, () => manager.applyLanguageComponents(languageId), {
-      className: "nce-vm-button nce-vm-button-primary nce-vm-lang-apply",
-      icon: "fi-rr-check",
-      focusKey: `vm-apply-components-${languageId}`,
-      disabled: manager.languageApplying === languageId || plan.blockers.length > 0,
-    }));
-    page.appendChild(section);
-    fragment.appendChild(page);
-    return fragment;
+    section.appendChild(VersionManagerLanguageDetail.planSummary(view.plan));
+    return section;
   }
 
-  static componentRow(manager, languageId, component, selection) {
-    const row = VersionManagerUI.element("label", "nce-vm-component");
+  static componentRow(manager, languageId, component, selection, plan) {
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
     checkbox.className = "nce-vm-component-checkbox";
@@ -71,33 +108,64 @@ class VersionManagerLanguageDetail {
       manager.toggleLanguageComponent(languageId, component.id, checkbox.checked);
     });
 
-    const body = VersionManagerUI.element("span", "nce-vm-component-body");
-    const title = VersionManagerUI.element("span", "nce-vm-component-title", component.name);
-    title.appendChild(VersionManagerUI.element("span", "nce-vm-component-type", component.type.replace("-", " ")));
-    body.appendChild(title);
-    body.appendChild(VersionManagerUI.element("span", "nce-vm-component-desc", component.description));
     const metaParts = [`Version ${component.installableVersion}`];
     if (!component.supported) metaParts.push("Not available on this platform");
-    body.appendChild(VersionManagerUI.element("span", "nce-vm-component-meta", metaParts.join(" · ")));
 
-    row.append(checkbox, body);
+    let badge = null;
+    if (plan) {
+      if ((plan.toInstall || []).includes(component.id)) badge = VersionManagerUI.badge("available");
+      else if ((plan.unchanged || []).includes(component.id)) badge = VersionManagerUI.badge("installed");
+      else if ((plan.toUninstall || []).includes(component.id)) badge = VersionManagerUI.badge("not-installed");
+    }
+
+    const row = VersionManagerUI.componentRow(component, {
+      selectionControl: checkbox,
+      badge,
+      meta: metaParts.join(" · "),
+    });
     return row;
   }
 
   static planSummary(plan) {
     const box = VersionManagerUI.element("div", "nce-vm-lang-plan");
     const parts = [];
-    if (plan.toInstall.length) parts.push(`Install ${plan.toInstall.length}`);
-    if (plan.toUninstall.length) parts.push(`Uninstall ${plan.toUninstall.length}`);
+    if (plan?.toInstall?.length) parts.push(`Install ${plan.toInstall.length}`);
+    if (plan?.toUninstall?.length) parts.push(`Uninstall ${plan.toUninstall.length}`);
     if (!parts.length) parts.push("Already up to date");
-    box.appendChild(VersionManagerUI.element(
-      "span",
-      "nce-vm-lang-plan-summary",
-      parts.join(" · "),
-    ));
-    for (const blocker of plan.blockers) {
+    box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-summary", parts.join(" · ")));
+    for (const blocker of plan?.blockers || []) {
       box.appendChild(VersionManagerUI.element("span", "nce-vm-lang-plan-blocker", blocker));
     }
     return box;
+  }
+
+  static informationSection(manager, languageId, view) {
+    const rows = VersionManagerUI.element("div", "nce-vm-info-list");
+
+    const packages = manager.snapshot?.packages || [];
+    const byId = new Map(packages.map((info) => [info.id, info]));
+    const installedCount = (view.components || []).filter((component) => {
+      const info = byId.get(component.packageId);
+      return info && (info.installations || []).length > 0;
+    }).length;
+    rows.appendChild(VersionManagerUI.informationRow(
+      "Installed components",
+      `${installedCount} of ${view.components.length}`,
+    ));
+
+    const versions = (view.components || [])
+      .filter((component) => component.installableVersion && component.installableVersion !== "—")
+      .map((component) => `${component.name}: ${component.installableVersion}`);
+    if (versions.length) {
+      rows.appendChild(VersionManagerUI.informationRow("Component versions", versions.join(", ")));
+    }
+    if (view.fileExtensions?.length) {
+      rows.appendChild(VersionManagerUI.informationRow("File extensions", view.fileExtensions.join(", ")));
+    }
+
+    const section = VersionManagerUI.element("section", "nce-vm-detail-section");
+    section.appendChild(VersionManagerUI.sectionHeader("Environment Information"));
+    section.appendChild(rows);
+    return section;
   }
 }
