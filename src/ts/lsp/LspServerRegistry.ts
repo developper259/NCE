@@ -6,6 +6,30 @@ export interface LspCommandCandidate {
   args: string[];
 }
 
+/**
+ * Declarative launch description for a server that NCE installed itself.
+ *
+ * The entry point is relative to the package installation directory. When
+ * `runtimePackageId` is set, the server is a script launched through that
+ * runtime (for example `node lib/cli.mjs --stdio`) instead of a native binary.
+ */
+export interface ManagedServerExecution {
+  /** Package that provides the server, as registered in the PackageRegistry. */
+  packageId: string;
+  /** Entry point relative to the installation directory. */
+  entryPoint: string;
+  /** Package providing the runtime that launches `entryPoint`, when it is a script. */
+  runtimePackageId?: string;
+  /** Arguments passed to the entry point. */
+  args: string[];
+  /**
+   * Extra initialization options merged into `initialize`. Values may reference
+   * resolved managed paths through the `{tsserver}` placeholder, which is
+   * replaced with the absolute `tsserver.js` of the resolved TypeScript package.
+   */
+  initializationOptions?: Record<string, unknown>;
+}
+
 export interface LspServerDefinition {
   id: string;
   name: string;
@@ -18,6 +42,8 @@ export interface LspServerDefinition {
   defaultEnabled: boolean;
   requiresConfiguration?: boolean;
   initializationOptions?: Record<string, unknown>;
+  /** How to launch this server from an installation owned by NCE. */
+  managed?: ManagedServerExecution;
 }
 
 const SERVER_DEFINITIONS: LspServerDefinition[] = [
@@ -26,43 +52,60 @@ const SERVER_DEFINITIONS: LspServerDefinition[] = [
     name: "TypeScript Language Server",
     description: "TypeScript and JavaScript language features.",
     languages: ["javascript", "typescript"],
-    extensions: [".js", ".mjs", ".ts"],
+    extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
     commands: [{ command: "typescript-language-server", args: ["--stdio"] }],
     rootMarkers: ["tsconfig.json", "jsconfig.json", "package.json"],
     priority: 100,
     defaultEnabled: true,
+    managed: {
+      packageId: "typescript-language-server",
+      entryPoint: "lib/cli.mjs",
+      runtimePackageId: "node",
+      args: ["--stdio"],
+      // typescript-language-server resolves tsserver.js from a sibling
+      // node_modules/typescript/lib, which does not exist here: NCE installs
+      // TypeScript in its own directory. `tsserver.path` is the officially
+      // supported way to point it at the managed TypeScript SDK.
+      initializationOptions: { tsserver: { path: "{tsserver}" } },
+    },
   },
   {
     id: "eslint-language-server",
     name: "ESLint Language Server",
     description: "ESLint diagnostics and quick fixes.",
     languages: ["javascript", "typescript"],
-    extensions: [".js", ".mjs", ".ts"],
+    extensions: [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"],
     commands: [{ command: "vscode-eslint-language-server", args: ["--stdio"] }],
     rootMarkers: [".eslintrc", ".eslintrc.js", ".eslintrc.cjs", ".eslintrc.json", "eslint.config.js", "eslint.config.mjs", "package.json"],
     priority: 40,
     defaultEnabled: false,
   },
   {
-    id: "basedpyright",
-    name: "BasedPyright",
+    id: "pyright",
+    name: "Pyright",
     description: "Python type checking and language features.",
     languages: ["python"],
-    extensions: [".py", ".pyw"],
+    extensions: [".py", ".pyi", ".pyw"],
     commands: [
-      { command: "basedpyright-langserver", args: ["--stdio"] },
       { command: "pyright-langserver", args: ["--stdio"] },
+      { command: "basedpyright-langserver", args: ["--stdio"] },
     ],
     rootMarkers: ["pyproject.toml", "setup.py", "setup.cfg", "requirements.txt", "Pipfile"],
     priority: 100,
     defaultEnabled: true,
+    managed: {
+      packageId: "pyright",
+      entryPoint: "langserver.index.js",
+      runtimePackageId: "node",
+      args: ["--stdio"],
+    },
   },
   {
     id: "ruff",
     name: "Ruff",
     description: "Fast Python linting and formatting.",
     languages: ["python"],
-    extensions: [".py", ".pyw"],
+    extensions: [".py", ".pyi", ".pyw"],
     commands: [
       { command: "ruff", args: ["server"] },
       { command: "ruff-lsp", args: [] },
@@ -175,9 +218,15 @@ const SERVER_DEFINITIONS: LspServerDefinition[] = [
 
 const EXTENSION_LANGUAGE = new Map<string, string>([
   [".js", "javascript"],
+  [".jsx", "javascript"],
   [".mjs", "javascript"],
+  [".cjs", "javascript"],
   [".ts", "typescript"],
+  [".tsx", "typescript"],
+  [".mts", "typescript"],
+  [".cts", "typescript"],
   [".py", "python"],
+  [".pyi", "python"],
   [".pyw", "python"],
   [".html", "html"],
   [".htm", "html"],
@@ -223,6 +272,18 @@ export function serversForLanguage(languageId: string): LspServerDefinition[] {
 
 export function isKnownServerId(id: string): boolean {
   return SERVER_DEFINITIONS.some((definition) => definition.id === id);
+}
+
+/**
+ * Server ids that were renamed. Configurations and stored selections written
+ * before the rename keep working through this alias table.
+ */
+export const SERVER_ID_ALIASES: Readonly<Record<string, string>> = {
+  basedpyright: "pyright",
+};
+/** Map a possibly-legacy server id onto its current definition id. */
+export function normalizeServerId(id: string): string {
+  return SERVER_ID_ALIASES[id] ?? id;
 }
 
 async function pathExists(target: string): Promise<boolean> {

@@ -3,6 +3,7 @@ import { builtinLanguages } from "../languages";
 import { LanguageApplicationService } from "../languages/LanguageApplicationService";
 import { LanguageService } from "../languages/LanguageService";
 import { PackageManager } from "../packages/PackageManager";
+import { ManagedToolResolver } from "../packages/ManagedToolResolver";
 import { PackageRegistry } from "../packages/PackageRegistry";
 import type { SettingsBridge } from "../packages/types";
 import type { IpcHandlerRegistrar } from "./IpcRouter";
@@ -27,6 +28,8 @@ export class VersionManager {
   readonly packages: PackageManager;
   readonly languages: LanguageService;
   readonly languageApplications: LanguageApplicationService;
+  /** Read-only view of NCE-owned installations, shared with the LSP engine. */
+  readonly managedTools: ManagedToolResolver;
   private readonly broadcast?: (channel: string, payload: unknown) => void;
   private unsubscribe: (() => void) | null = null;
 
@@ -38,6 +41,7 @@ export class VersionManager {
       registry,
       settings: options.settings,
     });
+    this.managedTools = new ManagedToolResolver({ store: this.packages.store });
     this.languages = new LanguageService(builtinLanguages, registry);
     this.languageApplications = new LanguageApplicationService(this.packages);
     this.broadcast = options.broadcast;

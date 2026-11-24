@@ -2,13 +2,39 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import type { LspCommandCandidate, LspServerDefinition } from "./LspServerRegistry";
 import type { LspServerConfiguration } from "./LspTypes";
+import type { ManagedToolResolver } from "../packages/ManagedToolResolver";
+
+export type LspExecutableSource = "configured" | "managed" | "path" | null;
 
 export interface LspExecutableResolution {
   available: boolean;
   command: string | null;
   args: string[];
-  source: "configured" | "path" | null;
+  source: LspExecutableSource;
   error: string | null;
+  /**
+   * Extra initialization options produced during resolution (for example the
+   * resolved `tsserver.path`). Merged over the definition's own options.
+   */
+  initializationOptions?: Record<string, unknown>;
+}
+
+/**
+ * Optional managed-tool resolution port. Only the two methods the LSP engine
+ * needs are required, so callers can inject a real `ManagedToolResolver` or a
+ * lightweight stub in tests.
+ */
+export interface ManagedToolPort {
+  resolve(packageId: string, entryPoint?: string): ReturnType<ManagedToolResolver["resolve"]>;
+}
+
+export interface ResolveServerOptions {
+  definition: LspServerDefinition;
+  configuration: LspServerConfiguration | undefined;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  /** When provided, NCE-owned installations are preferred over PATH discovery. */
+  managed?: ManagedToolPort | null;
 }
 
 function isExecutableFile(stats: { isFile(): boolean; mode: number }, platform: NodeJS.Platform): boolean {
@@ -65,16 +91,59 @@ async function resolveFromPath(
 }
 
 /**
- * Resolve a language server executable without a shell. A user-configured
- * absolute path takes precedence over PATH discovery of the registry
- * candidates. Missing binaries stay explicit so NCE remains usable.
+ * Replace `{tsserver}` placeholders with the absolute `tsserver.js` of the
+ * managed TypeScript package. Returns `null` when a placeholder is present but
+ * the TypeScript SDK cannot be resolved, so the caller can report the real
+ * reason instead of launching a server that will exit immediately.
+ */
+async function expandPlaceholders(
+  options: Record<string, unknown> | undefined,
+  managed: ManagedToolPort | null | undefined,
+): Promise<{ options: Record<string, unknown> | undefined; error: string | null }> {
+  if (!options) return { options, error: null };
+  const serialized = JSON.stringify(options);
+  if (!serialized.includes("{tsserver}")) return { options, error: null };
+
+  if (!managed)
+    return { options, error: "The TypeScript SDK path is required but no managed package resolver is available." };
+
+  const typescript = await managed.resolve("typescript", "lib/tsserver.js");
+  if (!typescript.available || !typescript.executable) {
+    return {
+      options,
+      error: `The TypeScript SDK could not be resolved: ${typescript.error || "tsserver.js is missing"}.`,
+    };
+  }
+  return {
+    options: JSON.parse(serialized.split("{tsserver}").join(typescript.executable)),
+    error: null,
+  };
+}
+
+/**
+ * Resolve how to launch a language server, without a shell.
+ *
+ * Order is deterministic and explicit:
+ *   1. an absolute path configured by the user in settings.json;
+ *   2. a valid installation owned by NCE, when the definition declares one;
+ *   3. a binary discovered on PATH.
+ *
+ * A configured path always wins, so existing user setups keep working. A
+ * managed installation wins over PATH so NCE never silently runs an unrelated
+ * system binary that happens to share the name. Every failure names the source
+ * that was tried.
  */
 export async function resolveServerExecutable(
-  definition: LspServerDefinition,
-  configuration: LspServerConfiguration | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-  platform: NodeJS.Platform = process.platform,
+  options: ResolveServerOptions,
 ): Promise<LspExecutableResolution> {
+  const {
+    definition,
+    configuration,
+    env = process.env,
+    platform = process.platform,
+    managed = null,
+  } = options;
+
   const configuredPath = typeof configuration?.path === "string"
     ? configuration.path.trim()
     : "";
@@ -92,6 +161,7 @@ export async function resolveServerExecutable(
     };
   }
 
+  // 1. Explicit user configuration always wins.
   if (configuredPath) {
     if (configuredPath.includes("\0") || !path.isAbsolute(configuredPath)) {
       return {
@@ -121,6 +191,13 @@ export async function resolveServerExecutable(
     };
   }
 
+  // 2. A server NCE installed itself.
+  if (definition.managed && managed) {
+    const managedResolution = await resolveManaged(definition, managed, configuredArgs);
+    if (managedResolution) return managedResolution;
+  }
+
+  // 3. PATH discovery of the registry candidates.
   for (const candidate of definition.commands as LspCommandCandidate[]) {
     const resolved = await resolveFromPath(candidate.command, env, platform);
     if (resolved) {
@@ -134,11 +211,87 @@ export async function resolveServerExecutable(
     }
   }
 
+  const managedHint = definition.managed
+    ? ` Install ${definition.managed.packageId} from the Version Manager, or`
+    : "";
   return {
     available: false,
     command: null,
     args: [],
     source: null,
-    error: `Executable not found. Install ${definition.commands[0]?.command || definition.id} or configure its absolute path.`,
+    error: `Executable not found.${managedHint} install ${definition.commands[0]?.command || definition.id} or configure its absolute path.`,
+  };
+}
+
+/**
+ * Build the real launch command for a managed server.
+ *
+ * Returns `null` when the package is simply not installed, so the caller can
+ * continue to PATH discovery. Any other problem (corrupted install, missing
+ * runtime, missing entry point) is returned as an explicit failure: silently
+ * falling back would hide a broken installation behind an unrelated binary.
+ */
+async function resolveManaged(
+  definition: LspServerDefinition,
+  managed: ManagedToolPort,
+  configuredArgs: string[] | null,
+): Promise<LspExecutableResolution | null> {
+  const spec = definition.managed!;
+  const server = await managed.resolve(spec.packageId, spec.entryPoint);
+
+  const notInstalled = !server.available
+    && server.error
+    && /is not installed by NCE/.test(server.error);
+  if (notInstalled) return null;
+
+  if (!server.available || !server.executable) {
+    return {
+      available: false,
+      command: null,
+      args: [],
+      source: null,
+      error: `${definition.name} is installed by NCE but cannot be launched: ${server.error || "unknown error"}.`,
+    };
+  }
+
+  const args = configuredArgs ?? spec.args;
+
+  // A script entry point needs its runtime: `node <entry> --stdio`.
+  if (spec.runtimePackageId) {
+    const runtime = await managed.resolve(spec.runtimePackageId);
+    if (!runtime.available || !runtime.executable) {
+      return {
+        available: false,
+        command: null,
+        args: [],
+        source: null,
+        error: `${definition.name} needs ${spec.runtimePackageId}, which is not usable: ${runtime.error || "not installed"}.`,
+      };
+    }
+    const expanded = await expandPlaceholders(spec.initializationOptions, managed);
+    if (expanded.error) {
+      return { available: false, command: null, args: [], source: null, error: expanded.error };
+    }
+    return {
+      available: true,
+      command: runtime.executable,
+      args: [server.executable, ...args],
+      source: "managed",
+      error: null,
+      initializationOptions: expanded.options,
+    };
+  }
+
+  const expanded = await expandPlaceholders(spec.initializationOptions, managed);
+  if (expanded.error) {
+    return { available: false, command: null, args: [], source: null, error: expanded.error };
+  }
+  return {
+    available: true,
+    command: server.executable,
+    args,
+    source: "managed",
+    error: null,
+    initializationOptions: expanded.options,
   };
 }

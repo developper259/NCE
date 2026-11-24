@@ -5,7 +5,7 @@ import type { IpcHandlerRegistrar } from "../manager/IpcRouter";
 import type { PathAccess } from "../manager/PathAccess";
 import { LspDiagnosticsStore } from "./LspDiagnosticsStore";
 import { LspDocumentStore, type LspOpenDocument } from "./LspDocumentStore";
-import { resolveServerExecutable, type LspExecutableResolution } from "./LspExecutableResolver";
+import { resolveServerExecutable, type LspExecutableResolution, type ManagedToolPort } from "./LspExecutableResolver";
 import { LspFeatureRouter, type LspRoute } from "./LspFeatureRouter";
 import { LspSession, type LspSessionState } from "./LspSession";
 import {
@@ -14,6 +14,7 @@ import {
   languageIdForPath,
   resolveServerRoot,
   serversForLanguage,
+  SERVER_ID_ALIASES,
   type LspServerDefinition,
 } from "./LspServerRegistry";
 import { sanitizeLspSettings } from "./LspSettings";
@@ -82,6 +83,8 @@ export interface LspManagerOptions {
   getTabSize?: () => number;
   requestTimeoutMs?: number;
   maxDocumentBytes?: number;
+  /** Resolves executables NCE installed itself; absent means PATH-only resolution. */
+  managedTools?: ManagedToolPort | null;
   onLog?: (serverId: string, level: "info" | "warn" | "error", message: string) => void;
 }
 
@@ -861,7 +864,7 @@ export class LspManager {
 
   private serverEnabled(definition: LspServerDefinition, settings: ReturnType<LspManager["settings"]>): boolean {
     if (!settings.enabled) return false;
-    const override = settings.servers[definition.id];
+    const override = this.serverSettings(definition, settings);
     return override?.enabled ?? definition.defaultEnabled;
   }
 
@@ -869,25 +872,108 @@ export class LspManager {
     definition: LspServerDefinition,
     settings: ReturnType<LspManager["settings"]>,
   ): LspServerConfiguration | undefined {
-    return settings.servers[definition.id];
+    return this.serverSettings(definition, settings);
+  }
+
+  /**
+   * Settings for a server, honouring legacy ids.
+   *
+   * A configuration written before a server was renamed (for example
+   * `basedpyright` for `pyright`) must keep working, so the current id is tried
+   * first and the legacy alias second.
+   */
+  private serverSettings(
+    definition: LspServerDefinition,
+    settings: ReturnType<LspManager["settings"]>,
+  ): LspServerConfiguration | undefined {
+    const direct = settings.servers[definition.id];
+    if (direct) return direct;
+    for (const [legacyId, currentId] of Object.entries(SERVER_ID_ALIASES)) {
+      if (currentId !== definition.id) continue;
+      const legacy = settings.servers[legacyId];
+      if (legacy) return legacy;
+    }
+    return undefined;
   }
 
   private resolveExecutable(
     definition: LspServerDefinition,
     settings: ReturnType<LspManager["settings"]>,
   ): Promise<LspExecutableResolution> {
-    const key = `${definition.id}:${JSON.stringify(settings.servers[definition.id] || {})}`;
+    const key = `${definition.id}:${JSON.stringify(this.serverSettings(definition, settings) || {})}`;
     let resolution = this.resolutions.get(key);
     if (!resolution) {
-      resolution = resolveServerExecutable(
+      resolution = resolveServerExecutable({
         definition,
-        this.serverConfiguration(definition, settings),
-        this.options.env ?? process.env,
-        this.options.platform ?? process.platform,
-      );
+        configuration: this.serverConfiguration(definition, settings),
+        env: this.options.env ?? process.env,
+        platform: this.options.platform ?? process.platform,
+        managed: this.options.managedTools ?? null,
+      });
       this.resolutions.set(key, resolution);
     }
     return resolution;
+  }
+
+  /**
+   * Drop cached executable resolutions. Called when the managed package
+   * inventory changes: a negative resolution must not survive an installation,
+   * and a positive one must not survive an uninstall.
+   */
+  invalidateResolutions(serverId?: string): void {
+    if (!serverId) {
+      this.resolutions.clear();
+      return;
+    }
+    for (const key of [...this.resolutions.keys()]) {
+      if (key.startsWith(`${serverId}:`)) this.resolutions.delete(key);
+    }
+  }
+
+  /**
+   * React to a change in the managed package inventory.
+   *
+   * Only servers whose launch depends on the changed package are affected, so
+   * installing an unrelated package never tears down healthy sessions.
+   */
+  async handleManagedPackagesChanged(packageIds: Iterable<string> = []): Promise<void> {
+    if (this.disposed) return;
+    const changed = new Set(packageIds);
+    const affected = getServerDefinitions().filter((definition) => {
+      const spec = definition.managed;
+      if (!spec) return false;
+      if (!changed.size) return true;
+      return changed.has(spec.packageId)
+        || (spec.runtimePackageId ? changed.has(spec.runtimePackageId) : false);
+    });
+    if (!affected.length) return;
+
+    // A changed inventory invalidates every cached launch decision.
+    this.resolutions.clear();
+
+    const affectedIds = new Set(affected.map((definition) => definition.id));
+    const doomed = [...this.sessions.entries()]
+      .filter(([, session]) => affectedIds.has(session.serverId));
+    if (!doomed.length) {
+      void this.emitStatus();
+      return;
+    }
+
+    // Sessions for the changed servers are stopped; the next open document or
+    // request restarts them against the fresh resolution.
+    this.generation += 1;
+    for (const [key, session] of doomed) {
+      this.sessions.delete(key);
+      this.attempts.delete(key);
+      this.pending.delete(key);
+      this.associations.delete(key);
+      this.diagnostics.clearServer(session.serverId);
+    }
+    this.rejectPendingApplyEdits("The managed language server changed.");
+    await Promise.allSettled(doomed.map(([, session]) => session.stop()));
+    if (this.disposed) return;
+    this.emitDiagnostics();
+    void this.emitStatus();
   }
 
   private sessionKey(serverId: string, root: string): string {
@@ -942,6 +1028,11 @@ export class LspManager {
       executable: resolution,
       root,
       workspaceRoot,
+      // Resolution-time options (for example the managed `tsserver.path`) win
+      // over the static definition defaults.
+      initializationOptions: resolution.initializationOptions
+        ? { ...(definition.initializationOptions ?? {}), ...resolution.initializationOptions }
+        : definition.initializationOptions,
       events: {
         onStatus: (updated) => {
           if (this.sessions.get(key) !== updated) return;

@@ -301,7 +301,10 @@ test("a missing executable is reported without registering a false synchronizati
     assert.deepEqual(opened.servers, [], "no server attached when the executable is missing");
 
     const status = await manager.getStatus();
-    const server = status.servers.find((entry) => entry.id === "basedpyright");
+    // The status reports the canonical server id; the legacy `basedpyright`
+    // settings key above is still honoured through the alias table.
+    const server = status.servers.find((entry) => entry.id === "pyright");
+    assert.ok(server, "the Python server is listed under its canonical id");
     assert.equal(server.available, false);
 
     // The document is registered, so the answer is "no provider", not "not open".

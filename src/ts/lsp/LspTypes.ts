@@ -70,7 +70,7 @@ export interface LspServerDefinitionView {
   enabled: boolean;
   executable: string | null;
   args: string[];
-  source: "configured" | "path" | null;
+  source: "configured" | "managed" | "path" | null;
   available: boolean;
   error: string | null;
   description: string;

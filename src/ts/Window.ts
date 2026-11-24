@@ -266,6 +266,9 @@ export class Window {
       pathAccess: this.pathAccess,
       getSettings: () => this.app.settings?.getAll?.().lsp,
       getTabSize: () => Number(this.app.settings?.get("editor.tabWidth")) || 2,
+      // The Version Manager owns the installation inventory at application
+      // level; the LSP engine only reads it through this narrow resolver.
+      managedTools: this.app.versionManager?.managedTools ?? null,
       send: (channel, payload) => {
         const target = this.window;
         if (!target || target.isDestroyed() || target.webContents.isDestroyed()) return;
