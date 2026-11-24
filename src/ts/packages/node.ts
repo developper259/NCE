@@ -1,10 +1,15 @@
 import type { ManagedPackageDefinition } from "./types";
 
-/** Node.js runtime managed by the Version Manager via the official Installer distribution. */
+/**
+ * JavaScript runtime managed by the Version Manager via the official Installer
+ * distribution. The catalog labels it "JavaScript" to match the language it
+ * serves; the underlying artifact is the Node.js distribution, which is why the
+ * installer package keeps its own technical name.
+ */
 export const node: ManagedPackageDefinition = {
   id: "node",
-  name: "Node.js",
-  description: "JavaScript runtime with npm and npx, used to run tools and scripts.",
+  name: "JavaScript",
+  description: "JavaScript runtime (Node.js) with npm and npx, used to run tools and scripts.",
   publisher: "Node.js Foundation",
   homepage: "https://nodejs.org",
   categories: ["language", "runtime"],

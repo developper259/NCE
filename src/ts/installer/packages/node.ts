@@ -1,11 +1,14 @@
 import type { PackageDefinition, PlatformConfig } from "../types";
 
-// Node.js 24.22.3 LTS (Krypton), published 2026-11-10. URLs, sizes and SHA-256
-// checksums come from https://nodejs.org/dist/v24.22.3/SHASUMS256.txt and the
-// HTTP Content-Length headers of the official archives. Only platforms whose
-// official distribution uses an archive format supported by the Installer
-// (.tar.gz / .zip) are declared; Linux ships .tar.xz and is intentionally
-// omitted until an xz decoder is available.
+// JavaScript runtime 24.22.3 LTS (Krypton), published 2026-11-10. This is the
+// official Node.js distribution; the catalog shows it as "JavaScript" to match
+// the language it serves, while the id, URLs and checksums stay Node.js. URLs,
+// sizes and SHA-256 checksums come from
+// https://nodejs.org/dist/v24.22.3/SHASUMS256.txt and the HTTP Content-Length
+// headers of the official archives. Only platforms whose official distribution
+// uses an archive format supported by the Installer (.tar.gz / .zip) are
+// declared; Linux ships .tar.xz and is intentionally omitted until an xz decoder
+// is available.
 const VERSION = "24.22.3";
 const BASE_URL = `https://nodejs.org/dist/v${VERSION}`;
 
@@ -31,7 +34,7 @@ function distribution(
 
 export const node: PackageDefinition = {
   id: "node",
-  name: "Node.js",
+  name: "JavaScript",
   version: VERSION,
   platforms: {
     darwin: {

@@ -1,23 +1,24 @@
 import type { LanguageDefinition } from "./types";
 
 /**
- * JavaScript environment: the Node.js runtime and the TypeScript language
- * server. The compiler is a component because the language server needs its
- * tsserver backend. TypeScript has its own definition (typescript.ts); both
- * map to the same managed packages so their lifecycle stays in PackageManager.
+ * JavaScript environment: the JavaScript runtime (the Node.js distribution) and
+ * the TypeScript language server. The compiler is a component because the
+ * language server needs its tsserver backend. TypeScript has its own definition
+ * (typescript.ts); both map to the same managed packages so their lifecycle
+ * stays in PackageManager.
  */
 export const javascript: LanguageDefinition = {
   id: "javascript",
   name: "JavaScript",
-  description: "Node.js runtime and TypeScript language tooling for JavaScript projects.",
+  description: "JavaScript runtime and TypeScript language tooling for JavaScript projects.",
   categories: ["language"],
   icon: "fi fi-brands-nodejs",
   fileExtensions: [".js", ".jsx", ".mjs", ".cjs"],
   components: [
     {
       id: "javascript.runtime",
-      name: "Node.js Runtime",
-      description: "Node.js with npm and npx for running scripts and tools.",
+      name: "JavaScript Runtime",
+      description: "JavaScript runtime (Node.js) with npm and npx for running scripts and tools.",
       type: "runtime",
       packageId: "node",
       platforms: ["darwin", "win32"],

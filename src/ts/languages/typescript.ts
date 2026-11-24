@@ -1,9 +1,10 @@
 import type { LanguageDefinition } from "./types";
 
 /**
- * TypeScript environment: the Node.js runtime, the TypeScript compiler and the
- * TypeScript language server. Components map to the same managed packages as
- * the JavaScript language; installation state stays in PackageManager.
+ * TypeScript environment: the JavaScript runtime (the Node.js distribution), the
+ * TypeScript compiler and the TypeScript language server. Components map to the
+ * same managed packages as the JavaScript language; installation state stays in
+ * PackageManager.
  */
 export const typescript: LanguageDefinition = {
   id: "typescript",
@@ -15,8 +16,8 @@ export const typescript: LanguageDefinition = {
   components: [
     {
       id: "typescript.runtime",
-      name: "Node.js Runtime",
-      description: "Node.js runtime required to run the TypeScript compiler and language server.",
+      name: "JavaScript Runtime",
+      description: "JavaScript runtime (Node.js) required to run the TypeScript compiler and language server.",
       type: "runtime",
       packageId: "node",
       platforms: ["darwin", "win32"],
