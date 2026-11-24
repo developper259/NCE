@@ -29,6 +29,7 @@ import type {
   VersionManagerEvent,
   VersionManagerSnapshot,
 } from "./types";
+import { PackageDependencyGraph, type RemovalCheck } from "./PackageDependencyGraph";
 
 const MAX_RECENT_OPERATIONS = 20;
 const EXTERNAL_VERSION_TIMEOUT_MS = 10_000;
@@ -129,6 +130,89 @@ export class PackageManager {
     const definition = this.registry.has(packageId) ? this.registry.get(packageId) : null;
     if (!definition)
       return { success: false, packageId, code: "PACKAGE_NOT_FOUND", error: `Unknown package "${String(packageId)}".` };
+    return this.installWithDependencies(definition, new Set());
+  }
+
+  /**
+   * Install a package and everything it declares it needs.
+   *
+   * `ManagedPackageDefinition.dependencies` was declarative only: nothing made
+   * sure a dependency was present, so Pyright could be installed without the
+   * Node.js runtime it cannot run without. Dependencies are now installed
+   * first, dependency-first, and a dependency that cannot run on this platform
+   * stops the whole operation with an explicit reason instead of producing a
+   * package that will never work.
+   */
+  private async installWithDependencies(
+    definition: ManagedPackageDefinition,
+    visiting: Set<string>,
+  ): Promise<ManagedInstallResult> {
+    if (visiting.has(definition.id))
+      return {
+        success: false,
+        packageId: definition.id,
+        code: "DEPENDENCY_CYCLE",
+        error: `Circular dependency involving ${definition.name}.`,
+      };
+    visiting.add(definition.id);
+
+    for (const dependencyId of definition.dependencies ?? []) {
+      if (!this.registry.has(dependencyId)) continue;
+      const dependency = this.registry.get(dependencyId);
+      if (!dependency.platforms.includes(this.platform))
+        return {
+          success: false,
+          packageId: definition.id,
+          code: "UNSUPPORTED_PLATFORM",
+          error: `${definition.name} requires ${dependency.name}, which has no distribution for ${this.platform}/${this.arch}.`,
+        };
+      if (this.hasUsableInstallation(dependencyId)) continue;
+      const installed = await this.installWithDependencies(dependency, visiting);
+      if (!installed.success) {
+        return {
+          success: false,
+          packageId: definition.id,
+          code: installed.code,
+          error: `${definition.name} needs ${dependency.name}, which could not be installed: ${installed.error}`,
+        };
+      }
+    }
+
+    visiting.delete(definition.id);
+    return this.installOne(definition);
+  }
+
+  /** True when a package has at least one installation in a usable state. */
+  private hasUsableInstallation(packageId: string): boolean {
+    return this.store
+      .listByPackage(packageId)
+      .some((record) => record.state === "installed");
+  }
+
+  /**
+   * Whether a package can be uninstalled without breaking another installed
+   * package. Exposed so the UI can explain a refusal before attempting it.
+   */
+  removalCheck(packageId: string): RemovalCheck {
+    return this.dependencyGraph().checkRemoval(packageId);
+  }
+
+  private dependencyGraph(): PackageDependencyGraph {
+    return new PackageDependencyGraph({
+      registry: this.registry,
+      installedPackageIds: () => this.store
+        .list()
+        .filter((record) => record.state === "installed")
+        .map((record) => record.packageId),
+      installedVersions: (packageId) => this.store
+        .listByPackage(packageId)
+        .filter((record) => record.state === "installed")
+        .map((record) => record.version),
+    });
+  }
+
+  private async installOne(definition: ManagedPackageDefinition): Promise<ManagedInstallResult> {
+    const packageId = definition.id;
     if (!definition.capabilities.includes("install"))
       return { success: false, packageId, code: "UNSUPPORTED_OPERATION", error: `${definition.name} cannot be installed by NCE.` };
     if (!definition.platforms.includes(this.platform))
@@ -181,6 +265,16 @@ export class PackageManager {
       return { success: false, packageId: record.packageId, code: "UNSUPPORTED_OPERATION", error: `${definition.name} cannot be uninstalled by NCE.` };
     if (this.active.has(definition.id))
       return { success: false, packageId: record.packageId, code: "OPERATION_BUSY", error: `Another operation is already running for ${definition.name}.` };
+
+    // A shared runtime must not disappear while something still needs it.
+    const removal = this.removalCheck(record.packageId);
+    if (!removal.allowed)
+      return {
+        success: false,
+        packageId: record.packageId,
+        code: "PACKAGE_REQUIRED",
+        error: removal.reason ?? `${definition.name} is still required by another package.`,
+      };
 
     const operation = this.startOperation(definition.id, "uninstall", record.id);
     let result: ManagedUninstallResult;
