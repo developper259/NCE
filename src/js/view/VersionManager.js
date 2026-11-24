@@ -179,8 +179,10 @@ class VersionManager {
     this.host.hidden = false;
     this.host.setAttribute("aria-hidden", "false");
     // The native window controls sit above the web contents, so the scrim
-    // cannot reach them; the main process dims them to match.
-    this.api?.setModalScrim?.("version-manager", true);
+    // cannot reach them; the main process dims them to match. This goes through
+    // the root preload API: `this.api` is the versionManager sub-API and has no
+    // setModalScrim, so calling it there was silently dropped.
+    this.editor.api?.setModalScrim?.("version-manager", true);
     setTimeout(() => this.host?.classList.add("nce-vm-open"), 0);
     this.subscribe();
     this.reload(true);
@@ -202,7 +204,7 @@ class VersionManager {
       if (!this.host) return;
       this.host.hidden = true;
       this.host.setAttribute("aria-hidden", "true");
-      this.api?.setModalScrim?.("version-manager", false);
+      this.editor.api?.setModalScrim?.("version-manager", false);
       // Another surface (quick panel, tab, sidebar) may already own focus.
       const active = document.activeElement;
       const focusStillOurs = active === document.body || this.dialog?.contains?.(active);
@@ -608,7 +610,7 @@ class VersionManager {
     this.unsubscribe?.();
     this.unsubscribe = null;
     if (this.hideTimer) clearTimeout(this.hideTimer);
-    if (this.host && !this.host.hidden) this.api?.setModalScrim?.("version-manager", false);
+    if (this.host && !this.host.hidden) this.editor.api?.setModalScrim?.("version-manager", false);
     this.host?.remove();
     this.host = null;
     this.dialog = null;

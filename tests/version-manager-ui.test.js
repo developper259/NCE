@@ -275,8 +275,18 @@ function setup(packages) {
     setTimeout: timers.setTimeout,
     clearTimeout: timers.clearTimeout,
   });
-  const manager = new VersionManager({ api: { versionManager: api } });
-  return { document, timers, api, state, manager };
+  // The scrim toggle lives on the root preload API, not on the versionManager
+  // sub-API: the native window controls are a window concern, not a package one.
+  state.scrimCalls = [];
+  const rootApi = {
+    versionManager: api,
+    setModalScrim(owner, active) {
+      state.scrimCalls.push([owner, active]);
+      return Promise.resolve(true);
+    },
+  };
+  const manager = new VersionManager({ api: rootApi });
+  return { document, timers, api, state, manager, rootApi };
 }
 
 test("Version Manager stays uncreated until first open, then loads and focuses", async () => {
@@ -328,6 +338,35 @@ test("Version Manager stays uncreated until first open, then loads and focuses",
   manager.destroy();
   assert.equal(document.body.children.includes(manager.host), false);
   assert.equal(document.body.children.length, 1);
+});
+
+test("the popup dims the native window controls through the root preload API", async () => {
+  const { timers, state, manager } = setup();
+
+  // The scrim toggle must reach the root preload API. It used to be called on
+  // the versionManager sub-API, where it does not exist, so the optional call
+  // silently did nothing and the native caption buttons stayed bright.
+  assert.equal(manager.show(), true);
+  await flush();
+  assert.deepEqual(state.scrimCalls, [["version-manager", true]],
+    "opening the popup dims the native overlay");
+
+  manager.hide();
+  timers.tick(160);
+  assert.deepEqual(state.scrimCalls, [
+    ["version-manager", true],
+    ["version-manager", false],
+  ], "closing the popup restores the native overlay");
+
+  // Destroying while open must not leave the overlay dimmed.
+  state.scrimCalls.length = 0;
+  manager.show();
+  await flush();
+  manager.destroy();
+  assert.deepEqual(state.scrimCalls, [
+    ["version-manager", true],
+    ["version-manager", false],
+  ], "destroying an open popup releases the scrim");
 });
 
 test("Escape and outside click close the popup; inside clicks do not", async () => {
