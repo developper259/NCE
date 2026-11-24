@@ -111,10 +111,12 @@ class VersionManagerLanguageDetail {
     const metaParts = [`Version ${component.installableVersion}`];
     if (!component.supported) metaParts.push("Not available on this platform");
 
+    // No "available" badge: the plan summary below the list already says what
+    // will be installed, so a badge on every pending component was pure noise.
+    // The "installed" badge stays, because it reports real state.
     let badge = null;
     if (plan) {
-      if ((plan.toInstall || []).includes(component.id)) badge = VersionManagerUI.badge("available");
-      else if ((plan.unchanged || []).includes(component.id)) badge = VersionManagerUI.badge("installed");
+      if ((plan.unchanged || []).includes(component.id)) badge = VersionManagerUI.badge("installed");
       else if ((plan.toUninstall || []).includes(component.id)) badge = VersionManagerUI.badge("not-installed");
     }
 

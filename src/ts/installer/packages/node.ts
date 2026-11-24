@@ -34,7 +34,7 @@ function distribution(
 
 export const node: PackageDefinition = {
   id: "node",
-  name: "JavaScript",
+  name: "JavaScript & TypeScript",
   version: VERSION,
   platforms: {
     darwin: {

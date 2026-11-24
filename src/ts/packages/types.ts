@@ -107,6 +107,12 @@ export interface ManagedPackageDefinition {
   versionArgs?: string[];
   /** Trusted absolute locations probed for an external installation. */
   externalCandidates?: (platform: InstallerPlatform, env: NodeJS.ProcessEnv) => string[];
+  /**
+   * True when this package is an installation artifact that the catalog must not
+   * list on its own. It is installed through the components of the language that
+   * owns it, so a separate card would duplicate that language.
+   */
+  hiddenFromCatalog?: boolean;
 }
 
 export interface PackageInfo {
@@ -129,6 +135,8 @@ export interface PackageInfo {
   installations: InstallationRecord[];
   external?: ExternalInstallation;
   lastError?: InstallationError;
+  /** True when the catalog must not list this package as its own card. */
+  hiddenFromCatalog?: boolean;
 }
 
 export type OperationKind = "install" | "uninstall" | "verify";

@@ -104,47 +104,23 @@ function emptyPlan() {
 function javascriptLanguageView() {
   return {
     id: "javascript",
-    name: "JavaScript",
-    description: "JavaScript language",
+    name: "JavaScript & TypeScript",
+    description: "JavaScript and TypeScript language",
     categories: ["language"],
-    icon: "fi fi-brands-nodejs",
-    fileExtensions: [".js"],
+    icon: "fi fi-brands-js",
+    fileExtensions: [".js", ".ts"],
     components: [
-      languageComponent("javascript.runtime", "Node.js Runtime", "runtime", "node", {
+      languageComponent("javascript.runtime", "JavaScript Runtime", "runtime", "node", {
         installableVersion: "24.22.3", defaultSelected: true,
       }),
       languageComponent("javascript.typescript", "TypeScript Compiler", "compiler", "typescript", {
-        installableVersion: "5.9.3", dependencies: ["javascript.runtime"],
+        installableVersion: "5.9.3", dependencies: ["javascript.runtime"], defaultSelected: true,
       }),
       languageComponent("javascript.lsp", "TypeScript Language Server", "language-server", "typescript-language-server", {
         installableVersion: "6.1.0", dependencies: ["javascript.typescript"], defaultSelected: true,
       }),
     ],
-    selected: ["javascript.runtime", "javascript.lsp"],
-    plan: emptyPlan(),
-  };
-}
-
-function typescriptLanguageView() {
-  return {
-    id: "typescript",
-    name: "TypeScript",
-    description: "TypeScript language",
-    categories: ["language"],
-    icon: "fi fi-brands-typescript",
-    fileExtensions: [".ts"],
-    components: [
-      languageComponent("typescript.runtime", "Node.js Runtime", "runtime", "node", {
-        installableVersion: "24.22.3", defaultSelected: true,
-      }),
-      languageComponent("typescript.compiler", "TypeScript Compiler", "compiler", "typescript", {
-        installableVersion: "5.9.3", dependencies: ["typescript.runtime"], defaultSelected: true,
-      }),
-      languageComponent("typescript.lsp", "TypeScript Language Server", "language-server", "typescript-language-server", {
-        installableVersion: "6.1.0", dependencies: ["typescript.compiler"], defaultSelected: true,
-      }),
-    ],
-    selected: ["typescript.runtime", "typescript.compiler", "typescript.lsp"],
+    selected: ["javascript.runtime", "javascript.typescript", "javascript.lsp"],
     plan: emptyPlan(),
   };
 }
@@ -183,17 +159,16 @@ test("the catalog lists the language without its language-server package", async
     "the language server is still available inside the language detail");
 });
 
-test("JavaScript and TypeScript open separate language details", async () => {
+test("JavaScript and TypeScript share one language detail", async () => {
   const javascript = javascriptLanguageView();
-  const typescript = typescriptLanguageView();
   const { manager } = setup({
-    languages: [javascript, typescript],
-    views: { javascript, typescript },
+    languages: [javascript],
+    views: { javascript },
     packages: [
-      packageInfo({ id: "node", name: "Node.js", categories: ["language", "runtime"] }),
+      packageInfo({ id: "node", name: "JavaScript", categories: ["language", "runtime"] }),
       packageInfo({
         id: "typescript", name: "TypeScript", categories: ["language", "compiler"],
-        installableVersion: "5.9.3",
+        installableVersion: "5.9.3", hiddenFromCatalog: true,
       }),
       packageInfo({
         id: "typescript-language-server", name: "TypeScript Language Server",
@@ -207,28 +182,22 @@ test("JavaScript and TypeScript open separate language details", async () => {
   await manager.show();
   await flush();
 
-  assert.ok(byFocusKey(manager.main, "vm-details-node"), "Node.js stays in the catalog");
-  assert.ok(byFocusKey(manager.main, "vm-details-typescript"), "TypeScript stays in the catalog");
+  assert.ok(byFocusKey(manager.main, "vm-details-node"), "the runtime stays in the catalog");
+  assert.equal(byFocusKey(manager.main, "vm-details-typescript"), null,
+    "the compiler is a component, not its own card");
   assert.equal(byFocusKey(manager.main, "vm-details-typescript-language-server"), null,
     "the shared language server is not a top-level package");
-  assert.match(manager.footerStatus.textContent, /0 installed · 3 available/,
-    "hidden language servers are not counted");
+  assert.match(manager.footerStatus.textContent, /0 installed · 2 available/,
+    "hidden packages are not counted");
 
-  byFocusKey(manager.main, "vm-details-typescript").click();
-  let text = textOf(manager.main);
-  assert.match(text, /TypeScript/);
-  assert.doesNotMatch(text, /JavaScript/);
-  assert.ok(byFocusKey(manager.main, "vm-component-typescript.compiler"));
-  assert.equal(byFocusKey(manager.main, "vm-component-javascript.runtime"), null,
-    "the TypeScript detail never renders JavaScript components");
-
-  manager.closeDetail();
   byFocusKey(manager.main, "vm-details-node").click();
-  text = textOf(manager.main);
-  assert.match(text, /JavaScript/);
+  const text = textOf(manager.main);
+  assert.match(text, /JavaScript & TypeScript/);
+  // One detail page carries all three components, including the compiler that
+  // used to live behind its own card.
   assert.ok(byFocusKey(manager.main, "vm-component-javascript.runtime"));
-  assert.equal(byFocusKey(manager.main, "vm-component-typescript.compiler"), null,
-    "the JavaScript detail never renders TypeScript components");
+  assert.ok(byFocusKey(manager.main, "vm-component-javascript.typescript"));
+  assert.ok(byFocusKey(manager.main, "vm-component-javascript.lsp"));
 });
 
 test("language detail renders one checkbox per component with version metadata", async () => {

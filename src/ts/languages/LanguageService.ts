@@ -64,9 +64,7 @@ export class LanguageService {
   languageForPackage(packageId: string): string | null {
     const owns = (language: LanguageDefinition) =>
       language.components.some((component) => component.packageId === packageId);
-    // A language whose id matches the package wins over shared components:
-    // "typescript" must open TypeScript, not the JavaScript definition that
-    // also lists the compiler and the language server.
+    // A language whose id matches the package wins over shared components.
     const exact = this.languages.find((language) => language.id === packageId && owns(language));
     if (exact) return exact.id;
     return this.languages.find(owns)?.id ?? null;

@@ -460,6 +460,7 @@ export class PackageManager {
       installations,
       external: this.external.get(definition.id),
       lastError,
+      hiddenFromCatalog: definition.hiddenFromCatalog === true,
     };
   }
 

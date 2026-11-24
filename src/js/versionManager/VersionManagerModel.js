@@ -80,8 +80,19 @@ class VersionManagerModel {
     return (packageInfo.categories || []).includes("language-server");
   }
 
+  /**
+   * Packages the catalog must not list as their own card. They are installed
+   * through the components of the language that owns them, so a separate card
+   * would show the same environment twice.
+   */
+  static isHiddenFromCatalog(packageInfo) {
+    return packageInfo.hiddenFromCatalog === true;
+  }
+
   static catalogPackages(packages) {
-    return packages.filter((packageInfo) => !VersionManagerModel.isLanguageServer(packageInfo));
+    return packages.filter((packageInfo) =>
+      !VersionManagerModel.isLanguageServer(packageInfo) &&
+      !VersionManagerModel.isHiddenFromCatalog(packageInfo));
   }
 
   static catalogSections(packages, { filter = "all", query = "" } = {}) {

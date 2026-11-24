@@ -25,32 +25,29 @@ const snapshot = (states = {}) => ({
 
 test("LanguageService lists every language with real component versions", () => {
   const list = service.list();
-  assert.deepEqual(list.map((item) => item.id).sort(), ["javascript", "python", "typescript"]);
+  assert.deepEqual(list.map((item) => item.id).sort(), ["javascript", "python"]);
   const js = list.find((item) => item.id === "javascript");
-  assert.equal(js.name, "JavaScript");
-  assert.deepEqual(js.fileExtensions, [".js", ".jsx", ".mjs", ".cjs"]);
+  assert.equal(js.name, "JavaScript & TypeScript");
+  assert.deepEqual(js.fileExtensions, [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"]);
   const runtime = js.components.find((component) => component.id === "javascript.runtime");
   assert.equal(runtime.installableVersion, "24.22.3");
   assert.equal(runtime.type, "runtime");
-  const ts = list.find((item) => item.id === "typescript");
-  assert.equal(ts.name, "TypeScript");
-  assert.deepEqual(ts.fileExtensions, [".ts", ".tsx", ".mts", ".cts"]);
-  assert.equal(ts.components.find((c) => c.id === "typescript.compiler").installableVersion, "5.9.3");
-  assert.equal(ts.components.find((c) => c.id === "typescript.lsp").installableVersion, "6.1.0");
+  assert.equal(js.components.find((c) => c.id === "javascript.typescript").installableVersion, "5.9.3");
+  assert.equal(js.components.find((c) => c.id === "javascript.lsp").installableVersion, "6.1.0");
   const py = list.find((item) => item.id === "python");
   assert.equal(py.components.find((c) => c.id === "python.runtime").installableVersion, "3.12.16");
 });
 
 test("LanguageService maps packages to their owning language", () => {
   assert.equal(service.languageForPackage("node"), "javascript");
-  assert.equal(service.languageForPackage("typescript"), "typescript");
+  assert.equal(service.languageForPackage("typescript"), "javascript");
   assert.equal(service.languageForPackage("typescript-language-server"), "javascript");
   assert.equal(service.languageForPackage("python"), "python");
   assert.equal(service.languageForPackage("pyright"), "python");
   assert.equal(service.languageForPackage("git"), null);
   assert.deepEqual(service.packageIdsFor("python").sort(), ["pyright", "python"]);
   assert.deepEqual(
-    service.packageIdsFor("typescript").sort(),
+    service.packageIdsFor("javascript").sort(),
     ["node", "typescript", "typescript-language-server"],
   );
 });
@@ -76,15 +73,25 @@ test("LanguageService computes a mixed plan from an explicit selection", () => {
   assert.deepEqual(view.plan.unchanged.sort(), ["javascript.runtime", "javascript.typescript"]);
 });
 
-test("TypeScript plans its own components independently from JavaScript", () => {
-  const view = service.view(
-    "typescript",
+test("the shared environment plans TypeScript components independently", () => {
+  // A JavaScript-only project selects the runtime; a TypeScript project also
+  // selects the compiler and the language server. Same language, two plans.
+  const jsOnly = service.view(
+    "javascript",
     snapshot({ node: "installed", typescript: "installed" }),
-    ["typescript.lsp"],
+    ["javascript.runtime"],
   );
-  assert.deepEqual(view.selected, ["typescript.lsp"]);
-  assert.deepEqual(view.plan.toInstall, ["typescript.lsp"]);
-  assert.deepEqual(view.plan.unchanged.sort(), ["typescript.compiler", "typescript.runtime"]);
+  assert.deepEqual(jsOnly.selected, ["javascript.runtime"]);
+  assert.deepEqual(jsOnly.plan.toInstall, []);
+  assert.deepEqual(jsOnly.plan.unchanged, ["javascript.runtime"]);
+
+  const withTs = service.view(
+    "javascript",
+    snapshot({ node: "installed", typescript: "installed" }),
+    ["javascript.runtime", "javascript.typescript", "javascript.lsp"],
+  );
+  assert.deepEqual(withTs.plan.toInstall, ["javascript.lsp"]);
+  assert.deepEqual(withTs.plan.unchanged.sort(), ["javascript.runtime", "javascript.typescript"]);
 });
 
 test("LanguageService rejects unknown languages", () => {

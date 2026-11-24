@@ -1,6 +1,12 @@
 import type { ManagedPackageDefinition } from "./types";
 
-/** TypeScript compiler and tsserver, installed as an isolated npm tarball. */
+/**
+ * TypeScript compiler and tsserver, installed as an isolated npm tarball.
+ *
+ * The catalog does not list it as its own card: it is a component of the
+ * JavaScript & TypeScript language, which installs it through its components.
+ * A separate card would show the same environment twice.
+ */
 export const typescript: ManagedPackageDefinition = {
   id: "typescript",
   name: "TypeScript",
@@ -16,4 +22,5 @@ export const typescript: ManagedPackageDefinition = {
   installableVersion: "5.9.3",
   installationRoot: "tools/typescript",
   uninstall: { strategy: "installer-directory" },
+  hiddenFromCatalog: true,
 };
