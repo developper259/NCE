@@ -8,6 +8,9 @@ class LspController {
     this.status = null;
     this.changeQueues = new Map();
     this.syncQueues = new Map();
+    // Bumped on every LSP reset. An open started before a reset must not
+    // register its result afterwards: the main process dropped that document.
+    this.syncGeneration = 0;
     this.diagnosticNodes = [];
     this.overlayFrame = null;
     this.problemsPanel = null;
@@ -249,24 +252,45 @@ class LspController {
     if (record) await this.closeRecord(record);
     if (!options.force && this.unsupported.get(file.id) === `${file.path}:${file.contentGeneration}`)
       return;
+    // Capture everything the response must still match once the await returns.
+    const generation = this.syncGeneration;
+    const contentGeneration = file.contentGeneration;
+    const filePath = file.path;
     let result = null;
     try {
-      result = await this.api.openDocument({ path: file.path, text: LspPositions.documentText(file) });
+      result = await this.api.openDocument({ path: filePath, text: LspPositions.documentText(file) });
     } catch (error) {
       console.warn("[LSP] Unable to open document", error);
       return;
     }
-    if (!result?.success) return;
+    // A reset landed while this open was in flight. The main process cleared its
+    // store, so this response describes a document that no longer exists. Drop
+    // it and let the reset-triggered synchronization reopen the file.
+    if (generation !== this.syncGeneration) return;
+    if (!result?.success) {
+      // The main process reports a superseded open when a reset raced it. The
+      // reset path already re-synchronizes every open file, so just stop here.
+      if (result?.code === "LSP_OPEN_SUPERSEDED") return;
+      return;
+    }
     if (!result.supported) {
-      this.unsupported.set(file.id, `${file.path}:${file.contentGeneration}`);
+      this.unsupported.set(file.id, `${filePath}:${contentGeneration}`);
+      return;
+    }
+    // The file may have been closed, retargeted or edited while opening. A record
+    // for a stale path or stale content would make completion ask about text the
+    // server never received.
+    if (!this.getEligibility(file) || file.path !== filePath) return;
+    if (file.contentGeneration !== contentGeneration) {
+      void this.ensureDocument(file, { force: true });
       return;
     }
     this.unsupported.delete(file.id);
     this.documents.set(file.id, {
       fileId: file.id,
-      filePath: file.path,
-      path: result.path || file.path,
-      generation: file.contentGeneration,
+      filePath,
+      path: result.path || filePath,
+      generation: contentGeneration,
       languageId: result.languageId,
       servers: result.servers || [],
       lastVersion: 1,
@@ -283,7 +307,10 @@ class LspController {
   async closeRecord(record) {
     this.documents.delete(record.fileId);
     this.unsupported.delete(record.fileId);
-    this.syncQueues.delete(record.fileId);
+    // The sync queue is deliberately left alone: it self-cleans in
+    // ensureDocument's finally. Deleting it here would let a second openDocument
+    // start for the same editor file while the first is still awaiting, and the
+    // two responses could then land out of order.
     this.changeQueues.delete(record.fileId);
     this.diagnosticsByPath.delete(record.path);
     this.diagnosticsDocuments = this.diagnosticsDocuments.filter((document) => document.path !== record.path);
@@ -296,6 +323,23 @@ class LspController {
 
   buildChanges(file, payload) {
     return LspPositions.changeForEdit(file, payload);
+  }
+
+  /** Resolves once every queued change for this file has been sent. */
+  async waitForPendingChanges(file) {
+    const queued = this.changeQueues.get(file.id);
+    if (!queued) return;
+    try {
+      await queued;
+    } catch {}
+  }
+
+  /** True when the record still describes this file, its path and its text. */
+  isRecordCurrent(file, record) {
+    if (!record || !file) return false;
+    if (this.documents.get(file.id) !== record) return false;
+    if (record.filePath !== file.path) return false;
+    return record.generation === file.contentGeneration;
   }
 
   queueChange(file, record, payload) {
@@ -343,6 +387,10 @@ class LspController {
   }
 
   handleReset() {
+    // Invalidate every open in flight before clearing state, so a response that
+    // arrives after this point cannot register a document the main process has
+    // already dropped.
+    this.syncGeneration += 1;
     this.documents.clear();
     this.unsupported.clear();
     this.progressByServer.clear();
@@ -389,7 +437,41 @@ class LspController {
         ? label
         : `${label} (${Math.round(progress.percentage)}%)`);
     }
+    // Progress is transient: it disappears the moment analysis finishes, which
+    // left the panel with nothing to say about a server that never started or
+    // that is running but has no document attached. Fall back to the persistent
+    // session state so a broken server stays visible.
+    if (!parts.length) parts.push(...this.describeServerStates());
     this.problemsPanel.setServerStatus(parts.join(" · "));
+  }
+
+  /**
+   * One short line per configured server: whether it is running, whether its
+   * executable was found, how many documents it holds, and any error. This is
+   * what makes a silent failure (server enabled, executable missing, or running
+   * with no document attached) visible without opening devtools.
+   */
+  describeServerStates() {
+    const status = this.status;
+    if (!status?.sessions?.length) return [];
+    const parts = [];
+    for (const session of status.sessions) {
+      const name = session.serverName || session.serverId;
+      if (!name) continue;
+      if (session.state === "ready") {
+        const documents = session.documents || 0;
+        parts.push(documents
+          ? `${name}: ready, ${documents} document${documents === 1 ? "" : "s"}`
+          : `${name}: ready, no document attached`);
+        continue;
+      }
+      if (session.state === "starting") {
+        parts.push(`${name}: starting`);
+        continue;
+      }
+      parts.push(session.error ? `${name}: ${session.error}` : `${name}: ${session.state}`);
+    }
+    return parts;
   }
 
   getProblemCounts() {
@@ -540,7 +622,17 @@ class LspController {
       context = this.getActiveContext();
       if (!context) return null;
     }
-    const { file, record } = context;
+    let { file, record } = context;
+    // A completion request is only meaningful against the exact text the server
+    // has. Wait for queued changes, then confirm the record still describes this
+    // file and this content generation.
+    await this.waitForPendingChanges(file);
+    if (!this.isRecordCurrent(file, record)) {
+      await this.ensureDocument(file, { force: true });
+      context = this.getActiveContext();
+      if (!context) return null;
+      ({ file, record } = context);
+    }
     const requestRow = file.row;
     const requestColumn = file.column;
     const token = ++this.requestToken;
@@ -555,6 +647,27 @@ class LspController {
     } catch (error) {
       console.warn("[LSP] Completion failed", error);
       return null;
+    }
+    // The main process lost this document (a reset, or a superseded open).
+    // Invalidate the stale record, resynchronize once, and retry a single time.
+    // No loop: a second failure surfaces as a real error.
+    if (result?.code === "LSP_DOCUMENT_NOT_OPEN") {
+      this.documents.delete(file.id);
+      await this.ensureDocument(file, { force: true });
+      const retried = this.getActiveContext();
+      if (!retried || retried.file !== file) return null;
+      try {
+        result = await this.api.completion({
+          path: retried.record.path,
+          position: this.getPosition(file),
+          triggerKind,
+          ...(triggerCharacter ? { triggerCharacter } : {}),
+        });
+      } catch (error) {
+        console.warn("[LSP] Completion retry failed", error);
+        return null;
+      }
+      record = retried.record;
     }
     if (token !== this.requestToken || this.editor.tabManager?.activeFile !== file) return null;
     if (file.row !== requestRow || file.column < requestColumn) return null;

@@ -172,7 +172,10 @@ export class JsonRpcConnection {
     this.closed = true;
     this.options.input.off("data", this.onData);
     this.options.input.off("error", this.onStreamError);
-    this.options.output.off("error", this.onStreamError);
+    // The output error listener stays attached. A write queued just before
+    // dispose still completes against a closed pipe and emits EPIPE; removing
+    // the listener here turned that into an unhandled stream error that crashed
+    // the process. The handler is a no-op once closed, so it is safe to keep.
     for (const entry of this.pending.values()) {
       if (entry.timer) clearTimeout(entry.timer);
       if (entry.abortListener && entry.signal)
@@ -204,6 +207,10 @@ export class JsonRpcConnection {
   }
 
   private readonly onStreamError = (error: Error): void => {
+    // A closed connection can still see EPIPE from a write that was in flight
+    // when it was disposed. That is expected teardown noise, not a protocol
+    // failure, and it must not surface as an unhandled stream error.
+    if (this.closed) return;
     this.fail(new JsonRpcProtocolError(`Language server stream error: ${error.message}`));
   };
 

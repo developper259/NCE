@@ -371,8 +371,15 @@ test("completion opens the document before the first request", async () => {
     },
   };
   controller.documents = new Map();
+  controller.changeQueues = new Map();
+  controller.syncGeneration = 0;
   controller.ensureDocument = async (target) => {
-    controller.documents.set(target.id, { path: target.path });
+    controller.documents.set(target.id, {
+      fileId: target.id,
+      filePath: target.path,
+      path: target.path,
+      generation: target.contentGeneration,
+    });
   };
   controller.requestToken = 0;
   controller.completionWidget = { show: (options) => { shown = options; } };
@@ -424,7 +431,14 @@ test("empty completion opens the suggestion menu without notifying", async () =>
   const controller = Object.create(LspController.prototype);
   controller.editor = { tabManager: { activeFile: file }, cD: null };
   controller.api = { completion: async () => ({ success: true, items: [] }) };
-  controller.documents = new Map([[file.id, { path: file.path }]]);
+  controller.documents = new Map([[file.id, {
+    fileId: file.id,
+    filePath: file.path,
+    path: file.path,
+    generation: file.contentGeneration,
+  }]]);
+  controller.changeQueues = new Map();
+  controller.syncGeneration = 0;
   controller.requestToken = 0;
   controller.completionWidget = { show: (options) => { shown = options; }, isVisible: true };
   controller.notify = (message, level) => notifications.push([level, message]);
@@ -735,4 +749,219 @@ test("problem counts are shared by the Problems panel and the bottom bar", () =>
   controller.refreshProblems();
   assert.equal(updates.length, 1);
   assert.deepEqual(plain(updates[0]), { errors: 2, warnings: 2, infos: 1 });
+});
+
+// ---- Document synchronization races -------------------------------------------
+
+function syncFixture(file, api) {
+  const LspPositions = loadGlobal("src/js/lsp/LspPositions.js", "LspPositions");
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController", {
+    LspPositions,
+    TAB_TYPES: { FILE: "file" },
+  });
+  const controller = Object.create(LspController.prototype);
+  controller.editor = { tabManager: { activeFile: file, files: [file] }, cD: null };
+  controller.api = api;
+  controller.documents = new Map();
+  controller.unsupported = new Map();
+  controller.changeQueues = new Map();
+  controller.syncQueues = new Map();
+  controller.syncGeneration = 0;
+  controller.diagnosticsByPath = new Map();
+  controller.diagnosticsDocuments = [];
+  controller.progressByServer = new Map();
+  controller.requestToken = 0;
+  controller.notifications = [];
+  controller.notify = (message, level) => controller.notifications.push([level, message]);
+  controller.scheduleDiagnosticsOverlay = () => {};
+  controller.refreshProblems = () => {};
+  controller.refreshDiagnosticsOverlay = () => {};
+  controller.refreshStatus = async () => {};
+  controller.completionWidget = { show: () => {}, hide: () => {} };
+  controller.hideHover = () => {};
+  controller.signaturePopover = { hide: () => {} };
+  return controller;
+}
+
+function syncFile(overrides = {}) {
+  return {
+    id: 11,
+    type: "file",
+    path: "/ws/main.py",
+    row: 0,
+    column: 0,
+    editVersion: 0,
+    contentGeneration: 1,
+    isLoaded: true,
+    loadError: null,
+    isDiffView: false,
+    largeFileMode: false,
+    lines: makeFile("import os").lines,
+    ...overrides,
+  };
+}
+
+test("a stale open response arriving after a reset is not registered", async () => {
+  const file = syncFile();
+  let release = null;
+  const controller = syncFixture(file, {
+    openDocument: () => new Promise((resolve) => { release = resolve; }),
+  });
+
+  const pending = controller.ensureDocument(file);
+  // ensureDocument chains through a microtask before calling openDocument.
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(typeof release, "function", "the open is in flight");
+  // A reset lands while the open is still in flight.
+  controller.handleReset();
+  release({ success: true, supported: true, path: file.path, languageId: "python", servers: [] });
+  await pending;
+
+  assert.equal(
+    controller.documents.has(file.id),
+    false,
+    "the reset cleared the store, so the stale response must not repopulate it",
+  );
+});
+
+test("a current open response is registered normally", async () => {
+  const file = syncFile();
+  const controller = syncFixture(file, {
+    openDocument: async () => ({
+      success: true, supported: true, path: file.path, languageId: "python",
+      servers: [{ serverId: "basedpyright" }],
+    }),
+  });
+
+  await controller.ensureDocument(file);
+
+  const record = controller.documents.get(file.id);
+  assert.ok(record, "the document is registered");
+  assert.equal(record.languageId, "python");
+  assert.equal(record.generation, 1);
+});
+
+test("a document edited while opening is reopened instead of registered stale", async () => {
+  const file = syncFile();
+  const opens = [];
+  const controller = syncFixture(file, {
+    async openDocument(payload) {
+      opens.push(payload);
+      // The buffer changes while the open is in flight.
+      file.contentGeneration = 2;
+      return { success: true, supported: true, path: file.path, languageId: "python", servers: [] };
+    },
+  });
+
+  await controller.ensureDocument(file);
+  await controller.syncQueues.get(file.id);
+
+  assert.ok(opens.length >= 2, "a second open carries the newer content");
+  assert.equal(controller.documents.get(file.id)?.generation, 2);
+});
+
+test("completion recovers once from LSP_DOCUMENT_NOT_OPEN", async () => {
+  const file = syncFile();
+  let completionCalls = 0;
+  let openCalls = 0;
+  const controller = syncFixture(file, {
+    async openDocument() {
+      openCalls += 1;
+      return { success: true, supported: true, path: file.path, languageId: "python", servers: [] };
+    },
+    async completion() {
+      completionCalls += 1;
+      if (completionCalls === 1) {
+        return { success: false, code: "LSP_DOCUMENT_NOT_OPEN", error: "not open" };
+      }
+      return { success: true, items: [{ label: "os" }] };
+    },
+  });
+
+  await controller.ensureDocument(file);
+  const result = await controller.requestCompletion(1);
+
+  assert.equal(result.success, true);
+  assert.equal(completionCalls, 2, "exactly one retry");
+  assert.equal(openCalls, 2, "the document was resynchronized once");
+  assert.equal(controller.notifications.length, 0, "a recovered request reports no error");
+});
+
+test("a completion that keeps failing surfaces the real error without looping", async () => {
+  const file = syncFile();
+  let completionCalls = 0;
+  const controller = syncFixture(file, {
+    async openDocument() {
+      return { success: true, supported: true, path: file.path, languageId: "python", servers: [] };
+    },
+    async completion() {
+      completionCalls += 1;
+      return { success: false, code: "LSP_DOCUMENT_NOT_OPEN", error: "still not open" };
+    },
+  });
+
+  await controller.ensureDocument(file);
+  const result = await controller.requestCompletion(1);
+
+  assert.equal(result, null);
+  assert.equal(completionCalls, 2, "two attempts, never a loop");
+  assert.deepEqual(controller.notifications.at(-1), ["error", "still not open"]);
+});
+
+test("closing a record does not drop a synchronization that is still running", async () => {
+  const file = syncFile();
+  let release = null;
+  let openCalls = 0;
+  const controller = syncFixture(file, {
+    openDocument: () => {
+      openCalls += 1;
+      return new Promise((resolve) => { release = resolve; });
+    },
+    closeDocument: async () => ({ success: true }),
+  });
+
+  const pending = controller.ensureDocument(file);
+  const record = { fileId: file.id, filePath: file.path, path: file.path, generation: 1 };
+  controller.documents.set(file.id, record);
+  await controller.closeRecord(record);
+
+  assert.equal(
+    controller.syncQueues.has(file.id),
+    true,
+    "the running queue keeps its ownership so a second open cannot start",
+  );
+
+  release({ success: true, supported: true, path: file.path, languageId: "python", servers: [] });
+  await pending;
+  assert.equal(openCalls, 1);
+});
+
+test("the problems panel reports persistent server state, not only progress", () => {
+  const LspController = loadGlobal("src/js/lsp/LspController.js", "LspController");
+  const controller = Object.create(LspController.prototype);
+  const lines = [];
+  controller.problemsPanel = { setServerStatus: (value) => lines.push(value) };
+  controller.progressByServer = new Map();
+  controller.status = {
+    sessions: [
+      { serverId: "basedpyright", serverName: "BasedPyright", state: "ready", documents: 1, error: null },
+      { serverId: "eslint-language-server", serverName: "ESLint", state: "failed", documents: 0, error: "executable not found" },
+    ],
+  };
+
+  controller.updateProblemsStatus();
+  assert.equal(lines.at(-1), "BasedPyright: ready, 1 document · ESLint: executable not found");
+
+  // A ready server with nothing attached is the silent case worth surfacing.
+  controller.status = {
+    sessions: [{ serverId: "basedpyright", serverName: "BasedPyright", state: "ready", documents: 0, error: null }],
+  };
+  controller.updateProblemsStatus();
+  assert.equal(lines.at(-1), "BasedPyright: ready, no document attached");
+
+  // Transient progress still wins while it exists.
+  controller.progressByServer = new Map([["k", { title: "Analyzing", message: null, percentage: 40 }]]);
+  controller.updateProblemsStatus();
+  assert.equal(lines.at(-1), "Analyzing (40%)");
 });

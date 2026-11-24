@@ -10,6 +10,7 @@ export type LspErrorCode =
   | "LSP_INVALID_ARGUMENT"
   | "LSP_INVALID_PATH"
   | "LSP_DOCUMENT_NOT_OPEN"
+  | "LSP_OPEN_SUPERSEDED"
   | "LSP_NO_PROVIDER";
 
 export interface LspFailure {

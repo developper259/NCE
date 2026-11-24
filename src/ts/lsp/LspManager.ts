@@ -247,10 +247,22 @@ export class LspManager {
       const settings = this.settings();
       if (!settings.enabled)
         return { success: true, supported: false, languageId: null, servers: [] };
+      // Capture the generation before any await: a reset that lands during
+      // resolution must invalidate this open, not be silently outrun by it.
+      const generation = this.generation;
       const definitions = serversForLanguage(languageId)
         .filter((definition) => this.serverEnabled(definition, settings));
-      if (!definitions.length)
-        return { success: true, supported: true, languageId, servers: [] };
+      // A language NCE supports with no active server is not synchronized. The
+      // document is still registered, with an empty association set, so feature
+      // requests answer LSP_NO_PROVIDER (an honest "nothing to ask") instead of
+      // LSP_DOCUMENT_NOT_OPEN (which claims the renderer is out of sync).
+      if (!definitions.length) {
+        this.detachDocument(target.path, { clearDiagnostics: false });
+        this.documents.open(target.path, pathToUri(target.path), languageId, text);
+        this.associations.set(target.path, new Set());
+        void this.emitStatus();
+        return { success: true, supported: true, languageId, path: target.path, servers: [] };
+      }
 
       this.detachDocument(target.path, { clearDiagnostics: false });
       const document = this.documents.open(target.path, pathToUri(target.path), languageId, text);
@@ -260,6 +272,15 @@ export class LspManager {
         const root = await resolveServerRoot(definition, target.path, target.workspace);
         const key = this.sessionKey(definition.id, root);
         const resolution = await this.resolveExecutable(definition, settings);
+        // Opening awaits executable and root resolution. A settings or workspace
+        // reset during that window clears the store and bumps the generation, so
+        // this document no longer exists. Report the supersession instead of
+        // returning a success for a document the manager has already dropped.
+        if (this.isSuperseded(generation)) {
+          this.documents.close(target.path);
+          this.associations.delete(target.path);
+          return { success: false, code: "LSP_OPEN_SUPERSEDED", error: "The language workspace changed while the document was opening. It will be synchronized again." };
+        }
         if (!resolution.available) {
           this.attempts.set(key, {
             key,
@@ -284,6 +305,11 @@ export class LspManager {
           serverName: definition.name,
           priority: definition.priority,
         });
+      }
+      if (this.isSuperseded(generation)) {
+        this.documents.close(target.path);
+        this.associations.delete(target.path);
+        return { success: false, code: "LSP_OPEN_SUPERSEDED", error: "The language workspace changed while the document was opening. It will be synchronized again." };
       }
       void this.emitStatus();
       return { success: true, supported: true, languageId, path: target.path, servers };
@@ -866,6 +892,15 @@ export class LspManager {
 
   private sessionKey(serverId: string, root: string): string {
     return `${serverId}::${root}`;
+  }
+
+  /**
+   * True when a settings or workspace reset happened while an asynchronous
+   * operation was in flight. Such an operation must not report success and must
+   * not attach anything to the sessions created after the reset.
+   */
+  private isSuperseded(generation: number): boolean {
+    return this.disposed || generation !== this.generation;
   }
 
   private async attachDocumentToServer(
