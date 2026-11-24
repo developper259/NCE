@@ -175,6 +175,14 @@ export class App {
         },
       },
       broadcast: (channel, payload) => this.broadcastToWindows(channel, payload),
+      // The LSP engine launches managed language servers, so it has to hear
+      // about inventory changes too. Without this an uninstalled server kept
+      // running and its diagnostics stayed in the Problems panel.
+      onInventoryChanged: (packageIds) => {
+        for (const window of this.windowManager?.getAllWindows() || []) {
+          void window.lspManager?.handleManagedPackagesChanged(packageIds);
+        }
+      },
     });
     const startupArgStart = app.isPackaged ? 1 : 2;
     const argv = Array.isArray(process.argv) ? process.argv : [];

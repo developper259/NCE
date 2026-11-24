@@ -129,6 +129,8 @@ export class LspManager {
   private readonly diagnostics = new LspDiagnosticsStore();
   private readonly router = new LspFeatureRouter();
   private readonly sessions = new Map<string, LspSession>();
+  /** How each live session was launched, so an inventory change can be matched. */
+  private readonly sessionSources = new Map<string, LspExecutableResolution>();
   private readonly attempts = new Map<string, ServerAttempt>();
   private readonly associations = new Map<string, Set<string>>();
   private readonly pending = new Map<string, Set<string>>();
@@ -182,6 +184,7 @@ export class LspManager {
     this.generation += 1;
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    this.sessionSources.clear();
     this.associations.clear();
     this.pending.clear();
     this.attempts.clear();
@@ -203,6 +206,7 @@ export class LspManager {
     this.generation += 1;
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    this.sessionSources.clear();
     this.associations.clear();
     this.pending.clear();
     this.attempts.clear();
@@ -224,6 +228,7 @@ export class LspManager {
     this.generation += 1;
     const sessions = [...this.sessions.values()];
     this.sessions.clear();
+    this.sessionSources.clear();
     this.associations.clear();
     this.pending.clear();
     this.attempts.clear();
@@ -710,6 +715,7 @@ export class LspManager {
       const sessions = [...this.sessions.values()].filter((session) => session.serverId === serverId);
       for (const session of sessions) {
         this.sessions.delete(session.key);
+        this.sessionSources.delete(session.key);
         this.attempts.delete(session.key);
         this.diagnostics.clearServer(session.key);
         for (const [documentPath, keys] of this.associations) {
@@ -933,47 +939,158 @@ export class LspManager {
   /**
    * React to a change in the managed package inventory.
    *
-   * Only servers whose launch depends on the changed package are affected, so
-   * installing an unrelated package never tears down healthy sessions.
+   * Two cases must be handled, and they are not the same:
+   *
+   * - A server whose launch depends on a changed package is torn down so the
+   *   next request re-resolves it. This covers installs, upgrades and repairs.
+   * - A server that was launched from a managed installation which is now gone
+   *   (or no longer usable) must be stopped and have its diagnostics cleared.
+   *   Uninstalling a language server used to leave its process running and its
+   *   problems still listed in the Problems panel, describing a server that no
+   *   longer existed.
+   *
+   * Only servers whose launch actually depends on the changed package are
+   * affected, so installing an unrelated package never tears down healthy
+   * sessions.
    */
   async handleManagedPackagesChanged(packageIds: Iterable<string> = []): Promise<void> {
     if (this.disposed) return;
     const changed = new Set(packageIds);
-    const affected = getServerDefinitions().filter((definition) => {
-      const spec = definition.managed;
-      if (!spec) return false;
-      if (!changed.size) return true;
-      return changed.has(spec.packageId)
-        || (spec.runtimePackageId ? changed.has(spec.runtimePackageId) : false);
-    });
-    if (!affected.length) return;
 
-    // A changed inventory invalidates every cached launch decision.
+    // An empty set means "the inventory moved, but not which package": a
+    // reconcile or a manual refresh. It must not be read as "every managed
+    // server changed", or refreshing the inventory would kill every healthy
+    // language server. In that case only servers that can no longer be
+    // resolved are stopped.
+    const affected = changed.size
+      ? getServerDefinitions().filter((definition) => {
+        const spec = definition.managed;
+        if (!spec) return false;
+        return changed.has(spec.packageId)
+          || (spec.runtimePackageId ? changed.has(spec.runtimePackageId) : false);
+      })
+      : [];
+
+    // Servers worth retrying after the inventory settles. On a refresh the
+    // caller could not name a package, so every managed server is a candidate:
+    // an install that landed during a reconcile must still be picked up.
+    const retryable = changed.size
+      ? affected
+      : getServerDefinitions().filter((definition) => Boolean(definition.managed));
+
+    // A session launched from a managed installation that is gone, or that can
+    // no longer be resolved, is dead even when its server is not in the changed
+    // set: the executable it is running from may have been deleted.
+    const orphaned = new Set<string>();
+    for (const [key, resolution] of this.sessionSources) {
+      if (resolution.source !== "managed") continue;
+      const serverId = this.sessions.get(key)?.serverId;
+      if (!serverId) continue;
+      const stillUsable = await this.managedLaunchStillUsable(serverId);
+      if (!stillUsable) orphaned.add(serverId);
+    }
+
+    // A changed inventory invalidates every cached launch decision, including
+    // when the caller could not say which package moved: a negative resolution
+    // must not survive an install.
     this.resolutions.clear();
 
     const affectedIds = new Set(affected.map((definition) => definition.id));
+    // Only a session that actually launched from the managed installation is
+    // invalidated by it. A server the user pointed at their own executable does
+    // not depend on the package and must survive an unrelated install.
     const doomed = [...this.sessions.entries()]
-      .filter(([, session]) => affectedIds.has(session.serverId));
-    if (!doomed.length) {
-      void this.emitStatus();
-      return;
+      .filter(([key, session]) => {
+        if (orphaned.has(session.serverId)) return true;
+        if (!affectedIds.has(session.serverId)) return false;
+        return this.sessionSources.get(key)?.source === "managed";
+      });
+
+    if (doomed.length) {
+      // Sessions for the changed servers are stopped; the documents they served
+      // are re-attached below against the fresh resolution. A server that is no
+      // longer installed simply cannot be restarted, and reports that when
+      // asked.
+      this.generation += 1;
+      for (const [key, session] of doomed) {
+        this.sessions.delete(key);
+        this.sessionSources.delete(key);
+        this.attempts.delete(key);
+        this.pending.delete(key);
+        this.associations.delete(key);
+        // Diagnostics are stored under the session key (`serverId::root`), not
+        // the bare server id: clearing by server id removed nothing, which is
+        // why an uninstalled server's problems stayed in the Problems panel.
+        this.diagnostics.clearServer(key);
+      }
+      this.rejectPendingApplyEdits("The managed language server changed.");
+      await Promise.allSettled(doomed.map(([, session]) => session.stop()));
+      if (this.disposed) return;
+      this.emitDiagnostics();
     }
 
-    // Sessions for the changed servers are stopped; the next open document or
-    // request restarts them against the fresh resolution.
-    this.generation += 1;
-    for (const [key, session] of doomed) {
-      this.sessions.delete(key);
-      this.attempts.delete(key);
-      this.pending.delete(key);
-      this.associations.delete(key);
-      this.diagnostics.clearServer(session.serverId);
-    }
-    this.rejectPendingApplyEdits("The managed language server changed.");
-    await Promise.allSettled(doomed.map(([, session]) => session.stop()));
+    // An install is the mirror image of an uninstall: there is no session to
+    // tear down, because the server could not be resolved when the document was
+    // opened. Without this the open document stayed unsynchronized until the
+    // window was reloaded.
+    await this.attachOpenDocuments(retryable);
     if (this.disposed) return;
-    this.emitDiagnostics();
     void this.emitStatus();
+  }
+
+  /**
+   * Attach already-open documents to servers that can now be launched.
+   *
+   * Only documents that are not already served by the server are touched, so
+   * this is safe to call when nothing changed. A document whose server is still
+   * unavailable is left alone: the next open or restart reports the reason.
+   */
+  private async attachOpenDocuments(definitions: LspServerDefinition[]): Promise<void> {
+    if (!definitions.length) return;
+    const settings = this.settings();
+    const workspace = await this.getWorkspace();
+    if (!workspace) return;
+    for (const definition of definitions) {
+      if (!this.serverEnabled(definition, settings)) continue;
+      for (const document of this.documents.all()) {
+        if (!definition.languages.includes(document.languageId)) continue;
+        const root = await resolveServerRoot(definition, document.path, workspace);
+        const key = this.sessionKey(definition.id, root);
+        // Already served: nothing to do. Re-attaching would send a second
+        // didOpen for a document the session already has.
+        if (this.associations.get(document.path)?.has(key)) continue;
+        const resolution = await this.resolveExecutable(definition, settings);
+        if (this.disposed) return;
+        if (!resolution.available) continue;
+        await this.attachDocumentToServer(definition, root, resolution, document, workspace);
+      }
+    }
+  }
+
+  /**
+   * Whether a session's managed launch can still be resolved.
+   *
+   * Only called for sessions that were launched from a managed installation, so
+   * "no longer installed by NCE" is not a neutral state here: it means the
+   * package was uninstalled and the executable the session is running from is
+   * gone. Any unavailable resolution therefore counts as orphaned.
+   *
+   * A server with no managed spec, or an inventory read that fails, is left
+   * alone: PATH and custom configurations are not the inventory's business, and
+   * a transient read failure must not tear down a working session.
+   */
+  private async managedLaunchStillUsable(serverId: string): Promise<boolean> {
+    const definition = getServerDefinition(serverId);
+    const spec = definition?.managed;
+    if (!spec) return true;
+    const managed = this.options.managedTools;
+    if (!managed) return true;
+    try {
+      const resolution = await managed.resolve(spec.packageId, spec.entryPoint);
+      return resolution.available;
+    } catch {
+      return true;
+    }
   }
 
   private sessionKey(serverId: string, root: string): string {
@@ -1072,6 +1189,7 @@ export class LspManager {
       applyWorkspaceEdit: (edit) => this.applyServerWorkspaceEdit(edit, definition.id),
     });
     this.sessions.set(key, session);
+    this.sessionSources.set(key, resolution);
     this.diagnostics.setServerName(key, definition.name);
     this.attempts.set(key, {
       key,
@@ -1445,6 +1563,12 @@ export class LspManager {
     }
     const document = this.documents.get(documentPath);
     if (!document) return;
+    // A server that has been stopped can still have a notification in flight.
+    // Publishing it would put diagnostics back into the Problems panel for a
+    // session that no longer exists, which is exactly the state teardown is
+    // trying to clear. The check is repeated after the awaits above because a
+    // teardown can land while this handler is resolving the document path.
+    if (!this.sessions.has(serverKey)) return;
     if (version !== null && version > document.version) return;
     if (!this.diagnostics.publish(uri, serverKey, version, diagnostics)) return;
     this.emitDiagnostics();

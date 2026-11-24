@@ -162,7 +162,8 @@ export interface VersionManagerSnapshot {
 
 export type VersionManagerEvent =
   | { type: "operation"; operation: OperationSnapshot }
-  | { type: "inventory-changed" };
+  /** `packageIds` names what changed, so dependent services can react precisely. */
+  | { type: "inventory-changed"; packageIds: string[] };
 
 export interface OperationFailure {
   success: false;

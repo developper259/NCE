@@ -17,6 +17,12 @@ export interface VersionManagerOptions {
   /** Optional registry override; defaults to all built-in managed packages. */
   registry?: PackageRegistry;
   broadcast?: (channel: string, payload: unknown) => void;
+  /**
+   * Called when the managed inventory changes, with the packages that moved.
+   * Main-process services that launch managed executables (the LSP engine)
+   * listen here; the renderer broadcast above only keeps UI views in sync.
+   */
+  onInventoryChanged?: (packageIds: string[]) => void;
 }
 
 /**
@@ -31,6 +37,7 @@ export class VersionManager {
   /** Read-only view of NCE-owned installations, shared with the LSP engine. */
   readonly managedTools: ManagedToolResolver;
   private readonly broadcast?: (channel: string, payload: unknown) => void;
+  private readonly onInventoryChanged?: (packageIds: string[]) => void;
   private unsubscribe: (() => void) | null = null;
 
   constructor(options: VersionManagerOptions) {
@@ -45,8 +52,12 @@ export class VersionManager {
     this.languages = new LanguageService(builtinLanguages, registry);
     this.languageApplications = new LanguageApplicationService(this.packages);
     this.broadcast = options.broadcast;
+    this.onInventoryChanged = options.onInventoryChanged;
     this.unsubscribe = this.packages.subscribe((event) => {
       this.broadcast?.("VersionManager:event", event);
+      if (event.type === "inventory-changed") {
+        this.onInventoryChanged?.(event.packageIds);
+      }
     });
   }
 

@@ -110,7 +110,7 @@ export class PackageManager {
 
   async refresh(): Promise<VersionManagerSnapshot> {
     await this.reconcile();
-    this.emit({ type: "inventory-changed" });
+    this.emitInventoryChanged();
     return this.getState();
   }
 
@@ -243,7 +243,7 @@ export class PackageManager {
       const record = await this.recordInstallation(definition, result, version);
       await this.applyInstallSettings(definition, record);
       this.finishOperation(operation, "completed");
-      this.emit({ type: "inventory-changed" });
+      this.emitInventoryChanged(definition.id);
     } else {
       this.finishOperation(
         operation,
@@ -288,7 +288,7 @@ export class PackageManager {
       await this.applyUninstallSettings(definition, record);
       await this.store.remove(record.id);
       this.finishOperation(operation, "completed");
-      this.emit({ type: "inventory-changed" });
+      this.emitInventoryChanged(record.packageId);
     } else {
       this.finishOperation(operation, "failed", { code: result.code, message: result.error });
     }
@@ -331,7 +331,7 @@ export class PackageManager {
       error,
     });
     this.finishOperation(operation, "completed");
-    this.emit({ type: "inventory-changed" });
+    this.emitInventoryChanged(record.packageId);
     return { success: true, installation: updated ?? { ...record, state, version, error } };
   }
 
@@ -599,6 +599,11 @@ export class PackageManager {
 
   private emit(event: VersionManagerEvent): void {
     this.emitter.emit("event", event);
+  }
+
+  /** Announce which packages changed, for services that depend on them. */
+  private emitInventoryChanged(...packageIds: string[]): void {
+    this.emit({ type: "inventory-changed", packageIds: [...new Set(packageIds)] });
   }
 }
 
