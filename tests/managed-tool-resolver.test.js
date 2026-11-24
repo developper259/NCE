@@ -12,6 +12,12 @@ const {
   isScriptEntryPoint,
 } = require("../dist/ts/packages/ManagedToolResolver.js");
 
+// Absolute paths must be real for the host platform: path.resolve turns
+// "/tools/x" into "C:\\tools\\x" on Windows, so the fake filesystem below would
+// never match. Building them with path.join keeps the suite cross-platform.
+const ROOT = path.resolve(path.parse(process.cwd()).root, "nce-test-tools");
+const tools = (...parts) => path.join(ROOT, ...parts);
+
 function record(overrides = {}) {
   return {
     id: overrides.id || `inst-${Math.random().toString(36).slice(2)}`,
@@ -53,7 +59,7 @@ function resolverWith(records, files, options = {}) {
 }
 
 test("resolves a native executable inside the recorded install directory", async () => {
-  const installDir = "/tools/node/24.22.3";
+  const installDir = tools("node", "24.22.3");
   const executable = path.join(installDir, "bin/node");
   const resolver = resolverWith(
     [record({ installDir, executable })],
@@ -69,7 +75,7 @@ test("resolves a native executable inside the recorded install directory", async
 });
 
 test("resolves a relative entry point against the install directory", async () => {
-  const installDir = "/tools/typescript-language-server/6.1.0";
+  const installDir = tools("typescript-language-server", "6.1.0");
   const entry = path.join(installDir, "lib/cli.mjs");
   const resolver = resolverWith(
     [record({ packageId: "typescript-language-server", installDir, executable: entry })],
@@ -82,7 +88,7 @@ test("resolves a relative entry point against the install directory", async () =
 });
 
 test("a JavaScript entry point does not need the executable bit", async () => {
-  const installDir = "/tools/pyright/1.1.414";
+  const installDir = tools("pyright", "1.1.414");
   const entry = path.join(installDir, "langserver.index.js");
   const resolver = resolverWith(
     [record({ packageId: "pyright", installDir, executable: entry })],
@@ -96,7 +102,7 @@ test("a JavaScript entry point does not need the executable bit", async () => {
 });
 
 test("a native entry point without the executable bit is rejected", async () => {
-  const installDir = "/tools/node/24.22.3";
+  const installDir = tools("node", "24.22.3");
   const executable = path.join(installDir, "bin/node");
   const resolver = resolverWith(
     [record({ installDir, executable })],
@@ -125,7 +131,7 @@ test("resolveIfInstalled treats a missing package as a quiet fallback", async ()
 });
 
 test("a corrupted installation is not usable and its state is reported", async () => {
-  const installDir = "/tools/pyright/1.1.414";
+  const installDir = tools("pyright", "1.1.414");
   const resolver = resolverWith(
     [record({ packageId: "pyright", installDir, state: "corrupted" })],
     [installDir],
@@ -137,7 +143,7 @@ test("a corrupted installation is not usable and its state is reported", async (
 });
 
 test("an installation whose directory disappeared is rejected", async () => {
-  const installDir = "/tools/node/24.22.3";
+  const installDir = tools("node", "24.22.3");
   const resolver = resolverWith(
     [record({ installDir, executable: path.join(installDir, "bin/node") })],
     [],
@@ -149,10 +155,10 @@ test("an installation whose directory disappeared is rejected", async () => {
 });
 
 test("an entry point escaping the install directory is rejected", async () => {
-  const installDir = "/tools/node/24.22.3";
+  const installDir = tools("node", "24.22.3");
   const resolver = resolverWith(
     [record({ installDir, executable: path.join(installDir, "bin/node") })],
-    [installDir, "/etc/passwd"],
+    [installDir, path.join(path.parse(ROOT).root, "outside-secret")],
   );
 
   const resolution = await resolver.resolve("node", "../../../etc/passwd");
@@ -161,8 +167,8 @@ test("an entry point escaping the install directory is rejected", async () => {
 });
 
 test("several versions resolve to the newest usable one", async () => {
-  const oldDir = "/tools/node/20.11.0";
-  const newDir = "/tools/node/24.22.3";
+  const oldDir = tools("node", "20.11.0");
+  const newDir = tools("node", "24.22.3");
   const resolver = resolverWith(
     [
       record({ id: "old", version: "20.11.0", installDir: oldDir, executable: path.join(oldDir, "bin/node") }),
@@ -177,8 +183,8 @@ test("several versions resolve to the newest usable one", async () => {
 });
 
 test("a corrupted newest version falls back to an older usable one", async () => {
-  const oldDir = "/tools/node/20.11.0";
-  const newDir = "/tools/node/24.22.3";
+  const oldDir = tools("node", "20.11.0");
+  const newDir = tools("node", "24.22.3");
   const resolver = resolverWith(
     [
       record({ id: "old", version: "20.11.0", installDir: oldDir, executable: path.join(oldDir, "bin/node") }),
