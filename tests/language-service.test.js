@@ -9,7 +9,10 @@ const { PackageRegistry } = require("../dist/ts/packages/PackageRegistry.js");
 const { builtinManagedPackages } = require("../dist/ts/packages/index.js");
 
 const registry = new PackageRegistry(builtinManagedPackages);
-const service = new LanguageService(builtinLanguages, registry);
+// Pin the platform: the Node.js distribution is declared for darwin and win32
+// only, so inheriting the host platform made these plans pass on macOS and
+// Windows but fail on Linux CI.
+const service = new LanguageService(builtinLanguages, registry, "darwin");
 
 const snapshot = (states = {}) => ({
   version: 1,
@@ -92,6 +95,22 @@ test("the shared environment plans TypeScript components independently", () => {
   );
   assert.deepEqual(withTs.plan.toInstall, ["javascript.lsp"]);
   assert.deepEqual(withTs.plan.unchanged.sort(), ["javascript.runtime", "javascript.typescript"]);
+});
+
+test("a platform without a Node.js distribution blocks the runtime instead of planning it", () => {
+  // Linux has no declared Node.js archive yet, so the runtime is reported as
+  // unsupported with an explicit blocker instead of being scheduled for an
+  // install that cannot succeed. This is the behaviour the Linux CI job sees.
+  const linux = new LanguageService(builtinLanguages, registry, "linux");
+  const view = linux.view(
+    "javascript",
+    snapshot(),
+    ["javascript.runtime", "javascript.typescript", "javascript.lsp"],
+  );
+  assert.deepEqual(view.plan.unsupported, ["javascript.runtime"]);
+  assert.ok(view.plan.blockers.some((blocker) => /not available on linux/.test(blocker)));
+  // The runtime is never scheduled for installation.
+  assert.equal(view.plan.toInstall.includes("javascript.runtime"), false);
 });
 
 test("LanguageService rejects unknown languages", () => {

@@ -221,7 +221,7 @@ test("server registry maps NSH languages and resolves project roots", async () =
   assert.equal(languageIdForPath("/tmp/app.ts"), "typescript");
   assert.equal(languageIdForPath("/tmp/header.h"), "c");
   assert.equal(languageIdForPath("/tmp/image.svg"), "xml");
-  assert.equal(languageIdForPath("/tmp/view.tsx"), null);
+  assert.equal(languageIdForPath("/tmp/view.tsx"), "typescript");
   const typescriptServers = serversForLanguage("typescript");
   assert.equal(typescriptServers.some((server) => server.id === "typescript-language-server"), true);
   assert.equal(typescriptServers.some((server) => server.id === "eslint-language-server"), true);

@@ -65,7 +65,7 @@ export class ComponentPlanner {
     const dependenciesToInstall = new Set<string>();
     for (const id of selected) {
       if (byId.has(id) && this.supports(byId.get(id)!, platform)) {
-        this.addWithDependencies(id, byId, desired, dependenciesToInstall);
+        this.addWithDependencies(id, byId, desired, dependenciesToInstall, platform, blockers);
       }
     }
 
@@ -128,6 +128,8 @@ export class ComponentPlanner {
     byId: Map<string, LanguageComponentDefinition>,
     desired: Set<string>,
     dependencies: Set<string>,
+    platform: InstallerPlatform,
+    blockers: string[],
     visiting = new Set<string>(),
   ): void {
     if (desired.has(id)) return;
@@ -138,8 +140,20 @@ export class ComponentPlanner {
     desired.add(id);
     for (const dependency of component.dependencies ?? []) {
       if (!byId.has(dependency)) continue;
+      const dependencyDefinition = byId.get(dependency)!;
+      // A dependency that cannot run on this platform must never be scheduled
+      // silently: the dependent component cannot work without it, so the plan
+      // reports a blocker instead of an install that would fail.
+      if (!this.supports(dependencyDefinition, platform)) {
+        blockers.push(
+          `${component.name} requires ${dependencyDefinition.name}, which is not available on ${platform}.`,
+        );
+        continue;
+      }
       if (!desired.has(dependency)) dependencies.add(dependency);
-      this.addWithDependencies(dependency, byId, desired, dependencies, visiting);
+      this.addWithDependencies(
+        dependency, byId, desired, dependencies, platform, blockers, visiting,
+      );
     }
     visiting.delete(id);
   }

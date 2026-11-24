@@ -21,6 +21,12 @@ export class LanguageService {
   constructor(
     private readonly languages: LanguageDefinition[],
     private readonly packages: PackageRegistry,
+    /**
+     * Platform used for component support and planning. Injectable so tests can
+     * assert a specific platform instead of inheriting the host one, which made
+     * the suite pass on macOS and Windows but fail on Linux.
+     */
+    private readonly platform: NodeJS.Platform = process.platform,
   ) {}
 
   /** Language metadata with component versions and platform support. */
@@ -50,7 +56,7 @@ export class LanguageService {
         language,
         selected: selection,
         installed: state,
-        platform: process.platform,
+        platform: this.platform,
       }),
     };
   }
@@ -87,7 +93,7 @@ export class LanguageService {
       capabilities: component.capabilities ? [...component.capabilities] : undefined,
       fileExtensions: component.fileExtensions ? [...component.fileExtensions] : undefined,
       installableVersion: definition?.installableVersion ?? "—",
-      supported: Boolean(definition?.platforms.includes(process.platform as NodeJS.Platform)),
+      supported: Boolean(definition?.platforms.includes(this.platform as NodeJS.Platform)),
     };
   }
 
