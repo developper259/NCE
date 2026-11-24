@@ -3464,8 +3464,8 @@ app.whenReady().then(() => {
         assert.equal(versionManagerResult.uninstalled, true);
         assert.equal(versionManagerResult.escapeClosed, true);
         assert.equal(versionManagerResult.sidebarReopened, true);
-        assert.equal(versionManagerResult.twoColumns, true, "the detail page renders two columns");
-        assert.equal(versionManagerResult.stackedSmall, true, "the detail columns stack on a small window");
+        assert.equal(versionManagerResult.singleColumn, true, "the detail page renders one unified column");
+        assert.equal(versionManagerResult.sectionsStacked, true, "the detail sections stack in that column");
         assert.equal(versionManagerResult.homepageLink, true, "the homepage opens as a real external link");
         assert.equal(
           fs.existsSync(plantedGitDir),

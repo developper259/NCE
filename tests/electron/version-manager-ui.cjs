@@ -111,34 +111,40 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(headerControls.hidden === true, "the detail page hides the catalog search and filters");
   check(getComputedStyle(headerControls).display === "none",
     "the hidden catalog controls take no space");
-  const columnsOf = () => [...document.querySelectorAll(".nce-vm-detail-col")];
-  const leftCol = () => columnsOf()[0];
-  const rightCol = () => columnsOf()[1];
-  const tracks = () => getComputedStyle(document.querySelector(".nce-vm-detail-columns"))
-    .gridTemplateColumns.split(" ").length;
-  check(columnsOf().length === 2, "the detail page has two columns");
-  check(leftCol().textContent.includes("State and installations"), "the left column covers state and installations");
-  check(rightCol().textContent.includes("About") && rightCol().textContent.includes("Information"),
-    "the right column covers about and information");
-  check(tracks() === 2, "both columns render side by side at full window size");
+  const detailSections = () => [...document.querySelectorAll(".nce-vm-detail-section")];
+  const sectionTitled = (title) => detailSections().find((node) =>
+    [...node.querySelectorAll(".nce-vm-section-title")].some((child) => child.textContent === title));
+  const installationSection = () => sectionTitled("Installation");
+  const informationSection = () => sectionTitled("Package Information");
+  check(detailSections().length === 2,
+    `the detail page is one column with Installation and Package Information (got ${detailSections().length} sections)`);
+  check(Boolean(installationSection()), "the Installation section is present");
+  check(Boolean(informationSection()), "the Package Information section is present");
+  check(document.querySelectorAll(".nce-vm-detail-col").length === 0,
+    "there are no independent two-column panels");
+  check(document.querySelectorAll(".nce-vm-detail-columns").length === 0,
+    "the two-column grid is gone");
   const detailText = main().textContent;
   check(detailText.includes("Managed by NCE"), "provenance is shown");
   check(detailText.includes(`${plantedInstallDir}/bin/git`), "the detail shows the executable");
-  const fieldLabels = [...leftCol().querySelectorAll(".nce-vm-field-label")].map((node) => node.textContent);
+  const fieldLabels = [...installationSection().querySelectorAll(".nce-vm-info-label")].map((node) => node.textContent);
   check(!fieldLabels.includes("Location"), "the detail hides the install location");
   check(!fieldLabels.includes("Source"), "the detail hides the download source");
   check(!fieldLabels.some((label) => label.startsWith("Checksum")), "the detail hides the checksum");
   const info = await gitInfo();
-  check(rightCol().textContent.includes(info.description), "the about column shows the full description");
-  const homepage = rightCol().querySelector("a.nce-vm-link");
+  check(document.querySelector(".nce-vm-detail-header").textContent.includes(info.description),
+    "the header shows the full description");
+  const homepage = informationSection().querySelector("a.nce-vm-link");
   check(
     Boolean(homepage) &&
     new URL(homepage.href).href === new URL(info.homepage).href &&
     homepage.target === "_blank",
     "the homepage is a real external link",
   );
-  check(!document.querySelector(".nce-vm-detail-header .nce-vm-category-tag"),
-    "categories are not duplicated in the header");
+  check(document.querySelectorAll(".nce-vm-category-tag").length === 1,
+    "the category appears once, in the header");
+  check(Boolean(document.querySelector(".nce-vm-detail-header .nce-vm-category-tag")),
+    "the category lives in the detail header");
   const externalZone = document.querySelector(".nce-vm-install-zone-external");
   if (externalZone) {
     check(info.external, "the external zone reflects a real detection");
@@ -159,21 +165,23 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(verifyRect.left < headerUninstallRect.left, "Verify sits to the left of Uninstall");
   check(Math.abs(verifyRect.top - headerUninstallRect.top) <= 1,
     "Verify and Uninstall share the header row");
-  check(leftCol().querySelectorAll(".nce-vm-install-actions button").length === 0,
+  check(installationSection().querySelectorAll(".nce-vm-install-actions button").length === 0,
     "installation blocks no longer repeat the actions");
 
-  // The two-column block sits low on the page with a wide gutter between
-  // installations and package information.
+  // One column: the sections stack below the header, in order, inside the page.
   const headerRect = rectOf(document.querySelector(".nce-vm-detail-header"));
-  const columnsElement = document.querySelector(".nce-vm-detail-columns");
-  const columnsRect = rectOf(columnsElement);
-  check(columnsRect.top >= headerRect.bottom + 24,
-    `the detail columns sit below the header (${columnsRect.top - headerRect.bottom}px)`);
-  const columnsStyle = getComputedStyle(columnsElement);
-  check(columnsStyle.columnGap === "40px",
-    `the two columns keep a wide gutter (got ${columnsStyle.columnGap})`);
-  check(rectOf(rightCol()).left - rectOf(leftCol()).right >= 39,
-    "the second column is separated from the first");
+  const pageElement = document.querySelector(".nce-vm-detail-page");
+  const pageStyle = getComputedStyle(pageElement);
+  check(pageStyle.display === "flex" && pageStyle.flexDirection === "column",
+    `the detail page is a single vertical column (got ${pageStyle.display}/${pageStyle.flexDirection})`);
+  const installationRect = rectOf(installationSection());
+  const informationRect = rectOf(informationSection());
+  check(installationRect.top >= headerRect.bottom,
+    `the sections sit below the header (${installationRect.top - headerRect.bottom}px)`);
+  check(informationRect.top >= installationRect.bottom,
+    "Package Information follows Installation in the same column");
+  check(Math.abs(installationRect.left - informationRect.left) <= 1,
+    "both sections share the same left edge");
 
   const backButton = document.querySelector('[data-focus-key="vm-back"]');
   check(Boolean(backButton), "the detail page offers a Back action");
@@ -200,26 +208,26 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   await nextFrame();
 
   // Window adaptation: stack below the breakpoint, keep paths readable, scroll.
-  const pathValue = [...leftCol().querySelectorAll(".nce-vm-field-value")]
+  const pathValue = [...installationSection().querySelectorAll(".nce-vm-info-value")]
     .find((node) => node.textContent.includes(plantedInstallDir));
   check(pathValue.scrollWidth <= pathValue.clientWidth, "the executable path wraps instead of clipping");
   check(main().scrollWidth <= main().clientWidth, "no horizontal overflow at full size");
   window.resizeTo(800, 700);
   await waitFor(() => innerWidth === 800, "the window to reach its minimum width");
   await nextFrame();
-  check(tracks() === 1, "the columns stack on a small window");
-  check(main().scrollWidth <= main().clientWidth, "no horizontal overflow when stacked");
-  check(pathValue.scrollWidth <= pathValue.clientWidth, "paths stay readable when stacked");
-  check(main().scrollHeight > main().clientHeight, "the stacked detail scrolls vertically");
+  check(detailSections().length === 2, "the single column keeps both sections on a small window");
+  check(main().scrollWidth <= main().clientWidth, "no horizontal overflow on a small window");
+  check(pathValue.scrollWidth <= pathValue.clientWidth, "paths stay readable on a small window");
+  check(main().scrollHeight > main().clientHeight, "the detail scrolls vertically when it is taller than the window");
   main().scrollTop = 120;
   check(main().scrollTop > 0, "the detail scroll container responds");
   main().scrollTop = 0;
   window.resizeTo(1100, 760);
   // macOS clamps windows to the display work area, so require a viewport
-  // past the stacking breakpoint instead of an exact pixel width.
+  // past the narrow layout instead of an exact pixel width.
   await waitFor(() => innerWidth >= 900, "the window to return to a wide layout");
   await nextFrame();
-  check(tracks() === 2, "the two columns return on a large window");
+  check(main().scrollWidth <= main().clientWidth, "no horizontal overflow on a large window");
 
   document.querySelector('[data-focus-key^="vm-header-uninstall-"]').click();
   await waitFor(() => document.querySelector(".nce-vm-confirm"), "the uninstall confirmation");
@@ -275,8 +283,8 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   check(document.querySelector(".nce-vm-group-title").textContent === "Available",
     "only the non-empty Available section renders after the uninstall");
 
-  // With a short detail page the two columns anchor to the bottom instead of
-  // floating directly under the header.
+  // A short detail page keeps the single column anchored under the header
+  // instead of stretching to fill the popup.
   document.querySelector('[data-focus-key="vm-details-git"]').click();
   await waitFor(
     () => document.querySelector(".nce-vm-detail-name")?.textContent === "Git",
@@ -285,11 +293,10 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
   await nextFrame();
   check(main().scrollHeight <= main().clientHeight + 1,
     "the short detail fits without scrolling");
-  const shortMainRect = rectOf(main());
-  const shortColumnsRect = rectOf(document.querySelector(".nce-vm-detail-columns"));
-  const mainPaddingBottom = Number.parseFloat(getComputedStyle(main()).paddingBottom);
-  check(Math.abs((shortMainRect.bottom - mainPaddingBottom) - shortColumnsRect.bottom) <= 1,
-    "the two columns sit against the bottom of the page");
+  const shortHeaderRect = rectOf(document.querySelector(".nce-vm-detail-header"));
+  const shortInstallationRect = rectOf(installationSection());
+  check(shortInstallationRect.top >= shortHeaderRect.bottom,
+    "the short detail keeps its sections under the header");
   document.querySelector('[data-focus-key="vm-back"]').click();
   await waitFor(
     () => document.querySelectorAll('[data-focus-key="vm-details-git"]').length === 1,
@@ -384,8 +391,8 @@ module.exports = async function exerciseVersionManagerUI(plantedInstallDir) {
     versionFromBinary: true,
     searchWorks: true,
     externalZone: Boolean(externalZone),
-    twoColumns: true,
-    stackedSmall: true,
+    singleColumn: true,
+    sectionsStacked: true,
     homepageLink: true,
     confirmationSpecific: true,
     uninstalled: true,
