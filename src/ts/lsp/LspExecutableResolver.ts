@@ -95,14 +95,18 @@ async function resolveFromPath(
  * managed TypeScript package. Returns `null` when a placeholder is present but
  * the TypeScript SDK cannot be resolved, so the caller can report the real
  * reason instead of launching a server that will exit immediately.
+ *
+ * The substitution walks the object instead of splicing into serialized JSON: a
+ * Windows path such as `C:\managed\...` contains backslashes that are not legal
+ * JSON escapes, so splicing produced a SyntaxError and the server could never
+ * launch on Windows.
  */
 async function expandPlaceholders(
   options: Record<string, unknown> | undefined,
   managed: ManagedToolPort | null | undefined,
 ): Promise<{ options: Record<string, unknown> | undefined; error: string | null }> {
   if (!options) return { options, error: null };
-  const serialized = JSON.stringify(options);
-  if (!serialized.includes("{tsserver}")) return { options, error: null };
+  if (!containsPlaceholder(options)) return { options, error: null };
 
   if (!managed)
     return { options, error: "The TypeScript SDK path is required but no managed package resolver is available." };
@@ -114,10 +118,28 @@ async function expandPlaceholders(
       error: `The TypeScript SDK could not be resolved: ${typescript.error || "tsserver.js is missing"}.`,
     };
   }
-  return {
-    options: JSON.parse(serialized.split("{tsserver}").join(typescript.executable)),
-    error: null,
-  };
+  return { options: replacePlaceholder(options, typescript.executable) as Record<string, unknown>, error: null };
+}
+
+function containsPlaceholder(value: unknown): boolean {
+  if (typeof value === "string") return value.includes("{tsserver}");
+  if (Array.isArray(value)) return value.some(containsPlaceholder);
+  if (value && typeof value === "object")
+    return Object.values(value as Record<string, unknown>).some(containsPlaceholder);
+  return false;
+}
+
+function replacePlaceholder(value: unknown, executable: string): unknown {
+  if (typeof value === "string") return value.split("{tsserver}").join(executable);
+  if (Array.isArray(value)) return value.map((entry) => replacePlaceholder(entry, executable));
+  if (value && typeof value === "object") {
+    const output: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      output[key] = replacePlaceholder(entry, executable);
+    }
+    return output;
+  }
+  return value;
 }
 
 /**

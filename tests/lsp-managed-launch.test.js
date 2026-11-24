@@ -114,6 +114,55 @@ test("TypeScript Language Server launches through managed Node.js with tsserver.
   );
 });
 
+test("a Windows tsserver path survives placeholder expansion", async () => {
+  // A Windows path contains backslashes, which are not legal JSON escapes. The
+  // placeholder used to be spliced into serialized JSON, so this threw a
+  // SyntaxError and the server could never launch on Windows.
+  const WINDOWS_TYPESCRIPT = {
+    installDir: "C:\\managed\\tools\\typescript\\5.9.3",
+    executable: "C:\\managed\\tools\\typescript\\5.9.3\\lib\\tsserver.js",
+    version: "5.9.3",
+  };
+  const WINDOWS_NODE = {
+    installDir: "C:\\managed\\tools\\node\\24.22.3",
+    executable: "C:\\managed\\tools\\node\\24.22.3\\node.exe",
+    version: "24.22.3",
+  };
+  const WINDOWS_TLS = {
+    installDir: "C:\\managed\\tools\\typescript-language-server\\6.1.0",
+    executable: "C:\\managed\\tools\\typescript-language-server\\6.1.0\\lib\\cli.mjs",
+    version: "6.1.0",
+  };
+
+  const resolution = await resolveServerExecutable({
+    definition: getServerDefinition("typescript-language-server"),
+    configuration: undefined,
+    env: EMPTY_ENV,
+    platform: "win32",
+    managed: managedPort({
+      node: WINDOWS_NODE,
+      "typescript-language-server": WINDOWS_TLS,
+      typescript: WINDOWS_TYPESCRIPT,
+    }),
+  });
+
+  assert.equal(resolution.available, true, resolution.error || undefined);
+  assert.equal(resolution.source, "managed");
+  assert.equal(resolution.command, WINDOWS_NODE.executable);
+  // The entry point comes from the test helper, which joins with a forward
+  // slash; only the tsserver path is produced by the code under test.
+  assert.match(resolution.args[0], /cli\.mjs$/);
+  assert.equal(resolution.args[1], "--stdio");
+  const tsserverPath = resolution.initializationOptions.tsserver.path;
+  // The regression was a SyntaxError from splicing a Windows path into JSON,
+  // which also mangled the backslashes. The path must survive intact.
+  assert.ok(
+    tsserverPath.startsWith("C:\\managed\\tools\\typescript\\5.9.3"),
+    `the Windows tsserver path must keep its backslashes, got: ${tsserverPath}`,
+  );
+  assert.match(tsserverPath, /tsserver\.js$/);
+});
+
 test("a missing TypeScript SDK is an explicit failure, not a silent launch", async () => {
   const resolution = await resolveServerExecutable({
     definition: getServerDefinition("typescript-language-server"),
